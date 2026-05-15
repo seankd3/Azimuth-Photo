@@ -3848,7 +3848,10 @@ async def api_rankings(
     db_sort = "elo" if sort == "similarity" and not search_scores else sort
     rankings_cache_key = None
     cacheable_metadata_search = search_mode == "metadata" and not search_scores
-    if not search["active"] or cacheable_metadata_search:
+    cacheable_embedding_search = search_mode in {"embedding", "deep_embedding"}
+    cacheable_search = cacheable_metadata_search or cacheable_embedding_search
+    normalized_search_query = _normalize_search_query(q) if search["active"] else ""
+    if not search["active"] or cacheable_search:
         rankings_cache_key = (
             db.DB_PATH,
             _cache_root(),
@@ -3865,10 +3868,11 @@ async def api_rankings(
             file_type,
             camera,
             lens,
-            text_query if cacheable_metadata_search else "",
-            search_mode if cacheable_metadata_search else "",
-            bool(search["ai_unavailable"]) if cacheable_metadata_search else False,
+            text_query if cacheable_metadata_search else normalized_search_query if cacheable_embedding_search else "",
+            search_mode if cacheable_search else "",
+            bool(search["ai_unavailable"]) if cacheable_search else False,
             bool(search.get("deep_requested")),
+            bool(search.get("deep_search_cached")),
             str(search.get("fallback_reason") or ""),
         )
         cached = _rankings_response_cache.get(rankings_cache_key)
@@ -3920,7 +3924,7 @@ async def api_rankings(
                 limit=min(len(page), 48),
             )
             _schedule_result_thumbnail_memory_warm(page)
-        return {
+        response = {
             "images": page,
             **_visibility_counts(total_images, visible_images),
             "total_kept": total_images,
@@ -3930,6 +3934,9 @@ async def api_rankings(
             "deep_search_cached": search.get("deep_search_cached", False),
             "fallback_reason": search.get("fallback_reason", ""),
         }
+        if rankings_cache_key is not None:
+            _cache_rankings_response(rankings_cache_key, response)
+        return response
 
     unfiltered_rankings = not any(
         (

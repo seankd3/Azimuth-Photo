@@ -2557,6 +2557,53 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second["search_mode"], "embedding")
         self.assertEqual([img["id"] for img in second["images"]], [match])
 
+    async def test_embedding_search_reuses_rankings_response_cache(self):
+        source = await self._source()
+        match = await self._image(source["id"], "cached-response-match.jpg")
+        miss = await self._image(source["id"], "cached-response-miss.jpg")
+        for image_id in (match, miss):
+            await self._cache_entry(image_id, "sm")
+
+        def fake_encode(_query, _config=None):
+            return np.array([1.0, 0.0], dtype=np.float32)
+
+        async def fake_get_matrix(model_key=None):
+            self.assertIsNone(model_key)
+            return [match, miss], np.array(
+                [
+                    [0.95, 0.05],
+                    [0.10, 0.90],
+                ],
+                dtype=np.float32,
+            )
+
+        embedding_worker.encode_text = fake_encode
+        elo_propagation.embed_cache.get_matrix = fake_get_matrix
+        app_module._rankings_response_cache.clear()
+        app_module._text_search_resolution_cache.clear()
+
+        first = await app_module.api_rankings(q="cached response query", sort="similarity", limit=10)
+
+        old_get_rankings = db.get_rankings
+        old_count_rankings = db.count_rankings
+
+        async def fail_get_rankings(*_args, **_kwargs):
+            raise AssertionError("cached embedding search should not fetch rankings again")
+
+        async def fail_count_rankings(*_args, **_kwargs):
+            raise AssertionError("cached embedding search should not recount rankings")
+
+        db.get_rankings = fail_get_rankings
+        db.count_rankings = fail_count_rankings
+        try:
+            second = await app_module.api_rankings(q="cached response query", sort="similarity", limit=10)
+        finally:
+            db.get_rankings = old_get_rankings
+            db.count_rankings = old_count_rankings
+
+        self.assertEqual(second["images"], first["images"])
+        self.assertEqual(second["search_mode"], "embedding")
+
     async def test_cached_text_search_resolution_does_not_relog_query_per_page(self):
         source = await self._source()
         visible_match = await self._image(source["id"], "repeat-query-visible.jpg")
