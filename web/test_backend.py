@@ -2511,6 +2511,8 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         visible_match = await self._image(source["id"], "sunset-visible.jpg")
         await self._cache_entry(visible_match, "sm")
         embedding_worker.encode_text = lambda _query: None
+        app_module._ai_status_response_cache.update({"data": {"stale": True}, "key": ("stale",), "expires": 999999999})
+        app_module._settings_response_cache.update({"data": {"stale": True}, "expires": 999999999})
 
         result = await app_module.api_search(q="sunset portrait", limit=10)
         pending = await db.get_pending_deep_search_queries(
@@ -2521,6 +2523,8 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result["search_mode"], "metadata")
         self.assertIn("sunset portrait", [row["query"] for row in pending])
+        self.assertIsNone(app_module._ai_status_response_cache["data"])
+        self.assertIsNone(app_module._settings_response_cache["data"])
 
     async def test_text_search_resolution_caches_fast_embedding_result(self):
         source = await self._source()

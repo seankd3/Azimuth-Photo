@@ -2808,6 +2808,8 @@ async def _record_deep_search_query(query: str):
         _deep_search_query_record_cache[cache_key] = (
             now + _deep_search_query_record_cache_ttl_seconds
         )
+        _invalidate_ai_status_response_cache()
+        _invalidate_settings_response_cache()
     except Exception:
         pass
 
