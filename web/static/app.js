@@ -798,6 +798,7 @@ const PhotoArchive = (() => {
         }
         restoreFilters();
         restoreSearchState();
+        initSearchInputControls();
         setCompareMode('mosaic');
         startAIStatusPolling(750);
         setTimeout(() => {
@@ -2124,6 +2125,51 @@ const PhotoArchive = (() => {
         return params.toString();
     }
 
+    function initSearchInputControls() {
+        const input = document.getElementById('search-input');
+        if (!input || input.dataset.searchBound === '1') return;
+        input.dataset.searchBound = '1';
+        input.addEventListener('input', (e) => {
+            clearTimeout(searchDebounce);
+            e.target.classList.add('searching');
+            const deepBtn = document.getElementById('deep-search-btn');
+            if (deepBtn) {
+                deepBtn.disabled = !hasActiveTextSearch(e.target.value.trim());
+                deepBtn.classList.remove('active');
+            }
+            searchDebounce = setTimeout(() => {
+                e.target.classList.remove('searching');
+                searchDebounce = null;
+                const wasSearching = hasActiveTextSearch();
+                searchQuery = e.target.value.trim();
+                deepSearchRequested = false;
+                if (hasActiveTextSearch()) {
+                    saveSearchState();
+                    updateSimilaritySortOption();
+                    if (!wasSearching) {
+                        applySortState('similarity', true, { persist: false });
+                    } else {
+                        saveSearchSortState();
+                    }
+                } else {
+                    clearPersistedSearchState();
+                    if (sortField === 'similarity') {
+                        restoreSortState();
+                        if (sortField === 'similarity') {
+                            applySortState('elo', true, { persist: false, persistSearch: false });
+                        }
+                    }
+                }
+                updateSearchControls();
+                reloadForFilters();
+                updateDateScrubber();
+            }, 300);
+        });
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') clearSearch();
+        });
+    }
+
     async function initLibrary() {
         initBottomBarMeasurement();
         resetLibraryResults();
@@ -2233,51 +2279,7 @@ const PhotoArchive = (() => {
         // Loupe zoom/pan interaction
         initLoupeInteraction();
 
-        // Set up search input
-        const input = document.getElementById('search-input');
-        if (input) {
-            input.addEventListener('input', (e) => {
-                clearTimeout(searchDebounce);
-                e.target.classList.add('searching');
-                const deepBtn = document.getElementById('deep-search-btn');
-                if (deepBtn) {
-                    deepBtn.disabled = !hasActiveTextSearch(e.target.value.trim());
-                    deepBtn.classList.remove('active');
-                }
-                searchDebounce = setTimeout(() => {
-                    e.target.classList.remove('searching');
-                    searchDebounce = null;
-                    const wasSearching = hasActiveTextSearch();
-                    searchQuery = e.target.value.trim();
-                    deepSearchRequested = false;
-                    if (hasActiveTextSearch()) {
-                        saveSearchState();
-                        updateSimilaritySortOption();
-                        if (!wasSearching) {
-                            applySortState('similarity', true, { persist: false });
-                        } else {
-                            saveSearchSortState();
-                        }
-                    } else {
-                        clearPersistedSearchState();
-                        if (sortField === 'similarity') {
-                            restoreSortState();
-                            if (sortField === 'similarity') {
-                                applySortState('elo', true, { persist: false, persistSearch: false });
-                            }
-                        }
-                    }
-                    updateSearchControls();
-                    // Search is a filter — reload rankings with the query
-                    resetLibraryResults({ clearBatch: true });
-                    loadRankings(true);
-                    updateDateScrubber();
-                }, 300);
-            });
-            input.addEventListener('keydown', (e) => {
-                if (e.key === 'Escape') clearSearch();
-            });
-        }
+        initSearchInputControls();
 
         document.querySelectorAll('.bottom-bar a[href]').forEach((link) => {
             link.addEventListener('click', () => {
@@ -2353,8 +2355,7 @@ const PhotoArchive = (() => {
             saveSearchSortState();
         }
         updateSearchControls();
-        resetLibraryResults({ clearBatch: true });
-        loadRankings(true);
+        reloadForFilters();
         updateDateScrubber();
     }
 

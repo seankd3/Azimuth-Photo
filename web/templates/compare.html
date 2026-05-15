@@ -55,6 +55,17 @@
         <span class="key">↑</span> Undo
     </div>
     <div class="bar-divider"></div>
+    <div class="bar-section bar-search">
+        <div class="bar-search-field">
+            <input type="text" id="search-input" class="bar-search-input" placeholder="Search..."
+                   autocomplete="off" spellcheck="false">
+            <button type="button" class="search-clear-sm hidden" id="search-clear" onclick="PhotoArchive.clearSearch()" aria-label="Clear search">&times;</button>
+        </div>
+        <button type="button" class="deep-search-btn" id="deep-search-btn" onclick="PhotoArchive.runDeepSearch()" disabled>
+            Deep Search
+        </button>
+    </div>
+    <div class="bar-divider"></div>
     {% include '_filters.html' %}
     <div class="bar-divider"></div>
     <div class="bar-section bar-stats">
@@ -68,13 +79,6 @@
         </div>
         <span class="coverage-label" id="coverage-label"></span>
     </div>
-    <div class="bar-divider"></div>
-    <div class="bar-section compare-search-active hidden" id="compare-search-active">
-        <span class="compare-search-label">Search</span>
-        <span class="compare-search-query" id="compare-search-query"></span>
-        <button type="button" class="compare-search-clear" onclick="PhotoArchive.clearSearch()" title="Clear search" aria-label="Clear search">&times;</button>
-    </div>
-    <div class="bar-divider"></div>
     <div class="bar-section bar-ai" id="bar-ai" onclick="PhotoArchive.toggleAIPanel()" style="cursor:pointer">
         <span class="bar-ai-label">AI</span>
         <span id="ai-embed-count">—</span>/<span id="ai-embed-total">—</span>

@@ -3512,6 +3512,28 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("strategy: warmStrategy", warmup)
         self.assertNotIn("strategy: mosaicStrategy", warmup)
 
+    async def test_compare_page_has_view_aware_deep_search_controls(self):
+        base_dir = os.path.dirname(__file__)
+        with open(os.path.join(base_dir, "templates", "compare.html"), encoding="utf-8") as fh:
+            compare_template = fh.read()
+        with open(os.path.join(base_dir, "static", "app.js"), encoding="utf-8") as fh:
+            script = fh.read()
+        init_compare = script.split("async function initCompare()", 1)[1].split(
+            "async function pollAIStatus",
+            1,
+        )[0]
+        run_deep = script.split("function runDeepSearch()", 1)[1].split(
+            "function setRankingsSort",
+            1,
+        )[0]
+
+        self.assertIn('id="search-input"', compare_template)
+        self.assertIn("PhotoArchive.runDeepSearch()", compare_template)
+        self.assertIn("function initSearchInputControls()", script)
+        self.assertIn("initSearchInputControls();", init_compare)
+        self.assertIn("reloadForFilters();", run_deep)
+        self.assertNotIn("loadRankings(true)", run_deep)
+
     async def test_filtered_compare_window_is_smaller_than_default_window(self):
         self.assertLess(app_module._FILTERED_SWISS_PAIR_WINDOW, app_module._SWISS_PAIR_WINDOW)
         self.assertGreaterEqual(app_module._FILTERED_SWISS_PAIR_WINDOW, 256)
