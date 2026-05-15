@@ -4130,7 +4130,7 @@ async def api_search(q: str = "", limit: int = 50, deep: bool = False):
     """Search images by text query using embedding similarity."""
     query = _normalize_search_query(q)
     if not query:
-        return {"images": [], "query": q, **_visibility_counts(0, 0)}
+        return {"images": [], "query": query, **_visibility_counts(0, 0)}
     limit = _clamp_int(limit, 50, 1, 500)
 
     async def metadata_fallback(reason: str):
@@ -4175,7 +4175,7 @@ async def api_search(q: str = "", limit: int = 50, deep: bool = False):
             _schedule_result_thumbnail_memory_warm(rows)
         response = {
             "images": result,
-            "query": q,
+            "query": query,
             "search_mode": "metadata",
             "ai_unavailable": True,
             "fallback_reason": reason,
@@ -4212,7 +4212,7 @@ async def api_search(q: str = "", limit: int = 50, deep: bool = False):
 
         return {
             "images": result,
-            "query": q,
+            "query": query,
             "search_mode": deep_search["search_mode"],
             "ai_unavailable": False,
             "deep_search_cached": True,
@@ -4272,7 +4272,7 @@ async def api_search(q: str = "", limit: int = 50, deep: bool = False):
 
     return {
         "images": result,
-        "query": q,
+        "query": query,
         "search_mode": "embedding",
         "ai_unavailable": False,
         "deep_requested": False,

@@ -2612,7 +2612,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         app_module._deep_search_query_record_cache.clear()
         long_query = " ".join(["verylongquery"] * 40)
 
-        await app_module.api_search(q=long_query, limit=10)
+        result = await app_module.api_search(q=long_query, limit=10)
 
         conn = await db.get_db()
         try:
@@ -2625,6 +2625,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNotNone(row)
         self.assertLessEqual(len(row["query"]), app_module.settings.MAX_DEEP_SEARCH_TERM_LENGTH)
+        self.assertEqual(result["query"], row["query"])
 
     async def test_uncached_deep_search_queues_without_loading_active_model(self):
         query = "future semantic cache"
