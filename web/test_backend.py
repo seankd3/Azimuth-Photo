@@ -2580,6 +2580,30 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(row)
         self.assertEqual(int(row["use_count"]), 1)
 
+    async def test_search_endpoint_does_not_relog_cached_query_response(self):
+        source = await self._source()
+        visible_match = await self._image(source["id"], "repeat-api-search-visible.jpg")
+        await self._cache_entry(visible_match, "sm")
+        embedding_worker.encode_text = lambda _query, _config=None: None
+        app_module._rankings_response_cache.clear()
+        app_module._deep_search_query_record_cache.clear()
+
+        await app_module.api_search(q="repeat api query", limit=10)
+        await app_module.api_search(q="repeat api query", limit=10)
+
+        conn = await db.get_db()
+        try:
+            cursor = await conn.execute(
+                "SELECT use_count FROM deep_search_queries WHERE query_key = ?",
+                ("repeat api query",),
+            )
+            row = await cursor.fetchone()
+        finally:
+            await conn.close()
+
+        self.assertIsNotNone(row)
+        self.assertEqual(int(row["use_count"]), 1)
+
     async def test_uncached_deep_search_queues_without_loading_active_model(self):
         query = "future semantic cache"
 

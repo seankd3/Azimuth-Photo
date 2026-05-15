@@ -1928,6 +1928,7 @@ _visible_pairing_candidates_refreshing: set[str] = set()
 _visible_pairing_candidates_generation = 0
 _rankings_response_cache: dict[tuple, dict] = {}
 _text_search_resolution_cache: dict[tuple, dict] = {}
+_deep_search_query_record_cache: dict[str, float] = {}
 _interaction_response_cache: dict[tuple, dict] = {}
 _settings_response_cache: dict[str, dict | float | None] = {"data": None, "expires": 0}
 _settings_response_refreshing = False
@@ -1938,6 +1939,7 @@ _patched_pairing_candidates_ttl_seconds = 15.0
 # idle TTL long so returning to the app does not pay a cold rebuild tax.
 _rankings_response_cache_ttl_seconds = 1800.0
 _text_search_resolution_cache_ttl_seconds = 300.0
+_deep_search_query_record_cache_ttl_seconds = 300.0
 _interaction_response_cache_ttl_seconds = 600.0
 _settings_response_cache_ttl_seconds = 10.0
 _ai_status_response_cache_ttl_seconds = 5.0
@@ -1974,6 +1976,7 @@ def _invalidate_pairing_cache(*, matchups: bool = False):
 def _invalidate_rankings_cache():
     _rankings_response_cache.clear()
     _text_search_resolution_cache.clear()
+    _deep_search_query_record_cache.clear()
 
 
 def _deep_search_query_embedding_stored(_model_key: str, _query: str):
@@ -2793,8 +2796,15 @@ async def _record_deep_search_query(query: str):
     extension_query = normalized_query.lower().lstrip(".")
     if extension_query in db.IMAGE_EXTENSION_SEARCH_TERMS:
         return
+    cache_key = normalized_query.casefold()
+    now = time.monotonic()
+    if _deep_search_query_record_cache.get(cache_key, 0.0) > now:
+        return
     try:
         await db.record_deep_search_query(normalized_query)
+        _deep_search_query_record_cache[cache_key] = (
+            now + _deep_search_query_record_cache_ttl_seconds
+        )
     except Exception:
         pass
 
