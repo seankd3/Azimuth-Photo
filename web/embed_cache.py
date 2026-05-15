@@ -13,13 +13,14 @@ import sqlite3
 import time
 import db
 
-COUNT_CHECK_TTL_SECONDS = 1.0
+# Avoid hitting SQLite on every semantic-search request. The embedding worker
+# patches new vectors into this cache directly; catalog/source changes call
+# invalidate(), so a longer verification window keeps search instant while the
+# thumbnail/original cache is writing heavily.
+COUNT_CHECK_TTL_SECONDS = 30.0
 MATRIX_GROWTH_MIN_ROWS = 512
 MATRIX_GROWTH_FACTOR = 1.10
 SNAPSHOT_DIR = os.path.join(os.path.dirname(__file__), ".embedcache")
-SNAPSHOT_MATRIX_PATH = os.path.join(SNAPSHOT_DIR, "matrix.npy")
-SNAPSHOT_IDS_PATH = os.path.join(SNAPSHOT_DIR, "image_ids.npy")
-SNAPSHOT_META_PATH = os.path.join(SNAPSHOT_DIR, "meta.json")
 
 _cache = {
     "image_ids": None,
@@ -27,13 +28,36 @@ _cache = {
     "matrix": None,
     "count": 0,
     "checked_at": 0.0,
+    "model_key": None,
 }
+_caches = {}
 _rebuild_lock = asyncio.Lock()
 
 
-def _matrix_view():
-    matrix = _cache["matrix"]
-    image_ids = _cache["image_ids"]
+def _target_model_key(model_key: str | None = None) -> str:
+    return model_key or db.active_embedding_model_key()
+
+
+def _empty_cache(model_key: str | None = None):
+    return {
+        "image_ids": None,
+        "id_to_idx": None,
+        "matrix": None,
+        "count": 0,
+        "checked_at": 0.0,
+        "model_key": model_key,
+    }
+
+
+def _activate_cache(cache: dict):
+    global _cache
+    _cache = cache
+
+
+def _matrix_view(cache: dict | None = None):
+    cache = cache or _cache
+    matrix = cache["matrix"]
+    image_ids = cache["image_ids"]
     if matrix is None or image_ids is None:
         return None
     return matrix[:len(image_ids)]
@@ -68,19 +92,37 @@ def _db_file_signature() -> list[list[str | int]]:
     return signature
 
 
-def _load_snapshot_sync(expected_count: int):
+def _snapshot_paths(model_key: str):
+    safe_key = (
+        str(model_key or "default")
+        .replace("/", "--")
+        .replace("\\", "--")
+        .replace(":", "-")
+        .replace("@", "-")
+    )
+    return (
+        os.path.join(SNAPSHOT_DIR, f"{safe_key}.matrix.npy"),
+        os.path.join(SNAPSHOT_DIR, f"{safe_key}.image_ids.npy"),
+        os.path.join(SNAPSHOT_DIR, f"{safe_key}.meta.json"),
+    )
+
+
+def _load_snapshot_sync(expected_count: int, model_key: str):
+    matrix_path, ids_path, meta_path = _snapshot_paths(model_key)
     try:
-        with open(SNAPSHOT_META_PATH, "r", encoding="utf-8") as f:
+        with open(meta_path, "r", encoding="utf-8") as f:
             meta = json.load(f)
         if int(meta.get("count", -1)) != expected_count:
+            return None
+        if meta.get("model_key") != model_key:
             return None
         if meta.get("db_signature") != _db_file_signature():
             return None
         # Load into RAM rather than returning a memmap. Search/similar should
         # pay a predictable warmup cost instead of page-faulting during the
         # first similarity matmul.
-        ids = np.load(SNAPSHOT_IDS_PATH)
-        matrix = np.load(SNAPSHOT_MATRIX_PATH)
+        ids = np.load(ids_path)
+        matrix = np.load(matrix_path)
         if len(ids) != expected_count or matrix.shape[0] != expected_count:
             return None
         return ids.astype(np.int64).tolist(), matrix
@@ -88,100 +130,127 @@ def _load_snapshot_sync(expected_count: int):
         return None
 
 
-def _save_snapshot_sync(image_ids: list[int], matrix: np.ndarray):
+def _save_snapshot_sync(image_ids: list[int], matrix: np.ndarray, model_key: str):
+    matrix_path, ids_path, meta_path = _snapshot_paths(model_key)
     try:
         os.makedirs(SNAPSHOT_DIR, exist_ok=True)
-        ids_tmp = f"{SNAPSHOT_IDS_PATH}.tmp"
-        matrix_tmp = f"{SNAPSHOT_MATRIX_PATH}.tmp"
-        meta_tmp = f"{SNAPSHOT_META_PATH}.tmp"
+        ids_tmp = f"{ids_path}.tmp"
+        matrix_tmp = f"{matrix_path}.tmp"
+        meta_tmp = f"{meta_path}.tmp"
         np.save(ids_tmp, np.asarray(image_ids, dtype=np.int64))
         np.save(matrix_tmp, np.asarray(matrix[:len(image_ids)], dtype=np.float32))
         with open(meta_tmp, "w", encoding="utf-8") as f:
             json.dump({
+                "model_key": model_key,
                 "count": len(image_ids),
                 "db_signature": _db_file_signature(),
                 "created_at": time.time(),
             }, f)
-        os.replace(f"{ids_tmp}.npy", SNAPSHOT_IDS_PATH)
-        os.replace(f"{matrix_tmp}.npy", SNAPSHOT_MATRIX_PATH)
-        os.replace(meta_tmp, SNAPSHOT_META_PATH)
+        os.replace(f"{ids_tmp}.npy", ids_path)
+        os.replace(f"{matrix_tmp}.npy", matrix_path)
+        os.replace(meta_tmp, meta_path)
     except Exception:
         pass
 
 
-def _get_embedding_count_sync() -> int:
+def _get_embedding_count_sync(model_key: str) -> int:
     conn = sqlite3.connect(db.DB_PATH, timeout=30)
     try:
         return conn.execute(
-            "SELECT COUNT(*) FROM embeddings e "
+            "SELECT COUNT(*) FROM embeddings_by_model e "
             "JOIN images i ON e.image_id = i.id "
             "JOIN catalog_sources s ON s.id = i.source_id "
-            "WHERE s.included = 1 AND s.online = 1 AND i.missing_at IS NULL"
+            "WHERE e.model_key = ? "
+            "AND s.included = 1 AND s.online = 1 AND i.missing_at IS NULL",
+            (model_key,),
         ).fetchone()[0]
     finally:
         conn.close()
 
 
-def _load_embeddings_sync(expected_count: int):
-    snapshot = _load_snapshot_sync(expected_count)
+def _load_embeddings_sync(expected_count: int, model_key: str):
+    snapshot = _load_snapshot_sync(expected_count, model_key)
     if snapshot is not None:
         return snapshot
 
     conn = sqlite3.connect(db.DB_PATH, timeout=30)
     try:
         rows = conn.execute(
-            "SELECT e.image_id, e.embedding FROM embeddings e "
+            "SELECT e.image_id, e.embedding FROM embeddings_by_model e "
             "JOIN images i ON e.image_id = i.id "
             "JOIN catalog_sources s ON s.id = i.source_id "
-            "WHERE s.included = 1 AND s.online = 1 AND i.missing_at IS NULL"
+            "WHERE e.model_key = ? "
+            "AND s.included = 1 AND s.online = 1 AND i.missing_at IS NULL",
+            (model_key,),
         ).fetchall()
     finally:
         conn.close()
     image_ids, matrix = _rows_to_matrix(rows)
     if image_ids and matrix is not None:
-        _save_snapshot_sync(image_ids, matrix)
+        _save_snapshot_sync(image_ids, matrix, model_key)
     return image_ids, matrix
 
 
 def _remove_snapshot_sync():
-    for path in (SNAPSHOT_MATRIX_PATH, SNAPSHOT_IDS_PATH, SNAPSHOT_META_PATH):
-        try:
-            os.remove(path)
-        except OSError:
-            pass
+    try:
+        for filename in os.listdir(SNAPSHOT_DIR):
+            if filename.endswith((".matrix.npy", ".image_ids.npy", ".meta.json")):
+                try:
+                    os.remove(os.path.join(SNAPSHOT_DIR, filename))
+                except OSError:
+                    pass
+    except OSError:
+        pass
 
 
-async def get_matrix():
+async def get_matrix(model_key: str | None = None):
     """Return (image_ids, matrix) from cache, rebuilding if needed."""
+    model_key = _target_model_key(model_key)
     now = time.monotonic()
+    cache = _caches.get(model_key)
     if (
-        _cache["matrix"] is not None
-        and now - _cache["checked_at"] < COUNT_CHECK_TTL_SECONDS
+        cache is not None
+        and cache["matrix"] is not None
+        and now - cache["checked_at"] < COUNT_CHECK_TTL_SECONDS
     ):
-        return _cache["image_ids"], _matrix_view()
+        _activate_cache(cache)
+        return cache["image_ids"], _matrix_view(cache)
 
     async with _rebuild_lock:
         now = time.monotonic()
+        cache = _caches.get(model_key)
         if (
-            _cache["matrix"] is not None
-            and now - _cache["checked_at"] < COUNT_CHECK_TTL_SECONDS
+            cache is not None
+            and cache["matrix"] is not None
+            and now - cache["checked_at"] < COUNT_CHECK_TTL_SECONDS
         ):
-            return _cache["image_ids"], _matrix_view()
+            _activate_cache(cache)
+            return cache["image_ids"], _matrix_view(cache)
 
-        current_count = await asyncio.to_thread(_get_embedding_count_sync)
-        _cache["checked_at"] = now
-        if _cache["matrix"] is not None and _cache["count"] == current_count:
-            return _cache["image_ids"], _matrix_view()
+        current_count = await asyncio.to_thread(_get_embedding_count_sync, model_key)
+        if cache is None:
+            cache = _empty_cache(model_key)
+            _caches[model_key] = cache
+        cache["checked_at"] = now
+        if (
+            cache["matrix"] is not None
+            and cache["count"] == current_count
+        ):
+            _activate_cache(cache)
+            return cache["image_ids"], _matrix_view(cache)
 
-        image_ids, matrix = await asyncio.to_thread(_load_embeddings_sync, current_count)
+        image_ids, matrix = await asyncio.to_thread(_load_embeddings_sync, current_count, model_key)
         if not image_ids or matrix is None:
-            _cache.update({
+            cache = {
                 "image_ids": None,
                 "id_to_idx": None,
                 "matrix": None,
                 "count": 0,
                 "checked_at": now,
-            })
+                "model_key": model_key,
+            }
+            _caches[model_key] = cache
+            _activate_cache(cache)
             return None, None
 
         # Build new cache atomically to avoid partial reads from concurrent callers
@@ -191,32 +260,55 @@ async def get_matrix():
             "matrix": matrix,
             "count": len(image_ids),
             "checked_at": now,
+            "model_key": model_key,
         }
-        _cache.update(new_cache)
+        _caches[model_key] = new_cache
+        _activate_cache(new_cache)
 
-        return image_ids, _matrix_view()
+        return image_ids, _matrix_view(new_cache)
 
 
-def get_warm_matrix():
+def get_warm_matrix(model_key: str | None = None):
     """Return the current in-memory matrix without triggering a rebuild."""
-    if _cache["matrix"] is None or _cache["image_ids"] is None:
+    model_key = _target_model_key(model_key)
+    cache = _caches.get(model_key)
+    if (
+        cache is None
+        or cache["matrix"] is None
+        or cache["image_ids"] is None
+    ):
         return None, None
-    return _cache["image_ids"], _matrix_view()
+    _activate_cache(cache)
+    return cache["image_ids"], _matrix_view(cache)
 
 
-def add_vectors(rows: list[tuple[int, np.ndarray]]):
+def add_vectors(rows: list[tuple[int, np.ndarray]], model_key: str | None = None):
     """Append freshly stored vectors to the warm cache without a full DB rebuild."""
-    if not rows or _cache["matrix"] is None or _cache["image_ids"] is None:
+    model_key = _target_model_key(model_key)
+    cache = _caches.get(model_key)
+    if (
+        not rows
+        or cache is None
+        or cache["matrix"] is None
+        or cache["image_ids"] is None
+    ):
         return
 
-    id_to_idx = _cache["id_to_idx"] or {}
-    new_rows = [(image_id, vec) for image_id, vec in rows if image_id not in id_to_idx]
+    id_to_idx = cache["id_to_idx"] or {}
+    matrix = cache["matrix"]
+    new_rows = []
+    for image_id, vec in rows:
+        idx = id_to_idx.get(image_id)
+        if idx is None:
+            new_rows.append((image_id, vec))
+            continue
+        matrix[idx] = np.asarray(vec, dtype=np.float32)
     if not new_rows:
-        _cache["checked_at"] = time.monotonic()
+        cache["count"] = len(cache["image_ids"])
+        cache["checked_at"] = time.monotonic()
         return
 
-    image_ids = list(_cache["image_ids"])
-    matrix = _cache["matrix"]
+    image_ids = list(cache["image_ids"])
     old_count = len(image_ids)
     dim = matrix.shape[1]
     new_count = old_count + len(new_rows)
@@ -235,30 +327,41 @@ def add_vectors(rows: list[tuple[int, np.ndarray]]):
         id_to_idx[image_id] = old_count + offset
         image_ids.append(image_id)
 
-    _cache.update({
+    cache.update({
         "image_ids": image_ids,
         "id_to_idx": id_to_idx,
         "matrix": matrix,
         "count": new_count,
         "checked_at": time.monotonic(),
     })
+    if _cache.get("model_key") == model_key:
+        _activate_cache(cache)
 
 
 def invalidate():
     """Force the next get_matrix() call to verify/rebuild the active set."""
+    for cache in _caches.values():
+        cache["checked_at"] = 0.0
+        cache["count"] = -1
     _cache["checked_at"] = 0.0
     _cache["count"] = -1
 
 
-def get_index() -> dict[int, int]:
-    return _cache["id_to_idx"] or {}
+def get_index(model_key: str | None = None) -> dict[int, int]:
+    target = _target_model_key(model_key)
+    cache = _caches.get(target)
+    if cache is None:
+        return {}
+    return cache["id_to_idx"] or {}
 
 
-def get_vector(image_id: int):
+def get_vector(image_id: int, model_key: str | None = None):
     """Get a single image's embedding vector from cache. Returns None if not cached."""
-    if _cache["matrix"] is None or _cache["id_to_idx"] is None:
+    target = _target_model_key(model_key)
+    cache = _caches.get(target)
+    if cache is None or cache["matrix"] is None or cache["id_to_idx"] is None:
         return None
-    idx = _cache["id_to_idx"].get(image_id)
+    idx = cache["id_to_idx"].get(image_id)
     if idx is None:
         return None
-    return _cache["matrix"][idx]
+    return cache["matrix"][idx]

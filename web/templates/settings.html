@@ -45,32 +45,156 @@
             <div class="catalog-source-list" id="catalog-source-list"></div>
         </section>
 
+        <section class="settings-card settings-card-wide">
+            <h2>Computer Work Mode</h2>
+            <p class="settings-card-copy">Choose how much background work photoArchive is allowed to do while you use the computer.</p>
+            <input id="background_work_mode" type="hidden">
+            <div class="work-mode-picker" id="background-work-mode-picker">
+                <label class="work-mode-option" data-work-mode-option="browse">
+                    <input type="radio" name="background_work_mode_choice" value="browse">
+                    <span class="work-mode-title">Browse</span>
+                    <span class="work-mode-copy">Pause background builders so Library, Compare, and Mosaic stay responsive.</span>
+                </label>
+                <label class="work-mode-option" data-work-mode-option="balanced">
+                    <input type="radio" name="background_work_mode_choice" value="balanced">
+                    <span class="work-mode-title">Light Background</span>
+                    <span class="work-mode-copy">Warm cache and embeddings only after the machine has been quiet.</span>
+                </label>
+                <label class="work-mode-option" data-work-mode-option="max">
+                    <input type="radio" name="background_work_mode_choice" value="max">
+                    <span class="work-mode-title">Max Work</span>
+                    <span class="work-mode-copy">Use more idle compute for overnight or away-from-desk builds.</span>
+                </label>
+            </div>
+            <div class="settings-metric-list">
+                <div>Background governor: <strong id="background-work-governor-status">—</strong></div>
+                <div>Allowed heavy work: <strong id="background-work-heavy-status">—</strong></div>
+            </div>
+        </section>
+
         <section class="settings-card">
             <h2>AI Model</h2>
             <p class="settings-card-copy">Install the model once from Hugging Face here, then the app will load it locally from disk for offline embeddings and search.</p>
             <label class="settings-field">
+                <span>Model preset</span>
+                <select id="embed_model_preset" disabled></select>
+            </label>
+            <label class="settings-field">
                 <span>Model ID</span>
-                <input id="embed_model_id" type="text" spellcheck="false" autocomplete="off">
+                <input id="embed_model_id" type="text" spellcheck="false" autocomplete="off" readonly>
             </label>
             <label class="settings-field">
                 <span>Revision</span>
-                <input id="embed_model_revision" type="text" spellcheck="false" autocomplete="off">
+                <input id="embed_model_revision" type="text" spellcheck="false" autocomplete="off" readonly>
             </label>
             <label class="settings-field">
                 <span>Local model directory</span>
-                <input id="embed_model_dir" type="text" spellcheck="false" autocomplete="off">
+                <input id="embed_model_dir" type="text" spellcheck="false" autocomplete="off" readonly>
+            </label>
+            <label class="settings-field">
+                <span>Embedding dimensions</span>
+                <input id="embed_model_dim" type="number" min="64" max="4096" step="64" readonly>
             </label>
             <label class="settings-field">
                 <span>Embedding batch target</span>
                 <input id="embed_batch_size" type="number" min="1" max="32" step="1">
+            </label>
+            <label class="settings-checkbox">
+                <input id="defer_ai_on_startup" type="checkbox">
+                <span>Defer AI model loading and background embeddings on launch.</span>
             </label>
             <div class="settings-metric-list">
                 <div>Install status: <strong id="model-install-status">—</strong></div>
                 <div id="model-install-message">—</div>
             </div>
             <div class="settings-actions">
-                <button class="bar-btn" type="button" id="install-model-btn" onclick="PhotoArchive.installAIModel()">Save + Install Model</button>
+                <button class="bar-btn" type="button" id="install-model-btn" onclick="PhotoArchive.installAIModel('fast')">Save + Install 2B Model</button>
             </div>
+        </section>
+
+        <section class="settings-card settings-card-wide">
+            <h2>Embedding Indexes</h2>
+            <p class="settings-card-copy">Normal search uses the fast 2B index immediately. Ready deep-cache terms can use the scheduled 8B index without loading the model during search.</p>
+            <div class="embedding-index-grid">
+                <div class="embedding-index-panel">
+                    <div class="embedding-index-header">
+                        <div>
+                            <div class="embedding-index-title">Daily Search</div>
+                            <div class="embedding-index-subtitle" id="fast-index-model">—</div>
+                        </div>
+                        <span class="embedding-index-badge" id="fast-index-badge">—</span>
+                    </div>
+                    <div class="embedding-index-meter" aria-hidden="true">
+                        <span id="fast-index-meter"></span>
+                    </div>
+                    <div class="embedding-index-progress" id="fast-index-progress">—</div>
+                    <div class="embedding-index-status" id="fast-index-status">—</div>
+                </div>
+                <div class="embedding-index-panel">
+                    <div class="embedding-index-header">
+                        <div>
+                            <div class="embedding-index-title">Deep Search</div>
+                            <div class="embedding-index-subtitle" id="deep-index-model">—</div>
+                        </div>
+                        <span class="embedding-index-badge" id="deep-index-badge">—</span>
+                    </div>
+                    <div class="embedding-index-meter" aria-hidden="true">
+                        <span id="deep-index-meter"></span>
+                    </div>
+                    <div class="embedding-index-progress" id="deep-index-progress">—</div>
+                    <div class="embedding-index-status" id="deep-index-status">—</div>
+                    <div class="settings-actions embedding-index-actions">
+                        <button class="bar-btn" type="button" onclick="PhotoArchive.installAIModel('deep')">Install 8B</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="settings-card settings-card-wide">
+            <h2>Deep Search Cache</h2>
+            <p class="settings-card-copy">Saved searches that should be ready for the smarter 8B index when the deep worker has time to run.</p>
+            <label class="settings-checkbox">
+                <input id="deep_search_schedule_enabled" type="checkbox">
+                <span>Run deep search work on a schedule</span>
+            </label>
+            <div class="deep-search-schedule-grid">
+                <label class="settings-field">
+                    <span>Start</span>
+                    <input id="deep_search_schedule_start" type="time" step="60">
+                </label>
+                <label class="settings-field">
+                    <span>Stop</span>
+                    <input id="deep_search_schedule_end" type="time" step="60">
+                </label>
+                <label class="settings-field">
+                    <span>Timezone</span>
+                    <select id="deep_search_schedule_timezone">
+                        <option value="America/Chicago">Central time</option>
+                    </select>
+                </label>
+            </div>
+            <div class="deep-search-day-picker" id="deep-search-day-picker">
+                <label><input type="checkbox" data-deep-search-day="mon">Mon</label>
+                <label><input type="checkbox" data-deep-search-day="tue">Tue</label>
+                <label><input type="checkbox" data-deep-search-day="wed">Wed</label>
+                <label><input type="checkbox" data-deep-search-day="thu">Thu</label>
+                <label><input type="checkbox" data-deep-search-day="fri">Fri</label>
+                <label><input type="checkbox" data-deep-search-day="sat">Sat</label>
+                <label><input type="checkbox" data-deep-search-day="sun">Sun</label>
+            </div>
+            <div class="settings-help-text" id="deep-search-schedule-summary">Runs Monday-Friday, 7:00 AM-4:00 PM Central time.</div>
+            <div class="settings-metric-list">
+                <div>Deep worker: <strong id="deep-search-worker-status">—</strong></div>
+                <div>8B image index: <strong id="deep-search-image-status">—</strong></div>
+                <div>8B query cache: <strong id="deep-search-query-status">—</strong></div>
+            </div>
+            <div class="deep-search-query-list" id="deep-search-query-list"></div>
+            <label class="settings-field">
+                <span>Searches to precompute</span>
+                <textarea id="deep_search_terms" rows="8" spellcheck="false" autocomplete="off" placeholder="cranes in fog&#10;black and white portraits&#10;favorite cafe photos"></textarea>
+            </label>
+            <div class="settings-help-text">One search per line. Duplicates are collapsed when settings are saved.</div>
+            <div class="deep-search-term-list" id="deep-search-term-list"></div>
         </section>
 
         <section class="settings-card">
@@ -163,8 +287,10 @@
                 </label>
                 <div class="settings-metric-list">
                     <div>RAM cache: <strong id="cache-stats-inline">—</strong></div>
+                    <div>System RAM free: <strong id="system-ram-free">—</strong></div>
                     <div>RAM tiers: <strong id="cache-ram-usage">—</strong></div>
                     <div>SSD cache: <strong id="cache-ssd-usage">—</strong></div>
+                    <div>SSD free: <strong id="system-ssd-free">—</strong></div>
                     <div id="cache-tier-sm">sm: —</div>
                     <div id="cache-tier-md">md: —</div>
                     <div id="cache-tier-lg">lg: —</div>

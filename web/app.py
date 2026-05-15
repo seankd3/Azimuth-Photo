@@ -1,6 +1,9 @@
 import asyncio
+import copy
 import csv
+import heapq
 import io
+import json
 import os
 import shutil
 import sqlite3
@@ -44,11 +47,36 @@ class SelectiveGZipMiddleware:
         await self.gzip(scope, receive, send)
 
 
+class StaticCacheHeadersMiddleware:
+    """Let browsers reuse static JS/CSS briefly while still revalidating soon."""
+
+    def __init__(self, app, max_age: int = 300):
+        self.app = app
+        self.cache_control = f"public, max-age={max_age}, stale-while-revalidate=3600"
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http" or not (scope.get("path") or "").startswith("/static/"):
+            await self.app(scope, receive, send)
+            return
+
+        async def send_with_cache_headers(message):
+            if message.get("type") == "http.response.start":
+                headers = list(message.get("headers") or [])
+                if not any(name.lower() == b"cache-control" for name, _value in headers):
+                    headers.append((b"cache-control", self.cache_control.encode("ascii")))
+                    message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, send_with_cache_headers)
+
+
 app = FastAPI(title="photoArchive")
 app.add_middleware(SelectiveGZipMiddleware, minimum_size=1000)
+app.add_middleware(StaticCacheHeadersMiddleware, max_age=86400)
 app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")), name="static")
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
 
+INTERACTION_CACHE_WARMUP_DELAY_SECONDS = 0.05
 _BROWSER_IMAGE_EXTENSIONS = thumbnails.BROWSER_ORIGINAL_EXTENSIONS
 _IDLE_ACTIVITY_EXCLUDED_PATHS = {
     "/api/ai/status",
@@ -60,6 +88,14 @@ _IDLE_ACTIVITY_EXCLUDED_PATHS = {
     "/api/ui/settings",
 }
 _STARTED_AT = time.time()
+_BACKGROUND_TASKS: set[asyncio.Task] = set()
+
+
+def _track_background_task(coro) -> asyncio.Task:
+    task = asyncio.create_task(coro)
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
+    return task
 
 
 def _positive_int(value) -> int | None:
@@ -110,6 +146,32 @@ def _git_commit() -> str | None:
 
 
 _GIT_COMMIT = _git_commit()
+_STATIC_VERSION: str | None = None
+
+
+def _static_version() -> str:
+    global _STATIC_VERSION
+    if _STATIC_VERSION is not None:
+        return _STATIC_VERSION
+    static_dir = os.path.join(os.path.dirname(__file__), "static")
+    try:
+        mtimes = [
+            os.path.getmtime(os.path.join(static_dir, filename))
+            for filename in ("app.js", "style.css")
+        ]
+        _STATIC_VERSION = str(int(max(mtimes)))
+    except OSError:
+        _STATIC_VERSION = str(int(_STARTED_AT))
+    return _STATIC_VERSION
+
+
+def _template_context(request: Request) -> dict:
+    return {"request": request, "static_version": _static_version()}
+
+
+def _warm_templates() -> None:
+    for template_name in ("settings.html", "library.html", "compare.html"):
+        templates.env.get_template(template_name)
 
 
 @app.middleware("http")
@@ -124,33 +186,208 @@ async def track_idle_activity(request: Request, call_next):
 async def startup():
     await db.init_db()
     thumbnails.configure(settings.load_settings())
-    asyncio.create_task(thumbnails.run_prefetch_worker())
-    asyncio.create_task(classify_orientations_background())
-    asyncio.create_task(scan_metadata_background())
-    try:
-        import embedding_worker
-        asyncio.create_task(embedding_worker.run_embedding_worker())
-    except ImportError:
-        pass  # AI features disabled — missing dependencies
 
-    # Pre-warm embed cache in background so first search/similar is fast
     async def _warm_embed_cache():
-        await asyncio.sleep(0)  # yield once then warm immediately
         try:
             import embed_cache
             await embed_cache.get_matrix()
         except Exception:
             pass
-    asyncio.create_task(_warm_embed_cache())
 
-    async def _warm_interaction_caches():
-        await asyncio.sleep(0.25)
+    async def _cleanup_stale_cache_temps_when_quiet():
+        await asyncio.to_thread(thumbnails.cleanup_stale_cache_temps)
+
+    async def _warm_common_filter_caches():
+        options = await db.get_filter_options()
+        file_types = [
+            str(item.get("ext") or "")
+            for item in (options.get("file_types") or [])[:3]
+            if item.get("ext")
+        ]
         await asyncio.gather(
-            _get_pairing_images(),
-            _get_past_matchups(),
+            *(
+                api_rankings(limit=60, file_type=file_type)
+                for file_type in file_types
+            ),
+            *(
+                api_rankings(limit=60, q=file_type)
+                for file_type in file_types
+            ),
+            *(
+                db.get_date_groups(
+                    file_type=file_type,
+                    visible_thumb_size="sm",
+                    cache_root=_cache_root(),
+                )
+                for file_type in file_types
+            ),
             return_exceptions=True,
         )
-    asyncio.create_task(_warm_interaction_caches())
+
+    async def _warm_light_startup_caches():
+        await asyncio.sleep(0.1)
+        await asyncio.gather(
+            db.get_catalog_image_counts(),
+            db.get_stats(),
+            db.get_ai_status_counts(),
+            db.get_filter_options(),
+            build_ai_status(),
+            db.get_date_groups(visible_thumb_size="sm", cache_root=_cache_root()),
+            api_rankings(limit=60),
+            mosaic_next(n=12, strategy="explore"),
+            api_folders(max_depth=0),
+            api_folders(max_depth=1),
+            api_folders(max_depth=2),
+            api_map_markers(),
+            api_settings(),
+            db.get_visible_orientation_pairing_pool_counts("md", _cache_root(), "landscape"),
+            db.get_visible_orientation_pairing_pool_counts("md", _cache_root(), "portrait"),
+            db.get_visible_orientation_pairing_pool_counts("sm", _cache_root(), "landscape"),
+            db.get_visible_orientation_pairing_pool_counts("sm", _cache_root(), "portrait"),
+            _warm_common_filter_caches(),
+            _warm_filtered_visible_ranked_candidates(
+                "md",
+                limit=_FILTERED_SWISS_PAIR_WINDOW,
+                orientation="landscape",
+                warm_matchups=True,
+            ),
+            _warm_filtered_visible_ranked_candidates(
+                "md",
+                limit=_FILTERED_SWISS_PAIR_WINDOW,
+                orientation="portrait",
+                warm_matchups=True,
+            ),
+            _warm_filtered_visible_ranked_candidates(
+                "sm",
+                limit=_FILTERED_MOSAIC_WINDOW,
+                orientation="landscape",
+            ),
+            _warm_filtered_visible_ranked_candidates(
+                "sm",
+                limit=_FILTERED_MOSAIC_WINDOW,
+                orientation="portrait",
+            ),
+            asyncio.to_thread(_warm_templates),
+            return_exceptions=True,
+        )
+
+    async def _wait_for_background_window(min_idle_seconds: float = 60.0):
+        while True:
+            idle_seconds = thumbnails.get_idle_seconds()
+            decision = resource_governor.get_background_decision(idle_seconds)
+            if idle_seconds >= min_idle_seconds and decision.can_start_heavy_work:
+                return
+            await asyncio.sleep(max(1.0, decision.sleep_seconds or 1.0))
+
+    _track_background_task(_warm_light_startup_caches())
+
+    async def _warm_priority_interaction_caches():
+        await asyncio.sleep(0.5)
+        await _wait_for_background_window()
+        await asyncio.gather(
+            db.get_stats(),
+            db.get_filter_options(),
+            _default_visible_pairing_candidates(
+                "md",
+                limit=_SWISS_PAIR_WINDOW,
+                include_card_metadata=True,
+            ),
+            _default_visible_pairing_candidates(
+                "sm",
+                copy_rows=True,
+                limit=_MOSAIC_EXPLORE_WINDOW,
+                order="cache",
+            ),
+            _default_visible_pairing_candidates(
+                "sm",
+                limit=_MOSAIC_DIVERSE_WINDOW,
+                order="least_compared",
+                include_card_metadata=False,
+            ),
+            _get_visible_past_matchups("md"),
+            api_folders(max_depth=1),
+            api_rankings(limit=50),
+            api_rankings(limit=50, sort="resolution"),
+            api_settings(),
+            return_exceptions=True,
+        )
+        await mosaic_next(n=12, strategy="explore")
+        await mosaic_next(n=12, strategy="diverse")
+        await compare_next(n=5)
+
+    _track_background_task(_warm_priority_interaction_caches())
+
+    async def _start_background_after_ready(coro_factory, delay: float = 5.0):
+        await asyncio.sleep(delay)
+        await coro_factory()
+
+    _track_background_task(_start_background_after_ready(thumbnails.run_prefetch_worker))
+    _track_background_task(_start_background_after_ready(_cleanup_stale_cache_temps_when_quiet, delay=20.0))
+    _track_background_task(_start_background_after_ready(classify_orientations_background))
+    _track_background_task(_start_background_after_ready(scan_metadata_background))
+    try:
+        import embedding_worker
+        if settings.get_settings().get("defer_ai_on_startup", True):
+            embedding_worker.pause_embedding_worker("AI work deferred by startup setting.")
+        _track_background_task(_start_background_after_ready(embedding_worker.run_embedding_worker))
+        _track_background_task(_start_background_after_ready(embedding_worker.run_deep_search_worker, delay=15.0))
+    except ImportError:
+        pass  # AI features disabled — missing dependencies
+
+    async def _warm_interaction_caches():
+        await asyncio.sleep(INTERACTION_CACHE_WARMUP_DELAY_SECONDS)
+        await _wait_for_background_window()
+        await asyncio.gather(
+            db.get_ai_status_counts(),
+            db.get_visible_orientation_pairing_pool_counts("md", _cache_root(), "landscape"),
+            db.get_visible_orientation_pairing_pool_counts("md", _cache_root(), "portrait"),
+            db.get_visible_orientation_pairing_pool_counts("sm", _cache_root(), "landscape"),
+            db.get_visible_orientation_pairing_pool_counts("sm", _cache_root(), "portrait"),
+            _warm_filtered_visible_ranked_candidates(
+                "md",
+                limit=_FILTERED_SWISS_PAIR_WINDOW,
+                orientation="landscape",
+                warm_matchups=True,
+            ),
+            _warm_filtered_visible_ranked_candidates(
+                "md",
+                limit=_FILTERED_SWISS_PAIR_WINDOW,
+                orientation="portrait",
+                warm_matchups=True,
+            ),
+            _warm_filtered_visible_ranked_candidates(
+                "sm",
+                limit=_FILTERED_MOSAIC_WINDOW,
+                orientation="landscape",
+            ),
+            _warm_filtered_visible_ranked_candidates(
+                "sm",
+                limit=_FILTERED_MOSAIC_WINDOW,
+                orientation="portrait",
+            ),
+            build_cache_status(ahead=0),
+            db.get_catalog_summary(),
+            api_date_groups(),
+            api_map_markers(),
+            api_rankings(limit=50, sort="newest"),
+            api_rankings(limit=50, sort="camera"),
+            return_exceptions=True,
+        )
+        await asyncio.gather(
+            mosaic_next(n=6, orientation="landscape"),
+            mosaic_next(n=12, strategy="diverse"),
+            mosaic_next(n=12, strategy="diverse", orientation="landscape"),
+            mosaic_next(n=12, strategy="diverse", orientation="portrait"),
+            compare_next(n=5, mode="topn"),
+            return_exceptions=True,
+        )
+    _track_background_task(_warm_interaction_caches())
+
+    async def _warm_embed_cache_when_quiet():
+        await asyncio.sleep(120.0)
+        await _wait_for_background_window()
+        await _warm_embed_cache()
+    _track_background_task(_warm_embed_cache_when_quiet())
 
 
 async def classify_orientations_background():
@@ -174,13 +411,20 @@ async def classify_orientations_background():
 
     while True:
         try:
-            rows = await db.get_unclassified_images(limit=200)
+            decision = resource_governor.get_background_decision(thumbnails.get_idle_seconds())
+            if decision.pause:
+                await asyncio.sleep(decision.sleep_seconds)
+                continue
+
+            batch_limit = max(10, min(200, int(200 * max(decision.intensity, 0.1))))
+            rows = await db.get_unclassified_images(limit=batch_limit)
             if not rows:
                 await asyncio.sleep(5)
                 continue
             results = await loop.run_in_executor(None, _classify_batch, rows)
             if results:
                 await db.batch_set_orientations(results)
+            await asyncio.sleep(max(0.05, decision.embedding_pause_seconds))
         except Exception as e:
             print(f"Orientation classifier error: {e}")
             await asyncio.sleep(5)
@@ -249,7 +493,6 @@ async def scan_metadata_background():
                 continue
             updates = await loop.run_in_executor(None, _extract_batch, rows)
             await db.batch_update_metadata(updates)
-            _invalidate_pairing_cache()
             await asyncio.sleep(max(0.05, decision.embedding_pause_seconds))
         except Exception as e:
             print(f"Metadata scanner error: {e}")
@@ -259,38 +502,44 @@ async def scan_metadata_background():
 @app.on_event("shutdown")
 async def shutdown():
     thumbnails.stop_prefetch()
+    tasks = list(_BACKGROUND_TASKS)
+    for task in tasks:
+        task.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+    _BACKGROUND_TASKS.clear()
 
 
 # --- Pages ---
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    return templates.TemplateResponse(request, "settings.html")
+    return templates.TemplateResponse(request, "settings.html", _template_context(request))
 
 
 @app.get("/compare", response_class=HTMLResponse)
 async def compare_page(request: Request):
-    return templates.TemplateResponse(request, "compare.html")
+    return templates.TemplateResponse(request, "compare.html", _template_context(request))
 
 
 @app.get("/rankings", response_class=HTMLResponse)
 async def rankings_page(request: Request):
-    return templates.TemplateResponse(request, "library.html")
+    return templates.TemplateResponse(request, "library.html", _template_context(request))
 
 
 @app.get("/library", response_class=HTMLResponse)
 async def library_page(request: Request):
-    return templates.TemplateResponse(request, "library.html")
+    return templates.TemplateResponse(request, "library.html", _template_context(request))
 
 
 @app.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request):
-    return templates.TemplateResponse(request, "settings.html")
+    return templates.TemplateResponse(request, "settings.html", _template_context(request))
 
 
 @app.get("/catalog", response_class=HTMLResponse)
 async def catalog_page(request: Request):
-    return templates.TemplateResponse(request, "settings.html")
+    return templates.TemplateResponse(request, "settings.html", _template_context(request))
 
 
 @app.get("/api/dev/status")
@@ -693,6 +942,7 @@ async def api_remove_catalog_source(source_id: int, request: Request):
 
     _invalidate_pairing_cache(matchups=True)
     _invalidate_folders_cache()
+    _invalidate_cache_status_cache()
     return {"ok": True, "source_id": source_id, **action, "catalog": await db.get_catalog_summary()}
 
 
@@ -703,11 +953,28 @@ async def serve_thumbnail(request: Request, size: str, image_id: int, cached: bo
     if size not in thumbnails.SIZES:
         return JSONResponse({"error": "Invalid size"}, status_code=400)
 
+    def cache_headers(signature: str) -> dict:
+        return {
+            "Cache-Control": (
+                f"public, max-age={thumbnails.BROWSER_CACHE_MAX_AGE}, "
+                f"stale-while-revalidate={thumbnails.BROWSER_CACHE_STALE_WHILE_REVALIDATE}"
+            ),
+            "ETag": f'"{signature}"',
+        }
+
     # Fast path: check memory cache, then SSD disk cache — no DB lookup or HDD stat.
     # The cached signature is strong enough for browser revalidation and avoids
     # the old "size-id" ETag that could mask regenerated thumbnails.
+    request_etag = request.headers.get("if-none-match")
     entry = thumbnails._memory_get_entry_fast(size, image_id)
     if entry is None:
+        path_entry = thumbnails.fast_disk_path_entry(size, image_id)
+        if path_entry is not None:
+            signature, path = path_entry
+            headers = cache_headers(signature)
+            if request_etag == headers["ETag"]:
+                return Response(status_code=304, headers=headers)
+            return FileResponse(path, media_type="image/jpeg", headers=headers)
         entry = await asyncio.get_event_loop().run_in_executor(
             None,
             thumbnails.fast_disk_read_entry,
@@ -720,14 +987,8 @@ async def serve_thumbnail(request: Request, size: str, image_id: int, cached: bo
             thumbnails._memory_put(size, image_id, signature, data)
     if entry is not None:
         signature, data = entry
-        headers = {
-            "Cache-Control": (
-                f"public, max-age={thumbnails.BROWSER_CACHE_MAX_AGE}, "
-                f"stale-while-revalidate={thumbnails.BROWSER_CACHE_STALE_WHILE_REVALIDATE}"
-            ),
-            "ETag": f'"{signature}"',
-        }
-        if request.headers.get("if-none-match") == headers["ETag"]:
+        headers = cache_headers(signature)
+        if request_etag == headers["ETag"]:
             return Response(status_code=304, headers=headers)
         return Response(content=data, media_type="image/jpeg", headers=headers)
     if cached:
@@ -748,6 +1009,7 @@ async def serve_thumbnail(request: Request, size: str, image_id: int, cached: bo
 
 @app.get("/api/full/{image_id}")
 async def serve_full_image(request: Request, image_id: int, background_tasks: BackgroundTasks, cached: bool = False):
+    request_etag = request.headers.get("if-none-match")
     if cached:
         entry = thumbnails.fast_disk_path_entry(thumbnails.FULL_TIER, image_id)
         if entry is None:
@@ -760,7 +1022,21 @@ async def serve_full_image(request: Request, image_id: int, background_tasks: Ba
             ),
             "ETag": f'"{signature}"',
         }
-        if request.headers.get("if-none-match") == headers["ETag"]:
+        if request_etag == headers["ETag"]:
+            return Response(status_code=304, headers=headers)
+        return FileResponse(path, headers=headers)
+
+    full_entry = thumbnails.fast_disk_path_entry(thumbnails.FULL_TIER, image_id)
+    if full_entry is not None:
+        signature, path = full_entry
+        headers = {
+            "Cache-Control": (
+                f"public, max-age={thumbnails.BROWSER_CACHE_MAX_AGE}, "
+                f"stale-while-revalidate={thumbnails.BROWSER_CACHE_STALE_WHILE_REVALIDATE}"
+            ),
+            "ETag": f'"{signature}"',
+        }
+        if request_etag == headers["ETag"]:
             return Response(status_code=304, headers=headers)
         return FileResponse(path, headers=headers)
 
@@ -771,7 +1047,7 @@ async def serve_full_image(request: Request, image_id: int, background_tasks: Ba
     ext = os.path.splitext(image["filepath"])[1].lower()
     if ext not in _BROWSER_IMAGE_EXTENSIONS:
         headers = thumbnails.response_headers(image["filepath"], "lg", image_id)
-        if request.headers.get("if-none-match") == headers["ETag"]:
+        if request_etag == headers["ETag"]:
             return Response(status_code=304, headers=headers)
 
         data = await thumbnails.get_thumbnail(image["filepath"], "lg", image_id)
@@ -780,7 +1056,7 @@ async def serve_full_image(request: Request, image_id: int, background_tasks: Ba
         return Response(content=data, media_type="image/jpeg", headers=headers)
 
     headers = thumbnails.response_headers(image["filepath"], thumbnails.FULL_TIER, image_id)
-    if request.headers.get("if-none-match") == headers["ETag"]:
+    if request_etag == headers["ETag"]:
         return Response(status_code=304, headers=headers)
 
     path = thumbnails.get_cached_full_image_path(image["filepath"], image_id)
@@ -794,8 +1070,7 @@ async def serve_full_image(request: Request, image_id: int, background_tasks: Ba
     return FileResponse(path, headers=headers)
 
 
-@app.get("/api/image/{image_id}/media-status")
-async def image_media_status(image_id: int):
+def _image_media_status_payload(image_id: int) -> dict:
     tiers = {}
     for size in thumbnails.THUMB_TIERS:
         cached = thumbnails.has_cached_fast(size, image_id)
@@ -816,6 +1091,38 @@ async def image_media_status(image_id: int):
         None,
     )
     return {"id": image_id, "tiers": tiers, "best_cached": best_cached}
+
+
+@app.get("/api/image/{image_id}/media-status")
+async def image_media_status(image_id: int):
+    return await asyncio.to_thread(_image_media_status_payload, image_id)
+
+
+@app.post("/api/images/media-status")
+async def images_media_status(request: Request):
+    body, error = await _json_object(request)
+    if error:
+        return error
+    raw_ids = body.get("ids", [])
+    if not isinstance(raw_ids, list):
+        raw_ids = [raw_ids]
+    ids = []
+    seen = set()
+    for value in raw_ids:
+        try:
+            image_id = int(value)
+        except (TypeError, ValueError):
+            continue
+        if image_id <= 0 or image_id in seen:
+            continue
+        seen.add(image_id)
+        ids.append(image_id)
+        if len(ids) >= 96:
+            break
+    statuses = await asyncio.to_thread(
+        lambda: [_image_media_status_payload(image_id) for image_id in ids]
+    )
+    return {"statuses": statuses}
 
 
 @app.post("/api/images/warm")
@@ -912,18 +1219,90 @@ async def warm_images(request: Request):
 
 # --- Cache Status ---
 
-async def _browser_original_count() -> int:
+_cache_status_cache: dict[tuple[int], dict] = {}
+_cache_status_refreshing: set[tuple[int]] = set()
+_cache_status_cache_ttl_seconds = 30.0
+_cache_status_ahead_limit = 5000
+_browser_original_count_cache = {"value": None, "bytes": 0, "expires": 0.0}
+_browser_original_count_cache_ttl_seconds = 30.0
+
+
+def _invalidate_cache_status_cache():
+    _cache_status_cache.clear()
+    _cache_status_refreshing.clear()
+    _browser_original_count_cache["value"] = None
+    _browser_original_count_cache["bytes"] = 0
+    _browser_original_count_cache["expires"] = 0.0
+    _expire_settings_response_cache()
+
+
+async def _browser_original_summary() -> dict:
+    now = time.monotonic()
+    cached = _browser_original_count_cache.get("value")
+    if cached is not None and float(_browser_original_count_cache.get("expires") or 0) > now:
+        return {
+            "count": int(cached),
+            "bytes": int(_browser_original_count_cache.get("bytes") or 0),
+        }
+
+    browser_exts = tuple(sorted(thumbnails.BROWSER_ORIGINAL_EXTENSIONS))
+    counts = await db.get_catalog_image_counts()
+    all_catalog_images_active = (
+        int(counts.get("active_images") or 0) > 0
+        and int(counts.get("active_images") or 0) == int(counts.get("total_catalog_images") or 0)
+        and int(counts.get("removed_images") or 0) == 0
+    )
     conn = await db.get_db()
     try:
-        cursor = await conn.execute(
-            "SELECT i.filepath FROM images i "
-            "JOIN catalog_sources s ON s.id = i.source_id "
-            "WHERE s.included = 1 AND s.online = 1 AND i.missing_at IS NULL"
-        )
-        rows = await cursor.fetchall()
-        return sum(1 for row in rows if thumbnails.is_browser_displayable_original(row["filepath"]))
+        placeholders = ",".join("?" for _ in browser_exts)
+        if all_catalog_images_active:
+            cursor = await conn.execute(
+                "SELECT COUNT(*) AS count, COALESCE(SUM(i.file_size), 0) AS bytes FROM images i "
+                "WHERE i.missing_at IS NULL "
+                f"AND i.file_ext IN ({placeholders})",
+                browser_exts,
+            )
+        else:
+            cursor = await conn.execute(
+                "SELECT COUNT(*) AS count, COALESCE(SUM(i.file_size), 0) AS bytes FROM images i "
+                "JOIN catalog_sources s ON s.id = i.source_id "
+                "WHERE s.included = 1 AND i.missing_at IS NULL "
+                f"AND i.file_ext IN ({placeholders})",
+                browser_exts,
+            )
+        row = await cursor.fetchone()
+        total = int(row["count"] or 0)
+        total_bytes = int(row["bytes"] or 0)
+
+        for condition in ("i.file_ext IS NULL", "i.file_ext = ''"):
+            if all_catalog_images_active:
+                cursor = await conn.execute(
+                    "SELECT i.filepath, i.file_size FROM images i "
+                    "WHERE i.missing_at IS NULL "
+                    f"AND {condition}"
+                )
+            else:
+                cursor = await conn.execute(
+                    "SELECT i.filepath, i.file_size FROM images i "
+                    "JOIN catalog_sources s ON s.id = i.source_id "
+                    "WHERE s.included = 1 AND i.missing_at IS NULL "
+                    f"AND {condition}"
+                )
+            rows = await cursor.fetchall()
+            for row in rows:
+                if thumbnails.is_browser_displayable_original(row["filepath"]):
+                    total += 1
+                    total_bytes += int(row["file_size"] or 0)
+        _browser_original_count_cache["value"] = total
+        _browser_original_count_cache["bytes"] = total_bytes
+        _browser_original_count_cache["expires"] = time.monotonic() + _browser_original_count_cache_ttl_seconds
+        return {"count": total, "bytes": total_bytes}
     finally:
         await conn.close()
+
+
+async def _browser_original_count() -> int:
+    return int((await _browser_original_summary())["count"])
 
 
 def _cache_recommendations(
@@ -931,13 +1310,16 @@ def _cache_recommendations(
     eligible_images: int,
     total_images: int,
     browser_original_images: int,
+    estimates: dict | None = None,
 ) -> dict:
-    estimates = thumbnails.cache_archive_estimates()
+    estimates = estimates or thumbnails.cache_archive_estimates()
     tiers = {}
     for tier_name in thumbnails.ALL_TIERS:
         avg_bytes = int(estimates.get("avg_bytes", {}).get(tier_name) or thumbnails.estimated_tier_bytes(tier_name))
         target_count = browser_original_images if tier_name == thumbnails.FULL_TIER else eligible_images
-        full_archive_bytes = avg_bytes * max(0, int(target_count))
+        full_archive_bytes = int(estimates.get("needed_bytes", {}).get(tier_name) or 0)
+        if full_archive_bytes <= 0:
+            full_archive_bytes = avg_bytes * max(0, int(target_count))
         budget_bytes = int(cache.get("disk", {}).get("tiers", {}).get(tier_name, {}).get("budget_bytes") or 0)
         estimated_cached = int(budget_bytes / avg_bytes) if avg_bytes > 0 else 0
         tiers[tier_name] = {
@@ -958,11 +1340,201 @@ def _cache_recommendations(
     }
 
 
-async def build_cache_status(ahead: int = 100):
-    stats = await db.get_stats()
-    active_total = stats["kept"] + stats["maybe"]
-    browser_original_total = await _browser_original_count()
-    cache = thumbnails.cache_stats()
+def _cache_archive_estimates_from_status(
+    cache: dict,
+    active_images: int,
+    total_images: int,
+    browser_original_images: int = 0,
+    browser_original_bytes: int = 0,
+) -> dict:
+    avg_bytes = {}
+    sample_count = {}
+    for tier_name in thumbnails.ALL_TIERS:
+        tier = cache.get("disk", {}).get("tiers", {}).get(tier_name, {})
+        count = int(tier.get("current_count") or tier.get("count") or 0)
+        bytes_used = int(tier.get("current_bytes") or tier.get("bytes") or 0)
+        avg_bytes[tier_name] = (
+            max(1, int(bytes_used / count))
+            if count > 0 and bytes_used > 0
+            else thumbnails.estimated_tier_bytes(tier_name)
+        )
+        sample_count[tier_name] = count
+
+    needed_bytes = {
+        tier_name: avg_bytes[tier_name] * max(0, int(active_images))
+        for tier_name in thumbnails.THUMB_TIERS
+    }
+    if browser_original_bytes > 0:
+        avg_bytes[thumbnails.FULL_TIER] = max(
+            1,
+            int(browser_original_bytes / max(1, int(browser_original_images or 0))),
+        )
+        needed_bytes[thumbnails.FULL_TIER] = int(browser_original_bytes)
+    else:
+        needed_bytes[thumbnails.FULL_TIER] = (
+            avg_bytes[thumbnails.FULL_TIER] * max(0, int(total_images))
+        )
+    return {
+        "active_images": max(0, int(active_images)),
+        "total_images": max(0, int(total_images)),
+        "avg_bytes": avg_bytes,
+        "sample_count": sample_count,
+        "needed_bytes": needed_bytes,
+    }
+
+
+def _copy_dict_of_dicts(value: dict | None) -> dict:
+    return {
+        key: dict(item) if isinstance(item, dict) else item
+        for key, item in (value or {}).items()
+    }
+
+
+def _system_resource_status(cache_root: str) -> dict:
+    disk_path = cache_root or os.getcwd()
+    try:
+        os.makedirs(disk_path, exist_ok=True)
+    except OSError:
+        disk_path = os.path.dirname(disk_path) or os.getcwd()
+    try:
+        disk_usage = shutil.disk_usage(disk_path)
+        disk = {
+            "path": disk_path,
+            "total_bytes": int(disk_usage.total),
+            "used_bytes": int(disk_usage.used),
+            "free_bytes": int(disk_usage.free),
+            "free_pct": round((disk_usage.free / disk_usage.total) * 100, 1) if disk_usage.total > 0 else 0.0,
+        }
+    except OSError:
+        disk = {
+            "path": disk_path,
+            "total_bytes": 0,
+            "used_bytes": 0,
+            "free_bytes": 0,
+            "free_pct": 0.0,
+        }
+
+    meminfo = {}
+    try:
+        with open("/proc/meminfo", "r", encoding="utf-8") as f:
+            for line in f:
+                key, raw_value = line.split(":", 1)
+                parts = raw_value.strip().split()
+                if parts:
+                    meminfo[key] = int(parts[0]) * 1024
+    except OSError:
+        pass
+    total = int(meminfo.get("MemTotal") or 0)
+    available = int(meminfo.get("MemAvailable") or 0)
+    swap_total = int(meminfo.get("SwapTotal") or 0)
+    swap_free = int(meminfo.get("SwapFree") or 0)
+    memory = {
+        "total_bytes": total,
+        "available_bytes": available,
+        "used_bytes": max(0, total - available),
+        "available_pct": round((available / total) * 100, 1) if total > 0 else 0.0,
+        "swap_total_bytes": swap_total,
+        "swap_used_bytes": max(0, swap_total - swap_free),
+        "swap_used_pct": round(((swap_total - swap_free) / swap_total) * 100, 1) if swap_total > 0 else 0.0,
+    }
+    return {"disk": disk, "memory": memory}
+
+
+def _copy_cache_status_response(status: dict) -> dict:
+    copied = dict(status)
+    if isinstance(status.get("memory"), dict):
+        copied["memory"] = dict(status["memory"])
+    if isinstance(status.get("disk"), dict):
+        disk = dict(status["disk"])
+        disk["tiers"] = _copy_dict_of_dicts(disk.get("tiers"))
+        copied["disk"] = disk
+    if isinstance(status.get("thumbnail_config"), dict):
+        copied["thumbnail_config"] = dict(status["thumbnail_config"])
+    if isinstance(status.get("recommendations"), dict):
+        recommendations = dict(status["recommendations"])
+        if isinstance(recommendations.get("budget"), dict):
+            recommendations["budget"] = dict(recommendations["budget"])
+        recommendations["tiers"] = _copy_dict_of_dicts(recommendations.get("tiers"))
+        copied["recommendations"] = recommendations
+    if isinstance(status.get("pregen"), dict):
+        pregen = dict(status["pregen"])
+        pregen["phases"] = _copy_dict_of_dicts(pregen.get("phases"))
+        for key in ("preview", "originals"):
+            if isinstance(pregen.get(key), dict):
+                pregen[key] = dict(pregen[key])
+        copied["pregen"] = pregen
+    if isinstance(status.get("governor"), dict):
+        copied["governor"] = dict(status["governor"])
+    if isinstance(status.get("system_resources"), dict):
+        resources = dict(status["system_resources"])
+        if isinstance(resources.get("disk"), dict):
+            resources["disk"] = dict(resources["disk"])
+        if isinstance(resources.get("memory"), dict):
+            resources["memory"] = dict(resources["memory"])
+        copied["system_resources"] = resources
+    return copied
+
+
+def _cache_status_ttl(result: dict) -> float:
+    pregen = result.get("pregen") or {}
+    if pregen.get("state") == "running":
+        return 2.0
+
+    preview_remaining = int((pregen.get("preview") or {}).get("remaining") or 0)
+    original_remaining = int((pregen.get("originals") or {}).get("remaining") or 0)
+    warming_enabled = bool(pregen.get("enabled")) and not bool(pregen.get("manual_pause"))
+    if warming_enabled and (preview_remaining > 0 or original_remaining > 0):
+        return 1.0
+
+    return _cache_status_cache_ttl_seconds
+
+
+async def build_cache_status(ahead: int = 100, *, force: bool = False):
+    ahead = _clamp_int(ahead, 0, 0, _cache_status_ahead_limit)
+    cache_key = (ahead,)
+    now = time.monotonic()
+    if not force:
+        cached = _cache_status_cache.get(cache_key)
+        if cached and cached["expires"] > now:
+            return _copy_cache_status_response(cached["data"])
+        if cached and cached.get("data") is not None:
+            if _cache_status_ttl(cached["data"]) > 1.0:
+                if cache_key not in _cache_status_refreshing:
+                    _cache_status_refreshing.add(cache_key)
+
+                    async def _refresh_cache_status():
+                        try:
+                            await build_cache_status(ahead=ahead, force=True)
+                        except Exception:
+                            pass
+                        finally:
+                            _cache_status_refreshing.discard(cache_key)
+
+                    asyncio.create_task(_refresh_cache_status())
+                return _copy_cache_status_response(cached["data"])
+
+    counts = await db.get_catalog_image_counts()
+
+    if int(counts.get("active_images") or 0) > 0:
+        browser_original_summary, cache = await asyncio.gather(
+            _browser_original_summary(),
+            asyncio.to_thread(thumbnails.cache_stats),
+        )
+        browser_original_total = int(browser_original_summary["count"])
+        browser_original_bytes = int(browser_original_summary["bytes"])
+    else:
+        cache = await asyncio.to_thread(thumbnails.cache_stats)
+        browser_original_total = 0
+        browser_original_bytes = 0
+    active_total = int(counts.get("active_images") or 0)
+    total_images = int(counts.get("total_catalog_images") or 0)
+    archive_estimates = _cache_archive_estimates_from_status(
+        cache,
+        active_total,
+        total_images,
+        browser_original_total,
+        browser_original_bytes,
+    )
 
     memory = cache["memory"]
     disk = cache["disk"]
@@ -997,10 +1569,17 @@ async def build_cache_status(ahead: int = 100):
         "recommendations": _cache_recommendations(
             cache,
             active_total,
-            stats["total_images"],
+            total_images,
             browser_original_total,
+            archive_estimates,
         ),
-        "pregen": thumbnails.get_pregen_status(active_total, cache, browser_original_total),
+        "pregen": thumbnails.get_pregen_status(
+            active_total,
+            cache,
+            browser_original_total,
+            archive_estimates,
+        ),
+        "system_resources": _system_resource_status(_cache_root()),
         "governor": resource_governor.get_background_decision(
             thumbnails.get_idle_seconds()
         ).to_dict(),
@@ -1010,51 +1589,60 @@ async def build_cache_status(ahead: int = 100):
         conn = await db.get_db()
         try:
             cursor = await conn.execute(
-                "SELECT i.id, i.filepath FROM images i "
-                "JOIN catalog_sources s ON s.id = i.source_id "
-                "WHERE s.included = 1 AND s.online = 1 AND i.missing_at IS NULL "
-                "ORDER BY i.id LIMIT ?",
-                (ahead,),
+                "WITH ahead_images AS ("
+                "  SELECT i.id FROM images i "
+                "  JOIN catalog_sources s ON s.id = i.source_id "
+                "  WHERE s.included = 1 AND i.missing_at IS NULL "
+                "  ORDER BY i.id LIMIT ?"
+                ") "
+                "SELECT COUNT(a.id) AS total, COUNT(c.image_id) AS cached "
+                "FROM ahead_images a "
+                "LEFT JOIN cache_entries c "
+                "  ON c.image_id = a.id AND c.cache_root = ? AND c.size = ?",
+                (ahead, _cache_root(), "lg"),
             )
-            rows = await cursor.fetchall()
+            row = await cursor.fetchone()
+            total = int(row["total"] or 0)
+            cached = int(row["cached"] or 0)
         finally:
             await conn.close()
 
-        result["total"] = len(rows)
-        result["cached"] = sum(
-            1 for row in rows if thumbnails.has_cached_fast("lg", row["id"])
-        )
+        result["total"] = total
+        result["cached"] = cached
     else:
         result["total"] = 0
         result["cached"] = 0
     result["window"] = ahead
+    cache_ttl = _cache_status_ttl(result)
+    _cache_status_cache[cache_key] = {
+        "data": _copy_cache_status_response(result),
+        "expires": time.monotonic() + cache_ttl,
+    }
     return result
 
 
 @app.get("/api/cache/status")
-async def cache_status(ahead: int = 100):
+async def cache_status(ahead: int = 0):
     return await build_cache_status(ahead=ahead)
 
 
 @app.post("/api/cache/pregen/start")
 async def cache_pregen_start():
     thumbnails.start_pregeneration()
-    return {"ok": True, "cache": await build_cache_status(ahead=0)}
+    _invalidate_cache_status_cache()
+    return {"ok": True, "cache": await build_cache_status(ahead=0, force=True)}
 
 
 @app.post("/api/cache/pregen/stop")
 async def cache_pregen_stop():
     thumbnails.stop_pregeneration()
-    return {"ok": True, "cache": await build_cache_status(ahead=0)}
+    _invalidate_cache_status_cache()
+    return {"ok": True, "cache": await build_cache_status(ahead=0, force=True)}
 
 
 @app.get("/api/cache/pregen/status")
 async def cache_pregen_status():
-    stats = await db.get_stats()
-    return thumbnails.get_pregen_status(
-        stats["kept"] + stats["maybe"],
-        original_total=await _browser_original_count(),
-    )
+    return (await build_cache_status(ahead=0)).get("pregen", {})
 
 
 @app.post("/api/ai/embeddings/pause")
@@ -1064,7 +1652,9 @@ async def api_pause_embeddings():
     except ImportError:
         return JSONResponse({"error": "Embeddings not available"}, status_code=503)
     embedding_worker.pause_embedding_worker()
-    return {"ok": True, "ai_status": await build_ai_status()}
+    _invalidate_ai_status_response_cache()
+    _invalidate_settings_response_cache()
+    return {"ok": True, "ai_status": await build_ai_status(force=True)}
 
 
 @app.post("/api/ai/embeddings/resume")
@@ -1074,23 +1664,60 @@ async def api_resume_embeddings():
     except ImportError:
         return JSONResponse({"error": "Embeddings not available"}, status_code=503)
     embedding_worker.resume_embedding_worker()
-    return {"ok": True, "ai_status": await build_ai_status()}
+    _invalidate_ai_status_response_cache()
+    _invalidate_settings_response_cache()
+    return {"ok": True, "ai_status": await build_ai_status(force=True)}
 
 
 # --- Settings API ---
 
 @app.get("/api/settings")
 async def api_settings():
+    global _settings_response_refreshing
+    cached = _settings_response_cache.get("data")
+    if cached is not None and float(_settings_response_cache.get("expires") or 0) > time.monotonic():
+        return _copy_settings_response(cached)
+    if cached is not None:
+        if not _settings_response_refreshing:
+            _settings_response_refreshing = True
+
+            async def _refresh_settings_response():
+                global _settings_response_refreshing
+                try:
+                    response = await _build_settings_response()
+                    _settings_response_cache["data"] = _copy_settings_response(response)
+                    _settings_response_cache["expires"] = time.monotonic() + _settings_response_cache_ttl_seconds
+                finally:
+                    _settings_response_refreshing = False
+
+            _track_background_task(_refresh_settings_response())
+        return _copy_settings_response(cached)
+
+    response = await _build_settings_response()
+    _settings_response_cache["data"] = _copy_settings_response(response)
+    _settings_response_cache["expires"] = time.monotonic() + _settings_response_cache_ttl_seconds
+    return response
+
+
+async def _build_settings_response():
     model_status = ai_models.get_model_status()
-    ai_status = await build_ai_status()
-    return {
+    cache_status_task = asyncio.create_task(build_cache_status(ahead=0))
+    ai_status_task = asyncio.create_task(build_ai_status(model_status=model_status))
+    catalog_task = asyncio.create_task(db.get_catalog_light_summary())
+    cache_status, ai_status, catalog = await asyncio.gather(
+        cache_status_task,
+        ai_status_task,
+        catalog_task,
+    )
+    response = {
         "settings": settings.get_settings(),
-        "cache_stats": await build_cache_status(ahead=0),
+        "cache_stats": cache_status,
         "model_status": model_status,
         "ai_status": ai_status,
-        "catalog": await db.get_catalog_summary(),
+        "catalog": catalog,
         **settings.settings_metadata(),
     }
+    return response
 
 
 @app.get("/api/ui/settings")
@@ -1160,6 +1787,16 @@ async def api_save_settings(request: Request):
         return error
     current = settings.get_settings()
     saved = settings.save_settings(body)
+    await db.sync_deep_search_terms(saved.get("deep_search_terms") or [])
+    model_changed = any(
+        current.get(field) != saved.get(field)
+        for field in ("embed_model_id", "embed_model_revision", "embed_model_dir", "embed_model_dim")
+    )
+    search_runtime_changed = (
+        model_changed
+        or float(current.get("search_similarity_threshold", 0.35))
+        != float(saved.get("search_similarity_threshold", 0.35))
+    )
     thumbnail_changed = any(
         int(current.get(field, 0)) != int(saved.get(field, 0))
         for field in ("thumb_size_sm", "thumb_size_md", "thumb_size_lg", "thumb_quality")
@@ -1169,10 +1806,32 @@ async def api_save_settings(request: Request):
         and str(body.get("thumbnail_cache_policy", "keep")).strip().lower() == "replace"
     )
     thumbnails.configure({**saved, "_replace_thumbnail_cache": replace_thumbnail_cache})
+    if current.get("defer_ai_on_startup") != saved.get("defer_ai_on_startup"):
+        try:
+            import embedding_worker
+            if saved.get("defer_ai_on_startup"):
+                embedding_worker.pause_embedding_worker("AI work deferred by startup setting.")
+            else:
+                embedding_worker.resume_embedding_worker()
+        except Exception:
+            pass
+    if model_changed:
+        try:
+            import embed_cache
+            import embedding_worker
+            embed_cache.invalidate()
+            embedding_worker._text_cache.clear()
+        except Exception:
+            pass
+    if search_runtime_changed:
+        _invalidate_rankings_cache()
+    _invalidate_cache_status_cache()
+    _invalidate_ai_status_response_cache()
+    _invalidate_settings_response_cache()
     return {
         "ok": True,
         "settings": saved,
-        "cache_stats": await build_cache_status(ahead=0),
+        "cache_stats": await build_cache_status(ahead=0, force=True),
         "model_status": ai_models.get_model_status(),
         "ai_status": await build_ai_status(),
         "catalog": await db.get_catalog_summary(),
@@ -1182,11 +1841,23 @@ async def api_save_settings(request: Request):
 @app.post("/api/settings/reset")
 async def api_reset_settings():
     saved = settings.reset_settings()
+    await db.sync_deep_search_terms(saved.get("deep_search_terms") or [])
     thumbnails.configure(saved)
+    try:
+        import embed_cache
+        import embedding_worker
+        embed_cache.invalidate()
+        embedding_worker._text_cache.clear()
+    except Exception:
+        pass
+    _invalidate_rankings_cache()
+    _invalidate_cache_status_cache()
+    _invalidate_ai_status_response_cache()
+    _invalidate_settings_response_cache()
     return {
         "ok": True,
         "settings": saved,
-        "cache_stats": await build_cache_status(ahead=0),
+        "cache_stats": await build_cache_status(ahead=0, force=True),
         "model_status": ai_models.get_model_status(),
         "ai_status": await build_ai_status(),
         "catalog": await db.get_catalog_summary(),
@@ -1198,47 +1869,242 @@ async def api_clear_thumbnail_cache():
     result = thumbnails.clear_cache()
     if result.get("refused"):
         return JSONResponse({"ok": False, **result}, status_code=400)
+    _invalidate_cache_status_cache()
     return {
         "ok": True,
         **result,
-        "cache_stats": await build_cache_status(ahead=0),
+        "cache_stats": await build_cache_status(ahead=0, force=True),
         "ai_status": await build_ai_status(),
     }
 
 
 @app.post("/api/ai/model/install")
-async def api_install_ai_model():
-    state = ai_models.start_model_install()
+async def api_install_ai_model(role: str = "fast"):
+    selected_role = "deep" if str(role or "").lower() == "deep" else "fast"
+    install_config = (
+        settings.deep_search_embedding_config()
+        if selected_role == "deep"
+        else settings.fast_search_embedding_config()
+    )
+    state = ai_models.start_model_install(install_config)
+    active_install_dir = str(state.get("model_dir") or "")
+    requested_install_dir = str(install_config["model_dir"] or "")
+    if (
+        state.get("running")
+        and active_install_dir
+        and requested_install_dir
+        and active_install_dir != requested_install_dir
+    ):
+        return JSONResponse(
+            {
+                "ok": False,
+                "role": selected_role,
+                "error": f"Another model install is already running: {state.get('model_id') or active_install_dir}",
+                "install": state,
+                "model_status": ai_models.get_model_status(install_config),
+                "ai_status": await build_ai_status(force=True),
+            },
+            status_code=409,
+        )
     return {
         "ok": True,
+        "role": selected_role,
         "install": state,
-        "model_status": ai_models.get_model_status(),
-        "ai_status": await build_ai_status(),
+        "model_status": ai_models.get_model_status(install_config),
+        "ai_status": await build_ai_status(force=True),
     }
 
 
 # --- Mosaic Ranking API ---
 
-# Cache for active pairing images — patched on direct comparisons and
-# refreshed after background Elo propagation touches wider neighborhoods.
-_pairing_cache = {"data": None, "by_id": None, "valid": False}
+# Cache for active pairing images. The default compare/mosaic path uses the
+# smaller visible-candidate cache below; this broader cache is for filtered
+# paths and is invalidated when ratings change.
+_pairing_cache = {"data": None, "valid": False}
 _matchups_cache = {"data": None, "valid": False}
+_visible_matchups_cache: dict[str, dict] = {}
+_visible_pairing_candidates_cache: dict[str, dict] = {}
+_visible_pairing_candidates_refreshing: set[str] = set()
+_visible_pairing_candidates_generation = 0
+_rankings_response_cache: dict[tuple, dict] = {}
+_text_search_resolution_cache: dict[tuple, dict] = {}
+_interaction_response_cache: dict[tuple, dict] = {}
+_settings_response_cache: dict[str, dict | float | None] = {"data": None, "expires": 0}
+_settings_response_refreshing = False
+_ai_status_response_cache: dict[str, dict | tuple | float | None] = {"data": None, "key": None, "expires": 0}
+_visible_pairing_candidates_cache_ttl_seconds = 15.0
+_patched_pairing_candidates_ttl_seconds = 15.0
+# Rankings are invalidated explicitly by rating/flag/catalog changes. Keep the
+# idle TTL long so returning to the app does not pay a cold rebuild tax.
+_rankings_response_cache_ttl_seconds = 1800.0
+_text_search_resolution_cache_ttl_seconds = 300.0
+_interaction_response_cache_ttl_seconds = 600.0
+_settings_response_cache_ttl_seconds = 10.0
+_ai_status_response_cache_ttl_seconds = 5.0
+_thumbnail_prefetch_inflight: set[str] = set()
+_thumbnail_memory_warm_inflight: set[str] = set()
+_SWISS_PAIR_WINDOW = 512
+_FILTERED_SWISS_PAIR_WINDOW = 256
+_FILTERED_MOSAIC_WINDOW = 192
+_MOSAIC_EXPLORE_WINDOW = 768
+_MOSAIC_DIVERSE_WINDOW = 1536
 
 async def _get_pairing_images():
     """Cached wrapper — invalidated by mosaic_pick and submit_comparison."""
     if _pairing_cache["valid"] and _pairing_cache["data"] is not None:
         return _pairing_cache["data"]
     rows = await db.get_active_images_for_pairing()
-    images = [dict(row) for row in rows]
-    _pairing_cache["data"] = images
-    _pairing_cache["by_id"] = {img["id"]: img for img in images}
+    _pairing_cache["data"] = rows
     _pairing_cache["valid"] = True
-    return images
+    return rows
 
 def _invalidate_pairing_cache(*, matchups: bool = False):
+    global _visible_pairing_candidates_generation
     _pairing_cache["valid"] = False
+    _visible_pairing_candidates_cache.clear()
+    _visible_pairing_candidates_refreshing.clear()
+    _visible_pairing_candidates_generation += 1
+    _invalidate_rankings_cache()
+    _invalidate_interaction_response_cache()
     if matchups:
         _matchups_cache["valid"] = False
+        _visible_matchups_cache.clear()
+
+
+def _invalidate_rankings_cache():
+    _rankings_response_cache.clear()
+    _text_search_resolution_cache.clear()
+
+
+def _deep_search_query_embedding_stored(_model_key: str, _query: str):
+    _invalidate_rankings_cache()
+    _invalidate_ai_status_response_cache()
+
+
+def _embedding_batch_stored(_model_key: str, _image_ids: list[int]):
+    _invalidate_rankings_cache()
+    _invalidate_ai_status_response_cache()
+    _duplicates_cache.update({"key": None, "data": None})
+    _collections_cache.update({"key": None, "data": None})
+    elo_propagation.invalidate_prediction_cache()
+    try:
+        import embed_cache
+        embed_cache.invalidate()
+    except Exception:
+        pass
+
+
+db.register_embedding_batch_listener(_embedding_batch_stored)
+db.register_deep_search_query_embedding_listener(_deep_search_query_embedding_stored)
+
+
+def _invalidate_interaction_response_cache():
+    _interaction_response_cache.clear()
+
+
+def _copy_interaction_response(response: dict) -> dict:
+    copied = dict(response)
+    if isinstance(response.get("images"), list):
+        copied["images"] = [dict(image) for image in response["images"]]
+    if isinstance(response.get("pairs"), list):
+        copied["pairs"] = [
+            {
+                "left": dict(pair.get("left") or {}),
+                "right": dict(pair.get("right") or {}),
+            }
+            for pair in response["pairs"]
+        ]
+    if isinstance(response.get("stats"), dict):
+        copied["stats"] = dict(response["stats"])
+    return copied
+
+
+def _copy_rankings_response(response: dict) -> dict:
+    copied = dict(response)
+    copied["images"] = list(response.get("images") or [])
+    return copied
+
+
+def _cache_rankings_response(cache_key, response: dict) -> None:
+    _rankings_response_cache[cache_key] = {
+        "data": _copy_rankings_response(response),
+        "json": json.dumps(response, separators=(",", ":")).encode("utf-8"),
+        "expires": time.monotonic() + _rankings_response_cache_ttl_seconds,
+    }
+
+
+def _invalidate_settings_response_cache():
+    global _settings_response_refreshing
+    _settings_response_cache["data"] = None
+    _settings_response_cache["expires"] = 0
+    _settings_response_refreshing = False
+
+
+def _expire_settings_response_cache():
+    global _settings_response_refreshing
+    _settings_response_cache["expires"] = 0
+    _settings_response_refreshing = False
+
+
+def _invalidate_ai_status_response_cache():
+    _ai_status_response_cache["data"] = None
+    _ai_status_response_cache["key"] = None
+    _ai_status_response_cache["expires"] = 0
+
+
+def _copy_settings_response(response: dict) -> dict:
+    copied = dict(response)
+    for key in ("settings", "model_status", "catalog", "defaults"):
+        if isinstance(response.get(key), dict):
+            copied[key] = dict(response[key])
+    if isinstance(response.get("ai_status"), dict):
+        copied["ai_status"] = _copy_ai_status_response(response["ai_status"])
+    if isinstance(response.get("cache_stats"), dict):
+        copied["cache_stats"] = _copy_cache_status_response(response["cache_stats"])
+    if isinstance(response.get("catalog"), dict):
+        catalog = dict(response["catalog"])
+        catalog["sources"] = [dict(source) for source in catalog.get("sources") or []]
+        if isinstance(catalog.get("stats"), dict):
+            catalog["stats"] = dict(catalog["stats"])
+        copied["catalog"] = catalog
+    if isinstance(response.get("cache_profiles"), list):
+        copied["cache_profiles"] = list(response["cache_profiles"])
+    if isinstance(response.get("background_work_modes"), list):
+        copied["background_work_modes"] = [
+            dict(mode) for mode in response["background_work_modes"]
+        ]
+    if isinstance(response.get("embedding_model_presets"), list):
+        copied["embedding_model_presets"] = [
+            dict(preset) for preset in response["embedding_model_presets"]
+        ]
+    return copied
+
+
+def _ai_model_status_cache_key(model_status: dict) -> tuple:
+    install = model_status.get("install") or {}
+    return (
+        bool(model_status.get("installed")),
+        str(model_status.get("model_id") or ""),
+        str(model_status.get("model_dir") or ""),
+        int(model_status.get("dimension") or 0),
+        str(model_status.get("model_key") or ""),
+        bool(install.get("running")),
+        str(install.get("status") or ""),
+        str(install.get("message") or ""),
+    )
+
+
+def _copy_ai_status_response(response: dict) -> dict:
+    copied = dict(response)
+    if isinstance(response.get("last_batch_stage_seconds"), dict):
+        copied["last_batch_stage_seconds"] = dict(response["last_batch_stage_seconds"])
+    if isinstance(response.get("governor"), dict):
+        copied["governor"] = dict(response["governor"])
+    if isinstance(response.get("deep_search"), dict):
+        copied["deep_search"] = copy.deepcopy(response["deep_search"])
+    if isinstance(response.get("embedding_indexes"), dict):
+        copied["embedding_indexes"] = copy.deepcopy(response["embedding_indexes"])
+    return copied
 
 
 async def _get_past_matchups():
@@ -1250,23 +2116,93 @@ async def _get_past_matchups():
     return matchups
 
 
+async def _get_visible_past_matchups(size: str):
+    cache_root = _cache_root()
+    cache_key = f"{db.DB_PATH}:{cache_root}:{size}"
+    cached = _visible_matchups_cache.get(cache_key)
+    if cached is not None:
+        return cached["data"]
+    matchups = await db.get_visible_past_matchups(size, cache_root)
+    _visible_matchups_cache[cache_key] = {"data": matchups}
+    return matchups
+
+
+async def _get_past_matchups_for_candidate_ids(size: str, image_ids: list[int]):
+    unique_ids = tuple(dict.fromkeys(int(image_id) for image_id in image_ids or [] if int(image_id) > 0))
+    if len(unique_ids) < 2:
+        return set()
+    cache_key = f"{db.DB_PATH}:{_cache_root()}:{size}:candidates:{len(unique_ids)}:{hash(unique_ids)}"
+    cached = _visible_matchups_cache.get(cache_key)
+    if cached is not None:
+        return cached["data"]
+    matchups = await db.get_past_matchups_for_image_ids(list(unique_ids))
+    _visible_matchups_cache[cache_key] = {"data": matchups}
+    return matchups
+
+
 def _add_past_matchups(pairs: list[tuple[int, int]]):
-    if not _matchups_cache["valid"] or _matchups_cache["data"] is None:
-        return
-    for a, b in pairs:
-        _matchups_cache["data"].add((min(a, b), max(a, b)))
+    _invalidate_interaction_response_cache()
+    normalized_pairs = [(min(a, b), max(a, b)) for a, b in pairs]
+    if _matchups_cache["valid"] and _matchups_cache["data"] is not None:
+        _matchups_cache["data"].update(normalized_pairs)
+    for cached in _visible_matchups_cache.values():
+        cached["data"].update(normalized_pairs)
 
 
 def _patch_pairing_cache(updates: list[tuple[int, float, int]]):
-    if not _pairing_cache["valid"] or _pairing_cache["by_id"] is None:
+    _invalidate_rankings_cache()
+    _invalidate_interaction_response_cache()
+    update_map = {
+        int(image_id): (float(elo), int(comparison_delta))
+        for image_id, elo, comparison_delta in updates
+    }
+    if not update_map:
+        _visible_pairing_candidates_cache.clear()
+        _pairing_cache["valid"] = False
         return
-    by_id = _pairing_cache["by_id"]
-    for image_id, new_elo, comparison_delta in updates:
-        img = by_id.get(image_id)
-        if img is None:
+
+    def _patched_rows(rows):
+        patched = []
+        changed = False
+        for row in rows:
+            try:
+                image_id = int(row["id"])
+            except (KeyError, TypeError, ValueError):
+                patched.append(row)
+                continue
+            update = update_map.get(image_id)
+            if update is None:
+                patched.append(row)
+                continue
+            new_elo, comparison_delta = update
+            row_dict = dict(row)
+            row_dict["elo"] = new_elo
+            row_dict["comparisons"] = int(row_dict.get("comparisons") or 0) + comparison_delta
+            patched.append(row_dict)
+            changed = True
+        return patched, changed
+
+    if _pairing_cache["valid"] and _pairing_cache["data"] is not None:
+        patched, changed = _patched_rows(_pairing_cache["data"])
+        if changed:
+            _pairing_cache["data"] = patched
+        else:
+            _pairing_cache["valid"] = False
+
+    now = time.monotonic()
+    for cache_key, cached in list(_visible_pairing_candidates_cache.items()):
+        rows = cached.get("data")
+        if rows is None:
             continue
-        img["elo"] = new_elo
-        img["comparisons"] = max(0, int(img.get("comparisons") or 0) + comparison_delta)
+        cached_ids = cached.get("id_set")
+        if cached_ids is not None and cached_ids.isdisjoint(update_map):
+            continue
+        patched, changed = _patched_rows(rows)
+        if not changed:
+            continue
+        cached["data"] = patched
+        cached["id_set"] = {int(row["id"]) for row in patched}
+        cached["expires"] = now + _patched_pairing_candidates_ttl_seconds
 
 
 def _schedule_pairing_propagation(coro):
@@ -1310,8 +2246,113 @@ def _visibility_counts(total_images: int, visible_images: int) -> dict:
     return app_helpers.visibility_counts(total_images, visible_images)
 
 
+def _interaction_pool_stats(total_images: int, visible_images: int) -> dict:
+    total = max(0, int(total_images or 0))
+    visible = max(0, int(visible_images or 0))
+    return {
+        "total_images": total,
+        "active_images": total,
+        "kept": total,
+        "maybe": 0,
+        "filtered_pool": visible,
+        "filtered_pool_visible": visible,
+        "filtered_pool_total": total,
+    }
+
+
 def _cache_root() -> str:
     return thumbnails.SSD_CACHE_DIR
+
+
+def _schedule_thumbnail_prefetch(rows, size: str, limit: int):
+    if not rows or limit <= 0:
+        return
+    if size in _thumbnail_prefetch_inflight:
+        return
+    _thumbnail_prefetch_inflight.add(size)
+
+    async def _run_prefetch():
+        try:
+            await thumbnails.prefetch_images(rows, size, limit=limit)
+        except Exception:
+            pass
+        finally:
+            _thumbnail_prefetch_inflight.discard(size)
+
+    asyncio.create_task(_run_prefetch())
+
+
+def _schedule_cached_thumbnail_memory_warm(
+    rows,
+    size: str,
+    limit: int,
+    *,
+    active_min_warm: int = 1,
+):
+    if size not in ("sm", "md", "lg") or not rows or limit <= 0:
+        return
+    image_ids = []
+    for row in rows[:limit]:
+        try:
+            image_ids.append(int(row["id"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+    if not image_ids:
+        return
+    key = f"{size}:{','.join(str(image_id) for image_id in image_ids)}"
+    if not key or any(existing.startswith(f"{size}:") for existing in _thumbnail_memory_warm_inflight):
+        return
+    _thumbnail_memory_warm_inflight.add(key)
+
+    def _warm():
+        warmed = 0
+        min_before_yield = max(1, min(int(active_min_warm or 1), limit))
+        for image_id in image_ids:
+            if warmed >= limit:
+                break
+            if warmed >= min_before_yield and thumbnails.get_idle_seconds() < 15.0:
+                break
+            if thumbnails._memory_get_entry_fast(size, image_id) is not None:
+                continue
+            if thumbnails.fast_disk_read_entry(size, image_id, populate_memory=True) is not None:
+                warmed += 1
+
+    async def _run_warm():
+        try:
+            await asyncio.to_thread(_warm)
+        except Exception:
+            pass
+        finally:
+            _thumbnail_memory_warm_inflight.discard(key)
+
+    asyncio.create_task(_run_warm())
+
+
+def _schedule_result_thumbnail_memory_warm(rows, *, sm_limit: int = 48, md_limit: int = 12, lg_limit: int = 12):
+    if not rows:
+        return
+    row_count = len(rows)
+    _schedule_cached_thumbnail_memory_warm(
+        rows, "sm", limit=min(row_count, sm_limit), active_min_warm=12
+    )
+    _schedule_cached_thumbnail_memory_warm(
+        rows, "md", limit=min(row_count, md_limit), active_min_warm=6
+    )
+    _schedule_cached_thumbnail_memory_warm(
+        rows, "lg", limit=min(row_count, lg_limit), active_min_warm=6
+    )
+
+
+def _compare_response_rows(response: dict) -> list[dict]:
+    rows = []
+    for pair in response.get("pairs") or ():
+        left = pair.get("left") if isinstance(pair, dict) else None
+        right = pair.get("right") if isinstance(pair, dict) else None
+        if isinstance(left, dict):
+            rows.append(left)
+        if isinstance(right, dict):
+            rows.append(right)
+    return rows
 
 
 def _chunks(values: list[int], size: int = 900):
@@ -1326,12 +2367,413 @@ async def _filter_visible_candidates(candidates: list[dict], size: str) -> list[
     return await app_helpers.filter_visible_candidates(candidates, size, _cache_root())
 
 
+async def _hydrate_active_rows(rows: list[dict]) -> list[dict]:
+    if not rows:
+        return []
+    try:
+        rows[0]["created_at"]
+        return rows
+    except (KeyError, IndexError, TypeError):
+        pass
+    by_id = await db.get_active_images_by_ids([row["id"] for row in rows])
+    return [by_id.get(row["id"], row) for row in rows]
+
+
+async def _default_visible_pairing_candidates(
+    size: str,
+    *,
+    copy_rows: bool = False,
+    limit: int | None = None,
+    order: str = "elo",
+    include_card_metadata: bool | None = None,
+) -> list[dict]:
+    cache_root = _cache_root()
+    normalized_limit = int(limit or 0)
+    if include_card_metadata is None:
+        include_card_metadata = size != "md"
+    cache_key = f"{db.DB_PATH}:{cache_root}:{size}:{normalized_limit}:{order}:{int(include_card_metadata)}"
+    now = time.monotonic()
+    cached = _visible_pairing_candidates_cache.get(cache_key)
+    if cached and cached["expires"] > now:
+        rows = cached["data"]
+    elif cached and cached.get("data") is not None:
+        rows = cached["data"]
+        if cache_key not in _visible_pairing_candidates_refreshing:
+            _visible_pairing_candidates_refreshing.add(cache_key)
+            refresh_generation = _visible_pairing_candidates_generation
+
+            async def _refresh_visible_pairing_candidates():
+                try:
+                    refreshed = await db.get_visible_images_for_pairing(
+                        size,
+                        cache_root,
+                        include_card_metadata=include_card_metadata,
+                        limit=normalized_limit or None,
+                        order=order,
+                    )
+                    if refresh_generation != _visible_pairing_candidates_generation:
+                        return
+                    _visible_pairing_candidates_cache[cache_key] = {
+                        "data": refreshed,
+                        "id_set": {int(row["id"]) for row in refreshed},
+                        "expires": time.monotonic() + _visible_pairing_candidates_cache_ttl_seconds,
+                    }
+                except Exception:
+                    pass
+                finally:
+                    _visible_pairing_candidates_refreshing.discard(cache_key)
+
+            asyncio.create_task(_refresh_visible_pairing_candidates())
+    else:
+        rows = await db.get_visible_images_for_pairing(
+            size,
+            cache_root,
+            include_card_metadata=include_card_metadata,
+            limit=normalized_limit or None,
+            order=order,
+        )
+        _visible_pairing_candidates_cache[cache_key] = {
+            "data": rows,
+            "id_set": {int(row["id"]) for row in rows},
+            "expires": time.monotonic() + _visible_pairing_candidates_cache_ttl_seconds,
+        }
+    if copy_rows:
+        return [dict(row) for row in rows]
+    return rows
+
+
+async def _filtered_visible_ranked_candidates(
+    size: str,
+    *,
+    limit: int,
+    orientation: str = "",
+    compared: str = "",
+    min_stars: int = 0,
+    folder: str = "",
+    flag: str = "",
+    date_taken: str = "",
+    file_type: str = "",
+    camera: str = "",
+    lens: str = "",
+) -> tuple[list[dict], int, int]:
+    cache_root = _cache_root()
+    cache_key = (
+        f"filtered:{db.DB_PATH}:{cache_root}:{size}:{max(1, int(limit))}:"
+        f"{orientation}:{compared}:{int(min_stars or 0)}:{folder}:{flag}:"
+        f"{date_taken}:{file_type}:{camera}:{lens}"
+    )
+    now = time.monotonic()
+    cached = _visible_pairing_candidates_cache.get(cache_key)
+    if cached and cached["expires"] > now:
+        return (
+            cached["data"],
+            int(cached.get("filtered_total") or len(cached["data"])),
+            int(cached.get("visible_count") or len(cached["data"])),
+        )
+    if cached and cached.get("data") is not None:
+        if cache_key not in _visible_pairing_candidates_refreshing:
+            _visible_pairing_candidates_refreshing.add(cache_key)
+            refresh_generation = _visible_pairing_candidates_generation
+
+            async def _refresh_filtered_visible_ranked_candidates():
+                try:
+                    refreshed_rows, refreshed_total, refreshed_visible = (
+                        await _load_filtered_visible_ranked_candidates(
+                            size,
+                            limit=limit,
+                            orientation=orientation,
+                            compared=compared,
+                            min_stars=min_stars,
+                            folder=folder,
+                            flag=flag,
+                            date_taken=date_taken,
+                            file_type=file_type,
+                            camera=camera,
+                            lens=lens,
+                        )
+                    )
+                    if refresh_generation != _visible_pairing_candidates_generation:
+                        return
+                    _visible_pairing_candidates_cache[cache_key] = {
+                        "data": refreshed_rows,
+                        "id_set": {int(row["id"]) for row in refreshed_rows},
+                        "filtered_total": int(refreshed_total),
+                        "visible_count": int(refreshed_visible),
+                        "expires": time.monotonic() + _visible_pairing_candidates_cache_ttl_seconds,
+                    }
+                except Exception:
+                    pass
+                finally:
+                    _visible_pairing_candidates_refreshing.discard(cache_key)
+
+            asyncio.create_task(_refresh_filtered_visible_ranked_candidates())
+        return (
+            cached["data"],
+            int(cached.get("filtered_total") or len(cached["data"])),
+            int(cached.get("visible_count") or len(cached["data"])),
+        )
+
+    result_rows, filtered_total, visible_count = await _load_filtered_visible_ranked_candidates(
+        size,
+        limit=limit,
+        orientation=orientation,
+        compared=compared,
+        min_stars=min_stars,
+        folder=folder,
+        flag=flag,
+        date_taken=date_taken,
+        file_type=file_type,
+        camera=camera,
+        lens=lens,
+    )
+    _visible_pairing_candidates_cache[cache_key] = {
+        "data": result_rows,
+        "id_set": {int(row["id"]) for row in result_rows},
+        "filtered_total": int(filtered_total),
+        "visible_count": int(visible_count),
+        "expires": time.monotonic() + _visible_pairing_candidates_cache_ttl_seconds,
+    }
+    return result_rows, int(filtered_total), int(visible_count)
+
+
+async def _load_filtered_visible_ranked_candidates(
+    size: str,
+    *,
+    limit: int,
+    orientation: str = "",
+    compared: str = "",
+    min_stars: int = 0,
+    folder: str = "",
+    flag: str = "",
+    date_taken: str = "",
+    file_type: str = "",
+    camera: str = "",
+    lens: str = "",
+) -> tuple[list[dict], int, int]:
+    cache_root = _cache_root()
+    normalized_limit = max(1, int(limit))
+    orientation_only = bool(orientation) and not any(
+        (
+            compared,
+            int(min_stars or 0),
+            folder,
+            flag,
+            date_taken,
+            file_type,
+            camera,
+            lens,
+        )
+    )
+    if orientation_only:
+        counts_task = asyncio.create_task(
+            db.get_visible_orientation_pairing_pool_counts(size, cache_root, orientation)
+        )
+    else:
+        filtered_total_task = asyncio.create_task(
+            db.count_rankings(
+                orientation=orientation,
+                compared=compared,
+                min_stars=min_stars,
+                folder=folder,
+                flag=flag,
+                date_taken=date_taken,
+                file_type=file_type,
+                camera=camera,
+                lens=lens,
+            )
+        )
+        visible_count_task = asyncio.create_task(
+            db.count_rankings(
+                orientation=orientation,
+                compared=compared,
+                min_stars=min_stars,
+                folder=folder,
+                flag=flag,
+                date_taken=date_taken,
+                file_type=file_type,
+                camera=camera,
+                lens=lens,
+                visible_thumb_size=size,
+                cache_root=cache_root,
+            )
+        )
+    rows = await db.get_rankings(
+        limit=normalized_limit,
+        offset=0,
+        sort="elo",
+        orientation=orientation,
+        compared=compared,
+        min_stars=min_stars,
+        folder=folder,
+        flag=flag,
+        date_taken=date_taken,
+        file_type=file_type,
+        camera=camera,
+        lens=lens,
+        visible_thumb_size=size,
+        cache_root=cache_root,
+    )
+    result_rows = [dict(row) for row in rows]
+    if orientation_only:
+        counts = await counts_task
+        filtered_total = int(counts.get("active_images") or 0)
+        visible_count = int(counts.get("visible_images") or 0)
+    else:
+        filtered_total = await filtered_total_task
+        visible_count = await visible_count_task
+    return result_rows, int(filtered_total), int(visible_count)
+
+
+async def _search_visible_ranked_candidates(
+    size: str,
+    *,
+    limit: int,
+    search: dict,
+    exclude_ids: set[int] | None = None,
+    orientation: str = "",
+    compared: str = "",
+    min_stars: int = 0,
+    folder: str = "",
+    flag: str = "",
+    date_taken: str = "",
+    file_type: str = "",
+    camera: str = "",
+    lens: str = "",
+) -> tuple[list[dict], int, int]:
+    cache_root = _cache_root()
+    exclude_ids = exclude_ids or set()
+    fetch_limit = max(1, int(limit)) + min(len(exclude_ids), 200)
+    id_filter = search.get("id_filter")
+    text_query = search.get("text_query") or ""
+    exact_counts = not (text_query and id_filter is None)
+    if exact_counts:
+        total_task = asyncio.create_task(
+            db.count_rankings(
+                orientation=orientation, compared=compared, min_stars=min_stars,
+                folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
+                camera=camera, lens=lens,
+                id_filter=id_filter,
+                text_query=text_query,
+            )
+        )
+        visible_task = asyncio.create_task(
+            db.count_rankings(
+                orientation=orientation, compared=compared, min_stars=min_stars,
+                folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
+                camera=camera, lens=lens,
+                id_filter=id_filter,
+                visible_thumb_size=size,
+                cache_root=cache_root,
+                text_query=text_query,
+            )
+        )
+    else:
+        total_task = None
+        visible_task = None
+    rows = await db.get_rankings(
+        limit=fetch_limit,
+        offset=0,
+        sort="elo",
+        orientation=orientation,
+        compared=compared,
+        min_stars=min_stars,
+        folder=folder,
+        flag=flag,
+        date_taken=date_taken,
+        file_type=file_type,
+        camera=camera,
+        lens=lens,
+        id_filter=id_filter,
+        visible_thumb_size=size,
+        cache_root=cache_root,
+        text_query=text_query,
+    )
+    result_rows = [
+        dict(row)
+        for row in rows
+        if int(row["id"]) not in exclude_ids
+    ][:max(1, int(limit))]
+    if exact_counts:
+        return result_rows, await total_task, await visible_task
+    visible_count = len(result_rows)
+    return result_rows, visible_count, visible_count
+
+
+async def _warm_filtered_visible_ranked_candidates(
+    size: str,
+    *,
+    limit: int,
+    orientation: str,
+    warm_matchups: bool = False,
+) -> None:
+    try:
+        rows, _filtered_total, _visible_count = await _filtered_visible_ranked_candidates(
+            size,
+            limit=limit,
+            orientation=orientation,
+        )
+        if warm_matchups:
+            await _get_past_matchups_for_candidate_ids(size, [row["id"] for row in rows])
+    except Exception:
+        pass
+
+
 async def _visible_ranked_images(ranked_ids: list[int], limit: int, size: str = "sm") -> list[dict]:
     return await app_helpers.visible_ranked_images(ranked_ids, limit, size, _cache_root())
 
 
 async def _count_visible_ranked_ids(ranked_ids: list[int], size: str = "sm") -> int:
     return await app_helpers.count_visible_ranked_ids(ranked_ids, size, _cache_root())
+
+
+async def _visible_embedding_page(
+    image_ids,
+    similarities,
+    limit: int,
+    size: str = "sm",
+    *,
+    exclude_id: int | None = None,
+    model_key: str | None = None,
+) -> tuple[list[dict], int, int]:
+    cached_ids = await db.get_cached_image_id_set(size, _cache_root())
+    if not cached_ids:
+        total = max(0, len(image_ids) - (1 if exclude_id is not None else 0))
+        return [], 0, total
+
+    id_to_idx = {}
+    try:
+        import embed_cache
+        id_to_idx = embed_cache.get_index(model_key)
+    except Exception:
+        id_to_idx = {int(image_id): idx for idx, image_id in enumerate(image_ids)}
+    if not id_to_idx:
+        id_to_idx = {int(image_id): idx for idx, image_id in enumerate(image_ids)}
+
+    visible_pairs = []
+    for image_id in cached_ids:
+        image_id = int(image_id)
+        if exclude_id is not None and image_id == exclude_id:
+            continue
+        idx = id_to_idx.get(image_id)
+        if idx is None:
+            continue
+        visible_pairs.append((image_id, float(similarities[idx])))
+
+    visible_count = len(visible_pairs)
+    if len(visible_pairs) > limit:
+        visible_pairs = heapq.nlargest(limit, visible_pairs, key=lambda item: item[1])
+    else:
+        visible_pairs.sort(key=lambda item: item[1], reverse=True)
+    selected_ids = [image_id for image_id, _score in visible_pairs[:limit]]
+
+    rows_by_id = await db.get_active_images_by_ids(selected_ids)
+    visible_rows = []
+    for image_id in selected_ids:
+        row = rows_by_id.get(image_id)
+        if row is not None:
+            visible_rows.append(row)
+    total = max(0, len(image_ids) - (1 if exclude_id is not None else 0))
+    return visible_rows, visible_count, total
 
 
 def _filter_by_metadata(
@@ -1344,9 +2786,71 @@ def _filter_by_metadata(
     return app_helpers.filter_by_metadata(images, date_taken, file_type, camera, lens)
 
 
-async def _resolve_text_search(q: str) -> dict:
+async def _record_deep_search_query(query: str):
+    normalized_query = " ".join(str(query or "").split())
+    if not normalized_query:
+        return
+    extension_query = normalized_query.lower().lstrip(".")
+    if extension_query in db.IMAGE_EXTENSION_SEARCH_TERMS:
+        return
+    try:
+        await db.record_deep_search_query(normalized_query)
+    except Exception:
+        pass
+
+
+async def _resolve_cached_deep_search(query: str) -> dict | None:
+    normalized_query = " ".join(str(query or "").split())
+    if not normalized_query:
+        return None
+    try:
+        import embed_cache
+        import embedding_worker
+
+        deep_config = settings.deep_search_embedding_config()
+        blob = await db.get_deep_search_query_embedding(normalized_query, deep_config["model_key"])
+        if blob is None:
+            return None
+        text_vec = embedding_worker.blob_to_vec(blob)
+        image_ids, matrix = await embed_cache.get_matrix(deep_config["model_key"])
+        if image_ids is None or matrix is None or matrix.shape[1] != text_vec.shape[0]:
+            return None
+        similarities = matrix @ text_vec
+        threshold = settings.get_settings().get("search_similarity_threshold", 0.35)
+        import numpy as np
+        matching_indices = np.flatnonzero(similarities >= threshold)
+        scores = {
+            int(image_ids[int(i)]): float(similarities[int(i)])
+            for i in matching_indices
+        }
+        return {
+            "id_filter": set(scores.keys()),
+            "scores": scores,
+            "image_ids": image_ids,
+            "similarities": similarities,
+            "search_mode": "deep_embedding",
+            "deep_model_key": deep_config["model_key"],
+        }
+    except Exception:
+        return None
+
+
+def _encode_text_with_config(encoder, query: str, config: dict):
+    try:
+        import inspect
+
+        if len(inspect.signature(encoder).parameters) < 2:
+            return encoder(query)
+    except (TypeError, ValueError):
+        pass
+    return encoder(query, config)
+
+
+async def _resolve_text_search(q: str, *, deep: bool = False) -> dict:
     """Resolve a text query into either embedding IDs or metadata fallback text."""
     normalized_query = (q or "").strip()
+    deep_requested = bool(deep)
+    cache_key = (normalized_query.casefold(), deep_requested)
     result = {
         "active": bool(normalized_query),
         "id_filter": None,
@@ -1354,24 +2858,86 @@ async def _resolve_text_search(q: str) -> dict:
         "text_query": "",
         "search_mode": "",
         "ai_unavailable": False,
+        "deep_requested": deep_requested,
+        "deep_search_cached": False,
+        "fallback_reason": "",
     }
     if not normalized_query:
+        return result
+
+    extension_query = normalized_query.lower().lstrip(".")
+    if extension_query not in db.IMAGE_EXTENSION_SEARCH_TERMS:
+        await _record_deep_search_query(normalized_query)
+
+    cached = _text_search_resolution_cache.get(cache_key)
+    if cached and cached["expires"] > time.monotonic():
+        return dict(cached["data"])
+
+    if extension_query in db.IMAGE_EXTENSION_SEARCH_TERMS:
+        result.update({
+            "text_query": normalized_query,
+            "search_mode": "metadata",
+        })
+        _text_search_resolution_cache[cache_key] = {
+            "data": dict(result),
+            "expires": time.monotonic() + _text_search_resolution_cache_ttl_seconds,
+        }
+        return result
+
+    deep_search = await _resolve_cached_deep_search(normalized_query)
+    if deep_search is not None:
+        result.update({
+            "id_filter": deep_search["id_filter"],
+            "scores": deep_search["scores"],
+            "search_mode": deep_search["search_mode"],
+            "deep_search_cached": True,
+        })
+        _text_search_resolution_cache[cache_key] = {
+            "data": dict(result),
+            "expires": time.monotonic() + _text_search_resolution_cache_ttl_seconds,
+        }
+        return result
+
+    if deep_requested:
+        result.update({
+            "text_query": normalized_query,
+            "search_mode": "metadata",
+            "ai_unavailable": True,
+            "fallback_reason": "deep_search_not_cached",
+        })
+        _text_search_resolution_cache[cache_key] = {
+            "data": dict(result),
+            "expires": time.monotonic() + _text_search_resolution_cache_ttl_seconds,
+        }
         return result
 
     try:
         import embedding_worker
         import embed_cache
 
+        import importlib.util
+        default_loader = (
+            getattr(embedding_worker.ensure_model_loaded_for_search, "__module__", "")
+            == "embedding_worker"
+        )
+        if default_loader and importlib.util.find_spec("torch") is None:
+            raise RuntimeError("torch is not installed")
+
+        fast_config = settings.fast_search_embedding_config()
         text_vec = await asyncio.get_event_loop().run_in_executor(
             None,
+            _encode_text_with_config,
             embedding_worker.encode_text,
             normalized_query,
+            fast_config,
         )
         if text_vec is None and await embedding_worker.ensure_model_loaded_for_search():
             text_vec = await asyncio.get_event_loop().run_in_executor(
                 None,
+                _encode_text_with_config,
                 embedding_worker.encode_text,
                 normalized_query,
+                fast_config,
             )
         if text_vec is not None:
             image_ids, matrix = await embed_cache.get_matrix()
@@ -1379,18 +2945,21 @@ async def _resolve_text_search(q: str) -> dict:
                 config = settings.get_settings()
                 threshold = config.get("search_similarity_threshold", 0.35)
                 similarities = matrix @ text_vec
-                search_ids: set[int] = set()
-                scores = {}
-                for i in range(len(image_ids)):
-                    if similarities[i] >= threshold:
-                        image_id = int(image_ids[i])
-                        search_ids.add(image_id)
-                        scores[image_id] = float(similarities[i])
+                import numpy as np
+                matching_indices = np.flatnonzero(similarities >= threshold)
+                scores = {
+                    int(image_ids[int(i)]): float(similarities[int(i)])
+                    for i in matching_indices
+                }
                 result.update({
-                    "id_filter": search_ids,
+                    "id_filter": set(scores.keys()),
                     "scores": scores,
                     "search_mode": "embedding",
                 })
+                _text_search_resolution_cache[cache_key] = {
+                    "data": dict(result),
+                    "expires": time.monotonic() + _text_search_resolution_cache_ttl_seconds,
+                }
                 return result
     except Exception:
         pass
@@ -1400,6 +2969,14 @@ async def _resolve_text_search(q: str) -> dict:
         "search_mode": "metadata",
         "ai_unavailable": True,
     })
+    if extension_query not in db.IMAGE_EXTENSION_SEARCH_TERMS:
+        metadata_ids = await db.metadata_search_image_ids(normalized_query)
+        if metadata_ids is not None:
+            result["id_filter"] = metadata_ids
+    _text_search_resolution_cache[cache_key] = {
+        "data": dict(result),
+        "expires": time.monotonic() + _text_search_resolution_cache_ttl_seconds,
+    }
     return result
 
 
@@ -1430,6 +3007,35 @@ def _apply_text_search_constraint(candidates: list[dict], search: dict) -> list[
     return [c for c in candidates if _metadata_text_match(c, text_query)]
 
 
+def _has_candidate_filters(
+    *,
+    exclude_ids: set[int] | None = None,
+    orientation: str = "",
+    compared: str = "",
+    min_stars: int = 0,
+    folder: str = "",
+    flag: str = "",
+    date_taken: str = "",
+    file_type: str = "",
+    camera: str = "",
+    lens: str = "",
+    search: dict | None = None,
+) -> bool:
+    return bool(
+        exclude_ids
+        or orientation
+        or compared
+        or min_stars > 0
+        or folder
+        or flag
+        or date_taken
+        or file_type
+        or camera
+        or lens
+        or (search and search.get("active"))
+    )
+
+
 async def _diverse_sample(candidates: list[dict], count: int) -> list[dict]:
     """Select images that maximize visual diversity using embedding distance."""
     import random
@@ -1440,13 +3046,19 @@ async def _diverse_sample(candidates: list[dict], count: int) -> list[dict]:
         import numpy as np
         import embed_cache
 
-        image_ids, matrix = embed_cache.get_warm_matrix()
-        if image_ids is None:
-            asyncio.create_task(embed_cache.get_matrix())
-            return random.sample(candidates, min(count, len(candidates)))
+        try:
+            deep_key = elo_propagation.compare_embedding_model_key()
+            image_ids, matrix = await embed_cache.get_matrix(deep_key)
+            id_to_idx = embed_cache.get_index(deep_key)
+        except Exception:
+            image_ids, matrix = None, None
+            id_to_idx = {}
 
-        # Use id_to_idx for O(1) lookups instead of building a full dict copy
-        id_to_idx = embed_cache._cache.get("id_to_idx") or {}
+        if image_ids is None:
+            image_ids, matrix = embed_cache.get_warm_matrix()
+            if image_ids is None:
+                return random.sample(candidates, min(count, len(candidates)))
+            id_to_idx = embed_cache.get_index()
 
         # Bound the expensive per-candidate work for large libraries. The final
         # diversity pool is only 500 images, so a 5k search window keeps the same
@@ -1496,7 +3108,7 @@ async def _diverse_sample(candidates: list[dict], count: int) -> list[dict]:
         # Use comparison-count strata instead of np.random.choice(..., p=weights):
         # it keeps the least-compared bias, but avoids normalizing/probability
         # sampling across every candidate.
-        POOL = min(500, len(cand_items))
+        POOL = min(max(count * 16, 96), 192, len(cand_items))
         comp_counts = np.fromiter(
             (c["comparisons"] for c in cand_items),
             dtype=np.float32,
@@ -1593,22 +3205,14 @@ async def mosaic_next(
     n: int = 12, exclude: str = "", strategy: str = "explore", grid_elo: float = 0,
     orientation: str = "", compared: str = "", min_stars: int = 0, folder: str = "",
     flag: str = "", date_taken: str = "", file_type: str = "", camera: str = "", lens: str = "",
-    q: str = "",
+    q: str = "", deep: bool = False,
 ):
     """Get active images for mosaic ranking with configurable sampling strategy."""
     exclude_ids = set()
     if exclude:
         exclude_ids = {int(x) for x in exclude.split(",") if x.strip().isdigit()}
-    search = await _resolve_text_search(q)
-
-    if strategy == "top":
-        images = await db.get_top_images(limit=50)
-    else:
-        images = await _get_pairing_images()
-
-    import random
-    candidates = app_helpers.filter_compare_mosaic_candidates(
-        images,
+    search = await _resolve_text_search(q, deep=deep)
+    has_filters = _has_candidate_filters(
         exclude_ids=exclude_ids,
         orientation=orientation,
         compared=compared,
@@ -1619,30 +3223,152 @@ async def mosaic_next(
         file_type=file_type,
         camera=camera,
         lens=lens,
+        search=search,
     )
-    candidates = _apply_text_search_constraint(candidates, search)
-    filtered_total = len(candidates)
-    candidates = await _filter_visible_candidates(candidates, "sm")
-    visible_count = len(candidates)
+    default_pool_only = not _has_candidate_filters(
+        orientation=orientation,
+        compared=compared,
+        min_stars=min_stars,
+        folder=folder,
+        flag=flag,
+        date_taken=date_taken,
+        file_type=file_type,
+        camera=camera,
+        lens=lens,
+        search=search,
+    )
+    response_cache_key = None
+    if default_pool_only and not exclude_ids and strategy in {"explore", "diverse"}:
+        response_cache_key = (
+            "mosaic_next",
+            db.DB_PATH,
+            _cache_root(),
+            int(n),
+            strategy,
+        )
+        cached_response = _interaction_response_cache.get(response_cache_key)
+        if cached_response and cached_response["expires"] > time.monotonic():
+            response = _copy_interaction_response(cached_response["data"])
+            _schedule_cached_thumbnail_memory_warm(response.get("images") or [], "sm", limit=min(max(1, n), 48))
+            return response
+    if default_pool_only and strategy != "top":
+        counts_task = asyncio.create_task(db.get_visible_pairing_pool_counts("sm", _cache_root()))
+        if strategy == "explore":
+            candidates = await _default_visible_pairing_candidates(
+                "sm",
+                limit=max(_MOSAIC_EXPLORE_WINDOW, n * 80),
+                order="cache",
+            )
+        elif strategy == "diverse":
+            candidates = await _default_visible_pairing_candidates(
+                "sm",
+                limit=max(_MOSAIC_DIVERSE_WINDOW, n * 120),
+                order="least_compared",
+                include_card_metadata=False,
+            )
+        else:
+            candidates = await _default_visible_pairing_candidates("sm")
+        if exclude_ids:
+            candidates = [row for row in candidates if int(row["id"]) not in exclude_ids]
+        counts = await counts_task
+        visible_count = int(counts.get("visible_images") or 0)
+        filtered_total = int(counts.get("active_images") or 0)
+        stats = _interaction_pool_stats(filtered_total, visible_count)
+    elif strategy != "top" and not search.get("active"):
+        stats = None
+        candidates, filtered_total, visible_count = await _filtered_visible_ranked_candidates(
+            "sm",
+            limit=max(_FILTERED_MOSAIC_WINDOW, n * 40),
+            orientation=orientation,
+            compared=compared,
+            min_stars=min_stars,
+            folder=folder,
+            flag=flag,
+            date_taken=date_taken,
+            file_type=file_type,
+            camera=camera,
+            lens=lens,
+        )
+        if exclude_ids:
+            candidates = [row for row in candidates if int(row["id"]) not in exclude_ids]
+            filtered_total = max(0, int(filtered_total) - len(exclude_ids))
+            visible_count = max(0, int(visible_count) - len(exclude_ids))
+    elif strategy != "top" and search.get("active"):
+        stats = None
+        candidates, filtered_total, visible_count = await _search_visible_ranked_candidates(
+            "sm",
+            limit=max(_FILTERED_MOSAIC_WINDOW, n * 40),
+            search=search,
+            exclude_ids=exclude_ids,
+            orientation=orientation,
+            compared=compared,
+            min_stars=min_stars,
+            folder=folder,
+            flag=flag,
+            date_taken=date_taken,
+            file_type=file_type,
+            camera=camera,
+            lens=lens,
+        )
+    else:
+        stats = None
+        if strategy == "top":
+            images = await db.get_top_images(limit=50)
+        else:
+            images = await _get_pairing_images()
+        candidates = app_helpers.filter_compare_mosaic_candidates(
+            images,
+            exclude_ids=exclude_ids,
+            orientation=orientation,
+            compared=compared,
+            min_stars=min_stars,
+            folder=folder,
+            flag=flag,
+            date_taken=date_taken,
+            file_type=file_type,
+            camera=camera,
+            lens=lens,
+        )
+        candidates = _apply_text_search_constraint(candidates, search)
+        filtered_total = len(candidates)
+        candidates = await _filter_visible_candidates(candidates, "sm")
+        visible_count = len(candidates)
 
-    if visible_count < 2:
-        stats = dict(await db.get_stats())
+    if len(candidates) < 2 and default_pool_only and strategy == "explore" and visible_count > len(candidates):
+        candidates = await _default_visible_pairing_candidates("sm")
+        if exclude_ids:
+            candidates = [row for row in candidates if int(row["id"]) not in exclude_ids]
+        visible_count = len(candidates)
+
+    if len(candidates) < 2:
+        stats = stats or _interaction_pool_stats(filtered_total, visible_count)
         stats["filtered_pool"] = visible_count
         stats["filtered_pool_visible"] = visible_count
         stats["filtered_pool_total"] = filtered_total
-        return {
+        response = {
             "images": [],
             **_visibility_counts(filtered_total, visible_count),
             "total_kept": filtered_total,
             "stats": stats,
             "search_mode": search["search_mode"],
             "ai_unavailable": search["ai_unavailable"],
+            "deep_requested": search.get("deep_requested", False),
+            "deep_search_cached": search.get("deep_search_cached", False),
+            "fallback_reason": search.get("fallback_reason", ""),
         }
+        if response_cache_key is not None:
+            _interaction_response_cache[response_cache_key] = {
+                "data": _copy_interaction_response(response),
+                "expires": time.monotonic() + _interaction_response_cache_ttl_seconds,
+            }
+        return response
 
-    # Effective Elo: use direct if compared, predicted if not, 1200 as fallback
-    for img in candidates:
-        img["effective_elo"] = img["elo"]
-    count = min(n, visible_count)
+    import random
+    count = min(n, len(candidates))
+
+    def effective_elo(img):
+        # Hook for predicted ranking can live here without mutating the shared candidate cache.
+        return img["elo"] or 1200.0
 
     if strategy == "diverse":
         # Maximize visual diversity: pick images that are most dissimilar from each other
@@ -1653,50 +3379,66 @@ async def mosaic_next(
             weights = [1.0 / (img["comparisons"] + 1) for img in candidates]
         elif strategy == "compete" and grid_elo > 0:
             # Favor images with effective Elo close to the grid average
-            weights = [1.0 / (abs(img["effective_elo"] - grid_elo) + 50) for img in candidates]
+            weights = [1.0 / (abs(effective_elo(img) - grid_elo) + 50) for img in candidates]
         elif strategy == "top":
             # Favor highest-rated within the top 50
-            weights = [img["effective_elo"] for img in candidates]
+            weights = [effective_elo(img) for img in candidates]
         else:
             # Random — uniform
             weights = [1.0 for _ in candidates]
 
+        draw_count = min(len(candidates), max(count * 4, count))
         sample = []
-        indices = list(range(len(candidates)))
-        for _ in range(count):
-            if not indices:
+        seen_ids = set()
+        for img in random.choices(candidates, weights=weights, k=draw_count):
+            image_id = img["id"]
+            if image_id in seen_ids:
+                continue
+            sample.append(img)
+            seen_ids.add(image_id)
+            if len(sample) >= count:
                 break
-            chosen = random.choices(indices, weights=[weights[i] for i in indices], k=1)[0]
-            sample.append(candidates[chosen])
-            indices.remove(chosen)
+        if len(sample) < count:
+            remaining = [img for img in candidates if img["id"] not in seen_ids]
+            sample.extend(random.sample(remaining, min(count - len(sample), len(remaining))))
 
+    sample_elo_by_id = {img["id"]: effective_elo(img) for img in sample}
+    hydrated_sample = await _hydrate_active_rows(sample)
     result = [
-        app_helpers.image_card(img, "sm", elo_value=img["effective_elo"])
-        for img in sample
+        app_helpers.image_card(img, "sm", elo_value=sample_elo_by_id.get(img["id"], img["elo"]))
+        for img in hydrated_sample
     ]
 
     if sample:
         config = settings.get_settings()
-        await thumbnails.prefetch_images(
-            sample,
+        _schedule_thumbnail_prefetch(
+            hydrated_sample,
             "md",
             limit=min(len(sample), config["mosaic_prefetch_limit"]),
         )
+        _schedule_cached_thumbnail_memory_warm(result, "sm", limit=min(len(result), 48))
 
-    stats = dict(await db.get_stats())
+    stats = stats or _interaction_pool_stats(filtered_total, visible_count)
     stats["filtered_pool"] = visible_count
     stats["filtered_pool_visible"] = visible_count
     stats["filtered_pool_total"] = filtered_total
-    return {
+    response = {
         "images": result,
         **_visibility_counts(filtered_total, visible_count),
         "total_kept": filtered_total,
         "stats": stats,
         "search_mode": search["search_mode"],
         "ai_unavailable": search["ai_unavailable"],
+        "deep_requested": search.get("deep_requested", False),
+        "deep_search_cached": search.get("deep_search_cached", False),
+        "fallback_reason": search.get("fallback_reason", ""),
     }
-
-
+    if response_cache_key is not None:
+        _interaction_response_cache[response_cache_key] = {
+            "data": _copy_interaction_response(response),
+            "expires": time.monotonic() + _interaction_response_cache_ttl_seconds,
+        }
+    return response
 @app.post("/api/mosaic/pick")
 async def mosaic_pick(request: Request):
     """
@@ -1726,71 +3468,37 @@ async def mosaic_pick(request: Request):
         seen_losers.add(loser_id)
         other_ids.append(loser_id)
 
-    # Single batch query instead of N+1 individual queries
-    all_ids = [picked_id] + other_ids
-    images = await db.get_active_images_by_ids(all_ids)
-
-    missing_ids = [image_id for image_id in all_ids if image_id not in images]
-    if missing_ids:
+    action_id = uuid.uuid4().hex
+    result = await db.record_active_mosaic_pick(picked_id, other_ids, action_id)
+    if not result.get("ok"):
         return JSONResponse(
-            {"error": "Images must exist in an active online catalog", "image_ids": missing_ids},
+            {
+                "error": "Images must exist in an active online catalog",
+                "image_ids": result.get("missing_ids", []),
+            },
             status_code=400,
         )
 
-    picked = images[picked_id]
-    picked_elo = picked["elo"]
-    comparison_rows = []
-    loser_updates = []
-    action_id = uuid.uuid4().hex
+    picked_elo = result["new_elo"]
+    pairs_recorded = result["pairs_recorded"]
+    loser_updates = result["loser_updates"]
 
-    conn = await db.get_db()
-    try:
-        for oid in other_ids:
-            other = images.get(oid)
-            new_picked, new_other = pairing.update_elo(picked_elo, other["elo"], k=12.0)
-
-            comparison_rows.append((picked_id, oid, picked_elo, other["elo"], action_id))
-            loser_updates.append((new_other, oid))
-            picked_elo = new_picked
-
-        if comparison_rows:
-            await conn.executemany(
-                "INSERT INTO comparisons "
-                "(winner_id, loser_id, mode, elo_before_winner, elo_before_loser, action_id) "
-                "VALUES (?, ?, 'mosaic', ?, ?, ?)",
-                comparison_rows,
-            )
-            await conn.executemany(
-                "UPDATE images SET elo = ?, comparisons = COALESCE(comparisons, 0) + 1 WHERE id = ?",
-                loser_updates,
-            )
-
-            await conn.execute(
-                "UPDATE images SET elo = ?, comparisons = COALESCE(comparisons, 0) + ? WHERE id = ?",
-                (picked_elo, len(comparison_rows), picked_id),
-            )
-        await conn.commit()
-        db.invalidate_stats_cache()
-    finally:
-        await conn.close()
-
-    if comparison_rows:
+    if pairs_recorded:
         _patch_pairing_cache(
-            [(picked_id, picked_elo, len(comparison_rows))]
-            + [(image_id, new_elo, 1) for new_elo, image_id in loser_updates]
+            [(picked_id, picked_elo, pairs_recorded)]
+            + [(image_id, new_elo, 1) for image_id, new_elo in loser_updates]
         )
-    _add_past_matchups([(picked_id, row[1]) for row in comparison_rows])
+    _add_past_matchups([(picked_id, loser_id) for loser_id in other_ids])
 
     # Fire-and-forget: propagate Elo to similar images via embeddings
-    valid_loser_ids = [row[1] for row in comparison_rows]
     _schedule_pairing_propagation(
-        elo_propagation.propagate_mosaic(picked_id, valid_loser_ids, k=12.0, action_id=action_id)
+        elo_propagation.propagate_mosaic(picked_id, other_ids, k=12.0, action_id=action_id)
     )
 
     return {
         "ok": True,
         "new_elo": round(picked_elo, 1),
-        "pairs_recorded": len(comparison_rows),
+        "pairs_recorded": pairs_recorded,
         "action_id": action_id,
     }
 
@@ -1821,16 +3529,12 @@ async def compare_next(
     n: int = 5, mode: str = "swiss",
     orientation: str = "", compared: str = "", min_stars: int = 0, folder: str = "",
     flag: str = "", date_taken: str = "", file_type: str = "", camera: str = "", lens: str = "",
-    q: str = "",
+    q: str = "", deep: bool = False,
 ):
-    search = await _resolve_text_search(q)
-    if mode == "topn":
-        images = await db.get_top_images(limit=50)
-    else:
-        images = await _get_pairing_images()
-
-    image_dicts = app_helpers.filter_compare_mosaic_candidates(
-        images,
+    search = await _resolve_text_search(q, deep=deep)
+    default_limited_candidates = False
+    ranked_candidate_order = False
+    has_filters = _has_candidate_filters(
         orientation=orientation,
         compared=compared,
         min_stars=min_stars,
@@ -1840,58 +3544,204 @@ async def compare_next(
         file_type=file_type,
         camera=camera,
         lens=lens,
+        search=search,
     )
-    image_dicts = _apply_text_search_constraint(image_dicts, search)
-    filtered_total = len(image_dicts)
-    image_dicts = await _filter_visible_candidates(image_dicts, "md")
-    visible_count = len(image_dicts)
+    response_cache_key = None
+    if not has_filters and mode != "topn":
+        response_cache_key = (
+            "compare_next",
+            db.DB_PATH,
+            _cache_root(),
+            int(n),
+            mode,
+        )
+        cached_response = _interaction_response_cache.get(response_cache_key)
+        if cached_response and cached_response["expires"] > time.monotonic():
+            return _copy_interaction_response(cached_response["data"])
+    if not has_filters and mode != "topn":
+        counts_task = asyncio.create_task(db.get_visible_pairing_pool_counts("md", _cache_root()))
+        image_dicts = await _default_visible_pairing_candidates(
+            "md",
+            limit=max(_SWISS_PAIR_WINDOW, n * 30),
+            include_card_metadata=True,
+        )
+        past_task = asyncio.create_task(
+            _get_past_matchups_for_candidate_ids("md", [row["id"] for row in image_dicts])
+        )
+        default_limited_candidates = True
+        ranked_candidate_order = True
+        counts = await counts_task
+        visible_count = int(counts.get("visible_images") or 0)
+        filtered_total = int(counts.get("active_images") or 0)
+        stats = _interaction_pool_stats(filtered_total, visible_count)
+    elif mode != "topn" and not search.get("active"):
+        stats = None
+        image_dicts, filtered_total, visible_count = await _filtered_visible_ranked_candidates(
+            "md",
+            limit=max(_FILTERED_SWISS_PAIR_WINDOW, n * 30),
+            orientation=orientation,
+            compared=compared,
+            min_stars=min_stars,
+            folder=folder,
+            flag=flag,
+            date_taken=date_taken,
+            file_type=file_type,
+            camera=camera,
+            lens=lens,
+        )
+        past_task = asyncio.create_task(
+            _get_past_matchups_for_candidate_ids("md", [row["id"] for row in image_dicts])
+        )
+        ranked_candidate_order = True
+    elif mode != "topn" and search.get("active"):
+        stats = None
+        image_dicts, filtered_total, visible_count = await _search_visible_ranked_candidates(
+            "md",
+            limit=max(_FILTERED_SWISS_PAIR_WINDOW, n * 30),
+            search=search,
+            orientation=orientation,
+            compared=compared,
+            min_stars=min_stars,
+            folder=folder,
+            flag=flag,
+            date_taken=date_taken,
+            file_type=file_type,
+            camera=camera,
+            lens=lens,
+        )
+        past_task = asyncio.create_task(
+            _get_past_matchups_for_candidate_ids("md", [row["id"] for row in image_dicts])
+        )
+        ranked_candidate_order = True
+    else:
+        stats = None
+        past_task = None
+        if mode == "topn":
+            images = await db.get_top_images(limit=50)
+        else:
+            images = await _get_pairing_images()
+        image_dicts = app_helpers.filter_compare_mosaic_candidates(
+            images,
+            orientation=orientation,
+            compared=compared,
+            min_stars=min_stars,
+            folder=folder,
+            flag=flag,
+            date_taken=date_taken,
+            file_type=file_type,
+            camera=camera,
+            lens=lens,
+        )
+        image_dicts = _apply_text_search_constraint(image_dicts, search)
+        filtered_total = len(image_dicts)
+        image_dicts = await _filter_visible_candidates(image_dicts, "md")
+        visible_count = len(image_dicts)
 
     if len(image_dicts) < 2:
-        stats = dict(await db.get_stats())
+        stats = stats or _interaction_pool_stats(filtered_total, visible_count)
         stats["filtered_pool"] = visible_count
         stats["filtered_pool_visible"] = visible_count
         stats["filtered_pool_total"] = filtered_total
-        return {
+        response = {
             "pairs": [],
             **_visibility_counts(filtered_total, visible_count),
             "total_kept": filtered_total,
             "stats": stats,
             "search_mode": search["search_mode"],
             "ai_unavailable": search["ai_unavailable"],
+            "deep_requested": search.get("deep_requested", False),
+            "deep_search_cached": search.get("deep_search_cached", False),
+            "fallback_reason": search.get("fallback_reason", ""),
         }
-    past = await _get_past_matchups()
-    pairs = pairing.swiss_pair(image_dicts, past, max_pairs=n)
+        if response_cache_key is not None:
+            _interaction_response_cache[response_cache_key] = {
+                "data": _copy_interaction_response(response),
+                "expires": time.monotonic() + _interaction_response_cache_ttl_seconds,
+            }
+        return response
+    past = await past_task if past_task is not None else await _get_past_matchups()
+    if not has_filters and mode != "topn" and len(image_dicts) > _SWISS_PAIR_WINDOW:
+        pairs = pairing.swiss_pair(image_dicts[:_SWISS_PAIR_WINDOW], past, max_pairs=n, presorted=True)
+        if len(pairs) < n:
+            pairs = pairing.swiss_pair(image_dicts, past, max_pairs=n, presorted=True)
+    else:
+        pairs = pairing.swiss_pair(image_dicts, past, max_pairs=n, presorted=ranked_candidate_order)
+    if default_limited_candidates and len(pairs) < n and visible_count > len(image_dicts):
+        image_dicts = await _default_visible_pairing_candidates("md")
+        past = await _get_visible_past_matchups("md")
+        pairs = pairing.swiss_pair(image_dicts, past, max_pairs=n, presorted=True)
+    elif (
+        has_filters
+        and mode != "topn"
+        and not search.get("active")
+        and len(pairs) < n
+        and visible_count > len(image_dicts)
+    ):
+        image_dicts, _filtered_total, _visible_count = await _filtered_visible_ranked_candidates(
+            "md",
+            limit=visible_count,
+            orientation=orientation,
+            compared=compared,
+            min_stars=min_stars,
+            folder=folder,
+            flag=flag,
+            date_taken=date_taken,
+            file_type=file_type,
+            camera=camera,
+            lens=lens,
+        )
+        past = await _get_visible_past_matchups("md")
+        pairs = pairing.swiss_pair(image_dicts, past, max_pairs=n, presorted=True)
 
     result = []
     prefetch_rows = []
+    pair_rows = [row for pair in pairs for row in pair]
+    hydrated_rows = await _hydrate_active_rows(pair_rows)
+    hydrated_by_id = {row["id"]: row for row in hydrated_rows}
     for left, right in pairs:
-        prefetch_rows.append(left)
-        prefetch_rows.append(right)
+        left_row = hydrated_by_id.get(left["id"], left)
+        right_row = hydrated_by_id.get(right["id"], right)
+        prefetch_rows.append(left_row)
+        prefetch_rows.append(right_row)
         result.append({
-            "left": app_helpers.image_card(left, "md"),
-            "right": app_helpers.image_card(right, "md"),
+            "left": app_helpers.image_card(left_row, "md"),
+            "right": app_helpers.image_card(right_row, "md"),
         })
 
     if prefetch_rows:
         config = settings.get_settings()
-        await thumbnails.prefetch_images(
+        _schedule_thumbnail_prefetch(
             prefetch_rows,
             "md",
             limit=min(len(prefetch_rows), config["compare_prefetch_limit"]),
         )
+        _schedule_cached_thumbnail_memory_warm(
+            prefetch_rows,
+            "md",
+            limit=min(len(prefetch_rows), max(2, n * 2)),
+        )
 
-    stats = dict(await db.get_stats())
+    stats = stats or _interaction_pool_stats(filtered_total, visible_count)
     stats["filtered_pool"] = visible_count
     stats["filtered_pool_visible"] = visible_count
     stats["filtered_pool_total"] = filtered_total
-    return {
+    response = {
         "pairs": result,
         **_visibility_counts(filtered_total, visible_count),
         "total_kept": filtered_total,
         "stats": stats,
         "search_mode": search["search_mode"],
         "ai_unavailable": search["ai_unavailable"],
+        "deep_requested": search.get("deep_requested", False),
+        "deep_search_cached": search.get("deep_search_cached", False),
+        "fallback_reason": search.get("fallback_reason", ""),
     }
+    if response_cache_key is not None:
+        _interaction_response_cache[response_cache_key] = {
+            "data": _copy_interaction_response(response),
+            "expires": time.monotonic() + _interaction_response_cache_ttl_seconds,
+        }
+    return response
 
 
 @app.post("/api/compare")
@@ -1908,31 +3758,21 @@ async def submit_comparison(request: Request):
     if winner_id == loser_id:
         return JSONResponse({"error": "Winner and loser must be different images"}, status_code=400)
 
-    both = await db.get_active_images_by_ids([winner_id, loser_id])
-    winner, loser = both.get(winner_id), both.get(loser_id)
-
-    if not winner or not loser:
+    action_id = uuid.uuid4().hex
+    result = await db.record_active_comparison(winner_id, loser_id, mode, action_id=action_id)
+    if not result:
         return JSONResponse(
             {"error": "Images must exist in an active online catalog"},
             status_code=400,
         )
 
-    k = pairing.get_k_factor(min(winner["comparisons"], loser["comparisons"]), mode)
-    new_winner_elo, new_loser_elo = pairing.update_elo(winner["elo"], loser["elo"], k)
-    action_id = uuid.uuid4().hex
-
-    await db.record_comparison(
-        winner_id, loser_id, mode,
-        winner["elo"], loser["elo"],
-        new_winner_elo, new_loser_elo,
-        action_id=action_id,
-    )
-
+    new_winner_elo = result["winner_elo"]
+    new_loser_elo = result["loser_elo"]
     _patch_pairing_cache([(winner_id, new_winner_elo, 1), (loser_id, new_loser_elo, 1)])
     _add_past_matchups([(winner_id, loser_id)])
     # Fire-and-forget: propagate Elo to similar images via embeddings.
     _schedule_pairing_propagation(
-        elo_propagation.propagate_comparison(winner_id, loser_id, k, action_id=action_id)
+        elo_propagation.propagate_comparison(winner_id, loser_id, result["k"], action_id=action_id)
     )
 
     return {
@@ -1959,37 +3799,85 @@ async def api_rankings(
     limit: int = 100, offset: int = 0, sort: str = "elo",
     orientation: str = "", compared: str = "", min_stars: int = 0,
     folder: str = "", flag: str = "", date_taken: str = "", file_type: str = "",
-    camera: str = "", lens: str = "", q: str = "",
+    camera: str = "", lens: str = "", q: str = "", deep: bool = False,
+    request: Request = None,
 ):
     limit = _clamp_int(limit, 100, 1, 500)
     offset = _clamp_int(offset, 0, 0, 1_000_000)
-    search = await _resolve_text_search(q)
+    search = await _resolve_text_search(q, deep=deep)
     search_ids = search["id_filter"]
     search_scores = search["scores"]
     search_mode = search["search_mode"]
     text_query = search["text_query"]
+    if search_mode == "metadata" and text_query and not search_ids and not file_type:
+        extension_query = text_query.lower().lstrip(".")
+        if extension_query in db.IMAGE_EXTENSION_SEARCH_TERMS:
+            file_type = extension_query
+            text_query = ""
+        elif search_ids is not None:
+            return {
+                "images": [],
+                **_visibility_counts(0, 0),
+                "total_kept": 0,
+                "search_mode": search_mode,
+                "ai_unavailable": search["ai_unavailable"],
+                "deep_requested": search.get("deep_requested", False),
+                "deep_search_cached": search.get("deep_search_cached", False),
+                "fallback_reason": search.get("fallback_reason", ""),
+            }
 
     db_sort = "elo" if sort == "similarity" and not search_scores else sort
+    rankings_cache_key = None
+    cacheable_metadata_search = search_mode == "metadata" and not search_scores
+    if not search["active"] or cacheable_metadata_search:
+        rankings_cache_key = (
+            db.DB_PATH,
+            _cache_root(),
+            limit,
+            offset,
+            sort,
+            db_sort,
+            orientation,
+            compared,
+            int(min_stars or 0),
+            folder,
+            flag,
+            date_taken,
+            file_type,
+            camera,
+            lens,
+            text_query if cacheable_metadata_search else "",
+            search_mode if cacheable_metadata_search else "",
+            bool(search["ai_unavailable"]) if cacheable_metadata_search else False,
+            bool(search.get("deep_requested")),
+            str(search.get("fallback_reason") or ""),
+        )
+        cached = _rankings_response_cache.get(rankings_cache_key)
+        if cached and cached["expires"] > time.monotonic():
+            _schedule_result_thumbnail_memory_warm((cached.get("data") or {}).get("images") or [])
+            if request is not None and cached.get("json") is not None:
+                return Response(content=cached["json"], media_type="application/json")
+            response = _copy_rankings_response(cached["data"])
+            return response
 
     # Similarity sort: fetch all matches, sort in Python, then paginate
     if sort == "similarity" and search_scores:
-        total_images, visible_images = await asyncio.gather(
+        total_task = asyncio.create_task(
             db.count_rankings(
                 orientation=orientation, compared=compared, min_stars=min_stars,
                 folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
-                camera=camera, lens=lens,
-                id_filter=search_ids,
-                text_query=text_query,
-            ),
-            db.count_rankings(
-                orientation=orientation, compared=compared, min_stars=min_stars,
-                folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
-                camera=camera, lens=lens,
-                id_filter=search_ids,
-                visible_thumb_size="sm", cache_root=_cache_root(),
-                text_query=text_query,
-            ),
+                camera=camera, lens=lens, id_filter=search_ids, text_query=text_query,
+            )
         )
+        visible_images = await db.count_rankings(
+            orientation=orientation, compared=compared, min_stars=min_stars,
+            folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
+            camera=camera, lens=lens,
+            id_filter=search_ids,
+            visible_thumb_size="sm", cache_root=_cache_root(),
+            text_query=text_query,
+        )
+        total_images = await total_task
         images = await db.get_rankings(
             limit=visible_images, offset=0, sort="elo",
             orientation=orientation, compared=compared, min_stars=min_stars,
@@ -2008,50 +3896,111 @@ async def api_rankings(
         all_results.sort(key=lambda x: x["similarity"], reverse=(sort == "similarity"))
         page = all_results[offset:offset + limit]
         if page:
-            await thumbnails.prefetch_images(
+            _schedule_thumbnail_prefetch(
                 [{"id": r["id"], "filepath": ""} for r in page], "sm",
                 limit=min(len(page), 48),
             )
+            _schedule_result_thumbnail_memory_warm(page)
         return {
             "images": page,
             **_visibility_counts(total_images, visible_images),
             "total_kept": total_images,
             "search_mode": search_mode,
             "ai_unavailable": search["ai_unavailable"],
+            "deep_requested": search.get("deep_requested", False),
+            "deep_search_cached": search.get("deep_search_cached", False),
+            "fallback_reason": search.get("fallback_reason", ""),
         }
 
-    images, visible_images, total_images = await asyncio.gather(
-        db.get_rankings(
-            limit=limit, offset=offset, sort=db_sort,
-            orientation=orientation, compared=compared, min_stars=min_stars,
-            folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
-            camera=camera, lens=lens,
-            id_filter=search_ids,
-            visible_thumb_size="sm", cache_root=_cache_root(),
-            text_query=text_query,
-        ),
-        db.count_rankings(
-            orientation=orientation, compared=compared, min_stars=min_stars,
-            folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
-            camera=camera, lens=lens,
-            id_filter=search_ids,
-            visible_thumb_size="sm", cache_root=_cache_root(),
-            text_query=text_query,
-        ),
-        db.count_rankings(
-            orientation=orientation, compared=compared, min_stars=min_stars,
-            folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
-            camera=camera, lens=lens,
-            id_filter=search_ids,
-            text_query=text_query,
-        ),
+    unfiltered_rankings = not any(
+        (
+            orientation,
+            compared,
+            int(min_stars or 0),
+            folder,
+            flag,
+            date_taken,
+            file_type,
+            camera,
+            lens,
+            search_ids,
+            text_query,
+        )
     )
+    if unfiltered_rankings:
+        counts_task = asyncio.create_task(db.get_visible_pairing_pool_counts("sm", _cache_root()))
+    else:
+        defer_empty_first_page_counts = bool(text_query) and offset == 0
+        total_task = None
+        visible_task = None
+        if not defer_empty_first_page_counts:
+            total_task = asyncio.create_task(
+                db.count_rankings(
+                    orientation=orientation, compared=compared, min_stars=min_stars,
+                    folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
+                    camera=camera, lens=lens,
+                    id_filter=search_ids,
+                    text_query=text_query,
+                )
+            )
+            visible_task = asyncio.create_task(
+                db.count_rankings(
+                    orientation=orientation, compared=compared, min_stars=min_stars,
+                    folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
+                    camera=camera, lens=lens,
+                    id_filter=search_ids,
+                    visible_thumb_size="sm", cache_root=_cache_root(),
+                    text_query=text_query,
+                )
+            )
+    images = await db.get_rankings(
+        limit=limit, offset=offset, sort=db_sort,
+        orientation=orientation, compared=compared, min_stars=min_stars,
+        folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
+        camera=camera, lens=lens,
+        id_filter=search_ids,
+        visible_thumb_size="sm", cache_root=_cache_root(),
+        text_query=text_query,
+    )
+    if unfiltered_rankings:
+        counts = await counts_task
+        total_images = int(counts.get("active_images") or 0)
+        visible_images = int(counts.get("visible_images") or 0)
+    else:
+        if defer_empty_first_page_counts and not images:
+            visible_images = 0
+            total_images = 0
+        else:
+            if total_task is None:
+                total_task = asyncio.create_task(
+                    db.count_rankings(
+                        orientation=orientation, compared=compared, min_stars=min_stars,
+                        folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
+                        camera=camera, lens=lens,
+                        id_filter=search_ids,
+                        text_query=text_query,
+                    )
+                )
+            if visible_task is None:
+                visible_task = asyncio.create_task(
+                    db.count_rankings(
+                        orientation=orientation, compared=compared, min_stars=min_stars,
+                        folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
+                        camera=camera, lens=lens,
+                        id_filter=search_ids,
+                        visible_thumb_size="sm", cache_root=_cache_root(),
+                        text_query=text_query,
+                    )
+                )
+            visible_images = await visible_task
+            total_images = await total_task
     if images:
-        await thumbnails.prefetch_images(
+        _schedule_thumbnail_prefetch(
             [dict(img) for img in images],
             "sm",
             limit=min(len(images), 48),
         )
+        _schedule_result_thumbnail_memory_warm(images)
     result = []
     for img in images:
         d = dict(img)
@@ -2062,13 +4011,19 @@ async def api_rankings(
             kwargs["date_group"] = app_helpers.date_group_for_image(d)
         entry = app_helpers.image_card(d, "sm", **kwargs)
         result.append(entry)
-    return {
+    response = {
         "images": result,
         **_visibility_counts(total_images, visible_images),
         "total_kept": total_images,
         "search_mode": search_mode,
         "ai_unavailable": search["ai_unavailable"],
+        "deep_requested": search.get("deep_requested", False),
+        "deep_search_cached": search.get("deep_search_cached", False),
+        "fallback_reason": search.get("fallback_reason", ""),
     }
+    if rankings_cache_key is not None:
+        _cache_rankings_response(rankings_cache_key, response)
+    return response
 
 
 @app.get("/api/date-groups")
@@ -2152,7 +4107,7 @@ async def export_rankings(format: str = "json", ids: str = ""):
 
 
 @app.get("/api/search")
-async def api_search(q: str = "", limit: int = 50):
+async def api_search(q: str = "", limit: int = 50, deep: bool = False):
     """Search images by text query using embedding similarity."""
     query = q.strip()
     if not query:
@@ -2160,6 +4115,18 @@ async def api_search(q: str = "", limit: int = 50):
     limit = _clamp_int(limit, 50, 1, 500)
 
     async def metadata_fallback(reason: str):
+        cache_key = (
+            "api_search_metadata",
+            db.DB_PATH,
+            _cache_root(),
+            limit,
+            query,
+            reason,
+            bool(deep),
+        )
+        cached = _rankings_response_cache.get(cache_key)
+        if cached and cached["expires"] > time.monotonic():
+            return _copy_rankings_response(cached["data"])
         rows, visible_images, total_images = await asyncio.gather(
             db.get_rankings(
                 limit=limit,
@@ -2181,19 +4148,61 @@ async def api_search(q: str = "", limit: int = 50):
             d = dict(img)
             result.append(app_helpers.image_card(d, "sm", similarity=None))
         if rows:
-            await thumbnails.prefetch_images(
+            _schedule_thumbnail_prefetch(
                 [dict(img) for img in rows],
                 "sm",
                 limit=min(len(rows), 48),
             )
-        return {
+            _schedule_result_thumbnail_memory_warm(rows)
+        response = {
             "images": result,
             "query": q,
             "search_mode": "metadata",
             "ai_unavailable": True,
             "fallback_reason": reason,
+            "deep_requested": bool(deep),
+            "deep_search_cached": False,
             **_visibility_counts(total_images, visible_images),
         }
+        _rankings_response_cache[cache_key] = {
+            "data": _copy_rankings_response(response),
+            "expires": time.monotonic() + _rankings_response_cache_ttl_seconds,
+        }
+        return response
+
+    await _record_deep_search_query(query)
+    deep_search = await _resolve_cached_deep_search(query)
+    if deep_search is not None:
+        image_ids = deep_search["image_ids"]
+        similarities = deep_search["similarities"]
+        visible_rows, visible_images, total_images = await _visible_embedding_page(
+            image_ids,
+            similarities,
+            limit,
+            "sm",
+            model_key=deep_search.get("deep_model_key"),
+        )
+        id_to_idx = {int(image_id): idx for idx, image_id in enumerate(image_ids)}
+        result = []
+        for img in visible_rows:
+            img_id = int(img["id"])
+            idx = id_to_idx.get(img_id)
+            score = float(similarities[idx]) if idx is not None else 0.0
+            result.append(app_helpers.image_card(img, "sm", similarity=score))
+        _schedule_result_thumbnail_memory_warm(visible_rows)
+
+        return {
+            "images": result,
+            "query": q,
+            "search_mode": deep_search["search_mode"],
+            "ai_unavailable": False,
+            "deep_search_cached": True,
+            "deep_requested": bool(deep),
+            **_visibility_counts(total_images, visible_images),
+        }
+
+    if deep:
+        return await metadata_fallback("deep_search_not_cached")
 
     try:
         import embedding_worker
@@ -2201,9 +4210,22 @@ async def api_search(q: str = "", limit: int = 50):
     except ImportError:
         return await metadata_fallback("embeddings_unavailable")
 
-    text_vec = await asyncio.get_event_loop().run_in_executor(None, embedding_worker.encode_text, query)
+    fast_config = settings.fast_search_embedding_config()
+    text_vec = await asyncio.get_event_loop().run_in_executor(
+        None,
+        _encode_text_with_config,
+        embedding_worker.encode_text,
+        query,
+        fast_config,
+    )
     if text_vec is None and await embedding_worker.ensure_model_loaded_for_search():
-        text_vec = await asyncio.get_event_loop().run_in_executor(None, embedding_worker.encode_text, query)
+        text_vec = await asyncio.get_event_loop().run_in_executor(
+            None,
+            _encode_text_with_config,
+            embedding_worker.encode_text,
+            query,
+            fast_config,
+        )
     if text_vec is None:
         return await metadata_fallback("model_loading")
 
@@ -2212,24 +4234,31 @@ async def api_search(q: str = "", limit: int = 50):
         return await metadata_fallback("embeddings_not_indexed")
 
     similarities = matrix @ text_vec
-    ranked_indices = _top_indices_desc(similarities, len(image_ids))
-    ranked_ids = [int(image_ids[int(i)]) for i in ranked_indices]
-    visible_images = await _count_visible_ranked_ids(ranked_ids, "sm")
-    visible_rows = await _visible_ranked_images(ranked_ids, limit, "sm")
-    score_by_id = {int(image_ids[int(i)]): float(similarities[int(i)]) for i in ranked_indices}
+    visible_rows, visible_images, total_images = await _visible_embedding_page(
+        image_ids,
+        similarities,
+        limit,
+        "sm",
+        model_key=fast_config["model_key"],
+    )
 
     result = []
+    id_to_idx = embed_cache.get_index()
     for img in visible_rows:
         img_id = int(img["id"])
-        score = score_by_id.get(img_id, 0.0)
+        idx = id_to_idx.get(img_id)
+        score = float(similarities[idx]) if idx is not None else 0.0
         result.append(app_helpers.image_card(img, "sm", similarity=score))
+    _schedule_result_thumbnail_memory_warm(visible_rows)
 
     return {
         "images": result,
         "query": q,
         "search_mode": "embedding",
         "ai_unavailable": False,
-        **_visibility_counts(len(ranked_ids), visible_images),
+        "deep_requested": False,
+        "deep_search_cached": False,
+        **_visibility_counts(total_images, visible_images),
     }
 
 
@@ -2251,31 +4280,34 @@ async def api_similar(image_id: int, limit: int = 50):
         return JSONResponse({"error": "Image not embedded yet"}, status_code=404)
 
     similarities = matrix @ source_vec
-    source_index = embed_cache.get_index().get(image_id)
-    ranked_indices = [
-        int(idx)
-        for idx in _top_indices_desc(similarities, len(image_ids), exclude_index=source_index)
-        if int(image_ids[int(idx)]) != image_id
-    ]
-    ranked_ids = [int(image_ids[idx]) for idx in ranked_indices]
-    visible_images = await _count_visible_ranked_ids(ranked_ids, "sm")
-    visible_rows = await _visible_ranked_images(ranked_ids, limit, "sm")
-    score_by_id = {int(image_ids[idx]): float(similarities[idx]) for idx in ranked_indices}
+    visible_rows, visible_images, total_images = await _visible_embedding_page(
+        image_ids,
+        similarities,
+        limit,
+        "sm",
+        exclude_id=image_id,
+        model_key=db.active_embedding_model_key(),
+    )
     results = []
+    id_to_idx = embed_cache.get_index()
     for img in visible_rows:
         img_id = int(img["id"])
-        results.append(app_helpers.image_card(img, "sm", similarity=score_by_id.get(img_id, 0.0)))
+        idx = id_to_idx.get(img_id)
+        score = float(similarities[idx]) if idx is not None else 0.0
+        results.append(app_helpers.image_card(img, "sm", similarity=score))
 
     return {
         "images": results,
         "source_id": image_id,
-        **_visibility_counts(len(ranked_ids), visible_images),
+        **_visibility_counts(total_images, visible_images),
     }
 
 
 @app.get("/api/duplicates")
 async def api_duplicates(threshold: float = 0.95, limit: int = 100):
     """Find near-duplicate image pairs using embedding similarity."""
+    if not await db.get_active_source_id_set():
+        return {"pairs": [], "visible_pairs": 0, "total_pairs": 0, "hidden_pending_thumbnails": 0}
     try:
         import numpy as np
         import embed_cache
@@ -2291,6 +4323,18 @@ async def api_duplicates(threshold: float = 0.95, limit: int = 100):
     BATCH = 500
     n = len(image_ids)
     cached_sm_ids = await _cached_image_ids([int(image_id) for image_id in image_ids], "sm")
+    cache_key = (
+        db.DB_PATH,
+        round(float(threshold), 4),
+        int(limit),
+        id(matrix),
+        len(image_ids),
+        len(cached_sm_ids),
+        hash(frozenset(cached_sm_ids)),
+    )
+    if _duplicates_cache["key"] == cache_key and _duplicates_cache["data"] is not None:
+        return copy.deepcopy(_duplicates_cache["data"])
+
     pairs = []
     total_pairs = 0
     hidden_pairs = 0
@@ -2334,17 +4378,21 @@ async def api_duplicates(threshold: float = 0.95, limit: int = 100):
             "b": {"id": id_b, "filename": b["filename"], "elo": round(b["elo"], 1), "thumb_url": f"/api/thumb/sm/{id_b}"},
         })
 
-    return {
+    response = {
         "pairs": result,
         "visible_pairs": len(result),
         "total_pairs": total_pairs,
         "hidden_pending_thumbnails": hidden_pairs,
     }
+    _duplicates_cache["key"] = cache_key
+    _duplicates_cache["data"] = copy.deepcopy(response)
+    return response
 
 
 _exif_cache: dict[int, dict] = {}
 _EXIF_CACHE_MAX = 2000
 _collections_cache = {"key": None, "data": None}
+_duplicates_cache = {"key": None, "data": None}
 
 @app.get("/api/image/{image_id}/exif")
 async def api_exif(image_id: int):
@@ -2391,15 +4439,16 @@ async def api_exif(image_id: int):
 @app.get("/api/collections")
 async def api_collections(n_clusters: int = 20):
     """Auto-group images into collections using embedding clustering."""
+    n_clusters = max(2, min(int(n_clusters), 100))
+    if not await db.get_active_source_id_set():
+        return {"collections": []}
+
     try:
-        import embedding_worker
         import numpy as np
         import embed_cache
-        from sklearn.cluster import KMeans, MiniBatchKMeans
     except ImportError:
         return JSONResponse({"error": "Dependencies not available"}, status_code=503)
 
-    n_clusters = max(2, min(int(n_clusters), 100))
     image_ids, matrix = await embed_cache.get_matrix()
     if image_ids is None or len(image_ids) < n_clusters:
         return {"collections": []}
@@ -2411,6 +4460,11 @@ async def api_collections(n_clusters: int = 20):
     cache_key = (int(n_clusters), len(image_ids), len(cached_sm_ids))
     if _collections_cache["key"] == cache_key and _collections_cache["data"] is not None:
         return _collections_cache["data"]
+
+    try:
+        from sklearn.cluster import KMeans, MiniBatchKMeans
+    except ImportError:
+        return JSONResponse({"error": "Dependencies not available"}, status_code=503)
 
     loop = asyncio.get_running_loop()
     if len(image_ids) > 5000:
@@ -2476,53 +4530,156 @@ async def api_collections(n_clusters: int = 20):
     return result
 
 
-_folders_cache = {"data": None, "expires": 0}
+_folders_cache: dict[int | None, dict] = {}
+_folders_refreshing: set[int | None] = set()
+_folders_cache_ttl_seconds = 300.0
 
 
 def _invalidate_folders_cache():
-    _folders_cache["data"] = None
-    _folders_cache["expires"] = 0
+    for cached in _folders_cache.values():
+        cached["expires"] = 0
 
-@app.get("/api/folders")
-async def api_folders():
-    """Get folder tree with image counts (cached 60s)."""
-    import time as _time
-    if _folders_cache["data"] and _time.time() < _folders_cache["expires"]:
-        return _folders_cache["data"]
 
-    conn = await db.get_db()
+def _clear_folders_cache():
+    _folders_cache.clear()
+    _folders_refreshing.clear()
+
+
+def _add_folder_counts(
+    folder_counts: dict[str, int],
+    root: str,
+    directory: str,
+    count: int = 1,
+    max_depth: int | None = None,
+):
+    root_prefix = root.rstrip(os.sep) + os.sep
+    if directory == root:
+        rel = "."
+    elif root != os.sep and directory.startswith(root_prefix):
+        rel = directory[len(root_prefix):]
+    elif root == os.sep and directory.startswith(root_prefix):
+        rel = directory[1:]
+    else:
+        rel = os.path.relpath(directory, root)
+
+    start = 0
+    while True:
+        idx = rel.find(os.sep, start)
+        if idx < 0:
+            if max_depth is None or rel.count(os.sep) <= max_depth:
+                folder_counts[rel] = folder_counts.get(rel, 0) + count
+            return
+        key = rel[:idx]
+        if max_depth is None or key.count(os.sep) <= max_depth:
+            folder_counts[key] = folder_counts.get(key, 0) + count
+        start = idx + 1
+
+
+def _parent_directory(path: str) -> str:
+    split_at = path.rfind(os.sep)
+    return path[:split_at] if split_at >= 0 else ""
+
+
+def _build_source_level_folders_payload(sources: list[tuple[int, str, int]]) -> dict | None:
+    source_paths = [path for _source_id, path, _active_count in sources if path]
+    if len(source_paths) < 2:
+        return None
+    root = os.path.commonpath(source_paths)
+    folders = []
+    for _source_id, source_path, active_image_count in sources:
+        if not source_path:
+            return None
+        rel = os.path.relpath(source_path, root)
+        folders.append({
+            "path": rel if rel != "." else os.path.basename(source_path.rstrip(os.sep)) or ".",
+            "count": int(active_image_count or 0),
+            "depth": 0,
+        })
+    return {"folders": sorted(folders, key=lambda item: item["path"]), "root": root}
+
+
+def _build_folders_payload(max_depth: int | None = None) -> dict:
+    conn = sqlite3.connect(db.DB_PATH)
     try:
-        cursor = await conn.execute(
-            "SELECT i.filepath FROM images i "
-            "JOIN catalog_sources s ON s.id = i.source_id "
-            "WHERE s.included = 1 AND s.online = 1 AND i.missing_at IS NULL"
-        )
-        rows = await cursor.fetchall()
+        sources = conn.execute(
+            "SELECT id, path, active_image_count FROM catalog_sources WHERE included = 1"
+        ).fetchall()
+        if max_depth == 0:
+            source_level = _build_source_level_folders_payload(sources)
+            if source_level is not None:
+                return source_level
+        directory_counts = {}
+        fallback_dirs = []
+        for source_id, source_path, active_image_count in sources:
+            if int(active_image_count or 0) <= 0:
+                continue
+            for (filepath,) in conn.execute(
+                "SELECT filepath FROM images "
+                "WHERE source_id = ? AND missing_at IS NULL",
+                (source_id,),
+            ):
+                directory = _parent_directory(filepath or "")
+                directory_counts[directory] = directory_counts.get(directory, 0) + 1
+                if not source_path:
+                    fallback_dirs.append(directory)
     finally:
-        await conn.close()
+        conn.close()
 
-    # Find common root and build relative folder tree
-    if not rows:
+    if not directory_counts:
         return {"folders": []}
 
-    paths = [os.path.dirname(row["filepath"]) for row in rows]
-    root = os.path.commonpath(paths)
+    source_paths = [path for _source_id, path, _active_count in sources if path]
+    root = os.path.commonpath(source_paths) if source_paths else os.path.commonpath(fallback_dirs)
 
     folder_counts = {}
-    for p in paths:
-        rel = os.path.relpath(p, root)
-        # Build hierarchy: each level gets counted
-        parts = rel.split(os.sep)
-        for depth in range(1, len(parts) + 1):
-            key = os.sep.join(parts[:depth])
-            folder_counts[key] = folder_counts.get(key, 0) + 1
+    for directory, count in directory_counts.items():
+        _add_folder_counts(folder_counts, root, directory, count, max_depth=max_depth)
 
-    # Sort by path and return
     folders = [{"path": k, "count": v, "depth": k.count(os.sep)}
                for k, v in sorted(folder_counts.items())]
-    result = {"folders": folders, "root": root}
-    _folders_cache["data"] = result
-    _folders_cache["expires"] = _time.time() + 60
+    return {"folders": folders, "root": root}
+
+
+@app.get("/api/folders")
+async def api_folders(max_depth: int | None = None):
+    """Get folder tree with image counts."""
+    import time as _time
+    normalized_max_depth = None
+    if max_depth is not None:
+        normalized_max_depth = max(0, min(int(max_depth), 10))
+    cached = _folders_cache.get(normalized_max_depth)
+    if cached and _time.time() < cached["expires"]:
+        return cached["data"]
+    if cached:
+        if normalized_max_depth not in _folders_refreshing:
+            _folders_refreshing.add(normalized_max_depth)
+
+            async def _refresh_folders():
+                try:
+                    result = await asyncio.to_thread(_build_folders_payload, normalized_max_depth)
+                    _folders_cache[normalized_max_depth] = {
+                        "data": result,
+                        "expires": _time.time() + _folders_cache_ttl_seconds,
+                    }
+                finally:
+                    _folders_refreshing.discard(normalized_max_depth)
+
+            asyncio.create_task(_refresh_folders())
+        return cached["data"]
+    counts = await db.get_catalog_image_counts()
+    if int(counts.get("active_images") or 0) <= 0:
+        result = {"folders": []}
+        _folders_cache[normalized_max_depth] = {
+            "data": result,
+            "expires": _time.time() + _folders_cache_ttl_seconds,
+        }
+        return result
+
+    result = await asyncio.to_thread(_build_folders_payload, normalized_max_depth)
+    _folders_cache[normalized_max_depth] = {
+        "data": result,
+        "expires": _time.time() + _folders_cache_ttl_seconds,
+    }
     return result
 
 
@@ -2537,12 +4694,40 @@ async def api_stats():
     return await db.get_stats()
 
 
-async def build_ai_status():
+async def build_ai_status(model_status: dict | None = None, *, force: bool = False):
     """Embedding worker + model install status for UI surfaces."""
-    embedded = await db.get_embedding_count()
-    stats = await db.get_stats()
-    total_images = stats["kept"] + stats["maybe"]
+    model_status = model_status or ai_models.get_model_status()
+    cache_key = _ai_model_status_cache_key(model_status)
+    if not force:
+        cached = _ai_status_response_cache.get("data")
+        if (
+            cached is not None
+            and _ai_status_response_cache.get("key") == cache_key
+            and float(_ai_status_response_cache.get("expires") or 0) > time.monotonic()
+        ):
+            return _copy_ai_status_response(cached)
+
+    counts = await db.get_ai_status_counts()
+    embedded = counts["embedded"]
+    total_images = counts["total_images"]
     remaining = max(total_images - embedded, 0)
+    fast_config = settings.fast_search_embedding_config()
+    deep_config = settings.deep_search_embedding_config()
+    fast_model_status = ai_models.get_model_status(fast_config)
+    deep_model_status = ai_models.get_model_status(deep_config)
+
+    def index_install_fields(status: dict) -> dict:
+        install = status.get("install") or {}
+        install_applies = (
+            bool(install.get("model_dir"))
+            and str(install.get("model_dir")) == str(status.get("model_dir"))
+        )
+        return {
+            "installed": bool(status.get("installed")),
+            "installing": bool(install.get("running")) and install_applies,
+            "install_status": str(install.get("status") or "idle") if install_applies else "idle",
+            "install_message": str(install.get("message") or "") if install_applies else "",
+        }
 
     worker_status = {}
     try:
@@ -2587,16 +4772,64 @@ async def build_ai_status():
             ).to_dict(),
         }
 
-    model_status = ai_models.get_model_status()
-    compared = int(stats.get("rated_images") or 0)
+    compared = int(counts.get("rated_images") or 0)
 
     recent_rate = float(worker_status.get("recent_images_per_min") or 0.0)
     overall_rate = float(worker_status.get("overall_images_per_min") or 0.0)
     effective_rate = recent_rate if recent_rate > 0 else overall_rate
     eta_seconds = int((remaining / effective_rate) * 60) if remaining > 0 and effective_rate > 0 else None
     progress_pct = round((embedded / total_images) * 100, 1) if total_images > 0 else 0.0
+    deep_embedded = await db.count_embeddings_for_model(deep_config, online_only=True)
+    deep_remaining = max(total_images - deep_embedded, 0)
+    deep_progress_pct = round((deep_embedded / total_images) * 100, 1) if total_images > 0 else 0.0
+    try:
+        deep_cache_counts = await db.get_deep_search_cache_status(deep_config, None)
+        deep_queries = await db.list_deep_search_queries(deep_config)
+    except Exception:
+        deep_cache_counts = {"pending_queries": 0, "embedded_queries": 0}
+        deep_queries = []
+    deep_worker = worker_status.get("deep_search") or {}
+    embedding_indexes = {
+        "fast": {
+            "role": "fast",
+            "label": "Daily Search",
+            "description": "Fast 2B image and text embeddings for normal browsing.",
+            "model_id": fast_config["model_id"],
+            "model_key": fast_config["model_key"],
+            "model_dir": fast_config["model_dir"],
+            "dimension": int(fast_config["dimension"]),
+            **index_install_fields(fast_model_status),
+            "embedded": embedded,
+            "total_images": total_images,
+            "remaining": remaining,
+            "progress_pct": progress_pct,
+            "worker_state": worker_status["state"],
+            "worker_message": worker_status["message"],
+            "manual_pause": bool(worker_status.get("manual_pause")),
+        },
+        "deep": {
+            "role": "deep",
+            "label": "Deep Search",
+            "description": "Smarter scheduled 8B image index and saved-query cache.",
+            "model_id": deep_config["model_id"],
+            "model_key": deep_config["model_key"],
+            "model_dir": deep_config["model_dir"],
+            "dimension": int(deep_config["dimension"]),
+            **index_install_fields(deep_model_status),
+            "embedded": deep_embedded,
+            "total_images": total_images,
+            "remaining": deep_remaining,
+            "progress_pct": deep_progress_pct,
+            "worker_state": deep_worker.get("state") or "idle",
+            "worker_message": deep_worker.get("message") or "",
+            "schedule": deep_worker.get("schedule") or settings.deep_search_schedule_status(settings.get_settings()),
+            "pending_queries": int(deep_cache_counts.get("pending_queries") or 0),
+            "embedded_queries": int(deep_cache_counts.get("embedded_queries") or 0),
+            "queries": deep_queries,
+        },
+    }
 
-    return {
+    response = {
         "embedded": embedded,
         "total_images": total_images,
         "total_kept": total_images,
@@ -2604,15 +4837,17 @@ async def build_ai_status():
         "progress_pct": progress_pct,
         "compared": compared,
         "rated_images": compared,
-        "direct_comparison_rows": int(stats.get("direct_comparison_rows") or 0),
-        "ranking_signal_count": int(stats.get("ranking_signal_count") or stats.get("total_comparisons") or 0),
-        "imported_ranking_without_history": int(stats.get("imported_ranking_without_history") or 0),
+        "direct_comparison_rows": int(counts.get("direct_comparison_rows") or 0),
+        "ranking_signal_count": int(counts.get("ranking_signal_count") or 0),
+        "imported_ranking_without_history": int(counts.get("imported_ranking_without_history") or 0),
         "model_installed": model_status["installed"],
         "installing": model_status["install"]["running"],
         "install_status": model_status["install"]["status"],
         "install_message": model_status["install"]["message"],
         "model_id": model_status["model_id"],
         "model_dir": model_status["model_dir"],
+        "model_key": model_status.get("model_key", ""),
+        "model_dimension": int(model_status.get("dimension") or 0),
         "worker_state": worker_status["state"],
         "worker_message": worker_status["message"],
         "worker_ready": worker_status["ready"],
@@ -2643,11 +4878,17 @@ async def build_ai_status():
         "oom_backoffs": worker_status.get("oom_backoffs", 0),
         "last_oom_at": worker_status.get("last_oom_at"),
         "batch_growth_paused_until": worker_status.get("batch_growth_paused_until"),
+        "deep_search": worker_status.get("deep_search") or {},
+        "embedding_indexes": embedding_indexes,
         "eta_seconds": eta_seconds,
         "governor": worker_status.get("governor") or resource_governor.get_background_decision(
             thumbnails.get_idle_seconds()
         ).to_dict(),
     }
+    _ai_status_response_cache["data"] = _copy_ai_status_response(response)
+    _ai_status_response_cache["key"] = cache_key
+    _ai_status_response_cache["expires"] = time.monotonic() + _ai_status_response_cache_ttl_seconds
+    return response
 
 
 @app.get("/api/ai/status")
@@ -2658,4 +4899,4 @@ async def ai_status():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True, access_log=False)

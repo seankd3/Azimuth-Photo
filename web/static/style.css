@@ -1387,7 +1387,8 @@ body.library-shell .library-container::-webkit-scrollbar-thumb:hover {
 }
 
 .settings-field input,
-.settings-field select {
+.settings-field select,
+.settings-field textarea {
     width: 100%;
     padding: 10px 12px;
     background: #181818;
@@ -1399,9 +1400,243 @@ body.library-shell .library-container::-webkit-scrollbar-thumb:hover {
 }
 
 .settings-field input:focus,
-.settings-field select:focus {
+.settings-field select:focus,
+.settings-field textarea:focus {
     border-color: var(--accent);
     background: #1d1d1d;
+}
+
+.settings-field textarea {
+    min-height: 150px;
+    resize: vertical;
+    line-height: 1.45;
+}
+
+.work-mode-picker {
+    display: grid;
+    gap: 10px;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.work-mode-option {
+    align-items: flex-start;
+    background: #181818;
+    border: 1px solid #333;
+    border-radius: var(--radius-lg);
+    cursor: pointer;
+    display: grid;
+    gap: 5px;
+    min-height: 132px;
+    padding: 14px;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.work-mode-option:hover,
+.work-mode-option.selected {
+    background: #1d1d1d;
+    border-color: var(--accent);
+}
+
+.work-mode-option input {
+    margin: 0 0 4px 0;
+}
+
+.work-mode-title {
+    color: #f1f1f1;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.work-mode-copy {
+    color: #9b9b9b;
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.embedding-index-grid {
+    display: grid;
+    gap: 12px;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.embedding-index-panel {
+    background: #181818;
+    border: 1px solid #333;
+    border-radius: var(--radius-lg);
+    display: grid;
+    gap: 10px;
+    padding: 14px;
+}
+
+.embedding-index-header {
+    align-items: flex-start;
+    display: flex;
+    gap: 12px;
+    justify-content: space-between;
+}
+
+.embedding-index-title {
+    color: #f1f1f1;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.embedding-index-subtitle {
+    color: #9b9b9b;
+    font-size: 12px;
+    line-height: 1.35;
+    margin-top: 3px;
+    overflow-wrap: anywhere;
+}
+
+.embedding-index-badge {
+    border: 1px solid #3b4550;
+    border-radius: 999px;
+    color: #dce3ea;
+    flex: 0 0 auto;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1;
+    padding: 6px 8px;
+}
+
+.embedding-index-badge.ready {
+    border-color: #3d684a;
+    color: #9ee0ad;
+}
+
+.embedding-index-badge.paused,
+.embedding-index-badge.scheduled {
+    border-color: #6b5a30;
+    color: #e2c46d;
+}
+
+.embedding-index-badge.missing,
+.embedding-index-badge.error {
+    border-color: #6d3f3f;
+    color: #f19a9a;
+}
+
+.embedding-index-meter {
+    background: #101010;
+    border: 1px solid #2f2f2f;
+    border-radius: 999px;
+    height: 8px;
+    overflow: hidden;
+}
+
+.embedding-index-meter span {
+    background: var(--accent);
+    display: block;
+    height: 100%;
+    transition: width 0.2s ease;
+    width: 0%;
+}
+
+.embedding-index-progress {
+    color: #d1d5db;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.embedding-index-status {
+    color: #9b9b9b;
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.deep-search-schedule-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 10px;
+}
+
+.deep-search-day-picker {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.deep-search-day-picker label {
+    align-items: center;
+    background: #1b1b1b;
+    border: 1px solid #333;
+    border-radius: var(--radius-lg);
+    color: #d1d5db;
+    display: inline-flex;
+    font-size: 12px;
+    gap: 6px;
+    min-height: 34px;
+    padding: 7px 10px;
+}
+
+.deep-search-day-picker input {
+    accent-color: var(--accent);
+}
+
+.deep-search-term-list {
+    display: grid;
+    gap: 8px;
+}
+
+.deep-search-term-summary {
+    color: #c7cbd0;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.deep-search-term-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.deep-search-term {
+    border: 1px solid #3b4550;
+    background: #1b2228;
+    border-radius: 999px;
+    color: #dce3ea;
+    font-size: 12px;
+    line-height: 1.25;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    padding: 5px 8px;
+}
+
+.deep-search-query-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.deep-search-query {
+    align-items: center;
+    background: #171b1f;
+    border: 1px solid #333c45;
+    border-radius: 999px;
+    color: #dce3ea;
+    display: inline-flex;
+    font-size: 12px;
+    gap: 6px;
+    line-height: 1.25;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    padding: 5px 8px;
+}
+
+.deep-search-query.cached {
+    border-color: #3d684a;
+}
+
+.deep-search-query.pending {
+    border-color: #6b5a30;
+}
+
+.deep-search-query-state {
+    color: #9b9b9b;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
 }
 
 .settings-split-grid {
@@ -1998,6 +2233,12 @@ body.library-shell .library-container::-webkit-scrollbar-thumb:hover {
 
 /* Search bar (in bottom bar) */
 .bar-search {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.bar-search-field {
     position: relative;
 }
 
@@ -2050,6 +2291,37 @@ body.library-shell .library-container::-webkit-scrollbar-thumb:hover {
 
 .search-clear-sm:hover {
     color: #aaa;
+}
+
+.deep-search-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 28px;
+    padding: 0 10px;
+    border: 1px solid #3a3a3a;
+    border-radius: var(--radius-sm);
+    background: var(--bg-input);
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.deep-search-btn:hover:not(:disabled),
+.deep-search-btn.active {
+    border-color: var(--accent);
+    color: var(--text-primary);
+}
+
+.deep-search-btn.active {
+    background: rgba(108, 180, 238, 0.12);
+}
+
+.deep-search-btn:disabled {
+    cursor: default;
+    opacity: 0.42;
 }
 
 .compare-search-active {
@@ -3030,6 +3302,9 @@ body.library-shell.date-scrubber-active .date-group-header {
     }
     .bar-search-input:focus {
         width: 200px;
+    }
+    .deep-search-btn {
+        padding: 0 8px;
     }
 }
 

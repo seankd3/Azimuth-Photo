@@ -20,12 +20,14 @@ _install_state = {
 }
 
 
-def _snapshot_config() -> dict:
-    cfg = settings.get_settings()
+def _snapshot_config(config: dict | None = None) -> dict:
+    cfg = config or settings.fast_search_embedding_config()
     return {
-        "model_id": cfg["embed_model_id"],
-        "revision": cfg["embed_model_revision"],
-        "model_dir": cfg["embed_model_dir"],
+        "model_id": cfg.get("embed_model_id") or cfg["model_id"],
+        "revision": cfg.get("embed_model_revision") or cfg.get("revision", "main"),
+        "model_dir": cfg.get("embed_model_dir") or cfg["model_dir"],
+        "dimension": int(cfg.get("embed_model_dim") or cfg.get("dimension") or settings.DEFAULT_SETTINGS["embed_model_dim"]),
+        "model_key": cfg.get("model_key") or settings.embedding_model_key(cfg),
     }
 
 
@@ -59,8 +61,8 @@ def model_files_present(model_dir: str) -> bool:
     return False
 
 
-def get_model_status() -> dict:
-    config = _snapshot_config()
+def get_model_status(config: dict | None = None) -> dict:
+    config = _snapshot_config(config)
     state = _copy_state()
     return {
         **config,
@@ -107,8 +109,8 @@ def _install_model_sync(model_id: str, revision: str, model_dir: str):
         )
 
 
-def start_model_install() -> dict:
-    config = _snapshot_config()
+def start_model_install(config: dict | None = None) -> dict:
+    config = _snapshot_config(config)
     with _install_lock:
         if _install_state["running"]:
             return copy.deepcopy(_install_state)

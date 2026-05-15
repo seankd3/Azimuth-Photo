@@ -18,7 +18,13 @@ def get_k_factor(comparisons: int, mode: str) -> float:
     return 20.0
 
 
-def swiss_pair(images: list[dict], past_matchups: set[tuple[int, int]], max_pairs: int = 5) -> list[tuple[dict, dict]]:
+def swiss_pair(
+    images: list[dict],
+    past_matchups: set[tuple[int, int]],
+    max_pairs: int = 5,
+    *,
+    presorted: bool = False,
+) -> list[tuple[dict, dict]]:
     """
     Swiss-system pairing: sort by Elo, pair adjacent with slight randomization.
 
@@ -29,8 +35,9 @@ def swiss_pair(images: list[dict], past_matchups: set[tuple[int, int]], max_pair
     if len(images) < 2:
         return []
 
-    # Sort by Elo descending
-    sorted_imgs = sorted(images, key=lambda x: x["elo"], reverse=True)
+    # Sort by Elo descending unless the caller is using a DB query that already
+    # returned this exact order.
+    sorted_imgs = list(images) if presorted else sorted(images, key=lambda x: x["elo"], reverse=True)
 
     # Add slight randomization: swap adjacent items with some probability
     randomized = list(sorted_imgs)

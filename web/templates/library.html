@@ -56,9 +56,14 @@
     </div>
     <div class="bar-divider"></div>
     <div class="bar-section bar-search">
-        <input type="text" id="search-input" class="bar-search-input" placeholder="Search..."
-               autocomplete="off" spellcheck="false">
-        <button type="button" class="search-clear-sm hidden" id="search-clear" onclick="PhotoArchive.clearSearch()" aria-label="Clear search">&times;</button>
+        <div class="bar-search-field">
+            <input type="text" id="search-input" class="bar-search-input" placeholder="Search..."
+                   autocomplete="off" spellcheck="false">
+            <button type="button" class="search-clear-sm hidden" id="search-clear" onclick="PhotoArchive.clearSearch()" aria-label="Clear search">&times;</button>
+        </div>
+        <button type="button" class="deep-search-btn" id="deep-search-btn" onclick="PhotoArchive.runDeepSearch()" disabled>
+            Deep Search
+        </button>
     </div>
     <div class="bar-divider"></div>
     {% include '_filters.html' %}

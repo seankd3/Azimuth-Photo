@@ -127,10 +127,11 @@ def filter_by_metadata(
             images = [img for img in images if str(img.get("date_taken") or "").startswith(prefix)]
 
     if file_type:
-        normalized_type = file_type.lower()
-        if not normalized_type.startswith("."):
-            normalized_type = f".{normalized_type}"
-        images = [img for img in images if (img.get("file_ext") or "").lower() == normalized_type]
+        normalized_type = file_type.lower().lstrip(".")
+        images = [
+            img for img in images
+            if (img.get("file_ext") or "").lower().lstrip(".") == normalized_type
+        ]
 
     if camera:
         images = [img for img in images if camera_label(img) == camera]

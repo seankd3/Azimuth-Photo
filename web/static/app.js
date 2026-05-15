@@ -15,7 +15,7 @@ const PhotoArchive = (() => {
     let coverageStatsFetchPromise = null;
     let compareImageToken = 0;
     const compareDisplayedTier = { left: -1, right: -1 };
-    const COVERAGE_STATS_THROTTLE_MS = 5000;
+    const COVERAGE_STATS_THROTTLE_MS = 30000;
 
     // --- Rankings State ---
     let rankingsOffset = 0;
@@ -23,9 +23,14 @@ const PhotoArchive = (() => {
     const RANKINGS_PAGE_SIZE = 100;
     const BACKGROUND_WARM_DELAY_MS = 250;
     const CROSS_VIEW_WARM_DELAY_MS = 1000;
-    const WARMUP_QUEUE_CONCURRENCY = 1;
+    const WARMUP_QUEUE_CONCURRENCY = 2;
     const LIBRARY_NEIGHBOR_LIMIT = 24;
     const MOSAIC_NEIGHBOR_LIMIT = 8;
+    const MOSAIC_REPLACEMENT_TARGET = 24;
+    const MOSAIC_REPLACEMENT_FETCH_MIN = 12;
+    const MOSAIC_REPLACEMENT_LOW_WATER = 8;
+    const MOSAIC_REPLACEMENT_PROBE_CONCURRENCY = 4;
+    const MOSAIC_REPLACEMENT_PRELOAD_TIMEOUT_MS = 900;
     const COMPARE_NEIGHBOR_PAIRS = 4;
     const FILMSTRIP_WINDOW_RADIUS = 55;
     const LOUPE_TIER_LABELS = ['Thumbnail (sm)', 'Medium (md)', 'Large (lg)', 'Original'];
@@ -54,6 +59,12 @@ const PhotoArchive = (() => {
     let warmTierFlushTimer = null;
     let bottomBarResizeObserver = null;
     let bottomBarResizeListenerAdded = false;
+    let visibilityListenerAdded = false;
+    let aiStatusPoller = null;
+    let aiStatusPollingStarted = false;
+    let aiStatusPollInFlight = false;
+    const AI_STATUS_ACTIVE_POLL_MS = 5000;
+    const AI_STATUS_IDLE_POLL_MS = 30000;
 
     function updateBottomBarHeightVar() {
         const bar = document.querySelector('.bottom-bar');
@@ -75,6 +86,42 @@ const PhotoArchive = (() => {
             window.addEventListener('resize', updateBottomBarHeightVar);
             bottomBarResizeListenerAdded = true;
         }
+    }
+
+    function startAIStatusPolling(initialDelayMs = 0) {
+        initVisibilityRefresh();
+        if (aiStatusPollingStarted) return;
+        aiStatusPollingStarted = true;
+        scheduleAIStatusPoll(initialDelayMs);
+    }
+
+    function scheduleAIStatusPoll(delayMs) {
+        if (!aiStatusPollingStarted || document.hidden) return;
+        if (aiStatusPoller) clearTimeout(aiStatusPoller);
+        aiStatusPoller = setTimeout(pollAIStatus, Math.max(0, Number(delayMs) || 0));
+    }
+
+    function aiStatusPollDelay(data) {
+        const workerState = String(data?.worker_state || '');
+        if (workerState === 'error' || data?.worker_error || !data?.model_installed) {
+            return AI_STATUS_IDLE_POLL_MS;
+        }
+        const active = Boolean(
+            data?.installing
+            || workerState === 'loading_model'
+            || workerState === 'embedding'
+        );
+        return active ? AI_STATUS_ACTIVE_POLL_MS : AI_STATUS_IDLE_POLL_MS;
+    }
+
+    function initVisibilityRefresh() {
+        if (visibilityListenerAdded) return;
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) return;
+            if (aiStatusPollingStarted) scheduleAIStatusPoll(0);
+            if (settingsPoller) refreshSettingsMeta().catch(() => {});
+        });
+        visibilityListenerAdded = true;
     }
 
     function clearWarmups() {
@@ -201,6 +248,12 @@ const PhotoArchive = (() => {
         warmTierFlushTimer = setTimeout(flushWarmImageTiers, WARM_TIER_BATCH_DELAY_MS);
     }
 
+    function invalidateMediaStatusesForPayload(payload) {
+        for (const ids of Object.values(payload || {})) {
+            for (const id of ids || []) mediaStatusCache.delete(Number(id));
+        }
+    }
+
     function flushWarmImageTiers() {
         warmTierFlushTimer = null;
         const payload = {};
@@ -219,10 +272,11 @@ const PhotoArchive = (() => {
             body: JSON.stringify({ tiers: payload }),
             keepalive: true,
         }).then(() => {
+            invalidateMediaStatusesForPayload(payload);
             const currentId = Number(loupeCurrentImage?.id || 0);
             if (!currentId) return;
             const includesCurrent = Object.values(payload).some((ids) => (ids || []).includes(currentId));
-            if (includesCurrent) refreshLoupeMediaStatus(loupeCurrentImage, loupeImageToken);
+            if (includesCurrent) refreshLoupeMediaStatus(loupeCurrentImage, loupeImageToken, { force: true });
         }).catch(() => {});
     }
 
@@ -330,6 +384,7 @@ const PhotoArchive = (() => {
         mosaicReplacements = [];
         mosaicFilling = false;
         mosaicBusy = false;
+        primeMediaStatuses(mosaicImages.map((img) => img.id));
         renderMosaic();
         warmImageTiers({
             md: mosaicImages.map((img) => img.id),
@@ -380,6 +435,8 @@ const PhotoArchive = (() => {
         }
         const rowH = Math.floor(lo);
 
+        const frag = document.createDocumentFragment();
+        const upgradeJobs = [];
         for (let index = 0; index < mosaicImages.length; index++) {
             const img = mosaicImages[index];
             const ar = img.aspect_ratio || 1.5;
@@ -390,9 +447,21 @@ const PhotoArchive = (() => {
             cell.style.flexGrow = ar;
             cell.style.flexBasis = (rowH * ar) + 'px';
             cell.onclick = () => mosaicClick(img.id);
-            cell.innerHTML = `<img src="${escapeHtml(img.thumb_url)}" alt="${escapeHtml(img.filename)}" data-tier-rank="0" onload="this.classList.add('loaded'); this.parentElement.classList.remove('skeleton-cell')">`;
+            const imageEl = document.createElement('img');
+            imageEl.src = img.thumb_url;
+            imageEl.alt = img.filename || '';
+            imageEl.dataset.tierRank = '0';
+            imageEl.onload = () => {
+                imageEl.classList.add('loaded');
+                cell.classList.remove('skeleton-cell');
+            };
+            cell.appendChild(imageEl);
             preloadImage(img.thumb_url);
-            grid.appendChild(cell);
+            frag.appendChild(cell);
+            upgradeJobs.push([cell, img, index]);
+        }
+        grid.appendChild(frag);
+        for (const [cell, img, index] of upgradeJobs) {
             scheduleMosaicImageUpgrade(cell, img, rowH, token, index);
         }
     }
@@ -457,36 +526,61 @@ const PhotoArchive = (() => {
     let mosaicFilling = false;
 
     function mosaicFillReplacements() {
-        if (mosaicFilling || mosaicReplacements.length >= 10) return;
+        if (mosaicFilling || mosaicReplacements.length >= MOSAIC_REPLACEMENT_TARGET) return;
         mosaicFilling = true;
         const generation = warmupGeneration;
         const renderToken = mosaicRenderToken;
         enqueueWarmup(async () => {
             try {
                 if (generation !== warmupGeneration || renderToken !== mosaicRenderToken) return;
+                const needed = Math.max(
+                    MOSAIC_REPLACEMENT_FETCH_MIN,
+                    MOSAIC_REPLACEMENT_TARGET - mosaicReplacements.length,
+                );
                 const excludeIds = [
                     ...mosaicImages.map(img => img.id),
                     ...mosaicReplacements.map(img => img.id),
                 ].join(',');
-                const res = await fetch(buildMosaicUrl({ n: 10, exclude: excludeIds }));
+                const res = await fetch(buildMosaicUrl({ n: needed, exclude: excludeIds }));
                 const data = await res.json();
                 if (generation !== warmupGeneration || renderToken !== mosaicRenderToken) return;
                 if (data.stats) {
                     compareStats = data.stats;
                     updateCompareProgress();
                 }
-                // Deduplicate against current grid and existing replacements
-                const onGrid = new Set(mosaicImages.map(img => img.id));
+                // Deduplicate against the grid and existing replacements, but stream
+                // ready thumbnails into the buffer so one slow probe cannot stall all swaps.
                 const inBuffer = new Set(mosaicReplacements.map(img => img.id));
-                const replacementUrls = [];
-                for (const img of data.images) {
-                    if (!onGrid.has(img.id) && !inBuffer.has(img.id)) {
-                        mosaicReplacements.push(img);
+                const candidates = [];
+                for (const img of data.images || []) {
+                    const onGrid = mosaicImages.some((entry) => entry.id === img.id);
+                    if (!onGrid && !inBuffer.has(img.id)) {
                         inBuffer.add(img.id);
-                        if (img.thumb_url) replacementUrls.push(img.thumb_url);
+                        candidates.push(img);
                     }
                 }
-                warmImageUrls(replacementUrls, generation).catch(() => {});
+                let readyCount = 0;
+                const addWhenReady = async (img) => {
+                    const probe = await loadImageProbe(img.thumb_url, {
+                        priority: 'auto',
+                        timeoutMs: MOSAIC_REPLACEMENT_PRELOAD_TIMEOUT_MS,
+                    });
+                    if (!probe.ok || generation !== warmupGeneration || renderToken !== mosaicRenderToken) return;
+                    const currentGrid = new Set(mosaicImages.map((entry) => entry.id));
+                    if (currentGrid.has(img.id) || mosaicReplacements.some((entry) => entry.id === img.id)) return;
+                    if (mosaicReplacements.length >= MOSAIC_REPLACEMENT_TARGET) return;
+                    mosaicReplacements.push(img);
+                    readyCount++;
+                };
+                for (let start = 0; start < candidates.length; start += MOSAIC_REPLACEMENT_PROBE_CONCURRENCY) {
+                    if (generation !== warmupGeneration || renderToken !== mosaicRenderToken) return;
+                    if (mosaicReplacements.length >= MOSAIC_REPLACEMENT_TARGET) break;
+                    const chunk = candidates.slice(start, start + MOSAIC_REPLACEMENT_PROBE_CONCURRENCY);
+                    await Promise.all(chunk.map(addWhenReady));
+                }
+                if (mosaicReplacements.length < MOSAIC_REPLACEMENT_FETCH_MIN && candidates.length > readyCount) {
+                    setTimeout(() => mosaicFillReplacements(), 300);
+                }
             } catch {} finally {
                 mosaicFilling = false;
             }
@@ -520,23 +614,27 @@ const PhotoArchive = (() => {
             propagationCounts: { ...mosaicPropagationCounts },
         };
 
-        const savePick = fetch('/api/mosaic/pick', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ winner_id: id, loser_ids: otherIds }),
-        }).then(async (res) => {
-            let payload = {};
-            try {
-                payload = await res.json();
-            } catch {}
-            if (!res.ok || payload.ok === false) {
-                throw new Error(payload.error || 'Failed to save pick');
-            }
-            return payload;
-        }).then(
-            (payload) => ({ ok: true, payload }),
-            (error) => ({ ok: false, error }),
-        );
+        const savePick = new Promise((resolve) => {
+            setTimeout(() => {
+                fetch('/api/mosaic/pick', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ winner_id: id, loser_ids: otherIds }),
+                }).then(async (res) => {
+                    let payload = {};
+                    try {
+                        payload = await res.json();
+                    } catch {}
+                    if (!res.ok || payload.ok === false) {
+                        throw new Error(payload.error || 'Failed to save pick');
+                    }
+                    return payload;
+                }).then(
+                    (payload) => resolve({ ok: true, payload }),
+                    (error) => resolve({ ok: false, error }),
+                );
+            }, 0);
+        });
 
         // Update stats using precomputed propagation count if available
         const propagated = mosaicPropagationCounts[id] || 0;
@@ -580,6 +678,9 @@ const PhotoArchive = (() => {
                     continue;
                 }
                 const newImg = mosaicReplacements.shift();
+                if (mosaicReplacements.length < MOSAIC_REPLACEMENT_LOW_WATER) {
+                    mosaicFillReplacements();
+                }
                 mosaicImages[ri] = newImg;
                 mosaicAge[ri] = 0;
                 targetCell.dataset.id = newImg.id;
@@ -587,9 +688,10 @@ const PhotoArchive = (() => {
                 const imgEl = targetCell.querySelector('img');
                 if (imgEl) {
                     imgEl.dataset.tierRank = '0';
-                    imgEl.classList.remove('loaded');
                     imgEl.src = newImg.thumb_url;
                     imgEl.alt = newImg.filename;
+                    imgEl.classList.add('loaded');
+                    targetCell.classList.remove('skeleton-cell');
                 }
                 targetCell.classList.remove('mosaic-picked');
                 scheduleMosaicImageUpgrade(targetCell, newImg, targetCell.clientHeight || 220, mosaicRenderToken, ri);
@@ -697,17 +799,23 @@ const PhotoArchive = (() => {
         restoreFilters();
         restoreSearchState();
         setCompareMode('mosaic');
-        pollAIStatus();
-        setInterval(pollAIStatus, 5000);
-        loadFolderList();
-        loadFilterOptions();
+        startAIStatusPolling(750);
+        setTimeout(() => {
+            loadFolderList();
+            scheduleFilterOptionsLoad();
+        }, 500);
         initStarHover();
     }
 
     async function pollAIStatus() {
+        aiStatusPoller = null;
+        if (document.hidden || aiStatusPollInFlight) return;
+        aiStatusPollInFlight = true;
+        let nextDelay = AI_STATUS_IDLE_POLL_MS;
         try {
             const res = await fetch('/api/ai/status');
             const data = await res.json();
+            nextDelay = aiStatusPollDelay(data);
             const countEl = document.getElementById('ai-embed-count');
             const totalEl = document.getElementById('ai-embed-total');
             const stateEl = document.getElementById('ai-model-state');
@@ -773,6 +881,9 @@ const PhotoArchive = (() => {
         } catch {
             const aiSection = document.getElementById('bar-ai');
             if (aiSection) aiSection.style.display = 'none';
+        } finally {
+            aiStatusPollInFlight = false;
+            scheduleAIStatusPoll(nextDelay);
         }
     }
 
@@ -826,6 +937,7 @@ const PhotoArchive = (() => {
 
         if (leftInfo) leftInfo.textContent = `${pair.left.filename} — ${pair.left.elo}`;
         if (rightInfo) rightInfo.textContent = `${pair.right.filename} — ${pair.right.elo}`;
+        primeMediaStatuses([pair.left.id, pair.right.id]);
         renderCompareImage(pair.left, leftImg, 'left', token);
         renderCompareImage(pair.right, rightImg, 'right', token);
         warmImageTiers({
@@ -996,6 +1108,7 @@ const PhotoArchive = (() => {
             .then((stats) => {
                 mergeCoverageStats(stats);
                 renderCoverageBar(stats);
+                updateCompareProgress();
             })
             .catch(() => {})
             .finally(() => {
@@ -1321,6 +1434,8 @@ const PhotoArchive = (() => {
     let dateScrubberScrollHandler = null;
     let dateScrubberScrollRaf = null;
     let searchQuery = '';
+    let deepSearchRequested = false;
+    let lastDeepSearchNoticeQuery = '';
     let searchDebounce = null;
     let rankingsLoading = false;
     let rankingsLoadPromise = null;
@@ -1335,6 +1450,7 @@ const PhotoArchive = (() => {
     const SORT_STORAGE_KEY = 'pa_sort';
     const SEARCH_STORAGE_KEY = 'pa_search_query';
     const SEARCH_SORT_STORAGE_KEY = 'pa_search_sort';
+    const SEARCH_DEEP_STORAGE_KEY = 'pa_search_deep';
     const SCROLL_POS_STORAGE_KEY = 'pa_scroll_pos';
     const SCROLL_OFFSET_STORAGE_KEY = 'pa_scroll_offset';
     const EMPTY_FILTERS = {
@@ -1432,6 +1548,7 @@ const PhotoArchive = (() => {
         const btn = document.getElementById('metadata-filter-btn');
         if (!panel) return;
         panel.classList.toggle('hidden');
+        if (!panel.classList.contains('hidden')) loadFilterOptions();
         if (btn) btn.setAttribute('aria-expanded', panel.classList.contains('hidden') ? 'false' : 'true');
     }
 
@@ -1590,7 +1707,10 @@ const PhotoArchive = (() => {
         params.set('strategy', strategy);
         params.set('grid_elo', String(gridElo));
         appendFilterParams(params, state.filters);
-        if (state.searchMode === 'search' && state.searchQuery) params.set('q', state.searchQuery);
+        if (state.searchMode === 'search' && state.searchQuery) {
+            params.set('q', state.searchQuery);
+            if (state.deepSearch) params.set('deep', '1');
+        }
         if (exclude) params.set('exclude', exclude);
         return `/api/mosaic/next?${params.toString()}`;
     }
@@ -1601,7 +1721,10 @@ const PhotoArchive = (() => {
         params.set('n', String(n));
         params.set('mode', mode);
         appendFilterParams(params, state.filters);
-        if (state.searchMode === 'search' && state.searchQuery) params.set('q', state.searchQuery);
+        if (state.searchMode === 'search' && state.searchQuery) {
+            params.set('q', state.searchQuery);
+            if (state.deepSearch) params.set('deep', '1');
+        }
         return `/api/compare/next?${params.toString()}`;
     }
 
@@ -1742,8 +1865,9 @@ const PhotoArchive = (() => {
                 CROSS_VIEW_WARM_DELAY_MS,
             );
         } else if (fromView === 'library') {
+            const warmStrategy = mosaicStrategy === 'diverse' ? 'explore' : mosaicStrategy;
             const compareUrl = buildMosaicUrl({
-                strategy: 'explore',
+                strategy: warmStrategy,
                 gridElo: 0,
                 n: mosaicSize,
             });
@@ -1837,6 +1961,7 @@ const PhotoArchive = (() => {
             sort: overrides.sort || sortValueForState(field, desc),
             searchMode: mode,
             searchQuery: query,
+            deepSearch: Boolean(overrides.deepSearch ?? (mode === 'search' && deepSearchRequested)),
         };
     }
 
@@ -1861,8 +1986,14 @@ const PhotoArchive = (() => {
         try {
             if (hasActiveTextSearch()) {
                 sessionStorage.setItem(SEARCH_STORAGE_KEY, searchQuery);
+                if (deepSearchRequested) {
+                    sessionStorage.setItem(SEARCH_DEEP_STORAGE_KEY, '1');
+                } else {
+                    sessionStorage.removeItem(SEARCH_DEEP_STORAGE_KEY);
+                }
             } else {
                 sessionStorage.removeItem(SEARCH_STORAGE_KEY);
+                sessionStorage.removeItem(SEARCH_DEEP_STORAGE_KEY);
             }
         } catch {}
     }
@@ -1881,6 +2012,7 @@ const PhotoArchive = (() => {
         try {
             sessionStorage.removeItem(SEARCH_STORAGE_KEY);
             sessionStorage.removeItem(SEARCH_SORT_STORAGE_KEY);
+            sessionStorage.removeItem(SEARCH_DEEP_STORAGE_KEY);
         } catch {}
     }
 
@@ -1924,8 +2056,10 @@ const PhotoArchive = (() => {
         try {
             const saved = (sessionStorage.getItem(SEARCH_STORAGE_KEY) || '').trim();
             searchQuery = saved;
+            deepSearchRequested = Boolean(searchQuery && sessionStorage.getItem(SEARCH_DEEP_STORAGE_KEY) === '1');
         } catch {
             searchQuery = '';
+            deepSearchRequested = false;
         }
         updateSimilaritySortOption();
         if (hasActiveTextSearch()) {
@@ -1938,8 +2072,15 @@ const PhotoArchive = (() => {
     function updateSearchControls() {
         const input = document.getElementById('search-input');
         const clearBtn = document.getElementById('search-clear');
+        const deepBtn = document.getElementById('deep-search-btn');
         if (input && searchQuery !== '__similar__') input.value = searchQuery;
         if (clearBtn) clearBtn.classList.toggle('hidden', !searchQuery);
+        if (deepBtn) {
+            const inputQuery = ((input && input.value) || '').trim();
+            const activeTextSearch = hasActiveTextSearch(inputQuery || searchQuery);
+            deepBtn.disabled = !activeTextSearch;
+            deepBtn.classList.toggle('active', activeTextSearch && deepSearchRequested);
+        }
         updateSimilaritySortOption();
         syncSortControls();
         updateCompareSearchIndicator();
@@ -1978,6 +2119,7 @@ const PhotoArchive = (() => {
         appendFilterParams(params, state.filters);
         if (state.searchMode === 'search' && state.searchQuery) {
             params.set('q', state.searchQuery);
+            if (state.deepSearch) params.set('deep', '1');
         }
         return params.toString();
     }
@@ -1998,11 +2140,12 @@ const PhotoArchive = (() => {
             updateCompareProgress();
         }).catch(() => {});
 
-        loadFolderList();
-        loadFilterOptions();
+        setTimeout(() => {
+            loadFolderList();
+            scheduleFilterOptionsLoad();
+        }, 500);
         initStarHover();
-        pollAIStatus();
-        setInterval(pollAIStatus, 5000);
+        startAIStatusPolling(750);
 
         await rankingsPromise;
         restoreScrollPosition();
@@ -2096,11 +2239,17 @@ const PhotoArchive = (() => {
             input.addEventListener('input', (e) => {
                 clearTimeout(searchDebounce);
                 e.target.classList.add('searching');
+                const deepBtn = document.getElementById('deep-search-btn');
+                if (deepBtn) {
+                    deepBtn.disabled = !hasActiveTextSearch(e.target.value.trim());
+                    deepBtn.classList.remove('active');
+                }
                 searchDebounce = setTimeout(() => {
                     e.target.classList.remove('searching');
                     searchDebounce = null;
                     const wasSearching = hasActiveTextSearch();
                     searchQuery = e.target.value.trim();
+                    deepSearchRequested = false;
                     if (hasActiveTextSearch()) {
                         saveSearchState();
                         updateSimilaritySortOption();
@@ -2162,6 +2311,7 @@ const PhotoArchive = (() => {
     function clearSearch() {
         const wasSimilaritySort = sortField === 'similarity';
         searchQuery = '';
+        deepSearchRequested = false;
         clearTimeout(searchDebounce);
         searchDebounce = null;
         clearPersistedSearchState();
@@ -2180,6 +2330,32 @@ const PhotoArchive = (() => {
         if (sortToggles) sortToggles.style.opacity = '';
         updateSearchControls();
         reloadForFilters();
+    }
+
+    function runDeepSearch() {
+        const input = document.getElementById('search-input');
+        const query = ((input && input.value) || searchQuery || '').trim();
+        if (!query || query === '__similar__') {
+            if (input) input.focus();
+            return;
+        }
+        const wasSearching = hasActiveTextSearch();
+        clearTimeout(searchDebounce);
+        searchDebounce = null;
+        if (input) input.classList.remove('searching');
+        searchQuery = query;
+        deepSearchRequested = true;
+        saveSearchState();
+        updateSimilaritySortOption();
+        if (!wasSearching || sortField !== 'similarity') {
+            applySortState('similarity', true, { persist: false });
+        } else {
+            saveSearchSortState();
+        }
+        updateSearchControls();
+        resetLibraryResults({ clearBatch: true });
+        loadRankings(true);
+        updateDateScrubber();
     }
 
     function setRankingsSort(sort, { persist = true } = {}) {
@@ -2384,6 +2560,17 @@ const PhotoArchive = (() => {
             const data = (requestOffset === 0 ? takeWarmCache(`library:${url}`) : null) || await fetchWarmJson(url);
             if (!data) return 0;
             if (requestGeneration !== libraryRequestGeneration) return 0;
+            if (
+                requestOffset === 0 &&
+                data.deep_requested &&
+                !data.deep_search_cached &&
+                data.fallback_reason === 'deep_search_not_cached' &&
+                searchQuery &&
+                searchQuery !== lastDeepSearchNoticeQuery
+            ) {
+                lastDeepSearchNoticeQuery = searchQuery;
+                showToast('Deep Search queued. Showing quick results until the 8B cache is ready.');
+            }
             if (requestOffset === 0 && typeof data.total_images === 'number') {
                 const visible = Number(data.visible_images ?? data.total_images ?? 0);
                 const total = Number(data.total_images ?? data.total_kept ?? visible);
@@ -2438,9 +2625,11 @@ const PhotoArchive = (() => {
 
                 const confDot = conf ? `<div class="rank-confidence ${conf}"></div>` : '';
                 const infoLine = libraryCardInfoLine(img, rank, showRank);
+                const eagerThumb = requestOffset === 0 && i < 12;
+                const loadingAttrs = eagerThumb ? 'loading="eager" fetchpriority="high"' : 'loading="lazy"';
 
                 card.innerHTML = `
-                    <img src="${escapeHtml(img.thumb_url)}" alt="${escapeHtml(img.filename)}" loading="lazy" onload="this.classList.add('loaded'); this.parentElement.classList.remove('skeleton-cell')">
+                    <img src="${escapeHtml(img.thumb_url)}" alt="${escapeHtml(img.filename)}" ${loadingAttrs} onload="this.classList.add('loaded'); this.parentElement.classList.remove('skeleton-cell')">
                     <div class="select-check">✓</div>
                     ${confDot}
                     ${flagBadge(img.flag)}
@@ -3078,6 +3267,36 @@ const PhotoArchive = (() => {
         return request;
     }
 
+    function primeMediaStatuses(imageIds) {
+        const ids = [...new Set((imageIds || [])
+            .map((id) => Number(id))
+            .filter((id) => id > 0 && !mediaStatusCache.has(id) && !mediaStatusInflight.has(id)))]
+            .slice(0, 96);
+        if (!ids.length) return;
+        const request = fetch('/api/images/media-status', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids }),
+        })
+            .then((res) => (res.ok ? res.json() : null))
+            .then((data) => {
+                const now = Date.now();
+                for (const status of data?.statuses || []) {
+                    if (status?.id) mediaStatusCache.set(Number(status.id), { time: now, data: status });
+                }
+                return data;
+            })
+            .catch(() => null);
+        for (const id of ids) {
+            const perImageRequest = request
+                .then(() => mediaStatusCache.get(id)?.data || null)
+                .finally(() => {
+                    if (mediaStatusInflight.get(id) === perImageRequest) mediaStatusInflight.delete(id);
+                });
+            mediaStatusInflight.set(id, perImageRequest);
+        }
+    }
+
     function loupeTierUrl(tier, imageId, cachedOnly = false) {
         if (tier === 'full') {
             return `/api/full/${imageId}${cachedOnly ? '?cached=1' : ''}`;
@@ -3146,7 +3365,7 @@ const PhotoArchive = (() => {
         return true;
     }
 
-    async function refreshLoupeMediaStatus(img = loupeCurrentImage, token = loupeImageToken, { force = true } = {}) {
+    async function refreshLoupeMediaStatus(img = loupeCurrentImage, token = loupeImageToken, { force = false } = {}) {
         if (!img || !isCurrentLoupeImage(img, token)) return null;
         const status = await getMediaStatus(img.id, { force });
         applyLoupeMediaStatus(status, img, token);
@@ -3783,10 +4002,10 @@ const PhotoArchive = (() => {
     }
 
     function loadFolderList() {
-        fetch('/api/folders').then(r => r.json()).then(data => {
+        fetch('/api/folders?max_depth=0').then(r => r.json()).then(data => {
             const sel = document.getElementById('filter-folder');
             if (!sel || !data.folders) return;
-            const topFolders = data.folders.filter(f => f.depth <= 1);
+            const topFolders = data.folders;
             for (const f of topFolders) {
                 const opt = document.createElement('option');
                 opt.value = f.path;
@@ -3799,7 +4018,9 @@ const PhotoArchive = (() => {
     }
 
     function loadFilterOptions() {
-        fetch('/api/filter-options').then(r => r.json()).then(data => {
+        if (filterOptionsLoaded) return Promise.resolve();
+        if (filterOptionsPromise) return filterOptionsPromise;
+        filterOptionsPromise = fetch('/api/filter-options').then(r => r.json()).then(data => {
             function populateSelect(selectId, allLabel, items, valueKey, labelFn, currentValue) {
                 const sel = document.getElementById(selectId);
                 if (!sel) return;
@@ -3860,7 +4081,24 @@ const PhotoArchive = (() => {
                 filters.lens,
             );
             updateMetadataFilterButton();
-        }).catch(() => {});
+            filterOptionsLoaded = true;
+        }).catch(() => {}).finally(() => {
+            filterOptionsPromise = null;
+        });
+        return filterOptionsPromise;
+    }
+
+    function scheduleFilterOptionsLoad() {
+        if (activeMetadataFilterCount() > 0) {
+            loadFilterOptions();
+            return;
+        }
+        const load = () => loadFilterOptions();
+        if ('requestIdleCallback' in window) {
+            requestIdleCallback(load, { timeout: 8000 });
+        } else {
+            setTimeout(load, 5000);
+        }
     }
 
     function initStarHover() {
@@ -3914,6 +4152,7 @@ const PhotoArchive = (() => {
 
         // Clear grid and show similar images
         searchQuery = '__similar__';
+        deepSearchRequested = false;
         clearPersistedSearchState();
         const input = document.getElementById('search-input');
         if (input) input.value = `Similar to: ${img.filename}`;
@@ -4336,28 +4575,59 @@ const PhotoArchive = (() => {
     // ==================== SETTINGS ====================
 
     const SETTINGS_FIELDS = [
+        'embed_model_preset',
         'embed_model_id',
         'embed_model_revision',
         'embed_model_dir',
+        'embed_model_dim',
         'thumb_size_sm',
         'thumb_size_md',
         'thumb_size_lg',
         'thumb_quality',
         'memory_cache_gb',
+        'background_work_mode',
         'cache_profile',
         'ssd_cache_dir',
         'ssd_cache_gb',
         'pregenerate_on_idle',
         'embed_batch_size',
+        'defer_ai_on_startup',
+        'deep_search_terms',
+        'deep_search_schedule_enabled',
+        'deep_search_schedule_days',
+        'deep_search_schedule_start',
+        'deep_search_schedule_end',
+        'deep_search_schedule_timezone',
         'search_similarity_threshold',
         'show_loupe_cache_status',
     ];
     const THUMB_OUTPUT_FIELDS = ['thumb_size_sm', 'thumb_size_md', 'thumb_size_lg', 'thumb_quality'];
+    const DEEP_SEARCH_MAX_TERMS = 200;
+    const DEEP_SEARCH_MAX_TERM_LENGTH = 160;
+    const DEEP_SEARCH_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+    const BACKGROUND_WORK_MODES = ['browse', 'balanced', 'max'];
+    const BACKGROUND_WORK_MODE_LABELS = {
+        browse: 'Browse',
+        balanced: 'Light Background',
+        max: 'Max Work',
+    };
+    const DEEP_SEARCH_DAY_LABELS = {
+        mon: 'Mon',
+        tue: 'Tue',
+        wed: 'Wed',
+        thu: 'Thu',
+        fri: 'Fri',
+        sat: 'Sat',
+        sun: 'Sun',
+    };
     let settingsPoller = null;
+    const SETTINGS_META_POLL_MS = 30000;
     let settingsPageData = null;
     let savedThumbnailOutput = null;
     let catalogSources = [];
     let catalogBrowsePath = '';
+    let filterOptionsLoaded = false;
+    let filterOptionsPromise = null;
 
     function escapeHtml(value) {
         return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
@@ -4371,6 +4641,162 @@ const PhotoArchive = (() => {
 
     function jsString(value) {
         return JSON.stringify(String(value ?? '')).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
+    }
+
+    function normalizeDeepSearchTerms(value) {
+        const rawTerms = Array.isArray(value) ? value : String(value ?? '').split(/\r?\n/);
+        const terms = [];
+        const seen = new Set();
+        for (const item of rawTerms) {
+            let term = String(item ?? '').replace(/\s+/g, ' ').trim();
+            if (!term) continue;
+            if (term.length > DEEP_SEARCH_MAX_TERM_LENGTH) {
+                term = term.slice(0, DEEP_SEARCH_MAX_TERM_LENGTH).trim();
+            }
+            if (!term) continue;
+            const key = term.toLowerCase();
+            if (seen.has(key)) continue;
+            seen.add(key);
+            terms.push(term);
+            if (terms.length >= DEEP_SEARCH_MAX_TERMS) break;
+        }
+        return terms;
+    }
+
+    function formatDeepSearchTerms(value) {
+        return normalizeDeepSearchTerms(value).join('\n');
+    }
+
+    function renderDeepSearchTerms(value) {
+        const el = document.getElementById('deep-search-term-list');
+        if (!el) return;
+        const terms = normalizeDeepSearchTerms(value);
+        if (!terms.length) {
+            el.innerHTML = '<div class="catalog-empty">No deep searches queued.</div>';
+            return;
+        }
+        const countLabel = `${terms.length.toLocaleString()} ${terms.length === 1 ? 'search' : 'searches'} queued`;
+        el.innerHTML = `
+            <div class="deep-search-term-summary">${countLabel}</div>
+            <div class="deep-search-term-chips">
+                ${terms.map((term) => `<span class="deep-search-term">${escapeHtml(term)}</span>`).join('')}
+            </div>
+        `;
+    }
+
+    function normalizeDeepSearchDays(value) {
+        const rawDays = Array.isArray(value)
+            ? value
+            : String(value ?? '').replace(/,/g, ' ').split(/\s+/);
+        const aliases = {
+            monday: 'mon',
+            mon: 'mon',
+            tuesday: 'tue',
+            tue: 'tue',
+            tues: 'tue',
+            wednesday: 'wed',
+            wed: 'wed',
+            thursday: 'thu',
+            thu: 'thu',
+            thur: 'thu',
+            thurs: 'thu',
+            friday: 'fri',
+            fri: 'fri',
+            saturday: 'sat',
+            sat: 'sat',
+            sunday: 'sun',
+            sun: 'sun',
+        };
+        const selected = new Set();
+        for (const value of rawDays) {
+            const day = aliases[String(value ?? '').trim().toLowerCase()];
+            if (day) selected.add(day);
+        }
+        return DEEP_SEARCH_DAYS.filter((day) => selected.has(day));
+    }
+
+    function collectDeepSearchScheduleDays() {
+        return Array.from(document.querySelectorAll('[data-deep-search-day]:checked'))
+            .map((input) => input.dataset.deepSearchDay)
+            .filter((day) => DEEP_SEARCH_DAYS.includes(day));
+    }
+
+    function setDeepSearchScheduleDays(value) {
+        const selected = new Set(normalizeDeepSearchDays(value));
+        for (const input of document.querySelectorAll('[data-deep-search-day]')) {
+            input.checked = selected.has(input.dataset.deepSearchDay);
+        }
+    }
+
+    function formatDeepSearchTime(value) {
+        const [hourText, minuteText] = String(value || '').split(':');
+        const hour = Number(hourText);
+        const minute = Number(minuteText);
+        if (!Number.isFinite(hour) || !Number.isFinite(minute)) return value || '';
+        const period = hour >= 12 ? 'PM' : 'AM';
+        const displayHour = ((hour + 11) % 12) + 1;
+        return `${displayHour}:${String(minute).padStart(2, '0')} ${period}`;
+    }
+
+    function renderDeepSearchSchedule(settings = null) {
+        const summary = document.getElementById('deep-search-schedule-summary');
+        if (!summary) return;
+        const enabled = settings
+            ? Boolean(settings.deep_search_schedule_enabled)
+            : Boolean(document.getElementById('deep_search_schedule_enabled')?.checked);
+        const days = settings
+            ? normalizeDeepSearchDays(settings.deep_search_schedule_days)
+            : collectDeepSearchScheduleDays();
+        const start = settings?.deep_search_schedule_start || document.getElementById('deep_search_schedule_start')?.value || '07:00';
+        const end = settings?.deep_search_schedule_end || document.getElementById('deep_search_schedule_end')?.value || '16:00';
+        const timezone = settings?.deep_search_schedule_timezone || document.getElementById('deep_search_schedule_timezone')?.value || 'America/Chicago';
+        const timezoneLabel = timezone === 'America/Chicago' ? 'Central time' : timezone;
+        if (!enabled) {
+            summary.textContent = 'Scheduled deep search work is off.';
+        } else if (!days.length) {
+            summary.textContent = `Schedule is on, but no weekdays are selected.`;
+        } else {
+            summary.textContent = `Runs ${days.map((day) => DEEP_SEARCH_DAY_LABELS[day]).join(', ')}, ${formatDeepSearchTime(start)}-${formatDeepSearchTime(end)} ${timezoneLabel}.`;
+        }
+    }
+
+    function normalizeBackgroundWorkMode(value) {
+        const mode = String(value || '').trim().toLowerCase();
+        return BACKGROUND_WORK_MODES.includes(mode) ? mode : 'balanced';
+    }
+
+    function setBackgroundWorkMode(value) {
+        const mode = normalizeBackgroundWorkMode(value);
+        const hidden = document.getElementById('background_work_mode');
+        if (hidden) hidden.value = mode;
+        for (const option of document.querySelectorAll('[data-work-mode-option]')) {
+            option.classList.toggle('selected', option.dataset.workModeOption === mode);
+        }
+        const radio = document.querySelector(`input[name="background_work_mode_choice"][value="${mode}"]`);
+        if (radio) radio.checked = true;
+    }
+
+    function selectedBackgroundWorkMode() {
+        return normalizeBackgroundWorkMode(
+            document.querySelector('input[name="background_work_mode_choice"]:checked')?.value ||
+            document.getElementById('background_work_mode')?.value
+        );
+    }
+
+    function renderBackgroundWorkStatus(cacheStats, aiStatus) {
+        const governor = cacheStats?.governor || aiStatus?.governor || {};
+        const statusEl = document.getElementById('background-work-governor-status');
+        const heavyEl = document.getElementById('background-work-heavy-status');
+        if (statusEl) {
+            const workMode = normalizeBackgroundWorkMode(governor.work_mode || selectedBackgroundWorkMode());
+            const modeLabel = BACKGROUND_WORK_MODE_LABELS[workMode] || workMode;
+            const state = governor.pause ? 'paused' : (governor.mode || 'ready');
+            const reason = governor.reason ? `: ${governor.reason}` : '';
+            statusEl.textContent = `${modeLabel} · ${state}${reason}`;
+        }
+        if (heavyEl) {
+            heavyEl.textContent = governor.can_start_heavy_work ? 'yes' : 'no';
+        }
     }
 
     function setSettingsStatus(message, tone = '') {
@@ -4720,7 +5146,9 @@ const PhotoArchive = (() => {
 
         const cacheEl = document.getElementById('cache-stats-inline');
         const ramEl = document.getElementById('cache-ram-usage');
+        const systemRamEl = document.getElementById('system-ram-free');
         const ssdEl = document.getElementById('cache-ssd-usage');
+        const systemSsdEl = document.getElementById('system-ssd-free');
         const smEl = document.getElementById('cache-tier-sm');
         const mdEl = document.getElementById('cache-tier-md');
         const lgEl = document.getElementById('cache-tier-lg');
@@ -4741,9 +5169,28 @@ const PhotoArchive = (() => {
             });
             ramEl.textContent = parts.join('   ');
         }
+        const resources = cacheStatus.system_resources || {};
+        const systemMemory = resources.memory || {};
+        const systemDisk = resources.disk || {};
+        if (systemRamEl) {
+            const available = Number(systemMemory.available_bytes || 0);
+            const total = Number(systemMemory.total_bytes || 0);
+            const pct = Number(systemMemory.available_pct || 0);
+            systemRamEl.textContent = total > 0
+                ? `${formatBytes(available)} / ${formatBytes(total)} (${pct.toFixed(1)}% free)`
+                : 'Unknown';
+        }
         if (ssdEl) {
             const pct = Number(disk.utilization_pct || 0);
             ssdEl.textContent = `${formatBytes(disk.used_bytes)} / ${formatBytes(disk.limit_bytes)} (${pct.toFixed(1)}%)`;
+        }
+        if (systemSsdEl) {
+            const free = Number(systemDisk.free_bytes || 0);
+            const total = Number(systemDisk.total_bytes || 0);
+            const pct = Number(systemDisk.free_pct || 0);
+            systemSsdEl.textContent = total > 0
+                ? `${formatBytes(free)} / ${formatBytes(total)} (${pct.toFixed(1)}% free)`
+                : 'Unknown';
         }
         if (smEl) smEl.textContent = formatCacheTier('sm', tiers.sm);
         if (mdEl) mdEl.textContent = formatCacheTier('md', tiers.md);
@@ -4809,6 +5256,7 @@ const PhotoArchive = (() => {
     function renderSettingsMeta(data) {
         settingsPageData = data || settingsPageData;
         const pathEl = document.getElementById('settings-path');
+        renderEmbeddingModelPresets(data.embedding_model_presets || []);
         renderCacheSettingsStatus(data.cache_stats);
         if (pathEl && data.settings_path) {
             pathEl.textContent = data.settings_path;
@@ -4816,10 +5264,48 @@ const PhotoArchive = (() => {
         renderAutoTuningStatus(data.settings);
         renderModelStatus(data.model_status);
         renderAISettingsStatus(data.ai_status);
+        renderBackgroundWorkStatus(data.cache_stats, data.ai_status);
         renderWorkBanner(data.ai_status, data.cache_stats);
         renderCacheTierGuide(data.cache_stats, data.settings);
         if (data.catalog) renderCatalogSources(data.catalog);
         updateCacheProfileHint();
+    }
+
+    function renderEmbeddingModelPresets(presets) {
+        const select = document.getElementById('embed_model_preset');
+        if (!select || select.dataset.populated === '1') return;
+        select.innerHTML = '';
+        for (const preset of presets) {
+            const option = document.createElement('option');
+            option.value = preset.key;
+            option.textContent = preset.label;
+            option.dataset.modelId = preset.model_id;
+            option.dataset.revision = preset.revision;
+            option.dataset.dimension = preset.dimension;
+            option.dataset.modelDir = preset.model_dir;
+            select.appendChild(option);
+        }
+        const custom = document.createElement('option');
+        custom.value = 'custom';
+        custom.textContent = 'Custom model';
+        select.appendChild(custom);
+        select.dataset.populated = '1';
+    }
+
+    function applySelectedEmbeddingPreset() {
+        const select = document.getElementById('embed_model_preset');
+        const option = select?.selectedOptions?.[0];
+        if (!select || !option || select.value === 'custom') return;
+        const fields = {
+            embed_model_id: option.dataset.modelId,
+            embed_model_revision: option.dataset.revision,
+            embed_model_dir: option.dataset.modelDir,
+            embed_model_dim: option.dataset.dimension,
+        };
+        for (const [id, value] of Object.entries(fields)) {
+            const input = document.getElementById(id);
+            if (input && value !== undefined) input.value = value;
+        }
     }
 
     function renderWorkBanner(aiStatus, cacheStatus) {
@@ -4983,8 +5469,10 @@ const PhotoArchive = (() => {
             titleEl.innerHTML = headline + (building ? ' <span class="cache-building-dot"></span>' : '');
         }
         if (subtitleEl) {
+            const freeBytes = Number(cs.system_resources?.disk?.free_bytes || 0);
+            const freeText = freeBytes > 0 ? ` · ${formatBytes(freeBytes)} free on disk` : '';
             subtitleEl.textContent =
-                `${profileLabel} priority · ${formatBytes(disk.used_bytes)} used of ${formatBytes(disk.limit_bytes)} on SSD`;
+                `${profileLabel} priority · ${formatBytes(disk.used_bytes)} used of ${formatBytes(disk.limit_bytes)} on SSD${freeText}`;
         }
 
         const card = (name, title) => {
@@ -5048,6 +5536,13 @@ const PhotoArchive = (() => {
             const originalsBytes = needs('full');
             const ssdBudget = Number(disk.limit_bytes || 0);
             const memoryBudget = Number(cs.memory?.limit_bytes || 0);
+            const resources = cs.system_resources || {};
+            const systemDisk = resources.disk || {};
+            const systemMemory = resources.memory || {};
+            const machineFreeBytes = Number(systemDisk.free_bytes || 0);
+            const machineFreePct = Number(systemDisk.free_pct || 0);
+            const ramAvailableBytes = Number(systemMemory.available_bytes || 0);
+            const ramAvailablePct = Number(systemMemory.available_pct || 0);
 
             // Budget bar segments (proportional to actual usage within the budget)
             const seg = (name) => ssdBudget > 0 ? Math.max(0, Math.min(100, used(name) / ssdBudget * 100)) : 0;
@@ -5060,6 +5555,9 @@ const PhotoArchive = (() => {
                 : memoryBudget >= 1 * 1024 * 1024 * 1024
                     ? `${formatBytes(memoryBudget)} RAM — solid for browsing.`
                     : `${formatBytes(memoryBudget)} RAM — conservative; previews cycle out faster.`;
+            const machineNote = machineFreeBytes > 0
+                ? `${formatBytes(machineFreeBytes)} SSD free on the cache volume (${machineFreePct.toFixed(1)}%). ${formatBytes(ramAvailableBytes)} RAM currently available (${ramAvailablePct.toFixed(1)}%).`
+                : `${formatBytes(ramAvailableBytes)} RAM currently available (${ramAvailablePct.toFixed(1)}%).`;
 
             adviceEl.innerHTML = `
                 <div class="cache-budget-bar">
@@ -5090,6 +5588,7 @@ const PhotoArchive = (() => {
                     </div>
                 </div>
                 <div class="cache-ram-note">${ramNote}</div>
+                <div class="cache-ram-note">${machineNote}</div>
             `;
         }
     }
@@ -5140,17 +5639,23 @@ const PhotoArchive = (() => {
         if (!statusEl || !messageEl || !buttonEl || !modelStatus) return;
 
         const install = modelStatus.install || {};
-        if (install.running) {
+        const installApplies = Boolean(install.model_dir && modelStatus.model_dir && install.model_dir === modelStatus.model_dir);
+        if (install.running && installApplies) {
             statusEl.textContent = 'Downloading';
             messageEl.textContent = install.message || `Downloading ${modelStatus.model_id}…`;
             buttonEl.disabled = true;
             buttonEl.textContent = 'Installing…';
+        } else if (install.running) {
+            statusEl.textContent = 'Installer busy';
+            messageEl.textContent = `${install.model_id || 'Another model'} is installing. The 2B install can start after it finishes.`;
+            buttonEl.disabled = true;
+            buttonEl.textContent = 'Installer Busy';
         } else if (modelStatus.installed) {
             statusEl.textContent = 'Installed';
             messageEl.textContent = `${modelStatus.model_id} is available locally at ${modelStatus.model_dir}`;
             buttonEl.disabled = false;
             buttonEl.textContent = 'Reinstall Model';
-        } else if (install.status === 'error') {
+        } else if (install.status === 'error' && installApplies) {
             statusEl.textContent = 'Error';
             messageEl.textContent = install.message || 'Model install failed.';
             buttonEl.disabled = false;
@@ -5179,19 +5684,147 @@ const PhotoArchive = (() => {
         return `~${totalSeconds}s`;
     }
 
+    function badgeStateForIndex(index) {
+        if (index?.installing) return { text: 'Installing', cls: 'indexing' };
+        if (!index?.installed) return { text: 'Missing', cls: 'missing' };
+        const remaining = Number(index.remaining || 0);
+        if (remaining <= 0 && Number(index.total_images || 0) > 0) return { text: 'Ready', cls: 'ready' };
+        const state = String(index.worker_state || '').replace(/_/g, ' ');
+        if (state === 'paused' || state === 'scheduled') return { text: state[0].toUpperCase() + state.slice(1), cls: state };
+        if (state === 'error') return { text: 'Error', cls: 'error' };
+        return { text: 'Indexing', cls: 'indexing' };
+    }
+
+    function renderEmbeddingIndex(role, index) {
+        const modelEl = document.getElementById(`${role}-index-model`);
+        const badgeEl = document.getElementById(`${role}-index-badge`);
+        const meterEl = document.getElementById(`${role}-index-meter`);
+        const progressEl = document.getElementById(`${role}-index-progress`);
+        const statusEl = document.getElementById(`${role}-index-status`);
+        if (!modelEl && !badgeEl && !meterEl && !progressEl && !statusEl) return;
+
+        const total = Number(index?.total_images || 0);
+        const embedded = Number(index?.embedded || 0);
+        const remaining = Number(index?.remaining || Math.max(total - embedded, 0));
+        const pct = total > 0 ? Math.max(0, Math.min(100, Number(index?.progress_pct || (embedded / total) * 100))) : 0;
+        const dimension = Number(index?.dimension || 0);
+        if (modelEl) {
+            modelEl.textContent = index?.model_id
+                ? `${index.model_id}${dimension ? ` · ${dimension.toLocaleString()}d` : ''}`
+                : '—';
+        }
+        if (badgeEl) {
+            const badge = badgeStateForIndex(index || {});
+            badgeEl.textContent = badge.text;
+            badgeEl.className = `embedding-index-badge ${badge.cls}`;
+        }
+        if (meterEl) meterEl.style.width = `${pct}%`;
+        if (progressEl) {
+            progressEl.textContent =
+                `${embedded.toLocaleString()} / ${total.toLocaleString()} images · ${pct.toFixed(1)}%`;
+        }
+        if (statusEl) {
+            const message = index?.install_message || index?.worker_message || '';
+            const queryText = role === 'deep'
+                ? ` · ${Number(index?.embedded_queries || 0).toLocaleString()} cached queries, ${Number(index?.pending_queries || 0).toLocaleString()} pending`
+                : '';
+            statusEl.textContent = `${remaining.toLocaleString()} images remaining${queryText}${message ? ` · ${message}` : ''}`;
+        }
+    }
+
+    function renderDeepSearchQueryList(queries) {
+        const el = document.getElementById('deep-search-query-list');
+        if (!el) return;
+        const items = Array.isArray(queries) ? queries.slice(0, 60) : [];
+        if (!items.length) {
+            el.innerHTML = '<span class="settings-help-text">No deep-search terms queued yet.</span>';
+            return;
+        }
+        el.innerHTML = items.map((item) => {
+            const cached = Boolean(item.cached);
+            const cls = cached ? 'cached' : 'pending';
+            const state = cached ? 'ready' : 'pending';
+            return `
+                <span class="deep-search-query ${cls}">
+                    <span>${escapeHtml(item.query || '')}</span>
+                    <span class="deep-search-query-state">${state}</span>
+                </span>
+            `;
+        }).join('');
+    }
+
     function renderAISettingsStatus(aiStatus) {
-        // Embedding progress display moved to the work banner.
-        // This function now only exists for any remaining per-element updates.
         if (!aiStatus) return;
+        const indexes = aiStatus.embedding_indexes || {};
+        renderEmbeddingIndex('fast', indexes.fast || {
+            model_id: aiStatus.model_id,
+            dimension: aiStatus.model_dimension,
+            installed: aiStatus.model_installed,
+            embedded: aiStatus.embedded,
+            total_images: aiStatus.total_images,
+            remaining: aiStatus.remaining,
+            progress_pct: aiStatus.progress_pct,
+            worker_state: aiStatus.worker_state,
+            worker_message: aiStatus.worker_message,
+        });
+        renderEmbeddingIndex('deep', indexes.deep || {});
+        const deep = aiStatus.deep_search || {};
+        const deepIndex = indexes.deep || {};
+        renderDeepSearchQueryList(deepIndex.queries || []);
+        const workerEl = document.getElementById('deep-search-worker-status');
+        const imageEl = document.getElementById('deep-search-image-status');
+        const queryEl = document.getElementById('deep-search-query-status');
+        if (workerEl) {
+            const state = deep.state ? String(deep.state).replace(/_/g, ' ') : 'waiting';
+            workerEl.textContent = deep.message ? `${state}: ${deep.message}` : state;
+        }
+        if (imageEl) {
+            const embedded = Number(deepIndex.embedded ?? deep.embedded_images ?? 0).toLocaleString();
+            const total = Number(deepIndex.total_images ?? deep.total_images ?? 0).toLocaleString();
+            const pending = Number(deepIndex.remaining ?? deep.pending_images ?? 0).toLocaleString();
+            imageEl.textContent = `${embedded} / ${total} indexed, ${pending} pending`;
+        }
+        if (queryEl) {
+            const embedded = Number(deepIndex.embedded_queries ?? deep.embedded_queries ?? 0).toLocaleString();
+            const pending = Number(deepIndex.pending_queries ?? deep.pending_queries ?? 0).toLocaleString();
+            queryEl.textContent = `${embedded} ready, ${pending} pending`;
+        }
+    }
+
+    function withEffectiveFastModelSettings(settings) {
+        const fast = settingsPageData?.ai_status?.embedding_indexes?.fast;
+        if (!fast?.model_id) return settings || {};
+        return {
+            ...(settings || {}),
+            embed_model_preset: 'qwen3-vl-embedding-2b',
+            embed_model_id: fast.model_id,
+            embed_model_revision: 'main',
+            embed_model_dir: fast.model_dir,
+            embed_model_dim: fast.dimension,
+        };
     }
 
     function populateSettingsForm(settings) {
+        settings = withEffectiveFastModelSettings(settings);
+        renderEmbeddingModelPresets(settingsPageData?.embedding_model_presets || []);
         for (const field of SETTINGS_FIELDS) {
+            if (field === 'deep_search_schedule_days') {
+                setDeepSearchScheduleDays(settings[field]);
+                continue;
+            }
+            if (field === 'background_work_mode') {
+                setBackgroundWorkMode(settings[field]);
+                continue;
+            }
             const input = document.getElementById(field);
             if (!input || settings[field] === undefined || settings[field] === null) continue;
-            if (input.type === 'checkbox') input.checked = Boolean(settings[field]);
+            if (field === 'deep_search_terms') {
+                input.value = formatDeepSearchTerms(settings[field]);
+                renderDeepSearchTerms(settings[field]);
+            } else if (input.type === 'checkbox') input.checked = Boolean(settings[field]);
             else input.value = settings[field];
         }
+        renderDeepSearchSchedule(settings);
         setThumbnailCachePolicy('keep');
         updateThumbnailChangeNotice();
     }
@@ -5253,19 +5886,31 @@ const PhotoArchive = (() => {
     function collectSettingsForm() {
         const payload = {};
         for (const field of SETTINGS_FIELDS) {
+            if (field === 'deep_search_schedule_days') {
+                payload[field] = collectDeepSearchScheduleDays();
+                continue;
+            }
+            if (field === 'background_work_mode') {
+                payload[field] = selectedBackgroundWorkMode();
+                continue;
+            }
             const input = document.getElementById(field);
             if (!input) continue;
-            if (input.type === 'checkbox') payload[field] = input.checked;
+            if (field === 'deep_search_terms') payload[field] = normalizeDeepSearchTerms(input.value);
+            else if (input.type === 'checkbox') payload[field] = input.checked;
             else if (input.type === 'number') payload[field] = Number(input.value || '0');
             else payload[field] = input.value;
         }
         payload.thumbnail_cache_policy = selectedThumbnailCachePolicy();
+        Object.assign(payload, withEffectiveFastModelSettings(payload));
         return payload;
     }
 
     async function loadSettingsPage(showStatus = true) {
         const res = await fetch('/api/settings');
         const data = await res.json();
+        settingsPageData = data;
+        renderEmbeddingModelPresets(data.embedding_model_presets || []);
         populateSettingsForm(data.settings || {});
         rememberThumbnailOutput(data.settings || {});
         updateThumbnailChangeNotice();
@@ -5277,13 +5922,27 @@ const PhotoArchive = (() => {
     }
 
     async function refreshSettingsMeta() {
-        const res = await fetch('/api/settings');
-        const data = await res.json();
+        if (document.hidden) return settingsPageData || {};
+        if (!settingsPageData) return loadSettingsPage(false);
+        const [cacheRes, aiRes] = await Promise.all([
+            fetch('/api/cache/status'),
+            fetch('/api/ai/status'),
+        ]);
+        const [cacheStats, aiStatus] = await Promise.all([
+            cacheRes.json(),
+            aiRes.json(),
+        ]);
+        const data = {
+            ...settingsPageData,
+            cache_stats: cacheStats,
+            ai_status: aiStatus,
+        };
         renderSettingsMeta(data);
         return data;
     }
 
     async function initSettings() {
+        initVisibilityRefresh();
         initBottomBarMeasurement();
         const form = document.getElementById('settings-form');
         if (form) {
@@ -5293,20 +5952,31 @@ const PhotoArchive = (() => {
             });
         }
         document.getElementById('cache_profile')?.addEventListener('change', updateCacheProfileHint);
+        for (const input of document.querySelectorAll('input[name="background_work_mode_choice"]')) {
+            input.addEventListener('change', () => setBackgroundWorkMode(input.value));
+        }
+        document.getElementById('embed_model_preset')?.addEventListener('change', applySelectedEmbeddingPreset);
+        document.getElementById('deep_search_terms')?.addEventListener('input', (event) => {
+            renderDeepSearchTerms(event.target.value);
+        });
+        document.getElementById('deep_search_schedule_enabled')?.addEventListener('change', () => renderDeepSearchSchedule());
+        document.getElementById('deep_search_schedule_start')?.addEventListener('input', () => renderDeepSearchSchedule());
+        document.getElementById('deep_search_schedule_end')?.addEventListener('input', () => renderDeepSearchSchedule());
+        document.getElementById('deep_search_schedule_timezone')?.addEventListener('change', () => renderDeepSearchSchedule());
+        for (const input of document.querySelectorAll('[data-deep-search-day]')) {
+            input.addEventListener('change', () => renderDeepSearchSchedule());
+        }
         for (const field of THUMB_OUTPUT_FIELDS) {
             document.getElementById(field)?.addEventListener('input', updateThumbnailChangeNotice);
         }
 
         try {
-            await loadSettingsPage(false);
-            await loadCatalogSources();
-            // Load scan folder and stats
-            const statsRes = await fetch('/api/stats');
-            const stats = await statsRes.json();
+            const settingsData = await loadSettingsPage(false);
+            renderCatalogSources(settingsData.catalog || {});
+            const stats = settingsData.catalog?.stats || {};
             const folderInput = document.getElementById('scan-folder');
             const totalEl = document.getElementById('scan-total-images');
             if (totalEl) totalEl.textContent = Number(stats.active_images ?? stats.total_images ?? 0).toLocaleString();
-            // Infer folder from DB
             try {
                 const folderRes = await fetch('/api/scan/folder');
                 const folderData = await folderRes.json();
@@ -5315,7 +5985,7 @@ const PhotoArchive = (() => {
 
             setSettingsStatus('Ready. Save to apply changes immediately.', 'muted');
             if (settingsPoller) clearInterval(settingsPoller);
-            settingsPoller = setInterval(() => refreshSettingsMeta().catch(() => {}), 5000);
+            settingsPoller = setInterval(() => refreshSettingsMeta().catch(() => {}), SETTINGS_META_POLL_MS);
         } catch (err) {
             setSettingsStatus(`Could not load settings: ${err.message}`, 'error');
         }
@@ -5455,8 +6125,10 @@ const PhotoArchive = (() => {
         }
     }
 
-    async function installAIModel() {
-        setSettingsStatus('Saving settings and starting model install…', 'muted');
+    async function installAIModel(role = 'fast') {
+        const installRole = role === 'deep' ? 'deep' : 'fast';
+        const label = installRole === 'deep' ? '8B deep model' : '2B daily model';
+        setSettingsStatus(`Saving settings and starting ${label} install…`, 'muted');
         try {
             const saveRes = await fetch('/api/settings', {
                 method: 'POST',
@@ -5472,13 +6144,14 @@ const PhotoArchive = (() => {
             updateThumbnailChangeNotice();
             renderSettingsMeta(saveData);
 
-            const installRes = await fetch('/api/ai/model/install', { method: 'POST' });
+            const installRes = await fetch(`/api/ai/model/install?role=${encodeURIComponent(installRole)}`, { method: 'POST' });
             const installData = await installRes.json();
             if (!installRes.ok || !installData.ok) {
                 throw new Error(installData.error || 'Install could not be started');
             }
-            renderModelStatus(installData.model_status);
-            setSettingsStatus('Model install started. The AI worker will pick it up automatically when the download finishes.', 'success');
+            if (installRole === 'fast') renderModelStatus(installData.model_status);
+            renderAISettingsStatus(installData.ai_status);
+            setSettingsStatus(`${label} install started. The worker will pick it up automatically when the download finishes.`, 'success');
         } catch (err) {
             setSettingsStatus(`Model install failed to start: ${err.message}`, 'error');
             showToast('Model install failed to start');
@@ -5570,6 +6243,7 @@ const PhotoArchive = (() => {
         hideConfirmModal,
         scrollToTop,
         clearSearch,
+        runDeepSearch,
         setCompareMode,
         setRankingsSort,
         setSortField,

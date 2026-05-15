@@ -4,6 +4,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(__file__))
 import helpers  # noqa: E402
+import resource_governor  # noqa: E402
 
 
 class ImageHelperTests(unittest.TestCase):
@@ -126,6 +127,98 @@ class ImageHelperTests(unittest.TestCase):
 
         self.assertEqual([img["id"] for img in filtered], [1, 2])
         self.assertIsNot(filtered[0], images[0])
+
+
+class ResourceGovernorTests(unittest.TestCase):
+    def setUp(self):
+        self.old_read_load_1m = resource_governor._read_load_1m
+        self.old_read_meminfo = resource_governor._read_meminfo
+        self.old_cpu_count = resource_governor.os.cpu_count
+
+    def tearDown(self):
+        resource_governor._read_load_1m = self.old_read_load_1m
+        resource_governor._read_meminfo = self.old_read_meminfo
+        resource_governor.os.cpu_count = self.old_cpu_count
+
+    def test_system_busy_uses_small_thumbnail_batches(self):
+        resource_governor.os.cpu_count = lambda: 8
+        resource_governor._read_load_1m = lambda: 8.2
+        resource_governor._read_meminfo = lambda: {
+            "MemAvailable": 10 * 1024 ** 3,
+            "SwapTotal": 10 * 1024 ** 3,
+            "SwapFree": 10 * 1024 ** 3,
+        }
+
+        decision = resource_governor.get_background_decision(idle_seconds=120, work_mode="balanced")
+
+        self.assertEqual(decision.reason, "system busy")
+        self.assertEqual(decision.work_mode, "balanced")
+        self.assertEqual(decision.thumbnail_batch_size, 4)
+        self.assertGreaterEqual(decision.thumbnail_pause_seconds, 1.0)
+
+    def test_recent_user_activity_keeps_background_batches_small(self):
+        resource_governor.os.cpu_count = lambda: 8
+        resource_governor._read_load_1m = lambda: 1.0
+        resource_governor._read_meminfo = lambda: {
+            "MemAvailable": 10 * 1024 ** 3,
+            "SwapTotal": 10 * 1024 ** 3,
+            "SwapFree": 10 * 1024 ** 3,
+        }
+
+        decision = resource_governor.get_background_decision(idle_seconds=30, work_mode="balanced")
+
+        self.assertEqual(decision.reason, "recent user activity")
+        self.assertTrue(decision.pause)
+        self.assertEqual(decision.thumbnail_batch_size, 0)
+        self.assertGreaterEqual(decision.thumbnail_pause_seconds, 5.0)
+
+    def test_healthy_system_uses_bounded_thumbnail_batches(self):
+        resource_governor.os.cpu_count = lambda: 8
+        resource_governor._read_load_1m = lambda: 1.0
+        resource_governor._read_meminfo = lambda: {
+            "MemAvailable": 10 * 1024 ** 3,
+            "SwapTotal": 10 * 1024 ** 3,
+            "SwapFree": 10 * 1024 ** 3,
+        }
+
+        decision = resource_governor.get_background_decision(idle_seconds=120, work_mode="balanced")
+
+        self.assertEqual(decision.reason, "system healthy")
+        self.assertEqual(decision.thumbnail_batch_size, 8)
+        self.assertFalse(decision.pause)
+
+    def test_browse_mode_pauses_background_compute(self):
+        resource_governor.os.cpu_count = lambda: 8
+        resource_governor._read_load_1m = lambda: 1.0
+        resource_governor._read_meminfo = lambda: {
+            "MemAvailable": 10 * 1024 ** 3,
+            "SwapTotal": 10 * 1024 ** 3,
+            "SwapFree": 10 * 1024 ** 3,
+        }
+
+        decision = resource_governor.get_background_decision(idle_seconds=999, work_mode="browse")
+
+        self.assertEqual(decision.reason, "browse mode")
+        self.assertTrue(decision.pause)
+        self.assertFalse(decision.can_start_heavy_work)
+        self.assertEqual(decision.thumbnail_batch_size, 0)
+
+    def test_max_mode_uses_larger_batches_when_healthy(self):
+        resource_governor.os.cpu_count = lambda: 8
+        resource_governor._read_load_1m = lambda: 1.0
+        resource_governor._read_meminfo = lambda: {
+            "MemAvailable": 10 * 1024 ** 3,
+            "SwapTotal": 10 * 1024 ** 3,
+            "SwapFree": 10 * 1024 ** 3,
+        }
+
+        decision = resource_governor.get_background_decision(idle_seconds=20, work_mode="max")
+
+        self.assertEqual(decision.work_mode, "max")
+        self.assertEqual(decision.reason, "system healthy")
+        self.assertFalse(decision.pause)
+        self.assertTrue(decision.can_start_heavy_work)
+        self.assertGreater(decision.thumbnail_batch_size, 8)
 
 
 if __name__ == "__main__":

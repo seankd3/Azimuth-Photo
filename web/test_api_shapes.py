@@ -52,6 +52,7 @@ class ApiShapeTests(unittest.TestCase):
         self.old_get_matrix = embed_cache.get_matrix
         self.old_get_index = embed_cache.get_index
         self.old_get_vector = embed_cache.get_vector
+        self.old_ensure_model_loaded_for_search = embedding_worker.ensure_model_loaded_for_search
 
         db.DB_PATH = os.path.join(self.tempdir.name, "api-shapes.db")
         app_module.settings.SETTINGS_PATH = os.path.join(self.tempdir.name, "settings.local.json")
@@ -59,14 +60,20 @@ class ApiShapeTests(unittest.TestCase):
         app_module.thumbnails.SSD_CACHE_DIR = os.path.join(self.tempdir.name, "cache")
         db.invalidate_stats_cache()
         db.invalidate_cached_image_ids_cache()
+        db.clear_filter_options_cache()
         asyncio.run(db.init_db())
-        app_module._pairing_cache.update({"data": None, "by_id": None, "valid": False})
+        app_module.settings.save_settings({"deep_search_schedule_enabled": False})
+        app_module._pairing_cache.update({"data": None, "valid": False})
         app_module._matchups_cache.update({"data": None, "valid": False})
 
         async def noop_prefetch(*_args, **_kwargs):
             return 0
 
+        async def no_model_load():
+            return False
+
         app_module.thumbnails.prefetch_images = noop_prefetch
+        embedding_worker.ensure_model_loaded_for_search = no_model_load
         self.source_id = self._create_source()
         self.ids = self._create_images()
         self.client = TestClient(app_module.app)
@@ -75,6 +82,7 @@ class ApiShapeTests(unittest.TestCase):
         self.client.close()
         app_module.thumbnails.prefetch_images = self.old_prefetch_images
         embedding_worker.encode_text = self.old_encode_text
+        embedding_worker.ensure_model_loaded_for_search = self.old_ensure_model_loaded_for_search
         embed_cache.get_matrix = self.old_get_matrix
         embed_cache.get_index = self.old_get_index
         embed_cache.get_vector = self.old_get_vector
@@ -84,7 +92,8 @@ class ApiShapeTests(unittest.TestCase):
         db.DB_PATH = self.old_db_path
         db.invalidate_stats_cache()
         db.invalidate_cached_image_ids_cache()
-        app_module._pairing_cache.update({"data": None, "by_id": None, "valid": False})
+        db.clear_filter_options_cache()
+        app_module._pairing_cache.update({"data": None, "valid": False})
         app_module._matchups_cache.update({"data": None, "valid": False})
         self.tempdir.cleanup()
 
@@ -189,7 +198,8 @@ class ApiShapeTests(unittest.TestCase):
                 None,
             ),
         ]
-        with sqlite3.connect(db.DB_PATH) as conn:
+        conn = sqlite3.connect(db.DB_PATH)
+        try:
             ids = []
             for row in rows:
                 cursor = conn.execute(
@@ -219,7 +229,18 @@ class ApiShapeTests(unittest.TestCase):
                             now,
                         ),
                     )
+            conn.execute(
+                "UPDATE catalog_sources SET image_count = ("
+                "  SELECT COUNT(*) FROM images WHERE images.source_id = catalog_sources.id"
+                "), active_image_count = CASE WHEN included = 1 AND online = 1 THEN ("
+                "  SELECT COUNT(*) FROM images "
+                "  WHERE images.source_id = catalog_sources.id AND images.missing_at IS NULL"
+                ") ELSE 0 END WHERE id = ?",
+                (self.source_id,),
+            )
             conn.commit()
+        finally:
+            conn.close()
         db.invalidate_stats_cache()
         db.invalidate_cached_image_ids_cache()
         return ids
@@ -325,6 +346,19 @@ class ApiShapeTests(unittest.TestCase):
         for pair in data["pairs"]:
             self.assertCardShape(pair["left"], thumb_size="md")
             self.assertCardShape(pair["right"], thumb_size="md")
+
+    def test_settings_catalog_includes_counts(self):
+        response = self.client.get("/api/settings")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        self.assertEqual(len(data["catalog"]["sources"]), 1)
+        self.assertEqual(data["catalog"]["stats"]["total_catalog_images"], 4)
+        self.assertEqual(data["catalog"]["stats"]["active_images"], 4)
+        self.assertEqual(data["catalog"]["stats"]["total_images"], 4)
+        resources = data["cache_stats"]["system_resources"]
+        self.assertIn("free_bytes", resources["disk"])
+        self.assertIn("available_bytes", resources["memory"])
 
 
 if __name__ == "__main__":

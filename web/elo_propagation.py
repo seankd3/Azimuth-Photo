@@ -15,6 +15,7 @@ import numpy as np
 
 import db
 import embed_cache
+import settings
 
 log = logging.getLogger("elo_propagation")
 
@@ -28,6 +29,55 @@ SIMILARITY_THRESHOLD = 0.70   # minimum cosine similarity to propagate
 MAX_NEIGHBORS = 100           # long tail — cubic scaling makes weak matches near-zero anyway
 PROPAGATION_DECAY = 0.3       # scale factor (0.3 = propagated change is 30% of direct)
 MAX_DIRECT_COMPARISONS = 50   # allow propagation to well-compared images (cubic scaling keeps it safe)
+
+
+def invalidate_prediction_cache():
+    global _prediction_cache_key, _prediction_cache_counts
+    _prediction_cache_key = None
+    _prediction_cache_counts = None
+
+
+def compare_embedding_model_key() -> str:
+    """Return the embedding surface Compare uses for vector propagation."""
+    return settings.deep_search_embedding_config()["model_key"]
+
+
+async def _get_compare_matrix(required_ids=()):
+    """
+    Prefer the smarter 8B embedding surface for Compare vector math.
+
+    If the deep index is still being backfilled and lacks the current images,
+    fall back to the active fast index so direct comparison workflows keep
+    producing propagation instead of going inert.
+    """
+    preferred_key = compare_embedding_model_key()
+    try:
+        image_ids, matrix = await embed_cache.get_matrix(preferred_key)
+        id_to_idx = embed_cache.get_index(preferred_key)
+    except Exception as exc:
+        log.warning("Compare deep embedding matrix unavailable: %s", exc)
+        image_ids, matrix, id_to_idx = None, None, {}
+    required = [int(image_id) for image_id in required_ids]
+    if (
+        image_ids is not None
+        and matrix is not None
+        and all(image_id in id_to_idx for image_id in required)
+    ):
+        return preferred_key, image_ids, matrix, id_to_idx
+
+    if image_ids is not None and matrix is not None:
+        missing_count = sum(1 for image_id in required if image_id not in id_to_idx)
+        if missing_count:
+            log.debug(
+                "Compare deep embedding matrix missing %s required images; falling back to active index",
+                missing_count,
+            )
+
+    fallback_key = db.active_embedding_model_key()
+    image_ids, matrix = await embed_cache.get_matrix()
+    if image_ids is None or matrix is None:
+        return fallback_key, None, None, {}
+    return fallback_key, image_ids, matrix, embed_cache.get_index()
 
 
 def _nonlinear_weight(similarity: float) -> float:
@@ -155,15 +205,14 @@ async def predict_propagation(grid_ids: list[int]) -> dict[int, int]:
     """Precompute how many images would be affected if each grid image were the winner.
     Returns {image_id: predicted_count} for each image in grid_ids."""
     global _prediction_cache_key, _prediction_cache_counts
-    cache_key = tuple(grid_ids)
-    if _prediction_cache_key == cache_key and _prediction_cache_counts is not None:
-        return dict(_prediction_cache_counts)
 
     try:
-        image_ids, matrix = await embed_cache.get_matrix()
+        model_key, image_ids, matrix, id_to_idx = await _get_compare_matrix(grid_ids)
         if image_ids is None:
             return {gid: 0 for gid in grid_ids}
-        id_to_idx = embed_cache.get_index()
+        cache_key = (model_key, len(image_ids), tuple(grid_ids))
+        if _prediction_cache_key == cache_key and _prediction_cache_counts is not None:
+            return dict(_prediction_cache_counts)
 
         grid_set = set(grid_ids)
         # Precompute neighbors for every grid image
@@ -219,10 +268,9 @@ async def propagate_comparison(winner_id: int, loser_id: int, k: float, action_i
     Called as a fire-and-forget background task.
     """
     try:
-        image_ids, matrix = await embed_cache.get_matrix()
+        _, image_ids, matrix, id_to_idx = await _get_compare_matrix((winner_id, loser_id))
         if image_ids is None:
             return  # no embeddings available yet
-        id_to_idx = embed_cache.get_index()
 
         # Find similar images for winner and loser
         winner_neighbors = _find_similar(winner_id, image_ids, matrix, id_to_idx, SIMILARITY_THRESHOLD, MAX_NEIGHBORS)
@@ -264,7 +312,7 @@ async def propagate_comparison(winner_id: int, loser_id: int, k: float, action_i
             )
             if updated:
                 await conn.commit()
-                db.invalidate_stats_cache()
+                db.invalidate_rating_stats_cache()
                 last_propagation_count = updated
                 log.debug(f"Propagated Elo to {updated} neighbors "
                          f"(winner={winner_id}, loser={loser_id})")
@@ -285,10 +333,9 @@ async def propagate_mosaic(winner_id: int, loser_ids: list[int], k: float, actio
     every image on the grid.
     """
     try:
-        image_ids, matrix = await embed_cache.get_matrix()
+        _, image_ids, matrix, id_to_idx = await _get_compare_matrix((winner_id, *loser_ids))
         if image_ids is None:
             return
-        id_to_idx = embed_cache.get_index()
 
         involved = {winner_id} | set(loser_ids)
 
@@ -343,7 +390,7 @@ async def propagate_mosaic(winner_id: int, loser_ids: list[int], k: float, actio
             )
             if updated:
                 await conn.commit()
-                db.invalidate_stats_cache()
+                db.invalidate_rating_stats_cache()
                 last_propagation_count = updated
                 log.debug(f"Propagated mosaic to {updated} neighbors "
                          f"(winner={winner_id}, {len(loser_ids)} losers)")
