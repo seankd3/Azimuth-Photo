@@ -2866,12 +2866,12 @@ async def _resolve_text_search(q: str, *, deep: bool = False) -> dict:
         return result
 
     extension_query = normalized_query.lower().lstrip(".")
-    if extension_query not in db.IMAGE_EXTENSION_SEARCH_TERMS:
-        await _record_deep_search_query(normalized_query)
-
     cached = _text_search_resolution_cache.get(cache_key)
     if cached and cached["expires"] > time.monotonic():
         return dict(cached["data"])
+
+    if extension_query not in db.IMAGE_EXTENSION_SEARCH_TERMS:
+        await _record_deep_search_query(normalized_query)
 
     if extension_query in db.IMAGE_EXTENSION_SEARCH_TERMS:
         result.update({

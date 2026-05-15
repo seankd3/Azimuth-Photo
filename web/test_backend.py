@@ -2557,6 +2557,29 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second["search_mode"], "embedding")
         self.assertEqual([img["id"] for img in second["images"]], [match])
 
+    async def test_cached_text_search_resolution_does_not_relog_query_per_page(self):
+        source = await self._source()
+        visible_match = await self._image(source["id"], "repeat-query-visible.jpg")
+        await self._cache_entry(visible_match, "sm")
+        embedding_worker.encode_text = lambda _query, _config=None: None
+        app_module._text_search_resolution_cache.clear()
+
+        await app_module.api_rankings(q="repeat cache query", limit=1, offset=0)
+        await app_module.api_rankings(q="repeat cache query", limit=1, offset=1)
+
+        conn = await db.get_db()
+        try:
+            cursor = await conn.execute(
+                "SELECT use_count FROM deep_search_queries WHERE query_key = ?",
+                ("repeat cache query",),
+            )
+            row = await cursor.fetchone()
+        finally:
+            await conn.close()
+
+        self.assertIsNotNone(row)
+        self.assertEqual(int(row["use_count"]), 1)
+
     async def test_uncached_deep_search_queues_without_loading_active_model(self):
         query = "future semantic cache"
 
