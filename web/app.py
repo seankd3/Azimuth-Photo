@@ -1817,12 +1817,11 @@ async def api_save_settings(request: Request):
             pass
     if model_changed:
         try:
-            import embed_cache
             import embedding_worker
-            embed_cache.invalidate()
             embedding_worker._text_cache.clear()
         except Exception:
             pass
+        _invalidate_vector_derived_caches()
     if search_runtime_changed:
         _invalidate_rankings_cache()
     _invalidate_cache_status_cache()
@@ -1984,9 +1983,7 @@ def _deep_search_query_embedding_stored(_model_key: str, _query: str):
     _invalidate_ai_status_response_cache()
 
 
-def _embedding_batch_stored(_model_key: str, _image_ids: list[int]):
-    _invalidate_rankings_cache()
-    _invalidate_ai_status_response_cache()
+def _invalidate_vector_derived_caches():
     _duplicates_cache.update({"key": None, "data": None})
     _collections_cache.update({"key": None, "data": None})
     elo_propagation.invalidate_prediction_cache()
@@ -1995,6 +1992,12 @@ def _embedding_batch_stored(_model_key: str, _image_ids: list[int]):
         embed_cache.invalidate()
     except Exception:
         pass
+
+
+def _embedding_batch_stored(_model_key: str, _image_ids: list[int]):
+    _invalidate_rankings_cache()
+    _invalidate_ai_status_response_cache()
+    _invalidate_vector_derived_caches()
 
 
 db.register_embedding_batch_listener(_embedding_batch_stored)

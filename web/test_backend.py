@@ -2846,6 +2846,27 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(elo_propagation._prediction_cache_key)
         self.assertIsNone(elo_propagation._prediction_cache_counts)
 
+    async def test_embedding_model_change_invalidates_vector_derived_caches(self):
+        app_module._duplicates_cache.update({"key": ("stale",), "data": {"pairs": []}})
+        app_module._collections_cache.update({"key": ("stale",), "data": {"collections": []}})
+        elo_propagation._prediction_cache_key = ("stale",)
+        elo_propagation._prediction_cache_counts = {1: 10}
+
+        await app_module.api_save_settings(JsonRequest({
+            "embed_model_preset": "custom",
+            "embed_model_id": "Local/Test-Embedding",
+            "embed_model_revision": "main",
+            "embed_model_dir": os.path.join(self.tempdir.name, "test-embedding-model"),
+            "embed_model_dim": 128,
+        }))
+
+        self.assertIsNone(app_module._duplicates_cache["key"])
+        self.assertIsNone(app_module._duplicates_cache["data"])
+        self.assertIsNone(app_module._collections_cache["key"])
+        self.assertIsNone(app_module._collections_cache["data"])
+        self.assertIsNone(elo_propagation._prediction_cache_key)
+        self.assertIsNone(elo_propagation._prediction_cache_counts)
+
     async def test_deep_image_index_is_independent_from_active_model_index(self):
         source = await self._source()
         image_id = await self._image(source["id"], "needs-deep-index.jpg")
