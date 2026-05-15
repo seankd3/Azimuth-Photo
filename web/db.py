@@ -1030,8 +1030,19 @@ async def record_deep_search_query(query: str, *, source: str = "search", pinned
 
 async def sync_deep_search_terms(terms: list[str] | tuple[str, ...] | None):
     normalized_terms = settings.normalize_deep_search_terms(terms or [])
+    desired = {term.casefold(): term for term in normalized_terms}
     db = await get_db()
     try:
+        cursor = await db.execute(
+            "SELECT query_key, query FROM deep_search_queries WHERE pinned = 1"
+        )
+        current = {
+            str(row["query_key"]): str(row["query"])
+            for row in await cursor.fetchall()
+        }
+        if current == desired:
+            return
+
         await db.execute("UPDATE deep_search_queries SET pinned = 0 WHERE pinned = 1")
         now = _time.time()
         for term in normalized_terms:

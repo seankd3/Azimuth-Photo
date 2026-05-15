@@ -3593,6 +3593,50 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(reloaded["deep_search_terms"], ["Crane", "black and white portraits"])
 
+    async def test_deep_search_term_sync_is_idempotent_when_terms_are_current(self):
+        terms = ["Crane", "black and white portraits"]
+        await db.sync_deep_search_terms(terms)
+
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "UPDATE deep_search_queries SET updated_at = ? WHERE pinned = 1",
+                (123.0,),
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        await db.sync_deep_search_terms(terms)
+
+        conn = await db.get_db()
+        try:
+            cursor = await conn.execute(
+                "SELECT query_key, query, pinned, updated_at "
+                "FROM deep_search_queries ORDER BY query_key"
+            )
+            rows = [dict(row) for row in await cursor.fetchall()]
+        finally:
+            await conn.close()
+
+        self.assertEqual(
+            rows,
+            [
+                {
+                    "query_key": "black and white portraits",
+                    "query": "black and white portraits",
+                    "pinned": 1,
+                    "updated_at": 123.0,
+                },
+                {
+                    "query_key": "crane",
+                    "query": "Crane",
+                    "pinned": 1,
+                    "updated_at": 123.0,
+                },
+            ],
+        )
+
     async def test_api_settings_returns_deep_search_terms(self):
         response = await app_module.api_save_settings(JsonRequest({
             "deep_search_terms": "crane\ncat in cafe window\nCRANE\n",
