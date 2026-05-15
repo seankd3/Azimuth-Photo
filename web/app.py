@@ -2820,7 +2820,7 @@ def _normalize_search_query(query: str) -> str:
     return normalized[:max_length].strip()
 
 
-async def _resolve_cached_deep_search(query: str) -> dict | None:
+async def _resolve_cached_deep_search(query: str, *, allow_cold_load: bool = True) -> dict | None:
     normalized_query = _normalize_search_query(query)
     if not normalized_query:
         return None
@@ -2833,7 +2833,10 @@ async def _resolve_cached_deep_search(query: str) -> dict | None:
         if blob is None:
             return None
         text_vec = embedding_worker.blob_to_vec(blob)
-        image_ids, matrix = await embed_cache.get_matrix(deep_config["model_key"])
+        if allow_cold_load:
+            image_ids, matrix = await embed_cache.get_matrix(deep_config["model_key"])
+        else:
+            image_ids, matrix = embed_cache.get_warm_matrix(deep_config["model_key"])
         if image_ids is None or matrix is None or matrix.shape[1] != text_vec.shape[0]:
             return None
         similarities = matrix @ text_vec
@@ -2905,7 +2908,10 @@ async def _resolve_text_search(q: str, *, deep: bool = False) -> dict:
         }
         return result
 
-    deep_search = await _resolve_cached_deep_search(normalized_query)
+    deep_search = await _resolve_cached_deep_search(
+        normalized_query,
+        allow_cold_load=deep_requested,
+    )
     if deep_search is not None:
         result.update({
             "id_filter": deep_search["id_filter"],
@@ -4199,7 +4205,7 @@ async def api_search(q: str = "", limit: int = 50, deep: bool = False):
         return response
 
     await _record_deep_search_query(query)
-    deep_search = await _resolve_cached_deep_search(query)
+    deep_search = await _resolve_cached_deep_search(query, allow_cold_load=deep)
     if deep_search is not None:
         image_ids = deep_search["image_ids"]
         similarities = deep_search["similarities"]

@@ -99,6 +99,24 @@ class EmbedCacheTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(embed_cache.get_vector(2).tolist(), [0.0, 1.0])
         self.assertEqual(embed_cache._cache["count"], 2)
 
+    async def test_get_warm_matrix_ignores_invalidated_cache(self):
+        embed_cache.db.active_embedding_model_key = lambda: "fast-model"
+        embed_cache._get_embedding_count_sync = lambda _model_key: 2
+        embed_cache._load_embeddings_sync = (
+            lambda _expected_count, _model_key: (
+                [1, 2],
+                np.array([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32),
+            )
+        )
+
+        await embed_cache.get_matrix()
+        embed_cache.invalidate()
+
+        image_ids, matrix = embed_cache.get_warm_matrix()
+
+        self.assertIsNone(image_ids)
+        self.assertIsNone(matrix)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -276,6 +276,7 @@ def get_warm_matrix(model_key: str | None = None):
         cache is None
         or cache["matrix"] is None
         or cache["image_ids"] is None
+        or int(cache.get("count") or 0) < 0
     ):
         return None, None
     _activate_cache(cache)

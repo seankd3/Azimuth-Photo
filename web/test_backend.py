@@ -2780,11 +2780,37 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         app_module._text_search_resolution_cache.clear()
         app_module._rankings_response_cache.clear()
 
-        result = await app_module.api_search(q="specific deep query", limit=1)
+        result = await app_module.api_search(q="specific deep query", deep=True, limit=1)
 
         self.assertEqual(result["search_mode"], "deep_embedding")
         self.assertTrue(result["deep_search_cached"])
         self.assertEqual([img["id"] for img in result["images"]], [match])
+
+    async def test_normal_search_does_not_cold_load_cached_deep_index(self):
+        config = app_module.settings.deep_search_embedding_config()
+        dimension = int(config["dimension"])
+        query_vec = np.zeros((dimension,), dtype=np.float32)
+        query_vec[0] = 1.0
+        await db.store_deep_search_query_embedding(config, "normal should stay fast", query_vec.tobytes())
+
+        async def fail_deep_get_matrix(model_key=None):
+            if model_key == config["model_key"]:
+                raise AssertionError("normal search should not cold-load the deep index")
+            return None, None
+
+        old_get_warm_matrix = elo_propagation.embed_cache.get_warm_matrix
+        embedding_worker.encode_text = lambda _query, _config=None: None
+        elo_propagation.embed_cache.get_matrix = fail_deep_get_matrix
+        elo_propagation.embed_cache.get_warm_matrix = lambda _model_key=None: (None, None)
+        try:
+            app_module._text_search_resolution_cache.clear()
+            app_module._rankings_response_cache.clear()
+            result = await app_module.api_search(q="normal should stay fast", limit=1)
+        finally:
+            elo_propagation.embed_cache.get_warm_matrix = old_get_warm_matrix
+
+        self.assertEqual(result["search_mode"], "metadata")
+        self.assertFalse(result.get("deep_search_cached", False))
 
     async def test_cached_deep_search_uses_deep_index_mapping_when_fast_cache_is_warm(self):
         source = await self._source()
@@ -2798,7 +2824,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         similarities = np.array([0.95, 0.10], dtype=np.float32)
         old_resolve_cached_deep_search = app_module._resolve_cached_deep_search
 
-        async def fake_resolve_cached_deep_search(_query):
+        async def fake_resolve_cached_deep_search(_query, *, allow_cold_load=True):
             return {
                 "id_filter": {match, miss},
                 "scores": {match: 0.95, miss: 0.10},
