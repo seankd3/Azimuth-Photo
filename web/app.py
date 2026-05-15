@@ -2793,7 +2793,7 @@ def _filter_by_metadata(
 
 
 async def _record_deep_search_query(query: str):
-    normalized_query = " ".join(str(query or "").split())
+    normalized_query = _normalize_search_query(query)
     if not normalized_query:
         return
     extension_query = normalized_query.lower().lstrip(".")
@@ -2812,8 +2812,14 @@ async def _record_deep_search_query(query: str):
         pass
 
 
+def _normalize_search_query(query: str) -> str:
+    normalized = " ".join(str(query or "").split())
+    max_length = int(getattr(settings, "MAX_DEEP_SEARCH_TERM_LENGTH", 160))
+    return normalized[:max_length].strip()
+
+
 async def _resolve_cached_deep_search(query: str) -> dict | None:
-    normalized_query = " ".join(str(query or "").split())
+    normalized_query = _normalize_search_query(query)
     if not normalized_query:
         return None
     try:
@@ -2861,7 +2867,7 @@ def _encode_text_with_config(encoder, query: str, config: dict):
 
 async def _resolve_text_search(q: str, *, deep: bool = False) -> dict:
     """Resolve a text query into either embedding IDs or metadata fallback text."""
-    normalized_query = (q or "").strip()
+    normalized_query = _normalize_search_query(q)
     deep_requested = bool(deep)
     cache_key = (normalized_query.casefold(), deep_requested)
     result = {
@@ -4122,7 +4128,7 @@ async def export_rankings(format: str = "json", ids: str = ""):
 @app.get("/api/search")
 async def api_search(q: str = "", limit: int = 50, deep: bool = False):
     """Search images by text query using embedding similarity."""
-    query = q.strip()
+    query = _normalize_search_query(q)
     if not query:
         return {"images": [], "query": q, **_visibility_counts(0, 0)}
     limit = _clamp_int(limit, 50, 1, 500)

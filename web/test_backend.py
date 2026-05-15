@@ -2604,6 +2604,28 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(row)
         self.assertEqual(int(row["use_count"]), 1)
 
+    async def test_search_query_logging_is_length_limited(self):
+        source = await self._source()
+        visible_match = await self._image(source["id"], "long-query-visible.jpg")
+        await self._cache_entry(visible_match, "sm")
+        embedding_worker.encode_text = lambda _query, _config=None: None
+        app_module._deep_search_query_record_cache.clear()
+        long_query = " ".join(["verylongquery"] * 40)
+
+        await app_module.api_search(q=long_query, limit=10)
+
+        conn = await db.get_db()
+        try:
+            cursor = await conn.execute(
+                "SELECT query FROM deep_search_queries ORDER BY updated_at DESC LIMIT 1"
+            )
+            row = await cursor.fetchone()
+        finally:
+            await conn.close()
+
+        self.assertIsNotNone(row)
+        self.assertLessEqual(len(row["query"]), app_module.settings.MAX_DEEP_SEARCH_TERM_LENGTH)
+
     async def test_uncached_deep_search_queues_without_loading_active_model(self):
         query = "future semantic cache"
 
