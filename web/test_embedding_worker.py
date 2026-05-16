@@ -53,6 +53,7 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.old_loaded_model_dir = embedding_worker._loaded_model_dir
         self.old_loaded_model_id = embedding_worker._loaded_model_id
         self.old_loaded_model_revision = embedding_worker._loaded_model_revision
+        self.old_search_model_load_task = embedding_worker._search_model_load_task
         self.old_model_load_retry_after = embedding_worker._model_load_retry_after
         self.old_model_load_error_key = embedding_worker._model_load_error_key
 
@@ -115,6 +116,7 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
         embedding_worker._loaded_model_dir = None
         embedding_worker._loaded_model_id = None
         embedding_worker._loaded_model_revision = None
+        embedding_worker._search_model_load_task = None
         embedding_worker._model_load_retry_after = 0.0
         embedding_worker._model_load_error_key = None
         embedding_worker._batch_control.update({
@@ -166,6 +168,11 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
         embedding_worker._loaded_model_dir = self.old_loaded_model_dir
         embedding_worker._loaded_model_id = self.old_loaded_model_id
         embedding_worker._loaded_model_revision = self.old_loaded_model_revision
+        task = embedding_worker._search_model_load_task
+        if task is not None and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        embedding_worker._search_model_load_task = self.old_search_model_load_task
         embedding_worker._model_load_retry_after = self.old_model_load_retry_after
         embedding_worker._model_load_error_key = self.old_model_load_error_key
 
@@ -326,6 +333,27 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
         status = embedding_worker.get_worker_status()
         self.assertEqual(status["state"], "error")
         self.assertIn("torch", status["last_error"])
+
+    async def test_start_search_model_load_warms_model_in_background_once(self):
+        calls = []
+        model = object()
+
+        def fake_load(model_dir, model_id):
+            calls.append((model_dir, model_id))
+            return model
+
+        embedding_worker._load_model = fake_load
+
+        self.assertTrue(embedding_worker.start_search_model_load())
+        task = embedding_worker._search_model_load_task
+        self.assertIsNotNone(task)
+        self.assertTrue(embedding_worker.start_search_model_load())
+
+        loaded = await task
+
+        self.assertTrue(loaded)
+        self.assertEqual(calls, [("/tmp/test-model", "test-model")])
+        self.assertTrue(embedding_worker.search_model_ready())
 
     async def test_missing_dependency_blocks_background_model_load(self):
         embedding_worker.settings.get_settings = lambda: {

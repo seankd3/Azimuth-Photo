@@ -48,6 +48,7 @@ _loaded_model_dir = None
 _loaded_model_id = None
 _loaded_model_revision = None
 _model_load_lock = None
+_search_model_load_task = None
 _model_load_retry_after = 0.0
 _model_load_error_key = None
 _worker_status = {
@@ -445,6 +446,45 @@ def _get_model_load_lock():
     if _model_load_lock is None:
         _model_load_lock = asyncio.Lock()
     return _model_load_lock
+
+
+def search_model_ready(config: dict | None = None) -> bool:
+    config = config or settings.fast_search_embedding_config()
+    return _model_is_current(*_model_values(config))
+
+
+def _clear_search_model_load_task(task):
+    global _search_model_load_task
+    if _search_model_load_task is task:
+        _search_model_load_task = None
+
+
+def start_search_model_load() -> bool:
+    """Start warming the 2B search model without blocking the caller."""
+    global _search_model_load_task
+
+    config = settings.fast_search_embedding_config()
+    model_dir, model_id, model_revision = _model_values(config)
+    if _model_is_current(model_dir, model_id, model_revision):
+        return True
+    if not ai_models.model_files_present(model_dir):
+        return False
+    if _block_model_load_for_missing_dependency(model_dir, model_id, model_revision):
+        return False
+    if _model_load_blocked(model_dir, model_id, model_revision):
+        return False
+    if _search_model_load_task is not None and not _search_model_load_task.done():
+        return True
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return False
+
+    _set_worker_status("loading_model", f"Loading {model_id} for search...", ready=False, config=config)
+    _search_model_load_task = loop.create_task(ensure_model_loaded_for_search())
+    _search_model_load_task.add_done_callback(_clear_search_model_load_task)
+    return True
 
 
 async def _ensure_model_loaded_for_config(config: dict, reason: str) -> bool:

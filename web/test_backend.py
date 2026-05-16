@@ -48,6 +48,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.old_get_vector = elo_propagation.embed_cache.get_vector
         self.old_encode_text = embedding_worker.encode_text
         self.old_ensure_model_loaded_for_search = embedding_worker.ensure_model_loaded_for_search
+        self.old_start_search_model_load = embedding_worker.start_search_model_load
         self.old_embedding_manual_pause = embedding_worker.get_worker_status()["manual_pause"]
         self.old_prefetch_images = app_module.thumbnails.prefetch_images
         self.old_schedule_full_image_cache = app_module.thumbnails.schedule_full_image_cache
@@ -89,6 +90,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         app_module._schedule_pairing_propagation = close_scheduled
         app_module.thumbnails.prefetch_images = noop_prefetch
         embedding_worker.ensure_model_loaded_for_search = no_model_load_for_search
+        embedding_worker.start_search_model_load = lambda: False
 
     async def asyncTearDown(self):
         app_module._schedule_pairing_propagation = self.old_schedule_pairing_propagation
@@ -97,6 +99,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         elo_propagation.embed_cache.get_vector = self.old_get_vector
         embedding_worker.encode_text = self.old_encode_text
         embedding_worker.ensure_model_loaded_for_search = self.old_ensure_model_loaded_for_search
+        embedding_worker.start_search_model_load = self.old_start_search_model_load
         if self.old_embedding_manual_pause:
             embedding_worker.pause_embedding_worker()
         else:
@@ -2212,6 +2215,20 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await db.metadata_search_image_ids("no-such-photo"), set())
         self.assertNotIn(miss, await db.metadata_search_image_ids("sunset"))
 
+    async def test_text_search_resolution_keeps_exact_filter_for_non_empty_fts_ids(self):
+        source = await self._source()
+        match = await self._image(source["id"], "sunset-visible.jpg")
+        await self._image(source["id"], "portrait-visible.jpg")
+
+        embedding_worker.encode_text = lambda _query, _config=None: None
+        app_module._text_search_resolution_cache.clear()
+
+        result = await app_module._resolve_text_search("sunset")
+
+        self.assertEqual(result["search_mode"], "metadata")
+        self.assertEqual(result["id_filter"], {match})
+        self.assertEqual(result["text_query"], "sunset")
+
     async def test_extension_metadata_search_uses_exact_extension_path(self):
         source = await self._source()
         jpg = await self._image(source["id"], "sunset-visible.jpg")
@@ -2313,7 +2330,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(elo_sorted["total_images"], 2)
         self.assertNotIn(miss, [img["id"] for img in elo_sorted["images"]])
 
-    async def test_rankings_search_loads_model_on_demand_when_worker_is_deferred(self):
+    async def test_rankings_search_warms_model_without_blocking_when_worker_is_deferred(self):
         source = await self._source()
         match = await self._image(source["id"], "semantic-match.jpg")
         miss = await self._image(source["id"], "semantic-miss.jpg")
@@ -2322,7 +2339,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
         image_ids = [match, miss]
         matrix = np.array([[0.90, 0.10], [0.10, 0.90]], dtype=np.float32)
-        calls = {"encode": 0, "ensure": 0}
+        calls = {"encode": 0, "start": 0}
 
         async def fake_get_matrix():
             return image_ids, matrix
@@ -2333,20 +2350,26 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
                 return None
             return np.array([1.0, 0.0], dtype=np.float32)
 
-        async def fake_ensure_model_loaded_for_search():
-            calls["ensure"] += 1
+        def fake_start_search_model_load():
+            calls["start"] += 1
             return True
 
         elo_propagation.embed_cache.get_matrix = fake_get_matrix
         embedding_worker.encode_text = fake_encode_text
-        embedding_worker.ensure_model_loaded_for_search = fake_ensure_model_loaded_for_search
+        embedding_worker.start_search_model_load = fake_start_search_model_load
+        app_module._text_search_resolution_cache.clear()
+        app_module._rankings_response_cache.clear()
 
-        result = await app_module.api_rankings(q="dog", sort="similarity", limit=10)
+        cold = await app_module.api_rankings(q="dog", sort="similarity", limit=10)
+        warm = await app_module.api_rankings(q="dog", sort="similarity", limit=10)
 
-        self.assertEqual([img["id"] for img in result["images"]], [match])
-        self.assertEqual(calls, {"encode": 2, "ensure": 1})
-        self.assertEqual(result["search_mode"], "embedding")
-        self.assertFalse(result["ai_unavailable"])
+        self.assertEqual(calls, {"encode": 2, "start": 1})
+        self.assertEqual(cold["search_mode"], "metadata")
+        self.assertTrue(cold["ai_unavailable"])
+        self.assertEqual(cold["fallback_reason"], "model_loading")
+        self.assertEqual(warm["search_mode"], "embedding")
+        self.assertFalse(warm["ai_unavailable"])
+        self.assertEqual([img["id"] for img in warm["images"]], [match])
 
     async def test_normal_search_uses_fast_2b_role_even_when_saved_preset_is_8b(self):
         source = await self._source()
@@ -2654,6 +2677,40 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNotNone(row)
         self.assertEqual(int(row["use_count"]), 1)
+
+    async def test_search_endpoint_metadata_fallback_keeps_exact_filter_for_non_empty_fts_ids(self):
+        source = await self._source()
+        visible_match = await self._image(source["id"], "sunset-api-visible.jpg")
+        await self._image(source["id"], "portrait-api-visible.jpg")
+        await self._cache_entry(visible_match, "sm")
+        embedding_worker.encode_text = lambda _query, _config=None: None
+        app_module._rankings_response_cache.clear()
+
+        seen = []
+        old_get_rankings = db.get_rankings
+        old_count_rankings = db.count_rankings
+
+        async def checked_get_rankings(*args, **kwargs):
+            seen.append(("get", kwargs.get("id_filter"), kwargs.get("text_query")))
+            return await old_get_rankings(*args, **kwargs)
+
+        async def checked_count_rankings(*args, **kwargs):
+            seen.append(("count", kwargs.get("id_filter"), kwargs.get("text_query")))
+            return await old_count_rankings(*args, **kwargs)
+
+        db.get_rankings = checked_get_rankings
+        db.count_rankings = checked_count_rankings
+        try:
+            result = await app_module.api_search(q="sunset-api", limit=10)
+        finally:
+            db.get_rankings = old_get_rankings
+            db.count_rankings = old_count_rankings
+
+        self.assertEqual([img["id"] for img in result["images"]], [visible_match])
+        self.assertTrue(seen)
+        for _kind, id_filter, text_query in seen:
+            self.assertEqual(id_filter, {visible_match})
+            self.assertEqual(text_query, "sunset-api")
 
     async def test_search_query_logging_is_length_limited(self):
         source = await self._source()
@@ -3499,6 +3556,17 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertNotIn('strategy="diverse"', light_warmup)
         self.assertIn('strategy="explore"', light_warmup)
+
+    async def test_startup_warms_fast_search_model_and_matrix_even_when_ai_work_is_deferred(self):
+        startup_source = inspect.getsource(app_module.startup)
+
+        self.assertIn("pause_embedding_worker", startup_source)
+        self.assertIn("start_search_model_load", startup_source)
+        self.assertIn("_track_background_task(_warm_embed_cache())", startup_source)
+        self.assertLess(
+            startup_source.index("pause_embedding_worker"),
+            startup_source.index("start_search_model_load"),
+        )
 
     async def test_library_cross_view_warmup_does_not_request_diverse_mosaic(self):
         with open(os.path.join(os.path.dirname(__file__), "static", "app.js"), encoding="utf-8") as fh:

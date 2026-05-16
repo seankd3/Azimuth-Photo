@@ -281,6 +281,7 @@ async def startup():
             await asyncio.sleep(max(1.0, decision.sleep_seconds or 1.0))
 
     _track_background_task(_warm_light_startup_caches())
+    _track_background_task(_warm_embed_cache())
 
     async def _warm_priority_interaction_caches():
         await asyncio.sleep(0.5)
@@ -330,6 +331,10 @@ async def startup():
         import embedding_worker
         if settings.get_settings().get("defer_ai_on_startup", True):
             embedding_worker.pause_embedding_worker("AI work deferred by startup setting.")
+        try:
+            embedding_worker.start_search_model_load()
+        except Exception:
+            pass
         _track_background_task(_start_background_after_ready(embedding_worker.run_embedding_worker))
         _track_background_task(_start_background_after_ready(embedding_worker.run_deep_search_worker, delay=15.0))
     except ImportError:
@@ -2830,6 +2835,24 @@ def _encode_text_with_config(encoder, query: str, config: dict):
     return search_service.encode_text_with_config(encoder, query, config)
 
 
+def _start_search_model_load(embedding_worker) -> bool:
+    start = getattr(embedding_worker, "start_search_model_load", None)
+    if not callable(start):
+        return False
+    try:
+        return bool(start())
+    except Exception:
+        return False
+
+
+async def _apply_metadata_search_ids(result: dict, normalized_query: str) -> None:
+    metadata_ids = await db.metadata_search_image_ids(normalized_query)
+    if metadata_ids is not None:
+        result["id_filter"] = metadata_ids
+        if not metadata_ids:
+            result["text_query"] = ""
+
+
 async def _resolve_text_search(q: str, *, deep: bool = False) -> dict:
     """Resolve a text query into either embedding IDs or metadata fallback text."""
     normalized_query = _normalize_search_query(q)
@@ -2918,14 +2941,16 @@ async def _resolve_text_search(q: str, *, deep: bool = False) -> dict:
             normalized_query,
             fast_config,
         )
-        if text_vec is None and await embedding_worker.ensure_model_loaded_for_search():
-            text_vec = await asyncio.get_event_loop().run_in_executor(
-                None,
-                _encode_text_with_config,
-                embedding_worker.encode_text,
-                normalized_query,
-                fast_config,
-            )
+        if text_vec is None and _start_search_model_load(embedding_worker):
+            result.update({
+                "text_query": normalized_query,
+                "search_mode": "metadata",
+                "ai_unavailable": True,
+                "fallback_reason": "model_loading",
+            })
+            if extension_query not in db.IMAGE_EXTENSION_SEARCH_TERMS:
+                await _apply_metadata_search_ids(result, normalized_query)
+            return result
         if text_vec is not None:
             image_ids, matrix = await embed_cache.get_matrix()
             if image_ids is not None:
@@ -2957,9 +2982,7 @@ async def _resolve_text_search(q: str, *, deep: bool = False) -> dict:
         "ai_unavailable": True,
     })
     if extension_query not in db.IMAGE_EXTENSION_SEARCH_TERMS:
-        metadata_ids = await db.metadata_search_image_ids(normalized_query)
-        if metadata_ids is not None:
-            result["id_filter"] = metadata_ids
+        await _apply_metadata_search_ids(result, normalized_query)
     _text_search_resolution_cache[cache_key] = {
         "data": dict(result),
         "expires": time.monotonic() + _text_search_resolution_cache_ttl_seconds,
@@ -3815,7 +3838,11 @@ async def api_rankings(
 
     db_sort = "elo" if sort == "similarity" and not search_scores else sort
     rankings_cache_key = None
-    cacheable_metadata_search = search_mode == "metadata" and not search_scores
+    cacheable_metadata_search = (
+        search_mode == "metadata"
+        and not search_scores
+        and search.get("fallback_reason") != "model_loading"
+    )
     cacheable_embedding_search = search_mode in {"embedding", "deep_embedding"}
     cacheable_search = cacheable_metadata_search or cacheable_embedding_search
     normalized_search_query = _normalize_search_query(q) if search["active"] else ""
@@ -3906,6 +3933,21 @@ async def api_rankings(
             _cache_rankings_response(rankings_cache_key, response)
         return response
 
+    if search_ids is not None and not search_ids:
+        response = {
+            "images": [],
+            **_visibility_counts(0, 0),
+            "total_kept": 0,
+            "search_mode": search_mode,
+            "ai_unavailable": search["ai_unavailable"],
+            "deep_requested": search.get("deep_requested", False),
+            "deep_search_cached": search.get("deep_search_cached", False),
+            "fallback_reason": search.get("fallback_reason", ""),
+        }
+        if rankings_cache_key is not None:
+            _cache_rankings_response(rankings_cache_key, response)
+        return response
+
     unfiltered_rankings = not any(
         (
             orientation,
@@ -3917,7 +3959,7 @@ async def api_rankings(
             file_type,
             camera,
             lens,
-            search_ids,
+            search_ids is not None,
             text_query,
         )
     )
@@ -4109,6 +4151,7 @@ async def api_search(q: str = "", limit: int = 50, deep: bool = False):
     limit = _clamp_int(limit, 50, 1, 500)
 
     async def metadata_fallback(reason: str):
+        cacheable = reason != "model_loading"
         cache_key = (
             "api_search_metadata",
             db.DB_PATH,
@@ -4118,9 +4161,13 @@ async def api_search(q: str = "", limit: int = 50, deep: bool = False):
             reason,
             bool(deep),
         )
-        cached = _rankings_response_cache.get(cache_key)
-        if cached and cached["expires"] > time.monotonic():
-            return _copy_rankings_response(cached["data"])
+        if cacheable:
+            cached = _rankings_response_cache.get(cache_key)
+            if cached and cached["expires"] > time.monotonic():
+                return _copy_rankings_response(cached["data"])
+        metadata_ids = await db.metadata_search_image_ids(query)
+        id_filter = metadata_ids if metadata_ids is not None else None
+        text_query = "" if metadata_ids is not None and not metadata_ids else query
         rows, visible_images, total_images = await asyncio.gather(
             db.get_rankings(
                 limit=limit,
@@ -4128,14 +4175,16 @@ async def api_search(q: str = "", limit: int = 50, deep: bool = False):
                 sort="elo",
                 visible_thumb_size="sm",
                 cache_root=_cache_root(),
-                text_query=query,
+                id_filter=id_filter,
+                text_query=text_query,
             ),
             db.count_rankings(
                 visible_thumb_size="sm",
                 cache_root=_cache_root(),
-                text_query=query,
+                id_filter=id_filter,
+                text_query=text_query,
             ),
-            db.count_rankings(text_query=query),
+            db.count_rankings(id_filter=id_filter, text_query=text_query),
         )
         result = []
         for img in rows:
@@ -4158,10 +4207,11 @@ async def api_search(q: str = "", limit: int = 50, deep: bool = False):
             "deep_search_cached": False,
             **_visibility_counts(total_images, visible_images),
         }
-        _rankings_response_cache[cache_key] = {
-            "data": _copy_rankings_response(response),
-            "expires": time.monotonic() + _rankings_response_cache_ttl_seconds,
-        }
+        if cacheable:
+            _rankings_response_cache[cache_key] = {
+                "data": _copy_rankings_response(response),
+                "expires": time.monotonic() + _rankings_response_cache_ttl_seconds,
+            }
         return response
 
     await _record_deep_search_query(query)
@@ -4212,16 +4262,10 @@ async def api_search(q: str = "", limit: int = 50, deep: bool = False):
         query,
         fast_config,
     )
-    if text_vec is None and await embedding_worker.ensure_model_loaded_for_search():
-        text_vec = await asyncio.get_event_loop().run_in_executor(
-            None,
-            _encode_text_with_config,
-            embedding_worker.encode_text,
-            query,
-            fast_config,
-        )
-    if text_vec is None:
+    if text_vec is None and _start_search_model_load(embedding_worker):
         return await metadata_fallback("model_loading")
+    if text_vec is None:
+        return await metadata_fallback("embeddings_unavailable")
 
     image_ids, matrix = await embed_cache.get_matrix()
     if image_ids is None:
