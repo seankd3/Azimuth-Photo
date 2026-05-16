@@ -412,6 +412,20 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
         self.assertEqual(warmed, 1)
         self.assertIsNotNone(thumbnails.fast_disk_path_entry(thumbnails.FULL_TIER, 1))
 
+    def test_bulk_warmup_treats_failure_only_batch_as_no_progress(self):
+        path = self._make_original_file("bad.jpg", 128)
+        self._add_catalog_original(1, path)
+        generated_before = thumbnails._pregen_status["generated_this_session"]
+        last_generated_before = thumbnails._pregen_status["last_generated_at"]
+        failures_before = thumbnails._pregen_source_read_failures
+
+        warmed = asyncio.run(thumbnails._run_pregen_bulk_batch(generate_batch=1))
+
+        self.assertEqual(warmed, -1)
+        self.assertEqual(thumbnails._pregen_status["generated_this_session"], generated_before)
+        self.assertEqual(thumbnails._pregen_status["last_generated_at"], last_generated_before)
+        self.assertEqual(thumbnails._pregen_source_read_failures, failures_before + 1)
+
     def test_bulk_candidate_signatures_skips_thumbnail_signature_work_when_previews_exist(self):
         path = self._make_image()
         signatures, file_size, file_modified_at = self._catalog_signatures(path)

@@ -2536,10 +2536,12 @@ def _record_pregen_result(result: dict) -> int:
     decode_encode_seconds = float(result.get("decode_encode_seconds", 0.0))
     source_read_failures = int(result.get("source_read_failures", 0))
     completed = max(source_reads, originals_written)
+    useful_work = thumbnails_written + originals_written
 
     if completed or thumbnails_written or source_read_failures:
-        _pregen_status["last_generated_at"] = _current_time()
-        _pregen_status["generated_this_session"] += completed
+        if useful_work:
+            _pregen_status["last_generated_at"] = _current_time()
+            _pregen_status["generated_this_session"] += completed
         _record_pregen_batch(
             completed,
             thumbnails_written=thumbnails_written,
@@ -2549,7 +2551,7 @@ def _record_pregen_result(result: dict) -> int:
             source_read_failures=source_read_failures,
         )
 
-    return completed or thumbnails_written or originals_written or source_read_failures
+    return useful_work
 
 
 async def _run_pregen_bulk_batch(generate_batch: int | None = None) -> int:
@@ -2652,6 +2654,8 @@ async def _run_pregen_bulk_batch(generate_batch: int | None = None) -> int:
             break
     if not _pregen_should_yield_to_foreground():
         await asyncio.to_thread(_flush_write_queue)
+    if completed <= 0:
+        return -1
     return completed
 
 
