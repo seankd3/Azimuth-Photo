@@ -3772,6 +3772,8 @@ class ModularContractTests(unittest.TestCase):
             ui_module = fh.read()
         with open(os.path.join(base_dir, "static", "js", "warmup.js"), encoding="utf-8") as fh:
             warmup = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "thumbnail_size.js"), encoding="utf-8") as fh:
+            thumbnail_size = fh.read()
 
         self.assertIn('type="module" src="/static/app.js?v={{ static_version }}"', base_template)
         self.assertIn("window.PhotoArchiveReady = import(`./js/bootstrap.js${suffix}`)", app_entry)
@@ -3782,6 +3784,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../filters.js';", legacy)
         self.assertIn("from '../media_status.js';", legacy)
         self.assertIn("from '../media_metadata.js';", legacy)
+        self.assertIn("from '../thumbnail_size.js';", legacy)
         self.assertIn("from '../compare/query.js';", legacy)
         self.assertIn("from '../compare/navigation.js';", legacy)
         self.assertIn("from '../compare/images.js';", legacy)
@@ -4119,6 +4122,8 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("export function createWarmCacheStore", warmup)
         self.assertIn("export function imageThumbUrls", warmup)
         self.assertIn("export function compareThumbUrls", warmup)
+        self.assertIn("export function applyLibraryThumbSize", thumbnail_size)
+        self.assertIn("export function createThumbnailSizeHandler", thumbnail_size)
         self.assertIn("export default legacyPhotoArchive;", legacy)
 
     @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
@@ -4408,6 +4413,80 @@ assert.deepEqual(events.at(-1), ['submit', 'left']);
 const undoEvent = key('ArrowUp');
 handler(undoEvent);
 assert.deepEqual(events.at(-1), ['undo']);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_thumbnail_size_node_probe_preserves_library_and_mosaic_flow(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import {
+    applyLibraryThumbSize,
+    createThumbnailSizeHandler,
+} from './static/js/thumbnail_size.js';
+
+const rootStyle = {};
+const cards = [
+    { dataset: { ar: '1.25' }, style: {} },
+    { dataset: {}, style: {} },
+];
+let mosaicGrid = null;
+const documentImpl = {
+    documentElement: {
+        style: {
+            setProperty: (name, value) => { rootStyle[name] = value; },
+        },
+    },
+    querySelectorAll(selector) {
+        return selector === '.rank-card' ? cards : [];
+    },
+    getElementById(id) {
+        return id === 'mosaic-grid' ? mosaicGrid : null;
+    },
+};
+
+assert.equal(applyLibraryThumbSize('200', { documentImpl }), 200);
+assert.equal(rootStyle['--thumb-height'], '200px');
+assert.equal(cards[0].style.height, '200px');
+assert.equal(cards[0].style.flexBasis, '250px');
+assert.equal(cards[1].style.flexBasis, '300px');
+
+let mosaicSize = 12;
+let thumbHeight = 0;
+const events = [];
+const setThumbSize = createThumbnailSizeHandler({
+    documentImpl,
+    getMosaicSize: () => mosaicSize,
+    setMosaicSize: (value) => {
+        mosaicSize = value;
+        events.push(['size', value]);
+    },
+    mosaicSizeFromThumbHeight: (value) => Number(value) > 300 ? 6 : 12,
+    clearWarmups: () => events.push(['clear']),
+    loadMosaicBatch: () => events.push(['load']),
+    setThumbHeight: (value) => { thumbHeight = value; },
+});
+
+setThumbSize('180');
+assert.equal(thumbHeight, 180);
+assert.equal(rootStyle['--thumb-height'], '180px');
+assert.deepEqual(events, []);
+
+mosaicGrid = {};
+setThumbSize('320');
+assert.equal(thumbHeight, 320);
+assert.equal(mosaicSize, 6);
+assert.deepEqual(events, [['clear'], ['size', 6], ['load']]);
+
+setThumbSize('340');
+assert.deepEqual(events, [['clear'], ['size', 6], ['load']]);
 """
         subprocess.run(
             ["node", "--input-type=module", "-e", script],

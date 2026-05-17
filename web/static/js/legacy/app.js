@@ -54,6 +54,7 @@ import {
     loadImageProbe,
     withTimeout,
 } from '../warmup.js';
+import { createThumbnailSizeHandler } from '../thumbnail_size.js';
 import {
     buildCompareUrl as buildCompareUrlCore,
     buildMosaicUrl as buildMosaicUrlCore,
@@ -2353,34 +2354,14 @@ const legacyPhotoArchive = (() => {
         }
     }
 
-    function setThumbSize(value) {
-        thumbHeight = parseInt(value);
-
-        // Compare page: slider controls mosaic grid size
-        const mosaicGrid = document.getElementById('mosaic-grid');
-        if (mosaicGrid) {
-            // Map slider 120-400 → mosaic count 24-4 (small thumb = more images)
-            const newSize = mosaicSizeFromThumbHeight(thumbHeight);
-            if (newSize !== mosaicSize) {
-                clearWarmups();
-                mosaicSize = newSize;
-                loadMosaicBatch();
-            }
-            return;
-        }
-
-        // Library page: slider controls card height
-        document.documentElement.style.setProperty('--thumb-height', thumbHeight + 'px');
-        const cards = document.querySelectorAll('.rank-card');
-        const updates = [];
-        for (const card of cards) {
-            updates.push({ el: card, basis: thumbHeight * (parseFloat(card.dataset.ar) || 1.5) });
-        }
-        for (const { el, basis } of updates) {
-            el.style.height = thumbHeight + 'px';
-            el.style.flexBasis = basis + 'px';
-        }
-    }
+    const setThumbSize = createThumbnailSizeHandler({
+        getMosaicSize: () => mosaicSize,
+        setMosaicSize: (value) => { mosaicSize = value; },
+        mosaicSizeFromThumbHeight,
+        clearWarmups,
+        loadMosaicBatch,
+        setThumbHeight: (value) => { thumbHeight = value; },
+    });
 
     function reloadForFilters() {
         clearWarmups();
