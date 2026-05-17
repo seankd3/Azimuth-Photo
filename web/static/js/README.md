@@ -32,6 +32,7 @@ and probe cancellation helpers.
 rendering, and tier-loading display.
 `loupe/metadata.js` owns Loupe metadata line assembly and overlay metadata rendering.
 `loupe/navigation.js` owns Loupe neighbor ordering and hot-set tier selection.
+`loupe/warmup.js` owns Loupe neighbor image preloading and hot-set cache warming.
 `loupe/filmstrip.js` owns Loupe filmstrip windowing, thumbnail DOM rendering,
 active-thumb updates, counter text, and centering behavior.
 `loupe/focus.js` owns Loupe focus targeting, tabbable-element filtering, and

@@ -3700,6 +3700,8 @@ class ModularContractTests(unittest.TestCase):
             loupe_metadata = fh.read()
         with open(os.path.join(base_dir, "static", "js", "loupe", "navigation.js"), encoding="utf-8") as fh:
             loupe_navigation = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "loupe", "warmup.js"), encoding="utf-8") as fh:
+            loupe_warmup = fh.read()
         with open(os.path.join(base_dir, "static", "js", "loupe", "filmstrip.js"), encoding="utf-8") as fh:
             loupe_filmstrip = fh.read()
         with open(os.path.join(base_dir, "static", "js", "loupe", "focus.js"), encoding="utf-8") as fh:
@@ -3855,7 +3857,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../loupe/loading.js';", legacy)
         self.assertIn("from '../loupe/status.js';", legacy)
         self.assertIn("from '../loupe/metadata.js';", legacy)
-        self.assertIn("from '../loupe/navigation.js';", legacy)
+        self.assertIn("from '../loupe/warmup.js';", legacy)
         self.assertIn("from '../loupe/filmstrip.js';", legacy)
         self.assertIn("from '../loupe/focus.js';", legacy)
         self.assertIn("from '../loupe/zoom.js';", legacy)
@@ -4024,6 +4026,9 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("export function renderLoupeMetadataOverlay", loupe_metadata)
         self.assertIn("export function loupeNeighborOffsets", loupe_navigation)
         self.assertIn("export function loupeHotSetTierIds", loupe_navigation)
+        self.assertIn("export function createLoupeWarmupController", loupe_warmup)
+        self.assertIn("from './navigation.js';", loupe_warmup)
+        self.assertIn("from './tiers.js';", loupe_warmup)
         self.assertIn("export function clearFilmstrip", loupe_filmstrip)
         self.assertIn("export function updateFilmstripCounter", loupe_filmstrip)
         self.assertIn("export function buildFilmstrip", loupe_filmstrip)
@@ -4219,6 +4224,110 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("export function applyLibraryThumbSize", thumbnail_size)
         self.assertIn("export function createThumbnailSizeHandler", thumbnail_size)
         self.assertIn("export default legacyPhotoArchive;", legacy)
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_loupe_warmup_controller_node_probe_preserves_neighbor_preload_flow(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createLoupeWarmupController } from './static/js/loupe/warmup.js';
+
+const images = [
+    { id: 1, thumb_url: '/thumb-1.jpg' },
+    { id: 2, thumb_url: '/thumb-2.jpg' },
+    { id: 3, thumb_url: '/thumb-3.jpg' },
+    { id: 4, thumb_url: '/thumb-4.jpg' },
+    { id: 5, thumb_url: '/thumb-5.jpg' },
+];
+let lightboxIndex = 2;
+let loupeToken = 9;
+let warmupGeneration = 3;
+let currentImage = images[2];
+const queued = [];
+const events = [];
+const controller = createLoupeWarmupController({
+    getLibraryImages: () => images,
+    getLightboxIndex: () => lightboxIndex,
+    getLoupeImageToken: () => loupeToken,
+    getWarmupGeneration: () => warmupGeneration,
+    getCurrentLoupeImage: () => currentImage,
+    isCurrentLoupeImage: (img, token) => token === loupeToken && currentImage?.id === img.id,
+    enqueueWarmup: (task, options) => queued.push({ task, options }),
+    warmImageTiers: (tiers) => events.push(['warm-tiers', tiers]),
+    preloadImageWithTimeout: async (url, priority, timeoutMs) => {
+        events.push(['preload', url, priority, timeoutMs]);
+    },
+    getMediaStatus: async (imageId) => {
+        events.push(['status', imageId]);
+        if (imageId === 4) {
+            return {
+                tiers: {
+                    md: { cached: false },
+                    lg: { cached: false },
+                    full: { cached: true, cached_url: '/full-cached-4.jpg' },
+                },
+            };
+        }
+        return {
+            tiers: {
+                md: { cached: true, cached_url: `/md-cached-${imageId}.jpg` },
+                lg: { cached: true, cached_url: `/lg-cached-${imageId}.jpg` },
+            },
+        };
+    },
+    loupeTierUrlImpl: (tier, id) => `/tier/${tier}/${id}`,
+    tierTimeouts: { md: 20, lg: 30, full: 40 },
+    preloadRadius: 2,
+});
+
+assert.equal(controller.preloadLoupeNeighbors(1), true);
+assert.deepEqual(queued.map((item) => item.options), [
+    { generation: 3 },
+    { generation: 3 },
+    { generation: 3 },
+    { generation: 3 },
+]);
+await queued[0].task();
+await queued[2].task();
+assert.deepEqual(events, [
+    ['preload', '/thumb-4.jpg', 'low', 1200],
+    ['status', 4],
+    ['preload', '/tier/md/4', 'low', 20],
+    ['preload', '/tier/lg/4', 'low', 30],
+    ['preload', '/full-cached-4.jpg', 'low', 40],
+    ['preload', '/thumb-5.jpg', 'low', 1200],
+    ['status', 5],
+    ['preload', '/md-cached-5.jpg', 'low', 20],
+    ['preload', '/lg-cached-5.jpg', 'low', 30],
+]);
+
+events.length = 0;
+assert.deepEqual(controller.warmLoupeHotSet(-1), {
+    md: [2, 4, 1, 5],
+    lg: [3, 2, 4, 1, 5],
+    full: [3, 2, 4],
+});
+assert.deepEqual(events, [['warm-tiers', {
+    md: [2, 4, 1, 5],
+    lg: [3, 2, 4, 1, 5],
+    full: [3, 2, 4],
+}]]);
+
+events.length = 0;
+warmupGeneration = 4;
+assert.equal(await controller.preloadLoupeNeighbor(images[3], 1, 9, 3), false);
+assert.deepEqual(events, []);
+
+lightboxIndex = -1;
+assert.equal(controller.preloadLoupeNeighbors(), false);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
 
     @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
     def test_media_status_controller_node_probe_preserves_warm_invalidation_flow(self):

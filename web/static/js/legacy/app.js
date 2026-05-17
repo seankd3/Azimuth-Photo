@@ -104,10 +104,7 @@ import {
     renderLoupeMetadata as renderLoupeMetadataCore,
     renderLoupeMetadataOverlay,
 } from '../loupe/metadata.js';
-import {
-    loupeHotSetTierIds,
-    loupeNeighborOffsets,
-} from '../loupe/navigation.js';
+import { createLoupeWarmupController } from '../loupe/warmup.js';
 import {
     buildFilmstrip as buildFilmstripCore,
     clearFilmstrip as clearFilmstripCore,
@@ -1547,6 +1544,20 @@ const legacyPhotoArchive = (() => {
     const loupeTierProbes = new Set();
     const loupeRefLong = 3840; // lg thumbnail long side used before original dimensions are known
     const LOUPE_PRELOAD_RADIUS = 3;
+    const loupeWarmupController = createLoupeWarmupController({
+        getLibraryImages: () => libraryImages,
+        getLightboxIndex: () => lightboxIndex,
+        getLoupeImageToken: () => loupeImageToken,
+        getWarmupGeneration: currentWarmupGeneration,
+        getCurrentLoupeImage: () => loupeCurrentImage,
+        isCurrentLoupeImage,
+        enqueueWarmup,
+        warmImageTiers,
+        preloadImageWithTimeout,
+        getMediaStatus,
+        loupeTierUrlImpl: loupeTierUrl,
+        preloadRadius: LOUPE_PRELOAD_RADIUS,
+    });
 
     function cancelLoupeProbes() {
         cancelLoupeProbesCore(loupeTierProbes, {
@@ -1803,56 +1814,15 @@ const legacyPhotoArchive = (() => {
     }
 
     function preloadLoupeNeighbors(direction = 0) {
-        if (lightboxIndex < 0) return;
-        const token = loupeImageToken;
-        const generation = currentWarmupGeneration();
-        for (const offset of loupeNeighborOffsets(LOUPE_PRELOAD_RADIUS, direction)) {
-            const ni = lightboxIndex + offset;
-            if (ni < 0 || ni >= libraryImages.length) continue;
-            const neighbor = libraryImages[ni];
-            const distance = Math.abs(offset);
-            enqueueWarmup(async () => {
-                if (!loupeCurrentImage || !isCurrentLoupeImage(loupeCurrentImage, token)) return;
-                await preloadLoupeNeighbor(neighbor, distance, token, generation);
-            }, { generation });
-        }
+        return loupeWarmupController.preloadLoupeNeighbors(direction);
     }
 
     function warmLoupeHotSet(direction = 0) {
-        const tiers = loupeHotSetTierIds(libraryImages, lightboxIndex, direction);
-        if (tiers) warmImageTiers(tiers);
+        return loupeWarmupController.warmLoupeHotSet(direction);
     }
 
     async function preloadLoupeNeighbor(img, distance = 1, token = loupeImageToken, generation = currentWarmupGeneration()) {
-        if (generation !== currentWarmupGeneration() || !loupeCurrentImage || !isCurrentLoupeImage(loupeCurrentImage, token)) return;
-        await preloadImageWithTimeout(img.thumb_url, 'low', 1200);
-        if (generation !== currentWarmupGeneration() || !loupeCurrentImage || !isCurrentLoupeImage(loupeCurrentImage, token)) return;
-        const status = await getMediaStatus(img.id);
-        if (generation !== currentWarmupGeneration() || !loupeCurrentImage || !isCurrentLoupeImage(loupeCurrentImage, token)) return;
-        const tiers = status?.tiers || {};
-        if (tiers.md?.cached) {
-            await preloadImageWithTimeout(tiers.md.cached_url, 'low', LOUPE_TIER_TIMEOUTS.md);
-        }
-        if (generation !== currentWarmupGeneration() || !loupeCurrentImage || !isCurrentLoupeImage(loupeCurrentImage, token)) return;
-        if (tiers.lg?.cached) {
-            await preloadImageWithTimeout(tiers.lg.cached_url, 'low', LOUPE_TIER_TIMEOUTS.lg);
-        }
-        if (generation !== currentWarmupGeneration() || !loupeCurrentImage || !isCurrentLoupeImage(loupeCurrentImage, token)) return;
-        if (distance === 1) {
-            if (!tiers.md?.cached) {
-                await preloadImageWithTimeout(loupeTierUrl('md', img.id), 'low', LOUPE_TIER_TIMEOUTS.md);
-            }
-            if (generation !== currentWarmupGeneration() || !loupeCurrentImage || !isCurrentLoupeImage(loupeCurrentImage, token)) return;
-            if (!tiers.lg?.cached) {
-                await preloadImageWithTimeout(loupeTierUrl('lg', img.id), 'low', LOUPE_TIER_TIMEOUTS.lg);
-            }
-            if (generation !== currentWarmupGeneration() || !loupeCurrentImage || !isCurrentLoupeImage(loupeCurrentImage, token)) return;
-            await preloadImageWithTimeout(
-                tiers.full?.cached ? tiers.full.cached_url : loupeTierUrl('full', img.id),
-                'low',
-                LOUPE_TIER_TIMEOUTS.full,
-            );
-        }
+        return loupeWarmupController.preloadLoupeNeighbor(img, distance, token, generation);
     }
 
     function preloadImageWithTimeout(url, priority, timeoutMs) {
