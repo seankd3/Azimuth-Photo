@@ -76,6 +76,9 @@ marker loading, marker-layer replacement, and map-bound fitting.
 `compare/navigation.js` owns Mosaic keyboard cell selection and visual-row navigation wiring.
 `compare/mode_controller.js` owns Compare/Mosaic mode and strategy switching
 glue while legacy keeps pair and mosaic state.
+`compare/mosaic_action_controller.js` owns Mosaic pick orchestration,
+optimistic replacement swapping, propagation follow-up, and rollback on failed
+save while legacy keeps board state storage.
 `compare/images.js` owns Compare pair image rendering and progressive tier
 upgrades.
 `compare/action_controller.js` owns Compare submit/undo state orchestration

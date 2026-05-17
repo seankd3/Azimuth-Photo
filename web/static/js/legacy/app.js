@@ -54,15 +54,13 @@ import {
 import {
     adoptMosaicTier as adoptMosaicTierCore,
     mosaicGridElo as mosaicGridEloCore,
-    mosaicLoserIds,
-    mosaicReplacementIndices,
     mosaicSizeFromThumbHeight,
     mosaicThumbHeightForSize,
-    postMosaicPick,
     renderMosaicGrid,
     scheduleMosaicImageUpgrade as scheduleMosaicImageUpgradeCore,
     upgradeMosaicCellImage as upgradeMosaicCellImageCore,
 } from '../compare/mosaic.js';
+import { createMosaicActionController } from '../compare/mosaic_action_controller.js';
 import {
     deselectMosaicCell as deselectMosaicCellCore,
     findMosaicCellInDirection as findMosaicCellInDirectionCore,
@@ -505,109 +503,39 @@ const legacyPhotoArchive = (() => {
     let mosaicBusy = false;
     let mosaicActionSeq = 0;
 
+    const mosaicActionController = createMosaicActionController({
+        getMosaicBusy: () => mosaicBusy,
+        setMosaicBusy: (busy) => { mosaicBusy = busy; },
+        setUndoCount: (count) => { undoCount = count; },
+        incrementMosaicActionSeq: () => ++mosaicActionSeq,
+        getMosaicActionSeq: () => mosaicActionSeq,
+        getMosaicImages: () => mosaicImages,
+        setMosaicImages: (images) => { mosaicImages = images; },
+        getMosaicAge: () => mosaicAge,
+        setMosaicAge: (age) => { mosaicAge = age; },
+        getMosaicReplacements: () => mosaicReplacements,
+        setMosaicReplacements: (replacements) => { mosaicReplacements = replacements; },
+        getMosaicRenderToken: () => mosaicRenderToken,
+        getMosaicPropagationCounts: () => mosaicPropagationCounts,
+        setMosaicPropagationCounts: (counts) => { mosaicPropagationCounts = counts; },
+        getCompareStats: () => compareStats,
+        setCompareStats: (stats) => { compareStats = stats; },
+        queryMosaicCells: () => document.querySelectorAll('.mosaic-cell'),
+        scheduleMosaicImageUpgrade,
+        mosaicFillReplacements,
+        precomputePropagation,
+        bumpRankingSignals,
+        updateCompareProgress,
+        fetchPropagationCount,
+        showPropagationBadge,
+        renderMosaic,
+        showToast,
+        showCompareEmpty,
+        replacementLowWater: MOSAIC_REPLACEMENT_LOW_WATER,
+    });
+
     function mosaicClick(id) {
-        if (mosaicBusy) return;
-        const idx = mosaicImages.findIndex(img => img.id === id);
-        if (idx === -1) return;
-        mosaicBusy = true;
-        undoCount = 0;
-        const actionSeq = ++mosaicActionSeq;
-
-        const otherIds = mosaicLoserIds(mosaicImages, id);
-
-        const snapshot = {
-            renderToken: mosaicRenderToken,
-            images: mosaicImages.slice(),
-            age: mosaicAge.slice(),
-            replacements: mosaicReplacements.slice(),
-            stats: { ...compareStats },
-            propagationCounts: { ...mosaicPropagationCounts },
-        };
-
-        const savePick = postMosaicPick(id, otherIds);
-
-        // Update stats using precomputed propagation count if available
-        const propagated = mosaicPropagationCounts[id] || 0;
-        bumpRankingSignals(otherIds.length + propagated, otherIds.length);
-        updateCompareProgress();
-        const needsPropagationPoll = propagated <= 0;
-        if (propagated > 0) {
-            showPropagationBadge(propagated);
-        }
-
-        // Green flash + scale pulse on the picked cell
-        const cells = document.querySelectorAll('.mosaic-cell');
-        const pickedCell = cells[idx];
-        if (pickedCell) pickedCell.classList.add('mosaic-picked');
-
-        // Age all non-clicked images
-        for (let i = 0; i < mosaicAge.length; i++) {
-            if (i !== idx) mosaicAge[i]++;
-        }
-
-        const replaceIndices = mosaicReplacementIndices(mosaicAge, idx);
-
-        if (mosaicRenderToken === snapshot.renderToken) {
-            for (const ri of replaceIndices) {
-                const targetCell = cells[ri];
-                if (!targetCell) continue;
-                if (mosaicReplacements.length === 0) {
-                    targetCell.classList.remove('mosaic-picked');
-                    mosaicFillReplacements();
-                    continue;
-                }
-                const newImg = mosaicReplacements.shift();
-                if (mosaicReplacements.length < MOSAIC_REPLACEMENT_LOW_WATER) {
-                    mosaicFillReplacements();
-                }
-                mosaicImages[ri] = newImg;
-                mosaicAge[ri] = 0;
-                targetCell.dataset.id = newImg.id;
-                targetCell.onclick = () => mosaicClick(newImg.id);
-                const imgEl = targetCell.querySelector('img');
-                if (imgEl) {
-                    imgEl.dataset.tierRank = '0';
-                    imgEl.src = newImg.thumb_url;
-                    imgEl.alt = newImg.filename;
-                    imgEl.classList.add('loaded');
-                    targetCell.classList.remove('skeleton-cell');
-                }
-                targetCell.classList.remove('mosaic-picked');
-                scheduleMosaicImageUpgrade(targetCell, newImg, targetCell.clientHeight || 220, mosaicRenderToken, ri);
-            }
-            mosaicFillReplacements();
-        }
-
-        mosaicBusy = false;
-
-        savePick.then((saveResult) => {
-            if (!saveResult.ok) {
-                if (mosaicRenderToken === snapshot.renderToken && mosaicActionSeq === actionSeq) {
-                    mosaicImages = snapshot.images;
-                    mosaicAge = snapshot.age;
-                    mosaicReplacements = snapshot.replacements;
-                    compareStats = snapshot.stats;
-                    mosaicPropagationCounts = snapshot.propagationCounts;
-                    renderMosaic();
-                    updateCompareProgress();
-                    showToast('Failed to save pick; restored the previous grid');
-                } else {
-                    showToast('Failed to save pick');
-                }
-                return;
-            }
-
-            // Refill replacement buffer and recompute propagation for new grid
-            if (needsPropagationPoll) {
-                fetchPropagationCount(0);
-            }
-            mosaicFillReplacements();
-            precomputePropagation();
-
-            if (mosaicImages.length < 2) {
-                showCompareEmpty();
-            }
-        });
+        return mosaicActionController.mosaicClick(id);
     }
 
     function showToast(msg) {

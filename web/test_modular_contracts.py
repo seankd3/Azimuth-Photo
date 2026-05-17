@@ -3715,6 +3715,8 @@ class ModularContractTests(unittest.TestCase):
             compare_mode_controller = fh.read()
         with open(os.path.join(base_dir, "static", "js", "compare", "action_controller.js"), encoding="utf-8") as fh:
             compare_action_controller = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "compare", "mosaic_action_controller.js"), encoding="utf-8") as fh:
+            compare_mosaic_action_controller = fh.read()
         with open(os.path.join(base_dir, "static", "js", "compare", "actions.js"), encoding="utf-8") as fh:
             compare_actions = fh.read()
         with open(os.path.join(base_dir, "static", "js", "compare", "propagation.js"), encoding="utf-8") as fh:
@@ -3822,6 +3824,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../compare/view.js';", legacy)
         self.assertIn("from '../compare/mode_controller.js';", legacy)
         self.assertIn("from '../compare/action_controller.js';", legacy)
+        self.assertIn("from '../compare/mosaic_action_controller.js';", legacy)
         self.assertIn("from '../compare/propagation.js';", legacy)
         self.assertIn("from '../compare/status.js';", legacy)
         self.assertIn("from '../compare/mosaic.js';", legacy)
@@ -3938,6 +3941,9 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("export function createCompareActionController", compare_action_controller)
         self.assertIn("from './actions.js';", compare_action_controller)
         self.assertIn("postComparisonImpl", compare_action_controller)
+        self.assertIn("export function createMosaicActionController", compare_mosaic_action_controller)
+        self.assertIn("from './mosaic.js';", compare_mosaic_action_controller)
+        self.assertIn("postMosaicPickImpl", compare_mosaic_action_controller)
         self.assertIn("export function buildComparisonPayload", compare_actions)
         self.assertIn("export async function postComparison", compare_actions)
         self.assertIn("export function applyComparisonElos", compare_actions)
@@ -5504,6 +5510,263 @@ assert.equal(await controller.undoComparison(), false);
 assert.deepEqual(events, [
     ['undoCount', 4],
     ['toast', 'Maximum undo reached'],
+]);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_mosaic_action_controller_node_probe_preserves_pick_and_rollback_flow(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createMosaicActionController } from './static/js/compare/mosaic_action_controller.js';
+
+function makeCell() {
+    const imgEl = {
+        dataset: {},
+        src: '',
+        alt: '',
+        classList: {
+            added: [],
+            add(value) {
+                this.added.push(value);
+            },
+        },
+    };
+    return {
+        dataset: {},
+        clientHeight: 260,
+        onclick: null,
+        imgEl,
+        classList: {
+            added: [],
+            removed: [],
+            add(value) {
+                this.added.push(value);
+            },
+            remove(value) {
+                this.removed.push(value);
+            },
+        },
+        querySelector(selector) {
+            return selector === 'img' ? imgEl : null;
+        },
+    };
+}
+
+let mosaicBusy = false;
+let undoCount = 1;
+let mosaicActionSeq = 0;
+let mosaicImages = [
+    { id: 1, filename: 'one.jpg', thumb_url: '/one.jpg' },
+    { id: 2, filename: 'two.jpg', thumb_url: '/two.jpg' },
+    { id: 3, filename: 'three.jpg', thumb_url: '/three.jpg' },
+];
+let mosaicAge = [0, 11, 4];
+let mosaicReplacements = [
+    { id: 4, filename: 'four.jpg', thumb_url: '/four.jpg' },
+    { id: 5, filename: 'five.jpg', thumb_url: '/five.jpg' },
+];
+let mosaicRenderToken = 17;
+let mosaicPropagationCounts = { 1: 2 };
+let compareStats = { visible: 3 };
+let cells = [makeCell(), makeCell(), makeCell()];
+const events = [];
+
+const controller = createMosaicActionController({
+    getMosaicBusy: () => mosaicBusy,
+    setMosaicBusy: (busy) => {
+        mosaicBusy = busy;
+        events.push(['busy', busy]);
+    },
+    setUndoCount: (count) => {
+        undoCount = count;
+        events.push(['undoCount', count]);
+    },
+    incrementMosaicActionSeq: () => {
+        mosaicActionSeq += 1;
+        events.push(['seq', mosaicActionSeq]);
+        return mosaicActionSeq;
+    },
+    getMosaicActionSeq: () => mosaicActionSeq,
+    getMosaicImages: () => mosaicImages,
+    setMosaicImages: (images) => {
+        mosaicImages = images;
+        events.push(['setImages', images.map((img) => img.id)]);
+    },
+    getMosaicAge: () => mosaicAge,
+    setMosaicAge: (age) => {
+        mosaicAge = age;
+        events.push(['setAge', [...age]]);
+    },
+    getMosaicReplacements: () => mosaicReplacements,
+    setMosaicReplacements: (replacements) => {
+        mosaicReplacements = replacements;
+        events.push(['setReplacements', replacements.map((img) => img.id)]);
+    },
+    getMosaicRenderToken: () => mosaicRenderToken,
+    getMosaicPropagationCounts: () => mosaicPropagationCounts,
+    setMosaicPropagationCounts: (counts) => {
+        mosaicPropagationCounts = counts;
+        events.push(['setPropagationCounts', { ...counts }]);
+    },
+    getCompareStats: () => compareStats,
+    setCompareStats: (stats) => {
+        compareStats = stats;
+        events.push(['setStats', { ...stats }]);
+    },
+    queryMosaicCells: () => cells,
+    scheduleMosaicImageUpgrade: (_cell, img, height, token, index) => {
+        events.push(['upgrade', img.id, height, token, index]);
+    },
+    mosaicFillReplacements: () => events.push(['fill']),
+    precomputePropagation: () => events.push(['precompute']),
+    bumpRankingSignals: (signalDelta, directDelta) => events.push(['bump', signalDelta, directDelta]),
+    updateCompareProgress: () => events.push(['progress']),
+    fetchPropagationCount: (count) => events.push(['fetchPropagation', count]),
+    showPropagationBadge: (count) => events.push(['badge', count]),
+    renderMosaic: () => events.push(['render']),
+    showToast: (message) => events.push(['toast', message]),
+    showCompareEmpty: () => events.push(['empty']),
+    replacementLowWater: 2,
+    postMosaicPickImpl: async (winnerId, loserIds) => {
+        events.push(['post', winnerId, loserIds]);
+        return { ok: true };
+    },
+});
+
+assert.equal(controller.mosaicClick(1), true);
+await Promise.resolve();
+assert.equal(mosaicBusy, false);
+assert.equal(undoCount, 0);
+assert.deepEqual(mosaicImages.map((img) => img.id), [4, 5, 3]);
+assert.deepEqual(mosaicAge, [0, 0, 5]);
+assert.deepEqual(mosaicReplacements, []);
+assert.equal(cells[0].dataset.id, 4);
+assert.equal(cells[0].imgEl.src, '/four.jpg');
+assert.equal(cells[0].imgEl.alt, 'four.jpg');
+assert.deepEqual(events, [
+    ['busy', true],
+    ['undoCount', 0],
+    ['seq', 1],
+    ['post', 1, [2, 3]],
+    ['bump', 4, 2],
+    ['progress'],
+    ['badge', 2],
+    ['fill'],
+    ['upgrade', 4, 260, 17, 0],
+    ['fill'],
+    ['upgrade', 5, 260, 17, 1],
+    ['fill'],
+    ['busy', false],
+    ['fill'],
+    ['precompute'],
+]);
+
+events.length = 0;
+mosaicBusy = false;
+undoCount = 1;
+mosaicActionSeq = 0;
+mosaicImages = [
+    { id: 10, filename: 'ten.jpg', thumb_url: '/ten.jpg' },
+    { id: 11, filename: 'eleven.jpg', thumb_url: '/eleven.jpg' },
+];
+mosaicAge = [0, 0];
+mosaicReplacements = [
+    { id: 12, filename: 'twelve.jpg', thumb_url: '/twelve.jpg' },
+];
+mosaicRenderToken = 22;
+mosaicPropagationCounts = {};
+compareStats = { visible: 2 };
+cells = [makeCell(), makeCell()];
+
+const failingController = createMosaicActionController({
+    getMosaicBusy: () => mosaicBusy,
+    setMosaicBusy: (busy) => {
+        mosaicBusy = busy;
+        events.push(['busy', busy]);
+    },
+    setUndoCount: (count) => {
+        undoCount = count;
+        events.push(['undoCount', count]);
+    },
+    incrementMosaicActionSeq: () => {
+        mosaicActionSeq += 1;
+        events.push(['seq', mosaicActionSeq]);
+        return mosaicActionSeq;
+    },
+    getMosaicActionSeq: () => mosaicActionSeq,
+    getMosaicImages: () => mosaicImages,
+    setMosaicImages: (images) => {
+        mosaicImages = images;
+        events.push(['setImages', images.map((img) => img.id)]);
+    },
+    getMosaicAge: () => mosaicAge,
+    setMosaicAge: (age) => {
+        mosaicAge = age;
+        events.push(['setAge', [...age]]);
+    },
+    getMosaicReplacements: () => mosaicReplacements,
+    setMosaicReplacements: (replacements) => {
+        mosaicReplacements = replacements;
+        events.push(['setReplacements', replacements.map((img) => img.id)]);
+    },
+    getMosaicRenderToken: () => mosaicRenderToken,
+    getMosaicPropagationCounts: () => mosaicPropagationCounts,
+    setMosaicPropagationCounts: (counts) => {
+        mosaicPropagationCounts = counts;
+        events.push(['setPropagationCounts', { ...counts }]);
+    },
+    getCompareStats: () => compareStats,
+    setCompareStats: (stats) => {
+        compareStats = stats;
+        events.push(['setStats', { ...stats }]);
+    },
+    queryMosaicCells: () => cells,
+    scheduleMosaicImageUpgrade: (_cell, img, height, token, index) => {
+        events.push(['upgrade', img.id, height, token, index]);
+    },
+    mosaicFillReplacements: () => events.push(['fill']),
+    precomputePropagation: () => events.push(['precompute']),
+    bumpRankingSignals: (signalDelta, directDelta) => events.push(['bump', signalDelta, directDelta]),
+    updateCompareProgress: () => events.push(['progress']),
+    fetchPropagationCount: (count) => events.push(['fetchPropagation', count]),
+    showPropagationBadge: (count) => events.push(['badge', count]),
+    renderMosaic: () => events.push(['render']),
+    showToast: (message) => events.push(['toast', message]),
+    showCompareEmpty: () => events.push(['empty']),
+    postMosaicPickImpl: async () => ({ ok: false }),
+});
+
+assert.equal(failingController.mosaicClick(10), true);
+await Promise.resolve();
+assert.deepEqual(mosaicImages.map((img) => img.id), [10, 11]);
+assert.deepEqual(mosaicAge, [0, 0]);
+assert.deepEqual(mosaicReplacements.map((img) => img.id), [12]);
+assert.deepEqual(events, [
+    ['busy', true],
+    ['undoCount', 0],
+    ['seq', 1],
+    ['bump', 1, 1],
+    ['progress'],
+    ['fill'],
+    ['upgrade', 12, 260, 22, 0],
+    ['fill'],
+    ['busy', false],
+    ['setImages', [10, 11]],
+    ['setAge', [0, 0]],
+    ['setReplacements', [12]],
+    ['setStats', { visible: 2 }],
+    ['setPropagationCounts', {}],
+    ['render'],
+    ['progress'],
+    ['toast', 'Failed to save pick; restored the previous grid'],
 ]);
 """
         subprocess.run(
