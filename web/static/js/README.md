@@ -130,3 +130,13 @@ stats handoff.
 
 Future extractions should move code out of `legacy/app.js` into feature folders
 here while keeping the same `window.PhotoArchive.*` methods available.
+
+## Browser Smoke Boundary
+
+`scripts/photoarchive-browser-smoke` is the live browser acceptance gate for the
+no-build frontend. Its `SMOKE_WORKFLOW_CONTRACT` maps the goal-level smoke
+workflows to concrete page selectors and public `window.PhotoArchive` methods:
+Settings, Catalog, People, Library, Compare/Mosaic, Loupe, Filters, Search,
+Export, Cache Status, and AI Status. The smoke run still avoids destructive
+actions; it proves that the page shells, compatibility API, static modules, and
+AI status polling surface are wired in the running app.

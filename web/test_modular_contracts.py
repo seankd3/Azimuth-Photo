@@ -6158,6 +6158,35 @@ assert.deepEqual(loadingEvents.slice(-2), [['set', 2], ['cancel-clear']]);
         self.assertIsNotNone(required_block)
         smoke_required = set(re.findall(r'"([A-Za-z_$][A-Za-z0-9_$]*)"', required_block.group(1)))
         self.assertIn('"/rankings"', smoke_script)
+        workflow_block = re.search(r"const SMOKE_WORKFLOW_CONTRACT = \[(.*?)\];", smoke_script, re.DOTALL)
+        self.assertIsNotNone(workflow_block)
+        workflow_contract = workflow_block.group(1)
+        workflow_names = set(re.findall(r'name: "([^"]+)"', workflow_contract))
+        goal_workflows = {
+            "Settings",
+            "People",
+            "Library",
+            "Compare/Mosaic",
+            "Loupe",
+            "Filters",
+            "Search",
+            "Export",
+            "Cache Status",
+            "AI Status",
+        }
+        self.assertFalse(
+            goal_workflows - workflow_names,
+            f"Browser smoke workflow contract missing goal workflows: {sorted(goal_workflows - workflow_names)}",
+        )
+        workflow_api = set()
+        for api_block in re.findall(r"api: \[(.*?)\]", workflow_contract, re.DOTALL):
+            workflow_api.update(re.findall(r'"([A-Za-z_$][A-Za-z0-9_$]*)"', api_block))
+        missing_required_api = sorted(workflow_api - smoke_required)
+        self.assertFalse(
+            missing_required_api,
+            f"Workflow contract API is not in REQUIRED_API: {missing_required_api}",
+        )
+        self.assertIn("workflowProbeExpression", smoke_script)
 
         legacy_return_start = legacy.rfind("    return {")
         self.assertGreater(legacy_return_start, -1)

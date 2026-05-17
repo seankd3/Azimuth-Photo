@@ -110,6 +110,91 @@ const AI_STATUS_FIELD_SELECTORS = {
         "#ai-panel-predictions-text",
     ],
 };
+const SMOKE_WORKFLOW_CONTRACT = [
+    {
+        name: "Settings",
+        pagePaths: ["/", "/settings"],
+        selectors: ["#settings-form", "#settings-status", "#settings-bar"],
+        api: ["initSettings", "saveSettings", "resetSettings"],
+    },
+    {
+        name: "Catalog",
+        pagePaths: ["/catalog"],
+        selectors: ["#settings-form", "#catalog-source-list", "#scan-folder"],
+        api: ["startScan", "addCatalogSource", "rescanCatalogSource"],
+    },
+    {
+        name: "People",
+        pagePaths: ["/people"],
+        selectors: ["#people-status-line", "#people-most-seen", "#people-needs-review"],
+        api: ["initPeople", "labelPerson", "filterLibraryByPerson"],
+    },
+    {
+        name: "Library",
+        pagePaths: ["/library", "/rankings"],
+        selectors: ["#rankings-grid", "#library-bar", "#sort-field", "#sort-dir-btn"],
+        api: ["initLibrary", "initRankings", "setRankingsSort", "setSortField", "toggleSortDir"],
+    },
+    {
+        name: "Compare/Mosaic",
+        pagePaths: ["/compare"],
+        selectors: ["#compare-bar", "#mosaic-grid", "#mode-mosaic", "#strategy-diverse"],
+        api: ["initCompare", "setCompareMode", "setMosaicStrategy", "mosaicShuffle"],
+    },
+    {
+        name: "Loupe",
+        pagePaths: ["/library", "/rankings"],
+        selectors: ["#loupe", "#loupe-img", "#filmstrip"],
+        api: ["openLightboxById", "closeLightbox", "lightboxNext", "lightboxPrev"],
+    },
+    {
+        name: "Filters",
+        pagePaths: ["/library", "/rankings", "/compare"],
+        selectors: ["#metadata-filter-btn", "#metadata-filter-panel", "#filter-folder", "#thumb-size"],
+        api: ["setFilter", "toggleMetadataFilters", "toggleFilter", "toggleStar", "setThumbSize"],
+    },
+    {
+        name: "Search",
+        pagePaths: ["/library", "/rankings", "/compare"],
+        selectors: ["#search-input", "#search-clear", "#deep-search-btn"],
+        api: ["clearSearch", "runDeepSearch", "findSimilar"],
+    },
+    {
+        name: "Export",
+        pagePaths: ["/library", "/rankings"],
+        selectors: [".bar-export"],
+        api: ["exportRankings", "batchExport", "toggleBatchMode", "clearBatchSelection"],
+    },
+    {
+        name: "Cache Status",
+        pagePaths: ["/", "/settings"],
+        selectors: [
+            "#cache-tier-guide",
+            "#cache-health-title",
+            "#cache-tier-table",
+            "#cache-stats-inline",
+            "#cache-pregen-summary",
+        ],
+        api: [
+            "applyRecommendedCache",
+            "clearThumbnailCache",
+            "startCachePregeneration",
+            "stopCachePregeneration",
+        ],
+    },
+    {
+        name: "AI Status",
+        pagePaths: ["/", "/settings", "/library", "/rankings", "/compare"],
+        api: ["installAIModel", "pauseEmbeddings", "resumeEmbeddings"],
+        pageSelectors: {
+            "/": ["#model-install-status", "#fast-index-status", "#deep-search-worker-status"],
+            "/settings": ["#model-install-status", "#fast-index-status", "#deep-search-worker-status"],
+            "/library": ["#bar-ai", "#ai-embed-count", "#ai-model-state"],
+            "/rankings": ["#bar-ai", "#ai-embed-count", "#ai-model-state"],
+            "/compare": ["#bar-ai", "#ai-embed-count", "#ai-model-state", "#ai-panel"],
+        },
+    },
+];
 const VISIBLE_PAGE_STATE_SCRIPT = `(() => {
     const defineGetter = (target, property, value) => {
         try {
@@ -713,6 +798,38 @@ function readinessExpression(pagePath) {
     })()`;
 }
 
+function workflowProbeExpression(pagePath) {
+    return `(() => {
+        const pagePath = ${JSON.stringify(pagePath)};
+        const workflows = ${JSON.stringify(SMOKE_WORKFLOW_CONTRACT)}.filter((workflow) => (
+            (workflow.pagePaths || []).includes(pagePath)
+        ));
+        const api = window.PhotoArchive || {};
+        const missing = [];
+        for (const workflow of workflows) {
+            const selectors = [
+                ...(workflow.selectors || []),
+                ...((workflow.pageSelectors || {})[pagePath] || []),
+            ];
+            const missingSelectors = selectors.filter((selector) => !document.querySelector(selector));
+            if (missingSelectors.length) {
+                missing.push(\`\${workflow.name} selectors: \${missingSelectors.join(", ")}\`);
+            }
+            const missingApi = (workflow.api || []).filter((name) => typeof api[name] !== "function");
+            if (missingApi.length) {
+                missing.push(\`\${workflow.name} API: \${missingApi.join(", ")}\`);
+            }
+        }
+        if (missing.length) {
+            throw new Error("smoke workflow contract failed: " + missing.join("; "));
+        }
+        return {
+            workflowNames: workflows.map((workflow) => workflow.name),
+            checked: workflows.length,
+        };
+    })()`;
+}
+
 function formatAIStatusResponses(responses) {
     if (!responses.length) {
         return "none";
@@ -963,6 +1080,15 @@ async function smokePage(cdp, baseUrl, pagePath) {
         await delay(400);
         if (issues.length) {
             throw new Error(issues.join("\n"));
+        }
+        const workflowProbe = await evaluate(
+            cdp,
+            sessionId,
+            workflowProbeExpression(pagePath),
+            `${pagePath} workflow probe`
+        );
+        if (workflowProbe?.checked) {
+            console.log(`workflow ok: ${pagePath} (${workflowProbe.workflowNames.join(", ")})`);
         }
         if (AI_STATUS_PAGE_PATHS.has(pagePath)) {
             await nudgeAIStatusPoller(cdp, sessionId, pagePath);
