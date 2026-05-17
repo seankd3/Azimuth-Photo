@@ -36,7 +36,6 @@ from features.export import routes as export_routes
 from features.library import routes as library_routes
 from features.library import service as library_service
 from features.media import warm as media_warm
-from features.search import routes as search_routes
 from features.search import service as search_service
 
 
@@ -245,14 +244,6 @@ api_stats = library_routes.api_stats
 
 _collections_cache = search_service._collections_cache
 _duplicates_cache = search_service._duplicates_cache
-
-api_search = search_routes.api_search
-api_similar = search_routes.api_similar
-api_duplicates = search_routes.api_duplicates
-api_exif = search_routes.api_exif
-api_collections = search_routes.api_collections
-_exif_cache = search_routes._exif_cache
-
 
 _lifecycle = _app_shell.lifecycle
 if _lifecycle is None:

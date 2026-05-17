@@ -2366,6 +2366,17 @@ class ModularContractTests(unittest.TestCase):
             self.assertNotIn("import db", contents)
             self.assertNotIn("db.", contents)
 
+        drained_names = (
+            "api_search",
+            "api_similar",
+            "api_duplicates",
+            "api_exif",
+            "api_collections",
+            "_exif_cache",
+        )
+        for name in drained_names:
+            self.assertFalse(hasattr(app_module, name), name)
+
         config_names = (
             "_api_rankings",
             "_visible_embedding_page",
