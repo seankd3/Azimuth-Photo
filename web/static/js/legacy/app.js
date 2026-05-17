@@ -75,6 +75,7 @@ import {
     findMosaicCellInDirection as findMosaicCellInDirectionCore,
     selectMosaicCell as selectMosaicCellCore,
 } from '../compare/navigation.js';
+import { createCompareKeyboardHandler } from '../compare/keyboard.js';
 import {
     adoptCompareTier as adoptCompareTierCore,
     renderCompareImage as renderCompareImageCore,
@@ -887,61 +888,6 @@ const legacyPhotoArchive = (() => {
         }
     }
 
-    function handleCompareKey(e) {
-        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-
-        if (e.key === 'Tab') {
-            e.preventDefault();
-            window.location.href = '/library';
-            return;
-        }
-
-        if (compareMode === 'mosaic') {
-            const cells = document.querySelectorAll('.mosaic-cell');
-            if (!cells.length) return;
-
-            if (e.key === 'ArrowRight' || e.key === 'ArrowLeft' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-                e.preventDefault();
-                if (selectedMosaicIndex < 0) {
-                    selectMosaicCell(0, cells);
-                    return;
-                }
-                if (e.key === 'ArrowRight') {
-                    selectMosaicCell(Math.min(selectedMosaicIndex + 1, cells.length - 1), cells);
-                } else if (e.key === 'ArrowLeft') {
-                    selectMosaicCell(Math.max(selectedMosaicIndex - 1, 0), cells);
-                } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-                    const target = findMosaicCellInDirection(cells, selectedMosaicIndex, e.key === 'ArrowDown' ? 1 : -1);
-                    selectMosaicCell(target, cells);
-                }
-            } else if (e.key === 'Enter' && selectedMosaicIndex >= 0 && selectedMosaicIndex < mosaicImages.length) {
-                e.preventDefault();
-                const keepIdx = selectedMosaicIndex;
-                mosaicClick(mosaicImages[selectedMosaicIndex].id);
-                // Re-select after swap animation so the cursor stays in place
-                setTimeout(() => {
-                    const cells = document.querySelectorAll('.mosaic-cell');
-                    if (keepIdx < cells.length) selectMosaicCell(keepIdx, cells);
-                }, 200);
-            } else if (e.key === 'Escape' && selectedMosaicIndex >= 0) {
-                e.preventDefault();
-                deselectMosaicCell(cells);
-            }
-            if (e.key === 'ArrowUp' && selectedMosaicIndex < 0) {
-                e.preventDefault();
-                undoComparison();
-            }
-            return;
-        }
-
-        // Swiss/A-B mode
-        switch (e.key) {
-            case 'ArrowLeft': submitComparison('left'); break;
-            case 'ArrowRight': submitComparison('right'); break;
-            case 'ArrowUp': undoComparison(); break;
-        }
-    }
-
     function selectMosaicCell(index, cells) {
         const selected = selectMosaicCellCore(index, cells);
         if (selected !== null) selectedMosaicIndex = selected;
@@ -954,6 +900,18 @@ const legacyPhotoArchive = (() => {
     function findMosaicCellInDirection(cells, currentIdx, direction) {
         return findMosaicCellInDirectionCore(cells, currentIdx, direction);
     }
+
+    const handleCompareKey = createCompareKeyboardHandler({
+        getCompareMode: () => compareMode,
+        getSelectedMosaicIndex: () => selectedMosaicIndex,
+        getMosaicImages: () => mosaicImages,
+        selectMosaicCell,
+        deselectMosaicCell,
+        findMosaicCellInDirection,
+        mosaicClick,
+        undoComparison,
+        submitComparison,
+    });
 
     function setCompareMode(mode) {
         clearWarmups();

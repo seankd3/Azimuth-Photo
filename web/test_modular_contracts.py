@@ -3682,6 +3682,8 @@ class ModularContractTests(unittest.TestCase):
             compare_query = fh.read()
         with open(os.path.join(base_dir, "static", "js", "compare", "navigation.js"), encoding="utf-8") as fh:
             compare_navigation = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "compare", "keyboard.js"), encoding="utf-8") as fh:
+            compare_keyboard = fh.read()
         with open(os.path.join(base_dir, "static", "js", "compare", "images.js"), encoding="utf-8") as fh:
             compare_images = fh.read()
         with open(os.path.join(base_dir, "static", "js", "compare", "view.js"), encoding="utf-8") as fh:
@@ -3788,6 +3790,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../compare/propagation.js';", legacy)
         self.assertIn("from '../compare/status.js';", legacy)
         self.assertIn("from '../compare/mosaic.js';", legacy)
+        self.assertIn("from '../compare/keyboard.js';", legacy)
         self.assertIn("from '../loupe/tiers.js';", legacy)
         self.assertIn("from '../loupe/loading.js';", legacy)
         self.assertIn("from '../loupe/status.js';", legacy)
@@ -3887,6 +3890,9 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("export function selectMosaicCell", compare_navigation)
         self.assertIn("export function deselectMosaicCell", compare_navigation)
         self.assertIn("export function findMosaicCellInDirection", compare_navigation)
+        self.assertIn("export function createCompareKeyboardHandler", compare_keyboard)
+        self.assertIn("getSelectedMosaicIndex", compare_keyboard)
+        self.assertIn("submitComparison('left')", compare_keyboard)
         self.assertIn("export function renderCompareImage", compare_images)
         self.assertIn("export async function upgradeCompareImage", compare_images)
         self.assertIn("export async function adoptCompareTier", compare_images)
@@ -4299,6 +4305,109 @@ assert.deepEqual(controller.selectedImageIds(), []);
 assert.equal(cards[0].classList.contains('selected'), false);
 assert.equal(cards[0].classList.contains('selectable'), false);
 assert.equal(batchBar, null);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_compare_keyboard_node_probe_preserves_navigation_flow(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createCompareKeyboardHandler } from './static/js/compare/keyboard.js';
+
+const cells = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+const images = [{ id: 7 }, { id: 8 }, { id: 9 }];
+let selected = -1;
+let mode = 'mosaic';
+const events = [];
+const timers = [];
+const windowImpl = { location: { href: '' } };
+const documentImpl = {
+    querySelectorAll(selector) {
+        return selector === '.mosaic-cell' ? cells : [];
+    },
+};
+const handler = createCompareKeyboardHandler({
+    documentImpl,
+    windowImpl,
+    setTimeoutImpl: (fn, ms) => timers.push({ fn, ms }),
+    getCompareMode: () => mode,
+    getSelectedMosaicIndex: () => selected,
+    getMosaicImages: () => images,
+    selectMosaicCell: (index, nextCells) => {
+        assert.equal(nextCells, cells);
+        selected = index;
+        events.push(['select', index]);
+    },
+    deselectMosaicCell: (nextCells) => {
+        assert.equal(nextCells, cells);
+        selected = -1;
+        events.push(['deselect']);
+    },
+    findMosaicCellInDirection: (_cells, current, direction) => current + direction,
+    mosaicClick: (id) => events.push(['pick', id]),
+    undoComparison: () => events.push(['undo']),
+    submitComparison: (side) => events.push(['submit', side]),
+});
+
+function key(name, tagName = 'DIV') {
+    let prevented = false;
+    return {
+        key: name,
+        target: { tagName },
+        preventDefault: () => { prevented = true; },
+        get prevented() { return prevented; },
+    };
+}
+
+const inputEvent = key('ArrowRight', 'INPUT');
+handler(inputEvent);
+assert.equal(inputEvent.prevented, false);
+assert.deepEqual(events, []);
+
+const tabEvent = key('Tab');
+handler(tabEvent);
+assert.equal(tabEvent.prevented, true);
+assert.equal(windowImpl.location.href, '/library');
+
+const firstArrow = key('ArrowRight');
+handler(firstArrow);
+assert.equal(firstArrow.prevented, true);
+assert.deepEqual(events.at(-1), ['select', 0]);
+
+const downArrow = key('ArrowDown');
+handler(downArrow);
+assert.equal(downArrow.prevented, true);
+assert.deepEqual(events.at(-1), ['select', 1]);
+
+const enterEvent = key('Enter');
+handler(enterEvent);
+assert.equal(enterEvent.prevented, true);
+assert.deepEqual(events.at(-1), ['pick', 8]);
+assert.equal(timers[0].ms, 200);
+timers[0].fn();
+assert.deepEqual(events.at(-1), ['select', 1]);
+
+const escapeEvent = key('Escape');
+handler(escapeEvent);
+assert.equal(escapeEvent.prevented, true);
+assert.deepEqual(events.at(-1), ['deselect']);
+
+mode = 'swiss';
+const leftEvent = key('ArrowLeft');
+handler(leftEvent);
+assert.equal(leftEvent.prevented, false);
+assert.deepEqual(events.at(-1), ['submit', 'left']);
+
+const undoEvent = key('ArrowUp');
+handler(undoEvent);
+assert.deepEqual(events.at(-1), ['undo']);
 """
         subprocess.run(
             ["node", "--input-type=module", "-e", script],
