@@ -120,6 +120,7 @@ import {
     updateLoupeZoomIndicator as updateLoupeZoomIndicatorCore,
 } from '../loupe/zoom.js';
 import { initLoupeInteraction as initLoupeInteractionCore } from '../loupe/interaction.js';
+import { createLoupeNavigationController } from '../loupe/navigation.js';
 import {
     SORT_KEYS,
     sortValueForState,
@@ -1439,22 +1440,11 @@ const legacyPhotoArchive = (() => {
     }
 
     function openLightbox(img) {
-        lightboxIndex = libraryImages.findIndex(i => i.id === img.id);
-        if (lightboxIndex < 0) {
-            openStandaloneLightbox(img);
-            return;
-        }
-        loupeStandaloneImage = null;
-        updateFilmstripCounter();
-        buildFilmstrip();
-        showLoupeImage(libraryImages[lightboxIndex], 0);
+        return loupeNavigationController.openLightbox(img);
     }
 
     function openStandaloneLightbox(img) {
-        loupeStandaloneImage = img;
-        lightboxIndex = -1;
-        clearFilmstrip();
-        showLoupeImage(img, 0);
+        return loupeNavigationController.openStandaloneLightbox(img);
     }
 
     function clearFilmstrip() {
@@ -1490,6 +1480,20 @@ const legacyPhotoArchive = (() => {
             },
         });
     }
+
+    const loupeNavigationController = createLoupeNavigationController({
+        getLibraryImages: () => libraryImages,
+        getLightboxIndex: () => lightboxIndex,
+        setLightboxIndex: (index) => { lightboxIndex = index; },
+        getSearchQuery: () => searchQuery,
+        getRankingsExhausted: () => rankingsExhausted,
+        setStandaloneImage: (img) => { loupeStandaloneImage = img; },
+        updateFilmstripCounter,
+        buildFilmstrip,
+        clearFilmstrip,
+        showLoupeImage,
+        loadRankings,
+    });
 
     // Loupe zoom/pan state
     let loupeScale = 1;
@@ -1901,39 +1905,15 @@ const legacyPhotoArchive = (() => {
     }
 
     async function ensureLibraryImageIndex(index) {
-        if (index < libraryImages.length) return true;
-        if (searchQuery === '__similar__') return false;
-        while (index >= libraryImages.length && !rankingsExhausted) {
-            const before = libraryImages.length;
-            const loaded = await loadRankings(false);
-            if (libraryImages.length <= before && !loaded) break;
-        }
-        return index < libraryImages.length;
+        return loupeNavigationController.ensureLibraryImageIndex(index);
     }
 
     function lightboxNext() {
-        if (lightboxIndex < 0) return;
-        const nextIndex = lightboxIndex + 1;
-        if (nextIndex < libraryImages.length) {
-            lightboxIndex = nextIndex;
-            updateFilmstripCounter();
-            showLoupeImage(libraryImages[lightboxIndex], 1);
-            return;
-        }
-        const fromIndex = lightboxIndex;
-        ensureLibraryImageIndex(nextIndex).then((ok) => {
-            if (!ok || lightboxIndex !== fromIndex) return;
-            lightboxIndex = nextIndex;
-            updateFilmstripCounter();
-            showLoupeImage(libraryImages[lightboxIndex], 1);
-        });
+        return loupeNavigationController.lightboxNext();
     }
 
     function lightboxPrev() {
-        if (lightboxIndex <= 0) return;
-        lightboxIndex--;
-        updateFilmstripCounter();
-        showLoupeImage(libraryImages[lightboxIndex], -1);
+        return loupeNavigationController.lightboxPrev();
     }
 
     function closeLightbox() {

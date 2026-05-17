@@ -3873,6 +3873,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../loupe/filmstrip.js';", legacy)
         self.assertIn("from '../loupe/focus.js';", legacy)
         self.assertIn("from '../loupe/zoom.js';", legacy)
+        self.assertIn("from '../loupe/navigation.js';", legacy)
         self.assertIn("from '../library/sort.js';", legacy)
         self.assertIn("from '../library/sort_controller.js';", legacy)
         self.assertIn("from '../library/search_state.js';", legacy)
@@ -4046,6 +4047,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("export function renderLoupeMetadataOverlay", loupe_metadata)
         self.assertIn("export function loupeNeighborOffsets", loupe_navigation)
         self.assertIn("export function loupeHotSetTierIds", loupe_navigation)
+        self.assertIn("export function createLoupeNavigationController", loupe_navigation)
         self.assertIn("export function createLoupeWarmupController", loupe_warmup)
         self.assertIn("from './navigation.js';", loupe_warmup)
         self.assertIn("from './tiers.js';", loupe_warmup)
@@ -4342,6 +4344,141 @@ assert.deepEqual(events, []);
 
 lightboxIndex = -1;
 assert.equal(controller.preloadLoupeNeighbors(), false);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_loupe_navigation_controller_node_probe_preserves_entry_and_step_flow(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createLoupeNavigationController } from './static/js/loupe/navigation.js';
+
+let images = [
+    { id: 1, filename: 'one.jpg' },
+    { id: 2, filename: 'two.jpg' },
+];
+let lightboxIndex = -1;
+let standaloneImage = null;
+let searchQuery = '';
+let rankingsExhausted = true;
+let loadRankingsImpl = async () => 0;
+const events = [];
+
+const controller = createLoupeNavigationController({
+    getLibraryImages: () => images,
+    getLightboxIndex: () => lightboxIndex,
+    setLightboxIndex: (index) => {
+        lightboxIndex = index;
+        events.push(['index', index]);
+    },
+    getSearchQuery: () => searchQuery,
+    getRankingsExhausted: () => rankingsExhausted,
+    setStandaloneImage: (img) => {
+        standaloneImage = img;
+        events.push(['standalone', img?.id ?? null]);
+    },
+    updateFilmstripCounter: () => events.push('counter'),
+    buildFilmstrip: () => events.push('build'),
+    clearFilmstrip: () => events.push('clear'),
+    showLoupeImage: (img, direction) => events.push(['show', img.id, direction]),
+    loadRankings: (...args) => loadRankingsImpl(...args),
+});
+
+controller.openLightbox({ id: 2 });
+assert.equal(lightboxIndex, 1);
+assert.equal(standaloneImage, null);
+assert.deepEqual(events, [
+    ['index', 1],
+    ['standalone', null],
+    'counter',
+    'build',
+    ['show', 2, 0],
+]);
+
+events.length = 0;
+controller.lightboxPrev();
+assert.equal(lightboxIndex, 0);
+assert.deepEqual(events, [
+    ['index', 0],
+    'counter',
+    ['show', 1, -1],
+]);
+
+events.length = 0;
+controller.lightboxNext();
+assert.equal(lightboxIndex, 1);
+assert.deepEqual(events, [
+    ['index', 1],
+    'counter',
+    ['show', 2, 1],
+]);
+
+events.length = 0;
+controller.openLightbox({ id: 99, filename: 'outside.jpg' });
+assert.equal(lightboxIndex, -1);
+assert.equal(standaloneImage.id, 99);
+assert.deepEqual(events, [
+    ['index', -1],
+    ['standalone', 99],
+    ['index', -1],
+    'clear',
+    ['show', 99, 0],
+]);
+
+events.length = 0;
+images = [
+    { id: 1, filename: 'one.jpg' },
+    { id: 2, filename: 'two.jpg' },
+];
+lightboxIndex = 1;
+searchQuery = '';
+rankingsExhausted = false;
+loadRankingsImpl = async (clearFirst) => {
+    events.push(['load', clearFirst]);
+    images.push({ id: 3, filename: 'three.jpg' });
+    return 1;
+};
+controller.lightboxNext();
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.equal(lightboxIndex, 2);
+assert.deepEqual(events, [
+    ['load', false],
+    ['index', 2],
+    'counter',
+    ['show', 3, 1],
+]);
+
+events.length = 0;
+images = [
+    { id: 1, filename: 'one.jpg' },
+    { id: 2, filename: 'two.jpg' },
+];
+lightboxIndex = 1;
+searchQuery = '__similar__';
+rankingsExhausted = false;
+controller.lightboxNext();
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.deepEqual(events, []);
+
+events.length = 0;
+searchQuery = '';
+loadRankingsImpl = async () => {
+    events.push(['load', false]);
+    images.push({ id: 3, filename: 'three.jpg' });
+    lightboxIndex = 0;
+    return 1;
+};
+controller.lightboxNext();
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.equal(lightboxIndex, 0);
+assert.deepEqual(events, [['load', false]]);
 """
         subprocess.run(
             ["node", "--input-type=module", "-e", script],

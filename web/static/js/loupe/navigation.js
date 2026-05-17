@@ -29,3 +29,89 @@ export function loupeHotSetTierIds(images, currentIndex, direction = 0) {
 
     return { md, lg, full };
 }
+
+
+export function createLoupeNavigationController({
+    getLibraryImages = () => [],
+    getLightboxIndex = () => -1,
+    setLightboxIndex = () => {},
+    getSearchQuery = () => '',
+    getRankingsExhausted = () => true,
+    setStandaloneImage = () => {},
+    updateFilmstripCounter = () => {},
+    buildFilmstrip = () => {},
+    clearFilmstrip = () => {},
+    showLoupeImage = () => {},
+    loadRankings = async () => 0,
+} = {}) {
+    async function ensureLibraryImageIndex(index) {
+        if (index < getLibraryImages().length) return true;
+        if (getSearchQuery() === '__similar__') return false;
+        while (index >= getLibraryImages().length && !getRankingsExhausted()) {
+            const before = getLibraryImages().length;
+            const loaded = await loadRankings(false);
+            if (getLibraryImages().length <= before && !loaded) break;
+        }
+        return index < getLibraryImages().length;
+    }
+
+    function openStandaloneLightbox(img) {
+        setStandaloneImage(img);
+        setLightboxIndex(-1);
+        clearFilmstrip();
+        showLoupeImage(img, 0);
+    }
+
+    function openLightbox(img) {
+        const images = getLibraryImages();
+        const index = images.findIndex(i => i.id === img.id);
+        setLightboxIndex(index);
+        if (index < 0) {
+            openStandaloneLightbox(img);
+            return;
+        }
+        setStandaloneImage(null);
+        updateFilmstripCounter();
+        buildFilmstrip();
+        showLoupeImage(images[index], 0);
+    }
+
+    function lightboxNext() {
+        const currentIndex = getLightboxIndex();
+        if (currentIndex < 0) return;
+
+        const nextIndex = currentIndex + 1;
+        const images = getLibraryImages();
+        if (nextIndex < images.length) {
+            setLightboxIndex(nextIndex);
+            updateFilmstripCounter();
+            showLoupeImage(images[nextIndex], 1);
+            return;
+        }
+
+        ensureLibraryImageIndex(nextIndex).then((ok) => {
+            if (!ok || getLightboxIndex() !== currentIndex) return;
+            const nextImages = getLibraryImages();
+            setLightboxIndex(nextIndex);
+            updateFilmstripCounter();
+            showLoupeImage(nextImages[nextIndex], 1);
+        });
+    }
+
+    function lightboxPrev() {
+        const currentIndex = getLightboxIndex();
+        if (currentIndex <= 0) return;
+        const nextIndex = currentIndex - 1;
+        setLightboxIndex(nextIndex);
+        updateFilmstripCounter();
+        showLoupeImage(getLibraryImages()[nextIndex], -1);
+    }
+
+    return {
+        ensureLibraryImageIndex,
+        lightboxNext,
+        lightboxPrev,
+        openLightbox,
+        openStandaloneLightbox,
+    };
+}

@@ -33,7 +33,8 @@ and probe cancellation helpers.
 `loupe/status.js` owns Loupe cache-status text formatting, overlay status-line
 rendering, and tier-loading display.
 `loupe/metadata.js` owns Loupe metadata line assembly and overlay metadata rendering.
-`loupe/navigation.js` owns Loupe neighbor ordering and hot-set tier selection.
+`loupe/navigation.js` owns Loupe list/standalone entry navigation, next/previous
+movement, neighbor ordering, and hot-set tier selection.
 `loupe/warmup.js` owns Loupe neighbor image preloading and hot-set cache warming.
 `loupe/filmstrip.js` owns Loupe filmstrip windowing, thumbnail DOM rendering,
 active-thumb updates, counter text, and centering behavior.
