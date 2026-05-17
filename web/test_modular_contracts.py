@@ -3331,13 +3331,21 @@ class ModularContractTests(unittest.TestCase):
         self.assertTrue(callable(app_wiring.configure_catalog_routes))
         self.assertTrue(callable(app_wiring.configure_library_routes))
         self.assertTrue(callable(app_wiring.configure_search_routes))
+        self.assertTrue(callable(app_wiring.configure_compare_service))
+        self.assertTrue(callable(app_wiring.configure_compare_routes))
+        self.assertTrue(callable(app_wiring.configure_export_routes))
+        self.assertTrue(callable(app_wiring.configure_library_service))
+        self.assertTrue(callable(app_wiring.configure_query_constraints))
+        self.assertTrue(callable(app_wiring.configure_settings_routes))
         with open(os.path.join(os.path.dirname(__file__), "core", "app_factory.py"), encoding="utf-8") as fh:
             app_factory_source = fh.read()
         with open(os.path.join(os.path.dirname(__file__), "core", "wiring.py"), encoding="utf-8") as fh:
             app_wiring_source = fh.read()
         self.assertIn("wiring.configure_database_backed_providers()", app_factory_source)
+        self.assertIn("wiring.configure_compare_service(", app_factory_source)
         self.assertNotIn("def _configure_database_backed_providers", app_factory_source)
         self.assertIn("def configure_database_backed_providers", app_wiring_source)
+        self.assertIn("def configure_compare_service", app_wiring_source)
 
         people_config_names = (
             "_get_people_review",

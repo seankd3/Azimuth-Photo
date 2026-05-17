@@ -271,28 +271,15 @@ def configure_library_service(
     schedule_result_thumbnail_memory_warm: Callable[[list], None],
     rankings_response_cache_ttl_seconds: Callable[[], float],
 ) -> None:
-    import db
-    from features.library import service as library_service
+    from core import wiring
 
-    library_service.configure(
+    wiring.configure_library_service(
         resolve_library_constraints=resolve_library_constraints,
         cache_root=cache_root,
         clamp_int=clamp_int,
         normalize_search_query=normalize_search_query,
         schedule_thumbnail_prefetch=schedule_thumbnail_prefetch,
         schedule_result_thumbnail_memory_warm=schedule_result_thumbnail_memory_warm,
-        extension_search_terms=lambda: db.IMAGE_EXTENSION_SEARCH_TERMS,
-        db_signature=lambda: db.DB_PATH,
-        get_date_groups=lambda **kwargs: db.get_date_groups(**kwargs),
-        get_map_markers=lambda **kwargs: db.get_map_markers(**kwargs),
-        get_filter_options=lambda: db.get_filter_options(),
-        get_stats=lambda: db.get_stats(),
-        count_rankings=lambda **kwargs: db.count_rankings(**kwargs),
-        get_rankings=lambda **kwargs: db.get_rankings(**kwargs),
-        get_visible_pairing_pool_counts=lambda size, cache_root: db.get_visible_pairing_pool_counts(
-            size,
-            cache_root,
-        ),
         rankings_response_cache_ttl_seconds=rankings_response_cache_ttl_seconds,
     )
 
@@ -320,9 +307,9 @@ def configure_settings_routes(
     get_stats: settings_routes.BuildResponse | None = None,
     refresh_source_online_states: settings_routes.AsyncBoolBuilder | None = None,
 ) -> None:
-    import db
+    from core import wiring
 
-    settings_routes.configure(
+    wiring.configure_settings_routes(
         settings_response_cache=settings_response_cache,
         settings_response_cache_ttl_seconds=settings_response_cache_ttl_seconds,
         build_settings_response=build_settings_response,
@@ -330,12 +317,9 @@ def configure_settings_routes(
         track_background_task=track_background_task,
         get_refreshing=get_refreshing,
         set_refreshing=set_refreshing,
-        db_path=db_path or (lambda: db.DB_PATH),
-        get_stats=get_stats or (lambda: db.get_stats()),
-        refresh_source_online_states=(
-            refresh_source_online_states
-            or (lambda: db.refresh_source_online_states())
-        ),
+        db_path=db_path,
+        get_stats=get_stats,
+        refresh_source_online_states=refresh_source_online_states,
         build_cache_status=build_cache_status,
         build_ai_status=build_ai_status,
         people_status_payload=people_status_payload,
@@ -370,39 +354,27 @@ def configure_compare_service(
     get_visible_pairing_pool_counts: Callable[..., Awaitable[dict]] | None = None,
     get_top_images: Callable[..., Awaitable[list]] | None = None,
 ) -> None:
-    import db
-    from features.compare import service as compare_service
+    from core import wiring
 
-    compare_service.configure(
+    wiring.configure_compare_service(
         invalidate_rankings_cache=invalidate_rankings_cache,
         invalidate_interaction_response_cache=invalidate_interaction_response_cache,
         cache_root=cache_root,
         resolve_library_constraints=resolve_library_constraints,
         schedule_thumbnail_prefetch=schedule_thumbnail_prefetch,
         schedule_cached_thumbnail_memory_warm=schedule_cached_thumbnail_memory_warm,
-        db_signature=db_signature or (lambda: db.DB_PATH),
-        get_active_images_for_pairing=get_active_images_for_pairing or (lambda: db.get_active_images_for_pairing()),
-        get_past_matchups=get_past_matchups or (lambda: db.get_past_matchups()),
-        get_visible_past_matchups=get_visible_past_matchups
-        or (lambda size, cache_root: db.get_visible_past_matchups(size, cache_root)),
-        get_past_matchups_for_image_ids=get_past_matchups_for_image_ids
-        or (lambda image_ids: db.get_past_matchups_for_image_ids(image_ids)),
-        get_active_images_by_ids=get_active_images_by_ids or (lambda image_ids: db.get_active_images_by_ids(image_ids)),
-        get_visible_images_for_pairing=get_visible_images_for_pairing
-        or (lambda size, cache_root, **kwargs: db.get_visible_images_for_pairing(size, cache_root, **kwargs)),
-        get_visible_orientation_pairing_pool_counts=get_visible_orientation_pairing_pool_counts
-        or (
-            lambda size, cache_root, orientation: db.get_visible_orientation_pairing_pool_counts(
-                size,
-                cache_root,
-                orientation,
-            )
-        ),
-        count_rankings=count_rankings or (lambda **kwargs: db.count_rankings(**kwargs)),
-        get_rankings=get_rankings or (lambda **kwargs: db.get_rankings(**kwargs)),
-        get_visible_pairing_pool_counts=get_visible_pairing_pool_counts
-        or (lambda size, cache_root: db.get_visible_pairing_pool_counts(size, cache_root)),
-        get_top_images=get_top_images or (lambda **kwargs: db.get_top_images(**kwargs)),
+        db_signature=db_signature,
+        get_active_images_for_pairing=get_active_images_for_pairing,
+        get_past_matchups=get_past_matchups,
+        get_visible_past_matchups=get_visible_past_matchups,
+        get_past_matchups_for_image_ids=get_past_matchups_for_image_ids,
+        get_active_images_by_ids=get_active_images_by_ids,
+        get_visible_images_for_pairing=get_visible_images_for_pairing,
+        get_visible_orientation_pairing_pool_counts=get_visible_orientation_pairing_pool_counts,
+        count_rankings=count_rankings,
+        get_rankings=get_rankings,
+        get_visible_pairing_pool_counts=get_visible_pairing_pool_counts,
+        get_top_images=get_top_images,
     )
 
 
@@ -418,26 +390,16 @@ def configure_compare_routes(
     mosaic_next_handler: compare_routes.NextHandler | None = None,
     compare_next_handler: compare_routes.NextHandler | None = None,
 ) -> None:
-    import db
-    from features.compare import service as compare_service
+    from core import wiring
 
-    compare_routes.configure(
-        patch_pairing_cache=patch_pairing_cache or compare_service.patch_pairing_cache,
-        add_past_matchups=add_past_matchups or compare_service.add_past_matchups,
+    wiring.configure_compare_routes(
+        patch_pairing_cache=patch_pairing_cache,
+        add_past_matchups=add_past_matchups,
         schedule_pairing_propagation=schedule_pairing_propagation,
         invalidate_pairing_cache=invalidate_pairing_cache,
-        record_active_mosaic_pick=record_active_mosaic_pick
-        or (lambda picked_id, other_ids, action_id: db.record_active_mosaic_pick(picked_id, other_ids, action_id)),
-        record_active_comparison=record_active_comparison
-        or (
-            lambda winner_id, loser_id, mode, **kwargs: db.record_active_comparison(
-                winner_id,
-                loser_id,
-                mode,
-                **kwargs,
-            )
-        ),
-        undo_last_comparison=undo_last_comparison or (lambda: db.undo_last_comparison()),
+        record_active_mosaic_pick=record_active_mosaic_pick,
+        record_active_comparison=record_active_comparison,
+        undo_last_comparison=undo_last_comparison,
         mosaic_next_handler=mosaic_next_handler,
         compare_next_handler=compare_next_handler,
     )
@@ -450,28 +412,13 @@ def configure_query_constraints(
     invalidate_ai_status_response_cache: Callable[[], None] | None = None,
     invalidate_settings_response_cache: Callable[[], None] | None = None,
 ) -> None:
-    import db
-    import settings
-    from core import query_constraints
-    from features.settings import status as settings_status
+    from core import wiring
 
-    query_constraints.configure(
-        record_deep_search_query=lambda query: db.record_deep_search_query(query),
-        extension_search_terms=db.IMAGE_EXTENSION_SEARCH_TERMS,
-        invalidate_ai_status_response_cache=(
-            invalidate_ai_status_response_cache or ai_routes.invalidate_ai_status_response_cache
-        ),
-        invalidate_settings_response_cache=(
-            invalidate_settings_response_cache or settings_status.invalidate_settings_response_cache
-        ),
-        metadata_search_image_ids=lambda query: db.metadata_search_image_ids(query),
-        get_deep_search_query_embedding=lambda query, model_key: db.get_deep_search_query_embedding(query, model_key),
-        fast_search_embedding_config=settings.fast_search_embedding_config,
-        get_settings=settings.get_settings,
-        parse_people_ids=db.parse_people_ids,
-        get_people_image_id_filter=lambda people_ids: db.get_people_image_id_filter(people_ids),
+    wiring.configure_query_constraints(
         text_search_resolution_cache_ttl_seconds=text_search_resolution_cache_ttl_seconds,
         deep_search_query_record_cache_ttl_seconds=deep_search_query_record_cache_ttl_seconds,
+        invalidate_ai_status_response_cache=invalidate_ai_status_response_cache,
+        invalidate_settings_response_cache=invalidate_settings_response_cache,
     )
 
 
@@ -480,7 +427,9 @@ def configure_export_routes(
     resolve_library_constraints: export_routes.ResolveLibraryConstraints,
     db_path: export_routes.DbPathProvider,
 ) -> None:
-    export_routes.configure(
+    from core import wiring
+
+    wiring.configure_export_routes(
         resolve_library_constraints=resolve_library_constraints,
         db_path=db_path,
     )
