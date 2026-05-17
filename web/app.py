@@ -31,15 +31,13 @@ from features.library import service as library_service
 
 
 APP_DIR = os.path.dirname(__file__)
-_STARTED_AT = time.time()
-_app_shell = create_app_shell(base_dir=APP_DIR, started_at=_STARTED_AT)
+_app_shell = create_app_shell(base_dir=APP_DIR, started_at=time.time())
 _runtime_services = _app_shell.runtime_services
 if _runtime_services is None:
     raise RuntimeError("App runtime services were not configured")
 app = _app_shell.app
 templates = _app_shell.templates
 
-_BROWSER_IMAGE_EXTENSIONS = thumbnails.BROWSER_ORIGINAL_EXTENSIONS
 _IDLE_ACTIVITY_EXCLUDED_PATHS = _app_shell.idle_activity_excluded_paths
 _background_task_tracker = _app_shell.background_task_tracker
 _BACKGROUND_TASKS = _app_shell.background_tasks
@@ -74,28 +72,20 @@ _text_search_resolution_cache = query_constraints._text_search_resolution_cache
 _deep_search_query_record_cache = query_constraints._deep_search_query_record_cache
 _interaction_response_cache = compare_service._interaction_response_cache
 _visible_pairing_candidates_cache_ttl_seconds = compare_service._visible_pairing_candidates_cache_ttl_seconds
-_patched_pairing_candidates_ttl_seconds = compare_service._patched_pairing_candidates_ttl_seconds
 # Rankings are invalidated explicitly by rating/flag/catalog changes. Keep the
 # idle TTL long so returning to the app does not pay a cold rebuild tax.
 _rankings_response_cache_ttl_seconds = library_service._rankings_response_cache_ttl_seconds
-_text_search_resolution_cache_ttl_seconds = query_constraints._text_search_resolution_cache_ttl_seconds
 _deep_search_query_record_cache_ttl_seconds = query_constraints._deep_search_query_record_cache_ttl_seconds
-_interaction_response_cache_ttl_seconds = compare_service._interaction_response_cache_ttl_seconds
 _SWISS_PAIR_WINDOW = compare_service._SWISS_PAIR_WINDOW
 _FILTERED_SWISS_PAIR_WINDOW = compare_service._FILTERED_SWISS_PAIR_WINDOW
 _FILTERED_MOSAIC_WINDOW = compare_service._FILTERED_MOSAIC_WINDOW
 _MOSAIC_EXPLORE_WINDOW = compare_service._MOSAIC_EXPLORE_WINDOW
-_MOSAIC_DIVERSE_WINDOW = compare_service._MOSAIC_DIVERSE_WINDOW
 
 _get_pairing_images = compare_service.get_pairing_images
-_invalidate_pairing_cache = _runtime_services.invalidate_pairing_cache
 
 _invalidate_rankings_cache = _runtime_services.invalidate_rankings_cache
-_invalidate_image_flag_caches = _runtime_services.invalidate_image_flag_caches
-_deep_search_query_embedding_stored = cache_events.deep_search_query_embedding_stored
 _invalidate_vector_derived_caches = _runtime_services.invalidate_vector_derived_caches
 _embedding_batch_stored = cache_events.embedding_batch_stored
-_invalidate_interaction_response_cache = _runtime_services.invalidate_interaction_response_cache
 
 _get_past_matchups = compare_service.get_past_matchups
 _get_visible_past_matchups = compare_service.get_visible_past_matchups
