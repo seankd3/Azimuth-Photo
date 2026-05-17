@@ -90,10 +90,6 @@ FACET_CACHE_TTL_SECONDS = ranking_repository.FACET_CACHE_TTL_SECONDS
 FILTER_OPTIONS_CACHE_TTL_SECONDS = filter_options_repository.FILTER_OPTIONS_CACHE_TTL_SECONDS
 
 
-def normalize_source_path(path: str) -> str:
-    return catalog_repository.normalize_source_path(path)
-
-
 def active_embedding_config() -> dict:
     return settings.fast_search_embedding_config()
 
@@ -102,20 +98,11 @@ def active_embedding_model_key() -> str:
     return active_embedding_config()["model_key"]
 
 
-def source_display_name(path: str) -> str:
-    return catalog_repository.source_display_name(path)
-
-
-def active_source_join(image_alias: str = "i", source_alias: str = "s") -> str:
-    return catalog_repository.active_source_join(image_alias, source_alias)
-
-
-def active_source_condition(source_alias: str = "s") -> str:
-    return catalog_repository.active_source_condition(source_alias)
-
-
-def active_image_condition(image_alias: str = "i", source_alias: str = "s") -> str:
-    return catalog_repository.active_image_condition(image_alias, source_alias)
+normalize_source_path = catalog_repository.normalize_source_path
+source_display_name = catalog_repository.source_display_name
+active_source_join = catalog_repository.active_source_join
+active_source_condition = catalog_repository.active_source_condition
+active_image_condition = catalog_repository.active_image_condition
 
 
 def _chunked(values: list[int], chunk_size: int = 500):
@@ -225,8 +212,7 @@ def _invalidate_ranking_count_cache():
     rating_repository.invalidate_visible_pairing_pool_counts_cache()
 
 
-def _cache_scope_matches(cache_root: str, size: str, target_root: str | None, target_size: str | None) -> bool:
-    return ranking_repository.cache_scope_matches(cache_root, size, target_root, target_size)
+_cache_scope_matches = ranking_repository.cache_scope_matches
 
 
 def _invalidate_visible_cache_dependent_counts(cache_root: str | None = None, size: str | None = None):
@@ -291,21 +277,9 @@ async def get_db() -> aiosqlite.Connection:
     return await data_connection.open_async(DB_PATH)
 
 
-async def _ensure_catalog_source(conn, path: str, *, included: bool = True, last_scan_at=None):
-    return await catalog_repository.ensure_catalog_source_on_conn(
-        conn,
-        path,
-        included=included,
-        last_scan_at=last_scan_at,
-    )
-
-
-async def _update_source_counts(conn, source_id: int | None = None):
-    await catalog_repository.update_source_counts_on_conn(conn, source_id)
-
-
-async def _refresh_source_online_states_on_conn(conn) -> bool:
-    return await catalog_repository.refresh_source_online_states_on_conn(conn)
+_ensure_catalog_source = catalog_repository.ensure_catalog_source_on_conn
+_update_source_counts = catalog_repository.update_source_counts_on_conn
+_refresh_source_online_states_on_conn = catalog_repository.refresh_source_online_states_on_conn
 
 
 async def _normalize_legacy_image_state(conn):
@@ -318,12 +292,8 @@ async def _migrate_catalog_sources(conn):
         _invalidate_filter_options_cache()
 
 
-async def _table_columns(conn, table: str) -> set[str]:
-    return await data_schema.table_columns(conn, table)
-
-
-async def _schema_is_current(conn) -> bool:
-    return await data_schema.schema_is_current(conn)
+_table_columns = data_schema.table_columns
+_schema_is_current = data_schema.schema_is_current
 
 
 async def _check_embedding_dimension(conn):
@@ -355,8 +325,7 @@ async def _ensure_embedding_model_tables(conn):
     )
 
 
-async def _ensure_embedding_model_row(conn, config: dict):
-    await embedding_repository.ensure_embedding_model_row(conn, config)
+_ensure_embedding_model_row = embedding_repository.ensure_embedding_model_row
 
 
 def normalize_deep_search_query(query: str) -> str:
@@ -429,12 +398,8 @@ async def list_deep_search_queries(config: dict, limit: int = 200) -> list[dict]
     )
 
 
-async def _ensure_metadata_fts(conn):
-    await data_schema.ensure_metadata_fts(conn)
-
-
-async def _apply_schema_and_migrations(conn, *, db_exists: bool):
-    await data_schema.apply_schema_and_migrations(conn, db_exists=db_exists)
+_ensure_metadata_fts = data_schema.ensure_metadata_fts
+_apply_schema_and_migrations = data_schema.apply_schema_and_migrations
 
 
 async def init_db():
@@ -808,8 +773,7 @@ def _invalidate_people_dependent_caches():
     _invalidate_filter_options_cache()
 
 
-def parse_people_ids(value) -> tuple[int, ...]:
-    return people_repository.parse_people_ids(value)
+parse_people_ids = people_repository.parse_people_ids
 
 
 _face_embedding_blob = people_repository._face_embedding_blob
@@ -971,72 +935,10 @@ STAR_THRESHOLDS = ranking_repository.STAR_THRESHOLDS
 IMAGE_EXTENSION_SEARCH_TERMS = ranking_repository.IMAGE_EXTENSION_SEARCH_TERMS
 
 
-def _ranking_filter_parts(
-    orientation: str = "", compared: str = "", min_stars: int = 0,
-    folder: str = "", flag: str = "", date_taken: str = "",
-    file_type: str = "", camera: str = "", lens: str = "",
-    visible_thumb_size: str = "", cache_root: str = "",
-    text_query: str = "",
-    include_source: bool = True,
-) -> tuple[list[str], list]:
-    return ranking_repository.ranking_filter_parts(
-        orientation=orientation,
-        compared=compared,
-        min_stars=min_stars,
-        folder=folder,
-        flag=flag,
-        date_taken=date_taken,
-        file_type=file_type,
-        camera=camera,
-        lens=lens,
-        visible_thumb_size=visible_thumb_size,
-        cache_root=cache_root,
-        text_query=text_query,
-        include_source=include_source,
-    )
-
-
-def _ranking_index_for_query(
-    sort: str,
-    *,
-    orientation: str = "",
-    id_filter: set | None,
-    text_query: str,
-) -> str | None:
-    return ranking_repository.ranking_index_for_query(
-        sort,
-        orientation=orientation,
-        id_filter=id_filter,
-        text_query=text_query,
-    )
-
-
-def _ranking_image_source(
-    sort: str,
-    *,
-    orientation: str = "",
-    id_filter: set | None,
-    text_query: str,
-) -> str:
-    return ranking_repository.ranking_image_source(
-        sort,
-        orientation=orientation,
-        id_filter=id_filter,
-        text_query=text_query,
-    )
-
-
-def _ranking_count_image_source(
-    *,
-    file_type: str = "",
-    id_filter: set | None,
-    text_query: str = "",
-) -> str:
-    return ranking_repository.ranking_count_image_source(
-        file_type=file_type,
-        id_filter=id_filter,
-        text_query=text_query,
-    )
+_ranking_filter_parts = ranking_repository.ranking_filter_parts
+_ranking_index_for_query = ranking_repository.ranking_index_for_query
+_ranking_image_source = ranking_repository.ranking_image_source
+_ranking_count_image_source = ranking_repository.ranking_count_image_source
 
 
 async def get_cached_image_ids(
@@ -1073,8 +975,7 @@ async def get_active_source_id_set() -> frozenset[int]:
     )
 
 
-def _metadata_fts_query(text_query: str) -> str:
-    return metadata_search_repository.metadata_fts_query(text_query)
+_metadata_fts_query = metadata_search_repository.metadata_fts_query
 
 
 async def metadata_search_image_ids(text_query: str, *, max_results: int = 5000) -> set[int] | None:
@@ -1185,60 +1086,8 @@ async def get_rankings(limit: int = 100, offset: int = 0, sort: str = "elo",
     )
 
 
-def _ranking_count_cache_key(
-    orientation: str = "",
-    compared: str = "",
-    min_stars: int = 0,
-    folder: str = "",
-    flag: str = "",
-    date_taken: str = "",
-    file_type: str = "",
-    camera: str = "",
-    lens: str = "",
-    id_filter: set = None,
-    visible_thumb_size: str = "",
-    cache_root: str = "",
-    text_query: str = "",
-):
-    return ranking_repository.ranking_count_cache_key(
-        orientation=orientation,
-        compared=compared,
-        min_stars=min_stars,
-        folder=folder,
-        flag=flag,
-        date_taken=date_taken,
-        file_type=file_type,
-        camera=camera,
-        lens=lens,
-        id_filter=id_filter,
-        visible_thumb_size=visible_thumb_size,
-        cache_root=cache_root,
-        text_query=text_query,
-    )
-
-
-def _facet_cache_key(
-    orientation: str = "", compared: str = "", min_stars: int = 0,
-    folder: str = "", flag: str = "", date_taken: str = "",
-    file_type: str = "", camera: str = "", lens: str = "",
-    visible_thumb_size: str = "", cache_root: str = "",
-    id_filter: set | None = None, text_query: str = "",
-) -> tuple | None:
-    return ranking_repository.facet_cache_key(
-        orientation=orientation,
-        compared=compared,
-        min_stars=min_stars,
-        folder=folder,
-        flag=flag,
-        date_taken=date_taken,
-        file_type=file_type,
-        camera=camera,
-        lens=lens,
-        visible_thumb_size=visible_thumb_size,
-        cache_root=cache_root,
-        id_filter=id_filter,
-        text_query=text_query,
-    )
+_ranking_count_cache_key = ranking_repository.ranking_count_cache_key
+_facet_cache_key = ranking_repository.facet_cache_key
 
 
 async def _count_rankings_uncached(orientation: str = "", compared: str = "", min_stars: int = 0,

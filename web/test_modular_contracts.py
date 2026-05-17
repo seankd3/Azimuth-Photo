@@ -1344,6 +1344,13 @@ class ModularContractTests(unittest.TestCase):
         self.assertTrue(callable(rankings.invalidate_rating_facet_caches))
         self.assertTrue(callable(rankings.invalidate_visible_cache_dependent_counts))
         self.assertTrue(callable(rankings.invalidate_rating_ranking_count_cache))
+        self.assertIs(db._ranking_filter_parts, rankings.ranking_filter_parts)
+        self.assertIs(db._ranking_index_for_query, rankings.ranking_index_for_query)
+        self.assertIs(db._ranking_image_source, rankings.ranking_image_source)
+        self.assertIs(db._ranking_count_image_source, rankings.ranking_count_image_source)
+        self.assertIs(db._ranking_count_cache_key, rankings.ranking_count_cache_key)
+        self.assertIs(db._facet_cache_key, rankings.facet_cache_key)
+        self.assertIs(db._cache_scope_matches, rankings.cache_scope_matches)
         self.assertIs(db._ranking_count_cache, rankings._ranking_count_cache)
         self.assertIs(db._date_groups_cache, rankings._date_groups_cache)
         self.assertIs(db._date_groups_refreshing, rankings._date_groups_refreshing)
@@ -1383,9 +1390,24 @@ class ModularContractTests(unittest.TestCase):
         self.assertTrue(callable(db._apply_schema_and_migrations))
         self.assertTrue(callable(db._normalize_legacy_image_state))
         self.assertTrue(callable(db._migrate_catalog_sources))
+        self.assertIs(db._table_columns, schema.table_columns)
+        self.assertIs(db._schema_is_current, schema.schema_is_current)
+        self.assertIs(db._ensure_metadata_fts, schema.ensure_metadata_fts)
+        self.assertIs(db._apply_schema_and_migrations, schema.apply_schema_and_migrations)
         self.assertIn(("aspect_ratio", "REAL DEFAULT NULL"), schema.IMAGE_COMPAT_COLUMNS)
         self.assertTrue(
             any("idx_comparisons_action_id" in sql for sql in schema.COMPAT_INDEX_SQL)
+        )
+        self.assertIs(db.normalize_source_path, catalog.normalize_source_path)
+        self.assertIs(db.source_display_name, catalog.source_display_name)
+        self.assertIs(db.active_source_join, catalog.active_source_join)
+        self.assertIs(db.active_source_condition, catalog.active_source_condition)
+        self.assertIs(db.active_image_condition, catalog.active_image_condition)
+        self.assertIs(db._ensure_catalog_source, catalog.ensure_catalog_source_on_conn)
+        self.assertIs(db._update_source_counts, catalog.update_source_counts_on_conn)
+        self.assertIs(
+            db._refresh_source_online_states_on_conn,
+            catalog.refresh_source_online_states_on_conn,
         )
         self.assertEqual(db.normalize_source_path("."), catalog.normalize_source_path("."))
         self.assertEqual(db.active_source_condition("src"), catalog.active_source_condition("src"))
@@ -1403,6 +1425,9 @@ class ModularContractTests(unittest.TestCase):
         self.assertEqual(db.CATALOG_CACHE_TTL_SECONDS, catalog.CATALOG_CACHE_TTL_SECONDS)
         self.assertTrue(callable(catalog.folder_source_rows))
         self.assertTrue(callable(catalog.folder_image_filepaths_by_source))
+        self.assertIs(db._metadata_fts_query, metadata_search.metadata_fts_query)
+        self.assertIs(db.parse_people_ids, people.parse_people_ids)
+        self.assertIs(db._ensure_embedding_model_row, embeddings.ensure_embedding_model_row)
         self.assertEqual(db._metadata_fts_query('sun"set'), metadata_search.metadata_fts_query('sun"set'))
 
     def test_filter_options_facade_delegates_with_mutable_db_path(self):
