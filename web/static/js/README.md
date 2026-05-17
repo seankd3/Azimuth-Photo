@@ -36,6 +36,8 @@ active-thumb updates, counter text, and centering behavior.
 Tab focus trapping.
 `loupe/zoom.js` owns Loupe zoom/pan math, image transform writes, and zoom
 indicator text.
+`loupe/interaction.js` owns Loupe mouse drag, click-to-zoom, wheel zoom, and
+resize interaction binding while legacy keeps the page state facade.
 `library/query.js` owns Library rankings query-string construction.
 `library/filters.js` owns Library filter session persistence, URL/session
 restore precedence, DOM application for filter buttons, stars, flags, and

@@ -145,6 +145,7 @@ import {
     loupeComputeFitScale as loupeComputeFitScaleCore,
     updateLoupeZoomIndicator as updateLoupeZoomIndicatorCore,
 } from '../loupe/zoom.js';
+import { initLoupeInteraction as initLoupeInteractionCore } from '../loupe/interaction.js';
 import { rankingQueryString as rankingQueryStringCore } from '../library/query.js';
 import {
     SORT_KEYS,
@@ -1912,8 +1913,6 @@ const legacyPhotoArchive = (() => {
     let loupeNatW = 0;
     let loupeNatH = 0;
     let loupeIsFit = true;
-    let _loupeDragMoved = false;
-    let _loupeDragging = false;
     let loupeZoomMode = 'fit';
     let loupeDisplayedTierRank = -1;
     let loupeImageToken = 0;
@@ -2322,87 +2321,23 @@ const legacyPhotoArchive = (() => {
     }
 
     function initLoupeInteraction() {
-        const wrap = document.getElementById('loupe-image-wrap');
-        const img = document.getElementById('loupe-img');
-        if (!wrap || !img) return;
-
-        // Drag to pan
-        let dragStartX = 0, dragStartY = 0;
-        let dragPanStartX = 0, dragPanStartY = 0;
-
-        wrap.addEventListener('mousedown', (e) => {
-            if (e.button !== 0) return;
-            const img = document.getElementById('loupe-img');
-            if (img) img.style.transition = 'opacity 0.15s';
-            _loupeDragMoved = false;
-            dragStartX = e.clientX;
-            dragStartY = e.clientY;
-            dragPanStartX = loupePanX;
-            dragPanStartY = loupePanY;
-
-            if (!loupeIsFit) {
-                _loupeDragging = true;
-                wrap.style.cursor = 'grabbing';
-                e.preventDefault();
-            }
-        });
-
-        window.addEventListener('mousemove', (e) => {
-            if (!_loupeDragging) return;
-            const dx = e.clientX - dragStartX;
-            const dy = e.clientY - dragStartY;
-            if (Math.abs(dx) > 3 || Math.abs(dy) > 3) _loupeDragMoved = true;
-            loupePanX = dragPanStartX + dx;
-            loupePanY = dragPanStartY + dy;
-            loupeClampPan();
-            loupeApplyTransform();
-        });
-
-        window.addEventListener('mouseup', () => {
-            if (_loupeDragging) {
-                _loupeDragging = false;
-                wrap.style.cursor = loupeIsFit ? 'zoom-in' : 'grab';
-            }
-        });
-
-        // Click to toggle between fit and 1:1
-        wrap.addEventListener('click', (e) => {
-            if (_loupeDragMoved) { _loupeDragMoved = false; return; }
-
-            if (loupeIsFit) {
-                // 1 image pixel == 1 CSS pixel against the current highest-res basis.
-                const targetScale = 1;
-                const img = document.getElementById('loupe-img');
-                requestLoupeFullImage();
-                if (img) img.style.transition = 'transform 0.2s ease-out, opacity 0.15s';
-                loupeZoomTo(targetScale, e.clientX, e.clientY, 'one-to-one');
-                setTimeout(() => { if (img) img.style.transition = 'opacity 0.15s'; }, 200);
-            } else {
-                loupeCenterFit();
-            }
-        });
-
-        // Mouse wheel zoom (centered on cursor)
-        wrap.addEventListener('wheel', (e) => {
-            e.preventDefault();
-            const img = document.getElementById('loupe-img');
-            requestLoupeFullImage();
-            if (img) img.style.transition = 'opacity 0.15s';
-            const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
-            loupeZoomTo(loupeScale * factor, e.clientX, e.clientY, 'custom');
-        }, { passive: false });
-
-        // Recalculate fit on window resize
-        window.addEventListener('resize', () => {
-            if (!loupeNatW) return;
-            loupeFitScale = loupeComputeFitScale();
-            if (loupeIsFit) {
-                loupeCenterFit({ animate: false });
-            } else {
-                loupeClampPan();
-                loupeApplyTransform();
-                updateZoomIndicator();
-            }
+        initLoupeInteractionCore({
+            getPan: () => ({ x: loupePanX, y: loupePanY }),
+            setPan: ({ x, y }) => {
+                loupePanX = x;
+                loupePanY = y;
+            },
+            getScale: () => loupeScale,
+            getNaturalWidth: () => loupeNatW,
+            getIsFit: () => loupeIsFit,
+            setFitScale: (value) => { loupeFitScale = value; },
+            computeFitScale: loupeComputeFitScale,
+            centerFit: loupeCenterFit,
+            zoomTo: loupeZoomTo,
+            clampPan: loupeClampPan,
+            applyTransform: loupeApplyTransform,
+            updateZoomIndicator,
+            requestFullImage: requestLoupeFullImage,
         });
     }
 
