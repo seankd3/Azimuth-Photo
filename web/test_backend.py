@@ -36,6 +36,7 @@ from features.media import routes as media_routes  # noqa: E402
 from features.media import warm as media_warm  # noqa: E402
 from features.people import routes as people_routes  # noqa: E402
 from features.search import routes as search_routes  # noqa: E402
+from features.search import service as search_service  # noqa: E402
 from features.settings import routes as settings_routes  # noqa: E402
 from features.settings import status as settings_status  # noqa: E402
 
@@ -3836,23 +3837,23 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(second_resolution["scores"][second], second_resolution["scores"][first])
 
     async def test_embedding_batch_listener_invalidates_vector_derived_caches(self):
-        app_module._duplicates_cache.update({"key": ("stale",), "data": {"pairs": []}})
-        app_module._collections_cache.update({"key": ("stale",), "data": {"collections": []}})
+        search_service._duplicates_cache.update({"key": ("stale",), "data": {"pairs": []}})
+        search_service._collections_cache.update({"key": ("stale",), "data": {"collections": []}})
         elo_propagation._prediction_cache_key = ("stale",)
         elo_propagation._prediction_cache_counts = {1: 10}
 
         app_module._embedding_batch_stored("model", [1])
 
-        self.assertIsNone(app_module._duplicates_cache["key"])
-        self.assertIsNone(app_module._duplicates_cache["data"])
-        self.assertIsNone(app_module._collections_cache["key"])
-        self.assertIsNone(app_module._collections_cache["data"])
+        self.assertIsNone(search_service._duplicates_cache["key"])
+        self.assertIsNone(search_service._duplicates_cache["data"])
+        self.assertIsNone(search_service._collections_cache["key"])
+        self.assertIsNone(search_service._collections_cache["data"])
         self.assertIsNone(elo_propagation._prediction_cache_key)
         self.assertIsNone(elo_propagation._prediction_cache_counts)
 
     async def test_embedding_model_change_invalidates_vector_derived_caches(self):
-        app_module._duplicates_cache.update({"key": ("stale",), "data": {"pairs": []}})
-        app_module._collections_cache.update({"key": ("stale",), "data": {"collections": []}})
+        search_service._duplicates_cache.update({"key": ("stale",), "data": {"pairs": []}})
+        search_service._collections_cache.update({"key": ("stale",), "data": {"collections": []}})
         elo_propagation._prediction_cache_key = ("stale",)
         elo_propagation._prediction_cache_counts = {1: 10}
 
@@ -3864,10 +3865,10 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             "embed_model_dim": 128,
         }))
 
-        self.assertIsNone(app_module._duplicates_cache["key"])
-        self.assertIsNone(app_module._duplicates_cache["data"])
-        self.assertIsNone(app_module._collections_cache["key"])
-        self.assertIsNone(app_module._collections_cache["data"])
+        self.assertIsNone(search_service._duplicates_cache["key"])
+        self.assertIsNone(search_service._duplicates_cache["data"])
+        self.assertIsNone(search_service._collections_cache["key"])
+        self.assertIsNone(search_service._collections_cache["data"])
         self.assertIsNone(elo_propagation._prediction_cache_key)
         self.assertIsNone(elo_propagation._prediction_cache_counts)
 
@@ -3976,7 +3977,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
         old_get_active_images_by_ids = db.get_active_images_by_ids
         elo_propagation.embed_cache.get_matrix = fake_get_matrix
-        app_module._duplicates_cache.update({"key": None, "data": None})
+        search_service._duplicates_cache.update({"key": None, "data": None})
         first_result = await search_routes.api_duplicates(threshold=0.95, limit=10)
 
         async def fail_get_active_images_by_ids(_ids):
@@ -3987,7 +3988,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             second_result = await search_routes.api_duplicates(threshold=0.95, limit=10)
         finally:
             db.get_active_images_by_ids = old_get_active_images_by_ids
-            app_module._duplicates_cache.update({"key": None, "data": None})
+            search_service._duplicates_cache.update({"key": None, "data": None})
 
         self.assertEqual(first_result, second_result)
         self.assertEqual(first_result["visible_pairs"], 1)

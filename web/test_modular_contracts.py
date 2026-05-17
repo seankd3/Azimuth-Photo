@@ -2275,20 +2275,23 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn(("metadata_updates", "/tmp/catalog-metadata.db", (("metadata", 2),)), calls)
         self.assertEqual(calls.count(("invalidate_filters",)), 2)
 
-    def test_search_service_owns_vector_helpers_with_app_facades(self):
+    def test_search_service_owns_vector_helpers_without_app_facades(self):
         search_service = importlib.import_module("features.search.service")
         cache_events = importlib.import_module("core.cache_events")
         cache_entry_repository = importlib.import_module("data.repositories.cache_entries")
         image_repository = importlib.import_module("data.repositories.images")
 
-        self.assertIs(app_module._visible_embedding_page, search_service.visible_embedding_page)
-        self.assertIs(app_module._duplicates_cache, search_service._duplicates_cache)
-        self.assertIs(app_module._collections_cache, search_service._collections_cache)
+        self.assertTrue(callable(search_service.visible_embedding_page))
+        self.assertIsInstance(search_service._duplicates_cache, dict)
+        self.assertIsInstance(search_service._collections_cache, dict)
+        self.assertFalse(hasattr(app_module, "_visible_embedding_page"))
+        self.assertFalse(hasattr(app_module, "_duplicates_cache"))
+        self.assertFalse(hasattr(app_module, "_collections_cache"))
         self.assertIs(cache_events._duplicates_cache, search_service._duplicates_cache)
         self.assertIs(cache_events._collections_cache, search_service._collections_cache)
 
-        app_module._duplicates_cache.update({"key": ("probe",), "data": {"pairs": []}})
-        app_module._collections_cache.update({"key": ("probe",), "data": {"collections": []}})
+        search_service._duplicates_cache.update({"key": ("probe",), "data": {"pairs": []}})
+        search_service._collections_cache.update({"key": ("probe",), "data": {"collections": []}})
         app_module._invalidate_vector_derived_caches()
         self.assertIsNone(search_service._duplicates_cache["key"])
         self.assertIsNone(search_service._duplicates_cache["data"])
@@ -2331,8 +2334,8 @@ class ModularContractTests(unittest.TestCase):
         self.assertEqual(calls[0][:4], ("cached", "/tmp/photo.db", "sm", "/tmp/cache-root"))
         self.assertEqual(calls[1], ("images", "/tmp/photo.db", (2, 3)))
 
-        app_module._duplicates_cache.update({"key": ("probe",), "data": {"pairs": []}})
-        app_module._collections_cache.update({"key": ("probe",), "data": {"collections": []}})
+        search_service._duplicates_cache.update({"key": ("probe",), "data": {"pairs": []}})
+        search_service._collections_cache.update({"key": ("probe",), "data": {"collections": []}})
         cache_events.invalidate_vector_derived_caches()
         self.assertIsNone(search_service._duplicates_cache["key"])
         self.assertIsNone(search_service._duplicates_cache["data"])

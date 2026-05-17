@@ -28,7 +28,6 @@ from core import cache_events
 from core import query_constraints
 from features.compare import service as compare_service
 from features.library import service as library_service
-from features.search import service as search_service
 
 
 APP_DIR = os.path.dirname(__file__)
@@ -115,9 +114,6 @@ _search_visible_ranked_candidates = compare_service.search_visible_ranked_candid
 _warm_filtered_visible_ranked_candidates = compare_service.warm_filtered_visible_ranked_candidates
 
 
-_visible_embedding_page = search_service.visible_embedding_page
-
-
 _sync_query_constraint_compat_globals = query_constraints.sync_configured_ttls
 _record_deep_search_query = query_constraints.record_configured_deep_search_query
 _normalize_search_query = query_constraints.normalize_search_query
@@ -159,9 +155,6 @@ _compare_next_impl = compare_service.compare_next_impl
 
 _api_rankings_impl = library_service.api_rankings_impl
 
-
-_collections_cache = search_service._collections_cache
-_duplicates_cache = search_service._duplicates_cache
 
 _lifecycle = _app_shell.lifecycle
 if _lifecycle is None:
