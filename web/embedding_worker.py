@@ -12,7 +12,9 @@ import logging
 import os
 import time
 from collections import deque
+from collections.abc import Awaitable, Callable
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any
 
 import numpy as np
 
@@ -21,7 +23,6 @@ _embed_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="embed-gp
 _preload_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="embed-preload")
 
 import ai_models
-import db
 import embed_cache
 import resource_governor
 import settings
@@ -109,6 +110,58 @@ _batch_control = {
     "growth_paused_until": None,
 }
 
+AsyncDictProvider = Callable[..., Awaitable[dict[str, Any]]]
+AsyncIntProvider = Callable[..., Awaitable[int]]
+AsyncListProvider = Callable[..., Awaitable[list[dict[str, Any]]]]
+AsyncNoneProvider = Callable[..., Awaitable[None]]
+_get_deep_search_cache_status: AsyncDictProvider | None = None
+_get_catalog_image_counts: AsyncDictProvider | None = None
+_count_embeddings_for_model: AsyncIntProvider | None = None
+_get_unembedded_images: AsyncListProvider | None = None
+_get_pending_deep_search_queries: AsyncListProvider | None = None
+_store_deep_search_query_embedding: AsyncNoneProvider | None = None
+_store_embeddings_batch: AsyncNoneProvider | None = None
+_get_embedding_count: AsyncIntProvider | None = None
+
+
+def configure(
+    *,
+    get_deep_search_cache_status: AsyncDictProvider | None = None,
+    get_catalog_image_counts: AsyncDictProvider | None = None,
+    count_embeddings_for_model: AsyncIntProvider | None = None,
+    get_unembedded_images: AsyncListProvider | None = None,
+    get_pending_deep_search_queries: AsyncListProvider | None = None,
+    store_deep_search_query_embedding: AsyncNoneProvider | None = None,
+    store_embeddings_batch: AsyncNoneProvider | None = None,
+    get_embedding_count: AsyncIntProvider | None = None,
+) -> None:
+    global _get_deep_search_cache_status, _get_catalog_image_counts
+    global _count_embeddings_for_model, _get_unembedded_images
+    global _get_pending_deep_search_queries, _store_deep_search_query_embedding
+    global _store_embeddings_batch, _get_embedding_count
+    if get_deep_search_cache_status is not None:
+        _get_deep_search_cache_status = get_deep_search_cache_status
+    if get_catalog_image_counts is not None:
+        _get_catalog_image_counts = get_catalog_image_counts
+    if count_embeddings_for_model is not None:
+        _count_embeddings_for_model = count_embeddings_for_model
+    if get_unembedded_images is not None:
+        _get_unembedded_images = get_unembedded_images
+    if get_pending_deep_search_queries is not None:
+        _get_pending_deep_search_queries = get_pending_deep_search_queries
+    if store_deep_search_query_embedding is not None:
+        _store_deep_search_query_embedding = store_deep_search_query_embedding
+    if store_embeddings_batch is not None:
+        _store_embeddings_batch = store_embeddings_batch
+    if get_embedding_count is not None:
+        _get_embedding_count = get_embedding_count
+
+
+def _configured(provider, name: str):
+    if provider is None:
+        raise RuntimeError(f"embedding_worker is missing configured dependency: {name}")
+    return provider
+
 
 def _target_embed_batch_size(config: dict | None = None) -> int:
     config = config or settings.get_settings()
@@ -133,6 +186,15 @@ def _refresh_batch_status(config: dict | None = None) -> tuple[int, int]:
         "batch_growth_paused_until": _batch_control.get("growth_paused_until"),
     })
     return active, target
+
+
+def _background_embed_batch_size(active_batch_size: int, decision) -> int:
+    if getattr(decision, "pause", False):
+        return 0
+    if getattr(decision, "work_mode", "balanced") == "max":
+        return max(1, int(active_batch_size or 1))
+    governor_batch = int(getattr(decision, "thumbnail_batch_size", 1) or 1)
+    return max(1, min(int(active_batch_size or 1), governor_batch, 2))
 
 
 def _note_successful_embedding_batch(config: dict | None = None):
@@ -650,13 +712,19 @@ async def process_deep_search_cache_once(*, force: bool = False, limit: int = 16
     schedule = settings.deep_search_schedule_status(app_config)
     _deep_search_status.update({"schedule": schedule})
 
-    status = await db.get_deep_search_cache_status(
+    status = await _configured(
+        _get_deep_search_cache_status,
+        "get_deep_search_cache_status",
+    )(
         deep_config,
         app_config.get("deep_search_terms") or [],
     )
-    catalog_counts = await db.get_catalog_image_counts()
+    catalog_counts = await _configured(_get_catalog_image_counts, "get_catalog_image_counts")()
     total_images = int(catalog_counts.get("active_images") or 0)
-    embedded_images = await db.count_embeddings_for_model(deep_config)
+    embedded_images = await _configured(
+        _count_embeddings_for_model,
+        "count_embeddings_for_model",
+    )(deep_config)
     pending_images = max(0, total_images - embedded_images)
     _deep_search_status.update({
         "pending_queries": status["pending_queries"],
@@ -726,13 +794,14 @@ async def process_deep_search_cache_once(*, force: bool = False, limit: int = 16
         )
 
     active_batch_size, _target_batch_size = _refresh_batch_status(deep_config)
+    governed_batch_size = _background_embed_batch_size(active_batch_size, decision)
     candidate_limit = max(
         1,
-        active_batch_size * EMBED_CANDIDATE_MULTIPLIER,
-        active_batch_size + len(_embed_retry_after),
+        governed_batch_size * EMBED_CANDIDATE_MULTIPLIER,
+        governed_batch_size + len(_embed_retry_after),
     )
     query_started = time.perf_counter()
-    image_candidates = await db.get_unembedded_images(
+    image_candidates = await _configured(_get_unembedded_images, "get_unembedded_images")(
         limit=candidate_limit,
         md_cache_root=thumbnails.SSD_CACHE_DIR,
         cache_size="sm",
@@ -749,7 +818,10 @@ async def process_deep_search_cache_once(*, force: bool = False, limit: int = 16
         "next_retry_at": next_retry_at,
     })
 
-    pending = await db.get_pending_deep_search_queries(
+    pending = await _configured(
+        _get_pending_deep_search_queries,
+        "get_pending_deep_search_queries",
+    )(
         deep_config,
         app_config.get("deep_search_terms") or [],
         limit=limit,
@@ -800,6 +872,7 @@ async def process_deep_search_cache_once(*, force: bool = False, limit: int = 16
             loop,
             _model,
             unembedded_images,
+            max_batch_size=governed_batch_size,
             batch_pause_seconds=max(
                 0.0,
                 min(5.0, float(app_config.get("embed_batch_pause_ms", 250)) / 1000.0),
@@ -818,17 +891,26 @@ async def process_deep_search_cache_once(*, force: bool = False, limit: int = 16
             if vec is None:
                 first_error = "model unavailable"
                 continue
-            await db.store_deep_search_query_embedding(deep_config, row["query"], vec_to_blob(vec))
+            await _configured(
+                _store_deep_search_query_embedding,
+                "store_deep_search_query_embedding",
+            )(deep_config, row["query"], vec_to_blob(vec))
             embedded += 1
         except Exception as exc:
             first_error = first_error or f"{type(exc).__name__}: {exc}"
 
     elapsed = time.perf_counter() - started
-    refreshed = await db.get_deep_search_cache_status(
+    refreshed = await _configured(
+        _get_deep_search_cache_status,
+        "get_deep_search_cache_status",
+    )(
         deep_config,
         app_config.get("deep_search_terms") or [],
     )
-    embedded_images = await db.count_embeddings_for_model(deep_config)
+    embedded_images = await _configured(
+        _count_embeddings_for_model,
+        "count_embeddings_for_model",
+    )(deep_config)
     pending_images = max(0, total_images - embedded_images)
     if embedded:
         return _update_deep_search_status(
@@ -921,6 +1003,7 @@ async def _process_embedding_candidates(
     model,
     rows,
     *,
+    max_batch_size: int | None = None,
     batch_pause_seconds: float = 0.0,
     embedding_config: dict | None = None,
 ) -> dict:
@@ -938,6 +1021,8 @@ async def _process_embedding_candidates(
             break
 
         active_batch_size, _target = _refresh_batch_status(embedding_config)
+        if max_batch_size is not None:
+            active_batch_size = max(1, min(active_batch_size, int(max_batch_size or 1)))
         if preload_future is None:
             preload_rows = rows[index:index + active_batch_size]
             preload_future = _schedule_preload(loop, preload_rows)
@@ -969,6 +1054,8 @@ async def _process_embedding_candidates(
         next_rows = None
         if next_index < len(rows):
             next_active_batch_size, _target = _refresh_batch_status(embedding_config)
+            if max_batch_size is not None:
+                next_active_batch_size = max(1, min(next_active_batch_size, int(max_batch_size or 1)))
             next_rows = rows[next_index:next_index + next_active_batch_size]
             next_future = _schedule_preload(loop, next_rows)
 
@@ -1039,7 +1126,10 @@ async def _process_embedding_candidates(
 
         store_started = time.perf_counter()
         if batch:
-            await db.store_embeddings_batch(batch, embedding_config=embedding_config)
+            await _configured(_store_embeddings_batch, "store_embeddings_batch")(
+                batch,
+                embedding_config=embedding_config,
+            )
             try:
                 embed_cache.add_vectors(cached_vectors, model_key=(
                     _model_key_for_config(embedding_config) if embedding_config else None
@@ -1047,9 +1137,12 @@ async def _process_embedding_candidates(
             except Exception as exc:
                 log.warning(f"Warm embedding cache update skipped: {exc}")
             if embedding_config:
-                embedded_count = await db.count_embeddings_for_model(embedding_config)
+                embedded_count = await _configured(
+                    _count_embeddings_for_model,
+                    "count_embeddings_for_model",
+                )(embedding_config)
             else:
-                embedded_count = await db.get_embedding_count()
+                embedded_count = await _configured(_get_embedding_count, "get_embedding_count")()
             log.info(f"Embedded {len(batch)} images (total: {embedded_count})")
             _note_successful_embedding_batch(embedding_config)
         store_seconds = time.perf_counter() - store_started
@@ -1171,7 +1264,7 @@ async def run_embedding_worker():
             if needs_model_load and not decision.can_start_heavy_work:
                 _set_worker_status(
                     "throttled",
-                    f"Model loading deferred until the desktop is idle and quiet: {decision.reason}.",
+                    f"Model loading deferred by Work Mode: {decision.reason}.",
                     ready=False,
                 )
                 await asyncio.sleep(max(5.0, decision.embedding_pause_seconds))
@@ -1201,14 +1294,15 @@ async def run_embedding_worker():
 
             # Phase 1: Embed unembedded images with pipelined CPU/GPU
             active_batch_size, _target_batch_size = _refresh_batch_status(config)
+            governed_batch_size = _background_embed_batch_size(active_batch_size, decision)
             candidate_limit = max(
                 1,
-                active_batch_size * EMBED_CANDIDATE_MULTIPLIER,
-                active_batch_size + len(_embed_retry_after),
+                governed_batch_size * EMBED_CANDIDATE_MULTIPLIER,
+                governed_batch_size + len(_embed_retry_after),
             )
             cache_size = "sm" if int(config.get("embed_model_dim", 0) or 0) > 2048 else "md"
             query_started = time.perf_counter()
-            candidates = await db.get_unembedded_images(
+            candidates = await _configured(_get_unembedded_images, "get_unembedded_images")(
                 limit=candidate_limit,
                 md_cache_root=thumbnails.SSD_CACHE_DIR,
                 cache_size=cache_size,
@@ -1226,13 +1320,14 @@ async def run_embedding_worker():
             if unembedded:
                 _set_worker_status(
                     "embedding",
-                    f"Embedding {len(unembedded)} images in batches up to {active_batch_size}…",
+                    f"Embedding {len(unembedded)} images in batches up to {governed_batch_size}…",
                     ready=True,
                 )
                 result = await _process_embedding_candidates(
                     loop,
                     _model,
                     unembedded,
+                    max_batch_size=governed_batch_size,
                     batch_pause_seconds=batch_pause_seconds,
                 )
 

@@ -38,6 +38,27 @@ CARD_KEYS = {
     "created_at",
     "thumb_url",
 }
+EXPORT_FIELD_NAMES = [
+    "rank",
+    "filename",
+    "filepath",
+    "elo",
+    "comparisons",
+    "propagated_updates",
+    "status",
+    "flag",
+    "date_taken",
+    "camera_make",
+    "camera_model",
+    "lens",
+    "file_ext",
+    "file_size",
+    "file_modified_at",
+    "width",
+    "height",
+    "latitude",
+    "longitude",
+]
 
 
 class ApiShapeTests(unittest.TestCase):
@@ -335,6 +356,51 @@ class ApiShapeTests(unittest.TestCase):
         for card in data["images"]:
             self.assertCardShape(card)
 
+    def test_library_date_groups_preserve_visible_group_shape(self):
+        response = self.client.get("/api/date-groups")
+        self.assertEqual(response.status_code, 200)
+        groups = response.json()["groups"]
+
+        self.assertEqual(
+            groups,
+            [
+                {"date": "2024-06", "label": "June 2024", "count": 1},
+                {"date": "2024-05", "label": "May 2024", "count": 1},
+                {"date": "", "label": "No Date", "count": 1},
+            ],
+        )
+
+    def test_library_map_markers_preserve_counts_and_thumb_urls(self):
+        response = self.client.get("/api/map/markers")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        self.assertEqual(data["total_count"], 4)
+        self.assertEqual(data["visible_count"], 3)
+        self.assertEqual(data["gps_count"], 2)
+        self.assertEqual(data["gps_total_count"], 2)
+        self.assertEqual(data["hidden_pending_thumbnails"], 0)
+        self.assertEqual(
+            [marker["thumb_url"] for marker in data["markers"]],
+            [f"/api/thumb/sm/{self.ids[0]}", f"/api/thumb/sm/{self.ids[1]}"],
+        )
+
+    def test_library_filter_options_and_stats_shapes(self):
+        filters_response = self.client.get("/api/filter-options")
+        self.assertEqual(filters_response.status_code, 200)
+        filters = filters_response.json()
+
+        self.assertIn("file_types", filters)
+        self.assertIn("cameras", filters)
+        self.assertIn("lenses", filters)
+
+        stats_response = self.client.get("/api/stats")
+        self.assertEqual(stats_response.status_code, 200)
+        stats = stats_response.json()
+
+        self.assertEqual(stats["total_catalog_images"], 4)
+        self.assertEqual(stats["active_images"], 4)
+
     def test_compare_cards_are_normalized(self):
         response = self.client.get("/api/compare/next?n=2&mode=swiss")
         self.assertEqual(response.status_code, 200)
@@ -359,6 +425,109 @@ class ApiShapeTests(unittest.TestCase):
         resources = data["cache_stats"]["system_resources"]
         self.assertIn("free_bytes", resources["disk"])
         self.assertIn("available_bytes", resources["memory"])
+
+    def test_catalog_summary_endpoint_includes_counts(self):
+        response = self.client.get("/api/catalog")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        self.assertEqual(len(data["sources"]), 1)
+        self.assertEqual(data["stats"]["total_catalog_images"], 4)
+        self.assertEqual(data["stats"]["active_images"], 4)
+
+    def test_catalog_browse_preserves_directory_shape(self):
+        nested = os.path.join(self.tempdir.name, "catalog", "nested")
+        os.makedirs(nested, exist_ok=True)
+
+        response = self.client.get("/api/catalog/browse", params={"path": os.path.dirname(nested)})
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        self.assertEqual(data["path"], os.path.dirname(nested))
+        self.assertTrue(data["exists"])
+        self.assertTrue(data["is_dir"])
+        self.assertIn("roots", data)
+        self.assertEqual(data["error"], "")
+        self.assertIn(
+            {"name": "nested", "path": nested, "readable": True},
+            data["entries"],
+        )
+
+    def test_scan_and_folders_endpoint_shapes(self):
+        scan_response = self.client.get("/api/scan/status")
+        self.assertEqual(scan_response.status_code, 200)
+        self.assertIn("scanning", scan_response.json())
+
+        folder_response = self.client.get("/api/scan/folder")
+        self.assertEqual(folder_response.status_code, 200)
+        self.assertIn("folder", folder_response.json())
+
+        folders_response = self.client.get("/api/folders?max_depth=1")
+        self.assertEqual(folders_response.status_code, 200)
+        self.assertIsInstance(folders_response.json()["folders"], list)
+
+    def test_cache_and_ai_status_endpoint_shapes(self):
+        cache_response = self.client.get("/api/cache/status?ahead=0")
+        self.assertEqual(cache_response.status_code, 200)
+        cache_data = cache_response.json()
+        self.assertIn("memory", cache_data)
+        self.assertIn("disk", cache_data)
+        self.assertIn("pregen", cache_data)
+
+        pregen_response = self.client.get("/api/cache/pregen/status")
+        self.assertEqual(pregen_response.status_code, 200)
+        self.assertIsInstance(pregen_response.json(), dict)
+
+        ai_response = self.client.get("/api/ai/status")
+        self.assertEqual(ai_response.status_code, 200)
+        ai_data = ai_response.json()
+        self.assertIn("worker_state", ai_data)
+        self.assertIn("model_id", ai_data)
+        self.assertIn("embedding_indexes", ai_data)
+
+    def test_media_status_endpoint_shapes(self):
+        single_response = self.client.get(f"/api/image/{self.ids[0]}/media-status")
+        self.assertEqual(single_response.status_code, 200)
+        single = single_response.json()
+
+        self.assertEqual(single["id"], self.ids[0])
+        self.assertIn("sm", single["tiers"])
+        self.assertIn("full", single["tiers"])
+        self.assertEqual(single["tiers"]["sm"]["url"], f"/api/thumb/sm/{self.ids[0]}")
+        self.assertEqual(single["tiers"]["full"]["cached_url"], f"/api/full/{self.ids[0]}?cached=1")
+
+        batch_response = self.client.post(
+            "/api/images/media-status",
+            json={"ids": [self.ids[0], str(self.ids[0]), "bad", self.ids[1]]},
+        )
+        self.assertEqual(batch_response.status_code, 200)
+        statuses = batch_response.json()["statuses"]
+
+        self.assertEqual([status["id"] for status in statuses], [self.ids[0], self.ids[1]])
+
+    def test_export_json_preserves_field_order_and_requested_ids(self):
+        requested_ids = [self.ids[1], self.ids[0]]
+        response = self.client.get(f"/api/export?ids={requested_ids[0]},{requested_ids[1]}")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+
+        self.assertEqual([row["filename"] for row in data], ["portrait-beta.jpg", "sunset-alpha.jpg"])
+        self.assertEqual([row["rank"] for row in data], [1, 2])
+        self.assertEqual(list(data[0].keys()), EXPORT_FIELD_NAMES)
+        self.assertEqual(data[0]["flag"], "unflagged")
+
+    def test_export_csv_preserves_header_order(self):
+        response = self.client.get(f"/api/export?format=csv&ids={self.ids[0]},{self.ids[1]}")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.headers["content-type"].startswith("text/csv"))
+        self.assertEqual(
+            response.headers["content-disposition"],
+            "attachment; filename=rankings.csv",
+        )
+        lines = response.text.splitlines()
+
+        self.assertEqual(lines[0], ",".join(EXPORT_FIELD_NAMES))
+        self.assertIn("sunset-alpha.jpg", lines[1])
 
 
 if __name__ == "__main__":

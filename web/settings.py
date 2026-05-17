@@ -44,6 +44,13 @@ DEFAULT_SETTINGS = {
     "deep_search_schedule_timezone": "America/Chicago",
     "search_similarity_threshold": 0.35,
     "show_loupe_cache_status": True,
+    "people_scan_enabled": True,
+    "people_auto_install": True,
+    "face_model_id": "buffalo_l",
+    "face_model_dir": _default_model_dir("insightface"),
+    "face_detection_size": 640,
+    "face_similarity_threshold": 0.52,
+    "face_merge_suggestion_threshold": 0.62,
 }
 
 EMBED_MODEL_PRESETS = {
@@ -78,11 +85,14 @@ INT_RANGES = {
     "embed_batch_pause_ms": (0, 5000),
     "embed_batch_size": (1, 32),
     "embed_model_dim": (64, 4096),
+    "face_detection_size": (160, 1280),
 }
 
 FLOAT_RANGES = {
     "memory_cache_gb": (0.0, 64.0),
     "search_similarity_threshold": (0.1, 0.8),
+    "face_similarity_threshold": (0.1, 0.9),
+    "face_merge_suggestion_threshold": (0.1, 0.95),
 }
 
 _lock = threading.Lock()
@@ -464,6 +474,12 @@ def normalize_settings(raw: dict | None) -> dict:
         raw.get("embed_model_dir", _default_model_dir(model_id)),
         _default_model_dir(model_id),
     )
+    face_model_id = str(raw.get("face_model_id") or normalized["face_model_id"]).strip()
+    normalized["face_model_id"] = face_model_id or DEFAULT_SETTINGS["face_model_id"]
+    normalized["face_model_dir"] = _resolve_cache_dir(
+        raw.get("face_model_dir", normalized["face_model_dir"]),
+        DEFAULT_SETTINGS["face_model_dir"],
+    )
 
     profile = str(raw.get("cache_profile", normalized["cache_profile"])).strip().lower()
     normalized["cache_profile"] = profile if profile in CACHE_PROFILES else DEFAULT_SETTINGS["cache_profile"]
@@ -495,6 +511,14 @@ def normalize_settings(raw: dict | None) -> dict:
 
     normalized["pregenerate_on_idle"] = bool(raw.get("pregenerate_on_idle", normalized["pregenerate_on_idle"]))
     normalized["defer_ai_on_startup"] = bool(raw.get("defer_ai_on_startup", normalized["defer_ai_on_startup"]))
+    normalized["people_scan_enabled"] = _normalize_bool(
+        raw.get("people_scan_enabled", normalized["people_scan_enabled"]),
+        DEFAULT_SETTINGS["people_scan_enabled"],
+    )
+    normalized["people_auto_install"] = _normalize_bool(
+        raw.get("people_auto_install", normalized["people_auto_install"]),
+        DEFAULT_SETTINGS["people_auto_install"],
+    )
     normalized["show_loupe_cache_status"] = bool(
         raw.get("show_loupe_cache_status", normalized["show_loupe_cache_status"])
     )

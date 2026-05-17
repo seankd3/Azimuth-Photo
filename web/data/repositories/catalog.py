@@ -1,0 +1,560 @@
+"""Catalog-source query helpers and cached catalog summaries."""
+
+import asyncio
+import os
+import time as _time
+
+from data import connection
+
+
+CATALOG_CACHE_TTL_SECONDS = 10.0
+_catalog_sources_cache = {"data": None, "expires": 0}
+_catalog_summary_cache = {"data": None, "expires": 0}
+_catalog_light_summary_cache = {"data": None, "expires": 0}
+_active_source_ids_cache = {"ids": frozenset(), "expires": 0}
+ACTIVE_SOURCE_IDS_TTL_SECONDS = 5.0
+
+
+def normalize_source_path(path: str) -> str:
+    """Return the canonical local path used as a catalog source key."""
+
+    return os.path.realpath(os.path.abspath(os.path.expanduser(path or "")))
+
+
+def source_display_name(path: str) -> str:
+    normalized = normalize_source_path(path)
+    return os.path.basename(normalized.rstrip(os.sep)) or normalized
+
+
+def active_source_join(image_alias: str = "i", source_alias: str = "s") -> str:
+    return f"JOIN catalog_sources {source_alias} ON {source_alias}.id = {image_alias}.source_id"
+
+
+def active_source_condition(source_alias: str = "s") -> str:
+    return f"{source_alias}.included = 1 AND {source_alias}.online = 1"
+
+
+def active_image_condition(image_alias: str = "i", source_alias: str = "s") -> str:
+    return (
+        f"{source_alias}.included = 1 "
+        f"AND {source_alias}.online = 1 "
+        f"AND {image_alias}.missing_at IS NULL"
+    )
+
+
+async def active_source_id_set(db_path: str) -> frozenset[int]:
+    conn = await connection.open_async(db_path)
+    try:
+        cursor = await conn.execute(
+            "SELECT id FROM catalog_sources WHERE included = 1 AND online = 1"
+        )
+        return frozenset(int(row["id"]) for row in await cursor.fetchall())
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+
+
+def invalidate_active_source_ids_cache() -> None:
+    _active_source_ids_cache["ids"] = frozenset()
+    _active_source_ids_cache["expires"] = 0
+
+
+def invalidate_catalog_summary_cache() -> None:
+    _catalog_summary_cache["data"] = None
+    _catalog_summary_cache["expires"] = 0
+    _catalog_light_summary_cache["data"] = None
+    _catalog_light_summary_cache["expires"] = 0
+
+
+def invalidate_catalog_cache() -> None:
+    _catalog_sources_cache["data"] = None
+    _catalog_sources_cache["expires"] = 0
+    invalidate_catalog_summary_cache()
+
+
+async def active_source_id_set_cached(
+    db_path: str,
+    *,
+    ttl_seconds: float = ACTIVE_SOURCE_IDS_TTL_SECONDS,
+) -> frozenset[int]:
+    now = _time.time()
+    if now < _active_source_ids_cache["expires"]:
+        return _active_source_ids_cache["ids"]
+    frozen = await active_source_id_set(db_path)
+    _active_source_ids_cache["ids"] = frozen
+    _active_source_ids_cache["expires"] = _time.time() + ttl_seconds
+    return frozen
+
+
+def _chunked(values: list[int], chunk_size: int = 500):
+    for start in range(0, len(values), chunk_size):
+        yield values[start:start + chunk_size]
+
+
+def insert_row_with_file_metadata(row):
+    if len(row) >= 5:
+        return row[:5]
+    filename, filepath = row[:2]
+    file_ext = os.path.splitext(filename)[1].lower()
+    file_size = None
+    file_modified_at = None
+    try:
+        stat = os.stat(filepath)
+        file_size = int(stat.st_size)
+        file_modified_at = float(stat.st_mtime)
+    except Exception:
+        pass
+    return filename, filepath, file_ext, file_size, file_modified_at
+
+
+async def ensure_catalog_source_on_conn(conn, path: str, *, included: bool = True, last_scan_at=None):
+    normalized = normalize_source_path(path)
+    display_name = source_display_name(normalized)
+    online = 1 if os.path.isdir(normalized) else 0
+    now = _time.time()
+    await conn.execute(
+        "INSERT INTO catalog_sources "
+        "(path, display_name, included, online, created_at, last_scan_at, last_seen_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(path) DO UPDATE SET "
+        "display_name = excluded.display_name, "
+        "included = CASE WHEN excluded.included = 1 THEN 1 ELSE catalog_sources.included END, "
+        "online = excluded.online, "
+        "last_scan_at = COALESCE(excluded.last_scan_at, catalog_sources.last_scan_at), "
+        "last_seen_at = excluded.last_seen_at, "
+        "removed_at = CASE WHEN excluded.included = 1 THEN NULL ELSE catalog_sources.removed_at END",
+        (normalized, display_name, 1 if included else 0, online, now, last_scan_at, now),
+    )
+    cursor = await conn.execute("SELECT * FROM catalog_sources WHERE path = ?", (normalized,))
+    return await cursor.fetchone()
+
+
+async def update_source_counts_on_conn(conn, source_id: int | None = None):
+    params = []
+    where = ""
+    if source_id is not None:
+        where = " WHERE id = ?"
+        params.append(source_id)
+    await conn.execute(
+        "UPDATE catalog_sources SET image_count = ("
+        "  SELECT COUNT(*) FROM images WHERE images.source_id = catalog_sources.id"
+        f"){where}",
+        params,
+    )
+    await conn.execute(
+        "UPDATE catalog_sources SET active_image_count = CASE "
+        "WHEN included = 1 THEN ("
+        "  SELECT COUNT(*) FROM images "
+        "  WHERE images.source_id = catalog_sources.id AND images.missing_at IS NULL"
+        ") ELSE 0 END"
+        f"{where}",
+        params,
+    )
+
+
+async def refresh_source_online_states_on_conn(conn) -> bool:
+    cursor = await conn.execute("SELECT id, path, online FROM catalog_sources")
+    rows = await cursor.fetchall()
+    now = _time.time()
+    updates = []
+    for row in rows:
+        online = 1 if os.path.isdir(row["path"]) else 0
+        if int(row["online"] or 0) != online:
+            updates.append((online, now, row["id"]))
+    if not updates:
+        return False
+    await conn.executemany(
+        "UPDATE catalog_sources SET online = ?, last_seen_at = ? WHERE id = ?",
+        updates,
+    )
+    await update_source_counts_on_conn(conn)
+    return True
+
+
+async def refresh_source_online_states(db_path: str) -> bool:
+    conn = await connection.open_async(db_path)
+    try:
+        changed = await refresh_source_online_states_on_conn(conn)
+        if changed:
+            await conn.commit()
+        return changed
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+
+
+async def insert_images_batch(db_path: str, rows: list[tuple], source_id: int | None = None):
+    if not rows:
+        return
+    conn = await connection.open_async(db_path)
+    try:
+        normalized_rows = [insert_row_with_file_metadata(row) for row in rows]
+        if source_id is not None:
+            await conn.executemany(
+                "INSERT OR IGNORE INTO images "
+                "(source_id, filename, filepath, status, file_ext, file_size, file_modified_at) "
+                "VALUES (?, ?, ?, 'kept', ?, ?, ?)",
+                [(source_id, *row) for row in normalized_rows],
+            )
+            await conn.executemany(
+                "UPDATE images SET "
+                "source_id = CASE WHEN source_id IS NULL THEN ? ELSE source_id END, "
+                "filename = ?, "
+                "file_ext = COALESCE(?, file_ext), "
+                "file_size = COALESCE(?, file_size), "
+                "file_modified_at = COALESCE(?, file_modified_at), "
+                "missing_at = NULL "
+                "WHERE filepath = ? AND (source_id = ? OR source_id IS NULL)",
+                [
+                    (source_id, row[0], row[2], row[3], row[4], row[1], source_id)
+                    for row in normalized_rows
+                ],
+            )
+            await update_source_counts_on_conn(conn, source_id)
+        else:
+            await conn.executemany(
+                "INSERT OR IGNORE INTO images "
+                "(filename, filepath, status, file_ext, file_size, file_modified_at) "
+                "VALUES (?, ?, 'kept', ?, ?, ?)",
+                normalized_rows,
+            )
+        await conn.commit()
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+
+
+async def mark_source_missing_files_on_conn(
+    conn,
+    source_id: int,
+    seen_filepaths: list[str],
+    missing_at: float,
+):
+    await conn.execute(
+        "CREATE TEMP TABLE IF NOT EXISTS source_scan_seen (filepath TEXT PRIMARY KEY)"
+    )
+    await conn.execute("DELETE FROM source_scan_seen")
+    unique_seen = list(dict.fromkeys(seen_filepaths))
+    if unique_seen:
+        await conn.executemany(
+            "INSERT OR IGNORE INTO source_scan_seen(filepath) VALUES (?)",
+            [(filepath,) for filepath in unique_seen],
+        )
+    await conn.execute(
+        "UPDATE images SET missing_at = NULL "
+        "WHERE source_id = ? AND filepath IN (SELECT filepath FROM source_scan_seen)",
+        (source_id,),
+    )
+    await conn.execute(
+        "UPDATE images SET missing_at = ? "
+        "WHERE source_id = ? AND missing_at IS NULL "
+        "AND filepath NOT IN (SELECT filepath FROM source_scan_seen)",
+        (missing_at, source_id),
+    )
+    await conn.execute("DELETE FROM source_scan_seen")
+
+
+async def add_or_restore_source(db_path: str, path: str):
+    conn = await connection.open_async(db_path)
+    try:
+        source = await ensure_catalog_source_on_conn(conn, path, included=True)
+        await update_source_counts_on_conn(conn, source["id"])
+        await conn.commit()
+        cursor = await conn.execute("SELECT * FROM catalog_sources WHERE id = ?", (source["id"],))
+        return await cursor.fetchone()
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+
+
+async def mark_source_scan_started(db_path: str, source_id: int) -> bool:
+    conn = await connection.open_async(db_path)
+    try:
+        now = _time.time()
+        cursor = await conn.execute(
+            "UPDATE catalog_sources SET included = 1, online = 1, removed_at = NULL, last_seen_at = ? "
+            "WHERE id = ?",
+            (now, source_id),
+        )
+        await conn.commit()
+        return bool(cursor.rowcount)
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+
+
+async def mark_source_scan_finished(
+    db_path: str,
+    source_id: int,
+    seen_filepaths: list[str] | None = None,
+):
+    conn = await connection.open_async(db_path)
+    try:
+        now = _time.time()
+        await conn.execute(
+            "UPDATE catalog_sources SET last_scan_at = ?, last_seen_at = ?, online = ? WHERE id = ?",
+            (now, now, 1, source_id),
+        )
+        if seen_filepaths is not None:
+            await mark_source_missing_files_on_conn(conn, source_id, seen_filepaths, now)
+        await update_source_counts_on_conn(conn, source_id)
+        await conn.commit()
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+
+
+def mark_image_missing_sync(db_path: str, image_id: int, missing_at: float | None = None) -> bool:
+    when = _time.time() if missing_at is None else float(missing_at)
+    conn = connection.open_sync(db_path)
+    try:
+        cursor = conn.execute(
+            "UPDATE images SET missing_at = COALESCE(missing_at, ?) WHERE id = ?",
+            (when, int(image_id)),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        connection.close_sync(conn, db_path=db_path)
+
+
+async def get_source(db_path: str, source_id: int):
+    conn = await connection.open_async(db_path)
+    try:
+        cursor = await conn.execute("SELECT * FROM catalog_sources WHERE id = ?", (source_id,))
+        return await cursor.fetchone()
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+
+
+async def get_source_by_path(db_path: str, path: str):
+    normalized = normalize_source_path(path)
+    conn = await connection.open_async(db_path)
+    try:
+        cursor = await conn.execute("SELECT * FROM catalog_sources WHERE path = ?", (normalized,))
+        return await cursor.fetchone()
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+
+
+async def get_catalog_sources(db_path: str):
+    conn = await connection.open_async(db_path)
+    try:
+        cursor = await conn.execute(
+            "SELECT id, path, display_name, included, online, image_count, active_image_count, "
+            "created_at, last_scan_at, last_seen_at, removed_at "
+            "FROM catalog_sources ORDER BY included DESC, display_name COLLATE NOCASE ASC, path ASC"
+        )
+        return await cursor.fetchall()
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+
+
+async def catalog_sources_cached(
+    db_path: str,
+    *,
+    refresh_source_online_states,
+    ttl_seconds: float = CATALOG_CACHE_TTL_SECONDS,
+):
+    now = _time.time()
+    if _catalog_sources_cache["data"] and now < _catalog_sources_cache["expires"]:
+        return _catalog_sources_cache["data"]
+    await refresh_source_online_states()
+    rows = await get_catalog_sources(db_path)
+    _catalog_sources_cache["data"] = rows
+    _catalog_sources_cache["expires"] = _time.time() + ttl_seconds
+    return rows
+
+
+async def catalog_summary_cached(
+    db_path: str,
+    *,
+    get_stats,
+    refresh_source_online_states,
+    ttl_seconds: float = CATALOG_CACHE_TTL_SECONDS,
+) -> dict:
+    now = _time.time()
+    if _catalog_summary_cache["data"] and now < _catalog_summary_cache["expires"]:
+        return _catalog_summary_cache["data"]
+    sources = [
+        dict(row)
+        for row in await catalog_sources_cached(
+            db_path,
+            refresh_source_online_states=refresh_source_online_states,
+            ttl_seconds=ttl_seconds,
+        )
+    ]
+    stats = await get_stats()
+    result = {"sources": sources, "stats": stats}
+    _catalog_summary_cache["data"] = result
+    _catalog_summary_cache["expires"] = _time.time() + ttl_seconds
+    return result
+
+
+async def catalog_light_summary_cached(
+    db_path: str,
+    *,
+    get_catalog_image_counts,
+    refresh_source_online_states,
+    ttl_seconds: float = CATALOG_CACHE_TTL_SECONDS,
+) -> dict:
+    now = _time.time()
+    if _catalog_light_summary_cache["data"] and now < _catalog_light_summary_cache["expires"]:
+        return _catalog_light_summary_cache["data"]
+    sources, counts = await asyncio.gather(
+        catalog_sources_cached(
+            db_path,
+            refresh_source_online_states=refresh_source_online_states,
+            ttl_seconds=ttl_seconds,
+        ),
+        get_catalog_image_counts(),
+    )
+    active = int(counts.get("active_images") or 0)
+    total = int(counts.get("total_catalog_images") or 0)
+    stats = {
+        **counts,
+        "total_images": active,
+        "active_images": active,
+        "kept": active,
+        "maybe": 0,
+        "removed_images": int(counts.get("removed_images") or 0),
+        "offline_images": int(counts.get("offline_images") or 0),
+        "total_catalog_images": total,
+    }
+    result = {"sources": [dict(row) for row in sources], "stats": stats}
+    _catalog_light_summary_cache["data"] = result
+    _catalog_light_summary_cache["expires"] = _time.time() + ttl_seconds
+    return result
+
+
+def folder_source_rows(db_path: str) -> list[tuple[int, str, int]]:
+    conn = connection.open_sync(db_path)
+    try:
+        return [
+            (int(row[0]), row[1], int(row[2] or 0))
+            for row in conn.execute(
+                "SELECT id, path, active_image_count FROM catalog_sources WHERE included = 1"
+            ).fetchall()
+        ]
+    finally:
+        connection.close_sync(conn, db_path=db_path)
+
+
+def folder_image_filepaths_by_source(db_path: str, source_ids: list[int]) -> dict[int, list[str]]:
+    ids = list(dict.fromkeys(int(source_id) for source_id in source_ids if int(source_id) > 0))
+    if not ids:
+        return {}
+    conn = connection.open_sync(db_path)
+    try:
+        paths_by_source: dict[int, list[str]] = {source_id: [] for source_id in ids}
+        for chunk in _chunked(ids, 900):
+            placeholders = ",".join("?" for _ in chunk)
+            rows = conn.execute(
+                "SELECT source_id, filepath FROM images "
+                f"WHERE source_id IN ({placeholders}) AND missing_at IS NULL",
+                chunk,
+            ).fetchall()
+            for source_id, filepath in rows:
+                paths_by_source.setdefault(int(source_id), []).append(filepath)
+        return paths_by_source
+    finally:
+        connection.close_sync(conn, db_path=db_path)
+
+
+async def remove_source_keep_data(db_path: str, source_id: int):
+    conn = await connection.open_async(db_path)
+    try:
+        now = _time.time()
+        await conn.execute(
+            "UPDATE catalog_sources SET included = 0, removed_at = ?, last_seen_at = ? WHERE id = ?",
+            (now, now, source_id),
+        )
+        await update_source_counts_on_conn(conn, source_id)
+        await conn.commit()
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+
+
+async def get_source_image_ids(db_path: str, source_id: int) -> list[int]:
+    conn = await connection.open_async(db_path)
+    try:
+        cursor = await conn.execute("SELECT id FROM images WHERE source_id = ?", (source_id,))
+        return [int(row["id"]) for row in await cursor.fetchall()]
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+
+
+async def purge_source_catalog_data(db_path: str, source_id: int) -> dict:
+    image_ids = await get_source_image_ids(db_path, source_id)
+    conn = await connection.open_async(db_path)
+    try:
+        comparison_count = 0
+        comparison_decrements: dict[int, int] = {}
+        if image_ids:
+            source_id_set = set(image_ids)
+            for chunk in _chunked(image_ids):
+                placeholders = ",".join("?" for _ in chunk)
+                await conn.execute(
+                    f"DELETE FROM embeddings WHERE image_id IN ({placeholders})",
+                    chunk,
+                )
+                await conn.execute(
+                    f"DELETE FROM embeddings_by_model WHERE image_id IN ({placeholders})",
+                    chunk,
+                )
+                cursor = await conn.execute(
+                    f"SELECT winner_id, loser_id FROM comparisons "
+                    f"WHERE winner_id IN ({placeholders}) OR loser_id IN ({placeholders})",
+                    chunk + chunk,
+                )
+                for row in await cursor.fetchall():
+                    winner_id = int(row["winner_id"])
+                    loser_id = int(row["loser_id"])
+                    if winner_id in source_id_set and loser_id not in source_id_set:
+                        comparison_decrements[loser_id] = comparison_decrements.get(loser_id, 0) + 1
+                    elif loser_id in source_id_set and winner_id not in source_id_set:
+                        comparison_decrements[winner_id] = comparison_decrements.get(winner_id, 0) + 1
+                cursor = await conn.execute(
+                    f"DELETE FROM comparisons "
+                    f"WHERE winner_id IN ({placeholders}) OR loser_id IN ({placeholders})",
+                    chunk + chunk,
+                )
+                comparison_count += max(0, cursor.rowcount or 0)
+                await conn.execute(
+                    f"DELETE FROM cache_entries WHERE image_id IN ({placeholders})",
+                    chunk,
+                )
+                await conn.execute(
+                    f"DELETE FROM images WHERE id IN ({placeholders})",
+                    chunk,
+                )
+            if comparison_decrements:
+                await conn.executemany(
+                    "UPDATE images SET comparisons = MAX(COALESCE(comparisons, 0) - ?, 0) WHERE id = ?",
+                    [(count, image_id) for image_id, count in comparison_decrements.items()],
+                )
+        await conn.execute("DELETE FROM catalog_sources WHERE id = ?", (source_id,))
+        await update_source_counts_on_conn(conn)
+        await conn.commit()
+        return {
+            "images_deleted": len(image_ids),
+            "comparisons_deleted": comparison_count,
+        }
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+
+
+async def get_scan_folder(db_path: str):
+    conn = await connection.open_async(db_path)
+    try:
+        cursor = await conn.execute(
+            "SELECT path FROM catalog_sources WHERE included = 1 "
+            "ORDER BY last_scan_at IS NULL ASC, last_scan_at DESC, id DESC LIMIT 1"
+        )
+        row = await cursor.fetchone()
+        if row:
+            return row["path"]
+        cursor = await conn.execute(
+            "SELECT filepath FROM images WHERE missing_at IS NULL ORDER BY RANDOM() LIMIT 50"
+        )
+        rows = await cursor.fetchall()
+        if not rows:
+            return None
+        dirs = [os.path.dirname(row["filepath"]) for row in rows]
+        return os.path.commonpath(dirs)
+    finally:
+        await connection.close_async(conn, db_path=db_path)

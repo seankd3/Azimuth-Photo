@@ -1,10 +1,12 @@
 import asyncio
 from datetime import datetime
+import io
 import inspect
 import os
 import sqlite3
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from zoneinfo import ZoneInfo
 
@@ -17,7 +19,13 @@ import app as app_module  # noqa: E402
 import db  # noqa: E402
 import embedding_worker  # noqa: E402
 import elo_propagation  # noqa: E402
+import face_worker  # noqa: E402
 import scanner  # noqa: E402
+from data.repositories import filter_options as filter_options_repository  # noqa: E402
+from data.repositories import cache_entries as cache_entry_repository  # noqa: E402
+from data.repositories import catalog as catalog_repository  # noqa: E402
+from data.repositories import images as image_repository  # noqa: E402
+from data.repositories import metadata_search, rankings, ratings, stats as stats_repository  # noqa: E402
 
 
 class JsonRequest:
@@ -211,6 +219,178 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
         elo_propagation.embed_cache.get_matrix = fake_get_matrix
         embedding_worker.encode_text = fake_encode_text
+
+    async def test_people_review_uses_face_crop_thumbnail(self):
+        from PIL import Image, ImageDraw
+
+        source = await self._source()
+        image_id = await self._image(source["id"], "group.jpg")
+        preview_path = os.path.join(self.tempdir.name, "people-preview.jpg")
+        preview = Image.new("RGB", (220, 140), (25, 25, 25))
+        draw = ImageDraw.Draw(preview)
+        draw.rectangle((30, 20, 80, 70), fill=(240, 220, 200))
+        draw.rectangle((150, 20, 200, 70), fill=(40, 80, 160))
+        preview.save(preview_path, "JPEG")
+
+        scan = await db.store_face_scan_result(
+            image_id=image_id,
+            model_id="buffalo_l",
+            cache_path=preview_path,
+            faces=[
+                {
+                    "bbox": {"x": 30, "y": 20, "w": 50, "h": 50},
+                    "confidence": 0.95,
+                    "quality": 0.9,
+                    "embedding": np.array([1.0, 0.0], dtype=np.float32),
+                }
+            ],
+        )
+        face_id = scan["face_ids"][0]
+        await db.assign_face(face_id)
+
+        review = await db.get_people_review(limit=4)
+        people = (
+            review["sections"]["most_seen"]
+            + review["sections"]["named_people"]
+            + review["sections"]["other_faces"]
+        )
+        self.assertEqual(len(people), 1)
+        person = people[0]
+        self.assertEqual(person["face_thumb_url"], f"/api/people/faces/{face_id}/thumb")
+        self.assertEqual(person["image_thumb_url"], f"/api/thumb/sm/{image_id}")
+        self.assertEqual(person["representative_bbox"]["x"], 30.0)
+
+        response = await app_module.api_people_face_thumb(HeaderRequest(), face_id, size=80)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.media_type, "image/jpeg")
+        face_image = Image.open(io.BytesIO(response.body))
+        self.assertEqual(face_image.size, (80, 80))
+        center_pixel = face_image.getpixel((40, 40))
+        self.assertGreater(center_pixel[0], center_pixel[2])
+
+    async def test_people_backlog_counts_cached_unscanned_images(self):
+        source = await self._source()
+        image_id = await self._image(source["id"], "unscanned.jpg")
+        await self._cache_entry(image_id, "md")
+        model_id = "buffalo_l"
+
+        pending = await db.count_images_needing_faces(
+            model_id=model_id,
+            cache_root=app_module.thumbnails.SSD_CACHE_DIR,
+        )
+        self.assertEqual(pending, 1)
+
+        review = await db.get_people_review(limit=4)
+        self.assertEqual(review["counts"]["pending_cached_images"], 1)
+
+        await db.store_face_scan_result(
+            image_id=image_id,
+            model_id=model_id,
+            cache_path=os.path.join(self.tempdir.name, "md-face-preview.jpg"),
+            faces=[],
+            status="scanned",
+        )
+        pending = await db.count_images_needing_faces(
+            model_id=model_id,
+            cache_root=app_module.thumbnails.SSD_CACHE_DIR,
+        )
+        self.assertEqual(pending, 0)
+
+    def test_people_work_mode_decision_ignores_activity_for_light_mode(self):
+        calls = []
+
+        class FakeGovernor:
+            @staticmethod
+            def get_background_decision(idle_seconds, work_mode=None):
+                calls.append((idle_seconds, work_mode))
+                return SimpleNamespace(
+                    work_mode=work_mode,
+                    mode="normal",
+                    pause=False,
+                    sleep_seconds=0.0,
+                    thumbnail_batch_size=8,
+                    thumbnail_pause_seconds=0.05,
+                    embedding_pause_seconds=0.25,
+                    reason="system healthy",
+                    load_1m=1.0,
+                    cpu_count=8,
+                    available_memory_gb=16.0,
+                    swap_used_pct=0.0,
+                    checked_at=1.0,
+                )
+
+        old_governor = sys.modules.get("resource_governor")
+        sys.modules["resource_governor"] = FakeGovernor
+        try:
+            decision = face_worker._people_background_decision({"background_work_mode": "balanced"})
+            self.assertFalse(decision.pause)
+            self.assertEqual(decision.thumbnail_batch_size, 2)
+            self.assertEqual(decision.embedding_pause_seconds, 1.5)
+            self.assertEqual(decision.reason, "light background")
+
+            decision = face_worker._people_background_decision({"background_work_mode": "max"})
+            self.assertFalse(decision.pause)
+            self.assertEqual(decision.thumbnail_batch_size, 16)
+            self.assertEqual(calls[0], (999999.0, "balanced"))
+            self.assertEqual(calls[1], (999999.0, "max"))
+        finally:
+            if old_governor is None:
+                sys.modules.pop("resource_governor", None)
+            else:
+                sys.modules["resource_governor"] = old_governor
+
+    async def test_people_merge_suggestions_include_face_thumbnails(self):
+        source = await self._source()
+        image_a = await self._image(source["id"], "source-face.jpg")
+        image_b = await self._image(source["id"], "target-face.jpg")
+
+        scan_a = await db.store_face_scan_result(
+            image_id=image_a,
+            model_id="buffalo_l",
+            cache_path=os.path.join(self.tempdir.name, "source-face-preview.jpg"),
+            faces=[
+                {
+                    "bbox": {"x": 10, "y": 12, "w": 34, "h": 42},
+                    "confidence": 0.95,
+                    "quality": 0.91,
+                    "embedding": np.array([1.0, 0.0], dtype=np.float32),
+                }
+            ],
+        )
+        scan_b = await db.store_face_scan_result(
+            image_id=image_b,
+            model_id="buffalo_l",
+            cache_path=os.path.join(self.tempdir.name, "target-face-preview.jpg"),
+            faces=[
+                {
+                    "bbox": {"x": 40, "y": 30, "w": 38, "h": 44},
+                    "confidence": 0.96,
+                    "quality": 0.92,
+                    "embedding": np.array([0.95, 0.05], dtype=np.float32),
+                }
+            ],
+        )
+        source_person = (await db.assign_face(scan_a["face_ids"][0]))["person_id"]
+        target_person = (await db.assign_face(scan_b["face_ids"][0]))["person_id"]
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "INSERT INTO people_merge_suggestions "
+                "(source_person_id, target_person_id, confidence, status, created_at, updated_at) "
+                "VALUES (?, ?, 0.74, 'pending', 1, 1)",
+                (min(source_person, target_person), max(source_person, target_person)),
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        review = await db.get_people_review(limit=4)
+        suggestion = review["sections"]["needs_review"][0]
+        self.assertIn("source", suggestion)
+        self.assertIn("target", suggestion)
+        self.assertTrue(suggestion["source"]["face_thumb_url"].startswith("/api/people/faces/"))
+        self.assertTrue(suggestion["target"]["face_thumb_url"].startswith("/api/people/faces/"))
+        self.assertEqual(suggestion["confidence"], 0.74)
 
     async def test_compare_payload_validation_rejects_invalid_and_inactive_images(self):
         source = await self._source()
@@ -544,6 +724,59 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stats["ranking_signal_count"], 1)
         self.assertEqual(stats["total_comparisons"], 1)
 
+    async def test_full_stats_repository_matches_facade_payload(self):
+        source = await self._source()
+        winner = await self._image(source["id"], "winner.jpg", comparisons=1)
+        loser = await self._image(source["id"], "loser.jpg", comparisons=1, propagated_updates=1)
+        picked = await self._image(source["id"], "picked.jpg", elo=1300.0)
+        rejected = await self._image(source["id"], "rejected.jpg")
+        conn = await db.get_db()
+        try:
+            await conn.execute("UPDATE images SET flag = 'picked' WHERE id = ?", (picked,))
+            await conn.execute("UPDATE images SET flag = 'rejected' WHERE id = ?", (rejected,))
+            await conn.execute(
+                "INSERT INTO comparisons "
+                "(winner_id, loser_id, mode, elo_before_winner, elo_before_loser, action_id) "
+                "VALUES (?, ?, 'swiss', 1200, 1200, 'repo-facade-parity')",
+                (winner, loser),
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+        db.invalidate_stats_cache()
+
+        repository_stats = await stats_repository.full_stats(db.DB_PATH)
+        db.invalidate_stats_cache()
+        facade_stats = await db._get_stats_uncached()
+        cached_stats = await db.get_stats()
+
+        self.assertEqual(facade_stats, repository_stats)
+        self.assertIs(db._stats_cache["data"], facade_stats)
+        self.assertIs(cached_stats, facade_stats)
+        self.assertEqual(
+            list(facade_stats.keys()),
+            [
+                "total_images",
+                "active_images",
+                "total_catalog_images",
+                "removed_images",
+                "offline_images",
+                "kept",
+                "maybe",
+                "picked",
+                "rejected",
+                "total_comparisons",
+                "total_catalog_comparisons",
+                "direct_comparison_rows",
+                "direct_catalog_comparison_rows",
+                "rated_images",
+                "ranking_signal_count",
+                "catalog_ranking_signal_count",
+                "propagated_update_count",
+                "imported_ranking_without_history",
+            ],
+        )
+
     async def test_pairing_cache_patch_keeps_immediate_candidate_cache_hot(self):
         app_module._pairing_cache.update({
             "valid": True,
@@ -815,6 +1048,107 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(options["undated"], 1)
         self.assertGreaterEqual(db.FILTER_OPTIONS_CACHE_TTL_SECONDS, 300.0)
 
+    async def test_filter_options_repository_matches_facade_with_cache(self):
+        source = await self._source()
+        removed_source = await self._source("removed-filter-options")
+        active = await self._image(source["id"], "active.jpg")
+        removed = await self._image(removed_source["id"], "removed.png")
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "UPDATE images SET date_taken = ?, file_ext = ?, camera_make = ?, "
+                "camera_model = ?, lens = ? WHERE id = ?",
+                ("2024-01-02", "jpg", "Fuji", "X-T5", "35mm", active),
+            )
+            await conn.execute(
+                "UPDATE images SET date_taken = ?, file_ext = ?, camera_make = ?, "
+                "camera_model = ?, lens = ? WHERE id = ?",
+                ("2023-01-02", "png", "Canon", "R5", "50mm", removed),
+            )
+            await conn.execute(
+                "UPDATE catalog_sources SET included = 0 WHERE id = ?",
+                (removed_source["id"],),
+            )
+            await db._update_source_counts(conn, removed_source["id"])
+            await conn.commit()
+        finally:
+            await conn.close()
+        db.invalidate_stats_cache()
+        db.clear_filter_options_cache()
+
+        repository_result = await filter_options_repository.filter_options(
+            db.DB_PATH,
+            catalog_counts=await db.get_catalog_image_counts(),
+            active_source_ids=sorted(await db.get_active_source_id_set()),
+        )
+        facade_result = await db.get_filter_options()
+
+        self.assertEqual(facade_result, repository_result)
+        self.assertEqual(facade_result["years"], [{"year": "2024", "count": 1}])
+        self.assertEqual(facade_result["file_types"], [{"ext": "jpg", "count": 1}])
+        self.assertEqual(facade_result["cameras"], [{"camera": "Fuji X-T5", "count": 1}])
+        self.assertEqual(facade_result["lenses"], [{"lens": "35mm", "count": 1}])
+        self.assertEqual(db._filter_options_cache["data"], facade_result)
+
+        original_filter_options = filter_options_repository.filter_options
+
+        async def fail_on_uncached_read(*_args, **_kwargs):
+            raise AssertionError("cached facade result should not hit repository")
+
+        filter_options_repository.filter_options = fail_on_uncached_read
+        try:
+            self.assertEqual(await db.get_filter_options(), facade_result)
+        finally:
+            filter_options_repository.filter_options = original_filter_options
+
+    async def test_rankings_repository_matches_facade_visible_cache_paths(self):
+        source = await self._source()
+        alpha = await self._image(source["id"], "alpha.jpg", elo=1300)
+        beta = await self._image(source["id"], "beta.jpg", elo=1400)
+        gamma = await self._image(source["id"], "gamma.jpg", elo=1500)
+        for image_id in (alpha, beta):
+            await self._cache_entry(image_id, "sm")
+        db.invalidate_cached_image_ids_cache()
+        db.invalidate_stats_cache()
+        filters = {
+            "sort": "filename",
+            "visible_thumb_size": "sm",
+            "cache_root": app_module.thumbnails.SSD_CACHE_DIR,
+        }
+
+        repository_rows = await rankings.rankings(
+            db.DB_PATH,
+            catalog_counts=await db.get_catalog_image_counts(),
+            limit=10,
+            offset=0,
+            use_cache_first_visible=True,
+            **filters,
+        )
+        facade_rows = await db.get_rankings(limit=10, offset=0, **filters)
+
+        self.assertEqual([dict(row) for row in facade_rows], [dict(row) for row in repository_rows])
+        self.assertEqual([row["id"] for row in facade_rows], [alpha, beta])
+
+        id_filtered_facade_rows = await db.get_rankings(
+            limit=10,
+            offset=0,
+            **filters,
+            id_filter={beta, gamma},
+        )
+        id_filtered_repository_rows = await rankings.rankings(
+            db.DB_PATH,
+            catalog_counts=await db.get_catalog_image_counts(),
+            limit=10,
+            offset=0,
+            sort="filename",
+            id_filter={beta},
+        )
+        self.assertEqual(
+            [dict(row) for row in id_filtered_facade_rows],
+            [dict(row) for row in id_filtered_repository_rows],
+        )
+        self.assertEqual([row["id"] for row in id_filtered_facade_rows], [beta])
+
     async def test_file_type_filters_match_dotted_and_plain_extensions(self):
         source = await self._source()
         plain = await self._image(source["id"], "plain.jpg")
@@ -969,9 +1303,27 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             app_module.thumbnails.SSD_CACHE_DIR,
             "landscape",
         )
+        repository_counts = await ratings.visible_orientation_pairing_pool_counts(
+            db.DB_PATH,
+            catalog_counts=await db.get_catalog_image_counts(),
+            size="md",
+            cache_root=app_module.thumbnails.SSD_CACHE_DIR,
+            orientation="landscape",
+        )
+        default_repository_counts = await ratings.visible_pairing_pool_counts(
+            db.DB_PATH,
+            catalog_counts=await db.get_catalog_image_counts(),
+            size="md",
+            cache_root=app_module.thumbnails.SSD_CACHE_DIR,
+        )
 
         self.assertEqual(counts["active_images"], 2)
         self.assertEqual(counts["visible_images"], 1)
+        self.assertEqual(counts, repository_counts)
+        self.assertEqual(
+            await db.get_visible_pairing_pool_counts("md", app_module.thumbnails.SSD_CACHE_DIR),
+            default_repository_counts,
+        )
 
         await self._cache_entry(hidden_landscape, "md")
         db.invalidate_cached_image_ids_cache(app_module.thumbnails.SSD_CACHE_DIR, "md")
@@ -1099,6 +1451,56 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("idx_images_visible_comparisons_elo", plan)
         self.assertNotIn("TEMP B-TREE", plan)
 
+    async def test_pairing_row_repositories_match_facades(self):
+        source = await self._source()
+        offline_source = await self._source("pairing-offline", online=False)
+        excluded_source = await self._source("pairing-excluded")
+        active = await self._image(source["id"], "pair-active.jpg", elo=1500)
+        uncached = await self._image(source["id"], "pair-uncached.jpg", elo=1400)
+        offline = await self._image(offline_source["id"], "pair-offline.jpg", elo=1300)
+        excluded = await self._image(excluded_source["id"], "pair-excluded.jpg", elo=1200)
+        for image_id in (active, offline, excluded):
+            await self._cache_entry(image_id, "sm")
+        conn = await db.get_db()
+        try:
+            await conn.execute("UPDATE catalog_sources SET included = 0 WHERE id = ?", (excluded_source["id"],))
+            await db._update_source_counts(conn, excluded_source["id"])
+            await conn.commit()
+        finally:
+            await conn.close()
+        db.invalidate_stats_cache()
+
+        counts = await db.get_catalog_image_counts()
+        active_repository_rows = await ratings.active_images_for_pairing(
+            db.DB_PATH,
+            catalog_counts=counts,
+        )
+        active_facade_rows = await db.get_active_images_for_pairing()
+        self.assertEqual(
+            [dict(row) for row in active_facade_rows],
+            [dict(row) for row in active_repository_rows],
+        )
+        self.assertEqual({row["id"] for row in active_facade_rows}, {active, uncached, offline})
+
+        visible_repository_rows = await ratings.visible_images_for_pairing(
+            db.DB_PATH,
+            "sm",
+            app_module.thumbnails.SSD_CACHE_DIR,
+            include_card_metadata=False,
+            order="cache",
+        )
+        visible_facade_rows = await db.get_visible_images_for_pairing(
+            "sm",
+            app_module.thumbnails.SSD_CACHE_DIR,
+            include_card_metadata=False,
+            order="cache",
+        )
+        self.assertEqual(
+            [dict(row) for row in visible_facade_rows],
+            [dict(row) for row in visible_repository_rows],
+        )
+        self.assertEqual([row["id"] for row in visible_facade_rows], [active])
+
     async def test_rankings_response_cache_invalidates_after_flag_change(self):
         source = await self._source()
         first = await self._image(source["id"], "first.jpg", elo=1500)
@@ -1199,12 +1601,50 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
         root = app_module.thumbnails.SSD_CACHE_DIR
         self.assertEqual(await db._cache_entry_count("sm", root), 1)
+        self.assertEqual(
+            await cache_entry_repository.cache_entry_count_cached(
+                db.DB_PATH,
+                size="sm",
+                cache_root=root,
+                ttl_seconds=db.CACHE_ENTRY_COUNT_TTL_SECONDS,
+            ),
+            1,
+        )
+        self.assertEqual(await db.get_cached_image_id_set("sm", root), frozenset({first}))
 
         await self._cache_entry(second, "sm")
         self.assertEqual(await db._cache_entry_count("sm", root), 1)
+        self.assertEqual(
+            await cache_entry_repository.cache_entry_count_cached(
+                db.DB_PATH,
+                size="sm",
+                cache_root=root,
+                ttl_seconds=db.CACHE_ENTRY_COUNT_TTL_SECONDS,
+            ),
+            1,
+        )
+        self.assertEqual(
+            await cache_entry_repository.cached_image_id_set_cached(
+                db.DB_PATH,
+                size="sm",
+                cache_root=root,
+                ttl_seconds=db.CACHED_IMAGE_IDS_TTL_SECONDS,
+            ),
+            frozenset({first}),
+        )
 
         db.invalidate_cached_image_ids_cache(cache_root=root, size="sm")
         self.assertEqual(await db._cache_entry_count("sm", root), 2)
+        self.assertEqual(
+            await cache_entry_repository.cache_entry_count_cached(
+                db.DB_PATH,
+                size="sm",
+                cache_root=root,
+                ttl_seconds=db.CACHE_ENTRY_COUNT_TTL_SECONDS,
+            ),
+            2,
+        )
+        self.assertEqual(await db.get_cached_image_id_set("sm", root), frozenset({first, second}))
 
     async def test_catalog_image_counts_cache_invalidates_with_stats(self):
         source = await self._source()
@@ -1215,10 +1655,22 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             "removed_images": 0,
             "offline_images": 0,
         })
+        self.assertEqual(await stats_repository.catalog_image_counts_cached(db.DB_PATH), {
+            "total_catalog_images": 0,
+            "active_images": 0,
+            "removed_images": 0,
+            "offline_images": 0,
+        })
 
         await self._image(source["id"], "counted.jpg")
 
         self.assertEqual(await db.get_catalog_image_counts(), {
+            "total_catalog_images": 1,
+            "active_images": 1,
+            "removed_images": 0,
+            "offline_images": 0,
+        })
+        self.assertEqual(await stats_repository.catalog_image_counts_cached(db.DB_PATH), {
             "total_catalog_images": 1,
             "active_images": 1,
             "removed_images": 0,
@@ -1304,12 +1756,14 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
         initial_stats = await db.get_stats()
         initial_ai_counts = await db.get_ai_status_counts()
+        self.assertIs(db._ai_status_counts_cache, stats_repository._ai_status_counts_cache)
         self.assertEqual(initial_stats["total_comparisons"], 0)
         self.assertEqual(initial_ai_counts["ranking_signal_count"], 0)
 
         result = await db.record_active_comparison(first, second, "swiss", action_id="stats-cache-test")
         self.assertIsNotNone(result)
         self.assertIsNotNone(db._stats_cache["data"])
+        self.assertEqual(stats_repository._ai_status_counts_cache["data"]["ranking_signal_count"], 1)
 
         compared_stats = await db.get_stats()
         compared_ai_counts = await db.get_ai_status_counts()
@@ -1348,6 +1802,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             return fresh_stats
 
         db._get_stats_uncached = fake_get_stats_uncached
+        stats_repository._stats_inflight_task = None
         db._stats_inflight_task = None
         db._stats_cache["data"] = stale_stats
         db._stats_cache["expires"] = db._time.time() - 1
@@ -1355,24 +1810,26 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             self.assertIs(await db.get_stats(), stale_stats)
             await asyncio.wait_for(refresh_started.wait(), timeout=1)
             self.assertEqual(calls, 1)
+            self.assertIs(db._stats_inflight_task, stats_repository._stats_inflight_task)
 
             self.assertIs(await db.get_stats(), stale_stats)
             self.assertEqual(calls, 1)
 
             refresh_can_finish.set()
-            await asyncio.wait_for(db._stats_inflight_task, timeout=1)
+            await asyncio.wait_for(stats_repository._stats_inflight_task, timeout=1)
 
             self.assertIs(await db.get_stats(), fresh_stats)
             self.assertEqual(calls, 1)
         finally:
             refresh_can_finish.set()
-            task = db._stats_inflight_task
+            task = stats_repository._stats_inflight_task
             if task is not None and not task.done():
                 task.cancel()
                 try:
                     await task
                 except asyncio.CancelledError:
                     pass
+            stats_repository._stats_inflight_task = None
             db._stats_inflight_task = None
             db._get_stats_uncached = old_get_stats_uncached
             db.invalidate_stats_cache()
@@ -1440,6 +1897,147 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(key, db._date_groups_refreshing)
         refreshed = db._date_groups_cache[key]["data"]
         self.assertEqual(refreshed[0]["date"], "2025-02")
+
+    async def test_date_groups_empty_catalog_keeps_facade_cache_empty(self):
+        cache_key = db._facet_cache_key()
+
+        self.assertEqual(
+            await rankings.date_groups(
+                db.DB_PATH,
+                catalog_counts=await db.get_catalog_image_counts(),
+            ),
+            [],
+        )
+        self.assertEqual(await db.get_date_groups(), [])
+        self.assertNotIn(cache_key, db._date_groups_cache)
+
+    async def test_date_groups_repository_matches_facade_with_visible_filters(self):
+        source = await self._source()
+        feb = await self._image(source["id"], "feb.jpg")
+        jan = await self._image(source["id"], "jan.jpg")
+        no_date = await self._image(source["id"], "no-date.jpg")
+        uncached_jan = await self._image(source["id"], "uncached-jan.jpg")
+        conn = await db.get_db()
+        try:
+            await conn.executemany(
+                "UPDATE images SET date_taken = ? WHERE id = ?",
+                [
+                    ("2024-02-03", feb),
+                    ("2024-01-02", jan),
+                    (None, no_date),
+                    ("2024-01-04", uncached_jan),
+                ],
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+        db.invalidate_stats_cache()
+        root = app_module.thumbnails.SSD_CACHE_DIR
+        for image_id in (feb, jan, no_date):
+            await self._cache_entry(image_id, "sm")
+
+        filters = {"visible_thumb_size": "sm", "cache_root": root}
+        repository_result = await rankings.date_groups(
+            db.DB_PATH,
+            catalog_counts=await db.get_catalog_image_counts(),
+            **filters,
+        )
+        db._date_groups_cache.clear()
+        facade_result = await db.get_date_groups(**filters)
+
+        self.assertEqual(facade_result, repository_result)
+        self.assertEqual(
+            facade_result,
+            [
+                {"date": "2024-02", "label": "February 2024", "count": 1},
+                {"date": "2024-01", "label": "January 2024", "count": 1},
+                {"date": "", "label": "No Date", "count": 1},
+            ],
+        )
+        cache_key = db._facet_cache_key(**filters)
+        self.assertEqual(db._date_groups_cache[cache_key]["data"], facade_result)
+
+        original_date_groups = rankings.date_groups
+
+        async def fail_on_uncached_read(*_args, **_kwargs):
+            raise AssertionError("cached facade result should not hit repository")
+
+        rankings.date_groups = fail_on_uncached_read
+        try:
+            self.assertEqual(await db.get_date_groups(**filters), facade_result)
+        finally:
+            rankings.date_groups = original_date_groups
+
+        id_filter = {jan, no_date, uncached_jan}
+        id_filtered = await db.get_date_groups(**filters, id_filter=id_filter)
+        repository_id_filtered = await rankings.date_groups(
+            db.DB_PATH,
+            catalog_counts=await db.get_catalog_image_counts(),
+            **filters,
+            id_filter=id_filter,
+        )
+        self.assertEqual(id_filtered, repository_id_filtered)
+        self.assertEqual(
+            id_filtered,
+            [
+                {"date": "2024-01", "label": "January 2024", "count": 1},
+                {"date": "", "label": "No Date", "count": 1},
+            ],
+        )
+
+    async def test_map_markers_repository_matches_facade_with_visible_filters(self):
+        source = await self._source()
+        visible_gps = await self._image(source["id"], "visible-gps.jpg")
+        visible_no_gps = await self._image(source["id"], "visible-no-gps.jpg")
+        hidden_gps = await self._image(source["id"], "hidden-gps.jpg")
+        conn = await db.get_db()
+        try:
+            await conn.executemany(
+                "UPDATE images SET latitude = ?, longitude = ? WHERE id = ?",
+                [
+                    (45.0, -93.0, visible_gps),
+                    (None, None, visible_no_gps),
+                    (46.0, -94.0, hidden_gps),
+                ],
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+        db.invalidate_stats_cache()
+        root = app_module.thumbnails.SSD_CACHE_DIR
+        for image_id in (visible_gps, visible_no_gps):
+            await self._cache_entry(image_id, "sm")
+
+        filters = {"visible_thumb_size": "sm", "cache_root": root}
+        repository_result = await rankings.map_markers(
+            db.DB_PATH,
+            catalog_counts=await db.get_catalog_image_counts(),
+            total_count=await db.count_rankings(),
+            visible_total_count=await db.count_rankings(**filters),
+            **filters,
+        )
+        db._map_markers_cache.clear()
+        facade_result = await db.get_map_markers(**filters)
+
+        self.assertEqual(facade_result, repository_result)
+        self.assertEqual([marker["id"] for marker in facade_result["markers"]], [visible_gps])
+        self.assertEqual(facade_result["total_count"], 3)
+        self.assertEqual(facade_result["visible_count"], 2)
+        self.assertEqual(facade_result["gps_total_count"], 2)
+        self.assertEqual(facade_result["hidden_pending_thumbnails"], 1)
+        cache_key = db._facet_cache_key(**filters)
+        self.assertEqual(db._map_markers_cache[cache_key]["data"], facade_result)
+
+        original_map_markers = rankings.map_markers
+
+        async def fail_on_uncached_read(*_args, **_kwargs):
+            raise AssertionError("cached facade result should not hit repository")
+
+        rankings.map_markers = fail_on_uncached_read
+        try:
+            self.assertEqual(await db.get_map_markers(**filters), facade_result)
+        finally:
+            rankings.map_markers = original_map_markers
 
     async def test_rescan_marks_missing_files_and_restores_seen_files(self):
         source = await self._source("scan-source")
@@ -1659,10 +2257,24 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
     async def test_scan_start_invalidates_active_source_cache(self):
         source = await self._source("offline-source", online=False)
         self.assertEqual(await db.get_active_source_id_set(), frozenset())
+        self.assertEqual(
+            await catalog_repository.active_source_id_set_cached(
+                db.DB_PATH,
+                ttl_seconds=db.ACTIVE_SOURCE_IDS_TTL_SECONDS,
+            ),
+            frozenset(),
+        )
 
         await db.mark_source_scan_started(source["id"])
 
         self.assertIn(source["id"], await db.get_active_source_id_set())
+        self.assertIn(
+            source["id"],
+            await catalog_repository.active_source_id_set_cached(
+                db.DB_PATH,
+                ttl_seconds=db.ACTIVE_SOURCE_IDS_TTL_SECONDS,
+            ),
+        )
 
     async def test_purge_source_invalidates_cached_image_id_cache(self):
         source = await self._source("purge-source")
@@ -1801,6 +2413,34 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(updated_light_summary["sources"]), 2)
         self.assertEqual(updated_summary["stats"]["total_catalog_images"], 2)
         self.assertEqual(updated_light_summary["stats"]["total_catalog_images"], 2)
+
+    async def test_catalog_summary_facades_share_repository_caches(self):
+        source = await self._source("repository-cache")
+        await self._image(source["id"], "repository-cache.jpg")
+
+        direct_summary = await catalog_repository.catalog_summary_cached(
+            db.DB_PATH,
+            get_stats=db.get_stats,
+            refresh_source_online_states=db.refresh_source_online_states,
+            ttl_seconds=db.CATALOG_CACHE_TTL_SECONDS,
+        )
+        direct_light_summary = await catalog_repository.catalog_light_summary_cached(
+            db.DB_PATH,
+            get_catalog_image_counts=db.get_catalog_image_counts,
+            refresh_source_online_states=db.refresh_source_online_states,
+            ttl_seconds=db.CATALOG_CACHE_TTL_SECONDS,
+        )
+
+        self.assertIs(db._catalog_sources_cache, catalog_repository._catalog_sources_cache)
+        self.assertIs(db._catalog_summary_cache, catalog_repository._catalog_summary_cache)
+        self.assertIs(db._catalog_light_summary_cache, catalog_repository._catalog_light_summary_cache)
+        self.assertIs(await db.get_catalog_summary(), direct_summary)
+        self.assertIs(await db.get_catalog_light_summary(), direct_light_summary)
+
+        db._invalidate_catalog_cache()
+        self.assertIsNone(catalog_repository._catalog_sources_cache["data"])
+        self.assertIsNone(catalog_repository._catalog_summary_cache["data"])
+        self.assertIsNone(catalog_repository._catalog_light_summary_cache["data"])
 
     async def test_visible_facet_caches_invalidate_when_cached_ids_change(self):
         source = await self._source()
@@ -2210,10 +2850,190 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         source = await self._source()
         match = await self._image(source["id"], "sunset-visible.jpg")
         miss = await self._image(source["id"], "portrait-visible.jpg")
+        missing_match = await self._image(source["id"], "sunset-missing.jpg", missing_at=123.0)
+        offline_source = await self._source("offline-metadata", online=False)
+        offline_match = await self._image(offline_source["id"], "sunset-offline.jpg")
+        rejected_match = await self._image(source["id"], "sunset-rejected.jpg")
+        conn = await db.get_db()
+        try:
+            await conn.execute("UPDATE images SET status = 'rejected' WHERE id = ?", (rejected_match,))
+            await conn.commit()
+        finally:
+            await conn.close()
 
         self.assertEqual(await db.metadata_search_image_ids("sunset"), {match})
         self.assertEqual(await db.metadata_search_image_ids("no-such-photo"), set())
         self.assertNotIn(miss, await db.metadata_search_image_ids("sunset"))
+        self.assertNotIn(missing_match, await db.metadata_search_image_ids("sunset"))
+        self.assertNotIn(offline_match, await db.metadata_search_image_ids("sunset"))
+        self.assertNotIn(rejected_match, await db.metadata_search_image_ids("sunset"))
+        self.assertIsNone(await db.metadata_search_image_ids("su"))
+        self.assertIsNone(await db.metadata_search_image_ids("sunset", max_results=1))
+        active_source_ids = await db.get_active_source_id_set()
+        self.assertEqual(
+            await metadata_search.metadata_search_image_ids(
+                db.DB_PATH,
+                "sunset",
+                active_source_ids=active_source_ids,
+            ),
+            await db.metadata_search_image_ids("sunset"),
+        )
+
+    async def test_rankable_image_id_set_uses_repository_with_facade_cache(self):
+        db._invalidate_rankable_image_ids_cache()
+        initial = await rankings.rankable_image_id_set(db.DB_PATH)
+        source = await self._source()
+        kept = await self._image(source["id"], "rankable-kept.jpg")
+        maybe = await self._image(source["id"], "rankable-maybe.jpg")
+        missing = await self._image(source["id"], "rankable-missing.jpg", missing_at=123.0)
+        rejected = await self._image(source["id"], "rankable-rejected.jpg")
+        excluded_source = await self._source("rankable-excluded")
+        excluded = await self._image(excluded_source["id"], "rankable-excluded.jpg")
+        conn = await db.get_db()
+        try:
+            await conn.execute("UPDATE images SET status = 'maybe' WHERE id = ?", (maybe,))
+            await conn.execute("UPDATE images SET status = 'rejected' WHERE id = ?", (rejected,))
+            await conn.execute("UPDATE catalog_sources SET included = 0 WHERE id = ?", (excluded_source["id"],))
+            await conn.commit()
+        finally:
+            await conn.close()
+        db._invalidate_active_source_ids_cache()
+        db._invalidate_rankable_image_ids_cache()
+
+        expected = initial | frozenset({kept, maybe})
+        self.assertEqual(await db.get_rankable_image_id_set(), expected)
+        self.assertEqual(await rankings.rankable_image_id_set_cached(db.DB_PATH), expected)
+        self.assertEqual(await rankings.rankable_image_id_set(db.DB_PATH), expected)
+        self.assertNotIn(missing, await db.get_rankable_image_id_set())
+        self.assertNotIn(rejected, await db.get_rankable_image_id_set())
+        self.assertNotIn(excluded, await db.get_rankable_image_id_set())
+
+        conn = await db.get_db()
+        try:
+            cursor = await conn.execute(
+                "INSERT INTO images (source_id, filename, filepath, status) VALUES (?, ?, ?, 'kept')",
+                (
+                    source["id"],
+                    "rankable-new-kept.jpg",
+                    os.path.join(self.tempdir.name, "rankable-new-kept.jpg"),
+                ),
+            )
+            await conn.commit()
+            new_kept = cursor.lastrowid
+        finally:
+            await conn.close()
+        self.assertEqual(await db.get_rankable_image_id_set(), expected)
+        self.assertEqual(await rankings.rankable_image_id_set_cached(db.DB_PATH), expected)
+        db._invalidate_rankable_image_ids_cache()
+        self.assertEqual(await db.get_rankable_image_id_set(), expected | frozenset({new_kept}))
+        self.assertEqual(
+            await rankings.rankable_image_id_set_cached(db.DB_PATH),
+            expected | frozenset({new_kept}),
+        )
+
+    async def test_count_rankings_with_id_filter_uses_repository_with_facade(self):
+        source = await self._source()
+        picked_kept = await self._image(source["id"], "count-picked-kept.jpg")
+        picked_maybe = await self._image(source["id"], "count-picked-maybe.jpg")
+        picked_missing = await self._image(source["id"], "count-picked-missing.jpg", missing_at=123.0)
+        picked_rejected = await self._image(source["id"], "count-picked-rejected.jpg")
+        unflagged = await self._image(source["id"], "count-unflagged.jpg")
+        excluded_source = await self._source("count-excluded")
+        picked_excluded = await self._image(excluded_source["id"], "count-picked-excluded.jpg")
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "UPDATE images SET flag = 'picked' WHERE id IN (?, ?, ?, ?, ?)",
+                (picked_kept, picked_maybe, picked_missing, picked_rejected, picked_excluded),
+            )
+            await conn.execute("UPDATE images SET status = 'maybe' WHERE id = ?", (picked_maybe,))
+            await conn.execute("UPDATE images SET status = 'rejected' WHERE id = ?", (picked_rejected,))
+            await conn.execute("UPDATE catalog_sources SET included = 0 WHERE id = ?", (excluded_source["id"],))
+            await db._update_source_counts(conn, source["id"])
+            await db._update_source_counts(conn, excluded_source["id"])
+            await conn.commit()
+        finally:
+            await conn.close()
+        db.invalidate_stats_cache()
+
+        id_values = [
+            picked_kept,
+            picked_kept,
+            picked_maybe,
+            picked_missing,
+            picked_rejected,
+            picked_excluded,
+            unflagged,
+            *range(1_000_000, 1_000_905),
+        ]
+        conditions, params = db._ranking_filter_parts(flag="picked")
+        conn = await db.get_db()
+        try:
+            repository_count = await rankings.count_rankings_with_id_filter_on_conn(
+                conn,
+                conditions,
+                params,
+                id_values,
+            )
+            facade_count = await db._count_rankings_with_id_filter(
+                conn,
+                conditions,
+                params,
+                id_values,
+            )
+        finally:
+            await conn.close()
+
+        self.assertEqual(repository_count, 2)
+        self.assertEqual(facade_count, repository_count)
+        self.assertEqual(await db.count_rankings(flag="picked", id_filter=set(id_values)), repository_count)
+
+    async def test_count_rankings_repository_matches_facade_visible_paths(self):
+        source = await self._source()
+        alpha = await self._image(source["id"], "count-alpha.jpg")
+        beta = await self._image(source["id"], "count-beta.jpg")
+        gamma = await self._image(source["id"], "count-gamma.jpg")
+        for image_id in (alpha, beta):
+            await self._cache_entry(image_id, "sm")
+        conn = await db.get_db()
+        try:
+            await conn.execute("UPDATE images SET flag = 'picked' WHERE id IN (?, ?, ?)", (alpha, beta, gamma))
+            await conn.commit()
+        finally:
+            await conn.close()
+        db.invalidate_cached_image_ids_cache()
+        db.invalidate_stats_cache()
+        db._ranking_count_cache.clear()
+
+        filters = {
+            "visible_thumb_size": "sm",
+            "cache_root": app_module.thumbnails.SSD_CACHE_DIR,
+        }
+        counts = await db.get_catalog_image_counts()
+
+        self.assertEqual(
+            await rankings.count_rankings_uncached(
+                db.DB_PATH,
+                catalog_counts=counts,
+                **filters,
+            ),
+            await db.count_rankings(**filters),
+        )
+
+        id_filter = {beta, gamma}
+        cached_visible_ids = set(await db.get_cached_image_id_set("sm", app_module.thumbnails.SSD_CACHE_DIR))
+        self.assertEqual(
+            await rankings.count_rankings_uncached(
+                db.DB_PATH,
+                catalog_counts=counts,
+                flag="picked",
+                id_filter=id_filter,
+                cached_visible_ids=cached_visible_ids,
+                **filters,
+            ),
+            await db.count_rankings(flag="picked", id_filter=id_filter, **filters),
+        )
+        self.assertEqual(await db.count_rankings(flag="picked", id_filter=id_filter, **filters), 1)
 
     async def test_text_search_resolution_keeps_exact_filter_for_non_empty_fts_ids(self):
         source = await self._source()
@@ -3186,12 +4006,13 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([call["id"] for call in full_calls], [first, second])
         self.assertTrue(all(call["hot"] for call in full_calls))
 
-    async def test_warm_images_skips_already_cached_thumbnail_ids(self):
+    async def test_warm_images_skips_cached_thumbnail_generation_but_primes_memory(self):
         source = await self._source()
         cached = await self._image(source["id"], "cached.jpg")
         uncached = await self._image(source["id"], "uncached.jpg")
         await self._cache_entry(cached, "md")
         prefetch_calls = []
+        memory_reads = []
 
         async def fake_prefetch(rows, tier, limit=None, hot=False):
             prefetch_calls.append({
@@ -3202,9 +4023,16 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             })
             return len(rows)
 
+        def fake_read(size, image_id, source_signature=None, *, populate_memory=False):
+            memory_reads.append((size, image_id, source_signature, populate_memory))
+            return ("sig", b"jpeg")
+
         app_module.thumbnails.prefetch_images = fake_prefetch
+        app_module.thumbnails.fast_disk_read_entry = fake_read
+        app_module._thumbnail_memory_warm_inflight.clear()
 
         result = await app_module.warm_images(JsonRequest({"tiers": {"md": [cached, uncached]}}))
+        await asyncio.sleep(0.05)
 
         self.assertEqual(result["scheduled"], {"md": 1})
         self.assertEqual(prefetch_calls, [{
@@ -3213,6 +4041,8 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             "limit": 1,
             "hot": True,
         }])
+        self.assertIn(("md", cached, None, True), memory_reads)
+        self.assertIn(("md", uncached, None, True), memory_reads)
 
     async def test_warm_images_is_best_effort_when_thumbnail_cache_is_locked(self):
         source = await self._source()
@@ -3347,7 +4177,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_cached_full_image_uses_file_response_without_image_lookup(self):
         old_path_entry = app_module.thumbnails.fast_disk_path_entry
-        old_get_image = db.get_image_by_id
+        old_get_image = image_repository.get_image_by_id
         full_path = os.path.join(self.tempdir.name, "full.jpg")
         with open(full_path, "wb") as f:
             f.write(b"jpeg")
@@ -3357,34 +4187,34 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(image_id, 42)
             return ("full-sig-42", full_path)
 
-        async def fail_get_image(_image_id):
+        async def fail_get_image(_db_path, _image_id):
             raise AssertionError("cached full image should not hit image lookup")
 
         app_module.thumbnails.fast_disk_path_entry = fake_path_entry
-        db.get_image_by_id = fail_get_image
+        image_repository.get_image_by_id = fail_get_image
         try:
             response = await app_module.serve_full_image(HeaderRequest(), 42, app_module.BackgroundTasks())
         finally:
             app_module.thumbnails.fast_disk_path_entry = old_path_entry
-            db.get_image_by_id = old_get_image
+            image_repository.get_image_by_id = old_get_image
 
         self.assertIsInstance(response, app_module.FileResponse)
         self.assertEqual(response.headers.get("etag"), '"full-sig-42"')
 
     async def test_cached_full_image_matching_etag_returns_304_without_image_lookup(self):
         old_path_entry = app_module.thumbnails.fast_disk_path_entry
-        old_get_image = db.get_image_by_id
+        old_get_image = image_repository.get_image_by_id
 
         def fake_path_entry(size, image_id):
             self.assertEqual(size, app_module.thumbnails.FULL_TIER)
             self.assertEqual(image_id, 42)
             return ("full-sig-42", "/tmp/unused-full.jpg")
 
-        async def fail_get_image(_image_id):
+        async def fail_get_image(_db_path, _image_id):
             raise AssertionError("matching full ETag should not hit image lookup")
 
         app_module.thumbnails.fast_disk_path_entry = fake_path_entry
-        db.get_image_by_id = fail_get_image
+        image_repository.get_image_by_id = fail_get_image
         try:
             response = await app_module.serve_full_image(
                 HeaderRequest({"if-none-match": '"full-sig-42"'}),
@@ -3393,7 +4223,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             )
         finally:
             app_module.thumbnails.fast_disk_path_entry = old_path_entry
-            db.get_image_by_id = old_get_image
+            image_repository.get_image_by_id = old_get_image
 
         self.assertEqual(response.status_code, 304)
 
@@ -3429,6 +4259,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             "thumbnail_config": {"changed_at": 0, "replace_stale_thumbnails": False},
         }
         captured = {}
+        cache_status_service = app_module.cache_status_service
 
         def fake_pregen_status(target_total, stats=None, original_total=0, archive_estimates=None):
             captured["target_total"] = target_total
@@ -3452,11 +4283,11 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
         old_cache_stats = app_module.thumbnails.cache_stats
         old_pregen_status = app_module.thumbnails.get_pregen_status
-        old_recommendations = app_module._cache_recommendations
+        old_recommendations = cache_status_service._cache_recommendations
         try:
             app_module.thumbnails.cache_stats = lambda: cache_stats
             app_module.thumbnails.get_pregen_status = fake_pregen_status
-            app_module._cache_recommendations = (
+            cache_status_service._cache_recommendations = (
                 lambda _cache, eligible, total, browser, estimates=None: {
                     "eligible_images": eligible,
                     "total_images": total,
@@ -3469,6 +4300,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         finally:
             app_module.thumbnails.cache_stats = old_cache_stats
             app_module.thumbnails.get_pregen_status = old_pregen_status
+            cache_status_service._cache_recommendations = old_recommendations
             app_module._cache_recommendations = old_recommendations
 
         self.assertEqual(captured, {"target_total": 2, "original_total": 1})
@@ -3548,7 +4380,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(app_module._visible_pairing_candidates_cache_ttl_seconds, 5.0)
 
     async def test_light_startup_warmup_does_not_cold_load_deep_diverse_mosaic(self):
-        startup_source = inspect.getsource(app_module.startup)
+        startup_source = inspect.getsource(app_module.background_runtime.run_startup)
         light_warmup = startup_source.split(
             "async def _warm_light_startup_caches():",
             1,
@@ -3558,18 +4390,21 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('strategy="explore"', light_warmup)
 
     async def test_startup_warms_fast_search_model_and_matrix_even_when_ai_work_is_deferred(self):
-        startup_source = inspect.getsource(app_module.startup)
+        startup_source = inspect.getsource(app_module.background_runtime.run_startup)
 
         self.assertIn("pause_embedding_worker", startup_source)
         self.assertIn("start_search_model_load", startup_source)
-        self.assertIn("_track_background_task(_warm_embed_cache())", startup_source)
+        self.assertIn("track_background_task(_warm_embed_cache())", startup_source)
         self.assertLess(
             startup_source.index("pause_embedding_worker"),
             startup_source.index("start_search_model_load"),
         )
 
     async def test_library_cross_view_warmup_does_not_request_diverse_mosaic(self):
-        with open(os.path.join(os.path.dirname(__file__), "static", "app.js"), encoding="utf-8") as fh:
+        with open(
+            os.path.join(os.path.dirname(__file__), "static", "js", "legacy", "app.js"),
+            encoding="utf-8",
+        ) as fh:
             script = fh.read()
         warmup = script.split("function scheduleCrossViewWarmup(fromView)", 1)[1].split(
             "function scheduleLibraryNeighborWarmup",
@@ -3584,8 +4419,10 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         base_dir = os.path.dirname(__file__)
         with open(os.path.join(base_dir, "templates", "compare.html"), encoding="utf-8") as fh:
             compare_template = fh.read()
-        with open(os.path.join(base_dir, "static", "app.js"), encoding="utf-8") as fh:
+        with open(os.path.join(base_dir, "static", "js", "legacy", "app.js"), encoding="utf-8") as fh:
             script = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "library", "search_controller.js"), encoding="utf-8") as fh:
+            search_controller = fh.read()
         init_compare = script.split("async function initCompare()", 1)[1].split(
             "async function pollAIStatus",
             1,
@@ -3594,12 +4431,18 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             "function setRankingsSort",
             1,
         )[0]
+        controller_run_deep = search_controller.split("export function runDeepSearch", 1)[1].split(
+            "return true;",
+            1,
+        )[0]
 
         self.assertIn('id="search-input"', compare_template)
         self.assertIn("PhotoArchive.runDeepSearch()", compare_template)
         self.assertIn("function initSearchInputControls()", script)
         self.assertIn("initSearchInputControls();", init_compare)
-        self.assertIn("reloadForFilters();", run_deep)
+        self.assertIn("runDeepSearchCore({", run_deep)
+        self.assertIn("reloadForFilters();", controller_run_deep)
+        self.assertIn("updateDateScrubber();", controller_run_deep)
         self.assertNotIn("loadRankings(true)", run_deep)
 
     async def test_filtered_compare_window_is_smaller_than_default_window(self):
@@ -4033,6 +4876,94 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(second["last_batch_stage_seconds"].get("db"), 999999)
         self.assertNotEqual(second["governor"].get("reason"), "mutated")
 
+    async def test_ai_status_response_cache_returns_stale_while_refreshing(self):
+        ai_routes = app_module.ai_routes
+        model_status = app_module.ai_models.get_model_status()
+        app_module._ai_status_response_cache.update({
+            "data": {
+                "embedded": 1,
+                "last_batch_stage_seconds": {"db": 1},
+                "governor": {"reason": "cached"},
+            },
+            "key": app_module._ai_model_status_cache_key(model_status),
+            "expires": app_module.time.monotonic() - 1,
+        })
+        old_create_task = ai_routes.asyncio.create_task
+        scheduled = []
+
+        def fake_create_task(coro):
+            scheduled.append(coro)
+            coro.close()
+            return object()
+
+        try:
+            ai_routes.asyncio.create_task = fake_create_task
+            ai_routes._ai_status_response_refreshing = False
+
+            first = await app_module.build_ai_status(model_status)
+            second = await app_module.build_ai_status(model_status)
+
+            self.assertEqual(first["embedded"], 1)
+            self.assertEqual(second["governor"]["reason"], "cached")
+            self.assertEqual(len(scheduled), 1)
+            self.assertTrue(ai_routes._ai_status_response_refreshing)
+        finally:
+            ai_routes.asyncio.create_task = old_create_task
+            ai_routes._ai_status_response_refreshing = False
+            app_module._invalidate_ai_status_response_cache()
+
+    async def test_ai_status_skips_deep_embedding_count_when_no_active_images(self):
+        ai_routes = app_module.ai_routes
+        config_names = (
+            "_invalidate_settings_response_cache",
+            "_get_ai_status_counts",
+            "_count_embeddings_for_model",
+            "_get_deep_search_cache_status",
+            "_list_deep_search_queries",
+        )
+        old_config = {name: getattr(ai_routes, name) for name in config_names}
+        calls = []
+
+        async def fake_get_ai_status_counts():
+            return {
+                "embedded": 0,
+                "total_images": 0,
+                "rated_images": 0,
+                "direct_comparison_rows": 0,
+                "ranking_signal_count": 0,
+                "imported_ranking_without_history": 0,
+            }
+
+        async def fake_count_embeddings_for_model(config, **kwargs):
+            calls.append((config["model_key"], dict(kwargs)))
+            return 99
+
+        async def fake_get_deep_search_cache_status(config, terms=None):
+            return {"pending_queries": 0, "embedded_queries": 0}
+
+        async def fake_list_deep_search_queries(config):
+            return []
+
+        try:
+            ai_routes.configure(
+                invalidate_settings_response_cache=lambda: None,
+                get_ai_status_counts=fake_get_ai_status_counts,
+                count_embeddings_for_model=fake_count_embeddings_for_model,
+                get_deep_search_cache_status=fake_get_deep_search_cache_status,
+                list_deep_search_queries=fake_list_deep_search_queries,
+            )
+            ai_routes.invalidate_ai_status_response_cache()
+
+            status = await app_module.build_ai_status(force=True)
+
+            self.assertEqual(status["total_images"], 0)
+            self.assertEqual(status["embedding_indexes"]["deep"]["embedded"], 0)
+            self.assertEqual(calls, [])
+        finally:
+            for name, value in old_config.items():
+                setattr(ai_routes, name, value)
+            ai_routes.invalidate_ai_status_response_cache()
+
     async def test_ai_status_counts_reuse_warm_stats_cache(self):
         db._stats_cache["data"] = {
             "active_images": 42,
@@ -4044,6 +4975,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         db._stats_cache["expires"] = db._time.time() + db.STATS_CACHE_TTL_SECONDS
         db._ai_status_counts_cache["data"] = None
         db._ai_status_counts_cache["expires"] = 0
+        self.assertIs(db._ai_status_counts_cache, stats_repository._ai_status_counts_cache)
 
         counts = await db.get_ai_status_counts()
 
@@ -4066,6 +4998,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         db._ai_status_counts_cache["expires"] = 0
         db._embedding_count_cache["value"] = 11
         db._embedding_count_cache["expires"] = db._time.time() + db.EMBEDDING_COUNT_CACHE_TTL_SECONDS
+        stats_repository._stats_inflight_task = None
         db._stats_inflight_task = None
         started = asyncio.Event()
         release = asyncio.Event()
@@ -4080,6 +5013,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         try:
             counts = await db.get_ai_status_counts()
             await asyncio.wait_for(started.wait(), timeout=1)
+            self.assertIs(db._stats_inflight_task, stats_repository._stats_inflight_task)
 
             self.assertEqual(counts["embedded"], 11)
             self.assertEqual(counts["total_images"], 42)
@@ -4089,9 +5023,10 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(counts["imported_ranking_without_history"], 2)
         finally:
             release.set()
-            task = db._stats_inflight_task
+            task = stats_repository._stats_inflight_task
             if task is not None and not task.done():
                 await task
+            stats_repository._stats_inflight_task = None
             db._stats_inflight_task = None
             db._get_stats_uncached = old_get_stats_uncached
             db.invalidate_stats_cache()

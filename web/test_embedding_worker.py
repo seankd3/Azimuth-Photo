@@ -35,15 +35,30 @@ class FakeModel:
 class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.old_preload_images = embedding_worker._preload_images
-        self.old_store_embeddings_batch = embedding_worker.db.store_embeddings_batch
-        self.old_get_embedding_count = embedding_worker.db.get_embedding_count
+        self.old_embedding_providers = {
+            name: getattr(embedding_worker, name)
+            for name in (
+                "_get_deep_search_cache_status",
+                "_get_catalog_image_counts",
+                "_count_embeddings_for_model",
+                "_get_unembedded_images",
+                "_get_pending_deep_search_queries",
+                "_store_deep_search_query_embedding",
+                "_store_embeddings_batch",
+                "_get_embedding_count",
+            )
+        }
         self.old_add_vectors = embedding_worker.embed_cache.add_vectors
         self.old_get_settings = embedding_worker.settings.get_settings
         self.old_fast_search_embedding_config = embedding_worker.settings.fast_search_embedding_config
+        self.old_deep_search_embedding_config = embedding_worker.settings.deep_search_embedding_config
+        self.old_deep_search_schedule_status = embedding_worker.settings.deep_search_schedule_status
         self.old_model_files_present = embedding_worker.ai_models.model_files_present
         self.old_missing_model_dependency = embedding_worker._missing_model_dependency
         self.old_load_model = embedding_worker._load_model
         self.old_clear_cuda_cache = embedding_worker._clear_cuda_cache
+        self.old_ensure_model_loaded_for_config = embedding_worker._ensure_model_loaded_for_config
+        self.old_encode_text = embedding_worker.encode_text
         self.old_worker_status = dict(embedding_worker._worker_status)
         self.old_batch_control = dict(embedding_worker._batch_control)
         self.old_retry_after = dict(embedding_worker._embed_retry_after)
@@ -81,16 +96,33 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
             self.stored.extend(rows)
             self.stored_embedding_configs.append(embedding_config)
 
-        async def fake_count():
+        async def fake_count(*_args, **_kwargs):
             return len(self.stored)
+
+        async def fake_empty_dict(*_args, **_kwargs):
+            return {}
+
+        async def fake_empty_list(*_args, **_kwargs):
+            return []
+
+        async def fake_noop(*_args, **_kwargs):
+            return None
 
         def fake_add_vectors(rows, model_key=None):
             self.cached.extend(rows)
             self.cached_model_keys.append(model_key)
 
         embedding_worker._preload_images = fake_preload
-        embedding_worker.db.store_embeddings_batch = fake_store
-        embedding_worker.db.get_embedding_count = fake_count
+        embedding_worker.configure(
+            get_deep_search_cache_status=fake_empty_dict,
+            get_catalog_image_counts=fake_empty_dict,
+            count_embeddings_for_model=fake_count,
+            get_unembedded_images=fake_empty_list,
+            get_pending_deep_search_queries=fake_empty_list,
+            store_deep_search_query_embedding=fake_noop,
+            store_embeddings_batch=fake_store,
+            get_embedding_count=fake_count,
+        )
         embedding_worker.embed_cache.add_vectors = fake_add_vectors
         embedding_worker.settings.get_settings = lambda: {"embed_batch_size": 8}
         embedding_worker.settings.fast_search_embedding_config = lambda: {
@@ -146,15 +178,19 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
 
     async def asyncTearDown(self):
         embedding_worker._preload_images = self.old_preload_images
-        embedding_worker.db.store_embeddings_batch = self.old_store_embeddings_batch
-        embedding_worker.db.get_embedding_count = self.old_get_embedding_count
+        for name, value in self.old_embedding_providers.items():
+            setattr(embedding_worker, name, value)
         embedding_worker.embed_cache.add_vectors = self.old_add_vectors
         embedding_worker.settings.get_settings = self.old_get_settings
         embedding_worker.settings.fast_search_embedding_config = self.old_fast_search_embedding_config
+        embedding_worker.settings.deep_search_embedding_config = self.old_deep_search_embedding_config
+        embedding_worker.settings.deep_search_schedule_status = self.old_deep_search_schedule_status
         embedding_worker.ai_models.model_files_present = self.old_model_files_present
         embedding_worker._missing_model_dependency = self.old_missing_model_dependency
         embedding_worker._load_model = self.old_load_model
         embedding_worker._clear_cuda_cache = self.old_clear_cuda_cache
+        embedding_worker._ensure_model_loaded_for_config = self.old_ensure_model_loaded_for_config
+        embedding_worker.encode_text = self.old_encode_text
         embedding_worker._worker_status.clear()
         embedding_worker._worker_status.update(self.old_worker_status)
         embedding_worker._batch_control.clear()
@@ -309,6 +345,118 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
         for key in ("candidate_query", "preload", "encode", "store", "pause", "wall"):
             self.assertIn(key, stages)
         self.assertIn("oom_backoffs", status)
+
+    async def test_deep_search_cache_idle_path_uses_injected_providers(self):
+        calls = []
+        deep_config = {
+            "model_key": "deep-test@main:4",
+            "model_id": "deep-test",
+            "revision": "main",
+            "dimension": 4,
+            "model_dir": "/tmp/deep-test",
+        }
+
+        async def fake_status(config, terms):
+            calls.append(("status", config, terms))
+            return {"pending_queries": 0, "embedded_queries": 2}
+
+        async def fake_catalog_counts():
+            calls.append(("catalog_counts",))
+            return {"active_images": 2}
+
+        async def fake_count(config):
+            calls.append(("count", config))
+            return 2
+
+        async def fail_unembedded(**_kwargs):
+            raise AssertionError("idle deep-search path should not fetch image candidates")
+
+        embedding_worker.settings.get_settings = lambda: {"deep_search_terms": ["crane"]}
+        embedding_worker.settings.deep_search_embedding_config = lambda: deep_config
+        embedding_worker.settings.deep_search_schedule_status = lambda _config: {"active": True}
+        embedding_worker.configure(
+            get_deep_search_cache_status=fake_status,
+            get_catalog_image_counts=fake_catalog_counts,
+            count_embeddings_for_model=fake_count,
+            get_unembedded_images=fail_unembedded,
+        )
+
+        result = await embedding_worker.process_deep_search_cache_once()
+
+        self.assertEqual(result["state"], "idle")
+        self.assertEqual(result["message"], "Deep search cache is up to date.")
+        self.assertEqual(
+            calls,
+            [
+                ("status", deep_config, ["crane"]),
+                ("catalog_counts",),
+                ("count", deep_config),
+            ],
+        )
+
+    async def test_deep_search_query_embedding_uses_injected_store_provider(self):
+        calls = []
+        deep_config = {
+            "model_key": "deep-test@main:4",
+            "model_id": "deep-test",
+            "revision": "main",
+            "dimension": 4,
+            "model_dir": "/tmp/deep-test",
+        }
+        statuses = [
+            {"pending_queries": 1, "embedded_queries": 0},
+            {"pending_queries": 0, "embedded_queries": 1},
+        ]
+
+        async def fake_status(config, terms):
+            calls.append(("status", config, terms))
+            return statuses.pop(0)
+
+        async def fake_catalog_counts():
+            calls.append(("catalog_counts",))
+            return {"active_images": 0}
+
+        async def fake_count(config):
+            calls.append(("count", config))
+            return 0
+
+        async def fake_unembedded(**kwargs):
+            calls.append(("unembedded", kwargs))
+            return []
+
+        async def fake_pending(config, terms, **kwargs):
+            calls.append(("pending", config, terms, kwargs))
+            return [{"query": "crane"}]
+
+        async def fake_store(config, query, blob):
+            calls.append(("store", config, query, np.frombuffer(blob, dtype=np.float32).tolist()))
+
+        async def fake_loaded(_config, _purpose):
+            calls.append(("loaded",))
+            return True
+
+        embedding_worker.settings.get_settings = lambda: {"deep_search_terms": ["crane"]}
+        embedding_worker.settings.deep_search_embedding_config = lambda: deep_config
+        embedding_worker.settings.deep_search_schedule_status = lambda _config: {"active": True}
+        embedding_worker._ensure_model_loaded_for_config = fake_loaded
+        embedding_worker.encode_text = lambda _query, _config=None: np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
+        embedding_worker.configure(
+            get_deep_search_cache_status=fake_status,
+            get_catalog_image_counts=fake_catalog_counts,
+            count_embeddings_for_model=fake_count,
+            get_unembedded_images=fake_unembedded,
+            get_pending_deep_search_queries=fake_pending,
+            store_deep_search_query_embedding=fake_store,
+        )
+
+        result = await embedding_worker.process_deep_search_cache_once(force=True, limit=3)
+
+        self.assertEqual(result["state"], "embedding")
+        self.assertEqual(result["pending_queries"], 0)
+        self.assertEqual(result["embedded_queries"], 1)
+        self.assertIn(("loaded",), calls)
+        self.assertIn(("pending", deep_config, ["crane"], {"limit": 3}), calls)
+        self.assertIn(("store", deep_config, "crane", [1.0, 0.0, 0.0, 0.0]), calls)
 
     async def test_search_model_loader_returns_fast_when_dependency_missing(self):
         called = False

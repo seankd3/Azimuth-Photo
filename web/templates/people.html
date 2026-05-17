@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}photoArchive — People{% endblock %}
+{% block body_class %}people-shell{% endblock %}
+{% block active_nav %}people{% endblock %}
+{% block content %}
+<div class="people-page">
+    <header class="people-header">
+        <div>
+            <h1>People</h1>
+            <div class="people-status-line" id="people-status-line">Loading People...</div>
+            <div class="people-license-line" id="people-license-line"></div>
+        </div>
+    </header>
+
+    <section class="people-section">
+        <div class="people-section-head">
+            <h2>Most Seen</h2>
+        </div>
+        <div class="people-grid" id="people-most-seen"></div>
+    </section>
+
+    <section class="people-section">
+        <div class="people-section-head">
+            <h2>Named People</h2>
+        </div>
+        <div class="people-grid" id="people-named"></div>
+    </section>
+
+    <section class="people-section">
+        <div class="people-section-head">
+            <h2>Needs Review</h2>
+        </div>
+        <div class="people-review-list" id="people-needs-review"></div>
+    </section>
+
+    <details class="people-section people-other-section">
+        <summary id="people-other-summary">Other Faces</summary>
+        <div class="people-grid" id="people-other"></div>
+    </details>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    window.__photoArchiveWhenReady((api) => api.initPeople());
+</script>
+{% endblock %}

@@ -1,0 +1,87 @@
+"""Search feature vector helpers and response caches."""
+
+import heapq
+from collections.abc import Callable
+
+from data.repositories import cache_entries as cache_entry_repository
+from data.repositories import images as image_repository
+
+
+_duplicates_cache = {"key": None, "data": None}
+_collections_cache = {"key": None, "data": None}
+
+_cache_root: Callable[[], str] | None = None
+_db_path: Callable[[], str] | None = None
+
+
+def configure(*, cache_root: Callable[[], str], db_path: Callable[[], str]) -> None:
+    global _cache_root, _db_path
+    _cache_root = cache_root
+    _db_path = db_path
+
+
+def _configured_cache_root() -> str:
+    if _cache_root is None:
+        raise RuntimeError("Search service is not configured")
+    return _cache_root()
+
+
+def _configured_db_path() -> str:
+    if _db_path is None:
+        raise RuntimeError("Search service is not configured")
+    return _db_path()
+
+
+async def visible_embedding_page(
+    image_ids,
+    similarities,
+    limit: int,
+    size: str = "sm",
+    *,
+    exclude_id: int | None = None,
+    model_key: str | None = None,
+) -> tuple[list[dict], int, int]:
+    db_path = _configured_db_path()
+    cached_ids = await cache_entry_repository.cached_image_id_set_cached(
+        db_path,
+        size=size,
+        cache_root=_configured_cache_root(),
+    )
+    if not cached_ids:
+        total = max(0, len(image_ids) - (1 if exclude_id is not None else 0))
+        return [], 0, total
+
+    id_to_idx = {}
+    try:
+        import embed_cache
+        id_to_idx = embed_cache.get_index(model_key)
+    except Exception:
+        id_to_idx = {int(image_id): idx for idx, image_id in enumerate(image_ids)}
+    if not id_to_idx:
+        id_to_idx = {int(image_id): idx for idx, image_id in enumerate(image_ids)}
+
+    visible_pairs = []
+    for image_id in cached_ids:
+        image_id = int(image_id)
+        if exclude_id is not None and image_id == exclude_id:
+            continue
+        idx = id_to_idx.get(image_id)
+        if idx is None:
+            continue
+        visible_pairs.append((image_id, float(similarities[idx])))
+
+    visible_count = len(visible_pairs)
+    if len(visible_pairs) > limit:
+        visible_pairs = heapq.nlargest(limit, visible_pairs, key=lambda item: item[1])
+    else:
+        visible_pairs.sort(key=lambda item: item[1], reverse=True)
+    selected_ids = [image_id for image_id, _score in visible_pairs[:limit]]
+
+    rows_by_id = await image_repository.get_active_images_by_ids(db_path, selected_ids)
+    visible_rows = []
+    for image_id in selected_ids:
+        row = rows_by_id.get(image_id)
+        if row is not None:
+            visible_rows.append(row)
+    total = max(0, len(image_ids) - (1 if exclude_id is not None else 0))
+    return visible_rows, visible_count, total

@@ -1,0 +1,1 @@
+"""Local diagnostic route package."""

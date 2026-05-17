@@ -1,22 +1,42 @@
-import db
+from collections.abc import Awaitable, Callable
 
-
-METADATA_FIELDS = (
-    "date_taken",
-    "camera_make",
-    "camera_model",
-    "lens",
-    "file_ext",
-    "file_size",
-    "file_modified_at",
-    "width",
-    "height",
-    "latitude",
-    "longitude",
-    "created_at",
+from core.responses import (
+    METADATA_FIELDS,
+    _MISSING,
+    _rounded_elo,
+    image_card,
+    metadata_payload,
 )
+from data.repositories import rankings as ranking_repository
 
-_MISSING = object()
+
+CachedImageIdsProvider = Callable[[list[int], str, str], Awaitable[set[int]]]
+GetActiveImagesByIdsProvider = Callable[[list[int]], Awaitable[dict[int, dict]]]
+
+_cached_image_ids_provider: CachedImageIdsProvider | None = None
+_get_active_images_by_ids_provider: GetActiveImagesByIdsProvider | None = None
+_star_thresholds: dict[int, int] = ranking_repository.STAR_THRESHOLDS
+
+
+def configure(
+    *,
+    cached_image_ids: CachedImageIdsProvider | None = None,
+    get_active_images_by_ids: GetActiveImagesByIdsProvider | None = None,
+    star_thresholds: dict[int, int] | None = None,
+) -> None:
+    global _cached_image_ids_provider, _get_active_images_by_ids_provider, _star_thresholds
+    if cached_image_ids is not None:
+        _cached_image_ids_provider = cached_image_ids
+    if get_active_images_by_ids is not None:
+        _get_active_images_by_ids_provider = get_active_images_by_ids
+    if star_thresholds is not None:
+        _star_thresholds = star_thresholds
+
+
+def _configured(provider, name: str):
+    if provider is None:
+        raise RuntimeError(f"helpers is missing configured dependency: {name}")
+    return provider
 
 
 def _get(image, key: str, default=None):
@@ -42,10 +62,6 @@ def _as_float(value, default: float = 0.0) -> float:
         return default
 
 
-def metadata_payload(image: dict) -> dict:
-    return {field: _get(image, field) for field in METADATA_FIELDS}
-
-
 def ranking_signal_count(image: dict) -> int:
     return _as_int(_get(image, "comparisons")) + _as_int(_get(image, "propagated_updates"))
 
@@ -65,38 +81,6 @@ def visibility_counts(total_images: int, visible_images: int) -> dict:
         "total_images": total,
         "hidden_pending_thumbnails": max(total - visible, 0),
     }
-
-
-def _rounded_elo(value) -> float:
-    return round(_as_float(value, 1200.0), 1)
-
-
-def image_card(
-    image: dict,
-    thumb_size: str = "sm",
-    *,
-    elo_value=_MISSING,
-    similarity=_MISSING,
-    date_group=_MISSING,
-) -> dict:
-    image_id = _as_int(_get(image, "id"))
-    card = {
-        "id": image_id,
-        "filename": _get(image, "filename", ""),
-        "elo": _rounded_elo(_get(image, "elo") if elo_value is _MISSING else elo_value),
-        "comparisons": _as_int(_get(image, "comparisons")),
-        "propagated_updates": _as_int(_get(image, "propagated_updates")),
-        "status": _get(image, "status") or "kept",
-        "flag": _get(image, "flag") or "unflagged",
-        "aspect_ratio": _as_float(_get(image, "aspect_ratio"), 1.5) or 1.5,
-        **metadata_payload(image),
-        "thumb_url": f"/api/thumb/{thumb_size}/{image_id}",
-    }
-    if similarity is not _MISSING:
-        card["similarity"] = None if similarity is None else round(_as_float(similarity), 4)
-    if date_group is not _MISSING:
-        card["date_group"] = date_group or ""
-    return card
 
 
 def date_group_for_image(image: dict) -> str:
@@ -168,7 +152,7 @@ def filter_compare_mosaic_candidates(
     elif compared == "confident":
         candidates = [c for c in candidates if _as_int(c.get("comparisons")) >= 10]
     if min_stars > 0:
-        threshold = db.STAR_THRESHOLDS.get(min_stars, 0)
+        threshold = _star_thresholds.get(min_stars, 0)
         candidates = [c for c in candidates if _as_float(c.get("elo"), 1200.0) >= threshold]
     if folder:
         candidates = [c for c in candidates if f"/{folder}/" in c.get("filepath", "")]
@@ -200,7 +184,7 @@ def _unique_int_ids(values) -> list[int]:
 
 async def cached_image_ids(image_ids, size: str, cache_root: str) -> set[int]:
     ids = _unique_int_ids(image_ids)
-    return await db.get_cached_image_ids(ids, size, cache_root)
+    return await _configured(_cached_image_ids_provider, "cached_image_ids")(ids, size, cache_root)
 
 
 async def filter_visible_candidates(candidates: list[dict], size: str, cache_root: str) -> list[dict]:
@@ -226,7 +210,10 @@ async def visible_ranked_images(
         cached_ids = await cached_image_ids(chunk, size, cache_root)
         if not cached_ids:
             continue
-        active_rows = await db.get_active_images_by_ids([image_id for image_id in chunk if image_id in cached_ids])
+        active_rows = await _configured(
+            _get_active_images_by_ids_provider,
+            "get_active_images_by_ids",
+        )([image_id for image_id in chunk if image_id in cached_ids])
         for image_id in chunk:
             row = active_rows.get(image_id)
             if row is None:
@@ -245,6 +232,9 @@ async def count_visible_ranked_ids(ranked_ids: list[int], size: str, cache_root:
         cached_ids = await cached_image_ids(chunk, size, cache_root)
         if not cached_ids:
             continue
-        active_rows = await db.get_active_images_by_ids([image_id for image_id in chunk if image_id in cached_ids])
+        active_rows = await _configured(
+            _get_active_images_by_ids_provider,
+            "get_active_images_by_ids",
+        )([image_id for image_id in chunk if image_id in cached_ids])
         visible += len(active_rows)
     return visible

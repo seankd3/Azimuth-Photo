@@ -12,17 +12,23 @@ class EmbedCacheTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.old_cache = embed_cache._cache
         self.old_caches = embed_cache._caches
-        self.old_active_model_key = embed_cache.db.active_embedding_model_key
+        self.old_active_model_key = embed_cache._active_embedding_model_key
+        self.old_db_path = embed_cache._db_path
         self.old_get_embedding_count_sync = embed_cache._get_embedding_count_sync
         self.old_load_embeddings_sync = embed_cache._load_embeddings_sync
 
         embed_cache._cache = embed_cache._empty_cache()
         embed_cache._caches = {}
+        embed_cache.configure(
+            active_embedding_model_key=lambda: "fast-model",
+            db_path=lambda: "/tmp/photoarchive-test.db",
+        )
 
     async def asyncTearDown(self):
         embed_cache._cache = self.old_cache
         embed_cache._caches = self.old_caches
-        embed_cache.db.active_embedding_model_key = self.old_active_model_key
+        embed_cache._active_embedding_model_key = self.old_active_model_key
+        embed_cache._db_path = self.old_db_path
         embed_cache._get_embedding_count_sync = self.old_get_embedding_count_sync
         embed_cache._load_embeddings_sync = self.old_load_embeddings_sync
 
@@ -33,7 +39,6 @@ class EmbedCacheTests(unittest.IsolatedAsyncioTestCase):
             "deep-model": np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=np.float32),
         }
 
-        embed_cache.db.active_embedding_model_key = lambda: "fast-model"
         embed_cache._get_embedding_count_sync = lambda _model_key: 2
 
         def fake_load_embeddings_sync(_expected_count, model_key):
@@ -61,7 +66,6 @@ class EmbedCacheTests(unittest.IsolatedAsyncioTestCase):
             "deep-model": np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=np.float32),
         }
 
-        embed_cache.db.active_embedding_model_key = lambda: "fast-model"
         embed_cache._get_embedding_count_sync = lambda _model_key: 2
         embed_cache._load_embeddings_sync = (
             lambda _expected_count, model_key: ([1, 2], matrices[model_key].copy())
@@ -81,7 +85,6 @@ class EmbedCacheTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(embed_cache.get_vector(3, "deep-model").tolist(), [0.0, 0.0, 1.0])
 
     async def test_add_vectors_replaces_existing_warm_vector(self):
-        embed_cache.db.active_embedding_model_key = lambda: "fast-model"
         embed_cache._get_embedding_count_sync = lambda _model_key: 2
         embed_cache._load_embeddings_sync = (
             lambda _expected_count, _model_key: (
@@ -100,7 +103,6 @@ class EmbedCacheTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(embed_cache._cache["count"], 2)
 
     async def test_get_warm_matrix_ignores_invalidated_cache(self):
-        embed_cache.db.active_embedding_model_key = lambda: "fast-model"
         embed_cache._get_embedding_count_sync = lambda _model_key: 2
         embed_cache._load_embeddings_sync = (
             lambda _expected_count, _model_key: (

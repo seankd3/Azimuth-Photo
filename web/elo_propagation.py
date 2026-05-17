@@ -10,10 +10,12 @@ nudges images that haven't been extensively compared yet.
 """
 
 import asyncio
+from collections.abc import Awaitable, Callable
 import logging
+from typing import Any
+
 import numpy as np
 
-import db
 import embed_cache
 import settings
 
@@ -23,12 +25,45 @@ log = logging.getLogger("elo_propagation")
 last_propagation_count = 0
 _prediction_cache_key = None
 _prediction_cache_counts = None
+ActiveEmbeddingModelKey = Callable[[], str]
+GetActiveImagesByIds = Callable[[list[int]], Awaitable[dict[int, dict]]]
+GetDb = Callable[[], Awaitable[Any]]
+InvalidateRatingStatsCache = Callable[[], None]
+_active_embedding_model_key: ActiveEmbeddingModelKey | None = None
+_get_active_images_by_ids: GetActiveImagesByIds | None = None
+_get_db: GetDb | None = None
+_invalidate_rating_stats_cache: InvalidateRatingStatsCache | None = None
 
 # Tuning parameters
 SIMILARITY_THRESHOLD = 0.70   # minimum cosine similarity to propagate
 MAX_NEIGHBORS = 100           # long tail — cubic scaling makes weak matches near-zero anyway
 PROPAGATION_DECAY = 0.3       # scale factor (0.3 = propagated change is 30% of direct)
 MAX_DIRECT_COMPARISONS = 50   # allow propagation to well-compared images (cubic scaling keeps it safe)
+
+
+def configure(
+    *,
+    active_embedding_model_key: ActiveEmbeddingModelKey | None = None,
+    get_active_images_by_ids: GetActiveImagesByIds | None = None,
+    get_db: GetDb | None = None,
+    invalidate_rating_stats_cache: InvalidateRatingStatsCache | None = None,
+) -> None:
+    global _active_embedding_model_key, _get_active_images_by_ids
+    global _get_db, _invalidate_rating_stats_cache
+    if active_embedding_model_key is not None:
+        _active_embedding_model_key = active_embedding_model_key
+    if get_active_images_by_ids is not None:
+        _get_active_images_by_ids = get_active_images_by_ids
+    if get_db is not None:
+        _get_db = get_db
+    if invalidate_rating_stats_cache is not None:
+        _invalidate_rating_stats_cache = invalidate_rating_stats_cache
+
+
+def _configured(provider, name: str):
+    if provider is None:
+        raise RuntimeError(f"elo_propagation is missing configured dependency: {name}")
+    return provider
 
 
 def invalidate_prediction_cache():
@@ -73,7 +108,7 @@ async def _get_compare_matrix(required_ids=()):
                 missing_count,
             )
 
-    fallback_key = db.active_embedding_model_key()
+    fallback_key = _configured(_active_embedding_model_key, "active_embedding_model_key")()
     image_ids, matrix = await embed_cache.get_matrix()
     if image_ids is None or matrix is None:
         return fallback_key, None, None, {}
@@ -231,7 +266,11 @@ async def predict_propagation(grid_ids: list[int]) -> dict[int, int]:
             for nid, _ in nlist:
                 if nid not in grid_set:
                     all_neighbor_ids.add(nid)
-        neighbor_data = await db.get_active_images_by_ids(list(all_neighbor_ids)) if all_neighbor_ids else {}
+        neighbor_data = (
+            await _configured(_get_active_images_by_ids, "get_active_images_by_ids")(list(all_neighbor_ids))
+            if all_neighbor_ids
+            else {}
+        )
 
         result = {}
         for winner_id in grid_ids:
@@ -281,9 +320,9 @@ async def propagate_comparison(winner_id: int, loser_id: int, k: float, action_i
 
         # Collect all neighbor IDs to fetch their current state
         all_neighbor_ids = list({nid for nid, _ in winner_neighbors + loser_neighbors})
-        neighbors = await db.get_active_images_by_ids(all_neighbor_ids)
+        neighbors = await _configured(_get_active_images_by_ids, "get_active_images_by_ids")(all_neighbor_ids)
 
-        conn = await db.get_db()
+        conn = await _configured(_get_db, "get_db")()
         try:
             deltas = {}
 
@@ -312,7 +351,7 @@ async def propagate_comparison(winner_id: int, loser_id: int, k: float, action_i
             )
             if updated:
                 await conn.commit()
-                db.invalidate_rating_stats_cache()
+                _configured(_invalidate_rating_stats_cache, "invalidate_rating_stats_cache")()
                 last_propagation_count = updated
                 log.debug(f"Propagated Elo to {updated} neighbors "
                          f"(winner={winner_id}, loser={loser_id})")
@@ -356,9 +395,9 @@ async def propagate_mosaic(winner_id: int, loser_ids: list[int], k: float, actio
         if not all_neighbor_ids:
             return
 
-        neighbors = await db.get_active_images_by_ids(list(all_neighbor_ids))
+        neighbors = await _configured(_get_active_images_by_ids, "get_active_images_by_ids")(list(all_neighbor_ids))
 
-        conn = await db.get_db()
+        conn = await _configured(_get_db, "get_db")()
         try:
             deltas = {}
 
@@ -390,7 +429,7 @@ async def propagate_mosaic(winner_id: int, loser_ids: list[int], k: float, actio
             )
             if updated:
                 await conn.commit()
-                db.invalidate_rating_stats_cache()
+                _configured(_invalidate_rating_stats_cache, "invalidate_rating_stats_cache")()
                 last_propagation_count = updated
                 log.debug(f"Propagated mosaic to {updated} neighbors "
                          f"(winner={winner_id}, {len(loser_ids)} losers)")

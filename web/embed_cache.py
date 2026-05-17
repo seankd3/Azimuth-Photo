@@ -7,11 +7,11 @@ Rebuilt when the embedding count changes (new images embedded).
 
 import numpy as np
 import asyncio
+from collections.abc import Callable
 import json
 import os
 import sqlite3
 import time
-import db
 
 # Avoid hitting SQLite on every semantic-search request. The embedding worker
 # patches new vectors into this cache directly; catalog/source changes call
@@ -32,10 +32,32 @@ _cache = {
 }
 _caches = {}
 _rebuild_lock = asyncio.Lock()
+ActiveEmbeddingModelKey = Callable[[], str]
+DbPath = Callable[[], str]
+_active_embedding_model_key: ActiveEmbeddingModelKey | None = None
+_db_path: DbPath | None = None
+
+
+def configure(
+    *,
+    active_embedding_model_key: ActiveEmbeddingModelKey | None = None,
+    db_path: DbPath | None = None,
+) -> None:
+    global _active_embedding_model_key, _db_path
+    if active_embedding_model_key is not None:
+        _active_embedding_model_key = active_embedding_model_key
+    if db_path is not None:
+        _db_path = db_path
+
+
+def _configured(provider, name: str):
+    if provider is None:
+        raise RuntimeError(f"embed_cache is missing configured dependency: {name}")
+    return provider
 
 
 def _target_model_key(model_key: str | None = None) -> str:
-    return model_key or db.active_embedding_model_key()
+    return model_key or _configured(_active_embedding_model_key, "active_embedding_model_key")()
 
 
 def _empty_cache(model_key: str | None = None):
@@ -83,7 +105,8 @@ def _rows_to_matrix(rows, *, overallocate: bool = True):
 
 def _db_file_signature() -> list[list[str | int]]:
     signature = []
-    for path in (db.DB_PATH, f"{db.DB_PATH}-wal", f"{db.DB_PATH}-shm"):
+    db_path = _configured(_db_path, "db_path")()
+    for path in (db_path, f"{db_path}-wal", f"{db_path}-shm"):
         try:
             stat = os.stat(path)
             signature.append([os.path.basename(path), stat.st_size, stat.st_mtime_ns])
@@ -154,7 +177,7 @@ def _save_snapshot_sync(image_ids: list[int], matrix: np.ndarray, model_key: str
 
 
 def _get_embedding_count_sync(model_key: str) -> int:
-    conn = sqlite3.connect(db.DB_PATH, timeout=30)
+    conn = sqlite3.connect(_configured(_db_path, "db_path")(), timeout=30)
     try:
         return conn.execute(
             "SELECT COUNT(*) FROM embeddings_by_model e "
@@ -173,7 +196,7 @@ def _load_embeddings_sync(expected_count: int, model_key: str):
     if snapshot is not None:
         return snapshot
 
-    conn = sqlite3.connect(db.DB_PATH, timeout=30)
+    conn = sqlite3.connect(_configured(_db_path, "db_path")(), timeout=30)
     try:
         rows = conn.execute(
             "SELECT e.image_id, e.embedding FROM embeddings_by_model e "

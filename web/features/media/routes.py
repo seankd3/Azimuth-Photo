@@ -1,0 +1,306 @@
+import asyncio
+import os
+import sqlite3
+from collections.abc import Awaitable, Callable
+
+from fastapi import APIRouter, BackgroundTasks, Request
+from fastapi.responses import FileResponse, JSONResponse, Response
+
+from data.repositories import images as image_repository
+import thumbnails
+
+
+router = APIRouter()
+CachedImageIds = Callable[[list[int], str], Awaitable[set[int]]]
+ScheduleMemoryWarm = Callable[..., None]
+DbPathProvider = Callable[[], str]
+_cached_image_ids: CachedImageIds | None = None
+_schedule_cached_thumbnail_memory_warm: ScheduleMemoryWarm | None = None
+_db_path: DbPathProvider | None = None
+_browser_image_extensions = thumbnails.BROWSER_ORIGINAL_EXTENSIONS
+
+
+def configure(
+    *,
+    cached_image_ids: CachedImageIds,
+    schedule_cached_thumbnail_memory_warm: ScheduleMemoryWarm,
+    db_path: DbPathProvider,
+) -> None:
+    global _cached_image_ids, _schedule_cached_thumbnail_memory_warm, _db_path
+    _cached_image_ids = cached_image_ids
+    _schedule_cached_thumbnail_memory_warm = schedule_cached_thumbnail_memory_warm
+    _db_path = db_path
+
+
+def _configured_db_path() -> str:
+    if _db_path is None:
+        raise RuntimeError("Media routes are not configured")
+    return _db_path()
+
+
+def _cache_headers(signature: str) -> dict:
+    return {
+        "Cache-Control": (
+            f"public, max-age={thumbnails.BROWSER_CACHE_MAX_AGE}, "
+            f"stale-while-revalidate={thumbnails.BROWSER_CACHE_STALE_WHILE_REVALIDATE}"
+        ),
+        "ETag": f'"{signature}"',
+    }
+
+
+@router.get("/api/thumb/{size}/{image_id}")
+async def serve_thumbnail(request: Request, size: str, image_id: int, cached: bool = False):
+    if size not in thumbnails.SIZES:
+        return JSONResponse({"error": "Invalid size"}, status_code=400)
+
+    # Fast path: check memory cache, then SSD disk cache with no DB lookup.
+    request_etag = request.headers.get("if-none-match")
+    entry = thumbnails._memory_get_entry_fast(size, image_id)
+    if entry is None:
+        path_entry = thumbnails.fast_disk_path_entry(size, image_id)
+        if path_entry is not None:
+            signature, path = path_entry
+            headers = _cache_headers(signature)
+            if request_etag == headers["ETag"]:
+                return Response(status_code=304, headers=headers)
+            return FileResponse(path, media_type="image/jpeg", headers=headers)
+        entry = await asyncio.get_event_loop().run_in_executor(
+            None,
+            thumbnails.fast_disk_read_entry,
+            size,
+            image_id,
+            None,
+        )
+        if entry is not None:
+            signature, data = entry
+            thumbnails._memory_put(size, image_id, signature, data)
+    if entry is not None:
+        signature, data = entry
+        headers = _cache_headers(signature)
+        if request_etag == headers["ETag"]:
+            return Response(status_code=304, headers=headers)
+        return Response(content=data, media_type="image/jpeg", headers=headers)
+    if cached:
+        return Response(status_code=204, headers={"Cache-Control": "no-store"})
+
+    image = await image_repository.get_image_by_id(_configured_db_path(), image_id)
+    if not image:
+        return JSONResponse({"error": "Image not found"}, status_code=404)
+
+    data = await thumbnails.get_thumbnail(image["filepath"], size, image_id)
+    if not data:
+        return JSONResponse({"error": "Thumbnail generation failed"}, status_code=500)
+
+    headers = thumbnails.response_headers(image["filepath"], size, image_id)
+    return Response(content=data, media_type="image/jpeg", headers=headers)
+
+
+@router.get("/api/full/{image_id}")
+async def serve_full_image(request: Request, image_id: int, background_tasks: BackgroundTasks, cached: bool = False):
+    request_etag = request.headers.get("if-none-match")
+    if cached:
+        entry = thumbnails.fast_disk_path_entry(thumbnails.FULL_TIER, image_id)
+        if entry is None:
+            return Response(status_code=204, headers={"Cache-Control": "no-store"})
+        signature, path = entry
+        headers = _cache_headers(signature)
+        if request_etag == headers["ETag"]:
+            return Response(status_code=304, headers=headers)
+        return FileResponse(path, headers=headers)
+
+    full_entry = thumbnails.fast_disk_path_entry(thumbnails.FULL_TIER, image_id)
+    if full_entry is not None:
+        signature, path = full_entry
+        headers = _cache_headers(signature)
+        if request_etag == headers["ETag"]:
+            return Response(status_code=304, headers=headers)
+        return FileResponse(path, headers=headers)
+
+    image = await image_repository.get_image_by_id(_configured_db_path(), image_id)
+    if not image:
+        return JSONResponse({"error": "Image not found"}, status_code=404)
+
+    ext = os.path.splitext(image["filepath"])[1].lower()
+    if ext not in _browser_image_extensions:
+        headers = thumbnails.response_headers(image["filepath"], "lg", image_id)
+        if request_etag == headers["ETag"]:
+            return Response(status_code=304, headers=headers)
+
+        data = await thumbnails.get_thumbnail(image["filepath"], "lg", image_id)
+        if not data:
+            return JSONResponse({"error": "Preview generation failed"}, status_code=500)
+        return Response(content=data, media_type="image/jpeg", headers=headers)
+
+    headers = thumbnails.response_headers(image["filepath"], thumbnails.FULL_TIER, image_id)
+    if request_etag == headers["ETag"]:
+        return Response(status_code=304, headers=headers)
+
+    path = thumbnails.get_cached_full_image_path(image["filepath"], image_id)
+    if path is None:
+        path = image["filepath"]
+        background_tasks.add_task(thumbnails.schedule_full_image_cache, image["filepath"], image_id)
+
+    if not path or not os.path.exists(path):
+        return JSONResponse({"error": "Full image unavailable"}, status_code=404)
+
+    return FileResponse(path, headers=headers)
+
+
+def image_media_status_payload(image_id: int) -> dict:
+    tiers = {}
+    for size in thumbnails.THUMB_TIERS:
+        cached = thumbnails.has_cached_fast(size, image_id)
+        tiers[size] = {
+            "cached": cached,
+            "url": f"/api/thumb/{size}/{image_id}",
+            "cached_url": f"/api/thumb/{size}/{image_id}?cached=1",
+        }
+
+    full_cached = thumbnails.fast_disk_path_entry(thumbnails.FULL_TIER, image_id) is not None
+    tiers[thumbnails.FULL_TIER] = {
+        "cached": full_cached,
+        "url": f"/api/full/{image_id}",
+        "cached_url": f"/api/full/{image_id}?cached=1",
+    }
+    best_cached = next(
+        (tier for tier in (thumbnails.FULL_TIER, "lg", "md", "sm") if tiers.get(tier, {}).get("cached")),
+        None,
+    )
+    return {"id": image_id, "tiers": tiers, "best_cached": best_cached}
+
+
+@router.get("/api/image/{image_id}/media-status")
+async def image_media_status(image_id: int):
+    return await asyncio.to_thread(image_media_status_payload, image_id)
+
+
+@router.post("/api/images/media-status")
+async def images_media_status(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Malformed JSON body"}, status_code=400)
+    if not isinstance(body, dict):
+        return JSONResponse({"error": "JSON body must be an object"}, status_code=400)
+    raw_ids = body.get("ids", [])
+    if not isinstance(raw_ids, list):
+        raw_ids = [raw_ids]
+    ids = []
+    seen = set()
+    for value in raw_ids:
+        try:
+            image_id = int(value)
+        except (TypeError, ValueError):
+            continue
+        if image_id <= 0 or image_id in seen:
+            continue
+        seen.add(image_id)
+        ids.append(image_id)
+        if len(ids) >= 96:
+            break
+    statuses = await asyncio.to_thread(
+        lambda: [image_media_status_payload(image_id) for image_id in ids]
+    )
+    return {"statuses": statuses}
+
+
+@router.post("/api/images/warm")
+async def warm_images(request: Request):
+    """Mark current/nearby images as hot and schedule SSD cache warming."""
+    if _cached_image_ids is None or _schedule_cached_thumbnail_memory_warm is None:
+        raise RuntimeError("Media routes are not configured")
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    tier_requests = body.get("tiers") or {}
+    requested: dict[str, list[int]] = {}
+    all_ids: set[int] = set()
+
+    for tier, values in tier_requests.items():
+        if tier not in thumbnails.ALL_TIERS:
+            continue
+        ids = []
+        seen_for_tier = set()
+        values_iter = values if isinstance(values, (list, tuple, set)) else [values]
+        for value in values_iter or []:
+            try:
+                image_id = int(value)
+            except (TypeError, ValueError):
+                continue
+            if image_id <= 0 or image_id in seen_for_tier:
+                continue
+            seen_for_tier.add(image_id)
+            ids.append(image_id)
+            all_ids.add(image_id)
+        if ids:
+            requested[tier] = ids[:96]
+
+    if not requested or not all_ids:
+        return {"scheduled": {}, "images": 0}
+
+    try:
+        rows_by_id = await image_repository.get_active_images_by_ids(_configured_db_path(), list(all_ids))
+    except (sqlite3.OperationalError, OSError) as exc:
+        print(f"Warm image lookup skipped: {exc}")
+        return {"scheduled": {tier: 0 for tier in requested}, "images": len(all_ids)}
+    except Exception as exc:
+        print(f"Warm image lookup skipped: {exc}")
+        return {"scheduled": {tier: 0 for tier in requested}, "images": len(all_ids)}
+
+    scheduled = {}
+    for tier in list(requested.keys()):
+        if tier not in thumbnails.THUMB_TIERS:
+            continue
+        hot_rows = [rows_by_id[image_id] for image_id in requested[tier] if image_id in rows_by_id]
+        if hot_rows:
+            _schedule_cached_thumbnail_memory_warm(
+                hot_rows,
+                tier,
+                limit=len(hot_rows),
+                active_min_warm=len(hot_rows),
+            )
+        cached_ids = await _cached_image_ids(requested[tier], tier)
+        if not cached_ids:
+            continue
+        requested[tier] = [image_id for image_id in requested[tier] if image_id not in cached_ids]
+        if not requested[tier]:
+            scheduled[tier] = 0
+
+    for tier, ids in requested.items():
+        rows = [rows_by_id[image_id] for image_id in ids if image_id in rows_by_id]
+        if not rows:
+            scheduled[tier] = 0
+            continue
+        if tier in thumbnails.THUMB_TIERS:
+            try:
+                scheduled[tier] = await thumbnails.prefetch_images(
+                    rows,
+                    tier,
+                    limit=len(rows),
+                    hot=True,
+                )
+            except (sqlite3.OperationalError, OSError) as exc:
+                print(f"Warm {tier} skipped: {exc}")
+                scheduled[tier] = 0
+            except Exception as exc:
+                print(f"Warm {tier} skipped: {exc}")
+                scheduled[tier] = 0
+        elif tier == thumbnails.FULL_TIER:
+            count = 0
+            for row in rows[:12]:
+                ext = os.path.splitext(row["filepath"])[1].lower()
+                if ext not in _browser_image_extensions:
+                    continue
+                try:
+                    await thumbnails.schedule_full_image_cache(row["filepath"], row["id"], hot=True)
+                    count += 1
+                except (sqlite3.OperationalError, OSError) as exc:
+                    print(f"Warm full image {row['id']} skipped: {exc}")
+                except Exception as exc:
+                    print(f"Warm full image {row['id']} skipped: {exc}")
+            scheduled[tier] = count
+
+    return {"scheduled": scheduled, "images": len(all_ids)}

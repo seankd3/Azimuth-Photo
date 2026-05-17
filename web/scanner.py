@@ -1,8 +1,15 @@
 import os
 import asyncio
-import db
+from collections.abc import Awaitable, Callable
 
 SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".dng", ".cr3", ".tif", ".tiff", ".webp"}
+
+MarkSourceScanStarted = Callable[[int], Awaitable[None]]
+InsertImagesBatch = Callable[..., Awaitable[None]]
+MarkSourceScanFinished = Callable[..., Awaitable[None]]
+_mark_source_scan_started: MarkSourceScanStarted | None = None
+_insert_images_batch: InsertImagesBatch | None = None
+_mark_source_scan_finished: MarkSourceScanFinished | None = None
 
 # Global scan state
 scan_state = {
@@ -14,6 +21,27 @@ scan_state = {
     "done": False,
     "error": "",
 }
+
+
+def configure(
+    *,
+    mark_source_scan_started: MarkSourceScanStarted | None = None,
+    insert_images_batch: InsertImagesBatch | None = None,
+    mark_source_scan_finished: MarkSourceScanFinished | None = None,
+) -> None:
+    global _mark_source_scan_started, _insert_images_batch, _mark_source_scan_finished
+    if mark_source_scan_started is not None:
+        _mark_source_scan_started = mark_source_scan_started
+    if insert_images_batch is not None:
+        _insert_images_batch = insert_images_batch
+    if mark_source_scan_finished is not None:
+        _mark_source_scan_finished = mark_source_scan_finished
+
+
+def _configured(provider, name: str):
+    if provider is None:
+        raise RuntimeError(f"scanner is missing configured dependency: {name}")
+    return provider
 
 
 def walk_images(folder: str):
@@ -50,7 +78,7 @@ async def scan_folder(folder: str, source_id: int | None = None, on_batch=None):
 
     try:
         if source_id is not None:
-            await db.mark_source_scan_started(source_id)
+            await _configured(_mark_source_scan_started, "mark_source_scan_started")(source_id)
 
         for row in walk_images(folder):
             batch.append(row)
@@ -58,7 +86,7 @@ async def scan_folder(folder: str, source_id: int | None = None, on_batch=None):
             scan_state["total_found"] += 1
 
             if len(batch) >= batch_size:
-                await db.insert_images_batch(batch, source_id=source_id)
+                await _configured(_insert_images_batch, "insert_images_batch")(batch, source_id=source_id)
                 scan_state["total_inserted"] += len(batch)
                 if on_batch:
                     await on_batch(scan_state["total_inserted"])
@@ -67,13 +95,16 @@ async def scan_folder(folder: str, source_id: int | None = None, on_batch=None):
                 await asyncio.sleep(0)
 
         if batch:
-            await db.insert_images_batch(batch, source_id=source_id)
+            await _configured(_insert_images_batch, "insert_images_batch")(batch, source_id=source_id)
             scan_state["total_inserted"] += len(batch)
             if on_batch:
                 await on_batch(scan_state["total_inserted"])
 
         if source_id is not None:
-            await db.mark_source_scan_finished(source_id, seen_filepaths=seen_filepaths)
+            await _configured(_mark_source_scan_finished, "mark_source_scan_finished")(
+                source_id,
+                seen_filepaths=seen_filepaths,
+            )
     except Exception as exc:
         scan_state["error"] = str(exc)
     finally:

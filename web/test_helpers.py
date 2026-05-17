@@ -1,3 +1,4 @@
+import asyncio
 import os
 import sys
 import unittest
@@ -5,6 +6,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(__file__))
 import helpers  # noqa: E402
 import resource_governor  # noqa: E402
+from core import responses as response_helpers  # noqa: E402
 
 
 class ImageHelperTests(unittest.TestCase):
@@ -63,6 +65,31 @@ class ImageHelperTests(unittest.TestCase):
         self.assertEqual(card["elo"], 1321.2)
         self.assertEqual(card["similarity"], 0.9877)
         self.assertEqual(card["date_group"], "2024-05")
+
+    def test_image_card_helper_facade_matches_core_response_helper(self):
+        image = self.image(5, elo=1333.36, comparisons=8, propagated_updates=2)
+
+        self.assertIs(helpers.image_card, response_helpers.image_card)
+        self.assertIs(helpers.metadata_payload, response_helpers.metadata_payload)
+        self.assertIs(helpers.METADATA_FIELDS, response_helpers.METADATA_FIELDS)
+        self.assertEqual(
+            helpers.image_card(
+                image,
+                "md",
+                similarity=0.812345,
+                date_group="2024-05",
+            ),
+            response_helpers.image_card(
+                image,
+                "md",
+                similarity=0.812345,
+                date_group="2024-05",
+            ),
+        )
+        self.assertEqual(
+            helpers.metadata_payload(image),
+            response_helpers.metadata_payload(image),
+        )
 
     def test_ranking_signal_checks_direct_propagated_and_imported(self):
         self.assertFalse(helpers.has_ranking_signal(self.image(1)))
@@ -128,6 +155,45 @@ class ImageHelperTests(unittest.TestCase):
         self.assertEqual([img["id"] for img in filtered], [1, 2])
         self.assertIsNot(filtered[0], images[0])
 
+    def test_db_backed_helpers_use_configured_providers(self):
+        old_cached = helpers._cached_image_ids_provider
+        old_active = helpers._get_active_images_by_ids_provider
+        old_thresholds = helpers._star_thresholds
+        calls = []
+
+        async def fake_cached_image_ids(image_ids, size, cache_root):
+            calls.append(("cached", tuple(image_ids), size, cache_root))
+            return {2, 3}
+
+        async def fake_active_images_by_ids(image_ids):
+            calls.append(("active", tuple(image_ids)))
+            return {int(image_id): self.image(int(image_id)) for image_id in image_ids}
+
+        try:
+            helpers.configure(
+                cached_image_ids=fake_cached_image_ids,
+                get_active_images_by_ids=fake_active_images_by_ids,
+                star_thresholds={4: 1300},
+            )
+            cached = asyncio.run(helpers.cached_image_ids([1, "2", "bad", 2, 3], "sm", "/tmp/cache"))
+            visible = asyncio.run(helpers.visible_ranked_images([1, 2, 3], 1, "sm", "/tmp/cache"))
+            visible_count = asyncio.run(helpers.count_visible_ranked_ids([1, 2, 3], "sm", "/tmp/cache"))
+            filtered = helpers.filter_compare_mosaic_candidates(
+                [self.image(1, elo=1299), self.image(2, elo=1301)],
+                min_stars=4,
+            )
+        finally:
+            helpers._cached_image_ids_provider = old_cached
+            helpers._get_active_images_by_ids_provider = old_active
+            helpers._star_thresholds = old_thresholds
+
+        self.assertEqual(cached, {2, 3})
+        self.assertEqual([img["id"] for img in visible], [2])
+        self.assertEqual(visible_count, 2)
+        self.assertEqual([img["id"] for img in filtered], [2])
+        self.assertIn(("cached", (1, 2, 3), "sm", "/tmp/cache"), calls)
+        self.assertIn(("active", (2, 3)), calls)
+
 
 class ResourceGovernorTests(unittest.TestCase):
     def setUp(self):
@@ -153,10 +219,10 @@ class ResourceGovernorTests(unittest.TestCase):
 
         self.assertEqual(decision.reason, "system busy")
         self.assertEqual(decision.work_mode, "balanced")
-        self.assertEqual(decision.thumbnail_batch_size, 4)
-        self.assertGreaterEqual(decision.thumbnail_pause_seconds, 1.0)
+        self.assertEqual(decision.thumbnail_batch_size, 1)
+        self.assertGreaterEqual(decision.thumbnail_pause_seconds, 3.0)
 
-    def test_recent_user_activity_keeps_background_batches_small(self):
+    def test_light_mode_ignores_recent_activity_with_small_batches(self):
         resource_governor.os.cpu_count = lambda: 8
         resource_governor._read_load_1m = lambda: 1.0
         resource_governor._read_meminfo = lambda: {
@@ -167,10 +233,11 @@ class ResourceGovernorTests(unittest.TestCase):
 
         decision = resource_governor.get_background_decision(idle_seconds=30, work_mode="balanced")
 
-        self.assertEqual(decision.reason, "recent user activity")
-        self.assertTrue(decision.pause)
-        self.assertEqual(decision.thumbnail_batch_size, 0)
-        self.assertGreaterEqual(decision.thumbnail_pause_seconds, 5.0)
+        self.assertEqual(decision.reason, "light background")
+        self.assertFalse(decision.pause)
+        self.assertEqual(decision.thumbnail_batch_size, 2)
+        self.assertGreaterEqual(decision.thumbnail_pause_seconds, 1.5)
+        self.assertTrue(decision.can_start_heavy_work)
 
     def test_healthy_system_uses_bounded_thumbnail_batches(self):
         resource_governor.os.cpu_count = lambda: 8
@@ -183,8 +250,9 @@ class ResourceGovernorTests(unittest.TestCase):
 
         decision = resource_governor.get_background_decision(idle_seconds=120, work_mode="balanced")
 
-        self.assertEqual(decision.reason, "system healthy")
-        self.assertEqual(decision.thumbnail_batch_size, 8)
+        self.assertEqual(decision.reason, "light background")
+        self.assertEqual(decision.mode, "light")
+        self.assertEqual(decision.thumbnail_batch_size, 2)
         self.assertFalse(decision.pause)
 
     def test_browse_mode_pauses_background_compute(self):
