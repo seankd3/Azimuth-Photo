@@ -3709,6 +3709,8 @@ class ModularContractTests(unittest.TestCase):
             compare_keyboard = fh.read()
         with open(os.path.join(base_dir, "static", "js", "compare", "images.js"), encoding="utf-8") as fh:
             compare_images = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "compare", "pair_controller.js"), encoding="utf-8") as fh:
+            compare_pair_controller = fh.read()
         with open(os.path.join(base_dir, "static", "js", "compare", "view.js"), encoding="utf-8") as fh:
             compare_view = fh.read()
         with open(os.path.join(base_dir, "static", "js", "compare", "mode_controller.js"), encoding="utf-8") as fh:
@@ -3825,6 +3827,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../compare/query.js';", legacy)
         self.assertIn("from '../compare/navigation.js';", legacy)
         self.assertIn("from '../compare/images.js';", legacy)
+        self.assertIn("from '../compare/pair_controller.js';", legacy)
         self.assertIn("from '../compare/view.js';", legacy)
         self.assertIn("from '../compare/mode_controller.js';", legacy)
         self.assertIn("from '../compare/action_controller.js';", legacy)
@@ -3938,6 +3941,9 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("export function renderCompareImage", compare_images)
         self.assertIn("export async function upgradeCompareImage", compare_images)
         self.assertIn("export async function adoptCompareTier", compare_images)
+        self.assertIn("export function createComparePairController", compare_pair_controller)
+        self.assertIn("fetchWarmJson", compare_pair_controller)
+        self.assertIn("isCurrentCompareImage", compare_pair_controller)
         self.assertIn("export function setCompareModeView", compare_view)
         self.assertIn("export function showCompareEmpty", compare_view)
         self.assertIn("export function createCompareModeController", compare_mode_controller)
@@ -5466,6 +5472,163 @@ assert.deepEqual(events, [
     ['coverage', 20, 5],
     ['roll', 'counter', 19, 23],
     ['badge', 3],
+]);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_compare_pair_controller_node_probe_preserves_fetch_display_and_empty_flow(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createComparePairController } from './static/js/compare/pair_controller.js';
+
+const elements = Object.fromEntries([
+    'compare-left-img',
+    'compare-right-img',
+    'compare-left-info',
+    'compare-right-info',
+].map(id => [id, { id, textContent: '' }]));
+const documentImpl = {
+    getElementById(id) {
+        return elements[id] || null;
+    },
+};
+
+let compareMode = 'swiss';
+let compareIndex = 0;
+let comparePairs = [];
+let compareStats = {};
+let compareImageToken = 0;
+const events = [];
+const pair = {
+    left: { id: 1, filename: 'left.jpg', elo: 1210, thumb_url: '/left-sm.jpg' },
+    right: { id: 2, filename: 'right.jpg', elo: 1190, thumb_url: '/right-sm.jpg' },
+};
+const controller = createComparePairController({
+    getCompareMode: () => compareMode,
+    getCompareIndex: () => compareIndex,
+    setCompareIndex: (index) => {
+        compareIndex = index;
+        events.push(['index', index]);
+    },
+    getComparePairs: () => comparePairs,
+    setComparePairs: (pairs) => {
+        comparePairs = pairs;
+        events.push(['pairs', pairs.length]);
+    },
+    setCompareStats: (stats) => {
+        compareStats = stats;
+        events.push(['stats', { ...stats }]);
+    },
+    incrementCompareImageToken: () => {
+        compareImageToken += 1;
+        events.push(['token', compareImageToken]);
+        return compareImageToken;
+    },
+    getCompareImageToken: () => compareImageToken,
+    buildCompareUrl: (mode, n) => {
+        events.push(['url', mode, n]);
+        return `/api/compare/next?mode=${mode}&n=${n}`;
+    },
+    takeWarmCache: (key) => {
+        events.push(['warm', key]);
+        return null;
+    },
+    fetchWarmJson: async (url) => {
+        events.push(['fetch', url]);
+        return { stats: { ranking_signal_count: 7 }, pairs: [pair] };
+    },
+    preloadImage: (url) => events.push(['preload', url]),
+    primeMediaStatuses: (ids) => events.push(['prime', ids]),
+    renderCompareImage: (img, imgEl, side, token) => events.push(['render', side, img.id, imgEl.id, token]),
+    warmImageTiers: (tiers) => events.push(['warm-tiers', tiers]),
+    updateCompareProgress: () => events.push(['progress']),
+    scheduleCompareNeighborWarmup: (mode) => events.push(['neighbor', mode]),
+    scheduleCrossViewWarmup: (view) => events.push(['cross', view]),
+    showCompareEmpty: () => events.push(['empty']),
+    documentImpl,
+    prefetchLowWater: 1,
+});
+
+assert.deepEqual(await controller.fetchComparePairs(), { stats: { ranking_signal_count: 7 }, pairs: [pair] });
+assert.equal(comparePairs.length, 1);
+assert.deepEqual(compareStats, { ranking_signal_count: 7 });
+assert.equal(controller.isCurrentCompareImage(0), true);
+assert.deepEqual(events, [
+    ['url', 'swiss', 8],
+    ['warm', 'compare:/api/compare/next?mode=swiss&n=8'],
+    ['fetch', '/api/compare/next?mode=swiss&n=8'],
+    ['stats', { ranking_signal_count: 7 }],
+    ['preload', '/left-sm.jpg'],
+    ['preload', '/right-sm.jpg'],
+    ['neighbor', 'swiss'],
+    ['cross', 'compare'],
+]);
+
+events.length = 0;
+assert.equal(controller.showComparePair(), true);
+assert.equal(elements['compare-left-info'].textContent, 'left.jpg — 1210');
+assert.equal(elements['compare-right-info'].textContent, 'right.jpg — 1190');
+assert.equal(controller.isCurrentCompareImage(1), true);
+assert.deepEqual(events, [
+    ['token', 1],
+    ['prime', [1, 2]],
+    ['render', 'left', 1, 'compare-left-img', 1],
+    ['render', 'right', 2, 'compare-right-img', 1],
+    ['warm-tiers', { lg: [1, 2], full: [1, 2] }],
+    ['progress'],
+]);
+
+events.length = 0;
+compareIndex = 1;
+comparePairs = [pair];
+const emptyController = createComparePairController({
+    getCompareMode: () => 'topn',
+    getCompareIndex: () => compareIndex,
+    setCompareIndex: (index) => {
+        compareIndex = index;
+        events.push(['empty-index', index]);
+    },
+    getComparePairs: () => comparePairs,
+    setComparePairs: (pairs) => {
+        comparePairs = pairs;
+        events.push(['empty-pairs', pairs.length]);
+    },
+    setCompareStats: (stats) => events.push(['empty-stats', { ...stats }]),
+    incrementCompareImageToken: () => ++compareImageToken,
+    getCompareImageToken: () => compareImageToken,
+    buildCompareUrl: (mode, n) => `/empty?mode=${mode}&n=${n}`,
+    takeWarmCache: () => null,
+    fetchWarmJson: async (url) => {
+        events.push(['empty-fetch', url]);
+        return { stats: {}, pairs: [] };
+    },
+    preloadImage: () => {},
+    primeMediaStatuses: () => {},
+    renderCompareImage: () => {},
+    warmImageTiers: () => {},
+    updateCompareProgress: () => {},
+    scheduleCompareNeighborWarmup: () => {},
+    scheduleCrossViewWarmup: () => {},
+    showCompareEmpty: () => events.push(['empty']),
+    documentImpl,
+});
+assert.equal(emptyController.showComparePair(), false);
+await Promise.resolve();
+await Promise.resolve();
+assert.deepEqual(events, [
+    ['empty-index', 0],
+    ['empty-pairs', 0],
+    ['empty-fetch', '/empty?mode=topn&n=8'],
+    ['empty-stats', {}],
+    ['empty'],
 ]);
 """
         subprocess.run(

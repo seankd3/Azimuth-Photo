@@ -76,6 +76,7 @@ import {
     renderCompareImage as renderCompareImageCore,
     upgradeCompareImage as upgradeCompareImageCore,
 } from '../compare/images.js';
+import { createComparePairController } from '../compare/pair_controller.js';
 import {
     showCompareEmpty as showCompareEmptyCore,
 } from '../compare/view.js';
@@ -538,69 +539,38 @@ const legacyPhotoArchive = (() => {
         initStarHover();
     }
 
+    const comparePairController = createComparePairController({
+        getCompareMode: () => compareMode,
+        getCompareIndex: () => compareIndex,
+        setCompareIndex: (index) => { compareIndex = index; },
+        getComparePairs: () => comparePairs,
+        setComparePairs: (pairs) => { comparePairs = pairs; },
+        setCompareStats: (stats) => { compareStats = stats; },
+        incrementCompareImageToken: () => ++compareImageToken,
+        getCompareImageToken: () => compareImageToken,
+        buildCompareUrl,
+        takeWarmCache,
+        fetchWarmJson,
+        preloadImage: (...args) => preloadImage(...args),
+        primeMediaStatuses,
+        renderCompareImage,
+        warmImageTiers,
+        updateCompareProgress,
+        scheduleCompareNeighborWarmup,
+        scheduleCrossViewWarmup,
+        showCompareEmpty,
+    });
+
     async function fetchComparePairs() {
-        const url = buildCompareUrl(compareMode, 8);
-        const useCache = compareIndex === 0 && comparePairs.length === 0;
-        const data = (useCache ? takeWarmCache(`compare:${url}`) : null) || await fetchWarmJson(url);
-        if (!data) return;
-        compareStats = data.stats || {};
-
-        if (data.pairs.length === 0 && comparePairs.length === 0) {
-            showCompareEmpty();
-            return;
-        }
-
-        // Append new pairs
-        for (const pair of data.pairs) {
-            comparePairs.push(pair);
-            preloadImage(pair.left.thumb_url);
-            preloadImage(pair.right.thumb_url);
-        }
-
-        if (compareIndex === 0) {
-            scheduleCompareNeighborWarmup(compareMode);
-        }
-        scheduleCrossViewWarmup('compare');
+        return comparePairController.fetchComparePairs();
     }
 
     function showComparePair() {
-        if (compareIndex >= comparePairs.length) {
-            // Fetch more pairs
-            compareIndex = 0;
-            comparePairs = [];
-            fetchComparePairs().then(() => {
-                if (comparePairs.length > 0) showComparePair();
-            });
-            return;
-        }
-
-        const pair = comparePairs[compareIndex];
-        const token = ++compareImageToken;
-        const leftImg = document.getElementById('compare-left-img');
-        const rightImg = document.getElementById('compare-right-img');
-        const leftInfo = document.getElementById('compare-left-info');
-        const rightInfo = document.getElementById('compare-right-info');
-
-        if (leftInfo) leftInfo.textContent = `${pair.left.filename} — ${pair.left.elo}`;
-        if (rightInfo) rightInfo.textContent = `${pair.right.filename} — ${pair.right.elo}`;
-        primeMediaStatuses([pair.left.id, pair.right.id]);
-        renderCompareImage(pair.left, leftImg, 'left', token);
-        renderCompareImage(pair.right, rightImg, 'right', token);
-        warmImageTiers({
-            lg: [pair.left.id, pair.right.id],
-            full: [pair.left.id, pair.right.id],
-        });
-
-        updateCompareProgress();
-
-        // Prefetch if running low
-        if (comparePairs.length - compareIndex < 4) {
-            fetchComparePairs();
-        }
+        return comparePairController.showComparePair();
     }
 
     function isCurrentCompareImage(token) {
-        return token === compareImageToken && compareIndex < comparePairs.length;
+        return comparePairController.isCurrentCompareImage(token);
     }
 
     function renderCompareImage(img, imgEl, side, token) {
