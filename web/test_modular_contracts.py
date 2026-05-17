@@ -3712,6 +3712,8 @@ class ModularContractTests(unittest.TestCase):
             library_flags = fh.read()
         with open(os.path.join(base_dir, "static", "js", "library", "batch.js"), encoding="utf-8") as fh:
             library_batch = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "library", "batch_controller.js"), encoding="utf-8") as fh:
+            library_batch_controller = fh.read()
         with open(os.path.join(base_dir, "static", "js", "export", "actions.js"), encoding="utf-8") as fh:
             export_actions = fh.read()
         with open(os.path.join(base_dir, "static", "js", "library", "similar.js"), encoding="utf-8") as fh:
@@ -3800,7 +3802,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../library/search_controls.js';", legacy)
         self.assertIn("from '../library/search_controller.js';", legacy)
         self.assertIn("from '../library/flags.js';", legacy)
-        self.assertIn("from '../library/batch.js';", legacy)
+        self.assertIn("from '../library/batch_controller.js';", legacy)
         self.assertIn("from '../export/actions.js';", legacy)
         self.assertIn("from '../library/similar.js';", legacy)
         self.assertIn("from '../library/display.js';", legacy)
@@ -3971,6 +3973,9 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("export async function batchFlag", library_batch)
         self.assertIn("export function batchExport", library_batch)
         self.assertIn("from '../export/actions.js';", library_batch)
+        self.assertIn("export function createBatchSelectionController", library_batch_controller)
+        self.assertIn("from './batch.js';", library_batch_controller)
+        self.assertIn("selectedImageIds", library_batch_controller)
         self.assertIn("export function fullRankingsExportUrl", export_actions)
         self.assertIn("export function selectedImagesExportUrl", export_actions)
         self.assertIn("export function exportRankings", export_actions)
@@ -4201,6 +4206,99 @@ batchExportFacade('json', {
     },
 });
 assert.deepEqual(facadeOpened, selectedOpened);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_library_batch_controller_node_probe_preserves_selection_flow(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createBatchSelectionController } from './static/js/library/batch_controller.js';
+
+function classList() {
+    const values = new Set();
+    return {
+        add: (...names) => names.forEach((name) => values.add(name)),
+        remove: (...names) => names.forEach((name) => values.delete(name)),
+        contains: (name) => values.has(name),
+    };
+}
+
+const cards = [
+    { classList: classList() },
+    { classList: classList() },
+];
+let batchBar = null;
+const documentImpl = {
+    body: {
+        appendChild(el) {
+            if (el.id === 'batch-bar') batchBar = el;
+        },
+    },
+    createElement() {
+        return {
+            id: '',
+            className: '',
+            innerHTML: '',
+            remove() {
+                if (this.id === 'batch-bar') batchBar = null;
+            },
+        };
+    },
+    getElementById(id) {
+        return id === 'batch-bar' ? batchBar : null;
+    },
+    querySelectorAll(selector) {
+        return selector === '.rank-card' ? cards : [];
+    },
+};
+const images = [
+    { id: 7, flag: 'unflagged' },
+    { id: 8, flag: 'picked' },
+];
+const opened = [];
+const controller = createBatchSelectionController({
+    documentImpl,
+    getImages: () => images,
+    openImage: (img) => opened.push(img.id),
+});
+
+controller.handleCardClick({}, images[0], cards[0], 0);
+assert.deepEqual(opened, [7]);
+assert.equal(controller.isBatchMode(), false);
+assert.deepEqual(controller.selectedImageIds(), []);
+
+controller.toggleBatchMode();
+assert.equal(controller.isBatchMode(), true);
+assert.equal(cards[0].classList.contains('selectable'), true);
+assert.equal(cards[1].classList.contains('selectable'), true);
+
+controller.handleCardClick({}, images[0], cards[0], 0);
+assert.deepEqual(controller.selectedImageIds(), [7]);
+assert.equal(controller.isSelected(7), true);
+assert.equal(controller.hasSelection(), true);
+assert.equal(cards[0].classList.contains('selected'), true);
+assert.match(batchBar.innerHTML, /1 selected/);
+
+controller.handleCardClick({ shiftKey: true, preventDefault() {} }, images[1], cards[1], 1);
+assert.deepEqual(controller.selectedImageIds(), [7, 8]);
+assert.equal(cards[1].classList.contains('selected'), true);
+assert.match(batchBar.innerHTML, /2 selected/);
+
+controller.clearBatchSelection();
+assert.equal(controller.isBatchMode(), false);
+assert.equal(controller.hasSelection(), false);
+assert.deepEqual(controller.selectedImageIds(), []);
+assert.equal(cards[0].classList.contains('selected'), false);
+assert.equal(cards[0].classList.contains('selectable'), false);
+assert.equal(batchBar, null);
 """
         subprocess.run(
             ["node", "--input-type=module", "-e", script],

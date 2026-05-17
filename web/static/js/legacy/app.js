@@ -179,14 +179,7 @@ import {
     setImageFlag as setImageFlagCore,
     updateImageFlagLocal as updateImageFlagLocalCore,
 } from '../library/flags.js';
-import {
-    batchExport as batchExportCore,
-    batchFlag as batchFlagCore,
-    clearBatchSelection as clearBatchSelectionCore,
-    handleCardClick as handleCardClickCore,
-    toggleBatchMode as toggleBatchModeCore,
-    updateBatchBar as updateBatchBarCore,
-} from '../library/batch.js';
+import { createBatchSelectionController } from '../library/batch_controller.js';
 import { exportRankings as exportRankingsCore } from '../export/actions.js';
 import {
     eloToStars,
@@ -1471,7 +1464,7 @@ const legacyPhotoArchive = (() => {
         bindLibraryKeyboard({
             getSelectedLibraryIndex: () => selectedLibraryIndex,
             getLibraryImages: () => libraryImages,
-            hasBatchSelection: () => batchSelected.size > 0,
+            hasBatchSelection: () => batchController.hasSelection(),
             selectLibraryCard,
             deselectLibraryCard,
             findCardInDirection,
@@ -1690,8 +1683,8 @@ const legacyPhotoArchive = (() => {
 
                 const card = document.createElement('div');
                 card.className = 'rank-card skeleton-cell' + (tier ? ' ' + tier : '') + (flagClass(img.flag) ? ' ' + flagClass(img.flag) : '');
-                if (batchMode) card.classList.add('selectable');
-                if (batchSelected.has(img.id)) card.classList.add('selected');
+                if (batchController.isBatchMode()) card.classList.add('selectable');
+                if (batchController.isSelected(img.id)) card.classList.add('selected');
                 card.dataset.imageId = img.id;
                 card.dataset.ar = ar;
                 card.style.height = rowH + 'px';
@@ -2536,60 +2529,31 @@ const legacyPhotoArchive = (() => {
 
     // ==================== BATCH SELECTION ====================
 
-    let batchMode = false;
-    let batchSelected = new Set();
-    let lastClickedIndex = -1;
+    const batchController = createBatchSelectionController({
+        getImages: () => libraryImages,
+        openImage: openLightbox,
+        showToast,
+        updateImageFlagLocal,
+    });
 
     function toggleBatchMode() {
-        const result = toggleBatchModeCore({ batchMode, batchSelected });
-        if (result.action === 'clear') {
-            clearBatchSelection();
-            return;
-        }
-        if (typeof result.batchMode === 'boolean') batchMode = result.batchMode;
-        if (result.updateBatchBar) updateBatchBar();
+        batchController.toggleBatchMode();
     }
 
     function clearBatchSelection() {
-        const result = clearBatchSelectionCore(batchSelected);
-        batchMode = result.batchMode;
-        lastClickedIndex = result.lastClickedIndex;
-        updateBatchBar();
+        batchController.clearBatchSelection();
     }
 
     function handleCardClick(e, img, card, index) {
-        const result = handleCardClickCore(e, img, card, index, {
-            batchMode,
-            batchSelected,
-            images: libraryImages,
-            lastClickedIndex,
-        });
-        if (result.action === 'clear') {
-            clearBatchSelection();
-            return;
-        }
-        if (typeof result.batchMode === 'boolean') batchMode = result.batchMode;
-        if (typeof result.lastClickedIndex === 'number') lastClickedIndex = result.lastClickedIndex;
-        if (result.updateBatchBar) updateBatchBar();
-        if (result.action === 'open') openLightbox(result.image);
-    }
-
-    function updateBatchBar() {
-        updateBatchBarCore(batchSelected.size);
+        batchController.handleCardClick(e, img, card, index);
     }
 
     async function batchFlag(flag) {
-        await batchFlagCore(flag, {
-            imageIds: Array.from(batchSelected),
-            images: libraryImages,
-            updateImageFlagLocal,
-            clearBatchSelection,
-            showToast,
-        });
+        await batchController.batchFlag(flag);
     }
 
     function batchExport(format) {
-        batchExportCore(format, { imageIds: Array.from(batchSelected) });
+        batchController.batchExport(format);
     }
 
     function exportRankings(format) {
