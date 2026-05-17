@@ -78,6 +78,8 @@ marker loading, marker-layer replacement, and map-bound fitting.
 glue while legacy keeps pair and mosaic state.
 `compare/images.js` owns Compare pair image rendering and progressive tier
 upgrades.
+`compare/action_controller.js` owns Compare submit/undo state orchestration
+while `compare/actions.js` owns pure request and Elo helper functions.
 `compare/view.js` owns Compare mode container visibility and empty-state display.
 `compare/actions.js` owns Compare pair action payloads, comparison POST/result
 parsing, returned ELO application, undo POST/result parsing, and undo toast text.

@@ -79,12 +79,8 @@ import {
 } from '../compare/view.js';
 import { createCompareModeController } from '../compare/mode_controller.js';
 import {
-    applyComparisonElos as applyComparisonElosCore,
-    buildComparisonPayload as buildComparisonPayloadCore,
-    postComparison as postComparisonCore,
-    postUndoComparison as postUndoComparisonCore,
-    undoComparisonToastText as undoComparisonToastTextCore,
-} from '../compare/actions.js';
+    createCompareActionController,
+} from '../compare/action_controller.js';
 import {
     fetchPropagationCount as fetchPropagationCountCore,
     precomputePropagationCounts,
@@ -832,62 +828,30 @@ const legacyPhotoArchive = (() => {
         return showPropagationBadgeCore(count);
     }
 
+    const compareActionController = createCompareActionController({
+        getCompareBusy: () => compareBusy,
+        setCompareBusy: (busy) => { compareBusy = busy; },
+        setUndoCount: (value) => { undoCount = value; },
+        incrementUndoCount: () => ++undoCount,
+        incrementCompareActionSeq: () => ++compareActionSeq,
+        getCompareActionSeq: () => compareActionSeq,
+        getCompareIndex: () => compareIndex,
+        setCompareIndex: (index) => { compareIndex = index; },
+        getComparePairs: () => comparePairs,
+        getCompareMode: () => compareMode,
+        showComparePair,
+        showToast,
+        fetchPropagationCount,
+        bumpRankingSignals,
+        updateCompareProgress,
+    });
+
     function submitComparison(side) {
-        if (compareBusy || compareIndex >= comparePairs.length) return;
-        compareBusy = true;
-        undoCount = 0;
-        const actionSeq = ++compareActionSeq;
-
-        const pair = comparePairs[compareIndex];
-        const previousIndex = compareIndex;
-        const payload = buildComparisonPayloadCore(pair, side, compareMode);
-
-        compareIndex++;
-        showComparePair();
-        compareBusy = false;
-
-        postComparisonCore(payload).then((result) => {
-            applyComparisonElosCore(pair, side, result);
-            fetchPropagationCount(1);
-        }).catch(() => {
-            if (compareActionSeq === actionSeq && compareMode !== 'mosaic') {
-                compareIndex = previousIndex;
-                showComparePair();
-                showToast('Failed to save comparison; restored the previous pair');
-            } else {
-                showToast('Failed to save comparison');
-            }
-        });
+        return compareActionController.submitComparison(side);
     }
 
     async function undoComparison() {
-        if (compareBusy) return;
-        undoCount++;
-        if (undoCount > 3) {
-            showToast('Maximum undo reached');
-            return;
-        }
-        compareBusy = true;
-        try {
-            const result = await postUndoComparisonCore();
-            if (result.ok) {
-                const comparisonsUndone = result.comparisonsUndone;
-                bumpRankingSignals(-comparisonsUndone, -comparisonsUndone);
-                updateCompareProgress();
-                if (compareMode !== 'mosaic' && compareIndex > 0) {
-                    compareIndex--;
-                    showComparePair();
-                } else if (compareMode === 'mosaic') {
-                    showToast(undoComparisonToastTextCore(comparisonsUndone));
-                }
-            } else {
-                showToast('Undo failed');
-            }
-        } catch {
-            showToast('Undo failed');
-        } finally {
-            compareBusy = false;
-        }
+        return compareActionController.undoComparison();
     }
 
     function selectMosaicCell(index, cells) {

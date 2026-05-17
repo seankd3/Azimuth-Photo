@@ -3713,6 +3713,8 @@ class ModularContractTests(unittest.TestCase):
             compare_view = fh.read()
         with open(os.path.join(base_dir, "static", "js", "compare", "mode_controller.js"), encoding="utf-8") as fh:
             compare_mode_controller = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "compare", "action_controller.js"), encoding="utf-8") as fh:
+            compare_action_controller = fh.read()
         with open(os.path.join(base_dir, "static", "js", "compare", "actions.js"), encoding="utf-8") as fh:
             compare_actions = fh.read()
         with open(os.path.join(base_dir, "static", "js", "compare", "propagation.js"), encoding="utf-8") as fh:
@@ -3819,7 +3821,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../compare/images.js';", legacy)
         self.assertIn("from '../compare/view.js';", legacy)
         self.assertIn("from '../compare/mode_controller.js';", legacy)
-        self.assertIn("from '../compare/actions.js';", legacy)
+        self.assertIn("from '../compare/action_controller.js';", legacy)
         self.assertIn("from '../compare/propagation.js';", legacy)
         self.assertIn("from '../compare/status.js';", legacy)
         self.assertIn("from '../compare/mosaic.js';", legacy)
@@ -3933,6 +3935,9 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("export function createCompareModeController", compare_mode_controller)
         self.assertIn("from './view.js';", compare_mode_controller)
         self.assertIn("setCompareModeViewImpl", compare_mode_controller)
+        self.assertIn("export function createCompareActionController", compare_action_controller)
+        self.assertIn("from './actions.js';", compare_action_controller)
+        self.assertIn("postComparisonImpl", compare_action_controller)
         self.assertIn("export function buildComparisonPayload", compare_actions)
         self.assertIn("export async function postComparison", compare_actions)
         self.assertIn("export function applyComparisonElos", compare_actions)
@@ -5337,6 +5342,169 @@ assert.equal(undoResult.ok, true);
 assert.equal(undoResult.comparisonsUndone, 2);
 assert.equal(undoComparisonToastText(2), 'Undid 2 comparisons');
 assert.equal(undoComparisonToastText(1), 'Undid 1 comparison');
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_compare_action_controller_node_probe_preserves_submit_and_undo_flow(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createCompareActionController } from './static/js/compare/action_controller.js';
+
+let compareBusy = false;
+let undoCount = 0;
+let compareActionSeq = 0;
+let compareIndex = 0;
+let compareMode = 'swiss';
+let comparePairs = [
+    { left: { id: 7, elo: 1200 }, right: { id: 8, elo: 1100 } },
+];
+const events = [];
+const controller = createCompareActionController({
+    getCompareBusy: () => compareBusy,
+    setCompareBusy: (busy) => {
+        compareBusy = busy;
+        events.push(['busy', busy]);
+    },
+    setUndoCount: (count) => {
+        undoCount = count;
+        events.push(['undoCount', count]);
+    },
+    incrementUndoCount: () => {
+        undoCount += 1;
+        events.push(['undoCount', undoCount]);
+        return undoCount;
+    },
+    incrementCompareActionSeq: () => {
+        compareActionSeq += 1;
+        events.push(['seq', compareActionSeq]);
+        return compareActionSeq;
+    },
+    getCompareActionSeq: () => compareActionSeq,
+    getCompareIndex: () => compareIndex,
+    setCompareIndex: (index) => {
+        compareIndex = index;
+        events.push(['index', index]);
+    },
+    getComparePairs: () => comparePairs,
+    getCompareMode: () => compareMode,
+    showComparePair: () => events.push(['show']),
+    showToast: (message) => events.push(['toast', message]),
+    fetchPropagationCount: (count) => events.push(['propagation', count]),
+    bumpRankingSignals: (signalDelta, directDelta) => events.push(['bump', signalDelta, directDelta]),
+    updateCompareProgress: () => events.push(['progress']),
+    buildComparisonPayloadImpl: (pair, side, mode) => {
+        events.push(['payload', pair.left.id, side, mode]);
+        return { pairId: pair.left.id, side, mode };
+    },
+    postComparisonImpl: async (payload) => {
+        events.push(['post', payload.side, payload.mode]);
+        return { winner_elo: 1300, loser_elo: 1050 };
+    },
+    applyComparisonElosImpl: (pair, side, result) => {
+        events.push(['apply', side, result.winner_elo, result.loser_elo]);
+        pair.left.elo = result.winner_elo;
+    },
+    postUndoComparisonImpl: async () => {
+        events.push(['undoPost']);
+        return { ok: true, comparisonsUndone: 2 };
+    },
+    undoComparisonToastTextImpl: (count) => `undo ${count}`,
+});
+
+assert.equal(controller.submitComparison('left'), true);
+await Promise.resolve();
+assert.equal(compareIndex, 1);
+assert.equal(compareBusy, false);
+assert.equal(comparePairs[0].left.elo, 1300);
+assert.deepEqual(events, [
+    ['busy', true],
+    ['undoCount', 0],
+    ['seq', 1],
+    ['payload', 7, 'left', 'swiss'],
+    ['index', 1],
+    ['show'],
+    ['busy', false],
+    ['post', 'left', 'swiss'],
+    ['apply', 'left', 1300, 1050],
+    ['propagation', 1],
+]);
+
+events.length = 0;
+compareIndex = 0;
+const failingController = createCompareActionController({
+    getCompareBusy: () => false,
+    setCompareBusy: (busy) => events.push(['busy', busy]),
+    setUndoCount: (count) => events.push(['undoCount', count]),
+    incrementCompareActionSeq: () => {
+        compareActionSeq += 1;
+        return compareActionSeq;
+    },
+    getCompareActionSeq: () => compareActionSeq,
+    getCompareIndex: () => compareIndex,
+    setCompareIndex: (index) => {
+        compareIndex = index;
+        events.push(['index', index]);
+    },
+    getComparePairs: () => comparePairs,
+    getCompareMode: () => 'topn',
+    showComparePair: () => events.push(['show']),
+    showToast: (message) => events.push(['toast', message]),
+    fetchPropagationCount: () => {},
+    bumpRankingSignals: () => {},
+    updateCompareProgress: () => {},
+    postComparisonImpl: async () => {
+        throw new Error('boom');
+    },
+});
+assert.equal(failingController.submitComparison('right'), true);
+await Promise.resolve();
+await Promise.resolve();
+assert.equal(compareIndex, 0);
+assert.deepEqual(events, [
+    ['busy', true],
+    ['undoCount', 0],
+    ['index', 1],
+    ['show'],
+    ['busy', false],
+    ['index', 0],
+    ['show'],
+    ['toast', 'Failed to save comparison; restored the previous pair'],
+]);
+
+events.length = 0;
+compareBusy = false;
+undoCount = 0;
+compareIndex = 1;
+compareMode = 'swiss';
+assert.equal(await controller.undoComparison(), true);
+assert.equal(compareBusy, false);
+assert.equal(compareIndex, 0);
+assert.deepEqual(events, [
+    ['undoCount', 1],
+    ['busy', true],
+    ['undoPost'],
+    ['bump', -2, -2],
+    ['progress'],
+    ['index', 0],
+    ['show'],
+    ['busy', false],
+]);
+
+events.length = 0;
+undoCount = 3;
+assert.equal(await controller.undoComparison(), false);
+assert.deepEqual(events, [
+    ['undoCount', 4],
+    ['toast', 'Maximum undo reached'],
+]);
 """
         subprocess.run(
             ["node", "--input-type=module", "-e", script],
