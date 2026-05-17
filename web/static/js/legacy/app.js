@@ -211,6 +211,7 @@ import {
     dateGroupOffset as dateGroupOffsetCore,
     findDateGroupHeader as findDateGroupHeaderCore,
     isDateSortValue,
+    jumpToDateGroup as jumpToDateGroupCore,
     renderDateScrubber as renderDateScrubberCore,
     setActiveDateScrubberGroup as setActiveDateScrubberGroupCore,
     setupDateScrubberScrollTracking as setupDateScrubberScrollTrackingCore,
@@ -1766,40 +1767,28 @@ const legacyPhotoArchive = (() => {
     }
 
     async function jumpToDateGroup(group) {
-        if (!isDateScrubberActive()) return;
-
-        const existingHeader = findDateGroupHeader(group);
-        if (existingHeader) {
-            setActiveDateScrubberGroup(group);
-            scrollLibraryContainerToElement(existingHeader);
-            return;
-        }
-
-        const offset = dateGroupOffset(group);
-        if (offset === null) return;
-
-        const gen = ++dateJumpGeneration;
-        libraryRequestGeneration++;
-        rankingsOffset = offset;
-        rankingsExhausted = false;
-        libraryImages = [];
-        lastDateGroup = null;
-        rankingsLoading = false;
-        rankingsLoadPromise = null;
-        selectedLibraryIndex = -1;
-
-        const grid = document.getElementById('rankings-grid');
-        if (grid) grid.innerHTML = '';
-        libraryScrollRoot()?.scrollTo({ top: 0, behavior: 'auto' });
-
-        await loadRankings(true);
-        if (gen !== dateJumpGeneration) return;
-
-        const loadedHeader = findDateGroupHeader(group);
-        if (loadedHeader) {
-            scrollLibraryContainerToElement(loadedHeader, 'auto');
-            setActiveDateScrubberGroup(group);
-        }
+        return jumpToDateGroupCore(group, {
+            isActive: isDateScrubberActive,
+            findHeader: findDateGroupHeader,
+            setActiveGroup: setActiveDateScrubberGroup,
+            scrollToElement: scrollLibraryContainerToElement,
+            getOffset: dateGroupOffset,
+            resetForOffset: (offset) => {
+                const gen = ++dateJumpGeneration;
+                libraryRequestGeneration++;
+                rankingsOffset = offset;
+                rankingsExhausted = false;
+                libraryImages = [];
+                lastDateGroup = null;
+                rankingsLoading = false;
+                rankingsLoadPromise = null;
+                selectedLibraryIndex = -1;
+                return gen;
+            },
+            isCurrentJump: (gen) => gen === dateJumpGeneration,
+            loadRankings,
+            scrollRoot: libraryScrollRoot,
+        });
     }
 
     async function updateDateScrubber() {

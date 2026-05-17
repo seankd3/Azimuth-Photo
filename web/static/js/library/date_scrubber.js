@@ -29,6 +29,49 @@ export function dateGroupOffset(dateGroups, group) {
 }
 
 
+export async function jumpToDateGroup(group, {
+    isActive = () => false,
+    findHeader = findDateGroupHeader,
+    setActiveGroup = setActiveDateScrubberGroup,
+    scrollToElement = () => {},
+    getOffset = () => null,
+    resetForOffset = () => 0,
+    isCurrentJump = () => true,
+    loadRankings = async () => {},
+    scrollRoot = libraryScrollRoot,
+    documentImpl = document,
+} = {}) {
+    if (!isActive()) return false;
+
+    const existingHeader = findHeader(group);
+    if (existingHeader) {
+        setActiveGroup(group);
+        scrollToElement(existingHeader);
+        return true;
+    }
+
+    const offset = getOffset(group);
+    if (offset === null) return false;
+
+    const gen = resetForOffset(offset);
+
+    const grid = documentImpl.getElementById('rankings-grid');
+    if (grid) grid.innerHTML = '';
+    scrollRoot()?.scrollTo({ top: 0, behavior: 'auto' });
+
+    await loadRankings(true);
+    if (!isCurrentJump(gen)) return false;
+
+    const loadedHeader = findHeader(group);
+    if (loadedHeader) {
+        scrollToElement(loadedHeader, 'auto');
+        setActiveGroup(group);
+        return true;
+    }
+    return false;
+}
+
+
 export function setActiveDateScrubberGroup(group, documentImpl = document) {
     const year = group ? group.substring(0, 4) : '';
     documentImpl.querySelectorAll('.scrubber-label, .scrubber-year').forEach(el => {

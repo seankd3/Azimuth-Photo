@@ -3965,6 +3965,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("export function isDateSortValue", library_date_scrubber)
         self.assertIn("export function findDateGroupHeader", library_date_scrubber)
         self.assertIn("export function dateGroupOffset", library_date_scrubber)
+        self.assertIn("export async function jumpToDateGroup", library_date_scrubber)
         self.assertIn("export function setActiveDateScrubberGroup", library_date_scrubber)
         self.assertIn("export function setupDateScrubberScrollTracking", library_date_scrubber)
         self.assertIn("export function renderDateScrubber", library_date_scrubber)
