@@ -39,13 +39,12 @@ import {
 import { createLibraryFilterController } from '../library/filter_controller.js';
 import { createMediaStatusClient } from '../media_status.js';
 import {
-    compareThumbUrls,
     createImagePreloader,
     createWarmupManager,
-    imageThumbUrls,
     loadImageProbe,
     withTimeout,
 } from '../warmup.js';
+import { createNeighborWarmupController } from '../warmup_neighbors.js';
 import { createThumbnailSizeHandler } from '../thumbnail_size.js';
 import {
     buildCompareUrl as buildCompareUrlCore,
@@ -892,72 +891,35 @@ const legacyPhotoArchive = (() => {
         if (scrubber) scrubber.classList.toggle('hidden', !active);
     }
 
+    const neighborWarmups = createNeighborWarmupController({
+        getMosaicStrategy: () => mosaicStrategy,
+        getMosaicSize: () => mosaicSize,
+        getSearchQuery: () => searchQuery,
+        getRankingsExhausted: () => rankingsExhausted,
+        getRankingsSort: () => rankingsSort,
+        getRankingsOffset: () => rankingsOffset,
+        buildRankingsUrl,
+        buildMosaicUrl,
+        buildCompareUrl,
+        currentQueryState,
+        scheduleBackgroundWarm,
+        warmRequests,
+        initialRankingsPageSize: INITIAL_RANKINGS_PAGE_SIZE,
+        rankingsPageSize: RANKINGS_PAGE_SIZE,
+        compareNeighborPairs: COMPARE_NEIGHBOR_PAIRS,
+        crossViewWarmDelayMs: CROSS_VIEW_WARM_DELAY_MS,
+    });
+
     function scheduleCrossViewWarmup(fromView) {
-        if (fromView === 'compare') {
-            const libraryUrl = buildRankingsUrl({
-                sort: 'elo',
-                limit: INITIAL_RANKINGS_PAGE_SIZE,
-                offset: 0,
-            });
-            const requests = [{
-                url: libraryUrl,
-                cacheKey: `library:${libraryUrl}`,
-                extract: imageThumbUrls,
-            }];
-            scheduleBackgroundWarm(
-                'crossview-library',
-                (token, generation) => warmRequests('crossview-library', token, generation, requests),
-                CROSS_VIEW_WARM_DELAY_MS,
-            );
-        } else if (fromView === 'library') {
-            const warmStrategy = mosaicStrategy === 'diverse' ? 'explore' : mosaicStrategy;
-            const compareUrl = buildMosaicUrl({
-                strategy: warmStrategy,
-                gridElo: 0,
-                n: mosaicSize,
-            });
-            const requests = [{
-                url: compareUrl,
-                cacheKey: `compare:${compareUrl}`,
-                extract: imageThumbUrls,
-            }];
-            scheduleBackgroundWarm(
-                'crossview-compare',
-                (token, generation) => warmRequests('crossview-compare', token, generation, requests),
-                CROSS_VIEW_WARM_DELAY_MS,
-            );
-        }
+        return neighborWarmups.scheduleCrossViewWarmup(fromView);
     }
 
     function scheduleLibraryNeighborWarmup() {
-        if (searchQuery || rankingsExhausted) return;
-        const nextUrl = buildRankingsUrl({
-            queryState: currentQueryState({ sort: rankingsSort }),
-            sort: rankingsSort,
-            limit: RANKINGS_PAGE_SIZE,
-            offset: rankingsOffset,
-        });
-        const requests = [{ url: nextUrl, cacheKey: `library:${nextUrl}`, extract: imageThumbUrls }];
-
-        scheduleBackgroundWarm(
-            'library-next-page',
-            (token, generation) => warmRequests('library-next-page', token, generation, requests),
-        );
+        return neighborWarmups.scheduleLibraryNeighborWarmup();
     }
 
     function scheduleCompareNeighborWarmup(mode = compareMode) {
-        if (mode === 'mosaic') return;
-        const requests = [];
-        requests.push({
-            url: buildCompareUrl(mode, COMPARE_NEIGHBOR_PAIRS),
-            extract: compareThumbUrls,
-        });
-
-        scheduleBackgroundWarm(
-            'compare-next-pairs',
-            (token, generation) => warmRequests('compare-next-pairs', token, generation, requests),
-            350,
-        );
+        return neighborWarmups.scheduleCompareNeighborWarmup(mode);
     }
 
     function hasActiveTextSearch(value = searchQuery) {

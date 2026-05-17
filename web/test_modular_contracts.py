@@ -3815,6 +3815,8 @@ class ModularContractTests(unittest.TestCase):
             ui_module = fh.read()
         with open(os.path.join(base_dir, "static", "js", "warmup.js"), encoding="utf-8") as fh:
             warmup = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "warmup_neighbors.js"), encoding="utf-8") as fh:
+            warmup_neighbors = fh.read()
         with open(os.path.join(base_dir, "static", "js", "thumbnail_size.js"), encoding="utf-8") as fh:
             thumbnail_size = fh.read()
 
@@ -3873,6 +3875,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../settings/page.js';", legacy)
         self.assertIn("from '../ui.js';", legacy)
         self.assertIn("from '../warmup.js';", legacy)
+        self.assertIn("from '../warmup_neighbors.js';", legacy)
         self.assertIn("export async function fetchJson", api_module)
         self.assertIn("export function aiStatusPollDelay", ai_status)
         self.assertIn("export function renderAIBottomBarStatus", ai_status)
@@ -4198,9 +4201,142 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("export function createWarmCacheStore", warmup)
         self.assertIn("export function imageThumbUrls", warmup)
         self.assertIn("export function compareThumbUrls", warmup)
+        self.assertIn("export function createNeighborWarmupController", warmup_neighbors)
+        self.assertIn("from './warmup.js';", warmup_neighbors)
+        self.assertIn("scheduleCrossViewWarmup", warmup_neighbors)
         self.assertIn("export function applyLibraryThumbSize", thumbnail_size)
         self.assertIn("export function createThumbnailSizeHandler", thumbnail_size)
         self.assertIn("export default legacyPhotoArchive;", legacy)
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_neighbor_warmup_controller_node_probe_preserves_scheduled_request_shapes(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createNeighborWarmupController } from './static/js/warmup_neighbors.js';
+
+const scheduled = [];
+const warmed = [];
+let mosaicStrategy = 'diverse';
+let mosaicSize = 12;
+let searchQuery = '';
+let rankingsExhausted = false;
+let rankingsSort = 'date_taken';
+let rankingsOffset = 200;
+
+const controller = createNeighborWarmupController({
+    getMosaicStrategy: () => mosaicStrategy,
+    getMosaicSize: () => mosaicSize,
+    getSearchQuery: () => searchQuery,
+    getRankingsExhausted: () => rankingsExhausted,
+    getRankingsSort: () => rankingsSort,
+    getRankingsOffset: () => rankingsOffset,
+    buildRankingsUrl: ({ queryState = {}, sort, limit, offset }) => {
+        return `/rankings?sort=${sort}&limit=${limit}&offset=${offset}&state=${queryState.marker || 'none'}`;
+    },
+    buildMosaicUrl: ({ strategy, gridElo, n }) => {
+        return `/mosaic?strategy=${strategy}&grid=${gridElo}&n=${n}`;
+    },
+    buildCompareUrl: (mode, n) => `/compare?mode=${mode}&n=${n}`,
+    currentQueryState: (overrides = {}) => ({ marker: `state-${overrides.sort || 'none'}` }),
+    scheduleBackgroundWarm: (key, task, delay) => {
+        scheduled.push({ key, task, delay });
+    },
+    warmRequests: (key, token, generation, requests) => {
+        warmed.push({
+            key,
+            token,
+            generation,
+            requests: requests.map((request) => ({
+                url: request.url,
+                cacheKey: request.cacheKey || null,
+                extracted: request.extract({ images: [{ thumb_url: '/img.jpg' }], pairs: [{ left: { thumb_url: '/l.jpg' }, right: { thumb_url: '/r.jpg' } }] }),
+            })),
+        });
+    },
+    imageThumbUrlsImpl: (data) => data.images.map((img) => `image:${img.thumb_url}`),
+    compareThumbUrlsImpl: (data) => data.pairs.flatMap((pair) => [`left:${pair.left.thumb_url}`, `right:${pair.right.thumb_url}`]),
+});
+
+controller.scheduleCrossViewWarmup('compare');
+controller.scheduleCrossViewWarmup('library');
+controller.scheduleLibraryNeighborWarmup();
+controller.scheduleCompareNeighborWarmup('swiss');
+controller.scheduleCompareNeighborWarmup('mosaic');
+
+assert.deepEqual(scheduled.map(({ key, delay }) => [key, delay]), [
+    ['crossview-library', 1000],
+    ['crossview-compare', 1000],
+    ['library-next-page', undefined],
+    ['compare-next-pairs', 350],
+]);
+
+scheduled.forEach(({ key, task }, index) => task(`token-${index}`, `generation-${index}`));
+assert.deepEqual(warmed, [
+    {
+        key: 'crossview-library',
+        token: 'token-0',
+        generation: 'generation-0',
+        requests: [{
+            url: '/rankings?sort=elo&limit=48&offset=0&state=none',
+            cacheKey: 'library:/rankings?sort=elo&limit=48&offset=0&state=none',
+            extracted: ['image:/img.jpg'],
+        }],
+    },
+    {
+        key: 'crossview-compare',
+        token: 'token-1',
+        generation: 'generation-1',
+        requests: [{
+            url: '/mosaic?strategy=explore&grid=0&n=12',
+            cacheKey: 'compare:/mosaic?strategy=explore&grid=0&n=12',
+            extracted: ['image:/img.jpg'],
+        }],
+    },
+    {
+        key: 'library-next-page',
+        token: 'token-2',
+        generation: 'generation-2',
+        requests: [{
+            url: '/rankings?sort=date_taken&limit=100&offset=200&state=state-date_taken',
+            cacheKey: 'library:/rankings?sort=date_taken&limit=100&offset=200&state=state-date_taken',
+            extracted: ['image:/img.jpg'],
+        }],
+    },
+    {
+        key: 'compare-next-pairs',
+        token: 'token-3',
+        generation: 'generation-3',
+        requests: [{
+            url: '/compare?mode=swiss&n=4',
+            cacheKey: null,
+            extracted: ['left:/l.jpg', 'right:/r.jpg'],
+        }],
+    },
+]);
+
+scheduled.length = 0;
+warmed.length = 0;
+searchQuery = 'wedding';
+controller.scheduleLibraryNeighborWarmup();
+searchQuery = '';
+rankingsExhausted = true;
+controller.scheduleLibraryNeighborWarmup();
+mosaicStrategy = 'recent';
+controller.scheduleCrossViewWarmup('library');
+assert.deepEqual(scheduled.map(({ key, delay }) => [key, delay]), [
+    ['crossview-compare', 1000],
+]);
+scheduled[0].task('token-recent', 'generation-recent');
+assert.equal(warmed[0].requests[0].url, '/mosaic?strategy=recent&grid=0&n=12');
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
 
     @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
     def test_export_actions_node_probe_preserves_url_contracts(self):

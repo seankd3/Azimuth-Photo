@@ -4446,19 +4446,26 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_library_cross_view_warmup_does_not_request_diverse_mosaic(self):
+        base_dir = os.path.dirname(__file__)
         with open(
-            os.path.join(os.path.dirname(__file__), "static", "js", "legacy", "app.js"),
+            os.path.join(base_dir, "static", "js", "legacy", "app.js"),
             encoding="utf-8",
         ) as fh:
             script = fh.read()
+        with open(
+            os.path.join(base_dir, "static", "js", "warmup_neighbors.js"),
+            encoding="utf-8",
+        ) as fh:
+            warmup_neighbors = fh.read()
         warmup = script.split("function scheduleCrossViewWarmup(fromView)", 1)[1].split(
             "function scheduleLibraryNeighborWarmup",
             1,
         )[0]
 
-        self.assertIn("const warmStrategy = mosaicStrategy === 'diverse' ? 'explore' : mosaicStrategy;", warmup)
-        self.assertIn("strategy: warmStrategy", warmup)
-        self.assertNotIn("strategy: mosaicStrategy", warmup)
+        self.assertIn("neighborWarmups.scheduleCrossViewWarmup(fromView)", warmup)
+        self.assertIn("const warmStrategy = strategy === 'diverse' ? 'explore' : strategy;", warmup_neighbors)
+        self.assertIn("strategy: warmStrategy", warmup_neighbors)
+        self.assertNotIn("strategy: getMosaicStrategy()", warmup_neighbors)
 
     async def test_compare_page_has_view_aware_deep_search_controls(self):
         base_dir = os.path.dirname(__file__)
