@@ -40,7 +40,6 @@ from features.library import routes as library_routes
 from features.library import service as library_service
 from features.media import routes as media_routes
 from features.media import warm as media_warm
-from features.people import routes as people_routes
 from features.search import routes as search_routes
 from features.search import service as search_service
 from features.settings import routes as settings_routes
@@ -73,20 +72,6 @@ _static_version = _app_shell.static_version
 _template_context = _app_shell.template_context
 _warm_templates = _app_shell.warm_templates
 _smoke_mode_enabled = background_runtime.smoke_mode_enabled
-
-
-_people_status_payload = people_routes.people_status_payload
-api_people_status = people_routes.api_people_status
-api_people = people_routes.api_people
-api_people_face_thumb = people_routes.api_people_face_thumb
-api_people_scan_pause = people_routes.api_people_scan_pause
-api_people_scan_resume = people_routes.api_people_scan_resume
-api_label_person = people_routes.api_label_person
-api_merge_people = people_routes.api_merge_people
-api_reject_people_merge = people_routes.api_reject_people_merge
-api_assign_face = people_routes.api_assign_face
-api_ignore_face = people_routes.api_ignore_face
-api_ignore_person = people_routes.api_ignore_person
 
 
 track_idle_activity = _app_shell.idle_activity_middleware

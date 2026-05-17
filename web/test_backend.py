@@ -28,6 +28,7 @@ from data.repositories import images as image_repository  # noqa: E402
 from data.repositories import metadata_search, rankings, ratings, stats as stats_repository  # noqa: E402
 from features.ai import routes as ai_routes  # noqa: E402
 from features.cache import status as cache_status_service  # noqa: E402
+from features.people import routes as people_routes  # noqa: E402
 from features.settings import routes as settings_routes  # noqa: E402
 from features.settings import status as settings_status  # noqa: E402
 
@@ -264,7 +265,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(person["image_thumb_url"], f"/api/thumb/sm/{image_id}")
         self.assertEqual(person["representative_bbox"]["x"], 30.0)
 
-        response = await app_module.api_people_face_thumb(HeaderRequest(), face_id, size=80)
+        response = await people_routes.api_people_face_thumb(HeaderRequest(), face_id, size=80)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.media_type, "image/jpeg")
         face_image = Image.open(io.BytesIO(response.body))

@@ -1824,6 +1824,23 @@ class ModularContractTests(unittest.TestCase):
             self.assertNotIn("import db", contents)
             self.assertNotIn("db.", contents)
 
+        drained_names = (
+            "_people_status_payload",
+            "api_people_status",
+            "api_people",
+            "api_people_face_thumb",
+            "api_people_scan_pause",
+            "api_people_scan_resume",
+            "api_label_person",
+            "api_merge_people",
+            "api_reject_people_merge",
+            "api_assign_face",
+            "api_ignore_face",
+            "api_ignore_person",
+        )
+        for name in drained_names:
+            self.assertFalse(hasattr(app_module, name), name)
+
         config_names = (
             "_get_people_review",
             "_get_face_thumbnail_context",
