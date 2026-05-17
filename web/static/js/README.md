@@ -152,8 +152,9 @@ hook with Settings metadata refresh.
 actions, and browse/use/up controls.
 `catalog/actions.js` owns Catalog source loading, add/rescan/remove actions,
 and scan-completion polling.
-`catalog/home_scan.js` owns the home-page "Scan Folder" button flow while
-preserving the `PhotoArchive.startScan` compatibility entrypoint.
+`catalog/home_scan.js` owns the home-page "Scan Folder" button flow.
+`catalog/scan_entrypoint.js` owns the `PhotoArchive.startScan` page-dispatch
+compatibility shim between the home page and Settings/Catalog source flow.
 `catalog/controller.js` owns the Catalog `window.PhotoArchive` compatibility
 adapter for inline handlers, source lookup, status/toast wiring, and fallback
 stats handoff.

@@ -18,6 +18,7 @@ import {
 } from '../ai/poller.js';
 import { toggleAIPanel } from '../ai/status.js';
 import { createHomeScanController } from '../catalog/home_scan.js';
+import { createScanEntrypoint } from '../catalog/scan_entrypoint.js';
 import {
     EMPTY_FILTERS as EMPTY_FILTERS_CORE,
     normalizeFilterState as normalizeFilterStateCore,
@@ -2200,12 +2201,14 @@ const legacyPhotoArchive = (() => {
         resumeAllWork,
     } = settingsPage;
     const homeScan = createHomeScanController();
+    const scanEntrypoint = createScanEntrypoint({
+        documentImpl: document,
+        homeScan,
+        settingsScan: startSettingsScan,
+    });
 
     function startScan() {
-        if (document.getElementById('folder-input')) {
-            return homeScan.startScan();
-        }
-        return startSettingsScan();
+        return scanEntrypoint.startScan();
     }
 
     // ==================== UTILITIES ====================

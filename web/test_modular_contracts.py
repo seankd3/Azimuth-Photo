@@ -3694,6 +3694,8 @@ class ModularContractTests(unittest.TestCase):
             catalog_actions = fh.read()
         with open(os.path.join(base_dir, "static", "js", "catalog", "home_scan.js"), encoding="utf-8") as fh:
             catalog_home_scan = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "catalog", "scan_entrypoint.js"), encoding="utf-8") as fh:
+            catalog_scan_entrypoint = fh.read()
         with open(os.path.join(base_dir, "static", "js", "catalog", "controller.js"), encoding="utf-8") as fh:
             catalog_controller = fh.read()
         with open(os.path.join(base_dir, "static", "js", "loupe", "tiers.js"), encoding="utf-8") as fh:
@@ -3843,6 +3845,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../api.js';", legacy)
         self.assertIn("from '../ai/poller.js';", legacy)
         self.assertIn("from '../catalog/home_scan.js';", legacy)
+        self.assertIn("from '../catalog/scan_entrypoint.js';", legacy)
         self.assertIn("from '../query_state.js';", legacy)
         self.assertIn("from '../query_controller.js';", legacy)
         self.assertIn("from '../filters.js';", legacy)
@@ -3931,6 +3934,8 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("export function createHomeScanController", catalog_home_scan)
         self.assertIn("fetchImpl('/api/scan'", catalog_home_scan)
         self.assertIn("fetchImpl('/api/scan/status'", catalog_home_scan)
+        self.assertIn("export function createScanEntrypoint", catalog_scan_entrypoint)
+        self.assertIn("documentImpl.getElementById('folder-input')", catalog_scan_entrypoint)
         self.assertIn("export function createCatalogApi", catalog_controller)
         self.assertIn("from './status.js';", catalog_controller)
         self.assertIn("from './sources.js';", catalog_controller)
@@ -7443,6 +7448,53 @@ assert.equal(timeouts.length, 1);
 assert.equal(timeouts[0].ms, 456);
 timeouts[0].callback();
 assert.equal(reloaded, 1);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_scan_entrypoint_node_probe_preserves_page_dispatch(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createScanEntrypoint } from './static/js/catalog/scan_entrypoint.js';
+
+const calls = [];
+let hasFolderInput = true;
+const documentImpl = {
+    getElementById(id) {
+        assert.equal(id, 'folder-input');
+        return hasFolderInput ? { id: 'folder-input' } : null;
+    },
+};
+const homeScan = {
+    startScan() {
+        calls.push('home');
+        return Promise.resolve('home-result');
+    },
+};
+const settingsScan = () => {
+    calls.push('settings');
+    return 'settings-result';
+};
+
+const entrypoint = createScanEntrypoint({
+    documentImpl,
+    homeScan,
+    settingsScan,
+});
+
+assert.equal(await entrypoint.startScan(), 'home-result');
+assert.deepEqual(calls, ['home']);
+
+hasFolderInput = false;
+assert.equal(entrypoint.startScan(), 'settings-result');
+assert.deepEqual(calls, ['home', 'settings']);
 """
         subprocess.run(
             ["node", "--input-type=module", "-e", script],
