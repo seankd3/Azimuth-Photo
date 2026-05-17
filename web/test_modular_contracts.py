@@ -3266,6 +3266,7 @@ class ModularContractTests(unittest.TestCase):
 
     def test_core_app_shell_owns_page_and_dev_wiring(self):
         app_factory = importlib.import_module("core.app_factory")
+        app_wiring = importlib.import_module("core.wiring")
         ai_routes = importlib.import_module("features.ai.routes")
         cache_routes = importlib.import_module("features.cache.routes")
         cache_status_service = importlib.import_module("features.cache.status")
@@ -3323,6 +3324,20 @@ class ModularContractTests(unittest.TestCase):
         self.assertTrue(callable(app_factory.configure_library_service))
         self.assertTrue(callable(app_factory.configure_query_constraints))
         self.assertTrue(callable(app_factory.configure_settings_routes))
+        self.assertTrue(callable(app_wiring.configure_database_backed_providers))
+        self.assertTrue(callable(app_wiring.configure_people_routes))
+        self.assertTrue(callable(app_wiring.configure_status_media_search_providers))
+        self.assertTrue(callable(app_wiring.configure_cache_events))
+        self.assertTrue(callable(app_wiring.configure_catalog_routes))
+        self.assertTrue(callable(app_wiring.configure_library_routes))
+        self.assertTrue(callable(app_wiring.configure_search_routes))
+        with open(os.path.join(os.path.dirname(__file__), "core", "app_factory.py"), encoding="utf-8") as fh:
+            app_factory_source = fh.read()
+        with open(os.path.join(os.path.dirname(__file__), "core", "wiring.py"), encoding="utf-8") as fh:
+            app_wiring_source = fh.read()
+        self.assertIn("wiring.configure_database_backed_providers()", app_factory_source)
+        self.assertNotIn("def _configure_database_backed_providers", app_factory_source)
+        self.assertIn("def configure_database_backed_providers", app_wiring_source)
 
         people_config_names = (
             "_get_people_review",

@@ -1,6 +1,5 @@
 """Shared backend plumbing for photoArchive.
 
-Feature routes still live in ``app.py`` during the modularization, but new
-cross-feature helpers should land here instead of growing the route module.
+Feature routes live under ``web/features`` and are registered by the app shell.
+Cross-feature helpers should land here instead of growing feature route modules.
 """
-
