@@ -1,12 +1,9 @@
-import asyncio
-import copy
 import json
 import os
 import time
-import uuid
 
-from fastapi import BackgroundTasks, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import BackgroundTasks
+from fastapi.responses import FileResponse
 
 import ai_models
 import db
@@ -14,9 +11,6 @@ import embed_cache
 import embedding_worker
 import elo_propagation
 import face_worker
-import pairing
-import resource_governor
-import scanner
 import settings
 import thumbnails
 from core.app_factory import (
