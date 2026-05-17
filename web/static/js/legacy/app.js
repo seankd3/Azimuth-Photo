@@ -72,10 +72,8 @@ import {
 } from '../compare/navigation.js';
 import { createCompareKeyboardHandler } from '../compare/keyboard.js';
 import {
-    adoptCompareTier as adoptCompareTierCore,
-    renderCompareImage as renderCompareImageCore,
-    upgradeCompareImage as upgradeCompareImageCore,
-} from '../compare/images.js';
+    createCompareImageController,
+} from '../compare/image_controller.js';
 import { createComparePairController } from '../compare/pair_controller.js';
 import {
     showCompareEmpty as showCompareEmptyCore,
@@ -573,29 +571,24 @@ const legacyPhotoArchive = (() => {
         return comparePairController.isCurrentCompareImage(token);
     }
 
+    const compareImageController = createCompareImageController({
+        displayedTiers: compareDisplayedTier,
+        getMediaStatus,
+        isCurrentCompareImage,
+        loadImageProbe,
+        loupeTierUrl,
+    });
+
     function renderCompareImage(img, imgEl, side, token) {
-        renderCompareImageCore(img, imgEl, side, token, {
-            displayedTiers: compareDisplayedTier,
-            isCurrentCompareImage,
-            upgradeCompareImageImpl: upgradeCompareImage,
-        });
+        return compareImageController.renderCompareImage(img, imgEl, side, token);
     }
 
     async function upgradeCompareImage(img, imgEl, side, token) {
-        return upgradeCompareImageCore(img, imgEl, side, token, {
-            getMediaStatus,
-            isCurrentCompareImage,
-            adoptCompareTierImpl: adoptCompareTier,
-        });
+        return compareImageController.upgradeCompareImage(img, imgEl, side, token);
     }
 
     async function adoptCompareTier(img, imgEl, side, tier, cachedOnly, token, timeoutMs) {
-        return adoptCompareTierCore(img, imgEl, side, tier, cachedOnly, token, timeoutMs, {
-            displayedTiers: compareDisplayedTier,
-            loadImageProbeImpl: loadImageProbe,
-            loupeTierUrlImpl: loupeTierUrl,
-            isCurrentCompareImage,
-        });
+        return compareImageController.adoptCompareTier(img, imgEl, side, tier, cachedOnly, token, timeoutMs);
     }
 
     const compareStatusController = createCompareStatusController({

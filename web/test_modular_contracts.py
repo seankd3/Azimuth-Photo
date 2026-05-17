@@ -3707,6 +3707,8 @@ class ModularContractTests(unittest.TestCase):
             compare_navigation = fh.read()
         with open(os.path.join(base_dir, "static", "js", "compare", "keyboard.js"), encoding="utf-8") as fh:
             compare_keyboard = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "compare", "image_controller.js"), encoding="utf-8") as fh:
+            compare_image_controller = fh.read()
         with open(os.path.join(base_dir, "static", "js", "compare", "images.js"), encoding="utf-8") as fh:
             compare_images = fh.read()
         with open(os.path.join(base_dir, "static", "js", "compare", "pair_controller.js"), encoding="utf-8") as fh:
@@ -3826,7 +3828,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../thumbnail_size.js';", legacy)
         self.assertIn("from '../compare/query.js';", legacy)
         self.assertIn("from '../compare/navigation.js';", legacy)
-        self.assertIn("from '../compare/images.js';", legacy)
+        self.assertIn("from '../compare/image_controller.js';", legacy)
         self.assertIn("from '../compare/pair_controller.js';", legacy)
         self.assertIn("from '../compare/view.js';", legacy)
         self.assertIn("from '../compare/mode_controller.js';", legacy)
@@ -3938,6 +3940,9 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("export function createCompareKeyboardHandler", compare_keyboard)
         self.assertIn("getSelectedMosaicIndex", compare_keyboard)
         self.assertIn("submitComparison('left')", compare_keyboard)
+        self.assertIn("export function createCompareImageController", compare_image_controller)
+        self.assertIn("from './images.js';", compare_image_controller)
+        self.assertIn("displayedTiers", compare_image_controller)
         self.assertIn("export function renderCompareImage", compare_images)
         self.assertIn("export async function upgradeCompareImage", compare_images)
         self.assertIn("export async function adoptCompareTier", compare_images)
@@ -5629,6 +5634,95 @@ assert.deepEqual(events, [
     ['empty-fetch', '/empty?mode=topn&n=8'],
     ['empty-stats', {}],
     ['empty'],
+]);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_compare_image_controller_node_probe_preserves_tier_adapter_wiring(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createCompareImageController } from './static/js/compare/image_controller.js';
+
+const displayedTiers = { left: -1, right: -1 };
+const getMediaStatus = async (imageId) => ({ ok: true, imageId });
+const isCurrentCompareImage = (token) => token === 7;
+const loadImageProbe = async (url) => ({ ok: true, url });
+const loupeTierUrl = (tier, imageId, cachedOnly) => `/${tier}/${imageId}/${cachedOnly ? 1 : 0}`;
+const calls = [];
+
+const controller = createCompareImageController({
+    displayedTiers,
+    getMediaStatus,
+    isCurrentCompareImage,
+    loadImageProbe,
+    loupeTierUrl,
+    renderCompareImageImpl: (img, imgEl, side, token, options) => {
+        calls.push([
+            'render',
+            img.id,
+            imgEl.id,
+            side,
+            token,
+            options.displayedTiers === displayedTiers,
+            options.isCurrentCompareImage === isCurrentCompareImage,
+            typeof options.upgradeCompareImageImpl,
+        ]);
+        return options.upgradeCompareImageImpl(img, imgEl, side, token);
+    },
+    upgradeCompareImageImpl: async (img, imgEl, side, token, options) => {
+        calls.push([
+            'upgrade',
+            options.getMediaStatus === getMediaStatus,
+            options.isCurrentCompareImage === isCurrentCompareImage,
+            typeof options.adoptCompareTierImpl,
+        ]);
+        const status = await options.getMediaStatus(img.id);
+        calls.push(['status', status.ok, status.imageId]);
+        return options.adoptCompareTierImpl(img, imgEl, side, 'md', false, token, 111);
+    },
+    adoptCompareTierImpl: async (img, _imgEl, side, tier, cachedOnly, token, timeoutMs, options) => {
+        calls.push([
+            'adopt',
+            img.id,
+            side,
+            tier,
+            cachedOnly,
+            token,
+            timeoutMs,
+            options.displayedTiers === displayedTiers,
+            options.loadImageProbeImpl === loadImageProbe,
+            options.loupeTierUrlImpl === loupeTierUrl,
+            options.isCurrentCompareImage === isCurrentCompareImage,
+        ]);
+        const url = options.loupeTierUrlImpl(tier, img.id, cachedOnly);
+        const probe = await options.loadImageProbeImpl(url);
+        return probe.url;
+    },
+});
+
+const image = { id: 9, filename: 'nine.jpg' };
+const imgEl = { id: 'left-img' };
+
+assert.equal(await controller.renderCompareImage(image, imgEl, 'left', 7), '/md/9/0');
+assert.equal(await controller.upgradeCompareImage(image, imgEl, 'right', 7), '/md/9/0');
+assert.equal(await controller.adoptCompareTier(image, imgEl, 'left', 'full', true, 7, 222), '/full/9/1');
+assert.deepEqual(calls, [
+    ['render', 9, 'left-img', 'left', 7, true, true, 'function'],
+    ['upgrade', true, true, 'function'],
+    ['status', true, 9],
+    ['adopt', 9, 'left', 'md', false, 7, 111, true, true, true, true],
+    ['upgrade', true, true, 'function'],
+    ['status', true, 9],
+    ['adopt', 9, 'right', 'md', false, 7, 111, true, true, true, true],
+    ['adopt', 9, 'left', 'full', true, 7, 222, true, true, true, true],
 ]);
 """
         subprocess.run(

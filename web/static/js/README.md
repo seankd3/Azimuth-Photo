@@ -78,6 +78,8 @@ marker loading, marker-layer replacement, and map-bound fitting.
 glue while legacy keeps pair and mosaic state.
 `compare/pair_controller.js` owns Compare pair fetching, pair display, low-water
 prefetch, pair image-token freshness, and pair-status side effects.
+`compare/image_controller.js` owns Compare pair image rendering adapter wiring,
+displayed tier state, media-status lookup, tier probing, and tier URL injection.
 `compare/mosaic_action_controller.js` owns Mosaic pick orchestration,
 optimistic replacement swapping, propagation follow-up, and rollback on failed
 save while legacy keeps board state storage.
