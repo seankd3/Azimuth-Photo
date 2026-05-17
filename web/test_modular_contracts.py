@@ -3676,6 +3676,8 @@ class ModularContractTests(unittest.TestCase):
             catalog_status = fh.read()
         with open(os.path.join(base_dir, "static", "js", "query_state.js"), encoding="utf-8") as fh:
             query_state = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "query_controller.js"), encoding="utf-8") as fh:
+            query_controller = fh.read()
         with open(os.path.join(base_dir, "static", "js", "filters.js"), encoding="utf-8") as fh:
             filters_module = fh.read()
         with open(os.path.join(base_dir, "static", "js", "media_status.js"), encoding="utf-8") as fh:
@@ -3842,11 +3844,11 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../ai/poller.js';", legacy)
         self.assertIn("from '../catalog/home_scan.js';", legacy)
         self.assertIn("from '../query_state.js';", legacy)
+        self.assertIn("from '../query_controller.js';", legacy)
         self.assertIn("from '../filters.js';", legacy)
         self.assertIn("from '../media_status.js';", legacy)
         self.assertIn("from '../media_metadata.js';", legacy)
         self.assertIn("from '../thumbnail_size.js';", legacy)
-        self.assertIn("from '../compare/query.js';", legacy)
         self.assertIn("from '../compare/navigation.js';", legacy)
         self.assertIn("from '../compare/image_controller.js';", legacy)
         self.assertIn("from '../compare/pair_controller.js';", legacy)
@@ -3868,7 +3870,6 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../loupe/filmstrip.js';", legacy)
         self.assertIn("from '../loupe/focus.js';", legacy)
         self.assertIn("from '../loupe/zoom.js';", legacy)
-        self.assertIn("from '../library/query.js';", legacy)
         self.assertIn("from '../library/sort.js';", legacy)
         self.assertIn("from '../library/sort_controller.js';", legacy)
         self.assertIn("from '../library/search_state.js';", legacy)
@@ -3942,6 +3943,10 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("export function filterQueryString", query_state)
         self.assertIn("export function buildFilterNeighborStates", query_state)
         self.assertIn("export function syncLibraryUrlState", query_state)
+        self.assertIn("export function createQueryController", query_controller)
+        self.assertIn("from './compare/query.js';", query_controller)
+        self.assertIn("from './library/query.js';", query_controller)
+        self.assertIn("from './search/query.js';", query_controller)
         self.assertIn("export function activeMetadataFilterCount", filters_module)
         self.assertIn("export function updateMetadataFilterButton", filters_module)
         self.assertIn("export function toggleMetadataFilters", filters_module)
@@ -4459,6 +4464,111 @@ assert.deepEqual(loaded, [
     { show_loupe_cache_status: false },
     { show_loupe_cache_status: true },
 ]);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_query_controller_node_probe_preserves_current_state_and_urls(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createQueryController } from './static/js/query_controller.js';
+
+let filters = {
+    orientation: 'portrait',
+    rating: '3',
+    folder: '/Trips',
+    flag: 'picked',
+};
+let searchQuery = 'golden hour';
+let deepSearchRequested = true;
+let sortField = 'date_taken';
+let sortDesc = false;
+let rankingsSort = 'date_taken_asc';
+let mosaicStrategy = 'diverse';
+let gridElo = 1234.5;
+
+const controller = createQueryController({
+    getFilters: () => filters,
+    getSearchQuery: () => searchQuery,
+    getDeepSearchRequested: () => deepSearchRequested,
+    getSortField: () => sortField,
+    getSortDesc: () => sortDesc,
+    getRankingsSort: () => rankingsSort,
+    getMosaicStrategy: () => mosaicStrategy,
+    getMosaicGridElo: () => gridElo,
+    libraryNeighborLimit: 24,
+    mosaicNeighborLimit: 8,
+    compareNeighborPairs: 4,
+});
+
+assert.deepEqual(controller.currentQueryState(), {
+    filters: {
+        orientation: 'portrait',
+        compared: '',
+        rating: '3',
+        folder: '/Trips',
+        flag: 'picked',
+        taken: '',
+        fileType: '',
+        camera: '',
+        lens: '',
+        people: '',
+    },
+    sortField: 'date_taken',
+    sortDesc: false,
+    sort: 'date_taken_asc',
+    searchMode: 'search',
+    searchQuery: 'golden hour',
+    deepSearch: true,
+});
+assert.equal(controller.filterParams(), '&orientation=portrait&min_stars=3&folder=%2FTrips&flag=picked');
+assert.equal(controller.filterQueryString(), 'orientation=portrait&min_stars=3&folder=%2FTrips&flag=picked');
+assert.equal(controller.currentSearchMode(), 'search');
+
+const rankingsUrl = new URL(controller.buildRankingsUrl({ offset: 12 }), 'http://local');
+assert.equal(rankingsUrl.pathname, '/api/rankings');
+assert.equal(rankingsUrl.searchParams.get('limit'), '24');
+assert.equal(rankingsUrl.searchParams.get('offset'), '12');
+assert.equal(rankingsUrl.searchParams.get('sort'), 'date_taken_asc');
+assert.equal(rankingsUrl.searchParams.get('orientation'), 'portrait');
+assert.equal(rankingsUrl.searchParams.get('q'), 'golden hour');
+assert.equal(rankingsUrl.searchParams.get('deep'), '1');
+
+const mosaicUrl = new URL(controller.buildMosaicUrl({ n: 12, exclude: '7,8' }), 'http://local');
+assert.equal(mosaicUrl.pathname, '/api/mosaic/next');
+assert.equal(mosaicUrl.searchParams.get('strategy'), 'diverse');
+assert.equal(mosaicUrl.searchParams.get('grid_elo'), '1234.5');
+assert.equal(mosaicUrl.searchParams.get('n'), '12');
+assert.equal(mosaicUrl.searchParams.get('exclude'), '7,8');
+assert.equal(mosaicUrl.searchParams.get('q'), 'golden hour');
+
+const compareUrl = new URL(controller.buildCompareUrl('topn'), 'http://local');
+assert.equal(compareUrl.pathname, '/api/compare/next');
+assert.equal(compareUrl.searchParams.get('mode'), 'topn');
+assert.equal(compareUrl.searchParams.get('n'), '4');
+assert.equal(compareUrl.searchParams.get('flag'), 'picked');
+
+searchQuery = '__similar__';
+assert.equal(controller.currentSearchMode(), 'similar');
+assert.equal(controller.currentQueryState().searchQuery, '');
+assert.equal(controller.currentQueryState().deepSearch, false);
+
+filters = { orientation: 'landscape', people: '42' };
+searchQuery = '';
+sortField = 'elo';
+sortDesc = true;
+assert.equal(controller.currentSearchMode(), 'library');
+assert.deepEqual(
+    controller.buildFilterNeighborStates().filter((state) => state.orientation === ''),
+    [{ orientation: '', compared: '', rating: '', folder: '', flag: '', taken: '', fileType: '', camera: '', lens: '', people: '42' }],
+);
 """
         subprocess.run(
             ["node", "--input-type=module", "-e", script],

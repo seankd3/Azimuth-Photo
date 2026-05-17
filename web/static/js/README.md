@@ -18,7 +18,9 @@ compatibility module.
 warmup scheduling while legacy keeps current view, query, and paging state.
 `api.js` owns small shared request helpers as fetch calls move out of
 `legacy/app.js`. `query_state.js` owns pure filter-state normalization, URL
-parameter helpers, Library URL-state syncing, and filter-neighbor state generation. `media_status.js` owns media-status cache, inflight
+parameter helpers, Library URL-state syncing, and filter-neighbor state generation.
+`query_controller.js` owns the state adapter for current query state plus
+Library, Mosaic, and Compare URL construction while legacy keeps mutable page state. `media_status.js` owns media-status cache, inflight
 request coordination, and warm-tier invalidation callbacks. `media_metadata.js` owns shared media date, camera,
 resolution, and title formatting helpers. `filters.js` owns shared filter-state
 summary helpers, metadata filter controls, lazy filter-option/folder-list

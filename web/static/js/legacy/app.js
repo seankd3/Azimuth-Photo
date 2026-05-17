@@ -19,13 +19,11 @@ import {
 import { toggleAIPanel } from '../ai/status.js';
 import { createHomeScanController } from '../catalog/home_scan.js';
 import {
-    buildFilterNeighborStates as buildFilterNeighborStatesCore,
     EMPTY_FILTERS as EMPTY_FILTERS_CORE,
-    filterParams as filterParamsCore,
-    filterQueryString as filterQueryStringCore,
     normalizeFilterState as normalizeFilterStateCore,
     syncLibraryUrlState as syncLibraryUrlStateCore,
 } from '../query_state.js';
+import { createQueryController } from '../query_controller.js';
 import {
     activeMetadataFilterCount as activeMetadataFilterCountCore,
     hasActiveFilters,
@@ -50,10 +48,6 @@ import {
 } from '../warmup.js';
 import { createNeighborWarmupController } from '../warmup_neighbors.js';
 import { createThumbnailSizeHandler } from '../thumbnail_size.js';
-import {
-    buildCompareUrl as buildCompareUrlCore,
-    buildMosaicUrl as buildMosaicUrlCore,
-} from '../compare/query.js';
 import {
     mosaicSizeFromThumbHeight,
     mosaicThumbHeightForSize,
@@ -125,7 +119,6 @@ import {
     updateLoupeZoomIndicator as updateLoupeZoomIndicatorCore,
 } from '../loupe/zoom.js';
 import { initLoupeInteraction as initLoupeInteractionCore } from '../loupe/interaction.js';
-import { rankingQueryString as rankingQueryStringCore } from '../library/query.js';
 import {
     SORT_KEYS,
     sortValueForState,
@@ -204,7 +197,6 @@ import {
 } from '../media_metadata.js';
 import {
     hasActiveTextSearch as hasActiveTextSearchCore,
-    searchModeForQuery,
 } from '../search/query.js';
 import { createFindSimilarAction } from '../library/similar.js';
 import { createPeopleApi } from '../people/controller.js';
@@ -744,55 +736,46 @@ const legacyPhotoArchive = (() => {
         return normalizeFilterState(filters);
     }
 
+    const queryController = createQueryController({
+        getFilters: currentFilterState,
+        getSearchQuery: () => searchQuery,
+        getDeepSearchRequested: () => deepSearchRequested,
+        getSortField: () => sortField,
+        getSortDesc: () => sortDesc,
+        getRankingsSort: () => rankingsSort,
+        getMosaicStrategy: () => mosaicStrategy,
+        getMosaicGridElo: mosaicGridElo,
+        libraryNeighborLimit: LIBRARY_NEIGHBOR_LIMIT,
+        mosaicNeighborLimit: MOSAIC_NEIGHBOR_LIMIT,
+        compareNeighborPairs: COMPARE_NEIGHBOR_PAIRS,
+    });
+
     function syncLibraryUrlState() {
         syncLibraryUrlStateCore({ filters: currentFilterState(), sortField, sortDesc });
     }
 
     function filterParams(state = currentQueryState()) {
-        return filterParamsCore(state);
+        return queryController.filterParams(state);
     }
 
     function filterQueryString(state = currentQueryState()) {
-        return filterQueryStringCore(state);
+        return queryController.filterQueryString(state);
     }
 
     function buildFilterNeighborStates(baseState = currentFilterState()) {
-        return buildFilterNeighborStatesCore(baseState);
+        return queryController.buildFilterNeighborStates(baseState);
     }
 
-    function buildRankingsUrl({
-        queryState = currentQueryState(),
-        sort = queryState.sort || rankingsSort,
-        filterState = null,
-        limit = LIBRARY_NEIGHBOR_LIMIT,
-        offset = 0,
-    } = {}) {
-        const state = currentQueryState({
-            ...queryState,
-            filters: filterState || queryState.filters,
-            sort,
-        });
-        return `/api/rankings?${rankingQueryString({ queryState: state, sort, limit, offset })}`;
+    function buildRankingsUrl(options = {}) {
+        return queryController.buildRankingsUrl(options);
     }
 
-    function buildMosaicUrl({
-        strategy = mosaicStrategy,
-        queryState = currentQueryState(),
-        filterState = null,
-        gridElo = mosaicGridElo(),
-        n = MOSAIC_NEIGHBOR_LIMIT,
-        exclude = '',
-    } = {}) {
-        const state = currentQueryState({
-            ...queryState,
-            filters: filterState || queryState.filters,
-        });
-        return buildMosaicUrlCore({ strategy, queryState: state, gridElo, n, exclude });
+    function buildMosaicUrl(options = {}) {
+        return queryController.buildMosaicUrl(options);
     }
 
     function buildCompareUrl(mode, n = COMPARE_NEIGHBOR_PAIRS, queryState = currentQueryState()) {
-        const state = currentQueryState(queryState);
-        return buildCompareUrlCore({ mode, n, queryState: state });
+        return queryController.buildCompareUrl(mode, n, queryState);
     }
 
     function currentLibraryPageSize() {
@@ -913,23 +896,11 @@ const legacyPhotoArchive = (() => {
     }
 
     function currentSearchMode() {
-        return searchModeForQuery(searchQuery);
+        return queryController.currentSearchMode();
     }
 
     function currentQueryState(overrides = {}) {
-        const field = overrides.sortField || sortField;
-        const desc = overrides.sortDesc ?? sortDesc;
-        const mode = overrides.searchMode || currentSearchMode();
-        const query = overrides.searchQuery ?? (mode === 'search' ? searchQuery : '');
-        return {
-            filters: normalizeFilterState(overrides.filters || overrides.filterState || filters),
-            sortField: field,
-            sortDesc: Boolean(desc),
-            sort: overrides.sort || sortValueForState(field, desc),
-            searchMode: mode,
-            searchQuery: query,
-            deepSearch: Boolean(overrides.deepSearch ?? (mode === 'search' && deepSearchRequested)),
-        };
+        return queryController.currentQueryState(overrides);
     }
 
     function applySortState(field, desc, { persist = true, persistSearch = true } = {}) {
@@ -1046,8 +1017,7 @@ const legacyPhotoArchive = (() => {
         offset = 0,
         sort = queryState.sort,
     } = {}) {
-        const state = currentQueryState({ ...queryState, sort });
-        return rankingQueryStringCore({ queryState: state, limit, offset, sort });
+        return queryController.rankingQueryString({ queryState, limit, offset, sort });
     }
 
     function initSearchInputControls() {
