@@ -25,7 +25,6 @@ import urllib.request
 
 import numpy as np
 
-import app as app_module
 import db
 import embed_cache
 import settings
@@ -192,7 +191,7 @@ def reset_app_caches():
     cache_status_service._cache_status_cache.clear()
     cache_status_service._cache_status_refreshing.clear()
     cache_status_service._browser_original_count_cache.update({"value": None, "bytes": 0, "expires": 0.0})
-    app_module._clear_folders_cache()
+    catalog_routes.clear_folders_cache()
 
 
 async def create_synthetic_active_catalog(

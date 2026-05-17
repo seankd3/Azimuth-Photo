@@ -1604,6 +1604,11 @@ class ModularContractTests(unittest.TestCase):
         for name in drained_names:
             self.assertFalse(hasattr(app_module, name), name)
 
+        with open(os.path.join(base_dir, "bench_perf.py"), encoding="utf-8") as fh:
+            bench_perf = fh.read()
+        self.assertIn("catalog_routes.clear_folders_cache()", bench_perf)
+        self.assertNotIn("app_module._clear_folders_cache()", bench_perf)
+
         config_names = (
             "_invalidate_pairing_cache",
             "_invalidate_cache_status_cache",
