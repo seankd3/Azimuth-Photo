@@ -14,7 +14,6 @@ import embed_cache
 import embedding_worker
 import elo_propagation
 import face_worker
-import helpers as app_helpers
 import pairing
 import resource_governor
 import scanner
@@ -27,8 +26,6 @@ from core.app_factory import (
 from core import background as background_runtime
 from core import cache_events
 from core import query_constraints
-from core import requests as request_helpers
-from core import responses as response_helpers
 from features.compare import service as compare_service
 from features.library import service as library_service
 from features.search import service as search_service
@@ -48,11 +45,6 @@ _IDLE_ACTIVITY_EXCLUDED_PATHS = _app_shell.idle_activity_excluded_paths
 _background_task_tracker = _app_shell.background_task_tracker
 _BACKGROUND_TASKS = _app_shell.background_tasks
 _track_background_task = _app_shell.track_background_task
-_positive_int = request_helpers.positive_int
-_clamp_int = request_helpers.clamp_int
-_json_object = request_helpers.json_object
-_ranking_signal_count = app_helpers.ranking_signal_count
-_has_ranking_signal = app_helpers.has_ranking_signal
 
 
 _static_assets = _app_shell.static_assets
@@ -106,11 +98,6 @@ _invalidate_vector_derived_caches = _runtime_services.invalidate_vector_derived_
 _embedding_batch_stored = cache_events.embedding_batch_stored
 _invalidate_interaction_response_cache = _runtime_services.invalidate_interaction_response_cache
 
-_copy_interaction_response = response_helpers.copy_interaction_response
-_copy_rankings_response = library_service.copy_rankings_response
-_cache_rankings_response = library_service.cache_rankings_response
-
-
 _get_past_matchups = compare_service.get_past_matchups
 _get_visible_past_matchups = compare_service.get_visible_past_matchups
 _get_past_matchups_for_candidate_ids = compare_service.get_past_matchups_for_candidate_ids
@@ -118,35 +105,6 @@ _add_past_matchups = compare_service.add_past_matchups
 _patch_pairing_cache = compare_service.patch_pairing_cache
 _schedule_pairing_propagation = _runtime_services.schedule_pairing_propagation
 
-
-def _top_indices_desc(values, limit: int, exclude_index: int | None = None):
-    import numpy as np
-
-    if limit <= 0 or len(values) == 0:
-        return []
-    if exclude_index is not None:
-        values = values.copy()
-        values[exclude_index] = -np.inf
-
-    limit = min(limit, len(values))
-    if len(values) <= limit:
-        return np.argsort(values)[::-1]
-
-    candidates = np.argpartition(values, -limit)[-limit:]
-    return candidates[np.argsort(values[candidates])[::-1]]
-
-
-_camera_label = app_helpers.camera_label
-_metadata_payload = app_helpers.metadata_payload
-_visibility_counts = response_helpers.visibility_counts
-_interaction_pool_stats = response_helpers.interaction_pool_stats
-
-
-_cache_root = _runtime_services.cache_root
-
-
-_compare_response_rows = response_helpers.compare_response_rows
-_chunks = app_helpers._chunks
 
 _filter_visible_candidates = compare_service.filter_visible_candidates
 _hydrate_active_rows = compare_service.hydrate_active_rows
@@ -157,18 +115,9 @@ _search_visible_ranked_candidates = compare_service.search_visible_ranked_candid
 _warm_filtered_visible_ranked_candidates = compare_service.warm_filtered_visible_ranked_candidates
 
 
-async def _visible_ranked_images(ranked_ids: list[int], limit: int, size: str = "sm") -> list[dict]:
-    return await app_helpers.visible_ranked_images(ranked_ids, limit, size, _cache_root())
-
-
-async def _count_visible_ranked_ids(ranked_ids: list[int], size: str = "sm") -> int:
-    return await app_helpers.count_visible_ranked_ids(ranked_ids, size, _cache_root())
-
-
 _visible_embedding_page = search_service.visible_embedding_page
 
 
-_filter_by_metadata = app_helpers.filter_by_metadata
 _sync_query_constraint_compat_globals = query_constraints.sync_configured_ttls
 _record_deep_search_query = query_constraints.record_configured_deep_search_query
 _normalize_search_query = query_constraints.normalize_search_query
