@@ -10,6 +10,116 @@ def copy_disk_stats(disk: dict) -> dict:
     return copied
 
 
+def cache_stats(
+    *,
+    memory_stats: Callable[[], dict],
+    current_time: Callable[[], float],
+    disk_stats_cache: dict,
+    disk_stats_cache_ttl_seconds: float,
+    disk_stats_cache_max_stale_seconds: float,
+    meta_lock,
+    db_connect: Callable[[], object],
+    cache_root: str,
+    cache_limit_bytes: int,
+    disk_allocations: dict[str, int],
+    all_tiers: tuple[str, ...],
+    thumb_tiers: tuple[str, ...],
+    full_tier: str,
+    replace_stale_thumbnails: bool,
+    thumb_config_changed_at: float,
+) -> dict:
+    memory = memory_stats()
+    now = current_time()
+    cached_disk = disk_stats_cache["data"]
+    if cached_disk is not None and now < disk_stats_cache["expires"]:
+        disk = copy_disk_stats(cached_disk)
+    else:
+        disk_tiers = {
+            size: {
+                "count": 0,
+                "bytes": 0,
+                "current_count": 0,
+                "current_bytes": 0,
+                "stale_count": 0,
+                "replacement_mode": False,
+                "budget_bytes": disk_allocations.get(size, 0),
+            }
+            for size in all_tiers
+        }
+
+        lock_acquired = meta_lock.acquire(blocking=False)
+        if not lock_acquired and cached_disk is not None:
+            disk = copy_disk_stats(cached_disk)
+            return {
+                "memory": memory,
+                "disk": disk,
+                "thumbnail_config": {
+                    "changed_at": thumb_config_changed_at,
+                    "replace_stale_thumbnails": replace_stale_thumbnails,
+                },
+            }
+        if not lock_acquired:
+            meta_lock.acquire()
+            lock_acquired = True
+        try:
+            conn = db_connect()
+            rows = conn.execute(
+                "SELECT size, COUNT(*) AS count, COALESCE(SUM(size_bytes), 0) AS bytes "
+                "FROM cache_entries WHERE cache_root = ? GROUP BY size",
+                (cache_root,),
+            ).fetchall()
+            if replace_stale_thumbnails and thumb_config_changed_at > 0:
+                current_rows = conn.execute(
+                    "SELECT size, COUNT(*) AS count, COALESCE(SUM(size_bytes), 0) AS bytes "
+                    "FROM cache_entries "
+                    "WHERE cache_root = ? AND (size = ? OR created_at >= ?) "
+                    "GROUP BY size",
+                    (cache_root, full_tier, thumb_config_changed_at),
+                ).fetchall()
+            else:
+                current_rows = rows
+        finally:
+            if lock_acquired:
+                meta_lock.release()
+
+        for row in rows:
+            if row["size"] in disk_tiers:
+                disk_tiers[row["size"]]["count"] = int(row["count"])
+                disk_tiers[row["size"]]["bytes"] = int(row["bytes"])
+        for row in current_rows:
+            if row["size"] in disk_tiers:
+                disk_tiers[row["size"]]["current_count"] = int(row["count"])
+                disk_tiers[row["size"]]["current_bytes"] = int(row["bytes"])
+        for size, info in disk_tiers.items():
+            if not replace_stale_thumbnails or size == full_tier:
+                info["current_count"] = info["count"]
+                info["current_bytes"] = info["bytes"]
+            info["stale_count"] = max(0, info["count"] - info["current_count"])
+            info["replacement_mode"] = bool(
+                replace_stale_thumbnails
+                and size in thumb_tiers
+                and info["stale_count"] > 0
+            )
+
+        disk = {
+            "root": cache_root,
+            "limit_bytes": cache_limit_bytes,
+            "used_bytes": sum(info["bytes"] for info in disk_tiers.values()),
+            "tiers": disk_tiers,
+        }
+        disk_stats_cache["data"] = copy_disk_stats(disk)
+        disk_stats_cache["expires"] = now + disk_stats_cache_ttl_seconds
+        disk_stats_cache["stale_until"] = now + disk_stats_cache_max_stale_seconds
+    return {
+        "memory": memory,
+        "disk": disk,
+        "thumbnail_config": {
+            "changed_at": thumb_config_changed_at,
+            "replace_stale_thumbnails": replace_stale_thumbnails,
+        },
+    }
+
+
 def original_cache_status(
     stats: dict,
     *,

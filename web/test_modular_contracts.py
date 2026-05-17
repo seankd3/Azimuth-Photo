@@ -5783,6 +5783,7 @@ assert.deepEqual(loadingEvents.slice(-2), [['set', 2], ['cancel-clear']]);
         self.assertTrue(callable(pregen.generate_batch_for_decision))
         self.assertTrue(callable(pregen.rates))
         self.assertTrue(callable(thumbnail_status.copy_disk_stats))
+        self.assertTrue(callable(thumbnail_status.cache_stats))
         self.assertTrue(callable(thumbnail_status.original_cache_status))
         self.assertTrue(callable(thumbnail_status.pregen_status))
         self.assertEqual(

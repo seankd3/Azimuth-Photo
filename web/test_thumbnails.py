@@ -190,6 +190,98 @@ class ThumbnailMaintenanceFacadeTests(unittest.TestCase):
 
 
 class ThumbnailStatusPayloadTests(unittest.TestCase):
+    def test_cache_stats_builder_owns_disk_payload_and_snapshot_cache(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            db_path = os.path.join(tempdir, "cache-stats.db")
+            with closing(sqlite3.connect(db_path)) as conn:
+                conn.executescript(
+                    """
+                    CREATE TABLE cache_entries (
+                        cache_root TEXT,
+                        size TEXT,
+                        image_id INTEGER,
+                        path TEXT,
+                        source_signature TEXT,
+                        size_bytes INTEGER,
+                        last_accessed REAL,
+                        created_at REAL
+                    );
+                    """
+                )
+                conn.executemany(
+                    "INSERT INTO cache_entries "
+                    "(cache_root, size, image_id, path, source_signature, size_bytes, last_accessed, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    [
+                        (tempdir, "sm", 1, "/tmp/sm-1.jpg", "sig-1", 100, 1.0, 40.0),
+                        (tempdir, "sm", 2, "/tmp/sm-2.jpg", "sig-2", 300, 1.0, 60.0),
+                        (tempdir, thumbnails.FULL_TIER, 3, "/tmp/full-3.jpg", "sig-3", 900, 1.0, 1.0),
+                    ],
+                )
+                conn.commit()
+
+            opened = sqlite3.connect(db_path)
+            opened.row_factory = sqlite3.Row
+            disk_stats_cache = {"data": None, "expires": 0.0, "stale_until": 0.0}
+            try:
+                result = thumbnail_status.cache_stats(
+                    memory_stats=lambda: {"used_bytes": 12},
+                    current_time=lambda: 100.0,
+                    disk_stats_cache=disk_stats_cache,
+                    disk_stats_cache_ttl_seconds=5.0,
+                    disk_stats_cache_max_stale_seconds=7.0,
+                    meta_lock=thumbnails.threading.Lock(),
+                    db_connect=lambda: opened,
+                    cache_root=tempdir,
+                    cache_limit_bytes=2048,
+                    disk_allocations={"sm": 512, "md": 256, "lg": 128, thumbnails.FULL_TIER: 1024},
+                    all_tiers=thumbnails.ALL_TIERS,
+                    thumb_tiers=thumbnails.THUMB_TIERS,
+                    full_tier=thumbnails.FULL_TIER,
+                    replace_stale_thumbnails=True,
+                    thumb_config_changed_at=50.0,
+                )
+
+                sm_count_before_mutation = result["disk"]["tiers"]["sm"]["count"]
+                result["disk"]["tiers"]["sm"]["count"] = 999
+                cached_result = thumbnail_status.cache_stats(
+                    memory_stats=lambda: {"used_bytes": 34},
+                    current_time=lambda: 101.0,
+                    disk_stats_cache=disk_stats_cache,
+                    disk_stats_cache_ttl_seconds=5.0,
+                    disk_stats_cache_max_stale_seconds=7.0,
+                    meta_lock=thumbnails.threading.Lock(),
+                    db_connect=lambda: (_ for _ in ()).throw(AssertionError("should reuse cached disk stats")),
+                    cache_root=tempdir,
+                    cache_limit_bytes=2048,
+                    disk_allocations={"sm": 512, "md": 256, "lg": 128, thumbnails.FULL_TIER: 1024},
+                    all_tiers=thumbnails.ALL_TIERS,
+                    thumb_tiers=thumbnails.THUMB_TIERS,
+                    full_tier=thumbnails.FULL_TIER,
+                    replace_stale_thumbnails=True,
+                    thumb_config_changed_at=50.0,
+                )
+            finally:
+                opened.close()
+
+        self.assertEqual(result["memory"], {"used_bytes": 12})
+        self.assertEqual(result["disk"]["root"], tempdir)
+        self.assertEqual(result["disk"]["limit_bytes"], 2048)
+        self.assertEqual(result["disk"]["used_bytes"], 1300)
+        self.assertEqual(sm_count_before_mutation, 2)
+        self.assertEqual(result["disk"]["tiers"]["sm"]["current_count"], 1)
+        self.assertEqual(result["disk"]["tiers"]["sm"]["current_bytes"], 300)
+        self.assertEqual(result["disk"]["tiers"]["sm"]["stale_count"], 1)
+        self.assertTrue(result["disk"]["tiers"]["sm"]["replacement_mode"])
+        self.assertEqual(result["disk"]["tiers"][thumbnails.FULL_TIER]["current_count"], 1)
+        self.assertFalse(result["disk"]["tiers"][thumbnails.FULL_TIER]["replacement_mode"])
+        self.assertEqual(disk_stats_cache["expires"], 105.0)
+        self.assertEqual(disk_stats_cache["stale_until"], 107.0)
+        self.assertEqual(cached_result["memory"], {"used_bytes": 34})
+        self.assertEqual(cached_result["disk"]["tiers"]["sm"]["count"], 2)
+        self.assertEqual(cached_result["thumbnail_config"]["changed_at"], 50.0)
+        self.assertTrue(cached_result["thumbnail_config"]["replace_stale_thumbnails"])
+
     def test_pregen_status_builder_owns_payload_math(self):
         class Decision:
             def to_dict(self):
