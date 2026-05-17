@@ -1290,10 +1290,15 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_orientation_visible_pairing_pool_counts(self):
         self.assertGreaterEqual(db.VISIBLE_PAIRING_POOL_COUNTS_TTL_SECONDS, 30.0)
+        self.assertIs(
+            db._visible_pairing_pool_counts_cache,
+            ratings._visible_pairing_pool_counts_cache,
+        )
         source = await self._source()
         visible_landscape = await self._image(source["id"], "visible-landscape.jpg")
         hidden_landscape = await self._image(source["id"], "hidden-landscape.jpg")
         portrait = await self._image(source["id"], "portrait.jpg")
+        cache_root = app_module.thumbnails.SSD_CACHE_DIR
         conn = await db.get_db()
         try:
             await conn.executemany(
@@ -1313,37 +1318,47 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
         counts = await db.get_visible_orientation_pairing_pool_counts(
             "md",
-            app_module.thumbnails.SSD_CACHE_DIR,
+            cache_root,
             "landscape",
         )
         repository_counts = await ratings.visible_orientation_pairing_pool_counts(
             db.DB_PATH,
             catalog_counts=await db.get_catalog_image_counts(),
             size="md",
-            cache_root=app_module.thumbnails.SSD_CACHE_DIR,
+            cache_root=cache_root,
             orientation="landscape",
         )
         default_repository_counts = await ratings.visible_pairing_pool_counts(
             db.DB_PATH,
             catalog_counts=await db.get_catalog_image_counts(),
             size="md",
-            cache_root=app_module.thumbnails.SSD_CACHE_DIR,
+            cache_root=cache_root,
         )
 
         self.assertEqual(counts["active_images"], 2)
         self.assertEqual(counts["visible_images"], 1)
         self.assertEqual(counts, repository_counts)
         self.assertEqual(
-            await db.get_visible_pairing_pool_counts("md", app_module.thumbnails.SSD_CACHE_DIR),
+            await db.get_visible_pairing_pool_counts("md", cache_root),
             default_repository_counts,
         )
+        self.assertIn(
+            (cache_root, "md", "orientation", "landscape"),
+            ratings._visible_pairing_pool_counts_cache,
+        )
+        self.assertIn((cache_root, "md"), ratings._visible_pairing_pool_counts_cache)
 
         await self._cache_entry(hidden_landscape, "md")
-        db.invalidate_cached_image_ids_cache(app_module.thumbnails.SSD_CACHE_DIR, "md")
+        db.invalidate_cached_image_ids_cache(cache_root, "md")
+        self.assertNotIn(
+            (cache_root, "md", "orientation", "landscape"),
+            ratings._visible_pairing_pool_counts_cache,
+        )
+        self.assertNotIn((cache_root, "md"), ratings._visible_pairing_pool_counts_cache)
 
         refreshed = await db.get_visible_orientation_pairing_pool_counts(
             "md",
-            app_module.thumbnails.SSD_CACHE_DIR,
+            cache_root,
             "landscape",
         )
 

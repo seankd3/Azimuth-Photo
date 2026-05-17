@@ -1,11 +1,41 @@
 """Rating write queries for compare, mosaic, and undo workflows."""
 
+import time as _time
+
 from data import connection
+
+VISIBLE_PAIRING_POOL_COUNTS_TTL_SECONDS = 30.0
+_visible_pairing_pool_counts_cache: dict[tuple, dict] = {}
 
 
 def _chunked(values: list[int], chunk_size: int = 500):
     for start in range(0, len(values), chunk_size):
         yield values[start:start + chunk_size]
+
+
+def _cache_scope_matches(
+    cache_root: str,
+    size: str,
+    target_root: str | None,
+    target_size: str | None,
+) -> bool:
+    return (
+        (target_root is None or cache_root == target_root)
+        and (target_size is None or size == target_size)
+    )
+
+
+def invalidate_visible_pairing_pool_counts_cache(
+    cache_root: str | None = None,
+    size: str | None = None,
+) -> None:
+    if cache_root is None and size is None:
+        _visible_pairing_pool_counts_cache.clear()
+        return
+    for key in list(_visible_pairing_pool_counts_cache.keys()):
+        key_root, key_size = key[:2]
+        if _cache_scope_matches(key_root, key_size, cache_root, size):
+            _visible_pairing_pool_counts_cache.pop(key, None)
 
 
 def _was_rated(row: dict) -> bool:
@@ -159,6 +189,36 @@ async def visible_pairing_pool_counts(
         await connection.close_async(conn, db_path=db_path)
 
 
+async def visible_pairing_pool_counts_cached(
+    db_path: str,
+    *,
+    get_catalog_image_counts,
+    size: str,
+    cache_root: str,
+    ttl_seconds: float = VISIBLE_PAIRING_POOL_COUNTS_TTL_SECONDS,
+) -> dict:
+    if not size or not cache_root:
+        counts = await get_catalog_image_counts()
+        return {"active_images": int(counts.get("active_images") or 0), "visible_images": 0}
+    cache_key = (cache_root, size)
+    now = _time.time()
+    cached = _visible_pairing_pool_counts_cache.get(cache_key)
+    if cached and cached["expires"] > now:
+        return dict(cached["data"])
+    counts = await get_catalog_image_counts()
+    result = await visible_pairing_pool_counts(
+        db_path,
+        catalog_counts=counts,
+        size=size,
+        cache_root=cache_root,
+    )
+    _visible_pairing_pool_counts_cache[cache_key] = {
+        "data": result,
+        "expires": _time.time() + ttl_seconds,
+    }
+    return dict(result)
+
+
 async def visible_orientation_pairing_pool_counts(
     db_path: str,
     *,
@@ -210,6 +270,48 @@ async def visible_orientation_pairing_pool_counts(
         }
     finally:
         await connection.close_async(conn, db_path=db_path)
+
+
+async def visible_orientation_pairing_pool_counts_cached(
+    db_path: str,
+    *,
+    get_catalog_image_counts,
+    count_rankings,
+    size: str,
+    cache_root: str,
+    orientation: str,
+    ttl_seconds: float = VISIBLE_PAIRING_POOL_COUNTS_TTL_SECONDS,
+) -> dict:
+    orientation = (orientation or "").strip()
+    if not orientation:
+        return await visible_pairing_pool_counts_cached(
+            db_path,
+            get_catalog_image_counts=get_catalog_image_counts,
+            size=size,
+            cache_root=cache_root,
+            ttl_seconds=ttl_seconds,
+        )
+    if not size or not cache_root:
+        active = await count_rankings(orientation=orientation)
+        return {"active_images": int(active), "visible_images": 0}
+    cache_key = (cache_root, size, "orientation", orientation)
+    now = _time.time()
+    cached = _visible_pairing_pool_counts_cache.get(cache_key)
+    if cached and cached["expires"] > now:
+        return dict(cached["data"])
+    counts = await get_catalog_image_counts()
+    result = await visible_orientation_pairing_pool_counts(
+        db_path,
+        catalog_counts=counts,
+        size=size,
+        cache_root=cache_root,
+        orientation=orientation,
+    )
+    _visible_pairing_pool_counts_cache[cache_key] = {
+        "data": result,
+        "expires": _time.time() + ttl_seconds,
+    }
+    return dict(result)
 
 
 def load_past_matchups(db_path: str) -> tuple[tuple[int, int | None], set[tuple[int, int]]]:

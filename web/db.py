@@ -65,7 +65,7 @@ _date_groups_cache = ranking_repository._date_groups_cache
 _date_groups_refreshing = ranking_repository._date_groups_refreshing
 _map_markers_cache = ranking_repository._map_markers_cache
 _ranking_count_cache = ranking_repository._ranking_count_cache
-_visible_pairing_pool_counts_cache: dict[tuple, dict] = {}
+_visible_pairing_pool_counts_cache = rating_repository._visible_pairing_pool_counts_cache
 _cached_image_ids_cache = cache_entry_repository._cached_image_ids_cache
 _cache_entry_count_cache = cache_entry_repository._cache_entry_count_cache
 _rankable_image_ids_cache = ranking_repository._rankable_image_ids_cache
@@ -76,7 +76,7 @@ _active_source_ids_cache = catalog_repository._active_source_ids_cache
 _past_matchups_cache = {"data": None, "signature": None}
 CACHED_IMAGE_IDS_TTL_SECONDS = cache_entry_repository.CACHED_IMAGE_IDS_TTL_SECONDS
 RANKING_COUNT_CACHE_TTL_SECONDS = ranking_repository.RANKING_COUNT_CACHE_TTL_SECONDS
-VISIBLE_PAIRING_POOL_COUNTS_TTL_SECONDS = 30.0
+VISIBLE_PAIRING_POOL_COUNTS_TTL_SECONDS = rating_repository.VISIBLE_PAIRING_POOL_COUNTS_TTL_SECONDS
 CACHE_ENTRY_COUNT_TTL_SECONDS = cache_entry_repository.CACHE_ENTRY_COUNT_TTL_SECONDS
 RANKABLE_IMAGE_IDS_TTL_SECONDS = ranking_repository.RANKABLE_IMAGE_IDS_TTL_SECONDS
 RANKING_VISIBLE_ID_FILTER_LIMIT = ranking_repository.RANKING_VISIBLE_ID_FILTER_LIMIT
@@ -222,7 +222,7 @@ def _invalidate_rating_facet_caches():
 
 def _invalidate_ranking_count_cache():
     ranking_repository.invalidate_ranking_count_cache()
-    _visible_pairing_pool_counts_cache.clear()
+    rating_repository.invalidate_visible_pairing_pool_counts_cache()
 
 
 def _cache_scope_matches(cache_root: str, size: str, target_root: str | None, target_size: str | None) -> bool:
@@ -231,10 +231,7 @@ def _cache_scope_matches(cache_root: str, size: str, target_root: str | None, ta
 
 def _invalidate_visible_cache_dependent_counts(cache_root: str | None = None, size: str | None = None):
     ranking_repository.invalidate_visible_cache_dependent_counts(cache_root, size)
-    for key in list(_visible_pairing_pool_counts_cache.keys()):
-        key_root, key_size = key[:2]
-        if _cache_scope_matches(key_root, key_size, cache_root, size):
-            _visible_pairing_pool_counts_cache.pop(key, None)
+    rating_repository.invalidate_visible_pairing_pool_counts_cache(cache_root, size)
 
 
 def _invalidate_rating_ranking_count_cache():
@@ -662,26 +659,13 @@ async def get_visible_images_for_pairing(
 
 async def get_visible_pairing_pool_counts(size: str, cache_root: str) -> dict:
     """Return active and visible counts for the default Compare/Mosaic pool."""
-    if not size or not cache_root:
-        counts = await get_catalog_image_counts()
-        return {"active_images": int(counts.get("active_images") or 0), "visible_images": 0}
-    cache_key = (cache_root, size)
-    now = _time.time()
-    cached = _visible_pairing_pool_counts_cache.get(cache_key)
-    if cached and cached["expires"] > now:
-        return dict(cached["data"])
-    counts = await get_catalog_image_counts()
-    result = await rating_repository.visible_pairing_pool_counts(
+    return await rating_repository.visible_pairing_pool_counts_cached(
         DB_PATH,
-        catalog_counts=counts,
+        get_catalog_image_counts=get_catalog_image_counts,
         size=size,
         cache_root=cache_root,
+        ttl_seconds=VISIBLE_PAIRING_POOL_COUNTS_TTL_SECONDS,
     )
-    _visible_pairing_pool_counts_cache[cache_key] = {
-        "data": result,
-        "expires": _time.time() + VISIBLE_PAIRING_POOL_COUNTS_TTL_SECONDS,
-    }
-    return dict(result)
 
 
 async def get_visible_orientation_pairing_pool_counts(
@@ -690,30 +674,15 @@ async def get_visible_orientation_pairing_pool_counts(
     orientation: str,
 ) -> dict:
     """Return active and visible counts for a simple orientation-filtered pool."""
-    orientation = (orientation or "").strip()
-    if not orientation:
-        return await get_visible_pairing_pool_counts(size, cache_root)
-    if not size or not cache_root:
-        active = await count_rankings(orientation=orientation)
-        return {"active_images": int(active), "visible_images": 0}
-    cache_key = (cache_root, size, "orientation", orientation)
-    now = _time.time()
-    cached = _visible_pairing_pool_counts_cache.get(cache_key)
-    if cached and cached["expires"] > now:
-        return dict(cached["data"])
-    counts = await get_catalog_image_counts()
-    result = await rating_repository.visible_orientation_pairing_pool_counts(
+    return await rating_repository.visible_orientation_pairing_pool_counts_cached(
         DB_PATH,
-        catalog_counts=counts,
+        get_catalog_image_counts=get_catalog_image_counts,
+        count_rankings=count_rankings,
         size=size,
         cache_root=cache_root,
         orientation=orientation,
+        ttl_seconds=VISIBLE_PAIRING_POOL_COUNTS_TTL_SECONDS,
     )
-    _visible_pairing_pool_counts_cache[cache_key] = {
-        "data": result,
-        "expires": _time.time() + VISIBLE_PAIRING_POOL_COUNTS_TTL_SECONDS,
-    }
-    return dict(result)
 
 
 async def get_past_matchups() -> set[tuple[int, int]]:
