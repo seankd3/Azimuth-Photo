@@ -26,6 +26,10 @@ from data.repositories import cache_entries as cache_entry_repository  # noqa: E
 from data.repositories import catalog as catalog_repository  # noqa: E402
 from data.repositories import images as image_repository  # noqa: E402
 from data.repositories import metadata_search, rankings, ratings, stats as stats_repository  # noqa: E402
+from features.ai import routes as ai_routes  # noqa: E402
+from features.cache import status as cache_status_service  # noqa: E402
+from features.settings import routes as settings_routes  # noqa: E402
+from features.settings import status as settings_status  # noqa: E402
 
 
 class JsonRequest:
@@ -83,8 +87,8 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         app_module._interaction_response_cache.clear()
         app_module._invalidate_rankings_cache()
         app_module._clear_folders_cache()
-        app_module._invalidate_cache_status_cache()
-        app_module._invalidate_settings_response_cache()
+        cache_status_service.invalidate_cache_status_cache()
+        settings_status.invalidate_settings_response_cache()
 
         def close_scheduled(coro):
             coro.close()
@@ -132,8 +136,8 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         app_module._interaction_response_cache.clear()
         app_module._invalidate_rankings_cache()
         app_module._clear_folders_cache()
-        app_module._invalidate_cache_status_cache()
-        app_module._invalidate_settings_response_cache()
+        cache_status_service.invalidate_cache_status_cache()
+        settings_status.invalidate_settings_response_cache()
         self.tempdir.cleanup()
 
     async def _source(self, name="catalog", *, online=True):
@@ -1518,9 +1522,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([image["id"] for image in refreshed["images"]], [first])
         self.assertNotIn(second, [image["id"] for image in refreshed["images"]])
 
-    async def test_benchmark_cache_reset_clears_response_caches(self):
-        import bench_perf
-
+    async def test_owner_cache_reset_clears_response_caches(self):
         source = await self._source()
         image_id = await self._image(source["id"], "first.jpg", elo=1500)
         await self._cache_entry(image_id, "sm")
@@ -1528,16 +1530,31 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         await app_module.api_rankings(limit=10, sort="elo")
         await app_module.api_settings()
         self.assertTrue(app_module._rankings_response_cache)
-        self.assertIsNotNone(app_module._settings_response_cache["data"])
-        self.assertIsNotNone(app_module._ai_status_response_cache["data"])
+        self.assertIsNotNone(settings_status._settings_response_cache["data"])
+        self.assertIsNotNone(ai_routes._ai_status_response_cache["data"])
         app_module._thumbnail_memory_warm_inflight.add("sm:1")
 
-        bench_perf.reset_app_caches()
+        db.invalidate_stats_cache()
+        db.invalidate_cached_image_ids_cache()
+        db.clear_filter_options_cache()
+        app_module._pairing_cache.update({"data": None, "valid": False})
+        app_module._matchups_cache.update({"data": None, "valid": False})
+        app_module._visible_matchups_cache.clear()
+        app_module._visible_pairing_candidates_cache.clear()
+        app_module._visible_pairing_candidates_refreshing.clear()
+        app_module._rankings_response_cache.clear()
+        app_module._text_search_resolution_cache.clear()
+        app_module._interaction_response_cache.clear()
+        app_module._thumbnail_memory_warm_inflight.clear()
+        settings_status.invalidate_settings_response_cache()
+        ai_routes.invalidate_ai_status_response_cache()
+        cache_status_service.invalidate_cache_status_cache()
+        app_module._clear_folders_cache()
 
         self.assertFalse(app_module._rankings_response_cache)
         self.assertFalse(app_module._thumbnail_memory_warm_inflight)
-        self.assertIsNone(app_module._settings_response_cache["data"])
-        self.assertIsNone(app_module._ai_status_response_cache["data"])
+        self.assertIsNone(settings_status._settings_response_cache["data"])
+        self.assertIsNone(ai_routes._ai_status_response_cache["data"])
 
     async def test_rankings_response_cache_returns_independent_image_lists(self):
         source = await self._source()
@@ -3354,8 +3371,8 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         visible_match = await self._image(source["id"], "sunset-visible.jpg")
         await self._cache_entry(visible_match, "sm")
         embedding_worker.encode_text = lambda _query: None
-        app_module._ai_status_response_cache.update({"data": {"stale": True}, "key": ("stale",), "expires": 999999999})
-        app_module._settings_response_cache.update({"data": {"stale": True}, "expires": 999999999})
+        ai_routes._ai_status_response_cache.update({"data": {"stale": True}, "key": ("stale",), "expires": 999999999})
+        settings_status._settings_response_cache.update({"data": {"stale": True}, "expires": 999999999})
 
         result = await app_module.api_search(q="sunset portrait", limit=10)
         pending = await db.get_pending_deep_search_queries(
@@ -3366,8 +3383,8 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result["search_mode"], "metadata")
         self.assertIn("sunset portrait", [row["query"] for row in pending])
-        self.assertIsNone(app_module._ai_status_response_cache["data"])
-        self.assertIsNone(app_module._settings_response_cache["data"])
+        self.assertIsNone(ai_routes._ai_status_response_cache["data"])
+        self.assertIsNone(settings_status._settings_response_cache["data"])
 
     async def test_text_search_resolution_caches_fast_embedding_result(self):
         source = await self._source()
@@ -4259,8 +4276,6 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             "thumbnail_config": {"changed_at": 0, "replace_stale_thumbnails": False},
         }
         captured = {}
-        cache_status_service = app_module.cache_status_service
-
         def fake_pregen_status(target_total, stats=None, original_total=0, archive_estimates=None):
             captured["target_total"] = target_total
             captured["original_total"] = original_total
@@ -4296,16 +4311,15 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
                 }
             )
 
-            result = await app_module.build_cache_status(ahead=0)
+            result = await cache_status_service.build_cache_status(ahead=0)
         finally:
             app_module.thumbnails.cache_stats = old_cache_stats
             app_module.thumbnails.get_pregen_status = old_pregen_status
             cache_status_service._cache_recommendations = old_recommendations
-            app_module._cache_recommendations = old_recommendations
 
         self.assertEqual(captured, {"target_total": 2, "original_total": 1})
-        self.assertGreaterEqual(app_module._cache_status_cache_ttl_seconds, 30.0)
-        self.assertGreaterEqual(app_module._browser_original_count_cache_ttl_seconds, 30.0)
+        self.assertGreaterEqual(cache_status_service._cache_status_cache_ttl_seconds, 30.0)
+        self.assertGreaterEqual(cache_status_service._browser_original_count_cache_ttl_seconds, 30.0)
         self.assertEqual(result["disk"]["tiers"]["sm"]["progress_total"], 2)
         self.assertEqual(result["disk"]["tiers"]["full"]["progress_total"], 1)
         self.assertEqual(result["pregen"]["preview"]["remaining"], 0)
@@ -4347,7 +4361,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             }
         }
 
-        self.assertEqual(app_module._cache_status_ttl(result), 1.0)
+        self.assertEqual(cache_status_service._cache_status_ttl(result), 1.0)
 
     async def test_cache_status_ttl_is_short_while_running(self):
         result = {
@@ -4359,17 +4373,17 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             }
         }
 
-        self.assertEqual(app_module._cache_status_ttl(result), 2.0)
+        self.assertEqual(cache_status_service._cache_status_ttl(result), 2.0)
 
     async def test_cache_status_caps_ahead_window(self):
-        result = await app_module.build_cache_status(
-            ahead=app_module._cache_status_ahead_limit + 100
+        result = await cache_status_service.build_cache_status(
+            ahead=cache_status_service._cache_status_ahead_limit + 100
         )
 
-        self.assertEqual(result["window"], app_module._cache_status_ahead_limit)
+        self.assertEqual(result["window"], cache_status_service._cache_status_ahead_limit)
 
     async def test_cache_pregen_status_reuses_cached_status_builder(self):
-        first = await app_module.build_cache_status(ahead=0)
+        first = await cache_status_service.build_cache_status(ahead=0)
         result = await app_module.cache_pregen_status()
 
         self.assertEqual(result["state"], first["pregen"]["state"])
@@ -4632,9 +4646,9 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         await db.store_embeddings_batch([(image_id, b"deep-vector")], embedding_config=deep_config)
         await db.record_deep_search_query("queued only")
         await db.store_deep_search_query_embedding(deep_config, "ready query", b"query-vector")
-        app_module._invalidate_ai_status_response_cache()
+        ai_routes.invalidate_ai_status_response_cache()
 
-        status = await app_module.build_ai_status(force=True)
+        status = await ai_routes.build_ai_status(force=True)
         indexes = status["embedding_indexes"]
         deep_queries = {item["query"]: item for item in indexes["deep"]["queries"]}
 
@@ -4678,12 +4692,12 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             }
 
         app_module.ai_models.get_model_status = fake_get_model_status
-        app_module._invalidate_ai_status_response_cache()
+        ai_routes.invalidate_ai_status_response_cache()
         try:
-            status = await app_module.build_ai_status(force=True)
+            status = await ai_routes.build_ai_status(force=True)
         finally:
             app_module.ai_models.get_model_status = old_get_model_status
-            app_module._invalidate_ai_status_response_cache()
+            ai_routes.invalidate_ai_status_response_cache()
 
         indexes = status["embedding_indexes"]
         self.assertFalse(indexes["fast"]["installing"])
@@ -4746,7 +4760,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_api_settings_cache_returns_independent_responses_and_invalidates(self):
         first = await app_module.api_settings()
-        self.assertIsNotNone(app_module._settings_response_cache["data"])
+        self.assertIsNotNone(settings_status._settings_response_cache["data"])
 
         second = await app_module.api_settings()
         second["settings"] = {"thumb_quality": 40}
@@ -4761,7 +4775,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_api_settings_cache_protects_nested_responses(self):
         first = await app_module.api_settings()
-        self.assertIsNotNone(app_module._settings_response_cache["data"])
+        self.assertIsNotNone(settings_status._settings_response_cache["data"])
 
         first["settings"]["thumb_quality"] = 40
         first["cache_stats"]["disk"]["tiers"]["sm"]["count"] = 999999
@@ -4790,52 +4804,52 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             "catalog": {},
             **app_module.settings.settings_metadata(),
         }
-        app_module._settings_response_cache["data"] = stale
-        app_module._settings_response_cache["expires"] = 0
-        old_build_settings_response = app_module._build_settings_response
+        settings_status._settings_response_cache["data"] = stale
+        settings_status._settings_response_cache["expires"] = 0
+        old_build_settings_response = settings_routes._build_settings_response
 
         async def fake_build_settings_response():
             await asyncio.sleep(0)
             return fresh
 
-        app_module._build_settings_response = fake_build_settings_response
+        settings_routes._build_settings_response = fake_build_settings_response
         try:
             response = await app_module.api_settings()
             self.assertEqual(response["settings"]["thumb_quality"], 40)
             await asyncio.sleep(0.01)
             self.assertEqual(
-                app_module._settings_response_cache["data"]["settings"]["thumb_quality"],
+                settings_status._settings_response_cache["data"]["settings"]["thumb_quality"],
                 80,
             )
         finally:
-            app_module._build_settings_response = old_build_settings_response
+            settings_routes._build_settings_response = old_build_settings_response
 
     async def test_cache_status_invalidation_expires_settings_without_dropping_stale_data(self):
         first = await app_module.api_settings()
-        self.assertIsNotNone(app_module._settings_response_cache["data"])
-        self.assertGreater(app_module._settings_response_cache["expires"], 0)
+        self.assertIsNotNone(settings_status._settings_response_cache["data"])
+        self.assertGreater(settings_status._settings_response_cache["expires"], 0)
 
-        app_module._invalidate_cache_status_cache()
+        cache_status_service.invalidate_cache_status_cache()
 
-        self.assertIsNotNone(app_module._settings_response_cache["data"])
-        self.assertEqual(app_module._settings_response_cache["expires"], 0)
+        self.assertIsNotNone(settings_status._settings_response_cache["data"])
+        self.assertEqual(settings_status._settings_response_cache["expires"], 0)
 
         second = await app_module.api_settings()
         self.assertEqual(second["settings"], first["settings"])
         for _ in range(20):
-            if not app_module._settings_response_refreshing:
+            if not settings_status.get_settings_response_refreshing():
                 break
             await asyncio.sleep(0.01)
 
     async def test_cache_status_cache_protects_nested_responses(self):
-        first = await app_module.build_cache_status(ahead=0)
-        self.assertTrue(app_module._cache_status_cache)
+        first = await cache_status_service.build_cache_status(ahead=0)
+        self.assertTrue(cache_status_service._cache_status_cache)
 
         first["disk"]["tiers"]["sm"]["count"] = 999999
         first["pregen"]["phases"]["sm"]["count"] = 999999
         first["system_resources"]["disk"]["free_bytes"] = -1
 
-        second = await app_module.build_cache_status(ahead=0)
+        second = await cache_status_service.build_cache_status(ahead=0)
 
         self.assertNotEqual(second["disk"]["tiers"]["sm"]["count"], 999999)
         self.assertNotEqual(second["pregen"]["phases"]["sm"]["count"], 999999)
@@ -4865,28 +4879,27 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(second["disk"]["tiers"]["sm"]["count"], 999999)
 
     async def test_ai_status_response_cache_protects_nested_responses(self):
-        first = await app_module.build_ai_status()
-        self.assertIsNotNone(app_module._ai_status_response_cache["data"])
+        first = await ai_routes.build_ai_status()
+        self.assertIsNotNone(ai_routes._ai_status_response_cache["data"])
 
         first["last_batch_stage_seconds"]["db"] = 999999
         first["governor"]["reason"] = "mutated"
 
-        second = await app_module.build_ai_status()
+        second = await ai_routes.build_ai_status()
 
         self.assertNotEqual(second["last_batch_stage_seconds"].get("db"), 999999)
         self.assertNotEqual(second["governor"].get("reason"), "mutated")
 
     async def test_ai_status_response_cache_returns_stale_while_refreshing(self):
-        ai_routes = app_module.ai_routes
         model_status = app_module.ai_models.get_model_status()
-        app_module._ai_status_response_cache.update({
+        ai_routes._ai_status_response_cache.update({
             "data": {
                 "embedded": 1,
                 "last_batch_stage_seconds": {"db": 1},
                 "governor": {"reason": "cached"},
             },
-            "key": app_module._ai_model_status_cache_key(model_status),
-            "expires": app_module.time.monotonic() - 1,
+            "key": ai_routes._ai_model_status_cache_key(model_status),
+            "expires": ai_routes.time.monotonic() - 1,
         })
         old_create_task = ai_routes.asyncio.create_task
         scheduled = []
@@ -4900,8 +4913,8 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             ai_routes.asyncio.create_task = fake_create_task
             ai_routes._ai_status_response_refreshing = False
 
-            first = await app_module.build_ai_status(model_status)
-            second = await app_module.build_ai_status(model_status)
+            first = await ai_routes.build_ai_status(model_status)
+            second = await ai_routes.build_ai_status(model_status)
 
             self.assertEqual(first["embedded"], 1)
             self.assertEqual(second["governor"]["reason"], "cached")
@@ -4910,10 +4923,9 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         finally:
             ai_routes.asyncio.create_task = old_create_task
             ai_routes._ai_status_response_refreshing = False
-            app_module._invalidate_ai_status_response_cache()
+            ai_routes.invalidate_ai_status_response_cache()
 
     async def test_ai_status_skips_deep_embedding_count_when_no_active_images(self):
-        ai_routes = app_module.ai_routes
         config_names = (
             "_invalidate_settings_response_cache",
             "_get_ai_status_counts",
@@ -4954,7 +4966,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             )
             ai_routes.invalidate_ai_status_response_cache()
 
-            status = await app_module.build_ai_status(force=True)
+            status = await ai_routes.build_ai_status(force=True)
 
             self.assertEqual(status["total_images"], 0)
             self.assertEqual(status["embedding_indexes"]["deep"]["embedded"], 0)

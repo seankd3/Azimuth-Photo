@@ -1728,7 +1728,7 @@ class ModularContractTests(unittest.TestCase):
         with open(path, "rb") as fh:
             return fh.read()
 
-    def test_ai_status_feature_owns_builder_with_app_facades(self):
+    def test_ai_status_feature_owns_builder_without_app_facades(self):
         base_dir = os.path.dirname(__file__)
         ai_routes = importlib.import_module("features.ai.routes")
 
@@ -1737,14 +1737,16 @@ class ModularContractTests(unittest.TestCase):
             self.assertNotIn("import db", contents)
             self.assertNotIn("db.", contents)
 
-        self.assertIs(app_module.build_ai_status, ai_routes.build_ai_status)
-        self.assertIs(
-            app_module._invalidate_ai_status_response_cache,
-            ai_routes.invalidate_ai_status_response_cache,
+        drained_names = (
+            "build_ai_status",
+            "_invalidate_ai_status_response_cache",
+            "_ai_status_response_cache",
+            "_copy_ai_status_response",
+            "_ai_model_status_cache_key",
+            "_ai_status_response_cache_ttl_seconds",
         )
-        self.assertIs(app_module._ai_status_response_cache, ai_routes._ai_status_response_cache)
-        self.assertIs(app_module._copy_ai_status_response, ai_routes._copy_ai_status_response)
-        self.assertIs(app_module._ai_model_status_cache_key, ai_routes._ai_model_status_cache_key)
+        for name in drained_names:
+            self.assertFalse(hasattr(app_module, name), name)
         self.assertTrue(callable(ai_routes._refresh_ai_status_response_cache))
 
         config_names = (
@@ -1927,7 +1929,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn(("ignore_person", 14), calls)
         self.assertIn(("face_thumb", 15), calls)
 
-    def test_cache_status_feature_owns_builder_with_app_facades(self):
+    def test_cache_status_feature_owns_builder_without_app_facades(self):
         base_dir = os.path.dirname(__file__)
         cache_status = importlib.import_module("features.cache.status")
         stats_repository = importlib.import_module("data.repositories.stats")
@@ -1935,25 +1937,26 @@ class ModularContractTests(unittest.TestCase):
         with open(os.path.join(base_dir, "features", "cache", "status.py"), encoding="utf-8") as fh:
             self.assertNotIn("import db", fh.read())
 
-        self.assertIs(app_module.build_cache_status, cache_status.build_cache_status)
-        self.assertIs(
-            app_module._invalidate_cache_status_cache,
-            cache_status.invalidate_cache_status_cache,
+        drained_names = (
+            "build_cache_status",
+            "_invalidate_cache_status_cache",
+            "_cache_status_cache",
+            "_cache_status_refreshing",
+            "_cache_status_cache_ttl_seconds",
+            "_cache_status_ahead_limit",
+            "_browser_original_count_cache",
+            "_browser_original_count_cache_ttl_seconds",
+            "_browser_original_summary",
+            "_browser_original_count",
+            "_cache_recommendations",
+            "_cache_archive_estimates_from_status",
+            "_copy_dict_of_dicts",
+            "_system_resource_status",
+            "_copy_cache_status_response",
+            "_cache_status_ttl",
         )
-        self.assertIs(app_module._cache_status_cache, cache_status._cache_status_cache)
-        self.assertIs(app_module._cache_status_refreshing, cache_status._cache_status_refreshing)
-        self.assertIs(app_module._browser_original_count_cache, cache_status._browser_original_count_cache)
-        self.assertIs(app_module._copy_cache_status_response, cache_status._copy_cache_status_response)
-        self.assertIs(app_module._cache_status_ttl, cache_status._cache_status_ttl)
-        self.assertIs(app_module._cache_recommendations, cache_status._cache_recommendations)
-        self.assertEqual(
-            app_module._cache_status_cache_ttl_seconds,
-            cache_status._cache_status_cache_ttl_seconds,
-        )
-        self.assertEqual(
-            app_module._browser_original_count_cache_ttl_seconds,
-            cache_status._browser_original_count_cache_ttl_seconds,
-        )
+        for name in drained_names:
+            self.assertFalse(hasattr(app_module, name), name)
 
         config_names = (
             "_cache_root_provider",
@@ -2637,7 +2640,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn(("image", "/tmp/media.db", 8), calls)
         self.assertIn(("active", "/tmp/media.db", (11,)), calls)
 
-    def test_settings_status_feature_owns_cache_with_app_facades(self):
+    def test_settings_status_feature_owns_cache_without_app_facades(self):
         base_dir = os.path.dirname(__file__)
         settings_status = importlib.import_module("features.settings.status")
         catalog_repository = importlib.import_module("data.repositories.catalog")
@@ -2645,28 +2648,22 @@ class ModularContractTests(unittest.TestCase):
         with open(os.path.join(base_dir, "features", "settings", "status.py"), encoding="utf-8") as fh:
             self.assertNotIn("import db", fh.read())
 
-        self.assertIs(app_module._build_settings_response, settings_status.build_settings_response)
-        self.assertIs(app_module._settings_response_cache, settings_status._settings_response_cache)
-        self.assertIs(
-            app_module._invalidate_settings_response_cache,
-            settings_status.invalidate_settings_response_cache,
+        drained_names = (
+            "_build_settings_response",
+            "_settings_response_cache",
+            "_settings_response_cache_ttl_seconds",
+            "_invalidate_settings_response_cache",
+            "_expire_settings_response_cache",
+            "_copy_settings_response",
+            "_set_settings_response_refreshing",
+            "_settings_response_refreshing",
         )
-        self.assertIs(
-            app_module._expire_settings_response_cache,
-            settings_status.expire_settings_response_cache,
-        )
-        self.assertIs(app_module._copy_settings_response, settings_status.copy_settings_response)
-        self.assertIs(
-            app_module._set_settings_response_refreshing,
-            settings_status.set_settings_response_refreshing,
-        )
-        self.assertEqual(
-            app_module._settings_response_cache_ttl_seconds,
-            settings_status._settings_response_cache_ttl_seconds,
-        )
+        for name in drained_names:
+            self.assertFalse(hasattr(app_module, name), name)
+
         settings_status.set_settings_response_refreshing(True)
         try:
-            self.assertTrue(app_module._settings_response_refreshing)
+            self.assertTrue(settings_status.get_settings_response_refreshing())
         finally:
             settings_status.set_settings_response_refreshing(False)
 
@@ -3584,6 +3581,8 @@ class ModularContractTests(unittest.TestCase):
             settings_actions = fh.read()
         with open(os.path.join(base_dir, "static", "js", "settings", "controller.js"), encoding="utf-8") as fh:
             settings_controller = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "settings", "page.js"), encoding="utf-8") as fh:
+            settings_page = fh.read()
         with open(os.path.join(base_dir, "static", "js", "ui.js"), encoding="utf-8") as fh:
             ui_module = fh.read()
         with open(os.path.join(base_dir, "static", "js", "warmup.js"), encoding="utf-8") as fh:
@@ -3594,12 +3593,10 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("Object.assign(compatibilityTarget, PhotoArchive);", bootstrap)
         self.assertIn("from '../api.js';", legacy)
         self.assertIn("from '../ai/poller.js';", legacy)
-        self.assertIn("from '../catalog/controller.js';", legacy)
         self.assertIn("from '../query_state.js';", legacy)
         self.assertIn("from '../filters.js';", legacy)
         self.assertIn("from '../media_status.js';", legacy)
         self.assertIn("from '../media_metadata.js';", legacy)
-        self.assertIn("from '../cache/guide.js';", legacy)
         self.assertIn("from '../compare/query.js';", legacy)
         self.assertIn("from '../compare/navigation.js';", legacy)
         self.assertIn("from '../compare/images.js';", legacy)
@@ -3637,14 +3634,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("toggleStar as toggleStarCore", legacy)
         self.assertIn("from '../search/query.js';", legacy)
         self.assertIn("from '../people/controller.js';", legacy)
-        self.assertIn("from '../settings/status.js';", legacy)
-        self.assertIn("from '../settings/cache_status.js';", legacy)
-        self.assertIn("from '../settings/ai_status.js';", legacy)
-        self.assertIn("from '../settings/people_status.js';", legacy)
-        self.assertIn("from '../settings/work_banner.js';", legacy)
-        self.assertIn("from '../settings/display.js';", legacy)
-        self.assertIn("from '../settings/form.js';", legacy)
-        self.assertIn("from '../settings/controller.js';", legacy)
+        self.assertIn("from '../settings/page.js';", legacy)
         self.assertIn("from '../ui.js';", legacy)
         self.assertIn("from '../warmup.js';", legacy)
         self.assertIn("export async function fetchJson", api_module)
@@ -3907,6 +3897,18 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from './actions.js';", settings_controller)
         self.assertIn("getSettingsPageData = () => ({})", settings_controller)
         self.assertIn("api.saveSettings();", settings_controller)
+        self.assertIn("export function createSettingsPageController", settings_page)
+        self.assertIn("from '../catalog/controller.js';", settings_page)
+        self.assertIn("from '../cache/guide.js';", settings_page)
+        self.assertIn("from './status.js';", settings_page)
+        self.assertIn("from './cache_status.js';", settings_page)
+        self.assertIn("from './ai_status.js';", settings_page)
+        self.assertIn("from './people_status.js';", settings_page)
+        self.assertIn("from './work_banner.js';", settings_page)
+        self.assertIn("from './display.js';", settings_page)
+        self.assertIn("from './form.js';", settings_page)
+        self.assertIn("from './controller.js';", settings_page)
+        self.assertIn("refreshSettingsMetaIfActive", settings_page)
         self.assertIn("export function formatBytes", ui_module)
         self.assertIn("export function escapeHtml", ui_module)
         self.assertIn("export function jsString", ui_module)

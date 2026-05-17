@@ -30,6 +30,9 @@ import db
 import embed_cache
 import settings
 import thumbnails
+from features.ai import routes as ai_routes
+from features.cache import status as cache_status_service
+from features.settings import status as settings_status
 
 try:
     sys.stdout.reconfigure(line_buffering=True)
@@ -175,11 +178,11 @@ def reset_app_caches():
     app_module._text_search_resolution_cache.clear()
     app_module._interaction_response_cache.clear()
     app_module._thumbnail_memory_warm_inflight.clear()
-    app_module._invalidate_settings_response_cache()
-    app_module._invalidate_ai_status_response_cache()
-    app_module._cache_status_cache.clear()
-    app_module._cache_status_refreshing.clear()
-    app_module._browser_original_count_cache.update({"value": None, "bytes": 0, "expires": 0.0})
+    settings_status.invalidate_settings_response_cache()
+    ai_routes.invalidate_ai_status_response_cache()
+    cache_status_service._cache_status_cache.clear()
+    cache_status_service._cache_status_refreshing.clear()
+    cache_status_service._browser_original_count_cache.update({"value": None, "bytes": 0, "expires": 0.0})
     app_module._clear_folders_cache()
 
 
@@ -554,8 +557,8 @@ async def bench_app_endpoints(iterations: int):
         app_module.api_date_groups(),
         app_module.api_map_markers(),
         app_module.api_folders(max_depth=1),
-        app_module.build_cache_status(ahead=0),
-        app_module.build_ai_status(),
+        cache_status_service.build_cache_status(ahead=0),
+        ai_routes.build_ai_status(),
         app_module.images_media_status(JsonRequest({"ids": media_status_ids})) if media_status_ids else asyncio.sleep(0),
         return_exceptions=True,
     )
@@ -588,9 +591,9 @@ async def bench_app_endpoints(iterations: int):
     await endpoint("map_markers", app_module.api_map_markers)
     await endpoint("folders shallow", lambda: app_module.api_folders(max_depth=1))
     await endpoint("folders full", app_module.api_folders)
-    await endpoint("cache_status", lambda: app_module.build_cache_status(ahead=0))
-    await endpoint("cache_status ahead", lambda: app_module.build_cache_status(ahead=1000))
-    await endpoint("ai_status", app_module.build_ai_status)
+    await endpoint("cache_status", lambda: cache_status_service.build_cache_status(ahead=0))
+    await endpoint("cache_status ahead", lambda: cache_status_service.build_cache_status(ahead=1000))
+    await endpoint("ai_status", ai_routes.build_ai_status)
     await endpoint("settings", app_module.api_settings)
     if media_status_ids:
         await endpoint("media_status batch", lambda: app_module.images_media_status(JsonRequest({"ids": media_status_ids})))
@@ -621,9 +624,9 @@ async def bench_cold_app_endpoints(iterations: int):
         ("map_markers", app_module.api_map_markers),
         ("folders shallow", lambda: app_module.api_folders(max_depth=1)),
         ("folders full", app_module.api_folders),
-        ("cache_status", lambda: app_module.build_cache_status(ahead=0)),
-        ("cache_status ahead", lambda: app_module.build_cache_status(ahead=1000)),
-        ("ai_status", app_module.build_ai_status),
+        ("cache_status", lambda: cache_status_service.build_cache_status(ahead=0)),
+        ("cache_status ahead", lambda: cache_status_service.build_cache_status(ahead=1000)),
+        ("ai_status", ai_routes.build_ai_status),
         ("settings", app_module.api_settings),
     ]
     if media_status_ids:

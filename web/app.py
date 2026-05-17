@@ -31,7 +31,6 @@ from core import requests as request_helpers
 from core import responses as response_helpers
 from features.ai import routes as ai_routes
 from features.cache import routes as cache_routes
-from features.cache import status as cache_status_service
 from features.catalog import metadata as catalog_metadata
 from features.catalog import routes as catalog_routes
 from features.compare import routes as compare_routes
@@ -45,7 +44,6 @@ from features.people import routes as people_routes
 from features.search import routes as search_routes
 from features.search import service as search_service
 from features.settings import routes as settings_routes
-from features.settings import status as settings_status
 
 
 APP_DIR = os.path.dirname(__file__)
@@ -101,41 +99,6 @@ _metadata_update_tuple = catalog_metadata.metadata_update_tuple
 scan_metadata_background = catalog_metadata.scan_metadata_background
 
 
-# --- Cache Status ---
-
-build_cache_status = cache_status_service.build_cache_status
-_invalidate_cache_status_cache = cache_status_service.invalidate_cache_status_cache
-_cache_status_cache = cache_status_service._cache_status_cache
-_cache_status_refreshing = cache_status_service._cache_status_refreshing
-_cache_status_cache_ttl_seconds = cache_status_service._cache_status_cache_ttl_seconds
-_cache_status_ahead_limit = cache_status_service._cache_status_ahead_limit
-_browser_original_count_cache = cache_status_service._browser_original_count_cache
-_browser_original_count_cache_ttl_seconds = cache_status_service._browser_original_count_cache_ttl_seconds
-_browser_original_summary = cache_status_service._browser_original_summary
-_browser_original_count = cache_status_service._browser_original_count
-_cache_recommendations = cache_status_service._cache_recommendations
-_cache_archive_estimates_from_status = cache_status_service._cache_archive_estimates_from_status
-_copy_dict_of_dicts = cache_status_service._copy_dict_of_dicts
-_system_resource_status = cache_status_service._system_resource_status
-_copy_cache_status_response = cache_status_service._copy_cache_status_response
-_cache_status_ttl = cache_status_service._cache_status_ttl
-
-
-_build_settings_response = settings_status.build_settings_response
-_settings_response_cache = settings_status._settings_response_cache
-_settings_response_cache_ttl_seconds = settings_status._settings_response_cache_ttl_seconds
-_invalidate_settings_response_cache = settings_status.invalidate_settings_response_cache
-_expire_settings_response_cache = settings_status.expire_settings_response_cache
-_copy_settings_response = settings_status.copy_settings_response
-_set_settings_response_refreshing = settings_status.set_settings_response_refreshing
-
-
-def __getattr__(name: str):
-    if name == "_settings_response_refreshing":
-        return settings_status._settings_response_refreshing
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-
 # --- Mosaic Ranking API ---
 
 # Cache for active pairing images. The default compare/mosaic path uses the
@@ -150,7 +113,6 @@ _rankings_response_cache = library_service._rankings_response_cache
 _text_search_resolution_cache = query_constraints._text_search_resolution_cache
 _deep_search_query_record_cache = query_constraints._deep_search_query_record_cache
 _interaction_response_cache = compare_service._interaction_response_cache
-_ai_status_response_cache = ai_routes._ai_status_response_cache
 _visible_pairing_candidates_cache_ttl_seconds = compare_service._visible_pairing_candidates_cache_ttl_seconds
 _patched_pairing_candidates_ttl_seconds = compare_service._patched_pairing_candidates_ttl_seconds
 # Rankings are invalidated explicitly by rating/flag/catalog changes. Keep the
@@ -159,7 +121,6 @@ _rankings_response_cache_ttl_seconds = library_service._rankings_response_cache_
 _text_search_resolution_cache_ttl_seconds = query_constraints._text_search_resolution_cache_ttl_seconds
 _deep_search_query_record_cache_ttl_seconds = query_constraints._deep_search_query_record_cache_ttl_seconds
 _interaction_response_cache_ttl_seconds = compare_service._interaction_response_cache_ttl_seconds
-_ai_status_response_cache_ttl_seconds = ai_routes._ai_status_response_cache_ttl_seconds
 _thumbnail_prefetch_inflight = media_warm._thumbnail_prefetch_inflight
 _thumbnail_memory_warm_inflight = media_warm._thumbnail_memory_warm_inflight
 _SWISS_PAIR_WINDOW = compare_service._SWISS_PAIR_WINDOW
@@ -206,13 +167,6 @@ _invalidate_interaction_response_cache = _runtime_services.invalidate_interactio
 _copy_interaction_response = response_helpers.copy_interaction_response
 _copy_rankings_response = library_service.copy_rankings_response
 _cache_rankings_response = library_service.cache_rankings_response
-
-
-_invalidate_ai_status_response_cache = ai_routes.invalidate_ai_status_response_cache
-
-
-_ai_model_status_cache_key = ai_routes._ai_model_status_cache_key
-_copy_ai_status_response = ai_routes._copy_ai_status_response
 
 
 _get_past_matchups = compare_service.get_past_matchups
@@ -351,9 +305,6 @@ api_duplicates = search_routes.api_duplicates
 api_exif = search_routes.api_exif
 api_collections = search_routes.api_collections
 _exif_cache = search_routes._exif_cache
-
-
-build_ai_status = ai_routes.build_ai_status
 
 
 api_settings = settings_routes.api_settings
