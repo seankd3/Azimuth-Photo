@@ -27,6 +27,7 @@ from data.repositories import catalog as catalog_repository  # noqa: E402
 from data.repositories import images as image_repository  # noqa: E402
 from data.repositories import metadata_search, rankings, ratings, stats as stats_repository  # noqa: E402
 from features.ai import routes as ai_routes  # noqa: E402
+from features.cache import routes as cache_routes  # noqa: E402
 from features.cache import status as cache_status_service  # noqa: E402
 from features.catalog import routes as catalog_routes  # noqa: E402
 from features.people import routes as people_routes  # noqa: E402
@@ -4386,7 +4387,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_cache_pregen_status_reuses_cached_status_builder(self):
         first = await cache_status_service.build_cache_status(ahead=0)
-        result = await app_module.cache_pregen_status()
+        result = await cache_routes.cache_pregen_status()
 
         self.assertEqual(result["state"], first["pregen"]["state"])
         self.assertIn("preview", result)
@@ -4725,7 +4726,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
         app_module.ai_models.start_model_install = lambda _config: dict(install_state)
         try:
-            response = await app_module.api_install_ai_model(role="deep")
+            response = await ai_routes.api_install_ai_model(role="deep")
         finally:
             app_module.ai_models.start_model_install = old_start_model_install
 

@@ -29,8 +29,6 @@ from core import cache_events
 from core import query_constraints
 from core import requests as request_helpers
 from core import responses as response_helpers
-from features.ai import routes as ai_routes
-from features.cache import routes as cache_routes
 from features.catalog import metadata as catalog_metadata
 from features.compare import routes as compare_routes
 from features.compare import service as compare_service
@@ -272,17 +270,6 @@ api_set_image_flag = settings_routes.api_set_image_flag
 api_batch_set_flag = settings_routes.api_batch_set_flag
 api_save_settings = settings_routes.api_save_settings
 api_reset_settings = settings_routes.api_reset_settings
-
-
-cache_status = cache_routes.cache_status
-cache_pregen_start = cache_routes.cache_pregen_start
-cache_pregen_stop = cache_routes.cache_pregen_stop
-cache_pregen_status = cache_routes.cache_pregen_status
-api_clear_thumbnail_cache = cache_routes.api_clear_thumbnail_cache
-api_pause_embeddings = ai_routes.api_pause_embeddings
-api_resume_embeddings = ai_routes.api_resume_embeddings
-api_install_ai_model = ai_routes.api_install_ai_model
-ai_status = ai_routes.ai_status
 
 
 _lifecycle = _app_shell.lifecycle

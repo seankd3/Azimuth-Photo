@@ -1766,6 +1766,10 @@ class ModularContractTests(unittest.TestCase):
             self.assertNotIn("db.", contents)
 
         drained_names = (
+            "ai_status",
+            "api_pause_embeddings",
+            "api_resume_embeddings",
+            "api_install_ai_model",
             "build_ai_status",
             "_invalidate_ai_status_response_cache",
             "_ai_status_response_cache",
@@ -1983,6 +1987,11 @@ class ModularContractTests(unittest.TestCase):
             self.assertNotIn("import db", fh.read())
 
         drained_names = (
+            "cache_status",
+            "cache_pregen_start",
+            "cache_pregen_stop",
+            "cache_pregen_status",
+            "api_clear_thumbnail_cache",
             "build_cache_status",
             "_invalidate_cache_status_cache",
             "_cache_status_cache",
