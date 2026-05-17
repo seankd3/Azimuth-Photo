@@ -31,7 +31,6 @@ from core import requests as request_helpers
 from core import responses as response_helpers
 from features.catalog import metadata as catalog_metadata
 from features.compare import service as compare_service
-from features.export import routes as export_routes
 from features.library import service as library_service
 from features.media import warm as media_warm
 from features.search import service as search_service
