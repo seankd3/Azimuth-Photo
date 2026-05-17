@@ -134,6 +134,19 @@ export function setupDateScrubberScrollTracking({
 }
 
 
+export function syncDateScrubberVisibility({
+    documentImpl = document,
+    currentLibraryView = () => 'grid',
+    isDateScrubberActive = () => false,
+} = {}) {
+    const scrubber = documentImpl.getElementById('date-scrubber');
+    const active = Boolean(scrubber) && currentLibraryView() !== 'map' && isDateScrubberActive();
+    documentImpl.body.classList.toggle('date-scrubber-active', active);
+    if (scrubber) scrubber.classList.toggle('hidden', !active);
+    return active;
+}
+
+
 export function renderDateScrubber(dateGroups, {
     documentImpl = document,
     onJump = null,

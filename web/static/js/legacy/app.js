@@ -187,6 +187,7 @@ import {
     renderDateScrubber as renderDateScrubberCore,
     setActiveDateScrubberGroup as setActiveDateScrubberGroupCore,
     setupDateScrubberScrollTracking as setupDateScrubberScrollTrackingCore,
+    syncDateScrubberVisibility as syncDateScrubberVisibilityCore,
     teardownDateScrubberScrollTracking as teardownDateScrubberScrollTrackingCore,
 } from '../library/date_scrubber.js';
 import {
@@ -869,10 +870,11 @@ const legacyPhotoArchive = (() => {
     }
 
     function syncDateScrubberVisibility() {
-        const scrubber = document.getElementById('date-scrubber');
-        const active = Boolean(scrubber) && currentLibraryView() !== 'map' && isDateScrubberActive();
-        document.body.classList.toggle('date-scrubber-active', active);
-        if (scrubber) scrubber.classList.toggle('hidden', !active);
+        return syncDateScrubberVisibilityCore({
+            documentImpl: document,
+            currentLibraryView,
+            isDateScrubberActive,
+        });
     }
 
     const neighborWarmups = createNeighborWarmupController({

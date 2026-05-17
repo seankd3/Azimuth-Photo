@@ -4111,6 +4111,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("export async function jumpToDateGroup", library_date_scrubber)
         self.assertIn("export function setActiveDateScrubberGroup", library_date_scrubber)
         self.assertIn("export function setupDateScrubberScrollTracking", library_date_scrubber)
+        self.assertIn("export function syncDateScrubberVisibility", library_date_scrubber)
         self.assertIn("export function renderDateScrubber", library_date_scrubber)
         self.assertIn("export function selectLibraryCard", library_navigation)
         self.assertIn("export function scrollCardFullyVisible", library_navigation)
@@ -7729,6 +7730,82 @@ lightboxIndex = 5;
 fetches.length = 0;
 await findSimilar();
 assert.deepEqual(fetches, []);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_date_scrubber_visibility_node_probe_preserves_grid_map_toggle(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { syncDateScrubberVisibility } from './static/js/library/date_scrubber.js';
+
+function classList(initial = []) {
+    const values = new Set(initial);
+    return {
+        add: (value) => values.add(value),
+        remove: (value) => values.delete(value),
+        toggle: (value, force) => {
+            const active = force === undefined ? !values.has(value) : Boolean(force);
+            if (active) values.add(value);
+            else values.delete(value);
+            return active;
+        },
+        contains: (value) => values.has(value),
+    };
+}
+
+const body = { classList: classList() };
+const scrubber = { classList: classList(['hidden']) };
+let view = 'grid';
+let active = true;
+let availableScrubber = scrubber;
+const documentImpl = {
+    body,
+    getElementById: (id) => (id === 'date-scrubber' ? availableScrubber : null),
+};
+
+assert.equal(syncDateScrubberVisibility({
+    documentImpl,
+    currentLibraryView: () => view,
+    isDateScrubberActive: () => active,
+}), true);
+assert.equal(body.classList.contains('date-scrubber-active'), true);
+assert.equal(scrubber.classList.contains('hidden'), false);
+
+view = 'map';
+assert.equal(syncDateScrubberVisibility({
+    documentImpl,
+    currentLibraryView: () => view,
+    isDateScrubberActive: () => active,
+}), false);
+assert.equal(body.classList.contains('date-scrubber-active'), false);
+assert.equal(scrubber.classList.contains('hidden'), true);
+
+view = 'grid';
+active = false;
+assert.equal(syncDateScrubberVisibility({
+    documentImpl,
+    currentLibraryView: () => view,
+    isDateScrubberActive: () => active,
+}), false);
+assert.equal(body.classList.contains('date-scrubber-active'), false);
+assert.equal(scrubber.classList.contains('hidden'), true);
+
+active = true;
+availableScrubber = null;
+assert.equal(syncDateScrubberVisibility({
+    documentImpl,
+    currentLibraryView: () => view,
+    isDateScrubberActive: () => active,
+}), false);
+assert.equal(body.classList.contains('date-scrubber-active'), false);
 """
         subprocess.run(
             ["node", "--input-type=module", "-e", script],
