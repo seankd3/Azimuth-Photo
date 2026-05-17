@@ -52,15 +52,11 @@ import {
     buildMosaicUrl as buildMosaicUrlCore,
 } from '../compare/query.js';
 import {
-    adoptMosaicTier as adoptMosaicTierCore,
-    mosaicGridElo as mosaicGridEloCore,
     mosaicSizeFromThumbHeight,
     mosaicThumbHeightForSize,
-    renderMosaicGrid,
-    scheduleMosaicImageUpgrade as scheduleMosaicImageUpgradeCore,
-    upgradeMosaicCellImage as upgradeMosaicCellImageCore,
 } from '../compare/mosaic.js';
 import { createMosaicActionController } from '../compare/mosaic_action_controller.js';
+import { createMosaicRenderController } from '../compare/mosaic_render_controller.js';
 import {
     createMosaicReplacementBuffer,
     MOSAIC_REPLACEMENT_LOW_WATER,
@@ -336,8 +332,23 @@ const legacyPhotoArchive = (() => {
     let mosaicRenderToken = 0;
     let mosaicResizeRaf = null;
 
+    const mosaicRenderController = createMosaicRenderController({
+        getMosaicImages: () => mosaicImages,
+        getCompareMode: () => compareMode,
+        getMosaicResizeRaf: () => mosaicResizeRaf,
+        setMosaicResizeRaf: (raf) => { mosaicResizeRaf = raf; },
+        incrementMosaicRenderToken: () => ++mosaicRenderToken,
+        getMosaicRenderToken: () => mosaicRenderToken,
+        setSelectedMosaicIndex: (index) => { selectedMosaicIndex = index; },
+        getMediaStatus,
+        loadImageProbe,
+        loupeTierUrl,
+        mosaicClick,
+        preloadImage: (...args) => preloadImage(...args),
+    });
+
     function mosaicGridElo() {
-        return mosaicGridEloCore(mosaicImages);
+        return mosaicRenderController.mosaicGridElo();
     }
 
     async function loadMosaicBatch() {
@@ -372,48 +383,23 @@ const legacyPhotoArchive = (() => {
     }
 
     function renderMosaic() {
-        const grid = document.getElementById('mosaic-grid');
-        if (!grid) return;
-        selectedMosaicIndex = -1;
-        const token = ++mosaicRenderToken;
-        renderMosaicGrid({
-            images: mosaicImages,
-            grid,
-            token,
-            onPick: mosaicClick,
-            preloadImage,
-            scheduleImageUpgrade: scheduleMosaicImageUpgrade,
-        });
+        return mosaicRenderController.renderMosaic();
     }
 
     function scheduleMosaicRender() {
-        if (mosaicResizeRaf) cancelAnimationFrame(mosaicResizeRaf);
-        mosaicResizeRaf = requestAnimationFrame(() => {
-            mosaicResizeRaf = null;
-            if (compareMode === 'mosaic' && mosaicImages.length) renderMosaic();
-        });
+        return mosaicRenderController.scheduleMosaicRender();
     }
 
     function scheduleMosaicImageUpgrade(cell, img, rowH, token, index = 0) {
-        scheduleMosaicImageUpgradeCore(cell, img, rowH, token, index, {
-            upgradeImage: upgradeMosaicCellImage,
-        });
+        return mosaicRenderController.scheduleMosaicImageUpgrade(cell, img, rowH, token, index);
     }
 
     async function upgradeMosaicCellImage(cell, img, rowH, token) {
-        return upgradeMosaicCellImageCore(cell, img, rowH, token, {
-            getRenderToken: () => mosaicRenderToken,
-            getMediaStatus,
-            adoptTier: adoptMosaicTier,
-        });
+        return mosaicRenderController.upgradeMosaicCellImage(cell, img, rowH, token);
     }
 
     async function adoptMosaicTier(cell, img, tier, cachedOnly, token, timeoutMs) {
-        return adoptMosaicTierCore(cell, img, tier, cachedOnly, token, timeoutMs, {
-            getRenderToken: () => mosaicRenderToken,
-            loadImageProbeImpl: loadImageProbe,
-            loupeTierUrlImpl: loupeTierUrl,
-        });
+        return mosaicRenderController.adoptMosaicTier(cell, img, tier, cachedOnly, token, timeoutMs);
     }
 
     // Pre-fetched replacement images ready to swap in instantly

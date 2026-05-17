@@ -83,6 +83,8 @@ displayed tier state, media-status lookup, tier probing, and tier URL injection.
 `compare/mosaic_action_controller.js` owns Mosaic pick orchestration,
 optimistic replacement swapping, propagation follow-up, and rollback on failed
 save while legacy keeps board state storage.
+`compare/mosaic_render_controller.js` owns Mosaic render/upscale adapter wiring,
+render token management, resize-frame scheduling, and tier probe dependencies.
 `compare/mosaic_replacements.js` owns Mosaic replacement-buffer fetching,
 deduping, readiness probing, retry scheduling, and replacement watermarks.
 `compare/images.js` owns Compare pair image rendering and progressive tier

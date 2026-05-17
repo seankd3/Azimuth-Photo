@@ -3721,6 +3721,8 @@ class ModularContractTests(unittest.TestCase):
             compare_action_controller = fh.read()
         with open(os.path.join(base_dir, "static", "js", "compare", "mosaic_action_controller.js"), encoding="utf-8") as fh:
             compare_mosaic_action_controller = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "compare", "mosaic_render_controller.js"), encoding="utf-8") as fh:
+            compare_mosaic_render_controller = fh.read()
         with open(os.path.join(base_dir, "static", "js", "compare", "mosaic_replacements.js"), encoding="utf-8") as fh:
             compare_mosaic_replacements = fh.read()
         with open(os.path.join(base_dir, "static", "js", "compare", "actions.js"), encoding="utf-8") as fh:
@@ -3834,6 +3836,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../compare/mode_controller.js';", legacy)
         self.assertIn("from '../compare/action_controller.js';", legacy)
         self.assertIn("from '../compare/mosaic_action_controller.js';", legacy)
+        self.assertIn("from '../compare/mosaic_render_controller.js';", legacy)
         self.assertIn("from '../compare/mosaic_replacements.js';", legacy)
         self.assertIn("from '../compare/propagation.js';", legacy)
         self.assertIn("from '../compare/status_controller.js';", legacy)
@@ -3960,6 +3963,9 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("export function createMosaicActionController", compare_mosaic_action_controller)
         self.assertIn("from './mosaic.js';", compare_mosaic_action_controller)
         self.assertIn("postMosaicPickImpl", compare_mosaic_action_controller)
+        self.assertIn("export function createMosaicRenderController", compare_mosaic_render_controller)
+        self.assertIn("from './mosaic.js';", compare_mosaic_render_controller)
+        self.assertIn("scheduleMosaicRender", compare_mosaic_render_controller)
         self.assertIn("export function createMosaicReplacementBuffer", compare_mosaic_replacements)
         self.assertIn("export const MOSAIC_REPLACEMENT_LOW_WATER", compare_mosaic_replacements)
         self.assertIn("replacementPreloadTimeoutMs", compare_mosaic_replacements)
@@ -5723,6 +5729,166 @@ assert.deepEqual(calls, [
     ['status', true, 9],
     ['adopt', 9, 'right', 'md', false, 7, 111, true, true, true, true],
     ['adopt', 9, 'left', 'full', true, 7, 222, true, true, true, true],
+]);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_mosaic_render_controller_node_probe_preserves_render_resize_and_tier_wiring(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createMosaicRenderController } from './static/js/compare/mosaic_render_controller.js';
+
+const grid = { id: 'mosaic-grid' };
+let images = [
+    { id: 1, elo: 1200, thumb_url: '/one.jpg' },
+    { id: 2, elo: 1400, thumb_url: '/two.jpg' },
+];
+let compareMode = 'mosaic';
+let mosaicResizeRaf = 'old-raf';
+let mosaicRenderToken = 4;
+let selectedMosaicIndex = 9;
+let scheduledFrame = null;
+const events = [];
+const getMediaStatus = async (imageId) => ({ tiers: { md: { cached: true } }, imageId });
+const loadImageProbe = async (url) => ({ ok: true, url });
+const loupeTierUrl = (tier, imageId, cachedOnly) => `/${tier}/${imageId}/${cachedOnly ? 1 : 0}`;
+
+const controller = createMosaicRenderController({
+    getMosaicImages: () => images,
+    getCompareMode: () => compareMode,
+    getMosaicResizeRaf: () => mosaicResizeRaf,
+    setMosaicResizeRaf: (raf) => {
+        mosaicResizeRaf = raf;
+        events.push(['raf', raf]);
+    },
+    incrementMosaicRenderToken: () => {
+        mosaicRenderToken += 1;
+        events.push(['token', mosaicRenderToken]);
+        return mosaicRenderToken;
+    },
+    getMosaicRenderToken: () => mosaicRenderToken,
+    setSelectedMosaicIndex: (index) => {
+        selectedMosaicIndex = index;
+        events.push(['select', index]);
+    },
+    getMediaStatus,
+    loadImageProbe,
+    loupeTierUrl,
+    mosaicClick: (id) => events.push(['pick', id]),
+    preloadImage: (url) => events.push(['preload', url]),
+    documentImpl: {
+        getElementById(id) {
+            return id === 'mosaic-grid' ? grid : null;
+        },
+    },
+    windowImpl: { innerWidth: 900, innerHeight: 700 },
+    cancelAnimationFrameImpl: (raf) => events.push(['cancel', raf]),
+    requestAnimationFrameImpl: (callback) => {
+        scheduledFrame = callback;
+        events.push(['request']);
+        return 'new-raf';
+    },
+    mosaicGridEloImpl: (nextImages) => {
+        events.push(['elo', nextImages.map((img) => img.id)]);
+        return 1300;
+    },
+    renderMosaicGridImpl: (options) => {
+        events.push([
+            'render',
+            options.images.map((img) => img.id),
+            options.grid.id,
+            options.token,
+            options.documentImpl.getElementById('mosaic-grid').id,
+            options.windowImpl.innerWidth,
+        ]);
+        options.onPick(2);
+        options.preloadImage('/warm.jpg');
+        return { rendered: true };
+    },
+    scheduleMosaicImageUpgradeImpl: (_cell, img, rowH, token, index, options) => {
+        events.push(['schedule-upgrade', img.id, rowH, token, index, typeof options.upgradeImage]);
+        return 'scheduled';
+    },
+    upgradeMosaicCellImageImpl: async (_cell, img, rowH, token, options) => {
+        events.push([
+            'upgrade',
+            img.id,
+            rowH,
+            token,
+            options.getRenderToken(),
+            options.getMediaStatus === getMediaStatus,
+            typeof options.adoptTier,
+        ]);
+        const status = await options.getMediaStatus(img.id);
+        return options.adoptTier({ dataset: { id: img.id } }, img, 'md', status.tiers.md.cached, token, 111);
+    },
+    adoptMosaicTierImpl: async (_cell, img, tier, cachedOnly, token, timeoutMs, options) => {
+        events.push([
+            'adopt',
+            img.id,
+            tier,
+            cachedOnly,
+            token,
+            timeoutMs,
+            options.getRenderToken(),
+            options.loadImageProbeImpl === loadImageProbe,
+            options.loupeTierUrlImpl === loupeTierUrl,
+        ]);
+        const url = options.loupeTierUrlImpl(tier, img.id, cachedOnly);
+        const probe = await options.loadImageProbeImpl(url);
+        return probe.url;
+    },
+});
+
+assert.equal(controller.mosaicGridElo(), 1300);
+assert.equal(controller.renderMosaic(), true);
+assert.equal(selectedMosaicIndex, -1);
+assert.equal(controller.scheduleMosaicImageUpgrade({}, { id: 3 }, 240, 5, 2), 'scheduled');
+assert.equal(await controller.upgradeMosaicCellImage({}, { id: 4 }, 220, 5), '/md/4/1');
+assert.equal(await controller.adoptMosaicTier({}, { id: 5 }, 'lg', false, 5, 222), '/lg/5/0');
+assert.equal(controller.scheduleMosaicRender(), 'new-raf');
+assert.equal(mosaicResizeRaf, 'new-raf');
+scheduledFrame();
+assert.equal(mosaicResizeRaf, null);
+assert.deepEqual(events, [
+    ['elo', [1, 2]],
+    ['select', -1],
+    ['token', 5],
+    ['render', [1, 2], 'mosaic-grid', 5, 'mosaic-grid', 900],
+    ['pick', 2],
+    ['preload', '/warm.jpg'],
+    ['schedule-upgrade', 3, 240, 5, 2, 'function'],
+    ['upgrade', 4, 220, 5, 5, true, 'function'],
+    ['adopt', 4, 'md', true, 5, 111, 5, true, true],
+    ['adopt', 5, 'lg', false, 5, 222, 5, true, true],
+    ['cancel', 'old-raf'],
+    ['request'],
+    ['raf', 'new-raf'],
+    ['raf', null],
+    ['select', -1],
+    ['token', 6],
+    ['render', [1, 2], 'mosaic-grid', 6, 'mosaic-grid', 900],
+    ['pick', 2],
+    ['preload', '/warm.jpg'],
+]);
+
+events.length = 0;
+compareMode = 'swiss';
+mosaicResizeRaf = null;
+assert.equal(controller.scheduleMosaicRender(), 'new-raf');
+scheduledFrame();
+assert.deepEqual(events, [
+    ['request'],
+    ['raf', 'new-raf'],
+    ['raf', null],
 ]);
 """
         subprocess.run(
