@@ -7,10 +7,6 @@ from fastapi.responses import FileResponse
 
 import ai_models
 import db
-import embed_cache
-import embedding_worker
-import elo_propagation
-import face_worker
 import settings
 import thumbnails
 from core.app_factory import (

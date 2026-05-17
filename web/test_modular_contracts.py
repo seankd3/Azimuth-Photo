@@ -160,7 +160,7 @@ class ModularContractTests(unittest.TestCase):
             self.assertNotIn("import db", contents)
             self.assertNotIn("db.", contents)
 
-        self.assertIs(app_module.embed_cache, embed_cache)
+        self.assertFalse(hasattr(app_module, "embed_cache"))
         self.assertTrue(callable(embed_cache.configure))
         self.assertTrue(callable(embed_cache._active_embedding_model_key))
         self.assertTrue(callable(embed_cache._db_path))
@@ -192,7 +192,7 @@ class ModularContractTests(unittest.TestCase):
             self.assertNotIn("import db", contents)
             self.assertNotIn("db.", contents)
 
-        self.assertIs(app_module.elo_propagation, elo_propagation)
+        self.assertFalse(hasattr(app_module, "elo_propagation"))
         self.assertTrue(callable(elo_propagation.configure))
         self.assertTrue(callable(elo_propagation._active_embedding_model_key))
         self.assertTrue(callable(elo_propagation._get_active_images_by_ids))
@@ -245,7 +245,7 @@ class ModularContractTests(unittest.TestCase):
             self.assertNotIn("import db", contents)
             self.assertNotIn("db.", contents)
 
-        self.assertIs(app_module.embedding_worker, embedding_worker)
+        self.assertFalse(hasattr(app_module, "embedding_worker"))
         self.assertTrue(callable(embedding_worker.configure))
         provider_names = (
             "_get_deep_search_cache_status",
@@ -1474,7 +1474,7 @@ class ModularContractTests(unittest.TestCase):
             self.assertNotIn("import db", contents)
             self.assertNotIn("db.", contents)
 
-        self.assertIs(app_module.face_worker, face_worker)
+        self.assertFalse(hasattr(app_module, "face_worker"))
         self.assertTrue(callable(face_worker.configure))
         self.assertTrue(callable(face_worker._count_images_needing_faces))
         self.assertTrue(callable(face_worker._get_images_needing_faces))
@@ -2375,6 +2375,7 @@ class ModularContractTests(unittest.TestCase):
         app_factory = importlib.import_module("core.app_factory")
         cache_events = importlib.import_module("core.cache_events")
         compare_service = importlib.import_module("features.compare.service")
+        elo_propagation = importlib.import_module("elo_propagation")
         library_service = importlib.import_module("features.library.service")
         search_service = importlib.import_module("features.search.service")
 
@@ -2413,7 +2414,7 @@ class ModularContractTests(unittest.TestCase):
             self.assertIs(cache_events._query_constraints, query_constraints)
             self.assertIs(cache_events._duplicates_cache, search_service._duplicates_cache)
             self.assertIs(cache_events._collections_cache, search_service._collections_cache)
-            self.assertIs(cache_events._elo_propagation, app_module.elo_propagation)
+            self.assertIs(cache_events._elo_propagation, elo_propagation)
             self.assertIn(cache_events.embedding_batch_stored, app_module.db._embedding_batch_listeners)
             self.assertIn(
                 cache_events.deep_search_query_embedding_stored,
