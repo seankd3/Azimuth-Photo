@@ -3658,6 +3658,8 @@ class ModularContractTests(unittest.TestCase):
         base_dir = os.path.dirname(__file__)
         with open(os.path.join(base_dir, "templates", "base.html"), encoding="utf-8") as fh:
             base_template = fh.read()
+        with open(os.path.join(base_dir, "templates", "index.html"), encoding="utf-8") as fh:
+            index_template = fh.read()
         with open(os.path.join(base_dir, "static", "app.js"), encoding="utf-8") as fh:
             app_entry = fh.read()
         with open(os.path.join(base_dir, "static", "js", "bootstrap.js"), encoding="utf-8") as fh:
@@ -3688,6 +3690,8 @@ class ModularContractTests(unittest.TestCase):
             catalog_browser = fh.read()
         with open(os.path.join(base_dir, "static", "js", "catalog", "actions.js"), encoding="utf-8") as fh:
             catalog_actions = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "catalog", "home_scan.js"), encoding="utf-8") as fh:
+            catalog_home_scan = fh.read()
         with open(os.path.join(base_dir, "static", "js", "catalog", "controller.js"), encoding="utf-8") as fh:
             catalog_controller = fh.read()
         with open(os.path.join(base_dir, "static", "js", "loupe", "tiers.js"), encoding="utf-8") as fh:
@@ -3830,10 +3834,13 @@ class ModularContractTests(unittest.TestCase):
             thumbnail_size = fh.read()
 
         self.assertIn('type="module" src="/static/app.js?v={{ static_version }}"', base_template)
+        self.assertIn('onclick="PhotoArchive.startScan()"', index_template)
+        self.assertNotIn("async function startScan()", index_template)
         self.assertIn("window.PhotoArchiveReady = import(`./js/bootstrap.js${suffix}`)", app_entry)
         self.assertIn("Object.assign(compatibilityTarget, PhotoArchive);", bootstrap)
         self.assertIn("from '../api.js';", legacy)
         self.assertIn("from '../ai/poller.js';", legacy)
+        self.assertIn("from '../catalog/home_scan.js';", legacy)
         self.assertIn("from '../query_state.js';", legacy)
         self.assertIn("from '../filters.js';", legacy)
         self.assertIn("from '../media_status.js';", legacy)
@@ -3920,6 +3927,9 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("export async function addCatalogSource", catalog_actions)
         self.assertIn("export async function rescanCatalogSource", catalog_actions)
         self.assertIn("export async function removeCatalogSource", catalog_actions)
+        self.assertIn("export function createHomeScanController", catalog_home_scan)
+        self.assertIn("fetchImpl('/api/scan'", catalog_home_scan)
+        self.assertIn("fetchImpl('/api/scan/status'", catalog_home_scan)
         self.assertIn("export function createCatalogApi", catalog_controller)
         self.assertIn("from './status.js';", catalog_controller)
         self.assertIn("from './sources.js';", catalog_controller)
@@ -7221,6 +7231,106 @@ assert.deepEqual(calls, [
     ['resumeEmbeddings', true, true, true],
     ['startCachePregeneration', true, true, true],
 ]);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_home_scan_controller_node_probe_preserves_scan_flow(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createHomeScanController } from './static/js/catalog/home_scan.js';
+
+function element({ value = '', classes = [] } = {}) {
+    const classSet = new Set(classes);
+    return {
+        value,
+        disabled: false,
+        textContent: '',
+        style: {},
+        classList: {
+            add: (name) => classSet.add(name),
+            remove: (name) => classSet.delete(name),
+            contains: (name) => classSet.has(name),
+        },
+    };
+}
+
+const elements = {
+    'folder-input': element({ value: '  /Photos  ' }),
+    'scan-btn': element(),
+    'scan-progress': element({ classes: ['hidden'] }),
+    'scan-status-text': element({ classes: ['scan-error'] }),
+    'scan-fill': element(),
+};
+const documentImpl = {
+    getElementById: (id) => elements[id] || null,
+};
+const requests = [];
+const responses = [
+    { ok: true, json: async () => ({ ok: true }) },
+    { ok: true, json: async () => ({ total_found: 4, total_inserted: 2, done: false }) },
+    { ok: true, json: async () => ({ total_found: 4, total_inserted: 4, done: true }) },
+];
+const intervals = [];
+const cleared = [];
+const timeouts = [];
+let reloaded = 0;
+const controller = createHomeScanController({
+    documentImpl,
+    fetchImpl: async (url, options = null) => {
+        requests.push([url, options]);
+        return responses.shift();
+    },
+    setIntervalImpl: (callback, ms) => {
+        intervals.push({ callback, ms });
+        return intervals.length;
+    },
+    clearIntervalImpl: (id) => cleared.push(id),
+    setTimeoutImpl: (callback, ms) => {
+        timeouts.push({ callback, ms });
+        return timeouts.length;
+    },
+    locationImpl: { reload: () => { reloaded += 1; } },
+    pollMs: 123,
+    reloadDelayMs: 456,
+});
+
+await controller.startScan();
+assert.deepEqual(requests[0], ['/api/scan', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ folder: '/Photos' }),
+}]);
+assert.equal(elements['scan-btn'].disabled, true);
+assert.equal(elements['scan-btn'].textContent, 'Scanning...');
+assert.equal(elements['scan-progress'].classList.contains('hidden'), false);
+assert.equal(elements['scan-status-text'].classList.contains('scan-error'), false);
+assert.equal(intervals.length, 1);
+assert.equal(intervals[0].ms, 123);
+
+await intervals[0].callback();
+assert.equal(requests[1][0], '/api/scan/status');
+assert.equal(elements['scan-status-text'].textContent, 'Found 4 images, inserted 2...');
+assert.equal(elements['scan-fill'].style.width, '50%');
+assert.deepEqual(cleared, []);
+
+await intervals[0].callback();
+assert.equal(elements['scan-status-text'].textContent, 'Done! 4 images ready.');
+assert.equal(elements['scan-fill'].style.width, '100%');
+assert.equal(elements['scan-btn'].disabled, false);
+assert.equal(elements['scan-btn'].textContent, 'Scan Folder');
+assert.deepEqual(cleared, [1]);
+assert.equal(timeouts.length, 1);
+assert.equal(timeouts[0].ms, 456);
+timeouts[0].callback();
+assert.equal(reloaded, 1);
 """
         subprocess.run(
             ["node", "--input-type=module", "-e", script],

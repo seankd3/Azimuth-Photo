@@ -17,6 +17,7 @@ import {
     createAIStatusPoller,
 } from '../ai/poller.js';
 import { toggleAIPanel } from '../ai/status.js';
+import { createHomeScanController } from '../catalog/home_scan.js';
 import {
     buildFilterNeighborStates as buildFilterNeighborStatesCore,
     EMPTY_FILTERS as EMPTY_FILTERS_CORE,
@@ -2215,7 +2216,7 @@ const legacyPhotoArchive = (() => {
         startCachePregeneration,
         stopCachePregeneration,
         installAIModel,
-        startScan,
+        startScan: startSettingsScan,
         addCatalogSource,
         rescanCatalogSource,
         openRemoveSourceDialog,
@@ -2232,6 +2233,14 @@ const legacyPhotoArchive = (() => {
         pauseAllWork,
         resumeAllWork,
     } = settingsPage;
+    const homeScan = createHomeScanController();
+
+    function startScan() {
+        if (document.getElementById('folder-input')) {
+            return homeScan.startScan();
+        }
+        return startSettingsScan();
+    }
 
     // ==================== UTILITIES ====================
 
