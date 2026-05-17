@@ -249,16 +249,14 @@ SSD_REMAINDER_PROFILES = thumbnail_config.SSD_REMAINDER_PROFILES
 MEMORY_CACHE_PROFILES = thumbnail_config.MEMORY_CACHE_PROFILES
 
 
-def _normalize_ratios(values: dict[str, float], tiers: tuple[str, ...]) -> dict[str, float]:
-    return thumbnail_config.normalize_ratios(values, tiers)
+_normalize_ratios = thumbnail_config.normalize_ratios
 
 
 def _active_memory_ratios() -> dict[str, float]:
     return thumbnail_config.active_memory_ratios(CACHE_PROFILE)
 
 
-def _allocate_by_ratios(total_bytes: int, ratios: dict[str, float], tiers: tuple[str, ...]) -> dict[str, int]:
-    return thumbnail_config.allocate_by_ratios(total_bytes, ratios, tiers)
+_allocate_by_ratios = thumbnail_config.allocate_by_ratios
 
 
 def _quality_size_factor() -> float:
@@ -286,8 +284,7 @@ def cache_archive_estimates() -> dict:
     return _cache_archive_estimates()
 
 
-def _allocate_weighted_capped(total_bytes: int, weights: dict[str, float], caps: dict[str, int]) -> dict[str, int]:
-    return thumbnail_config.allocate_weighted_capped(total_bytes, weights, caps)
+_allocate_weighted_capped = thumbnail_config.allocate_weighted_capped
 
 
 def _allocate_disk_budget(total_bytes: int) -> dict[str, int]:
@@ -388,8 +385,7 @@ def _source_missing(filepath: str) -> bool:
     return source_identity.source_missing(filepath, get_source_bits_fn=_get_source_bits)
 
 
-def _source_missing_error(filepath: str, exc: Exception) -> bool:
-    return source_identity.source_missing_error(filepath, exc)
+_source_missing_error = source_identity.source_missing_error
 
 
 def _mark_source_missing_from_error(filepath: str, image_id: int, exc: Exception) -> bool:
@@ -1153,8 +1149,7 @@ def _cache_full_image_bytes_sync(
     )
 
 
-def _load_raw_preview(filepath: str, max_target: int) -> Image.Image | None:
-    return generation.load_raw_preview(filepath, max_target)
+_load_raw_preview = generation.load_raw_preview
 
 
 def _load_source_image(filepath: str, max_target: int, prefer_draft: bool) -> Image.Image:
@@ -1183,8 +1178,7 @@ def _load_source_image_from_bytes(
     )
 
 
-def _resize_to_long_side(img: Image.Image, target_long_side: int) -> Image.Image:
-    return generation.resize_to_long_side(img, target_long_side)
+_resize_to_long_side = generation.resize_to_long_side
 
 
 def _queue_orientation(image_id: int, img: Image.Image):
@@ -2225,8 +2219,7 @@ async def _run_full_warm_batch(generate_batch: int | None = None) -> int:
     return originals_written
 
 
-def _copy_disk_stats(disk: dict) -> dict:
-    return thumbnail_status.copy_disk_stats(disk)
+_copy_disk_stats = thumbnail_status.copy_disk_stats
 
 
 def cache_stats() -> dict:
