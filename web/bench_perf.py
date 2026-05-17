@@ -32,6 +32,7 @@ import settings
 import thumbnails
 from features.ai import routes as ai_routes
 from features.cache import status as cache_status_service
+from features.media import routes as media_routes
 from features.settings import status as settings_status
 
 try:
@@ -559,7 +560,7 @@ async def bench_app_endpoints(iterations: int):
         app_module.api_folders(max_depth=1),
         cache_status_service.build_cache_status(ahead=0),
         ai_routes.build_ai_status(),
-        app_module.images_media_status(JsonRequest({"ids": media_status_ids})) if media_status_ids else asyncio.sleep(0),
+        media_routes.images_media_status(JsonRequest({"ids": media_status_ids})) if media_status_ids else asyncio.sleep(0),
         return_exceptions=True,
     )
     # Several endpoints intentionally schedule thumbnail prefetch after returning.
@@ -596,7 +597,7 @@ async def bench_app_endpoints(iterations: int):
     await endpoint("ai_status", ai_routes.build_ai_status)
     await endpoint("settings", app_module.api_settings)
     if media_status_ids:
-        await endpoint("media_status batch", lambda: app_module.images_media_status(JsonRequest({"ids": media_status_ids})))
+        await endpoint("media_status batch", lambda: media_routes.images_media_status(JsonRequest({"ids": media_status_ids})))
 
 
 async def bench_cold_app_endpoints(iterations: int):
@@ -631,7 +632,7 @@ async def bench_cold_app_endpoints(iterations: int):
     ]
     if media_status_ids:
         endpoints.append(
-            ("media_status batch", lambda: app_module.images_media_status(JsonRequest({"ids": media_status_ids})))
+            ("media_status batch", lambda: media_routes.images_media_status(JsonRequest({"ids": media_status_ids})))
         )
 
     for label, fn in endpoints:

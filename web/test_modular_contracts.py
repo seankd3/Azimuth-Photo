@@ -2613,6 +2613,17 @@ class ModularContractTests(unittest.TestCase):
         with open(os.path.join(base_dir, "features", "media", "routes.py"), encoding="utf-8") as fh:
             self.assertNotIn("import db", fh.read())
 
+        drained_names = (
+            "serve_thumbnail",
+            "serve_full_image",
+            "_image_media_status_payload",
+            "image_media_status",
+            "images_media_status",
+            "warm_images",
+        )
+        for name in drained_names:
+            self.assertFalse(hasattr(app_module, name), name)
+
         old_db_path = media_routes._db_path
         old_cached_image_ids = media_routes._cached_image_ids
         old_memory_warm = media_routes._schedule_cached_thumbnail_memory_warm

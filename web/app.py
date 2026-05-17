@@ -35,7 +35,6 @@ from features.compare import service as compare_service
 from features.export import routes as export_routes
 from features.library import routes as library_routes
 from features.library import service as library_service
-from features.media import routes as media_routes
 from features.media import warm as media_warm
 from features.search import routes as search_routes
 from features.search import service as search_service
@@ -174,14 +173,6 @@ _cache_root = _runtime_services.cache_root
 _compare_response_rows = response_helpers.compare_response_rows
 _chunks = app_helpers._chunks
 _cached_image_ids = media_warm.cached_image_ids
-
-serve_thumbnail = media_routes.serve_thumbnail
-serve_full_image = media_routes.serve_full_image
-_image_media_status_payload = media_routes.image_media_status_payload
-image_media_status = media_routes.image_media_status
-images_media_status = media_routes.images_media_status
-warm_images = media_routes.warm_images
-
 
 _filter_visible_candidates = compare_service.filter_visible_candidates
 _hydrate_active_rows = compare_service.hydrate_active_rows

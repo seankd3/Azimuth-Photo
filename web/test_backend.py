@@ -30,6 +30,7 @@ from features.ai import routes as ai_routes  # noqa: E402
 from features.cache import routes as cache_routes  # noqa: E402
 from features.cache import status as cache_status_service  # noqa: E402
 from features.catalog import routes as catalog_routes  # noqa: E402
+from features.media import routes as media_routes  # noqa: E402
 from features.people import routes as people_routes  # noqa: E402
 from features.settings import routes as settings_routes  # noqa: E402
 from features.settings import status as settings_status  # noqa: E402
@@ -4007,7 +4008,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         app_module.thumbnails.prefetch_images = fake_prefetch
         app_module.thumbnails.schedule_full_image_cache = fake_schedule_full
 
-        result = await app_module.warm_images(JsonRequest({
+        result = await media_routes.warm_images(JsonRequest({
             "tiers": {
                 "md": [first, str(first), -1, "bad", second, 999999],
                 "full": [first, first, second, "nope"],
@@ -4051,7 +4052,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         app_module.thumbnails.fast_disk_read_entry = fake_read
         app_module._thumbnail_memory_warm_inflight.clear()
 
-        result = await app_module.warm_images(JsonRequest({"tiers": {"md": [cached, uncached]}}))
+        result = await media_routes.warm_images(JsonRequest({"tiers": {"md": [cached, uncached]}}))
         await asyncio.sleep(0.05)
 
         self.assertEqual(result["scheduled"], {"md": 1})
@@ -4073,7 +4074,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
         app_module.thumbnails.prefetch_images = locked_prefetch
 
-        result = await app_module.warm_images(JsonRequest({"tiers": {"md": [image_id]}}))
+        result = await media_routes.warm_images(JsonRequest({"tiers": {"md": [image_id]}}))
 
         self.assertEqual(result, {"scheduled": {"md": 0}, "images": 1})
 
@@ -4086,7 +4087,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
         app_module.thumbnails.schedule_full_image_cache = locked_full
 
-        result = await app_module.warm_images(JsonRequest({"tiers": {"full": [image_id]}}))
+        result = await media_routes.warm_images(JsonRequest({"tiers": {"full": [image_id]}}))
 
         self.assertEqual(result, {"scheduled": {"full": 0}, "images": 1})
 
@@ -4102,7 +4103,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         app_module.thumbnails.has_cached_fast = fake_has_cached_fast
         app_module.thumbnails.fast_disk_path_entry = fake_fast_disk_path_entry
 
-        result = await app_module.image_media_status(42)
+        result = await media_routes.image_media_status(42)
 
         self.assertEqual(set(result["tiers"].keys()), {"sm", "md", "lg", "full"})
         self.assertTrue(result["tiers"]["md"]["cached"])
@@ -4122,7 +4123,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         app_module.thumbnails.has_cached_fast = fake_has_cached_fast
         app_module.thumbnails.fast_disk_path_entry = fake_fast_disk_path_entry
         try:
-            result = await app_module.images_media_status(JsonRequest({"ids": [42, "42", "bad", 43]}))
+            result = await media_routes.images_media_status(JsonRequest({"ids": [42, "42", "bad", 43]}))
         finally:
             app_module.thumbnails.has_cached_fast = old_has_cached_fast
             app_module.thumbnails.fast_disk_path_entry = old_fast_disk_path_entry
@@ -4151,7 +4152,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         app_module.thumbnails.fast_disk_path_entry = fake_path_entry
         app_module.thumbnails.fast_disk_read_entry = fail_read
         try:
-            response = await app_module.serve_thumbnail(
+            response = await media_routes.serve_thumbnail(
                 HeaderRequest({"if-none-match": '"sig-42"'}),
                 "sm",
                 42,
@@ -4186,7 +4187,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         app_module.thumbnails.fast_disk_path_entry = fake_path_entry
         app_module.thumbnails.fast_disk_read_entry = fail_read
         try:
-            response = await app_module.serve_thumbnail(HeaderRequest(), "lg", 42, cached=True)
+            response = await media_routes.serve_thumbnail(HeaderRequest(), "lg", 42, cached=True)
         finally:
             app_module.thumbnails._memory_get_entry_fast = old_memory_get
             app_module.thumbnails.fast_disk_path_entry = old_path_entry
@@ -4213,7 +4214,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         app_module.thumbnails.fast_disk_path_entry = fake_path_entry
         image_repository.get_image_by_id = fail_get_image
         try:
-            response = await app_module.serve_full_image(HeaderRequest(), 42, app_module.BackgroundTasks())
+            response = await media_routes.serve_full_image(HeaderRequest(), 42, app_module.BackgroundTasks())
         finally:
             app_module.thumbnails.fast_disk_path_entry = old_path_entry
             image_repository.get_image_by_id = old_get_image
@@ -4236,7 +4237,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         app_module.thumbnails.fast_disk_path_entry = fake_path_entry
         image_repository.get_image_by_id = fail_get_image
         try:
-            response = await app_module.serve_full_image(
+            response = await media_routes.serve_full_image(
                 HeaderRequest({"if-none-match": '"full-sig-42"'}),
                 42,
                 app_module.BackgroundTasks(),
