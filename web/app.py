@@ -53,15 +53,6 @@ if track_idle_activity is None:
     raise RuntimeError("App idle activity middleware was not configured")
 
 
-_schedule_pairing_propagation = _runtime_services.schedule_pairing_propagation
-
-
-_resolve_text_search = _runtime_services.resolve_text_search
-
-
-_resolve_library_constraints = _runtime_services.resolve_library_constraints
-
-
 _lifecycle = _app_shell.lifecycle
 if _lifecycle is None:
     raise RuntimeError("App lifecycle was not configured")

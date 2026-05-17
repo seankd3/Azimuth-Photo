@@ -711,13 +711,13 @@ async def bench_startup_warmed_interactions(iterations: int):
 async def bench_compare_rating_loop(iterations: int):
     print("\nCompare rating loop timings")
     reset_app_caches()
-    old_schedule = app_module._schedule_pairing_propagation
+    old_schedule = compare_routes._schedule_pairing_propagation
     human_delay = float(os.environ.get("PHOTOARCHIVE_BENCH_COMPARE_DELAY", "0") or 0)
 
     def close_scheduled(coro):
         coro.close()
 
-    app_module._schedule_pairing_propagation = close_scheduled
+    compare_routes._schedule_pairing_propagation = close_scheduled
     try:
         initial = await compare_routes.compare_next(n=2)
         pairs = initial.get("pairs") or []
@@ -783,18 +783,18 @@ async def bench_compare_rating_loop(iterations: int):
                     f"min={ms(elapsed):>8}ms"
                 )
     finally:
-        app_module._schedule_pairing_propagation = old_schedule
+        compare_routes._schedule_pairing_propagation = old_schedule
 
 
 async def bench_mosaic_pick_loop(iterations: int):
     print("\nMosaic pick timings")
     reset_app_caches()
-    old_schedule = app_module._schedule_pairing_propagation
+    old_schedule = compare_routes._schedule_pairing_propagation
 
     def close_scheduled(coro):
         coro.close()
 
-    app_module._schedule_pairing_propagation = close_scheduled
+    compare_routes._schedule_pairing_propagation = close_scheduled
     try:
         initial = await compare_routes.mosaic_next(n=12)
         images = initial.get("images") or []
@@ -839,7 +839,7 @@ async def bench_mosaic_pick_loop(iterations: int):
                     f"min={ms(min(times)):>8}ms"
                 )
     finally:
-        app_module._schedule_pairing_propagation = old_schedule
+        compare_routes._schedule_pairing_propagation = old_schedule
 
 
 def cached_thumbnail_rows():

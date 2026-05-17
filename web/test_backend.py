@@ -67,7 +67,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
         self.old_db_path = db.DB_PATH
-        self.old_schedule_pairing_propagation = app_module._schedule_pairing_propagation
+        self.old_schedule_pairing_propagation = compare_routes._schedule_pairing_propagation
         self.old_get_matrix = elo_propagation.embed_cache.get_matrix
         self.old_get_index = elo_propagation.embed_cache.get_index
         self.old_get_vector = elo_propagation.embed_cache.get_vector
@@ -112,13 +112,13 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         async def no_model_load_for_search():
             return False
 
-        app_module._schedule_pairing_propagation = close_scheduled
+        compare_routes._schedule_pairing_propagation = close_scheduled
         app_module.thumbnails.prefetch_images = noop_prefetch
         embedding_worker.ensure_model_loaded_for_search = no_model_load_for_search
         embedding_worker.start_search_model_load = lambda: False
 
     async def asyncTearDown(self):
-        app_module._schedule_pairing_propagation = self.old_schedule_pairing_propagation
+        compare_routes._schedule_pairing_propagation = self.old_schedule_pairing_propagation
         elo_propagation.embed_cache.get_matrix = self.old_get_matrix
         elo_propagation.embed_cache.get_index = self.old_get_index
         elo_propagation.embed_cache.get_vector = self.old_get_vector
@@ -3090,7 +3090,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         embedding_worker.encode_text = lambda _query, _config=None: None
         query_constraints._text_search_resolution_cache.clear()
 
-        result = await app_module._resolve_text_search("sunset")
+        result = await app_module._runtime_services.resolve_text_search("sunset")
 
         self.assertEqual(result["search_mode"], "metadata")
         self.assertEqual(result["id_filter"], {match})
@@ -3840,7 +3840,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         await db.store_embeddings_batch([(first, first_vec.tobytes())], embedding_config=config)
         query_constraints._text_search_resolution_cache.clear()
 
-        first_resolution = await app_module._resolve_text_search(query, deep=True)
+        first_resolution = await app_module._runtime_services.resolve_text_search(query, deep=True)
 
         self.assertEqual(first_resolution["id_filter"], {first})
         self.assertTrue(query_constraints._text_search_resolution_cache)
@@ -3849,7 +3849,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(query_constraints._text_search_resolution_cache)
 
-        second_resolution = await app_module._resolve_text_search(query, deep=True)
+        second_resolution = await app_module._runtime_services.resolve_text_search(query, deep=True)
 
         self.assertEqual(second_resolution["search_mode"], "deep_embedding")
         self.assertEqual(second_resolution["id_filter"], {first, second})
