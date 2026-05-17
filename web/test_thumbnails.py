@@ -11,6 +11,258 @@ from PIL import Image
 
 sys.path.insert(0, os.path.dirname(__file__))
 import thumbnails  # noqa: E402
+from data import schema as data_schema  # noqa: E402
+from thumbnails import budget as thumbnail_budget  # noqa: E402
+from thumbnails import config as thumbnail_config  # noqa: E402
+from thumbnails import maintenance as thumbnail_maintenance  # noqa: E402
+from thumbnails import runtime as thumbnail_runtime  # noqa: E402
+from thumbnails import status as thumbnail_status  # noqa: E402
+
+
+class ThumbnailConfigFacadeTests(unittest.TestCase):
+    def test_thumbnail_defaults_remain_available_from_facade(self):
+        for name in thumbnail_config.DEFAULT_EXPORT_NAMES:
+            self.assertTrue(hasattr(thumbnails, name), name)
+
+        for name in ("SIZES", "JPEG_EXTENSIONS", "BROWSER_ORIGINAL_EXTENSIONS", "RAW_EXTENSIONS"):
+            self.assertIs(getattr(thumbnails, name), getattr(thumbnail_config, name), name)
+        self.assertEqual(thumbnail_config.SSD_CACHE_BYTES, 10 * 1024 * 1024 * 1024)
+        self.assertIsInstance(thumbnails.SSD_CACHE_BYTES, int)
+
+
+class ThumbnailBudgetFacadeTests(unittest.TestCase):
+    def test_budget_module_owns_archive_estimates_and_facade_math(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            db_path = os.path.join(tempdir, "budget.db")
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                conn.executescript(
+                    """
+                    CREATE TABLE catalog_sources (
+                        id INTEGER PRIMARY KEY,
+                        included INTEGER,
+                        online INTEGER
+                    );
+                    CREATE TABLE images (
+                        id INTEGER PRIMARY KEY,
+                        source_id INTEGER,
+                        missing_at REAL
+                    );
+                    CREATE TABLE cache_entries (
+                        cache_root TEXT,
+                        size TEXT,
+                        size_bytes INTEGER,
+                        created_at REAL
+                    );
+                    """
+                )
+                conn.executemany(
+                    "INSERT INTO catalog_sources(id, included, online) VALUES (?, ?, ?)",
+                    [(1, 1, 1), (2, 1, 0), (3, 0, 1)],
+                )
+                conn.executemany(
+                    "INSERT INTO images(id, source_id, missing_at) VALUES (?, ?, ?)",
+                    [(1, 1, None), (2, 1, None), (3, 2, None), (4, 3, None), (5, 1, 1.0)],
+                )
+                conn.executemany(
+                    "INSERT INTO cache_entries(cache_root, size, size_bytes, created_at) VALUES (?, ?, ?, ?)",
+                    [
+                        (tempdir, thumbnails.THUMB_TIERS[0], 100, 100.0),
+                        (tempdir, thumbnails.THUMB_TIERS[0], 300, 100.0),
+                        (tempdir, thumbnails.FULL_TIER, 900, 1.0),
+                        (tempdir, "lg", 5000, 1.0),
+                    ],
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            def db_connect():
+                opened = sqlite3.connect(db_path)
+                opened.row_factory = sqlite3.Row
+                return opened
+
+            estimates = thumbnail_budget.cache_archive_estimates(
+                all_tiers=thumbnails.ALL_TIERS,
+                thumb_tiers=thumbnails.THUMB_TIERS,
+                full_tier=thumbnails.FULL_TIER,
+                ssd_cache_dir=tempdir,
+                thumb_config_changed_at=50.0,
+                meta_lock=thumbnails._meta_lock,
+                db_connect=db_connect,
+                estimated_tier_bytes_for_size=lambda _size: 10,
+            )
+
+        self.assertEqual(estimates["active_images"], 2)
+        self.assertEqual(estimates["total_images"], 3)
+        self.assertEqual(estimates["avg_bytes"]["sm"], 200)
+        self.assertEqual(estimates["sample_count"]["sm"], 2)
+        self.assertEqual(estimates["avg_bytes"][thumbnails.FULL_TIER], 900)
+        self.assertEqual(estimates["needed_bytes"]["sm"], 400)
+        self.assertEqual(estimates["needed_bytes"]["md"], 20)
+        self.assertEqual(estimates["needed_bytes"][thumbnails.FULL_TIER], 2700)
+        self.assertEqual(
+            thumbnails.estimated_tier_bytes("md"),
+            thumbnail_budget.estimated_tier_bytes("md", thumb_quality=thumbnails.THUMB_QUALITY),
+        )
+
+
+class ThumbnailRuntimeFacadeTests(unittest.TestCase):
+    def test_runtime_helpers_remain_available_from_facade(self):
+        self.assertIs(thumbnails._as_bool, thumbnail_runtime.as_bool)
+        self.assertIs(thumbnails._current_time, thumbnail_runtime.current_time)
+        self.assertIs(thumbnails._is_sqlite_locked, thumbnail_runtime.is_sqlite_locked)
+        self.assertIs(thumbnails._replace_executor, thumbnail_runtime.replace_executor)
+
+        self.assertTrue(thumbnails._as_bool(None, True))
+        self.assertFalse(thumbnails._as_bool("off", True))
+        self.assertGreater(thumbnails._current_time(), 0.0)
+        self.assertTrue(thumbnails._is_sqlite_locked(sqlite3.OperationalError("database is locked")))
+        self.assertFalse(thumbnails._is_sqlite_locked(sqlite3.OperationalError("disk I/O error")))
+
+
+class ThumbnailMaintenanceFacadeTests(unittest.TestCase):
+    def setUp(self):
+        self.old_cache_dir = thumbnails.SSD_CACHE_DIR
+        self.tempdirs = []
+
+    def tearDown(self):
+        thumbnails.SSD_CACHE_DIR = self.old_cache_dir
+        for tempdir in self.tempdirs:
+            tempdir.cleanup()
+
+    def _legacy_cache_root(self) -> str:
+        tempdir = tempfile.TemporaryDirectory()
+        self.tempdirs.append(tempdir)
+        path = os.path.join(tempdir.name, "sm", "1.jpg")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as f:
+            f.write(b"cache")
+        return tempdir.name
+
+    def test_cache_safety_helper_owns_marker_write_and_facade_matches(self):
+        direct_root = self._legacy_cache_root()
+        direct_result = thumbnail_maintenance.cache_dir_safe_to_clear(
+            direct_root,
+            thumbnails.ALL_TIERS,
+            thumbnails.CACHE_MARKER,
+        )
+        self.assertEqual(direct_result, (True, ""))
+        self.assertTrue(
+            os.path.exists(
+                thumbnail_maintenance.cache_marker_path(direct_root, thumbnails.CACHE_MARKER)
+            )
+        )
+
+        facade_root = self._legacy_cache_root()
+        thumbnails.SSD_CACHE_DIR = facade_root
+        facade_result = thumbnails._cache_dir_safe_to_clear()
+
+        self.assertEqual(facade_result, direct_result)
+        self.assertTrue(os.path.exists(thumbnails._cache_marker_path()))
+
+    def test_cache_temp_cleanup_helper_owns_invalidation(self):
+        root = self._legacy_cache_root()
+        old_tmp = os.path.join(root, thumbnails.FULL_TIER, "old.jpg.123.tmp")
+        fresh_tmp = os.path.join(root, thumbnails.FULL_TIER, "fresh.jpg.123.tmp")
+        os.makedirs(os.path.dirname(old_tmp), exist_ok=True)
+        for path in (old_tmp, fresh_tmp):
+            with open(path, "wb") as f:
+                f.write(b"x" * 10)
+        now = time.time()
+        old_time = now - 120
+        os.utime(old_tmp, (old_time, old_time))
+        invalidations = []
+
+        result = thumbnail_maintenance.cleanup_stale_cache_temps(
+            root,
+            (thumbnails.FULL_TIER,),
+            max_age_seconds=1,
+            current_time=lambda: now,
+            invalidate_disk_stats_cache=lambda: invalidations.append("invalidated"),
+        )
+
+        self.assertEqual(result, {"files_removed": 1, "bytes_removed": 10})
+        self.assertEqual(invalidations, ["invalidated"])
+        self.assertFalse(os.path.exists(old_tmp))
+        self.assertTrue(os.path.exists(fresh_tmp))
+
+
+class ThumbnailStatusPayloadTests(unittest.TestCase):
+    def test_pregen_status_builder_owns_payload_math(self):
+        class Decision:
+            def to_dict(self):
+                return {"pause": False}
+
+        stats = {
+            "disk": {
+                "tiers": {
+                    "sm": {
+                        "count": 3,
+                        "current_count": 2,
+                        "current_bytes": 200,
+                        "stale_count": 1,
+                        "replacement_mode": True,
+                        "bytes": 300,
+                        "budget_bytes": 1000,
+                    },
+                    "md": {
+                        "count": 1,
+                        "current_count": 1,
+                        "current_bytes": 100,
+                        "stale_count": 0,
+                        "replacement_mode": False,
+                        "bytes": 100,
+                        "budget_bytes": 800,
+                    },
+                }
+            }
+        }
+        diagnostics = {
+            "recent_source_reads_per_min": 6.0,
+            "recent_thumbnails_written_per_min": 12.0,
+            "recent_read_mbps": 2.5,
+            "avg_source_read_seconds": 0.125,
+            "avg_decode_encode_seconds": 0.25,
+            "recent_source_read_failures": 1,
+            "source_read_failures": 2,
+        }
+
+        result = thumbnail_status.pregen_status(
+            pregen_state={"enabled": True, "state": "running"},
+            stats=stats,
+            target_total=5,
+            original_total=3,
+            archive_estimates=None,
+            thumb_tiers=("sm", "md"),
+            background_tier_budget=lambda size, _estimates: {"sm": 500, "md": 400}[size],
+            estimated_tier_bytes=lambda _size: 100,
+            original_status=lambda *_args: {"remaining": 2, "count": 1, "total": 3},
+            pregen_rates=lambda: (6.0, 3.0, diagnostics),
+            pregen_background_decision=Decision,
+            pregen_generate_batch_for_decision=lambda _decision: 7,
+            idle_seconds=12.345,
+        )
+
+        self.assertEqual(result["state"], "running")
+        self.assertEqual(result["governor"]["effective_thumbnail_batch_size"], 7)
+        self.assertEqual(result["idle_seconds"], 12.35)
+        self.assertEqual(result["phases"]["sm"]["count"], 2)
+        self.assertTrue(result["phases"]["sm"]["replacement_mode"])
+        self.assertEqual(result["phases"]["sm"]["stale_count"], 1)
+        self.assertEqual(result["preview"], {
+            "count": 3,
+            "total": 9,
+            "remaining": 6,
+            "image_remaining": 3,
+            "progress_pct": 33.3,
+        })
+        self.assertEqual(result["eta_seconds"], 30)
+        self.assertIsNone(result["original_eta_seconds"])
+        self.assertTrue(result["replacement_mode"])
+        self.assertEqual(result["recent_source_read_failures"], 1)
+        self.assertEqual(result["source_read_failures"], 2)
 
 
 class ThumbnailBulkWarmupTests(unittest.TestCase):
@@ -22,17 +274,66 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
         self.old_load_source_image = thumbnails._load_source_image
         self.old_memory_bytes = thumbnails.MEMORY_CACHE_BYTES
         self.old_db_connect = thumbnails._db_connect
-        self.old_db_path = thumbnails.db.DB_PATH
+        self.old_data_providers = {
+            name: getattr(thumbnails.data_providers, name)
+            for name in (
+                "_db_path",
+                "_get_db",
+                "_batch_set_orientations",
+                "_mark_image_missing_sync",
+                "_invalidate_cached_image_ids_cache",
+                "_note_cached_image_ids_added",
+            )
+        }
         self.old_persistent_conn = thumbnails._persistent_conn
         self.old_prefetching = thumbnails._prefetching
         self.old_pregen_manual_mode = thumbnails._pregen_manual_mode
         self.old_pregen_manual_pause = thumbnails._pregen_manual_pause
         self.old_last_user_activity = thumbnails._last_user_activity
         self.old_disk_stats_cache = dict(thumbnails._disk_stats_cache)
+        self.old_background_work_mode = thumbnails._background_work_mode
+        self.old_read_load_1m = thumbnails.resource_governor._read_load_1m
+        self.old_read_meminfo = thumbnails.resource_governor._read_meminfo
+        self.old_cpu_count = thumbnails.resource_governor.os.cpu_count
 
         thumbnails.SSD_CACHE_DIR = self.tempdir.name
-        thumbnails.db.DB_PATH = os.path.join(self.tempdir.name, "thumbnail-cache-test.db")
+        self.db_path = os.path.join(self.tempdir.name, "thumbnail-cache-test.db")
         thumbnails._persistent_conn = None
+        self.provider_events = []
+
+        async def get_db():
+            return await thumbnails.data_connection.open_async(self.db_path)
+
+        async def batch_set_orientations(updates):
+            conn = await thumbnails.data_connection.open_async(self.db_path)
+            try:
+                await conn.executemany(
+                    "UPDATE images SET orientation = ?, aspect_ratio = ? WHERE id = ?",
+                    updates,
+                )
+                await conn.commit()
+            finally:
+                await conn.close()
+
+        def mark_image_missing_sync(image_id):
+            with closing(sqlite3.connect(self.db_path)) as conn:
+                cursor = conn.execute(
+                    "UPDATE images SET missing_at = COALESCE(missing_at, ?) WHERE id = ?",
+                    (time.time(), image_id),
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+
+        thumbnails.configure_data_providers(
+            db_path=lambda: self.db_path,
+            get_db=get_db,
+            batch_set_orientations=batch_set_orientations,
+            mark_image_missing_sync=mark_image_missing_sync,
+            invalidate_cached_image_ids_cache=lambda **kwargs: self.provider_events.append(("invalidate", kwargs)),
+            note_cached_image_ids_added=lambda cache_root, size, image_ids: self.provider_events.append(
+                ("note", cache_root, size, list(image_ids)),
+            ),
+        )
         thumbnails._disk_allocations.update({
             "sm": 64 * 1024 * 1024,
             "md": 64 * 1024 * 1024,
@@ -49,6 +350,14 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
         thumbnails._prefetching = True
         thumbnails._pregen_manual_mode = True
         thumbnails._pregen_manual_pause = False
+        thumbnails._background_work_mode = lambda: "balanced"
+        thumbnails.resource_governor.os.cpu_count = lambda: 8
+        thumbnails.resource_governor._read_load_1m = lambda: 1.0
+        thumbnails.resource_governor._read_meminfo = lambda: {
+            "MemAvailable": 10 * 1024 ** 3,
+            "SwapTotal": 10 * 1024 ** 3,
+            "SwapFree": 10 * 1024 ** 3,
+        }
         thumbnails._last_user_activity = thumbnails.time.monotonic() - 30.0
         thumbnails._reset_pregen_bulk_cursor()
         thumbnails._reset_pregen_full_cursor()
@@ -69,11 +378,16 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
         if thumbnails._persistent_conn is not None:
             thumbnails._persistent_conn.close()
         thumbnails._persistent_conn = self.old_persistent_conn
-        thumbnails.db.DB_PATH = self.old_db_path
+        for name, value in self.old_data_providers.items():
+            setattr(thumbnails.data_providers, name, value)
         thumbnails.MEMORY_CACHE_BYTES = self.old_memory_bytes
         thumbnails._prefetching = self.old_prefetching
         thumbnails._pregen_manual_mode = self.old_pregen_manual_mode
         thumbnails._pregen_manual_pause = self.old_pregen_manual_pause
+        thumbnails._background_work_mode = self.old_background_work_mode
+        thumbnails.resource_governor._read_load_1m = self.old_read_load_1m
+        thumbnails.resource_governor._read_meminfo = self.old_read_meminfo
+        thumbnails.resource_governor.os.cpu_count = self.old_cpu_count
         thumbnails._last_user_activity = self.old_last_user_activity
         thumbnails._clear_memory_cache()
         thumbnails._clear_disk_index()
@@ -122,8 +436,8 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
 
     def _add_catalog_original(self, image_id: int, path: str):
         stat = os.stat(path)
-        with closing(sqlite3.connect(thumbnails.db.DB_PATH)) as conn:
-            conn.executescript(thumbnails.db.SCHEMA)
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            conn.executescript(data_schema.SCHEMA)
             conn.execute(
                 "INSERT OR IGNORE INTO catalog_sources "
                 "(id, path, display_name, included, online) VALUES (1, ?, 'catalog', 1, 1)",
@@ -195,6 +509,42 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
         self.assertEqual(
             fallback_signature,
             thumbnails._build_source_signature_from_bits(f"321|987654321|{path}", "md", 42),
+        )
+
+    def test_source_identity_facade_uses_current_thumbnail_globals(self):
+        calls = []
+        old_quality = thumbnails.THUMB_QUALITY
+        old_md_size = thumbnails.SIZES["md"]
+        old_browser_max_age = thumbnails.BROWSER_CACHE_MAX_AGE
+        old_stale = thumbnails.BROWSER_CACHE_STALE_WHILE_REVALIDATE
+
+        def fake_source_bits(filepath):
+            calls.append(filepath)
+            return f"222|333|{filepath}"
+
+        thumbnails._get_source_bits = fake_source_bits
+        thumbnails.THUMB_QUALITY = 80
+        thumbnails.SIZES["md"] = 1600
+        thumbnails.BROWSER_CACHE_MAX_AGE = 123
+        thumbnails.BROWSER_CACHE_STALE_WHILE_REVALIDATE = 456
+        path = os.path.join(self.tempdir.name, "facade.jpg")
+        try:
+            source_bits = f"222|333|{path}"
+            expected_etag = (
+                f"\"{thumbnails._build_source_signature_from_bits(source_bits, 'md', 9)}\""
+            )
+            headers = thumbnails.response_headers(path, "md", 9)
+        finally:
+            thumbnails.THUMB_QUALITY = old_quality
+            thumbnails.SIZES["md"] = old_md_size
+            thumbnails.BROWSER_CACHE_MAX_AGE = old_browser_max_age
+            thumbnails.BROWSER_CACHE_STALE_WHILE_REVALIDATE = old_stale
+
+        self.assertEqual(calls, [path])
+        self.assertEqual(headers["ETag"], expected_etag)
+        self.assertEqual(
+            headers["Cache-Control"],
+            "public, max-age=123, stale-while-revalidate=456",
         )
 
     def test_full_candidate_signature_uses_catalog_metadata_before_stat_fallback(self):
@@ -318,7 +668,7 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
     def test_bulk_generation_marks_missing_source_without_retry(self):
         image_id = 5
         missing_path = os.path.join(self.tempdir.name, "missing.jpg")
-        with closing(sqlite3.connect(thumbnails.db.DB_PATH)) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn:
             conn.execute("CREATE TABLE images (id INTEGER PRIMARY KEY, missing_at REAL DEFAULT NULL)")
             conn.execute("INSERT INTO images(id, missing_at) VALUES (?, NULL)", (image_id,))
             conn.commit()
@@ -338,7 +688,7 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
         )
 
         self.assertEqual(metrics["source_read_failures"], 1)
-        with closing(sqlite3.connect(thumbnails.db.DB_PATH)) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn:
             row = conn.execute("SELECT missing_at FROM images WHERE id = ?", (image_id,)).fetchone()
         self.assertIsNotNone(row[0])
         self.assertEqual(thumbnails._thumbnail_retry_after, {})
@@ -381,6 +731,27 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
         self.assertIn("sm", needed)
         self.assertIn("md", needed)
         self.assertNotIn("lg", needed)
+
+    def test_bulk_candidate_skips_tier_inside_retry_window(self):
+        path = self._make_image()
+        signatures, file_size, file_modified_at = self._catalog_signatures(path, image_id=3)
+        thumbnails._thumbnail_retry_after[("sm", 3, signatures["sm"])] = time.time() + 3600
+        tier_room = {"sm": thumbnails.estimated_tier_bytes("sm")}
+
+        needed, source_size = thumbnails._bulk_candidate_signatures(
+            {
+                "id": 3,
+                "filepath": path,
+                "file_size": file_size,
+                "file_modified_at": file_modified_at,
+            },
+            tier_room,
+            {"sm": 64 * 1024 * 1024, "md": 0, "lg": 0},
+        )
+
+        self.assertEqual(needed, {})
+        self.assertEqual(source_size, file_size)
+        self.assertEqual(tier_room["sm"], thumbnails.estimated_tier_bytes("sm"))
 
     def test_full_warmup_copies_until_budget_room_is_used_and_skips_cached(self):
         thumbnails._disk_allocations[thumbnails.FULL_TIER] = 70
@@ -462,50 +833,51 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
         self.assertEqual(source_size, file_size)
         self.assertEqual(calls, [])
 
-    def test_manual_pregeneration_governor_still_sees_user_activity(self):
+    def test_background_governor_uses_light_mode_during_activity(self):
         thumbnails.note_user_activity()
 
-        decision = thumbnails.resource_governor.get_background_decision(thumbnails.get_idle_seconds())
+        decision = thumbnails.resource_governor.get_background_decision(
+            thumbnails.get_idle_seconds(),
+            work_mode="balanced",
+        )
 
-        self.assertEqual(decision.reason, "user active")
-        self.assertTrue(decision.pause)
-        self.assertEqual(decision.thumbnail_batch_size, 0)
+        self.assertEqual(decision.reason, "light background")
+        self.assertFalse(decision.pause)
+        self.assertEqual(decision.thumbnail_batch_size, 2)
 
-    def test_manual_pregeneration_batch_yields_to_user_activity(self):
+    def test_pregeneration_batch_pauses_in_browse_mode(self):
+        thumbnails._background_work_mode = lambda: "browse"
         thumbnails.note_user_activity()
 
         warmed = asyncio.run(thumbnails._run_pregen_bulk_batch(generate_batch=10))
 
         self.assertEqual(warmed, 0)
 
-    def test_manual_pregeneration_resumes_after_short_foreground_settle(self):
+    def test_light_background_uses_small_batch_during_activity(self):
         old_batch = thumbnails.PREGENERATE_GENERATE_BATCH
         try:
             thumbnails.PREGENERATE_GENERATE_BATCH = 64
-            thumbnails._last_user_activity = (
-                thumbnails.time.monotonic()
-                - thumbnails.MANUAL_PREGEN_FOREGROUND_SETTLE_SECONDS
-                - 0.5
-            )
+            thumbnails.note_user_activity()
 
             decision = thumbnails._pregen_background_decision()
 
-            self.assertEqual(decision.reason, "manual cache build")
+            self.assertEqual(decision.reason, "light background")
             self.assertFalse(decision.pause)
-            self.assertEqual(thumbnails._pregen_generate_batch_for_decision(decision), 8)
+            self.assertEqual(thumbnails._pregen_generate_batch_for_decision(decision), 2)
         finally:
             thumbnails.PREGENERATE_GENERATE_BATCH = old_batch
 
-    def test_manual_pregeneration_waits_during_foreground_settle(self):
-        thumbnails._last_user_activity = (
-            thumbnails.time.monotonic()
-            - thumbnails.MANUAL_PREGEN_FOREGROUND_SETTLE_SECONDS
-            + 0.5
-        )
+    def test_pregeneration_yields_only_in_browse_mode(self):
+        thumbnails.note_user_activity()
+
+        self.assertFalse(thumbnails._pregen_should_yield_to_foreground())
+
+        thumbnails._background_work_mode = lambda: "browse"
 
         self.assertTrue(thumbnails._pregen_should_yield_to_foreground())
 
-    def test_manual_full_warmup_yields_to_user_activity(self):
+    def test_full_warmup_pauses_in_browse_mode(self):
+        thumbnails._background_work_mode = lambda: "browse"
         thumbnails.note_user_activity()
         thumbnails._disk_allocations[thumbnails.FULL_TIER] = 64 * 1024 * 1024
 
@@ -626,8 +998,8 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
 
             status = thumbnails.get_pregen_status(target_total=0, stats=thumbnails.cache_stats())
 
-            self.assertEqual(status["governor"]["reason"], "user active")
-            self.assertEqual(status["governor"]["effective_thumbnail_batch_size"], 0)
+            self.assertEqual(status["governor"]["reason"], "light background")
+            self.assertEqual(status["governor"]["effective_thumbnail_batch_size"], 2)
         finally:
             thumbnails.PREGENERATE_GENERATE_BATCH = old_batch
 

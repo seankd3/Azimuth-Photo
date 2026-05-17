@@ -1,53 +1,43 @@
 import asyncio
-import hashlib
 import io
 import os
 import shutil
 import sqlite3
 import threading
 import time
-from collections import OrderedDict, deque
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 
-import db
 import resource_governor
-from PIL import Image, ImageOps
+from data import connection as data_connection
+from PIL import Image
+from . import budget as thumbnail_budget
+from . import config as thumbnail_config
+from . import data_providers
+from . import disk_store
+from . import full_cache
+from . import generation
+from . import maintenance as thumbnail_maintenance
+from . import pregen
+from . import pregen_candidates
+from . import runtime
+from . import source_identity
+from . import status as thumbnail_status
+from .memory_store import MemoryThumbnailStore
+from .runtime import as_bool as _as_bool
+from .runtime import current_time as _current_time
+from .runtime import is_sqlite_locked as _is_sqlite_locked
+from .runtime import replace_executor as _replace_executor
+
+configure_data_providers = data_providers.configure
 
 Image.MAX_IMAGE_PIXELS = None
 
-THUMB_TIERS = ("sm", "md", "lg")
-FULL_TIER = "full"
-ALL_TIERS = THUMB_TIERS + (FULL_TIER,)
-SIZES = {
-    "sm": 400,
-    "md": 1920,
-    "lg": 3840,
-}
-THUMB_QUALITY = 92
-CACHE_VERSION = "v3"
-CACHE_MARKER = ".photoarchive-cache"
-CACHE_PROFILE = "original_heavy"
-SSD_CACHE_DIR = os.getenv(
-    "PHOTOARCHIVE_THUMB_CACHE_DIR",
-    os.path.join(os.path.dirname(__file__), ".thumbcache"),
-)
-SSD_CACHE_BYTES = 10 * 1024 * 1024 * 1024
-MEMORY_CACHE_BYTES = 512 * 1024 * 1024
-PREGENERATE_ON_IDLE = True
-PREGENERATE_IDLE_SECONDS = 1.0
-PREGENERATE_SCAN_BATCH = 1024
-PREGENERATE_GENERATE_BATCH = 16
-PREGENERATE_NO_PROGRESS_SCAN_LIMIT = 12
-PREGENERATE_BATCH_PAUSE_SECONDS = 0.25
-MANUAL_PREGEN_FOREGROUND_SETTLE_SECONDS = 5.0
-THUMBNAIL_RETRY_SECONDS = 6 * 60 * 60
-BROWSER_CACHE_MAX_AGE = 86400
-BROWSER_CACHE_STALE_WHILE_REVALIDATE = 604800
-HOT_LG_RESERVE_FRACTION = 0.35
-HOT_LG_RESERVE_MIN_BYTES = 2 * 1024 * 1024 * 1024
-HOT_LG_RESERVE_MAX_BYTES = 64 * 1024 * 1024 * 1024
-COLD_CACHE_ACCESS_OFFSET_SECONDS = 45 * 24 * 60 * 60
+for _name in thumbnail_config.DEFAULT_EXPORT_NAMES:
+    globals()[_name] = getattr(thumbnail_config, _name)
+del _name
+
 _executor_workers = 4
 _prefetch_workers_count = 6
 
@@ -58,10 +48,11 @@ _prefetch_executor = ThreadPoolExecutor(
     thread_name_prefix="thumb-prefetch",
 )
 
+_memory_store = MemoryThumbnailStore(THUMB_TIERS)
 # In-memory thumbnail LRU: (size, image_id) -> (source_signature, jpeg_bytes)
-_memory_cache: OrderedDict[tuple[str, int], tuple[str, bytes]] = OrderedDict()
+_memory_cache = _memory_store.cache
 _memory_cache_bytes = 0
-_memory_tier_bytes = {size: 0 for size in THUMB_TIERS}
+_memory_tier_bytes = _memory_store.tier_bytes
 _cache_lock = threading.Lock()
 _meta_lock = threading.Lock()
 
@@ -104,23 +95,15 @@ _pregen_session_started_at: float | None = None
 _pregen_session_generated = 0
 _pregen_source_read_failures = 0
 
-JPEG_EXTENSIONS = {".jpg", ".jpeg"}
-BROWSER_ORIGINAL_EXTENSIONS = {".avif", ".bmp", ".gif", ".jpeg", ".jpg", ".png", ".webp"}
-RAW_EXTENSIONS = {
-    ".arw",
-    ".cr2",
-    ".cr3",
-    ".dng",
-    ".nef",
-    ".orf",
-    ".raf",
-    ".rw2",
-}
-
 
 _persistent_conn: sqlite3.Connection | None = None
 _cache_metadata_retry_after = 0.0
 _cache_metadata_lock_failures = 0
+
+
+def _sync_memory_cache_bytes() -> None:
+    global _memory_cache_bytes
+    _memory_cache_bytes = _memory_store.cache_bytes
 
 
 def _db_connect() -> sqlite3.Connection:
@@ -134,9 +117,11 @@ def _db_connect() -> sqlite3.Connection:
             _persistent_conn = None
 
     if _persistent_conn is None:
-        conn = sqlite3.connect(db.DB_PATH, timeout=30, check_same_thread=False)
+        db_path = data_providers.db_path()
+        conn = sqlite3.connect(db_path, timeout=30, check_same_thread=False)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
+        if not data_connection.is_ephemeral_db_path(db_path):
+            conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
         conn.execute("PRAGMA busy_timeout=30000")
         conn.execute(
@@ -180,24 +165,6 @@ def _db_connect() -> sqlite3.Connection:
     return _persistent_conn
 
 
-def _as_bool(value, default: bool) -> bool:
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        return value.strip().lower() not in ("", "0", "false", "no", "off")
-    return bool(value)
-
-
-def _current_time() -> float:
-    return time.time()
-
-
-def _is_sqlite_locked(exc: Exception) -> bool:
-    return isinstance(exc, sqlite3.OperationalError) and "locked" in str(exc).lower()
-
-
 def _note_cache_metadata_lock():
     global _cache_metadata_retry_after, _cache_metadata_lock_failures
     _cache_metadata_lock_failures = min(_cache_metadata_lock_failures + 1, 6)
@@ -221,59 +188,28 @@ def _cache_access_time(*, hot: bool) -> float:
 
 
 def _cache_marker_path() -> str:
-    return os.path.join(SSD_CACHE_DIR, CACHE_MARKER)
+    return thumbnail_maintenance.cache_marker_path(SSD_CACHE_DIR, CACHE_MARKER)
 
 
 def _cache_dir_has_marker() -> bool:
-    return bool(SSD_CACHE_DIR and os.path.isfile(_cache_marker_path()))
+    return thumbnail_maintenance.cache_dir_has_marker(SSD_CACHE_DIR, CACHE_MARKER)
 
 
 def _cache_dir_is_legacy_cache_layout() -> bool:
     """True for empty or old unmarked cache roots containing only cache tiers."""
-    if not SSD_CACHE_DIR or not os.path.isdir(SSD_CACHE_DIR):
-        return True
-    allowed = set(ALL_TIERS) | {CACHE_MARKER}
-    try:
-        entries = os.listdir(SSD_CACHE_DIR)
-    except OSError:
-        return False
-    for entry in entries:
-        if entry not in allowed:
-            return False
-        path = os.path.join(SSD_CACHE_DIR, entry)
-        if entry == CACHE_MARKER:
-            if not os.path.isfile(path):
-                return False
-        elif not os.path.isdir(path):
-            return False
-    return True
+    return thumbnail_maintenance.cache_dir_is_legacy_cache_layout(SSD_CACHE_DIR, ALL_TIERS, CACHE_MARKER)
 
 
 def _write_cache_marker():
-    if not SSD_CACHE_DIR:
-        return
-    try:
-        with open(_cache_marker_path(), "w", encoding="utf-8") as marker:
-            marker.write("photoArchive thumbnail cache\n")
-    except OSError as exc:
-        print(f"Could not write cache marker for {SSD_CACHE_DIR}: {exc}")
+    thumbnail_maintenance.write_cache_marker(SSD_CACHE_DIR, CACHE_MARKER)
 
 
 def _cache_dir_safe_to_clear() -> tuple[bool, str]:
-    if not SSD_CACHE_DIR:
-        return True, ""
-    if not os.path.exists(SSD_CACHE_DIR):
-        return True, ""
-    if not os.path.isdir(SSD_CACHE_DIR):
-        return False, f"Cache path is not a directory: {SSD_CACHE_DIR}"
-    if _cache_dir_has_marker():
-        return True, ""
-    if _cache_dir_is_legacy_cache_layout():
-        _write_cache_marker()
-        return True, ""
-    return (
-        False,
-        "Refusing to clear an unmarked cache directory that contains non-cache files",
+    return thumbnail_maintenance.cache_dir_safe_to_clear(
+        SSD_CACHE_DIR,
+        ALL_TIERS,
+        CACHE_MARKER,
+        write_marker=lambda _root, _marker: _write_cache_marker(),
     )
 
 
@@ -287,170 +223,63 @@ def get_idle_seconds() -> float:
 
 
 def _ensure_disk_cache_dirs():
-    if not SSD_CACHE_DIR:
-        return
-    should_mark = not os.path.exists(SSD_CACHE_DIR) or _cache_dir_has_marker() or _cache_dir_is_legacy_cache_layout()
-    os.makedirs(SSD_CACHE_DIR, exist_ok=True)
-    for size in THUMB_TIERS:
-        os.makedirs(os.path.join(SSD_CACHE_DIR, size), exist_ok=True)
-    os.makedirs(os.path.join(SSD_CACHE_DIR, FULL_TIER), exist_ok=True)
-    if should_mark:
-        _write_cache_marker()
+    thumbnail_maintenance.ensure_disk_cache_dirs(
+        SSD_CACHE_DIR,
+        THUMB_TIERS,
+        FULL_TIER,
+        CACHE_MARKER,
+        write_marker=lambda _root, _marker: _write_cache_marker(),
+    )
 
 
 def _cleanup_stale_cache_temps(max_age_seconds: float = 30 * 60) -> dict:
-    if not SSD_CACHE_DIR or not os.path.isdir(SSD_CACHE_DIR):
-        return {"files_removed": 0, "bytes_removed": 0}
-    cutoff = time.time() - max(60.0, float(max_age_seconds))
-    files_removed = 0
-    bytes_removed = 0
-    for tier in ALL_TIERS:
-        tier_dir = os.path.join(SSD_CACHE_DIR, tier)
-        if not os.path.isdir(tier_dir):
-            continue
-        for root, _dirs, files in os.walk(tier_dir):
-            for filename in files:
-                if not filename.endswith(".tmp"):
-                    continue
-                path = os.path.join(root, filename)
-                try:
-                    stat = os.stat(path)
-                    if stat.st_mtime > cutoff:
-                        continue
-                    os.remove(path)
-                    files_removed += 1
-                    bytes_removed += int(stat.st_size)
-                except FileNotFoundError:
-                    continue
-                except OSError:
-                    continue
-    if files_removed:
-        _invalidate_disk_stats_cache()
-    return {"files_removed": files_removed, "bytes_removed": bytes_removed}
+    return thumbnail_maintenance.cleanup_stale_cache_temps(
+        SSD_CACHE_DIR,
+        ALL_TIERS,
+        max_age_seconds=max_age_seconds,
+        invalidate_disk_stats_cache=_invalidate_disk_stats_cache,
+    )
 
 
 def cleanup_stale_cache_temps(max_age_seconds: float = 30 * 60) -> dict:
     return _cleanup_stale_cache_temps(max_age_seconds=max_age_seconds)
 
 
-SSD_REMAINDER_PROFILES = {
-    "browse_fast": {"lg": 0.80, FULL_TIER: 0.20},
-    "balanced": {"lg": 0.55, FULL_TIER: 0.45},
-    "original_heavy": {"lg": 0.35, FULL_TIER: 0.65},
-}
-
-MEMORY_CACHE_PROFILES = {
-    "browse_fast": {"sm": 0.30, "md": 0.50, "lg": 0.20},
-    "balanced": {"sm": 0.20, "md": 0.45, "lg": 0.35},
-    "original_heavy": {"sm": 0.15, "md": 0.45, "lg": 0.40},
-}
+SSD_REMAINDER_PROFILES = thumbnail_config.SSD_REMAINDER_PROFILES
+MEMORY_CACHE_PROFILES = thumbnail_config.MEMORY_CACHE_PROFILES
 
 
 def _normalize_ratios(values: dict[str, float], tiers: tuple[str, ...]) -> dict[str, float]:
-    cleaned = {tier: max(0.0, float(values.get(tier, 0.0) or 0.0)) for tier in tiers}
-    total = sum(cleaned.values())
-    if total <= 0:
-        return {tier: 0.0 for tier in tiers}
-    return {tier: cleaned[tier] / total for tier in tiers}
+    return thumbnail_config.normalize_ratios(values, tiers)
 
 
 def _active_memory_ratios() -> dict[str, float]:
-    return _normalize_ratios(
-        MEMORY_CACHE_PROFILES.get(CACHE_PROFILE, MEMORY_CACHE_PROFILES["original_heavy"]),
-        THUMB_TIERS,
-    )
+    return thumbnail_config.active_memory_ratios(CACHE_PROFILE)
 
 
 def _allocate_by_ratios(total_bytes: int, ratios: dict[str, float], tiers: tuple[str, ...]) -> dict[str, int]:
-    total = max(0, int(total_bytes))
-    allocations = {tier: 0 for tier in tiers}
-    if total <= 0:
-        return allocations
-
-    assigned = 0
-    active_tiers = [tier for tier in tiers if ratios.get(tier, 0.0) > 0]
-    for tier in active_tiers[:-1]:
-        amount = int(total * ratios[tier])
-        allocations[tier] = amount
-        assigned += amount
-    if active_tiers:
-        allocations[active_tiers[-1]] = max(0, total - assigned)
-    return allocations
+    return thumbnail_config.allocate_by_ratios(total_bytes, ratios, tiers)
 
 
 def _quality_size_factor() -> float:
-    quality = max(40, min(100, int(THUMB_QUALITY)))
-    if quality >= 92:
-        return 1.0 + (quality - 92) * 0.08
-    if quality >= 80:
-        return 0.45 + ((quality - 80) / 12.0) * 0.55
-    if quality >= 60:
-        return 0.28 + ((quality - 60) / 20.0) * 0.17
-    return 0.18 + ((quality - 40) / 20.0) * 0.10
+    return thumbnail_config.quality_size_factor(THUMB_QUALITY)
 
 
 def estimated_tier_bytes(size: str) -> int:
-    base = {
-        "sm": 33 * 1024,
-        "md": 450 * 1024,
-        "lg": 1750 * 1024,
-        FULL_TIER: 20 * 1024 * 1024,
-    }
-    if size == FULL_TIER:
-        return base[FULL_TIER]
-    return max(1, int(base.get(size, base["md"]) * _quality_size_factor()))
+    return thumbnail_budget.estimated_tier_bytes(size, thumb_quality=THUMB_QUALITY)
 
 
 def _cache_archive_estimates() -> dict:
-    fallbacks = {tier: estimated_tier_bytes(tier) for tier in ALL_TIERS}
-    estimates = {
-        "active_images": 0,
-        "total_images": 0,
-        "avg_bytes": dict(fallbacks),
-        "sample_count": {tier: 0 for tier in ALL_TIERS},
-        "needed_bytes": {tier: 0 for tier in ALL_TIERS},
-    }
-    try:
-        with _meta_lock:
-            conn = _db_connect()
-            try:
-                row = conn.execute(
-                    "SELECT "
-                    "SUM(CASE WHEN s.included = 1 AND s.online = 1 AND i.missing_at IS NULL THEN 1 ELSE 0 END) AS active_images, "
-                    "SUM(CASE WHEN s.included = 1 AND i.missing_at IS NULL THEN 1 ELSE 0 END) AS total_images "
-                    "FROM images i LEFT JOIN catalog_sources s ON s.id = i.source_id"
-                ).fetchone()
-                active_images = int(row["active_images"] or 0)
-                total_images = int(row["total_images"] or 0)
-                rows = conn.execute(
-                    "SELECT size, COUNT(*) AS count, COALESCE(SUM(size_bytes), 0) AS bytes "
-                    "FROM cache_entries WHERE cache_root = ? AND (size = ? OR created_at >= ?) GROUP BY size",
-                    (SSD_CACHE_DIR, FULL_TIER, _thumb_config_changed_at),
-                ).fetchall()
-            finally:
-                conn.close()
-    except Exception:
-        active_images = 0
-        total_images = 0
-        rows = []
-
-    for row in rows:
-        size = row["size"]
-        if size not in estimates["avg_bytes"]:
-            continue
-        count = int(row["count"] or 0)
-        size_bytes = int(row["bytes"] or 0)
-        if count > 0 and size_bytes > 0:
-            estimates["avg_bytes"][size] = max(1, int(size_bytes / count))
-            estimates["sample_count"][size] = count
-
-    estimates["active_images"] = active_images
-    estimates["total_images"] = total_images
-    preview_target_images = active_images if active_images > 0 else total_images
-    for tier in THUMB_TIERS:
-        estimates["needed_bytes"][tier] = estimates["avg_bytes"][tier] * preview_target_images
-    estimates["needed_bytes"][FULL_TIER] = estimates["avg_bytes"][FULL_TIER] * total_images
-    return estimates
+    return thumbnail_budget.cache_archive_estimates(
+        all_tiers=ALL_TIERS,
+        thumb_tiers=THUMB_TIERS,
+        full_tier=FULL_TIER,
+        ssd_cache_dir=SSD_CACHE_DIR,
+        thumb_config_changed_at=_thumb_config_changed_at,
+        meta_lock=_meta_lock,
+        db_connect=_db_connect,
+        estimated_tier_bytes_for_size=estimated_tier_bytes,
+    )
 
 
 def cache_archive_estimates() -> dict:
@@ -458,118 +287,51 @@ def cache_archive_estimates() -> dict:
 
 
 def _allocate_weighted_capped(total_bytes: int, weights: dict[str, float], caps: dict[str, int]) -> dict[str, int]:
-    tiers = tuple(caps.keys())
-    ratios = _normalize_ratios(weights, tiers)
-    allocations = {tier: 0 for tier in tiers}
-    remaining = max(0, int(total_bytes))
-    if remaining <= 0:
-        return allocations
-
-    rough = _allocate_by_ratios(remaining, ratios, tiers)
-    for tier in tiers:
-        allocations[tier] = min(max(0, int(caps.get(tier, 0))), rough.get(tier, 0))
-    remaining -= sum(allocations.values())
-
-    for tier in sorted(tiers, key=lambda item: ratios.get(item, 0.0), reverse=True):
-        if remaining <= 0:
-            break
-        room = max(0, int(caps.get(tier, 0)) - allocations[tier])
-        take = min(room, remaining)
-        allocations[tier] += take
-        remaining -= take
-    return allocations
+    return thumbnail_config.allocate_weighted_capped(total_bytes, weights, caps)
 
 
 def _allocate_disk_budget(total_bytes: int) -> dict[str, int]:
-    total = max(0, int(total_bytes))
-    allocations = {tier: 0 for tier in ALL_TIERS}
-    if total <= 0:
-        return allocations
-
     estimates = _cache_archive_estimates()
-    needed = estimates["needed_bytes"]
-    remaining = total
-
-    for tier in ("sm", "md"):
-        amount = min(remaining, int(needed.get(tier, 0) or 0))
-        allocations[tier] = amount
-        remaining -= amount
-        if remaining <= 0:
-            return allocations
-
-    remainder_weights = SSD_REMAINDER_PROFILES.get(
-        CACHE_PROFILE,
-        SSD_REMAINDER_PROFILES["original_heavy"],
+    return thumbnail_budget.allocate_disk_budget(
+        total_bytes,
+        needed_bytes=estimates["needed_bytes"],
+        profile=CACHE_PROFILE,
     )
-    remainder = _allocate_weighted_capped(
-        remaining,
-        remainder_weights,
-        {
-            "lg": int(needed.get("lg", 0) or 0),
-            FULL_TIER: int(needed.get(FULL_TIER, 0) or 0),
-        },
-    )
-    allocations["lg"] = remainder["lg"]
-    allocations[FULL_TIER] = remainder[FULL_TIER]
-
-    leftover = remaining - allocations["lg"] - allocations[FULL_TIER]
-    if leftover > 0:
-        allocations["md"] += leftover
-    return allocations
 
 
 def _background_tier_budget(size: str, archive_estimates: dict | None = None) -> int:
     budget = int(_disk_allocations.get(size, 0) or 0)
-    if size != "lg" or budget <= 0:
-        return budget
-
     estimates = archive_estimates or _cache_archive_estimates()
-    needed = int(estimates["needed_bytes"].get("lg", 0) or 0)
-    if needed <= 0 or budget >= int(needed * 0.95):
-        return budget
-
-    reserve = min(
-        budget,
-        max(
-            HOT_LG_RESERVE_MIN_BYTES,
-            min(HOT_LG_RESERVE_MAX_BYTES, int(budget * HOT_LG_RESERVE_FRACTION)),
-        ),
+    return thumbnail_budget.background_tier_budget(
+        size=size,
+        budget=budget,
+        needed_bytes=int(estimates["needed_bytes"].get("lg", 0) or 0),
+        hot_lg_reserve_fraction=HOT_LG_RESERVE_FRACTION,
+        hot_lg_reserve_min_bytes=HOT_LG_RESERVE_MIN_BYTES,
+        hot_lg_reserve_max_bytes=HOT_LG_RESERVE_MAX_BYTES,
     )
-    return max(0, budget - reserve)
 
 
 def cache_budget_config() -> dict:
-    memory_allocations = _allocate_by_ratios(MEMORY_CACHE_BYTES, _active_memory_ratios(), THUMB_TIERS)
-    ssd_ratios = _normalize_ratios(_disk_allocations, ALL_TIERS)
-    return {
-        "profile": CACHE_PROFILE,
-        "ssd_ratios": ssd_ratios,
-        "memory_ratios": _active_memory_ratios(),
-        "ssd_allocations": dict(_disk_allocations),
-        "memory_allocations": memory_allocations,
-    }
+    return thumbnail_budget.cache_budget_config(
+        profile=CACHE_PROFILE,
+        memory_cache_bytes=MEMORY_CACHE_BYTES,
+        disk_allocations=_disk_allocations,
+    )
 
 
-_SOURCE_STAT_CACHE_MAX = 25000
-_SOURCE_STAT_CACHE_TTL_SECONDS = 60.0
-_source_stat_cache: OrderedDict[str, tuple[float, str]] = OrderedDict()
+_SOURCE_STAT_CACHE_MAX = source_identity.SOURCE_STAT_CACHE_MAX
+_SOURCE_STAT_CACHE_TTL_SECONDS = source_identity.SOURCE_STAT_CACHE_TTL_SECONDS
+_source_stat_cache = source_identity.source_stat_cache
+
 
 def _get_source_bits(filepath: str) -> str:
-    """Cache os.stat results per filepath to avoid repeated HDD stat calls."""
-    now = time.monotonic()
-    cached = _source_stat_cache.get(filepath)
-    if cached is not None and now - cached[0] <= _SOURCE_STAT_CACHE_TTL_SECONDS:
-        _source_stat_cache.move_to_end(filepath)
-        return cached[1]
-    try:
-        stat = os.stat(filepath)
-        bits = f"{stat.st_size}|{stat.st_mtime_ns}|{filepath}"
-    except OSError:
-        bits = f"missing|{filepath}"
-    _source_stat_cache[filepath] = (now, bits)
-    if len(_source_stat_cache) > _SOURCE_STAT_CACHE_MAX:
-        _source_stat_cache.popitem(last=False)
-    return bits
+    return source_identity.get_source_bits(
+        filepath,
+        stat_cache=_source_stat_cache,
+        ttl_seconds=_SOURCE_STAT_CACHE_TTL_SECONDS,
+        max_entries=_SOURCE_STAT_CACHE_MAX,
+    )
 
 
 def _source_bits_from_catalog_metadata(
@@ -577,34 +339,24 @@ def _source_bits_from_catalog_metadata(
     file_size,
     file_modified_at,
 ) -> tuple[str, int | None, bool]:
-    """Build source identity from scan-time metadata, falling back to stat only if needed."""
-    if file_size is not None and file_modified_at is not None:
-        try:
-            source_size = int(file_size)
-            source_mtime = float(file_modified_at)
-            return f"catalog|{source_size}|{source_mtime:.9f}|{filepath}", source_size, False
-        except (TypeError, ValueError):
-            pass
-
-    bits = _get_source_bits(filepath)
-    if bits.startswith("missing|"):
-        return bits, None, True
-    try:
-        source_size = int(bits.split("|", 1)[0])
-    except (TypeError, ValueError):
-        source_size = None
-    return bits, source_size, False
+    return source_identity.source_bits_from_catalog_metadata(
+        filepath,
+        file_size,
+        file_modified_at,
+        get_source_bits_fn=_get_source_bits,
+    )
 
 
 def _build_source_signature_from_bits(source_bits: str, size: str, image_id: int) -> str:
-    if size == FULL_TIER:
-        signature = f"{CACHE_VERSION}|full|{image_id}|{source_bits}"
-    else:
-        signature = (
-            f"{CACHE_VERSION}|thumb|{size}|{image_id}|{SIZES[size]}|"
-            f"{THUMB_QUALITY}|{source_bits}"
-        )
-    return hashlib.sha1(signature.encode("utf-8", "surrogateescape")).hexdigest()
+    return source_identity.build_source_signature_from_bits(
+        source_bits,
+        size,
+        image_id,
+        cache_version=CACHE_VERSION,
+        full_tier=FULL_TIER,
+        sizes=SIZES,
+        thumb_quality=THUMB_QUALITY,
+    )
 
 
 def _build_source_signature(filepath: str, size: str, image_id: int) -> str:
@@ -618,36 +370,36 @@ def _build_catalog_source_signature(
     file_size,
     file_modified_at,
 ) -> tuple[str, int | None, bool]:
-    source_bits, source_size, source_missing = _source_bits_from_catalog_metadata(
+    return source_identity.build_catalog_source_signature(
         filepath,
+        size,
+        image_id,
         file_size,
         file_modified_at,
+        get_source_bits_fn=_get_source_bits,
+        cache_version=CACHE_VERSION,
+        full_tier=FULL_TIER,
+        sizes=SIZES,
+        thumb_quality=THUMB_QUALITY,
     )
-    return _build_source_signature_from_bits(source_bits, size, image_id), source_size, source_missing
 
 
 def _source_missing(filepath: str) -> bool:
-    return _get_source_bits(filepath).startswith("missing|")
+    return source_identity.source_missing(filepath, get_source_bits_fn=_get_source_bits)
 
 
 def _source_missing_error(filepath: str, exc: Exception) -> bool:
-    if isinstance(exc, FileNotFoundError):
-        return True
-    try:
-        return not os.path.exists(filepath)
-    except OSError:
-        return False
+    return source_identity.source_missing_error(filepath, exc)
 
 
 def _mark_source_missing_from_error(filepath: str, image_id: int, exc: Exception) -> bool:
-    if not _source_missing_error(filepath, exc):
-        return False
-    try:
-        db.mark_image_missing_sync(image_id)
-    except Exception as mark_error:
-        print(f"Failed to mark missing image {image_id} for {filepath}: {mark_error}")
-        return False
-    return True
+    return source_identity.mark_source_missing_from_error(
+        filepath,
+        image_id,
+        exc,
+        source_missing_error_fn=_source_missing_error,
+        mark_missing_sync=data_providers.mark_image_missing_sync,
+    )
 
 
 def get_etag(filepath: str, size: str, image_id: int) -> str:
@@ -655,71 +407,41 @@ def get_etag(filepath: str, size: str, image_id: int) -> str:
 
 
 def response_headers(filepath: str, size: str, image_id: int) -> dict[str, str]:
-    return {
-        "Cache-Control": (
-            f"public, max-age={BROWSER_CACHE_MAX_AGE}, "
-            f"stale-while-revalidate={BROWSER_CACHE_STALE_WHILE_REVALIDATE}"
-        ),
-        "ETag": get_etag(filepath, size, image_id),
-    }
+    return source_identity.response_headers(
+        etag=get_etag(filepath, size, image_id),
+        browser_cache_max_age=BROWSER_CACHE_MAX_AGE,
+        browser_cache_stale_while_revalidate=BROWSER_CACHE_STALE_WHILE_REVALIDATE,
+    )
 
 
 def _thumbnail_disk_path(size: str, image_id: int) -> str:
-    return os.path.join(SSD_CACHE_DIR, size, f"{image_id}.jpg")
+    return disk_store.thumbnail_disk_path(SSD_CACHE_DIR, size, image_id)
 
 
 def _full_disk_path(image_id: int, filepath: str) -> str:
-    ext = os.path.splitext(filepath)[1].lower() or ".bin"
-    return os.path.join(SSD_CACHE_DIR, FULL_TIER, f"{image_id}{ext}")
+    return disk_store.full_disk_path(SSD_CACHE_DIR, FULL_TIER, image_id, filepath)
 
 
 def is_browser_displayable_original(filepath: str) -> bool:
-    return os.path.splitext(filepath or "")[1].lower() in BROWSER_ORIGINAL_EXTENSIONS
-
-
-def _replace_executor(
-    current: ThreadPoolExecutor,
-    workers: int,
-    prefix: str,
-) -> ThreadPoolExecutor:
-    replacement = ThreadPoolExecutor(max_workers=workers, thread_name_prefix=prefix)
-    try:
-        current.shutdown(wait=False, cancel_futures=False)
-    except TypeError:
-        current.shutdown(wait=False)
-    return replacement
+    return disk_store.is_browser_displayable_original(filepath, BROWSER_ORIGINAL_EXTENSIONS)
 
 
 def _memory_get_fast(size: str, image_id: int) -> bytes | None:
     """Fast memory check — no signature validation."""
-    entry = _memory_get_entry_fast(size, image_id)
-    return entry[1] if entry is not None else None
+    with _cache_lock:
+        return _memory_store.get_fast(size, image_id)
 
 
 def _memory_get_entry_fast(size: str, image_id: int) -> tuple[str, bytes] | None:
     """Fast memory check that also returns the cached signature."""
-    key = (size, image_id)
     with _cache_lock:
-        entry = _memory_cache.get(key)
-        if entry is None:
-            return None
-        signature, data = entry
-        _memory_cache.move_to_end(key)
-        return signature, data
+        return _memory_store.get_entry_fast(size, image_id)
 
 
 def _memory_get(size: str, image_id: int, source_signature: str) -> bytes | None:
-    key = (size, image_id)
-
     with _cache_lock:
-        entry = _memory_cache.get(key)
-        if entry is None:
-            return None
-        cached_signature, data = entry
-        if cached_signature != source_signature:
-            _memory_remove_locked(key)
-            return None
-        _memory_cache.move_to_end(key)
+        data = _memory_store.get(size, image_id, source_signature)
+        _sync_memory_cache_bytes()
         return data
 
 
@@ -731,106 +453,59 @@ def _memory_tier_budget(size: str) -> int:
 
 
 def _memory_remove_locked(key: tuple[str, int]) -> bool:
-    global _memory_cache_bytes
-    entry = _memory_cache.pop(key, None)
-    if entry is None:
-        return False
-    size = key[0]
-    data_len = len(entry[1])
-    _memory_cache_bytes -= data_len
-    _memory_tier_bytes[size] = max(0, _memory_tier_bytes.get(size, 0) - data_len)
-    return True
+    removed = _memory_store.remove(key)
+    _sync_memory_cache_bytes()
+    return removed
 
 
 def _evict_memory_oldest_locked(size: str | None = None) -> bool:
-    for key in list(_memory_cache.keys()):
-        if size is None or key[0] == size:
-            return _memory_remove_locked(key)
-    return False
+    removed = _memory_store.evict_oldest(size)
+    _sync_memory_cache_bytes()
+    return removed
 
 
 def _enforce_memory_budget_locked():
-    for size in THUMB_TIERS:
-        budget = _memory_tier_budget(size)
-        while _memory_tier_bytes.get(size, 0) > budget:
-            if not _evict_memory_oldest_locked(size):
-                break
-
-    while _memory_cache and _memory_cache_bytes > MEMORY_CACHE_BYTES:
-        if not _evict_memory_oldest_locked():
-            break
+    _memory_store.enforce_budget(THUMB_TIERS, MEMORY_CACHE_BYTES, _memory_tier_budget)
+    _sync_memory_cache_bytes()
 
 
 def _memory_put(size: str, image_id: int, source_signature: str, data: bytes):
-    if not data or MEMORY_CACHE_BYTES <= 0:
-        return
-    tier_budget = _memory_tier_budget(size)
-    if tier_budget <= 0 or len(data) > tier_budget:
-        return
-
-    key = (size, image_id)
-    global _memory_cache_bytes
-
     with _cache_lock:
-        _memory_remove_locked(key)
-
-        _memory_cache[key] = (source_signature, data)
-        _memory_cache.move_to_end(key)
-        data_len = len(data)
-        _memory_cache_bytes += data_len
-        _memory_tier_bytes[size] = _memory_tier_bytes.get(size, 0) + data_len
-        _enforce_memory_budget_locked()
+        _memory_store.put(
+            size,
+            image_id,
+            source_signature,
+            data,
+            THUMB_TIERS,
+            MEMORY_CACHE_BYTES,
+            _memory_tier_budget,
+        )
+        _sync_memory_cache_bytes()
 
 
 def _clear_memory_cache() -> dict:
-    global _memory_cache_bytes
     with _cache_lock:
-        counts = {size: 0 for size in THUMB_TIERS}
-        for size, _image_id in _memory_cache.keys():
-            counts[size] = counts.get(size, 0) + 1
-        entries_cleared = len(_memory_cache)
-        bytes_cleared = _memory_cache_bytes
-        _memory_cache.clear()
-        _memory_cache_bytes = 0
-        for size in THUMB_TIERS:
-            _memory_tier_bytes[size] = 0
-    return {
-        "entries_cleared": entries_cleared,
-        "bytes_cleared": bytes_cleared,
-        "counts": counts,
-    }
+        result = _memory_store.clear(THUMB_TIERS)
+        _sync_memory_cache_bytes()
+        return result
 
 
 def _clear_memory_tiers(tiers: tuple[str, ...]):
     with _cache_lock:
-        for key in list(_memory_cache.keys()):
-            if key[0] not in tiers:
-                continue
-            _memory_remove_locked(key)
+        _memory_store.clear_tiers(tiers)
+        _sync_memory_cache_bytes()
 
 
 def _clear_memory_image_ids(image_ids: set[int]):
-    if not image_ids:
-        return
     with _cache_lock:
-        for key in list(_memory_cache.keys()):
-            if key[1] in image_ids:
-                _memory_remove_locked(key)
+        _memory_store.clear_image_ids(image_ids)
+        _sync_memory_cache_bytes()
 
 
 def _memory_stats() -> dict:
     with _cache_lock:
-        tiers = {size: {"count": 0, "bytes": 0} for size in THUMB_TIERS}
-        for (size, _image_id), (_signature, data) in _memory_cache.items():
-            tiers[size]["count"] += 1
-            tiers[size]["bytes"] += len(data)
-        for size in THUMB_TIERS:
-            tiers[size]["budget_bytes"] = _memory_tier_budget(size)
-        return {
-            "limit_bytes": MEMORY_CACHE_BYTES,
-            "used_bytes": _memory_cache_bytes,
-            "tiers": tiers,
-        }
+        _sync_memory_cache_bytes()
+        return _memory_store.stats(THUMB_TIERS, MEMORY_CACHE_BYTES, _memory_tier_budget)
 
 
 def _remove_cache_entry_locked(conn: sqlite3.Connection, row: sqlite3.Row):
@@ -1084,9 +759,7 @@ def _build_disk_path_index() -> bool:
             _note_cache_metadata_lock()
             return False
         raise
-    new_index = {}
-    for row in rows:
-        new_index[(row["size"], row["image_id"])] = (row["path"], row["source_signature"])
+    new_index = disk_store.index_from_rows(rows)
     with _disk_index_lock:
         _disk_path_index.clear()
         _disk_path_index.update(new_index)
@@ -1097,38 +770,34 @@ def _build_disk_path_index() -> bool:
 
 def _index_disk_entry(size: str, image_id: int, path: str, source_signature: str):
     """Update the in-memory index when a new cache entry is written."""
-    with _disk_index_lock:
-        _disk_path_index[(size, image_id)] = (path, source_signature)
+    disk_store.index_entry(_disk_path_index, _disk_index_lock, size, image_id, path, source_signature)
 
 
 def _unindex_disk_entry(size: str, image_id: int):
-    with _disk_index_lock:
-        _disk_path_index.pop((size, image_id), None)
+    disk_store.unindex_entry(_disk_path_index, _disk_index_lock, size, image_id)
 
 
 def _clear_disk_index(tiers: tuple[str, ...] | None = None):
     global _disk_index_built
-    with _disk_index_lock:
-        if tiers is None:
-            _disk_path_index.clear()
-            _disk_index_built = False
-            return
-        for key in list(_disk_path_index.keys()):
-            if key[0] in tiers:
-                _disk_path_index.pop(key, None)
+    disk_store.clear_index(_disk_path_index, _disk_index_lock, tiers)
+    if tiers is None:
+        _disk_index_built = False
 
 
 def fast_disk_has(size: str, image_id: int, source_signature: str | None = None) -> bool:
     if not _disk_index_built:
         if not _build_disk_path_index():
             return False
-    with _disk_index_lock:
-        entry = _disk_path_index.get((size, image_id))
+    entry = disk_store.lookup_index_entry(
+        _disk_path_index,
+        _disk_index_lock,
+        size,
+        image_id,
+        source_signature,
+    )
     if entry is None:
         return False
     path, cached_signature = entry
-    if source_signature is not None and cached_signature != source_signature:
-        return False
     if os.path.exists(path):
         return True
     _unindex_disk_entry(size, image_id)
@@ -1143,13 +812,16 @@ def fast_disk_path_entry(
     if not _disk_index_built:
         if not _build_disk_path_index():
             return None
-    with _disk_index_lock:
-        entry = _disk_path_index.get((size, image_id))
+    entry = disk_store.lookup_index_entry(
+        _disk_path_index,
+        _disk_index_lock,
+        size,
+        image_id,
+        source_signature,
+    )
     if entry is None:
         return None
     path, cached_signature = entry
-    if source_signature is not None and cached_signature != source_signature:
-        return None
     if os.path.exists(path):
         return cached_signature, path
     _unindex_disk_entry(size, image_id)
@@ -1166,13 +838,16 @@ def fast_disk_read_entry(
     if not _disk_index_built:
         if not _build_disk_path_index():
             return None
-    with _disk_index_lock:
-        entry = _disk_path_index.get((size, image_id))
+    entry = disk_store.lookup_index_entry(
+        _disk_path_index,
+        _disk_index_lock,
+        size,
+        image_id,
+        source_signature,
+    )
     if entry is None:
         return None
     path, cached_signature = entry
-    if source_signature is not None and cached_signature != source_signature:
-        return None
     try:
         with open(path, "rb") as f:
             data = f.read()
@@ -1283,9 +958,9 @@ def _store_disk_entry(
             conn.close()
         _index_disk_entry(size, image_id, path, source_signature)
         if removed_cache_ids:
-            db.invalidate_cached_image_ids_cache(cache_root=SSD_CACHE_DIR, size=size)
+            data_providers.invalidate_cached_image_ids_cache(cache_root=SSD_CACHE_DIR, size=size)
         else:
-            db.note_cached_image_ids_added(SSD_CACHE_DIR, size, [image_id])
+            data_providers.note_cached_image_ids_added(SSD_CACHE_DIR, size, [image_id])
 
 
 def _write_thumbnail_to_disk(size: str, image_id: int, source_signature: str, data: bytes, *, hot: bool) -> bool:
@@ -1363,9 +1038,9 @@ def _flush_write_queue() -> bool:
             _invalidate_disk_stats_cache(soft=True)
             for size in {entry[0] for entry in batch}:
                 if removed_by_size.get(size):
-                    db.invalidate_cached_image_ids_cache(cache_root=SSD_CACHE_DIR, size=size)
+                    data_providers.invalidate_cached_image_ids_cache(cache_root=SSD_CACHE_DIR, size=size)
                 else:
-                    db.note_cached_image_ids_added(
+                    data_providers.note_cached_image_ids_added(
                         SSD_CACHE_DIR,
                         size,
                         added_by_size.get(size, ()),
@@ -1400,31 +1075,20 @@ def _maybe_flush_write_queue():
 
 
 def _full_cache_has_room(image_id: int, source_size: int, budget: int) -> bool:
-    if budget <= 0 or source_size > budget:
-        return False
-    if _cache_metadata_backoff_active():
-        return False
-    with _meta_lock:
-        conn = None
-        try:
-            conn = _db_connect()
-            total = _tier_bytes(conn, FULL_TIER)
-            previous = conn.execute(
-                "SELECT size_bytes FROM cache_entries "
-                "WHERE cache_root = ? AND size = ? AND image_id = ?",
-                (SSD_CACHE_DIR, FULL_TIER, image_id),
-            ).fetchone()
-            previous_bytes = int(previous["size_bytes"]) if previous is not None else 0
-            _clear_cache_metadata_lock_backoff()
-            return max(0, total - previous_bytes) + source_size <= budget
-        except sqlite3.OperationalError as exc:
-            if _is_sqlite_locked(exc):
-                _note_cache_metadata_lock()
-                return False
-            raise
-        finally:
-            if conn is not None:
-                conn.close()
+    return full_cache.has_room(
+        image_id,
+        source_size,
+        budget,
+        cache_root=SSD_CACHE_DIR,
+        full_tier=FULL_TIER,
+        metadata_backoff_active=_cache_metadata_backoff_active,
+        meta_lock=_meta_lock,
+        db_connect=_db_connect,
+        tier_bytes=_tier_bytes,
+        clear_metadata_backoff=_clear_cache_metadata_lock_backoff,
+        note_metadata_lock=_note_cache_metadata_lock,
+        is_sqlite_locked=_is_sqlite_locked,
+    )
 
 
 def _cache_full_image_sync(
@@ -1435,41 +1099,26 @@ def _cache_full_image_sync(
     *,
     room_prechecked: bool = False,
 ) -> str:
-    if not os.path.exists(filepath):
-        return filepath
-
-    budget = _disk_allocations.get(FULL_TIER, 0)
-    if not SSD_CACHE_DIR or budget <= 0:
-        return filepath
-
-    try:
-        source_size = os.path.getsize(filepath)
-    except OSError:
-        return filepath
-
-    if source_size > budget:
-        return filepath
-
-    row = _get_disk_entry(FULL_TIER, image_id, source_signature)
-    if row is not None:
-        return row["path"]
-
-    if not hot and not room_prechecked and not _full_cache_has_room(image_id, source_size, budget):
-        return filepath
-
-    path = _full_disk_path(image_id, filepath)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    temp_path = f"{path}.{threading.get_ident()}.tmp"
-    shutil.copyfile(filepath, temp_path)
-    if not hot and not room_prechecked and not _full_cache_has_room(image_id, source_size, budget):
-        try:
-            os.remove(temp_path)
-        except OSError:
-            pass
-        return filepath
-    os.replace(temp_path, path)
-    _store_disk_entry(FULL_TIER, image_id, source_signature, path, source_size, hot=hot)
-    return path
+    return full_cache.cache_full_image(
+        filepath,
+        image_id,
+        source_signature,
+        cache_root=SSD_CACHE_DIR,
+        budget=_disk_allocations.get(FULL_TIER, 0),
+        read_disk_entry=lambda signature: _get_disk_entry(FULL_TIER, image_id, signature),
+        has_cache_room=_full_cache_has_room,
+        full_disk_path=_full_disk_path,
+        store_disk_entry=lambda entry_image_id, signature, path, size_bytes, *, hot: _store_disk_entry(
+            FULL_TIER,
+            entry_image_id,
+            signature,
+            path,
+            size_bytes,
+            hot=hot,
+        ),
+        hot=hot,
+        room_prechecked=room_prechecked,
+    )
 
 
 def _cache_full_image_bytes_sync(
@@ -1481,85 +1130,41 @@ def _cache_full_image_bytes_sync(
     hot: bool = True,
     room_prechecked: bool = False,
 ) -> str:
-    if not data:
-        return filepath
-
-    budget = _disk_allocations.get(FULL_TIER, 0)
-    source_size = len(data)
-    if not SSD_CACHE_DIR or budget <= 0 or source_size > budget:
-        return filepath
-
-    row = _get_disk_entry(FULL_TIER, image_id, source_signature)
-    if row is not None:
-        return row["path"]
-
-    if not hot and not room_prechecked and not _full_cache_has_room(image_id, source_size, budget):
-        return filepath
-
-    path = _full_disk_path(image_id, filepath)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    temp_path = f"{path}.{threading.get_ident()}.tmp"
-    with open(temp_path, "wb") as f:
-        f.write(data)
-    if not hot and not room_prechecked and not _full_cache_has_room(image_id, source_size, budget):
-        try:
-            os.remove(temp_path)
-        except OSError:
-            pass
-        return filepath
-    os.replace(temp_path, path)
-    _store_disk_entry(FULL_TIER, image_id, source_signature, path, source_size, hot=hot)
-    return path
+    return full_cache.cache_full_image_bytes(
+        filepath,
+        image_id,
+        source_signature,
+        data,
+        cache_root=SSD_CACHE_DIR,
+        budget=_disk_allocations.get(FULL_TIER, 0),
+        read_disk_entry=lambda signature: _get_disk_entry(FULL_TIER, image_id, signature),
+        has_cache_room=_full_cache_has_room,
+        full_disk_path=_full_disk_path,
+        store_disk_entry=lambda entry_image_id, signature, path, size_bytes, *, hot: _store_disk_entry(
+            FULL_TIER,
+            entry_image_id,
+            signature,
+            path,
+            size_bytes,
+            hot=hot,
+        ),
+        hot=hot,
+        room_prechecked=room_prechecked,
+    )
 
 
 def _load_raw_preview(filepath: str, max_target: int) -> Image.Image | None:
-    import rawpy
-
-    try:
-        with rawpy.imread(filepath) as raw:
-            thumb = raw.extract_thumb()
-        if thumb.format == rawpy.ThumbFormat.JPEG:
-            with Image.open(io.BytesIO(thumb.data)) as source:
-                source.load()
-                img = ImageOps.exif_transpose(source)
-                if img is source:
-                    img = source.copy()
-        elif thumb.format == rawpy.ThumbFormat.BITMAP:
-            img = Image.fromarray(thumb.data)
-        else:
-            return None
-
-        if max(img.width, img.height) >= max_target:
-            return img
-        img.close()
-    except Exception:
-        return None
-    return None
+    return generation.load_raw_preview(filepath, max_target)
 
 
 def _load_source_image(filepath: str, max_target: int, prefer_draft: bool) -> Image.Image:
-    ext = os.path.splitext(filepath)[1].lower()
-    if ext in RAW_EXTENSIONS:
-        preview = _load_raw_preview(filepath, max_target)
-        if preview is not None:
-            return preview
-
-        import rawpy
-
-        with rawpy.imread(filepath) as raw:
-            rgb = raw.postprocess(use_camera_wb=True, no_auto_bright=True)
-        return Image.fromarray(rgb)
-
-    with Image.open(filepath) as source:
-        if ext in JPEG_EXTENSIONS:
-            # Always use draft mode for JPEGs — decodes at reduced resolution
-            # via libjpeg DCT scaling, cutting both I/O and decode time.
-            source.draft("RGB", (max_target * 2, max_target * 2))
-        source.load()
-        img = ImageOps.exif_transpose(source)
-        if img is source:
-            img = source.copy()
-        return img
+    return generation.load_source_image(
+        filepath,
+        max_target,
+        prefer_draft,
+        jpeg_extensions=JPEG_EXTENSIONS,
+        raw_extensions=RAW_EXTENSIONS,
+    )
 
 
 def _load_source_image_from_bytes(
@@ -1568,41 +1173,18 @@ def _load_source_image_from_bytes(
     max_target: int,
     prefer_draft: bool,
 ) -> Image.Image:
-    ext = os.path.splitext(filepath)[1].lower()
-    if ext in RAW_EXTENSIONS:
-        return _load_source_image(filepath, max_target, prefer_draft)
-
-    with Image.open(io.BytesIO(data)) as source:
-        if ext in JPEG_EXTENSIONS:
-            source.draft("RGB", (max_target * 2, max_target * 2))
-        source.load()
-        img = ImageOps.exif_transpose(source)
-        if img is source:
-            img = source.copy()
-        return img
+    return generation.load_source_image_from_bytes(
+        filepath,
+        data,
+        max_target,
+        prefer_draft,
+        jpeg_extensions=JPEG_EXTENSIONS,
+        raw_extensions=RAW_EXTENSIONS,
+    )
 
 
 def _resize_to_long_side(img: Image.Image, target_long_side: int) -> Image.Image:
-    long_side = max(img.width, img.height)
-    if long_side <= target_long_side:
-        return img.copy()
-
-    # Fast integer pre-downscale with reduce() when source is much larger,
-    # then final filter for quality.
-    factor = max(1, long_side // (target_long_side * 2))
-    if factor > 1:
-        img = img.reduce(factor)
-        long_side = max(img.width, img.height)
-
-    scale = target_long_side / long_side
-    new_size = (
-        max(1, int(round(img.width * scale))),
-        max(1, int(round(img.height * scale))),
-    )
-    # Use BILINEAR for large targets (≥1920px) where the downscale ratio is small
-    # and quality difference is imperceptible. LANCZOS for smaller sizes.
-    resample = Image.BILINEAR if target_long_side >= 1920 else Image.LANCZOS
-    return img.resize(new_size, resample)
+    return generation.resize_to_long_side(img, target_long_side)
 
 
 def _queue_orientation(image_id: int, img: Image.Image):
@@ -1613,14 +1195,7 @@ def _queue_orientation(image_id: int, img: Image.Image):
 
 
 def _thumbnail_jpeg_bytes(variant: Image.Image, size: str) -> bytes:
-    buf = io.BytesIO()
-    variant.save(
-        buf,
-        "JPEG",
-        quality=THUMB_QUALITY,
-        progressive=(size != "sm"),
-    )
-    return buf.getvalue()
+    return generation.thumbnail_jpeg_bytes(variant, size, THUMB_QUALITY)
 
 
 def _encode_and_cache_thumbnail(
@@ -2198,7 +1773,7 @@ async def flush_orientation_updates():
     if not pending:
         return
 
-    await db.batch_set_orientations(
+    await data_providers.batch_set_orientations(
         [(orientation, aspect_ratio, image_id) for image_id, (orientation, aspect_ratio) in pending.items()]
     )
 
@@ -2225,69 +1800,40 @@ def _record_pregen_batch(
     source_read_failures: int = 0,
 ):
     global _pregen_session_generated, _pregen_session_started_at, _pregen_source_read_failures
-    if count <= 0 and not thumbnails_written and source_read_failures <= 0:
-        return
     now = _current_time()
+    entry = pregen.history_entry(
+        count,
+        ended_at=now,
+        thumbnails_written=thumbnails_written,
+        source_bytes=source_bytes,
+        read_seconds=read_seconds,
+        decode_encode_seconds=decode_encode_seconds,
+        source_read_failures=source_read_failures,
+    )
+    if entry is None:
+        return
     if _pregen_session_started_at is None:
         _pregen_session_started_at = now
     _pregen_session_generated += count
     _pregen_source_read_failures += max(0, int(source_read_failures))
-    _pregen_history.append({
-        "ended_at": now,
-        "count": int(count),
-        "thumbnails_written": int(thumbnails_written if thumbnails_written is not None else count),
-        "source_bytes": int(source_bytes or 0),
-        "read_seconds": float(read_seconds or 0.0),
-        "decode_encode_seconds": float(decode_encode_seconds or 0.0),
-        "source_read_failures": int(source_read_failures or 0),
-    })
-    cutoff = now - 30 * 60
-    while _pregen_history and _pregen_history[0]["ended_at"] < cutoff:
-        _pregen_history.popleft()
+    _pregen_history.append(entry)
+    pregen.trim_history(_pregen_history, now)
 
 
 def _pregen_rates() -> tuple[float, float, dict]:
     now = _current_time()
-    cutoff = now - 30 * 60
-    while _pregen_history and _pregen_history[0]["ended_at"] < cutoff:
-        _pregen_history.popleft()
-    recent_count = sum(item["count"] for item in _pregen_history)
-    recent_thumbnails = sum(item.get("thumbnails_written", item["count"]) for item in _pregen_history)
-    recent_bytes = sum(item.get("source_bytes", 0) for item in _pregen_history)
-    recent_read_seconds = sum(item.get("read_seconds", 0.0) for item in _pregen_history)
-    recent_decode_encode_seconds = sum(item.get("decode_encode_seconds", 0.0) for item in _pregen_history)
-    recent_failures = sum(item.get("source_read_failures", 0) for item in _pregen_history)
-    recent_window = max(1.0, min(30 * 60.0, now - _pregen_history[0]["ended_at"])) if _pregen_history else 0.0
-    recent_rate = (recent_count / recent_window) * 60.0 if recent_window > 0 else 0.0
-    recent_thumbnail_rate = (recent_thumbnails / recent_window) * 60.0 if recent_window > 0 else 0.0
-    session_window = max(1.0, now - _pregen_session_started_at) if _pregen_session_started_at else 0.0
-    overall_rate = (_pregen_session_generated / session_window) * 60.0 if session_window > 0 else 0.0
-    diagnostics = {
-        "recent_source_reads_per_min": recent_rate,
-        "recent_thumbnails_written_per_min": recent_thumbnail_rate,
-        "recent_read_mbps": (
-            (recent_bytes / (1024 * 1024)) / recent_read_seconds
-            if recent_read_seconds > 0
-            else 0.0
-        ),
-        "avg_source_read_seconds": (
-            recent_read_seconds / recent_count
-            if recent_count > 0
-            else 0.0
-        ),
-        "avg_decode_encode_seconds": (
-            recent_decode_encode_seconds / recent_count
-            if recent_count > 0
-            else 0.0
-        ),
-        "recent_source_read_failures": recent_failures,
-        "source_read_failures": _pregen_source_read_failures,
-    }
-    return recent_rate, overall_rate, diagnostics
+    pregen.trim_history(_pregen_history, now)
+    return pregen.rates(
+        _pregen_history,
+        now=now,
+        session_started_at=_pregen_session_started_at,
+        session_generated=_pregen_session_generated,
+        source_read_failures=_pregen_source_read_failures,
+    )
 
 
 async def _cache_target_total() -> int:
-    conn = await db.get_db()
+    conn = await data_providers.get_db()
     try:
         cursor = await conn.execute(
             "SELECT COUNT(*) AS c FROM images i "
@@ -2301,19 +1847,15 @@ async def _cache_target_total() -> int:
 
 
 def _reset_pregen_bulk_cursor():
-    _pregen_bulk_cursor["source_id"] = 0
-    _pregen_bulk_cursor["filepath"] = ""
-    _pregen_bulk_cursor["id"] = 0
+    pregen.reset_cursor(_pregen_bulk_cursor)
 
 
 def _reset_pregen_full_cursor():
-    _pregen_full_cursor["source_id"] = 0
-    _pregen_full_cursor["filepath"] = ""
-    _pregen_full_cursor["id"] = 0
+    pregen.reset_cursor(_pregen_full_cursor)
 
 
 async def _pregen_bulk_candidate_batch(limit: int):
-    conn = await db.get_db()
+    conn = await data_providers.get_db()
     try:
         cursor = await conn.execute(
             "SELECT i.id, i.source_id, i.filepath, i.file_size, i.file_modified_at "
@@ -2338,17 +1880,14 @@ async def _pregen_bulk_candidate_batch(limit: int):
         )
         rows = await cursor.fetchall()
         if rows:
-            last = rows[-1]
-            _pregen_bulk_cursor["source_id"] = int(last["source_id"] or 0)
-            _pregen_bulk_cursor["filepath"] = str(last["filepath"] or "")
-            _pregen_bulk_cursor["id"] = int(last["id"] or 0)
+            pregen.update_cursor_from_row(_pregen_bulk_cursor, rows[-1])
         return rows
     finally:
         await conn.close()
 
 
 async def _pregen_full_candidate_batch(limit: int):
-    conn = await db.get_db()
+    conn = await data_providers.get_db()
     try:
         cursor = await conn.execute(
             "SELECT i.id, i.source_id, i.filepath, i.file_size, i.file_modified_at "
@@ -2373,10 +1912,7 @@ async def _pregen_full_candidate_batch(limit: int):
         )
         rows = await cursor.fetchall()
         if rows:
-            last = rows[-1]
-            _pregen_full_cursor["source_id"] = int(last["source_id"] or 0)
-            _pregen_full_cursor["filepath"] = str(last["filepath"] or "")
-            _pregen_full_cursor["id"] = int(last["id"] or 0)
+            pregen.update_cursor_from_row(_pregen_full_cursor, rows[-1])
         return rows
     finally:
         await conn.close()
@@ -2434,92 +1970,32 @@ def _bulk_candidate_signatures(
     tier_room: dict[str, int],
     tier_budgets: dict[str, int],
 ) -> tuple[dict[str, str], int | None]:
-    image_id = int(row["id"])
-    filepath = row["filepath"]
-    source_size = None
-    source_missing = False
-    signatures = {}
-    active_tiers = [size for size in THUMB_TIERS if tier_budgets.get(size, 0) > 0]
-
-    if (
-        not _replace_stale_thumbnails
-        and active_tiers
-        and all(fast_disk_has(size, image_id) for size in active_tiers)
-    ):
-        try:
-            return {}, int(row["file_size"]) if row["file_size"] is not None else None
-        except (TypeError, ValueError):
-            return {}, None
-
-    for size in active_tiers:
-        signature, row_source_size, row_source_missing = _build_catalog_source_signature(
-            filepath,
-            size,
-            image_id,
-            row["file_size"],
-            row["file_modified_at"],
-        )
-        signatures[size] = signature
-        if source_size is None and row_source_size is not None:
-            source_size = row_source_size
-        source_missing = source_missing or row_source_missing
-
-    if source_missing:
-        return {}, source_size
-
-    needed = {}
-    now = time.time()
-    for size in active_tiers:
-        source_signature = signatures[size]
-        if _thumbnail_retry_after.get((size, image_id, source_signature), 0) > now:
-            continue
-        if fast_disk_has(size, image_id, source_signature):
-            continue
-
-        existing_entry = fast_disk_has(size, image_id)
-        if not existing_entry:
-            estimated_bytes = estimated_tier_bytes(size)
-            if tier_room.get(size, 0) < estimated_bytes:
-                continue
-            tier_room[size] = max(0, tier_room.get(size, 0) - estimated_bytes)
-
-        needed[size] = source_signature
-
-    return needed, source_size
+    return pregen_candidates.bulk_candidate_signatures(
+        row,
+        tier_room,
+        tier_budgets,
+        thumb_tiers=THUMB_TIERS,
+        replace_stale_thumbnails=_replace_stale_thumbnails,
+        fast_disk_has=fast_disk_has,
+        build_catalog_source_signature=_build_catalog_source_signature,
+        estimated_tier_bytes=estimated_tier_bytes,
+        retry_after=_thumbnail_retry_after,
+        now=time.time(),
+    )
 
 
 def _full_candidate_signature(row, full_room: dict[str, int], full_budget: int) -> dict | None:
-    image_id = int(row["id"])
-    filepath = row["filepath"]
-    if not is_browser_displayable_original(filepath):
-        return None
-    if fast_disk_path_entry(FULL_TIER, image_id) is not None:
-        return None
-
-    source_bits, source_size, source_missing = _source_bits_from_catalog_metadata(
-        filepath,
-        row["file_size"],
-        row["file_modified_at"],
+    return pregen_candidates.full_candidate_signature(
+        row,
+        full_room,
+        full_budget,
+        full_tier=FULL_TIER,
+        is_browser_displayable_original=is_browser_displayable_original,
+        fast_disk_path_entry=fast_disk_path_entry,
+        source_bits_from_catalog_metadata=_source_bits_from_catalog_metadata,
+        build_source_signature_from_bits=_build_source_signature_from_bits,
+        full_cache_has_room=_full_cache_has_room,
     )
-    if source_missing:
-        return None
-    try:
-        source_size = int(source_size)
-    except (TypeError, ValueError):
-        return None
-    source_signature = _build_source_signature_from_bits(source_bits, FULL_TIER, image_id)
-    if source_size > full_budget:
-        return None
-    if full_room.get("bytes", 0) < source_size and not _full_cache_has_room(image_id, source_size, full_budget):
-        return None
-
-    full_room["bytes"] = max(0, int(full_room.get("bytes", 0)) - int(source_size))
-    return {
-        "id": image_id,
-        "filepath": filepath,
-        "signature": source_signature,
-        "source_size": int(source_size),
-    }
 
 
 async def _run_pregen_phase(size: str, generate_batch: int | None = None) -> int:
@@ -2750,12 +2226,7 @@ async def _run_full_warm_batch(generate_batch: int | None = None) -> int:
 
 
 def _copy_disk_stats(disk: dict) -> dict:
-    copied = dict(disk)
-    copied["tiers"] = {
-        size: dict(info)
-        for size, info in (disk.get("tiers") or {}).items()
-    }
-    return copied
+    return thumbnail_status.copy_disk_stats(disk)
 
 
 def cache_stats() -> dict:
@@ -2912,42 +2383,13 @@ def _original_cache_status(
     original_total: int = 0,
     archive_estimates: dict | None = None,
 ) -> dict:
-    tier_stats = stats["disk"]["tiers"][FULL_TIER]
-    count = int(tier_stats.get("count", 0) or 0)
-    bytes_used = int(tier_stats.get("bytes", 0) or 0)
-    budget = int(tier_stats.get("budget_bytes", 0) or 0)
-    estimated_original_bytes = int(
-        (archive_estimates or {}).get("needed_bytes", {}).get(FULL_TIER) or 0
+    return thumbnail_status.original_cache_status(
+        stats,
+        full_tier=FULL_TIER,
+        original_total=original_total,
+        archive_estimates=archive_estimates,
+        estimated_full_tier_bytes=estimated_tier_bytes(FULL_TIER),
     )
-    avg_bytes = (
-        max(1, int(estimated_original_bytes / original_total))
-        if original_total > 0 and estimated_original_bytes > 0
-        else int(bytes_used / count)
-        if count > 0 and bytes_used > 0
-        else estimated_tier_bytes(FULL_TIER)
-    )
-    estimated_capacity = int(budget / avg_bytes) if avg_bytes > 0 and budget > 0 else 0
-    if original_total > 0:
-        target = min(original_total, max(count, estimated_capacity))
-        remaining = min(max(0, original_total - count), max(0, estimated_capacity - count))
-    else:
-        target = max(count, estimated_capacity)
-        remaining = max(0, estimated_capacity - count)
-
-    utilization_pct = round((bytes_used / budget) * 100, 1) if budget > 0 else 0.0
-    progress_pct = round((count / target) * 100, 1) if target > 0 else 0.0
-    return {
-        "count": count,
-        "total": target,
-        "eligible_total": int(original_total or 0),
-        "remaining": remaining,
-        "bytes": bytes_used,
-        "budget_bytes": budget,
-        "avg_bytes": avg_bytes,
-        "estimated_capacity": estimated_capacity,
-        "progress_pct": progress_pct,
-        "utilization_pct": utilization_pct,
-    }
 
 
 def get_pregen_status(
@@ -2957,109 +2399,21 @@ def get_pregen_status(
     archive_estimates: dict | None = None,
 ) -> dict:
     stats = stats or cache_stats()
-    phases = {}
-    remaining = 0
-    background_budgets = {
-        size: _background_tier_budget(size, archive_estimates)
-        for size in THUMB_TIERS
-    }
-    for size in THUMB_TIERS:
-        tier_stats = stats["disk"]["tiers"][size]
-        count = int(
-            tier_stats.get("progress_count")
-            if tier_stats.get("progress_count") is not None
-            else (
-                tier_stats.get("current_count", 0)
-                if tier_stats.get("replacement_mode")
-                else tier_stats.get("count", 0)
-            )
-        )
-        available_count = int(tier_stats.get("count", 0))
-        current_count = int(tier_stats.get("current_count", count))
-        target = target_total
-        progress_pct = round((count / target_total) * 100, 1) if target_total > 0 else 0.0
-        if target_total > 0:
-            background_budget = background_budgets[size]
-            avg_bytes = (
-                int(tier_stats.get("current_bytes", 0) / current_count)
-                if current_count > 0 and tier_stats.get("current_bytes", 0) > 0
-                else int(tier_stats["bytes"] / available_count)
-                if available_count > 0 and tier_stats["bytes"] > 0
-                else estimated_tier_bytes(size)
-            )
-            if avg_bytes > 0 and background_budget > 0:
-                target = min(target_total, max(count, int(background_budget / avg_bytes)))
-            remaining += max(0, target - count)
-        phases[size] = {
-            "count": count,
-            "available_count": available_count,
-            "current_count": current_count,
-            "stale_count": max(0, available_count - current_count),
-            "replacement_mode": bool(tier_stats.get("replacement_mode")),
-            "total": target,
-            "progress_pct": round((count / target) * 100, 1) if target > 0 else progress_pct,
-            "budget_bytes": tier_stats["budget_bytes"],
-            "background_budget_bytes": background_budgets[size],
-            "remaining": max(0, target - count),
-        }
-
-    preview_total = sum(int(phase.get("total", 0) or 0) for phase in phases.values())
-    preview_count = sum(min(int(phase.get("count", 0) or 0), int(phase.get("total", 0) or 0)) for phase in phases.values())
-    preview_images_remaining = max(
-        (int(phase.get("remaining", 0) or 0) for phase in phases.values()),
-        default=0,
+    return thumbnail_status.pregen_status(
+        pregen_state=_pregen_status,
+        stats=stats,
+        target_total=target_total,
+        original_total=original_total,
+        archive_estimates=archive_estimates,
+        thumb_tiers=THUMB_TIERS,
+        background_tier_budget=_background_tier_budget,
+        estimated_tier_bytes=estimated_tier_bytes,
+        original_status=_original_cache_status,
+        pregen_rates=_pregen_rates,
+        pregen_background_decision=_pregen_background_decision,
+        pregen_generate_batch_for_decision=_pregen_generate_batch_for_decision,
+        idle_seconds=get_idle_seconds(),
     )
-    preview = {
-        "count": preview_count,
-        "total": preview_total,
-        "remaining": remaining,
-        "image_remaining": preview_images_remaining,
-        "progress_pct": round((preview_count / preview_total) * 100, 1) if preview_total > 0 else 0.0,
-    }
-    originals = _original_cache_status(stats, original_total, archive_estimates)
-
-    recent_rate, overall_rate, diagnostics = _pregen_rates()
-    thumbnail_rate = diagnostics.get("recent_thumbnails_written_per_min", 0.0)
-    preview_rate = max(recent_rate, overall_rate, thumbnail_rate / max(1, len(THUMB_TIERS)))
-    eta_seconds = (
-        int((preview_images_remaining / preview_rate) * 60)
-        if preview_images_remaining > 0 and preview_rate > 0
-        else None
-    )
-    effective_rate = max(recent_rate, overall_rate)
-    original_eta_seconds = (
-        int((originals["remaining"] / effective_rate) * 60)
-        if remaining <= 0 and originals["remaining"] > 0 and effective_rate > 0
-        else None
-    )
-    replacement_mode = any(phase["replacement_mode"] for phase in phases.values())
-    decision = _pregen_background_decision()
-    governor_status = decision.to_dict()
-    governor_status["effective_thumbnail_batch_size"] = _pregen_generate_batch_for_decision(decision)
-
-    return {
-        **dict(_pregen_status),
-        "governor": governor_status,
-        "idle_seconds": round(max(0.0, time.monotonic() - _last_user_activity), 2),
-        "phases": phases,
-        "preview": preview,
-        "originals": originals,
-        "remaining": remaining,
-        "preview_remaining": remaining,
-        "originals_remaining": originals["remaining"],
-        "recent_images_per_min": round(recent_rate, 2),
-        "overall_images_per_min": round(overall_rate, 2),
-        "recent_source_reads_per_min": round(diagnostics["recent_source_reads_per_min"], 2),
-        "recent_thumbnails_written_per_min": round(diagnostics["recent_thumbnails_written_per_min"], 2),
-        "recent_read_mbps": round(diagnostics["recent_read_mbps"], 2),
-        "avg_source_read_seconds": round(diagnostics["avg_source_read_seconds"], 4),
-        "avg_decode_encode_seconds": round(diagnostics["avg_decode_encode_seconds"], 4),
-        "recent_source_read_failures": int(diagnostics["recent_source_read_failures"]),
-        "source_read_failures": int(diagnostics["source_read_failures"]),
-        "eta_seconds": eta_seconds,
-        "original_eta_seconds": original_eta_seconds,
-        "replacement_mode": replacement_mode,
-    }
 
 
 def purge_image_cache(image_ids: list[int]) -> dict:
@@ -3153,7 +2507,7 @@ def clear_cache() -> dict:
                 conn.close()
 
     _replace_stale_thumbnails = False
-    db.invalidate_cached_image_ids_cache(cache_root=SSD_CACHE_DIR)
+    data_providers.invalidate_cached_image_ids_cache(cache_root=SSD_CACHE_DIR)
 
     return {
         "memory_entries_cleared": memory["entries_cleared"],
@@ -3224,7 +2578,7 @@ def configure(config: dict):
         _invalidate_disk_stats_cache()
         _reset_pregen_bulk_cursor()
         _reset_pregen_full_cursor()
-        db.invalidate_cached_image_ids_cache()
+        data_providers.invalidate_cached_image_ids_cache()
     _ensure_disk_cache_dirs()
 
     _sync_thumb_config_metadata(
@@ -3259,7 +2613,7 @@ def configure(config: dict):
 
     _enforce_all_disk_budgets()
     _build_disk_path_index()
-    db.invalidate_cached_image_ids_cache()
+    data_providers.invalidate_cached_image_ids_cache()
 
 
 def start_pregeneration() -> dict:
@@ -3282,48 +2636,31 @@ def stop_pregeneration() -> dict:
 
 
 def _pregen_generate_batch_for_decision(decision) -> int:
-    if getattr(decision, "pause", False):
-        return 0
-    return max(
-        1,
-        min(
-            int(getattr(decision, "thumbnail_batch_size", 1) or 1),
-            int(PREGENERATE_GENERATE_BATCH or 1),
-        ),
-    )
+    return pregen.generate_batch_for_decision(decision, PREGENERATE_GENERATE_BATCH)
 
 
 def _pregen_background_decision():
-    decision = resource_governor.get_background_decision(get_idle_seconds())
-    if (
-        _pregen_manual_mode
-        and not _pregen_manual_pause
-        and decision.reason in {"user active", "recent user activity"}
-        and get_idle_seconds() >= MANUAL_PREGEN_FOREGROUND_SETTLE_SECONDS
-    ):
-        return resource_governor.BackgroundDecision(
-            work_mode=decision.work_mode,
-            mode="manual",
-            intensity=0.45,
-            pause=False,
-            sleep_seconds=0.0,
-            thumbnail_batch_size=max(4, min(8, int(PREGENERATE_GENERATE_BATCH or 8))),
-            thumbnail_pause_seconds=max(0.05, min(0.5, PREGENERATE_BATCH_PAUSE_SECONDS)),
-            embedding_pause_seconds=decision.embedding_pause_seconds,
-            reason="manual cache build",
-            load_1m=decision.load_1m,
-            cpu_count=decision.cpu_count,
-            available_memory_gb=decision.available_memory_gb,
-            swap_used_pct=decision.swap_used_pct,
-            idle_seconds=decision.idle_seconds,
-            checked_at=decision.checked_at,
-        )
+    decision = resource_governor.get_background_decision(
+        get_idle_seconds(),
+        work_mode=_background_work_mode(),
+    )
     return decision
 
 
+def _background_work_mode() -> str:
+    try:
+        import settings
+
+        mode = pregen.normalize_work_mode(settings.get_settings().get("background_work_mode"))
+        if mode:
+            return mode
+    except Exception:
+        pass
+    return "balanced"
+
+
 def _pregen_should_yield_to_foreground() -> bool:
-    settle_seconds = MANUAL_PREGEN_FOREGROUND_SETTLE_SECONDS if _pregen_manual_mode else 15.0
-    return get_idle_seconds() < settle_seconds
+    return _background_work_mode() == "browse"
 
 
 async def run_prefetch_worker():
@@ -3347,20 +2684,10 @@ async def run_prefetch_worker():
                 continue
 
             auto_enabled = PREGENERATE_ON_IDLE
-            idle_seconds = time.monotonic() - _last_user_activity
             if not _pregen_manual_mode and not auto_enabled:
-                _set_pregen_state("disabled", "Idle pre-generation is disabled in Settings.")
+                _set_pregen_state("disabled", "Background cache warming is disabled in Settings.")
                 no_progress_scan_passes = 0
                 await asyncio.sleep(2)
-                continue
-
-            if not _pregen_manual_mode and idle_seconds < PREGENERATE_IDLE_SECONDS:
-                _set_pregen_state(
-                    "waiting_for_idle",
-                    f"Waiting for {PREGENERATE_IDLE_SECONDS:.0f}s of user idle time.",
-                )
-                no_progress_scan_passes = 0
-                await asyncio.sleep(1)
                 continue
 
             now = time.monotonic()
@@ -3376,8 +2703,8 @@ async def run_prefetch_worker():
 
             if foreground_active or _pregen_should_yield_to_foreground():
                 _set_pregen_state(
-                    "waiting_for_idle",
-                    "Waiting for foreground activity to settle.",
+                    "throttled",
+                    "Background cache warming is paused in Browse mode.",
                 )
                 no_progress_scan_passes = 0
                 await asyncio.sleep(1)

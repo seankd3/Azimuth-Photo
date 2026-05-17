@@ -32,21 +32,22 @@ class BackgroundDecision:
     def can_start_heavy_work(self) -> bool:
         if self.work_mode == "browse":
             return False
+        load_ratio = self.load_1m / max(1, self.cpu_count)
         if self.work_mode == "max":
             return (
                 self.mode in {"normal", "manual"}
-                and self.idle_seconds >= 15.0
-                and (self.load_1m / max(1, self.cpu_count)) < 1.15
+                and load_ratio < 1.15
                 and self.available_memory_gb >= 4.0
                 and self.swap_used_pct < 50.0
             )
-        return (
-            self.mode == "normal"
-            and self.idle_seconds >= 60.0
-            and (self.load_1m / max(1, self.cpu_count)) < 0.70
-            and self.available_memory_gb >= 6.0
-            and self.swap_used_pct < 50.0
-        )
+        if self.work_mode == "balanced":
+            return (
+                self.mode == "light"
+                and load_ratio < 0.75
+                and self.available_memory_gb >= 4.0
+                and self.swap_used_pct < 35.0
+            )
+        return False
 
 
 def _read_meminfo() -> dict[str, int]:
@@ -162,58 +163,17 @@ def get_background_decision(idle_seconds: float = 999.0, work_mode: str | None =
             checked_at=checked_at,
         )
 
-    active_idle_threshold = 5.0 if work_mode == "max" else 10.0
-    recent_idle_threshold = 15.0 if work_mode == "max" else 60.0
-
-    if idle_seconds < active_idle_threshold:
-        return BackgroundDecision(
-            work_mode=work_mode,
-            mode="paused",
-            intensity=0.0,
-            pause=True,
-            sleep_seconds=2.0,
-            thumbnail_batch_size=0,
-            thumbnail_pause_seconds=2.0,
-            embedding_pause_seconds=1.5,
-            reason="user active",
-            load_1m=load_1m,
-            cpu_count=cpu_count,
-            available_memory_gb=available_gb,
-            swap_used_pct=swap_used_pct,
-            idle_seconds=round(idle_seconds, 2),
-            checked_at=checked_at,
-        )
-
-    if idle_seconds < recent_idle_threshold:
-        return BackgroundDecision(
-            work_mode=work_mode,
-            mode="paused",
-            intensity=0.0,
-            pause=True,
-            sleep_seconds=5.0,
-            thumbnail_batch_size=0,
-            thumbnail_pause_seconds=5.0,
-            embedding_pause_seconds=1.5,
-            reason="recent user activity",
-            load_1m=load_1m,
-            cpu_count=cpu_count,
-            available_memory_gb=available_gb,
-            swap_used_pct=swap_used_pct,
-            idle_seconds=round(idle_seconds, 2),
-            checked_at=checked_at,
-        )
-
     busy_threshold = 1.20 if work_mode == "max" else 0.95
     if load_ratio >= busy_threshold or swap_used_pct >= 40:
         return BackgroundDecision(
             work_mode=work_mode,
             mode="gentle",
-            intensity=0.55 if work_mode == "max" else 0.35,
+            intensity=0.55 if work_mode == "max" else 0.2,
             pause=False,
             sleep_seconds=0.0,
-            thumbnail_batch_size=8 if work_mode == "max" else 4,
-            thumbnail_pause_seconds=0.5 if work_mode == "max" else 1.5,
-            embedding_pause_seconds=0.5 if work_mode == "max" else 1.0,
+            thumbnail_batch_size=8 if work_mode == "max" else 1,
+            thumbnail_pause_seconds=0.5 if work_mode == "max" else 3.0,
+            embedding_pause_seconds=0.5 if work_mode == "max" else 3.0,
             reason="system busy",
             load_1m=load_1m,
             cpu_count=cpu_count,
@@ -225,14 +185,14 @@ def get_background_decision(idle_seconds: float = 999.0, work_mode: str | None =
 
     return BackgroundDecision(
         work_mode=work_mode,
-        mode="normal",
-        intensity=0.85 if work_mode == "max" else 0.45,
+        mode="normal" if work_mode == "max" else "light",
+        intensity=0.85 if work_mode == "max" else 0.25,
         pause=False,
         sleep_seconds=0.0,
-        thumbnail_batch_size=16 if work_mode == "max" else 8,
-        thumbnail_pause_seconds=0.0 if work_mode == "max" else 0.05,
-        embedding_pause_seconds=0.05 if work_mode == "max" else 0.25,
-        reason="system healthy",
+        thumbnail_batch_size=16 if work_mode == "max" else 2,
+        thumbnail_pause_seconds=0.0 if work_mode == "max" else 1.5,
+        embedding_pause_seconds=0.05 if work_mode == "max" else 1.5,
+        reason="system healthy" if work_mode == "max" else "light background",
         load_1m=load_1m,
         cpu_count=cpu_count,
         available_memory_gb=available_gb,
