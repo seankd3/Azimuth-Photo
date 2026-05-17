@@ -30,12 +30,14 @@ import db
 import embed_cache
 import settings
 import thumbnails
+from core import query_constraints
 from features.ai import routes as ai_routes
 from features.cache import status as cache_status_service
 from features.catalog import routes as catalog_routes
 from features.compare import routes as compare_routes
 from features.compare import service as compare_service
 from features.library import routes as library_routes
+from features.library import service as library_service
 from features.media import routes as media_routes
 from features.media import warm as media_warm
 from features.settings import routes as settings_routes
@@ -181,8 +183,8 @@ def reset_app_caches():
     compare_service._visible_matchups_cache.clear()
     compare_service._visible_pairing_candidates_cache.clear()
     compare_service._visible_pairing_candidates_refreshing.clear()
-    app_module._rankings_response_cache.clear()
-    app_module._text_search_resolution_cache.clear()
+    library_service._rankings_response_cache.clear()
+    query_constraints._text_search_resolution_cache.clear()
     compare_service._interaction_response_cache.clear()
     media_warm._thumbnail_memory_warm_inflight.clear()
     settings_status.invalidate_settings_response_cache()

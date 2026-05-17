@@ -873,24 +873,24 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn(("db_visible_pool", "sm", "/tmp/default-cache"), calls)
         self.assertIn(("db_top_images", {"limit": 50}), calls)
 
-    def test_library_service_backs_app_rankings_facades(self):
+    def test_library_service_owns_rankings_cache_without_app_facades(self):
         app_factory = importlib.import_module("core.app_factory")
         service = importlib.import_module("features.library.service")
         routes = importlib.import_module("features.library.routes")
 
         self.assertTrue(callable(app_factory.configure_library_service))
-        self.assertIs(app_module._rankings_response_cache, service._rankings_response_cache)
-        self.assertEqual(
-            app_module._rankings_response_cache_ttl_seconds,
-            service._rankings_response_cache_ttl_seconds,
-        )
-        self.assertIs(app_module._api_rankings_impl, service.api_rankings_impl)
+        self.assertIsInstance(service._rankings_response_cache, dict)
+        self.assertGreater(service._rankings_response_cache_ttl_seconds, 0)
+        self.assertTrue(callable(service.api_rankings_impl))
         self.assertTrue(callable(service.date_groups_payload))
         self.assertTrue(callable(service.map_markers_payload))
         self.assertTrue(callable(service.filter_options_payload))
         self.assertTrue(callable(service.stats_payload))
         self.assertTrue(callable(service.copy_rankings_response))
         self.assertTrue(callable(service.cache_rankings_response))
+        self.assertFalse(hasattr(app_module, "_rankings_response_cache"))
+        self.assertFalse(hasattr(app_module, "_rankings_response_cache_ttl_seconds"))
+        self.assertFalse(hasattr(app_module, "_api_rankings_impl"))
         self.assertFalse(hasattr(app_module, "_copy_rankings_response"))
         self.assertFalse(hasattr(app_module, "_cache_rankings_response"))
         self.assertFalse(hasattr(app_module, "api_rankings"))
@@ -903,13 +903,13 @@ class ModularContractTests(unittest.TestCase):
         app_module._invalidate_rankings_cache()
         self.assertFalse(service._rankings_response_cache)
 
-        old_ttl = app_module._rankings_response_cache_ttl_seconds
+        old_ttl = service._rankings_response_cache_ttl_seconds
         try:
-            app_module._rankings_response_cache_ttl_seconds = 0.0
+            service._rankings_response_cache_ttl_seconds = 0.0
             service.cache_rankings_response(("probe",), {"images": []})
             self.assertLessEqual(service._rankings_response_cache[("probe",)]["expires"], service.time.monotonic())
         finally:
-            app_module._rankings_response_cache_ttl_seconds = old_ttl
+            service._rankings_response_cache_ttl_seconds = old_ttl
             app_module._invalidate_rankings_cache()
 
         ranking_route = next(
@@ -1099,7 +1099,7 @@ class ModularContractTests(unittest.TestCase):
         )
         self.assertIn("/tmp/library.db", [key[0] for key in cache_keys])
 
-    def test_core_query_constraints_back_app_search_facades(self):
+    def test_core_query_constraints_own_text_resolution_with_runtime_facades(self):
         app_factory = importlib.import_module("core.app_factory")
         constraints = importlib.import_module("core.query_constraints")
         search_service = importlib.import_module("search_service")
@@ -1109,8 +1109,11 @@ class ModularContractTests(unittest.TestCase):
             self.assertNotIn("import db", contents)
             self.assertNotIn("db.", contents)
 
-        self.assertIs(app_module._text_search_resolution_cache, constraints._text_search_resolution_cache)
-        self.assertIs(app_module._deep_search_query_record_cache, constraints._deep_search_query_record_cache)
+        self.assertIsInstance(constraints._text_search_resolution_cache, dict)
+        self.assertIsInstance(constraints._deep_search_query_record_cache, dict)
+        self.assertFalse(hasattr(app_module, "_text_search_resolution_cache"))
+        self.assertFalse(hasattr(app_module, "_deep_search_query_record_cache"))
+        self.assertFalse(hasattr(app_module, "_deep_search_query_record_cache_ttl_seconds"))
         self.assertIs(app_module._normalize_search_query, constraints.normalize_search_query)
         self.assertIs(app_module._resolve_cached_deep_search, constraints.resolve_cached_deep_search)
         self.assertIs(app_module._encode_text_with_config, constraints.encode_text_with_config)
@@ -1135,8 +1138,8 @@ class ModularContractTests(unittest.TestCase):
         self.assertIs(search_service.encode_text_with_config, constraints.encode_text_with_config)
         self.assertTrue(callable(constraints._CONFIG.get("get_deep_search_query_embedding")))
 
-        app_module._text_search_resolution_cache[("probe", False)] = {"data": {}, "expires": 1}
-        app_module._deep_search_query_record_cache["probe"] = 1
+        constraints._text_search_resolution_cache[("probe", False)] = {"data": {}, "expires": 1}
+        constraints._deep_search_query_record_cache["probe"] = 1
         app_module._invalidate_rankings_cache()
         self.assertFalse(constraints._text_search_resolution_cache)
         self.assertFalse(constraints._deep_search_query_record_cache)
@@ -1227,7 +1230,6 @@ class ModularContractTests(unittest.TestCase):
 
     def test_core_deep_query_record_ttl_provider_controls_record_cache(self):
         old_ttl = query_constraints._deep_search_query_record_cache_ttl_seconds
-        old_app_ttl = app_module._deep_search_query_record_cache_ttl_seconds
         old_config = dict(query_constraints._CONFIG)
         query_constraints.clear_text_search_caches()
         calls = []
@@ -1246,12 +1248,10 @@ class ModularContractTests(unittest.TestCase):
                 invalidate_ai_status_response_cache=lambda: None,
                 invalidate_settings_response_cache=lambda: None,
             )
-            app_module._deep_search_query_record_cache_ttl_seconds = 0.0
             query_constraints._deep_search_query_record_cache_ttl_seconds = 0.0
             asyncio.run(run_probe())
             self.assertEqual(calls, ["ttl probe", "ttl probe"])
         finally:
-            app_module._deep_search_query_record_cache_ttl_seconds = old_app_ttl
             query_constraints._deep_search_query_record_cache_ttl_seconds = old_ttl
             query_constraints._CONFIG.clear()
             query_constraints._CONFIG.update(old_config)

@@ -26,7 +26,6 @@ from core.app_factory import (
 from core import background as background_runtime
 from core import cache_events
 from core import query_constraints
-from features.library import service as library_service
 
 
 APP_DIR = os.path.dirname(__file__)
@@ -54,17 +53,6 @@ _smoke_mode_enabled = background_runtime.smoke_mode_enabled
 track_idle_activity = _app_shell.idle_activity_middleware
 if track_idle_activity is None:
     raise RuntimeError("App idle activity middleware was not configured")
-
-
-# --- Mosaic Ranking API ---
-
-_rankings_response_cache = library_service._rankings_response_cache
-_text_search_resolution_cache = query_constraints._text_search_resolution_cache
-_deep_search_query_record_cache = query_constraints._deep_search_query_record_cache
-# Rankings are invalidated explicitly by rating/flag/catalog changes. Keep the
-# idle TTL long so returning to the app does not pay a cold rebuild tax.
-_rankings_response_cache_ttl_seconds = library_service._rankings_response_cache_ttl_seconds
-_deep_search_query_record_cache_ttl_seconds = query_constraints._deep_search_query_record_cache_ttl_seconds
 
 
 _invalidate_rankings_cache = _runtime_services.invalidate_rankings_cache
@@ -97,11 +85,6 @@ _intersect_image_id_filters = query_constraints.intersect_image_id_filters
 
 
 _resolve_library_constraints = _runtime_services.resolve_library_constraints
-
-
-# --- Rankings API ---
-
-_api_rankings_impl = library_service.api_rankings_impl
 
 
 _lifecycle = _app_shell.lifecycle
