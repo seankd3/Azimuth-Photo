@@ -15,6 +15,7 @@
         <div class="nav-links">
             <a href="/compare" class="nav-link{% if current_nav|trim == 'compare' %} active{% endif %}">Compare</a>
             <a href="/library" class="nav-link{% if current_nav|trim == 'library' %} active{% endif %}">Library</a>
+            <a href="/people" class="nav-link{% if current_nav|trim == 'people' %} active{% endif %}">People</a>
             <a href="/catalog" class="nav-link{% if current_nav|trim == 'catalog' %} active{% endif %}">Catalog</a>
         </div>
     </nav>
@@ -66,7 +67,37 @@
             </div>
         </div>
     </div>
-    <script src="/static/app.js?v={{ static_version }}"></script>
+    <script>
+        window.__photoArchiveWhenReady = window.__photoArchiveWhenReady || function(callback) {
+            window.__photoArchiveInitState = window.__photoArchiveInitState || {
+                scheduled: 0,
+                callbacks: 0,
+                errors: [],
+            };
+            window.__photoArchiveInitState.scheduled += 1;
+            const run = () => {
+                const ready = window.PhotoArchiveReady;
+                if (!ready || typeof ready.then !== 'function') {
+                    setTimeout(run, 0);
+                    return;
+                }
+                ready.then((api) => {
+                    window.__photoArchiveInitState.callbacks += 1;
+                    return callback(api);
+                }).catch((error) => {
+                    const message = error && error.message ? error.message : String(error);
+                    window.__photoArchiveInitState.errors.push(message);
+                    console.error('PhotoArchive page init failed:', error);
+                });
+            };
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', run);
+            } else {
+                run();
+            }
+        };
+    </script>
+    <script type="module" src="/static/app.js?v={{ static_version }}"></script>
     {% block scripts %}{% endblock %}
 </body>
 </html>

@@ -124,6 +124,10 @@ body.settings-shell main {
     overflow: auto;
 }
 
+body.people-shell main {
+    overflow: auto;
+}
+
 body.loupe-open {
     overflow: hidden;
 }
@@ -3274,6 +3278,226 @@ body.library-shell.date-scrubber-active .date-group-header {
     transform: translateX(-50%) translateY(0);
 }
 
+/* People */
+.people-page {
+    width: min(1320px, calc(100vw - 32px));
+    margin: 0 auto;
+    padding: 24px 0 40px;
+}
+
+.people-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 22px;
+}
+
+.people-header h1 {
+    font-size: 28px;
+    line-height: 1.1;
+    margin-bottom: 8px;
+}
+
+.people-status-line {
+    color: var(--text-secondary);
+    font-size: 13px;
+}
+
+.people-license-line {
+    color: var(--text-muted);
+    font-size: 12px;
+    margin-top: 4px;
+    max-width: 920px;
+    overflow-wrap: anywhere;
+}
+
+.people-section {
+    margin-top: 24px;
+}
+
+.people-section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+}
+
+.people-section h2,
+.people-other-section summary {
+    font-size: 16px;
+    color: var(--text-bright);
+}
+
+.people-other-section summary {
+    cursor: pointer;
+    margin-bottom: 10px;
+}
+
+.people-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 10px;
+}
+
+.people-card,
+.people-review-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-lg);
+    padding: 10px;
+    min-width: 0;
+}
+
+.people-thumb {
+    width: 74px;
+    height: 74px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-md);
+    background: var(--bg-input);
+    overflow: hidden;
+    flex: 0 0 auto;
+    padding: 0;
+    cursor: pointer;
+}
+
+.people-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.people-thumb-placeholder {
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(135deg, #333, #222);
+}
+
+.people-card-main {
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.people-card-title {
+    font-weight: 700;
+    color: var(--text-bright);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.people-card-meta {
+    color: var(--text-muted);
+    font-size: 12px;
+    margin-top: 3px;
+}
+
+.people-card-unnamed .people-card-meta {
+    margin-top: 0;
+}
+
+.people-label-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.people-label-row input {
+    min-width: 0;
+    width: 100%;
+    height: 28px;
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-sm);
+    background: var(--bg-input);
+    color: var(--text-primary);
+    padding: 0 8px;
+}
+
+.people-card-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex: 0 0 auto;
+}
+
+.people-review-list {
+    display: grid;
+    gap: 8px;
+}
+
+.people-review-row {
+    justify-content: space-between;
+}
+
+.people-review-pair {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    min-width: 0;
+}
+
+.people-review-face {
+    display: grid;
+    justify-items: center;
+    gap: 5px;
+    min-width: 92px;
+}
+
+.people-review-face-thumb {
+    width: 92px;
+    height: 92px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-md);
+    background: var(--bg-input);
+    overflow: hidden;
+    padding: 0;
+    cursor: pointer;
+}
+
+.people-review-face-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.people-review-face-label {
+    max-width: 112px;
+    color: var(--text-bright);
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.2;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.people-review-face-meta {
+    color: var(--text-muted);
+    font-size: 11px;
+}
+
+.people-review-match {
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 700;
+    min-width: 48px;
+    text-align: center;
+}
+
+.people-empty {
+    color: var(--text-muted);
+    background: var(--bg-surface);
+    border: 1px dashed var(--border-strong);
+    border-radius: var(--radius-lg);
+    padding: 18px;
+}
+
 @media (max-width: 900px) {
     .settings-hero {
         flex-direction: column;
@@ -3290,6 +3514,16 @@ body.library-shell.date-scrubber-active .date-group-header {
 
     .bar-nav {
         margin-left: 0;
+    }
+
+    .people-header,
+    .people-review-row {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .people-review-pair {
+        justify-content: center;
     }
 }
 
@@ -3324,5 +3558,15 @@ body.library-shell.date-scrubber-active .date-group-header {
         border-top: 1px solid var(--border-default);
         padding-top: var(--space-xs);
         margin-top: var(--space-xs);
+    }
+    .people-page {
+        width: calc(100vw - 20px);
+        padding-top: 16px;
+    }
+    .people-card {
+        align-items: flex-start;
+    }
+    .people-card-actions {
+        flex-direction: row;
     }
 }

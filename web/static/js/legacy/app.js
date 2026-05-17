@@ -1,0 +1,3087 @@
+import {
+    escapeHtml,
+    formatBytes,
+    hideConfirmModal as hideConfirmModalUi,
+    hideShortcuts as hideShortcutsUi,
+    initBottomBarMeasurement as initBottomBarMeasurementUi,
+    initShortcutOverlay,
+    initVisibilityRefresh as initVisibilityRefreshUi,
+    jsString,
+    showConfirmModal as showConfirmModalUi,
+    showShortcuts as showShortcutsUi,
+    showToast as showToastUi,
+    updateBottomBarHeightVar as updateBottomBarHeightVarUi,
+} from '../ui.js';
+import {
+    backgroundWorkStatusText,
+    setSettingsStatus,
+} from '../settings/status.js';
+import {
+    renderAutoTuningStatus,
+    renderCacheSettingsStatus,
+} from '../settings/cache_status.js';
+import {
+    applySelectedEmbeddingPreset,
+    renderAISettingsStatus,
+    renderEmbeddingModelPresets,
+    renderModelStatus,
+} from '../settings/ai_status.js';
+import { renderPeopleSettingsStatus } from '../settings/people_status.js';
+import { workBannerHtml } from '../settings/work_banner.js';
+import {
+    backgroundWorkModeLabel,
+    THUMB_OUTPUT_FIELDS,
+} from '../settings/display.js';
+import {
+    collectSettingsForm as collectSettingsFormCore,
+    populateSettingsForm as populateSettingsFormCore,
+    rememberThumbnailOutput,
+    renderDeepSearchSchedule,
+    renderDeepSearchTerms,
+    selectedBackgroundWorkMode,
+    setBackgroundWorkMode,
+    updateCacheProfileHint,
+    updateThumbnailChangeNotice,
+} from '../settings/form.js';
+import { createSettingsApi } from '../settings/controller.js';
+import { fetchJson } from '../api.js';
+import {
+    createAIStatusPoller,
+} from '../ai/poller.js';
+import { toggleAIPanel } from '../ai/status.js';
+import { createCatalogApi } from '../catalog/controller.js';
+import {
+    buildFilterNeighborStates as buildFilterNeighborStatesCore,
+    EMPTY_FILTERS as EMPTY_FILTERS_CORE,
+    filterParams as filterParamsCore,
+    filterQueryString as filterQueryStringCore,
+    normalizeFilterState as normalizeFilterStateCore,
+    syncLibraryUrlState as syncLibraryUrlStateCore,
+} from '../query_state.js';
+import {
+    activeMetadataFilterCount as activeMetadataFilterCountCore,
+    hasActiveFilters,
+    initStarHover as initStarHoverCore,
+    loadFilterOptions as loadFilterOptionsCore,
+    loadFolderList as loadFolderListCore,
+    scheduleFilterOptionsLoad as scheduleFilterOptionsLoadCore,
+    toggleMetadataFilters as toggleMetadataFiltersCore,
+    updateMetadataFilterButton as updateMetadataFilterButtonCore,
+} from '../filters.js';
+import {
+    clearLibraryFilters as clearLibraryFiltersCore,
+    FILTER_STORAGE_KEY,
+    applyFilterUiState as applyFilterUiStateCore,
+    restoreFilters as restoreFiltersCore,
+    saveFilters as saveFiltersCore,
+    setFilter as setLibraryFilterCore,
+    toggleFilter as toggleFilterCore,
+    toggleStar as toggleStarCore,
+} from '../library/filters.js';
+import { createMediaStatusClient } from '../media_status.js';
+import {
+    compareThumbUrls,
+    createImagePreloader,
+    createWarmupManager,
+    imageThumbUrls,
+    loadImageProbe,
+    withTimeout,
+} from '../warmup.js';
+import {
+    buildCompareUrl as buildCompareUrlCore,
+    buildMosaicUrl as buildMosaicUrlCore,
+} from '../compare/query.js';
+import {
+    adoptMosaicTier as adoptMosaicTierCore,
+    mosaicGridElo as mosaicGridEloCore,
+    mosaicLoserIds,
+    mosaicReplacementIndices,
+    mosaicSizeFromThumbHeight,
+    mosaicThumbHeightForSize,
+    postMosaicPick,
+    renderMosaicGrid,
+    scheduleMosaicImageUpgrade as scheduleMosaicImageUpgradeCore,
+    upgradeMosaicCellImage as upgradeMosaicCellImageCore,
+} from '../compare/mosaic.js';
+import {
+    deselectMosaicCell as deselectMosaicCellCore,
+    findMosaicCellInDirection as findMosaicCellInDirectionCore,
+    selectMosaicCell as selectMosaicCellCore,
+} from '../compare/navigation.js';
+import {
+    adoptCompareTier as adoptCompareTierCore,
+    renderCompareImage as renderCompareImageCore,
+    upgradeCompareImage as upgradeCompareImageCore,
+} from '../compare/images.js';
+import {
+    setCompareModeView as setCompareModeViewCore,
+    showCompareEmpty as showCompareEmptyCore,
+} from '../compare/view.js';
+import {
+    applyComparisonElos as applyComparisonElosCore,
+    buildComparisonPayload as buildComparisonPayloadCore,
+    postComparison as postComparisonCore,
+    postUndoComparison as postUndoComparisonCore,
+    undoComparisonToastText as undoComparisonToastTextCore,
+} from '../compare/actions.js';
+import {
+    fetchPropagationCount as fetchPropagationCountCore,
+    precomputePropagationCounts,
+} from '../compare/propagation.js';
+import {
+    bumpRankingSignals as bumpRankingSignalsCore,
+    mergeCoverageStats as mergeCoverageStatsCore,
+    renderCompareProgress as renderCompareProgressCore,
+    renderCoverageBar as renderCoverageBarCore,
+    rollUpCounter as rollUpCounterCore,
+    showPropagationBadge as showPropagationBadgeCore,
+} from '../compare/status.js';
+import { renderCacheTierGuide } from '../cache/guide.js';
+import {
+    LOUPE_BLANK_SRC,
+    LOUPE_TIER_RANKS,
+    LOUPE_TIER_TIMEOUTS,
+    loupeTierUrl as loupeTierUrlCore,
+} from '../loupe/tiers.js';
+import {
+    cancelLoupeProbes as cancelLoupeProbesCore,
+    loadLoupeTier as loadLoupeTierCore,
+    runLoupeProgressiveLoad as runLoupeProgressiveLoadCore,
+} from '../loupe/loading.js';
+import {
+    clearLoupeTierLoading as clearLoupeTierLoadingCore,
+    renderLoupeStatusLine as renderLoupeStatusLineCore,
+    setLoupeTierLoading as setLoupeTierLoadingCore,
+} from '../loupe/status.js';
+import {
+    renderLoupeMetadata as renderLoupeMetadataCore,
+    renderLoupeMetadataOverlay,
+} from '../loupe/metadata.js';
+import {
+    loupeHotSetTierIds,
+    loupeNeighborOffsets,
+} from '../loupe/navigation.js';
+import {
+    buildFilmstrip as buildFilmstripCore,
+    clearFilmstrip as clearFilmstripCore,
+    updateFilmstripActive as updateFilmstripActiveCore,
+    updateFilmstripCounter as updateFilmstripCounterCore,
+} from '../loupe/filmstrip.js';
+import {
+    focusLoupe as focusLoupeCore,
+    loupeFocusableElements as loupeFocusableElementsCore,
+    trapLoupeFocus as trapLoupeFocusCore,
+} from '../loupe/focus.js';
+import {
+    applyLoupeImageSize as applyLoupeImageSizeCore,
+    applyLoupeTransform as applyLoupeTransformCore,
+    clampLoupePan as clampLoupePanCore,
+    loupeComputeFitScale as loupeComputeFitScaleCore,
+    updateLoupeZoomIndicator as updateLoupeZoomIndicatorCore,
+} from '../loupe/zoom.js';
+import { rankingQueryString as rankingQueryStringCore } from '../library/query.js';
+import {
+    SORT_KEYS,
+    sortStateFromValue,
+    sortValueForState,
+} from '../library/sort.js';
+import {
+    clearPersistedSearchState as clearPersistedSearchStateCore,
+    restoreSearchSortState as restoreSearchSortStateCore,
+    restoreSearchState as restoreSearchStateCore,
+    restoreSortState as restoreSortStateCore,
+    saveSearchSortState as saveSearchSortStateCore,
+    saveSearchState as saveSearchStateCore,
+    saveSortState as saveSortStateCore,
+} from '../library/search_state.js';
+import {
+    syncSortControls as syncSortControlsCore,
+    updateCompareSearchIndicator as updateCompareSearchIndicatorCore,
+    updateSearchControls as updateSearchControlsCore,
+    updateSimilaritySortOption as updateSimilaritySortOptionCore,
+    updateSortDirIcon as updateSortDirIconCore,
+} from '../library/search_controls.js';
+import {
+    applySearchQueryChange as applySearchQueryChangeCore,
+    clearSearch as clearSearchCore,
+    initSearchInputControls as initSearchInputControlsCore,
+    runDeepSearch as runDeepSearchCore,
+} from '../library/search_controller.js';
+import {
+    setCurrentLibraryFlag as setCurrentLibraryFlagCore,
+    setImageFlag as setImageFlagCore,
+    updateImageFlagLocal as updateImageFlagLocalCore,
+} from '../library/flags.js';
+import {
+    batchExport as batchExportCore,
+    batchFlag as batchFlagCore,
+    clearBatchSelection as clearBatchSelectionCore,
+    handleCardClick as handleCardClickCore,
+    toggleBatchMode as toggleBatchModeCore,
+    updateBatchBar as updateBatchBarCore,
+} from '../library/batch.js';
+import { exportRankings as exportRankingsCore } from '../export/actions.js';
+import {
+    eloToStars,
+    flagBadge,
+    flagClass,
+    formatDateGroup,
+    getConfidenceClass,
+    getTierClass,
+    libraryCardInfoLine as libraryCardInfoLineCore,
+} from '../library/display.js';
+import {
+    hideLibraryEmptyState as hideLibraryEmptyStateCore,
+    libraryScrollRoot as libraryScrollRootCore,
+    restoreScrollPosition as restoreScrollPositionCore,
+    saveScrollPosition as saveScrollPositionCore,
+    scrollLibraryContainerToElement as scrollLibraryContainerToElementCore,
+    scrollToTop as scrollToTopCore,
+    updateBackToTopButton as updateBackToTopButtonCore,
+    updateLibraryEmptyState as updateLibraryEmptyStateCore,
+} from '../library/shell.js';
+import {
+    dateGroupOffset as dateGroupOffsetCore,
+    findDateGroupHeader as findDateGroupHeaderCore,
+    isDateSortValue,
+    renderDateScrubber as renderDateScrubberCore,
+    setActiveDateScrubberGroup as setActiveDateScrubberGroupCore,
+    setupDateScrubberScrollTracking as setupDateScrubberScrollTrackingCore,
+    teardownDateScrubberScrollTracking as teardownDateScrubberScrollTrackingCore,
+} from '../library/date_scrubber.js';
+import {
+    deselectLibraryCard as deselectLibraryCardCore,
+    findCardInDirection as findCardInDirectionCore,
+    selectLibraryCard as selectLibraryCardCore,
+} from '../library/navigation.js';
+import { bindLibraryKeyboard } from '../library/keyboard.js';
+import { createLibraryMapController } from '../library/map_controller.js';
+import {
+    formatDateTime,
+    imageAspectRatio,
+    imageMetadataTitle,
+} from '../media_metadata.js';
+import {
+    hasActiveTextSearch as hasActiveTextSearchCore,
+    searchModeForQuery,
+} from '../search/query.js';
+import { createFindSimilarAction } from '../library/similar.js';
+import { createPeopleApi } from '../people/controller.js';
+
+const legacyPhotoArchive = (() => {
+    // --- Compare Mode State ---
+    let comparePairs = [];
+    let compareIndex = 0;
+    let compareMode = 'swiss';
+    let compareModeTransitionToken = 0;
+    let compareBusy = false;
+    let compareActionSeq = 0;
+    let undoCount = 0;
+    let compareStats = {};
+    let coverageStatsLastFetched = 0;
+    let coverageStatsFetchPromise = null;
+    let compareImageToken = 0;
+    const compareDisplayedTier = { left: -1, right: -1 };
+    const COVERAGE_STATS_THROTTLE_MS = 30000;
+
+    // --- Rankings State ---
+    let rankingsOffset = 0;
+    const INITIAL_RANKINGS_PAGE_SIZE = 48;
+    const RANKINGS_PAGE_SIZE = 100;
+    const CROSS_VIEW_WARM_DELAY_MS = 1000;
+    const LIBRARY_NEIGHBOR_LIMIT = 24;
+    const MOSAIC_NEIGHBOR_LIMIT = 8;
+    const MOSAIC_REPLACEMENT_TARGET = 24;
+    const MOSAIC_REPLACEMENT_FETCH_MIN = 12;
+    const MOSAIC_REPLACEMENT_LOW_WATER = 8;
+    const MOSAIC_REPLACEMENT_PROBE_CONCURRENCY = 4;
+    const MOSAIC_REPLACEMENT_PRELOAD_TIMEOUT_MS = 900;
+    const COMPARE_NEIGHBOR_PAIRS = 4;
+    const FILMSTRIP_WINDOW_RADIUS = 55;
+    const mediaStatusClient = createMediaStatusClient({ maxAgeMs: 15000 });
+    let uiSettings = { show_loupe_cache_status: true };
+    let uiSettingsPromise = null;
+    let selectedLibraryIndex = -1;
+    let selectedMosaicIndex = -1;
+    const aiStatusPoller = createAIStatusPoller({
+        initVisibilityRefresh,
+    });
+    const warmups = createWarmupManager({
+        fetchJsonImpl: fetchJson,
+        preloadImageWithTimeout,
+        onWarmTiersApplied: handleWarmTiersApplied,
+    });
+    const {
+        clearWarmups,
+        enqueueWarmup,
+        fetchWarmJson,
+        scheduleBackgroundWarm,
+        takeWarmCache,
+        warmImageTiers,
+        warmRequests,
+    } = warmups;
+
+    function currentWarmupGeneration() {
+        return warmups.currentGeneration();
+    }
+
+    function updateBottomBarHeightVar() {
+        updateBottomBarHeightVarUi({
+            onMeasured: () => {
+                if (document.getElementById('mosaic-grid')) scheduleMosaicRender();
+            },
+        });
+    }
+
+    function initBottomBarMeasurement() {
+        initBottomBarMeasurementUi({
+            onMeasured: () => {
+                if (document.getElementById('mosaic-grid')) scheduleMosaicRender();
+            },
+        });
+    }
+
+    function startAIStatusPolling(initialDelayMs = 0, { immediate = false } = {}) {
+        aiStatusPoller.start(initialDelayMs);
+        if (immediate && !document.hidden) {
+            aiStatusPoller.poll();
+        }
+    }
+
+    function initVisibilityRefresh() {
+        initVisibilityRefreshUi({
+            onVisible: () => {
+                aiStatusPoller.handleVisible();
+                if (settingsPoller) refreshSettingsMeta().catch(() => {});
+            },
+        });
+    }
+
+    function invalidateMediaStatusesForPayload(payload) {
+        mediaStatusClient.invalidateForPayload(payload);
+    }
+
+    function handleWarmTiersApplied(payload) {
+        invalidateMediaStatusesForPayload(payload);
+        const currentId = Number(loupeCurrentImage?.id || 0);
+        if (!currentId) return;
+        const includesCurrent = Object.values(payload).some((ids) => (ids || []).includes(currentId));
+        if (includesCurrent) refreshLoupeMediaStatus(loupeCurrentImage, loupeImageToken, { force: true });
+    }
+
+    async function loadUiSettings() {
+        if (uiSettingsPromise) return uiSettingsPromise;
+        uiSettingsPromise = fetchJson('/api/ui/settings', { defaultValue: null })
+            .then((data) => {
+                const values = data?.settings || data || {};
+                uiSettings = {
+                    ...uiSettings,
+                    show_loupe_cache_status: values.show_loupe_cache_status !== false,
+                };
+                renderLoupeStatusLine();
+                return uiSettings;
+            })
+            .catch(() => uiSettings)
+            .finally(() => {
+                uiSettingsPromise = null;
+            });
+        return uiSettingsPromise;
+    }
+
+    // ==================== MOSAIC RANKING MODE ====================
+
+    let mosaicSize = 12;
+    let mosaicImages = []; // currently visible images [{id, filename, elo, thumb_url}, ...]
+    let mosaicAge = []; // how many clicks each image has survived on the board
+    let mosaicPickCount = 0;
+    let mosaicStrategy = 'diverse';
+    let mosaicPropagationCounts = {}; // precomputed: {imageId: predictedCount}
+    let mosaicRenderToken = 0;
+    let mosaicResizeRaf = null;
+
+    function mosaicGridElo() {
+        return mosaicGridEloCore(mosaicImages);
+    }
+
+    async function loadMosaicBatch() {
+        const url = buildMosaicUrl({ n: mosaicSize });
+        // Never use warm cache for diverse strategy — each load should be fresh
+        const data = (mosaicStrategy !== 'diverse' ? takeWarmCache(`compare:${url}`) : null) || await fetchWarmJson(url);
+        if (!data) return;
+        compareStats = data.stats || {};
+        updateCompareProgress();
+
+        if (data.images.length < 2) {
+            showCompareEmpty();
+            return;
+        }
+
+        mosaicImages = data.images;
+        mosaicAge = new Array(data.images.length).fill(0);
+        mosaicPickCount = 0;
+        mosaicReplacements = [];
+        mosaicFilling = false;
+        mosaicBusy = false;
+        primeMediaStatuses(mosaicImages.map((img) => img.id));
+        renderMosaic();
+        warmImageTiers({
+            md: mosaicImages.map((img) => img.id),
+            lg: mosaicImages.map((img) => img.id),
+        });
+        mosaicFillReplacements();
+        precomputePropagation();
+        scheduleCompareNeighborWarmup('mosaic');
+        scheduleCrossViewWarmup('compare');
+    }
+
+    function renderMosaic() {
+        const grid = document.getElementById('mosaic-grid');
+        if (!grid) return;
+        selectedMosaicIndex = -1;
+        const token = ++mosaicRenderToken;
+        renderMosaicGrid({
+            images: mosaicImages,
+            grid,
+            token,
+            onPick: mosaicClick,
+            preloadImage,
+            scheduleImageUpgrade: scheduleMosaicImageUpgrade,
+        });
+    }
+
+    function scheduleMosaicRender() {
+        if (mosaicResizeRaf) cancelAnimationFrame(mosaicResizeRaf);
+        mosaicResizeRaf = requestAnimationFrame(() => {
+            mosaicResizeRaf = null;
+            if (compareMode === 'mosaic' && mosaicImages.length) renderMosaic();
+        });
+    }
+
+    function scheduleMosaicImageUpgrade(cell, img, rowH, token, index = 0) {
+        scheduleMosaicImageUpgradeCore(cell, img, rowH, token, index, {
+            upgradeImage: upgradeMosaicCellImage,
+        });
+    }
+
+    async function upgradeMosaicCellImage(cell, img, rowH, token) {
+        return upgradeMosaicCellImageCore(cell, img, rowH, token, {
+            getRenderToken: () => mosaicRenderToken,
+            getMediaStatus,
+            adoptTier: adoptMosaicTier,
+        });
+    }
+
+    async function adoptMosaicTier(cell, img, tier, cachedOnly, token, timeoutMs) {
+        return adoptMosaicTierCore(cell, img, tier, cachedOnly, token, timeoutMs, {
+            getRenderToken: () => mosaicRenderToken,
+            loadImageProbeImpl: loadImageProbe,
+            loupeTierUrlImpl: loupeTierUrl,
+        });
+    }
+
+    // Pre-fetched replacement images ready to swap in instantly
+    let mosaicReplacements = [];
+    let mosaicFilling = false;
+
+    function mosaicFillReplacements() {
+        if (mosaicFilling || mosaicReplacements.length >= MOSAIC_REPLACEMENT_TARGET) return;
+        mosaicFilling = true;
+        const generation = currentWarmupGeneration();
+        const renderToken = mosaicRenderToken;
+        enqueueWarmup(async () => {
+            try {
+                if (generation !== currentWarmupGeneration() || renderToken !== mosaicRenderToken) return;
+                const needed = Math.max(
+                    MOSAIC_REPLACEMENT_FETCH_MIN,
+                    MOSAIC_REPLACEMENT_TARGET - mosaicReplacements.length,
+                );
+                const excludeIds = [
+                    ...mosaicImages.map(img => img.id),
+                    ...mosaicReplacements.map(img => img.id),
+                ].join(',');
+                const res = await fetch(buildMosaicUrl({ n: needed, exclude: excludeIds }));
+                const data = await res.json();
+                if (generation !== currentWarmupGeneration() || renderToken !== mosaicRenderToken) return;
+                if (data.stats) {
+                    compareStats = data.stats;
+                    updateCompareProgress();
+                }
+                // Deduplicate against the grid and existing replacements, but stream
+                // ready thumbnails into the buffer so one slow probe cannot stall all swaps.
+                const inBuffer = new Set(mosaicReplacements.map(img => img.id));
+                const candidates = [];
+                for (const img of data.images || []) {
+                    const onGrid = mosaicImages.some((entry) => entry.id === img.id);
+                    if (!onGrid && !inBuffer.has(img.id)) {
+                        inBuffer.add(img.id);
+                        candidates.push(img);
+                    }
+                }
+                let readyCount = 0;
+                const addWhenReady = async (img) => {
+                    const probe = await loadImageProbe(img.thumb_url, {
+                        priority: 'auto',
+                        timeoutMs: MOSAIC_REPLACEMENT_PRELOAD_TIMEOUT_MS,
+                    });
+                    if (!probe.ok || generation !== currentWarmupGeneration() || renderToken !== mosaicRenderToken) return;
+                    const currentGrid = new Set(mosaicImages.map((entry) => entry.id));
+                    if (currentGrid.has(img.id) || mosaicReplacements.some((entry) => entry.id === img.id)) return;
+                    if (mosaicReplacements.length >= MOSAIC_REPLACEMENT_TARGET) return;
+                    mosaicReplacements.push(img);
+                    readyCount++;
+                };
+                for (let start = 0; start < candidates.length; start += MOSAIC_REPLACEMENT_PROBE_CONCURRENCY) {
+                    if (generation !== currentWarmupGeneration() || renderToken !== mosaicRenderToken) return;
+                    if (mosaicReplacements.length >= MOSAIC_REPLACEMENT_TARGET) break;
+                    const chunk = candidates.slice(start, start + MOSAIC_REPLACEMENT_PROBE_CONCURRENCY);
+                    await Promise.all(chunk.map(addWhenReady));
+                }
+                if (mosaicReplacements.length < MOSAIC_REPLACEMENT_FETCH_MIN && candidates.length > readyCount) {
+                    setTimeout(() => mosaicFillReplacements(), 300);
+                }
+            } catch {} finally {
+                mosaicFilling = false;
+            }
+        }, {
+            generation,
+            onDrop: () => {
+                mosaicFilling = false;
+            },
+        });
+    }
+
+    let mosaicBusy = false;
+    let mosaicActionSeq = 0;
+
+    function mosaicClick(id) {
+        if (mosaicBusy) return;
+        const idx = mosaicImages.findIndex(img => img.id === id);
+        if (idx === -1) return;
+        mosaicBusy = true;
+        undoCount = 0;
+        const actionSeq = ++mosaicActionSeq;
+
+        const otherIds = mosaicLoserIds(mosaicImages, id);
+
+        const snapshot = {
+            renderToken: mosaicRenderToken,
+            images: mosaicImages.slice(),
+            age: mosaicAge.slice(),
+            replacements: mosaicReplacements.slice(),
+            stats: { ...compareStats },
+            propagationCounts: { ...mosaicPropagationCounts },
+        };
+
+        const savePick = postMosaicPick(id, otherIds);
+
+        // Update stats using precomputed propagation count if available
+        const propagated = mosaicPropagationCounts[id] || 0;
+        bumpRankingSignals(otherIds.length + propagated, otherIds.length);
+        updateCompareProgress();
+        const needsPropagationPoll = propagated <= 0;
+        if (propagated > 0) {
+            showPropagationBadge(propagated);
+        }
+
+        // Green flash + scale pulse on the picked cell
+        const cells = document.querySelectorAll('.mosaic-cell');
+        const pickedCell = cells[idx];
+        if (pickedCell) pickedCell.classList.add('mosaic-picked');
+
+        // Age all non-clicked images
+        for (let i = 0; i < mosaicAge.length; i++) {
+            if (i !== idx) mosaicAge[i]++;
+        }
+
+        const replaceIndices = mosaicReplacementIndices(mosaicAge, idx);
+
+        if (mosaicRenderToken === snapshot.renderToken) {
+            for (const ri of replaceIndices) {
+                const targetCell = cells[ri];
+                if (!targetCell) continue;
+                if (mosaicReplacements.length === 0) {
+                    targetCell.classList.remove('mosaic-picked');
+                    mosaicFillReplacements();
+                    continue;
+                }
+                const newImg = mosaicReplacements.shift();
+                if (mosaicReplacements.length < MOSAIC_REPLACEMENT_LOW_WATER) {
+                    mosaicFillReplacements();
+                }
+                mosaicImages[ri] = newImg;
+                mosaicAge[ri] = 0;
+                targetCell.dataset.id = newImg.id;
+                targetCell.onclick = () => mosaicClick(newImg.id);
+                const imgEl = targetCell.querySelector('img');
+                if (imgEl) {
+                    imgEl.dataset.tierRank = '0';
+                    imgEl.src = newImg.thumb_url;
+                    imgEl.alt = newImg.filename;
+                    imgEl.classList.add('loaded');
+                    targetCell.classList.remove('skeleton-cell');
+                }
+                targetCell.classList.remove('mosaic-picked');
+                scheduleMosaicImageUpgrade(targetCell, newImg, targetCell.clientHeight || 220, mosaicRenderToken, ri);
+            }
+            mosaicFillReplacements();
+        }
+
+        mosaicBusy = false;
+
+        savePick.then((saveResult) => {
+            if (!saveResult.ok) {
+                if (mosaicRenderToken === snapshot.renderToken && mosaicActionSeq === actionSeq) {
+                    mosaicImages = snapshot.images;
+                    mosaicAge = snapshot.age;
+                    mosaicReplacements = snapshot.replacements;
+                    compareStats = snapshot.stats;
+                    mosaicPropagationCounts = snapshot.propagationCounts;
+                    renderMosaic();
+                    updateCompareProgress();
+                    showToast('Failed to save pick; restored the previous grid');
+                } else {
+                    showToast('Failed to save pick');
+                }
+                return;
+            }
+
+            // Refill replacement buffer and recompute propagation for new grid
+            if (needsPropagationPoll) {
+                fetchPropagationCount(0);
+            }
+            mosaicFillReplacements();
+            precomputePropagation();
+
+            if (mosaicImages.length < 2) {
+                showCompareEmpty();
+            }
+        });
+    }
+
+    function showToast(msg) {
+        showToastUi(msg, { beforeShow: updateBottomBarHeightVar });
+    }
+
+    function showConfirmModal(title, text, onConfirm) {
+        showConfirmModalUi(title, text, onConfirm);
+    }
+
+    function hideConfirmModal() {
+        hideConfirmModalUi();
+    }
+
+    function setMosaicStrategy(strategy) {
+        clearWarmups();
+        mosaicStrategy = strategy;
+        const btn = document.getElementById('strategy-' + strategy);
+        if (btn) {
+            btn.parentElement.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+        }
+        loadMosaicBatch();
+    }
+
+    function mosaicShuffle() {
+        loadMosaicBatch();
+    }
+
+    // ==================== COMPARE MODE ====================
+
+    async function initCompare() {
+        initBottomBarMeasurement();
+        startAIStatusPolling(750, { immediate: true });
+        document.addEventListener('keydown', handleCompareKey);
+        window.addEventListener('resize', scheduleMosaicRender);
+        document.getElementById('compare-left').addEventListener('click', () => submitComparison('left'));
+        document.getElementById('compare-right').addEventListener('click', () => submitComparison('right'));
+        // Set slider to match default mosaic size (12 images → slider ~168)
+        const slider = document.getElementById('thumb-size');
+        if (slider) {
+            slider.value = mosaicThumbHeightForSize(mosaicSize);
+        }
+        restoreFilters();
+        restoreSearchState();
+        initSearchInputControls();
+        setCompareMode('mosaic');
+        setTimeout(() => {
+            loadFolderList();
+            scheduleFilterOptionsLoad();
+        }, 500);
+        initStarHover();
+    }
+
+    async function fetchComparePairs() {
+        const url = buildCompareUrl(compareMode, 8);
+        const useCache = compareIndex === 0 && comparePairs.length === 0;
+        const data = (useCache ? takeWarmCache(`compare:${url}`) : null) || await fetchWarmJson(url);
+        if (!data) return;
+        compareStats = data.stats || {};
+
+        if (data.pairs.length === 0 && comparePairs.length === 0) {
+            showCompareEmpty();
+            return;
+        }
+
+        // Append new pairs
+        for (const pair of data.pairs) {
+            comparePairs.push(pair);
+            preloadImage(pair.left.thumb_url);
+            preloadImage(pair.right.thumb_url);
+        }
+
+        if (compareIndex === 0) {
+            scheduleCompareNeighborWarmup(compareMode);
+        }
+        scheduleCrossViewWarmup('compare');
+    }
+
+    function showComparePair() {
+        if (compareIndex >= comparePairs.length) {
+            // Fetch more pairs
+            compareIndex = 0;
+            comparePairs = [];
+            fetchComparePairs().then(() => {
+                if (comparePairs.length > 0) showComparePair();
+            });
+            return;
+        }
+
+        const pair = comparePairs[compareIndex];
+        const token = ++compareImageToken;
+        const leftImg = document.getElementById('compare-left-img');
+        const rightImg = document.getElementById('compare-right-img');
+        const leftInfo = document.getElementById('compare-left-info');
+        const rightInfo = document.getElementById('compare-right-info');
+
+        if (leftInfo) leftInfo.textContent = `${pair.left.filename} — ${pair.left.elo}`;
+        if (rightInfo) rightInfo.textContent = `${pair.right.filename} — ${pair.right.elo}`;
+        primeMediaStatuses([pair.left.id, pair.right.id]);
+        renderCompareImage(pair.left, leftImg, 'left', token);
+        renderCompareImage(pair.right, rightImg, 'right', token);
+        warmImageTiers({
+            lg: [pair.left.id, pair.right.id],
+            full: [pair.left.id, pair.right.id],
+        });
+
+        updateCompareProgress();
+
+        // Prefetch if running low
+        if (comparePairs.length - compareIndex < 4) {
+            fetchComparePairs();
+        }
+    }
+
+    function isCurrentCompareImage(token) {
+        return token === compareImageToken && compareIndex < comparePairs.length;
+    }
+
+    function renderCompareImage(img, imgEl, side, token) {
+        renderCompareImageCore(img, imgEl, side, token, {
+            displayedTiers: compareDisplayedTier,
+            isCurrentCompareImage,
+            upgradeCompareImageImpl: upgradeCompareImage,
+        });
+    }
+
+    async function upgradeCompareImage(img, imgEl, side, token) {
+        return upgradeCompareImageCore(img, imgEl, side, token, {
+            getMediaStatus,
+            isCurrentCompareImage,
+            adoptCompareTierImpl: adoptCompareTier,
+        });
+    }
+
+    async function adoptCompareTier(img, imgEl, side, tier, cachedOnly, token, timeoutMs) {
+        return adoptCompareTierCore(img, imgEl, side, tier, cachedOnly, token, timeoutMs, {
+            displayedTiers: compareDisplayedTier,
+            loadImageProbeImpl: loadImageProbe,
+            loupeTierUrlImpl: loupeTierUrl,
+            isCurrentCompareImage,
+        });
+    }
+
+    let _displayedComparisons = -1;
+
+    function bumpRankingSignals(signalDelta, directDelta = 0) {
+        bumpRankingSignalsCore(compareStats, signalDelta, directDelta);
+    }
+
+    function updateCompareProgress() {
+        _displayedComparisons = renderCompareProgressCore({
+            stats: compareStats,
+            displayedComparisons: _displayedComparisons,
+            updateCoverageBarImpl: updateCoverageBar,
+            rollUpCounterImpl: rollUpCounter,
+        });
+    }
+
+    function renderCoverageBar(stats = compareStats) {
+        return renderCoverageBarCore(stats);
+    }
+
+    function mergeCoverageStats(stats) {
+        mergeCoverageStatsCore(compareStats, stats);
+    }
+
+    function updateCoverageBar() {
+        if (!renderCoverageBar()) return;
+        const now = Date.now();
+        if (coverageStatsFetchPromise || now - coverageStatsLastFetched < COVERAGE_STATS_THROTTLE_MS) return;
+        coverageStatsLastFetched = now;
+        coverageStatsFetchPromise = fetch('/api/stats')
+            .then((res) => res.json())
+            .then((stats) => {
+                mergeCoverageStats(stats);
+                renderCoverageBar(stats);
+                updateCompareProgress();
+            })
+            .catch(() => {})
+            .finally(() => {
+                coverageStatsFetchPromise = null;
+            });
+    }
+
+    function rollUpCounter(el, from, to) {
+        return rollUpCounterCore(el, from, to);
+    }
+
+    function precomputePropagation() {
+        precomputePropagationCounts(mosaicImages, {
+            onCounts: (counts) => {
+                mosaicPropagationCounts = counts;
+            },
+        });
+    }
+
+    function fetchPropagationCount(directCount = 0) {
+        fetchPropagationCountCore(directCount, {
+            onApply: (total, direct) => {
+                bumpRankingSignals(total, direct);
+                updateCompareProgress();
+            },
+            onBadge: showPropagationBadge,
+        });
+    }
+
+    function showPropagationBadge(count) {
+        return showPropagationBadgeCore(count);
+    }
+
+    function submitComparison(side) {
+        if (compareBusy || compareIndex >= comparePairs.length) return;
+        compareBusy = true;
+        undoCount = 0;
+        const actionSeq = ++compareActionSeq;
+
+        const pair = comparePairs[compareIndex];
+        const previousIndex = compareIndex;
+        const payload = buildComparisonPayloadCore(pair, side, compareMode);
+
+        compareIndex++;
+        showComparePair();
+        compareBusy = false;
+
+        postComparisonCore(payload).then((result) => {
+            applyComparisonElosCore(pair, side, result);
+            fetchPropagationCount(1);
+        }).catch(() => {
+            if (compareActionSeq === actionSeq && compareMode !== 'mosaic') {
+                compareIndex = previousIndex;
+                showComparePair();
+                showToast('Failed to save comparison; restored the previous pair');
+            } else {
+                showToast('Failed to save comparison');
+            }
+        });
+    }
+
+    async function undoComparison() {
+        if (compareBusy) return;
+        undoCount++;
+        if (undoCount > 3) {
+            showToast('Maximum undo reached');
+            return;
+        }
+        compareBusy = true;
+        try {
+            const result = await postUndoComparisonCore();
+            if (result.ok) {
+                const comparisonsUndone = result.comparisonsUndone;
+                bumpRankingSignals(-comparisonsUndone, -comparisonsUndone);
+                updateCompareProgress();
+                if (compareMode !== 'mosaic' && compareIndex > 0) {
+                    compareIndex--;
+                    showComparePair();
+                } else if (compareMode === 'mosaic') {
+                    showToast(undoComparisonToastTextCore(comparisonsUndone));
+                }
+            } else {
+                showToast('Undo failed');
+            }
+        } catch {
+            showToast('Undo failed');
+        } finally {
+            compareBusy = false;
+        }
+    }
+
+    function handleCompareKey(e) {
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+        if (e.key === 'Tab') {
+            e.preventDefault();
+            window.location.href = '/library';
+            return;
+        }
+
+        if (compareMode === 'mosaic') {
+            const cells = document.querySelectorAll('.mosaic-cell');
+            if (!cells.length) return;
+
+            if (e.key === 'ArrowRight' || e.key === 'ArrowLeft' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                e.preventDefault();
+                if (selectedMosaicIndex < 0) {
+                    selectMosaicCell(0, cells);
+                    return;
+                }
+                if (e.key === 'ArrowRight') {
+                    selectMosaicCell(Math.min(selectedMosaicIndex + 1, cells.length - 1), cells);
+                } else if (e.key === 'ArrowLeft') {
+                    selectMosaicCell(Math.max(selectedMosaicIndex - 1, 0), cells);
+                } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                    const target = findMosaicCellInDirection(cells, selectedMosaicIndex, e.key === 'ArrowDown' ? 1 : -1);
+                    selectMosaicCell(target, cells);
+                }
+            } else if (e.key === 'Enter' && selectedMosaicIndex >= 0 && selectedMosaicIndex < mosaicImages.length) {
+                e.preventDefault();
+                const keepIdx = selectedMosaicIndex;
+                mosaicClick(mosaicImages[selectedMosaicIndex].id);
+                // Re-select after swap animation so the cursor stays in place
+                setTimeout(() => {
+                    const cells = document.querySelectorAll('.mosaic-cell');
+                    if (keepIdx < cells.length) selectMosaicCell(keepIdx, cells);
+                }, 200);
+            } else if (e.key === 'Escape' && selectedMosaicIndex >= 0) {
+                e.preventDefault();
+                deselectMosaicCell(cells);
+            }
+            if (e.key === 'ArrowUp' && selectedMosaicIndex < 0) {
+                e.preventDefault();
+                undoComparison();
+            }
+            return;
+        }
+
+        // Swiss/A-B mode
+        switch (e.key) {
+            case 'ArrowLeft': submitComparison('left'); break;
+            case 'ArrowRight': submitComparison('right'); break;
+            case 'ArrowUp': undoComparison(); break;
+        }
+    }
+
+    function selectMosaicCell(index, cells) {
+        const selected = selectMosaicCellCore(index, cells);
+        if (selected !== null) selectedMosaicIndex = selected;
+    }
+
+    function deselectMosaicCell(cells) {
+        selectedMosaicIndex = deselectMosaicCellCore(cells);
+    }
+
+    function findMosaicCellInDirection(cells, currentIdx, direction) {
+        return findMosaicCellInDirectionCore(cells, currentIdx, direction);
+    }
+
+    function setCompareMode(mode) {
+        clearWarmups();
+        compareMode = mode;
+        const transitionToken = ++compareModeTransitionToken;
+        setCompareModeViewCore(mode, {
+            transitionToken,
+            isCurrentTransition: (token) => token === compareModeTransitionToken,
+            onMosaic: () => {
+                compareImageToken++;
+                loadMosaicBatch();
+            },
+            onPair: () => {
+                comparePairs = [];
+                compareIndex = 0;
+                fetchComparePairs().then(() => showComparePair());
+            },
+        });
+    }
+
+    function showCompareEmpty() {
+        showCompareEmptyCore();
+    }
+
+    // ==================== LIBRARY ====================
+
+    let rankingsSort = 'elo';
+    let sortField = 'elo';
+    let sortDesc = true;
+    let lastDateGroup = null;
+    let dateGroupsData = [];
+    let dateScrubberGeneration = 0;
+    let dateJumpGeneration = 0;
+    let searchQuery = '';
+    let deepSearchRequested = false;
+    let lastDeepSearchNoticeQuery = '';
+    let searchDebounce = null;
+    let rankingsLoading = false;
+    let rankingsLoadPromise = null;
+    let rankingsExhausted = false;
+    let libraryRequestGeneration = 0;
+    let pendingScrollRestoreOffset = 0;
+    let thumbHeight = 220;
+    let libraryImages = [];
+    let lightboxIndex = -1;
+    let loupeStandaloneImage = null;
+    const SORT_STORAGE_KEY = 'pa_sort';
+    const SEARCH_STORAGE_KEY = 'pa_search_query';
+    const SEARCH_SORT_STORAGE_KEY = 'pa_search_sort';
+    const SEARCH_DEEP_STORAGE_KEY = 'pa_search_deep';
+    const SCROLL_POS_STORAGE_KEY = 'pa_scroll_pos';
+    const SCROLL_OFFSET_STORAGE_KEY = 'pa_scroll_offset';
+    const EMPTY_FILTERS = { ...EMPTY_FILTERS_CORE };
+    let filters = { ...EMPTY_FILTERS };
+
+    function setCurrentFilters(nextFilters) {
+        filters = normalizeFilterState(nextFilters);
+        return filters;
+    }
+
+    function saveFilters() {
+        return saveFiltersCore({
+            getFilters: currentFilterState,
+            storage: sessionStorage,
+            storageKey: FILTER_STORAGE_KEY,
+            syncLibraryUrlState,
+        });
+    }
+
+    function restoreFilters() {
+        return restoreFiltersCore({
+            storage: sessionStorage,
+            storageKey: FILTER_STORAGE_KEY,
+            location: window.location,
+            setFilters: setCurrentFilters,
+            applyFilterUiState,
+        });
+    }
+
+    function applyFilterUiState(state = filters) {
+        return applyFilterUiStateCore({
+            filters: state,
+            document,
+            updateMetadataFilterButton,
+        });
+    }
+
+    function activeMetadataFilterCount() {
+        return activeMetadataFilterCountCore(filters);
+    }
+
+    function updateMetadataFilterButton() {
+        updateMetadataFilterButtonCore({ filters });
+    }
+
+    function toggleMetadataFilters() {
+        toggleMetadataFiltersCore({ loadFilterOptions });
+    }
+
+    function normalizeFilterState(state = {}) {
+        return normalizeFilterStateCore(state);
+    }
+
+    function currentFilterState() {
+        return normalizeFilterState(filters);
+    }
+
+    function syncLibraryUrlState() {
+        syncLibraryUrlStateCore({ filters: currentFilterState(), sortField, sortDesc });
+    }
+
+    function filterParams(state = currentQueryState()) {
+        return filterParamsCore(state);
+    }
+
+    function filterQueryString(state = currentQueryState()) {
+        return filterQueryStringCore(state);
+    }
+
+    function buildFilterNeighborStates(baseState = currentFilterState()) {
+        return buildFilterNeighborStatesCore(baseState);
+    }
+
+    function buildRankingsUrl({
+        queryState = currentQueryState(),
+        sort = queryState.sort || rankingsSort,
+        filterState = null,
+        limit = LIBRARY_NEIGHBOR_LIMIT,
+        offset = 0,
+    } = {}) {
+        const state = currentQueryState({
+            ...queryState,
+            filters: filterState || queryState.filters,
+            sort,
+        });
+        return `/api/rankings?${rankingQueryString({ queryState: state, sort, limit, offset })}`;
+    }
+
+    function buildMosaicUrl({
+        strategy = mosaicStrategy,
+        queryState = currentQueryState(),
+        filterState = null,
+        gridElo = mosaicGridElo(),
+        n = MOSAIC_NEIGHBOR_LIMIT,
+        exclude = '',
+    } = {}) {
+        const state = currentQueryState({
+            ...queryState,
+            filters: filterState || queryState.filters,
+        });
+        return buildMosaicUrlCore({ strategy, queryState: state, gridElo, n, exclude });
+    }
+
+    function buildCompareUrl(mode, n = COMPARE_NEIGHBOR_PAIRS, queryState = currentQueryState()) {
+        const state = currentQueryState(queryState);
+        return buildCompareUrlCore({ mode, n, queryState: state });
+    }
+
+    function currentLibraryPageSize() {
+        if (rankingsOffset === 0 && pendingScrollRestoreOffset > 0) {
+            return Math.max(INITIAL_RANKINGS_PAGE_SIZE, pendingScrollRestoreOffset + RANKINGS_PAGE_SIZE);
+        }
+        return rankingsOffset === 0 ? INITIAL_RANKINGS_PAGE_SIZE : RANKINGS_PAGE_SIZE;
+    }
+
+    function resetLibraryResults({ clearBatch = false } = {}) {
+        clearWarmups();
+        libraryRequestGeneration++;
+        rankingsOffset = 0;
+        rankingsExhausted = false;
+        libraryImages = [];
+        lastDateGroup = null;
+        rankingsLoading = false;
+        rankingsLoadPromise = null;
+        selectedLibraryIndex = -1;
+        hideLibraryEmptyState();
+        if (clearBatch) clearBatchSelection();
+    }
+
+    function hasActiveLibraryFilters() {
+        return hasActiveFilters(currentFilterState());
+    }
+
+    function hideLibraryEmptyState() {
+        hideLibraryEmptyStateCore();
+    }
+
+    function updateLibraryEmptyState() {
+        updateLibraryEmptyStateCore({
+            hasImages: libraryImages.length > 0,
+            searchQuery,
+            hasActiveTextSearch,
+            hasActiveLibraryFilters,
+            clearSearch,
+            clearLibraryFilters,
+        });
+    }
+
+    function libraryScrollRoot() {
+        return libraryScrollRootCore();
+    }
+
+    function saveScrollPosition() {
+        saveScrollPositionCore({
+            rankingsOffset,
+            scrollPosStorageKey: SCROLL_POS_STORAGE_KEY,
+            scrollOffsetStorageKey: SCROLL_OFFSET_STORAGE_KEY,
+        });
+    }
+
+    function restoreScrollPosition() {
+        restoreScrollPositionCore({
+            getRankingsOffset: () => rankingsOffset,
+            setRankingsOffset: (value) => { rankingsOffset = value; },
+            setPendingScrollRestoreOffset: (value) => { pendingScrollRestoreOffset = value; },
+            scrollPosStorageKey: SCROLL_POS_STORAGE_KEY,
+            scrollOffsetStorageKey: SCROLL_OFFSET_STORAGE_KEY,
+        });
+    }
+
+    function updateBackToTopButton() {
+        updateBackToTopButtonCore();
+    }
+
+    function scrollToTop() {
+        scrollToTopCore();
+    }
+
+    function scrollLibraryContainerToElement(el, behavior = 'smooth') {
+        scrollLibraryContainerToElementCore(el, behavior);
+    }
+
+    function syncDateScrubberVisibility() {
+        const scrubber = document.getElementById('date-scrubber');
+        const active = Boolean(scrubber) && currentLibraryView() !== 'map' && isDateScrubberActive();
+        document.body.classList.toggle('date-scrubber-active', active);
+        if (scrubber) scrubber.classList.toggle('hidden', !active);
+    }
+
+    function scheduleCrossViewWarmup(fromView) {
+        if (fromView === 'compare') {
+            const libraryUrl = buildRankingsUrl({
+                sort: 'elo',
+                limit: INITIAL_RANKINGS_PAGE_SIZE,
+                offset: 0,
+            });
+            const requests = [{
+                url: libraryUrl,
+                cacheKey: `library:${libraryUrl}`,
+                extract: imageThumbUrls,
+            }];
+            scheduleBackgroundWarm(
+                'crossview-library',
+                (token, generation) => warmRequests('crossview-library', token, generation, requests),
+                CROSS_VIEW_WARM_DELAY_MS,
+            );
+        } else if (fromView === 'library') {
+            const warmStrategy = mosaicStrategy === 'diverse' ? 'explore' : mosaicStrategy;
+            const compareUrl = buildMosaicUrl({
+                strategy: warmStrategy,
+                gridElo: 0,
+                n: mosaicSize,
+            });
+            const requests = [{
+                url: compareUrl,
+                cacheKey: `compare:${compareUrl}`,
+                extract: imageThumbUrls,
+            }];
+            scheduleBackgroundWarm(
+                'crossview-compare',
+                (token, generation) => warmRequests('crossview-compare', token, generation, requests),
+                CROSS_VIEW_WARM_DELAY_MS,
+            );
+        }
+    }
+
+    function scheduleLibraryNeighborWarmup() {
+        if (searchQuery || rankingsExhausted) return;
+        const nextUrl = buildRankingsUrl({
+            queryState: currentQueryState({ sort: rankingsSort }),
+            sort: rankingsSort,
+            limit: RANKINGS_PAGE_SIZE,
+            offset: rankingsOffset,
+        });
+        const requests = [{ url: nextUrl, cacheKey: `library:${nextUrl}`, extract: imageThumbUrls }];
+
+        scheduleBackgroundWarm(
+            'library-next-page',
+            (token, generation) => warmRequests('library-next-page', token, generation, requests),
+        );
+    }
+
+    function scheduleCompareNeighborWarmup(mode = compareMode) {
+        if (mode === 'mosaic') return;
+        const requests = [];
+        requests.push({
+            url: buildCompareUrl(mode, COMPARE_NEIGHBOR_PAIRS),
+            extract: compareThumbUrls,
+        });
+
+        scheduleBackgroundWarm(
+            'compare-next-pairs',
+            (token, generation) => warmRequests('compare-next-pairs', token, generation, requests),
+            350,
+        );
+    }
+
+    function hasActiveTextSearch(value = searchQuery) {
+        return hasActiveTextSearchCore(value);
+    }
+
+    function currentSearchMode() {
+        return searchModeForQuery(searchQuery);
+    }
+
+    function currentQueryState(overrides = {}) {
+        const field = overrides.sortField || sortField;
+        const desc = overrides.sortDesc ?? sortDesc;
+        const mode = overrides.searchMode || currentSearchMode();
+        const query = overrides.searchQuery ?? (mode === 'search' ? searchQuery : '');
+        return {
+            filters: normalizeFilterState(overrides.filters || overrides.filterState || filters),
+            sortField: field,
+            sortDesc: Boolean(desc),
+            sort: overrides.sort || sortValueForState(field, desc),
+            searchMode: mode,
+            searchQuery: query,
+            deepSearch: Boolean(overrides.deepSearch ?? (mode === 'search' && deepSearchRequested)),
+        };
+    }
+
+    function applySortState(field, desc, { persist = true, persistSearch = true } = {}) {
+        if (!SORT_KEYS[field]) return;
+        sortField = field;
+        sortDesc = Boolean(desc);
+        rankingsSort = sortValueForState(sortField, sortDesc);
+        syncSortControls();
+        if (persist && sortField !== 'similarity') saveSortState();
+        if (persistSearch && hasActiveTextSearch()) saveSearchSortState();
+    }
+
+    function saveSortState() {
+        saveSortStateCore({
+            storage: sessionStorage,
+            storageKey: SORT_STORAGE_KEY,
+            field: sortField,
+            desc: sortDesc,
+        });
+        syncLibraryUrlState();
+    }
+
+    function saveSearchState() {
+        saveSearchStateCore({
+            storage: sessionStorage,
+            searchKey: SEARCH_STORAGE_KEY,
+            deepKey: SEARCH_DEEP_STORAGE_KEY,
+            searchQuery,
+            deepSearchRequested,
+            hasActiveTextSearch,
+        });
+    }
+
+    function saveSearchSortState() {
+        saveSearchSortStateCore({
+            storage: sessionStorage,
+            storageKey: SEARCH_SORT_STORAGE_KEY,
+            searchQuery,
+            field: sortField,
+            desc: sortDesc,
+            hasActiveTextSearch,
+        });
+    }
+
+    function clearPersistedSearchState() {
+        clearPersistedSearchStateCore({
+            storage: sessionStorage,
+            searchKey: SEARCH_STORAGE_KEY,
+            searchSortKey: SEARCH_SORT_STORAGE_KEY,
+            deepKey: SEARCH_DEEP_STORAGE_KEY,
+        });
+    }
+
+    function restoreSortState() {
+        const restored = restoreSortStateCore({
+            storage: sessionStorage,
+            storageKey: SORT_STORAGE_KEY,
+            locationSearch: window.location.search,
+        });
+        if (restored) {
+            applySortState(restored.field, restored.desc, { persist: false, persistSearch: false });
+        }
+    }
+
+    function restoreSearchSortState() {
+        return restoreSearchSortStateCore({
+            storage: sessionStorage,
+            storageKey: SEARCH_SORT_STORAGE_KEY,
+        });
+    }
+
+    function restoreSearchState() {
+        const restored = restoreSearchStateCore({
+            storage: sessionStorage,
+            searchKey: SEARCH_STORAGE_KEY,
+            deepKey: SEARCH_DEEP_STORAGE_KEY,
+        });
+        searchQuery = restored.searchQuery;
+        deepSearchRequested = restored.deepSearchRequested;
+        updateSimilaritySortOption();
+        if (hasActiveTextSearch()) {
+            const restoredSort = restoreSearchSortState() || { field: 'similarity', desc: true };
+            applySortState(restoredSort.field, restoredSort.desc, { persist: false });
+        }
+        updateSearchControls();
+    }
+
+    function updateSearchControls() {
+        updateSearchControlsCore({
+            searchQuery,
+            deepSearchRequested,
+            sortField,
+            sortDesc,
+            hasActiveTextSearch,
+            afterCompareSearchIndicator: updateBottomBarHeightVar,
+        });
+    }
+
+    function updateCompareSearchIndicator() {
+        updateCompareSearchIndicatorCore({
+            searchQuery,
+            active: hasActiveTextSearch(),
+            afterUpdate: updateBottomBarHeightVar,
+        });
+    }
+
+    function syncSortControls() {
+        syncSortControlsCore({ sortField, sortDesc });
+    }
+
+    function rankingQueryString({
+        queryState = currentQueryState(),
+        limit = LIBRARY_NEIGHBOR_LIMIT,
+        offset = 0,
+        sort = queryState.sort,
+    } = {}) {
+        const state = currentQueryState({ ...queryState, sort });
+        return rankingQueryStringCore({ queryState: state, limit, offset, sort });
+    }
+
+    function initSearchInputControls() {
+        const input = document.getElementById('search-input');
+        if (!input || input.dataset.searchBound === '1') return;
+        input.dataset.searchBound = '1';
+        initSearchInputControlsCore({
+            getSearchDebounce: () => searchDebounce,
+            setSearchDebounce: (timer) => {
+                searchDebounce = timer;
+            },
+            hasActiveTextSearch,
+            applySearchQueryChangeImpl: (value) => applySearchQueryChangeCore(value, searchControllerContext()),
+            clearSearchImpl: clearSearch,
+        });
+    }
+
+    async function initLibrary() {
+        initBottomBarMeasurement();
+        startAIStatusPolling(750, { immediate: true });
+        resetLibraryResults();
+        restoreFilters();
+        restoreSortState();
+        restoreSearchState();
+        pendingScrollRestoreOffset = Number(sessionStorage.getItem(SCROLL_OFFSET_STORAGE_KEY) || 0);
+        loadUiSettings();
+
+        // Fire all init requests in parallel — don't block on rankings
+        const rankingsPromise = loadRankings();
+        const statsPromise = fetch('/api/stats').then(r => r.json()).then(stats => {
+            compareStats = stats;
+            updateCompareProgress();
+        }).catch(() => {});
+
+        setTimeout(() => {
+            loadFolderList();
+            scheduleFilterOptionsLoad();
+        }, 500);
+        initStarHover();
+
+        await rankingsPromise;
+        restoreScrollPosition();
+        await statsPromise;
+
+        // Infinite scroll via IntersectionObserver (avoids continuous scroll events)
+        const sentinel = document.createElement('div');
+        sentinel.style.height = '1px';
+        document.querySelector('.rankings-grid')?.after(sentinel);
+        const scrollObserver = new IntersectionObserver((entries) => {
+            if (entries[0].isIntersecting && currentLibraryView() === 'grid' && !rankingsLoading && !rankingsExhausted) {
+                loadRankings();
+            }
+        }, { root: libraryScrollRoot(), rootMargin: '600px 0px' });
+        scrollObserver.observe(sentinel);
+        const scrollRoot = libraryScrollRoot();
+        if (scrollRoot) {
+            scrollRoot.addEventListener('scroll', updateBackToTopButton, { passive: true });
+            updateBackToTopButton();
+        }
+
+        bindLibraryKeyboard({
+            getSelectedLibraryIndex: () => selectedLibraryIndex,
+            getLibraryImages: () => libraryImages,
+            hasBatchSelection: () => batchSelected.size > 0,
+            selectLibraryCard,
+            deselectLibraryCard,
+            findCardInDirection,
+            openLightbox,
+            lightboxNext,
+            lightboxPrev,
+            closeLightbox,
+            setCurrentLibraryFlag,
+            trapLoupeFocus,
+            batchFlag,
+            clearBatchSelection,
+            saveScrollPosition,
+        });
+
+        // Loupe zoom/pan interaction
+        initLoupeInteraction();
+
+        initSearchInputControls();
+
+        document.querySelectorAll('.bottom-bar a[href]').forEach((link) => {
+            link.addEventListener('click', () => {
+                const href = link.getAttribute('href') || '';
+                if (href && href !== window.location.pathname) saveScrollPosition();
+            });
+        });
+        window.addEventListener('beforeunload', saveScrollPosition);
+    }
+
+    function initRankings() { initLibrary(); }
+
+    function updateSimilaritySortOption() {
+        updateSimilaritySortOptionCore({ active: hasActiveTextSearch() });
+    }
+
+    function clearSearch() {
+        clearSearchCore({
+            ...searchControllerContext(),
+            clearSearchDebounce: clearSearchDebounceTimer,
+        });
+    }
+
+    function runDeepSearch() {
+        runDeepSearchCore({
+            ...searchControllerContext(),
+            clearSearchDebounce: clearSearchDebounceTimer,
+        });
+    }
+
+    function setRankingsSort(sort, { persist = true } = {}) {
+        rankingsSort = sort;
+        const state = sortStateFromValue(sort);
+        if (state) {
+            applySortState(state.field, state.desc, { persist });
+        }
+        resetLibraryResults({ clearBatch: true });
+        dateGroupsData = [];
+        loadRankings(true);  // true = clear grid before appending
+        updateDateScrubber();
+    }
+
+    function setSortField(field) {
+        if (!SORT_KEYS[field]) return;
+        const key = SORT_KEYS[field];
+        applySortState(field, key?.defaultDesc !== false, { persist: field !== 'similarity' });
+        resetLibraryResults({ clearBatch: true });
+        dateGroupsData = [];
+        loadRankings(true);
+        updateDateScrubber();
+    }
+
+    function toggleSortDir() {
+        if (sortField === 'similarity') return;
+        applySortState(sortField, !sortDesc);
+        resetLibraryResults({ clearBatch: true });
+        dateGroupsData = [];
+        loadRankings(true);
+        updateDateScrubber();
+    }
+
+    function updateSortDirIcon() {
+        updateSortDirIconCore({ sortDesc });
+    }
+
+    function clearSearchDebounceTimer() {
+        clearTimeout(searchDebounce);
+        searchDebounce = null;
+    }
+
+    function searchControllerContext() {
+        return {
+            getSearchQuery: () => searchQuery,
+            setSearchQuery: (value) => {
+                searchQuery = value;
+            },
+            setDeepSearchRequested: (value) => {
+                deepSearchRequested = value;
+            },
+            getSortField: () => sortField,
+            hasActiveTextSearch,
+            saveSearchState,
+            updateSimilaritySortOption,
+            applySortState,
+            saveSearchSortState,
+            clearPersistedSearchState,
+            restoreSortState,
+            updateSearchControls,
+            reloadForFilters,
+            updateDateScrubber,
+        };
+    }
+
+    function updateImageFlagLocal(imageId, flag) {
+        updateImageFlagLocalCore(imageId, flag, {
+            images: libraryImages,
+            loupeStandaloneImage,
+            loupeCurrentImage,
+            lightboxIndex,
+            updateLoupeFlagDisplay,
+        });
+    }
+
+    async function setImageFlag(imageId, flag) {
+        await setImageFlagCore(imageId, flag, {
+            images: libraryImages,
+            showToast,
+            updateImageFlagLocalImpl: updateImageFlagLocal,
+        });
+    }
+
+    function setCurrentLibraryFlag(flag) {
+        setCurrentLibraryFlagCore(flag, {
+            images: libraryImages,
+            lightboxIndex,
+            loupeStandaloneImage,
+            selectedLibraryIndex,
+            setImageFlagImpl: setImageFlag,
+        });
+    }
+
+    async function loadRankings(clearFirst = false) {
+        if (rankingsLoading) return rankingsLoadPromise || 0;
+        const promise = loadRankingsBatch(clearFirst);
+        rankingsLoadPromise = promise;
+        try {
+            return await promise;
+        } finally {
+            if (rankingsLoadPromise === promise) rankingsLoadPromise = null;
+        }
+    }
+
+    async function loadRankingsBatch(clearFirst = false) {
+        rankingsLoading = true;
+        const requestGeneration = libraryRequestGeneration;
+        const requestOffset = rankingsOffset;
+        const limit = currentLibraryPageSize();
+        const url = buildRankingsUrl({
+            queryState: currentQueryState({ sort: rankingsSort }),
+            limit,
+            offset: requestOffset,
+            sort: rankingsSort,
+        });
+        try {
+            const data = (requestOffset === 0 ? takeWarmCache(`library:${url}`) : null) || await fetchWarmJson(url);
+            if (!data) return 0;
+            if (requestGeneration !== libraryRequestGeneration) return 0;
+            if (
+                requestOffset === 0 &&
+                data.deep_requested &&
+                !data.deep_search_cached &&
+                data.fallback_reason === 'deep_search_not_cached' &&
+                searchQuery &&
+                searchQuery !== lastDeepSearchNoticeQuery
+            ) {
+                lastDeepSearchNoticeQuery = searchQuery;
+                showToast('Deep Search queued. Showing quick results until the 8B cache is ready.');
+            }
+            if (requestOffset === 0 && typeof data.total_images === 'number') {
+                const visible = Number(data.visible_images ?? data.total_images ?? 0);
+                const total = Number(data.total_images ?? data.total_kept ?? visible);
+                compareStats = {
+                    ...compareStats,
+                    filtered_pool: visible,
+                    filtered_pool_visible: visible,
+                    filtered_pool_total: total,
+                };
+                updateCompareProgress();
+            }
+            const grid = document.getElementById('rankings-grid');
+            if (clearFirst) { grid.innerHTML = ''; selectedLibraryIndex = -1; lastDateGroup = null; }
+            const showRank = (rankingsSort === 'elo' || rankingsSort === 'elo_asc');
+            const isDateSort = (rankingsSort === 'date_taken' || rankingsSort === 'date_taken_asc');
+            const rowH = thumbHeight;
+
+            // Batch DOM writes with DocumentFragment to avoid per-card reflows
+            const frag = document.createDocumentFragment();
+            const baseIndex = libraryImages.length;
+            for (let i = 0; i < data.images.length; i++) {
+                const img = data.images[i];
+                const rank = rankingsOffset + i + 1;
+                const ar = img.aspect_ratio || 1.5;
+                const tier = getTierClass(img.elo, img.comparisons);
+                const conf = img.comparisons > 0 ? getConfidenceClass(img.comparisons) : '';
+
+                // Insert date group header when group changes
+                if (isDateSort) {
+                    const group = img.date_group || '';
+                    if (group !== lastDateGroup) {
+                        lastDateGroup = group;
+                        const header = document.createElement('div');
+                        header.className = 'date-group-header';
+                        header.dataset.dateGroup = group;
+                        header.textContent = group ? formatDateGroup(group) : 'No Date';
+                        frag.appendChild(header);
+                    }
+                }
+
+                const card = document.createElement('div');
+                card.className = 'rank-card skeleton-cell' + (tier ? ' ' + tier : '') + (flagClass(img.flag) ? ' ' + flagClass(img.flag) : '');
+                if (batchMode) card.classList.add('selectable');
+                if (batchSelected.has(img.id)) card.classList.add('selected');
+                card.dataset.imageId = img.id;
+                card.dataset.ar = ar;
+                card.style.height = rowH + 'px';
+                card.style.flexGrow = ar;
+                card.style.flexBasis = (rowH * ar) + 'px';
+                card.title = imageMetadataTitle(img);
+                card.onclick = (e) => handleCardClick(e, img, card, baseIndex + i);
+
+                const confDot = conf ? `<div class="rank-confidence ${conf}"></div>` : '';
+                const infoLine = libraryCardInfoLine(img, rank, showRank);
+                const eagerThumb = requestOffset === 0 && i < 12;
+                const loadingAttrs = eagerThumb ? 'loading="eager" fetchpriority="high"' : 'loading="lazy"';
+
+                card.innerHTML = `
+                    <img src="${escapeHtml(img.thumb_url)}" alt="${escapeHtml(img.filename)}" ${loadingAttrs} onload="this.classList.add('loaded'); this.parentElement.classList.remove('skeleton-cell')">
+                    <div class="select-check">✓</div>
+                    ${confDot}
+                    ${flagBadge(img.flag)}
+                    <div class="rank-card-info">${infoLine}</div>
+                `;
+                frag.appendChild(card);
+                libraryImages.push(img);
+            }
+            grid.appendChild(frag);
+
+            rankingsOffset += data.images.length;
+            if (data.images.length < limit) {
+                rankingsExhausted = true;
+            }
+            if (data.images.length > 0) {
+                // Always warm neighbors — not just on first load
+                scheduleLibraryNeighborWarmup();
+                if (requestOffset === 0) scheduleCrossViewWarmup('library');
+                if (isDateScrubberActive()) setupScrubberScrollObserver();
+            }
+            updateLibraryEmptyState();
+            return data.images.length;
+        } finally {
+            if (requestGeneration === libraryRequestGeneration) rankingsLoading = false;
+        }
+    }
+
+    function libraryCardInfoLine(img, rank, showRank) {
+        return libraryCardInfoLineCore(img, rank, showRank, rankingsSort);
+    }
+
+    function isDateSortActive() {
+        return isDateSortValue(rankingsSort);
+    }
+
+    function isDateScrubberActive() {
+        return isDateSortActive() && currentSearchMode() === 'library';
+    }
+
+    function findDateGroupHeader(group) {
+        return findDateGroupHeaderCore(group);
+    }
+
+    function dateGroupOffset(group) {
+        return dateGroupOffsetCore(dateGroupsData, group);
+    }
+
+    function setActiveDateScrubberGroup(group) {
+        setActiveDateScrubberGroupCore(group);
+    }
+
+    function teardownDateScrubberScrollTracking() {
+        teardownDateScrubberScrollTrackingCore();
+    }
+
+    function setupDateScrubberScrollTracking() {
+        setupDateScrubberScrollTrackingCore({ scrollRoot: libraryScrollRoot() });
+    }
+
+    async function jumpToDateGroup(group) {
+        if (!isDateScrubberActive()) return;
+
+        const existingHeader = findDateGroupHeader(group);
+        if (existingHeader) {
+            setActiveDateScrubberGroup(group);
+            scrollLibraryContainerToElement(existingHeader);
+            return;
+        }
+
+        const offset = dateGroupOffset(group);
+        if (offset === null) return;
+
+        const gen = ++dateJumpGeneration;
+        libraryRequestGeneration++;
+        rankingsOffset = offset;
+        rankingsExhausted = false;
+        libraryImages = [];
+        lastDateGroup = null;
+        rankingsLoading = false;
+        rankingsLoadPromise = null;
+        selectedLibraryIndex = -1;
+
+        const grid = document.getElementById('rankings-grid');
+        if (grid) grid.innerHTML = '';
+        libraryScrollRoot()?.scrollTo({ top: 0, behavior: 'auto' });
+
+        await loadRankings(true);
+        if (gen !== dateJumpGeneration) return;
+
+        const loadedHeader = findDateGroupHeader(group);
+        if (loadedHeader) {
+            scrollLibraryContainerToElement(loadedHeader, 'auto');
+            setActiveDateScrubberGroup(group);
+        }
+    }
+
+    async function updateDateScrubber() {
+        const existing = document.getElementById('date-scrubber');
+        if (!isDateScrubberActive()) {
+            if (existing) existing.remove();
+            if (window._scrubberObserver) window._scrubberObserver.disconnect();
+            teardownDateScrubberScrollTracking();
+            syncDateScrubberVisibility();
+            return;
+        }
+        const gen = ++dateScrubberGeneration;
+        const query = filterQueryString(currentQueryState());
+        const url = `/api/date-groups${query ? `?${query}` : ''}`;
+        try {
+            const data = await fetch(url).then(r => r.json());
+            if (gen !== dateScrubberGeneration) return;
+            dateGroupsData = data.groups || [];
+            if (rankingsSort === 'date_taken_asc') dateGroupsData.reverse();
+            renderDateScrubber();
+        } catch {
+            // silently fail
+        }
+    }
+
+    function renderDateScrubber() {
+        renderDateScrubberCore(dateGroupsData, {
+            onJump: jumpToDateGroup,
+            setupScrollObserver: setupScrubberScrollObserver,
+            syncVisibility: syncDateScrubberVisibility,
+            teardownScrollTracking: teardownDateScrubberScrollTracking,
+        });
+    }
+
+    function setupScrubberScrollObserver() {
+        if (window._scrubberObserver) window._scrubberObserver.disconnect();
+        setupDateScrubberScrollTracking();
+    }
+
+    function selectLibraryCard(index, cards) {
+        const selected = selectLibraryCardCore(index, cards, { scrollRoot: libraryScrollRoot() });
+        if (selected !== null) selectedLibraryIndex = selected;
+    }
+
+    function deselectLibraryCard(cards) {
+        selectedLibraryIndex = deselectLibraryCardCore(cards);
+    }
+
+    function findCardInDirection(cards, currentIdx, direction) {
+        return findCardInDirectionCore(cards, currentIdx, direction);
+    }
+
+    function openLightbox(img) {
+        lightboxIndex = libraryImages.findIndex(i => i.id === img.id);
+        if (lightboxIndex < 0) {
+            openStandaloneLightbox(img);
+            return;
+        }
+        loupeStandaloneImage = null;
+        updateFilmstripCounter();
+        buildFilmstrip();
+        showLoupeImage(libraryImages[lightboxIndex], 0);
+    }
+
+    function openStandaloneLightbox(img) {
+        loupeStandaloneImage = img;
+        lightboxIndex = -1;
+        clearFilmstrip();
+        showLoupeImage(img, 0);
+    }
+
+    function clearFilmstrip() {
+        clearFilmstripCore({ images: libraryImages, lightboxIndex });
+    }
+
+    function updateFilmstripCounter() {
+        updateFilmstripCounterCore({ images: libraryImages, lightboxIndex });
+    }
+
+    function buildFilmstrip() {
+        buildFilmstripCore({
+            images: libraryImages,
+            lightboxIndex,
+            windowRadius: FILMSTRIP_WINDOW_RADIUS,
+            onSelect: (index, direction) => {
+                lightboxIndex = index;
+                updateFilmstripCounter();
+                showLoupeImage(libraryImages[index], direction);
+            },
+        });
+    }
+
+    function updateFilmstripActive() {
+        updateFilmstripActiveCore({
+            images: libraryImages,
+            lightboxIndex,
+            windowRadius: FILMSTRIP_WINDOW_RADIUS,
+            onSelect: (index, direction) => {
+                lightboxIndex = index;
+                updateFilmstripCounter();
+                showLoupeImage(libraryImages[index], direction);
+            },
+        });
+    }
+
+    // Loupe zoom/pan state
+    let loupeScale = 1;
+    let loupeFitScale = 1;
+    let loupePanX = 0;
+    let loupePanY = 0;
+    let loupeNatW = 0;
+    let loupeNatH = 0;
+    let loupeIsFit = true;
+    let _loupeDragMoved = false;
+    let _loupeDragging = false;
+    let loupeZoomMode = 'fit';
+    let loupeDisplayedTierRank = -1;
+    let loupeImageToken = 0;
+    let loupeCurrentImage = null;
+    let loupeFullLoadTimer = null;
+    let loupeFullLoadToken = 0;
+    let loupeHideTimer = null;
+    let loupeCurrentMediaStatus = null;
+    let loupeLoadingTierRank = -1;
+    let loupePreviousFocus = null;
+    const loupeTierProbes = new Set();
+    const loupeRefLong = 3840; // lg thumbnail long side used before original dimensions are known
+    const LOUPE_PRELOAD_RADIUS = 3;
+
+    function cancelLoupeProbes() {
+        cancelLoupeProbesCore(loupeTierProbes, {
+            clearLoupeTierLoadingImpl: clearLoupeTierLoading,
+        });
+    }
+
+    function focusLoupe() {
+        focusLoupeCore();
+    }
+
+    function loupeFocusableElements(loupe) {
+        return loupeFocusableElementsCore(loupe);
+    }
+
+    function trapLoupeFocus(e) {
+        trapLoupeFocusCore(e, { focusLoupeImpl: focusLoupeCore });
+    }
+
+    function showLoupeImage(img, direction = 0) {
+        const loupe = document.getElementById('loupe');
+        const loupeImg = document.getElementById('loupe-img');
+        if (!loupe || !loupeImg) return;
+        if (loupeHideTimer) {
+            clearTimeout(loupeHideTimer);
+            loupeHideTimer = null;
+        }
+
+        // Pre-calculate fit dimensions from aspect ratio so all progressive
+        // loads (sm/md/lg) display at the same screen size — no size jumps
+        const token = ++loupeImageToken;
+        clearWarmups();
+        loupeCurrentImage = img;
+        loupeFullLoadToken = 0;
+        cancelLoupeProbes();
+        if (loupeFullLoadTimer) {
+            clearTimeout(loupeFullLoadTimer);
+            loupeFullLoadTimer = null;
+        }
+        loupeDisplayedTierRank = -1;
+        loupeLoadingTierRank = -1;
+        loupeCurrentMediaStatus = null;
+        loupeIsFit = true;
+        loupeZoomMode = 'fit';
+        loupeImg.onload = null;
+        loupeImg.onerror = null;
+        loupeImg.style.opacity = '0';
+        loupeImg.src = LOUPE_BLANK_SRC;
+        const ar = imageAspectRatio(img);
+        loupeNatW = ar >= 1 ? loupeRefLong : Math.round(loupeRefLong * ar);
+        loupeNatH = ar >= 1 ? Math.round(loupeRefLong / ar) : loupeRefLong;
+        loupeImg.style.transition = 'opacity 0.15s';
+        loupeApplyImageSize();
+
+        document.body.classList.add('loupe-open');
+        const loupeWasHidden = loupe.classList.contains('hidden');
+        if (loupeWasHidden) {
+            loupePreviousFocus = document.activeElement;
+            loupe.classList.remove('hidden');
+            requestAnimationFrame(() => {
+                loupe.classList.add('loupe-visible');
+                focusLoupe();
+            });
+        } else if (!loupe.contains(document.activeElement)) {
+            focusLoupe();
+        }
+        loupeCenterFit({ animate: false });
+
+        // Progressive loading: sm -> md -> lg -> original. Slow tiers time out
+        // so the next tier still gets a chance, while late arrivals can still
+        // upgrade the image if they are sharper than the current display.
+        loupeImg.alt = img.filename || '';
+        runLoupeProgressiveLoad(img, token);
+
+        const { exifEl } = renderLoupeMetadataOverlay({
+            image: img,
+            eloToStarsImpl: eloToStars,
+        });
+        updateZoomIndicator();
+        renderLoupeStatusLine(img.flag || 'unflagged');
+
+        updateFilmstripActive();
+
+        preloadLoupeNeighbors(direction);
+        warmLoupeHotSet(direction);
+
+        // Load EXIF
+        fetch(`/api/image/${img.id}/exif`).then(r => r.json()).then(data => {
+            if (!data.exif || !isCurrentLoupeImage(img, token)) return;
+            renderLoupeMetadata({ ...img, ...data.exif }, exifEl);
+        }).catch(() => {});
+    }
+
+    function renderLoupeMetadata(metadata, exifEl = document.getElementById('loupe-overlay-exif')) {
+        renderLoupeMetadataCore(metadata, exifEl);
+    }
+
+    function isCurrentLoupeImage(img, token) {
+        const current = lightboxIndex >= 0 ? libraryImages[lightboxIndex] : loupeStandaloneImage;
+        return token === loupeImageToken && current?.id === img.id;
+    }
+
+    async function getMediaStatus(imageId, { force = false } = {}) {
+        return mediaStatusClient.getStatus(imageId, { force });
+    }
+
+    function primeMediaStatuses(imageIds) {
+        mediaStatusClient.primeStatuses(imageIds);
+    }
+
+    function loupeTierUrl(tier, imageId, cachedOnly = false) {
+        return loupeTierUrlCore(tier, imageId, cachedOnly);
+    }
+
+    function updateLoupeFlagDisplay(flag) {
+        renderLoupeStatusLine(flag);
+    }
+
+    function renderLoupeStatusLine(flag = loupeCurrentImage?.flag || 'unflagged') {
+        renderLoupeStatusLineCore({
+            displayedTierRank: loupeDisplayedTierRank,
+            flag,
+            loadingTierRank: loupeLoadingTierRank,
+            mediaStatus: loupeCurrentMediaStatus,
+            showCacheStatus: uiSettings.show_loupe_cache_status,
+        });
+    }
+
+    function setLoupeTierLoading(rank) {
+        const updated = setLoupeTierLoadingCore({
+            displayedTierRank: loupeDisplayedTierRank,
+            rank,
+        });
+        if (updated) loupeLoadingTierRank = rank;
+    }
+
+    function clearLoupeTierLoading(rank = loupeLoadingTierRank) {
+        const cleared = clearLoupeTierLoadingCore({
+            loadingTierRank: loupeLoadingTierRank,
+            rank,
+        });
+        if (cleared) loupeLoadingTierRank = -1;
+    }
+
+    function applyLoupeMediaStatus(status, img = loupeCurrentImage, token = loupeImageToken) {
+        if (!status || !img || !isCurrentLoupeImage(img, token)) return false;
+        loupeCurrentMediaStatus = status;
+        renderLoupeStatusLine(img.flag || 'unflagged');
+        return true;
+    }
+
+    async function refreshLoupeMediaStatus(img = loupeCurrentImage, token = loupeImageToken, { force = false } = {}) {
+        if (!img || !isCurrentLoupeImage(img, token)) return null;
+        const status = await getMediaStatus(img.id, { force });
+        applyLoupeMediaStatus(status, img, token);
+        return status;
+    }
+
+    function loupeApplyImageSize() {
+        applyLoupeImageSizeCore({
+            naturalWidth: loupeNatW,
+            naturalHeight: loupeNatH,
+        });
+    }
+
+    async function runLoupeProgressiveLoad(img, token) {
+        return runLoupeProgressiveLoadCore(img, token, {
+            loadLoupeTierImpl: loadLoupeTier,
+            getMediaStatus,
+            applyLoupeMediaStatus,
+            isCurrentLoupeImage,
+            loupeTierUrlImpl: loupeTierUrl,
+            getDisplayedTierRank: () => loupeDisplayedTierRank,
+            setFullLoadToken: (nextToken) => { loupeFullLoadToken = nextToken; },
+        });
+    }
+
+    function loadLoupeTier(img, url, rank, token, { adoptDimensions = false, timeoutMs = 0 } = {}) {
+        return loadLoupeTierCore(img, url, rank, token, {
+            adoptDimensions,
+            timeoutMs,
+            probes: loupeTierProbes,
+            isCurrentLoupeImage,
+            getDisplayedTierRank: () => loupeDisplayedTierRank,
+            setDisplayedTierRank: (nextRank) => { loupeDisplayedTierRank = nextRank; },
+            setFullLoadToken: (nextToken) => { loupeFullLoadToken = nextToken; },
+            setLoupeTierLoading,
+            clearLoupeTierLoading,
+            renderLoupeStatusLine: () => renderLoupeStatusLine(img.flag || 'unflagged'),
+            refreshLoupeMediaStatus,
+            adoptSourceDimensions: loupeAdoptSourceDimensions,
+        });
+    }
+
+    function requestLoupeFullImage(img = loupeCurrentImage, token = loupeImageToken) {
+        if (!img || !isCurrentLoupeImage(img, token) || loupeFullLoadToken === token) return;
+        loupeFullLoadToken = token;
+        if (loupeFullLoadTimer) {
+            clearTimeout(loupeFullLoadTimer);
+            loupeFullLoadTimer = null;
+        }
+        loadLoupeTier(img, loupeTierUrl('full', img.id), 3, token, {
+            adoptDimensions: true,
+            timeoutMs: LOUPE_TIER_TIMEOUTS.full,
+        }).then((loaded) => {
+            if (!loaded && isCurrentLoupeImage(img, token) && loupeDisplayedTierRank < LOUPE_TIER_RANKS.full) {
+                loupeFullLoadToken = 0;
+            }
+        });
+    }
+
+    function loupeAdoptSourceDimensions(width, height) {
+        const wrap = document.getElementById('loupe-image-wrap');
+        const oldW = loupeNatW;
+        const oldH = loupeNatH;
+        if (!wrap || !oldW || !oldH || width <= 0 || height <= 0) {
+            loupeNatW = width;
+            loupeNatH = height;
+            loupeApplyImageSize();
+            return;
+        }
+
+        if (Math.abs(oldW - width) < 1 && Math.abs(oldH - height) < 1) return;
+
+        const focusX = Math.max(0, Math.min(1, ((wrap.clientWidth / 2) - loupePanX) / loupeScale / oldW));
+        const focusY = Math.max(0, Math.min(1, ((wrap.clientHeight / 2) - loupePanY) / loupeScale / oldH));
+        const oldScale = loupeScale;
+        const wasFit = loupeZoomMode === 'fit' || loupeIsFit;
+        const wasOneToOne = loupeZoomMode === 'one-to-one';
+
+        loupeNatW = width;
+        loupeNatH = height;
+        loupeApplyImageSize();
+        loupeFitScale = loupeComputeFitScale();
+
+        if (wasFit) {
+            loupeScale = loupeFitScale;
+            loupePanX = (wrap.clientWidth - loupeNatW * loupeScale) / 2;
+            loupePanY = (wrap.clientHeight - loupeNatH * loupeScale) / 2;
+            loupeIsFit = true;
+            loupeZoomMode = 'fit';
+        } else {
+            loupeScale = wasOneToOne ? 1 : oldScale * (oldW / loupeNatW);
+            loupePanX = (wrap.clientWidth / 2) - (focusX * loupeNatW * loupeScale);
+            loupePanY = (wrap.clientHeight / 2) - (focusY * loupeNatH * loupeScale);
+            loupeIsFit = false;
+            loupeZoomMode = wasOneToOne ? 'one-to-one' : 'custom';
+            loupeClampPan();
+        }
+
+        loupeApplyTransform();
+        updateZoomIndicator();
+        wrap.style.cursor = loupeIsFit ? 'zoom-in' : 'grab';
+    }
+
+    function preloadLoupeNeighbors(direction = 0) {
+        if (lightboxIndex < 0) return;
+        const token = loupeImageToken;
+        const generation = currentWarmupGeneration();
+        for (const offset of loupeNeighborOffsets(LOUPE_PRELOAD_RADIUS, direction)) {
+            const ni = lightboxIndex + offset;
+            if (ni < 0 || ni >= libraryImages.length) continue;
+            const neighbor = libraryImages[ni];
+            const distance = Math.abs(offset);
+            enqueueWarmup(async () => {
+                if (!loupeCurrentImage || !isCurrentLoupeImage(loupeCurrentImage, token)) return;
+                await preloadLoupeNeighbor(neighbor, distance, token, generation);
+            }, { generation });
+        }
+    }
+
+    function warmLoupeHotSet(direction = 0) {
+        const tiers = loupeHotSetTierIds(libraryImages, lightboxIndex, direction);
+        if (tiers) warmImageTiers(tiers);
+    }
+
+    async function preloadLoupeNeighbor(img, distance = 1, token = loupeImageToken, generation = currentWarmupGeneration()) {
+        if (generation !== currentWarmupGeneration() || !loupeCurrentImage || !isCurrentLoupeImage(loupeCurrentImage, token)) return;
+        await preloadImageWithTimeout(img.thumb_url, 'low', 1200);
+        if (generation !== currentWarmupGeneration() || !loupeCurrentImage || !isCurrentLoupeImage(loupeCurrentImage, token)) return;
+        const status = await getMediaStatus(img.id);
+        if (generation !== currentWarmupGeneration() || !loupeCurrentImage || !isCurrentLoupeImage(loupeCurrentImage, token)) return;
+        const tiers = status?.tiers || {};
+        if (tiers.md?.cached) {
+            await preloadImageWithTimeout(tiers.md.cached_url, 'low', LOUPE_TIER_TIMEOUTS.md);
+        }
+        if (generation !== currentWarmupGeneration() || !loupeCurrentImage || !isCurrentLoupeImage(loupeCurrentImage, token)) return;
+        if (tiers.lg?.cached) {
+            await preloadImageWithTimeout(tiers.lg.cached_url, 'low', LOUPE_TIER_TIMEOUTS.lg);
+        }
+        if (generation !== currentWarmupGeneration() || !loupeCurrentImage || !isCurrentLoupeImage(loupeCurrentImage, token)) return;
+        if (distance === 1) {
+            if (!tiers.md?.cached) {
+                await preloadImageWithTimeout(loupeTierUrl('md', img.id), 'low', LOUPE_TIER_TIMEOUTS.md);
+            }
+            if (generation !== currentWarmupGeneration() || !loupeCurrentImage || !isCurrentLoupeImage(loupeCurrentImage, token)) return;
+            if (!tiers.lg?.cached) {
+                await preloadImageWithTimeout(loupeTierUrl('lg', img.id), 'low', LOUPE_TIER_TIMEOUTS.lg);
+            }
+            if (generation !== currentWarmupGeneration() || !loupeCurrentImage || !isCurrentLoupeImage(loupeCurrentImage, token)) return;
+            await preloadImageWithTimeout(
+                tiers.full?.cached ? tiers.full.cached_url : loupeTierUrl('full', img.id),
+                'low',
+                LOUPE_TIER_TIMEOUTS.full,
+            );
+        }
+    }
+
+    function preloadImageWithTimeout(url, priority, timeoutMs) {
+        return withTimeout(preloadImage(url, priority), timeoutMs);
+    }
+
+    // ==================== LOUPE ZOOM/PAN ====================
+
+    function loupeComputeFitScale() {
+        return loupeComputeFitScaleCore({
+            naturalWidth: loupeNatW,
+            naturalHeight: loupeNatH,
+        });
+    }
+
+    function loupeApplyTransform() {
+        applyLoupeTransformCore({
+            panX: loupePanX,
+            panY: loupePanY,
+            scale: loupeScale,
+        });
+    }
+
+    function updateZoomIndicator() {
+        updateLoupeZoomIndicatorCore({
+            currentImage: loupeCurrentImage,
+            naturalWidth: loupeNatW,
+            naturalHeight: loupeNatH,
+            zoomMode: loupeZoomMode,
+            scale: loupeScale,
+        });
+    }
+
+    function loupeCenterFit({ animate = true } = {}) {
+        const wrap = document.getElementById('loupe-image-wrap');
+        const img = document.getElementById('loupe-img');
+        if (!wrap || !img) return;
+        loupeApplyImageSize();
+        loupeFitScale = loupeComputeFitScale();
+        loupeScale = loupeFitScale;
+        loupePanX = (wrap.clientWidth - loupeNatW * loupeScale) / 2;
+        loupePanY = (wrap.clientHeight - loupeNatH * loupeScale) / 2;
+        loupeIsFit = true;
+        loupeZoomMode = 'fit';
+        if (animate) img.style.transition = 'transform 0.2s ease-out, opacity 0.15s';
+        loupeApplyTransform();
+        updateZoomIndicator();
+        wrap.style.cursor = 'zoom-in';
+        if (animate) setTimeout(() => { if (img) img.style.transition = 'opacity 0.15s'; }, 200);
+    }
+
+    function loupeZoomTo(newScale, pivotX, pivotY, mode = 'custom') {
+        const wrap = document.getElementById('loupe-image-wrap');
+        if (!wrap) return;
+
+        const rect = wrap.getBoundingClientRect();
+        const imgX = (pivotX - rect.left - loupePanX) / loupeScale;
+        const imgY = (pivotY - rect.top - loupePanY) / loupeScale;
+
+        const minScale = Math.max(0.01, Math.min(loupeFitScale, 1) * 0.5);
+        const maxScale = Math.max(4, loupeFitScale * 4);
+        loupeScale = Math.max(minScale, Math.min(maxScale, newScale));
+
+        loupePanX = pivotX - rect.left - imgX * loupeScale;
+        loupePanY = pivotY - rect.top - imgY * loupeScale;
+
+        loupeIsFit = Math.abs(loupeScale - loupeFitScale) < 0.001;
+        loupeZoomMode = loupeIsFit ? 'fit' : mode;
+        loupeClampPan();
+        loupeApplyTransform();
+        updateZoomIndicator();
+        wrap.style.cursor = loupeIsFit ? 'zoom-in' : 'grab';
+    }
+
+    function loupeClampPan() {
+        const wrap = document.getElementById('loupe-image-wrap');
+        const nextPan = clampLoupePanCore({
+            wrap,
+            naturalWidth: loupeNatW,
+            naturalHeight: loupeNatH,
+            scale: loupeScale,
+            panX: loupePanX,
+            panY: loupePanY,
+        });
+        loupePanX = nextPan.panX;
+        loupePanY = nextPan.panY;
+    }
+
+    function initLoupeInteraction() {
+        const wrap = document.getElementById('loupe-image-wrap');
+        const img = document.getElementById('loupe-img');
+        if (!wrap || !img) return;
+
+        // Drag to pan
+        let dragStartX = 0, dragStartY = 0;
+        let dragPanStartX = 0, dragPanStartY = 0;
+
+        wrap.addEventListener('mousedown', (e) => {
+            if (e.button !== 0) return;
+            const img = document.getElementById('loupe-img');
+            if (img) img.style.transition = 'opacity 0.15s';
+            _loupeDragMoved = false;
+            dragStartX = e.clientX;
+            dragStartY = e.clientY;
+            dragPanStartX = loupePanX;
+            dragPanStartY = loupePanY;
+
+            if (!loupeIsFit) {
+                _loupeDragging = true;
+                wrap.style.cursor = 'grabbing';
+                e.preventDefault();
+            }
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            if (!_loupeDragging) return;
+            const dx = e.clientX - dragStartX;
+            const dy = e.clientY - dragStartY;
+            if (Math.abs(dx) > 3 || Math.abs(dy) > 3) _loupeDragMoved = true;
+            loupePanX = dragPanStartX + dx;
+            loupePanY = dragPanStartY + dy;
+            loupeClampPan();
+            loupeApplyTransform();
+        });
+
+        window.addEventListener('mouseup', () => {
+            if (_loupeDragging) {
+                _loupeDragging = false;
+                wrap.style.cursor = loupeIsFit ? 'zoom-in' : 'grab';
+            }
+        });
+
+        // Click to toggle between fit and 1:1
+        wrap.addEventListener('click', (e) => {
+            if (_loupeDragMoved) { _loupeDragMoved = false; return; }
+
+            if (loupeIsFit) {
+                // 1 image pixel == 1 CSS pixel against the current highest-res basis.
+                const targetScale = 1;
+                const img = document.getElementById('loupe-img');
+                requestLoupeFullImage();
+                if (img) img.style.transition = 'transform 0.2s ease-out, opacity 0.15s';
+                loupeZoomTo(targetScale, e.clientX, e.clientY, 'one-to-one');
+                setTimeout(() => { if (img) img.style.transition = 'opacity 0.15s'; }, 200);
+            } else {
+                loupeCenterFit();
+            }
+        });
+
+        // Mouse wheel zoom (centered on cursor)
+        wrap.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const img = document.getElementById('loupe-img');
+            requestLoupeFullImage();
+            if (img) img.style.transition = 'opacity 0.15s';
+            const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+            loupeZoomTo(loupeScale * factor, e.clientX, e.clientY, 'custom');
+        }, { passive: false });
+
+        // Recalculate fit on window resize
+        window.addEventListener('resize', () => {
+            if (!loupeNatW) return;
+            loupeFitScale = loupeComputeFitScale();
+            if (loupeIsFit) {
+                loupeCenterFit({ animate: false });
+            } else {
+                loupeClampPan();
+                loupeApplyTransform();
+                updateZoomIndicator();
+            }
+        });
+    }
+
+    async function ensureLibraryImageIndex(index) {
+        if (index < libraryImages.length) return true;
+        if (searchQuery === '__similar__') return false;
+        while (index >= libraryImages.length && !rankingsExhausted) {
+            const before = libraryImages.length;
+            const loaded = await loadRankings(false);
+            if (libraryImages.length <= before && !loaded) break;
+        }
+        return index < libraryImages.length;
+    }
+
+    function lightboxNext() {
+        if (lightboxIndex < 0) return;
+        const nextIndex = lightboxIndex + 1;
+        if (nextIndex < libraryImages.length) {
+            lightboxIndex = nextIndex;
+            updateFilmstripCounter();
+            showLoupeImage(libraryImages[lightboxIndex], 1);
+            return;
+        }
+        const fromIndex = lightboxIndex;
+        ensureLibraryImageIndex(nextIndex).then((ok) => {
+            if (!ok || lightboxIndex !== fromIndex) return;
+            lightboxIndex = nextIndex;
+            updateFilmstripCounter();
+            showLoupeImage(libraryImages[lightboxIndex], 1);
+        });
+    }
+
+    function lightboxPrev() {
+        if (lightboxIndex <= 0) return;
+        lightboxIndex--;
+        updateFilmstripCounter();
+        showLoupeImage(libraryImages[lightboxIndex], -1);
+    }
+
+    function closeLightbox() {
+        const loupe = document.getElementById('loupe');
+        const previousFocus = loupePreviousFocus;
+        loupePreviousFocus = null;
+        if (loupe) {
+            loupe.classList.remove('loupe-visible');
+            if (loupeHideTimer) clearTimeout(loupeHideTimer);
+            loupeHideTimer = setTimeout(() => {
+                if (!document.body.classList.contains('loupe-open')) loupe.classList.add('hidden');
+                loupeHideTimer = null;
+            }, 150);
+        }
+        document.body.classList.remove('loupe-open');
+        loupeImageToken++;
+        clearWarmups();
+        cancelLoupeProbes();
+        if (loupeFullLoadTimer) {
+            clearTimeout(loupeFullLoadTimer);
+            loupeFullLoadTimer = null;
+        }
+        loupeCurrentImage = null;
+        loupeStandaloneImage = null;
+        loupeFullLoadToken = 0;
+        loupeCurrentMediaStatus = null;
+        loupeDisplayedTierRank = -1;
+        loupeIsFit = true;
+        loupeZoomMode = 'fit';
+        loupeNatW = 0;
+        loupeNatH = 0;
+        updateZoomIndicator();
+        lightboxIndex = -1;
+        if (previousFocus && document.contains(previousFocus) && typeof previousFocus.focus === 'function') {
+            previousFocus.focus({ preventScroll: true });
+        }
+    }
+
+    function setThumbSize(value) {
+        thumbHeight = parseInt(value);
+
+        // Compare page: slider controls mosaic grid size
+        const mosaicGrid = document.getElementById('mosaic-grid');
+        if (mosaicGrid) {
+            // Map slider 120-400 → mosaic count 24-4 (small thumb = more images)
+            const newSize = mosaicSizeFromThumbHeight(thumbHeight);
+            if (newSize !== mosaicSize) {
+                clearWarmups();
+                mosaicSize = newSize;
+                loadMosaicBatch();
+            }
+            return;
+        }
+
+        // Library page: slider controls card height
+        document.documentElement.style.setProperty('--thumb-height', thumbHeight + 'px');
+        const cards = document.querySelectorAll('.rank-card');
+        const updates = [];
+        for (const card of cards) {
+            updates.push({ el: card, basis: thumbHeight * (parseFloat(card.dataset.ar) || 1.5) });
+        }
+        for (const { el, basis } of updates) {
+            el.style.height = thumbHeight + 'px';
+            el.style.flexBasis = basis + 'px';
+        }
+    }
+
+    function reloadForFilters() {
+        clearWarmups();
+        // Reload the appropriate view based on which page we're on
+        const grid = document.getElementById('rankings-grid');
+        if (grid) {
+            resetLibraryResults({ clearBatch: true });
+            loadRankings(true);
+            if (isDateSortActive()) updateDateScrubber();
+            if (currentLibraryView() === 'map') loadMap();
+        } else {
+            // Compare page — reload the active compare surface with the same filters
+            if (compareMode === 'mosaic') {
+                loadMosaicBatch();
+            } else {
+                comparePairs = [];
+                compareIndex = 0;
+                fetchComparePairs().then(() => showComparePair());
+            }
+        }
+    }
+
+    function setFilter(key, value) {
+        filters = setLibraryFilterCore(key, value, {
+            filters,
+            updateMetadataFilterButton,
+            saveFilters,
+            reloadForFilters,
+        });
+    }
+
+    function clearLibraryFilters() {
+        filters = clearLibraryFiltersCore({
+            emptyFilters: EMPTY_FILTERS,
+            document,
+            setFilters: (nextFilters) => {
+                filters = nextFilters;
+            },
+            updateMetadataFilterButton,
+            saveFilters,
+            reloadForFilters,
+        });
+    }
+
+    function toggleFilter(key, value, btn) {
+        filters = toggleFilterCore(key, value, btn, {
+            filters,
+            saveFilters,
+            reloadForFilters,
+        });
+    }
+
+    function toggleStar(level) {
+        filters = toggleStarCore(level, {
+            filters,
+            document,
+            saveFilters,
+            reloadForFilters,
+        });
+    }
+
+    function loadFolderList() {
+        return loadFolderListCore({ filters });
+    }
+
+    function loadFilterOptions() {
+        return loadFilterOptionsCore({ filters, updateMetadataFilterButton });
+    }
+
+    function scheduleFilterOptionsLoad() {
+        return scheduleFilterOptionsLoadCore({
+            filters,
+            activeMetadataFilterCount,
+            loadFilterOptions,
+        });
+    }
+
+    function initStarHover() {
+        initStarHoverCore();
+    }
+
+    const findSimilar = createFindSimilarAction({
+        getLightboxIndex: () => lightboxIndex,
+        getLibraryImages: () => libraryImages,
+        setLibraryImages: (images) => { libraryImages = images; },
+        setRankingsOffset: (offset) => { rankingsOffset = offset; },
+        setRankingsExhausted: (exhausted) => { rankingsExhausted = exhausted; },
+        getThumbHeight: () => thumbHeight,
+        getCompareStats: () => compareStats,
+        setCompareStats: (stats) => { compareStats = stats; },
+        setSearchQuery: (query) => { searchQuery = query; },
+        setDeepSearchRequested: (requested) => { deepSearchRequested = requested; },
+        bumpLibraryRequestGeneration: () => ++libraryRequestGeneration,
+        getLibraryRequestGeneration: () => libraryRequestGeneration,
+        closeLightbox,
+        clearWarmups,
+        clearPersistedSearchState,
+        updateDateScrubber,
+        clearBatchSelection,
+        updateCompareProgress,
+        openLightbox,
+    });
+
+
+    // ==================== BATCH SELECTION ====================
+
+    let batchMode = false;
+    let batchSelected = new Set();
+    let lastClickedIndex = -1;
+
+    function toggleBatchMode() {
+        const result = toggleBatchModeCore({ batchMode, batchSelected });
+        if (result.action === 'clear') {
+            clearBatchSelection();
+            return;
+        }
+        if (typeof result.batchMode === 'boolean') batchMode = result.batchMode;
+        if (result.updateBatchBar) updateBatchBar();
+    }
+
+    function clearBatchSelection() {
+        const result = clearBatchSelectionCore(batchSelected);
+        batchMode = result.batchMode;
+        lastClickedIndex = result.lastClickedIndex;
+        updateBatchBar();
+    }
+
+    function handleCardClick(e, img, card, index) {
+        const result = handleCardClickCore(e, img, card, index, {
+            batchMode,
+            batchSelected,
+            images: libraryImages,
+            lastClickedIndex,
+        });
+        if (result.action === 'clear') {
+            clearBatchSelection();
+            return;
+        }
+        if (typeof result.batchMode === 'boolean') batchMode = result.batchMode;
+        if (typeof result.lastClickedIndex === 'number') lastClickedIndex = result.lastClickedIndex;
+        if (result.updateBatchBar) updateBatchBar();
+        if (result.action === 'open') openLightbox(result.image);
+    }
+
+    function updateBatchBar() {
+        updateBatchBarCore(batchSelected.size);
+    }
+
+    async function batchFlag(flag) {
+        await batchFlagCore(flag, {
+            imageIds: Array.from(batchSelected),
+            images: libraryImages,
+            updateImageFlagLocal,
+            clearBatchSelection,
+            showToast,
+        });
+    }
+
+    function batchExport(format) {
+        batchExportCore(format, { imageIds: Array.from(batchSelected) });
+    }
+
+    function exportRankings(format) {
+        exportRankingsCore(format, {
+            queryState: currentQueryState({ sort: rankingsSort }),
+            sort: rankingsSort,
+        });
+    }
+
+    // ==================== MAP VIEW ====================
+
+    const mapController = createLibraryMapController({
+        clearWarmups,
+        clearBatchSelection,
+        currentFilterState,
+        currentQueryState,
+        libraryScrollRoot,
+        openImageById: openLightboxById,
+        syncDateScrubberVisibility,
+    });
+
+    function currentLibraryView() {
+        return mapController.getLibraryView();
+    }
+
+    function setLibraryView(mode) {
+        return mapController.setLibraryView(mode);
+    }
+
+    function loadMap() {
+        return mapController.loadMap();
+    }
+
+    function openLightboxById(id) {
+        const img = libraryImages.find(i => i.id === id);
+        if (img) {
+            openLightbox(img);
+        } else {
+            // Image is outside the active ordered list, so open it without mutating that list.
+            fetch(`/api/image/${id}/exif`).then(r => r.json()).then(data => {
+                const exif = data.exif || {};
+                openStandaloneLightbox({
+                    id,
+                    filename: exif.filename || `Image ${id}`,
+                    thumb_url: `/api/thumb/sm/${id}`,
+                    aspect_ratio: 1.5,
+                    elo: 0,
+                    comparisons: 0,
+                    flag: 'unflagged',
+                    ...exif,
+                });
+            }).catch(() => showToast('Could not open image'));
+        }
+    }
+
+    // ==================== PEOPLE ====================
+
+    const peopleApi = createPeopleApi({ showToast });
+    const {
+        initPeople,
+        labelPerson,
+        mergePeople,
+        rejectPeopleMerge,
+        ignorePerson,
+        filterLibraryByPerson,
+        useFallbackThumb,
+        rememberPeopleLabelDraft,
+    } = peopleApi;
+
+    // ==================== SETTINGS ====================
+
+    const SETTINGS_FIELDS = [
+        'embed_model_preset',
+        'embed_model_id',
+        'embed_model_revision',
+        'embed_model_dir',
+        'embed_model_dim',
+        'thumb_size_sm',
+        'thumb_size_md',
+        'thumb_size_lg',
+        'thumb_quality',
+        'memory_cache_gb',
+        'background_work_mode',
+        'cache_profile',
+        'ssd_cache_dir',
+        'ssd_cache_gb',
+        'pregenerate_on_idle',
+        'embed_batch_size',
+        'defer_ai_on_startup',
+        'deep_search_terms',
+        'deep_search_schedule_enabled',
+        'deep_search_schedule_days',
+        'deep_search_schedule_start',
+        'deep_search_schedule_end',
+        'deep_search_schedule_timezone',
+        'search_similarity_threshold',
+        'show_loupe_cache_status',
+        'face_model_id',
+        'face_model_dir',
+        'face_detection_size',
+        'face_similarity_threshold',
+        'face_merge_suggestion_threshold',
+    ];
+    let settingsPoller = null;
+    const SETTINGS_META_POLL_MS = 30000;
+    let settingsPageData = null;
+
+    function renderBackgroundWorkStatus(cacheStats, aiStatus) {
+        const statusEl = document.getElementById('background-work-governor-status');
+        const heavyEl = document.getElementById('background-work-heavy-status');
+        const workMode = selectedBackgroundWorkMode();
+        const modeLabel = backgroundWorkModeLabel(workMode);
+        const status = backgroundWorkStatusText(cacheStats, aiStatus, modeLabel);
+        if (statusEl) {
+            statusEl.textContent = status.governorText;
+        }
+        if (heavyEl) {
+            heavyEl.textContent = status.heavyText;
+        }
+    }
+
+    const catalogApi = createCatalogApi({
+        getFallbackStats: () => settingsPageData?.catalog?.stats || {},
+        setSettingsStatus,
+        showToast,
+    });
+    const {
+        sourceState,
+        renderCatalogSources,
+        loadCatalogSources,
+        setScanBusy,
+        pollScanUntilDone,
+        addCatalogSource,
+        rescanCatalogSource,
+        openRemoveSourceDialog,
+        closeRemoveSourceDialog,
+        removeCatalogSource,
+        chooseCatalogFolder,
+        browseDirectory,
+        toggleDirectoryBrowser,
+        browseDirectoryParent,
+        selectBrowsedDirectory,
+        useBrowsedDirectory,
+    } = catalogApi;
+
+    function renderSettingsMeta(data) {
+        settingsPageData = data || settingsPageData;
+        const pathEl = document.getElementById('settings-path');
+        renderEmbeddingModelPresets(data.embedding_model_presets || []);
+        renderCacheSettingsStatus(data.cache_stats);
+        if (pathEl && data.settings_path) {
+            pathEl.textContent = data.settings_path;
+        }
+        renderAutoTuningStatus(data.settings);
+        renderModelStatus(data.model_status);
+        renderAISettingsStatus(data.ai_status);
+        renderPeopleSettingsStatus(data.people_status);
+        renderBackgroundWorkStatus(data.cache_stats, data.ai_status);
+        renderWorkBanner(data.ai_status, data.cache_stats);
+        renderCacheTierGuide(data.cache_stats, data.settings);
+        if (data.catalog) renderCatalogSources(data.catalog);
+        updateCacheProfileHint();
+    }
+
+    function renderWorkBanner(aiStatus, cacheStatus) {
+        const el = document.getElementById('work-banner');
+        if (!el) return;
+        el.innerHTML = workBannerHtml(aiStatus, cacheStatus);
+    }
+
+    function populateSettingsForm(settings) {
+        populateSettingsFormCore(settings, { fields: SETTINGS_FIELDS, settingsPageData });
+    }
+
+    function collectSettingsForm() {
+        return collectSettingsFormCore({ fields: SETTINGS_FIELDS, settingsPageData });
+    }
+
+    const settingsApi = createSettingsApi({
+        collectSettingsForm,
+        populateSettingsForm,
+        rememberThumbnailOutput,
+        renderSettingsMeta,
+        setSettingsStatus,
+        showToast,
+        updateThumbnailChangeNotice,
+        showConfirmModal,
+        formatBytes,
+        renderCacheSettingsStatus,
+        renderAISettingsStatus,
+        renderModelStatus,
+        updateCacheProfileHint,
+        getSettingsPageData: () => settingsPageData,
+    });
+    const {
+        saveSettings,
+        applyRecommendedCache,
+        resetSettings,
+        clearThumbnailCache,
+        startCachePregeneration,
+        stopCachePregeneration,
+        installAIModel,
+        pauseEmbeddings,
+        resumeEmbeddings,
+        pauseAllWork,
+        resumeAllWork,
+    } = settingsApi;
+
+    async function loadSettingsPage(showStatus = true) {
+        const res = await fetch('/api/settings');
+        const data = await res.json();
+        settingsPageData = data;
+        renderEmbeddingModelPresets(data.embedding_model_presets || []);
+        populateSettingsForm(data.settings || {});
+        rememberThumbnailOutput(data.settings || {});
+        updateThumbnailChangeNotice();
+        renderSettingsMeta(data);
+        if (showStatus) {
+            setSettingsStatus('Loaded current settings.', 'muted');
+        }
+        return data;
+    }
+
+    async function refreshSettingsMeta() {
+        if (document.hidden) return settingsPageData || {};
+        if (!settingsPageData) return loadSettingsPage(false);
+        const [cacheRes, aiRes, peopleRes] = await Promise.all([
+            fetch('/api/cache/status'),
+            fetch('/api/ai/status'),
+            fetch('/api/people/status'),
+        ]);
+        const [cacheStats, aiStatus, peopleStatus] = await Promise.all([
+            cacheRes.json(),
+            aiRes.json(),
+            peopleRes.json(),
+        ]);
+        const data = {
+            ...settingsPageData,
+            cache_stats: cacheStats,
+            ai_status: aiStatus,
+            people_status: peopleStatus,
+        };
+        renderSettingsMeta(data);
+        return data;
+    }
+
+    async function initSettings() {
+        initVisibilityRefresh();
+        initBottomBarMeasurement();
+        const form = document.getElementById('settings-form');
+        if (form) {
+            form.addEventListener('submit', (e) => {
+                e.preventDefault();
+                saveSettings();
+            });
+        }
+        document.getElementById('cache_profile')?.addEventListener('change', updateCacheProfileHint);
+        for (const input of document.querySelectorAll('input[name="background_work_mode_choice"]')) {
+            input.addEventListener('change', () => setBackgroundWorkMode(input.value));
+        }
+        document.getElementById('embed_model_preset')?.addEventListener('change', applySelectedEmbeddingPreset);
+        document.getElementById('deep_search_terms')?.addEventListener('input', (event) => {
+            renderDeepSearchTerms(event.target.value);
+        });
+        document.getElementById('deep_search_schedule_enabled')?.addEventListener('change', () => renderDeepSearchSchedule());
+        document.getElementById('deep_search_schedule_start')?.addEventListener('input', () => renderDeepSearchSchedule());
+        document.getElementById('deep_search_schedule_end')?.addEventListener('input', () => renderDeepSearchSchedule());
+        document.getElementById('deep_search_schedule_timezone')?.addEventListener('change', () => renderDeepSearchSchedule());
+        for (const input of document.querySelectorAll('[data-deep-search-day]')) {
+            input.addEventListener('change', () => renderDeepSearchSchedule());
+        }
+        for (const field of THUMB_OUTPUT_FIELDS) {
+            document.getElementById(field)?.addEventListener('input', updateThumbnailChangeNotice);
+        }
+
+        try {
+            const settingsData = await loadSettingsPage(false);
+            renderCatalogSources(settingsData.catalog || {});
+            const stats = settingsData.catalog?.stats || {};
+            const folderInput = document.getElementById('scan-folder');
+            const totalEl = document.getElementById('scan-total-images');
+            if (totalEl) totalEl.textContent = Number(stats.active_images ?? stats.total_images ?? 0).toLocaleString();
+            try {
+                const folderRes = await fetch('/api/scan/folder');
+                const folderData = await folderRes.json();
+                if (folderInput && folderData.folder) folderInput.value = folderData.folder;
+            } catch {}
+
+            setSettingsStatus('Ready. Save to apply changes immediately.', 'muted');
+            if (settingsPoller) clearInterval(settingsPoller);
+            settingsPoller = setInterval(() => refreshSettingsMeta().catch(() => {}), SETTINGS_META_POLL_MS);
+        } catch (err) {
+            setSettingsStatus(`Could not load settings: ${err.message}`, 'error');
+        }
+    }
+
+    async function startScan() {
+        return addCatalogSource();
+    }
+
+    // ==================== UTILITIES ====================
+
+    const preloadImage = createImagePreloader({ limit: 240, concurrency: 8 });
+
+    function showShortcuts() {
+        showShortcutsUi();
+    }
+
+    function hideShortcuts() {
+        hideShortcutsUi();
+    }
+
+    initShortcutOverlay();
+
+    // ==================== PUBLIC API ====================
+
+    return {
+        initCompare,
+        initLibrary,
+        initRankings,
+        initPeople,
+        initSettings,
+        showShortcuts,
+        hideShortcuts,
+        showConfirmModal,
+        hideConfirmModal,
+        scrollToTop,
+        clearSearch,
+        runDeepSearch,
+        setCompareMode,
+        setRankingsSort,
+        setSortField,
+        toggleSortDir,
+        exportRankings,
+        closeLightbox,
+        lightboxNext,
+        lightboxPrev,
+        setThumbSize,
+        setFilter,
+        toggleMetadataFilters,
+        toggleFilter,
+        toggleStar,
+        findSimilar,
+        toggleBatchMode,
+        clearBatchSelection,
+        batchExport,
+        batchFlag,
+        mosaicShuffle,
+        setMosaicStrategy,
+        toggleAIPanel,
+        saveSettings,
+        applyRecommendedCache,
+        resetSettings,
+        clearThumbnailCache,
+        startCachePregeneration,
+        stopCachePregeneration,
+        installAIModel,
+        startScan,
+        addCatalogSource,
+        rescanCatalogSource,
+        openRemoveSourceDialog,
+        closeRemoveSourceDialog,
+        removeCatalogSource,
+        chooseCatalogFolder,
+        toggleDirectoryBrowser,
+        browseDirectory,
+        browseDirectoryParent,
+        selectBrowsedDirectory,
+        useBrowsedDirectory,
+        pauseEmbeddings,
+        resumeEmbeddings,
+        pauseAllWork,
+        resumeAllWork,
+        setLibraryView,
+        openLightboxById,
+        labelPerson,
+        mergePeople,
+        rejectPeopleMerge,
+        ignorePerson,
+        filterLibraryByPerson,
+        useFallbackThumb,
+        rememberPeopleLabelDraft,
+    };
+})();
+
+export default legacyPhotoArchive;

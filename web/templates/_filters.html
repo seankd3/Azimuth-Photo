@@ -34,6 +34,10 @@
         <button type="button" class="filter-star" data-star="5" onclick="PhotoArchive.toggleStar(5)" aria-label="5 stars">&#9734;</button>
     </div>
     <div class="filter-sep"></div>
+    <select id="filter-people" class="bar-select" onchange="PhotoArchive.setFilter('people', this.value)">
+        <option value="">All People</option>
+    </select>
+    <div class="filter-sep"></div>
     <select id="filter-folder" class="bar-select" onchange="PhotoArchive.setFilter('folder', this.value)">
         <option value="">All Folders</option>
     </select>

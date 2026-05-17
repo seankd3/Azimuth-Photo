@@ -129,12 +129,13 @@
     <div class="bar-section bar-nav">
         <a href="/compare" class="bar-link active">Compare</a>
         <a href="/library" class="bar-link">Library</a>
+        <a href="/people" class="bar-link">People</a>
     </div>
 </footer>
 {% endblock %}
 
 {% block scripts %}
 <script>
-    document.addEventListener('DOMContentLoaded', () => PhotoArchive.initCompare());
+    window.__photoArchiveWhenReady((api) => api.initCompare());
 </script>
 {% endblock %}

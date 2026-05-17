@@ -58,17 +58,17 @@
                 <label class="work-mode-option" data-work-mode-option="balanced">
                     <input type="radio" name="background_work_mode_choice" value="balanced">
                     <span class="work-mode-title">Light Background</span>
-                    <span class="work-mode-copy">Warm cache and embeddings only after the machine has been quiet.</span>
+                    <span class="work-mode-copy">Trickle cache, embeddings, and People work in small batches while you use the app.</span>
                 </label>
                 <label class="work-mode-option" data-work-mode-option="max">
                     <input type="radio" name="background_work_mode_choice" value="max">
                     <span class="work-mode-title">Max Work</span>
-                    <span class="work-mode-copy">Use more idle compute for overnight or away-from-desk builds.</span>
+                    <span class="work-mode-copy">Use larger background batches for overnight or away-from-desk builds.</span>
                 </label>
             </div>
             <div class="settings-metric-list">
                 <div>Background governor: <strong id="background-work-governor-status">—</strong></div>
-                <div>Allowed heavy work: <strong id="background-work-heavy-status">—</strong></div>
+                <div>Background work: <strong id="background-work-heavy-status">—</strong></div>
             </div>
         </section>
 
@@ -109,6 +109,41 @@
             </div>
             <div class="settings-actions">
                 <button class="bar-btn" type="button" id="install-model-btn" onclick="PhotoArchive.installAIModel('fast')">Save + Install 2B Model</button>
+            </div>
+        </section>
+
+        <section class="settings-card">
+            <h2>People Recognition</h2>
+            <p class="settings-card-copy">Local face detection runs in the background from cached previews. Person labels stay in the catalog.</p>
+            <label class="settings-field">
+                <span>Face model ID</span>
+                <input id="face_model_id" type="text" spellcheck="false" autocomplete="off">
+            </label>
+            <label class="settings-field">
+                <span>Local model directory</span>
+                <input id="face_model_dir" type="text" spellcheck="false" autocomplete="off">
+            </label>
+            <div class="settings-split-grid">
+                <label class="settings-field">
+                    <span>Detection size</span>
+                    <input id="face_detection_size" type="number" min="160" max="1280" step="32">
+                </label>
+                <label class="settings-field">
+                    <span>Cluster threshold</span>
+                    <input id="face_similarity_threshold" type="number" min="0.1" max="0.9" step="0.01">
+                </label>
+                <label class="settings-field">
+                    <span>Merge threshold</span>
+                    <input id="face_merge_suggestion_threshold" type="number" min="0.1" max="0.95" step="0.01">
+                </label>
+            </div>
+            <div class="settings-metric-list">
+                <div>People worker: <strong id="people-worker-status">—</strong></div>
+                <div>Face index: <strong id="people-model-status">—</strong></div>
+                <div id="people-model-license">—</div>
+            </div>
+            <div class="settings-actions">
+                <a class="bar-btn bar-btn-link" href="/people">Review People</a>
             </div>
         </section>
 
@@ -269,7 +304,7 @@
             <div class="settings-help-text" id="cache-profile-hint">photoArchive fills the basics first, then spends leftover SSD space according to this priority.</div>
             <label class="settings-checkbox">
                 <input id="pregenerate_on_idle" type="checkbox">
-                <span>Warm image cache while the computer is idle</span>
+                <span>Warm image cache in the background</span>
             </label>
             <label class="settings-checkbox">
                 <input id="show_loupe_cache_status" type="checkbox">
@@ -329,6 +364,6 @@
 
 {% block scripts %}
 <script>
-    document.addEventListener('DOMContentLoaded', () => PhotoArchive.initSettings());
+    window.__photoArchiveWhenReady((api) => api.initSettings());
 </script>
 {% endblock %}
