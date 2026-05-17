@@ -32,7 +32,6 @@ from core import responses as response_helpers
 from features.ai import routes as ai_routes
 from features.cache import routes as cache_routes
 from features.catalog import metadata as catalog_metadata
-from features.catalog import routes as catalog_routes
 from features.compare import routes as compare_routes
 from features.compare import service as compare_service
 from features.export import routes as export_routes
@@ -116,31 +115,6 @@ _MOSAIC_DIVERSE_WINDOW = compare_service._MOSAIC_DIVERSE_WINDOW
 
 _get_pairing_images = compare_service.get_pairing_images
 _invalidate_pairing_cache = _runtime_services.invalidate_pairing_cache
-
-start_scan = catalog_routes.start_scan
-scan_status = catalog_routes.scan_status
-scan_folder = catalog_routes.scan_folder
-_scan_prefetch_on_batch = catalog_routes.scan_prefetch_on_batch
-_quick_browse_roots = catalog_routes.quick_browse_roots
-_folder_picker_start = catalog_routes.folder_picker_start
-_folder_picker_commands = catalog_routes.folder_picker_commands
-_native_folder_picker_available = catalog_routes.native_folder_picker_available
-_run_native_folder_picker = catalog_routes.run_native_folder_picker
-api_catalog_folder_picker_status = catalog_routes.api_catalog_folder_picker_status
-api_catalog_select_folder = catalog_routes.api_catalog_select_folder
-api_catalog_browse = catalog_routes.api_catalog_browse
-api_catalog_summary = catalog_routes.api_catalog_summary
-api_add_catalog_source = catalog_routes.api_add_catalog_source
-api_rescan_catalog_source = catalog_routes.api_rescan_catalog_source
-api_remove_catalog_source = catalog_routes.api_remove_catalog_source
-_invalidate_folders_cache = catalog_routes.invalidate_folders_cache
-_clear_folders_cache = catalog_routes.clear_folders_cache
-_add_folder_counts = catalog_routes.add_folder_counts
-_parent_directory = catalog_routes.parent_directory
-_build_source_level_folders_payload = catalog_routes.build_source_level_folders_payload
-_build_folders_payload = catalog_routes.build_folders_payload
-api_folders = catalog_routes.api_folders
-
 
 _invalidate_rankings_cache = _runtime_services.invalidate_rankings_cache
 _invalidate_image_flag_caches = _runtime_services.invalidate_image_flag_caches

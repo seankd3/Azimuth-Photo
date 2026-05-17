@@ -1492,6 +1492,34 @@ class ModularContractTests(unittest.TestCase):
             self.assertNotIn("import db", contents)
             self.assertNotIn("db.", contents)
 
+        drained_names = (
+            "start_scan",
+            "scan_status",
+            "scan_folder",
+            "_scan_prefetch_on_batch",
+            "_quick_browse_roots",
+            "_folder_picker_start",
+            "_folder_picker_commands",
+            "_native_folder_picker_available",
+            "_run_native_folder_picker",
+            "api_catalog_folder_picker_status",
+            "api_catalog_select_folder",
+            "api_catalog_browse",
+            "api_catalog_summary",
+            "api_add_catalog_source",
+            "api_rescan_catalog_source",
+            "api_remove_catalog_source",
+            "_invalidate_folders_cache",
+            "_clear_folders_cache",
+            "_add_folder_counts",
+            "_parent_directory",
+            "_build_source_level_folders_payload",
+            "_build_folders_payload",
+            "api_folders",
+        )
+        for name in drained_names:
+            self.assertFalse(hasattr(app_module, name), name)
+
         config_names = (
             "_invalidate_pairing_cache",
             "_invalidate_cache_status_cache",

@@ -28,6 +28,7 @@ from data.repositories import images as image_repository  # noqa: E402
 from data.repositories import metadata_search, rankings, ratings, stats as stats_repository  # noqa: E402
 from features.ai import routes as ai_routes  # noqa: E402
 from features.cache import status as cache_status_service  # noqa: E402
+from features.catalog import routes as catalog_routes  # noqa: E402
 from features.people import routes as people_routes  # noqa: E402
 from features.settings import routes as settings_routes  # noqa: E402
 from features.settings import status as settings_status  # noqa: E402
@@ -87,7 +88,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         app_module._visible_pairing_candidates_cache.clear()
         app_module._interaction_response_cache.clear()
         app_module._invalidate_rankings_cache()
-        app_module._clear_folders_cache()
+        catalog_routes.clear_folders_cache()
         cache_status_service.invalidate_cache_status_cache()
         settings_status.invalidate_settings_response_cache()
 
@@ -136,7 +137,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         app_module._visible_pairing_candidates_cache.clear()
         app_module._interaction_response_cache.clear()
         app_module._invalidate_rankings_cache()
-        app_module._clear_folders_cache()
+        catalog_routes.clear_folders_cache()
         cache_status_service.invalidate_cache_status_cache()
         settings_status.invalidate_settings_response_cache()
         self.tempdir.cleanup()
@@ -1550,7 +1551,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         settings_status.invalidate_settings_response_cache()
         ai_routes.invalidate_ai_status_response_cache()
         cache_status_service.invalidate_cache_status_cache()
-        app_module._clear_folders_cache()
+        catalog_routes.clear_folders_cache()
 
         self.assertFalse(app_module._rankings_response_cache)
         self.assertFalse(app_module._thumbnail_memory_warm_inflight)
@@ -2179,7 +2180,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(markers["total_count"], 1)
         self.assertEqual(markers["gps_total_count"], 0)
 
-        folders = await app_module.api_folders()
+        folders = await catalog_routes.api_folders()
         self.assertTrue(folders["folders"])
 
         collections = await app_module.api_collections()
@@ -2205,8 +2206,8 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
                 f.write(b"image")
 
         await scanner.scan_folder(source["path"], source_id=source["id"])
-        app_module._invalidate_folders_cache()
-        result = await app_module.api_folders()
+        catalog_routes.invalidate_folders_cache()
+        result = await catalog_routes.api_folders()
 
         self.assertEqual(result["root"], source["path"])
         counts = {folder["path"]: folder["count"] for folder in result["folders"]}
@@ -2215,7 +2216,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(counts["Family/Trip"], 2)
         self.assertEqual(counts["Family/Trip/Day"], 1)
 
-        shallow = await app_module.api_folders(max_depth=1)
+        shallow = await catalog_routes.api_folders(max_depth=1)
         shallow_counts = {folder["path"]: folder["count"] for folder in shallow["folders"]}
         self.assertEqual(shallow_counts["."], 1)
         self.assertEqual(shallow_counts["Family"], 3)
@@ -2233,8 +2234,8 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
                 f.write(b"image")
 
         await scanner.scan_folder(source["path"], source_id=source["id"])
-        app_module._invalidate_folders_cache()
-        result = await app_module.api_folders()
+        catalog_routes.invalidate_folders_cache()
+        result = await catalog_routes.api_folders()
 
         self.assertEqual(result["root"], source["path"])
         self.assertEqual(result["folders"], [{"path": ".", "count": 2, "depth": 0}])
@@ -2265,8 +2266,8 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
                     f.write(b"image")
             await scanner.scan_folder(source["path"], source_id=source["id"])
 
-        app_module._invalidate_folders_cache()
-        result = await app_module.api_folders(max_depth=0)
+        catalog_routes.invalidate_folders_cache()
+        result = await catalog_routes.api_folders(max_depth=0)
 
         self.assertEqual(result["root"], self.tempdir.name)
         counts = {folder["path"]: folder["count"] for folder in result["folders"]}
