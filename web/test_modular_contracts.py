@@ -3938,6 +3938,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("export function scheduleFilterOptionsLoad", filters_module)
         self.assertIn("export function initStarHover", filters_module)
         self.assertIn("export function createMediaStatusClient", media_status)
+        self.assertIn("export function createMediaStatusController", media_status)
         self.assertIn("export function imageMetadataTitle", media_metadata)
         self.assertIn("export function formatDateTime", media_metadata)
         self.assertIn("export function formatCacheTier", cache_status)
@@ -4218,6 +4219,63 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("export function applyLibraryThumbSize", thumbnail_size)
         self.assertIn("export function createThumbnailSizeHandler", thumbnail_size)
         self.assertIn("export default legacyPhotoArchive;", legacy)
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_media_status_controller_node_probe_preserves_warm_invalidation_flow(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createMediaStatusController } from './static/js/media_status.js';
+
+const events = [];
+let currentImage = { id: 7, filename: 'seven.jpg' };
+let loupeToken = 11;
+const client = {
+    getStatus: async (imageId, options) => {
+        events.push(['get', imageId, options.force]);
+        return { id: Number(imageId), ok: true };
+    },
+    primeStatuses: (ids) => {
+        events.push(['prime', ids]);
+    },
+    invalidateForPayload: (payload) => {
+        events.push(['invalidate', payload]);
+    },
+};
+
+const controller = createMediaStatusController({
+    client,
+    getCurrentLoupeImage: () => currentImage,
+    getLoupeImageToken: () => loupeToken,
+    refreshLoupeMediaStatus: (img, token, options) => {
+        events.push(['refresh', img.id, token, options.force]);
+    },
+});
+
+assert.deepEqual(await controller.getMediaStatus(7, { force: true }), { id: 7, ok: true });
+controller.primeMediaStatuses([7, 8]);
+assert.equal(controller.handleWarmTiersApplied({ md: [4, 7], lg: [8] }), true);
+currentImage = { id: 9 };
+assert.equal(controller.handleWarmTiersApplied({ md: [4, 7], lg: [8] }), false);
+currentImage = null;
+assert.equal(controller.handleWarmTiersApplied({ md: [7] }), false);
+
+assert.deepEqual(events, [
+    ['get', 7, true],
+    ['prime', [7, 8]],
+    ['invalidate', { md: [4, 7], lg: [8] }],
+    ['refresh', 7, 11, true],
+    ['invalidate', { md: [4, 7], lg: [8] }],
+    ['invalidate', { md: [7] }],
+]);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
 
     @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
     def test_ui_settings_loader_node_probe_preserves_cache_status_toggle_loading(self):

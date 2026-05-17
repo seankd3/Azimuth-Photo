@@ -37,7 +37,10 @@ import {
     saveFilters as saveFiltersCore,
 } from '../library/filters.js';
 import { createLibraryFilterController } from '../library/filter_controller.js';
-import { createMediaStatusClient } from '../media_status.js';
+import {
+    createMediaStatusClient,
+    createMediaStatusController,
+} from '../media_status.js';
 import {
     createImagePreloader,
     createWarmupManager,
@@ -231,7 +234,13 @@ const legacyPhotoArchive = (() => {
     const MOSAIC_NEIGHBOR_LIMIT = 8;
     const COMPARE_NEIGHBOR_PAIRS = 4;
     const FILMSTRIP_WINDOW_RADIUS = 55;
-    const mediaStatusClient = createMediaStatusClient({ maxAgeMs: 15000 });
+    const mediaStatusController = createMediaStatusController({
+        client: createMediaStatusClient({ maxAgeMs: 15000 }),
+        getCurrentLoupeImage: () => loupeCurrentImage,
+        getLoupeImageToken: () => loupeImageToken,
+        refreshLoupeMediaStatus,
+    });
+    const { handleWarmTiersApplied } = mediaStatusController;
     let selectedLibraryIndex = -1;
     let selectedMosaicIndex = -1;
     const aiStatusPoller = createAIStatusPoller({
@@ -286,18 +295,6 @@ const legacyPhotoArchive = (() => {
                 refreshSettingsMetaIfActive().catch(() => {});
             },
         });
-    }
-
-    function invalidateMediaStatusesForPayload(payload) {
-        mediaStatusClient.invalidateForPayload(payload);
-    }
-
-    function handleWarmTiersApplied(payload) {
-        invalidateMediaStatusesForPayload(payload);
-        const currentId = Number(loupeCurrentImage?.id || 0);
-        if (!currentId) return;
-        const includesCurrent = Object.values(payload).some((ids) => (ids || []).includes(currentId));
-        if (includesCurrent) refreshLoupeMediaStatus(loupeCurrentImage, loupeImageToken, { force: true });
     }
 
     const uiSettingsLoader = createUiSettingsLoader({
@@ -1653,11 +1650,11 @@ const legacyPhotoArchive = (() => {
     }
 
     async function getMediaStatus(imageId, { force = false } = {}) {
-        return mediaStatusClient.getStatus(imageId, { force });
+        return mediaStatusController.getMediaStatus(imageId, { force });
     }
 
     function primeMediaStatuses(imageIds) {
-        mediaStatusClient.primeStatuses(imageIds);
+        mediaStatusController.primeMediaStatuses(imageIds);
     }
 
     function loupeTierUrl(tier, imageId, cachedOnly = false) {

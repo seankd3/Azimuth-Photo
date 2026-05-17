@@ -74,3 +74,41 @@ export function createMediaStatusClient({ maxAgeMs = 15000 } = {}) {
         primeStatuses,
     };
 }
+
+
+export function createMediaStatusController({
+    client = createMediaStatusClient(),
+    getCurrentLoupeImage = () => null,
+    getLoupeImageToken = () => 0,
+    refreshLoupeMediaStatus = () => {},
+} = {}) {
+    async function getMediaStatus(imageId, { force = false } = {}) {
+        return client.getStatus(imageId, { force });
+    }
+
+    function primeMediaStatuses(imageIds) {
+        client.primeStatuses(imageIds);
+    }
+
+    function invalidateMediaStatusesForPayload(payload) {
+        client.invalidateForPayload(payload);
+    }
+
+    function handleWarmTiersApplied(payload) {
+        invalidateMediaStatusesForPayload(payload);
+        const currentImage = getCurrentLoupeImage();
+        const currentId = Number(currentImage?.id || 0);
+        if (!currentId) return false;
+        const includesCurrent = Object.values(payload || {}).some((ids) => (ids || []).includes(currentId));
+        if (!includesCurrent) return false;
+        refreshLoupeMediaStatus(currentImage, getLoupeImageToken(), { force: true });
+        return true;
+    }
+
+    return {
+        getMediaStatus,
+        handleWarmTiersApplied,
+        invalidateMediaStatusesForPayload,
+        primeMediaStatuses,
+    };
+}
