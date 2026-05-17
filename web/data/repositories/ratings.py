@@ -6,6 +6,7 @@ from data import connection
 
 VISIBLE_PAIRING_POOL_COUNTS_TTL_SECONDS = 30.0
 _visible_pairing_pool_counts_cache: dict[tuple, dict] = {}
+_past_matchups_cache = {"data": None, "signature": None}
 
 
 def _chunked(values: list[int], chunk_size: int = 500):
@@ -36,6 +37,11 @@ def invalidate_visible_pairing_pool_counts_cache(
         key_root, key_size = key[:2]
         if _cache_scope_matches(key_root, key_size, cache_root, size):
             _visible_pairing_pool_counts_cache.pop(key, None)
+
+
+def invalidate_past_matchups_cache() -> None:
+    _past_matchups_cache["data"] = None
+    _past_matchups_cache["signature"] = None
 
 
 def _was_rated(row: dict) -> bool:
@@ -325,6 +331,21 @@ def load_past_matchups(db_path: str) -> tuple[tuple[int, int | None], set[tuple[
         }
     finally:
         connection.close_sync(conn, db_path=db_path)
+
+
+def past_matchups_cached(db_path: str, *, active_source_ids) -> set[tuple[int, int]]:
+    if not active_source_ids:
+        return set()
+
+    if _past_matchups_cache["data"] is not None:
+        signature = past_matchups_signature(db_path)
+        if _past_matchups_cache["signature"] == signature:
+            return set(_past_matchups_cache["data"])
+
+    signature, loaded = load_past_matchups(db_path)
+    _past_matchups_cache["signature"] = signature
+    _past_matchups_cache["data"] = loaded
+    return set(loaded)
 
 
 def _past_matchups_signature_on_conn(conn) -> tuple[int, int | None]:

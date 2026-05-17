@@ -66,6 +66,7 @@ _date_groups_refreshing = ranking_repository._date_groups_refreshing
 _map_markers_cache = ranking_repository._map_markers_cache
 _ranking_count_cache = ranking_repository._ranking_count_cache
 _visible_pairing_pool_counts_cache = rating_repository._visible_pairing_pool_counts_cache
+_past_matchups_cache = rating_repository._past_matchups_cache
 _cached_image_ids_cache = cache_entry_repository._cached_image_ids_cache
 _cache_entry_count_cache = cache_entry_repository._cache_entry_count_cache
 _rankable_image_ids_cache = ranking_repository._rankable_image_ids_cache
@@ -73,7 +74,6 @@ _embedding_count_cache = {"key": None, "value": None, "expires": 0}
 _ensured_embedding_model_keys: set[str] = set()
 _ai_status_counts_cache = stats_repository._ai_status_counts_cache
 _active_source_ids_cache = catalog_repository._active_source_ids_cache
-_past_matchups_cache = {"data": None, "signature": None}
 CACHED_IMAGE_IDS_TTL_SECONDS = cache_entry_repository.CACHED_IMAGE_IDS_TTL_SECONDS
 RANKING_COUNT_CACHE_TTL_SECONDS = ranking_repository.RANKING_COUNT_CACHE_TTL_SECONDS
 VISIBLE_PAIRING_POOL_COUNTS_TTL_SECONDS = rating_repository.VISIBLE_PAIRING_POOL_COUNTS_TTL_SECONDS
@@ -251,8 +251,7 @@ def _invalidate_active_source_ids_cache():
 
 
 def _invalidate_past_matchups_cache():
-    _past_matchups_cache["data"] = None
-    _past_matchups_cache["signature"] = None
+    rating_repository.invalidate_past_matchups_cache()
 
 
 def invalidate_stats_cache():
@@ -652,17 +651,11 @@ async def get_visible_orientation_pairing_pool_counts(
 
 async def get_past_matchups() -> set[tuple[int, int]]:
     """Return set of (min_id, max_id) tuples for all past matchups."""
-    if not await get_active_source_id_set():
-        return set()
-
-    if _past_matchups_cache["data"] is not None:
-        signature = await asyncio.to_thread(rating_repository.past_matchups_signature, DB_PATH)
-        if _past_matchups_cache["signature"] == signature:
-            return set(_past_matchups_cache["data"])
-    signature, loaded = await asyncio.to_thread(rating_repository.load_past_matchups, DB_PATH)
-    _past_matchups_cache["signature"] = signature
-    _past_matchups_cache["data"] = loaded
-    return set(loaded)
+    return await asyncio.to_thread(
+        rating_repository.past_matchups_cached,
+        DB_PATH,
+        active_source_ids=await get_active_source_id_set(),
+    )
 
 
 async def get_visible_past_matchups(size: str, cache_root: str) -> set[tuple[int, int]]:
