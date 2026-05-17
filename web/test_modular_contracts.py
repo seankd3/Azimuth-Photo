@@ -2815,6 +2815,17 @@ class ModularContractTests(unittest.TestCase):
         with open(os.path.join(base_dir, "features", "settings", "routes.py"), encoding="utf-8") as fh:
             self.assertNotIn("import db", fh.read())
 
+        drained_names = (
+            "api_settings",
+            "api_ui_settings",
+            "api_set_image_flag",
+            "api_batch_set_flag",
+            "api_save_settings",
+            "api_reset_settings",
+        )
+        for name in drained_names:
+            self.assertFalse(hasattr(app_module, name), name)
+
         config_names = (
             "_settings_response_cache",
             "_settings_response_cache_ttl_seconds",

@@ -1520,7 +1520,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(initial["images"], [])
         self.assertTrue(app_module._rankings_response_cache)
 
-        await app_module.api_set_image_flag(first, JsonRequest({"flag": "picked"}))
+        await settings_routes.api_set_image_flag(first, JsonRequest({"flag": "picked"}))
         refreshed = await app_module.api_rankings(limit=10, sort="elo", flag="picked")
 
         self.assertEqual([image["id"] for image in refreshed["images"]], [first])
@@ -1532,7 +1532,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         await self._cache_entry(image_id, "sm")
 
         await app_module.api_rankings(limit=10, sort="elo")
-        await app_module.api_settings()
+        await settings_routes.api_settings()
         self.assertTrue(app_module._rankings_response_cache)
         self.assertIsNotNone(settings_status._settings_response_cache["data"])
         self.assertIsNotNone(ai_routes._ai_status_response_cache["data"])
@@ -3850,7 +3850,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         elo_propagation._prediction_cache_key = ("stale",)
         elo_propagation._prediction_cache_counts = {1: 10}
 
-        await app_module.api_save_settings(JsonRequest({
+        await settings_routes.api_save_settings(JsonRequest({
             "embed_model_preset": "custom",
             "embed_model_id": "Local/Test-Embedding",
             "embed_model_revision": "main",
@@ -4492,7 +4492,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(app_module._BACKGROUND_TASKS, set())
 
     async def test_ui_settings_returns_default_loupe_cache_status(self):
-        result = await app_module.api_ui_settings()
+        result = await settings_routes.api_ui_settings()
 
         self.assertEqual(result, {"settings": {"show_loupe_cache_status": True}})
 
@@ -4501,7 +4501,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(saved["show_loupe_cache_status"])
 
         reloaded = app_module.settings.load_settings(force=True)
-        result = await app_module.api_ui_settings()
+        result = await settings_routes.api_ui_settings()
 
         self.assertFalse(reloaded["show_loupe_cache_status"])
         self.assertEqual(result, {"settings": {"show_loupe_cache_status": False}})
@@ -4567,13 +4567,13 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_api_settings_returns_deep_search_terms(self):
-        response = await app_module.api_save_settings(JsonRequest({
+        response = await settings_routes.api_save_settings(JsonRequest({
             "deep_search_terms": "crane\ncat in cafe window\nCRANE\n",
         }))
 
         self.assertEqual(response["settings"]["deep_search_terms"], ["crane", "cat in cafe window"])
 
-        refreshed = await app_module.api_settings()
+        refreshed = await settings_routes.api_settings()
 
         self.assertEqual(refreshed["settings"]["deep_search_terms"], ["crane", "cat in cafe window"])
 
@@ -4737,10 +4737,10 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("already running", body["error"])
 
     async def test_defer_ai_on_startup_setting_controls_embedding_pause(self):
-        await app_module.api_save_settings(JsonRequest({"defer_ai_on_startup": False}))
+        await settings_routes.api_save_settings(JsonRequest({"defer_ai_on_startup": False}))
         self.assertFalse(embedding_worker.get_worker_status()["manual_pause"])
 
-        response = await app_module.api_save_settings(JsonRequest({"defer_ai_on_startup": True}))
+        response = await settings_routes.api_save_settings(JsonRequest({"defer_ai_on_startup": True}))
 
         self.assertTrue(response["settings"]["defer_ai_on_startup"])
         self.assertTrue(response["ai_status"]["embedding_manual_pause"])
@@ -4763,29 +4763,29 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(str(context["static_version"]).isdigit())
 
     async def test_api_settings_cache_returns_independent_responses_and_invalidates(self):
-        first = await app_module.api_settings()
+        first = await settings_routes.api_settings()
         self.assertIsNotNone(settings_status._settings_response_cache["data"])
 
-        second = await app_module.api_settings()
+        second = await settings_routes.api_settings()
         second["settings"] = {"thumb_quality": 40}
-        third = await app_module.api_settings()
+        third = await settings_routes.api_settings()
         self.assertNotEqual(third["settings"], {"thumb_quality": 40})
 
         target_quality = 80 if third["settings"]["thumb_quality"] != 80 else 79
-        await app_module.api_save_settings(JsonRequest({"thumb_quality": target_quality}))
-        refreshed = await app_module.api_settings()
+        await settings_routes.api_save_settings(JsonRequest({"thumb_quality": target_quality}))
+        refreshed = await settings_routes.api_settings()
 
         self.assertEqual(refreshed["settings"]["thumb_quality"], target_quality)
 
     async def test_api_settings_cache_protects_nested_responses(self):
-        first = await app_module.api_settings()
+        first = await settings_routes.api_settings()
         self.assertIsNotNone(settings_status._settings_response_cache["data"])
 
         first["settings"]["thumb_quality"] = 40
         first["cache_stats"]["disk"]["tiers"]["sm"]["count"] = 999999
         first["catalog"]["sources"].append({"id": 999999})
 
-        second = await app_module.api_settings()
+        second = await settings_routes.api_settings()
 
         self.assertNotEqual(second["settings"]["thumb_quality"], 40)
         self.assertNotEqual(second["cache_stats"]["disk"]["tiers"]["sm"]["count"], 999999)
@@ -4818,7 +4818,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
         settings_routes._build_settings_response = fake_build_settings_response
         try:
-            response = await app_module.api_settings()
+            response = await settings_routes.api_settings()
             self.assertEqual(response["settings"]["thumb_quality"], 40)
             await asyncio.sleep(0.01)
             self.assertEqual(
@@ -4829,7 +4829,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             settings_routes._build_settings_response = old_build_settings_response
 
     async def test_cache_status_invalidation_expires_settings_without_dropping_stale_data(self):
-        first = await app_module.api_settings()
+        first = await settings_routes.api_settings()
         self.assertIsNotNone(settings_status._settings_response_cache["data"])
         self.assertGreater(settings_status._settings_response_cache["expires"], 0)
 
@@ -4838,7 +4838,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(settings_status._settings_response_cache["data"])
         self.assertEqual(settings_status._settings_response_cache["expires"], 0)
 
-        second = await app_module.api_settings()
+        second = await settings_routes.api_settings()
         self.assertEqual(second["settings"], first["settings"])
         for _ in range(20):
             if not settings_status.get_settings_response_refreshing():
@@ -4869,7 +4869,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             "expires": app_module.time.monotonic() + 100,
         }
 
-        await app_module.api_save_settings(JsonRequest({"search_similarity_threshold": 0.55}))
+        await settings_routes.api_save_settings(JsonRequest({"search_similarity_threshold": 0.55}))
 
         self.assertFalse(app_module._rankings_response_cache)
         self.assertFalse(app_module._text_search_resolution_cache)

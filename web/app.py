@@ -38,7 +38,6 @@ from features.library import service as library_service
 from features.media import warm as media_warm
 from features.search import routes as search_routes
 from features.search import service as search_service
-from features.settings import routes as settings_routes
 
 
 APP_DIR = os.path.dirname(__file__)
@@ -253,14 +252,6 @@ api_duplicates = search_routes.api_duplicates
 api_exif = search_routes.api_exif
 api_collections = search_routes.api_collections
 _exif_cache = search_routes._exif_cache
-
-
-api_settings = settings_routes.api_settings
-api_ui_settings = settings_routes.api_ui_settings
-api_set_image_flag = settings_routes.api_set_image_flag
-api_batch_set_flag = settings_routes.api_batch_set_flag
-api_save_settings = settings_routes.api_save_settings
-api_reset_settings = settings_routes.api_reset_settings
 
 
 _lifecycle = _app_shell.lifecycle

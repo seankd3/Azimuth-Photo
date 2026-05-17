@@ -33,6 +33,7 @@ import thumbnails
 from features.ai import routes as ai_routes
 from features.cache import status as cache_status_service
 from features.media import routes as media_routes
+from features.settings import routes as settings_routes
 from features.settings import status as settings_status
 
 try:
@@ -595,7 +596,7 @@ async def bench_app_endpoints(iterations: int):
     await endpoint("cache_status", lambda: cache_status_service.build_cache_status(ahead=0))
     await endpoint("cache_status ahead", lambda: cache_status_service.build_cache_status(ahead=1000))
     await endpoint("ai_status", ai_routes.build_ai_status)
-    await endpoint("settings", app_module.api_settings)
+    await endpoint("settings", settings_routes.api_settings)
     if media_status_ids:
         await endpoint("media_status batch", lambda: media_routes.images_media_status(JsonRequest({"ids": media_status_ids})))
 
@@ -628,7 +629,7 @@ async def bench_cold_app_endpoints(iterations: int):
         ("cache_status", lambda: cache_status_service.build_cache_status(ahead=0)),
         ("cache_status ahead", lambda: cache_status_service.build_cache_status(ahead=1000)),
         ("ai_status", ai_routes.build_ai_status),
-        ("settings", app_module.api_settings),
+        ("settings", settings_routes.api_settings),
     ]
     if media_status_ids:
         endpoints.append(
