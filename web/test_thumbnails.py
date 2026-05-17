@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 import thumbnails  # noqa: E402
 from data import schema as data_schema  # noqa: E402
 from thumbnails import budget as thumbnail_budget  # noqa: E402
+from thumbnails import cache_entries as thumbnail_cache_entries  # noqa: E402
 from thumbnails import config as thumbnail_config  # noqa: E402
 from thumbnails import maintenance as thumbnail_maintenance  # noqa: E402
 from thumbnails import runtime as thumbnail_runtime  # noqa: E402
@@ -366,6 +367,7 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
         self.old_load_source_image = thumbnails._load_source_image
         self.old_memory_bytes = thumbnails.MEMORY_CACHE_BYTES
         self.old_db_connect = thumbnails._db_connect
+        self.old_cache_entry_db_connect = thumbnail_cache_entries._db_connect
         self.old_data_providers = {
             name: getattr(thumbnails.data_providers, name)
             for name in (
@@ -377,7 +379,7 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
                 "_note_cached_image_ids_added",
             )
         }
-        self.old_persistent_conn = thumbnails._persistent_conn
+        self.old_persistent_conn = thumbnail_cache_entries._persistent_conn
         self.old_prefetching = thumbnails._prefetching
         self.old_pregen_manual_mode = thumbnails._pregen_manual_mode
         self.old_pregen_manual_pause = thumbnails._pregen_manual_pause
@@ -390,7 +392,7 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
 
         thumbnails.SSD_CACHE_DIR = self.tempdir.name
         self.db_path = os.path.join(self.tempdir.name, "thumbnail-cache-test.db")
-        thumbnails._persistent_conn = None
+        thumbnail_cache_entries._persistent_conn = None
         self.provider_events = []
 
         async def get_db():
@@ -458,7 +460,7 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
         with thumbnails._write_queue_lock:
             thumbnails._write_queue.clear()
         with thumbnails._disk_index_lock:
-            thumbnails._disk_index_built = True
+            thumbnail_cache_entries._disk_index_built = True
 
     def tearDown(self):
         thumbnails.SSD_CACHE_DIR = self.old_cache_dir
@@ -467,9 +469,10 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
         thumbnails._get_source_bits = self.old_get_source_bits
         thumbnails._load_source_image = self.old_load_source_image
         thumbnails._db_connect = self.old_db_connect
-        if thumbnails._persistent_conn is not None:
-            thumbnails._persistent_conn.close()
-        thumbnails._persistent_conn = self.old_persistent_conn
+        thumbnail_cache_entries._db_connect = self.old_cache_entry_db_connect
+        if thumbnail_cache_entries._persistent_conn is not None:
+            thumbnail_cache_entries._persistent_conn.close()
+        thumbnail_cache_entries._persistent_conn = self.old_persistent_conn
         for name, value in self.old_data_providers.items():
             setattr(thumbnails.data_providers, name, value)
         thumbnails.MEMORY_CACHE_BYTES = self.old_memory_bytes
@@ -1131,7 +1134,7 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
             def rollback(self):
                 pass
 
-        thumbnails._db_connect = lambda: LockedConn()
+        thumbnail_cache_entries._db_connect = lambda: LockedConn()
 
         self.assertFalse(thumbnails.touch_cached_signature("sm", 1, "sig"))
 
@@ -1139,7 +1142,7 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
         def locked_connect():
             raise sqlite3.OperationalError("database is locked")
 
-        thumbnails._db_connect = locked_connect
+        thumbnail_cache_entries._db_connect = locked_connect
 
         self.assertFalse(thumbnails.touch_cached_signature("sm", 1, "sig"))
 
@@ -1154,7 +1157,7 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
         path = os.path.join(self.tempdir.name, "sm", "1.jpg")
         with thumbnails._write_queue_lock:
             thumbnails._write_queue.append(("sm", 1, "sig", path, 123, time.time()))
-        thumbnails._db_connect = lambda: LockedConn()
+        thumbnail_cache_entries._db_connect = lambda: LockedConn()
 
         self.assertFalse(thumbnails._flush_write_queue())
         with thumbnails._write_queue_lock:
@@ -1168,7 +1171,7 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
         def locked_connect():
             raise sqlite3.OperationalError("database is locked")
 
-        thumbnails._db_connect = locked_connect
+        thumbnail_cache_entries._db_connect = locked_connect
 
         self.assertFalse(thumbnails._flush_write_queue())
         with thumbnails._write_queue_lock:
@@ -1239,7 +1242,7 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
 
         thumbnails.stop_prefetch()
 
-        self.assertIsNone(thumbnails._persistent_conn)
+        self.assertIsNone(thumbnail_cache_entries._persistent_conn)
         with self.assertRaises(sqlite3.ProgrammingError):
             conn.execute("SELECT 1")
 

@@ -43,6 +43,7 @@ from features.search import routes as search_routes  # noqa: E402
 from features.search import service as search_service  # noqa: E402
 from features.settings import routes as settings_routes  # noqa: E402
 from features.settings import status as settings_status  # noqa: E402
+from thumbnails import cache_entries as thumbnail_cache_entries  # noqa: E402
 
 
 class JsonRequest:
@@ -80,12 +81,12 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.old_has_cached_fast = app_module.thumbnails.has_cached_fast
         self.old_fast_disk_path_entry = app_module.thumbnails.fast_disk_path_entry
         self.old_fast_disk_read_entry = app_module.thumbnails.fast_disk_read_entry
-        self.old_thumbnail_persistent_conn = app_module.thumbnails._persistent_conn
+        self.old_thumbnail_persistent_conn = thumbnail_cache_entries._persistent_conn
         self.old_settings_path = app_module.settings.SETTINGS_PATH
         self.old_settings_state = app_module.settings._settings
 
         db.DB_PATH = os.path.join(self.tempdir.name, "photoarchive-test.db")
-        app_module.thumbnails._persistent_conn = None
+        thumbnail_cache_entries._persistent_conn = None
         app_module.settings.SETTINGS_PATH = os.path.join(self.tempdir.name, "settings.local.json")
         app_module.settings._settings = None
         db.invalidate_stats_cache()
@@ -134,9 +135,9 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         app_module.thumbnails.has_cached_fast = self.old_has_cached_fast
         app_module.thumbnails.fast_disk_path_entry = self.old_fast_disk_path_entry
         app_module.thumbnails.fast_disk_read_entry = self.old_fast_disk_read_entry
-        if app_module.thumbnails._persistent_conn is not None:
-            app_module.thumbnails._persistent_conn.close()
-        app_module.thumbnails._persistent_conn = self.old_thumbnail_persistent_conn
+        if thumbnail_cache_entries._persistent_conn is not None:
+            thumbnail_cache_entries._persistent_conn.close()
+        thumbnail_cache_entries._persistent_conn = self.old_thumbnail_persistent_conn
         app_module.settings.SETTINGS_PATH = self.old_settings_path
         app_module.settings._settings = self.old_settings_state
         db.DB_PATH = self.old_db_path
@@ -2341,10 +2342,10 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
     async def test_thumbnail_store_invalidates_cached_image_id_cache(self):
         source = await self._source("thumb-store-source")
         image_id = await self._image(source["id"], "new-cache.jpg")
-        app_module.thumbnails._persistent_conn = None
+        thumbnail_cache_entries._persistent_conn = None
         old_allocations = dict(app_module.thumbnails._disk_allocations)
         app_module.thumbnails._disk_allocations["sm"] = 10_000
-        app_module.thumbnails._tier_byte_totals.clear()
+        thumbnail_cache_entries._tier_byte_totals.clear()
         db.invalidate_cached_image_ids_cache()
         try:
             self.assertNotIn(
@@ -2352,7 +2353,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
                 await db.get_cached_image_id_set("sm", app_module.thumbnails.SSD_CACHE_DIR),
             )
 
-            app_module.thumbnails._store_disk_entry(
+            thumbnail_cache_entries._store_disk_entry(
                 "sm",
                 image_id,
                 "sig-sm",
@@ -2367,18 +2368,18 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         finally:
             app_module.thumbnails._disk_allocations.clear()
             app_module.thumbnails._disk_allocations.update(old_allocations)
-            app_module.thumbnails._tier_byte_totals.clear()
+            thumbnail_cache_entries._tier_byte_totals.clear()
 
     async def test_thumbnail_write_queue_flush_invalidates_cached_image_id_cache(self):
         source = await self._source("thumb-flush-source")
         image_id = await self._image(source["id"], "queued-cache.jpg")
-        app_module.thumbnails._persistent_conn = None
+        thumbnail_cache_entries._persistent_conn = None
         old_allocations = dict(app_module.thumbnails._disk_allocations)
-        old_queue = list(app_module.thumbnails._write_queue)
+        old_queue = list(thumbnail_cache_entries._write_queue)
         app_module.thumbnails._disk_allocations["sm"] = 10_000
-        app_module.thumbnails._tier_byte_totals.clear()
-        with app_module.thumbnails._write_queue_lock:
-            app_module.thumbnails._write_queue.clear()
+        thumbnail_cache_entries._tier_byte_totals.clear()
+        with thumbnail_cache_entries._write_queue_lock:
+            thumbnail_cache_entries._write_queue.clear()
         db.invalidate_cached_image_ids_cache()
         try:
             self.assertNotIn(
@@ -2386,8 +2387,8 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
                 await db.get_cached_image_id_set("sm", app_module.thumbnails.SSD_CACHE_DIR),
             )
 
-            with app_module.thumbnails._write_queue_lock:
-                app_module.thumbnails._write_queue.append(
+            with thumbnail_cache_entries._write_queue_lock:
+                thumbnail_cache_entries._write_queue.append(
                     (
                         "sm",
                         image_id,
@@ -2397,7 +2398,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
                         app_module.thumbnails._current_time(),
                     )
                 )
-            self.assertTrue(app_module.thumbnails._flush_write_queue())
+            self.assertTrue(thumbnail_cache_entries._flush_write_queue())
 
             self.assertIn(
                 image_id,
@@ -2406,10 +2407,10 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         finally:
             app_module.thumbnails._disk_allocations.clear()
             app_module.thumbnails._disk_allocations.update(old_allocations)
-            app_module.thumbnails._tier_byte_totals.clear()
-            with app_module.thumbnails._write_queue_lock:
-                app_module.thumbnails._write_queue.clear()
-                app_module.thumbnails._write_queue.extend(old_queue)
+            thumbnail_cache_entries._tier_byte_totals.clear()
+            with thumbnail_cache_entries._write_queue_lock:
+                thumbnail_cache_entries._write_queue.clear()
+                thumbnail_cache_entries._write_queue.extend(old_queue)
 
     async def test_thumbnail_append_preserves_visible_facet_cache(self):
         root = app_module.thumbnails.SSD_CACHE_DIR
