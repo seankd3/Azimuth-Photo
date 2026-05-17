@@ -74,6 +74,8 @@ scrolling, and visual-row navigation wiring.
 marker loading, marker-layer replacement, and map-bound fitting.
 `compare/query.js` owns Compare and Mosaic API query-string construction.
 `compare/navigation.js` owns Mosaic keyboard cell selection and visual-row navigation wiring.
+`compare/mode_controller.js` owns Compare/Mosaic mode and strategy switching
+glue while legacy keeps pair and mosaic state.
 `compare/images.js` owns Compare pair image rendering and progressive tier
 upgrades.
 `compare/view.js` owns Compare mode container visibility and empty-state display.

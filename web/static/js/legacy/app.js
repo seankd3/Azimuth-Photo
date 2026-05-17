@@ -75,9 +75,9 @@ import {
     upgradeCompareImage as upgradeCompareImageCore,
 } from '../compare/images.js';
 import {
-    setCompareModeView as setCompareModeViewCore,
     showCompareEmpty as showCompareEmptyCore,
 } from '../compare/view.js';
+import { createCompareModeController } from '../compare/mode_controller.js';
 import {
     applyComparisonElos as applyComparisonElosCore,
     buildComparisonPayload as buildComparisonPayloadCore,
@@ -626,19 +626,28 @@ const legacyPhotoArchive = (() => {
         hideConfirmModalUi();
     }
 
+    const compareModeController = createCompareModeController({
+        clearWarmups,
+        setMosaicStrategyValue: (strategy) => { mosaicStrategy = strategy; },
+        setCompareModeValue: (mode) => { compareMode = mode; },
+        incrementTransitionToken: () => ++compareModeTransitionToken,
+        isCurrentTransition: (token) => token === compareModeTransitionToken,
+        incrementCompareImageToken: () => { compareImageToken++; },
+        loadMosaicBatch,
+        resetComparePairs: () => {
+            comparePairs = [];
+            compareIndex = 0;
+        },
+        fetchComparePairs,
+        showComparePair,
+    });
+
     function setMosaicStrategy(strategy) {
-        clearWarmups();
-        mosaicStrategy = strategy;
-        const btn = document.getElementById('strategy-' + strategy);
-        if (btn) {
-            btn.parentElement.querySelectorAll('button').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-        }
-        loadMosaicBatch();
+        return compareModeController.setMosaicStrategy(strategy);
     }
 
     function mosaicShuffle() {
-        loadMosaicBatch();
+        return compareModeController.mosaicShuffle();
     }
 
     // ==================== COMPARE MODE ====================
@@ -907,22 +916,7 @@ const legacyPhotoArchive = (() => {
     });
 
     function setCompareMode(mode) {
-        clearWarmups();
-        compareMode = mode;
-        const transitionToken = ++compareModeTransitionToken;
-        setCompareModeViewCore(mode, {
-            transitionToken,
-            isCurrentTransition: (token) => token === compareModeTransitionToken,
-            onMosaic: () => {
-                compareImageToken++;
-                loadMosaicBatch();
-            },
-            onPair: () => {
-                comparePairs = [];
-                compareIndex = 0;
-                fetchComparePairs().then(() => showComparePair());
-            },
-        });
+        return compareModeController.setCompareMode(mode);
     }
 
     function showCompareEmpty() {

@@ -3711,6 +3711,8 @@ class ModularContractTests(unittest.TestCase):
             compare_images = fh.read()
         with open(os.path.join(base_dir, "static", "js", "compare", "view.js"), encoding="utf-8") as fh:
             compare_view = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "compare", "mode_controller.js"), encoding="utf-8") as fh:
+            compare_mode_controller = fh.read()
         with open(os.path.join(base_dir, "static", "js", "compare", "actions.js"), encoding="utf-8") as fh:
             compare_actions = fh.read()
         with open(os.path.join(base_dir, "static", "js", "compare", "propagation.js"), encoding="utf-8") as fh:
@@ -3816,6 +3818,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../compare/navigation.js';", legacy)
         self.assertIn("from '../compare/images.js';", legacy)
         self.assertIn("from '../compare/view.js';", legacy)
+        self.assertIn("from '../compare/mode_controller.js';", legacy)
         self.assertIn("from '../compare/actions.js';", legacy)
         self.assertIn("from '../compare/propagation.js';", legacy)
         self.assertIn("from '../compare/status.js';", legacy)
@@ -3927,6 +3930,9 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("export async function adoptCompareTier", compare_images)
         self.assertIn("export function setCompareModeView", compare_view)
         self.assertIn("export function showCompareEmpty", compare_view)
+        self.assertIn("export function createCompareModeController", compare_mode_controller)
+        self.assertIn("from './view.js';", compare_mode_controller)
+        self.assertIn("setCompareModeViewImpl", compare_mode_controller)
         self.assertIn("export function buildComparisonPayload", compare_actions)
         self.assertIn("export async function postComparison", compare_actions)
         self.assertIn("export function applyComparisonElos", compare_actions)
@@ -4341,6 +4347,116 @@ assert.deepEqual(controller.selectedImageIds(), []);
 assert.equal(cards[0].classList.contains('selected'), false);
 assert.equal(cards[0].classList.contains('selectable'), false);
 assert.equal(batchBar, null);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_compare_mode_controller_node_probe_preserves_mode_flow(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createCompareModeController } from './static/js/compare/mode_controller.js';
+
+const siblingButtons = [
+    { classList: { removed: [], remove(cls) { this.removed.push(cls); } } },
+];
+const strategyButton = {
+    classList: {
+        added: [],
+        add(cls) { this.added.push(cls); },
+    },
+    parentElement: {
+        querySelectorAll(selector) {
+            assert.equal(selector, 'button');
+            return siblingButtons;
+        },
+    },
+};
+const documentImpl = {
+    getElementById(id) {
+        return id === 'strategy-explore' ? strategyButton : null;
+    },
+};
+let mosaicStrategy = 'diverse';
+let compareMode = 'swiss';
+let transition = 0;
+let imageToken = 0;
+const events = [];
+const controller = createCompareModeController({
+    documentImpl,
+    clearWarmups: () => events.push(['clear']),
+    setMosaicStrategyValue: (strategy) => {
+        mosaicStrategy = strategy;
+        events.push(['strategy', strategy]);
+    },
+    setCompareModeValue: (mode) => {
+        compareMode = mode;
+        events.push(['mode', mode]);
+    },
+    incrementTransitionToken: () => {
+        transition += 1;
+        return transition;
+    },
+    isCurrentTransition: (token) => token === transition,
+    incrementCompareImageToken: () => {
+        imageToken += 1;
+        events.push(['imageToken', imageToken]);
+    },
+    loadMosaicBatch: () => events.push(['mosaic']),
+    resetComparePairs: () => events.push(['resetPairs']),
+    fetchComparePairs: () => {
+        events.push(['fetchPairs']);
+        return Promise.resolve();
+    },
+    showComparePair: () => events.push(['showPair']),
+    setCompareModeViewImpl: (mode, options) => {
+        events.push(['view', mode, options.transitionToken, options.isCurrentTransition(options.transitionToken)]);
+        if (mode === 'mosaic') options.onMosaic();
+        else options.onPair();
+    },
+});
+
+controller.setMosaicStrategy('explore');
+assert.equal(mosaicStrategy, 'explore');
+assert.deepEqual(siblingButtons[0].classList.removed, ['active']);
+assert.deepEqual(strategyButton.classList.added, ['active']);
+assert.deepEqual(events, [['clear'], ['strategy', 'explore'], ['mosaic']]);
+
+events.length = 0;
+controller.mosaicShuffle();
+assert.deepEqual(events, [['mosaic']]);
+
+events.length = 0;
+controller.setCompareMode('mosaic');
+assert.equal(compareMode, 'mosaic');
+assert.equal(transition, 1);
+assert.equal(imageToken, 1);
+assert.deepEqual(events, [
+    ['clear'],
+    ['mode', 'mosaic'],
+    ['view', 'mosaic', 1, true],
+    ['imageToken', 1],
+    ['mosaic'],
+]);
+
+events.length = 0;
+controller.setCompareMode('topn');
+await Promise.resolve();
+assert.equal(compareMode, 'topn');
+assert.deepEqual(events, [
+    ['clear'],
+    ['mode', 'topn'],
+    ['view', 'topn', 2, true],
+    ['resetPairs'],
+    ['fetchPairs'],
+    ['showPair'],
+]);
 """
         subprocess.run(
             ["node", "--input-type=module", "-e", script],
