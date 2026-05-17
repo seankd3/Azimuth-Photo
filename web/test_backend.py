@@ -30,6 +30,7 @@ from features.ai import routes as ai_routes  # noqa: E402
 from features.cache import routes as cache_routes  # noqa: E402
 from features.cache import status as cache_status_service  # noqa: E402
 from features.catalog import routes as catalog_routes  # noqa: E402
+from features.library import routes as library_routes  # noqa: E402
 from features.media import routes as media_routes  # noqa: E402
 from features.people import routes as people_routes  # noqa: E402
 from features.search import routes as search_routes  # noqa: E402
@@ -1276,7 +1277,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         await self._cache_entry(visible_high, "sm")
         await self._cache_entry(visible_low, "sm")
 
-        result = await app_module.api_rankings(limit=10, sort="elo")
+        result = await library_routes.api_rankings(limit=10, sort="elo")
 
         self.assertEqual([img["id"] for img in result["images"]], [visible_high, visible_low])
         self.assertEqual(result["visible_images"], 2)
@@ -1517,12 +1518,12 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         await self._cache_entry(first, "sm")
         await self._cache_entry(second, "sm")
 
-        initial = await app_module.api_rankings(limit=10, sort="elo", flag="picked")
+        initial = await library_routes.api_rankings(limit=10, sort="elo", flag="picked")
         self.assertEqual(initial["images"], [])
         self.assertTrue(app_module._rankings_response_cache)
 
         await settings_routes.api_set_image_flag(first, JsonRequest({"flag": "picked"}))
-        refreshed = await app_module.api_rankings(limit=10, sort="elo", flag="picked")
+        refreshed = await library_routes.api_rankings(limit=10, sort="elo", flag="picked")
 
         self.assertEqual([image["id"] for image in refreshed["images"]], [first])
         self.assertNotIn(second, [image["id"] for image in refreshed["images"]])
@@ -1532,7 +1533,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         image_id = await self._image(source["id"], "first.jpg", elo=1500)
         await self._cache_entry(image_id, "sm")
 
-        await app_module.api_rankings(limit=10, sort="elo")
+        await library_routes.api_rankings(limit=10, sort="elo")
         await settings_routes.api_settings()
         self.assertTrue(app_module._rankings_response_cache)
         self.assertIsNotNone(settings_status._settings_response_cache["data"])
@@ -1566,10 +1567,10 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         image_id = await self._image(source["id"], "first.jpg", elo=1500)
         await self._cache_entry(image_id, "sm")
 
-        first = await app_module.api_rankings(limit=10, sort="elo")
-        second = await app_module.api_rankings(limit=10, sort="elo")
+        first = await library_routes.api_rankings(limit=10, sort="elo")
+        second = await library_routes.api_rankings(limit=10, sort="elo")
         second["images"].clear()
-        third = await app_module.api_rankings(limit=10, sort="elo")
+        third = await library_routes.api_rankings(limit=10, sort="elo")
 
         self.assertEqual([image["id"] for image in first["images"]], [image_id])
         self.assertEqual([image["id"] for image in third["images"]], [image_id])
@@ -2113,7 +2114,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         await self._cache_entry(missing, "md")
         await self._cache_entry(active_b, "md")
 
-        rankings = await app_module.api_rankings(limit=10, sort="elo")
+        rankings = await library_routes.api_rankings(limit=10, sort="elo")
         self.assertEqual([img["id"] for img in rankings["images"]], [active_a, active_b])
         self.assertEqual(rankings["visible_images"], 2)
         self.assertEqual(rankings["total_images"], 2)
@@ -2166,7 +2167,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         await self._cache_entry(image_id, "sm")
         await self._cache_entry(image_id, "md")
 
-        rankings = await app_module.api_rankings(limit=10)
+        rankings = await library_routes.api_rankings(limit=10)
         self.assertEqual([image["id"] for image in rankings["images"]], [image_id])
         self.assertEqual(rankings["total_images"], 1)
 
@@ -2643,7 +2644,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
         app_module.thumbnails.prefetch_images = blocking_prefetch
         try:
-            result = await asyncio.wait_for(app_module.api_rankings(limit=2), timeout=0.5)
+            result = await asyncio.wait_for(library_routes.api_rankings(limit=2), timeout=0.5)
             self.assertEqual(len(result["images"]), 2)
             await asyncio.wait_for(started.wait(), timeout=0.5)
         finally:
@@ -2858,7 +2859,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
         embedding_worker.encode_text = lambda _query: None
 
-        result = await app_module.api_rankings(q="sunset", sort="similarity", limit=10)
+        result = await library_routes.api_rankings(q="sunset", sort="similarity", limit=10)
 
         self.assertEqual([img["id"] for img in result["images"]], [visible_match])
         self.assertEqual(result["search_mode"], "metadata")
@@ -3096,7 +3097,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
         embedding_worker.encode_text = fake_encode_text
 
-        result = await app_module.api_rankings(q="jpg", limit=10)
+        result = await library_routes.api_rankings(q="jpg", limit=10)
 
         self.assertEqual([image["id"] for image in result["images"]], [jpg])
         self.assertEqual(result["total_images"], 1)
@@ -3107,12 +3108,12 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         image_id = await self._image(source["id"], "cached-response.jpg")
         await self._cache_entry(image_id, "sm")
 
-        first = await app_module.api_rankings(limit=1)
+        first = await library_routes.api_rankings(limit=1)
         self.assertIsInstance(first, dict)
         self.assertEqual([image["id"] for image in first["images"]], [image_id])
 
         request = Request({"type": "http", "method": "GET", "path": "/api/rankings", "headers": []})
-        second = await app_module.api_rankings(limit=1, request=request)
+        second = await library_routes.api_rankings(limit=1, request=request)
 
         self.assertIsInstance(second, Response)
         self.assertEqual(second.media_type, "application/json")
@@ -3139,7 +3140,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         db.count_rankings = counted_count_rankings
         db.get_rankings = counted_get_rankings
         try:
-            result = await app_module.api_rankings(q="no-such-visible-photo", limit=10)
+            result = await library_routes.api_rankings(q="no-such-visible-photo", limit=10)
         finally:
             db.count_rankings = old_count_rankings
             db.get_rankings = old_get_rankings
@@ -3163,8 +3164,8 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             [0.92, 0.70, 0.10],
         )
 
-        similarity = await app_module.api_rankings(q="landscapes", sort="similarity", limit=10)
-        elo_sorted = await app_module.api_rankings(q="landscapes", sort="elo", limit=10)
+        similarity = await library_routes.api_rankings(q="landscapes", sort="similarity", limit=10)
+        elo_sorted = await library_routes.api_rankings(q="landscapes", sort="elo", limit=10)
 
         self.assertEqual([img["id"] for img in similarity["images"]], [best_match, rated_match])
         self.assertEqual([img["id"] for img in elo_sorted["images"]], [rated_match, best_match])
@@ -3202,8 +3203,8 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         app_module._text_search_resolution_cache.clear()
         app_module._rankings_response_cache.clear()
 
-        cold = await app_module.api_rankings(q="dog", sort="similarity", limit=10)
-        warm = await app_module.api_rankings(q="dog", sort="similarity", limit=10)
+        cold = await library_routes.api_rankings(q="dog", sort="similarity", limit=10)
+        warm = await library_routes.api_rankings(q="dog", sort="similarity", limit=10)
 
         self.assertEqual(calls, {"encode": 2, "start": 1})
         self.assertEqual(cold["search_mode"], "metadata")
@@ -3238,7 +3239,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         embedding_worker.encode_text = fake_encode_text
         app_module._text_search_resolution_cache.clear()
 
-        result = await app_module.api_rankings(q="semantic dog", sort="similarity", limit=10)
+        result = await library_routes.api_rankings(q="semantic dog", sort="similarity", limit=10)
 
         self.assertEqual(result["search_mode"], "embedding")
         self.assertEqual([img["id"] for img in result["images"]], [match])
@@ -3418,8 +3419,8 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         elo_propagation.embed_cache.get_matrix = fake_get_matrix
         app_module._text_search_resolution_cache.clear()
 
-        first = await app_module.api_rankings(q="fast cached query", sort="similarity", limit=10)
-        second = await app_module.api_rankings(q="fast cached query", sort="similarity", limit=10)
+        first = await library_routes.api_rankings(q="fast cached query", sort="similarity", limit=10)
+        second = await library_routes.api_rankings(q="fast cached query", sort="similarity", limit=10)
 
         self.assertEqual(len(calls), 1)
         self.assertEqual(first["search_mode"], "embedding")
@@ -3451,7 +3452,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         app_module._rankings_response_cache.clear()
         app_module._text_search_resolution_cache.clear()
 
-        first = await app_module.api_rankings(q="cached response query", sort="similarity", limit=10)
+        first = await library_routes.api_rankings(q="cached response query", sort="similarity", limit=10)
 
         old_get_rankings = db.get_rankings
         old_count_rankings = db.count_rankings
@@ -3465,7 +3466,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         db.get_rankings = fail_get_rankings
         db.count_rankings = fail_count_rankings
         try:
-            second = await app_module.api_rankings(q="cached response query", sort="similarity", limit=10)
+            second = await library_routes.api_rankings(q="cached response query", sort="similarity", limit=10)
         finally:
             db.get_rankings = old_get_rankings
             db.count_rankings = old_count_rankings
@@ -3480,8 +3481,8 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         embedding_worker.encode_text = lambda _query, _config=None: None
         app_module._text_search_resolution_cache.clear()
 
-        await app_module.api_rankings(q="repeat cache query", limit=1, offset=0)
-        await app_module.api_rankings(q="repeat cache query", limit=1, offset=1)
+        await library_routes.api_rankings(q="repeat cache query", limit=1, offset=0)
+        await library_routes.api_rankings(q="repeat cache query", limit=1, offset=1)
 
         conn = await db.get_db()
         try:
@@ -3591,7 +3592,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         app_module._text_search_resolution_cache.clear()
         app_module._rankings_response_cache.clear()
 
-        rankings = await app_module.api_rankings(q=query, deep=True, sort="similarity", limit=10)
+        rankings = await library_routes.api_rankings(q=query, deep=True, sort="similarity", limit=10)
         search = await search_routes.api_search(q=query, deep=True, limit=10)
         pending = await db.get_pending_deep_search_queries(
             app_module.settings.deep_search_embedding_config(),

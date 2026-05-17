@@ -32,6 +32,7 @@ import settings
 import thumbnails
 from features.ai import routes as ai_routes
 from features.cache import status as cache_status_service
+from features.library import routes as library_routes
 from features.media import routes as media_routes
 from features.settings import routes as settings_routes
 from features.settings import status as settings_status
@@ -550,14 +551,14 @@ async def bench_app_endpoints(iterations: int):
     await asyncio.gather(
         db.get_stats(),
         db.get_filter_options(),
-        app_module.api_rankings(limit=50),
-        app_module.api_rankings(limit=50, q="jpg"),
+        library_routes.api_rankings(limit=50),
+        library_routes.api_rankings(limit=50, q="jpg"),
         app_module.compare_next(n=2),
         app_module.mosaic_next(n=6),
         app_module.mosaic_next(n=12, strategy="diverse"),
         app_module.mosaic_next(n=12, strategy="diverse", orientation="landscape"),
-        app_module.api_date_groups(),
-        app_module.api_map_markers(),
+        library_routes.api_date_groups(),
+        library_routes.api_map_markers(),
         app_module.api_folders(max_depth=1),
         cache_status_service.build_cache_status(ahead=0),
         ai_routes.build_ai_status(),
@@ -573,11 +574,11 @@ async def bench_app_endpoints(iterations: int):
         await asyncio.sleep(0.01)
         await time_async(label, iterations, fn)
 
-    await endpoint("api_rankings default", lambda: app_module.api_rankings(limit=50))
-    await endpoint("api_rankings metadata search", lambda: app_module.api_rankings(limit=50, q="jpg"))
+    await endpoint("api_rankings default", lambda: library_routes.api_rankings(limit=50))
+    await endpoint("api_rankings metadata search", lambda: library_routes.api_rankings(limit=50, q="jpg"))
     await endpoint(
         "api_rankings metadata empty",
-        lambda: app_module.api_rankings(limit=50, q="nonexistentsearchterm"),
+        lambda: library_routes.api_rankings(limit=50, q="nonexistentsearchterm"),
     )
     await endpoint("compare_next default", lambda: app_module.compare_next(n=2))
     await endpoint("compare_next filtered", lambda: app_module.compare_next(n=2, orientation="landscape"))
@@ -588,9 +589,9 @@ async def bench_app_endpoints(iterations: int):
         "mosaic_next diverse filtered",
         lambda: app_module.mosaic_next(n=12, strategy="diverse", orientation="landscape"),
     )
-    await endpoint("filter_options", app_module.api_filter_options)
-    await endpoint("date_groups", app_module.api_date_groups)
-    await endpoint("map_markers", app_module.api_map_markers)
+    await endpoint("filter_options", library_routes.api_filter_options)
+    await endpoint("date_groups", library_routes.api_date_groups)
+    await endpoint("map_markers", library_routes.api_map_markers)
     await endpoint("folders shallow", lambda: app_module.api_folders(max_depth=1))
     await endpoint("folders full", app_module.api_folders)
     await endpoint("cache_status", lambda: cache_status_service.build_cache_status(ahead=0))
@@ -606,11 +607,11 @@ async def bench_cold_app_endpoints(iterations: int):
     media_status_ids = cached_ids_sample("sm", 24)
 
     endpoints = [
-        ("api_rankings default", lambda: app_module.api_rankings(limit=50)),
-        ("api_rankings metadata search", lambda: app_module.api_rankings(limit=50, q="jpg")),
+        ("api_rankings default", lambda: library_routes.api_rankings(limit=50)),
+        ("api_rankings metadata search", lambda: library_routes.api_rankings(limit=50, q="jpg")),
         (
             "api_rankings metadata empty",
-            lambda: app_module.api_rankings(limit=50, q="nonexistentsearchterm"),
+            lambda: library_routes.api_rankings(limit=50, q="nonexistentsearchterm"),
         ),
         ("compare_next default", lambda: app_module.compare_next(n=2)),
         ("compare_next filtered", lambda: app_module.compare_next(n=2, orientation="landscape")),
@@ -621,9 +622,9 @@ async def bench_cold_app_endpoints(iterations: int):
             "mosaic_next diverse filtered",
             lambda: app_module.mosaic_next(n=12, strategy="diverse", orientation="landscape"),
         ),
-        ("filter_options", app_module.api_filter_options),
-        ("date_groups", app_module.api_date_groups),
-        ("map_markers", app_module.api_map_markers),
+        ("filter_options", library_routes.api_filter_options),
+        ("date_groups", library_routes.api_date_groups),
+        ("map_markers", library_routes.api_map_markers),
         ("folders shallow", lambda: app_module.api_folders(max_depth=1)),
         ("folders full", app_module.api_folders),
         ("cache_status", lambda: cache_status_service.build_cache_status(ahead=0)),

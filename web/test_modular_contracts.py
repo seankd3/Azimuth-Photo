@@ -850,6 +850,11 @@ class ModularContractTests(unittest.TestCase):
         self.assertTrue(callable(service.map_markers_payload))
         self.assertTrue(callable(service.filter_options_payload))
         self.assertTrue(callable(service.stats_payload))
+        self.assertFalse(hasattr(app_module, "api_rankings"))
+        self.assertFalse(hasattr(app_module, "api_date_groups"))
+        self.assertFalse(hasattr(app_module, "api_map_markers"))
+        self.assertFalse(hasattr(app_module, "api_filter_options"))
+        self.assertFalse(hasattr(app_module, "api_stats"))
 
         service._rankings_response_cache[("probe",)] = {"data": {}, "expires": 1}
         app_module._invalidate_rankings_cache()

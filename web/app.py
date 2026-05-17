@@ -33,7 +33,6 @@ from features.catalog import metadata as catalog_metadata
 from features.compare import routes as compare_routes
 from features.compare import service as compare_service
 from features.export import routes as export_routes
-from features.library import routes as library_routes
 from features.library import service as library_service
 from features.media import warm as media_warm
 from features.search import service as search_service
@@ -233,13 +232,6 @@ _compare_next_impl = compare_service.compare_next_impl
 # --- Rankings API ---
 
 _api_rankings_impl = library_service.api_rankings_impl
-
-
-api_rankings = library_routes.api_rankings
-api_date_groups = library_routes.api_date_groups
-api_map_markers = library_routes.api_map_markers
-api_filter_options = library_routes.api_filter_options
-api_stats = library_routes.api_stats
 
 
 _collections_cache = search_service._collections_cache
