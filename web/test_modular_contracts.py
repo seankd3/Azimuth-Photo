@@ -1114,15 +1114,24 @@ class ModularContractTests(unittest.TestCase):
         self.assertFalse(hasattr(app_module, "_text_search_resolution_cache"))
         self.assertFalse(hasattr(app_module, "_deep_search_query_record_cache"))
         self.assertFalse(hasattr(app_module, "_deep_search_query_record_cache_ttl_seconds"))
-        self.assertIs(app_module._normalize_search_query, constraints.normalize_search_query)
-        self.assertIs(app_module._resolve_cached_deep_search, constraints.resolve_cached_deep_search)
-        self.assertIs(app_module._encode_text_with_config, constraints.encode_text_with_config)
-        self.assertIs(app_module._start_search_model_load, constraints.start_search_model_load)
-        self.assertIs(app_module._search_constraint_active, constraints.search_constraint_active)
-        self.assertIs(app_module._intersect_image_id_filters, constraints.intersect_image_id_filters)
-        self.assertIs(app_module._sync_query_constraint_compat_globals, constraints.sync_configured_ttls)
-        self.assertIs(app_module._record_deep_search_query, constraints.record_configured_deep_search_query)
-        self.assertIs(app_module._apply_metadata_search_ids, constraints.apply_configured_metadata_search_ids)
+        for name in (
+            "_normalize_search_query",
+            "_resolve_cached_deep_search",
+            "_encode_text_with_config",
+            "_start_search_model_load",
+            "_search_constraint_active",
+            "_intersect_image_id_filters",
+            "_sync_query_constraint_compat_globals",
+            "_record_deep_search_query",
+            "_apply_metadata_search_ids",
+        ):
+            self.assertFalse(hasattr(app_module, name))
+        self.assertTrue(callable(constraints.normalize_search_query))
+        self.assertTrue(callable(constraints.resolve_cached_deep_search))
+        self.assertTrue(callable(constraints.encode_text_with_config))
+        self.assertTrue(callable(constraints.start_search_model_load))
+        self.assertTrue(callable(constraints.search_constraint_active))
+        self.assertTrue(callable(constraints.intersect_image_id_filters))
         self.assertTrue(callable(constraints.configure))
         self.assertTrue(callable(constraints.sync_configured_ttls))
         self.assertTrue(callable(constraints.record_configured_deep_search_query))
@@ -1130,7 +1139,6 @@ class ModularContractTests(unittest.TestCase):
         self.assertTrue(callable(constraints.resolve_configured_text_search))
         self.assertTrue(callable(constraints.resolve_configured_library_constraints))
         self.assertTrue(callable(app_factory.configure_query_constraints))
-        self.assertTrue(callable(app_module._record_deep_search_query))
         self.assertTrue(callable(app_module._resolve_text_search))
         self.assertTrue(callable(app_module._resolve_library_constraints))
         self.assertIs(search_service.normalize_search_query, constraints.normalize_search_query)
@@ -1189,7 +1197,7 @@ class ModularContractTests(unittest.TestCase):
 
         try:
             app_module.db.get_deep_search_query_embedding = fake_db_get_deep_search_query_embedding
-            result = asyncio.run(app_module._resolve_cached_deep_search("late bound probe"))
+            result = asyncio.run(constraints.resolve_cached_deep_search("late bound probe"))
         finally:
             app_module.db.get_deep_search_query_embedding = old_db_deep_embedding
 
@@ -1238,8 +1246,8 @@ class ModularContractTests(unittest.TestCase):
             calls.append(query)
 
         async def run_probe():
-            await app_module._record_deep_search_query("ttl probe")
-            await app_module._record_deep_search_query("ttl probe")
+            await query_constraints.record_configured_deep_search_query("ttl probe")
+            await query_constraints.record_configured_deep_search_query("ttl probe")
 
         try:
             query_constraints.configure(

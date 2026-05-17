@@ -25,7 +25,6 @@ from core.app_factory import (
 )
 from core import background as background_runtime
 from core import cache_events
-from core import query_constraints
 
 
 APP_DIR = os.path.dirname(__file__)
@@ -62,26 +61,7 @@ _embedding_batch_stored = cache_events.embedding_batch_stored
 _schedule_pairing_propagation = _runtime_services.schedule_pairing_propagation
 
 
-_sync_query_constraint_compat_globals = query_constraints.sync_configured_ttls
-_record_deep_search_query = query_constraints.record_configured_deep_search_query
-_normalize_search_query = query_constraints.normalize_search_query
-
-
-_resolve_cached_deep_search = query_constraints.resolve_cached_deep_search
-
-
-_encode_text_with_config = query_constraints.encode_text_with_config
-
-
-_start_search_model_load = query_constraints.start_search_model_load
-
-
-_apply_metadata_search_ids = query_constraints.apply_configured_metadata_search_ids
 _resolve_text_search = _runtime_services.resolve_text_search
-
-
-_search_constraint_active = query_constraints.search_constraint_active
-_intersect_image_id_filters = query_constraints.intersect_image_id_filters
 
 
 _resolve_library_constraints = _runtime_services.resolve_library_constraints

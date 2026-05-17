@@ -3745,7 +3745,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         deep_key = app_module.settings.deep_search_embedding_config()["model_key"]
         image_ids = [match, miss]
         similarities = np.array([0.95, 0.10], dtype=np.float32)
-        old_resolve_cached_deep_search = app_module._resolve_cached_deep_search
+        old_resolve_cached_deep_search = query_constraints.resolve_cached_deep_search
 
         async def fake_resolve_cached_deep_search(_query, *, allow_cold_load=True):
             return {
@@ -3762,12 +3762,12 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
                 return {match: 0, miss: 1}
             return {match: 1, miss: 0}
 
-        app_module._resolve_cached_deep_search = fake_resolve_cached_deep_search
+        query_constraints.resolve_cached_deep_search = fake_resolve_cached_deep_search
         elo_propagation.embed_cache.get_index = fake_get_index
         try:
             result = await search_routes.api_search(q="specific deep query", deep=True, limit=1)
         finally:
-            app_module._resolve_cached_deep_search = old_resolve_cached_deep_search
+            query_constraints.resolve_cached_deep_search = old_resolve_cached_deep_search
 
         self.assertEqual(result["search_mode"], "deep_embedding")
         self.assertEqual([img["id"] for img in result["images"]], [match])
