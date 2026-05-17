@@ -24,7 +24,6 @@ from core.app_factory import (
     create_app_shell,
 )
 from core import background as background_runtime
-from core import cache_events
 
 
 APP_DIR = os.path.dirname(__file__)
@@ -53,10 +52,6 @@ track_idle_activity = _app_shell.idle_activity_middleware
 if track_idle_activity is None:
     raise RuntimeError("App idle activity middleware was not configured")
 
-
-_invalidate_rankings_cache = _runtime_services.invalidate_rankings_cache
-_invalidate_vector_derived_caches = _runtime_services.invalidate_vector_derived_caches
-_embedding_batch_stored = cache_events.embedding_batch_stored
 
 _schedule_pairing_propagation = _runtime_services.schedule_pairing_propagation
 

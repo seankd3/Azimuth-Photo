@@ -12,6 +12,7 @@ from fastapi.routing import APIRoute
 
 import app as app_module
 import db
+from core import cache_events
 from core import query_constraints
 
 
@@ -900,7 +901,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertFalse(hasattr(app_module, "api_stats"))
 
         service._rankings_response_cache[("probe",)] = {"data": {}, "expires": 1}
-        app_module._invalidate_rankings_cache()
+        cache_events.invalidate_rankings_cache()
         self.assertFalse(service._rankings_response_cache)
 
         old_ttl = service._rankings_response_cache_ttl_seconds
@@ -910,7 +911,7 @@ class ModularContractTests(unittest.TestCase):
             self.assertLessEqual(service._rankings_response_cache[("probe",)]["expires"], service.time.monotonic())
         finally:
             service._rankings_response_cache_ttl_seconds = old_ttl
-            app_module._invalidate_rankings_cache()
+            cache_events.invalidate_rankings_cache()
 
         ranking_route = next(
             route
@@ -1148,7 +1149,7 @@ class ModularContractTests(unittest.TestCase):
 
         constraints._text_search_resolution_cache[("probe", False)] = {"data": {}, "expires": 1}
         constraints._deep_search_query_record_cache["probe"] = 1
-        app_module._invalidate_rankings_cache()
+        cache_events.invalidate_rankings_cache()
         self.assertFalse(constraints._text_search_resolution_cache)
         self.assertFalse(constraints._deep_search_query_record_cache)
 
@@ -2318,7 +2319,7 @@ class ModularContractTests(unittest.TestCase):
 
         search_service._duplicates_cache.update({"key": ("probe",), "data": {"pairs": []}})
         search_service._collections_cache.update({"key": ("probe",), "data": {"collections": []}})
-        app_module._invalidate_vector_derived_caches()
+        cache_events.invalidate_vector_derived_caches()
         self.assertIsNone(search_service._duplicates_cache["key"])
         self.assertIsNone(search_service._duplicates_cache["data"])
         self.assertIsNone(search_service._collections_cache["key"])
@@ -2402,6 +2403,9 @@ class ModularContractTests(unittest.TestCase):
             )
 
             app_factory.create_app(base_dir=os.path.dirname(__file__))
+            self.assertFalse(hasattr(app_module, "_invalidate_rankings_cache"))
+            self.assertFalse(hasattr(app_module, "_invalidate_vector_derived_caches"))
+            self.assertFalse(hasattr(app_module, "_embedding_batch_stored"))
             self.assertIs(cache_events._compare_service, compare_service)
             self.assertIs(cache_events._library_service, library_service)
             self.assertIs(cache_events._query_constraints, query_constraints)

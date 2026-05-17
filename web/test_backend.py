@@ -21,6 +21,7 @@ import embedding_worker  # noqa: E402
 import elo_propagation  # noqa: E402
 import face_worker  # noqa: E402
 import scanner  # noqa: E402
+from core import cache_events  # noqa: E402
 from core import query_constraints  # noqa: E402
 from data.repositories import filter_options as filter_options_repository  # noqa: E402
 from data.repositories import cache_entries as cache_entry_repository  # noqa: E402
@@ -97,7 +98,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         compare_service._visible_matchups_cache.clear()
         compare_service._visible_pairing_candidates_cache.clear()
         compare_service._interaction_response_cache.clear()
-        app_module._invalidate_rankings_cache()
+        cache_events.invalidate_rankings_cache()
         catalog_routes.clear_folders_cache()
         cache_status_service.invalidate_cache_status_cache()
         settings_status.invalidate_settings_response_cache()
@@ -146,7 +147,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         compare_service._visible_matchups_cache.clear()
         compare_service._visible_pairing_candidates_cache.clear()
         compare_service._interaction_response_cache.clear()
-        app_module._invalidate_rankings_cache()
+        cache_events.invalidate_rankings_cache()
         catalog_routes.clear_folders_cache()
         cache_status_service.invalidate_cache_status_cache()
         settings_status.invalidate_settings_response_cache()
@@ -3860,7 +3861,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         elo_propagation._prediction_cache_key = ("stale",)
         elo_propagation._prediction_cache_counts = {1: 10}
 
-        app_module._embedding_batch_stored("model", [1])
+        cache_events.embedding_batch_stored("model", [1])
 
         self.assertIsNone(search_service._duplicates_cache["key"])
         self.assertIsNone(search_service._duplicates_cache["data"])
