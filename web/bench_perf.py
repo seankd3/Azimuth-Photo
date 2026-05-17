@@ -36,6 +36,7 @@ from features.catalog import routes as catalog_routes
 from features.compare import routes as compare_routes
 from features.library import routes as library_routes
 from features.media import routes as media_routes
+from features.media import warm as media_warm
 from features.settings import routes as settings_routes
 from features.settings import status as settings_status
 
@@ -182,7 +183,7 @@ def reset_app_caches():
     app_module._rankings_response_cache.clear()
     app_module._text_search_resolution_cache.clear()
     app_module._interaction_response_cache.clear()
-    app_module._thumbnail_memory_warm_inflight.clear()
+    media_warm._thumbnail_memory_warm_inflight.clear()
     settings_status.invalidate_settings_response_cache()
     ai_routes.invalidate_ai_status_response_cache()
     cache_status_service._cache_status_cache.clear()

@@ -2135,21 +2135,21 @@ class ModularContractTests(unittest.TestCase):
             any(call[0] == "browser_originals" and call[1] == "/tmp/cache-status.db" for call in calls)
         )
 
-    def test_media_warm_feature_owns_scheduler_with_app_facades(self):
+    def test_media_warm_feature_owns_scheduler_without_app_facades(self):
         media_warm = importlib.import_module("features.media.warm")
 
-        self.assertIs(app_module._thumbnail_prefetch_inflight, media_warm._thumbnail_prefetch_inflight)
-        self.assertIs(app_module._thumbnail_memory_warm_inflight, media_warm._thumbnail_memory_warm_inflight)
-        self.assertIs(app_module._schedule_thumbnail_prefetch, media_warm.schedule_thumbnail_prefetch)
-        self.assertIs(
-            app_module._schedule_cached_thumbnail_memory_warm,
-            media_warm.schedule_cached_thumbnail_memory_warm,
-        )
-        self.assertIs(
-            app_module._schedule_result_thumbnail_memory_warm,
-            media_warm.schedule_result_thumbnail_memory_warm,
-        )
-        self.assertIs(app_module._cached_image_ids, media_warm.cached_image_ids)
+        self.assertIsInstance(media_warm._thumbnail_prefetch_inflight, set)
+        self.assertIsInstance(media_warm._thumbnail_memory_warm_inflight, set)
+        self.assertTrue(callable(media_warm.schedule_thumbnail_prefetch))
+        self.assertTrue(callable(media_warm.schedule_cached_thumbnail_memory_warm))
+        self.assertTrue(callable(media_warm.schedule_result_thumbnail_memory_warm))
+        self.assertTrue(callable(media_warm.cached_image_ids))
+        self.assertFalse(hasattr(app_module, "_thumbnail_prefetch_inflight"))
+        self.assertFalse(hasattr(app_module, "_thumbnail_memory_warm_inflight"))
+        self.assertFalse(hasattr(app_module, "_schedule_thumbnail_prefetch"))
+        self.assertFalse(hasattr(app_module, "_schedule_cached_thumbnail_memory_warm"))
+        self.assertFalse(hasattr(app_module, "_schedule_result_thumbnail_memory_warm"))
+        self.assertFalse(hasattr(app_module, "_cached_image_ids"))
 
     def test_catalog_metadata_feature_owns_background_helpers_with_app_facades(self):
         base_dir = os.path.dirname(__file__)

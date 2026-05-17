@@ -32,7 +32,6 @@ from core import responses as response_helpers
 from features.catalog import metadata as catalog_metadata
 from features.compare import service as compare_service
 from features.library import service as library_service
-from features.media import warm as media_warm
 from features.search import service as search_service
 
 
@@ -97,8 +96,6 @@ _rankings_response_cache_ttl_seconds = library_service._rankings_response_cache_
 _text_search_resolution_cache_ttl_seconds = query_constraints._text_search_resolution_cache_ttl_seconds
 _deep_search_query_record_cache_ttl_seconds = query_constraints._deep_search_query_record_cache_ttl_seconds
 _interaction_response_cache_ttl_seconds = compare_service._interaction_response_cache_ttl_seconds
-_thumbnail_prefetch_inflight = media_warm._thumbnail_prefetch_inflight
-_thumbnail_memory_warm_inflight = media_warm._thumbnail_memory_warm_inflight
 _SWISS_PAIR_WINDOW = compare_service._SWISS_PAIR_WINDOW
 _FILTERED_SWISS_PAIR_WINDOW = compare_service._FILTERED_SWISS_PAIR_WINDOW
 _FILTERED_MOSAIC_WINDOW = compare_service._FILTERED_MOSAIC_WINDOW
@@ -151,15 +148,11 @@ _visibility_counts = response_helpers.visibility_counts
 _interaction_pool_stats = response_helpers.interaction_pool_stats
 
 
-_schedule_thumbnail_prefetch = media_warm.schedule_thumbnail_prefetch
-_schedule_cached_thumbnail_memory_warm = media_warm.schedule_cached_thumbnail_memory_warm
-_schedule_result_thumbnail_memory_warm = media_warm.schedule_result_thumbnail_memory_warm
 _cache_root = _runtime_services.cache_root
 
 
 _compare_response_rows = response_helpers.compare_response_rows
 _chunks = app_helpers._chunks
-_cached_image_ids = media_warm.cached_image_ids
 
 _filter_visible_candidates = compare_service.filter_visible_candidates
 _hydrate_active_rows = compare_service.hydrate_active_rows

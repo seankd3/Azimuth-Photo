@@ -33,6 +33,7 @@ from features.catalog import routes as catalog_routes  # noqa: E402
 from features.compare import routes as compare_routes  # noqa: E402
 from features.library import routes as library_routes  # noqa: E402
 from features.media import routes as media_routes  # noqa: E402
+from features.media import warm as media_warm  # noqa: E402
 from features.people import routes as people_routes  # noqa: E402
 from features.search import routes as search_routes  # noqa: E402
 from features.settings import routes as settings_routes  # noqa: E402
@@ -1539,7 +1540,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(app_module._rankings_response_cache)
         self.assertIsNotNone(settings_status._settings_response_cache["data"])
         self.assertIsNotNone(ai_routes._ai_status_response_cache["data"])
-        app_module._thumbnail_memory_warm_inflight.add("sm:1")
+        media_warm._thumbnail_memory_warm_inflight.add("sm:1")
 
         db.invalidate_stats_cache()
         db.invalidate_cached_image_ids_cache()
@@ -1552,14 +1553,14 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         app_module._rankings_response_cache.clear()
         app_module._text_search_resolution_cache.clear()
         app_module._interaction_response_cache.clear()
-        app_module._thumbnail_memory_warm_inflight.clear()
+        media_warm._thumbnail_memory_warm_inflight.clear()
         settings_status.invalidate_settings_response_cache()
         ai_routes.invalidate_ai_status_response_cache()
         cache_status_service.invalidate_cache_status_cache()
         catalog_routes.clear_folders_cache()
 
         self.assertFalse(app_module._rankings_response_cache)
-        self.assertFalse(app_module._thumbnail_memory_warm_inflight)
+        self.assertFalse(media_warm._thumbnail_memory_warm_inflight)
         self.assertIsNone(settings_status._settings_response_cache["data"])
         self.assertIsNone(ai_routes._ai_status_response_cache["data"])
 
@@ -2685,17 +2686,17 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
         app_module.thumbnails.fast_disk_read_entry = fake_read
 
-        app_module._schedule_cached_thumbnail_memory_warm(
+        media_warm.schedule_cached_thumbnail_memory_warm(
             [{"id": 10}, {"id": 11}],
             "sm",
             limit=2,
         )
-        app_module._schedule_cached_thumbnail_memory_warm(
+        media_warm.schedule_cached_thumbnail_memory_warm(
             [{"id": 20}, {"id": 21}],
             "md",
             limit=2,
         )
-        app_module._schedule_cached_thumbnail_memory_warm(
+        media_warm.schedule_cached_thumbnail_memory_warm(
             [{"id": 30}, {"id": 31}],
             "lg",
             limit=2,
@@ -2720,8 +2721,10 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
         app_module.thumbnails.fast_disk_read_entry = fake_read
 
-        app_module._schedule_result_thumbnail_memory_warm(rows)
-        await asyncio.sleep(0.05)
+        media_warm.schedule_result_thumbnail_memory_warm(rows)
+        deadline = asyncio.get_running_loop().time() + 0.5
+        while len(calls) < 21 and asyncio.get_running_loop().time() < deadline:
+            await asyncio.sleep(0.01)
 
         by_size = {}
         for size, image_id, populate_memory in calls:
@@ -4053,7 +4056,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
         app_module.thumbnails.prefetch_images = fake_prefetch
         app_module.thumbnails.fast_disk_read_entry = fake_read
-        app_module._thumbnail_memory_warm_inflight.clear()
+        media_warm._thumbnail_memory_warm_inflight.clear()
 
         result = await media_routes.warm_images(JsonRequest({"tiers": {"md": [cached, uncached]}}))
         await asyncio.sleep(0.05)
