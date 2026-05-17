@@ -70,8 +70,9 @@ construction/opening for JSON and CSV downloads.
 `library/display.js` owns Library card flag, tier, similarity, info-line, and date labels.
 `library/shell.js` owns Library empty-state display, scroll persistence,
 back-to-top visibility, and scroll-to-card helpers.
-`library/date_scrubber.js` owns Library date-scrubber DOM rendering, active
-group highlighting, offset math, jump-to-group loading, and scroll tracking.
+`library/date_scrubber.js` owns Library date-scrubber fetch orchestration, DOM
+rendering, active group highlighting, offset math, jump-to-group loading, and
+scroll tracking.
 `library/navigation.js` owns Library card keyboard selection, visibility
 scrolling, and visual-row navigation wiring.
 `library/map.js` owns Library map library loading, info/error display, and popup DOM construction.

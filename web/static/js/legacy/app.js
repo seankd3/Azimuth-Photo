@@ -182,6 +182,7 @@ import {
     setupDateScrubberScrollTracking as setupDateScrubberScrollTrackingCore,
     syncDateScrubberVisibility as syncDateScrubberVisibilityCore,
     teardownDateScrubberScrollTracking as teardownDateScrubberScrollTrackingCore,
+    createDateScrubberController,
 } from '../library/date_scrubber.js';
 import {
     deselectLibraryCard as deselectLibraryCardCore,
@@ -860,6 +861,24 @@ const legacyPhotoArchive = (() => {
         });
     }
 
+    const dateScrubberController = createDateScrubberController({
+        documentImpl: document,
+        windowImpl: window,
+        fetchImpl: fetch,
+        isActive: isDateScrubberActive,
+        getQueryString: () => filterQueryString(currentQueryState()),
+        getSortValue: () => rankingsSort,
+        getGroups: () => dateGroupsData,
+        setGroups: (groups) => { dateGroupsData = groups; },
+        nextGeneration: () => ++dateScrubberGeneration,
+        isCurrentGeneration: (gen) => gen === dateScrubberGeneration,
+        onJump: jumpToDateGroup,
+        setupScrollObserver: () => setupDateScrubberScrollTracking(),
+        syncVisibility: syncDateScrubberVisibility,
+        teardownScrollTracking: teardownDateScrubberScrollTracking,
+        renderDateScrubberImpl: renderDateScrubberCore,
+    });
+
     const neighborWarmups = createNeighborWarmupController({
         getMosaicStrategy: () => mosaicStrategy,
         getMosaicSize: () => mosaicSize,
@@ -1394,40 +1413,15 @@ const legacyPhotoArchive = (() => {
     }
 
     async function updateDateScrubber() {
-        const existing = document.getElementById('date-scrubber');
-        if (!isDateScrubberActive()) {
-            if (existing) existing.remove();
-            if (window._scrubberObserver) window._scrubberObserver.disconnect();
-            teardownDateScrubberScrollTracking();
-            syncDateScrubberVisibility();
-            return;
-        }
-        const gen = ++dateScrubberGeneration;
-        const query = filterQueryString(currentQueryState());
-        const url = `/api/date-groups${query ? `?${query}` : ''}`;
-        try {
-            const data = await fetch(url).then(r => r.json());
-            if (gen !== dateScrubberGeneration) return;
-            dateGroupsData = data.groups || [];
-            if (rankingsSort === 'date_taken_asc') dateGroupsData.reverse();
-            renderDateScrubber();
-        } catch {
-            // silently fail
-        }
+        return dateScrubberController.updateDateScrubber();
     }
 
     function renderDateScrubber() {
-        renderDateScrubberCore(dateGroupsData, {
-            onJump: jumpToDateGroup,
-            setupScrollObserver: setupScrubberScrollObserver,
-            syncVisibility: syncDateScrubberVisibility,
-            teardownScrollTracking: teardownDateScrubberScrollTracking,
-        });
+        return dateScrubberController.renderDateScrubber();
     }
 
     function setupScrubberScrollObserver() {
-        if (window._scrubberObserver) window._scrubberObserver.disconnect();
-        setupDateScrubberScrollTracking();
+        return dateScrubberController.setupScrubberScrollObserver();
     }
 
     function selectLibraryCard(index, cards) {

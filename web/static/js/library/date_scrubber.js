@@ -180,3 +180,73 @@ export function renderDateScrubber(dateGroups, {
     setupScrollObserver?.();
     return scrubber;
 }
+
+
+export function createDateScrubberController({
+    documentImpl = document,
+    windowImpl = window,
+    fetchImpl = fetch,
+    isActive = () => false,
+    getQueryString = () => '',
+    getSortValue = () => '',
+    getGroups = () => [],
+    setGroups = () => {},
+    nextGeneration = () => 0,
+    isCurrentGeneration = () => true,
+    onJump = null,
+    setupScrollObserver = null,
+    syncVisibility = null,
+    teardownScrollTracking = null,
+    renderDateScrubberImpl = renderDateScrubber,
+} = {}) {
+    function clearInactiveScrubber() {
+        const existing = documentImpl.getElementById('date-scrubber');
+        if (existing) existing.remove();
+        if (windowImpl?._scrubberObserver) windowImpl._scrubberObserver.disconnect();
+        teardownScrollTracking?.();
+        syncVisibility?.();
+        return false;
+    }
+
+    function setupScrubberScrollObserver() {
+        if (windowImpl?._scrubberObserver) windowImpl._scrubberObserver.disconnect();
+        return setupScrollObserver?.();
+    }
+
+    function renderScrubber() {
+        return renderDateScrubberImpl(getGroups(), {
+            documentImpl,
+            onJump,
+            setupScrollObserver: setupScrubberScrollObserver,
+            syncVisibility,
+            teardownScrollTracking,
+        });
+    }
+
+    async function updateDateScrubber() {
+        if (!isActive()) return clearInactiveScrubber();
+
+        const gen = nextGeneration();
+        const query = getQueryString();
+        const url = `/api/date-groups${query ? `?${query}` : ''}`;
+        try {
+            const response = await fetchImpl(url);
+            const data = await response.json();
+            if (!isCurrentGeneration(gen)) return false;
+
+            const groups = data.groups || [];
+            setGroups(getSortValue() === 'date_taken_asc' ? [...groups].reverse() : groups);
+            renderScrubber();
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    return {
+        clearInactiveScrubber,
+        renderDateScrubber: renderScrubber,
+        setupScrubberScrollObserver,
+        updateDateScrubber,
+    };
+}

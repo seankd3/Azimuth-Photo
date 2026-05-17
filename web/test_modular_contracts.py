@@ -4118,6 +4118,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("export function setupDateScrubberScrollTracking", library_date_scrubber)
         self.assertIn("export function syncDateScrubberVisibility", library_date_scrubber)
         self.assertIn("export function renderDateScrubber", library_date_scrubber)
+        self.assertIn("export function createDateScrubberController", library_date_scrubber)
         self.assertIn("export function selectLibraryCard", library_navigation)
         self.assertIn("export function scrollCardFullyVisible", library_navigation)
         self.assertIn("export function deselectLibraryCard", library_navigation)
@@ -7916,6 +7917,107 @@ assert.equal(syncDateScrubberVisibility({
     isDateScrubberActive: () => active,
 }), false);
 assert.equal(body.classList.contains('date-scrubber-active'), false);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_date_scrubber_controller_node_probe_preserves_fetch_render_flow(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createDateScrubberController } from './static/js/library/date_scrubber.js';
+
+let active = false;
+let sortValue = 'date_taken_asc';
+let groups = [];
+let generation = 0;
+let freshGeneration = true;
+const fetches = [];
+const calls = [];
+const existingScrubber = {
+    remove: () => calls.push('remove'),
+};
+const documentImpl = {
+    getElementById: (id) => (id === 'date-scrubber' ? existingScrubber : null),
+};
+const windowImpl = {
+    _scrubberObserver: {
+        disconnect: () => calls.push('disconnect'),
+    },
+};
+
+const controller = createDateScrubberController({
+    documentImpl,
+    windowImpl,
+    fetchImpl: async (url) => {
+        fetches.push(url);
+        return {
+            async json() {
+                return {
+                    groups: [
+                        { date: '2026-05', count: 2 },
+                        { date: '2026-04', count: 1 },
+                    ],
+                };
+            },
+        };
+    },
+    isActive: () => active,
+    getQueryString: () => 'orientation=portrait',
+    getSortValue: () => sortValue,
+    getGroups: () => groups,
+    setGroups: (nextGroups) => {
+        groups = nextGroups;
+        calls.push(['groups', nextGroups.map((item) => item.date)]);
+    },
+    nextGeneration: () => {
+        generation += 1;
+        return generation;
+    },
+    isCurrentGeneration: () => freshGeneration,
+    onJump: (group) => calls.push(['jump', group]),
+    setupScrollObserver: () => calls.push('setup'),
+    syncVisibility: () => calls.push('sync'),
+    teardownScrollTracking: () => calls.push('teardown'),
+    renderDateScrubberImpl: (dateGroups, options) => {
+        calls.push(['render', dateGroups.map((item) => item.date)]);
+        options.syncVisibility();
+        options.setupScrollObserver();
+        options.onJump('2026-04');
+        return { id: 'rendered' };
+    },
+});
+
+assert.equal(await controller.updateDateScrubber(), false);
+assert.deepEqual(calls, ['remove', 'disconnect', 'teardown', 'sync']);
+assert.deepEqual(fetches, []);
+
+active = true;
+calls.length = 0;
+assert.equal(await controller.updateDateScrubber(), true);
+assert.deepEqual(fetches, ['/api/date-groups?orientation=portrait']);
+assert.deepEqual(groups.map((item) => item.date), ['2026-04', '2026-05']);
+assert.deepEqual(calls, [
+    ['groups', ['2026-04', '2026-05']],
+    ['render', ['2026-04', '2026-05']],
+    'sync',
+    'disconnect',
+    'setup',
+    ['jump', '2026-04'],
+]);
+
+freshGeneration = false;
+sortValue = 'date_taken';
+calls.length = 0;
+assert.equal(await controller.updateDateScrubber(), false);
+assert.deepEqual(groups.map((item) => item.date), ['2026-04', '2026-05']);
+assert.deepEqual(calls, []);
 """
         subprocess.run(
             ["node", "--input-type=module", "-e", script],
