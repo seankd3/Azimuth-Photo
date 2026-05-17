@@ -29,7 +29,6 @@ from core import cache_events
 from core import query_constraints
 from core import requests as request_helpers
 from core import responses as response_helpers
-from features.catalog import metadata as catalog_metadata
 from features.compare import service as compare_service
 from features.library import service as library_service
 from features.search import service as search_service
@@ -67,11 +66,6 @@ _smoke_mode_enabled = background_runtime.smoke_mode_enabled
 track_idle_activity = _app_shell.idle_activity_middleware
 if track_idle_activity is None:
     raise RuntimeError("App idle activity middleware was not configured")
-
-
-classify_orientations_background = catalog_metadata.classify_orientations_background
-_metadata_update_tuple = catalog_metadata.metadata_update_tuple
-scan_metadata_background = catalog_metadata.scan_metadata_background
 
 
 # --- Mosaic Ranking API ---

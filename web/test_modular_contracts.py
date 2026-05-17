@@ -2151,7 +2151,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertFalse(hasattr(app_module, "_schedule_result_thumbnail_memory_warm"))
         self.assertFalse(hasattr(app_module, "_cached_image_ids"))
 
-    def test_catalog_metadata_feature_owns_background_helpers_with_app_facades(self):
+    def test_catalog_metadata_feature_owns_background_helpers_without_app_facades(self):
         base_dir = os.path.dirname(__file__)
         catalog_metadata = importlib.import_module("features.catalog.metadata")
         image_repository = importlib.import_module("data.repositories.images")
@@ -2159,14 +2159,17 @@ class ModularContractTests(unittest.TestCase):
         with open(os.path.join(base_dir, "features", "catalog", "metadata.py"), encoding="utf-8") as fh:
             self.assertNotIn("import db", fh.read())
 
-        self.assertIs(app_module.classify_orientations_background, catalog_metadata.classify_orientations_background)
-        self.assertIs(app_module._metadata_update_tuple, catalog_metadata.metadata_update_tuple)
-        self.assertIs(app_module.scan_metadata_background, catalog_metadata.scan_metadata_background)
+        self.assertTrue(callable(catalog_metadata.classify_orientations_background))
+        self.assertTrue(callable(catalog_metadata.metadata_update_tuple))
+        self.assertTrue(callable(catalog_metadata.scan_metadata_background))
+        self.assertFalse(hasattr(app_module, "classify_orientations_background"))
+        self.assertFalse(hasattr(app_module, "_metadata_update_tuple"))
+        self.assertFalse(hasattr(app_module, "scan_metadata_background"))
 
         old_time = catalog_metadata.time.time
         try:
             catalog_metadata.time.time = lambda: 123.0
-            row = app_module._metadata_update_tuple(
+            row = catalog_metadata.metadata_update_tuple(
                 42,
                 {
                     "date_taken": "2024-01-02 03:04:05",
