@@ -28,23 +28,15 @@ import {
 import {
     activeMetadataFilterCount as activeMetadataFilterCountCore,
     hasActiveFilters,
-    initStarHover as initStarHoverCore,
-    loadFilterOptions as loadFilterOptionsCore,
-    loadFolderList as loadFolderListCore,
-    scheduleFilterOptionsLoad as scheduleFilterOptionsLoadCore,
-    toggleMetadataFilters as toggleMetadataFiltersCore,
     updateMetadataFilterButton as updateMetadataFilterButtonCore,
 } from '../filters.js';
 import {
-    clearLibraryFilters as clearLibraryFiltersCore,
     FILTER_STORAGE_KEY,
     applyFilterUiState as applyFilterUiStateCore,
     restoreFilters as restoreFiltersCore,
     saveFilters as saveFiltersCore,
-    setFilter as setLibraryFilterCore,
-    toggleFilter as toggleFilterCore,
-    toggleStar as toggleStarCore,
 } from '../library/filters.js';
+import { createLibraryFilterController } from '../library/filter_controller.js';
 import { createMediaStatusClient } from '../media_status.js';
 import {
     compareThumbUrls,
@@ -1006,10 +998,6 @@ const legacyPhotoArchive = (() => {
 
     function updateMetadataFilterButton() {
         updateMetadataFilterButtonCore({ filters });
-    }
-
-    function toggleMetadataFilters() {
-        toggleMetadataFiltersCore({ loadFilterOptions });
     }
 
     function normalizeFilterState(state = {}) {
@@ -2355,84 +2343,68 @@ const legacyPhotoArchive = (() => {
         setThumbHeight: (value) => { thumbHeight = value; },
     });
 
+    const libraryFilterController = createLibraryFilterController({
+        emptyFilters: EMPTY_FILTERS,
+        getFilters: () => filters,
+        setFilters: (nextFilters) => { filters = nextFilters; },
+        clearWarmups,
+        resetLibraryResults,
+        loadRankings,
+        isDateSortActive,
+        updateDateScrubber,
+        currentLibraryView,
+        loadMap,
+        getCompareMode: () => compareMode,
+        loadMosaicBatch,
+        resetComparePairs: () => {
+            comparePairs = [];
+            compareIndex = 0;
+        },
+        fetchComparePairs,
+        showComparePair,
+        updateMetadataFilterButton,
+        saveFilters,
+        activeMetadataFilterCount,
+    });
+
     function reloadForFilters() {
-        clearWarmups();
-        // Reload the appropriate view based on which page we're on
-        const grid = document.getElementById('rankings-grid');
-        if (grid) {
-            resetLibraryResults({ clearBatch: true });
-            loadRankings(true);
-            if (isDateSortActive()) updateDateScrubber();
-            if (currentLibraryView() === 'map') loadMap();
-        } else {
-            // Compare page — reload the active compare surface with the same filters
-            if (compareMode === 'mosaic') {
-                loadMosaicBatch();
-            } else {
-                comparePairs = [];
-                compareIndex = 0;
-                fetchComparePairs().then(() => showComparePair());
-            }
-        }
+        return libraryFilterController.reloadForFilters();
     }
 
     function setFilter(key, value) {
-        filters = setLibraryFilterCore(key, value, {
-            filters,
-            updateMetadataFilterButton,
-            saveFilters,
-            reloadForFilters,
-        });
+        return libraryFilterController.setFilter(key, value);
     }
 
     function clearLibraryFilters() {
-        filters = clearLibraryFiltersCore({
-            emptyFilters: EMPTY_FILTERS,
-            document,
-            setFilters: (nextFilters) => {
-                filters = nextFilters;
-            },
-            updateMetadataFilterButton,
-            saveFilters,
-            reloadForFilters,
-        });
+        return libraryFilterController.clearLibraryFilters();
     }
 
     function toggleFilter(key, value, btn) {
-        filters = toggleFilterCore(key, value, btn, {
-            filters,
-            saveFilters,
-            reloadForFilters,
-        });
+        return libraryFilterController.toggleFilter(key, value, btn);
     }
 
     function toggleStar(level) {
-        filters = toggleStarCore(level, {
-            filters,
-            document,
-            saveFilters,
-            reloadForFilters,
-        });
+        return libraryFilterController.toggleStar(level);
     }
 
     function loadFolderList() {
-        return loadFolderListCore({ filters });
+        return libraryFilterController.loadFolderList();
     }
 
     function loadFilterOptions() {
-        return loadFilterOptionsCore({ filters, updateMetadataFilterButton });
+        return libraryFilterController.loadFilterOptions();
     }
 
     function scheduleFilterOptionsLoad() {
-        return scheduleFilterOptionsLoadCore({
-            filters,
-            activeMetadataFilterCount,
-            loadFilterOptions,
-        });
+        return libraryFilterController.scheduleFilterOptionsLoad();
+    }
+
+    function toggleMetadataFilters() {
+        return libraryFilterController.toggleMetadataFilters();
     }
 
     function initStarHover() {
-        initStarHoverCore();
+        return libraryFilterController.initStarHover();
     }
 
     const findSimilar = createFindSimilarAction({

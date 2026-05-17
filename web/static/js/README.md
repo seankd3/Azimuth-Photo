@@ -43,6 +43,9 @@ resize interaction binding while legacy keeps the page state facade.
 restore precedence, DOM application for filter buttons, stars, flags, and
 selects, plus the behavior behind the legacy `setFilter`, `clearLibraryFilters`,
 `toggleFilter`, and `toggleStar` compatibility methods.
+`library/filter_controller.js` owns the legacy filter controller glue that
+reloads the correct Library, map, Mosaic, or Compare surface after filter
+changes while delegating pure filter mutations to `library/filters.js`.
 `library/sort.js` owns Library sort keys and sort state conversion.
 `library/search_state.js` owns Library/search session persistence for sort,
 search query, deep-search flag, and search-specific sort state.

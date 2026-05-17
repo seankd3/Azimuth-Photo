@@ -3741,6 +3741,8 @@ class ModularContractTests(unittest.TestCase):
             library_batch = fh.read()
         with open(os.path.join(base_dir, "static", "js", "library", "batch_controller.js"), encoding="utf-8") as fh:
             library_batch_controller = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "library", "filter_controller.js"), encoding="utf-8") as fh:
+            library_filter_controller = fh.read()
         with open(os.path.join(base_dir, "static", "js", "export", "actions.js"), encoding="utf-8") as fh:
             export_actions = fh.read()
         with open(os.path.join(base_dir, "static", "js", "library", "similar.js"), encoding="utf-8") as fh:
@@ -3835,6 +3837,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../library/search_controller.js';", legacy)
         self.assertIn("from '../library/flags.js';", legacy)
         self.assertIn("from '../library/batch_controller.js';", legacy)
+        self.assertIn("from '../library/filter_controller.js';", legacy)
         self.assertIn("from '../export/actions.js';", legacy)
         self.assertIn("from '../library/similar.js';", legacy)
         self.assertIn("from '../library/display.js';", legacy)
@@ -3843,10 +3846,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../library/navigation.js';", legacy)
         self.assertIn("from '../library/map_controller.js';", legacy)
         self.assertIn("from '../library/filters.js';", legacy)
-        self.assertIn("clearLibraryFilters as clearLibraryFiltersCore", legacy)
-        self.assertIn("setFilter as setLibraryFilterCore", legacy)
-        self.assertIn("toggleFilter as toggleFilterCore", legacy)
-        self.assertIn("toggleStar as toggleStarCore", legacy)
+        self.assertIn("createLibraryFilterController", legacy)
         self.assertIn("from '../search/query.js';", legacy)
         self.assertIn("from '../people/controller.js';", legacy)
         self.assertIn("from '../settings/page.js';", legacy)
@@ -4012,6 +4012,10 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("export function createBatchSelectionController", library_batch_controller)
         self.assertIn("from './batch.js';", library_batch_controller)
         self.assertIn("selectedImageIds", library_batch_controller)
+        self.assertIn("export function createLibraryFilterController", library_filter_controller)
+        self.assertIn("from '../filters.js';", library_filter_controller)
+        self.assertIn("from './filters.js';", library_filter_controller)
+        self.assertIn("reloadForFilters", library_filter_controller)
         self.assertIn("export function fullRankingsExportUrl", export_actions)
         self.assertIn("export function selectedImagesExportUrl", export_actions)
         self.assertIn("export function exportRankings", export_actions)
@@ -4604,6 +4608,125 @@ events.length = 0;
 sortField = 'similarity';
 assert.equal(controller.toggleSortDir(), false);
 assert.deepEqual(events, []);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_library_filter_controller_node_probe_preserves_reload_flow(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createLibraryFilterController } from './static/js/library/filter_controller.js';
+
+let gridPresent = true;
+let filters = { folder: '', flag: '', rating: '' };
+let compareMode = 'mosaic';
+let libraryView = 'grid';
+let dateSort = false;
+const elements = {
+    folder: { value: '' },
+    star: { dataset: { star: '3' }, classList: { toggle: () => {}, remove: () => {} }, textContent: '' },
+};
+const documentImpl = {
+    getElementById(id) {
+        if (id === 'rankings-grid') return gridPresent ? {} : null;
+        return elements[id] || { value: '' };
+    },
+    querySelectorAll(selector) {
+        if (selector === '.filter-star') return [elements.star];
+        return [];
+    },
+};
+const events = [];
+const controller = createLibraryFilterController({
+    documentImpl,
+    emptyFilters: { folder: '', flag: '', rating: '' },
+    getFilters: () => filters,
+    setFilters: (nextFilters) => {
+        filters = nextFilters;
+        events.push(['setFilters', { ...nextFilters }]);
+    },
+    clearWarmups: () => events.push(['clearWarmups']),
+    resetLibraryResults: (options) => events.push(['reset', options.clearBatch]),
+    loadRankings: (clearFirst) => events.push(['rankings', clearFirst]),
+    isDateSortActive: () => dateSort,
+    updateDateScrubber: () => events.push(['scrubber']),
+    currentLibraryView: () => libraryView,
+    loadMap: () => events.push(['map']),
+    getCompareMode: () => compareMode,
+    loadMosaicBatch: () => events.push(['mosaic']),
+    resetComparePairs: () => events.push(['resetCompare']),
+    fetchComparePairs: () => {
+        events.push(['fetchPairs']);
+        return Promise.resolve();
+    },
+    showComparePair: () => events.push(['showPair']),
+    updateMetadataFilterButton: () => events.push(['metadata']),
+    saveFilters: () => events.push(['save']),
+    activeMetadataFilterCount: () => 1,
+    loadFolderListImpl: ({ filters }) => events.push(['folders', filters.folder]),
+    loadFilterOptionsImpl: ({ filters }) => events.push(['options', filters.folder]),
+    scheduleFilterOptionsLoadImpl: ({ filters, activeMetadataFilterCount, loadFilterOptions }) => {
+        events.push(['schedule', filters.folder, activeMetadataFilterCount()]);
+        loadFilterOptions();
+    },
+    toggleMetadataFiltersImpl: ({ loadFilterOptions }) => {
+        events.push(['toggleMetadata']);
+        loadFilterOptions();
+    },
+    initStarHoverImpl: () => events.push(['stars']),
+});
+
+controller.setFilter('folder', '/photos');
+assert.equal(filters.folder, '/photos');
+assert.deepEqual(events, [
+    ['metadata'],
+    ['save'],
+    ['clearWarmups'],
+    ['reset', true],
+    ['rankings', true],
+    ['setFilters', { folder: '/photos', flag: '', rating: '' }],
+]);
+
+events.length = 0;
+libraryView = 'map';
+dateSort = true;
+assert.equal(controller.reloadForFilters(), 'library');
+assert.deepEqual(events, [['clearWarmups'], ['reset', true], ['rankings', true], ['scrubber'], ['map']]);
+
+events.length = 0;
+gridPresent = false;
+compareMode = 'mosaic';
+assert.equal(controller.reloadForFilters(), 'mosaic');
+assert.deepEqual(events, [['clearWarmups'], ['mosaic']]);
+
+events.length = 0;
+compareMode = 'swiss';
+assert.equal(controller.reloadForFilters(), 'compare');
+await Promise.resolve();
+assert.deepEqual(events, [['clearWarmups'], ['resetCompare'], ['fetchPairs'], ['showPair']]);
+
+events.length = 0;
+controller.loadFolderList();
+controller.loadFilterOptions();
+controller.scheduleFilterOptionsLoad();
+controller.toggleMetadataFilters();
+controller.initStarHover();
+assert.deepEqual(events, [
+    ['folders', '/photos'],
+    ['options', '/photos'],
+    ['schedule', '/photos', 1],
+    ['options', '/photos'],
+    ['toggleMetadata'],
+    ['options', '/photos'],
+    ['stars'],
+]);
 """
         subprocess.run(
             ["node", "--input-type=module", "-e", script],
