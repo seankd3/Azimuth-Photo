@@ -3723,6 +3723,8 @@ class ModularContractTests(unittest.TestCase):
             compare_actions = fh.read()
         with open(os.path.join(base_dir, "static", "js", "compare", "propagation.js"), encoding="utf-8") as fh:
             compare_propagation = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "compare", "status_controller.js"), encoding="utf-8") as fh:
+            compare_status_controller = fh.read()
         with open(os.path.join(base_dir, "static", "js", "compare", "status.js"), encoding="utf-8") as fh:
             compare_status = fh.read()
         with open(os.path.join(base_dir, "static", "js", "compare", "mosaic.js"), encoding="utf-8") as fh:
@@ -3829,7 +3831,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../compare/mosaic_action_controller.js';", legacy)
         self.assertIn("from '../compare/mosaic_replacements.js';", legacy)
         self.assertIn("from '../compare/propagation.js';", legacy)
-        self.assertIn("from '../compare/status.js';", legacy)
+        self.assertIn("from '../compare/status_controller.js';", legacy)
         self.assertIn("from '../compare/mosaic.js';", legacy)
         self.assertIn("from '../compare/keyboard.js';", legacy)
         self.assertIn("from '../loupe/tiers.js';", legacy)
@@ -3957,6 +3959,9 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("export function undoComparisonToastText", compare_actions)
         self.assertIn("export function precomputePropagationCounts", compare_propagation)
         self.assertIn("export function fetchPropagationCount", compare_propagation)
+        self.assertIn("export function createCompareStatusController", compare_status_controller)
+        self.assertIn("from './propagation.js';", compare_status_controller)
+        self.assertIn("coverageStatsFetchPromise", compare_status_controller)
         self.assertIn("export function visibleTotalLabel", compare_status)
         self.assertIn("export function poolVisibleCount", compare_status)
         self.assertIn("export function coveragePercent", compare_status)
@@ -5354,6 +5359,114 @@ assert.equal(undoResult.ok, true);
 assert.equal(undoResult.comparisonsUndone, 2);
 assert.equal(undoComparisonToastText(2), 'Undid 2 comparisons');
 assert.equal(undoComparisonToastText(1), 'Undid 1 comparison');
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_compare_status_controller_node_probe_preserves_progress_and_propagation_flow(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createCompareStatusController } from './static/js/compare/status_controller.js';
+
+const stats = {
+    ranking_signal_count: 10,
+    total_comparisons: 10,
+    direct_comparison_rows: 4,
+    filtered_pool_visible: 2,
+    total_images: 10,
+    rated_images: 1,
+};
+const events = [];
+const controller = createCompareStatusController({
+    getCompareStats: () => stats,
+    nowImpl: () => 100,
+    coverageStatsThrottleMs: 20,
+    fetchImpl: async (url) => {
+        events.push(['fetch', url]);
+        assert.equal(url, '/api/stats');
+        return {
+            async json() {
+                return {
+                    total_images: 20,
+                    rated_images: 5,
+                    total_comparisons: 17,
+                    ranking_signal_count: 19,
+                };
+            },
+        };
+    },
+    renderCoverageBarImpl: (nextStats) => {
+        events.push(['coverage', nextStats.total_images, nextStats.rated_images]);
+        return true;
+    },
+    renderCompareProgressImpl: ({
+        stats: progressStats,
+        displayedComparisons,
+        updateCoverageBarImpl,
+        rollUpCounterImpl,
+    }) => {
+        events.push(['progress', progressStats.ranking_signal_count, displayedComparisons]);
+        updateCoverageBarImpl();
+        rollUpCounterImpl('counter', displayedComparisons, progressStats.ranking_signal_count);
+        return progressStats.ranking_signal_count;
+    },
+    rollUpCounterImpl: (el, from, to) => events.push(['roll', el, from, to]),
+    fetchPropagationCountImpl: (directCount, { onApply, onBadge }) => {
+        events.push(['propagation-request', directCount]);
+        onApply(Number(directCount) + 3, Number(directCount));
+        onBadge(3);
+        return 'propagation-ok';
+    },
+    showPropagationBadgeImpl: (count) => {
+        events.push(['badge', count]);
+        return true;
+    },
+});
+
+controller.bumpRankingSignals(2, 1);
+assert.equal(stats.ranking_signal_count, 12);
+assert.equal(stats.total_comparisons, 12);
+assert.equal(stats.direct_comparison_rows, 5);
+
+assert.equal(controller.updateCompareProgress(), 12);
+await controller.coverageStatsFetchPromise();
+assert.equal(stats.total_images, 20);
+assert.equal(stats.rated_images, 5);
+assert.equal(stats.ranking_signal_count, 19);
+assert.deepEqual(events, [
+    ['progress', 12, -1],
+    ['coverage', 10, 1],
+    ['fetch', '/api/stats'],
+    ['roll', 'counter', -1, 12],
+    ['coverage', 20, 5],
+    ['progress', 19, 12],
+    ['coverage', 20, 5],
+    ['roll', 'counter', 12, 19],
+]);
+
+events.length = 0;
+assert.equal(controller.updateCoverageBar(), false);
+assert.deepEqual(events, [['coverage', 20, 5]]);
+
+events.length = 0;
+assert.equal(controller.fetchPropagationCount(1), 'propagation-ok');
+assert.equal(stats.ranking_signal_count, 23);
+assert.equal(stats.total_comparisons, 23);
+assert.equal(stats.direct_comparison_rows, 6);
+assert.deepEqual(events, [
+    ['propagation-request', 1],
+    ['progress', 23, 19],
+    ['coverage', 20, 5],
+    ['roll', 'counter', 19, 23],
+    ['badge', 3],
+]);
 """
         subprocess.run(
             ["node", "--input-type=module", "-e", script],

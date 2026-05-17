@@ -84,17 +84,9 @@ import {
     createCompareActionController,
 } from '../compare/action_controller.js';
 import {
-    fetchPropagationCount as fetchPropagationCountCore,
     precomputePropagationCounts,
 } from '../compare/propagation.js';
-import {
-    bumpRankingSignals as bumpRankingSignalsCore,
-    mergeCoverageStats as mergeCoverageStatsCore,
-    renderCompareProgress as renderCompareProgressCore,
-    renderCoverageBar as renderCoverageBarCore,
-    rollUpCounter as rollUpCounterCore,
-    showPropagationBadge as showPropagationBadgeCore,
-} from '../compare/status.js';
+import { createCompareStatusController } from '../compare/status_controller.js';
 import {
     LOUPE_BLANK_SRC,
     LOUPE_TIER_RANKS,
@@ -232,11 +224,8 @@ const legacyPhotoArchive = (() => {
     let compareActionSeq = 0;
     let undoCount = 0;
     let compareStats = {};
-    let coverageStatsLastFetched = 0;
-    let coverageStatsFetchPromise = null;
     let compareImageToken = 0;
     const compareDisplayedTier = { left: -1, right: -1 };
-    const COVERAGE_STATS_THROTTLE_MS = 30000;
 
     // --- Rankings State ---
     let rankingsOffset = 0;
@@ -639,49 +628,33 @@ const legacyPhotoArchive = (() => {
         });
     }
 
-    let _displayedComparisons = -1;
+    const compareStatusController = createCompareStatusController({
+        getCompareStats: () => compareStats,
+        fetchImpl: fetch,
+    });
 
     function bumpRankingSignals(signalDelta, directDelta = 0) {
-        bumpRankingSignalsCore(compareStats, signalDelta, directDelta);
+        return compareStatusController.bumpRankingSignals(signalDelta, directDelta);
     }
 
     function updateCompareProgress() {
-        _displayedComparisons = renderCompareProgressCore({
-            stats: compareStats,
-            displayedComparisons: _displayedComparisons,
-            updateCoverageBarImpl: updateCoverageBar,
-            rollUpCounterImpl: rollUpCounter,
-        });
+        return compareStatusController.updateCompareProgress();
     }
 
     function renderCoverageBar(stats = compareStats) {
-        return renderCoverageBarCore(stats);
+        return compareStatusController.renderCoverageBar(stats);
     }
 
     function mergeCoverageStats(stats) {
-        mergeCoverageStatsCore(compareStats, stats);
+        return compareStatusController.mergeCoverageStats(stats);
     }
 
     function updateCoverageBar() {
-        if (!renderCoverageBar()) return;
-        const now = Date.now();
-        if (coverageStatsFetchPromise || now - coverageStatsLastFetched < COVERAGE_STATS_THROTTLE_MS) return;
-        coverageStatsLastFetched = now;
-        coverageStatsFetchPromise = fetch('/api/stats')
-            .then((res) => res.json())
-            .then((stats) => {
-                mergeCoverageStats(stats);
-                renderCoverageBar(stats);
-                updateCompareProgress();
-            })
-            .catch(() => {})
-            .finally(() => {
-                coverageStatsFetchPromise = null;
-            });
+        return compareStatusController.updateCoverageBar();
     }
 
     function rollUpCounter(el, from, to) {
-        return rollUpCounterCore(el, from, to);
+        return compareStatusController.rollUpCounter(el, from, to);
     }
 
     function precomputePropagation() {
@@ -693,17 +666,11 @@ const legacyPhotoArchive = (() => {
     }
 
     function fetchPropagationCount(directCount = 0) {
-        fetchPropagationCountCore(directCount, {
-            onApply: (total, direct) => {
-                bumpRankingSignals(total, direct);
-                updateCompareProgress();
-            },
-            onBadge: showPropagationBadge,
-        });
+        return compareStatusController.fetchPropagationCount(directCount);
     }
 
     function showPropagationBadge(count) {
-        return showPropagationBadgeCore(count);
+        return compareStatusController.showPropagationBadge(count);
     }
 
     const compareActionController = createCompareActionController({

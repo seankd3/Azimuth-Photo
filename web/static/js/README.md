@@ -90,6 +90,8 @@ while `compare/actions.js` owns pure request and Elo helper functions.
 parsing, returned ELO application, undo POST/result parsing, and undo toast text.
 `compare/propagation.js` owns Compare/Mosaic propagation prediction and last
 propagation-count request helpers.
+`compare/status_controller.js` owns Compare progress, coverage-stat refresh,
+ranking-signal mutation, propagation-count application, and status UI glue.
 `compare/mosaic.js` owns Mosaic grid sizing/rendering, progressive cell tier
 upgrades, pick request/result helpers, and replacement-index selection.
 `compare/status.js` owns Compare pool/progress labels, ranking-signal count
