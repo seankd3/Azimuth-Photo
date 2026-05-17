@@ -3717,6 +3717,8 @@ class ModularContractTests(unittest.TestCase):
             compare_action_controller = fh.read()
         with open(os.path.join(base_dir, "static", "js", "compare", "mosaic_action_controller.js"), encoding="utf-8") as fh:
             compare_mosaic_action_controller = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "compare", "mosaic_replacements.js"), encoding="utf-8") as fh:
+            compare_mosaic_replacements = fh.read()
         with open(os.path.join(base_dir, "static", "js", "compare", "actions.js"), encoding="utf-8") as fh:
             compare_actions = fh.read()
         with open(os.path.join(base_dir, "static", "js", "compare", "propagation.js"), encoding="utf-8") as fh:
@@ -3825,6 +3827,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../compare/mode_controller.js';", legacy)
         self.assertIn("from '../compare/action_controller.js';", legacy)
         self.assertIn("from '../compare/mosaic_action_controller.js';", legacy)
+        self.assertIn("from '../compare/mosaic_replacements.js';", legacy)
         self.assertIn("from '../compare/propagation.js';", legacy)
         self.assertIn("from '../compare/status.js';", legacy)
         self.assertIn("from '../compare/mosaic.js';", legacy)
@@ -3944,6 +3947,9 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("export function createMosaicActionController", compare_mosaic_action_controller)
         self.assertIn("from './mosaic.js';", compare_mosaic_action_controller)
         self.assertIn("postMosaicPickImpl", compare_mosaic_action_controller)
+        self.assertIn("export function createMosaicReplacementBuffer", compare_mosaic_replacements)
+        self.assertIn("export const MOSAIC_REPLACEMENT_LOW_WATER", compare_mosaic_replacements)
+        self.assertIn("replacementPreloadTimeoutMs", compare_mosaic_replacements)
         self.assertIn("export function buildComparisonPayload", compare_actions)
         self.assertIn("export async function postComparison", compare_actions)
         self.assertIn("export function applyComparisonElos", compare_actions)
@@ -5768,6 +5774,164 @@ assert.deepEqual(events, [
     ['progress'],
     ['toast', 'Failed to save pick; restored the previous grid'],
 ]);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_mosaic_replacement_buffer_node_probe_preserves_fetch_dedupe_and_retry_flow(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createMosaicReplacementBuffer } from './static/js/compare/mosaic_replacements.js';
+
+let mosaicFilling = false;
+let mosaicImages = [
+    { id: 1 },
+    { id: 2 },
+];
+let mosaicReplacements = [
+    { id: 3, thumb_url: '/three.jpg' },
+];
+let mosaicRenderToken = 9;
+let warmupGeneration = 4;
+let compareStats = {};
+const events = [];
+const timers = [];
+const enqueued = [];
+
+const buffer = createMosaicReplacementBuffer({
+    getMosaicFilling: () => mosaicFilling,
+    setMosaicFilling: (filling) => {
+        mosaicFilling = filling;
+        events.push(['filling', filling]);
+    },
+    getMosaicImages: () => mosaicImages,
+    getMosaicReplacements: () => mosaicReplacements,
+    getMosaicRenderToken: () => mosaicRenderToken,
+    getWarmupGeneration: () => warmupGeneration,
+    enqueueWarmup: (task, options) => {
+        enqueued.push({ task, options });
+        events.push(['enqueue', options.generation]);
+    },
+    buildMosaicUrl: ({ n, exclude }) => {
+        events.push(['url', n, exclude]);
+        return `/api/mosaic/next?n=${n}&exclude=${exclude}`;
+    },
+    fetchImpl: async (url) => {
+        events.push(['fetch', url]);
+        return {
+            async json() {
+                return {
+                    stats: { visible: 5 },
+                    images: [
+                        { id: 2, thumb_url: '/two.jpg' },
+                        { id: 3, thumb_url: '/three.jpg' },
+                        { id: 4, thumb_url: '/four.jpg' },
+                        { id: 5, thumb_url: '/five.jpg' },
+                        { id: 4, thumb_url: '/four-duplicate.jpg' },
+                    ],
+                };
+            },
+        };
+    },
+    loadImageProbe: async (url, options) => {
+        events.push(['probe', url, options.priority, options.timeoutMs]);
+        return { ok: url !== '/five.jpg' };
+    },
+    setCompareStats: (stats) => {
+        compareStats = stats;
+        events.push(['stats', { ...stats }]);
+    },
+    updateCompareProgress: () => events.push(['progress']),
+    setTimeoutImpl: (callback, delayMs) => {
+        timers.push({ callback, delayMs });
+        events.push(['retry', delayMs]);
+    },
+    replacementTarget: 3,
+    replacementFetchMin: 2,
+    replacementProbeConcurrency: 1,
+    replacementPreloadTimeoutMs: 123,
+});
+
+assert.equal(buffer.fillReplacements(), true);
+assert.equal(mosaicFilling, true);
+assert.equal(enqueued.length, 1);
+assert.equal(enqueued[0].options.generation, 4);
+assert.deepEqual(events, [
+    ['filling', true],
+    ['enqueue', 4],
+]);
+
+await enqueued[0].task();
+assert.equal(mosaicFilling, false);
+assert.deepEqual(mosaicReplacements.map((img) => img.id), [3, 4]);
+assert.deepEqual(compareStats, { visible: 5 });
+assert.equal(timers.length, 0);
+assert.deepEqual(events, [
+    ['filling', true],
+    ['enqueue', 4],
+    ['url', 2, '1,2,3'],
+    ['fetch', '/api/mosaic/next?n=2&exclude=1,2,3'],
+    ['stats', { visible: 5 }],
+    ['progress'],
+    ['probe', '/four.jpg', 'auto', 123],
+    ['probe', '/five.jpg', 'auto', 123],
+    ['filling', false],
+]);
+
+events.length = 0;
+mosaicFilling = true;
+assert.equal(buffer.fillReplacements(), false);
+assert.deepEqual(events, []);
+
+mosaicFilling = false;
+mosaicReplacements = [];
+const retryBuffer = createMosaicReplacementBuffer({
+    getMosaicFilling: () => mosaicFilling,
+    setMosaicFilling: (filling) => {
+        mosaicFilling = filling;
+        events.push(['retry-filling', filling]);
+    },
+    getMosaicImages: () => [],
+    getMosaicReplacements: () => mosaicReplacements,
+    getMosaicRenderToken: () => 1,
+    getWarmupGeneration: () => 1,
+    enqueueWarmup: (task, options) => enqueued.push({ task, options }),
+    buildMosaicUrl: () => '/retry',
+    fetchImpl: async () => ({
+        async json() {
+            return { images: [{ id: 9, thumb_url: '/nine.jpg' }] };
+        },
+    }),
+    loadImageProbe: async () => ({ ok: false }),
+    setCompareStats: () => {},
+    updateCompareProgress: () => {},
+    setTimeoutImpl: (callback, delayMs) => {
+        timers.push({ callback, delayMs });
+        events.push(['retry-scheduled', delayMs]);
+    },
+    replacementTarget: 4,
+    replacementFetchMin: 2,
+});
+assert.equal(retryBuffer.fillReplacements(), true);
+await enqueued.at(-1).task();
+assert.deepEqual(events, [
+    ['retry-filling', true],
+    ['retry-scheduled', 300],
+    ['retry-filling', false],
+]);
+assert.equal(typeof timers.at(-1).callback, 'function');
+
+events.length = 0;
+mosaicFilling = true;
+enqueued.at(-1).options.onDrop();
+assert.deepEqual(events, [['retry-filling', false]]);
 """
         subprocess.run(
             ["node", "--input-type=module", "-e", script],

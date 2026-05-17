@@ -62,6 +62,10 @@ import {
 } from '../compare/mosaic.js';
 import { createMosaicActionController } from '../compare/mosaic_action_controller.js';
 import {
+    createMosaicReplacementBuffer,
+    MOSAIC_REPLACEMENT_LOW_WATER,
+} from '../compare/mosaic_replacements.js';
+import {
     deselectMosaicCell as deselectMosaicCellCore,
     findMosaicCellInDirection as findMosaicCellInDirectionCore,
     selectMosaicCell as selectMosaicCellCore,
@@ -241,11 +245,6 @@ const legacyPhotoArchive = (() => {
     const CROSS_VIEW_WARM_DELAY_MS = 1000;
     const LIBRARY_NEIGHBOR_LIMIT = 24;
     const MOSAIC_NEIGHBOR_LIMIT = 8;
-    const MOSAIC_REPLACEMENT_TARGET = 24;
-    const MOSAIC_REPLACEMENT_FETCH_MIN = 12;
-    const MOSAIC_REPLACEMENT_LOW_WATER = 8;
-    const MOSAIC_REPLACEMENT_PROBE_CONCURRENCY = 4;
-    const MOSAIC_REPLACEMENT_PRELOAD_TIMEOUT_MS = 900;
     const COMPARE_NEIGHBOR_PAIRS = 4;
     const FILMSTRIP_WINDOW_RADIUS = 55;
     const mediaStatusClient = createMediaStatusClient({ maxAgeMs: 15000 });
@@ -433,71 +432,22 @@ const legacyPhotoArchive = (() => {
     let mosaicReplacements = [];
     let mosaicFilling = false;
 
+    const mosaicReplacementBuffer = createMosaicReplacementBuffer({
+        getMosaicFilling: () => mosaicFilling,
+        setMosaicFilling: (filling) => { mosaicFilling = filling; },
+        getMosaicImages: () => mosaicImages,
+        getMosaicReplacements: () => mosaicReplacements,
+        getMosaicRenderToken: () => mosaicRenderToken,
+        getWarmupGeneration: currentWarmupGeneration,
+        enqueueWarmup,
+        buildMosaicUrl,
+        loadImageProbe,
+        setCompareStats: (stats) => { compareStats = stats; },
+        updateCompareProgress,
+    });
+
     function mosaicFillReplacements() {
-        if (mosaicFilling || mosaicReplacements.length >= MOSAIC_REPLACEMENT_TARGET) return;
-        mosaicFilling = true;
-        const generation = currentWarmupGeneration();
-        const renderToken = mosaicRenderToken;
-        enqueueWarmup(async () => {
-            try {
-                if (generation !== currentWarmupGeneration() || renderToken !== mosaicRenderToken) return;
-                const needed = Math.max(
-                    MOSAIC_REPLACEMENT_FETCH_MIN,
-                    MOSAIC_REPLACEMENT_TARGET - mosaicReplacements.length,
-                );
-                const excludeIds = [
-                    ...mosaicImages.map(img => img.id),
-                    ...mosaicReplacements.map(img => img.id),
-                ].join(',');
-                const res = await fetch(buildMosaicUrl({ n: needed, exclude: excludeIds }));
-                const data = await res.json();
-                if (generation !== currentWarmupGeneration() || renderToken !== mosaicRenderToken) return;
-                if (data.stats) {
-                    compareStats = data.stats;
-                    updateCompareProgress();
-                }
-                // Deduplicate against the grid and existing replacements, but stream
-                // ready thumbnails into the buffer so one slow probe cannot stall all swaps.
-                const inBuffer = new Set(mosaicReplacements.map(img => img.id));
-                const candidates = [];
-                for (const img of data.images || []) {
-                    const onGrid = mosaicImages.some((entry) => entry.id === img.id);
-                    if (!onGrid && !inBuffer.has(img.id)) {
-                        inBuffer.add(img.id);
-                        candidates.push(img);
-                    }
-                }
-                let readyCount = 0;
-                const addWhenReady = async (img) => {
-                    const probe = await loadImageProbe(img.thumb_url, {
-                        priority: 'auto',
-                        timeoutMs: MOSAIC_REPLACEMENT_PRELOAD_TIMEOUT_MS,
-                    });
-                    if (!probe.ok || generation !== currentWarmupGeneration() || renderToken !== mosaicRenderToken) return;
-                    const currentGrid = new Set(mosaicImages.map((entry) => entry.id));
-                    if (currentGrid.has(img.id) || mosaicReplacements.some((entry) => entry.id === img.id)) return;
-                    if (mosaicReplacements.length >= MOSAIC_REPLACEMENT_TARGET) return;
-                    mosaicReplacements.push(img);
-                    readyCount++;
-                };
-                for (let start = 0; start < candidates.length; start += MOSAIC_REPLACEMENT_PROBE_CONCURRENCY) {
-                    if (generation !== currentWarmupGeneration() || renderToken !== mosaicRenderToken) return;
-                    if (mosaicReplacements.length >= MOSAIC_REPLACEMENT_TARGET) break;
-                    const chunk = candidates.slice(start, start + MOSAIC_REPLACEMENT_PROBE_CONCURRENCY);
-                    await Promise.all(chunk.map(addWhenReady));
-                }
-                if (mosaicReplacements.length < MOSAIC_REPLACEMENT_FETCH_MIN && candidates.length > readyCount) {
-                    setTimeout(() => mosaicFillReplacements(), 300);
-                }
-            } catch {} finally {
-                mosaicFilling = false;
-            }
-        }, {
-            generation,
-            onDrop: () => {
-                mosaicFilling = false;
-            },
-        });
+        return mosaicReplacementBuffer.fillReplacements();
     }
 
     let mosaicBusy = false;

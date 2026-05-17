@@ -79,6 +79,8 @@ glue while legacy keeps pair and mosaic state.
 `compare/mosaic_action_controller.js` owns Mosaic pick orchestration,
 optimistic replacement swapping, propagation follow-up, and rollback on failed
 save while legacy keeps board state storage.
+`compare/mosaic_replacements.js` owns Mosaic replacement-buffer fetching,
+deduping, readiness probing, retry scheduling, and replacement watermarks.
 `compare/images.js` owns Compare pair image rendering and progressive tier
 upgrades.
 `compare/action_controller.js` owns Compare submit/undo state orchestration
