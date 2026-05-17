@@ -26,7 +26,6 @@ from core.app_factory import (
 from core import background as background_runtime
 from core import cache_events
 from core import query_constraints
-from features.compare import service as compare_service
 from features.library import service as library_service
 
 
@@ -59,49 +58,20 @@ if track_idle_activity is None:
 
 # --- Mosaic Ranking API ---
 
-# Cache for active pairing images. The default compare/mosaic path uses the
-# smaller visible-candidate cache below; this broader cache is for filtered
-# paths and is invalidated when ratings change.
-_pairing_cache = compare_service._pairing_cache
-_matchups_cache = compare_service._matchups_cache
-_visible_matchups_cache = compare_service._visible_matchups_cache
-_visible_pairing_candidates_cache = compare_service._visible_pairing_candidates_cache
-_visible_pairing_candidates_refreshing = compare_service._visible_pairing_candidates_refreshing
 _rankings_response_cache = library_service._rankings_response_cache
 _text_search_resolution_cache = query_constraints._text_search_resolution_cache
 _deep_search_query_record_cache = query_constraints._deep_search_query_record_cache
-_interaction_response_cache = compare_service._interaction_response_cache
-_visible_pairing_candidates_cache_ttl_seconds = compare_service._visible_pairing_candidates_cache_ttl_seconds
 # Rankings are invalidated explicitly by rating/flag/catalog changes. Keep the
 # idle TTL long so returning to the app does not pay a cold rebuild tax.
 _rankings_response_cache_ttl_seconds = library_service._rankings_response_cache_ttl_seconds
 _deep_search_query_record_cache_ttl_seconds = query_constraints._deep_search_query_record_cache_ttl_seconds
-_SWISS_PAIR_WINDOW = compare_service._SWISS_PAIR_WINDOW
-_FILTERED_SWISS_PAIR_WINDOW = compare_service._FILTERED_SWISS_PAIR_WINDOW
-_FILTERED_MOSAIC_WINDOW = compare_service._FILTERED_MOSAIC_WINDOW
-_MOSAIC_EXPLORE_WINDOW = compare_service._MOSAIC_EXPLORE_WINDOW
 
-_get_pairing_images = compare_service.get_pairing_images
 
 _invalidate_rankings_cache = _runtime_services.invalidate_rankings_cache
 _invalidate_vector_derived_caches = _runtime_services.invalidate_vector_derived_caches
 _embedding_batch_stored = cache_events.embedding_batch_stored
 
-_get_past_matchups = compare_service.get_past_matchups
-_get_visible_past_matchups = compare_service.get_visible_past_matchups
-_get_past_matchups_for_candidate_ids = compare_service.get_past_matchups_for_candidate_ids
-_add_past_matchups = compare_service.add_past_matchups
-_patch_pairing_cache = compare_service.patch_pairing_cache
 _schedule_pairing_propagation = _runtime_services.schedule_pairing_propagation
-
-
-_filter_visible_candidates = compare_service.filter_visible_candidates
-_hydrate_active_rows = compare_service.hydrate_active_rows
-_default_visible_pairing_candidates = compare_service.default_visible_pairing_candidates
-_filtered_visible_ranked_candidates = compare_service.filtered_visible_ranked_candidates
-_load_filtered_visible_ranked_candidates = compare_service.load_filtered_visible_ranked_candidates
-_search_visible_ranked_candidates = compare_service.search_visible_ranked_candidates
-_warm_filtered_visible_ranked_candidates = compare_service.warm_filtered_visible_ranked_candidates
 
 
 _sync_query_constraint_compat_globals = query_constraints.sync_configured_ttls
@@ -127,18 +97,6 @@ _intersect_image_id_filters = query_constraints.intersect_image_id_filters
 
 
 _resolve_library_constraints = _runtime_services.resolve_library_constraints
-
-
-_metadata_text_match = compare_service.metadata_text_match
-_apply_text_search_constraint = compare_service.apply_text_search_constraint
-_has_candidate_filters = compare_service.has_candidate_filters
-
-
-_diverse_sample = compare_service.diverse_sample
-
-
-_mosaic_next_impl = compare_service.mosaic_next_impl
-_compare_next_impl = compare_service.compare_next_impl
 
 
 # --- Rankings API ---

@@ -344,7 +344,7 @@ class ModularContractTests(unittest.TestCase):
             ],
         )
 
-    def test_compare_service_backs_app_cache_facades(self):
+    def test_compare_service_owns_cache_and_helpers_without_app_facades(self):
         app_factory = importlib.import_module("core.app_factory")
         service = importlib.import_module("features.compare.service")
 
@@ -356,49 +356,67 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("configure_compare_service(", factory_entry)
         self.assertNotIn("configure_compare_service(", app_entry)
         self.assertNotIn("compare_service.configure(", app_entry)
-        self.assertIs(app_module._pairing_cache, service._pairing_cache)
-        self.assertIs(app_module._matchups_cache, service._matchups_cache)
-        self.assertIs(app_module._visible_matchups_cache, service._visible_matchups_cache)
-        self.assertIs(app_module._visible_pairing_candidates_cache, service._visible_pairing_candidates_cache)
-        self.assertIs(app_module._visible_pairing_candidates_refreshing, service._visible_pairing_candidates_refreshing)
-        self.assertIs(app_module._interaction_response_cache, service._interaction_response_cache)
-        self.assertIs(app_module._get_pairing_images, service.get_pairing_images)
-        self.assertIs(app_module._get_past_matchups, service.get_past_matchups)
-        self.assertIs(app_module._get_visible_past_matchups, service.get_visible_past_matchups)
-        self.assertIs(
-            app_module._get_past_matchups_for_candidate_ids,
-            service.get_past_matchups_for_candidate_ids,
-        )
-        self.assertIs(app_module._add_past_matchups, service.add_past_matchups)
-        self.assertIs(app_module._patch_pairing_cache, service.patch_pairing_cache)
-        self.assertIs(app_module._filter_visible_candidates, service.filter_visible_candidates)
-        self.assertIs(app_module._hydrate_active_rows, service.hydrate_active_rows)
-        self.assertIs(
-            app_module._default_visible_pairing_candidates,
-            service.default_visible_pairing_candidates,
-        )
-        self.assertIs(
-            app_module._filtered_visible_ranked_candidates,
-            service.filtered_visible_ranked_candidates,
-        )
-        self.assertIs(
-            app_module._load_filtered_visible_ranked_candidates,
-            service.load_filtered_visible_ranked_candidates,
-        )
-        self.assertIs(
-            app_module._search_visible_ranked_candidates,
-            service.search_visible_ranked_candidates,
-        )
-        self.assertIs(
-            app_module._warm_filtered_visible_ranked_candidates,
-            service.warm_filtered_visible_ranked_candidates,
-        )
-        self.assertIs(app_module._metadata_text_match, service.metadata_text_match)
-        self.assertIs(app_module._apply_text_search_constraint, service.apply_text_search_constraint)
-        self.assertIs(app_module._has_candidate_filters, service.has_candidate_filters)
-        self.assertIs(app_module._diverse_sample, service.diverse_sample)
-        self.assertIs(app_module._mosaic_next_impl, service.mosaic_next_impl)
-        self.assertIs(app_module._compare_next_impl, service.compare_next_impl)
+        self.assertIsInstance(service._pairing_cache, dict)
+        self.assertIsInstance(service._matchups_cache, dict)
+        self.assertIsInstance(service._visible_matchups_cache, dict)
+        self.assertIsInstance(service._visible_pairing_candidates_cache, dict)
+        self.assertIsInstance(service._visible_pairing_candidates_refreshing, set)
+        self.assertIsInstance(service._interaction_response_cache, dict)
+        for name in (
+            "get_pairing_images",
+            "get_past_matchups",
+            "get_visible_past_matchups",
+            "get_past_matchups_for_candidate_ids",
+            "add_past_matchups",
+            "patch_pairing_cache",
+            "filter_visible_candidates",
+            "hydrate_active_rows",
+            "default_visible_pairing_candidates",
+            "filtered_visible_ranked_candidates",
+            "load_filtered_visible_ranked_candidates",
+            "search_visible_ranked_candidates",
+            "warm_filtered_visible_ranked_candidates",
+            "metadata_text_match",
+            "apply_text_search_constraint",
+            "has_candidate_filters",
+            "diverse_sample",
+            "mosaic_next_impl",
+            "compare_next_impl",
+        ):
+            self.assertTrue(callable(getattr(service, name)))
+        for name in (
+            "_pairing_cache",
+            "_matchups_cache",
+            "_visible_matchups_cache",
+            "_visible_pairing_candidates_cache",
+            "_visible_pairing_candidates_refreshing",
+            "_interaction_response_cache",
+            "_visible_pairing_candidates_cache_ttl_seconds",
+            "_SWISS_PAIR_WINDOW",
+            "_FILTERED_SWISS_PAIR_WINDOW",
+            "_FILTERED_MOSAIC_WINDOW",
+            "_MOSAIC_EXPLORE_WINDOW",
+            "_get_pairing_images",
+            "_get_past_matchups",
+            "_get_visible_past_matchups",
+            "_get_past_matchups_for_candidate_ids",
+            "_add_past_matchups",
+            "_patch_pairing_cache",
+            "_filter_visible_candidates",
+            "_hydrate_active_rows",
+            "_default_visible_pairing_candidates",
+            "_filtered_visible_ranked_candidates",
+            "_load_filtered_visible_ranked_candidates",
+            "_search_visible_ranked_candidates",
+            "_warm_filtered_visible_ranked_candidates",
+            "_metadata_text_match",
+            "_apply_text_search_constraint",
+            "_has_candidate_filters",
+            "_diverse_sample",
+            "_mosaic_next_impl",
+            "_compare_next_impl",
+        ):
+            self.assertFalse(hasattr(app_module, name))
         self.assertFalse(hasattr(app_module, "mosaic_next"))
         self.assertFalse(hasattr(app_module, "mosaic_pick"))
         self.assertFalse(hasattr(app_module, "propagation_last"))

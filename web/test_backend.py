@@ -31,6 +31,7 @@ from features.cache import routes as cache_routes  # noqa: E402
 from features.cache import status as cache_status_service  # noqa: E402
 from features.catalog import routes as catalog_routes  # noqa: E402
 from features.compare import routes as compare_routes  # noqa: E402
+from features.compare import service as compare_service  # noqa: E402
 from features.library import routes as library_routes  # noqa: E402
 from features.media import routes as media_routes  # noqa: E402
 from features.media import warm as media_warm  # noqa: E402
@@ -89,11 +90,11 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         db._invalidate_past_matchups_cache()
         db.clear_filter_options_cache()
         await db.init_db()
-        app_module._pairing_cache.update({"data": None, "valid": False})
-        app_module._matchups_cache.update({"data": None, "valid": False})
-        app_module._visible_matchups_cache.clear()
-        app_module._visible_pairing_candidates_cache.clear()
-        app_module._interaction_response_cache.clear()
+        compare_service._pairing_cache.update({"data": None, "valid": False})
+        compare_service._matchups_cache.update({"data": None, "valid": False})
+        compare_service._visible_matchups_cache.clear()
+        compare_service._visible_pairing_candidates_cache.clear()
+        compare_service._interaction_response_cache.clear()
         app_module._invalidate_rankings_cache()
         catalog_routes.clear_folders_cache()
         cache_status_service.invalidate_cache_status_cache()
@@ -140,9 +141,9 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         db.invalidate_cached_image_ids_cache()
         db._invalidate_past_matchups_cache()
         db.clear_filter_options_cache()
-        app_module._visible_matchups_cache.clear()
-        app_module._visible_pairing_candidates_cache.clear()
-        app_module._interaction_response_cache.clear()
+        compare_service._visible_matchups_cache.clear()
+        compare_service._visible_pairing_candidates_cache.clear()
+        compare_service._interaction_response_cache.clear()
         app_module._invalidate_rankings_cache()
         catalog_routes.clear_folders_cache()
         cache_status_service.invalidate_cache_status_cache()
@@ -588,7 +589,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         elo_propagation.embed_cache.get_index = fake_get_index
         elo_propagation.embed_cache.get_warm_matrix = fail_get_warm_matrix
         try:
-            sample = await app_module._diverse_sample(candidates, 2)
+            sample = await compare_service.diverse_sample(candidates, 2)
         finally:
             elo_propagation.embed_cache.get_warm_matrix = old_get_warm_matrix
 
@@ -791,7 +792,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_pairing_cache_patch_keeps_immediate_candidate_cache_hot(self):
-        app_module._pairing_cache.update({
+        compare_service._pairing_cache.update({
             "valid": True,
             "data": [
                 {"id": 1, "elo": 1200.0, "comparisons": 0},
@@ -799,7 +800,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             ],
         })
         expires = app_module.time.monotonic() + 1.0
-        app_module._visible_pairing_candidates_cache["test:md:2:elo"] = {
+        compare_service._visible_pairing_candidates_cache["test:md:2:elo"] = {
             "data": [
                 {"id": 1, "elo": 1200.0, "comparisons": 0},
                 {"id": 2, "elo": 1300.0, "comparisons": 2},
@@ -807,7 +808,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             "id_set": {1, 2},
             "expires": expires,
         }
-        app_module._visible_pairing_candidates_cache["test:sm:2:cache"] = {
+        compare_service._visible_pairing_candidates_cache["test:sm:2:cache"] = {
             "data": [
                 {"id": 3, "elo": 1100.0, "comparisons": 0},
             ],
@@ -815,17 +816,17 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             "expires": expires,
         }
 
-        app_module._patch_pairing_cache([(1, 1400.0, 1)])
+        compare_service.patch_pairing_cache([(1, 1400.0, 1)])
 
-        self.assertTrue(app_module._pairing_cache["valid"])
-        self.assertEqual(app_module._pairing_cache["data"][0]["elo"], 1400.0)
-        cached = app_module._visible_pairing_candidates_cache["test:md:2:elo"]
+        self.assertTrue(compare_service._pairing_cache["valid"])
+        self.assertEqual(compare_service._pairing_cache["data"][0]["elo"], 1400.0)
+        cached = compare_service._visible_pairing_candidates_cache["test:md:2:elo"]
         self.assertEqual([row["id"] for row in cached["data"]], [1, 2])
         self.assertEqual(cached["data"][0]["comparisons"], 1)
         self.assertEqual(cached["id_set"], {1, 2})
         self.assertGreater(cached["expires"], expires)
         self.assertEqual(
-            app_module._visible_pairing_candidates_cache["test:sm:2:cache"]["expires"],
+            compare_service._visible_pairing_candidates_cache["test:sm:2:cache"]["expires"],
             expires,
         )
 
@@ -1561,14 +1562,14 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         db.invalidate_stats_cache()
         db.invalidate_cached_image_ids_cache()
         db.clear_filter_options_cache()
-        app_module._pairing_cache.update({"data": None, "valid": False})
-        app_module._matchups_cache.update({"data": None, "valid": False})
-        app_module._visible_matchups_cache.clear()
-        app_module._visible_pairing_candidates_cache.clear()
-        app_module._visible_pairing_candidates_refreshing.clear()
+        compare_service._pairing_cache.update({"data": None, "valid": False})
+        compare_service._matchups_cache.update({"data": None, "valid": False})
+        compare_service._visible_matchups_cache.clear()
+        compare_service._visible_pairing_candidates_cache.clear()
+        compare_service._visible_pairing_candidates_refreshing.clear()
         app_module._rankings_response_cache.clear()
         app_module._text_search_resolution_cache.clear()
-        app_module._interaction_response_cache.clear()
+        compare_service._interaction_response_cache.clear()
         media_warm._thumbnail_memory_warm_inflight.clear()
         settings_status.invalidate_settings_response_cache()
         ai_routes.invalidate_ai_status_response_cache()
@@ -2596,7 +2597,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             await self._cache_entry(image_id, "md")
 
         mosaic_first = await compare_routes.mosaic_next(n=3, strategy="diverse")
-        self.assertTrue(app_module._interaction_response_cache)
+        self.assertTrue(compare_service._interaction_response_cache)
         old_get_visible = db.get_visible_images_for_pairing
 
         async def fail_visible_pairing(*_args, **_kwargs):
@@ -2618,7 +2619,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         await compare_routes.submit_comparison(
             JsonRequest({"winner_id": first, "loser_id": second})
         )
-        self.assertFalse(app_module._interaction_response_cache)
+        self.assertFalse(compare_service._interaction_response_cache)
 
     async def test_mosaic_prefetch_runs_after_response(self):
         source = await self._source()
@@ -4417,7 +4418,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_interaction_cache_warmup_starts_quickly_after_startup(self):
         self.assertLessEqual(app_module.INTERACTION_CACHE_WARMUP_DELAY_SECONDS, 0.05)
-        self.assertGreaterEqual(app_module._visible_pairing_candidates_cache_ttl_seconds, 5.0)
+        self.assertGreaterEqual(compare_service._visible_pairing_candidates_cache_ttl_seconds, 5.0)
 
     async def test_light_startup_warmup_does_not_cold_load_deep_diverse_mosaic(self):
         startup_source = inspect.getsource(app_module.background_runtime.run_startup)
@@ -4486,13 +4487,13 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("loadRankings(true)", run_deep)
 
     async def test_filtered_compare_window_is_smaller_than_default_window(self):
-        self.assertLess(app_module._FILTERED_SWISS_PAIR_WINDOW, app_module._SWISS_PAIR_WINDOW)
-        self.assertGreaterEqual(app_module._FILTERED_SWISS_PAIR_WINDOW, 256)
+        self.assertLess(compare_service._FILTERED_SWISS_PAIR_WINDOW, compare_service._SWISS_PAIR_WINDOW)
+        self.assertGreaterEqual(compare_service._FILTERED_SWISS_PAIR_WINDOW, 256)
 
     async def test_filtered_mosaic_window_is_bounded_but_not_tiny(self):
-        self.assertLess(app_module._FILTERED_MOSAIC_WINDOW, app_module._MOSAIC_EXPLORE_WINDOW)
-        self.assertGreaterEqual(app_module._FILTERED_MOSAIC_WINDOW, 128)
-        self.assertGreaterEqual(app_module._MOSAIC_EXPLORE_WINDOW, 768)
+        self.assertLess(compare_service._FILTERED_MOSAIC_WINDOW, compare_service._MOSAIC_EXPLORE_WINDOW)
+        self.assertGreaterEqual(compare_service._FILTERED_MOSAIC_WINDOW, 128)
+        self.assertGreaterEqual(compare_service._MOSAIC_EXPLORE_WINDOW, 768)
 
     async def test_shutdown_cancels_tracked_background_tasks(self):
         cancelled = asyncio.Event()

@@ -34,6 +34,7 @@ from features.ai import routes as ai_routes
 from features.cache import status as cache_status_service
 from features.catalog import routes as catalog_routes
 from features.compare import routes as compare_routes
+from features.compare import service as compare_service
 from features.library import routes as library_routes
 from features.media import routes as media_routes
 from features.media import warm as media_warm
@@ -175,14 +176,14 @@ def reset_app_caches():
     clear_filter_options = getattr(db, "clear_filter_options_cache", None)
     if clear_filter_options is not None:
         clear_filter_options()
-    app_module._pairing_cache.update({"data": None, "valid": False})
-    app_module._matchups_cache.update({"data": None, "valid": False})
-    app_module._visible_matchups_cache.clear()
-    app_module._visible_pairing_candidates_cache.clear()
-    app_module._visible_pairing_candidates_refreshing.clear()
+    compare_service._pairing_cache.update({"data": None, "valid": False})
+    compare_service._matchups_cache.update({"data": None, "valid": False})
+    compare_service._visible_matchups_cache.clear()
+    compare_service._visible_pairing_candidates_cache.clear()
+    compare_service._visible_pairing_candidates_refreshing.clear()
     app_module._rankings_response_cache.clear()
     app_module._text_search_resolution_cache.clear()
-    app_module._interaction_response_cache.clear()
+    compare_service._interaction_response_cache.clear()
     media_warm._thumbnail_memory_warm_inflight.clear()
     settings_status.invalidate_settings_response_cache()
     ai_routes.invalidate_ai_status_response_cache()
@@ -661,15 +662,15 @@ async def bench_startup_warmed_interactions(iterations: int):
     settings.get_settings()
     await db.get_stats()
     await asyncio.gather(
-        app_module._warm_filtered_visible_ranked_candidates(
+        compare_service.warm_filtered_visible_ranked_candidates(
             "md",
-            limit=app_module._FILTERED_SWISS_PAIR_WINDOW,
+            limit=compare_service._FILTERED_SWISS_PAIR_WINDOW,
             orientation="landscape",
             warm_matchups=True,
         ),
-        app_module._warm_filtered_visible_ranked_candidates(
+        compare_service.warm_filtered_visible_ranked_candidates(
             "sm",
-            limit=app_module._FILTERED_MOSAIC_WINDOW,
+            limit=compare_service._FILTERED_MOSAIC_WINDOW,
             orientation="landscape",
         ),
         compare_routes.mosaic_next(n=12, strategy="diverse"),

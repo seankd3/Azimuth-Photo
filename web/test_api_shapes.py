@@ -13,6 +13,7 @@ import app as app_module  # noqa: E402
 import db  # noqa: E402
 import embed_cache  # noqa: E402
 import embedding_worker  # noqa: E402
+from features.compare import service as compare_service  # noqa: E402
 
 
 CARD_KEYS = {
@@ -84,8 +85,8 @@ class ApiShapeTests(unittest.TestCase):
         db.clear_filter_options_cache()
         asyncio.run(db.init_db())
         app_module.settings.save_settings({"deep_search_schedule_enabled": False})
-        app_module._pairing_cache.update({"data": None, "valid": False})
-        app_module._matchups_cache.update({"data": None, "valid": False})
+        compare_service._pairing_cache.update({"data": None, "valid": False})
+        compare_service._matchups_cache.update({"data": None, "valid": False})
 
         async def noop_prefetch(*_args, **_kwargs):
             return 0
@@ -114,8 +115,8 @@ class ApiShapeTests(unittest.TestCase):
         db.invalidate_stats_cache()
         db.invalidate_cached_image_ids_cache()
         db.clear_filter_options_cache()
-        app_module._pairing_cache.update({"data": None, "valid": False})
-        app_module._matchups_cache.update({"data": None, "valid": False})
+        compare_service._pairing_cache.update({"data": None, "valid": False})
+        compare_service._matchups_cache.update({"data": None, "valid": False})
         self.tempdir.cleanup()
 
     def _create_source(self):
