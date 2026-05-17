@@ -3704,6 +3704,8 @@ class ModularContractTests(unittest.TestCase):
             library_query = fh.read()
         with open(os.path.join(base_dir, "static", "js", "library", "sort.js"), encoding="utf-8") as fh:
             library_sort = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "library", "sort_controller.js"), encoding="utf-8") as fh:
+            library_sort_controller = fh.read()
         with open(os.path.join(base_dir, "static", "js", "library", "search_state.js"), encoding="utf-8") as fh:
             library_search_state = fh.read()
         with open(os.path.join(base_dir, "static", "js", "library", "search_controls.js"), encoding="utf-8") as fh:
@@ -3804,6 +3806,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../loupe/zoom.js';", legacy)
         self.assertIn("from '../library/query.js';", legacy)
         self.assertIn("from '../library/sort.js';", legacy)
+        self.assertIn("from '../library/sort_controller.js';", legacy)
         self.assertIn("from '../library/search_state.js';", legacy)
         self.assertIn("from '../library/search_controls.js';", legacy)
         self.assertIn("from '../library/search_controller.js';", legacy)
@@ -3954,6 +3957,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("export function clampLoupePan", loupe_zoom)
         self.assertIn("export function rankingQueryString", library_query)
         self.assertIn("export function sortValueForState", library_sort)
+        self.assertIn("export function createLibrarySortController", library_sort_controller)
         self.assertIn("export function saveSortState", library_search_state)
         self.assertIn("export function saveSearchState", library_search_state)
         self.assertIn("export function saveSearchSortState", library_search_state)
@@ -4487,6 +4491,96 @@ assert.deepEqual(events, [['clear'], ['size', 6], ['load']]);
 
 setThumbSize('340');
 assert.deepEqual(events, [['clear'], ['size', 6], ['load']]);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_library_sort_controller_node_probe_preserves_reload_flow(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createLibrarySortController } from './static/js/library/sort_controller.js';
+
+let rankingsSort = 'elo';
+let sortField = 'elo';
+let sortDesc = true;
+let dateGroups = ['2026-05'];
+const events = [];
+const controller = createLibrarySortController({
+    getSortField: () => sortField,
+    getSortDesc: () => sortDesc,
+    setRankingsSortValue: (value) => {
+        rankingsSort = value;
+        events.push(['rankingsSort', value]);
+    },
+    applySortState: (field, desc, options = {}) => {
+        sortField = field;
+        sortDesc = desc;
+        events.push(['apply', field, desc, options.persist]);
+    },
+    resetLibraryResults: (options) => events.push(['reset', options.clearBatch]),
+    clearDateGroups: () => {
+        dateGroups = [];
+        events.push(['dateGroups']);
+    },
+    loadRankings: (clearFirst) => events.push(['load', clearFirst]),
+    updateDateScrubber: () => events.push(['scrubber']),
+});
+
+controller.setRankingsSort('date_taken_asc', { persist: false });
+assert.equal(rankingsSort, 'date_taken_asc');
+assert.equal(sortField, 'date_taken');
+assert.equal(sortDesc, false);
+assert.deepEqual(dateGroups, []);
+assert.deepEqual(events, [
+    ['rankingsSort', 'date_taken_asc'],
+    ['apply', 'date_taken', false, false],
+    ['reset', true],
+    ['dateGroups'],
+    ['load', true],
+    ['scrubber'],
+]);
+
+events.length = 0;
+controller.setSortField('filename');
+assert.equal(sortField, 'filename');
+assert.equal(sortDesc, false);
+assert.deepEqual(events, [
+    ['apply', 'filename', false, true],
+    ['reset', true],
+    ['dateGroups'],
+    ['load', true],
+    ['scrubber'],
+]);
+
+events.length = 0;
+assert.equal(controller.setSortField('not-real'), false);
+assert.deepEqual(events, []);
+
+events.length = 0;
+sortField = 'elo';
+sortDesc = true;
+assert.equal(controller.toggleSortDir(), true);
+assert.equal(sortField, 'elo');
+assert.equal(sortDesc, false);
+assert.deepEqual(events, [
+    ['apply', 'elo', false, undefined],
+    ['reset', true],
+    ['dateGroups'],
+    ['load', true],
+    ['scrubber'],
+]);
+
+events.length = 0;
+sortField = 'similarity';
+assert.equal(controller.toggleSortDir(), false);
+assert.deepEqual(events, []);
 """
         subprocess.run(
             ["node", "--input-type=module", "-e", script],

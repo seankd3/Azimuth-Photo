@@ -151,9 +151,9 @@ import { initLoupeInteraction as initLoupeInteractionCore } from '../loupe/inter
 import { rankingQueryString as rankingQueryStringCore } from '../library/query.js';
 import {
     SORT_KEYS,
-    sortStateFromValue,
     sortValueForState,
 } from '../library/sort.js';
+import { createLibrarySortController } from '../library/sort_controller.js';
 import {
     clearPersistedSearchState as clearPersistedSearchStateCore,
     restoreSearchSortState as restoreSearchSortStateCore,
@@ -1472,35 +1472,27 @@ const legacyPhotoArchive = (() => {
         });
     }
 
-    function setRankingsSort(sort, { persist = true } = {}) {
-        rankingsSort = sort;
-        const state = sortStateFromValue(sort);
-        if (state) {
-            applySortState(state.field, state.desc, { persist });
-        }
-        resetLibraryResults({ clearBatch: true });
-        dateGroupsData = [];
-        loadRankings(true);  // true = clear grid before appending
-        updateDateScrubber();
+    const librarySortController = createLibrarySortController({
+        getSortField: () => sortField,
+        getSortDesc: () => sortDesc,
+        setRankingsSortValue: (value) => { rankingsSort = value; },
+        applySortState,
+        resetLibraryResults,
+        clearDateGroups: () => { dateGroupsData = []; },
+        loadRankings,
+        updateDateScrubber,
+    });
+
+    function setRankingsSort(sort, options) {
+        return librarySortController.setRankingsSort(sort, options);
     }
 
     function setSortField(field) {
-        if (!SORT_KEYS[field]) return;
-        const key = SORT_KEYS[field];
-        applySortState(field, key?.defaultDesc !== false, { persist: field !== 'similarity' });
-        resetLibraryResults({ clearBatch: true });
-        dateGroupsData = [];
-        loadRankings(true);
-        updateDateScrubber();
+        return librarySortController.setSortField(field);
     }
 
     function toggleSortDir() {
-        if (sortField === 'similarity') return;
-        applySortState(sortField, !sortDesc);
-        resetLibraryResults({ clearBatch: true });
-        dateGroupsData = [];
-        loadRankings(true);
-        updateDateScrubber();
+        return librarySortController.toggleSortDir();
     }
 
     function updateSortDirIcon() {
