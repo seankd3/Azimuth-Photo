@@ -32,6 +32,7 @@ import settings
 import thumbnails
 from features.ai import routes as ai_routes
 from features.cache import status as cache_status_service
+from features.compare import routes as compare_routes
 from features.library import routes as library_routes
 from features.media import routes as media_routes
 from features.settings import routes as settings_routes
@@ -553,10 +554,10 @@ async def bench_app_endpoints(iterations: int):
         db.get_filter_options(),
         library_routes.api_rankings(limit=50),
         library_routes.api_rankings(limit=50, q="jpg"),
-        app_module.compare_next(n=2),
-        app_module.mosaic_next(n=6),
-        app_module.mosaic_next(n=12, strategy="diverse"),
-        app_module.mosaic_next(n=12, strategy="diverse", orientation="landscape"),
+        compare_routes.compare_next(n=2),
+        compare_routes.mosaic_next(n=6),
+        compare_routes.mosaic_next(n=12, strategy="diverse"),
+        compare_routes.mosaic_next(n=12, strategy="diverse", orientation="landscape"),
         library_routes.api_date_groups(),
         library_routes.api_map_markers(),
         app_module.api_folders(max_depth=1),
@@ -580,14 +581,14 @@ async def bench_app_endpoints(iterations: int):
         "api_rankings metadata empty",
         lambda: library_routes.api_rankings(limit=50, q="nonexistentsearchterm"),
     )
-    await endpoint("compare_next default", lambda: app_module.compare_next(n=2))
-    await endpoint("compare_next filtered", lambda: app_module.compare_next(n=2, orientation="landscape"))
-    await endpoint("mosaic_next default", lambda: app_module.mosaic_next(n=6))
-    await endpoint("mosaic_next filtered", lambda: app_module.mosaic_next(n=6, orientation="landscape"))
-    await endpoint("mosaic_next diverse", lambda: app_module.mosaic_next(n=12, strategy="diverse"))
+    await endpoint("compare_next default", lambda: compare_routes.compare_next(n=2))
+    await endpoint("compare_next filtered", lambda: compare_routes.compare_next(n=2, orientation="landscape"))
+    await endpoint("mosaic_next default", lambda: compare_routes.mosaic_next(n=6))
+    await endpoint("mosaic_next filtered", lambda: compare_routes.mosaic_next(n=6, orientation="landscape"))
+    await endpoint("mosaic_next diverse", lambda: compare_routes.mosaic_next(n=12, strategy="diverse"))
     await endpoint(
         "mosaic_next diverse filtered",
-        lambda: app_module.mosaic_next(n=12, strategy="diverse", orientation="landscape"),
+        lambda: compare_routes.mosaic_next(n=12, strategy="diverse", orientation="landscape"),
     )
     await endpoint("filter_options", library_routes.api_filter_options)
     await endpoint("date_groups", library_routes.api_date_groups)
@@ -613,14 +614,14 @@ async def bench_cold_app_endpoints(iterations: int):
             "api_rankings metadata empty",
             lambda: library_routes.api_rankings(limit=50, q="nonexistentsearchterm"),
         ),
-        ("compare_next default", lambda: app_module.compare_next(n=2)),
-        ("compare_next filtered", lambda: app_module.compare_next(n=2, orientation="landscape")),
-        ("mosaic_next default", lambda: app_module.mosaic_next(n=6)),
-        ("mosaic_next filtered", lambda: app_module.mosaic_next(n=6, orientation="landscape")),
-        ("mosaic_next diverse", lambda: app_module.mosaic_next(n=12, strategy="diverse")),
+        ("compare_next default", lambda: compare_routes.compare_next(n=2)),
+        ("compare_next filtered", lambda: compare_routes.compare_next(n=2, orientation="landscape")),
+        ("mosaic_next default", lambda: compare_routes.mosaic_next(n=6)),
+        ("mosaic_next filtered", lambda: compare_routes.mosaic_next(n=6, orientation="landscape")),
+        ("mosaic_next diverse", lambda: compare_routes.mosaic_next(n=12, strategy="diverse")),
         (
             "mosaic_next diverse filtered",
-            lambda: app_module.mosaic_next(n=12, strategy="diverse", orientation="landscape"),
+            lambda: compare_routes.mosaic_next(n=12, strategy="diverse", orientation="landscape"),
         ),
         ("filter_options", library_routes.api_filter_options),
         ("date_groups", library_routes.api_date_groups),
@@ -669,11 +670,11 @@ async def bench_startup_warmed_interactions(iterations: int):
             limit=app_module._FILTERED_MOSAIC_WINDOW,
             orientation="landscape",
         ),
-        app_module.mosaic_next(n=12, strategy="diverse"),
-        app_module.mosaic_next(n=12, strategy="diverse", orientation="landscape"),
+        compare_routes.mosaic_next(n=12, strategy="diverse"),
+        compare_routes.mosaic_next(n=12, strategy="diverse", orientation="landscape"),
         return_exceptions=True,
     )
-    await app_module.mosaic_next(n=6, orientation="landscape")
+    await compare_routes.mosaic_next(n=6, orientation="landscape")
 
     async def first_then_hot(label: str, fn):
         start = time.perf_counter()
@@ -690,15 +691,15 @@ async def bench_startup_warmed_interactions(iterations: int):
             f"p95={ms(percentile(times, 95)):>8}ms"
         )
 
-    await first_then_hot("compare filtered warmed", lambda: app_module.compare_next(n=2, orientation="landscape"))
-    await first_then_hot("mosaic filtered warmed", lambda: app_module.mosaic_next(n=6, orientation="landscape"))
+    await first_then_hot("compare filtered warmed", lambda: compare_routes.compare_next(n=2, orientation="landscape"))
+    await first_then_hot("mosaic filtered warmed", lambda: compare_routes.mosaic_next(n=6, orientation="landscape"))
     await first_then_hot(
         "mosaic diverse warmed",
-        lambda: app_module.mosaic_next(n=12, strategy="diverse"),
+        lambda: compare_routes.mosaic_next(n=12, strategy="diverse"),
     )
     await first_then_hot(
         "mosaic diverse filtered warmed",
-        lambda: app_module.mosaic_next(n=12, strategy="diverse", orientation="landscape"),
+        lambda: compare_routes.mosaic_next(n=12, strategy="diverse", orientation="landscape"),
     )
 
 
@@ -713,7 +714,7 @@ async def bench_compare_rating_loop(iterations: int):
 
     app_module._schedule_pairing_propagation = close_scheduled
     try:
-        initial = await app_module.compare_next(n=2)
+        initial = await compare_routes.compare_next(n=2)
         pairs = initial.get("pairs") or []
         if not pairs:
             print("compare submit+next              skipped (no visible pairs)")
@@ -729,13 +730,13 @@ async def bench_compare_rating_loop(iterations: int):
 
             loop_start = time.perf_counter()
             start = time.perf_counter()
-            await app_module.submit_comparison(
+            await compare_routes.submit_comparison(
                 JsonRequest({"winner_id": winner, "loser_id": loser})
             )
             submit_times.append(time.perf_counter() - start)
 
             start = time.perf_counter()
-            next_result = await app_module.compare_next(n=2)
+            next_result = await compare_routes.compare_next(n=2)
             next_times.append(time.perf_counter() - start)
             loop_times.append(time.perf_counter() - loop_start)
 
@@ -757,18 +758,18 @@ async def bench_compare_rating_loop(iterations: int):
 
         if human_delay > 0:
             reset_app_caches()
-            initial = await app_module.compare_next(n=2)
+            initial = await compare_routes.compare_next(n=2)
             pairs = initial.get("pairs") or []
             if pairs:
                 pair = pairs[0]
                 winner = pair["left"]["id"]
                 loser = pair["right"]["id"]
                 await asyncio.sleep(human_delay)
-                await app_module.submit_comparison(
+                await compare_routes.submit_comparison(
                     JsonRequest({"winner_id": winner, "loser_id": loser})
                 )
                 start = time.perf_counter()
-                await app_module.compare_next(n=2)
+                await compare_routes.compare_next(n=2)
                 elapsed = time.perf_counter() - start
                 label = f"compare next after {human_delay:.1f}s think"
                 print(
@@ -790,7 +791,7 @@ async def bench_mosaic_pick_loop(iterations: int):
 
     app_module._schedule_pairing_propagation = close_scheduled
     try:
-        initial = await app_module.mosaic_next(n=12)
+        initial = await compare_routes.mosaic_next(n=12)
         images = initial.get("images") or []
         if len(images) < 2:
             print("mosaic pick                     skipped (not enough visible images)")
@@ -807,13 +808,13 @@ async def bench_mosaic_pick_loop(iterations: int):
 
             loop_start = time.perf_counter()
             start = time.perf_counter()
-            await app_module.mosaic_pick(
+            await compare_routes.mosaic_pick(
                 JsonRequest({"winner_id": winner, "loser_ids": losers})
             )
             pick_times.append(time.perf_counter() - start)
 
             start = time.perf_counter()
-            next_result = await app_module.mosaic_next(n=12)
+            next_result = await compare_routes.mosaic_next(n=12)
             next_times.append(time.perf_counter() - start)
             loop_times.append(time.perf_counter() - loop_start)
 

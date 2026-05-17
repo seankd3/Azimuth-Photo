@@ -30,7 +30,6 @@ from core import query_constraints
 from core import requests as request_helpers
 from core import responses as response_helpers
 from features.catalog import metadata as catalog_metadata
-from features.compare import routes as compare_routes
 from features.compare import service as compare_service
 from features.export import routes as export_routes
 from features.library import service as library_service
@@ -128,14 +127,6 @@ _get_past_matchups_for_candidate_ids = compare_service.get_past_matchups_for_can
 _add_past_matchups = compare_service.add_past_matchups
 _patch_pairing_cache = compare_service.patch_pairing_cache
 _schedule_pairing_propagation = _runtime_services.schedule_pairing_propagation
-
-mosaic_next = compare_routes.mosaic_next
-mosaic_pick = compare_routes.mosaic_pick
-propagation_last = compare_routes.propagation_last
-propagation_predict = compare_routes.propagation_predict
-compare_next = compare_routes.compare_next
-submit_comparison = compare_routes.submit_comparison
-compare_undo = compare_routes.compare_undo
 
 
 def _top_indices_desc(values, limit: int, exclude_index: int | None = None):

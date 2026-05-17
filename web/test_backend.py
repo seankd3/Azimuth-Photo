@@ -30,6 +30,7 @@ from features.ai import routes as ai_routes  # noqa: E402
 from features.cache import routes as cache_routes  # noqa: E402
 from features.cache import status as cache_status_service  # noqa: E402
 from features.catalog import routes as catalog_routes  # noqa: E402
+from features.compare import routes as compare_routes  # noqa: E402
 from features.library import routes as library_routes  # noqa: E402
 from features.media import routes as media_routes  # noqa: E402
 from features.people import routes as people_routes  # noqa: E402
@@ -409,25 +410,25 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         offline_source = await self._source("offline", online=False)
         offline = await self._image(offline_source["id"], "offline.jpg")
 
-        response = await app_module.submit_comparison(BadJsonRequest())
+        response = await compare_routes.submit_comparison(BadJsonRequest())
         self.assertEqual(response.status_code, 400)
 
-        response = await app_module.mosaic_pick(JsonRequest([]))
+        response = await compare_routes.mosaic_pick(JsonRequest([]))
         self.assertEqual(response.status_code, 400)
 
-        response = await app_module.submit_comparison(JsonRequest({"winner_id": a, "loser_id": a}))
+        response = await compare_routes.submit_comparison(JsonRequest({"winner_id": a, "loser_id": a}))
         self.assertEqual(response.status_code, 400)
 
-        response = await app_module.submit_comparison(JsonRequest({"winner_id": a, "loser_id": offline}))
+        response = await compare_routes.submit_comparison(JsonRequest({"winner_id": a, "loser_id": offline}))
         self.assertTrue(response["ok"])
 
-        response = await app_module.mosaic_pick(JsonRequest({"winner_id": a, "loser_ids": [b, b]}))
+        response = await compare_routes.mosaic_pick(JsonRequest({"winner_id": a, "loser_ids": [b, b]}))
         self.assertEqual(response.status_code, 400)
 
-        response = await app_module.mosaic_pick(JsonRequest({"winner_id": a, "loser_ids": [a]}))
+        response = await compare_routes.mosaic_pick(JsonRequest({"winner_id": a, "loser_ids": [a]}))
         self.assertEqual(response.status_code, 400)
 
-        response = await app_module.mosaic_pick(JsonRequest({"winner_id": a, "loser_ids": [999999]}))
+        response = await compare_routes.mosaic_pick(JsonRequest({"winner_id": a, "loser_ids": [999999]}))
         self.assertEqual(response.status_code, 400)
 
     async def test_mosaic_pick_undo_reverts_whole_action(self):
@@ -439,7 +440,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             await self._image(source["id"], "loser3.jpg"),
         ]
 
-        result = await app_module.mosaic_pick(JsonRequest({"winner_id": winner, "loser_ids": losers}))
+        result = await compare_routes.mosaic_pick(JsonRequest({"winner_id": winner, "loser_ids": losers}))
         self.assertTrue(result["ok"])
         self.assertEqual(result["pairs_recorded"], 3)
         self.assertTrue(result["action_id"])
@@ -453,7 +454,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(counts["c"], 3)
         self.assertEqual(counts["actions"], 1)
 
-        undo = await app_module.compare_undo()
+        undo = await compare_routes.compare_undo()
         self.assertTrue(undo["ok"])
         self.assertEqual(undo["comparisons_undone"], 3)
 
@@ -635,7 +636,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(propagated["propagated_updates"], 1)
         self.assertGreater(propagated["elo"], 1200.0)
 
-        undo = await app_module.compare_undo()
+        undo = await compare_routes.compare_undo()
         self.assertTrue(undo["ok"])
         self.assertEqual(undo["comparisons_undone"], 1)
         self.assertEqual(undo["propagations_undone"], 1)
@@ -687,7 +688,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         source = await self._source()
         winner = await self._image(source["id"], "winner.jpg")
         loser = await self._image(source["id"], "loser.jpg")
-        await app_module.submit_comparison(JsonRequest({"winner_id": winner, "loser_id": loser}))
+        await compare_routes.submit_comparison(JsonRequest({"winner_id": winner, "loser_id": loser}))
 
         stats = await db.get_stats()
 
@@ -2119,11 +2120,11 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rankings["visible_images"], 2)
         self.assertEqual(rankings["total_images"], 2)
 
-        mosaic = await app_module.mosaic_next(n=3, strategy="diverse")
+        mosaic = await compare_routes.mosaic_next(n=3, strategy="diverse")
         self.assertNotIn(missing, [img["id"] for img in mosaic["images"]])
         self.assertEqual(mosaic["total_images"], 2)
 
-        compare = await app_module.compare_next(n=2, mode="swiss")
+        compare = await compare_routes.compare_next(n=2, mode="swiss")
         pair_ids = {
             image["id"]
             for pair in compare["pairs"]
@@ -2557,7 +2558,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         await self._cache_entry(first, "sm")
         await self._cache_entry(second, "sm")
 
-        result = await app_module.mosaic_next(n=3, strategy="diverse")
+        result = await compare_routes.mosaic_next(n=3, strategy="diverse")
         ids = [img["id"] for img in result["images"]]
 
         self.assertEqual(ids, [first, second])
@@ -2577,7 +2578,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             await self._cache_entry(image_id, "sm")
             await self._cache_entry(image_id, "md")
 
-        mosaic_first = await app_module.mosaic_next(n=3, strategy="diverse")
+        mosaic_first = await compare_routes.mosaic_next(n=3, strategy="diverse")
         self.assertTrue(app_module._interaction_response_cache)
         old_get_visible = db.get_visible_images_for_pairing
 
@@ -2586,18 +2587,18 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
         db.get_visible_images_for_pairing = fail_visible_pairing
         try:
-            mosaic_second = await app_module.mosaic_next(n=3, strategy="diverse")
+            mosaic_second = await compare_routes.mosaic_next(n=3, strategy="diverse")
         finally:
             db.get_visible_images_for_pairing = old_get_visible
 
         self.assertEqual(mosaic_second["images"], mosaic_first["images"])
         mosaic_second["images"][0]["filename"] = "mutated"
         mosaic_second["stats"]["filtered_pool"] = 999
-        mosaic_third = await app_module.mosaic_next(n=3, strategy="diverse")
+        mosaic_third = await compare_routes.mosaic_next(n=3, strategy="diverse")
         self.assertNotEqual(mosaic_third["images"][0]["filename"], "mutated")
         self.assertNotEqual(mosaic_third["stats"]["filtered_pool"], 999)
 
-        await app_module.submit_comparison(
+        await compare_routes.submit_comparison(
             JsonRequest({"winner_id": first, "loser_id": second})
         )
         self.assertFalse(app_module._interaction_response_cache)
@@ -2619,7 +2620,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         app_module.thumbnails.prefetch_images = blocking_prefetch
         try:
             result = await asyncio.wait_for(
-                app_module.mosaic_next(n=2, strategy="random"),
+                compare_routes.mosaic_next(n=2, strategy="random"),
                 timeout=0.5,
             )
             self.assertEqual(len(result["images"]), 2)
@@ -2667,7 +2668,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
         app_module.thumbnails.prefetch_images = blocking_prefetch
         try:
-            result = await asyncio.wait_for(app_module.compare_next(n=1, mode="swiss"), timeout=0.5)
+            result = await asyncio.wait_for(compare_routes.compare_next(n=1, mode="swiss"), timeout=0.5)
             self.assertEqual(len(result["pairs"]), 1)
             await asyncio.wait_for(started.wait(), timeout=0.5)
         finally:
@@ -2740,7 +2741,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         await self._cache_entry(visible_a, "md")
         await self._cache_entry(visible_b, "md")
 
-        result = await app_module.compare_next(n=2, mode="swiss")
+        result = await compare_routes.compare_next(n=2, mode="swiss")
         pair_ids = {
             image["id"]
             for pair in result["pairs"]
@@ -3261,7 +3262,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             [0.95, 0.90, 0.80, 0.10],
         )
 
-        result = await app_module.mosaic_next(n=5, strategy="random", q="landscapes")
+        result = await compare_routes.mosaic_next(n=5, strategy="random", q="landscapes")
         ids = {img["id"] for img in result["images"]}
 
         self.assertEqual(ids, {visible_a, visible_b})
@@ -3284,7 +3285,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             [0.95, 0.80, 0.10],
         )
 
-        result = await app_module.compare_next(n=2, mode="swiss", q="landscapes")
+        result = await compare_routes.compare_next(n=2, mode="swiss", q="landscapes")
         pair_ids = {
             image["id"]
             for pair in result["pairs"]
@@ -3307,8 +3308,8 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
         embedding_worker.encode_text = lambda _query: None
 
-        mosaic = await app_module.mosaic_next(n=5, strategy="random", q="sunset")
-        compare = await app_module.compare_next(n=2, mode="swiss", q="sunset")
+        mosaic = await compare_routes.mosaic_next(n=5, strategy="random", q="sunset")
+        compare = await compare_routes.compare_next(n=2, mode="swiss", q="sunset")
         mosaic_ids = {img["id"] for img in mosaic["images"]}
         compare_ids = {
             image["id"]
@@ -3621,8 +3622,8 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         embedding_worker.ensure_model_loaded_for_search = fail_ensure
         app_module._text_search_resolution_cache.clear()
 
-        mosaic = await app_module.mosaic_next(q=query, deep=True, n=5)
-        compare = await app_module.compare_next(q=query, deep=True, n=2)
+        mosaic = await compare_routes.mosaic_next(q=query, deep=True, n=5)
+        compare = await compare_routes.compare_next(q=query, deep=True, n=2)
         pending = await db.get_pending_deep_search_queries(
             app_module.settings.deep_search_embedding_config(),
             [],
