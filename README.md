@@ -75,8 +75,11 @@ Elo propagation means you don't have to compare every photo individually. Rank o
 
 ```
 web/
-  app.py               FastAPI routes, middleware, all API endpoints
-  db.py                 SQLite schema, queries, migrations (WAL mode)
+  app.py               Compatibility entrypoint for uvicorn app:app and old imports
+  core/                Shared FastAPI shell, request/response/query helpers, cache fanout
+  features/            Vertical page/API workflow modules with feature-owned routers
+  data/                SQLite connection/schema modules plus domain repositories
+  db.py                Compatibility facade over data repositories and legacy callers
   embedding_worker.py   Background AI worker (Qwen3-VL-Embedding-2B, int4)
   embed_cache.py        Shared in-memory embedding matrix for search/similar/duplicates
   ai_models.py          Model installation and download management
@@ -84,9 +87,10 @@ web/
   scanner.py            Recursive folder scanning with batch inserts
   pairing.py            Elo calculation and Swiss-system pairing
   elo_propagation.py    Propagate Elo to similar images via embedding cosine similarity
-  thumbnails.py         Progressive sm/md/lg/original cache, RAM/SSD budgets, prefetch
+  thumbnails/           Thumbnail package facade plus split cache/generation/status modules
   static/
-    app.js              Frontend module (vanilla JS IIFE, no framework)
+    app.js              No-build ES module bootstrap for window.PhotoArchive
+    js/                 Shared and feature browser modules; legacy/app.js drains over time
     style.css           Dark theme, justified grids, loupe view
   templates/
     base.html           Base layout with navbar/bottom_bar blocks
@@ -104,13 +108,19 @@ web/
 - **AI**: Qwen3-VL-Embedding-2B via sentence-transformers + bitsandbytes (int4 quantized)
 - **ML**: scikit-learn Ridge regression for taste model
 
+### Where New Work Goes
+
+Feature workflow code belongs under `web/features/<feature>/`: each feature owns its routes plus any service code that orchestrates that page or API surface. Shared request parsing, response contracts, query constraints, cache invalidation, background startup/shutdown, and app construction belong under `web/core/`.
+
+SQL should move by domain into `web/data/repositories/`, with `web/db.py` kept as the compatibility facade until old call sites are gone. Thumbnail cache/runtime work belongs in the `web/thumbnails/` package, with `import thumbnails` preserved through the package facade. Browser code stays no-build ES modules under `web/static/js/`; keep `window.PhotoArchive` compatibility stable while code drains out of `web/static/js/legacy/app.js`.
+
 ### Design Decisions
 
 - **Local-first**: Everything runs on your machine. SQLite database, local thumbnails, local embeddings. No network calls except model download.
 - **Slow storage friendly**: Designed for photos on external HDDs. RAM + SSD cache budgets are user-configurable, with automatic tier allocation and progressive image upgrades from `sm` to `md` to `lg` to cached originals.
 - **In-place preview refreshes**: Changing thumbnail size or JPEG quality does not have to wipe the cache. Old previews can remain usable while photoArchive replaces each file in the background.
 - **SSD-first AI workflow**: The embedding worker reads cached `md` previews from SSD, so search indexing does not compete with thumbnail generation for HDD reads.
-- **No framework frontend**: The entire UI is one vanilla JS module. No build step, no dependencies. Just open and edit.
+- **No framework frontend**: Browser-native ES modules, no build step, no node_modules, no framework. The compatibility bootstrap keeps `window.PhotoArchive` stable while old code drains out of `static/js/legacy/app.js`.
 - **Elo over stars**: Star ratings require absolute judgments. Elo only requires relative ones ("which is better?") and converges to a true ranking automatically.
 - **Selective GZip**: Custom middleware skips compression for binary image payloads to avoid wasting CPU on already-compressed data.
 

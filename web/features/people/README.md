@@ -1,0 +1,9 @@
+# People Feature
+
+Owns: People review/status payloads, face thumbnail rendering, scan pause/resume, person labels, merges, merge-suggestion rejection, face assignment, and face/person ignore actions.
+Depends on: injected DB-backed People read/write providers, app-configured `web/face_worker.py` scan providers, `web/settings.py`, the `thumbnails` package facade, `core.requests.json_object`, `core.requests.positive_int`, and PIL for face thumbnail crops.
+Public routes: `/api/people/status`, `/api/people`, `/api/people/faces/{face_id}/thumb`, `/api/people/scan/pause`, `/api/people/scan/resume`, `/api/people/{person_id}/label`, `/api/people/merge`, `/api/people/merge-suggestions/{suggestion_id}/reject`, `/api/people/faces/{face_id}/assign`, `/api/people/faces/{face_id}/ignore`, `/api/people/{person_id}/ignore`. The `/people` HTML page is owned by `features/pages`.
+Frontend modules: `static/js/people/controller.js` owns the People `window.PhotoArchive` compatibility adapter; `static/js/people/actions.js`, `static/js/people/cards.js`, `static/js/people/labels.js`, `static/js/people/page.js`, and `static/js/settings/people_status.js` own lower-level People UI/actions.
+Data repositories: People route reads/writes are injected from `web/app.py`, currently backed by `web/db.py` compatibility facades that preserve People-dependent cache invalidation over `data/repositories/people.py`. Likely direct repository owners after cache orchestration moves: `data/repositories/people.py` and `data/repositories/images.py`.
+Tests to run: `cd web && .venv/bin/python -m unittest test_backend test_api_shapes test_modular_contracts -q`.
+Do not touch: People settings keys, status payload fields, source-media safety fields, face thumbnail cache headers, or People filter composition semantics without parity tests.

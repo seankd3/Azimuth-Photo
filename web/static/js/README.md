@@ -1,0 +1,130 @@
+# Browser Modules
+
+`/static/app.js` is the ES module entrypoint loaded by `base.html`. It forwards
+the cache-busting query string into this folder and imports `bootstrap.js`.
+
+`bootstrap.js` owns the public `window.PhotoArchive` compatibility assignment.
+During migration it imports `legacy/app.js`, which contains the old no-build
+frontend monolith behind compatibility wrappers.
+
+`ui.js` owns shared toast, confirm-modal, shortcut overlay, bottom-bar
+measurement, visibility-refresh wiring, visual-row navigation math, formatting,
+and escaping helpers.
+`warmup.js` owns the browser image preloader, image probe, timeout,
+warm-cache helpers, background warmup scheduling, warmup URL extraction,
+request warming, and image-tier warm batching used by the legacy
+compatibility module.
+`api.js` owns small shared request helpers as fetch calls move out of
+`legacy/app.js`. `query_state.js` owns pure filter-state normalization, URL
+parameter helpers, Library URL-state syncing, and filter-neighbor state generation. `media_status.js` owns media-status cache and inflight
+request coordination. `media_metadata.js` owns shared media date, camera,
+resolution, and title formatting helpers. `filters.js` owns shared filter-state
+summary helpers, metadata filter controls, lazy filter-option/folder-list
+population, and star-hover UI.
+
+Feature folders are being introduced gradually. `loupe/tiers.js` owns Loupe
+tier names, ranks, timeouts, blank image source, and tier URL construction.
+`loupe/loading.js` owns Loupe progressive tier loading, tier probe lifecycle,
+and probe cancellation helpers.
+`loupe/status.js` owns Loupe cache-status text formatting, overlay status-line
+rendering, and tier-loading display.
+`loupe/metadata.js` owns Loupe metadata line assembly and overlay metadata rendering.
+`loupe/navigation.js` owns Loupe neighbor ordering and hot-set tier selection.
+`loupe/filmstrip.js` owns Loupe filmstrip windowing, thumbnail DOM rendering,
+active-thumb updates, counter text, and centering behavior.
+`loupe/focus.js` owns Loupe focus targeting, tabbable-element filtering, and
+Tab focus trapping.
+`loupe/zoom.js` owns Loupe zoom/pan math, image transform writes, and zoom
+indicator text.
+`library/query.js` owns Library rankings query-string construction.
+`library/filters.js` owns Library filter session persistence, URL/session
+restore precedence, DOM application for filter buttons, stars, flags, and
+selects, plus the behavior behind the legacy `setFilter`, `clearLibraryFilters`,
+`toggleFilter`, and `toggleStar` compatibility methods.
+`library/sort.js` owns Library sort keys and sort state conversion.
+`library/search_state.js` owns Library/search session persistence for sort,
+search query, deep-search flag, and search-specific sort state.
+`library/search_controls.js` owns Library and Compare search/sort DOM control
+rendering.
+`library/search_controller.js` owns Library search input debounce, clear-search,
+and deep-search control flow.
+`library/similar.js` owns the Library "find similar" action, similar-results
+request flow, search-control state, and similar-card DOM rendering.
+`library/flags.js` owns Library image-flag local DOM/state updates, single-image
+flag POSTs, and current-image flag selection.
+`library/batch.js` owns Library batch-selection click/toggle/clear mechanics,
+batch-selection bar HTML, batch flag POSTs, rollback handling, and the
+compatibility facade for selected-image export.
+`export/actions.js` owns full-ranking export and selected-image export URL
+construction/opening for JSON and CSV downloads.
+`library/display.js` owns Library card flag, tier, similarity, info-line, and date labels.
+`library/shell.js` owns Library empty-state display, scroll persistence,
+back-to-top visibility, and scroll-to-card helpers.
+`library/date_scrubber.js` owns Library date-scrubber DOM rendering, active
+group highlighting, offset math, and scroll tracking.
+`library/navigation.js` owns Library card keyboard selection, visibility
+scrolling, and visual-row navigation wiring.
+`library/map.js` owns Library map library loading, info/error display, and popup DOM construction.
+`library/map_controller.js` owns Library map-view state, grid/map toggle behavior,
+marker loading, marker-layer replacement, and map-bound fitting.
+`compare/query.js` owns Compare and Mosaic API query-string construction.
+`compare/navigation.js` owns Mosaic keyboard cell selection and visual-row navigation wiring.
+`compare/images.js` owns Compare pair image rendering and progressive tier
+upgrades.
+`compare/view.js` owns Compare mode container visibility and empty-state display.
+`compare/actions.js` owns Compare pair action payloads, comparison POST/result
+parsing, returned ELO application, undo POST/result parsing, and undo toast text.
+`compare/propagation.js` owns Compare/Mosaic propagation prediction and last
+propagation-count request helpers.
+`compare/mosaic.js` owns Mosaic grid sizing/rendering, progressive cell tier
+upgrades, pick request/result helpers, and replacement-index selection.
+`compare/status.js` owns Compare pool/progress labels, ranking-signal count
+mutation, coverage percentage/bar display, propagation badge display, and
+counter roll-up animation.
+`search/query.js` owns shared text/deep-search query helpers.
+`people/labels.js` owns People display label, worker status, and settings status text helpers.
+`people/cards.js` owns People card, grid, and merge-suggestion HTML.
+`people/page.js` owns People page loading/polling, rendering, label-draft
+preservation, focus restoration, and face-thumbnail fallback behavior.
+`people/actions.js` owns People label, merge, reject, ignore, and Library-filter
+actions.
+`people/controller.js` owns the People `window.PhotoArchive` compatibility
+adapter for inline handlers and action refresh/toast wiring.
+`settings/status.js` owns Settings page status banner updates.
+`settings/cache_status.js` owns Settings cache status and auto-tuning panel rendering.
+`settings/ai_status.js` owns Settings AI/model/deep-search status panel rendering and embedding model preset controls.
+`settings/people_status.js` owns Settings People status panel rendering.
+`settings/work_banner.js` owns Settings background-work banner HTML.
+`settings/deep_search.js` owns Settings deep-search term HTML and schedule
+normalization/summary text.
+`settings/display.js` owns Settings work-mode, cache-profile, rate, ETA,
+auto-tuning, thumbnail-output change, and embedding-index badge formatting.
+`settings/form.js` owns Settings form population/collection, deep-search
+schedule controls, work-mode selection state, cache-profile hint updates, and
+thumbnail-output change notices.
+`settings/actions.js` owns Settings save/reset, cache clear/pregen, embedding
+pause/resume, and model-install request flows.
+`settings/controller.js` owns the Settings public-action `window.PhotoArchive`
+compatibility adapter while legacy keeps page initialization and page state.
+`legacy/app.js` should import stateless Settings helpers directly; keep local
+Settings wrappers only when they bind page state such as `SETTINGS_FIELDS` or
+`settingsPageData`.
+`cache/status.js` owns cache status, resource, and pregen display formatting helpers.
+`cache/guide.js` owns Settings cache-tier guide rendering.
+`ai/status.js` owns AI status delay logic, bottom-bar/panel rendering, model
+install display, and deep-search status/query HTML. `ai/poller.js` owns the AI
+status polling lifecycle; `legacy/app.js` still shares the visibility-refresh
+hook with Settings metadata refresh.
+`catalog/status.js` owns catalog source status and scan-state display helpers.
+`catalog/sources.js` owns Catalog source-list row HTML, source-list rendering, and remove-source dialog rendering.
+`catalog/directory.js` owns Catalog directory-browser root, row, breadcrumb HTML, and browser rendering.
+`catalog/browser.js` owns Catalog directory-browser path state, folder-picker
+actions, and browse/use/up controls.
+`catalog/actions.js` owns Catalog source loading, add/rescan/remove actions,
+and scan-completion polling.
+`catalog/controller.js` owns the Catalog `window.PhotoArchive` compatibility
+adapter for inline handlers, source lookup, status/toast wiring, and fallback
+stats handoff.
+
+Future extractions should move code out of `legacy/app.js` into feature folders
+here while keeping the same `window.PhotoArchive.*` methods available.

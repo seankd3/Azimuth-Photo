@@ -1,0 +1,9 @@
+# Catalog Feature
+
+Owns: scan start/status/folder, source add/rescan/remove, folder picker availability/selection, folder browsing, catalog summary, and folder-count payloads.
+Depends on: injected DB-backed providers from `web/app.py` for catalog/source orchestration and cache-preserving mutation facades, app-configured `web/scanner.py`, `web/settings.py`, the `thumbnails` package facade, `core.requests.json_object`, `data.repositories.catalog` for path normalization and folder-count reads, `data.repositories.images` for metadata/orientation worker reads and writes, injected pairing/cache invalidators, and optional `web/embed_cache.py` invalidation.
+Public routes: `/api/scan`, `/api/scan/status`, `/api/scan/folder`, `/api/catalog/folder-picker`, `/api/catalog/select-folder`, `/api/catalog/browse`, `/api/catalog`, `/api/catalog/sources`, `/api/catalog/sources/{source_id}/rescan`, `/api/catalog/sources/{source_id}/remove`, `/api/folders`.
+Frontend modules: `static/js/catalog/controller.js` owns the `window.PhotoArchive` compatibility adapter; `static/js/catalog/actions.js`, `static/js/catalog/browser.js`, `static/js/catalog/directory.js`, `static/js/catalog/sources.js`, and `static/js/catalog/status.js` own the lower-level Catalog UI/actions.
+Data repositories: Routes call `data/repositories/catalog.py` directly for pure path/folder reads and use app-injected providers for DB-backed source mutations so the existing `db.py` cache fanout remains intact during migration. Metadata/orientation workers use `data/repositories/images.py` with app-owned filter-options invalidation injected from `web/app.py`.
+Tests to run: `cd web && .venv/bin/python -m unittest test_api_shapes test_modular_contracts test_backend -q`.
+Do not touch: original source media, missing/offline source semantics, source removal modes, folder-picker fallbacks, or scan-state response fields without parity tests.
