@@ -3816,6 +3816,8 @@ class ModularContractTests(unittest.TestCase):
             settings_controller = fh.read()
         with open(os.path.join(base_dir, "static", "js", "settings", "page.js"), encoding="utf-8") as fh:
             settings_page = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "settings", "ui_settings.js"), encoding="utf-8") as fh:
+            settings_ui_settings = fh.read()
         with open(os.path.join(base_dir, "static", "js", "ui.js"), encoding="utf-8") as fh:
             ui_module = fh.read()
         with open(os.path.join(base_dir, "static", "js", "warmup.js"), encoding="utf-8") as fh:
@@ -3878,6 +3880,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../search/query.js';", legacy)
         self.assertIn("from '../people/controller.js';", legacy)
         self.assertIn("from '../settings/page.js';", legacy)
+        self.assertIn("from '../settings/ui_settings.js';", legacy)
         self.assertIn("from '../ui.js';", legacy)
         self.assertIn("from '../warmup.js';", legacy)
         self.assertIn("from '../warmup_neighbors.js';", legacy)
@@ -4189,6 +4192,9 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from './form.js';", settings_page)
         self.assertIn("from './controller.js';", settings_page)
         self.assertIn("refreshSettingsMetaIfActive", settings_page)
+        self.assertIn("export function createUiSettingsLoader", settings_ui_settings)
+        self.assertIn("export function normalizeUiSettings", settings_ui_settings)
+        self.assertIn("fetchJsonImpl('/api/ui/settings'", settings_ui_settings)
         self.assertIn("export function formatBytes", ui_module)
         self.assertIn("export function escapeHtml", ui_module)
         self.assertIn("export function jsString", ui_module)
@@ -4212,6 +4218,77 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("export function applyLibraryThumbSize", thumbnail_size)
         self.assertIn("export function createThumbnailSizeHandler", thumbnail_size)
         self.assertIn("export default legacyPhotoArchive;", legacy)
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_ui_settings_loader_node_probe_preserves_cache_status_toggle_loading(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import {
+    createUiSettingsLoader,
+    normalizeUiSettings,
+} from './static/js/settings/ui_settings.js';
+
+assert.deepEqual(normalizeUiSettings({}), { show_loupe_cache_status: true });
+assert.deepEqual(normalizeUiSettings({ show_loupe_cache_status: false }), { show_loupe_cache_status: false });
+assert.deepEqual(
+    normalizeUiSettings({ show_loupe_cache_status: false }, { show_loupe_cache_status: true, extra: 'kept' }),
+    { show_loupe_cache_status: false, extra: 'kept' },
+);
+
+let calls = 0;
+const loaded = [];
+let resolveRequest;
+const loader = createUiSettingsLoader({
+    fetchJsonImpl: (url, options) => {
+        calls += 1;
+        assert.equal(url, '/api/ui/settings');
+        assert.deepEqual(options, { defaultValue: null });
+        return new Promise((resolve) => {
+            resolveRequest = resolve;
+        });
+    },
+    onLoaded: (settings) => loaded.push({ ...settings }),
+});
+
+assert.deepEqual(loader.getSettings(), { show_loupe_cache_status: true });
+const first = loader.loadUiSettings();
+const second = loader.loadUiSettings();
+assert.equal(first, second);
+assert.equal(calls, 1);
+resolveRequest({ settings: { show_loupe_cache_status: false } });
+assert.deepEqual(await first, { show_loupe_cache_status: false });
+assert.deepEqual(loader.getSettings(), { show_loupe_cache_status: false });
+assert.deepEqual(loaded, [{ show_loupe_cache_status: false }]);
+
+const third = loader.loadUiSettings();
+assert.equal(calls, 2);
+resolveRequest({ settings: {} });
+assert.deepEqual(await third, { show_loupe_cache_status: true });
+assert.deepEqual(loader.getSettings(), { show_loupe_cache_status: true });
+
+let fallbackCalls = 0;
+const fallbackLoader = createUiSettingsLoader({
+    fetchJsonImpl: () => {
+        fallbackCalls += 1;
+        return Promise.reject(new Error('offline'));
+    },
+    onLoaded: () => loaded.push({ loadedOnFailure: true }),
+});
+assert.deepEqual(await fallbackLoader.loadUiSettings(), { show_loupe_cache_status: true });
+assert.equal(fallbackCalls, 1);
+assert.deepEqual(loaded, [
+    { show_loupe_cache_status: false },
+    { show_loupe_cache_status: true },
+]);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
 
     @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
     def test_neighbor_warmup_controller_node_probe_preserves_scheduled_request_shapes(self):

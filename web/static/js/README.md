@@ -130,6 +130,8 @@ thumbnail-output change notices.
 pause/resume, and model-install request flows.
 `settings/controller.js` owns the Settings public-action `window.PhotoArchive`
 compatibility adapter while legacy keeps page initialization and page state.
+`settings/ui_settings.js` owns lightweight browser UI setting loading used by
+shared views, including the Loupe cache-status display toggle.
 `legacy/app.js` should import stateless Settings helpers directly; keep local
 Settings wrappers only when they bind page state such as `SETTINGS_FIELDS` or
 `settingsPageData`.

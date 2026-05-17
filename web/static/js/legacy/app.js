@@ -207,6 +207,7 @@ import {
 import { createFindSimilarAction } from '../library/similar.js';
 import { createPeopleApi } from '../people/controller.js';
 import { createSettingsPageController } from '../settings/page.js';
+import { createUiSettingsLoader } from '../settings/ui_settings.js';
 
 const legacyPhotoArchive = (() => {
     // --- Compare Mode State ---
@@ -231,8 +232,6 @@ const legacyPhotoArchive = (() => {
     const COMPARE_NEIGHBOR_PAIRS = 4;
     const FILMSTRIP_WINDOW_RADIUS = 55;
     const mediaStatusClient = createMediaStatusClient({ maxAgeMs: 15000 });
-    let uiSettings = { show_loupe_cache_status: true };
-    let uiSettingsPromise = null;
     let selectedLibraryIndex = -1;
     let selectedMosaicIndex = -1;
     const aiStatusPoller = createAIStatusPoller({
@@ -301,23 +300,13 @@ const legacyPhotoArchive = (() => {
         if (includesCurrent) refreshLoupeMediaStatus(loupeCurrentImage, loupeImageToken, { force: true });
     }
 
+    const uiSettingsLoader = createUiSettingsLoader({
+        fetchJsonImpl: fetchJson,
+        onLoaded: () => renderLoupeStatusLine(),
+    });
+
     async function loadUiSettings() {
-        if (uiSettingsPromise) return uiSettingsPromise;
-        uiSettingsPromise = fetchJson('/api/ui/settings', { defaultValue: null })
-            .then((data) => {
-                const values = data?.settings || data || {};
-                uiSettings = {
-                    ...uiSettings,
-                    show_loupe_cache_status: values.show_loupe_cache_status !== false,
-                };
-                renderLoupeStatusLine();
-                return uiSettings;
-            })
-            .catch(() => uiSettings)
-            .finally(() => {
-                uiSettingsPromise = null;
-            });
-        return uiSettingsPromise;
+        return uiSettingsLoader.loadUiSettings();
     }
 
     // ==================== MOSAIC RANKING MODE ====================
@@ -1685,7 +1674,7 @@ const legacyPhotoArchive = (() => {
             flag,
             loadingTierRank: loupeLoadingTierRank,
             mediaStatus: loupeCurrentMediaStatus,
-            showCacheStatus: uiSettings.show_loupe_cache_status,
+            showCacheStatus: uiSettingsLoader.getSettings().show_loupe_cache_status,
         });
     }
 
