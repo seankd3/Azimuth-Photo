@@ -76,7 +76,6 @@ import {
     setImageFlag as setImageFlagCore,
     updateImageFlagLocal as updateImageFlagLocalCore,
 } from '../library/flags.js';
-import { createBatchSelectionController } from '../library/batch_controller.js';
 import { exportRankings as exportRankingsCore } from '../export/actions.js';
 import { eloToStars } from '../library/display.js';
 import { appendLibraryRankCards } from '../library/rank_cards.js';
@@ -121,6 +120,7 @@ import {
 import { createFindSimilarAction } from '../library/similar.js';
 import { createPeopleApi } from '../people/controller.js';
 import { createSettingsPageController } from '../settings/page.js';
+import { createLegacyBatchBridge } from './batch_bridge.js';
 import { createLegacyFilterQueryBridge } from './filter_query_bridge.js';
 import { createLegacyLoupeBridge } from './loupe_bridge.js';
 import { createLegacyPublicApi } from './public_api.js';
@@ -941,7 +941,7 @@ const legacyPhotoArchive = (() => {
         bindLibraryKeyboard({
             getSelectedLibraryIndex: () => selectedLibraryIndex,
             getLibraryImages: () => libraryImages,
-            hasBatchSelection: () => batchController.hasSelection(),
+            hasBatchSelection: () => batchBridge.hasSelection(),
             selectLibraryCard,
             deselectLibraryCard,
             findCardInDirection,
@@ -1136,8 +1136,8 @@ const legacyPhotoArchive = (() => {
                 rankingsSort,
                 thumbHeight: rowH,
                 lastDateGroup,
-                isBatchMode: () => batchController.isBatchMode(),
-                isSelected: (imageId) => batchController.isSelected(imageId),
+                isBatchMode: () => batchBridge.isBatchMode(),
+                isSelected: (imageId) => batchBridge.isSelected(imageId),
                 onCardClick: handleCardClick,
             });
             lastDateGroup = appendResult.lastDateGroup;
@@ -1403,7 +1403,7 @@ const legacyPhotoArchive = (() => {
 
     // ==================== BATCH SELECTION ====================
 
-    const batchController = createBatchSelectionController({
+    const batchBridge = createLegacyBatchBridge({
         getImages: () => libraryImages,
         openImage: openLightbox,
         showToast,
@@ -1411,23 +1411,23 @@ const legacyPhotoArchive = (() => {
     });
 
     function toggleBatchMode() {
-        batchController.toggleBatchMode();
+        batchBridge.toggleBatchMode();
     }
 
     function clearBatchSelection() {
-        batchController.clearBatchSelection();
+        batchBridge.clearBatchSelection();
     }
 
     function handleCardClick(e, img, card, index) {
-        batchController.handleCardClick(e, img, card, index);
+        batchBridge.handleCardClick(e, img, card, index);
     }
 
     async function batchFlag(flag) {
-        await batchController.batchFlag(flag);
+        await batchBridge.batchFlag(flag);
     }
 
     function batchExport(format) {
-        batchController.batchExport(format);
+        batchBridge.batchExport(format);
     }
 
     function exportRankings(format) {

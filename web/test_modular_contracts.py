@@ -3843,6 +3843,8 @@ class ModularContractTests(unittest.TestCase):
             bootstrap = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "app.js"), encoding="utf-8") as fh:
             legacy = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "legacy", "batch_bridge.js"), encoding="utf-8") as fh:
+            legacy_batch_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "filter_query_bridge.js"), encoding="utf-8") as fh:
             legacy_filter_query_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "loupe_bridge.js"), encoding="utf-8") as fh:
@@ -4039,6 +4041,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../ai/poller.js';", legacy_ui_runtime_bridge)
         self.assertIn("from '../catalog/home_scan.js';", legacy)
         self.assertIn("from '../catalog/scan_entrypoint.js';", legacy)
+        self.assertIn("from './batch_bridge.js';", legacy)
         self.assertIn("from './filter_query_bridge.js';", legacy)
         self.assertIn("from './loupe_bridge.js';", legacy)
         self.assertIn("from './search_sort_bridge.js';", legacy)
@@ -4076,7 +4079,9 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("export function createLegacySearchSortBridge", legacy_search_sort_bridge)
         self.assertIn("from '../library/search_controller.js';", legacy)
         self.assertIn("from '../library/flags.js';", legacy)
-        self.assertIn("from '../library/batch_controller.js';", legacy)
+        self.assertNotIn("from '../library/batch_controller.js';", legacy)
+        self.assertIn("from '../library/batch_controller.js';", legacy_batch_bridge)
+        self.assertIn("export function createLegacyBatchBridge", legacy_batch_bridge)
         self.assertIn("from '../library/filter_controller.js';", legacy)
         self.assertIn("from '../export/actions.js';", legacy)
         self.assertIn("from '../library/similar.js';", legacy)
@@ -5834,6 +5839,69 @@ assert.deepEqual(controller.selectedImageIds(), []);
 assert.equal(cards[0].classList.contains('selected'), false);
 assert.equal(cards[0].classList.contains('selectable'), false);
 assert.equal(batchBar, null);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_legacy_batch_bridge_node_probe_preserves_controller_facade(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createLegacyBatchBridge } from './static/js/legacy/batch_bridge.js';
+
+const calls = [];
+let capturedOptions = null;
+const fakeController = {
+    batchExport: (format) => calls.push(['batchExport', format]),
+    batchFlag: async (flag) => calls.push(['batchFlag', flag]),
+    clearBatchSelection: () => calls.push(['clearBatchSelection']),
+    handleCardClick: (event, img, card, index) => calls.push(['handleCardClick', event.type, img.id, card.id, index]),
+    hasSelection: () => true,
+    isBatchMode: () => true,
+    isSelected: (imageId) => imageId === 7,
+    toggleBatchMode: () => calls.push(['toggleBatchMode']),
+};
+const bridge = createLegacyBatchBridge({
+    createBatchSelectionControllerImpl: (options) => {
+        capturedOptions = options;
+        return fakeController;
+    },
+    getImages: () => [{ id: 7 }],
+    openImage: (img) => calls.push(['openImage', img.id]),
+    showToast: (message) => calls.push(['showToast', message]),
+    updateImageFlagLocal: (imageId, flag) => calls.push(['updateImageFlagLocal', imageId, flag]),
+});
+
+assert.deepEqual(capturedOptions.getImages(), [{ id: 7 }]);
+capturedOptions.openImage({ id: 8 });
+capturedOptions.showToast('selected');
+capturedOptions.updateImageFlagLocal(9, 'picked');
+assert.equal(bridge.hasSelection(), true);
+assert.equal(bridge.isBatchMode(), true);
+assert.equal(bridge.isSelected(7), true);
+assert.equal(bridge.isSelected(8), false);
+bridge.toggleBatchMode();
+bridge.clearBatchSelection();
+bridge.handleCardClick({ type: 'click' }, { id: 7 }, { id: 'card-7' }, 3);
+await bridge.batchFlag('rejected');
+bridge.batchExport('csv');
+
+assert.deepEqual(calls, [
+    ['openImage', 8],
+    ['showToast', 'selected'],
+    ['updateImageFlagLocal', 9, 'picked'],
+    ['toggleBatchMode'],
+    ['clearBatchSelection'],
+    ['handleCardClick', 'click', 7, 'card-7', 3],
+    ['batchFlag', 'rejected'],
+    ['batchExport', 'csv'],
+]);
 """
         subprocess.run(
             ["node", "--input-type=module", "-e", script],
