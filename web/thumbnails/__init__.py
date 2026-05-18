@@ -5,7 +5,6 @@ import shutil
 import sqlite3
 import threading
 import time
-from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 
@@ -87,10 +86,11 @@ _pregen_status = {
     "generated_this_session": 0,
     "last_error": "",
 }
-_pregen_history = deque()
-_pregen_session_started_at: float | None = None
-_pregen_session_generated = 0
-_pregen_source_read_failures = 0
+_pregen_bookkeeping = pregen.SessionBookkeeping()
+_pregen_history = _pregen_bookkeeping.history
+_pregen_session_started_at: float | None = _pregen_bookkeeping.session_started_at
+_pregen_session_generated = _pregen_bookkeeping.session_generated
+_pregen_source_read_failures = _pregen_bookkeeping.source_read_failures
 
 
 _write_queue = thumbnail_cache_entries._write_queue
@@ -1304,6 +1304,21 @@ def _set_pregen_state(state: str, message: str = "", phase: str | None = None, e
         _pregen_status["started_at"] = _current_time()
 
 
+def _sync_pregen_bookkeeping_from_facade() -> None:
+    _pregen_bookkeeping.history = _pregen_history
+    _pregen_bookkeeping.session_started_at = _pregen_session_started_at
+    _pregen_bookkeeping.session_generated = _pregen_session_generated
+    _pregen_bookkeeping.source_read_failures = _pregen_source_read_failures
+
+
+def _sync_pregen_facade_from_bookkeeping() -> None:
+    global _pregen_history, _pregen_session_started_at, _pregen_session_generated, _pregen_source_read_failures
+    _pregen_history = _pregen_bookkeeping.history
+    _pregen_session_started_at = _pregen_bookkeeping.session_started_at
+    _pregen_session_generated = _pregen_bookkeeping.session_generated
+    _pregen_source_read_failures = _pregen_bookkeeping.source_read_failures
+
+
 def _record_pregen_batch(
     count: int,
     *,
@@ -1313,37 +1328,25 @@ def _record_pregen_batch(
     decode_encode_seconds: float = 0.0,
     source_read_failures: int = 0,
 ):
-    global _pregen_session_generated, _pregen_session_started_at, _pregen_source_read_failures
-    now = _current_time()
-    entry = pregen.history_entry(
+    _sync_pregen_bookkeeping_from_facade()
+    pregen.record_batch(
+        _pregen_bookkeeping,
         count,
-        ended_at=now,
+        now=_current_time(),
         thumbnails_written=thumbnails_written,
         source_bytes=source_bytes,
         read_seconds=read_seconds,
         decode_encode_seconds=decode_encode_seconds,
         source_read_failures=source_read_failures,
     )
-    if entry is None:
-        return
-    if _pregen_session_started_at is None:
-        _pregen_session_started_at = now
-    _pregen_session_generated += count
-    _pregen_source_read_failures += max(0, int(source_read_failures))
-    _pregen_history.append(entry)
-    pregen.trim_history(_pregen_history, now)
+    _sync_pregen_facade_from_bookkeeping()
 
 
 def _pregen_rates() -> tuple[float, float, dict]:
-    now = _current_time()
-    pregen.trim_history(_pregen_history, now)
-    return pregen.rates(
-        _pregen_history,
-        now=now,
-        session_started_at=_pregen_session_started_at,
-        session_generated=_pregen_session_generated,
-        source_read_failures=_pregen_source_read_failures,
-    )
+    _sync_pregen_bookkeeping_from_facade()
+    result = pregen.session_rates(_pregen_bookkeeping, now=_current_time())
+    _sync_pregen_facade_from_bookkeeping()
+    return result
 
 
 async def _cache_target_total() -> int:

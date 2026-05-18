@@ -1,5 +1,23 @@
+from collections import deque
+
+
 WINDOW_SECONDS = 30 * 60
 VALID_WORK_MODES = {"browse", "balanced", "max"}
+
+
+class SessionBookkeeping:
+    def __init__(
+        self,
+        *,
+        history=None,
+        session_started_at: float | None = None,
+        session_generated: int = 0,
+        source_read_failures: int = 0,
+    ):
+        self.history = history if history is not None else deque()
+        self.session_started_at = session_started_at
+        self.session_generated = session_generated
+        self.source_read_failures = source_read_failures
 
 
 def reset_cursor(cursor: dict) -> None:
@@ -41,6 +59,36 @@ def trim_history(history, now: float, *, window_seconds: float = WINDOW_SECONDS)
     cutoff = now - window_seconds
     while history and history[0]["ended_at"] < cutoff:
         history.popleft()
+
+
+def record_batch(
+    bookkeeping: SessionBookkeeping,
+    count: int,
+    *,
+    now: float,
+    thumbnails_written: int | None = None,
+    source_bytes: int = 0,
+    read_seconds: float = 0.0,
+    decode_encode_seconds: float = 0.0,
+    source_read_failures: int = 0,
+) -> None:
+    entry = history_entry(
+        count,
+        ended_at=now,
+        thumbnails_written=thumbnails_written,
+        source_bytes=source_bytes,
+        read_seconds=read_seconds,
+        decode_encode_seconds=decode_encode_seconds,
+        source_read_failures=source_read_failures,
+    )
+    if entry is None:
+        return
+    if bookkeeping.session_started_at is None:
+        bookkeeping.session_started_at = now
+    bookkeeping.session_generated += count
+    bookkeeping.source_read_failures += max(0, int(source_read_failures))
+    bookkeeping.history.append(entry)
+    trim_history(bookkeeping.history, now)
 
 
 def rates(
@@ -85,6 +133,17 @@ def rates(
         "source_read_failures": source_read_failures,
     }
     return recent_rate, overall_rate, diagnostics
+
+
+def session_rates(bookkeeping: SessionBookkeeping, *, now: float) -> tuple[float, float, dict]:
+    trim_history(bookkeeping.history, now)
+    return rates(
+        bookkeeping.history,
+        now=now,
+        session_started_at=bookkeeping.session_started_at,
+        session_generated=bookkeeping.session_generated,
+        source_read_failures=bookkeeping.source_read_failures,
+    )
 
 
 def generate_batch_for_decision(decision, configured_batch: int) -> int:

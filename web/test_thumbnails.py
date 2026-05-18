@@ -163,6 +163,56 @@ class ThumbnailPregenFacadeTests(unittest.TestCase):
         self.assertTrue(thumbnail_pregen.should_yield_to_foreground(lambda: "browse"))
         self.assertFalse(thumbnail_pregen.should_yield_to_foreground(lambda: "balanced"))
 
+    def test_session_bookkeeping_remains_facaded_from_pregen_module(self):
+        old_history = thumbnails._pregen_history
+        old_session_started_at = thumbnails._pregen_session_started_at
+        old_session_generated = thumbnails._pregen_session_generated
+        old_source_read_failures = thumbnails._pregen_source_read_failures
+        old_current_time = thumbnails._current_time
+        try:
+            thumbnails._pregen_history = thumbnail_pregen.SessionBookkeeping().history
+            thumbnails._pregen_session_started_at = None
+            thumbnails._pregen_session_generated = 0
+            thumbnails._pregen_source_read_failures = 0
+            ticks = iter([100.0, 130.0])
+            thumbnails._current_time = lambda: next(ticks)
+
+            thumbnails._record_pregen_batch(
+                3,
+                thumbnails_written=5,
+                source_bytes=4 * 1024 * 1024,
+                read_seconds=2.0,
+                decode_encode_seconds=1.0,
+                source_read_failures=1,
+            )
+            facade_rates = thumbnails._pregen_rates()
+
+            self.assertEqual(thumbnails._pregen_session_started_at, 100.0)
+            self.assertEqual(thumbnails._pregen_session_generated, 3)
+            self.assertEqual(thumbnails._pregen_source_read_failures, 1)
+            self.assertEqual(len(thumbnails._pregen_history), 1)
+
+            direct_bookkeeping = thumbnail_pregen.SessionBookkeeping(
+                history=thumbnails._pregen_history,
+                session_started_at=thumbnails._pregen_session_started_at,
+                session_generated=thumbnails._pregen_session_generated,
+                source_read_failures=thumbnails._pregen_source_read_failures,
+            )
+            self.assertEqual(
+                facade_rates,
+                thumbnail_pregen.session_rates(direct_bookkeeping, now=130.0),
+            )
+            self.assertEqual(facade_rates[0], 6.0)
+            self.assertEqual(facade_rates[1], 6.0)
+            self.assertEqual(facade_rates[2]["recent_thumbnails_written_per_min"], 10.0)
+            self.assertEqual(facade_rates[2]["recent_read_mbps"], 2.0)
+        finally:
+            thumbnails._pregen_history = old_history
+            thumbnails._pregen_session_started_at = old_session_started_at
+            thumbnails._pregen_session_generated = old_session_generated
+            thumbnails._pregen_source_read_failures = old_source_read_failures
+            thumbnails._current_time = old_current_time
+
 
 class ThumbnailMaintenanceFacadeTests(unittest.TestCase):
     def setUp(self):
