@@ -9,6 +9,8 @@ frontend monolith behind compatibility wrappers. `legacy/public_api.js` owns the
 exported compatibility method table that backs `window.PhotoArchive.*`.
 `legacy/catalog_scan_bridge.js` owns the legacy home/settings scan entrypoint
 facade around the extracted Catalog scan controllers.
+`legacy/people_bridge.js` owns the legacy People public-method facade around
+the extracted People controller.
 `legacy/ui_action_bridge.js` owns the legacy toast, confirm modal, shortcut,
 and formatting facade around shared UI helpers.
 `legacy/filter_query_bridge.js` owns the legacy filter/query state bridge that

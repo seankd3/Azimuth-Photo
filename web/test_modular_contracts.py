@@ -3871,6 +3871,8 @@ class ModularContractTests(unittest.TestCase):
             legacy_loupe_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "mosaic_bridge.js"), encoding="utf-8") as fh:
             legacy_mosaic_bridge = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "legacy", "people_bridge.js"), encoding="utf-8") as fh:
+            legacy_people_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "search_action_bridge.js"), encoding="utf-8") as fh:
             legacy_search_action_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "search_sort_bridge.js"), encoding="utf-8") as fh:
@@ -4083,6 +4085,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from './library_shell_bridge.js';", legacy)
         self.assertIn("from './loupe_bridge.js';", legacy)
         self.assertIn("from './mosaic_bridge.js';", legacy)
+        self.assertIn("from './people_bridge.js';", legacy)
         self.assertIn("from './search_action_bridge.js';", legacy)
         self.assertIn("from './search_sort_bridge.js';", legacy)
         self.assertIn("from './ui_action_bridge.js';", legacy)
@@ -4166,7 +4169,9 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("export function createLegacyFilterQueryBridge", legacy_filter_query_bridge)
         self.assertIn("createLibraryFilterController", legacy)
         self.assertIn("from '../search/query.js';", legacy)
-        self.assertIn("from '../people/controller.js';", legacy)
+        self.assertNotIn("from '../people/controller.js';", legacy)
+        self.assertIn("from '../people/controller.js';", legacy_people_bridge)
+        self.assertIn("export function createLegacyPeopleBridge", legacy_people_bridge)
         self.assertIn("from '../settings/page.js';", legacy)
         self.assertIn("from '../settings/ui_settings.js';", legacy_ui_runtime_bridge)
         self.assertNotIn("from '../ui.js';", legacy)
@@ -9932,6 +9937,65 @@ assert.deepEqual(calls, [
     ['rejectPeopleMerge', 12, 'function', true],
     ['ignorePerson', 9, 'function', true],
     ['filterLibraryByPerson', [7]],
+]);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_legacy_people_bridge_node_probe_preserves_people_facade(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createLegacyPeopleBridge } from './static/js/legacy/people_bridge.js';
+
+const calls = [];
+const showToast = (message) => calls.push(['toast', message]);
+const bridge = createLegacyPeopleBridge({
+    showToast,
+    createPeopleApiImpl: (options) => {
+        assert.equal(options.showToast, showToast);
+        calls.push('init');
+        return {
+            initPeople: (...args) => calls.push(['initPeople', args]),
+            labelPerson: (...args) => calls.push(['labelPerson', args]),
+            mergePeople: (...args) => calls.push(['mergePeople', args]),
+            rejectPeopleMerge: (...args) => calls.push(['rejectPeopleMerge', args]),
+            ignorePerson: (...args) => calls.push(['ignorePerson', args]),
+            filterLibraryByPerson: (...args) => calls.push(['filterLibraryByPerson', args]),
+            useFallbackThumb: (...args) => {
+                calls.push(['useFallbackThumb', args]);
+                return true;
+            },
+            rememberPeopleLabelDraft: (...args) => calls.push(['rememberPeopleLabelDraft', args]),
+        };
+    },
+});
+
+bridge.initPeople('page');
+bridge.labelPerson(7);
+bridge.mergePeople(7, 8);
+bridge.rejectPeopleMerge(9);
+bridge.ignorePerson(10);
+bridge.filterLibraryByPerson(11);
+assert.equal(bridge.useFallbackThumb('img'), true);
+bridge.rememberPeopleLabelDraft(12, 'Ada');
+
+assert.deepEqual(calls, [
+    'init',
+    ['initPeople', ['page']],
+    ['labelPerson', [7]],
+    ['mergePeople', [7, 8]],
+    ['rejectPeopleMerge', [9]],
+    ['ignorePerson', [10]],
+    ['filterLibraryByPerson', [11]],
+    ['useFallbackThumb', ['img']],
+    ['rememberPeopleLabelDraft', [12, 'Ada']],
 ]);
 """
         subprocess.run(

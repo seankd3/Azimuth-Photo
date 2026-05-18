@@ -41,7 +41,6 @@ import {
     hasActiveTextSearch as hasActiveTextSearchCore,
 } from '../search/query.js';
 import { createFindSimilarAction } from '../library/similar.js';
-import { createPeopleApi } from '../people/controller.js';
 import { createSettingsPageController } from '../settings/page.js';
 import { createLegacyBatchBridge } from './batch_bridge.js';
 import { createLegacyCatalogScanBridge } from './catalog_scan_bridge.js';
@@ -61,6 +60,7 @@ import { createLegacyLibraryInitBridge } from './library_init_bridge.js';
 import { createLegacyLibraryMapBridge } from './library_map_bridge.js';
 import { createLegacyLoupeBridge } from './loupe_bridge.js';
 import { createLegacyMosaicBridge } from './mosaic_bridge.js';
+import { createLegacyPeopleBridge } from './people_bridge.js';
 import { createLegacyPublicApi } from './public_api.js';
 import { createLegacySearchActionBridge } from './search_action_bridge.js';
 import { createLegacySearchSortBridge } from './search_sort_bridge.js';
@@ -1065,7 +1065,7 @@ const legacyPhotoArchive = (() => {
 
     // ==================== PEOPLE ====================
 
-    const peopleApi = createPeopleApi({ showToast });
+    const peopleApi = createLegacyPeopleBridge({ showToast });
     const {
         initPeople,
         labelPerson,
