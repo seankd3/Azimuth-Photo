@@ -17,6 +17,7 @@ from thumbnails import cache_entries as thumbnail_cache_entries  # noqa: E402
 from thumbnails import config as thumbnail_config  # noqa: E402
 from thumbnails import full_cache as thumbnail_full_cache  # noqa: E402
 from thumbnails import generation as thumbnail_generation  # noqa: E402
+from thumbnails import jobs as thumbnail_jobs  # noqa: E402
 from thumbnails import maintenance as thumbnail_maintenance  # noqa: E402
 from thumbnails import pregen as thumbnail_pregen  # noqa: E402
 from thumbnails import runtime as thumbnail_runtime  # noqa: E402
@@ -124,6 +125,103 @@ class ThumbnailRuntimeFacadeTests(unittest.TestCase):
         self.assertGreater(thumbnails._current_time(), 0.0)
         self.assertTrue(thumbnails._is_sqlite_locked(sqlite3.OperationalError("database is locked")))
         self.assertFalse(thumbnails._is_sqlite_locked(sqlite3.OperationalError("disk I/O error")))
+
+
+class ThumbnailJobsFacadeTests(unittest.TestCase):
+    def test_prefetch_jobs_owns_schedule_rules(self):
+        async def run_case():
+            scheduled = []
+            touches = []
+            created_tasks = []
+
+            def ensure_thumbnail_with_executor(
+                filepath,
+                size,
+                image_id,
+                executor,
+                *,
+                note_activity,
+                include_smaller_tiers,
+                allow_stale_fallback,
+            ):
+                scheduled.append(
+                    (
+                        filepath,
+                        size,
+                        image_id,
+                        executor,
+                        note_activity,
+                        include_smaller_tiers,
+                        allow_stale_fallback,
+                    )
+                )
+                return f"task:{image_id}"
+
+            result = await thumbnail_jobs.prefetch_images(
+                [
+                    {"id": 1, "filepath": "memory.jpg"},
+                    {"id": 2, "filepath": "disk.jpg"},
+                    {"id": 3, "filepath": ""},
+                    {"id": 4, "filepath": "needed.jpg"},
+                ],
+                "md",
+                hot=True,
+                sizes={"md": 1000},
+                replace_stale_thumbnails=lambda: False,
+                memory_get_entry_fast=lambda _size, image_id: b"cached" if image_id == 1 else None,
+                memory_get=lambda _size, _image_id, _signature: None,
+                fast_disk_has=lambda _size, image_id, *_args: image_id == 2,
+                touch_cached_signature=lambda *args: touches.append(args) or True,
+                touch_cached=lambda *args: touches.append(args) or True,
+                build_source_signature=lambda filepath, size, image_id: f"{filepath}:{size}:{image_id}",
+                has_cached=lambda _size, _filepath, _image_id: False,
+                ensure_thumbnail_with_executor=ensure_thumbnail_with_executor,
+                prefetch_executor="prefetch-executor",
+                create_task=lambda task: created_tasks.append(task),
+            )
+
+            stale_scheduled = []
+            stale_result = await thumbnail_jobs.prefetch_images(
+                [{"id": 5, "filepath": "fresh.jpg"}],
+                "md",
+                hot=False,
+                sizes={"md": 1000},
+                replace_stale_thumbnails=lambda: True,
+                memory_get_entry_fast=lambda _size, _image_id: None,
+                memory_get=lambda _size, _image_id, _signature: None,
+                fast_disk_has=lambda *_args: False,
+                touch_cached_signature=lambda *args: touches.append(args) or True,
+                touch_cached=lambda *args: touches.append(args) or True,
+                build_source_signature=lambda filepath, size, image_id: f"{filepath}:{size}:{image_id}",
+                has_cached=lambda _size, _filepath, _image_id: False,
+                ensure_thumbnail_with_executor=lambda *args, **kwargs: (
+                    stale_scheduled.append((args, kwargs)) or "stale-task"
+                ),
+                prefetch_executor="prefetch-executor",
+                create_task=lambda task: created_tasks.append(task),
+            )
+
+            return result, scheduled, touches, created_tasks, stale_result, stale_scheduled
+
+        result, scheduled, touches, created_tasks, stale_result, stale_scheduled = asyncio.run(run_case())
+
+        self.assertEqual(result, 1)
+        self.assertEqual(
+            scheduled,
+            [("needed.jpg", "md", 4, "prefetch-executor", True, True, True)],
+        )
+        self.assertEqual(touches, [("md", 2, None)])
+        self.assertEqual(created_tasks, ["task:4", "stale-task"])
+        self.assertEqual(stale_result, 1)
+        self.assertEqual(stale_scheduled[0][0], ("fresh.jpg", "md", 5, "prefetch-executor"))
+        self.assertEqual(
+            stale_scheduled[0][1],
+            {
+                "note_activity": False,
+                "include_smaller_tiers": True,
+                "allow_stale_fallback": False,
+            },
+        )
 
 
 class ThumbnailPregenFacadeTests(unittest.TestCase):

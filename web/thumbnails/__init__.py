@@ -16,6 +16,7 @@ from . import data_providers
 from . import disk_store
 from . import full_cache
 from . import generation
+from . import jobs as thumbnail_jobs
 from . import maintenance as thumbnail_maintenance
 from . import pregen
 from . import pregen_candidates
@@ -953,65 +954,24 @@ async def prefetch_images(
     *,
     hot: bool = False,
 ) -> int:
-    if size not in SIZES or not images:
-        return 0
-
-    scheduled = 0
-    for img in images:
-        if limit is not None and scheduled >= limit:
-            break
-        image_id = img.get("id")
-        filepath = img.get("filepath")
-        if image_id is None or not filepath:
-            continue
-        require_current = _replace_stale_thumbnails
-        if not require_current and _memory_get_entry_fast(size, image_id) is not None:
-            continue
-        if not require_current and fast_disk_has(size, image_id):
-            if hot:
-                touch_cached_signature(size, image_id, None)
-            continue
-
-        if not require_current:
-            asyncio.create_task(
-                _ensure_thumbnail_with_executor(
-                    filepath,
-                    size,
-                    image_id,
-                    _prefetch_executor,
-                    note_activity=hot,
-                    include_smaller_tiers=True,
-                    allow_stale_fallback=True,
-                )
-            )
-            scheduled += 1
-            continue
-
-        source_signature = _build_source_signature(filepath, size, image_id)
-        if require_current:
-            if _memory_get(size, image_id, source_signature) is not None:
-                continue
-            if fast_disk_has(size, image_id, source_signature):
-                if hot:
-                    touch_cached_signature(size, image_id, source_signature)
-                continue
-        if has_cached(size, filepath, image_id):
-            if hot:
-                touch_cached(size, filepath, image_id)
-            continue
-        asyncio.create_task(
-            _ensure_thumbnail_with_executor(
-                filepath,
-                size,
-                image_id,
-                _prefetch_executor,
-                note_activity=hot,
-                include_smaller_tiers=True,
-                allow_stale_fallback=not require_current,
-            )
-        )
-        scheduled += 1
-    return scheduled
+    return await thumbnail_jobs.prefetch_images(
+        images,
+        size,
+        limit,
+        hot=hot,
+        sizes=SIZES,
+        replace_stale_thumbnails=lambda: _replace_stale_thumbnails,
+        memory_get_entry_fast=_memory_get_entry_fast,
+        memory_get=_memory_get,
+        fast_disk_has=fast_disk_has,
+        touch_cached_signature=touch_cached_signature,
+        touch_cached=touch_cached,
+        build_source_signature=_build_source_signature,
+        has_cached=has_cached,
+        ensure_thumbnail_with_executor=_ensure_thumbnail_with_executor,
+        prefetch_executor=_prefetch_executor,
+        create_task=asyncio.create_task,
+    )
 
 
 async def _run_full_image_job(filepath: str, image_id: int, hot: bool):

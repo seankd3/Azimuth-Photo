@@ -20,7 +20,9 @@ missing-source probes, and thumbnail HTTP cache header payloads.
 invalidation callbacks for the legacy facade. `status.py` owns pure cache and
 pregeneration status payload helpers. `full_cache.py` owns full-original cache room checks,
 atomic source-copy/write helpers, cached-path lookup, and full-image inflight
-orchestration. `pregen_candidates.py` owns reusable
+orchestration. `jobs.py` owns thumbnail request/prefetch scheduling helpers
+that are wired to active executors and caches by the compatibility facade.
+`pregen_candidates.py` owns reusable
 candidate-selection helpers for background cache warming. `pregen_worker.py`
 owns the async background thumbnail/full-original batch runners and the
 background prefetch worker loop. The package still
