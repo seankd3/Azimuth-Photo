@@ -117,6 +117,36 @@ def record_batch(
     trim_history(bookkeeping.history, now)
 
 
+def record_result(result: dict, pregen_state: dict, *, record_batch, now_provider=None) -> int:
+    if now_provider is None:
+        now_provider = time.time
+
+    source_reads = int(result.get("source_reads", 0))
+    thumbnails_written = int(result.get("thumbnails_written", 0))
+    originals_written = int(result.get("originals_written", 0))
+    source_bytes = int(result.get("source_bytes", 0))
+    read_seconds = float(result.get("read_seconds", 0.0))
+    decode_encode_seconds = float(result.get("decode_encode_seconds", 0.0))
+    source_read_failures = int(result.get("source_read_failures", 0))
+    completed = max(source_reads, originals_written)
+    useful_work = thumbnails_written + originals_written
+
+    if completed or thumbnails_written or source_read_failures:
+        if useful_work:
+            pregen_state["last_generated_at"] = now_provider()
+            pregen_state["generated_this_session"] += completed
+        record_batch(
+            completed,
+            thumbnails_written=thumbnails_written,
+            source_bytes=source_bytes,
+            read_seconds=read_seconds,
+            decode_encode_seconds=decode_encode_seconds,
+            source_read_failures=source_read_failures,
+        )
+
+    return useful_work
+
+
 def rates(
     history,
     *,

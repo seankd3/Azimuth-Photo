@@ -281,6 +281,104 @@ class ThumbnailPregenFacadeTests(unittest.TestCase):
             thumbnails._pregen_source_read_failures = old_source_read_failures
             thumbnails._current_time = old_current_time
 
+    def test_pregen_result_accounting_remains_facaded_from_pregen_module(self):
+        old_status = thumbnails._pregen_status
+        old_record_pregen_batch = thumbnails._record_pregen_batch
+        old_current_time = thumbnails._current_time
+        base_status = {
+            "enabled": True,
+            "manual_mode": False,
+            "manual_pause": False,
+            "state": "idle",
+            "message": "",
+            "active_phase": None,
+            "started_at": None,
+            "last_generated_at": None,
+            "generated_this_session": 7,
+            "last_error": "",
+        }
+        useful_result = {
+            "source_reads": 2,
+            "thumbnails_written": 3,
+            "originals_written": 1,
+            "source_bytes": 1024,
+            "read_seconds": 0.5,
+            "decode_encode_seconds": 0.25,
+            "source_read_failures": 0,
+        }
+        failure_only_result = {
+            "source_reads": 0,
+            "thumbnails_written": 0,
+            "originals_written": 0,
+            "source_bytes": 2048,
+            "read_seconds": 0.75,
+            "decode_encode_seconds": 0.0,
+            "source_read_failures": 1,
+        }
+
+        try:
+            direct_status = dict(base_status)
+            direct_batches = []
+
+            def direct_record_batch(count, **kwargs):
+                direct_batches.append((count, kwargs))
+
+            direct_return = thumbnail_pregen.record_result(
+                useful_result,
+                direct_status,
+                record_batch=direct_record_batch,
+                now_provider=lambda: 55.5,
+            )
+
+            thumbnails._pregen_status = dict(base_status)
+            facade_batches = []
+            thumbnails._record_pregen_batch = (
+                lambda count, **kwargs: facade_batches.append((count, kwargs))
+            )
+            thumbnails._current_time = lambda: 55.5
+
+            facade_return = thumbnails._record_pregen_result(useful_result)
+
+            self.assertEqual(facade_return, direct_return)
+            self.assertEqual(thumbnails._pregen_status, direct_status)
+            self.assertEqual(facade_batches, direct_batches)
+            self.assertEqual(facade_return, 4)
+            self.assertEqual(thumbnails._pregen_status["generated_this_session"], 9)
+            self.assertEqual(thumbnails._pregen_status["last_generated_at"], 55.5)
+            self.assertEqual(facade_batches[0][0], 2)
+            self.assertEqual(facade_batches[0][1]["thumbnails_written"], 3)
+            self.assertEqual(facade_batches[0][1]["source_bytes"], 1024)
+
+            direct_status = dict(base_status)
+            direct_batches = []
+            direct_return = thumbnail_pregen.record_result(
+                failure_only_result,
+                direct_status,
+                record_batch=direct_record_batch,
+                now_provider=lambda: self.fail("failure-only result should not update generation time"),
+            )
+
+            thumbnails._pregen_status = dict(base_status)
+            facade_batches = []
+            thumbnails._current_time = lambda: self.fail(
+                "failure-only result should not update generation time"
+            )
+
+            facade_return = thumbnails._record_pregen_result(failure_only_result)
+
+            self.assertEqual(facade_return, direct_return)
+            self.assertEqual(thumbnails._pregen_status, direct_status)
+            self.assertEqual(facade_batches, direct_batches)
+            self.assertEqual(facade_return, 0)
+            self.assertEqual(thumbnails._pregen_status["generated_this_session"], 7)
+            self.assertIsNone(thumbnails._pregen_status["last_generated_at"])
+            self.assertEqual(facade_batches[0][0], 0)
+            self.assertEqual(facade_batches[0][1]["source_read_failures"], 1)
+        finally:
+            thumbnails._pregen_status = old_status
+            thumbnails._record_pregen_batch = old_record_pregen_batch
+            thumbnails._current_time = old_current_time
+
 
 class ThumbnailMaintenanceFacadeTests(unittest.TestCase):
     def setUp(self):
