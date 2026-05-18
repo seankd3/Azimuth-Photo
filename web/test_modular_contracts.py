@@ -2592,6 +2592,15 @@ class ModularContractTests(unittest.TestCase):
         old_embedding_listeners = list(db._embedding_batch_listeners)
         old_deep_query_listeners = list(db._deep_search_query_embedding_listeners)
         try:
+            self.assertIs(db._embedding_batch_listeners, cache_events.embedding_batch_listeners)
+            self.assertIs(
+                db._deep_search_query_embedding_listeners,
+                cache_events.deep_search_query_embedding_listeners,
+            )
+            self.assertTrue(callable(cache_events.register_embedding_batch_listener))
+            self.assertTrue(callable(cache_events.register_deep_search_query_embedding_listener))
+            self.assertTrue(callable(cache_events.notify_embedding_batch_stored))
+            self.assertTrue(callable(cache_events.notify_deep_search_query_embedding_stored))
             for name in config_names:
                 setattr(cache_events, name, None)
             db._embedding_batch_listeners[:] = []

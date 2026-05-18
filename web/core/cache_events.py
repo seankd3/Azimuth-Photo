@@ -32,6 +32,34 @@ _invalidate_ai_status_response_cache: Callable[[], None] | None = None
 _duplicates_cache: dict | None = None
 _collections_cache: dict | None = None
 _elo_propagation = None
+embedding_batch_listeners = []
+deep_search_query_embedding_listeners = []
+
+
+def register_embedding_batch_listener(listener) -> None:
+    if listener not in embedding_batch_listeners:
+        embedding_batch_listeners.append(listener)
+
+
+def register_deep_search_query_embedding_listener(listener) -> None:
+    if listener not in deep_search_query_embedding_listeners:
+        deep_search_query_embedding_listeners.append(listener)
+
+
+def notify_embedding_batch_stored(model_key: str, image_ids: list[int]) -> None:
+    for listener in list(embedding_batch_listeners):
+        try:
+            listener(model_key, image_ids)
+        except Exception:
+            pass
+
+
+def notify_deep_search_query_embedding_stored(model_key: str, query: str) -> None:
+    for listener in list(deep_search_query_embedding_listeners):
+        try:
+            listener(model_key, query)
+        except Exception:
+            pass
 
 
 def configure(

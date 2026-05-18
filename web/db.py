@@ -18,34 +18,24 @@ from data.repositories import stats as stats_repository
 import settings
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "photoarchive.db")
-_embedding_batch_listeners = []
-_deep_search_query_embedding_listeners = []
+_embedding_batch_listeners = cache_events.embedding_batch_listeners
+_deep_search_query_embedding_listeners = cache_events.deep_search_query_embedding_listeners
 
 
 def register_embedding_batch_listener(listener):
-    if listener not in _embedding_batch_listeners:
-        _embedding_batch_listeners.append(listener)
+    cache_events.register_embedding_batch_listener(listener)
 
 
 def register_deep_search_query_embedding_listener(listener):
-    if listener not in _deep_search_query_embedding_listeners:
-        _deep_search_query_embedding_listeners.append(listener)
+    cache_events.register_deep_search_query_embedding_listener(listener)
 
 
 def _notify_embedding_batch_stored(model_key: str, image_ids: list[int]):
-    for listener in list(_embedding_batch_listeners):
-        try:
-            listener(model_key, image_ids)
-        except Exception:
-            pass
+    cache_events.notify_embedding_batch_stored(model_key, image_ids)
 
 
 def _notify_deep_search_query_embedding_stored(model_key: str, query: str):
-    for listener in list(_deep_search_query_embedding_listeners):
-        try:
-            listener(model_key, query)
-        except Exception:
-            pass
+    cache_events.notify_deep_search_query_embedding_stored(model_key, query)
 
 
 EXPECTED_EMBEDDING_DIM = data_schema.EXPECTED_EMBEDDING_DIM
