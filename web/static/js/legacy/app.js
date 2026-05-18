@@ -760,49 +760,23 @@ const legacyPhotoArchive = (() => {
         syncLibraryUrlState,
         afterCompareSearchIndicator: updateBottomBarHeightVar,
     });
-
-    function applySortState(field, desc, { persist = true, persistSearch = true } = {}) {
-        return searchSortBridge.applySortState(field, desc, { persist, persistSearch });
-    }
-
-    function saveSortState() {
-        return searchSortBridge.saveSortState();
-    }
-
-    function saveSearchState() {
-        return searchSortBridge.saveSearchState();
-    }
-
-    function saveSearchSortState() {
-        return searchSortBridge.saveSearchSortState();
-    }
-
-    function clearPersistedSearchState() {
-        return searchSortBridge.clearPersistedSearchState();
-    }
-
-    function restoreSortState() {
-        return searchSortBridge.restoreSortState();
-    }
-
-    function restoreSearchSortState() {
-        return searchSortBridge.restoreSearchSortState();
-    }
+    const {
+        applySortState,
+        clearPersistedSearchState,
+        restoreSearchSortState,
+        restoreSortState,
+        saveSearchSortState,
+        saveSearchState,
+        saveSortState,
+        syncSortControls,
+        updateCompareSearchIndicator,
+        updateSearchControls,
+        updateSimilaritySortOption,
+        updateSortDirIcon,
+    } = searchSortBridge;
 
     function restoreSearchState() {
         return searchSortBridge.restoreSearchState();
-    }
-
-    function updateSearchControls() {
-        return searchSortBridge.updateSearchControls();
-    }
-
-    function updateCompareSearchIndicator() {
-        return searchSortBridge.updateCompareSearchIndicator();
-    }
-
-    function syncSortControls() {
-        return searchSortBridge.syncSortControls();
     }
 
     function rankingQueryString({
@@ -906,10 +880,6 @@ const legacyPhotoArchive = (() => {
 
     function initRankings() { initLibrary(); }
 
-    function updateSimilaritySortOption() {
-        return searchSortBridge.updateSimilaritySortOption();
-    }
-
     function clearSearch() {
         clearSearchCore({
             ...searchControllerContext(),
@@ -934,22 +904,11 @@ const legacyPhotoArchive = (() => {
         loadRankings,
         updateDateScrubber,
     });
-
-    function setRankingsSort(sort, options) {
-        return librarySortController.setRankingsSort(sort, options);
-    }
-
-    function setSortField(field) {
-        return librarySortController.setSortField(field);
-    }
-
-    function toggleSortDir() {
-        return librarySortController.toggleSortDir();
-    }
-
-    function updateSortDirIcon() {
-        return searchSortBridge.updateSortDirIcon();
-    }
+    const {
+        setRankingsSort,
+        setSortField,
+        toggleSortDir,
+    } = librarySortController;
 
     function clearSearchDebounceTimer() {
         clearTimeout(searchDebounce);
@@ -988,18 +947,10 @@ const legacyPhotoArchive = (() => {
         showToast,
         updateLoupeFlagDisplay,
     });
-
-    function updateImageFlagLocal(imageId, flag) {
-        return flagBridge.updateImageFlagLocal(imageId, flag);
-    }
-
-    async function setImageFlag(imageId, flag) {
-        return await flagBridge.setImageFlag(imageId, flag);
-    }
-
-    function setCurrentLibraryFlag(flag) {
-        return flagBridge.setCurrentLibraryFlag(flag);
-    }
+    const {
+        setCurrentLibraryFlag,
+        updateImageFlagLocal,
+    } = flagBridge;
 
     async function loadRankings(clearFirst = false) {
         if (rankingsLoading) return rankingsLoadPromise || 0;
@@ -1220,10 +1171,7 @@ const legacyPhotoArchive = (() => {
         getQueryState: () => currentQueryState({ sort: rankingsSort }),
         getSort: () => rankingsSort,
     });
-
-    function exportRankings(format) {
-        return exportBridge.exportRankings(format);
-    }
+    const { exportRankings } = exportBridge;
 
     // ==================== MAP VIEW ====================
 
