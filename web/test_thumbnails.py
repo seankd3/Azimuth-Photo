@@ -128,6 +128,143 @@ class ThumbnailRuntimeFacadeTests(unittest.TestCase):
 
 
 class ThumbnailJobsFacadeTests(unittest.TestCase):
+    def test_cache_presence_jobs_own_facade_checks(self):
+        calls = []
+
+        self.assertTrue(
+            thumbnail_jobs.has_cached(
+                "md",
+                "source.jpg",
+                7,
+                thumb_tiers=("sm", "md"),
+                build_source_signature=lambda filepath, size, image_id: f"{filepath}:{size}:{image_id}",
+                memory_get=lambda size, image_id, signature: calls.append(("memory", size, image_id, signature)) or b"x",
+                fast_disk_has=lambda *args: calls.append(("fast", args)) or False,
+                get_disk_entry=lambda *args, **kwargs: calls.append(("db", args, kwargs)) or None,
+            )
+        )
+        self.assertEqual(calls, [("memory", "md", 7, "source.jpg:md:7")])
+
+        self.assertTrue(
+            thumbnail_jobs.has_cached_fast(
+                "md",
+                7,
+                memory_get_entry_fast=lambda size, image_id: None,
+                fast_disk_has=lambda size, image_id: (size, image_id) == ("md", 7),
+            )
+        )
+
+    def test_thumbnail_jobs_own_ensure_and_get_orchestration(self):
+        async def run_case():
+            calls = []
+            inflight = {}
+
+            async def run_thumbnail_job(
+                filepath,
+                size,
+                image_id,
+                executor,
+                include_smaller_tiers,
+                hot,
+                allow_stale_fallback,
+            ):
+                calls.append(
+                    (
+                        "run",
+                        filepath,
+                        size,
+                        image_id,
+                        executor,
+                        include_smaller_tiers,
+                        hot,
+                        allow_stale_fallback,
+                    )
+                )
+                await asyncio.sleep(0)
+                return b"generated"
+
+            generated = await thumbnail_jobs.ensure_thumbnail_with_executor(
+                "source.jpg",
+                "md",
+                7,
+                "executor",
+                note_activity=True,
+                include_smaller_tiers=False,
+                allow_stale_fallback=True,
+                note_user_activity=lambda: calls.append(("activity",)),
+                build_source_signature=lambda filepath, size, image_id: f"{filepath}:{size}:{image_id}",
+                memory_get=lambda *_args: None,
+                fast_disk_read_entry=lambda *_args: None,
+                read_disk_thumbnail=lambda *_args: None,
+                source_missing=lambda _filepath: False,
+                inflight=inflight,
+                run_thumbnail_job=run_thumbnail_job,
+            )
+
+            disk = await thumbnail_jobs.ensure_thumbnail_with_executor(
+                "source.jpg",
+                "md",
+                8,
+                "executor",
+                note_activity=False,
+                include_smaller_tiers=True,
+                allow_stale_fallback=False,
+                note_user_activity=lambda: calls.append(("unexpected-activity",)),
+                build_source_signature=lambda filepath, size, image_id: f"{filepath}:{size}:{image_id}",
+                memory_get=lambda *_args: None,
+                fast_disk_read_entry=lambda *args: ("path", b"disk") if args[2] == "source.jpg:md:8" else None,
+                read_disk_thumbnail=lambda *_args: None,
+                source_missing=lambda _filepath: False,
+                inflight=inflight,
+                run_thumbnail_job=run_thumbnail_job,
+            )
+
+            missing = await thumbnail_jobs.ensure_thumbnail_with_executor(
+                "missing.jpg",
+                "md",
+                9,
+                "executor",
+                note_activity=False,
+                include_smaller_tiers=False,
+                allow_stale_fallback=True,
+                note_user_activity=lambda: calls.append(("unexpected-activity",)),
+                build_source_signature=lambda filepath, size, image_id: f"{filepath}:{size}:{image_id}",
+                memory_get=lambda *_args: None,
+                fast_disk_read_entry=lambda *_args: None,
+                read_disk_thumbnail=lambda *_args: None,
+                source_missing=lambda _filepath: True,
+                inflight=inflight,
+                run_thumbnail_job=run_thumbnail_job,
+            )
+
+            via_get = await thumbnail_jobs.get_thumbnail(
+                "source.jpg",
+                "sm",
+                10,
+                executor="default-executor",
+                ensure_thumbnail_with_executor=lambda *args, **kwargs: (
+                    calls.append(("get", args, kwargs)) or asyncio.sleep(0, result=b"via-get")
+                ),
+            )
+
+            return generated, disk, missing, via_get, calls, inflight
+
+        generated, disk, missing, via_get, calls, inflight = asyncio.run(run_case())
+
+        self.assertEqual(generated, b"generated")
+        self.assertEqual(disk, b"disk")
+        self.assertEqual(missing, b"")
+        self.assertEqual(via_get, b"via-get")
+        self.assertEqual(inflight, {})
+        self.assertIn(("activity",), calls)
+        self.assertIn(("run", "source.jpg", "md", 7, "executor", False, True, True), calls)
+        get_calls = [call for call in calls if call[0] == "get"]
+        self.assertEqual(get_calls[0][1], ("source.jpg", "sm", 10, "default-executor"))
+        self.assertEqual(
+            get_calls[0][2],
+            {"note_activity": True, "include_smaller_tiers": False},
+        )
+
     def test_prefetch_jobs_owns_schedule_rules(self):
         async def run_case():
             scheduled = []

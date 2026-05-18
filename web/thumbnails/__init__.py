@@ -4,7 +4,6 @@ import sqlite3
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from functools import partial
 
 import resource_governor
 from data import connection as data_connection
@@ -828,18 +827,25 @@ def _generate_thumbnail_set_sync(
 
 
 def has_cached(size: str, filepath: str, image_id: int) -> bool:
-    source_signature = _build_source_signature(filepath, size, image_id)
-    if size in THUMB_TIERS and _memory_get(size, image_id, source_signature) is not None:
-        return True
-    # Fast check via in-memory index — avoids SQLite while still rejecting
-    # stale signatures and evicted files.
-    if fast_disk_has(size, image_id, source_signature):
-        return True
-    return _get_disk_entry(size, image_id, source_signature, touch=False) is not None
+    return thumbnail_jobs.has_cached(
+        size,
+        filepath,
+        image_id,
+        thumb_tiers=THUMB_TIERS,
+        build_source_signature=_build_source_signature,
+        memory_get=_memory_get,
+        fast_disk_has=fast_disk_has,
+        get_disk_entry=_get_disk_entry,
+    )
 
 
 def has_cached_fast(size: str, image_id: int) -> bool:
-    return _memory_get_entry_fast(size, image_id) is not None or fast_disk_has(size, image_id)
+    return thumbnail_jobs.has_cached_fast(
+        size,
+        image_id,
+        memory_get_entry_fast=_memory_get_entry_fast,
+        fast_disk_has=fast_disk_has,
+    )
 
 
 async def _run_thumbnail_job(
@@ -851,18 +857,15 @@ async def _run_thumbnail_job(
     hot: bool,
     allow_stale_fallback: bool,
 ):
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(
+    return await thumbnail_jobs.run_thumbnail_job(
+        filepath,
+        size,
+        image_id,
         executor,
-        partial(
-            _generate_missing_thumbnails_sync,
-            filepath,
-            size,
-            image_id,
-            include_smaller_tiers=include_smaller_tiers,
-            hot=hot,
-            allow_stale_fallback=allow_stale_fallback,
-        ),
+        include_smaller_tiers,
+        hot,
+        allow_stale_fallback,
+        generate_missing_thumbnails_sync=_generate_missing_thumbnails_sync,
     )
 
 
@@ -876,74 +879,33 @@ async def _ensure_thumbnail_with_executor(
     include_smaller_tiers: bool = False,
     allow_stale_fallback: bool = True,
 ) -> bytes:
-    if note_activity:
-        note_user_activity()
-
-    source_signature = _build_source_signature(filepath, size, image_id)
-    cached = _memory_get(size, image_id, source_signature)
-    if cached is not None:
-        return cached
-
-    # Try lock-free fast path via in-memory index before DB round-trip
-    disk_entry = fast_disk_read_entry(
-        size,
-        image_id,
-        None if allow_stale_fallback else source_signature,
-    )
-    if disk_entry is not None:
-        return disk_entry[1]
-
-    cached = _read_disk_thumbnail(size, image_id, source_signature)
-    if cached is not None:
-        return cached
-    if _source_missing(filepath):
-        return b""
-
-    inflight_key = ("thumb", image_id, source_signature)
-    task = _inflight.get(inflight_key)
-    if task is None:
-        task = asyncio.create_task(
-            _run_thumbnail_job(
-                filepath,
-                size,
-                image_id,
-                executor,
-                include_smaller_tiers,
-                note_activity,
-                allow_stale_fallback,
-            )
-        )
-        _inflight[inflight_key] = task
-
-    try:
-        generated = await task
-    finally:
-        if _inflight.get(inflight_key) is task and task.done():
-            _inflight.pop(inflight_key, None)
-    if generated:
-        return generated
-
-    cached = _memory_get(size, image_id, source_signature)
-    if cached is not None:
-        return cached
-    disk_entry = fast_disk_read_entry(
-        size,
-        image_id,
-        None if allow_stale_fallback else source_signature,
-    )
-    if disk_entry is not None:
-        return disk_entry[1]
-    return _read_disk_thumbnail(size, image_id, source_signature) or b""
-
-
-async def get_thumbnail(filepath: str, size: str, image_id: int) -> bytes:
-    return await _ensure_thumbnail_with_executor(
+    return await thumbnail_jobs.ensure_thumbnail_with_executor(
         filepath,
         size,
         image_id,
-        _executor,
-        note_activity=True,
-        include_smaller_tiers=False,
+        executor,
+        note_activity=note_activity,
+        include_smaller_tiers=include_smaller_tiers,
+        allow_stale_fallback=allow_stale_fallback,
+        note_user_activity=note_user_activity,
+        build_source_signature=_build_source_signature,
+        memory_get=_memory_get,
+        fast_disk_read_entry=fast_disk_read_entry,
+        read_disk_thumbnail=_read_disk_thumbnail,
+        source_missing=_source_missing,
+        inflight=_inflight,
+        run_thumbnail_job=_run_thumbnail_job,
+        create_task=asyncio.create_task,
+    )
+
+
+async def get_thumbnail(filepath: str, size: str, image_id: int) -> bytes:
+    return await thumbnail_jobs.get_thumbnail(
+        filepath,
+        size,
+        image_id,
+        executor=_executor,
+        ensure_thumbnail_with_executor=_ensure_thumbnail_with_executor,
     )
 
 
