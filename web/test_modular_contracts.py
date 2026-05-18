@@ -3875,6 +3875,8 @@ class ModularContractTests(unittest.TestCase):
             legacy_search_action_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "search_sort_bridge.js"), encoding="utf-8") as fh:
             legacy_search_sort_bridge = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "legacy", "ui_action_bridge.js"), encoding="utf-8") as fh:
+            legacy_ui_action_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "ui_runtime_bridge.js"), encoding="utf-8") as fh:
             legacy_ui_runtime_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "api.js"), encoding="utf-8") as fh:
@@ -4083,6 +4085,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from './mosaic_bridge.js';", legacy)
         self.assertIn("from './search_action_bridge.js';", legacy)
         self.assertIn("from './search_sort_bridge.js';", legacy)
+        self.assertIn("from './ui_action_bridge.js';", legacy)
         self.assertIn("from './ui_runtime_bridge.js';", legacy)
         self.assertIn("export function createLegacyUiRuntimeBridge", legacy_ui_runtime_bridge)
         self.assertIn("from '../query_state.js';", legacy_filter_query_bridge)
@@ -4166,7 +4169,9 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../people/controller.js';", legacy)
         self.assertIn("from '../settings/page.js';", legacy)
         self.assertIn("from '../settings/ui_settings.js';", legacy_ui_runtime_bridge)
-        self.assertIn("from '../ui.js';", legacy)
+        self.assertNotIn("from '../ui.js';", legacy)
+        self.assertIn("from '../ui.js';", legacy_ui_action_bridge)
+        self.assertIn("export function createLegacyUiActionBridge", legacy_ui_action_bridge)
         self.assertIn("from '../ui.js';", legacy_ui_runtime_bridge)
         self.assertIn("from '../warmup.js';", legacy)
         self.assertIn("from '../warmup_neighbors.js';", legacy)
@@ -5547,6 +5552,65 @@ assert.equal(rankingsSort, 'similarity');
 bridge.updateSearchControls();
 bridge.updateCompareSearchIndicator();
 assert.equal(bottomBarCalls, 0);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_legacy_ui_action_bridge_node_probe_preserves_ui_facade(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createLegacyUiActionBridge } from './static/js/legacy/ui_action_bridge.js';
+
+const events = [];
+const beforeShowToast = () => events.push('before-toast');
+const bridge = createLegacyUiActionBridge({
+    beforeShowToast,
+    formatBytesImpl: (value) => {
+        events.push(['format', value]);
+        return `${value} B`;
+    },
+    hideConfirmModalImpl: () => { events.push('hide-confirm'); },
+    hideShortcutsImpl: () => { events.push('hide-shortcuts'); },
+    initShortcutOverlayImpl: () => { events.push('init-shortcuts'); },
+    showConfirmModalImpl: (title, text, onConfirm) => {
+        events.push(['confirm', title, text, typeof onConfirm]);
+        onConfirm();
+        return 'confirmed';
+    },
+    showShortcutsImpl: () => { events.push('show-shortcuts'); },
+    showToastImpl: (message, options) => {
+        events.push(['toast', message, options.beforeShow === beforeShowToast]);
+        options.beforeShow();
+        return 'shown';
+    },
+});
+
+assert.equal(bridge.formatBytes(42), '42 B');
+assert.equal(bridge.showToast('Saved'), 'shown');
+assert.equal(bridge.showConfirmModal('Title', 'Body', () => events.push('confirmed-callback')), 'confirmed');
+assert.equal(bridge.hideConfirmModal(), undefined);
+assert.equal(bridge.showShortcuts(), undefined);
+assert.equal(bridge.hideShortcuts(), undefined);
+assert.equal(bridge.initShortcutOverlay(), undefined);
+
+assert.deepEqual(events, [
+    ['format', 42],
+    ['toast', 'Saved', true],
+    'before-toast',
+    ['confirm', 'Title', 'Body', 'function'],
+    'confirmed-callback',
+    'hide-confirm',
+    'show-shortcuts',
+    'hide-shortcuts',
+    'init-shortcuts',
+]);
 """
         subprocess.run(
             ["node", "--input-type=module", "-e", script],

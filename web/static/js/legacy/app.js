@@ -1,12 +1,3 @@
-import {
-    formatBytes,
-    hideConfirmModal as hideConfirmModalUi,
-    hideShortcuts as hideShortcutsUi,
-    initShortcutOverlay,
-    showConfirmModal as showConfirmModalUi,
-    showShortcuts as showShortcutsUi,
-    showToast as showToastUi,
-} from '../ui.js';
 import { fetchJson } from '../api.js';
 import { toggleAIPanel } from '../ai/status.js';
 import {
@@ -73,6 +64,7 @@ import { createLegacyMosaicBridge } from './mosaic_bridge.js';
 import { createLegacyPublicApi } from './public_api.js';
 import { createLegacySearchActionBridge } from './search_action_bridge.js';
 import { createLegacySearchSortBridge } from './search_sort_bridge.js';
+import { createLegacyUiActionBridge } from './ui_action_bridge.js';
 import { createLegacyUiRuntimeBridge } from './ui_runtime_bridge.js';
 
 const legacyPhotoArchive = (() => {
@@ -161,6 +153,10 @@ const legacyPhotoArchive = (() => {
         startAIStatusPolling,
         updateBottomBarHeightVar,
     } = uiRuntimeBridge;
+    const uiActionBridge = createLegacyUiActionBridge({
+        beforeShowToast: updateBottomBarHeightVar,
+    });
+    const { formatBytes } = uiActionBridge;
 
     // ==================== MOSAIC RANKING MODE ====================
 
@@ -265,15 +261,15 @@ const legacyPhotoArchive = (() => {
     }
 
     function showToast(msg) {
-        showToastUi(msg, { beforeShow: updateBottomBarHeightVar });
+        return uiActionBridge.showToast(msg);
     }
 
     function showConfirmModal(title, text, onConfirm) {
-        showConfirmModalUi(title, text, onConfirm);
+        return uiActionBridge.showConfirmModal(title, text, onConfirm);
     }
 
     function hideConfirmModal() {
-        hideConfirmModalUi();
+        return uiActionBridge.hideConfirmModal();
     }
 
     const compareModeController = createCompareModeController({
@@ -1131,14 +1127,14 @@ const legacyPhotoArchive = (() => {
     const preloadImage = createImagePreloader({ limit: 240, concurrency: 8 });
 
     function showShortcuts() {
-        showShortcutsUi();
+        return uiActionBridge.showShortcuts();
     }
 
     function hideShortcuts() {
-        hideShortcutsUi();
+        return uiActionBridge.hideShortcuts();
     }
 
-    initShortcutOverlay();
+    uiActionBridge.initShortcutOverlay();
 
     // ==================== PUBLIC API ====================
 
