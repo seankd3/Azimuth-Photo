@@ -3863,6 +3863,8 @@ class ModularContractTests(unittest.TestCase):
             legacy_library_shell_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "library_init_bridge.js"), encoding="utf-8") as fh:
             legacy_library_init_bridge = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "legacy", "library_map_bridge.js"), encoding="utf-8") as fh:
+            legacy_library_map_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "loupe_bridge.js"), encoding="utf-8") as fh:
             legacy_loupe_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "mosaic_bridge.js"), encoding="utf-8") as fh:
@@ -4070,6 +4072,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from './filter_query_bridge.js';", legacy)
         self.assertIn("from './flag_bridge.js';", legacy)
         self.assertIn("from './library_init_bridge.js';", legacy)
+        self.assertIn("from './library_map_bridge.js';", legacy)
         self.assertIn("from './library_shell_bridge.js';", legacy)
         self.assertIn("from './loupe_bridge.js';", legacy)
         self.assertIn("from './mosaic_bridge.js';", legacy)
@@ -4148,7 +4151,9 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../library/keyboard.js';", legacy_library_init_bridge)
         self.assertIn("export function createLegacyLibraryInitBridge", legacy_library_init_bridge)
         self.assertNotIn("from '../library/navigation.js';", legacy)
-        self.assertIn("from '../library/map_controller.js';", legacy)
+        self.assertNotIn("from '../library/map_controller.js';", legacy)
+        self.assertIn("from '../library/map_controller.js';", legacy_library_map_bridge)
+        self.assertIn("export function createLegacyLibraryMapBridge", legacy_library_map_bridge)
         self.assertIn("from '../library/filters.js';", legacy_filter_query_bridge)
         self.assertIn("export function createLegacyFilterQueryBridge", legacy_filter_query_bridge)
         self.assertIn("createLibraryFilterController", legacy)
@@ -10964,6 +10969,109 @@ assert.equal(scrollRoot.classList.contains('map-active'), false);
 assert.equal(nodes['rankings-grid'].classList.contains('hidden'), false);
 assert.equal(nodes['map-container'].classList.contains('hidden'), true);
 assert.equal(scrollRoot.scrollTop, 12);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_legacy_library_map_bridge_node_probe_preserves_map_facade(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createLegacyLibraryMapBridge } from './static/js/legacy/library_map_bridge.js';
+
+const events = [];
+let view = 'grid';
+const documentImpl = { id: 'doc' };
+const windowImpl = { id: 'win' };
+const fetchImpl = () => {};
+const consoleImpl = { error: () => {} };
+const clearWarmups = () => events.push('clear');
+const clearBatchSelection = () => events.push('batch-clear');
+const currentFilterState = () => ({ flag: 'picked' });
+const currentQueryState = () => ({ q: 'lake' });
+const images = [{ id: 7 }];
+const getLibraryImages = () => images;
+const libraryScrollRoot = () => ({ id: 'scroll' });
+const openLightbox = (image) => events.push(['open', image.id]);
+const openStandaloneLightbox = (image) => events.push(['standalone', image.id]);
+const showToast = (message) => events.push(['toast', message]);
+const syncDateScrubberVisibility = () => events.push('sync');
+
+const bridge = createLegacyLibraryMapBridge({
+    documentImpl,
+    windowImpl,
+    fetchImpl,
+    consoleImpl,
+    clearWarmups,
+    clearBatchSelection,
+    currentFilterState,
+    currentQueryState,
+    getLibraryImages,
+    libraryScrollRoot,
+    openLightbox,
+    openStandaloneLightbox,
+    showToast,
+    syncDateScrubberVisibility,
+    createLibraryMapControllerImpl: (options) => {
+        assert.equal(options.documentImpl, documentImpl);
+        assert.equal(options.windowImpl, windowImpl);
+        assert.equal(options.fetchImpl, fetchImpl);
+        assert.equal(options.consoleImpl, consoleImpl);
+        assert.equal(options.clearWarmups, clearWarmups);
+        assert.equal(options.clearBatchSelection, clearBatchSelection);
+        assert.equal(options.currentFilterState, currentFilterState);
+        assert.equal(options.currentQueryState, currentQueryState);
+        assert.equal(options.getLibraryImages, getLibraryImages);
+        assert.equal(options.libraryScrollRoot, libraryScrollRoot);
+        assert.equal(options.openLightbox, openLightbox);
+        assert.equal(options.openStandaloneLightbox, openStandaloneLightbox);
+        assert.equal(options.showToast, showToast);
+        assert.equal(options.syncDateScrubberVisibility, syncDateScrubberVisibility);
+        events.push(['init', options.getLibraryImages().map((image) => image.id)]);
+        return {
+            getLibraryView: () => {
+                events.push(['get-view', view]);
+                return view;
+            },
+            setLibraryView: (mode) => {
+                view = mode;
+                events.push(['set-view', mode]);
+                return 'set';
+            },
+            loadMap: () => {
+                events.push('load');
+                return Promise.resolve('loaded');
+            },
+            openLightboxById: (id) => {
+                events.push(['open-id', id]);
+                return id === 7;
+            },
+        };
+    },
+});
+
+assert.equal(bridge.currentLibraryView(), 'grid');
+assert.equal(bridge.setLibraryView('map'), 'set');
+assert.equal(bridge.currentLibraryView(), 'map');
+assert.equal(await bridge.loadMap(), 'loaded');
+assert.equal(bridge.openLightboxById(7), true);
+assert.equal(bridge.openLightboxById(99), false);
+
+assert.deepEqual(events, [
+    ['init', [7]],
+    ['get-view', 'grid'],
+    ['set-view', 'map'],
+    ['get-view', 'map'],
+    'load',
+    ['open-id', 7],
+    ['open-id', 99],
+]);
 """
         subprocess.run(
             ["node", "--input-type=module", "-e", script],

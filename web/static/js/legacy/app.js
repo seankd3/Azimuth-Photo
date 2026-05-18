@@ -44,7 +44,6 @@ import {
 import { createLibrarySortController } from '../library/sort_controller.js';
 import { eloToStars } from '../library/display.js';
 import { appendLibraryRankCards } from '../library/rank_cards.js';
-import { createLibraryMapController } from '../library/map_controller.js';
 import {
     formatDateTime,
     imageAspectRatio,
@@ -69,6 +68,7 @@ import {
     createLegacyLibraryShellBridge,
 } from './library_shell_bridge.js';
 import { createLegacyLibraryInitBridge } from './library_init_bridge.js';
+import { createLegacyLibraryMapBridge } from './library_map_bridge.js';
 import { createLegacyLoupeBridge } from './loupe_bridge.js';
 import { createLegacyMosaicBridge } from './mosaic_bridge.js';
 import { createLegacyPublicApi } from './public_api.js';
@@ -481,6 +481,7 @@ const legacyPhotoArchive = (() => {
     let pendingScrollRestoreOffset = 0;
     let thumbHeight = 220;
     let libraryImages = [];
+    let libraryMapBridge;
     const filterQueryBridge = createLegacyFilterQueryBridge({
         documentImpl: document,
         storage: sessionStorage,
@@ -993,7 +994,7 @@ const legacyPhotoArchive = (() => {
 
     // ==================== MAP VIEW ====================
 
-    const mapController = createLibraryMapController({
+    libraryMapBridge = createLegacyLibraryMapBridge({
         clearWarmups,
         clearBatchSelection,
         currentFilterState,
@@ -1007,19 +1008,19 @@ const legacyPhotoArchive = (() => {
     });
 
     function currentLibraryView() {
-        return mapController.getLibraryView();
+        return libraryMapBridge.currentLibraryView();
     }
 
     function setLibraryView(mode) {
-        return mapController.setLibraryView(mode);
+        return libraryMapBridge.setLibraryView(mode);
     }
 
     function loadMap() {
-        return mapController.loadMap();
+        return libraryMapBridge.loadMap();
     }
 
     function openLightboxById(id) {
-        return mapController.openLightboxById(id);
+        return libraryMapBridge.openLightboxById(id);
     }
 
     const libraryInitBridge = createLegacyLibraryInitBridge({
