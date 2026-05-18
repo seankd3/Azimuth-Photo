@@ -7,6 +7,9 @@ the cache-busting query string into this folder and imports `bootstrap.js`.
 During migration it imports `legacy/app.js`, which contains the old no-build
 frontend monolith behind compatibility wrappers. `legacy/public_api.js` owns the
 exported compatibility method table that backs `window.PhotoArchive.*`.
+`legacy/filter_query_bridge.js` owns the legacy filter/query state bridge that
+connects Library, Mosaic, and Compare URL construction to the extracted filter
+and query modules.
 
 `ui.js` owns shared toast, confirm-modal, shortcut overlay, bottom-bar
 measurement, visibility-refresh wiring, visual-row navigation math, formatting,
@@ -22,7 +25,8 @@ state.
 `legacy/app.js`. `query_state.js` owns pure filter-state normalization, URL
 parameter helpers, Library URL-state syncing, and filter-neighbor state generation.
 `query_controller.js` owns the state adapter for current query state plus
-Library, Mosaic, and Compare URL construction while legacy keeps mutable page state. `media_status.js` owns media-status cache, inflight
+Library, Mosaic, and Compare URL construction while the legacy bridge keeps the
+mutable filter state. `media_status.js` owns media-status cache, inflight
 request coordination, and warm-tier invalidation callbacks. `media_metadata.js` owns shared media date, camera,
 resolution, and title formatting helpers. `filters.js` owns shared filter-state
 summary helpers, metadata filter controls, lazy filter-option/folder-list

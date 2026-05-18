@@ -3843,6 +3843,8 @@ class ModularContractTests(unittest.TestCase):
             bootstrap = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "app.js"), encoding="utf-8") as fh:
             legacy = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "legacy", "filter_query_bridge.js"), encoding="utf-8") as fh:
+            legacy_filter_query_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "api.js"), encoding="utf-8") as fh:
             api_module = fh.read()
         with open(os.path.join(base_dir, "static", "js", "ai", "status.js"), encoding="utf-8") as fh:
@@ -4031,9 +4033,10 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../ai/poller.js';", legacy)
         self.assertIn("from '../catalog/home_scan.js';", legacy)
         self.assertIn("from '../catalog/scan_entrypoint.js';", legacy)
-        self.assertIn("from '../query_state.js';", legacy)
-        self.assertIn("from '../query_controller.js';", legacy)
-        self.assertIn("from '../filters.js';", legacy)
+        self.assertIn("from './filter_query_bridge.js';", legacy)
+        self.assertIn("from '../query_state.js';", legacy_filter_query_bridge)
+        self.assertIn("from '../query_controller.js';", legacy_filter_query_bridge)
+        self.assertIn("from '../filters.js';", legacy_filter_query_bridge)
         self.assertIn("from '../media_status.js';", legacy)
         self.assertIn("from '../media_metadata.js';", legacy)
         self.assertIn("from '../thumbnail_size.js';", legacy)
@@ -4071,7 +4074,8 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../library/date_scrubber.js';", legacy)
         self.assertIn("from '../library/navigation.js';", legacy)
         self.assertIn("from '../library/map_controller.js';", legacy)
-        self.assertIn("from '../library/filters.js';", legacy)
+        self.assertIn("from '../library/filters.js';", legacy_filter_query_bridge)
+        self.assertIn("export function createLegacyFilterQueryBridge", legacy_filter_query_bridge)
         self.assertIn("createLibraryFilterController", legacy)
         self.assertIn("from '../search/query.js';", legacy)
         self.assertIn("from '../people/controller.js';", legacy)
@@ -5094,6 +5098,107 @@ assert.deepEqual(
     controller.buildFilterNeighborStates().filter((state) => state.orientation === ''),
     [{ orientation: '', compared: '', rating: '', folder: '', flag: '', taken: '', fileType: '', camera: '', lens: '', people: '42' }],
 );
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_legacy_filter_query_bridge_node_probe_preserves_state_storage_and_urls(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createLegacyFilterQueryBridge } from './static/js/legacy/filter_query_bridge.js';
+
+const storage = {
+    items: new Map(),
+    getItem(key) {
+        return this.items.has(key) ? this.items.get(key) : null;
+    },
+    setItem(key, value) {
+        this.items.set(key, String(value));
+    },
+    removeItem(key) {
+        this.items.delete(key);
+    },
+};
+const documentImpl = {
+    querySelectorAll() {
+        return [];
+    },
+    getElementById() {
+        return null;
+    },
+};
+let searchQuery = 'golden hour';
+let deepSearchRequested = true;
+let sortField = 'date_taken';
+let sortDesc = false;
+let rankingsSort = 'date_taken_asc';
+let mosaicStrategy = 'diverse';
+let gridElo = 1212;
+
+const bridge = createLegacyFilterQueryBridge({
+    documentImpl,
+    storage,
+    locationImpl: {
+        search: '?orientation=portrait&min_stars=4&folder=%2FTrips&people=42',
+    },
+    getSearchQuery: () => searchQuery,
+    getDeepSearchRequested: () => deepSearchRequested,
+    getSortField: () => sortField,
+    getSortDesc: () => sortDesc,
+    getRankingsSort: () => rankingsSort,
+    getMosaicStrategy: () => mosaicStrategy,
+    getMosaicGridElo: () => gridElo,
+    libraryNeighborLimit: 24,
+    mosaicNeighborLimit: 8,
+    compareNeighborPairs: 4,
+});
+
+const restored = bridge.restoreFilters();
+assert.equal(restored.orientation, 'portrait');
+assert.equal(restored.rating, 4);
+assert.equal(restored.folder, '/Trips');
+assert.equal(restored.people, '42');
+assert.equal(bridge.activeMetadataFilterCount(), 0);
+assert.equal(bridge.hasActiveLibraryFilters(), true);
+assert.equal(bridge.filterParams(), '&orientation=portrait&min_stars=4&folder=%2FTrips&people=42');
+
+const rankingsUrl = new URL(bridge.buildRankingsUrl({ offset: 12 }), 'http://local');
+assert.equal(rankingsUrl.pathname, '/api/rankings');
+assert.equal(rankingsUrl.searchParams.get('limit'), '24');
+assert.equal(rankingsUrl.searchParams.get('offset'), '12');
+assert.equal(rankingsUrl.searchParams.get('q'), 'golden hour');
+assert.equal(rankingsUrl.searchParams.get('deep'), '1');
+assert.equal(rankingsUrl.searchParams.get('people'), '42');
+
+const mosaicUrl = new URL(bridge.buildMosaicUrl({ n: 12, exclude: '7,8' }), 'http://local');
+assert.equal(mosaicUrl.pathname, '/api/mosaic/next');
+assert.equal(mosaicUrl.searchParams.get('strategy'), 'diverse');
+assert.equal(mosaicUrl.searchParams.get('grid_elo'), '1212');
+assert.equal(mosaicUrl.searchParams.get('exclude'), '7,8');
+
+const compareUrl = new URL(bridge.buildCompareUrl('topn'), 'http://local');
+assert.equal(compareUrl.pathname, '/api/compare/next');
+assert.equal(compareUrl.searchParams.get('mode'), 'topn');
+assert.equal(compareUrl.searchParams.get('n'), '4');
+
+bridge.saveFilters();
+assert.deepEqual(JSON.parse(storage.getItem('pa_filters')), bridge.currentFilterState());
+
+bridge.setFilters({ flag: 'picked' });
+searchQuery = '';
+deepSearchRequested = false;
+sortField = 'elo';
+sortDesc = true;
+assert.equal(bridge.currentSearchMode(), 'library');
+assert.equal(bridge.filterQueryString(), 'flag=picked');
+assert.equal(bridge.hasActiveLibraryFilters(), true);
 """
         subprocess.run(
             ["node", "--input-type=module", "-e", script],

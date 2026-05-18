@@ -13,8 +13,8 @@ export function hasActiveFilters(state = {}) {
 }
 
 
-export function updateMetadataFilterButton({ filters = {} } = {}) {
-    const btn = document.getElementById('metadata-filter-btn');
+export function updateMetadataFilterButton({ filters = {}, documentImpl = globalThis.document } = {}) {
+    const btn = documentImpl?.getElementById('metadata-filter-btn');
     if (!btn) return;
     const count = activeMetadataFilterCount(filters);
     btn.textContent = count ? `Metadata (${count})` : 'Metadata';

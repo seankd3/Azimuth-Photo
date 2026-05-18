@@ -18,26 +18,9 @@ import { toggleAIPanel } from '../ai/status.js';
 import { createHomeScanController } from '../catalog/home_scan.js';
 import { createScanEntrypoint } from '../catalog/scan_entrypoint.js';
 import {
-    EMPTY_FILTERS as EMPTY_FILTERS_CORE,
-    normalizeFilterState as normalizeFilterStateCore,
-    syncLibraryUrlState as syncLibraryUrlStateCore,
-} from '../query_state.js';
-import { createQueryController } from '../query_controller.js';
-import {
     COMPARE_NEIGHBOR_PAIRS,
     MOSAIC_NEIGHBOR_LIMIT,
 } from '../compare/query.js';
-import {
-    activeMetadataFilterCount as activeMetadataFilterCountCore,
-    hasActiveFilters,
-    updateMetadataFilterButton as updateMetadataFilterButtonCore,
-} from '../filters.js';
-import {
-    FILTER_STORAGE_KEY,
-    applyFilterUiState as applyFilterUiStateCore,
-    restoreFilters as restoreFiltersCore,
-    saveFilters as saveFiltersCore,
-} from '../library/filters.js';
 import { createLibraryFilterController } from '../library/filter_controller.js';
 import {
     createMediaStatusClient,
@@ -177,6 +160,7 @@ import { createFindSimilarAction } from '../library/similar.js';
 import { createPeopleApi } from '../people/controller.js';
 import { createSettingsPageController } from '../settings/page.js';
 import { createUiSettingsLoader } from '../settings/ui_settings.js';
+import { createLegacyFilterQueryBridge } from './filter_query_bridge.js';
 import { createLegacyPublicApi } from './public_api.js';
 
 const legacyPhotoArchive = (() => {
@@ -644,59 +628,10 @@ const legacyPhotoArchive = (() => {
     let pendingScrollRestoreOffset = 0;
     let thumbHeight = 220;
     let libraryImages = [];
-    const EMPTY_FILTERS = { ...EMPTY_FILTERS_CORE };
-    let filters = { ...EMPTY_FILTERS };
-
-    function setCurrentFilters(nextFilters) {
-        filters = normalizeFilterState(nextFilters);
-        return filters;
-    }
-
-    function saveFilters() {
-        return saveFiltersCore({
-            getFilters: currentFilterState,
-            storage: sessionStorage,
-            storageKey: FILTER_STORAGE_KEY,
-            syncLibraryUrlState,
-        });
-    }
-
-    function restoreFilters() {
-        return restoreFiltersCore({
-            storage: sessionStorage,
-            storageKey: FILTER_STORAGE_KEY,
-            location: window.location,
-            setFilters: setCurrentFilters,
-            applyFilterUiState,
-        });
-    }
-
-    function applyFilterUiState(state = filters) {
-        return applyFilterUiStateCore({
-            filters: state,
-            document,
-            updateMetadataFilterButton,
-        });
-    }
-
-    function activeMetadataFilterCount() {
-        return activeMetadataFilterCountCore(filters);
-    }
-
-    function updateMetadataFilterButton() {
-        updateMetadataFilterButtonCore({ filters });
-    }
-
-    function normalizeFilterState(state = {}) {
-        return normalizeFilterStateCore(state);
-    }
-
-    function currentFilterState() {
-        return normalizeFilterState(filters);
-    }
-
-    const queryController = createQueryController({
-        getFilters: currentFilterState,
+    const filterQueryBridge = createLegacyFilterQueryBridge({
+        documentImpl: document,
+        storage: sessionStorage,
+        locationImpl: window.location,
         getSearchQuery: () => searchQuery,
         getDeepSearchRequested: () => deepSearchRequested,
         getSortField: () => sortField,
@@ -708,33 +643,74 @@ const legacyPhotoArchive = (() => {
         mosaicNeighborLimit: MOSAIC_NEIGHBOR_LIMIT,
         compareNeighborPairs: COMPARE_NEIGHBOR_PAIRS,
     });
+    const {
+        EMPTY_FILTERS,
+        getFilters,
+        setFilters,
+    } = filterQueryBridge;
+
+    function activeMetadataFilterCount() {
+        return filterQueryBridge.activeMetadataFilterCount();
+    }
+
+    function applyFilterUiState(...args) {
+        return filterQueryBridge.applyFilterUiState(...args);
+    }
+
+    function buildCompareUrl(...args) {
+        return filterQueryBridge.buildCompareUrl(...args);
+    }
+
+    function buildFilterNeighborStates(...args) {
+        return filterQueryBridge.buildFilterNeighborStates(...args);
+    }
+
+    function buildMosaicUrl(...args) {
+        return filterQueryBridge.buildMosaicUrl(...args);
+    }
+
+    function buildRankingsUrl(...args) {
+        return filterQueryBridge.buildRankingsUrl(...args);
+    }
+
+    function currentFilterState() {
+        return filterQueryBridge.currentFilterState();
+    }
+
+    function currentQueryState(...args) {
+        return filterQueryBridge.currentQueryState(...args);
+    }
+
+    function currentSearchMode() {
+        return filterQueryBridge.currentSearchMode();
+    }
+
+    function filterParams(...args) {
+        return filterQueryBridge.filterParams(...args);
+    }
+
+    function filterQueryString(...args) {
+        return filterQueryBridge.filterQueryString(...args);
+    }
+
+    function hasActiveLibraryFilters() {
+        return filterQueryBridge.hasActiveLibraryFilters();
+    }
+
+    function restoreFilters() {
+        return filterQueryBridge.restoreFilters();
+    }
+
+    function saveFilters() {
+        return filterQueryBridge.saveFilters();
+    }
 
     function syncLibraryUrlState() {
-        syncLibraryUrlStateCore({ filters: currentFilterState(), sortField, sortDesc });
+        return filterQueryBridge.syncLibraryUrlState();
     }
 
-    function filterParams(state = currentQueryState()) {
-        return queryController.filterParams(state);
-    }
-
-    function filterQueryString(state = currentQueryState()) {
-        return queryController.filterQueryString(state);
-    }
-
-    function buildFilterNeighborStates(baseState = currentFilterState()) {
-        return queryController.buildFilterNeighborStates(baseState);
-    }
-
-    function buildRankingsUrl(options = {}) {
-        return queryController.buildRankingsUrl(options);
-    }
-
-    function buildMosaicUrl(options = {}) {
-        return queryController.buildMosaicUrl(options);
-    }
-
-    function buildCompareUrl(mode, n = COMPARE_NEIGHBOR_PAIRS, queryState = currentQueryState()) {
-        return queryController.buildCompareUrl(mode, n, queryState);
+    function updateMetadataFilterButton() {
+        return filterQueryBridge.updateMetadataFilterButton();
     }
 
     function currentLibraryPageSize() {
@@ -753,10 +729,6 @@ const legacyPhotoArchive = (() => {
         selectedLibraryIndex = -1;
         hideLibraryEmptyState();
         if (clearBatch) clearBatchSelection();
-    }
-
-    function hasActiveLibraryFilters() {
-        return hasActiveFilters(currentFilterState());
     }
 
     function hideLibraryEmptyState() {
@@ -867,14 +839,6 @@ const legacyPhotoArchive = (() => {
 
     function hasActiveTextSearch(value = searchQuery) {
         return hasActiveTextSearchCore(value);
-    }
-
-    function currentSearchMode() {
-        return queryController.currentSearchMode();
-    }
-
-    function currentQueryState(overrides = {}) {
-        return queryController.currentQueryState(overrides);
     }
 
     function applySortState(field, desc, { persist = true, persistSearch = true } = {}) {
@@ -991,7 +955,7 @@ const legacyPhotoArchive = (() => {
         offset = 0,
         sort = queryState.sort,
     } = {}) {
-        return queryController.rankingQueryString({ queryState, limit, offset, sort });
+        return filterQueryBridge.rankingQueryString({ queryState, limit, offset, sort });
     }
 
     function initSearchInputControls() {
@@ -1444,8 +1408,8 @@ const legacyPhotoArchive = (() => {
 
     const libraryFilterController = createLibraryFilterController({
         emptyFilters: EMPTY_FILTERS,
-        getFilters: () => filters,
-        setFilters: (nextFilters) => { filters = nextFilters; },
+        getFilters,
+        setFilters,
         clearWarmups,
         resetLibraryResults,
         loadRankings,
