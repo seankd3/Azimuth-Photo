@@ -44,10 +44,6 @@ import {
 } from '../compare/navigation.js';
 import { createCompareKeyboardHandler } from '../compare/keyboard.js';
 import {
-    createCompareImageController,
-} from '../compare/image_controller.js';
-import { createComparePairController } from '../compare/pair_controller.js';
-import {
     showCompareEmpty as showCompareEmptyCore,
 } from '../compare/view.js';
 import { createCompareModeController } from '../compare/mode_controller.js';
@@ -72,6 +68,7 @@ import { createFindSimilarAction } from '../library/similar.js';
 import { createPeopleApi } from '../people/controller.js';
 import { createSettingsPageController } from '../settings/page.js';
 import { createLegacyBatchBridge } from './batch_bridge.js';
+import { createLegacyCompareDisplayBridge } from './compare_display_bridge.js';
 import { createLegacyCompareFlowBridge } from './compare_flow_bridge.js';
 import { createLegacyDateScrubberBridge } from './date_scrubber_bridge.js';
 import { createLegacyExportBridge } from './export_bridge.js';
@@ -355,7 +352,8 @@ const legacyPhotoArchive = (() => {
 
     // ==================== COMPARE MODE ====================
 
-    const comparePairController = createComparePairController({
+    const compareDisplayBridge = createLegacyCompareDisplayBridge({
+        displayedTiers: compareDisplayedTier,
         getCompareMode: () => compareMode,
         getCompareIndex: () => compareIndex,
         setCompareIndex: (index) => { compareIndex = index; },
@@ -375,38 +373,33 @@ const legacyPhotoArchive = (() => {
         scheduleCompareNeighborWarmup,
         scheduleCrossViewWarmup,
         showCompareEmpty,
-    });
-
-    async function fetchComparePairs() {
-        return comparePairController.fetchComparePairs();
-    }
-
-    function showComparePair() {
-        return comparePairController.showComparePair();
-    }
-
-    function isCurrentCompareImage(token) {
-        return comparePairController.isCurrentCompareImage(token);
-    }
-
-    const compareImageController = createCompareImageController({
-        displayedTiers: compareDisplayedTier,
         getMediaStatus,
-        isCurrentCompareImage,
         loadImageProbe,
         loupeTierUrl,
     });
 
+    function showComparePair() {
+        return compareDisplayBridge.showComparePair();
+    }
+
+    function isCurrentCompareImage(token) {
+        return compareDisplayBridge.isCurrentCompareImage(token);
+    }
+
     function renderCompareImage(img, imgEl, side, token) {
-        return compareImageController.renderCompareImage(img, imgEl, side, token);
+        return compareDisplayBridge.renderCompareImage(img, imgEl, side, token);
     }
 
     async function upgradeCompareImage(img, imgEl, side, token) {
-        return compareImageController.upgradeCompareImage(img, imgEl, side, token);
+        return compareDisplayBridge.upgradeCompareImage(img, imgEl, side, token);
     }
 
     async function adoptCompareTier(img, imgEl, side, tier, cachedOnly, token, timeoutMs) {
-        return compareImageController.adoptCompareTier(img, imgEl, side, tier, cachedOnly, token, timeoutMs);
+        return compareDisplayBridge.adoptCompareTier(img, imgEl, side, tier, cachedOnly, token, timeoutMs);
+    }
+
+    async function fetchComparePairs() {
+        return compareDisplayBridge.fetchComparePairs();
     }
 
     const compareFlowBridge = createLegacyCompareFlowBridge({

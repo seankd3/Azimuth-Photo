@@ -3845,6 +3845,8 @@ class ModularContractTests(unittest.TestCase):
             legacy = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "batch_bridge.js"), encoding="utf-8") as fh:
             legacy_batch_bridge = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "legacy", "compare_display_bridge.js"), encoding="utf-8") as fh:
+            legacy_compare_display_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "compare_flow_bridge.js"), encoding="utf-8") as fh:
             legacy_compare_flow_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "date_scrubber_bridge.js"), encoding="utf-8") as fh:
@@ -4056,6 +4058,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../catalog/home_scan.js';", legacy)
         self.assertIn("from '../catalog/scan_entrypoint.js';", legacy)
         self.assertIn("from './batch_bridge.js';", legacy)
+        self.assertIn("from './compare_display_bridge.js';", legacy)
         self.assertIn("from './compare_flow_bridge.js';", legacy)
         self.assertIn("from './date_scrubber_bridge.js';", legacy)
         self.assertIn("from './export_bridge.js';", legacy)
@@ -4075,8 +4078,11 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../media_metadata.js';", legacy)
         self.assertIn("from '../thumbnail_size.js';", legacy)
         self.assertIn("from '../compare/navigation.js';", legacy)
-        self.assertIn("from '../compare/image_controller.js';", legacy)
-        self.assertIn("from '../compare/pair_controller.js';", legacy)
+        self.assertNotIn("from '../compare/image_controller.js';", legacy)
+        self.assertIn("from '../compare/image_controller.js';", legacy_compare_display_bridge)
+        self.assertNotIn("from '../compare/pair_controller.js';", legacy)
+        self.assertIn("from '../compare/pair_controller.js';", legacy_compare_display_bridge)
+        self.assertIn("export function createLegacyCompareDisplayBridge", legacy_compare_display_bridge)
         self.assertIn("from '../compare/view.js';", legacy)
         self.assertIn("from '../compare/mode_controller.js';", legacy)
         self.assertNotIn("from '../compare/action_controller.js';", legacy)
@@ -7930,6 +7936,155 @@ assert.deepEqual(events, [
     ['undo'],
     ['undo-inc', 1],
     ['toast', 'undone'],
+]);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_legacy_compare_display_bridge_node_probe_preserves_pair_and_image_glue(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createLegacyCompareDisplayBridge } from './static/js/legacy/compare_display_bridge.js';
+
+const events = [];
+const displayedTiers = { left: -1, right: -1 };
+let compareMode = 'swiss';
+let compareIndex = 0;
+let comparePairs = [];
+let compareStats = {};
+let compareImageToken = 0;
+const documentImpl = {
+    getElementById(id) {
+        events.push(['get', id]);
+        return { id };
+    },
+};
+
+const bridge = createLegacyCompareDisplayBridge({
+    displayedTiers,
+    getCompareMode: () => compareMode,
+    getCompareIndex: () => compareIndex,
+    setCompareIndex: (index) => {
+        compareIndex = index;
+        events.push(['index', index]);
+    },
+    getComparePairs: () => comparePairs,
+    setComparePairs: (pairs) => {
+        comparePairs = pairs;
+        events.push(['pairs', pairs.length]);
+    },
+    setCompareStats: (stats) => {
+        compareStats = stats;
+        events.push(['stats', stats.ready]);
+    },
+    incrementCompareImageToken: () => {
+        compareImageToken += 1;
+        events.push(['token', compareImageToken]);
+        return compareImageToken;
+    },
+    getCompareImageToken: () => compareImageToken,
+    buildCompareUrl: (mode, count) => {
+        events.push(['url', mode, count]);
+        return `/api/compare/${mode}/${count}`;
+    },
+    takeWarmCache: (key) => {
+        events.push(['warm', key]);
+        return null;
+    },
+    fetchWarmJson: async (url) => {
+        events.push(['fetch', url]);
+        return {
+            stats: { ready: true },
+            pairs: [{ left: { id: 1 }, right: { id: 2 } }],
+        };
+    },
+    preloadImage: (url) => events.push(['preload', url]),
+    primeMediaStatuses: (ids) => events.push(['prime', ids]),
+    warmImageTiers: (tiers) => events.push(['warm-tiers', tiers]),
+    updateCompareProgress: () => events.push(['progress']),
+    scheduleCompareNeighborWarmup: (mode) => events.push(['neighbor', mode]),
+    scheduleCrossViewWarmup: (view) => events.push(['cross', view]),
+    showCompareEmpty: () => events.push(['empty']),
+    getMediaStatus: (id) => ({ id }),
+    loadImageProbe: (url) => events.push(['probe', url]),
+    loupeTierUrl: (img, tier) => `${img.id}:${tier}`,
+    documentImpl,
+    createCompareImageControllerImpl: (options) => {
+        events.push(['image-init', options.displayedTiers === displayedTiers]);
+        return {
+            renderCompareImage: (img, imgEl, side, token) => {
+                events.push(['render', img.id, imgEl.id, side, token, options.isCurrentCompareImage(token)]);
+                return true;
+            },
+            upgradeCompareImage: async (img, imgEl, side, token) => {
+                events.push(['upgrade', img.id, imgEl.id, side, token, options.isCurrentCompareImage(token)]);
+                return 'upgraded';
+            },
+            adoptCompareTier: async (img, imgEl, side, tier, cachedOnly, token, timeoutMs) => {
+                events.push(['adopt', img.id, imgEl.id, side, tier, cachedOnly, token, timeoutMs]);
+                return 'adopted';
+            },
+        };
+    },
+    createComparePairControllerImpl: (options) => {
+        events.push(['pair-init', options.documentImpl === documentImpl]);
+        return {
+            fetchComparePairs: async () => {
+                const url = options.buildCompareUrl(options.getCompareMode(), 8);
+                options.takeWarmCache(`compare:${url}`);
+                const data = await options.fetchWarmJson(url);
+                options.setCompareStats(data.stats);
+                options.getComparePairs().push(...data.pairs);
+                options.scheduleCompareNeighborWarmup(options.getCompareMode());
+                options.scheduleCrossViewWarmup('compare');
+                return data;
+            },
+            showComparePair: () => {
+                const token = options.incrementCompareImageToken();
+                options.primeMediaStatuses([1, 2]);
+                options.renderCompareImage({ id: 1 }, { id: 'left-img' }, 'left', token);
+                options.warmImageTiers({ lg: [1, 2], full: [1, 2] });
+                options.updateCompareProgress();
+                return true;
+            },
+            isCurrentCompareImage: (token) => token === options.getCompareImageToken(),
+        };
+    },
+});
+
+assert.equal((await bridge.fetchComparePairs()).stats.ready, true);
+assert.equal(compareStats.ready, true);
+assert.equal(comparePairs.length, 1);
+assert.equal(bridge.showComparePair(), true);
+assert.equal(bridge.isCurrentCompareImage(1), true);
+assert.equal(bridge.renderCompareImage({ id: 3 }, { id: 'manual-img' }, 'right', 1), true);
+assert.equal(await bridge.upgradeCompareImage({ id: 4 }, { id: 'upgrade-img' }, 'left', 1), 'upgraded');
+assert.equal(await bridge.adoptCompareTier({ id: 5 }, { id: 'adopt-img' }, 'right', 'lg', true, 1, 250), 'adopted');
+
+assert.deepEqual(events, [
+    ['image-init', true],
+    ['pair-init', true],
+    ['url', 'swiss', 8],
+    ['warm', 'compare:/api/compare/swiss/8'],
+    ['fetch', '/api/compare/swiss/8'],
+    ['stats', true],
+    ['neighbor', 'swiss'],
+    ['cross', 'compare'],
+    ['token', 1],
+    ['prime', [1, 2]],
+    ['render', 1, 'left-img', 'left', 1, true],
+    ['warm-tiers', { lg: [1, 2], full: [1, 2] }],
+    ['progress'],
+    ['render', 3, 'manual-img', 'right', 1, true],
+    ['upgrade', 4, 'upgrade-img', 'left', 1, true],
+    ['adopt', 5, 'adopt-img', 'right', 'lg', true, 1, 250],
 ]);
 """
         subprocess.run(

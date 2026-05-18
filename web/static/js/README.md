@@ -116,6 +116,8 @@ glue while legacy keeps pair and mosaic state.
 prefetch, pair image-token freshness, and pair-status side effects.
 `compare/image_controller.js` owns Compare pair image rendering adapter wiring,
 displayed tier state, media-status lookup, tier probing, and tier URL injection.
+`legacy/compare_display_bridge.js` owns the legacy Compare pair/image display
+facade that connects compatibility state to Compare pair and image controllers.
 `compare/mosaic_action_controller.js` owns Mosaic pick orchestration,
 optimistic replacement swapping, propagation follow-up, and rollback on failed
 save while legacy keeps board state storage.
