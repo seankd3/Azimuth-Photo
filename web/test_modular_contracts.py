@@ -3863,6 +3863,8 @@ class ModularContractTests(unittest.TestCase):
             legacy_library_init_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "loupe_bridge.js"), encoding="utf-8") as fh:
             legacy_loupe_bridge = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "legacy", "mosaic_bridge.js"), encoding="utf-8") as fh:
+            legacy_mosaic_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "search_action_bridge.js"), encoding="utf-8") as fh:
             legacy_search_action_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "search_sort_bridge.js"), encoding="utf-8") as fh:
@@ -4067,6 +4069,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from './library_init_bridge.js';", legacy)
         self.assertIn("from './library_shell_bridge.js';", legacy)
         self.assertIn("from './loupe_bridge.js';", legacy)
+        self.assertIn("from './mosaic_bridge.js';", legacy)
         self.assertIn("from './search_action_bridge.js';", legacy)
         self.assertIn("from './search_sort_bridge.js';", legacy)
         self.assertIn("from './ui_runtime_bridge.js';", legacy)
@@ -4088,9 +4091,13 @@ class ModularContractTests(unittest.TestCase):
         self.assertNotIn("from '../compare/action_controller.js';", legacy)
         self.assertIn("from '../compare/action_controller.js';", legacy_compare_flow_bridge)
         self.assertIn("export function createLegacyCompareFlowBridge", legacy_compare_flow_bridge)
-        self.assertIn("from '../compare/mosaic_action_controller.js';", legacy)
-        self.assertIn("from '../compare/mosaic_render_controller.js';", legacy)
-        self.assertIn("from '../compare/mosaic_replacements.js';", legacy)
+        self.assertNotIn("from '../compare/mosaic_action_controller.js';", legacy)
+        self.assertIn("from '../compare/mosaic_action_controller.js';", legacy_mosaic_bridge)
+        self.assertNotIn("from '../compare/mosaic_render_controller.js';", legacy)
+        self.assertIn("from '../compare/mosaic_render_controller.js';", legacy_mosaic_bridge)
+        self.assertNotIn("from '../compare/mosaic_replacements.js';", legacy)
+        self.assertIn("from '../compare/mosaic_replacements.js';", legacy_mosaic_bridge)
+        self.assertIn("export function createLegacyMosaicBridge", legacy_mosaic_bridge)
         self.assertNotIn("from '../compare/propagation.js';", legacy)
         self.assertIn("from '../compare/propagation.js';", legacy_compare_flow_bridge)
         self.assertNotIn("from '../compare/status_controller.js';", legacy)
@@ -8085,6 +8092,260 @@ assert.deepEqual(events, [
     ['render', 3, 'manual-img', 'right', 1, true],
     ['upgrade', 4, 'upgrade-img', 'left', 1, true],
     ['adopt', 5, 'adopt-img', 'right', 'lg', true, 1, 250],
+]);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_legacy_mosaic_bridge_node_probe_preserves_batch_render_and_action_glue(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createLegacyMosaicBridge } from './static/js/legacy/mosaic_bridge.js';
+
+const events = [];
+let mosaicImages = [];
+let mosaicAge = [];
+let mosaicPickCount = -1;
+let mosaicReplacements = ['old'];
+let mosaicFilling = true;
+let mosaicBusy = true;
+let mosaicActionSeq = 0;
+let mosaicPropagationCounts = { 10: 4 };
+let mosaicRenderToken = 2;
+let mosaicResizeRaf = 'raf';
+let selectedMosaicIndex = -1;
+let compareStats = {};
+
+const bridge = createLegacyMosaicBridge({
+    getMosaicSize: () => 6,
+    getMosaicStrategy: () => 'ranked',
+    getMosaicImages: () => mosaicImages,
+    setMosaicImages: (images) => {
+        mosaicImages = images;
+        events.push(['images', images.map((image) => image.id)]);
+    },
+    getMosaicAge: () => mosaicAge,
+    setMosaicAge: (age) => {
+        mosaicAge = age;
+        events.push(['age', age]);
+    },
+    setMosaicPickCount: (count) => {
+        mosaicPickCount = count;
+        events.push(['pick-count', count]);
+    },
+    getMosaicResizeRaf: () => mosaicResizeRaf,
+    setMosaicResizeRaf: (raf) => {
+        mosaicResizeRaf = raf;
+        events.push(['raf', raf]);
+    },
+    incrementMosaicRenderToken: () => {
+        mosaicRenderToken += 1;
+        events.push(['token', mosaicRenderToken]);
+        return mosaicRenderToken;
+    },
+    getMosaicRenderToken: () => mosaicRenderToken,
+    setSelectedMosaicIndex: (index) => {
+        selectedMosaicIndex = index;
+        events.push(['selected', index]);
+    },
+    getMosaicReplacements: () => mosaicReplacements,
+    setMosaicReplacements: (replacements) => {
+        mosaicReplacements = replacements;
+        events.push(['replacements', replacements.length]);
+    },
+    getMosaicFilling: () => mosaicFilling,
+    setMosaicFilling: (filling) => {
+        mosaicFilling = filling;
+        events.push(['filling', filling]);
+    },
+    getMosaicBusy: () => mosaicBusy,
+    setMosaicBusy: (busy) => {
+        mosaicBusy = busy;
+        events.push(['busy', busy]);
+    },
+    incrementMosaicActionSeq: () => {
+        mosaicActionSeq += 1;
+        events.push(['seq', mosaicActionSeq]);
+        return mosaicActionSeq;
+    },
+    getMosaicActionSeq: () => mosaicActionSeq,
+    getMosaicPropagationCounts: () => mosaicPropagationCounts,
+    setMosaicPropagationCounts: (counts) => {
+        mosaicPropagationCounts = counts;
+        events.push(['prop-counts', counts]);
+    },
+    getCompareMode: () => 'mosaic',
+    getCompareStats: () => compareStats,
+    setCompareStats: (stats) => {
+        compareStats = stats;
+        events.push(['stats', stats.ready]);
+    },
+    buildMosaicUrl: ({ n, exclude } = {}) => {
+        events.push(['url', n, exclude || '']);
+        return `/api/mosaic?n=${n}${exclude ? `&exclude=${exclude}` : ''}`;
+    },
+    takeWarmCache: (key) => {
+        events.push(['warm', key]);
+        return null;
+    },
+    fetchWarmJson: async (url) => {
+        events.push(['fetch', url]);
+        return {
+            stats: { ready: true },
+            images: [{ id: 10 }, { id: 20 }],
+        };
+    },
+    primeMediaStatuses: (ids) => events.push(['prime', ids]),
+    warmImageTiers: (tiers) => events.push(['warm-tiers', tiers]),
+    currentWarmupGeneration: () => 9,
+    enqueueWarmup: (job, options) => events.push(['enqueue', typeof job, options.generation]),
+    getMediaStatus: (id) => ({ id }),
+    loadImageProbe: (url) => events.push(['probe', url]),
+    loupeTierUrl: (img, tier) => `${img.id}:${tier}`,
+    preloadImage: (url) => events.push(['preload', url]),
+    updateCompareProgress: () => events.push(['progress']),
+    precomputePropagation: () => {
+        events.push(['precompute']);
+        return true;
+    },
+    scheduleCompareNeighborWarmup: (mode) => events.push(['neighbor', mode]),
+    scheduleCrossViewWarmup: (view) => events.push(['cross', view]),
+    showCompareEmpty: () => events.push(['empty']),
+    setUndoCount: (count) => events.push(['undo-count', count]),
+    bumpRankingSignals: (signalDelta, directDelta) => events.push(['bump', signalDelta, directDelta]),
+    fetchPropagationCount: (directCount) => events.push(['propagation', directCount]),
+    showPropagationBadge: (count) => events.push(['badge', count]),
+    showToast: (message) => events.push(['toast', message]),
+    documentImpl: {
+        querySelectorAll(selector) {
+            events.push(['query', selector]);
+            return [];
+        },
+    },
+    createMosaicRenderControllerImpl: (options) => {
+        events.push(['render-init', options.getCompareMode(), options.getMosaicResizeRaf()]);
+        return {
+            mosaicGridElo: () => {
+                events.push(['grid', options.getMosaicImages().length]);
+                return 1234;
+            },
+            renderMosaic: () => {
+                events.push(['render', options.getMosaicImages().map((image) => image.id)]);
+                options.incrementMosaicRenderToken();
+                return true;
+            },
+            scheduleMosaicRender: () => {
+                events.push(['schedule']);
+                options.setMosaicResizeRaf('next-raf');
+                return true;
+            },
+            scheduleMosaicImageUpgrade: (_cell, img, _rowH, token, index) => {
+                events.push(['schedule-upgrade', img.id, token, index]);
+                return 'scheduled';
+            },
+            upgradeMosaicCellImage: async (_cell, img, _rowH, token) => {
+                events.push(['upgrade', img.id, token]);
+                return 'upgraded';
+            },
+            adoptMosaicTier: async (_cell, img, tier, cachedOnly, token, timeoutMs) => {
+                events.push(['adopt', img.id, tier, cachedOnly, token, timeoutMs]);
+                return 'adopted';
+            },
+        };
+    },
+    createMosaicReplacementBufferImpl: (options) => {
+        events.push(['replacement-init']);
+        return {
+            fillReplacements: () => {
+                events.push(['fill', options.getMosaicImages().length, options.getWarmupGeneration()]);
+                options.enqueueWarmup(async () => {}, { generation: options.getWarmupGeneration() });
+                return 'filled';
+            },
+        };
+    },
+    createMosaicActionControllerImpl: (options) => {
+        events.push(['action-init']);
+        return {
+            mosaicClick: (id) => {
+                events.push(['click', id]);
+                options.setMosaicBusy(true);
+                options.setUndoCount(0);
+                options.incrementMosaicActionSeq();
+                options.bumpRankingSignals(2, 1);
+                options.fetchPropagationCount(1);
+                options.showPropagationBadge(2);
+                options.renderMosaic();
+                return true;
+            },
+        };
+    },
+});
+
+assert.equal(bridge.mosaicGridElo(), 1234);
+assert.equal(bridge.scheduleMosaicRender(), true);
+assert.equal(bridge.scheduleMosaicImageUpgrade({}, { id: 99 }, 200, 3, 1), 'scheduled');
+assert.equal(await bridge.upgradeMosaicCellImage({}, { id: 98 }, 200, 3), 'upgraded');
+assert.equal(await bridge.adoptMosaicTier({}, { id: 97 }, 'lg', true, 3, 250), 'adopted');
+assert.equal((await bridge.loadMosaicBatch()).stats.ready, true);
+assert.deepEqual(mosaicImages.map((image) => image.id), [10, 20]);
+assert.deepEqual(mosaicAge, [0, 0]);
+assert.equal(mosaicPickCount, 0);
+assert.deepEqual(mosaicReplacements, []);
+assert.equal(mosaicFilling, false);
+assert.equal(mosaicBusy, false);
+assert.equal(bridge.mosaicFillReplacements(), 'filled');
+assert.equal(bridge.mosaicClick(10), true);
+assert.equal(mosaicBusy, true);
+assert.equal(mosaicActionSeq, 1);
+
+assert.deepEqual(events, [
+    ['render-init', 'mosaic', 'raf'],
+    ['replacement-init'],
+    ['action-init'],
+    ['grid', 0],
+    ['schedule'],
+    ['raf', 'next-raf'],
+    ['schedule-upgrade', 99, 3, 1],
+    ['upgrade', 98, 3],
+    ['adopt', 97, 'lg', true, 3, 250],
+    ['url', 6, ''],
+    ['warm', 'compare:/api/mosaic?n=6'],
+    ['fetch', '/api/mosaic?n=6'],
+    ['stats', true],
+    ['progress'],
+    ['images', [10, 20]],
+    ['age', [0, 0]],
+    ['pick-count', 0],
+    ['replacements', 0],
+    ['filling', false],
+    ['busy', false],
+    ['prime', [10, 20]],
+    ['render', [10, 20]],
+    ['token', 3],
+    ['warm-tiers', { md: [10, 20], lg: [10, 20] }],
+    ['fill', 2, 9],
+    ['enqueue', 'function', 9],
+    ['precompute'],
+    ['neighbor', 'mosaic'],
+    ['cross', 'compare'],
+    ['fill', 2, 9],
+    ['enqueue', 'function', 9],
+    ['click', 10],
+    ['busy', true],
+    ['undo-count', 0],
+    ['seq', 1],
+    ['bump', 2, 1],
+    ['propagation', 1],
+    ['badge', 2],
+    ['render', [10, 20]],
+    ['token', 4],
 ]);
 """
         subprocess.run(

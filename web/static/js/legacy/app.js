@@ -31,12 +31,6 @@ import {
     mosaicSizeFromThumbHeight,
 } from '../compare/mosaic.js';
 import { createComparePageController } from '../compare/page_controller.js';
-import { createMosaicActionController } from '../compare/mosaic_action_controller.js';
-import { createMosaicRenderController } from '../compare/mosaic_render_controller.js';
-import {
-    createMosaicReplacementBuffer,
-    MOSAIC_REPLACEMENT_LOW_WATER,
-} from '../compare/mosaic_replacements.js';
 import {
     deselectMosaicCell as deselectMosaicCellCore,
     findMosaicCellInDirection as findMosaicCellInDirectionCore,
@@ -81,6 +75,7 @@ import {
 } from './library_shell_bridge.js';
 import { createLegacyLibraryInitBridge } from './library_init_bridge.js';
 import { createLegacyLoupeBridge } from './loupe_bridge.js';
+import { createLegacyMosaicBridge } from './mosaic_bridge.js';
 import { createLegacyPublicApi } from './public_api.js';
 import { createLegacySearchActionBridge } from './search_action_bridge.js';
 import { createLegacySearchSortBridge } from './search_sort_bridge.js';
@@ -183,135 +178,96 @@ const legacyPhotoArchive = (() => {
     let mosaicPropagationCounts = {}; // precomputed: {imageId: predictedCount}
     let mosaicRenderToken = 0;
     let mosaicResizeRaf = null;
+    // Pre-fetched replacement images ready to swap in instantly
+    let mosaicReplacements = [];
+    let mosaicFilling = false;
+    let mosaicBusy = false;
+    let mosaicActionSeq = 0;
 
-    const mosaicRenderController = createMosaicRenderController({
+    const mosaicBridge = createLegacyMosaicBridge({
+        documentImpl: document,
+        getMosaicSize: () => mosaicSize,
+        getMosaicStrategy: () => mosaicStrategy,
         getMosaicImages: () => mosaicImages,
-        getCompareMode: () => compareMode,
+        setMosaicImages: (images) => { mosaicImages = images; },
+        getMosaicAge: () => mosaicAge,
+        setMosaicAge: (age) => { mosaicAge = age; },
+        setMosaicPickCount: (count) => { mosaicPickCount = count; },
         getMosaicResizeRaf: () => mosaicResizeRaf,
         setMosaicResizeRaf: (raf) => { mosaicResizeRaf = raf; },
         incrementMosaicRenderToken: () => ++mosaicRenderToken,
         getMosaicRenderToken: () => mosaicRenderToken,
         setSelectedMosaicIndex: (index) => { selectedMosaicIndex = index; },
+        getMosaicReplacements: () => mosaicReplacements,
+        setMosaicReplacements: (replacements) => { mosaicReplacements = replacements; },
+        getMosaicFilling: () => mosaicFilling,
+        setMosaicFilling: (filling) => { mosaicFilling = filling; },
+        getMosaicBusy: () => mosaicBusy,
+        setMosaicBusy: (busy) => { mosaicBusy = busy; },
+        incrementMosaicActionSeq: () => ++mosaicActionSeq,
+        getMosaicActionSeq: () => mosaicActionSeq,
+        getMosaicPropagationCounts: () => mosaicPropagationCounts,
+        setMosaicPropagationCounts: (counts) => { mosaicPropagationCounts = counts; },
+        getCompareMode: () => compareMode,
+        getCompareStats: () => compareStats,
+        setCompareStats: (stats) => { compareStats = stats; },
+        buildMosaicUrl,
+        takeWarmCache,
+        fetchWarmJson,
+        primeMediaStatuses,
+        warmImageTiers,
+        currentWarmupGeneration,
+        enqueueWarmup,
         getMediaStatus,
         loadImageProbe,
         loupeTierUrl,
-        mosaicClick,
         preloadImage: (...args) => preloadImage(...args),
+        updateCompareProgress,
+        precomputePropagation,
+        scheduleCompareNeighborWarmup,
+        scheduleCrossViewWarmup,
+        showCompareEmpty,
+        setUndoCount: (count) => { undoCount = count; },
+        bumpRankingSignals,
+        fetchPropagationCount,
+        showPropagationBadge,
+        showToast,
     });
 
     function mosaicGridElo() {
-        return mosaicRenderController.mosaicGridElo();
+        return mosaicBridge.mosaicGridElo();
     }
 
     async function loadMosaicBatch() {
-        const url = buildMosaicUrl({ n: mosaicSize });
-        // Never use warm cache for diverse strategy — each load should be fresh
-        const data = (mosaicStrategy !== 'diverse' ? takeWarmCache(`compare:${url}`) : null) || await fetchWarmJson(url);
-        if (!data) return;
-        compareStats = data.stats || {};
-        updateCompareProgress();
-
-        if (data.images.length < 2) {
-            showCompareEmpty();
-            return;
-        }
-
-        mosaicImages = data.images;
-        mosaicAge = new Array(data.images.length).fill(0);
-        mosaicPickCount = 0;
-        mosaicReplacements = [];
-        mosaicFilling = false;
-        mosaicBusy = false;
-        primeMediaStatuses(mosaicImages.map((img) => img.id));
-        renderMosaic();
-        warmImageTiers({
-            md: mosaicImages.map((img) => img.id),
-            lg: mosaicImages.map((img) => img.id),
-        });
-        mosaicFillReplacements();
-        precomputePropagation();
-        scheduleCompareNeighborWarmup('mosaic');
-        scheduleCrossViewWarmup('compare');
+        return mosaicBridge.loadMosaicBatch();
     }
 
     function renderMosaic() {
-        return mosaicRenderController.renderMosaic();
+        return mosaicBridge.renderMosaic();
     }
 
     function scheduleMosaicRender() {
-        return mosaicRenderController.scheduleMosaicRender();
+        return mosaicBridge.scheduleMosaicRender();
     }
 
     function scheduleMosaicImageUpgrade(cell, img, rowH, token, index = 0) {
-        return mosaicRenderController.scheduleMosaicImageUpgrade(cell, img, rowH, token, index);
+        return mosaicBridge.scheduleMosaicImageUpgrade(cell, img, rowH, token, index);
     }
 
     async function upgradeMosaicCellImage(cell, img, rowH, token) {
-        return mosaicRenderController.upgradeMosaicCellImage(cell, img, rowH, token);
+        return mosaicBridge.upgradeMosaicCellImage(cell, img, rowH, token);
     }
 
     async function adoptMosaicTier(cell, img, tier, cachedOnly, token, timeoutMs) {
-        return mosaicRenderController.adoptMosaicTier(cell, img, tier, cachedOnly, token, timeoutMs);
+        return mosaicBridge.adoptMosaicTier(cell, img, tier, cachedOnly, token, timeoutMs);
     }
-
-    // Pre-fetched replacement images ready to swap in instantly
-    let mosaicReplacements = [];
-    let mosaicFilling = false;
-
-    const mosaicReplacementBuffer = createMosaicReplacementBuffer({
-        getMosaicFilling: () => mosaicFilling,
-        setMosaicFilling: (filling) => { mosaicFilling = filling; },
-        getMosaicImages: () => mosaicImages,
-        getMosaicReplacements: () => mosaicReplacements,
-        getMosaicRenderToken: () => mosaicRenderToken,
-        getWarmupGeneration: currentWarmupGeneration,
-        enqueueWarmup,
-        buildMosaicUrl,
-        loadImageProbe,
-        setCompareStats: (stats) => { compareStats = stats; },
-        updateCompareProgress,
-    });
 
     function mosaicFillReplacements() {
-        return mosaicReplacementBuffer.fillReplacements();
+        return mosaicBridge.mosaicFillReplacements();
     }
 
-    let mosaicBusy = false;
-    let mosaicActionSeq = 0;
-
-    const mosaicActionController = createMosaicActionController({
-        getMosaicBusy: () => mosaicBusy,
-        setMosaicBusy: (busy) => { mosaicBusy = busy; },
-        setUndoCount: (count) => { undoCount = count; },
-        incrementMosaicActionSeq: () => ++mosaicActionSeq,
-        getMosaicActionSeq: () => mosaicActionSeq,
-        getMosaicImages: () => mosaicImages,
-        setMosaicImages: (images) => { mosaicImages = images; },
-        getMosaicAge: () => mosaicAge,
-        setMosaicAge: (age) => { mosaicAge = age; },
-        getMosaicReplacements: () => mosaicReplacements,
-        setMosaicReplacements: (replacements) => { mosaicReplacements = replacements; },
-        getMosaicRenderToken: () => mosaicRenderToken,
-        getMosaicPropagationCounts: () => mosaicPropagationCounts,
-        setMosaicPropagationCounts: (counts) => { mosaicPropagationCounts = counts; },
-        getCompareStats: () => compareStats,
-        setCompareStats: (stats) => { compareStats = stats; },
-        queryMosaicCells: () => document.querySelectorAll('.mosaic-cell'),
-        scheduleMosaicImageUpgrade,
-        mosaicFillReplacements,
-        precomputePropagation,
-        bumpRankingSignals,
-        updateCompareProgress,
-        fetchPropagationCount,
-        showPropagationBadge,
-        renderMosaic,
-        showToast,
-        showCompareEmpty,
-        replacementLowWater: MOSAIC_REPLACEMENT_LOW_WATER,
-    });
-
     function mosaicClick(id) {
-        return mosaicActionController.mosaicClick(id);
+        return mosaicBridge.mosaicClick(id);
     }
 
     function showToast(msg) {
