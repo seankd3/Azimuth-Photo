@@ -5,6 +5,7 @@ import os
 import time as _time
 
 from data import connection
+from data.repositories.common import chunked as _chunked
 
 
 CATALOG_CACHE_TTL_SECONDS = 10.0
@@ -83,11 +84,6 @@ async def active_source_id_set_cached(
     _active_source_ids_cache["ids"] = frozen
     _active_source_ids_cache["expires"] = _time.time() + ttl_seconds
     return frozen
-
-
-def _chunked(values: list[int], chunk_size: int = 500):
-    for start in range(0, len(values), chunk_size):
-        yield values[start:start + chunk_size]
 
 
 def insert_row_with_file_metadata(row):

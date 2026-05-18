@@ -4,15 +4,11 @@ import asyncio
 import time as _time
 
 from data import connection
+from data.repositories.common import chunked as _chunked
 
 VISIBLE_PAIRING_POOL_COUNTS_TTL_SECONDS = 30.0
 _visible_pairing_pool_counts_cache: dict[tuple, dict] = {}
 _past_matchups_cache = {"data": None, "signature": None}
-
-
-def _chunked(values: list[int], chunk_size: int = 500):
-    for start in range(0, len(values), chunk_size):
-        yield values[start:start + chunk_size]
 
 
 def _cache_scope_matches(

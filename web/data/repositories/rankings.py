@@ -5,6 +5,7 @@ from datetime import datetime
 import time as _time
 
 from data import connection
+from data.repositories.common import chunked as _chunked
 
 RANKING_SORTS = {
     "elo": "i.elo DESC",
@@ -102,11 +103,6 @@ _date_groups_refreshing: set[tuple] = set()
 _map_markers_cache: dict[tuple, dict] = {}
 _ranking_count_cache: dict[tuple, dict] = {}
 _rankable_image_ids_cache = {"ids": frozenset(), "expires": 0}
-
-
-def _chunked(values, size: int):
-    for index in range(0, len(values), size):
-        yield values[index:index + size]
 
 
 def ranking_count_cache_key(

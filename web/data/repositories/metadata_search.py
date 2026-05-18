@@ -1,15 +1,11 @@
 """Metadata text-search helpers backed by the metadata FTS index."""
 
 from data import connection
+from data.repositories.common import chunked as _chunked
 
 
 def metadata_fts_query(text_query: str) -> str:
     return '"' + (text_query or "").replace('"', '""') + '"'
-
-
-def _chunked(items, size: int):
-    for index in range(0, len(items), size):
-        yield items[index:index + size]
 
 
 async def metadata_search_image_ids(

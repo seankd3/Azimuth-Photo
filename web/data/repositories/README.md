@@ -8,6 +8,7 @@ Target repository split:
 - `ratings.py`: compare/mosaic writes, undo state, and matchup reads. Cache invalidation still belongs to the `web/db.py` facade.
 - `embeddings.py`: embedding rows, embedding model rows, deep-search query cache, vector counts.
 - `metadata_search.py`: metadata FTS query escaping and bounded active-image ID lookups.
+- `common.py`: shared repository helpers that do not own domain behavior.
 - `people.py`: People filters, membership refresh, face backlog queries, face thumbnail context, labels, merges, manual face assignment, and ignore actions. Scan-result storage, clustering, and full review assembly are still behind `web/db.py`.
 - `cache_entries.py`: thumbnail/full-original cache entry ID and count lookups.
 - `stats.py`: catalog count snapshots, full dashboard stats, full-stats TTL/stale-refresh caching, and AI-status aggregate counts. `web/db.py` keeps compatibility facades and cross-repository invalidation fanout during migration.
