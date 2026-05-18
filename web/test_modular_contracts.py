@@ -3891,6 +3891,8 @@ class ModularContractTests(unittest.TestCase):
             legacy_search_sort_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "settings_page_bridge.js"), encoding="utf-8") as fh:
             legacy_settings_page_bridge = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "legacy", "shared_runtime_bridge.js"), encoding="utf-8") as fh:
+            legacy_shared_runtime_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "thumbnail_size_bridge.js"), encoding="utf-8") as fh:
             legacy_thumbnail_size_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "ui_action_bridge.js"), encoding="utf-8") as fh:
@@ -4081,7 +4083,10 @@ class ModularContractTests(unittest.TestCase):
         self.assertNotIn("async function startScan()", index_template)
         self.assertIn("window.PhotoArchiveReady = import(`./js/bootstrap.js${suffix}`)", app_entry)
         self.assertIn("Object.assign(compatibilityTarget, PhotoArchive);", bootstrap)
-        self.assertIn("from '../api.js';", legacy)
+        self.assertNotIn("from '../api.js';", legacy)
+        self.assertIn("from '../api.js';", legacy_shared_runtime_bridge)
+        self.assertIn("from '../ai/status.js';", legacy_shared_runtime_bridge)
+        self.assertIn("export function createLegacySharedRuntimeBridge", legacy_shared_runtime_bridge)
         self.assertIn("from '../ai/poller.js';", legacy_ui_runtime_bridge)
         self.assertNotIn("from '../catalog/home_scan.js';", legacy)
         self.assertIn("from '../catalog/home_scan.js';", legacy_catalog_scan_bridge)
@@ -4111,6 +4116,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from './search_action_bridge.js';", legacy)
         self.assertIn("from './search_sort_bridge.js';", legacy)
         self.assertIn("from './settings_page_bridge.js';", legacy)
+        self.assertIn("from './shared_runtime_bridge.js';", legacy)
         self.assertIn("from './thumbnail_size_bridge.js';", legacy)
         self.assertIn("from './ui_action_bridge.js';", legacy)
         self.assertIn("from './ui_runtime_bridge.js';", legacy)
@@ -7716,6 +7722,40 @@ assert.equal(panel.hidden, true);
 assert.equal(toggleAIPanel({ documentImpl: document }), true);
 assert.equal(panel.hidden, false);
 assert.equal(toggleAIPanel({ documentImpl: { getElementById: () => null } }), false);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_legacy_shared_runtime_bridge_node_probe_preserves_fetch_and_ai_facades(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createLegacySharedRuntimeBridge } from './static/js/legacy/shared_runtime_bridge.js';
+
+const calls = [];
+const bridge = createLegacySharedRuntimeBridge({
+    fetchJsonImpl: (...args) => {
+        calls.push(['fetchJson', args]);
+        return { ok: true };
+    },
+    toggleAIPanelImpl: (...args) => {
+        calls.push(['toggleAIPanel', args]);
+        return true;
+    },
+});
+
+assert.deepEqual(bridge.fetchJson('/api/test', { defaultValue: null }), { ok: true });
+assert.equal(bridge.toggleAIPanel({ panel: true }), true);
+assert.deepEqual(calls, [
+    ['fetchJson', ['/api/test', { defaultValue: null }]],
+    ['toggleAIPanel', [{ panel: true }]],
+]);
 """
         subprocess.run(
             ["node", "--input-type=module", "-e", script],

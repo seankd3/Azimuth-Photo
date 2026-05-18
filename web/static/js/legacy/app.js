@@ -1,5 +1,3 @@
-import { fetchJson } from '../api.js';
-import { toggleAIPanel } from '../ai/status.js';
 import {
     COMPARE_NEIGHBOR_PAIRS,
     MOSAIC_NEIGHBOR_LIMIT,
@@ -58,6 +56,7 @@ import { createLegacyPublicApi } from './public_api.js';
 import { createLegacySearchActionBridge } from './search_action_bridge.js';
 import { createLegacySearchSortBridge } from './search_sort_bridge.js';
 import { createLegacySettingsPageBridge } from './settings_page_bridge.js';
+import { createLegacySharedRuntimeBridge } from './shared_runtime_bridge.js';
 import { createLegacyThumbnailSizeBridge } from './thumbnail_size_bridge.js';
 import { createLegacyUiActionBridge } from './ui_action_bridge.js';
 import { createLegacyUiRuntimeBridge } from './ui_runtime_bridge.js';
@@ -79,6 +78,8 @@ const legacyPhotoArchive = (() => {
     let rankingsOffset = 0;
     let selectedLibraryIndex = -1;
     let selectedMosaicIndex = -1;
+    const sharedRuntimeBridge = createLegacySharedRuntimeBridge();
+    const { fetchJson, toggleAIPanel } = sharedRuntimeBridge;
     const loupeBridge = createLegacyLoupeBridge({
         getLibraryImages: () => libraryImages,
         getSearchQuery: () => searchQuery,

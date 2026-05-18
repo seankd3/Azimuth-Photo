@@ -54,7 +54,8 @@ compatibility module.
 `warmup_neighbors.js` owns Library/Compare cross-view and neighbor-request
 warmup scheduling constants while legacy keeps current view, query, and paging
 state.
-`api.js` owns small shared request helpers as fetch calls move out of
+`api.js` owns small shared request helpers. `legacy/shared_runtime_bridge.js`
+owns the legacy API fetch and AI-panel toggle facade as shared calls move out of
 `legacy/app.js`. `query_state.js` owns pure filter-state normalization, URL
 parameter helpers, Library URL-state syncing, and filter-neighbor state generation.
 `query_controller.js` owns the state adapter for current query state plus
