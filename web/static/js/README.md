@@ -13,6 +13,8 @@ facade around the extracted Catalog scan controllers.
 the extracted People controller.
 `legacy/settings_page_bridge.js` owns the legacy Settings/Catalog settings page
 public-method facade around the extracted Settings page controller.
+`legacy/thumbnail_size_bridge.js` owns the legacy Library/Mosaic thumbnail-size
+facade around shared thumbnail sizing and Mosaic size math.
 `legacy/ui_action_bridge.js` owns the legacy toast, confirm modal, shortcut,
 and formatting facade around shared UI helpers.
 `legacy/filter_query_bridge.js` owns the legacy filter/query state bridge that

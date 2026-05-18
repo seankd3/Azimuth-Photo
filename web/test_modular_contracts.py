@@ -3879,6 +3879,8 @@ class ModularContractTests(unittest.TestCase):
             legacy_search_sort_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "settings_page_bridge.js"), encoding="utf-8") as fh:
             legacy_settings_page_bridge = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "legacy", "thumbnail_size_bridge.js"), encoding="utf-8") as fh:
+            legacy_thumbnail_size_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "ui_action_bridge.js"), encoding="utf-8") as fh:
             legacy_ui_action_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "ui_runtime_bridge.js"), encoding="utf-8") as fh:
@@ -4091,6 +4093,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from './search_action_bridge.js';", legacy)
         self.assertIn("from './search_sort_bridge.js';", legacy)
         self.assertIn("from './settings_page_bridge.js';", legacy)
+        self.assertIn("from './thumbnail_size_bridge.js';", legacy)
         self.assertIn("from './ui_action_bridge.js';", legacy)
         self.assertIn("from './ui_runtime_bridge.js';", legacy)
         self.assertIn("export function createLegacyUiRuntimeBridge", legacy_ui_runtime_bridge)
@@ -4099,7 +4102,8 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../filters.js';", legacy_filter_query_bridge)
         self.assertIn("from '../media_status.js';", legacy_loupe_bridge)
         self.assertIn("from '../media_metadata.js';", legacy)
-        self.assertIn("from '../thumbnail_size.js';", legacy)
+        self.assertNotIn("from '../thumbnail_size.js';", legacy)
+        self.assertIn("from '../thumbnail_size.js';", legacy_thumbnail_size_bridge)
         self.assertNotIn("from '../compare/navigation.js';", legacy)
         self.assertIn("from '../compare/navigation.js';", legacy_compare_keyboard_bridge)
         self.assertNotIn("from '../compare/image_controller.js';", legacy)
@@ -4123,7 +4127,8 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../compare/propagation.js';", legacy_compare_flow_bridge)
         self.assertNotIn("from '../compare/status_controller.js';", legacy)
         self.assertIn("from '../compare/status_controller.js';", legacy_compare_flow_bridge)
-        self.assertIn("from '../compare/mosaic.js';", legacy)
+        self.assertNotIn("from '../compare/mosaic.js';", legacy)
+        self.assertIn("from '../compare/mosaic.js';", legacy_thumbnail_size_bridge)
         self.assertIn("from '../compare/query.js';", legacy)
         self.assertIn("from '../compare/page_controller.js';", legacy)
         self.assertNotIn("from '../compare/keyboard.js';", legacy)
@@ -4178,6 +4183,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertNotIn("from '../settings/page.js';", legacy)
         self.assertIn("from '../settings/page.js';", legacy_settings_page_bridge)
         self.assertIn("export function createLegacySettingsPageBridge", legacy_settings_page_bridge)
+        self.assertIn("export function createLegacyThumbnailSizeBridge", legacy_thumbnail_size_bridge)
         self.assertIn("from '../settings/ui_settings.js';", legacy_ui_runtime_bridge)
         self.assertNotIn("from '../ui.js';", legacy)
         self.assertIn("from '../ui.js';", legacy_ui_action_bridge)
@@ -7188,6 +7194,74 @@ assert.deepEqual(events, [['clear'], ['size', 6], ['load']]);
 
 setThumbSize('340');
 assert.deepEqual(events, [['clear'], ['size', 6], ['load']]);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_legacy_thumbnail_size_bridge_node_probe_preserves_size_facade(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createLegacyThumbnailSizeBridge } from './static/js/legacy/thumbnail_size_bridge.js';
+
+const events = [];
+let mosaicSize = 12;
+let thumbHeight = 0;
+const bridge = createLegacyThumbnailSizeBridge({
+    getMosaicSize: () => mosaicSize,
+    setMosaicSize: (value) => {
+        mosaicSize = value;
+        events.push(['size', value]);
+    },
+    clearWarmups: () => events.push('clear'),
+    loadMosaicBatch: () => events.push('load'),
+    setThumbHeight: (value) => {
+        thumbHeight = value;
+        events.push(['thumb', value]);
+    },
+    createThumbnailSizeHandlerImpl: (options) => {
+        assert.equal(typeof options.getMosaicSize, 'function');
+        assert.equal(typeof options.setMosaicSize, 'function');
+        assert.equal(typeof options.mosaicSizeFromThumbHeight, 'function');
+        assert.equal(typeof options.clearWarmups, 'function');
+        assert.equal(typeof options.loadMosaicBatch, 'function');
+        assert.equal(typeof options.setThumbHeight, 'function');
+        events.push('init');
+        return (value) => {
+            const nextSize = options.mosaicSizeFromThumbHeight(value);
+            options.setThumbHeight(Number(value));
+            if (nextSize !== options.getMosaicSize()) {
+                options.clearWarmups();
+                options.setMosaicSize(nextSize);
+                options.loadMosaicBatch();
+            }
+            return nextSize;
+        };
+    },
+    mosaicSizeFromThumbHeightImpl: (value) => Number(value) > 300 ? 6 : 12,
+});
+
+assert.equal(bridge.setThumbSize('180'), 12);
+assert.equal(thumbHeight, 180);
+assert.equal(mosaicSize, 12);
+assert.equal(bridge.setThumbSize('320'), 6);
+assert.equal(thumbHeight, 320);
+assert.equal(mosaicSize, 6);
+
+assert.deepEqual(events, [
+    'init',
+    ['thumb', 180],
+    ['thumb', 320],
+    'clear',
+    ['size', 6],
+    'load',
+]);
 """
         subprocess.run(
             ["node", "--input-type=module", "-e", script],

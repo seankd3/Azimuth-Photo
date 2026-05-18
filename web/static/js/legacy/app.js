@@ -15,10 +15,6 @@ import {
     DEFAULT_CROSS_VIEW_WARM_DELAY_MS,
     createNeighborWarmupController,
 } from '../warmup_neighbors.js';
-import { createThumbnailSizeHandler } from '../thumbnail_size.js';
-import {
-    mosaicSizeFromThumbHeight,
-} from '../compare/mosaic.js';
 import { createComparePageController } from '../compare/page_controller.js';
 import {
     showCompareEmpty as showCompareEmptyCore,
@@ -64,6 +60,7 @@ import { createLegacyPublicApi } from './public_api.js';
 import { createLegacySearchActionBridge } from './search_action_bridge.js';
 import { createLegacySearchSortBridge } from './search_sort_bridge.js';
 import { createLegacySettingsPageBridge } from './settings_page_bridge.js';
+import { createLegacyThumbnailSizeBridge } from './thumbnail_size_bridge.js';
 import { createLegacyUiActionBridge } from './ui_action_bridge.js';
 import { createLegacyUiRuntimeBridge } from './ui_runtime_bridge.js';
 
@@ -856,14 +853,14 @@ const legacyPhotoArchive = (() => {
 
     loupeBridge.initController();
 
-    const setThumbSize = createThumbnailSizeHandler({
+    const thumbnailSizeBridge = createLegacyThumbnailSizeBridge({
         getMosaicSize: () => mosaicSize,
         setMosaicSize: (value) => { mosaicSize = value; },
-        mosaicSizeFromThumbHeight,
         clearWarmups,
         loadMosaicBatch,
         setThumbHeight: (value) => { thumbHeight = value; },
     });
+    const { setThumbSize } = thumbnailSizeBridge;
 
     const libraryFilterController = createLibraryFilterController({
         emptyFilters: EMPTY_FILTERS,
