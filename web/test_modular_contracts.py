@@ -3858,6 +3858,8 @@ class ModularContractTests(unittest.TestCase):
             loupe_focus = fh.read()
         with open(os.path.join(base_dir, "static", "js", "loupe", "zoom.js"), encoding="utf-8") as fh:
             loupe_zoom = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "loupe", "controller.js"), encoding="utf-8") as fh:
+            loupe_controller = fh.read()
         with open(os.path.join(base_dir, "static", "js", "compare", "query.js"), encoding="utf-8") as fh:
             compare_query = fh.read()
         with open(os.path.join(base_dir, "static", "js", "compare", "navigation.js"), encoding="utf-8") as fh:
@@ -4008,14 +4010,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../compare/mosaic.js';", legacy)
         self.assertIn("from '../compare/keyboard.js';", legacy)
         self.assertIn("from '../loupe/tiers.js';", legacy)
-        self.assertIn("from '../loupe/loading.js';", legacy)
-        self.assertIn("from '../loupe/status.js';", legacy)
-        self.assertIn("from '../loupe/metadata.js';", legacy)
-        self.assertIn("from '../loupe/warmup.js';", legacy)
-        self.assertIn("from '../loupe/filmstrip.js';", legacy)
-        self.assertIn("from '../loupe/focus.js';", legacy)
-        self.assertIn("from '../loupe/zoom.js';", legacy)
-        self.assertIn("from '../loupe/navigation.js';", legacy)
+        self.assertIn("from '../loupe/controller.js';", legacy)
         self.assertIn("from '../library/sort.js';", legacy)
         self.assertIn("from '../library/sort_controller.js';", legacy)
         self.assertIn("from '../library/search_state.js';", legacy)
@@ -4204,6 +4199,15 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("export function loupeComputeFitScale", loupe_zoom)
         self.assertIn("export function updateLoupeZoomIndicator", loupe_zoom)
         self.assertIn("export function clampLoupePan", loupe_zoom)
+        self.assertIn("export function createLoupeController", loupe_controller)
+        self.assertIn("from './loading.js';", loupe_controller)
+        self.assertIn("from './status.js';", loupe_controller)
+        self.assertIn("from './metadata.js';", loupe_controller)
+        self.assertIn("from './warmup.js';", loupe_controller)
+        self.assertIn("from './filmstrip.js';", loupe_controller)
+        self.assertIn("from './focus.js';", loupe_controller)
+        self.assertIn("from './zoom.js';", loupe_controller)
+        self.assertIn("from './navigation.js';", loupe_controller)
         self.assertIn("export function rankingQueryString", library_query)
         self.assertIn("export function sortValueForState", library_sort)
         self.assertIn("export function createLibrarySortController", library_sort_controller)
@@ -4621,6 +4625,177 @@ controller.lightboxNext();
 await new Promise((resolve) => setTimeout(resolve, 0));
 assert.equal(lightboxIndex, 0);
 assert.deepEqual(events, [['load', false]]);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_loupe_controller_node_probe_preserves_public_navigation_and_close_flow(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createLoupeController } from './static/js/loupe/controller.js';
+
+function classList(initial = []) {
+    const values = new Set(initial);
+    return {
+        values,
+        add(value) { values.add(value); },
+        remove(value) { values.delete(value); },
+        contains(value) { return values.has(value); },
+        toggle(value, force) {
+            const enabled = force === undefined ? !values.has(value) : Boolean(force);
+            if (enabled) values.add(value);
+            else values.delete(value);
+            return enabled;
+        },
+    };
+}
+
+function element(id) {
+    return {
+        id,
+        children: [],
+        dataset: {},
+        disabled: false,
+        innerHTML: '',
+        offsetLeft: 0,
+        offsetWidth: 20,
+        scrollWidth: 100,
+        clientWidth: 100,
+        clientHeight: 80,
+        style: {},
+        textContent: '',
+        classList: classList(),
+        appendChild(child) {
+            this.children.push(child);
+            return child;
+        },
+        focus(options) {
+            events.push(['focus', id, options?.preventScroll ?? false]);
+        },
+        getBoundingClientRect() {
+            return { left: 0, top: 0 };
+        },
+        querySelector() {
+            return null;
+        },
+        querySelectorAll() {
+            return [];
+        },
+        scrollTo(options) {
+            events.push(['scrollTo', id, options.left ?? 0]);
+        },
+        contains(node) {
+            return node === this || node?.insideLoupe === true;
+        },
+    };
+}
+
+const events = [];
+const nodes = {
+    loupe: element('loupe'),
+    'loupe-img': element('loupe-img'),
+    'loupe-image-wrap': element('loupe-image-wrap'),
+    'filmstrip-scroll': element('filmstrip-scroll'),
+    'filmstrip-counter': element('filmstrip-counter'),
+    'loupe-overlay-filename': element('loupe-overlay-filename'),
+    'loupe-overlay-exif': element('loupe-overlay-exif'),
+    'loupe-overlay-stats': element('loupe-overlay-stats'),
+    'loupe-overlay-tier': element('loupe-overlay-tier'),
+    'loupe-overlay-zoom': element('loupe-overlay-zoom'),
+};
+nodes.loupe.classList.add('hidden');
+const previousFocus = { focus: (options) => events.push(['restore-focus', options?.preventScroll ?? false]) };
+const body = {
+    classList: classList(),
+    contains: (node) => node === previousFocus,
+};
+const documentImpl = {
+    activeElement: previousFocus,
+    body,
+    createElement: (tag) => ({ ...element(tag), tag }),
+    getElementById: (id) => nodes[id] || null,
+    contains: (node) => node === previousFocus,
+};
+
+class MockImage {
+    constructor() {
+        this.decoding = '';
+        this.fetchPriority = '';
+        this.naturalWidth = 0;
+        this.naturalHeight = 0;
+        this.onload = null;
+        this.onerror = null;
+        this._src = '';
+    }
+    set src(value) { this._src = value; }
+    get src() { return this._src; }
+}
+
+const images = [
+    { id: 1, filename: 'one.jpg', thumb_url: '/thumb/1.jpg', aspect_ratio: 1.5, elo: 1200, comparisons: 0 },
+    { id: 2, filename: 'two.jpg', thumb_url: '/thumb/2.jpg', aspect_ratio: 1.25, flag: 'picked', elo: 1300, comparisons: 3 },
+];
+const controller = createLoupeController({
+    documentImpl,
+    windowImpl: { addEventListener: () => {} },
+    ImageImpl: MockImage,
+    requestAnimationFrameImpl: (callback) => callback(),
+    setTimeoutImpl: (callback, ms) => {
+        events.push(['timer', ms]);
+        return { callback, ms };
+    },
+    clearTimeoutImpl: (timer) => events.push(['clear-timer', timer?.ms ?? null]),
+    fetchImpl: async (url) => ({
+        json: async () => ({ exif: { filename: `fetched-${url}` } }),
+    }),
+    getLibraryImages: () => images,
+    getSearchQuery: () => '',
+    getRankingsExhausted: () => true,
+    loadRankings: async () => 0,
+    clearWarmups: () => events.push('clear-warmups'),
+    currentWarmupGeneration: () => 5,
+    enqueueWarmup: (task, options) => events.push(['enqueue', options.generation]),
+    warmImageTiers: (tiers) => events.push(['warm', tiers]),
+    preloadImageWithTimeout: async () => {},
+    getMediaStatus: async () => ({ best_cached: null, tiers: {} }),
+    getUiSettings: () => ({ show_loupe_cache_status: true }),
+    imageAspectRatio: (img) => img.aspect_ratio || 1.5,
+    eloToStars: () => 3,
+});
+
+controller.openLightbox(images[1]);
+assert.equal(controller.getLightboxIndex(), 1);
+assert.equal(controller.getCurrentImage().id, 2);
+assert.equal(body.classList.contains('loupe-open'), true);
+assert.equal(nodes.loupe.classList.contains('hidden'), false);
+assert.equal(nodes['filmstrip-counter'].textContent, '2 / 2');
+assert.equal(nodes['loupe-overlay-filename'].textContent, 'two.jpg');
+assert.equal(nodes['loupe-img'].alt, 'two.jpg');
+assert.equal(nodes['loupe-img'].style.opacity, '0');
+assert.equal(controller.stateSnapshot().loupeImageToken, 1);
+
+controller.lightboxPrev();
+assert.equal(controller.getLightboxIndex(), 0);
+assert.equal(controller.getCurrentImage().id, 1);
+
+controller.lightboxNext();
+assert.equal(controller.getLightboxIndex(), 1);
+assert.equal(controller.getCurrentImage().id, 2);
+
+controller.closeLightbox();
+assert.equal(controller.getLightboxIndex(), -1);
+assert.equal(controller.getCurrentImage(), null);
+assert.equal(controller.getStandaloneImage(), null);
+assert.equal(body.classList.contains('loupe-open'), false);
+assert.deepEqual(events.filter((event) => event === 'clear-warmups').length, 4);
+assert.deepEqual(events.at(-1), ['restore-focus', true]);
 """
         subprocess.run(
             ["node", "--input-type=module", "-e", script],

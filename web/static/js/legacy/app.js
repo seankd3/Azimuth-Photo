@@ -81,46 +81,9 @@ import {
 } from '../compare/propagation.js';
 import { createCompareStatusController } from '../compare/status_controller.js';
 import {
-    LOUPE_BLANK_SRC,
-    LOUPE_TIER_RANKS,
-    LOUPE_TIER_TIMEOUTS,
     loupeTierUrl as loupeTierUrlCore,
 } from '../loupe/tiers.js';
-import {
-    cancelLoupeProbes as cancelLoupeProbesCore,
-    loadLoupeTier as loadLoupeTierCore,
-    runLoupeProgressiveLoad as runLoupeProgressiveLoadCore,
-} from '../loupe/loading.js';
-import {
-    clearLoupeTierLoading as clearLoupeTierLoadingCore,
-    renderLoupeStatusLine as renderLoupeStatusLineCore,
-    setLoupeTierLoading as setLoupeTierLoadingCore,
-} from '../loupe/status.js';
-import {
-    renderLoupeMetadata as renderLoupeMetadataCore,
-    renderLoupeMetadataOverlay,
-} from '../loupe/metadata.js';
-import { createLoupeWarmupController } from '../loupe/warmup.js';
-import {
-    buildFilmstrip as buildFilmstripCore,
-    clearFilmstrip as clearFilmstripCore,
-    updateFilmstripActive as updateFilmstripActiveCore,
-    updateFilmstripCounter as updateFilmstripCounterCore,
-} from '../loupe/filmstrip.js';
-import {
-    focusLoupe as focusLoupeCore,
-    loupeFocusableElements as loupeFocusableElementsCore,
-    trapLoupeFocus as trapLoupeFocusCore,
-} from '../loupe/focus.js';
-import {
-    applyLoupeImageSize as applyLoupeImageSizeCore,
-    applyLoupeTransform as applyLoupeTransformCore,
-    clampLoupePan as clampLoupePanCore,
-    loupeComputeFitScale as loupeComputeFitScaleCore,
-    updateLoupeZoomIndicator as updateLoupeZoomIndicatorCore,
-} from '../loupe/zoom.js';
-import { initLoupeInteraction as initLoupeInteractionCore } from '../loupe/interaction.js';
-import { createLoupeNavigationController } from '../loupe/navigation.js';
+import { createLoupeController } from '../loupe/controller.js';
 import {
     SORT_KEYS,
     sortValueForState,
@@ -227,12 +190,12 @@ const legacyPhotoArchive = (() => {
     const LIBRARY_NEIGHBOR_LIMIT = 24;
     const MOSAIC_NEIGHBOR_LIMIT = 8;
     const COMPARE_NEIGHBOR_PAIRS = 4;
-    const FILMSTRIP_WINDOW_RADIUS = 55;
+    let loupeController = null;
     const mediaStatusController = createMediaStatusController({
         client: createMediaStatusClient({ maxAgeMs: 15000 }),
-        getCurrentLoupeImage: () => loupeCurrentImage,
-        getLoupeImageToken: () => loupeImageToken,
-        refreshLoupeMediaStatus,
+        getCurrentLoupeImage: () => loupeController?.getCurrentImage() || null,
+        getLoupeImageToken: () => loupeController?.getImageToken() || 0,
+        refreshLoupeMediaStatus: (...args) => loupeController?.refreshLoupeMediaStatus(...args),
     });
     const { handleWarmTiersApplied } = mediaStatusController;
     let selectedLibraryIndex = -1;
@@ -680,8 +643,6 @@ const legacyPhotoArchive = (() => {
     let pendingScrollRestoreOffset = 0;
     let thumbHeight = 220;
     let libraryImages = [];
-    let lightboxIndex = -1;
-    let loupeStandaloneImage = null;
     const SORT_STORAGE_KEY = 'pa_sort';
     const SEARCH_STORAGE_KEY = 'pa_search_query';
     const SEARCH_SORT_STORAGE_KEY = 'pa_search_sort';
@@ -1209,9 +1170,9 @@ const legacyPhotoArchive = (() => {
     function updateImageFlagLocal(imageId, flag) {
         updateImageFlagLocalCore(imageId, flag, {
             images: libraryImages,
-            loupeStandaloneImage,
-            loupeCurrentImage,
-            lightboxIndex,
+            loupeStandaloneImage: loupeController?.getStandaloneImage() || null,
+            loupeCurrentImage: loupeController?.getCurrentImage() || null,
+            lightboxIndex: loupeController?.getLightboxIndex() ?? -1,
             updateLoupeFlagDisplay,
         });
     }
@@ -1227,8 +1188,8 @@ const legacyPhotoArchive = (() => {
     function setCurrentLibraryFlag(flag) {
         setCurrentLibraryFlagCore(flag, {
             images: libraryImages,
-            lightboxIndex,
-            loupeStandaloneImage,
+            lightboxIndex: loupeController?.getLightboxIndex() ?? -1,
+            loupeStandaloneImage: loupeController?.getStandaloneImage() || null,
             selectedLibraryIndex,
             setImageFlagImpl: setImageFlag,
         });
@@ -1439,197 +1400,28 @@ const legacyPhotoArchive = (() => {
         return findCardInDirectionCore(cards, currentIdx, direction);
     }
 
-    function openLightbox(img) {
-        return loupeNavigationController.openLightbox(img);
-    }
-
-    function openStandaloneLightbox(img) {
-        return loupeNavigationController.openStandaloneLightbox(img);
-    }
-
-    function clearFilmstrip() {
-        clearFilmstripCore({ images: libraryImages, lightboxIndex });
-    }
-
-    function updateFilmstripCounter() {
-        updateFilmstripCounterCore({ images: libraryImages, lightboxIndex });
-    }
-
-    function buildFilmstrip() {
-        buildFilmstripCore({
-            images: libraryImages,
-            lightboxIndex,
-            windowRadius: FILMSTRIP_WINDOW_RADIUS,
-            onSelect: (index, direction) => {
-                lightboxIndex = index;
-                updateFilmstripCounter();
-                showLoupeImage(libraryImages[index], direction);
-            },
-        });
-    }
-
-    function updateFilmstripActive() {
-        updateFilmstripActiveCore({
-            images: libraryImages,
-            lightboxIndex,
-            windowRadius: FILMSTRIP_WINDOW_RADIUS,
-            onSelect: (index, direction) => {
-                lightboxIndex = index;
-                updateFilmstripCounter();
-                showLoupeImage(libraryImages[index], direction);
-            },
-        });
-    }
-
-    const loupeNavigationController = createLoupeNavigationController({
+    loupeController = createLoupeController({
         getLibraryImages: () => libraryImages,
-        getLightboxIndex: () => lightboxIndex,
-        setLightboxIndex: (index) => { lightboxIndex = index; },
         getSearchQuery: () => searchQuery,
         getRankingsExhausted: () => rankingsExhausted,
-        setStandaloneImage: (img) => { loupeStandaloneImage = img; },
-        updateFilmstripCounter,
-        buildFilmstrip,
-        clearFilmstrip,
-        showLoupeImage,
         loadRankings,
-    });
-
-    // Loupe zoom/pan state
-    let loupeScale = 1;
-    let loupeFitScale = 1;
-    let loupePanX = 0;
-    let loupePanY = 0;
-    let loupeNatW = 0;
-    let loupeNatH = 0;
-    let loupeIsFit = true;
-    let loupeZoomMode = 'fit';
-    let loupeDisplayedTierRank = -1;
-    let loupeImageToken = 0;
-    let loupeCurrentImage = null;
-    let loupeFullLoadTimer = null;
-    let loupeFullLoadToken = 0;
-    let loupeHideTimer = null;
-    let loupeCurrentMediaStatus = null;
-    let loupeLoadingTierRank = -1;
-    let loupePreviousFocus = null;
-    const loupeTierProbes = new Set();
-    const loupeRefLong = 3840; // lg thumbnail long side used before original dimensions are known
-    const LOUPE_PRELOAD_RADIUS = 3;
-    const loupeWarmupController = createLoupeWarmupController({
-        getLibraryImages: () => libraryImages,
-        getLightboxIndex: () => lightboxIndex,
-        getLoupeImageToken: () => loupeImageToken,
-        getWarmupGeneration: currentWarmupGeneration,
-        getCurrentLoupeImage: () => loupeCurrentImage,
-        isCurrentLoupeImage,
+        clearWarmups,
+        currentWarmupGeneration,
         enqueueWarmup,
         warmImageTiers,
         preloadImageWithTimeout,
         getMediaStatus,
-        loupeTierUrlImpl: loupeTierUrl,
-        preloadRadius: LOUPE_PRELOAD_RADIUS,
+        getUiSettings: () => uiSettingsLoader.getSettings(),
+        imageAspectRatio,
+        eloToStars,
     });
 
-    function cancelLoupeProbes() {
-        cancelLoupeProbesCore(loupeTierProbes, {
-            clearLoupeTierLoadingImpl: clearLoupeTierLoading,
-        });
+    function openLightbox(img) {
+        return loupeController.openLightbox(img);
     }
 
-    function focusLoupe() {
-        focusLoupeCore();
-    }
-
-    function loupeFocusableElements(loupe) {
-        return loupeFocusableElementsCore(loupe);
-    }
-
-    function trapLoupeFocus(e) {
-        trapLoupeFocusCore(e, { focusLoupeImpl: focusLoupeCore });
-    }
-
-    function showLoupeImage(img, direction = 0) {
-        const loupe = document.getElementById('loupe');
-        const loupeImg = document.getElementById('loupe-img');
-        if (!loupe || !loupeImg) return;
-        if (loupeHideTimer) {
-            clearTimeout(loupeHideTimer);
-            loupeHideTimer = null;
-        }
-
-        // Pre-calculate fit dimensions from aspect ratio so all progressive
-        // loads (sm/md/lg) display at the same screen size — no size jumps
-        const token = ++loupeImageToken;
-        clearWarmups();
-        loupeCurrentImage = img;
-        loupeFullLoadToken = 0;
-        cancelLoupeProbes();
-        if (loupeFullLoadTimer) {
-            clearTimeout(loupeFullLoadTimer);
-            loupeFullLoadTimer = null;
-        }
-        loupeDisplayedTierRank = -1;
-        loupeLoadingTierRank = -1;
-        loupeCurrentMediaStatus = null;
-        loupeIsFit = true;
-        loupeZoomMode = 'fit';
-        loupeImg.onload = null;
-        loupeImg.onerror = null;
-        loupeImg.style.opacity = '0';
-        loupeImg.src = LOUPE_BLANK_SRC;
-        const ar = imageAspectRatio(img);
-        loupeNatW = ar >= 1 ? loupeRefLong : Math.round(loupeRefLong * ar);
-        loupeNatH = ar >= 1 ? Math.round(loupeRefLong / ar) : loupeRefLong;
-        loupeImg.style.transition = 'opacity 0.15s';
-        loupeApplyImageSize();
-
-        document.body.classList.add('loupe-open');
-        const loupeWasHidden = loupe.classList.contains('hidden');
-        if (loupeWasHidden) {
-            loupePreviousFocus = document.activeElement;
-            loupe.classList.remove('hidden');
-            requestAnimationFrame(() => {
-                loupe.classList.add('loupe-visible');
-                focusLoupe();
-            });
-        } else if (!loupe.contains(document.activeElement)) {
-            focusLoupe();
-        }
-        loupeCenterFit({ animate: false });
-
-        // Progressive loading: sm -> md -> lg -> original. Slow tiers time out
-        // so the next tier still gets a chance, while late arrivals can still
-        // upgrade the image if they are sharper than the current display.
-        loupeImg.alt = img.filename || '';
-        runLoupeProgressiveLoad(img, token);
-
-        const { exifEl } = renderLoupeMetadataOverlay({
-            image: img,
-            eloToStarsImpl: eloToStars,
-        });
-        updateZoomIndicator();
-        renderLoupeStatusLine(img.flag || 'unflagged');
-
-        updateFilmstripActive();
-
-        preloadLoupeNeighbors(direction);
-        warmLoupeHotSet(direction);
-
-        // Load EXIF
-        fetch(`/api/image/${img.id}/exif`).then(r => r.json()).then(data => {
-            if (!data.exif || !isCurrentLoupeImage(img, token)) return;
-            renderLoupeMetadata({ ...img, ...data.exif }, exifEl);
-        }).catch(() => {});
-    }
-
-    function renderLoupeMetadata(metadata, exifEl = document.getElementById('loupe-overlay-exif')) {
-        renderLoupeMetadataCore(metadata, exifEl);
-    }
-
-    function isCurrentLoupeImage(img, token) {
-        const current = lightboxIndex >= 0 ? libraryImages[lightboxIndex] : loupeStandaloneImage;
-        return token === loupeImageToken && current?.id === img.id;
+    function openStandaloneLightbox(img) {
+        return loupeController.openStandaloneLightbox(img);
     }
 
     async function getMediaStatus(imageId, { force = false } = {}) {
@@ -1645,311 +1437,47 @@ const legacyPhotoArchive = (() => {
     }
 
     function updateLoupeFlagDisplay(flag) {
-        renderLoupeStatusLine(flag);
+        return loupeController.updateLoupeFlagDisplay(flag);
     }
 
-    function renderLoupeStatusLine(flag = loupeCurrentImage?.flag || 'unflagged') {
-        renderLoupeStatusLineCore({
-            displayedTierRank: loupeDisplayedTierRank,
-            flag,
-            loadingTierRank: loupeLoadingTierRank,
-            mediaStatus: loupeCurrentMediaStatus,
-            showCacheStatus: uiSettingsLoader.getSettings().show_loupe_cache_status,
-        });
+    function renderLoupeStatusLine(flag) {
+        return loupeController?.renderLoupeStatusLine(flag);
     }
 
-    function setLoupeTierLoading(rank) {
-        const updated = setLoupeTierLoadingCore({
-            displayedTierRank: loupeDisplayedTierRank,
-            rank,
-        });
-        if (updated) loupeLoadingTierRank = rank;
+    function focusLoupe() {
+        return loupeController.focusLoupe();
     }
 
-    function clearLoupeTierLoading(rank = loupeLoadingTierRank) {
-        const cleared = clearLoupeTierLoadingCore({
-            loadingTierRank: loupeLoadingTierRank,
-            rank,
-        });
-        if (cleared) loupeLoadingTierRank = -1;
+    function loupeFocusableElements(loupe) {
+        return loupeController.loupeFocusableElements(loupe);
     }
 
-    function applyLoupeMediaStatus(status, img = loupeCurrentImage, token = loupeImageToken) {
-        if (!status || !img || !isCurrentLoupeImage(img, token)) return false;
-        loupeCurrentMediaStatus = status;
-        renderLoupeStatusLine(img.flag || 'unflagged');
-        return true;
-    }
-
-    async function refreshLoupeMediaStatus(img = loupeCurrentImage, token = loupeImageToken, { force = false } = {}) {
-        if (!img || !isCurrentLoupeImage(img, token)) return null;
-        const status = await getMediaStatus(img.id, { force });
-        applyLoupeMediaStatus(status, img, token);
-        return status;
-    }
-
-    function loupeApplyImageSize() {
-        applyLoupeImageSizeCore({
-            naturalWidth: loupeNatW,
-            naturalHeight: loupeNatH,
-        });
-    }
-
-    async function runLoupeProgressiveLoad(img, token) {
-        return runLoupeProgressiveLoadCore(img, token, {
-            loadLoupeTierImpl: loadLoupeTier,
-            getMediaStatus,
-            applyLoupeMediaStatus,
-            isCurrentLoupeImage,
-            loupeTierUrlImpl: loupeTierUrl,
-            getDisplayedTierRank: () => loupeDisplayedTierRank,
-            setFullLoadToken: (nextToken) => { loupeFullLoadToken = nextToken; },
-        });
-    }
-
-    function loadLoupeTier(img, url, rank, token, { adoptDimensions = false, timeoutMs = 0 } = {}) {
-        return loadLoupeTierCore(img, url, rank, token, {
-            adoptDimensions,
-            timeoutMs,
-            probes: loupeTierProbes,
-            isCurrentLoupeImage,
-            getDisplayedTierRank: () => loupeDisplayedTierRank,
-            setDisplayedTierRank: (nextRank) => { loupeDisplayedTierRank = nextRank; },
-            setFullLoadToken: (nextToken) => { loupeFullLoadToken = nextToken; },
-            setLoupeTierLoading,
-            clearLoupeTierLoading,
-            renderLoupeStatusLine: () => renderLoupeStatusLine(img.flag || 'unflagged'),
-            refreshLoupeMediaStatus,
-            adoptSourceDimensions: loupeAdoptSourceDimensions,
-        });
-    }
-
-    function requestLoupeFullImage(img = loupeCurrentImage, token = loupeImageToken) {
-        if (!img || !isCurrentLoupeImage(img, token) || loupeFullLoadToken === token) return;
-        loupeFullLoadToken = token;
-        if (loupeFullLoadTimer) {
-            clearTimeout(loupeFullLoadTimer);
-            loupeFullLoadTimer = null;
-        }
-        loadLoupeTier(img, loupeTierUrl('full', img.id), 3, token, {
-            adoptDimensions: true,
-            timeoutMs: LOUPE_TIER_TIMEOUTS.full,
-        }).then((loaded) => {
-            if (!loaded && isCurrentLoupeImage(img, token) && loupeDisplayedTierRank < LOUPE_TIER_RANKS.full) {
-                loupeFullLoadToken = 0;
-            }
-        });
-    }
-
-    function loupeAdoptSourceDimensions(width, height) {
-        const wrap = document.getElementById('loupe-image-wrap');
-        const oldW = loupeNatW;
-        const oldH = loupeNatH;
-        if (!wrap || !oldW || !oldH || width <= 0 || height <= 0) {
-            loupeNatW = width;
-            loupeNatH = height;
-            loupeApplyImageSize();
-            return;
-        }
-
-        if (Math.abs(oldW - width) < 1 && Math.abs(oldH - height) < 1) return;
-
-        const focusX = Math.max(0, Math.min(1, ((wrap.clientWidth / 2) - loupePanX) / loupeScale / oldW));
-        const focusY = Math.max(0, Math.min(1, ((wrap.clientHeight / 2) - loupePanY) / loupeScale / oldH));
-        const oldScale = loupeScale;
-        const wasFit = loupeZoomMode === 'fit' || loupeIsFit;
-        const wasOneToOne = loupeZoomMode === 'one-to-one';
-
-        loupeNatW = width;
-        loupeNatH = height;
-        loupeApplyImageSize();
-        loupeFitScale = loupeComputeFitScale();
-
-        if (wasFit) {
-            loupeScale = loupeFitScale;
-            loupePanX = (wrap.clientWidth - loupeNatW * loupeScale) / 2;
-            loupePanY = (wrap.clientHeight - loupeNatH * loupeScale) / 2;
-            loupeIsFit = true;
-            loupeZoomMode = 'fit';
-        } else {
-            loupeScale = wasOneToOne ? 1 : oldScale * (oldW / loupeNatW);
-            loupePanX = (wrap.clientWidth / 2) - (focusX * loupeNatW * loupeScale);
-            loupePanY = (wrap.clientHeight / 2) - (focusY * loupeNatH * loupeScale);
-            loupeIsFit = false;
-            loupeZoomMode = wasOneToOne ? 'one-to-one' : 'custom';
-            loupeClampPan();
-        }
-
-        loupeApplyTransform();
-        updateZoomIndicator();
-        wrap.style.cursor = loupeIsFit ? 'zoom-in' : 'grab';
-    }
-
-    function preloadLoupeNeighbors(direction = 0) {
-        return loupeWarmupController.preloadLoupeNeighbors(direction);
-    }
-
-    function warmLoupeHotSet(direction = 0) {
-        return loupeWarmupController.warmLoupeHotSet(direction);
-    }
-
-    async function preloadLoupeNeighbor(img, distance = 1, token = loupeImageToken, generation = currentWarmupGeneration()) {
-        return loupeWarmupController.preloadLoupeNeighbor(img, distance, token, generation);
+    function trapLoupeFocus(e) {
+        return loupeController.trapLoupeFocus(e);
     }
 
     function preloadImageWithTimeout(url, priority, timeoutMs) {
         return withTimeout(preloadImage(url, priority), timeoutMs);
     }
 
-    // ==================== LOUPE ZOOM/PAN ====================
-
-    function loupeComputeFitScale() {
-        return loupeComputeFitScaleCore({
-            naturalWidth: loupeNatW,
-            naturalHeight: loupeNatH,
-        });
-    }
-
-    function loupeApplyTransform() {
-        applyLoupeTransformCore({
-            panX: loupePanX,
-            panY: loupePanY,
-            scale: loupeScale,
-        });
-    }
-
-    function updateZoomIndicator() {
-        updateLoupeZoomIndicatorCore({
-            currentImage: loupeCurrentImage,
-            naturalWidth: loupeNatW,
-            naturalHeight: loupeNatH,
-            zoomMode: loupeZoomMode,
-            scale: loupeScale,
-        });
-    }
-
-    function loupeCenterFit({ animate = true } = {}) {
-        const wrap = document.getElementById('loupe-image-wrap');
-        const img = document.getElementById('loupe-img');
-        if (!wrap || !img) return;
-        loupeApplyImageSize();
-        loupeFitScale = loupeComputeFitScale();
-        loupeScale = loupeFitScale;
-        loupePanX = (wrap.clientWidth - loupeNatW * loupeScale) / 2;
-        loupePanY = (wrap.clientHeight - loupeNatH * loupeScale) / 2;
-        loupeIsFit = true;
-        loupeZoomMode = 'fit';
-        if (animate) img.style.transition = 'transform 0.2s ease-out, opacity 0.15s';
-        loupeApplyTransform();
-        updateZoomIndicator();
-        wrap.style.cursor = 'zoom-in';
-        if (animate) setTimeout(() => { if (img) img.style.transition = 'opacity 0.15s'; }, 200);
-    }
-
-    function loupeZoomTo(newScale, pivotX, pivotY, mode = 'custom') {
-        const wrap = document.getElementById('loupe-image-wrap');
-        if (!wrap) return;
-
-        const rect = wrap.getBoundingClientRect();
-        const imgX = (pivotX - rect.left - loupePanX) / loupeScale;
-        const imgY = (pivotY - rect.top - loupePanY) / loupeScale;
-
-        const minScale = Math.max(0.01, Math.min(loupeFitScale, 1) * 0.5);
-        const maxScale = Math.max(4, loupeFitScale * 4);
-        loupeScale = Math.max(minScale, Math.min(maxScale, newScale));
-
-        loupePanX = pivotX - rect.left - imgX * loupeScale;
-        loupePanY = pivotY - rect.top - imgY * loupeScale;
-
-        loupeIsFit = Math.abs(loupeScale - loupeFitScale) < 0.001;
-        loupeZoomMode = loupeIsFit ? 'fit' : mode;
-        loupeClampPan();
-        loupeApplyTransform();
-        updateZoomIndicator();
-        wrap.style.cursor = loupeIsFit ? 'zoom-in' : 'grab';
-    }
-
-    function loupeClampPan() {
-        const wrap = document.getElementById('loupe-image-wrap');
-        const nextPan = clampLoupePanCore({
-            wrap,
-            naturalWidth: loupeNatW,
-            naturalHeight: loupeNatH,
-            scale: loupeScale,
-            panX: loupePanX,
-            panY: loupePanY,
-        });
-        loupePanX = nextPan.panX;
-        loupePanY = nextPan.panY;
-    }
-
     function initLoupeInteraction() {
-        initLoupeInteractionCore({
-            getPan: () => ({ x: loupePanX, y: loupePanY }),
-            setPan: ({ x, y }) => {
-                loupePanX = x;
-                loupePanY = y;
-            },
-            getScale: () => loupeScale,
-            getNaturalWidth: () => loupeNatW,
-            getIsFit: () => loupeIsFit,
-            setFitScale: (value) => { loupeFitScale = value; },
-            computeFitScale: loupeComputeFitScale,
-            centerFit: loupeCenterFit,
-            zoomTo: loupeZoomTo,
-            clampPan: loupeClampPan,
-            applyTransform: loupeApplyTransform,
-            updateZoomIndicator,
-            requestFullImage: requestLoupeFullImage,
-        });
+        return loupeController.initLoupeInteraction();
     }
 
     async function ensureLibraryImageIndex(index) {
-        return loupeNavigationController.ensureLibraryImageIndex(index);
+        return loupeController.ensureLibraryImageIndex(index);
     }
 
     function lightboxNext() {
-        return loupeNavigationController.lightboxNext();
+        return loupeController.lightboxNext();
     }
 
     function lightboxPrev() {
-        return loupeNavigationController.lightboxPrev();
+        return loupeController.lightboxPrev();
     }
 
     function closeLightbox() {
-        const loupe = document.getElementById('loupe');
-        const previousFocus = loupePreviousFocus;
-        loupePreviousFocus = null;
-        if (loupe) {
-            loupe.classList.remove('loupe-visible');
-            if (loupeHideTimer) clearTimeout(loupeHideTimer);
-            loupeHideTimer = setTimeout(() => {
-                if (!document.body.classList.contains('loupe-open')) loupe.classList.add('hidden');
-                loupeHideTimer = null;
-            }, 150);
-        }
-        document.body.classList.remove('loupe-open');
-        loupeImageToken++;
-        clearWarmups();
-        cancelLoupeProbes();
-        if (loupeFullLoadTimer) {
-            clearTimeout(loupeFullLoadTimer);
-            loupeFullLoadTimer = null;
-        }
-        loupeCurrentImage = null;
-        loupeStandaloneImage = null;
-        loupeFullLoadToken = 0;
-        loupeCurrentMediaStatus = null;
-        loupeDisplayedTierRank = -1;
-        loupeIsFit = true;
-        loupeZoomMode = 'fit';
-        loupeNatW = 0;
-        loupeNatH = 0;
-        updateZoomIndicator();
-        lightboxIndex = -1;
-        if (previousFocus && document.contains(previousFocus) && typeof previousFocus.focus === 'function') {
-            previousFocus.focus({ preventScroll: true });
-        }
+        return loupeController.closeLightbox();
     }
 
     const setThumbSize = createThumbnailSizeHandler({
@@ -2026,7 +1554,7 @@ const legacyPhotoArchive = (() => {
     }
 
     const findSimilar = createFindSimilarAction({
-        getLightboxIndex: () => lightboxIndex,
+        getLightboxIndex: () => loupeController?.getLightboxIndex() ?? -1,
         getLibraryImages: () => libraryImages,
         setLibraryImages: (images) => { libraryImages = images; },
         setRankingsOffset: (offset) => { rankingsOffset = offset; },
@@ -2225,6 +1753,8 @@ const legacyPhotoArchive = (() => {
         setSortField,
         toggleSortDir,
         exportRankings,
+        openLightbox,
+        openStandaloneLightbox,
         closeLightbox,
         lightboxNext,
         lightboxPrev,
