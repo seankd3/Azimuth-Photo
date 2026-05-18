@@ -11,6 +11,8 @@ exported compatibility method table that backs `window.PhotoArchive.*`.
 connects Library, Mosaic, and Compare URL construction to the extracted filter
 and query modules. `legacy/flag_bridge.js` owns the legacy Library image-flag
 facade that binds flag updates to Loupe and selection state.
+`legacy/export_bridge.js` owns the legacy full-ranking export facade that binds
+the extracted export helper to current Library query/sort state.
 `legacy/batch_bridge.js` owns the legacy batch-selection
 controller facade for Library card selection, batch flagging, and selected-image
 export. `legacy/loupe_bridge.js` owns the legacy Loupe controller and

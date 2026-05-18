@@ -71,7 +71,6 @@ import {
     initSearchInputControls as initSearchInputControlsCore,
     runDeepSearch as runDeepSearchCore,
 } from '../library/search_controller.js';
-import { exportRankings as exportRankingsCore } from '../export/actions.js';
 import { eloToStars } from '../library/display.js';
 import { appendLibraryRankCards } from '../library/rank_cards.js';
 import {
@@ -116,6 +115,7 @@ import { createFindSimilarAction } from '../library/similar.js';
 import { createPeopleApi } from '../people/controller.js';
 import { createSettingsPageController } from '../settings/page.js';
 import { createLegacyBatchBridge } from './batch_bridge.js';
+import { createLegacyExportBridge } from './export_bridge.js';
 import { createLegacyFilterQueryBridge } from './filter_query_bridge.js';
 import { createLegacyFlagBridge } from './flag_bridge.js';
 import { createLegacyLoupeBridge } from './loupe_bridge.js';
@@ -1420,11 +1420,13 @@ const legacyPhotoArchive = (() => {
         batchBridge.batchExport(format);
     }
 
+    const exportBridge = createLegacyExportBridge({
+        getQueryState: () => currentQueryState({ sort: rankingsSort }),
+        getSort: () => rankingsSort,
+    });
+
     function exportRankings(format) {
-        exportRankingsCore(format, {
-            queryState: currentQueryState({ sort: rankingsSort }),
-            sort: rankingsSort,
-        });
+        return exportBridge.exportRankings(format);
     }
 
     // ==================== MAP VIEW ====================

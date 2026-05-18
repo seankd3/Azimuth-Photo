@@ -3845,6 +3845,8 @@ class ModularContractTests(unittest.TestCase):
             legacy = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "batch_bridge.js"), encoding="utf-8") as fh:
             legacy_batch_bridge = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "legacy", "export_bridge.js"), encoding="utf-8") as fh:
+            legacy_export_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "filter_query_bridge.js"), encoding="utf-8") as fh:
             legacy_filter_query_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "flag_bridge.js"), encoding="utf-8") as fh:
@@ -4044,6 +4046,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../catalog/home_scan.js';", legacy)
         self.assertIn("from '../catalog/scan_entrypoint.js';", legacy)
         self.assertIn("from './batch_bridge.js';", legacy)
+        self.assertIn("from './export_bridge.js';", legacy)
         self.assertIn("from './filter_query_bridge.js';", legacy)
         self.assertIn("from './flag_bridge.js';", legacy)
         self.assertIn("from './loupe_bridge.js';", legacy)
@@ -4088,7 +4091,9 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../library/batch_controller.js';", legacy_batch_bridge)
         self.assertIn("export function createLegacyBatchBridge", legacy_batch_bridge)
         self.assertIn("from '../library/filter_controller.js';", legacy)
-        self.assertIn("from '../export/actions.js';", legacy)
+        self.assertNotIn("from '../export/actions.js';", legacy)
+        self.assertIn("from '../export/actions.js';", legacy_export_bridge)
+        self.assertIn("export function createLegacyExportBridge", legacy_export_bridge)
         self.assertIn("from '../library/similar.js';", legacy)
         self.assertIn("from '../library/display.js';", legacy)
         self.assertIn("from '../library/rank_cards.js';", legacy)
@@ -5984,6 +5989,38 @@ assert.deepEqual(calls, [
     ['setImageFlag', 7, 'rejected', true, true, true],
     ['setCurrentLibraryFlag', 'unflagged', true, 2, true, 0, true],
 ]);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_legacy_export_bridge_node_probe_preserves_query_state_facade(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createLegacyExportBridge } from './static/js/legacy/export_bridge.js';
+
+const calls = [];
+const bridge = createLegacyExportBridge({
+    exportRankingsImpl: (format, options) => calls.push([format, options]),
+    getQueryState: () => ({ sort: 'elo', orientation: 'portrait', people: '42' }),
+    getSort: () => 'date_desc',
+});
+
+bridge.exportRankings('csv');
+
+assert.deepEqual(calls, [[
+    'csv',
+    {
+        queryState: { sort: 'elo', orientation: 'portrait', people: '42' },
+        sort: 'date_desc',
+    },
+]]);
 """
         subprocess.run(
             ["node", "--input-type=module", "-e", script],
