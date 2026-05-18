@@ -33,6 +33,52 @@ def update_cursor_from_row(cursor: dict, row) -> None:
     cursor["id"] = int(row["id"] or 0)
 
 
+async def cache_target_total(get_db) -> int:
+    conn = await get_db()
+    try:
+        cursor = await conn.execute(
+            "SELECT COUNT(*) AS c FROM images i "
+            "JOIN catalog_sources s ON s.id = i.source_id "
+            "WHERE s.included = 1 AND s.online = 1 AND i.missing_at IS NULL"
+        )
+        row = await cursor.fetchone()
+        return int(row["c"] if row else 0)
+    finally:
+        await conn.close()
+
+
+async def candidate_batch(get_db, cursor_state: dict, limit: int):
+    conn = await get_db()
+    try:
+        cursor = await conn.execute(
+            "SELECT i.id, i.source_id, i.filepath, i.file_size, i.file_modified_at "
+            "FROM images i "
+            "JOIN catalog_sources s ON s.id = i.source_id "
+            "WHERE s.included = 1 AND s.online = 1 "
+            "AND i.missing_at IS NULL "
+            "AND ("
+            "  i.source_id > ? "
+            "  OR (i.source_id = ? AND (i.filepath > ? OR (i.filepath = ? AND i.id > ?)))"
+            ") "
+            "ORDER BY i.source_id ASC, i.filepath ASC, i.id ASC "
+            "LIMIT ?",
+            (
+                int(cursor_state.get("source_id") or 0),
+                int(cursor_state.get("source_id") or 0),
+                str(cursor_state.get("filepath") or ""),
+                str(cursor_state.get("filepath") or ""),
+                int(cursor_state.get("id") or 0),
+                limit,
+            ),
+        )
+        rows = await cursor.fetchall()
+        if rows:
+            update_cursor_from_row(cursor_state, rows[-1])
+        return rows
+    finally:
+        await conn.close()
+
+
 def set_state(
     pregen_state: dict,
     state: str,

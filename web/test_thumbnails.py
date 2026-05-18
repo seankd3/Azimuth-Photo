@@ -803,6 +803,108 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
             )
             conn.commit()
 
+    def test_pregen_candidate_queries_remain_facaded_from_pregen_module(self):
+        first = self._make_original_file("a.jpg", 30)
+        second = self._make_original_file("b.jpg", 40)
+        self._add_catalog_original(10, second)
+        self._add_catalog_original(9, first)
+
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            conn.executescript(data_schema.SCHEMA)
+            conn.execute(
+                "INSERT OR IGNORE INTO catalog_sources "
+                "(id, path, display_name, included, online) VALUES (2, ?, 'offline', 1, 0)",
+                (os.path.join(self.tempdir.name, "offline"),),
+            )
+            conn.execute(
+                "INSERT OR IGNORE INTO catalog_sources "
+                "(id, path, display_name, included, online) VALUES (3, ?, 'excluded', 0, 1)",
+                (os.path.join(self.tempdir.name, "excluded"),),
+            )
+            conn.executemany(
+                "INSERT OR REPLACE INTO images "
+                "(id, source_id, filename, filepath, status, file_size, file_modified_at, missing_at) "
+                "VALUES (?, ?, ?, ?, 'kept', ?, ?, ?)",
+                [
+                    (
+                        11,
+                        1,
+                        "missing.jpg",
+                        os.path.join(self.tempdir.name, "missing.jpg"),
+                        12,
+                        1.0,
+                        10.0,
+                    ),
+                    (
+                        12,
+                        2,
+                        "offline.jpg",
+                        os.path.join(self.tempdir.name, "offline.jpg"),
+                        12,
+                        1.0,
+                        None,
+                    ),
+                    (
+                        13,
+                        3,
+                        "excluded.jpg",
+                        os.path.join(self.tempdir.name, "excluded.jpg"),
+                        12,
+                        1.0,
+                        None,
+                    ),
+                ],
+            )
+            conn.commit()
+
+        direct_total = asyncio.run(
+            thumbnail_pregen.cache_target_total(thumbnails.data_providers.get_db)
+        )
+        facade_total = asyncio.run(thumbnails._cache_target_total())
+
+        self.assertEqual(facade_total, direct_total)
+        self.assertEqual(facade_total, 2)
+
+        direct_cursor = {"source_id": 0, "filepath": "", "id": 0}
+        direct_first = asyncio.run(
+            thumbnail_pregen.candidate_batch(
+                thumbnails.data_providers.get_db,
+                direct_cursor,
+                1,
+            )
+        )
+        direct_second = asyncio.run(
+            thumbnail_pregen.candidate_batch(
+                thumbnails.data_providers.get_db,
+                direct_cursor,
+                10,
+            )
+        )
+
+        thumbnails._reset_pregen_bulk_cursor()
+        facade_first = asyncio.run(thumbnails._pregen_bulk_candidate_batch(1))
+        facade_second = asyncio.run(thumbnails._pregen_bulk_candidate_batch(10))
+
+        self.assertEqual(
+            [row["id"] for row in facade_first],
+            [row["id"] for row in direct_first],
+        )
+        self.assertEqual(
+            [row["id"] for row in facade_second],
+            [row["id"] for row in direct_second],
+        )
+        self.assertEqual([row["id"] for row in facade_first + facade_second], [9, 10])
+        self.assertEqual(thumbnails._pregen_bulk_cursor, direct_cursor)
+
+        thumbnails._reset_pregen_full_cursor()
+        full_rows = asyncio.run(thumbnails._pregen_full_candidate_batch(10))
+
+        self.assertEqual([row["id"] for row in full_rows], [9, 10])
+        self.assertEqual(
+            thumbnails._pregen_full_cursor,
+            {"source_id": 1, "filepath": second, "id": 10},
+        )
+
     def _cache_original_now(self, image_id: int, path: str):
         signature = thumbnails._build_source_signature(path, thumbnails.FULL_TIER, image_id)
         return thumbnails._cache_full_image_sync(path, image_id, signature, hot=False)
@@ -1267,6 +1369,7 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
         old_cache_target_total = thumbnails._cache_target_total
         old_run_bulk = thumbnails._run_pregen_bulk_batch
         old_run_full = thumbnails._run_full_warm_batch
+        old_flush_write_queue = thumbnails._flush_write_queue
         old_flush_orientation = thumbnails.flush_orientation_updates
         old_should_yield = thumbnails._pregen_should_yield_to_foreground
         old_background_decision = thumbnails._pregen_background_decision
@@ -1323,6 +1426,7 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
             thumbnails._cache_target_total = fake_cache_target_total
             thumbnails._run_pregen_bulk_batch = fake_run_bulk
             thumbnails._run_full_warm_batch = fake_run_full
+            thumbnails._flush_write_queue = lambda: True
             thumbnails.flush_orientation_updates = fake_flush_orientation
             thumbnails._pregen_should_yield_to_foreground = fake_should_yield
             thumbnails._pregen_background_decision = fake_decision
@@ -1337,6 +1441,7 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
             thumbnails._cache_target_total = old_cache_target_total
             thumbnails._run_pregen_bulk_batch = old_run_bulk
             thumbnails._run_full_warm_batch = old_run_full
+            thumbnails._flush_write_queue = old_flush_write_queue
             thumbnails.flush_orientation_updates = old_flush_orientation
             thumbnails._pregen_should_yield_to_foreground = old_should_yield
             thumbnails._pregen_background_decision = old_background_decision

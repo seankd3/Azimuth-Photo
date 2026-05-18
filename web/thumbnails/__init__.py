@@ -1352,17 +1352,7 @@ def _pregen_rates() -> tuple[float, float, dict]:
 
 
 async def _cache_target_total() -> int:
-    conn = await data_providers.get_db()
-    try:
-        cursor = await conn.execute(
-            "SELECT COUNT(*) AS c FROM images i "
-            "JOIN catalog_sources s ON s.id = i.source_id "
-            "WHERE s.included = 1 AND s.online = 1 AND i.missing_at IS NULL"
-        )
-        row = await cursor.fetchone()
-        return int(row["c"] if row else 0)
-    finally:
-        await conn.close()
+    return await pregen.cache_target_total(data_providers.get_db)
 
 
 def _reset_pregen_bulk_cursor():
@@ -1374,67 +1364,19 @@ def _reset_pregen_full_cursor():
 
 
 async def _pregen_bulk_candidate_batch(limit: int):
-    conn = await data_providers.get_db()
-    try:
-        cursor = await conn.execute(
-            "SELECT i.id, i.source_id, i.filepath, i.file_size, i.file_modified_at "
-            "FROM images i "
-            "JOIN catalog_sources s ON s.id = i.source_id "
-            "WHERE s.included = 1 AND s.online = 1 "
-            "AND i.missing_at IS NULL "
-            "AND ("
-            "  i.source_id > ? "
-            "  OR (i.source_id = ? AND (i.filepath > ? OR (i.filepath = ? AND i.id > ?)))"
-            ") "
-            "ORDER BY i.source_id ASC, i.filepath ASC, i.id ASC "
-            "LIMIT ?",
-            (
-                int(_pregen_bulk_cursor.get("source_id") or 0),
-                int(_pregen_bulk_cursor.get("source_id") or 0),
-                str(_pregen_bulk_cursor.get("filepath") or ""),
-                str(_pregen_bulk_cursor.get("filepath") or ""),
-                int(_pregen_bulk_cursor.get("id") or 0),
-                limit,
-            ),
-        )
-        rows = await cursor.fetchall()
-        if rows:
-            pregen.update_cursor_from_row(_pregen_bulk_cursor, rows[-1])
-        return rows
-    finally:
-        await conn.close()
+    return await pregen.candidate_batch(
+        data_providers.get_db,
+        _pregen_bulk_cursor,
+        limit,
+    )
 
 
 async def _pregen_full_candidate_batch(limit: int):
-    conn = await data_providers.get_db()
-    try:
-        cursor = await conn.execute(
-            "SELECT i.id, i.source_id, i.filepath, i.file_size, i.file_modified_at "
-            "FROM images i "
-            "JOIN catalog_sources s ON s.id = i.source_id "
-            "WHERE s.included = 1 AND s.online = 1 "
-            "AND i.missing_at IS NULL "
-            "AND ("
-            "  i.source_id > ? "
-            "  OR (i.source_id = ? AND (i.filepath > ? OR (i.filepath = ? AND i.id > ?)))"
-            ") "
-            "ORDER BY i.source_id ASC, i.filepath ASC, i.id ASC "
-            "LIMIT ?",
-            (
-                int(_pregen_full_cursor.get("source_id") or 0),
-                int(_pregen_full_cursor.get("source_id") or 0),
-                str(_pregen_full_cursor.get("filepath") or ""),
-                str(_pregen_full_cursor.get("filepath") or ""),
-                int(_pregen_full_cursor.get("id") or 0),
-                limit,
-            ),
-        )
-        rows = await cursor.fetchall()
-        if rows:
-            pregen.update_cursor_from_row(_pregen_full_cursor, rows[-1])
-        return rows
-    finally:
-        await conn.close()
+    return await pregen.candidate_batch(
+        data_providers.get_db,
+        _pregen_full_cursor,
+        limit,
+    )
 
 
 def _bulk_tier_budgets() -> dict[str, int]:
