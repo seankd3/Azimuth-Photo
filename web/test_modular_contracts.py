@@ -1404,6 +1404,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertTrue(callable(stats.invalidate_catalog_image_counts_cache))
         self.assertTrue(callable(cache_events.invalidate_stats_cache))
         self.assertTrue(callable(cache_events.invalidate_rating_stats_cache))
+        self.assertTrue(callable(cache_events.invalidate_people_dependent_caches))
         self.assertTrue(callable(cache_events.patch_direct_rating_stats_cache))
         self.assertIs(db._catalog_image_counts_cache, stats._catalog_image_counts_cache)
         self.assertTrue(callable(stats.full_stats))

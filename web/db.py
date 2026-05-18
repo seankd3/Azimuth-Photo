@@ -683,9 +683,9 @@ async def undo_last_comparison():
 
 
 def _invalidate_people_dependent_caches():
-    _invalidate_ranking_count_cache()
-    _invalidate_facet_caches()
-    _invalidate_filter_options_cache()
+    cache_events.invalidate_people_dependent_caches(
+        filter_options_invalidator=_invalidate_filter_options_cache,
+    )
 
 
 parse_people_ids = people_repository.parse_people_ids

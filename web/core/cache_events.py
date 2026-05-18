@@ -177,6 +177,15 @@ def invalidate_rating_stats_cache() -> None:
     invalidate_ai_status_counts_cache()
 
 
+def invalidate_people_dependent_caches(*, filter_options_invalidator=None) -> None:
+    invalidate_ranking_count_cache()
+    invalidate_facet_caches()
+    if filter_options_invalidator is None:
+        invalidate_filter_options_cache()
+    else:
+        filter_options_invalidator()
+
+
 def increment_cached_int(mapping: dict, key: str, delta: int, *, cap: int | None = None) -> None:
     if key not in mapping:
         return
