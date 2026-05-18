@@ -1,5 +1,7 @@
 import os
+import sqlite3
 import sys
+import tempfile
 import unittest
 
 import numpy as np
@@ -118,6 +120,68 @@ class EmbedCacheTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNone(image_ids)
         self.assertIsNone(matrix)
+
+    async def test_offline_source_embeddings_stay_searchable(self):
+        embed_cache._get_embedding_count_sync = self.old_get_embedding_count_sync
+        embed_cache._load_embeddings_sync = self.old_load_embeddings_sync
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            db_path = os.path.join(tempdir, "photoarchive.db")
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.executescript(
+                    """
+                    CREATE TABLE catalog_sources (
+                        id INTEGER PRIMARY KEY,
+                        included INTEGER NOT NULL,
+                        online INTEGER NOT NULL
+                    );
+                    CREATE TABLE images (
+                        id INTEGER PRIMARY KEY,
+                        source_id INTEGER NOT NULL,
+                        missing_at REAL
+                    );
+                    CREATE TABLE embeddings_by_model (
+                        model_key TEXT NOT NULL,
+                        image_id INTEGER NOT NULL,
+                        embedding BLOB NOT NULL,
+                        dimension INTEGER NOT NULL,
+                        PRIMARY KEY (model_key, image_id)
+                    );
+                    """
+                )
+                conn.execute(
+                    "INSERT INTO catalog_sources (id, included, online) VALUES (1, 1, 0)"
+                )
+                conn.execute(
+                    "INSERT INTO images (id, source_id, missing_at) VALUES (7, 1, NULL)"
+                )
+                conn.execute(
+                    "INSERT INTO embeddings_by_model "
+                    "(model_key, image_id, embedding, dimension) VALUES (?, ?, ?, ?)",
+                    (
+                        "fast-model",
+                        7,
+                        np.array([0.25, 0.75], dtype=np.float32).tobytes(),
+                        2,
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            embed_cache.configure(
+                active_embedding_model_key=lambda: "fast-model",
+                db_path=lambda: db_path,
+            )
+
+            self.assertEqual(embed_cache._get_embedding_count_sync("fast-model"), 1)
+            image_ids, matrix = embed_cache._load_embeddings_sync(1, "fast-model")
+
+        self.assertEqual(image_ids, [7])
+        self.assertGreaterEqual(matrix.shape[0], 1)
+        self.assertEqual(matrix.shape[1], 2)
+        self.assertEqual(matrix[0].tolist(), [0.25, 0.75])
 
 
 if __name__ == "__main__":

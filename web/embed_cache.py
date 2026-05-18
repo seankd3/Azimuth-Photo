@@ -184,7 +184,7 @@ def _get_embedding_count_sync(model_key: str) -> int:
             "JOIN images i ON e.image_id = i.id "
             "JOIN catalog_sources s ON s.id = i.source_id "
             "WHERE e.model_key = ? "
-            "AND s.included = 1 AND s.online = 1 AND i.missing_at IS NULL",
+            "AND s.included = 1 AND i.missing_at IS NULL",
             (model_key,),
         ).fetchone()[0]
     finally:
@@ -203,7 +203,7 @@ def _load_embeddings_sync(expected_count: int, model_key: str):
             "JOIN images i ON e.image_id = i.id "
             "JOIN catalog_sources s ON s.id = i.source_id "
             "WHERE e.model_key = ? "
-            "AND s.included = 1 AND s.online = 1 AND i.missing_at IS NULL",
+            "AND s.included = 1 AND i.missing_at IS NULL",
             (model_key,),
         ).fetchall()
     finally:

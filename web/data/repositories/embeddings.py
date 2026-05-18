@@ -447,7 +447,7 @@ async def count_embeddings_for_model(
                 "SELECT COUNT(*) AS c FROM embeddings_by_model e "
                 "JOIN images i ON e.image_id = i.id "
                 "JOIN catalog_sources s ON s.id = i.source_id "
-                "WHERE e.model_key = ? AND s.included = 1 AND s.online = 1 "
+                "WHERE e.model_key = ? AND s.included = 1 "
                 "AND i.missing_at IS NULL",
                 (model_key,),
             )
