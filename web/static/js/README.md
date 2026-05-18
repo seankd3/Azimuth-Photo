@@ -69,6 +69,7 @@ compatibility facade for selected-image export.
 `export/actions.js` owns full-ranking export and selected-image export URL
 construction/opening for JSON and CSV downloads.
 `library/display.js` owns Library card flag, tier, similarity, info-line, and date labels.
+`library/rank_cards.js` owns Library ranking-card and date-header DOM construction.
 `library/shell.js` owns Library empty-state display, scroll persistence,
 back-to-top visibility, and scroll-to-card helpers.
 `library/date_scrubber.js` owns Library date-scrubber fetch orchestration, DOM

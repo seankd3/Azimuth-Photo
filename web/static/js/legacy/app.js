@@ -1,12 +1,10 @@
 import {
-    escapeHtml,
     formatBytes,
     hideConfirmModal as hideConfirmModalUi,
     hideShortcuts as hideShortcutsUi,
     initBottomBarMeasurement as initBottomBarMeasurementUi,
     initShortcutOverlay,
     initVisibilityRefresh as initVisibilityRefreshUi,
-    jsString,
     showConfirmModal as showConfirmModalUi,
     showShortcuts as showShortcutsUi,
     showToast as showToastUi,
@@ -118,15 +116,8 @@ import {
 } from '../library/flags.js';
 import { createBatchSelectionController } from '../library/batch_controller.js';
 import { exportRankings as exportRankingsCore } from '../export/actions.js';
-import {
-    eloToStars,
-    flagBadge,
-    flagClass,
-    formatDateGroup,
-    getConfidenceClass,
-    getTierClass,
-    libraryCardInfoLine as libraryCardInfoLineCore,
-} from '../library/display.js';
+import { eloToStars } from '../library/display.js';
+import { appendLibraryRankCards } from '../library/rank_cards.js';
 import {
     hideLibraryEmptyState as hideLibraryEmptyStateCore,
     libraryScrollRoot as libraryScrollRootCore,
@@ -159,7 +150,6 @@ import { createLibraryMapController } from '../library/map_controller.js';
 import {
     formatDateTime,
     imageAspectRatio,
-    imageMetadataTitle,
 } from '../media_metadata.js';
 import {
     hasActiveTextSearch as hasActiveTextSearchCore,
@@ -1242,60 +1232,25 @@ const legacyPhotoArchive = (() => {
             }
             const grid = document.getElementById('rankings-grid');
             if (clearFirst) { grid.innerHTML = ''; selectedLibraryIndex = -1; lastDateGroup = null; }
-            const showRank = (rankingsSort === 'elo' || rankingsSort === 'elo_asc');
-            const isDateSort = (rankingsSort === 'date_taken' || rankingsSort === 'date_taken_asc');
             const rowH = thumbHeight;
 
             // Batch DOM writes with DocumentFragment to avoid per-card reflows
             const frag = document.createDocumentFragment();
             const baseIndex = libraryImages.length;
-            for (let i = 0; i < data.images.length; i++) {
-                const img = data.images[i];
-                const rank = rankingsOffset + i + 1;
-                const ar = img.aspect_ratio || 1.5;
-                const tier = getTierClass(img.elo, img.comparisons);
-                const conf = img.comparisons > 0 ? getConfidenceClass(img.comparisons) : '';
-
-                // Insert date group header when group changes
-                if (isDateSort) {
-                    const group = img.date_group || '';
-                    if (group !== lastDateGroup) {
-                        lastDateGroup = group;
-                        const header = document.createElement('div');
-                        header.className = 'date-group-header';
-                        header.dataset.dateGroup = group;
-                        header.textContent = group ? formatDateGroup(group) : 'No Date';
-                        frag.appendChild(header);
-                    }
-                }
-
-                const card = document.createElement('div');
-                card.className = 'rank-card skeleton-cell' + (tier ? ' ' + tier : '') + (flagClass(img.flag) ? ' ' + flagClass(img.flag) : '');
-                if (batchController.isBatchMode()) card.classList.add('selectable');
-                if (batchController.isSelected(img.id)) card.classList.add('selected');
-                card.dataset.imageId = img.id;
-                card.dataset.ar = ar;
-                card.style.height = rowH + 'px';
-                card.style.flexGrow = ar;
-                card.style.flexBasis = (rowH * ar) + 'px';
-                card.title = imageMetadataTitle(img);
-                card.onclick = (e) => handleCardClick(e, img, card, baseIndex + i);
-
-                const confDot = conf ? `<div class="rank-confidence ${conf}"></div>` : '';
-                const infoLine = libraryCardInfoLine(img, rank, showRank);
-                const eagerThumb = requestOffset === 0 && i < 12;
-                const loadingAttrs = eagerThumb ? 'loading="eager" fetchpriority="high"' : 'loading="lazy"';
-
-                card.innerHTML = `
-                    <img src="${escapeHtml(img.thumb_url)}" alt="${escapeHtml(img.filename)}" ${loadingAttrs} onload="this.classList.add('loaded'); this.parentElement.classList.remove('skeleton-cell')">
-                    <div class="select-check">✓</div>
-                    ${confDot}
-                    ${flagBadge(img.flag)}
-                    <div class="rank-card-info">${infoLine}</div>
-                `;
-                frag.appendChild(card);
-                libraryImages.push(img);
-            }
+            const appendResult = appendLibraryRankCards({
+                fragment: frag,
+                images: data.images,
+                rankingsOffset,
+                baseIndex,
+                rankingsSort,
+                thumbHeight: rowH,
+                lastDateGroup,
+                isBatchMode: () => batchController.isBatchMode(),
+                isSelected: (imageId) => batchController.isSelected(imageId),
+                onCardClick: handleCardClick,
+            });
+            lastDateGroup = appendResult.lastDateGroup;
+            libraryImages.push(...data.images);
             grid.appendChild(frag);
 
             rankingsOffset += data.images.length;
@@ -1313,10 +1268,6 @@ const legacyPhotoArchive = (() => {
         } finally {
             if (requestGeneration === libraryRequestGeneration) rankingsLoading = false;
         }
-    }
-
-    function libraryCardInfoLine(img, rank, showRank) {
-        return libraryCardInfoLineCore(img, rank, showRank, rankingsSort);
     }
 
     function isDateSortActive() {

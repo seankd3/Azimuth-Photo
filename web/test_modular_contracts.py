@@ -3926,6 +3926,8 @@ class ModularContractTests(unittest.TestCase):
             library_similar = fh.read()
         with open(os.path.join(base_dir, "static", "js", "library", "display.js"), encoding="utf-8") as fh:
             library_display = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "library", "rank_cards.js"), encoding="utf-8") as fh:
+            library_rank_cards = fh.read()
         with open(os.path.join(base_dir, "static", "js", "library", "shell.js"), encoding="utf-8") as fh:
             library_shell = fh.read()
         with open(os.path.join(base_dir, "static", "js", "library", "date_scrubber.js"), encoding="utf-8") as fh:
@@ -4025,6 +4027,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../export/actions.js';", legacy)
         self.assertIn("from '../library/similar.js';", legacy)
         self.assertIn("from '../library/display.js';", legacy)
+        self.assertIn("from '../library/rank_cards.js';", legacy)
         self.assertIn("from '../library/shell.js';", legacy)
         self.assertIn("from '../library/date_scrubber.js';", legacy)
         self.assertIn("from '../library/navigation.js';", legacy)
@@ -4265,6 +4268,9 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("export function libraryCardInfoLine", library_display)
         self.assertIn("export function dateScrubberLabelsHtml", library_display)
         self.assertIn("export function similarLibraryCardHtml", library_display)
+        self.assertIn("export function appendLibraryRankCards", library_rank_cards)
+        self.assertIn("from './display.js';", library_rank_cards)
+        self.assertIn("imageMetadataTitle", library_rank_cards)
         self.assertIn("export function updateLibraryEmptyState", library_shell)
         self.assertIn("export function saveScrollPosition", library_shell)
         self.assertIn("export function restoreScrollPosition", library_shell)
@@ -7441,6 +7447,117 @@ events.length = 0;
 mosaicFilling = true;
 enqueued.at(-1).options.onDrop();
 assert.deepEqual(events, [['retry-filling', false]]);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_library_rank_cards_node_probe_preserves_card_dom_contract(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { appendLibraryRankCards } from './static/js/library/rank_cards.js';
+
+function makeElement(tag) {
+    const el = {
+        tag,
+        className: '',
+        dataset: {},
+        style: {},
+        children: [],
+        innerHTML: '',
+        textContent: '',
+        title: '',
+        onclick: null,
+        appendChild(child) {
+            this.children.push(child);
+            return child;
+        },
+    };
+    el.classList = {
+        add(value) {
+            const parts = el.className ? el.className.split(/\s+/) : [];
+            if (!parts.includes(value)) parts.push(value);
+            el.className = parts.join(' ');
+        },
+    };
+    return el;
+}
+
+const calls = [];
+const fragment = makeElement('fragment');
+const result = appendLibraryRankCards({
+    documentImpl: {
+        createDocumentFragment: () => makeElement('fragment'),
+        createElement: makeElement,
+    },
+    fragment,
+    images: [
+        {
+            id: 7,
+            filename: 'near <lake>.jpg',
+            thumb_url: '/api/thumb/sm/7?name=<lake>',
+            aspect_ratio: 2,
+            flag: 'picked',
+            elo: 1200,
+            comparisons: 0,
+            date_group: '',
+        },
+        {
+            id: 8,
+            filename: 'far.jpg',
+            thumb_url: '/api/thumb/sm/8',
+            aspect_ratio: 1,
+            flag: '',
+            elo: 1325,
+            comparisons: 4,
+            date_group: '',
+        },
+    ],
+    rankingsOffset: 0,
+    baseIndex: 4,
+    rankingsSort: 'date_taken',
+    thumbHeight: 180,
+    lastDateGroup: null,
+    isBatchMode: () => true,
+    isSelected: (imageId) => imageId === 7,
+    onCardClick: (_event, image, _card, index) => calls.push(['click', image.id, index]),
+});
+
+assert.equal(result.fragment, fragment);
+assert.equal(result.lastDateGroup, '');
+assert.equal(fragment.children.length, 3);
+const header = fragment.children[0];
+assert.equal(header.className, 'date-group-header');
+assert.equal(header.dataset.dateGroup, '');
+assert.equal(header.textContent, 'No Date');
+
+const firstCard = fragment.children[1];
+assert.equal(firstCard.className, 'rank-card skeleton-cell flag-picked selectable selected');
+assert.equal(firstCard.dataset.imageId, 7);
+assert.equal(firstCard.dataset.ar, 2);
+assert.equal(firstCard.style.height, '180px');
+assert.equal(firstCard.style.flexGrow, 2);
+assert.equal(firstCard.style.flexBasis, '360px');
+assert.match(firstCard.title, /^near <lake>\.jpg/);
+assert.match(firstCard.innerHTML, /fetchpriority="high"/);
+assert.match(firstCard.innerHTML, /near &lt;lake&gt;\.jpg/);
+assert.match(firstCard.innerHTML, /\/api\/thumb\/sm\/7\?name=&lt;lake&gt;/);
+firstCard.onclick({ type: 'click' });
+assert.deepEqual(calls, [['click', 7, 4]]);
+
+const secondCard = fragment.children[2];
+assert.equal(secondCard.className, 'rank-card skeleton-cell tier-bronze selectable');
+assert.equal(secondCard.style.flexBasis, '180px');
+assert.match(secondCard.innerHTML, /rank-confidence medium/);
+assert.match(secondCard.innerHTML, /loading="eager"/);
+secondCard.onclick({ type: 'click' });
+assert.deepEqual(calls.at(-1), ['click', 8, 5]);
 """
         subprocess.run(
             ["node", "--input-type=module", "-e", script],
