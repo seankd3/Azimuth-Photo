@@ -16,6 +16,7 @@ from thumbnails import budget as thumbnail_budget  # noqa: E402
 from thumbnails import cache_entries as thumbnail_cache_entries  # noqa: E402
 from thumbnails import config as thumbnail_config  # noqa: E402
 from thumbnails import maintenance as thumbnail_maintenance  # noqa: E402
+from thumbnails import pregen as thumbnail_pregen  # noqa: E402
 from thumbnails import runtime as thumbnail_runtime  # noqa: E402
 from thumbnails import status as thumbnail_status  # noqa: E402
 
@@ -121,6 +122,46 @@ class ThumbnailRuntimeFacadeTests(unittest.TestCase):
         self.assertGreater(thumbnails._current_time(), 0.0)
         self.assertTrue(thumbnails._is_sqlite_locked(sqlite3.OperationalError("database is locked")))
         self.assertFalse(thumbnails._is_sqlite_locked(sqlite3.OperationalError("disk I/O error")))
+
+
+class ThumbnailPregenFacadeTests(unittest.TestCase):
+    def test_decision_helpers_remain_facaded_from_pregen_module(self):
+        calls = []
+
+        def decision_provider(idle_seconds, *, work_mode):
+            calls.append((idle_seconds, work_mode))
+            return {"decision": work_mode}
+
+        decision = type("Decision", (), {"pause": False, "thumbnail_batch_size": 12})()
+        old_batch = thumbnails.PREGENERATE_GENERATE_BATCH
+        try:
+            thumbnails.PREGENERATE_GENERATE_BATCH = 4
+            self.assertEqual(
+                thumbnails._pregen_generate_batch_for_decision(decision),
+                thumbnail_pregen.generate_batch_for_decision(decision, 4),
+            )
+        finally:
+            thumbnails.PREGENERATE_GENERATE_BATCH = old_batch
+
+        self.assertEqual(
+            thumbnail_pregen.background_decision(
+                12.5,
+                work_mode_provider=lambda: "max",
+                decision_provider=decision_provider,
+            ),
+            {"decision": "max"},
+        )
+        self.assertEqual(calls, [(12.5, "max")])
+        self.assertEqual(
+            thumbnail_pregen.background_work_mode(lambda: {"background_work_mode": "browse"}),
+            "browse",
+        )
+        self.assertEqual(
+            thumbnail_pregen.background_work_mode(lambda: {"background_work_mode": "invalid"}),
+            "balanced",
+        )
+        self.assertTrue(thumbnail_pregen.should_yield_to_foreground(lambda: "browse"))
+        self.assertFalse(thumbnail_pregen.should_yield_to_foreground(lambda: "balanced"))
 
 
 class ThumbnailMaintenanceFacadeTests(unittest.TestCase):

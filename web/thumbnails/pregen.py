@@ -102,3 +102,42 @@ def generate_batch_for_decision(decision, configured_batch: int) -> int:
 def normalize_work_mode(value, *, default: str = "balanced") -> str:
     mode = str(value or "").strip().lower()
     return mode if mode in VALID_WORK_MODES else default
+
+
+def background_work_mode(settings_getter=None, *, default: str = "balanced") -> str:
+    try:
+        if settings_getter is None:
+            import settings
+
+            settings_getter = settings.get_settings
+
+        mode = normalize_work_mode(
+            settings_getter().get("background_work_mode"),
+            default=default,
+        )
+        if mode:
+            return mode
+    except Exception:
+        pass
+    return default
+
+
+def background_decision(
+    idle_seconds: float,
+    *,
+    work_mode_provider=None,
+    decision_provider=None,
+):
+    if work_mode_provider is None:
+        work_mode_provider = background_work_mode
+    if decision_provider is None:
+        import resource_governor
+
+        decision_provider = resource_governor.get_background_decision
+    return decision_provider(idle_seconds, work_mode=work_mode_provider())
+
+
+def should_yield_to_foreground(work_mode_provider=None) -> bool:
+    if work_mode_provider is None:
+        work_mode_provider = background_work_mode
+    return work_mode_provider() == "browse"

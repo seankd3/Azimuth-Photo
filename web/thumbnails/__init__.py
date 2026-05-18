@@ -2080,27 +2080,19 @@ def _pregen_generate_batch_for_decision(decision) -> int:
 
 
 def _pregen_background_decision():
-    decision = resource_governor.get_background_decision(
+    return pregen.background_decision(
         get_idle_seconds(),
-        work_mode=_background_work_mode(),
+        work_mode_provider=_background_work_mode,
+        decision_provider=resource_governor.get_background_decision,
     )
-    return decision
 
 
 def _background_work_mode() -> str:
-    try:
-        import settings
-
-        mode = pregen.normalize_work_mode(settings.get_settings().get("background_work_mode"))
-        if mode:
-            return mode
-    except Exception:
-        pass
-    return "balanced"
+    return pregen.background_work_mode()
 
 
 def _pregen_should_yield_to_foreground() -> bool:
-    return _background_work_mode() == "browse"
+    return pregen.should_yield_to_foreground(_background_work_mode)
 
 
 async def run_prefetch_worker():
