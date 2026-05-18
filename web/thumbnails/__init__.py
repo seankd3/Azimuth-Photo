@@ -701,10 +701,12 @@ _resize_to_long_side = generation.resize_to_long_side
 
 
 def _queue_orientation(image_id: int, img: Image.Image):
-    orientation = "landscape" if img.width >= img.height else "portrait"
-    aspect_ratio = round(img.width / img.height, 4) if img.height > 0 else 1.5
-    with _orientation_lock:
-        _orientation_queue[image_id] = (orientation, aspect_ratio)
+    return generation.queue_orientation(
+        image_id,
+        img,
+        orientation_lock=_orientation_lock,
+        orientation_queue=_orientation_queue,
+    )
 
 
 def _thumbnail_jpeg_bytes(variant: Image.Image, size: str) -> bytes:
@@ -719,16 +721,17 @@ def _encode_and_cache_thumbnail(
     *,
     hot: bool,
 ) -> tuple[Image.Image, bytes, bool]:
-    if variant.mode != "RGB":
-        converted = variant.convert("RGB")
-        variant.close()
-        variant = converted
-
-    data = _thumbnail_jpeg_bytes(variant, size)
-    _memory_put(size, image_id, source_signature, data)
-    written = _write_thumbnail_to_disk(size, image_id, source_signature, data, hot=hot)
-    _thumbnail_retry_after.pop((size, image_id, source_signature), None)
-    return variant, data, written
+    return generation.encode_and_cache_thumbnail(
+        size,
+        image_id,
+        source_signature,
+        variant,
+        hot=hot,
+        thumb_quality=THUMB_QUALITY,
+        memory_put=_memory_put,
+        write_thumbnail_to_disk=_write_thumbnail_to_disk,
+        thumbnail_retry_after=_thumbnail_retry_after,
+    )
 
 
 def _planned_thumbnail_sizes(

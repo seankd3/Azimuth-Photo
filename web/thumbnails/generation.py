@@ -118,6 +118,37 @@ def thumbnail_jpeg_bytes(variant: Image.Image, size: str, quality: int) -> bytes
     return buf.getvalue()
 
 
+def queue_orientation(image_id: int, img: Image.Image, *, orientation_lock, orientation_queue) -> None:
+    orientation = "landscape" if img.width >= img.height else "portrait"
+    aspect_ratio = round(img.width / img.height, 4) if img.height > 0 else 1.5
+    with orientation_lock:
+        orientation_queue[image_id] = (orientation, aspect_ratio)
+
+
+def encode_and_cache_thumbnail(
+    size: str,
+    image_id: int,
+    source_signature: str,
+    variant: Image.Image,
+    *,
+    hot: bool,
+    thumb_quality: int,
+    memory_put,
+    write_thumbnail_to_disk,
+    thumbnail_retry_after: dict,
+) -> tuple[Image.Image, bytes, bool]:
+    if variant.mode != "RGB":
+        converted = variant.convert("RGB")
+        variant.close()
+        variant = converted
+
+    data = thumbnail_jpeg_bytes(variant, size, thumb_quality)
+    memory_put(size, image_id, source_signature, data)
+    written = write_thumbnail_to_disk(size, image_id, source_signature, data, hot=hot)
+    thumbnail_retry_after.pop((size, image_id, source_signature), None)
+    return variant, data, written
+
+
 def load_embedding_image(
     filepath: str,
     image_id: int,

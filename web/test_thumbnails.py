@@ -1167,6 +1167,87 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
             if facade_image is not None:
                 facade_image.close()
 
+    def test_generation_encode_and_orientation_helpers_remain_facaded(self):
+        class FakeLock:
+            def __init__(self):
+                self.entered = 0
+
+            def __enter__(self):
+                self.entered += 1
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        direct_queue = {}
+        direct_lock = FakeLock()
+        direct_image = Image.new("L", (10, 20), color=100)
+        thumbnail_generation.queue_orientation(
+            5,
+            direct_image,
+            orientation_lock=direct_lock,
+            orientation_queue=direct_queue,
+        )
+
+        key = ("md", 5, "signature")
+        direct_retry = {key: 1.0}
+        direct_calls = []
+        direct_variant, direct_data, direct_written = thumbnail_generation.encode_and_cache_thumbnail(
+            "md",
+            5,
+            "signature",
+            direct_image,
+            hot=True,
+            thumb_quality=thumbnails.THUMB_QUALITY,
+            memory_put=lambda *args: direct_calls.append(("memory", args)),
+            write_thumbnail_to_disk=lambda *args, hot: direct_calls.append(("disk", args, hot)) or True,
+            thumbnail_retry_after=direct_retry,
+        )
+
+        old_orientation_lock = thumbnails._orientation_lock
+        old_orientation_queue = thumbnails._orientation_queue
+        old_memory_put = thumbnails._memory_put
+        old_write_thumbnail = thumbnails._write_thumbnail_to_disk
+        old_retry_after = thumbnails._thumbnail_retry_after
+        facade_image = Image.new("L", (10, 20), color=100)
+        try:
+            facade_lock = FakeLock()
+            facade_queue = {}
+            facade_retry = {key: 1.0}
+            facade_calls = []
+            thumbnails._orientation_lock = facade_lock
+            thumbnails._orientation_queue = facade_queue
+            thumbnails._memory_put = lambda *args: facade_calls.append(("memory", args))
+            thumbnails._write_thumbnail_to_disk = (
+                lambda *args, hot: facade_calls.append(("disk", args, hot)) or True
+            )
+            thumbnails._thumbnail_retry_after = facade_retry
+
+            thumbnails._queue_orientation(5, facade_image)
+            facade_variant, facade_data, facade_written = thumbnails._encode_and_cache_thumbnail(
+                "md",
+                5,
+                "signature",
+                facade_image,
+                hot=True,
+            )
+
+            self.assertEqual(facade_queue, direct_queue)
+            self.assertEqual(facade_lock.entered, direct_lock.entered)
+            self.assertEqual(facade_variant.mode, "RGB")
+            self.assertEqual(facade_data, direct_data)
+            self.assertEqual(facade_written, direct_written)
+            self.assertEqual(facade_calls, direct_calls)
+            self.assertEqual(facade_retry, direct_retry)
+        finally:
+            thumbnails._orientation_lock = old_orientation_lock
+            thumbnails._orientation_queue = old_orientation_queue
+            thumbnails._memory_put = old_memory_put
+            thumbnails._write_thumbnail_to_disk = old_write_thumbnail
+            thumbnails._thumbnail_retry_after = old_retry_after
+            direct_variant.close()
+            if 'facade_variant' in locals():
+                facade_variant.close()
+
     def _cache_original_now(self, image_id: int, path: str):
         signature = thumbnails._build_source_signature(path, thumbnails.FULL_TIER, image_id)
         return thumbnails._cache_full_image_sync(path, image_id, signature, hot=False)
