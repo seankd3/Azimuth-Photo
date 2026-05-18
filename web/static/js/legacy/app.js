@@ -65,12 +65,6 @@ import {
     currentLibraryPageSize as currentLibraryPageSizeCore,
 } from '../library/pagination.js';
 import { createLibrarySortController } from '../library/sort_controller.js';
-import {
-    applySearchQueryChange as applySearchQueryChangeCore,
-    clearSearch as clearSearchCore,
-    initSearchInputControls as initSearchInputControlsCore,
-    runDeepSearch as runDeepSearchCore,
-} from '../library/search_controller.js';
 import { eloToStars } from '../library/display.js';
 import { appendLibraryRankCards } from '../library/rank_cards.js';
 import { createLibraryMapController } from '../library/map_controller.js';
@@ -97,6 +91,7 @@ import {
 import { createLegacyLibraryInitBridge } from './library_init_bridge.js';
 import { createLegacyLoupeBridge } from './loupe_bridge.js';
 import { createLegacyPublicApi } from './public_api.js';
+import { createLegacySearchActionBridge } from './search_action_bridge.js';
 import { createLegacySearchSortBridge } from './search_sort_bridge.js';
 import { createLegacyUiRuntimeBridge } from './ui_runtime_bridge.js';
 
@@ -556,7 +551,6 @@ const legacyPhotoArchive = (() => {
     let searchQuery = '';
     let deepSearchRequested = false;
     let lastDeepSearchNoticeQuery = '';
-    let searchDebounce = null;
     let rankingsLoading = false;
     let rankingsLoadPromise = null;
     let rankingsExhausted = false;
@@ -788,35 +782,6 @@ const legacyPhotoArchive = (() => {
         return filterQueryBridge.rankingQueryString({ queryState, limit, offset, sort });
     }
 
-    function initSearchInputControls() {
-        const input = document.getElementById('search-input');
-        if (!input || input.dataset.searchBound === '1') return;
-        input.dataset.searchBound = '1';
-        initSearchInputControlsCore({
-            getSearchDebounce: () => searchDebounce,
-            setSearchDebounce: (timer) => {
-                searchDebounce = timer;
-            },
-            hasActiveTextSearch,
-            applySearchQueryChangeImpl: (value) => applySearchQueryChangeCore(value, searchControllerContext()),
-            clearSearchImpl: clearSearch,
-        });
-    }
-
-    function clearSearch() {
-        clearSearchCore({
-            ...searchControllerContext(),
-            clearSearchDebounce: clearSearchDebounceTimer,
-        });
-    }
-
-    function runDeepSearch() {
-        runDeepSearchCore({
-            ...searchControllerContext(),
-            clearSearchDebounce: clearSearchDebounceTimer,
-        });
-    }
-
     const librarySortController = createLibrarySortController({
         getSortField: () => sortField,
         getSortDesc: () => sortDesc,
@@ -833,32 +798,39 @@ const legacyPhotoArchive = (() => {
         toggleSortDir,
     } = librarySortController;
 
-    function clearSearchDebounceTimer() {
-        clearTimeout(searchDebounce);
-        searchDebounce = null;
+    const searchActionBridge = createLegacySearchActionBridge({
+        documentImpl: document,
+        getSearchQuery: () => searchQuery,
+        setSearchQuery: (value) => {
+            searchQuery = value;
+        },
+        getDeepSearchRequested: () => deepSearchRequested,
+        setDeepSearchRequested: (value) => {
+            deepSearchRequested = value;
+        },
+        getSortField: () => sortField,
+        hasActiveTextSearch,
+        saveSearchState,
+        updateSimilaritySortOption,
+        applySortState,
+        saveSearchSortState,
+        clearPersistedSearchState,
+        restoreSortState,
+        updateSearchControls,
+        reloadForFilters,
+        updateDateScrubber,
+    });
+
+    function initSearchInputControls() {
+        return searchActionBridge.initSearchInputControls();
     }
 
-    function searchControllerContext() {
-        return {
-            getSearchQuery: () => searchQuery,
-            setSearchQuery: (value) => {
-                searchQuery = value;
-            },
-            setDeepSearchRequested: (value) => {
-                deepSearchRequested = value;
-            },
-            getSortField: () => sortField,
-            hasActiveTextSearch,
-            saveSearchState,
-            updateSimilaritySortOption,
-            applySortState,
-            saveSearchSortState,
-            clearPersistedSearchState,
-            restoreSortState,
-            updateSearchControls,
-            reloadForFilters,
-            updateDateScrubber,
-        };
+    function clearSearch() {
+        return searchActionBridge.clearSearch();
+    }
+
+    function runDeepSearch() {
+        return searchActionBridge.runDeepSearch();
     }
 
     const flagBridge = createLegacyFlagBridge({

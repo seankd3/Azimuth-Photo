@@ -21,7 +21,9 @@ navigation. `legacy/library_init_bridge.js` owns the legacy Library page
 initialization workflow around restored state, first rankings load, infinite
 scroll setup, keyboard binding, and Loupe/search startup. `legacy/date_scrubber_bridge.js`
 owns the legacy Library date scrubber state facade around date grouping,
-jumping, visibility, and scroll tracking. `legacy/loupe_bridge.js` owns the legacy Loupe controller and
+jumping, visibility, and scroll tracking. `legacy/search_action_bridge.js` owns
+the legacy Library/Compare search action facade around input binding, debounce,
+clear search, and Deep Search. `legacy/loupe_bridge.js` owns the legacy Loupe controller and
 media-status facade wiring. `legacy/search_sort_bridge.js` owns the legacy
 search/sort state bridge that connects persisted search state and sort-control
 rendering to the extracted Library modules. `legacy/ui_runtime_bridge.js` owns

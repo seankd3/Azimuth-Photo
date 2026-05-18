@@ -3859,6 +3859,8 @@ class ModularContractTests(unittest.TestCase):
             legacy_library_init_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "loupe_bridge.js"), encoding="utf-8") as fh:
             legacy_loupe_bridge = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "legacy", "search_action_bridge.js"), encoding="utf-8") as fh:
+            legacy_search_action_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "search_sort_bridge.js"), encoding="utf-8") as fh:
             legacy_search_sort_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "ui_runtime_bridge.js"), encoding="utf-8") as fh:
@@ -4059,6 +4061,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from './library_init_bridge.js';", legacy)
         self.assertIn("from './library_shell_bridge.js';", legacy)
         self.assertIn("from './loupe_bridge.js';", legacy)
+        self.assertIn("from './search_action_bridge.js';", legacy)
         self.assertIn("from './search_sort_bridge.js';", legacy)
         self.assertIn("from './ui_runtime_bridge.js';", legacy)
         self.assertIn("export function createLegacyUiRuntimeBridge", legacy_ui_runtime_bridge)
@@ -4092,7 +4095,9 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../library/search_state.js';", legacy_search_sort_bridge)
         self.assertIn("from '../library/search_controls.js';", legacy_search_sort_bridge)
         self.assertIn("export function createLegacySearchSortBridge", legacy_search_sort_bridge)
-        self.assertIn("from '../library/search_controller.js';", legacy)
+        self.assertNotIn("from '../library/search_controller.js';", legacy)
+        self.assertIn("from '../library/search_controller.js';", legacy_search_action_bridge)
+        self.assertIn("export function createLegacySearchActionBridge", legacy_search_action_bridge)
         self.assertNotIn("from '../library/flags.js';", legacy)
         self.assertIn("from '../library/flags.js';", legacy_flag_bridge)
         self.assertIn("export function createLegacyFlagBridge", legacy_flag_bridge)
@@ -5244,6 +5249,148 @@ sortDesc = true;
 assert.equal(bridge.currentSearchMode(), 'library');
 assert.equal(bridge.filterQueryString(), 'flag=picked');
 assert.equal(bridge.hasActiveLibraryFilters(), true);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_legacy_search_action_bridge_node_probe_preserves_context_and_debounce(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createLegacySearchActionBridge } from './static/js/legacy/search_action_bridge.js';
+
+const events = [];
+const input = { dataset: {}, value: 'mist', classList: { remove() {} } };
+let searchQuery = 'old';
+let deepSearchRequested = false;
+let sortField = 'elo';
+let timer = 'pending';
+const documentImpl = {
+    getElementById(id) {
+        events.push(['get', id]);
+        return id === 'search-input' ? input : null;
+    },
+};
+const bridge = createLegacySearchActionBridge({
+    documentImpl,
+    clearTimeoutImpl: value => events.push(['clear-timeout', value]),
+    getSearchQuery: () => searchQuery,
+    setSearchQuery: value => {
+        searchQuery = value;
+        events.push(['set-query', value]);
+    },
+    getDeepSearchRequested: () => deepSearchRequested,
+    setDeepSearchRequested: value => {
+        deepSearchRequested = Boolean(value);
+        events.push(['set-deep', Boolean(value)]);
+    },
+    getSortField: () => sortField,
+    hasActiveTextSearch: value => Boolean(value),
+    saveSearchState: () => events.push('save-search'),
+    updateSimilaritySortOption: () => events.push('similarity-option'),
+    applySortState: (...args) => events.push(['sort', ...args]),
+    saveSearchSortState: () => events.push('save-search-sort'),
+    clearPersistedSearchState: () => events.push('clear-persisted'),
+    restoreSortState: () => events.push('restore-sort'),
+    updateSearchControls: () => events.push('controls'),
+    reloadForFilters: () => events.push('reload'),
+    updateDateScrubber: () => events.push('scrubber'),
+    initSearchInputControlsImpl: options => {
+        events.push([
+            'init',
+            options.documentImpl === documentImpl,
+            options.getSearchDebounce(),
+            options.hasActiveTextSearch('abc'),
+        ]);
+        options.setSearchDebounce('next');
+        options.applySearchQueryChangeImpl('new query');
+        options.clearSearchImpl();
+        return true;
+    },
+    applySearchQueryChangeImpl: (value, context) => {
+        events.push(['apply', value, context.getSearchQuery()]);
+        context.setSearchQuery(value);
+        context.setDeepSearchRequested(false);
+        context.saveSearchState();
+        context.updateSimilaritySortOption();
+        context.applySortState('similarity', true, { persist: false });
+        context.saveSearchSortState();
+        context.updateSearchControls();
+        context.reloadForFilters();
+        context.updateDateScrubber();
+    },
+    clearSearchImpl: options => {
+        events.push(['clear', options.getSearchQuery(), options.documentImpl === documentImpl]);
+        options.clearSearchDebounce();
+        options.setSearchQuery('');
+        options.setDeepSearchRequested(false);
+        options.clearPersistedSearchState();
+        options.restoreSortState();
+        options.updateSearchControls();
+        options.reloadForFilters();
+    },
+    runDeepSearchImpl: options => {
+        events.push(['deep', options.getSearchQuery(), options.documentImpl === documentImpl]);
+        options.clearSearchDebounce();
+        options.setSearchQuery('deep query');
+        options.setDeepSearchRequested(true);
+        options.saveSearchState();
+        options.updateSimilaritySortOption();
+        options.updateSearchControls();
+        options.reloadForFilters();
+        options.updateDateScrubber();
+        return true;
+    },
+});
+
+assert.equal(bridge.initSearchInputControls(), true);
+assert.equal(input.dataset.searchBound, '1');
+assert.equal(searchQuery, '');
+assert.equal(deepSearchRequested, false);
+assert.equal(bridge.initSearchInputControls(), false);
+assert.equal(bridge.runDeepSearch(), true);
+assert.equal(searchQuery, 'deep query');
+assert.equal(deepSearchRequested, true);
+assert.equal(bridge.context().getDeepSearchRequested(), true);
+
+assert.deepEqual(events, [
+    ['get', 'search-input'],
+    ['init', true, null, true],
+    ['apply', 'new query', 'old'],
+    ['set-query', 'new query'],
+    ['set-deep', false],
+    'save-search',
+    'similarity-option',
+    ['sort', 'similarity', true, { persist: false }],
+    'save-search-sort',
+    'controls',
+    'reload',
+    'scrubber',
+    ['clear', 'new query', true],
+    ['clear-timeout', 'next'],
+    ['set-query', ''],
+    ['set-deep', false],
+    'clear-persisted',
+    'restore-sort',
+    'controls',
+    'reload',
+    ['get', 'search-input'],
+    ['deep', '', true],
+    ['clear-timeout', null],
+    ['set-query', 'deep query'],
+    ['set-deep', true],
+    'save-search',
+    'similarity-option',
+    'controls',
+    'reload',
+    'scrubber',
+]);
 """
         subprocess.run(
             ["node", "--input-type=module", "-e", script],
