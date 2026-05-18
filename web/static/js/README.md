@@ -15,7 +15,9 @@ facade that binds flag updates to Loupe and selection state.
 the extracted export helper to current Library query/sort state.
 `legacy/batch_bridge.js` owns the legacy batch-selection
 controller facade for Library card selection, batch flagging, and selected-image
-export. `legacy/loupe_bridge.js` owns the legacy Loupe controller and
+export. `legacy/library_shell_bridge.js` owns the legacy Library shell and card
+keyboard-selection facade around scroll persistence, empty state, and card
+navigation. `legacy/loupe_bridge.js` owns the legacy Loupe controller and
 media-status facade wiring. `legacy/search_sort_bridge.js` owns the legacy
 search/sort state bridge that connects persisted search state and sort-control
 rendering to the extracted Library modules. `legacy/ui_runtime_bridge.js` owns

@@ -3851,6 +3851,8 @@ class ModularContractTests(unittest.TestCase):
             legacy_filter_query_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "flag_bridge.js"), encoding="utf-8") as fh:
             legacy_flag_bridge = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "legacy", "library_shell_bridge.js"), encoding="utf-8") as fh:
+            legacy_library_shell_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "loupe_bridge.js"), encoding="utf-8") as fh:
             legacy_loupe_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "search_sort_bridge.js"), encoding="utf-8") as fh:
@@ -4049,6 +4051,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from './export_bridge.js';", legacy)
         self.assertIn("from './filter_query_bridge.js';", legacy)
         self.assertIn("from './flag_bridge.js';", legacy)
+        self.assertIn("from './library_shell_bridge.js';", legacy)
         self.assertIn("from './loupe_bridge.js';", legacy)
         self.assertIn("from './search_sort_bridge.js';", legacy)
         self.assertIn("from './ui_runtime_bridge.js';", legacy)
@@ -4097,9 +4100,12 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../library/similar.js';", legacy)
         self.assertIn("from '../library/display.js';", legacy)
         self.assertIn("from '../library/rank_cards.js';", legacy)
-        self.assertIn("from '../library/shell.js';", legacy)
+        self.assertNotIn("from '../library/shell.js';", legacy)
+        self.assertIn("from '../library/shell.js';", legacy_library_shell_bridge)
+        self.assertIn("from '../library/navigation.js';", legacy_library_shell_bridge)
+        self.assertIn("export function createLegacyLibraryShellBridge", legacy_library_shell_bridge)
         self.assertIn("from '../library/date_scrubber.js';", legacy)
-        self.assertIn("from '../library/navigation.js';", legacy)
+        self.assertNotIn("from '../library/navigation.js';", legacy)
         self.assertIn("from '../library/map_controller.js';", legacy)
         self.assertIn("from '../library/filters.js';", legacy_filter_query_bridge)
         self.assertIn("export function createLegacyFilterQueryBridge", legacy_filter_query_bridge)
@@ -6021,6 +6027,113 @@ assert.deepEqual(calls, [[
         sort: 'date_desc',
     },
 ]]);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_legacy_library_shell_bridge_node_probe_preserves_state_facade(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import {
+    SCROLL_OFFSET_STORAGE_KEY,
+    SCROLL_POS_STORAGE_KEY,
+    createLegacyLibraryShellBridge,
+} from './static/js/legacy/library_shell_bridge.js';
+
+const calls = [];
+let rankingsOffset = 12;
+let pendingOffset = 4;
+let selectedIndex = -1;
+const cards = [{ id: 'a' }, { id: 'b' }];
+const scrollRoot = { id: 'root' };
+const bridge = createLegacyLibraryShellBridge({
+    hideLibraryEmptyStateImpl: () => calls.push(['hide']),
+    updateLibraryEmptyStateImpl: (options) => calls.push([
+        'empty',
+        options.hasImages,
+        options.searchQuery,
+        options.hasActiveTextSearch('find me'),
+        options.hasActiveLibraryFilters(),
+        options.clearSearch === clearSearch,
+        options.clearLibraryFilters === clearLibraryFilters,
+    ]),
+    libraryScrollRootImpl: () => scrollRoot,
+    saveScrollPositionImpl: (options) => calls.push([
+        'save',
+        options.rankingsOffset,
+        options.scrollPosStorageKey,
+        options.scrollOffsetStorageKey,
+    ]),
+    restoreScrollPositionImpl: (options) => {
+        calls.push(['restore', options.getRankingsOffset(), options.scrollPosStorageKey, options.scrollOffsetStorageKey]);
+        options.setRankingsOffset(20);
+        options.setPendingScrollRestoreOffset(0);
+    },
+    updateBackToTopButtonImpl: () => calls.push(['back']),
+    scrollToTopImpl: () => calls.push(['top']),
+    scrollLibraryContainerToElementImpl: (el, behavior) => calls.push(['scrollToElement', el.id, behavior]),
+    selectLibraryCardImpl: (index, passedCards, options) => {
+        calls.push(['select', index, passedCards === cards, options.scrollRoot === scrollRoot]);
+        return index;
+    },
+    deselectLibraryCardImpl: (passedCards) => {
+        calls.push(['deselect', passedCards === cards]);
+        return -1;
+    },
+    findCardInDirectionImpl: (passedCards, currentIdx, direction) => {
+        calls.push(['find', passedCards === cards, currentIdx, direction]);
+        return 1;
+    },
+    getImages: () => [{ id: 7 }],
+    getRankingsOffset: () => rankingsOffset,
+    setRankingsOffset: (value) => { rankingsOffset = value; },
+    setPendingScrollRestoreOffset: (value) => { pendingOffset = value; },
+    setSelectedLibraryIndex: (value) => { selectedIndex = value; },
+    getSearchQuery: () => 'find me',
+    hasActiveTextSearch: (value) => value === 'find me',
+    hasActiveLibraryFilters: () => true,
+    clearSearch,
+    clearLibraryFilters,
+});
+
+function clearSearch() {}
+function clearLibraryFilters() {}
+
+bridge.hideLibraryEmptyState();
+bridge.updateLibraryEmptyState();
+assert.equal(bridge.libraryScrollRoot(), scrollRoot);
+bridge.saveScrollPosition();
+bridge.restoreScrollPosition();
+bridge.updateBackToTopButton();
+bridge.scrollToTop();
+bridge.scrollLibraryContainerToElement({ id: 'target' }, 'auto');
+assert.equal(bridge.selectLibraryCard(1, cards), 1);
+assert.equal(selectedIndex, 1);
+assert.equal(bridge.deselectLibraryCard(cards), -1);
+assert.equal(selectedIndex, -1);
+assert.equal(bridge.findCardInDirection(cards, 0, 'right'), 1);
+assert.equal(rankingsOffset, 20);
+assert.equal(pendingOffset, 0);
+
+assert.deepEqual(calls, [
+    ['hide'],
+    ['empty', true, 'find me', true, true, true, true],
+    ['save', 12, SCROLL_POS_STORAGE_KEY, SCROLL_OFFSET_STORAGE_KEY],
+    ['restore', 12, SCROLL_POS_STORAGE_KEY, SCROLL_OFFSET_STORAGE_KEY],
+    ['back'],
+    ['top'],
+    ['scrollToElement', 'target', 'auto'],
+    ['select', 1, true, true],
+    ['deselect', true],
+    ['find', true, 0, 'right'],
+]);
 """
         subprocess.run(
             ["node", "--input-type=module", "-e", script],

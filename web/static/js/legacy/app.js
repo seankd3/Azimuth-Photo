@@ -74,18 +74,6 @@ import {
 import { eloToStars } from '../library/display.js';
 import { appendLibraryRankCards } from '../library/rank_cards.js';
 import {
-    SCROLL_OFFSET_STORAGE_KEY,
-    SCROLL_POS_STORAGE_KEY,
-    hideLibraryEmptyState as hideLibraryEmptyStateCore,
-    libraryScrollRoot as libraryScrollRootCore,
-    restoreScrollPosition as restoreScrollPositionCore,
-    saveScrollPosition as saveScrollPositionCore,
-    scrollLibraryContainerToElement as scrollLibraryContainerToElementCore,
-    scrollToTop as scrollToTopCore,
-    updateBackToTopButton as updateBackToTopButtonCore,
-    updateLibraryEmptyState as updateLibraryEmptyStateCore,
-} from '../library/shell.js';
-import {
     dateGroupOffset as dateGroupOffsetCore,
     findDateGroupHeader as findDateGroupHeaderCore,
     isDateSortValue,
@@ -97,11 +85,6 @@ import {
     teardownDateScrubberScrollTracking as teardownDateScrubberScrollTrackingCore,
     createDateScrubberController,
 } from '../library/date_scrubber.js';
-import {
-    deselectLibraryCard as deselectLibraryCardCore,
-    findCardInDirection as findCardInDirectionCore,
-    selectLibraryCard as selectLibraryCardCore,
-} from '../library/navigation.js';
 import { bindLibraryKeyboard } from '../library/keyboard.js';
 import { createLibraryMapController } from '../library/map_controller.js';
 import {
@@ -118,6 +101,11 @@ import { createLegacyBatchBridge } from './batch_bridge.js';
 import { createLegacyExportBridge } from './export_bridge.js';
 import { createLegacyFilterQueryBridge } from './filter_query_bridge.js';
 import { createLegacyFlagBridge } from './flag_bridge.js';
+import {
+    SCROLL_OFFSET_STORAGE_KEY,
+    SCROLL_POS_STORAGE_KEY,
+    createLegacyLibraryShellBridge,
+} from './library_shell_bridge.js';
 import { createLegacyLoupeBridge } from './loupe_bridge.js';
 import { createLegacyPublicApi } from './public_api.js';
 import { createLegacySearchSortBridge } from './search_sort_bridge.js';
@@ -651,6 +639,19 @@ const legacyPhotoArchive = (() => {
         return filterQueryBridge.hasActiveLibraryFilters();
     }
 
+    const libraryShellBridge = createLegacyLibraryShellBridge({
+        getImages: () => libraryImages,
+        getRankingsOffset: () => rankingsOffset,
+        setRankingsOffset: (value) => { rankingsOffset = value; },
+        setPendingScrollRestoreOffset: (value) => { pendingScrollRestoreOffset = value; },
+        setSelectedLibraryIndex: (value) => { selectedLibraryIndex = value; },
+        getSearchQuery: () => searchQuery,
+        hasActiveTextSearch,
+        hasActiveLibraryFilters,
+        clearSearch,
+        clearLibraryFilters,
+    });
+
     function restoreFilters() {
         return filterQueryBridge.restoreFilters();
     }
@@ -686,52 +687,35 @@ const legacyPhotoArchive = (() => {
     }
 
     function hideLibraryEmptyState() {
-        hideLibraryEmptyStateCore();
+        return libraryShellBridge.hideLibraryEmptyState();
     }
 
     function updateLibraryEmptyState() {
-        updateLibraryEmptyStateCore({
-            hasImages: libraryImages.length > 0,
-            searchQuery,
-            hasActiveTextSearch,
-            hasActiveLibraryFilters,
-            clearSearch,
-            clearLibraryFilters,
-        });
+        return libraryShellBridge.updateLibraryEmptyState();
     }
 
     function libraryScrollRoot() {
-        return libraryScrollRootCore();
+        return libraryShellBridge.libraryScrollRoot();
     }
 
     function saveScrollPosition() {
-        saveScrollPositionCore({
-            rankingsOffset,
-            scrollPosStorageKey: SCROLL_POS_STORAGE_KEY,
-            scrollOffsetStorageKey: SCROLL_OFFSET_STORAGE_KEY,
-        });
+        return libraryShellBridge.saveScrollPosition();
     }
 
     function restoreScrollPosition() {
-        restoreScrollPositionCore({
-            getRankingsOffset: () => rankingsOffset,
-            setRankingsOffset: (value) => { rankingsOffset = value; },
-            setPendingScrollRestoreOffset: (value) => { pendingScrollRestoreOffset = value; },
-            scrollPosStorageKey: SCROLL_POS_STORAGE_KEY,
-            scrollOffsetStorageKey: SCROLL_OFFSET_STORAGE_KEY,
-        });
+        return libraryShellBridge.restoreScrollPosition();
     }
 
     function updateBackToTopButton() {
-        updateBackToTopButtonCore();
+        return libraryShellBridge.updateBackToTopButton();
     }
 
     function scrollToTop() {
-        scrollToTopCore();
+        return libraryShellBridge.scrollToTop();
     }
 
     function scrollLibraryContainerToElement(el, behavior = 'smooth') {
-        scrollLibraryContainerToElementCore(el, behavior);
+        return libraryShellBridge.scrollLibraryContainerToElement(el, behavior);
     }
 
     function syncDateScrubberVisibility() {
@@ -1217,16 +1201,15 @@ const legacyPhotoArchive = (() => {
     }
 
     function selectLibraryCard(index, cards) {
-        const selected = selectLibraryCardCore(index, cards, { scrollRoot: libraryScrollRoot() });
-        if (selected !== null) selectedLibraryIndex = selected;
+        return libraryShellBridge.selectLibraryCard(index, cards);
     }
 
     function deselectLibraryCard(cards) {
-        selectedLibraryIndex = deselectLibraryCardCore(cards);
+        return libraryShellBridge.deselectLibraryCard(cards);
     }
 
     function findCardInDirection(cards, currentIdx, direction) {
-        return findCardInDirectionCore(cards, currentIdx, direction);
+        return libraryShellBridge.findCardInDirection(cards, currentIdx, direction);
     }
 
     loupeBridge.initController();
