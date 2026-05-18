@@ -1613,151 +1613,30 @@ def _pregen_should_yield_to_foreground() -> bool:
 async def run_prefetch_worker():
     global _prefetching
     _prefetching = True
-    _target_total_cache = 0
-    _target_total_at = 0.0
-    no_progress_scan_passes = 0
-
-    while _prefetching:
-        try:
-            foreground_active = _pregen_should_yield_to_foreground()
-            if not foreground_active:
-                await asyncio.to_thread(_flush_write_queue)
-                await flush_orientation_updates()
-
-            if _pregen_manual_pause:
-                _set_pregen_state("paused", "Pre-generation paused by user.")
-                no_progress_scan_passes = 0
-                await asyncio.sleep(1)
-                continue
-
-            auto_enabled = PREGENERATE_ON_IDLE
-            if not _pregen_manual_mode and not auto_enabled:
-                _set_pregen_state("disabled", "Background cache warming is disabled in Settings.")
-                no_progress_scan_passes = 0
-                await asyncio.sleep(2)
-                continue
-
-            now = time.monotonic()
-            if now - _target_total_at > 30:
-                _target_total_cache = await _cache_target_total()
-                _target_total_at = now
-            target_total = _target_total_cache
-            if target_total <= 0:
-                _set_pregen_state("idle", "No images available to warm.")
-                no_progress_scan_passes = 0
-                await asyncio.sleep(5)
-                continue
-
-            if foreground_active or _pregen_should_yield_to_foreground():
-                _set_pregen_state(
-                    "throttled",
-                    "Background cache warming is paused in Browse mode.",
-                )
-                no_progress_scan_passes = 0
-                await asyncio.sleep(1)
-                continue
-
-            decision = _pregen_background_decision()
-            generate_batch = _pregen_generate_batch_for_decision(decision)
-            governor_status = decision.to_dict()
-            governor_status["effective_thumbnail_batch_size"] = generate_batch
-            _pregen_status["governor"] = governor_status
-            if decision.pause:
-                _set_pregen_state(
-                    "throttled",
-                    f"Background work paused: {decision.reason}.",
-                )
-                no_progress_scan_passes = 0
-                await asyncio.sleep(decision.sleep_seconds)
-                continue
-
-            phase_order = ("sm", "md", "lg")
-            phases = [size for size in phase_order if _background_tier_budget(size) > 0]
-            full_budget = int(_disk_allocations.get(FULL_TIER, 0) or 0)
-            if not phases and full_budget <= 0:
-                _set_pregen_state("idle", "No SSD cache budget is available.")
-                no_progress_scan_passes = 0
-                await asyncio.sleep(5)
-                continue
-
-            generated = 0
-            if phases:
-                _set_pregen_state(
-                    "running",
-                    f"Bulk warming preview cache ({decision.mode}: {decision.reason})...",
-                    phase="previews",
-                )
-                generated = await _run_pregen_bulk_batch(
-                    generate_batch=generate_batch,
-                )
-
-                await flush_orientation_updates()
-
-            if generated <= 0 and full_budget > 0:
-                _set_pregen_state(
-                    "running",
-                    f"Warming original SSD cache ({decision.mode}: {decision.reason})...",
-                    phase=FULL_TIER,
-                )
-                full_generated = await _run_full_warm_batch(
-                    generate_batch=max(1, min(8, generate_batch)),
-                )
-                generated = full_generated if full_generated != 0 else generated
-
-            if generated == 0:
-                no_progress_scan_passes = 0
-                status = get_pregen_status(target_total)
-                phase_parts = []
-                for phase in phases:
-                    phase_parts.append(
-                        f"{phase}: {status['phases'][phase]['count']}/{target_total}"
-                    )
-                if full_budget > 0:
-                    originals = status["originals"]
-                    phase_parts.append(
-                        f"full: {originals['count']} cached, {originals['utilization_pct']:.1f}% of budget"
-                    )
-                _set_pregen_state(
-                    "complete",
-                    "Cache is warm for current budget. " + " · ".join(phase_parts),
-                )
-                await asyncio.sleep(5)
-            elif generated < 0:
-                no_progress_scan_passes += 1
-                if no_progress_scan_passes >= PREGENERATE_NO_PROGRESS_SCAN_LIMIT:
-                    status = get_pregen_status(target_total)
-                    phase_parts = []
-                    for phase in phases:
-                        phase_status = status["phases"][phase]
-                        phase_parts.append(
-                            f"{phase}: {phase_status['count']}/{phase_status['total']}"
-                        )
-                    if full_budget > 0:
-                        originals = status["originals"]
-                        phase_parts.append(
-                            f"full: {originals['count']} cached, {originals['utilization_pct']:.1f}% of budget"
-                        )
-                    _set_pregen_state(
-                        "complete",
-                        "Cache scan found no more warmable images. " + " · ".join(phase_parts),
-                    )
-                    no_progress_scan_passes = 0
-                    await asyncio.sleep(5)
-                else:
-                    _set_pregen_state(
-                        "running",
-                        f"Scanning for remaining cache work ({no_progress_scan_passes}/{PREGENERATE_NO_PROGRESS_SCAN_LIMIT}).",
-                        phase="previews",
-                    )
-                    await asyncio.sleep(max(0.25, PREGENERATE_BATCH_PAUSE_SECONDS, decision.thumbnail_pause_seconds))
-            else:
-                no_progress_scan_passes = 0
-                await asyncio.sleep(max(PREGENERATE_BATCH_PAUSE_SECONDS, decision.thumbnail_pause_seconds))
-
-        except Exception as e:
-            _set_pregen_state("error", "Pre-generation worker hit an error.", error=str(e))
-            print(f"Prefetch worker error: {e}")
-            await asyncio.sleep(5)
+    await pregen_worker.run_prefetch_worker_loop(
+        is_prefetching=lambda: _prefetching,
+        is_manual_paused=lambda: _pregen_manual_pause,
+        is_manual_mode=lambda: _pregen_manual_mode,
+        pregen_on_idle=lambda: PREGENERATE_ON_IDLE,
+        cache_target_total=lambda: _cache_target_total(),
+        current_monotonic=time.monotonic,
+        set_pregen_state=_set_pregen_state,
+        sleep=asyncio.sleep,
+        flush_write_queue=lambda: _flush_write_queue(),
+        flush_orientation_updates=lambda: flush_orientation_updates(),
+        should_yield_to_foreground=lambda: _pregen_should_yield_to_foreground(),
+        background_decision=lambda: _pregen_background_decision(),
+        generate_batch_for_decision=lambda decision: _pregen_generate_batch_for_decision(decision),
+        pregen_status=_pregen_status,
+        disk_allocations=_disk_allocations,
+        full_tier=FULL_TIER,
+        background_tier_budget=lambda size: _background_tier_budget(size),
+        run_pregen_bulk_batch=lambda generate_batch=None: _run_pregen_bulk_batch(generate_batch=generate_batch),
+        run_full_warm_batch=lambda generate_batch=None: _run_full_warm_batch(generate_batch=generate_batch),
+        get_pregen_status=lambda target_total: get_pregen_status(target_total),
+        no_progress_scan_limit=lambda: PREGENERATE_NO_PROGRESS_SCAN_LIMIT,
+        batch_pause_seconds=lambda: PREGENERATE_BATCH_PAUSE_SECONDS,
+    )
 
 
 def stop_prefetch():

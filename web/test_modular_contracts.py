@@ -9236,6 +9236,7 @@ assert.deepEqual(loadingEvents.slice(-2), [['set', 2], ['cancel-clear']]);
         self.assertTrue(callable(pregen.should_yield_to_foreground))
         self.assertTrue(callable(pregen_worker.run_pregen_bulk_batch))
         self.assertTrue(callable(pregen_worker.run_full_warm_batch))
+        self.assertTrue(callable(pregen_worker.run_prefetch_worker_loop))
         self.assertIs(thumbnails._source_missing_error, source_identity.source_missing_error)
         self.assertTrue(callable(thumbnail_status.copy_disk_stats))
         self.assertTrue(callable(thumbnail_status.cache_stats))
