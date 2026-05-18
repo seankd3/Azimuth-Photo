@@ -70,7 +70,7 @@ _past_matchups_cache = rating_repository._past_matchups_cache
 _cached_image_ids_cache = cache_entry_repository._cached_image_ids_cache
 _cache_entry_count_cache = cache_entry_repository._cache_entry_count_cache
 _rankable_image_ids_cache = ranking_repository._rankable_image_ids_cache
-_embedding_count_cache = {"key": None, "value": None, "expires": 0}
+_embedding_count_cache = embedding_repository._embedding_count_cache
 _ensured_embedding_model_keys: set[str] = set()
 _ai_status_counts_cache = stats_repository._ai_status_counts_cache
 _active_source_ids_cache = catalog_repository._active_source_ids_cache
@@ -82,7 +82,7 @@ RANKABLE_IMAGE_IDS_TTL_SECONDS = ranking_repository.RANKABLE_IMAGE_IDS_TTL_SECON
 RANKING_VISIBLE_ID_FILTER_LIMIT = ranking_repository.RANKING_VISIBLE_ID_FILTER_LIMIT
 RANKING_CACHE_FIRST_VISIBLE_LIMIT = ranking_repository.RANKING_CACHE_FIRST_VISIBLE_LIMIT
 STATS_CACHE_TTL_SECONDS = stats_repository.FULL_STATS_CACHE_TTL_SECONDS
-EMBEDDING_COUNT_CACHE_TTL_SECONDS = 10.0
+EMBEDDING_COUNT_CACHE_TTL_SECONDS = embedding_repository.EMBEDDING_COUNT_CACHE_TTL_SECONDS
 AI_STATUS_COUNTS_CACHE_TTL_SECONDS = stats_repository.AI_STATUS_COUNTS_CACHE_TTL_SECONDS
 ACTIVE_SOURCE_IDS_TTL_SECONDS = catalog_repository.ACTIVE_SOURCE_IDS_TTL_SECONDS
 CATALOG_CACHE_TTL_SECONDS = catalog_repository.CATALOG_CACHE_TTL_SECONDS
@@ -240,9 +240,7 @@ def _invalidate_rankable_image_ids_cache():
 
 
 def _invalidate_embedding_count_cache():
-    _embedding_count_cache["key"] = None
-    _embedding_count_cache["value"] = None
-    _embedding_count_cache["expires"] = 0
+    embedding_repository.invalidate_embedding_count_cache()
     _invalidate_ai_status_counts_cache()
 
 
@@ -1334,19 +1332,11 @@ async def get_all_embeddings():
 
 
 async def get_embedding_count() -> int:
-    now = _time.time()
-    model_key = active_embedding_model_key()
-    if (
-        _embedding_count_cache["key"] in (model_key, None)
-        and _embedding_count_cache["value"] is not None
-        and now < _embedding_count_cache["expires"]
-    ):
-        return int(_embedding_count_cache["value"])
-    count = await count_embeddings_for_model(active_embedding_config(), online_only=True)
-    _embedding_count_cache["key"] = model_key
-    _embedding_count_cache["value"] = count
-    _embedding_count_cache["expires"] = _time.time() + EMBEDDING_COUNT_CACHE_TTL_SECONDS
-    return count
+    return await embedding_repository.embedding_count_cached(
+        active_embedding_config=active_embedding_config,
+        count_embeddings_for_model=count_embeddings_for_model,
+        ttl_seconds=EMBEDDING_COUNT_CACHE_TTL_SECONDS,
+    )
 
 
 async def get_ai_status_counts() -> dict:

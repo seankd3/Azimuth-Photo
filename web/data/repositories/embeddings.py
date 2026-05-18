@@ -5,6 +5,16 @@ import time as _time
 from data import connection
 
 
+EMBEDDING_COUNT_CACHE_TTL_SECONDS = 10.0
+_embedding_count_cache = {"key": None, "value": None, "expires": 0}
+
+
+def invalidate_embedding_count_cache() -> None:
+    _embedding_count_cache["key"] = None
+    _embedding_count_cache["value"] = None
+    _embedding_count_cache["expires"] = 0
+
+
 def normalize_deep_search_query(query: str) -> str:
     return " ".join(str(query or "").split())
 
@@ -468,6 +478,28 @@ async def count_embeddings_for_model(
         return int((await cursor.fetchone())["c"] or 0)
     finally:
         await connection.close_async(conn, db_path=db_path)
+
+
+async def embedding_count_cached(
+    *,
+    active_embedding_config,
+    count_embeddings_for_model,
+    ttl_seconds: float = EMBEDDING_COUNT_CACHE_TTL_SECONDS,
+) -> int:
+    now = _time.time()
+    embedding_config = active_embedding_config()
+    model_key = embedding_config["model_key"]
+    if (
+        _embedding_count_cache["key"] in (model_key, None)
+        and _embedding_count_cache["value"] is not None
+        and now < _embedding_count_cache["expires"]
+    ):
+        return int(_embedding_count_cache["value"])
+    count = await count_embeddings_for_model(embedding_config, online_only=True)
+    _embedding_count_cache["key"] = model_key
+    _embedding_count_cache["value"] = count
+    _embedding_count_cache["expires"] = _time.time() + ttl_seconds
+    return count
 
 
 async def get_all_embeddings(

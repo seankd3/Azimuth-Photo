@@ -1294,6 +1294,13 @@ class ModularContractTests(unittest.TestCase):
         self.assertIs(db._cache_entry_count_cache, cache_entries._cache_entry_count_cache)
         self.assertTrue(callable(embeddings.store_embeddings_batch))
         self.assertTrue(callable(embeddings.store_deep_search_query_embedding))
+        self.assertTrue(callable(embeddings.embedding_count_cached))
+        self.assertTrue(callable(embeddings.invalidate_embedding_count_cache))
+        self.assertIs(db._embedding_count_cache, embeddings._embedding_count_cache)
+        self.assertEqual(
+            db.EMBEDDING_COUNT_CACHE_TTL_SECONDS,
+            embeddings.EMBEDDING_COUNT_CACHE_TTL_SECONDS,
+        )
         self.assertTrue(callable(filter_options.filter_options))
         self.assertTrue(callable(filter_options.empty_filter_options))
         self.assertTrue(callable(filter_options.filter_options_cached))
