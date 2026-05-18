@@ -15,6 +15,7 @@ from data import schema as data_schema  # noqa: E402
 from thumbnails import budget as thumbnail_budget  # noqa: E402
 from thumbnails import cache_entries as thumbnail_cache_entries  # noqa: E402
 from thumbnails import config as thumbnail_config  # noqa: E402
+from thumbnails import full_cache as thumbnail_full_cache  # noqa: E402
 from thumbnails import maintenance as thumbnail_maintenance  # noqa: E402
 from thumbnails import pregen as thumbnail_pregen  # noqa: E402
 from thumbnails import runtime as thumbnail_runtime  # noqa: E402
@@ -1020,6 +1021,106 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
             thumbnails._clear_cache_metadata_lock_backoff = old_clear_backoff
             thumbnails._note_cache_metadata_lock = old_note_lock
             thumbnails._is_sqlite_locked = old_is_locked
+
+    def test_full_image_orchestration_remains_facaded_from_full_cache_module(self):
+        source_path = self._make_original_file("full-source.bin", 32)
+        cached_path = os.path.join(self.tempdir.name, "cached-full.jpg")
+
+        def source_signature(filepath, size, image_id):
+            return f"{filepath}:{size}:{image_id}"
+
+        def cached_entry(size, image_id, signature):
+            self.assertEqual(size, thumbnails.FULL_TIER)
+            self.assertEqual(image_id, 42)
+            self.assertEqual(signature, source_signature(source_path, size, image_id))
+            return {"path": cached_path}
+
+        old_build_source_signature = thumbnails._build_source_signature
+        old_get_disk_entry = thumbnails._get_disk_entry
+        old_inflight = thumbnails._inflight
+        old_run_full_image_job = thumbnails._run_full_image_job
+        old_note_user_activity = thumbnails.note_user_activity
+        old_touch_cached_signature = thumbnails.touch_cached_signature
+        old_cache_dir = thumbnails.SSD_CACHE_DIR
+        old_allocations = dict(thumbnails._disk_allocations)
+        try:
+            thumbnails._build_source_signature = source_signature
+            thumbnails._get_disk_entry = cached_entry
+            self.assertEqual(
+                thumbnails.get_cached_full_image_path(source_path, 42),
+                thumbnail_full_cache.get_cached_full_image_path(
+                    source_path,
+                    42,
+                    full_tier=thumbnails.FULL_TIER,
+                    build_source_signature=source_signature,
+                    get_disk_entry=cached_entry,
+                ),
+            )
+
+            async def direct_get_full():
+                calls = []
+
+                async def run_job(filepath, image_id, hot):
+                    calls.append(("job", filepath, image_id, hot))
+                    return cached_path
+
+                inflight = {}
+                result = await thumbnail_full_cache.get_full_image_path(
+                    source_path,
+                    43,
+                    note_user_activity=lambda: calls.append(("activity",)),
+                    full_tier=thumbnails.FULL_TIER,
+                    build_source_signature=source_signature,
+                    get_disk_entry=lambda *_args: None,
+                    inflight=inflight,
+                    run_full_image_job=run_job,
+                )
+                return result, calls, inflight
+
+            direct_result, direct_calls, direct_inflight = asyncio.run(direct_get_full())
+
+            facade_calls = []
+
+            async def facade_run_job(filepath, image_id, hot):
+                facade_calls.append(("job", filepath, image_id, hot))
+                return cached_path
+
+            thumbnails._get_disk_entry = lambda *_args: None
+            thumbnails._run_full_image_job = facade_run_job
+            thumbnails.note_user_activity = lambda: facade_calls.append(("activity",))
+            thumbnails._inflight = {}
+
+            facade_result = asyncio.run(thumbnails.get_full_image_path(source_path, 43))
+
+            self.assertEqual(facade_result, direct_result)
+            self.assertEqual(facade_calls, direct_calls)
+            self.assertEqual(direct_inflight, {})
+            self.assertEqual(thumbnails._inflight, {})
+
+            async def run_facade_schedule():
+                thumbnails._inflight = {}
+                thumbnails.SSD_CACHE_DIR = self.tempdir.name
+                thumbnails._disk_allocations[thumbnails.FULL_TIER] = 1000
+                thumbnails.touch_cached_signature = lambda *_args: False
+                await thumbnails.schedule_full_image_cache(source_path, 44, hot=False)
+                await asyncio.sleep(0)
+                await asyncio.sleep(0)
+
+            facade_calls.clear()
+            asyncio.run(run_facade_schedule())
+
+            self.assertEqual(facade_calls, [("job", source_path, 44, False)])
+            self.assertEqual(thumbnails._inflight, {})
+        finally:
+            thumbnails._build_source_signature = old_build_source_signature
+            thumbnails._get_disk_entry = old_get_disk_entry
+            thumbnails._inflight = old_inflight
+            thumbnails._run_full_image_job = old_run_full_image_job
+            thumbnails.note_user_activity = old_note_user_activity
+            thumbnails.touch_cached_signature = old_touch_cached_signature
+            thumbnails.SSD_CACHE_DIR = old_cache_dir
+            thumbnails._disk_allocations.clear()
+            thumbnails._disk_allocations.update(old_allocations)
 
     def _cache_original_now(self, image_id: int, path: str):
         signature = thumbnails._build_source_signature(path, thumbnails.FULL_TIER, image_id)

@@ -15,8 +15,9 @@ image loading, resizing, and JPEG encoding helpers. `source_identity.py` owns so
 caching, catalog/source signatures, missing-source probes, and thumbnail HTTP
 cache header payloads. `data_providers.py` owns app-injected DB/cache
 invalidation callbacks for the legacy facade. `status.py` owns pure cache and
-pregeneration status payload helpers. `full_cache.py` owns full-original cache room checks and atomic
-source-copy/write helpers. `pregen_candidates.py` owns reusable
+pregeneration status payload helpers. `full_cache.py` owns full-original cache room checks,
+atomic source-copy/write helpers, cached-path lookup, and full-image inflight
+orchestration. `pregen_candidates.py` owns reusable
 candidate-selection helpers for background cache warming. The package still
 keeps most legacy behavior in `__init__.py` because callers monkeypatch module
 globals in tests and worker setup. `runtime.py` owns generic

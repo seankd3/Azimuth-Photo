@@ -1,3 +1,4 @@
+import asyncio
 import os
 import shutil
 import threading
@@ -138,3 +139,112 @@ def cache_full_image_bytes(
     os.replace(temp_path, path)
     store_disk_entry(image_id, source_signature, path, source_size, hot=hot)
     return path
+
+
+async def run_full_image_job(
+    filepath: str,
+    image_id: int,
+    hot: bool,
+    *,
+    executor,
+    full_tier: str,
+    build_source_signature,
+    cache_full_image_sync,
+) -> str:
+    loop = asyncio.get_running_loop()
+    source_signature = build_source_signature(filepath, full_tier, image_id)
+    return await loop.run_in_executor(
+        executor,
+        cache_full_image_sync,
+        filepath,
+        image_id,
+        source_signature,
+        hot,
+    )
+
+
+def get_cached_full_image_path(
+    filepath: str,
+    image_id: int,
+    *,
+    full_tier: str,
+    build_source_signature,
+    get_disk_entry,
+) -> str | None:
+    source_signature = build_source_signature(filepath, full_tier, image_id)
+    row = get_disk_entry(full_tier, image_id, source_signature)
+    return row["path"] if row is not None else None
+
+
+async def schedule_full_image_cache(
+    filepath: str,
+    image_id: int,
+    *,
+    hot: bool,
+    cache_root: str,
+    budget: int,
+    path_exists,
+    full_tier: str,
+    build_source_signature,
+    touch_cached_signature,
+    inflight: dict,
+    run_full_image_job,
+) -> None:
+    if not cache_root or budget <= 0:
+        return
+    if not path_exists(filepath):
+        return
+
+    source_signature = build_source_signature(filepath, full_tier, image_id)
+    if touch_cached_signature(full_tier, image_id, source_signature):
+        return
+    inflight_key = ("full", image_id, source_signature)
+    task = inflight.get(inflight_key)
+    if task is not None:
+        return
+
+    task = asyncio.create_task(run_full_image_job(filepath, image_id, hot))
+    inflight[inflight_key] = task
+
+    async def release_when_done():
+        try:
+            await task
+        except Exception:
+            pass
+        finally:
+            if inflight.get(inflight_key) is task:
+                inflight.pop(inflight_key, None)
+
+    asyncio.create_task(release_when_done())
+
+
+async def get_full_image_path(
+    filepath: str,
+    image_id: int,
+    *,
+    note_user_activity,
+    full_tier: str,
+    build_source_signature,
+    get_disk_entry,
+    inflight: dict,
+    run_full_image_job,
+) -> str:
+    note_user_activity()
+    source_signature = build_source_signature(filepath, full_tier, image_id)
+    row = get_disk_entry(full_tier, image_id, source_signature)
+    if row is not None:
+        return row["path"]
+
+    inflight_key = ("full", image_id, source_signature)
+    task = inflight.get(inflight_key)
+    if task is None:
+        task = asyncio.create_task(run_full_image_job(filepath, image_id, True))
+        inflight[inflight_key] = task
+
+    try:
+        result = await task
+    finally:
+        if inflight.get(inflight_key) is task and task.done():
+            inflight.pop(inflight_key, None)
+
+    return str(result)

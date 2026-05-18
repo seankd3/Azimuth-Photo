@@ -1165,73 +1165,54 @@ async def prefetch_images(
 
 
 async def _run_full_image_job(filepath: str, image_id: int, hot: bool):
-    loop = asyncio.get_running_loop()
-    source_signature = _build_source_signature(filepath, FULL_TIER, image_id)
-    return await loop.run_in_executor(
-        _executor,
-        _cache_full_image_sync,
+    return await full_cache.run_full_image_job(
         filepath,
         image_id,
-        source_signature,
         hot,
+        executor=_executor,
+        full_tier=FULL_TIER,
+        build_source_signature=_build_source_signature,
+        cache_full_image_sync=_cache_full_image_sync,
     )
 
 
 def get_cached_full_image_path(filepath: str, image_id: int) -> str | None:
-    source_signature = _build_source_signature(filepath, FULL_TIER, image_id)
-    row = _get_disk_entry(FULL_TIER, image_id, source_signature)
-    return row["path"] if row is not None else None
+    return full_cache.get_cached_full_image_path(
+        filepath,
+        image_id,
+        full_tier=FULL_TIER,
+        build_source_signature=_build_source_signature,
+        get_disk_entry=_get_disk_entry,
+    )
 
 
 async def schedule_full_image_cache(filepath: str, image_id: int, *, hot: bool = True):
-    if not SSD_CACHE_DIR or _disk_allocations.get(FULL_TIER, 0) <= 0:
-        return
-    if not os.path.exists(filepath):
-        return
-
-    source_signature = _build_source_signature(filepath, FULL_TIER, image_id)
-    if touch_cached_signature(FULL_TIER, image_id, source_signature):
-        return
-    inflight_key = ("full", image_id, source_signature)
-    task = _inflight.get(inflight_key)
-    if task is not None:
-        return
-
-    task = asyncio.create_task(_run_full_image_job(filepath, image_id, hot))
-    _inflight[inflight_key] = task
-
-    async def _release_when_done():
-        try:
-            await task
-        except Exception:
-            pass
-        finally:
-            if _inflight.get(inflight_key) is task:
-                _inflight.pop(inflight_key, None)
-
-    asyncio.create_task(_release_when_done())
+    return await full_cache.schedule_full_image_cache(
+        filepath,
+        image_id,
+        hot=hot,
+        cache_root=SSD_CACHE_DIR,
+        budget=_disk_allocations.get(FULL_TIER, 0),
+        path_exists=os.path.exists,
+        full_tier=FULL_TIER,
+        build_source_signature=_build_source_signature,
+        touch_cached_signature=touch_cached_signature,
+        inflight=_inflight,
+        run_full_image_job=_run_full_image_job,
+    )
 
 
 async def get_full_image_path(filepath: str, image_id: int) -> str:
-    note_user_activity()
-    source_signature = _build_source_signature(filepath, FULL_TIER, image_id)
-    row = _get_disk_entry(FULL_TIER, image_id, source_signature)
-    if row is not None:
-        return row["path"]
-
-    inflight_key = ("full", image_id, source_signature)
-    task = _inflight.get(inflight_key)
-    if task is None:
-        task = asyncio.create_task(_run_full_image_job(filepath, image_id, True))
-        _inflight[inflight_key] = task
-
-    try:
-        result = await task
-    finally:
-        if _inflight.get(inflight_key) is task and task.done():
-            _inflight.pop(inflight_key, None)
-
-    return str(result)
+    return await full_cache.get_full_image_path(
+        filepath,
+        image_id,
+        note_user_activity=note_user_activity,
+        full_tier=FULL_TIER,
+        build_source_signature=_build_source_signature,
+        get_disk_entry=_get_disk_entry,
+        inflight=_inflight,
+        run_full_image_job=_run_full_image_job,
+    )
 
 
 def load_embedding_image(filepath: str, image_id: int, *, require_cached: bool = False) -> Image.Image | None:
