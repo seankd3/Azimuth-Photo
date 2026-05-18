@@ -865,6 +865,34 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ai_counts["embedded"], 1)
         self.assertEqual(await db.get_embedding_count(), 1)
 
+    async def test_online_embedding_count_status_path_is_read_only(self):
+        source = await self._source("active")
+        image_id = await self._image(source["id"], "active.jpg")
+        legacy_key = db._legacy_embedding_model_key()
+
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "INSERT INTO embeddings (image_id, embedding) VALUES (?, ?)",
+                (image_id, b"active"),
+            )
+            await conn.execute("DELETE FROM embedding_models WHERE model_key = ?", (legacy_key,))
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        self.assertEqual(await db.get_embedding_count(), 1)
+
+        conn = await db.get_db()
+        try:
+            cursor = await conn.execute(
+                "SELECT 1 FROM embedding_models WHERE model_key = ?",
+                (legacy_key,),
+            )
+            self.assertIsNone(await cursor.fetchone())
+        finally:
+            await conn.close()
+
     async def test_fast_search_role_ignores_saved_deep_model_preset(self):
         source = await self._source("active")
         image_id = await self._image(source["id"], "active.jpg")

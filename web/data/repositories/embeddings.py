@@ -39,7 +39,21 @@ async def _searchable_embedding_count_on_conn(conn, model_key: str) -> int:
     return int((await cursor.fetchone())["c"] or 0)
 
 
-async def _online_embedding_count_on_conn(conn, model_key: str) -> int:
+async def _online_embedding_count_on_conn(conn, model_key: str, legacy_model_key: str) -> int:
+    if model_key == legacy_model_key:
+        cursor = await conn.execute(
+            "WITH model_image_ids AS ("
+            "  SELECT image_id FROM embeddings_by_model WHERE model_key = ? "
+            "  UNION "
+            "  SELECT image_id FROM embeddings"
+            ") "
+            "SELECT COUNT(*) AS c FROM model_image_ids e "
+            "JOIN images i ON e.image_id = i.id "
+            "JOIN catalog_sources s ON s.id = i.source_id "
+            "WHERE s.included = 1 AND s.online = 1 AND i.missing_at IS NULL",
+            (model_key,),
+        )
+        return int((await cursor.fetchone())["c"] or 0)
     cursor = await conn.execute(
         "SELECT COUNT(*) AS c FROM embeddings_by_model e "
         "JOIN images i ON e.image_id = i.id "
@@ -569,6 +583,8 @@ async def count_embeddings_for_model(
     model_key = embedding_config["model_key"]
     conn = await connection.open_async(db_path)
     try:
+        if online_only:
+            return await _online_embedding_count_on_conn(conn, model_key, legacy_model_key)
         await ensure_embedding_model_tables(
             conn,
             active_config=active_config,
@@ -577,8 +593,6 @@ async def count_embeddings_for_model(
             ensured_keys=ensured_keys,
         )
         await ensure_embedding_model_row(conn, embedding_config)
-        if online_only:
-            return await _online_embedding_count_on_conn(conn, model_key)
 
         active = int((catalog_counts or {}).get("active_images") or 0)
         if active <= 0:

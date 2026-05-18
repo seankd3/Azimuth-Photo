@@ -55,9 +55,9 @@ function renderRow(row) {
                 <div class="background-work-progress-fill" style="width:${pct}%"></div>
             </div>
             <div class="background-work-meta">
-                <span>${done} / ${total} - ${pct.toFixed(1)}%</span>
-                <span>${row.detail}</span>
-                <strong>${row.eta}</strong>
+                <span class="background-work-progress-text">${done} / ${total} - ${pct.toFixed(1)}%</span>
+                <span class="background-work-detail">${row.detail}</span>
+                <strong class="background-work-eta">${row.eta}</strong>
             </div>
         </div>
     `;
