@@ -1,3 +1,4 @@
+import sqlite3
 import time
 from collections import deque
 
@@ -77,6 +78,75 @@ async def candidate_batch(get_db, cursor_state: dict, limit: int):
         return rows
     finally:
         await conn.close()
+
+
+def bulk_tier_budgets(thumb_tiers, background_tier_budget) -> dict[str, int]:
+    return {size: background_tier_budget(size) for size in thumb_tiers}
+
+
+def full_tier_room(
+    budget: int,
+    *,
+    full_tier: str,
+    meta_lock,
+    db_connect,
+    tier_bytes,
+    cache_metadata_backoff_active,
+    clear_cache_metadata_lock_backoff,
+    note_cache_metadata_lock,
+    is_sqlite_locked,
+) -> int:
+    if budget <= 0 or cache_metadata_backoff_active():
+        return 0
+    with meta_lock:
+        conn = None
+        try:
+            conn = db_connect()
+            room = max(0, int(budget) - tier_bytes(conn, full_tier))
+            clear_cache_metadata_lock_backoff()
+            return room
+        except sqlite3.OperationalError as exc:
+            if is_sqlite_locked(exc):
+                note_cache_metadata_lock()
+                return 0
+            raise
+        finally:
+            if conn is not None:
+                conn.close()
+
+
+def bulk_tier_room(
+    tier_budgets: dict[str, int],
+    *,
+    thumb_tiers,
+    meta_lock,
+    db_connect,
+    tier_bytes,
+    cache_metadata_backoff_active,
+    clear_cache_metadata_lock_backoff,
+    note_cache_metadata_lock,
+    is_sqlite_locked,
+) -> dict[str, int]:
+    if cache_metadata_backoff_active():
+        return {size: 0 for size in thumb_tiers}
+    with meta_lock:
+        conn = None
+        try:
+            conn = db_connect()
+            room = {
+                size: max(0, int(tier_budgets.get(size, 0) or 0) - tier_bytes(conn, size))
+                for size in thumb_tiers
+            }
+            clear_cache_metadata_lock_backoff()
+            return room
+        except sqlite3.OperationalError as exc:
+            if is_sqlite_locked(exc):
+                note_cache_metadata_lock()
+                return {size: 0 for size in thumb_tiers}
+            raise
+        finally:
+            if conn is not None:
+                conn.close()
 
 
 def set_state(

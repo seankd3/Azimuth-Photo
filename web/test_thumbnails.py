@@ -905,6 +905,122 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
             {"source_id": 1, "filepath": second, "id": 10},
         )
 
+    def test_pregen_tier_budget_room_helpers_remain_facaded_from_pregen_module(self):
+        class FakeConnection:
+            def __init__(self):
+                self.closed = False
+
+            def close(self):
+                self.closed = True
+
+        class FakeLock:
+            def __init__(self):
+                self.entered = 0
+
+            def __enter__(self):
+                self.entered += 1
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        budgets = {size: (idx + 1) * 100 for idx, size in enumerate(thumbnails.THUMB_TIERS)}
+        tier_bytes = {size: (idx + 1) * 25 for idx, size in enumerate(thumbnails.THUMB_TIERS)}
+        tier_bytes[thumbnails.FULL_TIER] = 40
+
+        old_background_tier_budget = thumbnails._background_tier_budget
+        old_meta_lock = thumbnails._meta_lock
+        old_db_connect = thumbnails._db_connect
+        old_tier_bytes = thumbnails._tier_bytes
+        old_backoff_active = thumbnails._cache_metadata_backoff_active
+        old_clear_backoff = thumbnails._clear_cache_metadata_lock_backoff
+        old_note_lock = thumbnails._note_cache_metadata_lock
+        old_is_locked = thumbnails._is_sqlite_locked
+        try:
+            thumbnails._background_tier_budget = lambda size: budgets[size]
+            self.assertEqual(
+                thumbnails._bulk_tier_budgets(),
+                thumbnail_pregen.bulk_tier_budgets(
+                    thumbnails.THUMB_TIERS,
+                    thumbnails._background_tier_budget,
+                ),
+            )
+
+            direct_events = []
+            direct_connection_queue = [FakeConnection(), FakeConnection()]
+            direct_connections = list(direct_connection_queue)
+            direct_lock = FakeLock()
+            direct_full_room = thumbnail_pregen.full_tier_room(
+                200,
+                full_tier=thumbnails.FULL_TIER,
+                meta_lock=direct_lock,
+                db_connect=lambda: direct_connection_queue.pop(0),
+                tier_bytes=lambda conn, size: tier_bytes[size],
+                cache_metadata_backoff_active=lambda: False,
+                clear_cache_metadata_lock_backoff=lambda: direct_events.append("clear"),
+                note_cache_metadata_lock=lambda: direct_events.append("note"),
+                is_sqlite_locked=lambda exc: False,
+            )
+            direct_bulk_room = thumbnail_pregen.bulk_tier_room(
+                budgets,
+                thumb_tiers=thumbnails.THUMB_TIERS,
+                meta_lock=direct_lock,
+                db_connect=lambda: direct_connection_queue.pop(0),
+                tier_bytes=lambda conn, size: tier_bytes[size],
+                cache_metadata_backoff_active=lambda: False,
+                clear_cache_metadata_lock_backoff=lambda: direct_events.append("clear"),
+                note_cache_metadata_lock=lambda: direct_events.append("note"),
+                is_sqlite_locked=lambda exc: False,
+            )
+
+            facade_events = []
+            facade_connection_queue = [FakeConnection(), FakeConnection()]
+            facade_connections = list(facade_connection_queue)
+            thumbnails._meta_lock = FakeLock()
+            thumbnails._db_connect = lambda: facade_connection_queue.pop(0)
+            thumbnails._tier_bytes = lambda conn, size: tier_bytes[size]
+            thumbnails._cache_metadata_backoff_active = lambda: False
+            thumbnails._clear_cache_metadata_lock_backoff = lambda: facade_events.append("clear")
+            thumbnails._note_cache_metadata_lock = lambda: facade_events.append("note")
+            thumbnails._is_sqlite_locked = lambda exc: False
+
+            self.assertEqual(thumbnails._full_tier_room(200), direct_full_room)
+            self.assertEqual(thumbnails._bulk_tier_room(budgets), direct_bulk_room)
+            self.assertEqual(direct_full_room, 160)
+            self.assertEqual(direct_bulk_room, {
+                size: budgets[size] - tier_bytes[size] for size in thumbnails.THUMB_TIERS
+            })
+            self.assertEqual(direct_events, ["clear", "clear"])
+            self.assertEqual(facade_events, direct_events)
+            self.assertEqual(direct_lock.entered, 2)
+            self.assertEqual(thumbnails._meta_lock.entered, 2)
+            self.assertTrue(all(conn.closed for conn in direct_connections))
+            self.assertTrue(all(conn.closed for conn in facade_connections))
+
+            locked_conn = FakeConnection()
+            locked_events = []
+            thumbnails._db_connect = lambda: locked_conn
+            thumbnails._tier_bytes = (
+                lambda conn, size: (_ for _ in ()).throw(
+                    sqlite3.OperationalError("database is locked")
+                )
+            )
+            thumbnails._is_sqlite_locked = lambda exc: True
+            thumbnails._clear_cache_metadata_lock_backoff = lambda: locked_events.append("clear")
+            thumbnails._note_cache_metadata_lock = lambda: locked_events.append("note")
+
+            self.assertEqual(thumbnails._full_tier_room(200), 0)
+            self.assertEqual(locked_events, ["note"])
+            self.assertTrue(locked_conn.closed)
+        finally:
+            thumbnails._background_tier_budget = old_background_tier_budget
+            thumbnails._meta_lock = old_meta_lock
+            thumbnails._db_connect = old_db_connect
+            thumbnails._tier_bytes = old_tier_bytes
+            thumbnails._cache_metadata_backoff_active = old_backoff_active
+            thumbnails._clear_cache_metadata_lock_backoff = old_clear_backoff
+            thumbnails._note_cache_metadata_lock = old_note_lock
+            thumbnails._is_sqlite_locked = old_is_locked
+
     def _cache_original_now(self, image_id: int, path: str):
         signature = thumbnails._build_source_signature(path, thumbnails.FULL_TIER, image_id)
         return thumbnails._cache_full_image_sync(path, image_id, signature, hot=False)

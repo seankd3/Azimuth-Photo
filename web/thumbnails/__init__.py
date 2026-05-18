@@ -1380,50 +1380,35 @@ async def _pregen_full_candidate_batch(limit: int):
 
 
 def _bulk_tier_budgets() -> dict[str, int]:
-    return {size: _background_tier_budget(size) for size in THUMB_TIERS}
+    return pregen.bulk_tier_budgets(THUMB_TIERS, _background_tier_budget)
 
 
 def _full_tier_room(budget: int) -> int:
-    if budget <= 0 or _cache_metadata_backoff_active():
-        return 0
-    with _meta_lock:
-        conn = None
-        try:
-            conn = _db_connect()
-            room = max(0, int(budget) - _tier_bytes(conn, FULL_TIER))
-            _clear_cache_metadata_lock_backoff()
-            return room
-        except sqlite3.OperationalError as exc:
-            if _is_sqlite_locked(exc):
-                _note_cache_metadata_lock()
-                return 0
-            raise
-        finally:
-            if conn is not None:
-                conn.close()
+    return pregen.full_tier_room(
+        budget,
+        full_tier=FULL_TIER,
+        meta_lock=_meta_lock,
+        db_connect=_db_connect,
+        tier_bytes=_tier_bytes,
+        cache_metadata_backoff_active=_cache_metadata_backoff_active,
+        clear_cache_metadata_lock_backoff=_clear_cache_metadata_lock_backoff,
+        note_cache_metadata_lock=_note_cache_metadata_lock,
+        is_sqlite_locked=_is_sqlite_locked,
+    )
 
 
 def _bulk_tier_room(tier_budgets: dict[str, int]) -> dict[str, int]:
-    if _cache_metadata_backoff_active():
-        return {size: 0 for size in THUMB_TIERS}
-    with _meta_lock:
-        conn = None
-        try:
-            conn = _db_connect()
-            room = {
-                size: max(0, int(tier_budgets.get(size, 0) or 0) - _tier_bytes(conn, size))
-                for size in THUMB_TIERS
-            }
-            _clear_cache_metadata_lock_backoff()
-            return room
-        except sqlite3.OperationalError as exc:
-            if _is_sqlite_locked(exc):
-                _note_cache_metadata_lock()
-                return {size: 0 for size in THUMB_TIERS}
-            raise
-        finally:
-            if conn is not None:
-                conn.close()
+    return pregen.bulk_tier_room(
+        tier_budgets,
+        thumb_tiers=THUMB_TIERS,
+        meta_lock=_meta_lock,
+        db_connect=_db_connect,
+        tier_bytes=_tier_bytes,
+        cache_metadata_backoff_active=_cache_metadata_backoff_active,
+        clear_cache_metadata_lock_backoff=_clear_cache_metadata_lock_backoff,
+        note_cache_metadata_lock=_note_cache_metadata_lock,
+        is_sqlite_locked=_is_sqlite_locked,
+    )
 
 
 def _bulk_candidate_signatures(
