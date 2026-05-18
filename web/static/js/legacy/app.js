@@ -2,18 +2,12 @@ import {
     formatBytes,
     hideConfirmModal as hideConfirmModalUi,
     hideShortcuts as hideShortcutsUi,
-    initBottomBarMeasurement as initBottomBarMeasurementUi,
     initShortcutOverlay,
-    initVisibilityRefresh as initVisibilityRefreshUi,
     showConfirmModal as showConfirmModalUi,
     showShortcuts as showShortcutsUi,
     showToast as showToastUi,
-    updateBottomBarHeightVar as updateBottomBarHeightVarUi,
 } from '../ui.js';
 import { fetchJson } from '../api.js';
-import {
-    createAIStatusPoller,
-} from '../ai/poller.js';
 import { toggleAIPanel } from '../ai/status.js';
 import { createHomeScanController } from '../catalog/home_scan.js';
 import { createScanEntrypoint } from '../catalog/scan_entrypoint.js';
@@ -135,10 +129,10 @@ import {
 import { createFindSimilarAction } from '../library/similar.js';
 import { createPeopleApi } from '../people/controller.js';
 import { createSettingsPageController } from '../settings/page.js';
-import { createUiSettingsLoader } from '../settings/ui_settings.js';
 import { createLegacyFilterQueryBridge } from './filter_query_bridge.js';
 import { createLegacyPublicApi } from './public_api.js';
 import { createLegacySearchSortBridge } from './search_sort_bridge.js';
+import { createLegacyUiRuntimeBridge } from './ui_runtime_bridge.js';
 
 const legacyPhotoArchive = (() => {
     // --- Compare Mode State ---
@@ -165,9 +159,6 @@ const legacyPhotoArchive = (() => {
     const { handleWarmTiersApplied } = mediaStatusController;
     let selectedLibraryIndex = -1;
     let selectedMosaicIndex = -1;
-    const aiStatusPoller = createAIStatusPoller({
-        initVisibilityRefresh,
-    });
     const warmups = createWarmupManager({
         fetchJsonImpl: fetchJson,
         preloadImageWithTimeout,
@@ -187,45 +178,34 @@ const legacyPhotoArchive = (() => {
         return warmups.currentGeneration();
     }
 
+    const uiRuntimeBridge = createLegacyUiRuntimeBridge({
+        documentImpl: document,
+        fetchJsonImpl: fetchJson,
+        onBottomBarMeasured: () => {
+            if (document.getElementById('mosaic-grid')) scheduleMosaicRender();
+        },
+        refreshSettingsMetaIfActive: () => refreshSettingsMetaIfActive(),
+        onUiSettingsLoaded: () => renderLoupeStatusLine(),
+    });
+
     function updateBottomBarHeightVar() {
-        updateBottomBarHeightVarUi({
-            onMeasured: () => {
-                if (document.getElementById('mosaic-grid')) scheduleMosaicRender();
-            },
-        });
+        return uiRuntimeBridge.updateBottomBarHeightVar();
     }
 
     function initBottomBarMeasurement() {
-        initBottomBarMeasurementUi({
-            onMeasured: () => {
-                if (document.getElementById('mosaic-grid')) scheduleMosaicRender();
-            },
-        });
+        return uiRuntimeBridge.initBottomBarMeasurement();
     }
 
     function startAIStatusPolling(initialDelayMs = 0, { immediate = false } = {}) {
-        aiStatusPoller.start(initialDelayMs);
-        if (immediate && !document.hidden) {
-            aiStatusPoller.poll();
-        }
+        return uiRuntimeBridge.startAIStatusPolling(initialDelayMs, { immediate });
     }
 
     function initVisibilityRefresh() {
-        initVisibilityRefreshUi({
-            onVisible: () => {
-                aiStatusPoller.handleVisible();
-                refreshSettingsMetaIfActive().catch(() => {});
-            },
-        });
+        return uiRuntimeBridge.initVisibilityRefresh();
     }
 
-    const uiSettingsLoader = createUiSettingsLoader({
-        fetchJsonImpl: fetchJson,
-        onLoaded: () => renderLoupeStatusLine(),
-    });
-
     async function loadUiSettings() {
-        return uiSettingsLoader.loadUiSettings();
+        return uiRuntimeBridge.loadUiSettings();
     }
 
     // ==================== MOSAIC RANKING MODE ====================
@@ -1269,7 +1249,7 @@ const legacyPhotoArchive = (() => {
         warmImageTiers,
         preloadImageWithTimeout,
         getMediaStatus,
-        getUiSettings: () => uiSettingsLoader.getSettings(),
+        getUiSettings: () => uiRuntimeBridge.getUiSettings(),
         imageAspectRatio,
         eloToStars,
     });

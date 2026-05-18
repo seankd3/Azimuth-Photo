@@ -3847,6 +3847,8 @@ class ModularContractTests(unittest.TestCase):
             legacy_filter_query_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "search_sort_bridge.js"), encoding="utf-8") as fh:
             legacy_search_sort_bridge = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "legacy", "ui_runtime_bridge.js"), encoding="utf-8") as fh:
+            legacy_ui_runtime_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "api.js"), encoding="utf-8") as fh:
             api_module = fh.read()
         with open(os.path.join(base_dir, "static", "js", "ai", "status.js"), encoding="utf-8") as fh:
@@ -4032,11 +4034,13 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("window.PhotoArchiveReady = import(`./js/bootstrap.js${suffix}`)", app_entry)
         self.assertIn("Object.assign(compatibilityTarget, PhotoArchive);", bootstrap)
         self.assertIn("from '../api.js';", legacy)
-        self.assertIn("from '../ai/poller.js';", legacy)
+        self.assertIn("from '../ai/poller.js';", legacy_ui_runtime_bridge)
         self.assertIn("from '../catalog/home_scan.js';", legacy)
         self.assertIn("from '../catalog/scan_entrypoint.js';", legacy)
         self.assertIn("from './filter_query_bridge.js';", legacy)
         self.assertIn("from './search_sort_bridge.js';", legacy)
+        self.assertIn("from './ui_runtime_bridge.js';", legacy)
+        self.assertIn("export function createLegacyUiRuntimeBridge", legacy_ui_runtime_bridge)
         self.assertIn("from '../query_state.js';", legacy_filter_query_bridge)
         self.assertIn("from '../query_controller.js';", legacy_filter_query_bridge)
         self.assertIn("from '../filters.js';", legacy_filter_query_bridge)
@@ -4084,8 +4088,9 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../search/query.js';", legacy)
         self.assertIn("from '../people/controller.js';", legacy)
         self.assertIn("from '../settings/page.js';", legacy)
-        self.assertIn("from '../settings/ui_settings.js';", legacy)
+        self.assertIn("from '../settings/ui_settings.js';", legacy_ui_runtime_bridge)
         self.assertIn("from '../ui.js';", legacy)
+        self.assertIn("from '../ui.js';", legacy_ui_runtime_bridge)
         self.assertIn("from '../warmup.js';", legacy)
         self.assertIn("from '../warmup_neighbors.js';", legacy)
         self.assertIn("export async function fetchJson", api_module)
@@ -5322,6 +5327,78 @@ assert.equal(rankingsSort, 'similarity');
 bridge.updateSearchControls();
 bridge.updateCompareSearchIndicator();
 assert.equal(bottomBarCalls, 0);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_legacy_ui_runtime_bridge_node_probe_preserves_measurement_visibility_and_settings(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createLegacyUiRuntimeBridge } from './static/js/legacy/ui_runtime_bridge.js';
+
+const events = [];
+const listeners = {};
+const documentImpl = {
+    hidden: false,
+    documentElement: {
+        style: {
+            values: {},
+            setProperty(name, value) {
+                this.values[name] = value;
+            },
+        },
+    },
+    querySelector(selector) {
+        if (selector === '.bottom-bar') return { offsetHeight: 44 };
+        return null;
+    },
+    addEventListener(type, callback) {
+        listeners[type] = callback;
+    },
+};
+const windowImpl = {
+    addEventListener(type) {
+        events.push(['window-listener', type]);
+    },
+};
+const bridge = createLegacyUiRuntimeBridge({
+    documentImpl,
+    windowImpl,
+    fetchJsonImpl: async (url, options) => {
+        events.push(['fetch', url, options.defaultValue]);
+        return { settings: { show_loupe_cache_status: false } };
+    },
+    onBottomBarMeasured: () => events.push('measured'),
+    refreshSettingsMetaIfActive: async () => events.push('refresh-settings'),
+    onUiSettingsLoaded: settings => events.push(['settings-loaded', settings.show_loupe_cache_status]),
+});
+
+bridge.updateBottomBarHeightVar();
+assert.equal(documentImpl.documentElement.style.values['--current-bottom-bar-height'], '44px');
+assert.deepEqual(events, ['measured']);
+
+bridge.initBottomBarMeasurement();
+assert.equal(documentImpl.documentElement.style.values['--current-bottom-bar-height'], '44px');
+assert.deepEqual(events.slice(1), ['measured', ['window-listener', 'resize']]);
+
+bridge.initVisibilityRefresh();
+await listeners.visibilitychange();
+assert.equal(events.at(-1), 'refresh-settings');
+
+const settings = await bridge.loadUiSettings();
+assert.equal(settings.show_loupe_cache_status, false);
+assert.equal(bridge.getUiSettings().show_loupe_cache_status, false);
+assert.deepEqual(events.slice(-2), [
+    ['fetch', '/api/ui/settings', null],
+    ['settings-loaded', false],
+]);
 """
         subprocess.run(
             ["node", "--input-type=module", "-e", script],

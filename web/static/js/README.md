@@ -11,7 +11,9 @@ exported compatibility method table that backs `window.PhotoArchive.*`.
 connects Library, Mosaic, and Compare URL construction to the extracted filter
 and query modules. `legacy/search_sort_bridge.js` owns the legacy search/sort
 state bridge that connects persisted search state and sort-control rendering to
-the extracted Library modules.
+the extracted Library modules. `legacy/ui_runtime_bridge.js` owns the legacy
+bottom-bar measurement, visibility refresh, AI-status polling, and UI-settings
+loader glue.
 
 `ui.js` owns shared toast, confirm-modal, shortcut overlay, bottom-bar
 measurement, visibility-refresh wiring, visual-row navigation math, formatting,
