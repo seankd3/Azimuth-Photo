@@ -1,5 +1,4 @@
 import aiosqlite
-import asyncio
 import os
 import time as _time
 
@@ -593,10 +592,9 @@ async def batch_set_image_flags(image_ids: list[int], flag: str, chunk_size: int
 
 
 async def get_active_images_for_pairing():
-    """Get active images sorted by Elo for Swiss-system pairing."""
-    return await rating_repository.active_images_for_pairing(
+    return await rating_repository.get_active_images_for_pairing(
         DB_PATH,
-        catalog_counts=await get_catalog_image_counts(),
+        get_catalog_image_counts=get_catalog_image_counts,
     )
 
 
@@ -608,8 +606,7 @@ async def get_visible_images_for_pairing(
     limit: int | None = None,
     order: str = "elo",
 ):
-    """Return visible active pairing rows for one thumbnail tier, sorted by Elo."""
-    return await rating_repository.visible_images_for_pairing(
+    return await rating_repository.get_visible_images_for_pairing(
         DB_PATH,
         size,
         cache_root,
@@ -620,8 +617,7 @@ async def get_visible_images_for_pairing(
 
 
 async def get_visible_pairing_pool_counts(size: str, cache_root: str) -> dict:
-    """Return active and visible counts for the default Compare/Mosaic pool."""
-    return await rating_repository.visible_pairing_pool_counts_cached(
+    return await rating_repository.get_visible_pairing_pool_counts(
         DB_PATH,
         get_catalog_image_counts=get_catalog_image_counts,
         size=size,
@@ -635,8 +631,7 @@ async def get_visible_orientation_pairing_pool_counts(
     cache_root: str,
     orientation: str,
 ) -> dict:
-    """Return active and visible counts for a simple orientation-filtered pool."""
-    return await rating_repository.visible_orientation_pairing_pool_counts_cached(
+    return await rating_repository.get_visible_orientation_pairing_pool_counts(
         DB_PATH,
         get_catalog_image_counts=get_catalog_image_counts,
         count_rankings=count_rankings,
@@ -648,35 +643,24 @@ async def get_visible_orientation_pairing_pool_counts(
 
 
 async def get_past_matchups() -> set[tuple[int, int]]:
-    """Return set of (min_id, max_id) tuples for all past matchups."""
-    return await asyncio.to_thread(
-        rating_repository.past_matchups_cached,
+    return await rating_repository.get_past_matchups(
         DB_PATH,
-        active_source_ids=await get_active_source_id_set(),
+        get_active_source_id_set=get_active_source_id_set,
     )
 
 
 async def get_visible_past_matchups(size: str, cache_root: str) -> set[tuple[int, int]]:
-    """Return past matchup pairs where both images are visible in one cache tier."""
-    if not size or not cache_root:
-        return set()
-    return await asyncio.to_thread(
-        rating_repository.load_visible_past_matchups,
+    return await rating_repository.get_visible_past_matchups(
         DB_PATH,
-        size=size,
-        cache_root=cache_root,
+        size,
+        cache_root,
     )
 
 
 async def get_past_matchups_for_image_ids(image_ids: list[int]) -> set[tuple[int, int]]:
-    """Return past matchup pairs where both images are in a bounded candidate set."""
-    ids = list(dict.fromkeys(int(image_id) for image_id in image_ids or [] if int(image_id) > 0))
-    if len(ids) < 2:
-        return set()
-    return await asyncio.to_thread(
-        rating_repository.load_past_matchups_for_image_ids,
+    return await rating_repository.get_past_matchups_for_image_ids(
         DB_PATH,
-        image_ids=ids,
+        image_ids,
     )
 
 

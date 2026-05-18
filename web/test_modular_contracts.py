@@ -1334,12 +1334,19 @@ class ModularContractTests(unittest.TestCase):
         self.assertTrue(callable(db.get_people_review))
         self.assertTrue(callable(people.assign_face))
         self.assertTrue(callable(ratings.active_images_for_pairing))
+        self.assertTrue(callable(ratings.get_active_images_for_pairing))
         self.assertTrue(callable(ratings.visible_images_for_pairing))
+        self.assertTrue(callable(ratings.get_visible_images_for_pairing))
         self.assertTrue(callable(ratings.visible_pairing_pool_counts))
+        self.assertTrue(callable(ratings.get_visible_pairing_pool_counts))
         self.assertTrue(callable(ratings.visible_orientation_pairing_pool_counts))
+        self.assertTrue(callable(ratings.get_visible_orientation_pairing_pool_counts))
         self.assertTrue(callable(ratings.past_matchups_cached))
+        self.assertTrue(callable(ratings.get_past_matchups))
+        self.assertTrue(callable(ratings.get_visible_past_matchups))
         self.assertTrue(callable(ratings.invalidate_past_matchups_cache))
         self.assertTrue(callable(ratings.load_past_matchups_for_image_ids))
+        self.assertTrue(callable(ratings.get_past_matchups_for_image_ids))
         self.assertTrue(callable(ratings.record_active_comparison))
         self.assertIs(db._past_matchups_cache, ratings._past_matchups_cache)
         self.assertTrue(callable(rankings.ranking_filter_parts))
@@ -1445,6 +1452,135 @@ class ModularContractTests(unittest.TestCase):
         self.assertIs(db.parse_people_ids, people.parse_people_ids)
         self.assertIs(db._ensure_embedding_model_row, embeddings.ensure_embedding_model_row)
         self.assertEqual(db._metadata_fts_query('sun"set'), metadata_search.metadata_fts_query('sun"set'))
+
+    def test_rating_facades_delegate_with_mutable_db_path(self):
+        ratings = importlib.import_module("data.repositories.ratings")
+        old_db_path = db.DB_PATH
+        names = (
+            "get_active_images_for_pairing",
+            "get_visible_images_for_pairing",
+            "get_visible_pairing_pool_counts",
+            "get_visible_orientation_pairing_pool_counts",
+            "get_past_matchups",
+            "get_visible_past_matchups",
+            "get_past_matchups_for_image_ids",
+        )
+        old_functions = {name: getattr(ratings, name) for name in names}
+        calls = []
+
+        async def fake_active(db_path, *, get_catalog_image_counts):
+            calls.append(("active", db_path, get_catalog_image_counts))
+            return ["active"]
+
+        async def fake_visible(db_path, size, cache_root, **kwargs):
+            calls.append(("visible", db_path, size, cache_root, kwargs))
+            return ["visible"]
+
+        async def fake_pool(db_path, **kwargs):
+            calls.append(("pool", db_path, kwargs))
+            return {"pool": True}
+
+        async def fake_orientation_pool(db_path, **kwargs):
+            calls.append(("orientation", db_path, kwargs))
+            return {"orientation": True}
+
+        async def fake_past(db_path, *, get_active_source_id_set):
+            calls.append(("past", db_path, get_active_source_id_set))
+            return {("past",)}
+
+        async def fake_visible_past(db_path, size, cache_root):
+            calls.append(("visible-past", db_path, size, cache_root))
+            return {("visible", "past")}
+
+        async def fake_candidate_past(db_path, image_ids):
+            calls.append(("candidate-past", db_path, tuple(image_ids)))
+            return {("candidate", "past")}
+
+        try:
+            ratings.get_active_images_for_pairing = fake_active
+            ratings.get_visible_images_for_pairing = fake_visible
+            ratings.get_visible_pairing_pool_counts = fake_pool
+            ratings.get_visible_orientation_pairing_pool_counts = fake_orientation_pool
+            ratings.get_past_matchups = fake_past
+            ratings.get_visible_past_matchups = fake_visible_past
+            ratings.get_past_matchups_for_image_ids = fake_candidate_past
+
+            db.DB_PATH = "/tmp/photoarchive-ratings-a.db"
+            self.assertEqual(asyncio.run(db.get_active_images_for_pairing()), ["active"])
+            self.assertEqual(
+                asyncio.run(
+                    db.get_visible_images_for_pairing(
+                        "sm",
+                        "/cache-a",
+                        include_card_metadata=False,
+                        limit=7,
+                        order="cache",
+                    )
+                ),
+                ["visible"],
+            )
+            self.assertEqual(
+                asyncio.run(db.get_visible_pairing_pool_counts("md", "/cache-b")),
+                {"pool": True},
+            )
+            self.assertEqual(
+                asyncio.run(db.get_visible_orientation_pairing_pool_counts("lg", "/cache-c", "portrait")),
+                {"orientation": True},
+            )
+
+            db.DB_PATH = "/tmp/photoarchive-ratings-b.db"
+            self.assertEqual(asyncio.run(db.get_past_matchups()), {("past",)})
+            self.assertEqual(
+                asyncio.run(db.get_visible_past_matchups("sm", "/cache-d")),
+                {("visible", "past")},
+            )
+            self.assertEqual(
+                asyncio.run(db.get_past_matchups_for_image_ids([9, 10])),
+                {("candidate", "past")},
+            )
+        finally:
+            db.DB_PATH = old_db_path
+            for name, value in old_functions.items():
+                setattr(ratings, name, value)
+
+        self.assertEqual(
+            calls,
+            [
+                ("active", "/tmp/photoarchive-ratings-a.db", db.get_catalog_image_counts),
+                (
+                    "visible",
+                    "/tmp/photoarchive-ratings-a.db",
+                    "sm",
+                    "/cache-a",
+                    {"include_card_metadata": False, "limit": 7, "order": "cache"},
+                ),
+                (
+                    "pool",
+                    "/tmp/photoarchive-ratings-a.db",
+                    {
+                        "get_catalog_image_counts": db.get_catalog_image_counts,
+                        "size": "md",
+                        "cache_root": "/cache-b",
+                        "ttl_seconds": db.VISIBLE_PAIRING_POOL_COUNTS_TTL_SECONDS,
+                    },
+                ),
+                (
+                    "orientation",
+                    "/tmp/photoarchive-ratings-a.db",
+                    {
+                        "get_catalog_image_counts": db.get_catalog_image_counts,
+                        "count_rankings": db.count_rankings,
+                        "size": "lg",
+                        "cache_root": "/cache-c",
+                        "orientation": "portrait",
+                        "ttl_seconds": db.VISIBLE_PAIRING_POOL_COUNTS_TTL_SECONDS,
+                    },
+                ),
+                ("past", "/tmp/photoarchive-ratings-b.db", db.get_active_source_id_set),
+                ("visible-past", "/tmp/photoarchive-ratings-b.db", "sm", "/cache-d"),
+                ("candidate-past", "/tmp/photoarchive-ratings-b.db", (9, 10)),
+            ],
+        )
 
     def test_filter_options_facade_delegates_with_mutable_db_path(self):
         filter_options = importlib.import_module("data.repositories.filter_options")

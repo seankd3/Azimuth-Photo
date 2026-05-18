@@ -1,5 +1,6 @@
 """Rating write queries for compare, mosaic, and undo workflows."""
 
+import asyncio
 import time as _time
 
 from data import connection
@@ -89,6 +90,14 @@ async def active_images_for_pairing(db_path: str, *, catalog_counts: dict):
         await connection.close_async(conn, db_path=db_path)
 
 
+async def get_active_images_for_pairing(db_path: str, *, get_catalog_image_counts):
+    """Get active images sorted by Elo for Swiss-system pairing."""
+    return await active_images_for_pairing(
+        db_path,
+        catalog_counts=await get_catalog_image_counts(),
+    )
+
+
 async def visible_images_for_pairing(
     db_path: str,
     size: str,
@@ -161,6 +170,26 @@ async def visible_images_for_pairing(
         await connection.close_async(conn, db_path=db_path)
 
 
+async def get_visible_images_for_pairing(
+    db_path: str,
+    size: str,
+    cache_root: str,
+    *,
+    include_card_metadata: bool = True,
+    limit: int | None = None,
+    order: str = "elo",
+):
+    """Return visible active pairing rows for one thumbnail tier, sorted by Elo."""
+    return await visible_images_for_pairing(
+        db_path,
+        size,
+        cache_root,
+        include_card_metadata=include_card_metadata,
+        limit=limit,
+        order=order,
+    )
+
+
 async def visible_pairing_pool_counts(
     db_path: str,
     *,
@@ -223,6 +252,24 @@ async def visible_pairing_pool_counts_cached(
         "expires": _time.time() + ttl_seconds,
     }
     return dict(result)
+
+
+async def get_visible_pairing_pool_counts(
+    db_path: str,
+    *,
+    get_catalog_image_counts,
+    size: str,
+    cache_root: str,
+    ttl_seconds: float = VISIBLE_PAIRING_POOL_COUNTS_TTL_SECONDS,
+) -> dict:
+    """Return active and visible counts for the default Compare/Mosaic pool."""
+    return await visible_pairing_pool_counts_cached(
+        db_path,
+        get_catalog_image_counts=get_catalog_image_counts,
+        size=size,
+        cache_root=cache_root,
+        ttl_seconds=ttl_seconds,
+    )
 
 
 async def visible_orientation_pairing_pool_counts(
@@ -320,6 +367,28 @@ async def visible_orientation_pairing_pool_counts_cached(
     return dict(result)
 
 
+async def get_visible_orientation_pairing_pool_counts(
+    db_path: str,
+    *,
+    get_catalog_image_counts,
+    count_rankings,
+    size: str,
+    cache_root: str,
+    orientation: str,
+    ttl_seconds: float = VISIBLE_PAIRING_POOL_COUNTS_TTL_SECONDS,
+) -> dict:
+    """Return active and visible counts for a simple orientation-filtered pool."""
+    return await visible_orientation_pairing_pool_counts_cached(
+        db_path,
+        get_catalog_image_counts=get_catalog_image_counts,
+        count_rankings=count_rankings,
+        size=size,
+        cache_root=cache_root,
+        orientation=orientation,
+        ttl_seconds=ttl_seconds,
+    )
+
+
 def load_past_matchups(db_path: str) -> tuple[tuple[int, int | None], set[tuple[int, int]]]:
     conn = connection.open_sync(db_path)
     try:
@@ -346,6 +415,15 @@ def past_matchups_cached(db_path: str, *, active_source_ids) -> set[tuple[int, i
     _past_matchups_cache["signature"] = signature
     _past_matchups_cache["data"] = loaded
     return set(loaded)
+
+
+async def get_past_matchups(db_path: str, *, get_active_source_id_set) -> set[tuple[int, int]]:
+    """Return set of (min_id, max_id) tuples for all past matchups."""
+    return await asyncio.to_thread(
+        past_matchups_cached,
+        db_path,
+        active_source_ids=await get_active_source_id_set(),
+    )
 
 
 def _past_matchups_signature_on_conn(conn) -> tuple[int, int | None]:
@@ -385,6 +463,22 @@ def load_visible_past_matchups(
         return {(min(winner_id, loser_id), max(winner_id, loser_id)) for winner_id, loser_id in rows}
     finally:
         connection.close_sync(conn, db_path=db_path)
+
+
+async def get_visible_past_matchups(
+    db_path: str,
+    size: str,
+    cache_root: str,
+) -> set[tuple[int, int]]:
+    """Return past matchup pairs where both images are visible in one cache tier."""
+    if not size or not cache_root:
+        return set()
+    return await asyncio.to_thread(
+        load_visible_past_matchups,
+        db_path,
+        size=size,
+        cache_root=cache_root,
+    )
 
 
 def load_past_matchups_for_image_ids(
@@ -431,6 +525,21 @@ def load_past_matchups_for_image_ids(
         return {(min(winner_id, loser_id), max(winner_id, loser_id)) for winner_id, loser_id in rows}
     finally:
         connection.close_sync(conn, db_path=db_path)
+
+
+async def get_past_matchups_for_image_ids(
+    db_path: str,
+    image_ids: list[int],
+) -> set[tuple[int, int]]:
+    """Return past matchup pairs where both images are in a bounded candidate set."""
+    ids = list(dict.fromkeys(int(image_id) for image_id in image_ids or [] if int(image_id) > 0))
+    if len(ids) < 2:
+        return set()
+    return await asyncio.to_thread(
+        load_past_matchups_for_image_ids,
+        db_path,
+        image_ids=ids,
+    )
 
 
 async def record_comparison(
