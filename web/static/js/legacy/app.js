@@ -18,7 +18,6 @@ import { createComparePageController } from '../compare/page_controller.js';
 import {
     showCompareEmpty as showCompareEmptyCore,
 } from '../compare/view.js';
-import { createCompareModeController } from '../compare/mode_controller.js';
 import {
     INITIAL_RANKINGS_PAGE_SIZE,
     LIBRARY_NEIGHBOR_LIMIT,
@@ -41,6 +40,7 @@ import { createLegacyCatalogScanBridge } from './catalog_scan_bridge.js';
 import { createLegacyCompareDisplayBridge } from './compare_display_bridge.js';
 import { createLegacyCompareFlowBridge } from './compare_flow_bridge.js';
 import { createLegacyCompareKeyboardBridge } from './compare_keyboard_bridge.js';
+import { createLegacyCompareModeBridge } from './compare_mode_bridge.js';
 import { createLegacyDateScrubberBridge } from './date_scrubber_bridge.js';
 import { createLegacyExportBridge } from './export_bridge.js';
 import { createLegacyFilterQueryBridge } from './filter_query_bridge.js';
@@ -269,7 +269,8 @@ const legacyPhotoArchive = (() => {
         return uiActionBridge.hideConfirmModal();
     }
 
-    const compareModeController = createCompareModeController({
+    const compareModeBridge = createLegacyCompareModeBridge({
+        documentImpl: document,
         clearWarmups,
         setMosaicStrategyValue: (strategy) => { mosaicStrategy = strategy; },
         setCompareModeValue: (mode) => { compareMode = mode; },
@@ -286,11 +287,11 @@ const legacyPhotoArchive = (() => {
     });
 
     function setMosaicStrategy(strategy) {
-        return compareModeController.setMosaicStrategy(strategy);
+        return compareModeBridge.setMosaicStrategy(strategy);
     }
 
     function mosaicShuffle() {
-        return compareModeController.mosaicShuffle();
+        return compareModeBridge.mosaicShuffle();
     }
 
     // ==================== COMPARE MODE ====================
@@ -427,7 +428,7 @@ const legacyPhotoArchive = (() => {
     } = compareKeyboardBridge;
 
     function setCompareMode(mode) {
-        return compareModeController.setCompareMode(mode);
+        return compareModeBridge.setCompareMode(mode);
     }
 
     const comparePageController = createComparePageController({

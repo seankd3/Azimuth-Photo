@@ -134,6 +134,8 @@ displayed tier state, media-status lookup, tier probing, and tier URL injection.
 facade that connects compatibility state to Compare pair and image controllers.
 `legacy/compare_keyboard_bridge.js` owns the legacy Compare/Mosaic keyboard
 navigation facade around the extracted Compare keyboard and navigation helpers.
+`legacy/compare_mode_bridge.js` owns the legacy Compare/Mosaic mode and
+strategy-switching facade around the extracted Compare mode controller.
 `legacy/mosaic_bridge.js` owns the legacy Mosaic render, replacement-buffer,
 pick-action, and batch-load facade around the extracted Mosaic controllers.
 `compare/mosaic_action_controller.js` owns Mosaic pick orchestration,

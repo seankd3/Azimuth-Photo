@@ -3853,6 +3853,8 @@ class ModularContractTests(unittest.TestCase):
             legacy_compare_flow_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "compare_keyboard_bridge.js"), encoding="utf-8") as fh:
             legacy_compare_keyboard_bridge = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "legacy", "compare_mode_bridge.js"), encoding="utf-8") as fh:
+            legacy_compare_mode_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "date_scrubber_bridge.js"), encoding="utf-8") as fh:
             legacy_date_scrubber_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "export_bridge.js"), encoding="utf-8") as fh:
@@ -4082,6 +4084,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from './compare_display_bridge.js';", legacy)
         self.assertIn("from './compare_flow_bridge.js';", legacy)
         self.assertIn("from './compare_keyboard_bridge.js';", legacy)
+        self.assertIn("from './compare_mode_bridge.js';", legacy)
         self.assertIn("from './date_scrubber_bridge.js';", legacy)
         self.assertIn("from './export_bridge.js';", legacy)
         self.assertIn("from './filter_query_bridge.js';", legacy)
@@ -4115,7 +4118,9 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../compare/pair_controller.js';", legacy_compare_display_bridge)
         self.assertIn("export function createLegacyCompareDisplayBridge", legacy_compare_display_bridge)
         self.assertIn("from '../compare/view.js';", legacy)
-        self.assertIn("from '../compare/mode_controller.js';", legacy)
+        self.assertNotIn("from '../compare/mode_controller.js';", legacy)
+        self.assertIn("from '../compare/mode_controller.js';", legacy_compare_mode_bridge)
+        self.assertIn("export function createLegacyCompareModeBridge", legacy_compare_mode_bridge)
         self.assertNotIn("from '../compare/action_controller.js';", legacy)
         self.assertIn("from '../compare/action_controller.js';", legacy_compare_flow_bridge)
         self.assertIn("export function createLegacyCompareFlowBridge", legacy_compare_flow_bridge)
@@ -6889,6 +6894,59 @@ assert.deepEqual(events, [
     ['fetchPairs'],
     ['showPair'],
 ]);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_legacy_compare_mode_bridge_node_probe_preserves_mode_facade(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createLegacyCompareModeBridge } from './static/js/legacy/compare_mode_bridge.js';
+
+const expected = {
+    documentImpl: { getElementById: () => null },
+    clearWarmups: () => {},
+    setMosaicStrategyValue: () => {},
+    setCompareModeValue: () => {},
+    incrementTransitionToken: () => 1,
+    isCurrentTransition: () => true,
+    incrementCompareImageToken: () => {},
+    loadMosaicBatch: () => {},
+    resetComparePairs: () => {},
+    fetchComparePairs: () => Promise.resolve(),
+    showComparePair: () => {},
+};
+const dependencyNames = Object.keys(expected);
+const methodNames = ['mosaicShuffle', 'setCompareMode', 'setMosaicStrategy'];
+const calls = [];
+
+const bridge = createLegacyCompareModeBridge({
+    ...expected,
+    createCompareModeControllerImpl: (deps) => {
+        for (const name of dependencyNames) {
+            assert.strictEqual(deps[name], expected[name], `${name} dependency`);
+        }
+        return Object.fromEntries(methodNames.map((name) => [
+            name,
+            (...args) => {
+                calls.push([name, args]);
+                return `${name}-result`;
+            },
+        ]));
+    },
+});
+
+for (const name of methodNames) {
+    assert.equal(bridge[name](`${name}-arg`), `${name}-result`);
+}
+assert.deepEqual(calls, methodNames.map((name) => [name, [`${name}-arg`]]));
 """
         subprocess.run(
             ["node", "--input-type=module", "-e", script],
