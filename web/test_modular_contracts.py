@@ -10459,6 +10459,7 @@ assert.deepEqual(loadingEvents.slice(-2), [['set', 2], ['cancel-clear']]);
         thumbnails = importlib.import_module("thumbnails")
         cache_entries = importlib.import_module("thumbnails.cache_entries")
         thumbnail_config = importlib.import_module("thumbnails.config")
+        config_metadata = importlib.import_module("thumbnails.config_metadata")
         data_providers = importlib.import_module("thumbnails.data_providers")
         disk_store = importlib.import_module("thumbnails.disk_store")
         full_cache = importlib.import_module("thumbnails.full_cache")
@@ -10473,6 +10474,7 @@ assert.deepEqual(loadingEvents.slice(-2), [['set', 2], ['cancel-clear']]);
 
         self.assertTrue(callable(thumbnail_config.allocate_disk_budget))
         self.assertTrue(callable(thumbnail_config.cache_budget_config))
+        self.assertTrue(callable(config_metadata.sync_thumb_config_metadata))
         self.assertIs(thumbnails._normalize_ratios, thumbnail_config.normalize_ratios)
         self.assertIs(thumbnails._allocate_by_ratios, thumbnail_config.allocate_by_ratios)
         self.assertIs(thumbnails._allocate_weighted_capped, thumbnail_config.allocate_weighted_capped)

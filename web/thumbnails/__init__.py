@@ -11,6 +11,7 @@ from PIL import Image
 from . import budget as thumbnail_budget
 from . import cache_entries as thumbnail_cache_entries
 from . import config as thumbnail_config
+from . import config_metadata as thumbnail_config_metadata
 from . import data_providers
 from . import disk_store
 from . import full_cache
@@ -1253,59 +1254,30 @@ def cache_stats() -> dict:
 
 
 def _thumb_config_signature() -> str:
-    return f"{CACHE_VERSION}|{SIZES['sm']}|{SIZES['md']}|{SIZES['lg']}|{THUMB_QUALITY}"
+    return thumbnail_config_metadata.thumb_config_signature(CACHE_VERSION, SIZES, THUMB_QUALITY)
 
 
 def _sync_thumb_config_metadata(new_signature: str, *, replace_thumbnail_cache: bool):
     global _last_thumb_config_signature, _thumb_config_changed_at, _replace_stale_thumbnails
-    now = _current_time()
-
-    with _meta_lock:
-        conn = _db_connect()
-        try:
-            row = conn.execute(
-                "SELECT thumb_config_signature, thumb_config_changed_at, replace_stale_thumbnails "
-                "FROM cache_metadata WHERE cache_root = ?",
-                (SSD_CACHE_DIR,),
-            ).fetchone()
-            previous_signature = row["thumb_config_signature"] if row else _last_thumb_config_signature
-            previous_changed_at = float(row["thumb_config_changed_at"]) if row else _thumb_config_changed_at
-            previous_replace_stale = bool(row["replace_stale_thumbnails"]) if row else _replace_stale_thumbnails
-        finally:
-            conn.close()
-
-    changed = bool(previous_signature and previous_signature != new_signature)
-    if changed:
-        _clear_memory_tiers(THUMB_TIERS)
-        _thumb_config_changed_at = now
-        _replace_stale_thumbnails = bool(replace_thumbnail_cache)
-        for tier in THUMB_TIERS:
-            _pregen_scan_offsets[tier] = 0
-        _reset_pregen_bulk_cursor()
-        _reset_pregen_full_cursor()
-    else:
-        _thumb_config_changed_at = previous_changed_at or 0.0
-        _replace_stale_thumbnails = previous_replace_stale
-
-    with _meta_lock:
-        conn = _db_connect()
-        try:
-            conn.execute(
-                "INSERT OR REPLACE INTO cache_metadata "
-                "(cache_root, thumb_config_signature, thumb_config_changed_at, replace_stale_thumbnails) "
-                "VALUES (?, ?, ?, ?)",
-                (
-                    SSD_CACHE_DIR,
-                    new_signature,
-                    _thumb_config_changed_at,
-                    1 if _replace_stale_thumbnails else 0,
-                ),
-            )
-            conn.commit()
-        finally:
-            conn.close()
-
-    _last_thumb_config_signature = new_signature
+    result = thumbnail_config_metadata.sync_thumb_config_metadata(
+        new_signature,
+        cache_root=SSD_CACHE_DIR,
+        current_signature=_last_thumb_config_signature,
+        current_changed_at=_thumb_config_changed_at,
+        current_replace_stale=_replace_stale_thumbnails,
+        replace_thumbnail_cache=replace_thumbnail_cache,
+        now=_current_time(),
+        meta_lock=_meta_lock,
+        db_connect=_db_connect,
+        clear_memory_tiers=_clear_memory_tiers,
+        thumb_tiers=THUMB_TIERS,
+        pregen_scan_offsets=_pregen_scan_offsets,
+        reset_pregen_bulk_cursor=_reset_pregen_bulk_cursor,
+        reset_pregen_full_cursor=_reset_pregen_full_cursor,
+    )
+    _last_thumb_config_signature = result["last_signature"]
+    _thumb_config_changed_at = result["changed_at"]
+    _replace_stale_thumbnails = result["replace_stale_thumbnails"]
 
 
 def _original_cache_status(

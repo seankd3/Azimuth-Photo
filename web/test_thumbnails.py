@@ -15,6 +15,7 @@ from data import schema as data_schema  # noqa: E402
 from thumbnails import budget as thumbnail_budget  # noqa: E402
 from thumbnails import cache_entries as thumbnail_cache_entries  # noqa: E402
 from thumbnails import config as thumbnail_config  # noqa: E402
+from thumbnails import config_metadata as thumbnail_config_metadata  # noqa: E402
 from thumbnails import full_cache as thumbnail_full_cache  # noqa: E402
 from thumbnails import generation as thumbnail_generation  # noqa: E402
 from thumbnails import jobs as thumbnail_jobs  # noqa: E402
@@ -33,6 +34,76 @@ class ThumbnailConfigFacadeTests(unittest.TestCase):
             self.assertIs(getattr(thumbnails, name), getattr(thumbnail_config, name), name)
         self.assertEqual(thumbnail_config.SSD_CACHE_BYTES, 10 * 1024 * 1024 * 1024)
         self.assertIsInstance(thumbnails.SSD_CACHE_BYTES, int)
+
+    def test_config_metadata_module_owns_signature_transition(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            db_path = os.path.join(tempdir, "metadata.db")
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            try:
+                conn.execute(
+                    "CREATE TABLE cache_metadata ("
+                    "cache_root TEXT PRIMARY KEY, "
+                    "thumb_config_signature TEXT, "
+                    "thumb_config_changed_at REAL, "
+                    "replace_stale_thumbnails INTEGER)"
+                )
+                conn.execute(
+                    "INSERT INTO cache_metadata VALUES (?, ?, ?, ?)",
+                    (tempdir, "old-signature", 12.0, 0),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            def db_connect():
+                opened = sqlite3.connect(db_path)
+                opened.row_factory = sqlite3.Row
+                return opened
+
+            events = []
+            offsets = {"sm": 3, "md": 4, "lg": 5}
+            signature = thumbnail_config_metadata.thumb_config_signature(
+                "v9",
+                {"sm": 400, "md": 1920, "lg": 3840},
+                91,
+            )
+            result = thumbnail_config_metadata.sync_thumb_config_metadata(
+                signature,
+                cache_root=tempdir,
+                current_signature="old-signature",
+                current_changed_at=12.0,
+                current_replace_stale=False,
+                replace_thumbnail_cache=True,
+                now=44.0,
+                meta_lock=thumbnails._meta_lock,
+                db_connect=db_connect,
+                clear_memory_tiers=lambda tiers: events.append(("clear", tiers)),
+                thumb_tiers=("sm", "md", "lg"),
+                pregen_scan_offsets=offsets,
+                reset_pregen_bulk_cursor=lambda: events.append("bulk"),
+                reset_pregen_full_cursor=lambda: events.append("full"),
+            )
+
+            self.assertEqual(result["last_signature"], signature)
+            self.assertTrue(result["changed"])
+            self.assertEqual(result["changed_at"], 44.0)
+            self.assertTrue(result["replace_stale_thumbnails"])
+            self.assertEqual(offsets, {"sm": 0, "md": 0, "lg": 0})
+            self.assertEqual(events, [("clear", ("sm", "md", "lg")), "bulk", "full"])
+
+            conn = db_connect()
+            try:
+                row = conn.execute(
+                    "SELECT thumb_config_signature, thumb_config_changed_at, replace_stale_thumbnails "
+                    "FROM cache_metadata WHERE cache_root = ?",
+                    (tempdir,),
+                ).fetchone()
+            finally:
+                conn.close()
+            self.assertEqual(row["thumb_config_signature"], signature)
+            self.assertEqual(row["thumb_config_changed_at"], 44.0)
+            self.assertEqual(row["replace_stale_thumbnails"], 1)
 
 
 class ThumbnailBudgetFacadeTests(unittest.TestCase):
