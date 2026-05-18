@@ -1,10 +1,3 @@
-import {
-    createImagePreloader,
-    createWarmupManager,
-    loadImageProbe,
-    withTimeout,
-} from '../warmup.js';
-import { createNeighborWarmupController } from '../warmup_neighbors.js';
 import { createLegacyBatchBridge } from './batch_bridge.js';
 import { createLegacyCatalogScanBridge } from './catalog_scan_bridge.js';
 import { createLegacyCompareDisplayBridge } from './compare_display_bridge.js';
@@ -39,6 +32,7 @@ import { createLegacySharedRuntimeBridge } from './shared_runtime_bridge.js';
 import { createLegacyThumbnailSizeBridge } from './thumbnail_size_bridge.js';
 import { createLegacyUiActionBridge } from './ui_action_bridge.js';
 import { createLegacyUiRuntimeBridge } from './ui_runtime_bridge.js';
+import { createLegacyWarmupBridge } from './warmup_bridge.js';
 
 const legacyPhotoArchive = (() => {
     // --- Compare Mode State ---
@@ -57,6 +51,14 @@ const legacyPhotoArchive = (() => {
     let rankingsOffset = 0;
     let selectedLibraryIndex = -1;
     let selectedMosaicIndex = -1;
+    const warmupBridge = createLegacyWarmupBridge();
+    const {
+        createImagePreloader,
+        createNeighborWarmupController,
+        createWarmupManager,
+        loadImageProbe,
+        withTimeout,
+    } = warmupBridge;
     const sharedRuntimeBridge = createLegacySharedRuntimeBridge();
     const { fetchJson, toggleAIPanel } = sharedRuntimeBridge;
     const sharedHelpersBridge = createLegacySharedHelpersBridge();

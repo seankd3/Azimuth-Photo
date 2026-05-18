@@ -51,6 +51,8 @@ and escaping helpers.
 warm-cache helpers, background warmup scheduling, warmup URL extraction,
 request warming, and image-tier warm batching used by the legacy
 compatibility module.
+`legacy/warmup_bridge.js` owns the legacy facade for warmup runtimes and
+neighbor-warmup controller construction.
 `warmup_neighbors.js` owns Library/Compare cross-view and neighbor-request
 warmup scheduling constants while legacy keeps current view, query, and paging
 state.

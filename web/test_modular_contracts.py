@@ -3901,6 +3901,8 @@ class ModularContractTests(unittest.TestCase):
             legacy_ui_action_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "ui_runtime_bridge.js"), encoding="utf-8") as fh:
             legacy_ui_runtime_bridge = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "legacy", "warmup_bridge.js"), encoding="utf-8") as fh:
+            legacy_warmup_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "api.js"), encoding="utf-8") as fh:
             api_module = fh.read()
         with open(os.path.join(base_dir, "static", "js", "ai", "status.js"), encoding="utf-8") as fh:
@@ -4124,6 +4126,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from './thumbnail_size_bridge.js';", legacy)
         self.assertIn("from './ui_action_bridge.js';", legacy)
         self.assertIn("from './ui_runtime_bridge.js';", legacy)
+        self.assertIn("from './warmup_bridge.js';", legacy)
         self.assertIn("export function createLegacyUiRuntimeBridge", legacy_ui_runtime_bridge)
         self.assertIn("from '../query_state.js';", legacy_filter_query_bridge)
         self.assertIn("from '../query_controller.js';", legacy_filter_query_bridge)
@@ -4238,8 +4241,11 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../ui.js';", legacy_ui_action_bridge)
         self.assertIn("export function createLegacyUiActionBridge", legacy_ui_action_bridge)
         self.assertIn("from '../ui.js';", legacy_ui_runtime_bridge)
-        self.assertIn("from '../warmup.js';", legacy)
-        self.assertIn("from '../warmup_neighbors.js';", legacy)
+        self.assertNotIn("from '../warmup.js';", legacy)
+        self.assertNotIn("from '../warmup_neighbors.js';", legacy)
+        self.assertIn("from '../warmup.js';", legacy_warmup_bridge)
+        self.assertIn("from '../warmup_neighbors.js';", legacy_warmup_bridge)
+        self.assertIn("export function createLegacyWarmupBridge", legacy_warmup_bridge)
         self.assertIn("from '../warmup_neighbors.js';", legacy_shared_helpers_bridge)
         self.assertIn("export async function fetchJson", api_module)
         self.assertIn("export function aiStatusPollDelay", ai_status)
@@ -7823,6 +7829,59 @@ assert.deepEqual(calls, [
     ['date', ['2026-05-18']],
     ['search', ['lake']],
     ['empty', ['arg']],
+]);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_legacy_warmup_bridge_node_probe_preserves_runtime_facades(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createLegacyWarmupBridge } from './static/js/legacy/warmup_bridge.js';
+
+const calls = [];
+const bridge = createLegacyWarmupBridge({
+    createImagePreloaderImpl: (...args) => {
+        calls.push(['preloader', args]);
+        return 'preloader-result';
+    },
+    createWarmupManagerImpl: (...args) => {
+        calls.push(['manager', args]);
+        return 'manager-result';
+    },
+    loadImageProbeImpl: (...args) => {
+        calls.push(['probe', args]);
+        return 'probe-result';
+    },
+    withTimeoutImpl: (...args) => {
+        calls.push(['timeout', args]);
+        return 'timeout-result';
+    },
+    createNeighborWarmupControllerImpl: (...args) => {
+        calls.push(['neighbor', args]);
+        return 'neighbor-result';
+    },
+});
+
+const promise = Promise.resolve('ok');
+assert.equal(bridge.createImagePreloader({ limit: 1 }), 'preloader-result');
+assert.equal(bridge.createWarmupManager({ queueConcurrency: 1 }), 'manager-result');
+assert.equal(bridge.loadImageProbe('/thumb.jpg'), 'probe-result');
+assert.equal(bridge.withTimeout(promise, 50), 'timeout-result');
+assert.equal(bridge.createNeighborWarmupController({ rankingsPageSize: 80 }), 'neighbor-result');
+assert.deepEqual(calls, [
+    ['preloader', [{ limit: 1 }]],
+    ['manager', [{ queueConcurrency: 1 }]],
+    ['probe', ['/thumb.jpg']],
+    ['timeout', [promise, 50]],
+    ['neighbor', [{ rankingsPageSize: 80 }]],
 ]);
 """
         subprocess.run(
