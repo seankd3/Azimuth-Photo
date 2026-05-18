@@ -17,10 +17,6 @@ import {
 } from '../compare/query.js';
 import { createLibraryFilterController } from '../library/filter_controller.js';
 import {
-    createMediaStatusClient,
-    createMediaStatusController,
-} from '../media_status.js';
-import {
     createImagePreloader,
     createWarmupManager,
     loadImageProbe,
@@ -62,10 +58,6 @@ import {
     precomputePropagationCounts,
 } from '../compare/propagation.js';
 import { createCompareStatusController } from '../compare/status_controller.js';
-import {
-    loupeTierUrl as loupeTierUrlCore,
-} from '../loupe/tiers.js';
-import { createLoupeController } from '../loupe/controller.js';
 import {
     INITIAL_RANKINGS_PAGE_SIZE,
     LIBRARY_NEIGHBOR_LIMIT,
@@ -130,6 +122,7 @@ import { createFindSimilarAction } from '../library/similar.js';
 import { createPeopleApi } from '../people/controller.js';
 import { createSettingsPageController } from '../settings/page.js';
 import { createLegacyFilterQueryBridge } from './filter_query_bridge.js';
+import { createLegacyLoupeBridge } from './loupe_bridge.js';
 import { createLegacyPublicApi } from './public_api.js';
 import { createLegacySearchSortBridge } from './search_sort_bridge.js';
 import { createLegacyUiRuntimeBridge } from './ui_runtime_bridge.js';
@@ -149,16 +142,24 @@ const legacyPhotoArchive = (() => {
 
     // --- Rankings State ---
     let rankingsOffset = 0;
-    let loupeController = null;
-    const mediaStatusController = createMediaStatusController({
-        client: createMediaStatusClient({ maxAgeMs: 15000 }),
-        getCurrentLoupeImage: () => loupeController?.getCurrentImage() || null,
-        getLoupeImageToken: () => loupeController?.getImageToken() || 0,
-        refreshLoupeMediaStatus: (...args) => loupeController?.refreshLoupeMediaStatus(...args),
-    });
-    const { handleWarmTiersApplied } = mediaStatusController;
     let selectedLibraryIndex = -1;
     let selectedMosaicIndex = -1;
+    const loupeBridge = createLegacyLoupeBridge({
+        getLibraryImages: () => libraryImages,
+        getSearchQuery: () => searchQuery,
+        getRankingsExhausted: () => rankingsExhausted,
+        loadRankings,
+        clearWarmups: () => clearWarmups(),
+        currentWarmupGeneration,
+        enqueueWarmup: (...args) => enqueueWarmup(...args),
+        warmImageTiers: (...args) => warmImageTiers(...args),
+        preloadImage: (...args) => preloadImage(...args),
+        withTimeoutImpl: withTimeout,
+        getUiSettings: () => uiRuntimeBridge.getUiSettings(),
+        imageAspectRatio,
+        eloToStars,
+    });
+    const { handleWarmTiersApplied } = loupeBridge;
     const warmups = createWarmupManager({
         fetchJsonImpl: fetchJson,
         preloadImageWithTimeout,
@@ -1047,9 +1048,9 @@ const legacyPhotoArchive = (() => {
     function updateImageFlagLocal(imageId, flag) {
         updateImageFlagLocalCore(imageId, flag, {
             images: libraryImages,
-            loupeStandaloneImage: loupeController?.getStandaloneImage() || null,
-            loupeCurrentImage: loupeController?.getCurrentImage() || null,
-            lightboxIndex: loupeController?.getLightboxIndex() ?? -1,
+            loupeStandaloneImage: loupeBridge.getStandaloneImage(),
+            loupeCurrentImage: loupeBridge.getCurrentImage(),
+            lightboxIndex: loupeBridge.getLightboxIndex(),
             updateLoupeFlagDisplay,
         });
     }
@@ -1065,8 +1066,8 @@ const legacyPhotoArchive = (() => {
     function setCurrentLibraryFlag(flag) {
         setCurrentLibraryFlagCore(flag, {
             images: libraryImages,
-            lightboxIndex: loupeController?.getLightboxIndex() ?? -1,
-            loupeStandaloneImage: loupeController?.getStandaloneImage() || null,
+            lightboxIndex: loupeBridge.getLightboxIndex(),
+            loupeStandaloneImage: loupeBridge.getStandaloneImage(),
             selectedLibraryIndex,
             setImageFlagImpl: setImageFlag,
         });
@@ -1238,84 +1239,70 @@ const legacyPhotoArchive = (() => {
         return findCardInDirectionCore(cards, currentIdx, direction);
     }
 
-    loupeController = createLoupeController({
-        getLibraryImages: () => libraryImages,
-        getSearchQuery: () => searchQuery,
-        getRankingsExhausted: () => rankingsExhausted,
-        loadRankings,
-        clearWarmups,
-        currentWarmupGeneration,
-        enqueueWarmup,
-        warmImageTiers,
-        preloadImageWithTimeout,
-        getMediaStatus,
-        getUiSettings: () => uiRuntimeBridge.getUiSettings(),
-        imageAspectRatio,
-        eloToStars,
-    });
+    loupeBridge.initController();
 
     function openLightbox(img) {
-        return loupeController.openLightbox(img);
+        return loupeBridge.openLightbox(img);
     }
 
     function openStandaloneLightbox(img) {
-        return loupeController.openStandaloneLightbox(img);
+        return loupeBridge.openStandaloneLightbox(img);
     }
 
     async function getMediaStatus(imageId, { force = false } = {}) {
-        return mediaStatusController.getMediaStatus(imageId, { force });
+        return loupeBridge.getMediaStatus(imageId, { force });
     }
 
     function primeMediaStatuses(imageIds) {
-        mediaStatusController.primeMediaStatuses(imageIds);
+        return loupeBridge.primeMediaStatuses(imageIds);
     }
 
     function loupeTierUrl(tier, imageId, cachedOnly = false) {
-        return loupeTierUrlCore(tier, imageId, cachedOnly);
+        return loupeBridge.loupeTierUrl(tier, imageId, cachedOnly);
     }
 
     function updateLoupeFlagDisplay(flag) {
-        return loupeController.updateLoupeFlagDisplay(flag);
+        return loupeBridge.updateLoupeFlagDisplay(flag);
     }
 
     function renderLoupeStatusLine(flag) {
-        return loupeController?.renderLoupeStatusLine(flag);
+        return loupeBridge.renderLoupeStatusLine(flag);
     }
 
     function focusLoupe() {
-        return loupeController.focusLoupe();
+        return loupeBridge.focusLoupe();
     }
 
     function loupeFocusableElements(loupe) {
-        return loupeController.loupeFocusableElements(loupe);
+        return loupeBridge.loupeFocusableElements(loupe);
     }
 
     function trapLoupeFocus(e) {
-        return loupeController.trapLoupeFocus(e);
+        return loupeBridge.trapLoupeFocus(e);
     }
 
     function preloadImageWithTimeout(url, priority, timeoutMs) {
-        return withTimeout(preloadImage(url, priority), timeoutMs);
+        return loupeBridge.preloadImageWithTimeout(url, priority, timeoutMs);
     }
 
     function initLoupeInteraction() {
-        return loupeController.initLoupeInteraction();
+        return loupeBridge.initLoupeInteraction();
     }
 
     async function ensureLibraryImageIndex(index) {
-        return loupeController.ensureLibraryImageIndex(index);
+        return loupeBridge.ensureLibraryImageIndex(index);
     }
 
     function lightboxNext() {
-        return loupeController.lightboxNext();
+        return loupeBridge.lightboxNext();
     }
 
     function lightboxPrev() {
-        return loupeController.lightboxPrev();
+        return loupeBridge.lightboxPrev();
     }
 
     function closeLightbox() {
-        return loupeController.closeLightbox();
+        return loupeBridge.closeLightbox();
     }
 
     const setThumbSize = createThumbnailSizeHandler({
@@ -1392,7 +1379,7 @@ const legacyPhotoArchive = (() => {
     }
 
     const findSimilar = createFindSimilarAction({
-        getLightboxIndex: () => loupeController?.getLightboxIndex() ?? -1,
+        getLightboxIndex: () => loupeBridge.getLightboxIndex(),
         getLibraryImages: () => libraryImages,
         setLibraryImages: (images) => { libraryImages = images; },
         setRankingsOffset: (offset) => { rankingsOffset = offset; },

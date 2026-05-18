@@ -3845,6 +3845,8 @@ class ModularContractTests(unittest.TestCase):
             legacy = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "filter_query_bridge.js"), encoding="utf-8") as fh:
             legacy_filter_query_bridge = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "legacy", "loupe_bridge.js"), encoding="utf-8") as fh:
+            legacy_loupe_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "search_sort_bridge.js"), encoding="utf-8") as fh:
             legacy_search_sort_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "ui_runtime_bridge.js"), encoding="utf-8") as fh:
@@ -4038,13 +4040,14 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../catalog/home_scan.js';", legacy)
         self.assertIn("from '../catalog/scan_entrypoint.js';", legacy)
         self.assertIn("from './filter_query_bridge.js';", legacy)
+        self.assertIn("from './loupe_bridge.js';", legacy)
         self.assertIn("from './search_sort_bridge.js';", legacy)
         self.assertIn("from './ui_runtime_bridge.js';", legacy)
         self.assertIn("export function createLegacyUiRuntimeBridge", legacy_ui_runtime_bridge)
         self.assertIn("from '../query_state.js';", legacy_filter_query_bridge)
         self.assertIn("from '../query_controller.js';", legacy_filter_query_bridge)
         self.assertIn("from '../filters.js';", legacy_filter_query_bridge)
-        self.assertIn("from '../media_status.js';", legacy)
+        self.assertIn("from '../media_status.js';", legacy_loupe_bridge)
         self.assertIn("from '../media_metadata.js';", legacy)
         self.assertIn("from '../thumbnail_size.js';", legacy)
         self.assertIn("from '../compare/navigation.js';", legacy)
@@ -4062,8 +4065,9 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../compare/query.js';", legacy)
         self.assertIn("from '../compare/page_controller.js';", legacy)
         self.assertIn("from '../compare/keyboard.js';", legacy)
-        self.assertIn("from '../loupe/tiers.js';", legacy)
-        self.assertIn("from '../loupe/controller.js';", legacy)
+        self.assertIn("from '../loupe/tiers.js';", legacy_loupe_bridge)
+        self.assertIn("from '../loupe/controller.js';", legacy_loupe_bridge)
+        self.assertIn("export function createLegacyLoupeBridge", legacy_loupe_bridge)
         self.assertIn("from '../library/sort.js';", legacy_search_sort_bridge)
         self.assertIn("from '../library/pagination.js';", legacy)
         self.assertIn("from '../library/sort_controller.js';", legacy)
@@ -5398,6 +5402,114 @@ assert.equal(bridge.getUiSettings().show_loupe_cache_status, false);
 assert.deepEqual(events.slice(-2), [
     ['fetch', '/api/ui/settings', null],
     ['settings-loaded', false],
+]);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_legacy_loupe_bridge_node_probe_preserves_controller_and_media_facades(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createLegacyLoupeBridge } from './static/js/legacy/loupe_bridge.js';
+
+const calls = [];
+let capturedOptions = null;
+const fakeController = {
+    closeLightbox: () => calls.push('close'),
+    ensureLibraryImageIndex: async index => {
+        calls.push(['ensure', index]);
+        return index;
+    },
+    focusLoupe: () => calls.push('focus'),
+    getCurrentImage: () => ({ id: 7, filename: 'seven.jpg' }),
+    getImageToken: () => 42,
+    getLightboxIndex: () => 3,
+    getStandaloneImage: () => ({ id: 9, filename: 'nine.jpg' }),
+    initLoupeInteraction: () => calls.push('interaction'),
+    lightboxNext: () => calls.push('next'),
+    lightboxPrev: () => calls.push('prev'),
+    loupeFocusableElements: loupe => ['focusable', loupe],
+    openLightbox: img => calls.push(['open', img.id]),
+    openStandaloneLightbox: img => calls.push(['standalone', img.id]),
+    refreshLoupeMediaStatus: (image, token, options) => calls.push(['refresh', image.id, token, options.force]),
+    renderLoupeStatusLine: flag => calls.push(['status-line', flag]),
+    trapLoupeFocus: event => calls.push(['trap', event.key]),
+    updateLoupeFlagDisplay: flag => calls.push(['flag', flag]),
+};
+const fakeClient = {
+    getStatus: async (imageId, options) => ({ imageId, force: options.force }),
+    invalidateForPayload: payload => calls.push(['invalidate', payload]),
+    primeStatuses: ids => calls.push(['prime', ids]),
+};
+const bridge = createLegacyLoupeBridge({
+    mediaStatusClient: fakeClient,
+    createLoupeControllerImpl: options => {
+        capturedOptions = options;
+        return fakeController;
+    },
+    getLibraryImages: () => [{ id: 7 }],
+    getSearchQuery: () => 'crane',
+    getRankingsExhausted: () => false,
+    loadRankings: async () => 1,
+    clearWarmups: () => calls.push('clear-warmups'),
+    currentWarmupGeneration: () => 5,
+    enqueueWarmup: task => calls.push(['enqueue', typeof task]),
+    warmImageTiers: tiers => calls.push(['warm', tiers]),
+    preloadImage: (url, priority) => Promise.resolve({ url, priority }),
+    withTimeoutImpl: async (promise, timeoutMs) => ({ ...(await promise), timeoutMs }),
+    getUiSettings: () => ({ show_loupe_cache_status: true }),
+    imageAspectRatio: () => 1.5,
+    eloToStars: () => 4,
+});
+
+assert.equal(bridge.getController(), null);
+bridge.initController();
+assert.equal(bridge.getController(), fakeController);
+assert.equal(typeof capturedOptions.getMediaStatus, 'function');
+assert.equal(capturedOptions.getSearchQuery(), 'crane');
+assert.deepEqual(await capturedOptions.preloadImageWithTimeout('/thumb.jpg', 'high', 50), {
+    url: '/thumb.jpg',
+    priority: 'high',
+    timeoutMs: 50,
+});
+assert.deepEqual(await bridge.getMediaStatus(7, { force: true }), { imageId: 7, force: true });
+bridge.primeMediaStatuses([7, 8]);
+bridge.handleWarmTiersApplied({ md: [7] });
+bridge.openLightbox({ id: 7 });
+bridge.openStandaloneLightbox({ id: 8 });
+bridge.updateLoupeFlagDisplay('picked');
+bridge.renderLoupeStatusLine('picked');
+bridge.focusLoupe();
+bridge.trapLoupeFocus({ key: 'Tab' });
+await bridge.ensureLibraryImageIndex(4);
+bridge.lightboxPrev();
+bridge.lightboxNext();
+bridge.closeLightbox();
+assert.equal(bridge.getLightboxIndex(), 3);
+assert.equal(bridge.getCurrentImage().id, 7);
+assert.equal(bridge.getStandaloneImage().id, 9);
+assert.equal(bridge.loupeTierUrl('md', 7, true), '/api/thumb/md/7?cached=1');
+assert.deepEqual(calls, [
+    ['prime', [7, 8]],
+    ['invalidate', { md: [7] }],
+    ['refresh', 7, 42, true],
+    ['open', 7],
+    ['standalone', 8],
+    ['flag', 'picked'],
+    ['status-line', 'picked'],
+    'focus',
+    ['trap', 'Tab'],
+    ['ensure', 4],
+    'prev',
+    'next',
+    'close',
 ]);
 """
         subprocess.run(
