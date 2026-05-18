@@ -742,38 +742,22 @@ def _planned_thumbnail_sizes(
     include_smaller_tiers: bool = False,
     allow_stale_fallback: bool = True,
 ) -> list[str]:
-    if _source_missing(filepath):
-        return []
-
-    needed = []
-    now = time.time()
-    if include_smaller_tiers:
-        requested_long_side = SIZES.get(requested_size, 0)
-        candidate_sizes = tuple(
-            size for size in THUMB_TIERS
-            if SIZES[size] <= requested_long_side and (size == requested_size or _disk_allocations.get(size, 0) > 0)
-        )
-    else:
-        candidate_sizes = (requested_size,)
-    for size in candidate_sizes:
-        if size not in THUMB_TIERS:
-            continue
-        source_signature = _build_source_signature(filepath, size, image_id)
-        if _thumbnail_retry_after.get((size, image_id, source_signature), 0) > now:
-            continue
-        if _memory_get(size, image_id, source_signature) is not None:
-            continue
-        # Fast check via in-memory index before expensive DB query.
-        if fast_disk_has(size, image_id, source_signature):
-            continue
-        if allow_stale_fallback and fast_disk_has(size, image_id):
-            continue
-        if _get_disk_entry(size, image_id, source_signature, touch=False) is not None:
-            continue
-        needed.append(size)
-    if include_smaller_tiers:
-        return sorted(needed, key=lambda tier: SIZES[tier], reverse=True)
-    return needed
+    return generation.planned_thumbnail_sizes(
+        filepath,
+        image_id,
+        requested_size,
+        include_smaller_tiers=include_smaller_tiers,
+        allow_stale_fallback=allow_stale_fallback,
+        source_missing=_source_missing,
+        sizes=SIZES,
+        thumb_tiers=THUMB_TIERS,
+        disk_allocations=_disk_allocations,
+        build_source_signature=_build_source_signature,
+        thumbnail_retry_after=_thumbnail_retry_after,
+        memory_get=_memory_get,
+        fast_disk_has=fast_disk_has,
+        get_disk_entry=_get_disk_entry,
+    )
 
 
 def _generate_missing_thumbnails_sync(

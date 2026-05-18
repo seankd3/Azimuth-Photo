@@ -1,5 +1,6 @@
 import io
 import os
+import time
 
 from PIL import Image, ImageOps
 
@@ -147,6 +148,58 @@ def encode_and_cache_thumbnail(
     written = write_thumbnail_to_disk(size, image_id, source_signature, data, hot=hot)
     thumbnail_retry_after.pop((size, image_id, source_signature), None)
     return variant, data, written
+
+
+def planned_thumbnail_sizes(
+    filepath: str,
+    image_id: int,
+    requested_size: str,
+    *,
+    include_smaller_tiers: bool,
+    allow_stale_fallback: bool,
+    source_missing,
+    sizes: dict[str, int],
+    thumb_tiers: tuple[str, ...],
+    disk_allocations: dict[str, int],
+    build_source_signature,
+    thumbnail_retry_after: dict,
+    memory_get,
+    fast_disk_has,
+    get_disk_entry,
+    now_provider=time.time,
+) -> list[str]:
+    if source_missing(filepath):
+        return []
+
+    needed = []
+    now = now_provider()
+    if include_smaller_tiers:
+        requested_long_side = sizes.get(requested_size, 0)
+        candidate_sizes = tuple(
+            size for size in thumb_tiers
+            if sizes[size] <= requested_long_side
+            and (size == requested_size or disk_allocations.get(size, 0) > 0)
+        )
+    else:
+        candidate_sizes = (requested_size,)
+    for size in candidate_sizes:
+        if size not in thumb_tiers:
+            continue
+        source_signature = build_source_signature(filepath, size, image_id)
+        if thumbnail_retry_after.get((size, image_id, source_signature), 0) > now:
+            continue
+        if memory_get(size, image_id, source_signature) is not None:
+            continue
+        if fast_disk_has(size, image_id, source_signature):
+            continue
+        if allow_stale_fallback and fast_disk_has(size, image_id):
+            continue
+        if get_disk_entry(size, image_id, source_signature, touch=False) is not None:
+            continue
+        needed.append(size)
+    if include_smaller_tiers:
+        return sorted(needed, key=lambda tier: sizes[tier], reverse=True)
+    return needed
 
 
 def load_embedding_image(

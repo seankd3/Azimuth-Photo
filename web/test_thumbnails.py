@@ -1248,6 +1248,89 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
             if 'facade_variant' in locals():
                 facade_variant.close()
 
+    def test_planned_thumbnail_sizes_remains_facaded_from_generation_module(self):
+        path = os.path.join(self.tempdir.name, "planned.jpg")
+        image_id = 8
+
+        def source_signature(filepath, size, item_id):
+            return f"{filepath}:{size}:{item_id}"
+
+        retry_signature = source_signature(path, "sm", image_id)
+        retry_until = time.time() + 3600.0
+        retry_after = {("sm", image_id, retry_signature): retry_until}
+
+        def memory_get(size, item_id, signature):
+            if size == "md":
+                return b"cached"
+            return None
+
+        def fast_has(size, item_id, signature=None):
+            return size == "lg" and signature is not None
+
+        disk_entry_calls = []
+
+        def disk_entry(size, item_id, signature, *, touch=True):
+            disk_entry_calls.append((size, item_id, signature, touch))
+            return None
+
+        direct = thumbnail_generation.planned_thumbnail_sizes(
+            path,
+            image_id,
+            "lg",
+            include_smaller_tiers=True,
+            allow_stale_fallback=True,
+            source_missing=lambda _path: False,
+            sizes=thumbnails.SIZES,
+            thumb_tiers=thumbnails.THUMB_TIERS,
+            disk_allocations={"sm": 1, "md": 1, "lg": 1},
+            build_source_signature=source_signature,
+            thumbnail_retry_after=retry_after,
+            memory_get=memory_get,
+            fast_disk_has=fast_has,
+            get_disk_entry=disk_entry,
+            now_provider=lambda: retry_until - 1.0,
+        )
+
+        old_source_missing = thumbnails._source_missing
+        old_build_source_signature = thumbnails._build_source_signature
+        old_retry_after = thumbnails._thumbnail_retry_after
+        old_memory_get = thumbnails._memory_get
+        old_fast_disk_has = thumbnails.fast_disk_has
+        old_get_disk_entry = thumbnails._get_disk_entry
+        old_allocations = dict(thumbnails._disk_allocations)
+        try:
+            thumbnails._source_missing = lambda _path: False
+            thumbnails._build_source_signature = source_signature
+            thumbnails._thumbnail_retry_after = retry_after
+            thumbnails._memory_get = memory_get
+            thumbnails.fast_disk_has = fast_has
+            thumbnails._get_disk_entry = disk_entry
+            thumbnails._disk_allocations.clear()
+            thumbnails._disk_allocations.update({"sm": 1, "md": 1, "lg": 1})
+
+            facade = thumbnails._planned_thumbnail_sizes(
+                path,
+                image_id,
+                "lg",
+                include_smaller_tiers=True,
+                allow_stale_fallback=True,
+            )
+
+            self.assertEqual(facade, direct)
+            self.assertEqual(facade, [])
+
+            thumbnails._source_missing = lambda _path: True
+            self.assertEqual(thumbnails._planned_thumbnail_sizes(path, image_id, "lg"), [])
+        finally:
+            thumbnails._source_missing = old_source_missing
+            thumbnails._build_source_signature = old_build_source_signature
+            thumbnails._thumbnail_retry_after = old_retry_after
+            thumbnails._memory_get = old_memory_get
+            thumbnails.fast_disk_has = old_fast_disk_has
+            thumbnails._get_disk_entry = old_get_disk_entry
+            thumbnails._disk_allocations.clear()
+            thumbnails._disk_allocations.update(old_allocations)
+
     def _cache_original_now(self, image_id: int, path: str):
         signature = thumbnails._build_source_signature(path, thumbnails.FULL_TIER, image_id)
         return thumbnails._cache_full_image_sync(path, image_id, signature, hot=False)
