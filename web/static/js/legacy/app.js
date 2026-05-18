@@ -1619,8 +1619,11 @@ const legacyPhotoArchive = (() => {
         clearBatchSelection,
         currentFilterState,
         currentQueryState,
+        getLibraryImages: () => libraryImages,
         libraryScrollRoot,
-        openImageById: openLightboxById,
+        openLightbox,
+        openStandaloneLightbox,
+        showToast,
         syncDateScrubberVisibility,
     });
 
@@ -1637,25 +1640,7 @@ const legacyPhotoArchive = (() => {
     }
 
     function openLightboxById(id) {
-        const img = libraryImages.find(i => i.id === id);
-        if (img) {
-            openLightbox(img);
-        } else {
-            // Image is outside the active ordered list, so open it without mutating that list.
-            fetch(`/api/image/${id}/exif`).then(r => r.json()).then(data => {
-                const exif = data.exif || {};
-                openStandaloneLightbox({
-                    id,
-                    filename: exif.filename || `Image ${id}`,
-                    thumb_url: `/api/thumb/sm/${id}`,
-                    aspect_ratio: 1.5,
-                    elo: 0,
-                    comparisons: 0,
-                    flag: 'unflagged',
-                    ...exif,
-                });
-            }).catch(() => showToast('Could not open image'));
-        }
+        return mapController.openLightboxById(id);
     }
 
     // ==================== PEOPLE ====================

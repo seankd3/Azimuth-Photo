@@ -18,8 +18,11 @@ export function createLibraryMapController({
     clearBatchSelection,
     currentFilterState,
     currentQueryState,
+    getLibraryImages = () => [],
     libraryScrollRoot,
-    openImageById,
+    openLightbox = () => {},
+    openStandaloneLightbox = () => {},
+    showToast = () => {},
     syncDateScrubberVisibility,
 } = {}) {
     let mapInstance = null;
@@ -71,6 +74,38 @@ export function createLibraryMapController({
         }
     }
 
+    function openLightboxById(id) {
+        const imageId = Number(id);
+        const img = getLibraryImages().find((item) => Number(item.id) === imageId);
+        if (img) {
+            openLightbox(img);
+            return true;
+        }
+
+        if (!fetchImpl || !Number.isFinite(imageId)) {
+            showToast('Could not open image');
+            return false;
+        }
+
+        fetchImpl(`/api/image/${imageId}/exif`)
+            .then((response) => response.json())
+            .then((data) => {
+                const exif = data.exif || {};
+                openStandaloneLightbox({
+                    id: imageId,
+                    filename: exif.filename || `Image ${imageId}`,
+                    thumb_url: `/api/thumb/sm/${imageId}`,
+                    aspect_ratio: 1.5,
+                    elo: 0,
+                    comparisons: 0,
+                    flag: 'unflagged',
+                    ...exif,
+                });
+            })
+            .catch(() => showToast('Could not open image'));
+        return false;
+    }
+
     async function loadMap() {
         const container = documentImpl.getElementById('map-container');
         const requestGeneration = ++mapRequestGeneration;
@@ -110,7 +145,7 @@ export function createLibraryMapController({
 
             for (const m of data.markers) {
                 const marker = leaflet.marker([m.lat, m.lng]);
-                marker.bindPopup(buildMapPopup(m, { openImageById }), { maxWidth: 200 });
+                marker.bindPopup(buildMapPopup(m, { openImageById: openLightboxById }), { maxWidth: 200 });
                 mapMarkerLayer.addLayer(marker);
             }
             mapInstance.addLayer(mapMarkerLayer);
@@ -129,6 +164,7 @@ export function createLibraryMapController({
     return {
         getLibraryView,
         loadMap,
+        openLightboxById,
         setLibraryView,
     };
 }

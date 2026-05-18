@@ -4284,6 +4284,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("export function buildMapPopup", library_map)
         self.assertIn("export function createLibraryMapController", library_map_controller)
         self.assertIn("from './map.js';", library_map_controller)
+        self.assertIn("openLightboxById", library_map_controller)
         self.assertIn("export const FILTER_STORAGE_KEY = 'pa_filters';", library_filters)
         self.assertIn("export function saveFilters", library_filters)
         self.assertIn("export function restoreFilters", library_filters)
@@ -8632,12 +8633,31 @@ globalThis.window = windowImpl;
 
 const fetched = [];
 const calls = [];
+const opened = [];
+const standalone = [];
+const toasts = [];
 const scrollRoot = element('div', 'scroll-root');
 const controller = createLibraryMapController({
     documentImpl,
     windowImpl,
     fetchImpl: async (url) => {
         fetched.push(url);
+        if (url === '/api/image/99/exif') {
+            return {
+                async json() {
+                    return {
+                        exif: {
+                            filename: 'outside.jpg',
+                            aspect_ratio: 1.25,
+                            flag: 'picked',
+                        },
+                    };
+                },
+            };
+        }
+        if (url === '/api/image/100/exif') {
+            throw new Error('exif failed');
+        }
         return {
             async json() {
                 return {
@@ -8653,8 +8673,11 @@ const controller = createLibraryMapController({
     clearBatchSelection: () => calls.push('clearBatchSelection'),
     currentFilterState: () => ({ orientation: 'portrait', flag: 'picked' }),
     currentQueryState: () => ({ searchMode: 'search', searchQuery: 'lake', deepSearch: true }),
+    getLibraryImages: () => [{ id: 7, filename: 'active.jpg' }],
     libraryScrollRoot: () => scrollRoot,
-    openImageById: (id) => calls.push(['openImageById', id]),
+    openLightbox: (image) => opened.push(image),
+    openStandaloneLightbox: (image) => standalone.push(image),
+    showToast: (message) => toasts.push(message),
     syncDateScrubberVisibility: () => calls.push('syncDateScrubberVisibility'),
 });
 
@@ -8677,6 +8700,25 @@ assert.deepEqual(mapCalls.slice(0, 2), [['map', 'map-container'], ['tileLayer', 
 assert.equal(addedMarkers.length, 1);
 assert.deepEqual(addedMarkers[0].coords, [45, -93]);
 assert.equal(nodes['map-container'].children.some((child) => child.id === 'map-info'), true);
+
+addedMarkers[0].popup.children[0].onclick();
+assert.deepEqual(opened, [{ id: 7, filename: 'active.jpg' }]);
+
+assert.equal(controller.openLightboxById(99), false);
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.deepEqual(standalone, [{
+    id: 99,
+    filename: 'outside.jpg',
+    thumb_url: '/api/thumb/sm/99',
+    aspect_ratio: 1.25,
+    elo: 0,
+    comparisons: 0,
+    flag: 'picked',
+}]);
+
+assert.equal(controller.openLightboxById(100), false);
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.deepEqual(toasts, ['Could not open image']);
 
 controller.setLibraryView('grid');
 assert.equal(controller.getLibraryView(), 'grid');
