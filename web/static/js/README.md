@@ -46,6 +46,8 @@ indicator text.
 `loupe/interaction.js` owns Loupe mouse drag, click-to-zoom, wheel zoom, and
 resize interaction binding while legacy keeps the page state facade.
 `library/query.js` owns Library rankings query-string construction.
+`library/pagination.js` owns Library rankings page-size constants and
+scroll-restore page-size math.
 `library/filters.js` owns Library filter session persistence, URL/session
 restore precedence, DOM application for filter buttons, stars, flags, and
 selects, plus the behavior behind the legacy `setFilter`, `clearLibraryFilters`,

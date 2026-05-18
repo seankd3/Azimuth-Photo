@@ -3920,6 +3920,8 @@ class ModularContractTests(unittest.TestCase):
             cache_guide = fh.read()
         with open(os.path.join(base_dir, "static", "js", "library", "query.js"), encoding="utf-8") as fh:
             library_query = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "library", "pagination.js"), encoding="utf-8") as fh:
+            library_pagination = fh.read()
         with open(os.path.join(base_dir, "static", "js", "library", "sort.js"), encoding="utf-8") as fh:
             library_sort = fh.read()
         with open(os.path.join(base_dir, "static", "js", "library", "sort_controller.js"), encoding="utf-8") as fh:
@@ -4035,6 +4037,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../loupe/tiers.js';", legacy)
         self.assertIn("from '../loupe/controller.js';", legacy)
         self.assertIn("from '../library/sort.js';", legacy)
+        self.assertIn("from '../library/pagination.js';", legacy)
         self.assertIn("from '../library/sort_controller.js';", legacy)
         self.assertIn("from '../library/search_state.js';", legacy)
         self.assertIn("from '../library/search_controls.js';", legacy)
@@ -4236,6 +4239,9 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from './zoom.js';", loupe_controller)
         self.assertIn("from './navigation.js';", loupe_controller)
         self.assertIn("export function rankingQueryString", library_query)
+        self.assertIn("export const INITIAL_RANKINGS_PAGE_SIZE", library_pagination)
+        self.assertIn("export const RANKINGS_PAGE_SIZE", library_pagination)
+        self.assertIn("export function currentLibraryPageSize", library_pagination)
         self.assertIn("export function sortValueForState", library_sort)
         self.assertIn("export function createLibrarySortController", library_sort_controller)
         self.assertIn("export function saveSortState", library_search_state)

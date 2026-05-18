@@ -86,6 +86,11 @@ import {
     SORT_KEYS,
     sortValueForState,
 } from '../library/sort.js';
+import {
+    INITIAL_RANKINGS_PAGE_SIZE,
+    RANKINGS_PAGE_SIZE,
+    currentLibraryPageSize as currentLibraryPageSizeCore,
+} from '../library/pagination.js';
 import { createLibrarySortController } from '../library/sort_controller.js';
 import {
     clearPersistedSearchState as clearPersistedSearchStateCore,
@@ -175,8 +180,6 @@ const legacyPhotoArchive = (() => {
 
     // --- Rankings State ---
     let rankingsOffset = 0;
-    const INITIAL_RANKINGS_PAGE_SIZE = 48;
-    const RANKINGS_PAGE_SIZE = 100;
     const CROSS_VIEW_WARM_DELAY_MS = 1000;
     const LIBRARY_NEIGHBOR_LIMIT = 24;
     const MOSAIC_NEIGHBOR_LIMIT = 8;
@@ -731,10 +734,7 @@ const legacyPhotoArchive = (() => {
     }
 
     function currentLibraryPageSize() {
-        if (rankingsOffset === 0 && pendingScrollRestoreOffset > 0) {
-            return Math.max(INITIAL_RANKINGS_PAGE_SIZE, pendingScrollRestoreOffset + RANKINGS_PAGE_SIZE);
-        }
-        return rankingsOffset === 0 ? INITIAL_RANKINGS_PAGE_SIZE : RANKINGS_PAGE_SIZE;
+        return currentLibraryPageSizeCore({ rankingsOffset, pendingScrollRestoreOffset });
     }
 
     function resetLibraryResults({ clearBatch = false } = {}) {
