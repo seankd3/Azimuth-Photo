@@ -16,6 +16,7 @@ from thumbnails import budget as thumbnail_budget  # noqa: E402
 from thumbnails import cache_entries as thumbnail_cache_entries  # noqa: E402
 from thumbnails import config as thumbnail_config  # noqa: E402
 from thumbnails import full_cache as thumbnail_full_cache  # noqa: E402
+from thumbnails import generation as thumbnail_generation  # noqa: E402
 from thumbnails import maintenance as thumbnail_maintenance  # noqa: E402
 from thumbnails import pregen as thumbnail_pregen  # noqa: E402
 from thumbnails import runtime as thumbnail_runtime  # noqa: E402
@@ -1121,6 +1122,50 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
             thumbnails.SSD_CACHE_DIR = old_cache_dir
             thumbnails._disk_allocations.clear()
             thumbnails._disk_allocations.update(old_allocations)
+
+    def test_embedding_image_loader_remains_facaded_from_generation_module(self):
+        path = self._make_image()
+        image_id = 72
+        signature = thumbnails._build_source_signature(path, "md", image_id)
+        data = thumbnails._generate_thumbnail_set_sync(
+            path,
+            image_id,
+            {"md": signature},
+        )
+        self.assertEqual(data["thumbnails_written"], 1)
+        cached_bytes = thumbnails.fast_disk_read("md", image_id)
+        self.assertIsNotNone(cached_bytes)
+
+        direct_image = thumbnail_generation.load_embedding_image(
+            path,
+            image_id,
+            require_cached=True,
+            sizes=thumbnails.SIZES,
+            memory_get_fast=lambda *_args: None,
+            fast_disk_read=lambda *_args: cached_bytes,
+            build_source_signature=thumbnails._build_source_signature,
+            memory_get=thumbnails._memory_get,
+            read_disk_thumbnail=thumbnails._read_disk_thumbnail,
+            load_source_image=thumbnails._load_source_image,
+            resize_to_long_side=thumbnails._resize_to_long_side,
+        )
+        facade_image = thumbnails.load_embedding_image(path, image_id, require_cached=True)
+        missing_cached = thumbnails.load_embedding_image(
+            os.path.join(self.tempdir.name, "missing.jpg"),
+            image_id + 1,
+            require_cached=True,
+        )
+        try:
+            self.assertIsNotNone(direct_image)
+            self.assertIsNotNone(facade_image)
+            self.assertEqual(facade_image.mode, "RGB")
+            self.assertEqual(facade_image.size, direct_image.size)
+            self.assertIsNone(missing_cached)
+        finally:
+            if direct_image is not None:
+                direct_image.close()
+            if facade_image is not None:
+                facade_image.close()
 
     def _cache_original_now(self, image_id: int, path: str):
         signature = thumbnails._build_source_signature(path, thumbnails.FULL_TIER, image_id)

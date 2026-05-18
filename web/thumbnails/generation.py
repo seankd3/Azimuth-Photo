@@ -116,3 +116,57 @@ def thumbnail_jpeg_bytes(variant: Image.Image, size: str, quality: int) -> bytes
         progressive=(size != "sm"),
     )
     return buf.getvalue()
+
+
+def load_embedding_image(
+    filepath: str,
+    image_id: int,
+    *,
+    require_cached: bool,
+    sizes: dict[str, int],
+    memory_get_fast,
+    fast_disk_read,
+    build_source_signature,
+    memory_get,
+    read_disk_thumbnail,
+    load_source_image,
+    resize_to_long_side,
+) -> Image.Image | None:
+    """Load an embedding input, preferring cached md thumbnails over originals."""
+    data = memory_get_fast("md", image_id)
+    if data is None:
+        data = fast_disk_read("md", image_id)
+
+    if data is None:
+        source_signature = build_source_signature(filepath, "md", image_id)
+        data = memory_get("md", image_id, source_signature)
+        if data is None:
+            data = read_disk_thumbnail("md", image_id, source_signature)
+
+    if data is not None:
+        with Image.open(io.BytesIO(data)) as source:
+            source.load()
+            img = source.copy()
+        if img.mode != "RGB":
+            converted = img.convert("RGB")
+            img.close()
+            img = converted
+        return img
+
+    if require_cached:
+        return None
+
+    try:
+        md_size = sizes["md"]
+        img = load_source_image(filepath, md_size, prefer_draft=False)
+        resized = resize_to_long_side(img, md_size)
+        if resized is not img:
+            img.close()
+        img = resized
+        if img.mode != "RGB":
+            converted = img.convert("RGB")
+            img.close()
+            img = converted
+        return img
+    except Exception:
+        return None

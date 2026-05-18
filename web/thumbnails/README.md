@@ -10,10 +10,10 @@ archive-estimate adapter that samples cache metadata for those budget helpers.
 in-memory thumbnail LRU operations. `disk_store.py` owns stateless disk path,
 marker-safety, temp cleanup, and index helpers; `maintenance.py` wires those
 helpers to the active cache root while preserving source-safe marker behavior.
-`generation.py` owns source
-image loading, resizing, and JPEG encoding helpers. `source_identity.py` owns source stat
-caching, catalog/source signatures, missing-source probes, and thumbnail HTTP
-cache header payloads. `data_providers.py` owns app-injected DB/cache
+`generation.py` owns source image loading, resizing, JPEG encoding helpers, and
+embedding input image loading. `source_identity.py` owns source stat caching,
+catalog/source signatures, missing-source probes, and thumbnail HTTP cache
+header payloads. `data_providers.py` owns app-injected DB/cache
 invalidation callbacks for the legacy facade. `status.py` owns pure cache and
 pregeneration status payload helpers. `full_cache.py` owns full-original cache room checks,
 atomic source-copy/write helpers, cached-path lookup, and full-image inflight

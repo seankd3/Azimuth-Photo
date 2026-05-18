@@ -1,5 +1,4 @@
 import asyncio
-import io
 import os
 import shutil
 import sqlite3
@@ -1216,48 +1215,19 @@ async def get_full_image_path(filepath: str, image_id: int) -> str:
 
 
 def load_embedding_image(filepath: str, image_id: int, *, require_cached: bool = False) -> Image.Image | None:
-    """Load an image for embedding. Prefers SSD-cached md thumbnails for speed,
-    but falls back to reading the original file from HDD if no cache exists."""
-    # Try fast path first (no HDD stat)
-    data = _memory_get_fast("md", image_id)
-    if data is None:
-        data = fast_disk_read("md", image_id)
-
-    # Fallback to signature-validated read
-    if data is None:
-        source_signature = _build_source_signature(filepath, "md", image_id)
-        data = _memory_get("md", image_id, source_signature)
-        if data is None:
-            data = _read_disk_thumbnail("md", image_id, source_signature)
-
-    if data is not None:
-        with Image.open(io.BytesIO(data)) as source:
-            source.load()
-            img = source.copy()
-        if img.mode != "RGB":
-            converted = img.convert("RGB")
-            img.close()
-            img = converted
-        return img
-
-    if require_cached:
-        return None
-
-    # No cached thumbnail — load original from HDD and resize to md
-    try:
-        md_size = SIZES["md"]
-        img = _load_source_image(filepath, md_size, prefer_draft=False)
-        resized = _resize_to_long_side(img, md_size)
-        if resized is not img:
-            img.close()
-        img = resized
-        if img.mode != "RGB":
-            converted = img.convert("RGB")
-            img.close()
-            img = converted
-        return img
-    except Exception:
-        return None
+    return generation.load_embedding_image(
+        filepath,
+        image_id,
+        require_cached=require_cached,
+        sizes=SIZES,
+        memory_get_fast=_memory_get_fast,
+        fast_disk_read=fast_disk_read,
+        build_source_signature=_build_source_signature,
+        memory_get=_memory_get,
+        read_disk_thumbnail=_read_disk_thumbnail,
+        load_source_image=_load_source_image,
+        resize_to_long_side=_resize_to_long_side,
+    )
 
 
 async def flush_orientation_updates():
