@@ -13,7 +13,7 @@ helpers to the active cache root and owns cache purge/clear orchestration while
 preserving source-safe marker behavior.
 `generation.py` owns source image loading, resizing, JPEG encoding/cache-write
 helpers, orientation extraction, thumbnail generation planning, single-image
-thumbnail generation, and embedding input image loading.
+thumbnail generation, orientation flushes, and embedding input image loading.
 `source_identity.py` owns source stat caching, catalog/source signatures,
 missing-source probes, and thumbnail HTTP cache header payloads.
 `data_providers.py` owns app-injected DB/cache

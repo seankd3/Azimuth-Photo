@@ -1637,6 +1637,74 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
             if 'facade_variant' in locals():
                 facade_variant.close()
 
+    def test_generation_flush_orientation_updates_remains_facaded(self):
+        class FakeLock:
+            def __init__(self):
+                self.entered = 0
+
+            def __enter__(self):
+                self.entered += 1
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        async def run_case():
+            direct_queue = {
+                7: ("portrait", 0.75),
+                8: ("landscape", 1.5),
+            }
+            direct_lock = FakeLock()
+            direct_calls = []
+
+            await thumbnail_generation.flush_orientation_updates(
+                orientation_lock=direct_lock,
+                orientation_queue=direct_queue,
+                batch_set_orientations=lambda updates: (
+                    direct_calls.append(tuple(updates)) or asyncio.sleep(0)
+                ),
+            )
+
+            old_orientation_lock = thumbnails._orientation_lock
+            old_orientation_queue = thumbnails._orientation_queue
+            old_batch_set_orientations = thumbnails.data_providers.batch_set_orientations
+            try:
+                facade_lock = FakeLock()
+                facade_queue = {
+                    7: ("portrait", 0.75),
+                    8: ("landscape", 1.5),
+                }
+                facade_calls = []
+                thumbnails._orientation_lock = facade_lock
+                thumbnails._orientation_queue = facade_queue
+                thumbnails.data_providers.batch_set_orientations = (
+                    lambda updates: facade_calls.append(tuple(updates)) or asyncio.sleep(0)
+                )
+
+                await thumbnails.flush_orientation_updates()
+
+                return (
+                    direct_queue,
+                    direct_lock.entered,
+                    direct_calls,
+                    facade_queue,
+                    facade_lock.entered,
+                    facade_calls,
+                )
+            finally:
+                thumbnails._orientation_lock = old_orientation_lock
+                thumbnails._orientation_queue = old_orientation_queue
+                thumbnails.data_providers.batch_set_orientations = old_batch_set_orientations
+
+        direct_queue, direct_entered, direct_calls, facade_queue, facade_entered, facade_calls = (
+            asyncio.run(run_case())
+        )
+
+        self.assertEqual(direct_queue, {})
+        self.assertEqual(facade_queue, {})
+        self.assertEqual(direct_entered, facade_entered)
+        self.assertEqual(facade_calls, direct_calls)
+        self.assertEqual(direct_calls, [(("portrait", 0.75, 7), ("landscape", 1.5, 8))])
+
     def test_planned_thumbnail_sizes_remains_facaded_from_generation_module(self):
         path = os.path.join(self.tempdir.name, "planned.jpg")
         image_id = 8

@@ -126,6 +126,27 @@ def queue_orientation(image_id: int, img: Image.Image, *, orientation_lock, orie
         orientation_queue[image_id] = (orientation, aspect_ratio)
 
 
+async def flush_orientation_updates(
+    *,
+    orientation_lock,
+    orientation_queue,
+    batch_set_orientations,
+) -> None:
+    with orientation_lock:
+        pending = dict(orientation_queue)
+        orientation_queue.clear()
+
+    if not pending:
+        return
+
+    await batch_set_orientations(
+        [
+            (orientation, aspect_ratio, image_id)
+            for image_id, (orientation, aspect_ratio) in pending.items()
+        ]
+    )
+
+
 def encode_and_cache_thumbnail(
     size: str,
     image_id: int,

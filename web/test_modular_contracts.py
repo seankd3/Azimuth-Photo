@@ -9677,6 +9677,7 @@ assert.deepEqual(loadingEvents.slice(-2), [['set', 2], ['cancel-clear']]);
         self.assertTrue(callable(generation.generate_thumbnail_set))
         self.assertTrue(callable(generation.resize_to_long_side))
         self.assertTrue(callable(generation.thumbnail_jpeg_bytes))
+        self.assertTrue(callable(generation.flush_orientation_updates))
         self.assertTrue(callable(jobs.has_cached))
         self.assertTrue(callable(jobs.has_cached_fast))
         self.assertTrue(callable(jobs.ensure_thumbnail_with_executor))

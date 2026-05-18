@@ -1004,15 +1004,10 @@ def load_embedding_image(filepath: str, image_id: int, *, require_cached: bool =
 
 
 async def flush_orientation_updates():
-    with _orientation_lock:
-        pending = dict(_orientation_queue)
-        _orientation_queue.clear()
-
-    if not pending:
-        return
-
-    await data_providers.batch_set_orientations(
-        [(orientation, aspect_ratio, image_id) for image_id, (orientation, aspect_ratio) in pending.items()]
+    return await generation.flush_orientation_updates(
+        orientation_lock=_orientation_lock,
+        orientation_queue=_orientation_queue,
+        batch_set_orientations=data_providers.batch_set_orientations,
     )
 
 
