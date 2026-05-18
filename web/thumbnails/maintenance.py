@@ -1,5 +1,8 @@
 """Thumbnail cache-root maintenance helpers."""
 
+import os
+import shutil
+import sqlite3
 import time
 from collections.abc import Callable
 
@@ -76,3 +79,138 @@ def cleanup_stale_cache_temps(
     if result["files_removed"] and invalidate_disk_stats_cache is not None:
         invalidate_disk_stats_cache()
     return result
+
+
+def purge_image_cache(
+    image_ids: list[int],
+    *,
+    memory_cache,
+    clear_memory_image_ids: Callable[[set[int]], None],
+    flush_write_queue: Callable[[], object],
+    meta_lock,
+    db_connect: Callable[[], object],
+    remove_cache_entry_locked: Callable[[object, object], object],
+    tier_byte_totals,
+    invalidate_disk_stats_cache: Callable[[], object],
+    source_stat_cache,
+) -> dict:
+    """Remove RAM/disk cache entries for catalog images that are being purged."""
+    ids = {int(image_id) for image_id in image_ids or [] if int(image_id) > 0}
+    if not ids:
+        return {"memory_entries_removed": 0, "disk_entries_removed": 0, "disk_files_removed": 0}
+
+    memory_before = len(memory_cache)
+    clear_memory_image_ids(ids)
+    memory_removed = max(0, memory_before - len(memory_cache))
+    flush_write_queue()
+
+    disk_entries_removed = 0
+    disk_files_removed = 0
+    with meta_lock:
+        conn = db_connect()
+        try:
+            id_list = list(ids)
+            for start in range(0, len(id_list), 500):
+                chunk = id_list[start:start + 500]
+                placeholders = ",".join("?" for _ in chunk)
+                rows = conn.execute(
+                    f"SELECT cache_root, size, image_id, path, size_bytes "
+                    f"FROM cache_entries WHERE image_id IN ({placeholders})",
+                    chunk,
+                ).fetchall()
+                for row in rows:
+                    if os.path.exists(row["path"]):
+                        disk_files_removed += 1
+                    remove_cache_entry_locked(conn, row)
+                    disk_entries_removed += 1
+            conn.commit()
+        finally:
+            conn.close()
+    tier_byte_totals.clear()
+    invalidate_disk_stats_cache()
+    source_stat_cache.clear()
+    return {
+        "memory_entries_removed": memory_removed,
+        "disk_entries_removed": disk_entries_removed,
+        "disk_files_removed": disk_files_removed,
+    }
+
+
+def clear_cache(
+    *,
+    cache_root: str,
+    cache_marker: str,
+    cache_dir_safe_to_clear: Callable[[], tuple[bool, str]],
+    clear_memory_cache: Callable[[], dict],
+    flush_write_queue: Callable[[], object],
+    ensure_disk_cache_dirs: Callable[[], object],
+    clear_disk_index: Callable[[], object],
+    tier_byte_totals,
+    invalidate_disk_stats_cache: Callable[[], object],
+    source_stat_cache,
+    reset_pregen_bulk_cursor: Callable[[], object],
+    reset_pregen_full_cursor: Callable[[], object],
+    meta_lock,
+    db_connect: Callable[[], object],
+    clear_cache_metadata_lock_backoff: Callable[[], object],
+    is_sqlite_locked: Callable[[Exception], bool],
+    note_cache_metadata_lock: Callable[[], object],
+    set_replace_stale_thumbnails: Callable[[bool], object],
+    invalidate_cached_image_ids_cache: Callable[..., object],
+    print_fn: Callable[[str], object] = print,
+) -> dict:
+    safe_to_clear, unsafe_reason = cache_dir_safe_to_clear()
+    if not safe_to_clear:
+        return {
+            "refused": True,
+            "error": unsafe_reason,
+            "ssd_cache_dir": cache_root,
+        }
+
+    memory = clear_memory_cache()
+    flush_write_queue()
+
+    disk_removed = 0
+    if cache_root and os.path.isdir(cache_root):
+        for _root, _dirs, files in os.walk(cache_root):
+            disk_removed += sum(1 for filename in files if filename != cache_marker)
+        shutil.rmtree(cache_root, ignore_errors=True)
+    ensure_disk_cache_dirs()
+    clear_disk_index()
+    tier_byte_totals.clear()
+    invalidate_disk_stats_cache()
+    source_stat_cache.clear()
+    reset_pregen_bulk_cursor()
+    reset_pregen_full_cursor()
+
+    with meta_lock:
+        conn = None
+        try:
+            conn = db_connect()
+            conn.execute("DELETE FROM cache_entries WHERE cache_root = ?", (cache_root,))
+            conn.execute(
+                "UPDATE cache_metadata SET replace_stale_thumbnails = 0 WHERE cache_root = ?",
+                (cache_root,),
+            )
+            conn.commit()
+            clear_cache_metadata_lock_backoff()
+        except sqlite3.OperationalError as exc:
+            if is_sqlite_locked(exc):
+                note_cache_metadata_lock()
+                print_fn(f"Cache metadata clear skipped: {exc}")
+            else:
+                raise
+        finally:
+            if conn is not None:
+                conn.close()
+
+    set_replace_stale_thumbnails(False)
+    invalidate_cached_image_ids_cache(cache_root=cache_root)
+
+    return {
+        "memory_entries_cleared": memory["entries_cleared"],
+        "memory_bytes_cleared": memory["bytes_cleared"],
+        "memory_before": memory["counts"],
+        "disk_files_removed": disk_removed,
+        "ssd_cache_dir": cache_root,
+    }

@@ -9,7 +9,8 @@ archive-estimate adapter that samples cache metadata for those budget helpers.
 `memory_store.py` owns the
 in-memory thumbnail LRU operations. `disk_store.py` owns stateless disk path,
 marker-safety, temp cleanup, and index helpers; `maintenance.py` wires those
-helpers to the active cache root while preserving source-safe marker behavior.
+helpers to the active cache root and owns cache purge/clear orchestration while
+preserving source-safe marker behavior.
 `generation.py` owns source image loading, resizing, JPEG encoding/cache-write
 helpers, orientation extraction, thumbnail generation planning, single-image
 thumbnail generation, and embedding input image loading.

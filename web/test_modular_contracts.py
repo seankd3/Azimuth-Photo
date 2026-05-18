@@ -9207,6 +9207,8 @@ assert.deepEqual(loadingEvents.slice(-2), [['set', 2], ['cancel-clear']]);
         self.assertIs(thumbnails._resize_to_long_side, generation.resize_to_long_side)
         self.assertTrue(callable(maintenance.cache_dir_safe_to_clear))
         self.assertTrue(callable(maintenance.cleanup_stale_cache_temps))
+        self.assertTrue(callable(maintenance.purge_image_cache))
+        self.assertTrue(callable(maintenance.clear_cache))
         self.assertTrue(callable(memory_store.MemoryThumbnailStore))
         self.assertTrue(callable(pregen.background_decision))
         self.assertTrue(callable(pregen.background_work_mode))

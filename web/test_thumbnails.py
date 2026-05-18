@@ -448,6 +448,160 @@ class ThumbnailMaintenanceFacadeTests(unittest.TestCase):
         self.assertFalse(os.path.exists(old_tmp))
         self.assertTrue(os.path.exists(fresh_tmp))
 
+    def test_cache_purge_helper_owns_memory_disk_and_source_invalidation(self):
+        cache_file = os.path.join(self._legacy_cache_root(), "sm", "42.jpg")
+        with open(cache_file, "wb") as f:
+            f.write(b"cache")
+        events = []
+
+        class FakeConnection:
+            def execute(self, sql, params=()):
+                events.append(("execute", sql.split()[0], tuple(params)))
+                class FakeCursor:
+                    def fetchall(self):
+                        return [
+                            {
+                                "cache_root": "/cache",
+                                "size": "sm",
+                                "image_id": 42,
+                                "path": cache_file,
+                                "size_bytes": 5,
+                            },
+                            {
+                                "cache_root": "/cache",
+                                "size": "md",
+                                "image_id": 43,
+                                "path": os.path.join(os.path.dirname(cache_file), "missing.jpg"),
+                                "size_bytes": 7,
+                            },
+                        ]
+
+                return FakeCursor()
+
+            def commit(self):
+                events.append("commit")
+
+            def close(self):
+                events.append("close")
+
+        class FakeLock:
+            def __enter__(self):
+                events.append("lock")
+
+            def __exit__(self, exc_type, exc, tb):
+                events.append("unlock")
+                return False
+
+        memory_cache = {(size, 42): (size, b"data") for size in ("sm", "md")}
+        tier_byte_totals = {"sm": 5}
+        source_stat_cache = {"source": "bits"}
+
+        result = thumbnail_maintenance.purge_image_cache(
+            [42, 43],
+            memory_cache=memory_cache,
+            clear_memory_image_ids=lambda ids: [
+                memory_cache.pop(key)
+                for key in list(memory_cache)
+                if key[1] in ids
+            ],
+            flush_write_queue=lambda: events.append("flush"),
+            meta_lock=FakeLock(),
+            db_connect=FakeConnection,
+            remove_cache_entry_locked=lambda conn, row: events.append(("remove", row["image_id"])),
+            tier_byte_totals=tier_byte_totals,
+            invalidate_disk_stats_cache=lambda: events.append("invalidate"),
+            source_stat_cache=source_stat_cache,
+        )
+
+        self.assertEqual(result, {
+            "memory_entries_removed": 2,
+            "disk_entries_removed": 2,
+            "disk_files_removed": 1,
+        })
+        self.assertEqual(memory_cache, {})
+        self.assertEqual(tier_byte_totals, {})
+        self.assertEqual(source_stat_cache, {})
+        self.assertIn("flush", events)
+        self.assertIn("commit", events)
+        self.assertIn("close", events)
+        self.assertEqual(
+            [event for event in events if isinstance(event, tuple) and event[0] == "remove"],
+            [("remove", 42), ("remove", 43)],
+        )
+
+    def test_clear_cache_helper_owns_source_safe_delete_and_metadata_reset(self):
+        root = self._legacy_cache_root()
+        cache_file = os.path.join(root, "sm", "1.jpg")
+        events = []
+
+        class FakeConnection:
+            def execute(self, sql, params=()):
+                events.append(("execute", sql.split()[0], tuple(params)))
+
+            def commit(self):
+                events.append("commit")
+
+            def close(self):
+                events.append("close")
+
+        class FakeLock:
+            def __enter__(self):
+                events.append("lock")
+
+            def __exit__(self, exc_type, exc, tb):
+                events.append("unlock")
+                return False
+
+        tier_byte_totals = {"sm": 5}
+        source_stat_cache = {"source": "bits"}
+        replaced = []
+        invalidated = []
+
+        result = thumbnail_maintenance.clear_cache(
+            cache_root=root,
+            cache_marker=thumbnails.CACHE_MARKER,
+            cache_dir_safe_to_clear=lambda: (True, ""),
+            clear_memory_cache=lambda: {
+                "entries_cleared": 2,
+                "bytes_cleared": 9,
+                "counts": {"sm": 1, "md": 1, "lg": 0},
+            },
+            flush_write_queue=lambda: events.append("flush"),
+            ensure_disk_cache_dirs=lambda: thumbnail_maintenance.ensure_disk_cache_dirs(
+                root,
+                thumbnails.THUMB_TIERS,
+                thumbnails.FULL_TIER,
+                thumbnails.CACHE_MARKER,
+            ),
+            clear_disk_index=lambda: events.append("clear-index"),
+            tier_byte_totals=tier_byte_totals,
+            invalidate_disk_stats_cache=lambda: events.append("invalidate"),
+            source_stat_cache=source_stat_cache,
+            reset_pregen_bulk_cursor=lambda: events.append("bulk-cursor"),
+            reset_pregen_full_cursor=lambda: events.append("full-cursor"),
+            meta_lock=FakeLock(),
+            db_connect=FakeConnection,
+            clear_cache_metadata_lock_backoff=lambda: events.append("clear-backoff"),
+            is_sqlite_locked=lambda exc: False,
+            note_cache_metadata_lock=lambda: events.append("note-lock"),
+            set_replace_stale_thumbnails=lambda value: replaced.append(value),
+            invalidate_cached_image_ids_cache=lambda **kwargs: invalidated.append(kwargs),
+        )
+
+        self.assertEqual(result["memory_entries_cleared"], 2)
+        self.assertEqual(result["memory_bytes_cleared"], 9)
+        self.assertEqual(result["disk_files_removed"], 1)
+        self.assertEqual(result["ssd_cache_dir"], root)
+        self.assertFalse(os.path.exists(cache_file))
+        self.assertTrue(os.path.exists(thumbnail_maintenance.cache_marker_path(root, thumbnails.CACHE_MARKER)))
+        self.assertEqual(tier_byte_totals, {})
+        self.assertEqual(source_stat_cache, {})
+        self.assertEqual(replaced, [False])
+        self.assertEqual(invalidated, [{"cache_root": root}])
+        self.assertIn("clear-backoff", events)
+        self.assertIn("bulk-cursor", events)
+        self.assertIn("full-cursor", events)
+
 
 class ThumbnailStatusPayloadTests(unittest.TestCase):
     def test_cache_stats_builder_owns_disk_payload_and_snapshot_cache(self):
