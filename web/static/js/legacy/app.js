@@ -1,32 +1,10 @@
 import {
-    COMPARE_NEIGHBOR_PAIRS,
-    MOSAIC_NEIGHBOR_LIMIT,
-} from '../compare/query.js';
-import {
     createImagePreloader,
     createWarmupManager,
     loadImageProbe,
     withTimeout,
 } from '../warmup.js';
-import {
-    DEFAULT_CROSS_VIEW_WARM_DELAY_MS,
-    createNeighborWarmupController,
-} from '../warmup_neighbors.js';
-import {
-    showCompareEmpty as showCompareEmptyCore,
-} from '../compare/view.js';
-import {
-    INITIAL_RANKINGS_PAGE_SIZE,
-    LIBRARY_NEIGHBOR_LIMIT,
-    RANKINGS_PAGE_SIZE,
-    currentLibraryPageSize as currentLibraryPageSizeCore,
-} from '../library/pagination.js';
-import {
-    formatDateTime,
-} from '../media_metadata.js';
-import {
-    hasActiveTextSearch as hasActiveTextSearchCore,
-} from '../search/query.js';
+import { createNeighborWarmupController } from '../warmup_neighbors.js';
 import { createLegacyBatchBridge } from './batch_bridge.js';
 import { createLegacyCatalogScanBridge } from './catalog_scan_bridge.js';
 import { createLegacyCompareDisplayBridge } from './compare_display_bridge.js';
@@ -55,6 +33,7 @@ import { createLegacyPeopleBridge } from './people_bridge.js';
 import { createLegacyPublicApi } from './public_api.js';
 import { createLegacySearchActionBridge } from './search_action_bridge.js';
 import { createLegacySearchSortBridge } from './search_sort_bridge.js';
+import { createLegacySharedHelpersBridge } from './shared_helpers_bridge.js';
 import { createLegacySettingsPageBridge } from './settings_page_bridge.js';
 import { createLegacySharedRuntimeBridge } from './shared_runtime_bridge.js';
 import { createLegacyThumbnailSizeBridge } from './thumbnail_size_bridge.js';
@@ -80,6 +59,15 @@ const legacyPhotoArchive = (() => {
     let selectedMosaicIndex = -1;
     const sharedRuntimeBridge = createLegacySharedRuntimeBridge();
     const { fetchJson, toggleAIPanel } = sharedRuntimeBridge;
+    const sharedHelpersBridge = createLegacySharedHelpersBridge();
+    const {
+        compareNeighborPairs: COMPARE_NEIGHBOR_PAIRS,
+        crossViewWarmDelayMs: DEFAULT_CROSS_VIEW_WARM_DELAY_MS,
+        initialRankingsPageSize: INITIAL_RANKINGS_PAGE_SIZE,
+        libraryNeighborLimit: LIBRARY_NEIGHBOR_LIMIT,
+        mosaicNeighborLimit: MOSAIC_NEIGHBOR_LIMIT,
+        rankingsPageSize: RANKINGS_PAGE_SIZE,
+    } = sharedHelpersBridge;
     const loupeBridge = createLegacyLoupeBridge({
         getLibraryImages: () => libraryImages,
         getSearchQuery: () => searchQuery,
@@ -452,7 +440,7 @@ const legacyPhotoArchive = (() => {
     }
 
     function showCompareEmpty() {
-        showCompareEmptyCore();
+        sharedHelpersBridge.showCompareEmpty();
     }
 
     // ==================== LIBRARY ====================
@@ -548,7 +536,7 @@ const legacyPhotoArchive = (() => {
     } = libraryShellBridge;
 
     function currentLibraryPageSize() {
-        return currentLibraryPageSizeCore({ rankingsOffset, pendingScrollRestoreOffset });
+        return sharedHelpersBridge.currentLibraryPageSize({ rankingsOffset, pendingScrollRestoreOffset });
     }
 
     function resetLibraryResults({ clearBatch = false } = {}) {
@@ -641,7 +629,7 @@ const legacyPhotoArchive = (() => {
     }
 
     function hasActiveTextSearch(value = searchQuery) {
-        return hasActiveTextSearchCore(value);
+        return sharedHelpersBridge.hasActiveTextSearch(value);
     }
 
     const searchSortBridge = createLegacySearchSortBridge({

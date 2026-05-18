@@ -3891,6 +3891,8 @@ class ModularContractTests(unittest.TestCase):
             legacy_search_sort_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "settings_page_bridge.js"), encoding="utf-8") as fh:
             legacy_settings_page_bridge = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "legacy", "shared_helpers_bridge.js"), encoding="utf-8") as fh:
+            legacy_shared_helpers_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "shared_runtime_bridge.js"), encoding="utf-8") as fh:
             legacy_shared_runtime_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "thumbnail_size_bridge.js"), encoding="utf-8") as fh:
@@ -4115,6 +4117,8 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from './people_bridge.js';", legacy)
         self.assertIn("from './search_action_bridge.js';", legacy)
         self.assertIn("from './search_sort_bridge.js';", legacy)
+        self.assertIn("from './shared_helpers_bridge.js';", legacy)
+        self.assertIn("export function createLegacySharedHelpersBridge", legacy_shared_helpers_bridge)
         self.assertIn("from './settings_page_bridge.js';", legacy)
         self.assertIn("from './shared_runtime_bridge.js';", legacy)
         self.assertIn("from './thumbnail_size_bridge.js';", legacy)
@@ -4125,7 +4129,8 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../query_controller.js';", legacy_filter_query_bridge)
         self.assertIn("from '../filters.js';", legacy_filter_query_bridge)
         self.assertIn("from '../media_status.js';", legacy_loupe_bridge)
-        self.assertIn("from '../media_metadata.js';", legacy)
+        self.assertNotIn("from '../media_metadata.js';", legacy)
+        self.assertIn("from '../media_metadata.js';", legacy_shared_helpers_bridge)
         self.assertNotIn("from '../thumbnail_size.js';", legacy)
         self.assertIn("from '../thumbnail_size.js';", legacy_thumbnail_size_bridge)
         self.assertNotIn("from '../compare/navigation.js';", legacy)
@@ -4135,7 +4140,8 @@ class ModularContractTests(unittest.TestCase):
         self.assertNotIn("from '../compare/pair_controller.js';", legacy)
         self.assertIn("from '../compare/pair_controller.js';", legacy_compare_display_bridge)
         self.assertIn("export function createLegacyCompareDisplayBridge", legacy_compare_display_bridge)
-        self.assertIn("from '../compare/view.js';", legacy)
+        self.assertNotIn("from '../compare/view.js';", legacy)
+        self.assertIn("from '../compare/view.js';", legacy_shared_helpers_bridge)
         self.assertNotIn("from '../compare/mode_controller.js';", legacy)
         self.assertIn("from '../compare/mode_controller.js';", legacy_compare_mode_bridge)
         self.assertIn("export function createLegacyCompareModeBridge", legacy_compare_mode_bridge)
@@ -4155,7 +4161,8 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../compare/status_controller.js';", legacy_compare_flow_bridge)
         self.assertNotIn("from '../compare/mosaic.js';", legacy)
         self.assertIn("from '../compare/mosaic.js';", legacy_thumbnail_size_bridge)
-        self.assertIn("from '../compare/query.js';", legacy)
+        self.assertNotIn("from '../compare/query.js';", legacy)
+        self.assertIn("from '../compare/query.js';", legacy_shared_helpers_bridge)
         self.assertNotIn("from '../compare/page_controller.js';", legacy)
         self.assertIn("from '../compare/page_controller.js';", legacy_compare_page_bridge)
         self.assertIn("export function createLegacyComparePageBridge", legacy_compare_page_bridge)
@@ -4169,7 +4176,8 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../media_metadata.js';", legacy_loupe_bridge)
         self.assertIn("export function createLegacyLoupeBridge", legacy_loupe_bridge)
         self.assertIn("from '../library/sort.js';", legacy_search_sort_bridge)
-        self.assertIn("from '../library/pagination.js';", legacy)
+        self.assertNotIn("from '../library/pagination.js';", legacy)
+        self.assertIn("from '../library/pagination.js';", legacy_shared_helpers_bridge)
         self.assertNotIn("from '../library/sort_controller.js';", legacy)
         self.assertIn("from '../library/sort_controller.js';", legacy_library_sort_bridge)
         self.assertIn("export function createLegacyLibrarySortBridge", legacy_library_sort_bridge)
@@ -4216,7 +4224,8 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../library/filters.js';", legacy_filter_query_bridge)
         self.assertIn("export function createLegacyFilterQueryBridge", legacy_filter_query_bridge)
         self.assertIn("createLibraryFilterController", legacy_library_filter_bridge)
-        self.assertIn("from '../search/query.js';", legacy)
+        self.assertNotIn("from '../search/query.js';", legacy)
+        self.assertIn("from '../search/query.js';", legacy_shared_helpers_bridge)
         self.assertNotIn("from '../people/controller.js';", legacy)
         self.assertIn("from '../people/controller.js';", legacy_people_bridge)
         self.assertIn("export function createLegacyPeopleBridge", legacy_people_bridge)
@@ -4231,6 +4240,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../ui.js';", legacy_ui_runtime_bridge)
         self.assertIn("from '../warmup.js';", legacy)
         self.assertIn("from '../warmup_neighbors.js';", legacy)
+        self.assertIn("from '../warmup_neighbors.js';", legacy_shared_helpers_bridge)
         self.assertIn("export async function fetchJson", api_module)
         self.assertIn("export function aiStatusPollDelay", ai_status)
         self.assertIn("export function renderAIBottomBarStatus", ai_status)
@@ -7755,6 +7765,64 @@ assert.equal(bridge.toggleAIPanel({ panel: true }), true);
 assert.deepEqual(calls, [
     ['fetchJson', ['/api/test', { defaultValue: null }]],
     ['toggleAIPanel', [{ panel: true }]],
+]);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_legacy_shared_helpers_bridge_node_probe_preserves_helper_facades(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createLegacySharedHelpersBridge } from './static/js/legacy/shared_helpers_bridge.js';
+
+const calls = [];
+const bridge = createLegacySharedHelpersBridge({
+    compareNeighborPairs: 4,
+    mosaicNeighborLimit: 22,
+    initialRankingsPageSize: 33,
+    libraryNeighborLimit: 44,
+    rankingsPageSize: 55,
+    crossViewWarmDelayMs: 66,
+    currentLibraryPageSizeImpl: (...args) => {
+        calls.push(['pageSize', args]);
+        return 77;
+    },
+    formatDateTimeImpl: (...args) => {
+        calls.push(['date', args]);
+        return 'formatted';
+    },
+    hasActiveTextSearchImpl: (...args) => {
+        calls.push(['search', args]);
+        return true;
+    },
+    showCompareEmptyImpl: (...args) => {
+        calls.push(['empty', args]);
+        return 'shown';
+    },
+});
+
+assert.equal(bridge.compareNeighborPairs, 4);
+assert.equal(bridge.mosaicNeighborLimit, 22);
+assert.equal(bridge.initialRankingsPageSize, 33);
+assert.equal(bridge.libraryNeighborLimit, 44);
+assert.equal(bridge.rankingsPageSize, 55);
+assert.equal(bridge.crossViewWarmDelayMs, 66);
+assert.equal(bridge.currentLibraryPageSize({ rankingsOffset: 1 }), 77);
+assert.equal(bridge.formatDateTime('2026-05-18'), 'formatted');
+assert.equal(bridge.hasActiveTextSearch('lake'), true);
+assert.equal(bridge.showCompareEmpty('arg'), 'shown');
+assert.deepEqual(calls, [
+    ['pageSize', [{ rankingsOffset: 1 }]],
+    ['date', ['2026-05-18']],
+    ['search', ['lake']],
+    ['empty', ['arg']],
 ]);
 """
         subprocess.run(
