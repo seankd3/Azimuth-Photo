@@ -179,26 +179,13 @@ const legacyPhotoArchive = (() => {
         refreshSettingsMetaIfActive: () => refreshSettingsMetaIfActive(),
         onUiSettingsLoaded: () => renderLoupeStatusLine(),
     });
-
-    function updateBottomBarHeightVar() {
-        return uiRuntimeBridge.updateBottomBarHeightVar();
-    }
-
-    function initBottomBarMeasurement() {
-        return uiRuntimeBridge.initBottomBarMeasurement();
-    }
-
-    function startAIStatusPolling(initialDelayMs = 0, { immediate = false } = {}) {
-        return uiRuntimeBridge.startAIStatusPolling(initialDelayMs, { immediate });
-    }
-
-    function initVisibilityRefresh() {
-        return uiRuntimeBridge.initVisibilityRefresh();
-    }
-
-    async function loadUiSettings() {
-        return uiRuntimeBridge.loadUiSettings();
-    }
+    const {
+        initBottomBarMeasurement,
+        initVisibilityRefresh,
+        loadUiSettings,
+        startAIStatusPolling,
+        updateBottomBarHeightVar,
+    } = uiRuntimeBridge;
 
     // ==================== MOSAIC RANKING MODE ====================
 
@@ -594,56 +581,33 @@ const legacyPhotoArchive = (() => {
     });
     const {
         EMPTY_FILTERS,
+        activeMetadataFilterCount,
+        applyFilterUiState,
+        buildFilterNeighborStates,
+        buildRankingsUrl,
+        currentFilterState,
+        currentQueryState,
+        currentSearchMode,
+        filterParams,
+        filterQueryString,
         getFilters,
+        hasActiveLibraryFilters,
+        saveFilters,
         setFilters,
+        syncLibraryUrlState,
+        updateMetadataFilterButton,
     } = filterQueryBridge;
-
-    function activeMetadataFilterCount() {
-        return filterQueryBridge.activeMetadataFilterCount();
-    }
-
-    function applyFilterUiState(...args) {
-        return filterQueryBridge.applyFilterUiState(...args);
-    }
 
     function buildCompareUrl(...args) {
         return filterQueryBridge.buildCompareUrl(...args);
-    }
-
-    function buildFilterNeighborStates(...args) {
-        return filterQueryBridge.buildFilterNeighborStates(...args);
     }
 
     function buildMosaicUrl(...args) {
         return filterQueryBridge.buildMosaicUrl(...args);
     }
 
-    function buildRankingsUrl(...args) {
-        return filterQueryBridge.buildRankingsUrl(...args);
-    }
-
-    function currentFilterState() {
-        return filterQueryBridge.currentFilterState();
-    }
-
-    function currentQueryState(...args) {
-        return filterQueryBridge.currentQueryState(...args);
-    }
-
-    function currentSearchMode() {
-        return filterQueryBridge.currentSearchMode();
-    }
-
-    function filterParams(...args) {
-        return filterQueryBridge.filterParams(...args);
-    }
-
-    function filterQueryString(...args) {
-        return filterQueryBridge.filterQueryString(...args);
-    }
-
-    function hasActiveLibraryFilters() {
-        return filterQueryBridge.hasActiveLibraryFilters();
+    function restoreFilters() {
+        return filterQueryBridge.restoreFilters();
     }
 
     const libraryShellBridge = createLegacyLibraryShellBridge({
@@ -658,22 +622,19 @@ const legacyPhotoArchive = (() => {
         clearSearch,
         clearLibraryFilters,
     });
-
-    function restoreFilters() {
-        return filterQueryBridge.restoreFilters();
-    }
-
-    function saveFilters() {
-        return filterQueryBridge.saveFilters();
-    }
-
-    function syncLibraryUrlState() {
-        return filterQueryBridge.syncLibraryUrlState();
-    }
-
-    function updateMetadataFilterButton() {
-        return filterQueryBridge.updateMetadataFilterButton();
-    }
+    const {
+        deselectLibraryCard,
+        findCardInDirection,
+        hideLibraryEmptyState,
+        libraryScrollRoot,
+        restoreScrollPosition,
+        saveScrollPosition,
+        scrollLibraryContainerToElement,
+        scrollToTop,
+        selectLibraryCard,
+        updateBackToTopButton,
+        updateLibraryEmptyState,
+    } = libraryShellBridge;
 
     function currentLibraryPageSize() {
         return currentLibraryPageSizeCore({ rankingsOffset, pendingScrollRestoreOffset });
@@ -691,38 +652,6 @@ const legacyPhotoArchive = (() => {
         selectedLibraryIndex = -1;
         hideLibraryEmptyState();
         if (clearBatch) clearBatchSelection();
-    }
-
-    function hideLibraryEmptyState() {
-        return libraryShellBridge.hideLibraryEmptyState();
-    }
-
-    function updateLibraryEmptyState() {
-        return libraryShellBridge.updateLibraryEmptyState();
-    }
-
-    function libraryScrollRoot() {
-        return libraryShellBridge.libraryScrollRoot();
-    }
-
-    function saveScrollPosition() {
-        return libraryShellBridge.saveScrollPosition();
-    }
-
-    function restoreScrollPosition() {
-        return libraryShellBridge.restoreScrollPosition();
-    }
-
-    function updateBackToTopButton() {
-        return libraryShellBridge.updateBackToTopButton();
-    }
-
-    function scrollToTop() {
-        return libraryShellBridge.scrollToTop();
-    }
-
-    function scrollLibraryContainerToElement(el, behavior = 'smooth') {
-        return libraryShellBridge.scrollLibraryContainerToElement(el, behavior);
     }
 
     const dateScrubberBridge = createLegacyDateScrubberBridge({
@@ -754,10 +683,20 @@ const legacyPhotoArchive = (() => {
         isCurrentDateJump: (gen) => gen === dateJumpGeneration,
         loadRankings,
     });
-
-    function syncDateScrubberVisibility() {
-        return dateScrubberBridge.syncDateScrubberVisibility();
-    }
+    const {
+        dateGroupOffset,
+        findDateGroupHeader,
+        isDateScrubberActive,
+        isDateSortActive,
+        jumpToDateGroup,
+        renderDateScrubber,
+        setActiveDateScrubberGroup,
+        setupDateScrubberScrollTracking,
+        setupScrubberScrollObserver,
+        syncDateScrubberVisibility,
+        teardownDateScrubberScrollTracking,
+        updateDateScrubber,
+    } = dateScrubberBridge;
 
     const neighborWarmups = createNeighborWarmupController({
         getMosaicStrategy: () => mosaicStrategy,
@@ -1148,62 +1087,6 @@ const legacyPhotoArchive = (() => {
         } finally {
             if (requestGeneration === libraryRequestGeneration) rankingsLoading = false;
         }
-    }
-
-    function isDateSortActive() {
-        return dateScrubberBridge.isDateSortActive();
-    }
-
-    function isDateScrubberActive() {
-        return dateScrubberBridge.isDateScrubberActive();
-    }
-
-    function findDateGroupHeader(group) {
-        return dateScrubberBridge.findDateGroupHeader(group);
-    }
-
-    function dateGroupOffset(group) {
-        return dateScrubberBridge.dateGroupOffset(group);
-    }
-
-    function setActiveDateScrubberGroup(group) {
-        return dateScrubberBridge.setActiveDateScrubberGroup(group);
-    }
-
-    function teardownDateScrubberScrollTracking() {
-        return dateScrubberBridge.teardownDateScrubberScrollTracking();
-    }
-
-    function setupDateScrubberScrollTracking() {
-        return dateScrubberBridge.setupDateScrubberScrollTracking();
-    }
-
-    async function jumpToDateGroup(group) {
-        return dateScrubberBridge.jumpToDateGroup(group);
-    }
-
-    async function updateDateScrubber() {
-        return dateScrubberBridge.updateDateScrubber();
-    }
-
-    function renderDateScrubber() {
-        return dateScrubberBridge.renderDateScrubber();
-    }
-
-    function setupScrubberScrollObserver() {
-        return dateScrubberBridge.setupScrubberScrollObserver();
-    }
-
-    function selectLibraryCard(index, cards) {
-        return libraryShellBridge.selectLibraryCard(index, cards);
-    }
-
-    function deselectLibraryCard(cards) {
-        return libraryShellBridge.deselectLibraryCard(cards);
-    }
-
-    function findCardInDirection(cards, currentIdx, direction) {
-        return libraryShellBridge.findCardInDirection(cards, currentIdx, direction);
     }
 
     loupeBridge.initController();
