@@ -115,6 +115,8 @@ compatibility facade for selected-image export.
 construction/opening for JSON and CSV downloads.
 `library/display.js` owns Library card flag, tier, similarity, info-line, and date labels.
 `library/rank_cards.js` owns Library ranking-card and date-header DOM construction.
+`legacy/library_rank_cards_bridge.js` owns the legacy Library rank-card append
+facade around the extracted rank-card renderer.
 `library/shell.js` owns Library empty-state display, scroll persistence keys and
 helpers, back-to-top visibility, and scroll-to-card helpers.
 `library/date_scrubber.js` owns Library date-scrubber fetch orchestration, DOM

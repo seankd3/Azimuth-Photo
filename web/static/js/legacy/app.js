@@ -23,7 +23,6 @@ import {
     RANKINGS_PAGE_SIZE,
     currentLibraryPageSize as currentLibraryPageSizeCore,
 } from '../library/pagination.js';
-import { appendLibraryRankCards } from '../library/rank_cards.js';
 import {
     formatDateTime,
 } from '../media_metadata.js';
@@ -49,6 +48,7 @@ import {
 import { createLegacyLibraryInitBridge } from './library_init_bridge.js';
 import { createLegacyLibraryFilterBridge } from './library_filter_bridge.js';
 import { createLegacyLibraryMapBridge } from './library_map_bridge.js';
+import { createLegacyLibraryRankCardsBridge } from './library_rank_cards_bridge.js';
 import { createLegacyLibrarySimilarBridge } from './library_similar_bridge.js';
 import { createLegacyLibrarySortBridge } from './library_sort_bridge.js';
 import { createLegacyLoupeBridge } from './loupe_bridge.js';
@@ -762,6 +762,7 @@ const legacyPhotoArchive = (() => {
         setCurrentLibraryFlag,
         updateImageFlagLocal,
     } = flagBridge;
+    const { appendLibraryRankCards } = createLegacyLibraryRankCardsBridge();
 
     async function loadRankings(clearFirst = false) {
         if (rankingsLoading) return rankingsLoadPromise || 0;

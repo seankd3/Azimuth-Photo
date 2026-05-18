@@ -3873,6 +3873,8 @@ class ModularContractTests(unittest.TestCase):
             legacy_library_filter_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "library_map_bridge.js"), encoding="utf-8") as fh:
             legacy_library_map_bridge = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "legacy", "library_rank_cards_bridge.js"), encoding="utf-8") as fh:
+            legacy_library_rank_cards_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "library_similar_bridge.js"), encoding="utf-8") as fh:
             legacy_library_similar_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "library_sort_bridge.js"), encoding="utf-8") as fh:
@@ -4099,6 +4101,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from './library_filter_bridge.js';", legacy)
         self.assertIn("from './library_init_bridge.js';", legacy)
         self.assertIn("from './library_map_bridge.js';", legacy)
+        self.assertIn("from './library_rank_cards_bridge.js';", legacy)
         self.assertIn("from './library_shell_bridge.js';", legacy)
         self.assertIn("from './library_similar_bridge.js';", legacy)
         self.assertIn("from './library_sort_bridge.js';", legacy)
@@ -4187,7 +4190,9 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("export function createLegacyLibrarySimilarBridge", legacy_library_similar_bridge)
         self.assertNotIn("from '../library/display.js';", legacy)
         self.assertIn("from '../library/display.js';", legacy_loupe_bridge)
-        self.assertIn("from '../library/rank_cards.js';", legacy)
+        self.assertNotIn("from '../library/rank_cards.js';", legacy)
+        self.assertIn("from '../library/rank_cards.js';", legacy_library_rank_cards_bridge)
+        self.assertIn("export function createLegacyLibraryRankCardsBridge", legacy_library_rank_cards_bridge)
         self.assertNotIn("from '../library/shell.js';", legacy)
         self.assertIn("from '../library/shell.js';", legacy_library_shell_bridge)
         self.assertIn("from '../library/navigation.js';", legacy_library_shell_bridge)
@@ -9944,6 +9949,32 @@ assert.match(secondCard.innerHTML, /rank-confidence medium/);
 assert.match(secondCard.innerHTML, /loading="eager"/);
 secondCard.onclick({ type: 'click' });
 assert.deepEqual(calls.at(-1), ['click', 8, 5]);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_legacy_library_rank_cards_bridge_node_probe_preserves_append_facade(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createLegacyLibraryRankCardsBridge } from './static/js/legacy/library_rank_cards_bridge.js';
+
+const calls = [];
+const bridge = createLegacyLibraryRankCardsBridge({
+    appendLibraryRankCardsImpl: (...args) => {
+        calls.push(args);
+        return { lastDateGroup: '2026-05' };
+    },
+});
+
+assert.deepEqual(bridge.appendLibraryRankCards({ images: [{ id: 1 }] }), { lastDateGroup: '2026-05' });
+assert.deepEqual(calls, [[{ images: [{ id: 1 }] }]]);
 """
         subprocess.run(
             ["node", "--input-type=module", "-e", script],
