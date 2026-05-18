@@ -3865,6 +3865,8 @@ class ModularContractTests(unittest.TestCase):
             legacy_library_shell_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "library_init_bridge.js"), encoding="utf-8") as fh:
             legacy_library_init_bridge = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "legacy", "library_filter_bridge.js"), encoding="utf-8") as fh:
+            legacy_library_filter_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "library_map_bridge.js"), encoding="utf-8") as fh:
             legacy_library_map_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "loupe_bridge.js"), encoding="utf-8") as fh:
@@ -4084,6 +4086,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from './export_bridge.js';", legacy)
         self.assertIn("from './filter_query_bridge.js';", legacy)
         self.assertIn("from './flag_bridge.js';", legacy)
+        self.assertIn("from './library_filter_bridge.js';", legacy)
         self.assertIn("from './library_init_bridge.js';", legacy)
         self.assertIn("from './library_map_bridge.js';", legacy)
         self.assertIn("from './library_shell_bridge.js';", legacy)
@@ -4152,7 +4155,9 @@ class ModularContractTests(unittest.TestCase):
         self.assertNotIn("from '../library/batch_controller.js';", legacy)
         self.assertIn("from '../library/batch_controller.js';", legacy_batch_bridge)
         self.assertIn("export function createLegacyBatchBridge", legacy_batch_bridge)
-        self.assertIn("from '../library/filter_controller.js';", legacy)
+        self.assertNotIn("from '../library/filter_controller.js';", legacy)
+        self.assertIn("from '../library/filter_controller.js';", legacy_library_filter_bridge)
+        self.assertIn("export function createLegacyLibraryFilterBridge", legacy_library_filter_bridge)
         self.assertNotIn("from '../export/actions.js';", legacy)
         self.assertIn("from '../export/actions.js';", legacy_export_bridge)
         self.assertIn("export function createLegacyExportBridge", legacy_export_bridge)
@@ -4175,7 +4180,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("export function createLegacyLibraryMapBridge", legacy_library_map_bridge)
         self.assertIn("from '../library/filters.js';", legacy_filter_query_bridge)
         self.assertIn("export function createLegacyFilterQueryBridge", legacy_filter_query_bridge)
-        self.assertIn("createLibraryFilterController", legacy)
+        self.assertIn("createLibraryFilterController", legacy_library_filter_bridge)
         self.assertIn("from '../search/query.js';", legacy)
         self.assertNotIn("from '../people/controller.js';", legacy)
         self.assertIn("from '../people/controller.js';", legacy_people_bridge)
@@ -7471,6 +7476,78 @@ assert.deepEqual(events, [
     ['options', '/photos'],
     ['stars'],
 ]);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_legacy_library_filter_bridge_node_probe_preserves_filter_facade(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createLegacyLibraryFilterBridge } from './static/js/legacy/library_filter_bridge.js';
+
+const expected = {
+    emptyFilters: { folder: '', flag: '', rating: '' },
+    getFilters: () => ({ folder: '/photos' }),
+    setFilters: () => {},
+    clearWarmups: () => {},
+    resetLibraryResults: () => {},
+    loadRankings: () => {},
+    isDateSortActive: () => false,
+    updateDateScrubber: () => {},
+    currentLibraryView: () => 'grid',
+    loadMap: () => {},
+    getCompareMode: () => 'swiss',
+    loadMosaicBatch: () => {},
+    resetComparePairs: () => {},
+    fetchComparePairs: () => Promise.resolve(),
+    showComparePair: () => {},
+    updateMetadataFilterButton: () => {},
+    saveFilters: () => {},
+    activeMetadataFilterCount: () => 0,
+};
+const dependencyNames = Object.keys(expected);
+const methodNames = [
+    'clearLibraryFilters',
+    'initStarHover',
+    'loadFilterOptions',
+    'loadFolderList',
+    'reloadForFilters',
+    'scheduleFilterOptionsLoad',
+    'setFilter',
+    'toggleFilter',
+    'toggleMetadataFilters',
+    'toggleStar',
+];
+const calls = [];
+
+const bridge = createLegacyLibraryFilterBridge({
+    ...expected,
+    createLibraryFilterControllerImpl: (deps) => {
+        for (const name of dependencyNames) {
+            assert.strictEqual(deps[name], expected[name], `${name} dependency`);
+        }
+        const methods = {};
+        for (const name of methodNames) {
+            methods[name] = (...args) => {
+                calls.push([name, args]);
+                return `${name}-result`;
+            };
+        }
+        return methods;
+    },
+});
+
+for (const name of methodNames) {
+    assert.equal(bridge[name](`${name}-arg`), `${name}-result`);
+}
+assert.deepEqual(calls, methodNames.map((name) => [name, [`${name}-arg`]]));
 """
         subprocess.run(
             ["node", "--input-type=module", "-e", script],

@@ -1,0 +1,57 @@
+import { createLibraryFilterController } from '../library/filter_controller.js';
+
+export function createLegacyLibraryFilterBridge({
+    emptyFilters,
+    getFilters,
+    setFilters,
+    clearWarmups,
+    resetLibraryResults,
+    loadRankings,
+    isDateSortActive,
+    updateDateScrubber,
+    currentLibraryView,
+    loadMap,
+    getCompareMode,
+    loadMosaicBatch,
+    resetComparePairs,
+    fetchComparePairs,
+    showComparePair,
+    updateMetadataFilterButton,
+    saveFilters,
+    activeMetadataFilterCount,
+    createLibraryFilterControllerImpl = createLibraryFilterController,
+} = {}) {
+    const controller = createLibraryFilterControllerImpl({
+        emptyFilters,
+        getFilters,
+        setFilters,
+        clearWarmups,
+        resetLibraryResults,
+        loadRankings,
+        isDateSortActive,
+        updateDateScrubber,
+        currentLibraryView,
+        loadMap,
+        getCompareMode,
+        loadMosaicBatch,
+        resetComparePairs,
+        fetchComparePairs,
+        showComparePair,
+        updateMetadataFilterButton,
+        saveFilters,
+        activeMetadataFilterCount,
+    });
+
+    return {
+        clearLibraryFilters: (...args) => controller.clearLibraryFilters(...args),
+        initStarHover: (...args) => controller.initStarHover(...args),
+        loadFilterOptions: (...args) => controller.loadFilterOptions(...args),
+        loadFolderList: (...args) => controller.loadFolderList(...args),
+        reloadForFilters: (...args) => controller.reloadForFilters(...args),
+        scheduleFilterOptionsLoad: (...args) => controller.scheduleFilterOptionsLoad(...args),
+        setFilter: (...args) => controller.setFilter(...args),
+        toggleFilter: (...args) => controller.toggleFilter(...args),
+        toggleMetadataFilters: (...args) => controller.toggleMetadataFilters(...args),
+        toggleStar: (...args) => controller.toggleStar(...args),
+    };
+}

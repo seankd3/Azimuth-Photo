@@ -27,7 +27,9 @@ the extracted export helper to current Library query/sort state.
 controller facade for Library card selection, batch flagging, and selected-image
 export. `legacy/library_shell_bridge.js` owns the legacy Library shell and card
 keyboard-selection facade around scroll persistence, empty state, and card
-navigation. `legacy/library_map_bridge.js` owns the legacy Library map-view
+navigation. `legacy/library_filter_bridge.js` owns the legacy Library/Compare
+filter-control facade around the extracted Library filter controller.
+`legacy/library_map_bridge.js` owns the legacy Library map-view
 facade around the extracted map controller. `legacy/library_init_bridge.js`
 owns the legacy Library page
 initialization workflow around restored state, first rankings load, infinite

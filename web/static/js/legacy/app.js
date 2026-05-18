@@ -4,7 +4,6 @@ import {
     COMPARE_NEIGHBOR_PAIRS,
     MOSAIC_NEIGHBOR_LIMIT,
 } from '../compare/query.js';
-import { createLibraryFilterController } from '../library/filter_controller.js';
 import {
     createImagePreloader,
     createWarmupManager,
@@ -52,6 +51,7 @@ import {
     createLegacyLibraryShellBridge,
 } from './library_shell_bridge.js';
 import { createLegacyLibraryInitBridge } from './library_init_bridge.js';
+import { createLegacyLibraryFilterBridge } from './library_filter_bridge.js';
 import { createLegacyLibraryMapBridge } from './library_map_bridge.js';
 import { createLegacyLoupeBridge } from './loupe_bridge.js';
 import { createLegacyMosaicBridge } from './mosaic_bridge.js';
@@ -862,7 +862,7 @@ const legacyPhotoArchive = (() => {
     });
     const { setThumbSize } = thumbnailSizeBridge;
 
-    const libraryFilterController = createLibraryFilterController({
+    const libraryFilterBridge = createLegacyLibraryFilterBridge({
         emptyFilters: EMPTY_FILTERS,
         getFilters,
         setFilters,
@@ -887,43 +887,43 @@ const legacyPhotoArchive = (() => {
     });
 
     function reloadForFilters() {
-        return libraryFilterController.reloadForFilters();
+        return libraryFilterBridge.reloadForFilters();
     }
 
     function setFilter(key, value) {
-        return libraryFilterController.setFilter(key, value);
+        return libraryFilterBridge.setFilter(key, value);
     }
 
     function clearLibraryFilters() {
-        return libraryFilterController.clearLibraryFilters();
+        return libraryFilterBridge.clearLibraryFilters();
     }
 
     function toggleFilter(key, value, btn) {
-        return libraryFilterController.toggleFilter(key, value, btn);
+        return libraryFilterBridge.toggleFilter(key, value, btn);
     }
 
     function toggleStar(level) {
-        return libraryFilterController.toggleStar(level);
+        return libraryFilterBridge.toggleStar(level);
     }
 
     function loadFolderList() {
-        return libraryFilterController.loadFolderList();
+        return libraryFilterBridge.loadFolderList();
     }
 
     function loadFilterOptions() {
-        return libraryFilterController.loadFilterOptions();
+        return libraryFilterBridge.loadFilterOptions();
     }
 
     function scheduleFilterOptionsLoad() {
-        return libraryFilterController.scheduleFilterOptionsLoad();
+        return libraryFilterBridge.scheduleFilterOptionsLoad();
     }
 
     function toggleMetadataFilters() {
-        return libraryFilterController.toggleMetadataFilters();
+        return libraryFilterBridge.toggleMetadataFilters();
     }
 
     function initStarHover() {
-        return libraryFilterController.initStarHover();
+        return libraryFilterBridge.initStarHover();
     }
 
     const findSimilar = createFindSimilarAction({
