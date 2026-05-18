@@ -7,6 +7,7 @@ from data import connection as data_connection
 from data import schema as data_schema
 from data.repositories import cache_entries as cache_entry_repository
 from data.repositories import catalog as catalog_repository
+from data.repositories.common import chunked as _chunked
 from data.repositories import embeddings as embedding_repository
 from data.repositories import filter_options as filter_options_repository
 from data.repositories import images as image_repository
@@ -93,11 +94,6 @@ source_display_name = catalog_repository.source_display_name
 active_source_join = catalog_repository.active_source_join
 active_source_condition = catalog_repository.active_source_condition
 active_image_condition = catalog_repository.active_image_condition
-
-
-def _chunked(values: list[int], chunk_size: int = 500):
-    for start in range(0, len(values), chunk_size):
-        yield values[start:start + chunk_size]
 
 
 def _invalidate_stats_cache():

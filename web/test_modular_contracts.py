@@ -1292,6 +1292,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertTrue(callable(connection.open_async))
         self.assertTrue(callable(connection.open_sync))
         self.assertEqual(list(repository_common.chunked([1, 2, 3], 2)), [[1, 2], [3]])
+        self.assertIs(db._chunked, repository_common.chunked)
         self.assertIs(catalog._chunked, repository_common.chunked)
         self.assertIs(metadata_search._chunked, repository_common.chunked)
         self.assertIs(ratings._chunked, repository_common.chunked)
