@@ -5,7 +5,8 @@ the cache-busting query string into this folder and imports `bootstrap.js`.
 
 `bootstrap.js` owns the public `window.PhotoArchive` compatibility assignment.
 During migration it imports `legacy/app.js`, which contains the old no-build
-frontend monolith behind compatibility wrappers.
+frontend monolith behind compatibility wrappers. `legacy/public_api.js` owns the
+exported compatibility method table that backs `window.PhotoArchive.*`.
 
 `ui.js` owns shared toast, confirm-modal, shortcut overlay, bottom-bar
 measurement, visibility-refresh wiring, visual-row navigation math, formatting,

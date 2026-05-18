@@ -158,6 +158,7 @@ import { createFindSimilarAction } from '../library/similar.js';
 import { createPeopleApi } from '../people/controller.js';
 import { createSettingsPageController } from '../settings/page.js';
 import { createUiSettingsLoader } from '../settings/ui_settings.js';
+import { createLegacyPublicApi } from './public_api.js';
 
 const legacyPhotoArchive = (() => {
     // --- Compare Mode State ---
@@ -1668,7 +1669,7 @@ const legacyPhotoArchive = (() => {
 
     // ==================== PUBLIC API ====================
 
-    return {
+    return createLegacyPublicApi({
         initCompare,
         initLibrary,
         initRankings,
@@ -1736,7 +1737,7 @@ const legacyPhotoArchive = (() => {
         filterLibraryByPerson,
         useFallbackThumb,
         rememberPeopleLabelDraft,
-    };
+    });
 })();
 
 export default legacyPhotoArchive;

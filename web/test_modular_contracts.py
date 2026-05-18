@@ -9111,6 +9111,8 @@ assert.deepEqual(loadingEvents.slice(-2), [['set', 2], ['cancel-clear']]);
             smoke_script = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "app.js"), encoding="utf-8") as fh:
             legacy = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "legacy", "public_api.js"), encoding="utf-8") as fh:
+            legacy_public_api = fh.read()
 
         required_block = re.search(r"const REQUIRED_API = \[(.*?)\];", smoke_script, re.DOTALL)
         self.assertIsNotNone(required_block)
@@ -9146,12 +9148,13 @@ assert.deepEqual(loadingEvents.slice(-2), [['set', 2], ['cancel-clear']]);
         )
         self.assertIn("workflowProbeExpression", smoke_script)
 
-        legacy_return_start = legacy.rfind("    return {")
+        self.assertIn("createLegacyPublicApi", legacy)
+        legacy_return_start = legacy_public_api.rfind("    return {")
         self.assertGreater(legacy_return_start, -1)
         legacy_exports = set(
             re.findall(
                 r"^\s*([A-Za-z_$][A-Za-z0-9_$]*),\s*$",
-                legacy[legacy_return_start:],
+                legacy_public_api[legacy_return_start:],
                 re.MULTILINE,
             )
         )
