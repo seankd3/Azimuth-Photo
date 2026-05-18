@@ -4482,12 +4482,12 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             compare_template = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "app.js"), encoding="utf-8") as fh:
             script = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "legacy", "library_init_bridge.js"), encoding="utf-8") as fh:
+            library_init_bridge = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "compare", "page_controller.js"), encoding="utf-8") as fh:
+            compare_page_controller = fh.read()
         with open(os.path.join(base_dir, "static", "js", "library", "search_controller.js"), encoding="utf-8") as fh:
             search_controller = fh.read()
-        init_compare = script.split("async function initCompare()", 1)[1].split(
-            "async function pollAIStatus",
-            1,
-        )[0]
         run_deep = script.split("function runDeepSearch()", 1)[1].split(
             "function setRankingsSort",
             1,
@@ -4500,7 +4500,9 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('id="search-input"', compare_template)
         self.assertIn("PhotoArchive.runDeepSearch()", compare_template)
         self.assertIn("function initSearchInputControls()", script)
-        self.assertIn("initSearchInputControls();", init_compare)
+        self.assertIn("initSearchInputControls,", script)
+        self.assertIn("initSearchInputControls();", compare_page_controller)
+        self.assertIn("initSearchInputControls();", library_init_bridge)
         self.assertIn("runDeepSearchCore({", run_deep)
         self.assertIn("reloadForFilters();", controller_run_deep)
         self.assertIn("updateDateScrubber();", controller_run_deep)

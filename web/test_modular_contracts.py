@@ -3855,6 +3855,8 @@ class ModularContractTests(unittest.TestCase):
             legacy_flag_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "library_shell_bridge.js"), encoding="utf-8") as fh:
             legacy_library_shell_bridge = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "legacy", "library_init_bridge.js"), encoding="utf-8") as fh:
+            legacy_library_init_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "loupe_bridge.js"), encoding="utf-8") as fh:
             legacy_loupe_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "search_sort_bridge.js"), encoding="utf-8") as fh:
@@ -4054,6 +4056,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from './export_bridge.js';", legacy)
         self.assertIn("from './filter_query_bridge.js';", legacy)
         self.assertIn("from './flag_bridge.js';", legacy)
+        self.assertIn("from './library_init_bridge.js';", legacy)
         self.assertIn("from './library_shell_bridge.js';", legacy)
         self.assertIn("from './loupe_bridge.js';", legacy)
         self.assertIn("from './search_sort_bridge.js';", legacy)
@@ -4110,6 +4113,9 @@ class ModularContractTests(unittest.TestCase):
         self.assertNotIn("from '../library/date_scrubber.js';", legacy)
         self.assertIn("from '../library/date_scrubber.js';", legacy_date_scrubber_bridge)
         self.assertIn("export function createLegacyDateScrubberBridge", legacy_date_scrubber_bridge)
+        self.assertNotIn("from '../library/keyboard.js';", legacy)
+        self.assertIn("from '../library/keyboard.js';", legacy_library_init_bridge)
+        self.assertIn("export function createLegacyLibraryInitBridge", legacy_library_init_bridge)
         self.assertNotIn("from '../library/navigation.js';", legacy)
         self.assertIn("from '../library/map_controller.js';", legacy)
         self.assertIn("from '../library/filters.js';", legacy_filter_query_bridge)
@@ -6312,6 +6318,197 @@ assert.deepEqual(calls, [
     ['select', 1, true, true],
     ['deselect', true],
     ['find', true, 0, 'right'],
+]);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_legacy_library_init_bridge_node_probe_preserves_init_workflow(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createLegacyLibraryInitBridge } from './static/js/legacy/library_init_bridge.js';
+
+const events = [];
+const linkHandlers = {};
+const link = {
+    getAttribute(name) {
+        return name === 'href' ? '/compare' : '';
+    },
+    addEventListener(type, handler) {
+        linkHandlers[type] = handler;
+        events.push(['link-listener', type]);
+    },
+};
+const grid = {
+    after(el) {
+        events.push(['grid-after', el.style.height]);
+    },
+};
+const documentImpl = {
+    createElement(tag) {
+        events.push(['create', tag]);
+        return { tagName: tag, style: {} };
+    },
+    querySelector(selector) {
+        events.push(['query', selector]);
+        return selector === '.rankings-grid' ? grid : null;
+    },
+    querySelectorAll(selector) {
+        events.push(['queryAll', selector]);
+        return selector === '.bottom-bar a[href]' ? [link] : [];
+    },
+};
+const windowHandlers = {};
+const windowImpl = {
+    location: { pathname: '/library' },
+    addEventListener(type, handler) {
+        windowHandlers[type] = handler;
+        events.push(['window-listener', type]);
+    },
+};
+const scrollRoot = {
+    addEventListener(type, handler, options) {
+        events.push(['scroll-listener', type, options.passive]);
+        this.handler = handler;
+    },
+};
+let observerCallback = null;
+let loadCount = 0;
+let pendingOffset = 0;
+let stats = null;
+let keyboardOptions = null;
+const bridge = createLegacyLibraryInitBridge({
+    documentImpl,
+    windowImpl,
+    sessionStorageImpl: {
+        getItem(key) {
+            events.push(['storage', key]);
+            return '42';
+        },
+    },
+    intersectionObserverImpl: class FakeObserver {
+        constructor(callback, options) {
+            observerCallback = callback;
+            events.push(['observer', options.root === scrollRoot, options.rootMargin]);
+        }
+        observe(el) {
+            events.push(['observe', el.style.height]);
+        }
+    },
+    setTimeoutImpl: (callback, delay) => {
+        events.push(['timeout', delay]);
+        callback();
+    },
+    fetchStats: async () => {
+        events.push(['fetch-stats']);
+        return { filtered_pool: 9 };
+    },
+    scrollOffsetStorageKey: 'scroll-offset',
+    initBottomBarMeasurement: () => events.push('bottom'),
+    startAIStatusPolling: (delay, options) => events.push(['ai', delay, options.immediate]),
+    resetLibraryResults: () => events.push('reset'),
+    restoreFilters: () => events.push('restore-filters'),
+    restoreSortState: () => events.push('restore-sort'),
+    restoreSearchState: () => events.push('restore-search'),
+    setPendingScrollRestoreOffset: value => {
+        pendingOffset = value;
+        events.push(['pending', value]);
+    },
+    loadUiSettings: () => events.push('load-ui'),
+    loadRankings: async () => {
+        loadCount += 1;
+        events.push(['load-rankings', loadCount]);
+        return loadCount;
+    },
+    setCompareStats: value => {
+        stats = value;
+        events.push(['stats', value.filtered_pool]);
+    },
+    updateCompareProgress: () => events.push('progress'),
+    loadFolderList: () => events.push('folders'),
+    scheduleFilterOptionsLoad: () => events.push('filters'),
+    initStarHover: () => events.push('stars'),
+    restoreScrollPosition: () => events.push('restore-scroll'),
+    currentLibraryView: () => 'grid',
+    getRankingsLoading: () => false,
+    getRankingsExhausted: () => false,
+    libraryScrollRoot: () => scrollRoot,
+    updateBackToTopButton: () => events.push('back-top'),
+    getSelectedLibraryIndex: () => 2,
+    getLibraryImages: () => [{ id: 7 }],
+    hasBatchSelection: () => false,
+    selectLibraryCard: () => {},
+    deselectLibraryCard: () => {},
+    findCardInDirection: () => 0,
+    openLightbox: () => {},
+    lightboxNext: () => {},
+    lightboxPrev: () => {},
+    closeLightbox: () => {},
+    setCurrentLibraryFlag: () => {},
+    trapLoupeFocus: () => {},
+    batchFlag: () => {},
+    clearBatchSelection: () => {},
+    saveScrollPosition: () => events.push('save-scroll'),
+    initLoupeInteraction: () => events.push('loupe-interaction'),
+    initSearchInputControls: () => events.push('search-inputs'),
+    bindLibraryKeyboardImpl: options => {
+        keyboardOptions = options;
+        events.push(['keyboard', options.getSelectedLibraryIndex(), options.getLibraryImages()[0].id]);
+    },
+});
+
+assert.equal(typeof bridge.initRankings, 'function');
+await bridge.initLibrary();
+assert.equal(pendingOffset, 42);
+assert.deepEqual(stats, { filtered_pool: 9 });
+assert.equal(loadCount, 1);
+assert.equal(typeof observerCallback, 'function');
+assert.equal(keyboardOptions.hasBatchSelection(), false);
+observerCallback([{ isIntersecting: true }]);
+assert.equal(loadCount, 2);
+linkHandlers.click();
+assert.equal(windowHandlers.beforeunload, keyboardOptions.saveScrollPosition);
+assert.deepEqual(events, [
+    'bottom',
+    ['ai', 750, true],
+    'reset',
+    'restore-filters',
+    'restore-sort',
+    'restore-search',
+    ['storage', 'scroll-offset'],
+    ['pending', 42],
+    'load-ui',
+    ['load-rankings', 1],
+    ['fetch-stats'],
+    ['timeout', 500],
+    'folders',
+    'filters',
+    'stars',
+    ['stats', 9],
+    'progress',
+    'restore-scroll',
+    ['create', 'div'],
+    ['query', '.rankings-grid'],
+    ['grid-after', '1px'],
+    ['observer', true, '600px 0px'],
+    ['observe', '1px'],
+    ['scroll-listener', 'scroll', true],
+    'back-top',
+    ['keyboard', 2, 7],
+    'loupe-interaction',
+    'search-inputs',
+    ['queryAll', '.bottom-bar a[href]'],
+    ['link-listener', 'click'],
+    ['window-listener', 'beforeunload'],
+    ['load-rankings', 2],
+    'save-scroll',
 ]);
 """
         subprocess.run(

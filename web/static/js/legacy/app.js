@@ -73,7 +73,6 @@ import {
 } from '../library/search_controller.js';
 import { eloToStars } from '../library/display.js';
 import { appendLibraryRankCards } from '../library/rank_cards.js';
-import { bindLibraryKeyboard } from '../library/keyboard.js';
 import { createLibraryMapController } from '../library/map_controller.js';
 import {
     formatDateTime,
@@ -95,6 +94,7 @@ import {
     SCROLL_POS_STORAGE_KEY,
     createLegacyLibraryShellBridge,
 } from './library_shell_bridge.js';
+import { createLegacyLibraryInitBridge } from './library_init_bridge.js';
 import { createLegacyLoupeBridge } from './loupe_bridge.js';
 import { createLegacyPublicApi } from './public_api.js';
 import { createLegacySearchSortBridge } from './search_sort_bridge.js';
@@ -803,83 +803,6 @@ const legacyPhotoArchive = (() => {
         });
     }
 
-    async function initLibrary() {
-        initBottomBarMeasurement();
-        startAIStatusPolling(750, { immediate: true });
-        resetLibraryResults();
-        restoreFilters();
-        restoreSortState();
-        restoreSearchState();
-        pendingScrollRestoreOffset = Number(sessionStorage.getItem(SCROLL_OFFSET_STORAGE_KEY) || 0);
-        loadUiSettings();
-
-        // Fire all init requests in parallel — don't block on rankings
-        const rankingsPromise = loadRankings();
-        const statsPromise = fetch('/api/stats').then(r => r.json()).then(stats => {
-            compareStats = stats;
-            updateCompareProgress();
-        }).catch(() => {});
-
-        setTimeout(() => {
-            loadFolderList();
-            scheduleFilterOptionsLoad();
-        }, 500);
-        initStarHover();
-
-        await rankingsPromise;
-        restoreScrollPosition();
-        await statsPromise;
-
-        // Infinite scroll via IntersectionObserver (avoids continuous scroll events)
-        const sentinel = document.createElement('div');
-        sentinel.style.height = '1px';
-        document.querySelector('.rankings-grid')?.after(sentinel);
-        const scrollObserver = new IntersectionObserver((entries) => {
-            if (entries[0].isIntersecting && currentLibraryView() === 'grid' && !rankingsLoading && !rankingsExhausted) {
-                loadRankings();
-            }
-        }, { root: libraryScrollRoot(), rootMargin: '600px 0px' });
-        scrollObserver.observe(sentinel);
-        const scrollRoot = libraryScrollRoot();
-        if (scrollRoot) {
-            scrollRoot.addEventListener('scroll', updateBackToTopButton, { passive: true });
-            updateBackToTopButton();
-        }
-
-        bindLibraryKeyboard({
-            getSelectedLibraryIndex: () => selectedLibraryIndex,
-            getLibraryImages: () => libraryImages,
-            hasBatchSelection: () => batchBridge.hasSelection(),
-            selectLibraryCard,
-            deselectLibraryCard,
-            findCardInDirection,
-            openLightbox,
-            lightboxNext,
-            lightboxPrev,
-            closeLightbox,
-            setCurrentLibraryFlag,
-            trapLoupeFocus,
-            batchFlag,
-            clearBatchSelection,
-            saveScrollPosition,
-        });
-
-        // Loupe zoom/pan interaction
-        initLoupeInteraction();
-
-        initSearchInputControls();
-
-        document.querySelectorAll('.bottom-bar a[href]').forEach((link) => {
-            link.addEventListener('click', () => {
-                const href = link.getAttribute('href') || '';
-                if (href && href !== window.location.pathname) saveScrollPosition();
-            });
-        });
-        window.addEventListener('beforeunload', saveScrollPosition);
-    }
-
-    function initRankings() { initLibrary(); }
-
     function clearSearch() {
         clearSearchCore({
             ...searchControllerContext(),
@@ -1203,6 +1126,51 @@ const legacyPhotoArchive = (() => {
     function openLightboxById(id) {
         return mapController.openLightboxById(id);
     }
+
+    const libraryInitBridge = createLegacyLibraryInitBridge({
+        documentImpl: document,
+        windowImpl: window,
+        sessionStorageImpl: sessionStorage,
+        scrollOffsetStorageKey: SCROLL_OFFSET_STORAGE_KEY,
+        initBottomBarMeasurement,
+        startAIStatusPolling,
+        resetLibraryResults,
+        restoreFilters,
+        restoreSortState,
+        restoreSearchState,
+        setPendingScrollRestoreOffset: (value) => { pendingScrollRestoreOffset = value; },
+        loadUiSettings,
+        loadRankings,
+        setCompareStats: (stats) => { compareStats = stats; },
+        updateCompareProgress,
+        loadFolderList,
+        scheduleFilterOptionsLoad,
+        initStarHover,
+        restoreScrollPosition,
+        currentLibraryView,
+        getRankingsLoading: () => rankingsLoading,
+        getRankingsExhausted: () => rankingsExhausted,
+        libraryScrollRoot,
+        updateBackToTopButton,
+        getSelectedLibraryIndex: () => selectedLibraryIndex,
+        getLibraryImages: () => libraryImages,
+        hasBatchSelection: () => batchBridge.hasSelection(),
+        selectLibraryCard,
+        deselectLibraryCard,
+        findCardInDirection,
+        openLightbox,
+        lightboxNext,
+        lightboxPrev,
+        closeLightbox,
+        setCurrentLibraryFlag,
+        trapLoupeFocus,
+        batchFlag,
+        clearBatchSelection,
+        saveScrollPosition,
+        initLoupeInteraction,
+        initSearchInputControls,
+    });
+    const { initLibrary, initRankings } = libraryInitBridge;
 
     // ==================== PEOPLE ====================
 
