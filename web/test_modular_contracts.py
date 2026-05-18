@@ -9171,6 +9171,7 @@ assert.deepEqual(loadingEvents.slice(-2), [['set', 2], ['cancel-clear']]);
         maintenance = importlib.import_module("thumbnails.maintenance")
         memory_store = importlib.import_module("thumbnails.memory_store")
         pregen = importlib.import_module("thumbnails.pregen")
+        pregen_worker = importlib.import_module("thumbnails.pregen_worker")
         source_identity = importlib.import_module("thumbnails.source_identity")
         thumbnail_status = importlib.import_module("thumbnails.status")
 
@@ -9215,6 +9216,8 @@ assert.deepEqual(loadingEvents.slice(-2), [['set', 2], ['cancel-clear']]);
         self.assertTrue(callable(pregen.generate_batch_for_decision))
         self.assertTrue(callable(pregen.rates))
         self.assertTrue(callable(pregen.should_yield_to_foreground))
+        self.assertTrue(callable(pregen_worker.run_pregen_bulk_batch))
+        self.assertTrue(callable(pregen_worker.run_full_warm_batch))
         self.assertIs(thumbnails._source_missing_error, source_identity.source_missing_error)
         self.assertTrue(callable(thumbnail_status.copy_disk_stats))
         self.assertTrue(callable(thumbnail_status.cache_stats))

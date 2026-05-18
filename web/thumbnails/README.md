@@ -21,7 +21,8 @@ invalidation callbacks for the legacy facade. `status.py` owns pure cache and
 pregeneration status payload helpers. `full_cache.py` owns full-original cache room checks,
 atomic source-copy/write helpers, cached-path lookup, and full-image inflight
 orchestration. `pregen_candidates.py` owns reusable
-candidate-selection helpers for background cache warming. The package still
+candidate-selection helpers for background cache warming. `pregen_worker.py`
+owns the async background thumbnail/full-original batch runners. The package still
 keeps most legacy behavior in `__init__.py` because callers monkeypatch module
 globals in tests and worker setup. `runtime.py` owns generic
 bool/time/SQLite-lock/executor helpers that remain aliased from the facade.

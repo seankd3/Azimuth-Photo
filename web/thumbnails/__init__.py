@@ -19,6 +19,7 @@ from . import generation
 from . import maintenance as thumbnail_maintenance
 from . import pregen
 from . import pregen_candidates
+from . import pregen_worker
 from . import runtime
 from . import source_identity
 from . import status as thumbnail_status
@@ -1260,198 +1261,55 @@ def _record_pregen_result(result: dict) -> int:
 
 
 async def _run_pregen_bulk_batch(generate_batch: int | None = None) -> int:
-    generate_batch = generate_batch or PREGENERATE_GENERATE_BATCH
-    tier_budgets = _bulk_tier_budgets()
-    if all(tier_budgets.get(size, 0) <= 0 for size in THUMB_TIERS):
-        return 0
-
-    if not await asyncio.to_thread(_flush_write_queue) and _cache_metadata_backoff_active():
-        return 0
-    tier_room = _bulk_tier_room(tier_budgets)
-    if all(room <= 0 for room in tier_room.values()) and _cache_metadata_backoff_active():
-        return 0
-    full_budget = int(_disk_allocations.get(FULL_TIER, 0) or 0)
-    full_room = {"bytes": _full_tier_room(full_budget)} if full_budget > 0 else {"bytes": 0}
-    pending = []
-    scanned_batches = 0
-    max_scan_batches = 4
-    reached_end = False
-
-    while len(pending) < generate_batch and scanned_batches < max_scan_batches:
-        if not _prefetching or _pregen_manual_pause:
-            break
-        if _pregen_should_yield_to_foreground():
-            break
-
-        rows = await _pregen_bulk_candidate_batch(PREGENERATE_SCAN_BATCH)
-        if not rows:
-            _reset_pregen_bulk_cursor()
-            reached_end = True
-            if pending:
-                break
-            rows = await _pregen_bulk_candidate_batch(PREGENERATE_SCAN_BATCH)
-            if not rows:
-                return 0
-
-        for row in rows:
-            if not _prefetching or _pregen_manual_pause:
-                break
-            if _pregen_should_yield_to_foreground():
-                break
-            size_signatures, source_size = _bulk_candidate_signatures(row, tier_room, tier_budgets)
-            full_item = (
-                _full_candidate_signature(row, full_room, full_budget)
-                if full_room["bytes"] > 0
-                else None
-            )
-            if not size_signatures and full_item is None:
-                continue
-            pending.append({
-                "id": int(row["id"]),
-                "filepath": row["filepath"],
-                "signatures": size_signatures,
-                "full": full_item,
-                "source_size": source_size,
-            })
-            if len(pending) >= generate_batch:
-                break
-
-        scanned_batches += 1
-        if len(rows) < PREGENERATE_SCAN_BATCH:
-            _reset_pregen_bulk_cursor()
-            reached_end = True
-            break
-        if reached_end:
-            break
-
-    if not pending:
-        if scanned_batches >= max_scan_batches and not reached_end:
-            return -1
-        return 0
-
-    loop = asyncio.get_running_loop()
-    completed = 0
-    idx = 0
-    wave_size = 1
-    for start in range(0, len(pending), wave_size):
-        wave = pending[start:start + wave_size]
-        tasks = [
-            loop.run_in_executor(
-                _prefetch_executor,
-                partial(
-                    _generate_thumbnail_set_sync,
-                    item["filepath"],
-                    item["id"],
-                    item["signatures"],
-                    source_bytes=item["source_size"],
-                    full_item=item.get("full"),
-                    hot=False,
-                ),
-            )
-            for item in wave
-        ]
-        for task in asyncio.as_completed(tasks):
-            idx += 1
-            completed += _record_pregen_result(await task)
-            if idx % 8 == 0 and not _pregen_should_yield_to_foreground():
-                await asyncio.to_thread(_flush_write_queue)
-        if _pregen_should_yield_to_foreground():
-            break
-    if not _pregen_should_yield_to_foreground():
-        await asyncio.to_thread(_flush_write_queue)
-    if completed <= 0:
-        return -1
-    return completed
+    return await pregen_worker.run_pregen_bulk_batch(
+        generate_batch,
+        default_generate_batch=PREGENERATE_GENERATE_BATCH,
+        scan_batch=PREGENERATE_SCAN_BATCH,
+        thumb_tiers=THUMB_TIERS,
+        full_tier=FULL_TIER,
+        disk_allocations=_disk_allocations,
+        is_prefetching=lambda: _prefetching,
+        is_manual_paused=lambda: _pregen_manual_pause,
+        should_yield_to_foreground=_pregen_should_yield_to_foreground,
+        flush_write_queue=_flush_write_queue,
+        cache_metadata_backoff_active=_cache_metadata_backoff_active,
+        bulk_tier_budgets=_bulk_tier_budgets,
+        bulk_tier_room=_bulk_tier_room,
+        full_tier_room=_full_tier_room,
+        pregen_bulk_candidate_batch=_pregen_bulk_candidate_batch,
+        reset_pregen_bulk_cursor=_reset_pregen_bulk_cursor,
+        bulk_candidate_signatures=_bulk_candidate_signatures,
+        full_candidate_signature=_full_candidate_signature,
+        prefetch_executor=_prefetch_executor,
+        generate_thumbnail_set_sync=_generate_thumbnail_set_sync,
+        record_pregen_result=_record_pregen_result,
+    )
 
 
 async def _run_full_warm_batch(generate_batch: int | None = None) -> int:
-    generate_batch = generate_batch or PREGENERATE_GENERATE_BATCH
-    full_budget = int(_disk_allocations.get(FULL_TIER, 0) or 0)
-    if full_budget <= 0 or not SSD_CACHE_DIR:
-        return 0
-
-    if not await asyncio.to_thread(_flush_write_queue) and _cache_metadata_backoff_active():
-        return 0
-    full_room = {"bytes": _full_tier_room(full_budget)}
-    if full_room["bytes"] <= 0:
-        return 0
-
-    pending = []
-    scanned_batches = 0
-    max_scan_batches = 4
-    reached_end = False
-
-    while len(pending) < generate_batch and scanned_batches < max_scan_batches:
-        if not _prefetching or _pregen_manual_pause:
-            break
-        if _pregen_should_yield_to_foreground():
-            break
-
-        rows = await _pregen_full_candidate_batch(PREGENERATE_SCAN_BATCH)
-        if not rows:
-            _reset_pregen_full_cursor()
-            reached_end = True
-            if pending:
-                break
-            rows = await _pregen_full_candidate_batch(PREGENERATE_SCAN_BATCH)
-            if not rows:
-                return 0
-
-        for row in rows:
-            if not _prefetching or _pregen_manual_pause:
-                break
-            if _pregen_should_yield_to_foreground():
-                break
-            item = _full_candidate_signature(row, full_room, full_budget)
-            if item is None:
-                continue
-            pending.append(item)
-            if len(pending) >= generate_batch or full_room["bytes"] <= 0:
-                break
-
-        scanned_batches += 1
-        if len(rows) < PREGENERATE_SCAN_BATCH:
-            _reset_pregen_full_cursor()
-            reached_end = True
-            break
-        if reached_end or full_room["bytes"] <= 0:
-            break
-
-    if not pending:
-        if scanned_batches >= max_scan_batches and not reached_end:
-            return -1
-        return 0
-
-    loop = asyncio.get_running_loop()
-
-    originals_written = 0
-    wave_size = 1
-
-    async def cache_full_item(item: dict) -> tuple[dict, str]:
-        result = await loop.run_in_executor(
-            _prefetch_executor,
-            _cache_full_image_sync,
-            item["filepath"],
-            item["id"],
-            item["signature"],
-            False,
-        )
-        return item, result
-
-    for start in range(0, len(pending), wave_size):
-        wave = pending[start:start + wave_size]
-        tasks = [asyncio.create_task(cache_full_item(item)) for item in wave]
-        for task in asyncio.as_completed(tasks):
-            item, result = await task
-            if result != item["filepath"] and fast_disk_has(FULL_TIER, item["id"], item["signature"]):
-                originals_written += 1
-                item_bytes = int(item.get("source_size") or 0)
-                _pregen_status["last_generated_at"] = _current_time()
-                _pregen_status["generated_this_session"] += 1
-                _record_pregen_batch(1, thumbnails_written=0, source_bytes=item_bytes)
-        if _pregen_should_yield_to_foreground():
-            break
-    return originals_written
+    return await pregen_worker.run_full_warm_batch(
+        generate_batch,
+        default_generate_batch=PREGENERATE_GENERATE_BATCH,
+        scan_batch=PREGENERATE_SCAN_BATCH,
+        cache_root=SSD_CACHE_DIR,
+        full_tier=FULL_TIER,
+        disk_allocations=_disk_allocations,
+        is_prefetching=lambda: _prefetching,
+        is_manual_paused=lambda: _pregen_manual_pause,
+        should_yield_to_foreground=_pregen_should_yield_to_foreground,
+        flush_write_queue=_flush_write_queue,
+        cache_metadata_backoff_active=_cache_metadata_backoff_active,
+        full_tier_room=_full_tier_room,
+        pregen_full_candidate_batch=_pregen_full_candidate_batch,
+        reset_pregen_full_cursor=_reset_pregen_full_cursor,
+        full_candidate_signature=_full_candidate_signature,
+        prefetch_executor=_prefetch_executor,
+        cache_full_image_sync=_cache_full_image_sync,
+        fast_disk_has=fast_disk_has,
+        pregen_state=_pregen_status,
+        current_time=_current_time,
+        record_pregen_batch=_record_pregen_batch,
+    )
 
 
 _copy_disk_stats = thumbnail_status.copy_disk_stats
