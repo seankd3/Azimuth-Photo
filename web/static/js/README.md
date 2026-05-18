@@ -104,6 +104,8 @@ rendering; legacy wires both through `legacy/search_sort_bridge.js`.
 and deep-search control flow.
 `library/similar.js` owns the Library "find similar" action, similar-results
 request flow, search-control state, and similar-card DOM rendering.
+`legacy/library_similar_bridge.js` owns the legacy Library find-similar facade
+around the extracted similar action.
 `library/flags.js` owns Library image-flag local DOM/state updates, single-image
 flag POSTs, and current-image flag selection.
 `library/batch.js` owns Library batch-selection click/toggle/clear mechanics,

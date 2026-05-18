@@ -30,7 +30,6 @@ import {
 import {
     hasActiveTextSearch as hasActiveTextSearchCore,
 } from '../search/query.js';
-import { createFindSimilarAction } from '../library/similar.js';
 import { createLegacyBatchBridge } from './batch_bridge.js';
 import { createLegacyCatalogScanBridge } from './catalog_scan_bridge.js';
 import { createLegacyCompareDisplayBridge } from './compare_display_bridge.js';
@@ -50,6 +49,7 @@ import {
 import { createLegacyLibraryInitBridge } from './library_init_bridge.js';
 import { createLegacyLibraryFilterBridge } from './library_filter_bridge.js';
 import { createLegacyLibraryMapBridge } from './library_map_bridge.js';
+import { createLegacyLibrarySimilarBridge } from './library_similar_bridge.js';
 import { createLegacyLibrarySortBridge } from './library_sort_bridge.js';
 import { createLegacyLoupeBridge } from './loupe_bridge.js';
 import { createLegacyMosaicBridge } from './mosaic_bridge.js';
@@ -926,7 +926,9 @@ const legacyPhotoArchive = (() => {
         return libraryFilterBridge.initStarHover();
     }
 
-    const findSimilar = createFindSimilarAction({
+    const findSimilar = createLegacyLibrarySimilarBridge({
+        documentImpl: document,
+        fetchImpl: fetch,
         getLightboxIndex: () => loupeBridge.getLightboxIndex(),
         getLibraryImages: () => libraryImages,
         setLibraryImages: (images) => { libraryImages = images; },

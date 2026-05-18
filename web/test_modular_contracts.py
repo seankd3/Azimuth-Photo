@@ -3873,6 +3873,8 @@ class ModularContractTests(unittest.TestCase):
             legacy_library_filter_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "library_map_bridge.js"), encoding="utf-8") as fh:
             legacy_library_map_bridge = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "legacy", "library_similar_bridge.js"), encoding="utf-8") as fh:
+            legacy_library_similar_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "library_sort_bridge.js"), encoding="utf-8") as fh:
             legacy_library_sort_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "loupe_bridge.js"), encoding="utf-8") as fh:
@@ -4098,6 +4100,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from './library_init_bridge.js';", legacy)
         self.assertIn("from './library_map_bridge.js';", legacy)
         self.assertIn("from './library_shell_bridge.js';", legacy)
+        self.assertIn("from './library_similar_bridge.js';", legacy)
         self.assertIn("from './library_sort_bridge.js';", legacy)
         self.assertIn("from './loupe_bridge.js';", legacy)
         self.assertIn("from './mosaic_bridge.js';", legacy)
@@ -4179,7 +4182,9 @@ class ModularContractTests(unittest.TestCase):
         self.assertNotIn("from '../export/actions.js';", legacy)
         self.assertIn("from '../export/actions.js';", legacy_export_bridge)
         self.assertIn("export function createLegacyExportBridge", legacy_export_bridge)
-        self.assertIn("from '../library/similar.js';", legacy)
+        self.assertNotIn("from '../library/similar.js';", legacy)
+        self.assertIn("from '../library/similar.js';", legacy_library_similar_bridge)
+        self.assertIn("export function createLegacyLibrarySimilarBridge", legacy_library_similar_bridge)
         self.assertNotIn("from '../library/display.js';", legacy)
         self.assertIn("from '../library/display.js';", legacy_loupe_bridge)
         self.assertIn("from '../library/rank_cards.js';", legacy)
@@ -11207,6 +11212,63 @@ lightboxIndex = 5;
 fetches.length = 0;
 await findSimilar();
 assert.deepEqual(fetches, []);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_legacy_library_similar_bridge_node_probe_preserves_action_facade(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createLegacyLibrarySimilarBridge } from './static/js/legacy/library_similar_bridge.js';
+
+const expected = {
+    documentImpl: { getElementById: () => null },
+    fetchImpl: async () => ({ json: async () => ({ images: [] }) }),
+    getLightboxIndex: () => 0,
+    getLibraryImages: () => [{ id: 1 }],
+    setLibraryImages: () => {},
+    setRankingsOffset: () => {},
+    setRankingsExhausted: () => {},
+    getThumbHeight: () => 220,
+    getCompareStats: () => ({}),
+    setCompareStats: () => {},
+    setSearchQuery: () => {},
+    setDeepSearchRequested: () => {},
+    bumpLibraryRequestGeneration: () => 1,
+    getLibraryRequestGeneration: () => 1,
+    closeLightbox: () => {},
+    clearWarmups: () => {},
+    clearPersistedSearchState: () => {},
+    updateDateScrubber: () => {},
+    clearBatchSelection: () => {},
+    updateCompareProgress: () => {},
+    openLightbox: () => {},
+};
+const dependencyNames = Object.keys(expected);
+const calls = [];
+
+const findSimilar = createLegacyLibrarySimilarBridge({
+    ...expected,
+    createFindSimilarActionImpl: (deps) => {
+        for (const name of dependencyNames) {
+            assert.strictEqual(deps[name], expected[name], `${name} dependency`);
+        }
+        return (...args) => {
+            calls.push(args);
+            return 'similar-result';
+        };
+    },
+});
+
+assert.equal(findSimilar('arg'), 'similar-result');
+assert.deepEqual(calls, [['arg']]);
 """
         subprocess.run(
             ["node", "--input-type=module", "-e", script],
