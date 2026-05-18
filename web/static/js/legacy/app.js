@@ -71,11 +71,6 @@ import {
     initSearchInputControls as initSearchInputControlsCore,
     runDeepSearch as runDeepSearchCore,
 } from '../library/search_controller.js';
-import {
-    setCurrentLibraryFlag as setCurrentLibraryFlagCore,
-    setImageFlag as setImageFlagCore,
-    updateImageFlagLocal as updateImageFlagLocalCore,
-} from '../library/flags.js';
 import { exportRankings as exportRankingsCore } from '../export/actions.js';
 import { eloToStars } from '../library/display.js';
 import { appendLibraryRankCards } from '../library/rank_cards.js';
@@ -122,6 +117,7 @@ import { createPeopleApi } from '../people/controller.js';
 import { createSettingsPageController } from '../settings/page.js';
 import { createLegacyBatchBridge } from './batch_bridge.js';
 import { createLegacyFilterQueryBridge } from './filter_query_bridge.js';
+import { createLegacyFlagBridge } from './flag_bridge.js';
 import { createLegacyLoupeBridge } from './loupe_bridge.js';
 import { createLegacyPublicApi } from './public_api.js';
 import { createLegacySearchSortBridge } from './search_sort_bridge.js';
@@ -1045,32 +1041,26 @@ const legacyPhotoArchive = (() => {
         };
     }
 
+    const flagBridge = createLegacyFlagBridge({
+        getImages: () => libraryImages,
+        getLightboxIndex: () => loupeBridge.getLightboxIndex(),
+        getSelectedLibraryIndex: () => selectedLibraryIndex,
+        getStandaloneImage: () => loupeBridge.getStandaloneImage(),
+        getCurrentImage: () => loupeBridge.getCurrentImage(),
+        showToast,
+        updateLoupeFlagDisplay,
+    });
+
     function updateImageFlagLocal(imageId, flag) {
-        updateImageFlagLocalCore(imageId, flag, {
-            images: libraryImages,
-            loupeStandaloneImage: loupeBridge.getStandaloneImage(),
-            loupeCurrentImage: loupeBridge.getCurrentImage(),
-            lightboxIndex: loupeBridge.getLightboxIndex(),
-            updateLoupeFlagDisplay,
-        });
+        return flagBridge.updateImageFlagLocal(imageId, flag);
     }
 
     async function setImageFlag(imageId, flag) {
-        await setImageFlagCore(imageId, flag, {
-            images: libraryImages,
-            showToast,
-            updateImageFlagLocalImpl: updateImageFlagLocal,
-        });
+        return await flagBridge.setImageFlag(imageId, flag);
     }
 
     function setCurrentLibraryFlag(flag) {
-        setCurrentLibraryFlagCore(flag, {
-            images: libraryImages,
-            lightboxIndex: loupeBridge.getLightboxIndex(),
-            loupeStandaloneImage: loupeBridge.getStandaloneImage(),
-            selectedLibraryIndex,
-            setImageFlagImpl: setImageFlag,
-        });
+        return flagBridge.setCurrentLibraryFlag(flag);
     }
 
     async function loadRankings(clearFirst = false) {

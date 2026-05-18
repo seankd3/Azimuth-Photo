@@ -9,7 +9,9 @@ frontend monolith behind compatibility wrappers. `legacy/public_api.js` owns the
 exported compatibility method table that backs `window.PhotoArchive.*`.
 `legacy/filter_query_bridge.js` owns the legacy filter/query state bridge that
 connects Library, Mosaic, and Compare URL construction to the extracted filter
-and query modules. `legacy/batch_bridge.js` owns the legacy batch-selection
+and query modules. `legacy/flag_bridge.js` owns the legacy Library image-flag
+facade that binds flag updates to Loupe and selection state.
+`legacy/batch_bridge.js` owns the legacy batch-selection
 controller facade for Library card selection, batch flagging, and selected-image
 export. `legacy/loupe_bridge.js` owns the legacy Loupe controller and
 media-status facade wiring. `legacy/search_sort_bridge.js` owns the legacy

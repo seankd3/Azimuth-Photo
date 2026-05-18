@@ -3847,6 +3847,8 @@ class ModularContractTests(unittest.TestCase):
             legacy_batch_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "filter_query_bridge.js"), encoding="utf-8") as fh:
             legacy_filter_query_bridge = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "legacy", "flag_bridge.js"), encoding="utf-8") as fh:
+            legacy_flag_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "loupe_bridge.js"), encoding="utf-8") as fh:
             legacy_loupe_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "search_sort_bridge.js"), encoding="utf-8") as fh:
@@ -4043,6 +4045,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../catalog/scan_entrypoint.js';", legacy)
         self.assertIn("from './batch_bridge.js';", legacy)
         self.assertIn("from './filter_query_bridge.js';", legacy)
+        self.assertIn("from './flag_bridge.js';", legacy)
         self.assertIn("from './loupe_bridge.js';", legacy)
         self.assertIn("from './search_sort_bridge.js';", legacy)
         self.assertIn("from './ui_runtime_bridge.js';", legacy)
@@ -4078,7 +4081,9 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../library/search_controls.js';", legacy_search_sort_bridge)
         self.assertIn("export function createLegacySearchSortBridge", legacy_search_sort_bridge)
         self.assertIn("from '../library/search_controller.js';", legacy)
-        self.assertIn("from '../library/flags.js';", legacy)
+        self.assertNotIn("from '../library/flags.js';", legacy)
+        self.assertIn("from '../library/flags.js';", legacy_flag_bridge)
+        self.assertIn("export function createLegacyFlagBridge", legacy_flag_bridge)
         self.assertNotIn("from '../library/batch_controller.js';", legacy)
         self.assertIn("from '../library/batch_controller.js';", legacy_batch_bridge)
         self.assertIn("export function createLegacyBatchBridge", legacy_batch_bridge)
@@ -5901,6 +5906,83 @@ assert.deepEqual(calls, [
     ['handleCardClick', 'click', 7, 'card-7', 3],
     ['batchFlag', 'rejected'],
     ['batchExport', 'csv'],
+]);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_legacy_flag_bridge_node_probe_preserves_flag_facade(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createLegacyFlagBridge } from './static/js/legacy/flag_bridge.js';
+
+const images = [{ id: 7, flag: 'unflagged' }];
+const standalone = { id: 8, flag: 'picked' };
+const current = { id: 7, flag: 'unflagged' };
+const calls = [];
+const bridge = createLegacyFlagBridge({
+    updateImageFlagLocalImpl: (imageId, flag, options) => {
+        calls.push([
+            'updateImageFlagLocal',
+            imageId,
+            flag,
+            options.images === images,
+            options.loupeStandaloneImage === standalone,
+            options.loupeCurrentImage === current,
+            options.lightboxIndex,
+            options.updateLoupeFlagDisplay === updateLoupeFlagDisplay,
+        ]);
+    },
+    setImageFlagImpl: async (imageId, flag, options) => {
+        calls.push([
+            'setImageFlag',
+            imageId,
+            flag,
+            options.images === images,
+            options.showToast === showToast,
+            options.updateImageFlagLocalImpl === bridge.updateImageFlagLocal,
+        ]);
+        return true;
+    },
+    setCurrentLibraryFlagImpl: (flag, options) => {
+        calls.push([
+            'setCurrentLibraryFlag',
+            flag,
+            options.images === images,
+            options.lightboxIndex,
+            options.loupeStandaloneImage === standalone,
+            options.selectedLibraryIndex,
+            options.setImageFlagImpl === bridge.setImageFlag,
+        ]);
+        return images[0];
+    },
+    getImages: () => images,
+    getLightboxIndex: () => 2,
+    getSelectedLibraryIndex: () => 0,
+    getStandaloneImage: () => standalone,
+    getCurrentImage: () => current,
+    showToast,
+    updateLoupeFlagDisplay,
+});
+
+function showToast() {}
+function updateLoupeFlagDisplay() {}
+
+bridge.updateImageFlagLocal(7, 'picked');
+assert.equal(await bridge.setImageFlag(7, 'rejected'), true);
+assert.equal(bridge.setCurrentLibraryFlag('unflagged'), images[0]);
+
+assert.deepEqual(calls, [
+    ['updateImageFlagLocal', 7, 'picked', true, true, true, 2, true],
+    ['setImageFlag', 7, 'rejected', true, true, true],
+    ['setCurrentLibraryFlag', 'unflagged', true, 2, true, 0, true],
 ]);
 """
         subprocess.run(
