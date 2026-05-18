@@ -1,152 +1,135 @@
 # photoArchive
 
-A local-first photo archive manager with AI-powered ranking, semantic search, and a Lightroom-inspired library interface. Built for photographers who need to efficiently review, rank, and organize large photo collections.
+photoArchive is a local-first photo archive for browsing, searching, ranking, and organizing large personal photo collections. It is built for real working libraries: external drives, many thousands of images, slow storage, long background jobs, and a need for fast day-to-day interaction.
 
-Everything runs locally on your machine — no cloud, no subscriptions, no uploads. Your photos stay yours.
+Everything runs on your machine. Source photos and videos are treated as source-of-truth media and are never modified or deleted by the app.
+
+## Current Features
+
+- **Library**: dense justified grid, map view, Lightroom-style loupe with filmstrip, keyboard navigation, flags, stars, metadata filters, folder filters, People filters, similarity search, and JSON/CSV export.
+- **Compare**: Mosaic, Swiss A/B, and Top 50 ranking modes backed by Elo scoring. Mosaic lets one pick record many ranking signals at once.
+- **People**: local face scanning, review queues, labels, merges, ignored faces, and People filters that work alongside Library search and filters.
+- **Semantic search**: fast daily search with Qwen3-VL-Embedding-2B, plus scheduled deep search with Qwen3-VL-Embedding-8B for saved/cached terms.
+- **Search result caching**: repeated semantic searches can return from a persistent SQLite result cache, so common searches stay fast after the first successful embedding pass.
+- **Similarity and duplicates**: whole-image embedding search powers "find similar", duplicate discovery, and visual grouping.
+- **Ranking intelligence**: Elo propagation nudges visually similar under-ranked images after a comparison, while direct comparisons remain the source of confidence.
+- **Cache-aware browsing**: RAM and SSD thumbnail/original caches keep active Library, Loupe, Compare, and Mosaic browsing responsive even when source media lives on slower storage.
+- **Background work controls**: Settings and the bottom bar show embedding, deep-search, preview-cache, and original-cache progress with rates, ETAs, and pause/resume controls.
+- **No build frontend**: browser-native HTML/CSS/JavaScript modules, no Vite, no TypeScript, no bundling.
 
 ## Quick Start
 
 ```bash
-git clone https://github.com/SeanKennyDoherty/photoArchive.git
-cd photoArchive/web
+git clone https://github.com/Sean-Kenneth-Doherty/photo-archive.git
+cd photo-archive/web
 python -m venv .venv
-source .venv/bin/activate    # Linux/Mac
-# .venv\Scripts\activate     # Windows
+source .venv/bin/activate
 pip install -r requirements.txt
 
 cd ..
 ./scripts/photoarchive-server restart
 ```
 
-Open **http://localhost:8000**. Click "Scan Folder" and point it at your photo directory. That's it.
+Open `http://127.0.0.1:8000`, go to Catalog or Settings, and add the folder that contains your photos.
 
-### Requirements
+The server helper respects:
 
-- Python 3.11+
-- NVIDIA GPU with ~3.5GB VRAM (for AI features — the app works without a GPU but semantic search, similarity, and taste learning require it)
-- A folder of photos (JPG, JPEG, PNG, TIFF, DNG, CR3, WebP)
+- `PHOTOARCHIVE_HOST` default `127.0.0.1`
+- `PHOTOARCHIVE_PORT` default `8000`
+- `PHOTOARCHIVE_MAX_LOG_BYTES` for `.run/server.log` rotation
 
-### Alternative: Run Directly
+You can also run the app directly:
 
 ```bash
 cd web
-.venv/bin/uvicorn app:app --host 0.0.0.0 --port 8000
+.venv/bin/uvicorn app:app --host 127.0.0.1 --port 8000
 ```
 
-The port and host are configurable via `PHOTOARCHIVE_PORT` and `PHOTOARCHIVE_HOST` environment variables (defaults: `127.0.0.1:8000`).
+## Requirements
 
-## What It Does
+- Python 3.11+
+- Linux is the primary development target
+- SQLite, Pillow, FastAPI, and the packages in `web/requirements.txt`
+- NVIDIA GPU strongly recommended for embedding work
+- Local model storage for Qwen embedding models
 
-### The Workflow: Browse → Flag → Compare
+The app still works without AI models installed, but semantic search, similarity, deep search, duplicate detection, and embedding-backed ranking features will be unavailable or degraded until models are present.
 
-1. **Browse** — Review your archive in a justified Library grid and Lightroom-style loupe.
+## Main Workflow
 
-2. **Flag** — Mark images as Picked, Unflagged, or Rejected with lightweight Lightroom-style flags. Flags are just filters; they do not change ranking behavior.
+1. **Add catalog sources** in Catalog or Settings. The scanner indexes file paths and metadata without touching the original files.
+2. **Browse Library** with cache-backed thumbnails, search, filters, People filters, map view, and Loupe.
+3. **Flag and filter** images as picked, unflagged, or rejected. Flags are organizational filters, not source-file operations.
+4. **Rank in Compare** using Mosaic, Swiss A/B, or Top 50.
+5. **Return to Library** to search, inspect ranked results, filter the archive, and export.
 
-3. **Compare** — Rank images using Elo ratings. Three modes:
-   - **Mosaic**: Pick the best from a justified grid of 12 images. One click = 11 comparisons. Fast.
-   - **Swiss**: Side-by-side A/B comparisons with Swiss-system pairing (30% random swap to avoid echo chambers).
-   - **Top 50**: Refine rankings among your highest-rated images.
-   - Five selection strategies: Learn (AI-guided uncertainty), Explore, Compete, Top Cut, Random.
+## Search And AI
 
-4. **Library** — Browse your ranked archive. Justified grid, Lightroom-style loupe view with filmstrip, text search, find similar, filter by flag/orientation/stars/folder/ranked status, export rankings as JSON or CSV.
+photoArchive uses two embedding surfaces:
 
-### AI Features
+- **Daily Search, 2B**: the fast Qwen3-VL-Embedding-2B index used for normal semantic search and interactive work.
+- **Deep Search, 8B**: a scheduled Qwen3-VL-Embedding-8B index for smarter saved terms and overnight/max-work runs.
 
-The AI system is optional but powerful. Install the model from the Settings page (or it auto-downloads on first use, ~3.4GB).
+The intended behavior is fast foreground work and heavy background work:
 
-- **Semantic search**: Type "red car" or "portrait with bokeh" and find matching photos via 2048-dim multimodal embeddings
-- **Find similar**: Click any photo and find visually similar ones across your archive
-- **Taste learning**: A Ridge regression taste model learns your preferences from comparisons and predicts where uncompared images would rank
-- **Uncertainty-driven selection**: The "Learn" strategy surfaces the most informative images to compare next, using per-image uncertainty via leverage scores
-- **Elo propagation**: Compare one photo from a set of 30 similar shots, and all 30 get nudged toward the right ranking automatically (cosine similarity > 0.75, 30% K-factor, max 10 neighbors)
-- **Auto-collections**: K-means clustering groups your photos into visual themes
-- **Duplicate detection**: Find near-duplicates via embedding cosine similarity
+- the 2B model warms on normal app startup;
+- the app can show fast 2B results first;
+- repeated semantic searches are cached in SQLite;
+- deep 8B work can run later and update cached intelligence without blocking normal browsing.
 
-### How Ranking Works
+Settings exposes model install/status, embedding progress, deep-search query status, cache health, and background-work mode. The Library and Compare bottom bar includes a compact Work panel with colored progress bars and ETAs.
 
-Images start at 1200 Elo. In mosaic mode, picking one image as "best" records it as the winner against all others visible (K=12 per pair). The Elo system naturally surfaces the best photos over time.
+## Data And Safety
 
-The taste model accelerates this: after enough comparisons, it learns patterns in your preferences via the image embeddings and predicts where uncompared images would rank. This "predicted Elo" is used for pairing uncompared images so they get matched against appropriate opponents instead of all starting at 1200.
+Runtime data lives under `web/` by default:
 
-Elo propagation means you don't have to compare every photo individually. Rank one shot from a burst of 30 similar photos, and all 30 get adjusted. The propagation only affects images with fewer than 8 direct comparisons, so it never overrides confident rankings.
+- `photoarchive.db`: SQLite catalog, metadata, ratings, comparisons, People data, embeddings, and search result caches
+- `.thumbcache/`: generated thumbnails and optional browser-readable hot original copies
+- `.models/`: local AI models
+- `settings.local.json`: machine-local runtime settings
+- `.run/server.log`: local server log
+
+These generated paths are gitignored. Source photos/videos are not mutated. Cached originals are copies used for fast browser access, not replacements for archive media.
 
 ## Architecture
 
-```
+```text
 web/
-  app.py               Compatibility entrypoint for uvicorn app:app and old imports
-  core/                Shared FastAPI shell, request/response/query helpers, cache fanout
-  features/            Vertical page/API workflow modules with feature-owned routers
-  data/                SQLite connection/schema modules plus domain repositories
-  db.py                Compatibility facade over data repositories and legacy callers
-  embedding_worker.py   Background AI worker (Qwen3-VL-Embedding-2B, int4)
-  embed_cache.py        Shared in-memory embedding matrix for search/similar/duplicates
-  ai_models.py          Model installation and download management
-  settings.py           Runtime settings with JSON persistence and hot-reload
-  scanner.py            Recursive folder scanning with batch inserts
-  pairing.py            Elo calculation and Swiss-system pairing
-  elo_propagation.py    Propagate Elo to similar images via embedding cosine similarity
-  thumbnails/           Thumbnail package facade plus split cache/generation/status modules
-  static/
-    app.js              No-build ES module bootstrap for window.PhotoArchive
-    js/                 Shared and feature browser modules; legacy/app.js drains over time
-    style.css           Dark theme, justified grids, loupe view
-  templates/
-    base.html           Base layout with navbar/bottom_bar blocks
-    _filters.html       Shared filter partial (orientation, stars, folder, ranked status)
-    index.html          Landing page with folder scan
-    compare.html        Mosaic/Swiss/Top50 compare modes with AI panel
-    library.html        Justified grid, loupe view, filmstrip, search
-    settings.html       Thumbnail, cache, and AI model configuration
+  app.py                 compatibility entrypoint for uvicorn app:app
+  core/                  app factory, request/response helpers, query constraints, cache fanout
+  features/              vertical page/API workflows such as library, compare, people, cache, settings
+  data/                  schema, SQLite connection helpers, domain repositories
+  db.py                  compatibility facade over data repositories
+  embedding_worker.py    background embedding and deep-search worker
+  embed_cache.py         in-memory embedding matrices for search/similarity paths
+  thumbnails/            thumbnail generation, cache budgets, pregen workers, status
+  static/js/             no-build browser modules plus the legacy compatibility bridge
+  templates/             FastAPI/Jinja page templates and shared partials
 ```
 
-### Stack
+New feature workflow code should live in `web/features/<feature>/`. Shared app shell and cross-feature helpers belong in `web/core/`. Domain SQL belongs in `web/data/repositories/`, with `web/db.py` kept as the compatibility facade during migration.
 
-- **Backend**: Python, FastAPI, aiosqlite (SQLite in WAL mode)
-- **Frontend**: Vanilla HTML/CSS/JS — no build step, no node_modules, no framework
-- **AI**: Qwen3-VL-Embedding-2B via sentence-transformers + bitsandbytes (int4 quantized)
-- **ML**: scikit-learn Ridge regression for taste model
+The browser remains no-build native JavaScript. Public URLs, JSON response shapes, settings keys, and `window.PhotoArchive.*` compatibility are intentionally preserved while the older frontend drains out of `web/static/js/legacy/app.js`.
 
-### Where New Work Goes
+## Testing
 
-Feature workflow code belongs under `web/features/<feature>/`: each feature owns its routes plus any service code that orchestrates that page or API surface. Shared request parsing, response contracts, query constraints, cache invalidation, background startup/shutdown, and app construction belong under `web/core/`.
+Common checks:
 
-SQL should move by domain into `web/data/repositories/`, with `web/db.py` kept as the compatibility facade until old call sites are gone. Thumbnail cache/runtime work belongs in the `web/thumbnails/` package, with `import thumbnails` preserved through the package facade. Browser code stays no-build ES modules under `web/static/js/`; keep `window.PhotoArchive` compatibility stable while code drains out of `web/static/js/legacy/app.js`.
+```bash
+cd web
+.venv/bin/python -m unittest
+cd ..
+scripts/photoarchive-browser-smoke --base-url http://127.0.0.1:8000
+```
 
-### Design Decisions
+For quick server checks:
 
-- **Local-first**: Everything runs on your machine. SQLite database, local thumbnails, local embeddings. No network calls except model download.
-- **Slow storage friendly**: Designed for photos on external HDDs. RAM + SSD cache budgets are user-configurable, with automatic tier allocation and progressive image upgrades from `sm` to `md` to `lg` to cached originals.
-- **In-place preview refreshes**: Changing thumbnail size or JPEG quality does not have to wipe the cache. Old previews can remain usable while photoArchive replaces each file in the background.
-- **SSD-first AI workflow**: The embedding worker reads cached `md` previews from SSD, so search indexing does not compete with thumbnail generation for HDD reads.
-- **No framework frontend**: Browser-native ES modules, no build step, no node_modules, no framework. The compatibility bootstrap keeps `window.PhotoArchive` stable while old code drains out of `static/js/legacy/app.js`.
-- **Elo over stars**: Star ratings require absolute judgments. Elo only requires relative ones ("which is better?") and converges to a true ranking automatically.
-- **Selective GZip**: Custom middleware skips compression for binary image payloads to avoid wasting CPU on already-compressed data.
-
-## Configuration
-
-Settings are available at **http://localhost:8000/settings** after launch:
-
-- Thumbnail sizes (small, medium, large) and quality
-- RAM/SSD cache budgets, cache profile, tier allocation, and prefetch settings
-- AI model installation and status
-- Embedding model selection
-- Search similarity threshold
-
-When thumbnail size or JPEG quality changes, Settings lets you either keep existing previews as-is or refresh them in the background. Refreshing is progressive: the old preview remains available until the new one is generated and atomically written into place.
-
-Settings persist to `web/settings.local.json` (gitignored). Legacy settings are auto-migrated.
-
-## Data
-
-All app data stays in `web/` by default:
-- `photoarchive.db` — SQLite database (image metadata, Elo ratings, comparisons, embeddings)
-- `.thumbcache/` — Generated thumbnails plus selective SSD copies of hot originals
-- `.embedcache/` — Cached embedding vectors
-- `.models/` — Downloaded AI models (~3.4GB)
-
-All of these are gitignored. Your source photo files are never modified. Browser-readable originals may be copied into the SSD hot cache when there is room, but the archive files themselves remain untouched.
+```bash
+./scripts/photoarchive-server status
+curl http://127.0.0.1:8000/api/dev/status
+curl http://127.0.0.1:8000/api/ai/status
+curl http://127.0.0.1:8000/api/cache/status
+```
 
 ## License
 

@@ -60,7 +60,7 @@ const legacyPhotoArchive = (() => {
         withTimeout,
     } = warmupBridge;
     const sharedRuntimeBridge = createLegacySharedRuntimeBridge();
-    const { fetchJson, toggleAIPanel } = sharedRuntimeBridge;
+    const { fetchJson, toggleAIPanel, toggleBackgroundWorkPanel } = sharedRuntimeBridge;
     const sharedHelpersBridge = createLegacySharedHelpersBridge();
     const {
         compareNeighborPairs: COMPARE_NEIGHBOR_PAIRS,
@@ -1165,6 +1165,7 @@ const legacyPhotoArchive = (() => {
         mosaicShuffle,
         setMosaicStrategy,
         toggleAIPanel,
+        toggleBackgroundWorkPanel,
         saveSettings,
         applyRecommendedCache,
         resetSettings,

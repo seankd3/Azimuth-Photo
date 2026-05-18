@@ -1,4 +1,10 @@
 import { escapeHtml } from '../ui.js';
+import {
+    bindBackgroundWorkPanel as bindBackgroundWorkPanelCore,
+    renderBackgroundWorkPanel,
+    renderBackgroundWorkSummary,
+    toggleBackgroundWorkPanel as toggleBackgroundWorkPanelCore,
+} from '../work/status_panel.js';
 
 export function aiStatusPollDelay(data, {
     activePollMs = 5000,
@@ -18,34 +24,7 @@ export function aiStatusPollDelay(data, {
 
 
 export function renderAIBottomBarStatus(data = {}, { documentImpl = globalThis.document } = {}) {
-    const countEl = documentImpl?.getElementById?.('ai-embed-count');
-    const totalEl = documentImpl?.getElementById?.('ai-embed-total');
-    const stateEl = documentImpl?.getElementById?.('ai-model-state');
-    const totalImages = Number(data.total_images ?? data.total_kept ?? 0);
-    if (countEl) countEl.textContent = data.embedded.toLocaleString();
-    if (totalEl) totalEl.textContent = totalImages.toLocaleString();
-    if (stateEl) {
-        if (data.installing) {
-            stateEl.textContent = 'Installing';
-            stateEl.className = 'bar-ai-state embedding';
-        } else if (!data.model_installed) {
-            stateEl.textContent = 'Install';
-            stateEl.className = 'bar-ai-state';
-        } else if (!data.worker_ready && data.worker_state === 'loading_model') {
-            stateEl.textContent = 'Loading';
-            stateEl.className = 'bar-ai-state embedding';
-        } else if (data.embedded < totalImages) {
-            stateEl.textContent = 'Embedding';
-            stateEl.className = 'bar-ai-state embedding';
-        } else if (data.embedded > 0) {
-            stateEl.textContent = 'Ready';
-            stateEl.className = 'bar-ai-state trained';
-        } else {
-            stateEl.textContent = '';
-            stateEl.className = 'bar-ai-state';
-        }
-    }
-    return { totalImages };
+    return renderBackgroundWorkSummary(data, { documentImpl });
 }
 
 
@@ -93,14 +72,27 @@ export function renderAIPanelStatus(data = {}, {
 export function renderAIStatusWidgets(data = {}, options = {}) {
     const { totalImages } = renderAIBottomBarStatus(data, options);
     renderAIPanelStatus(data, { ...options, totalImages });
+    renderBackgroundWorkPanel(data, options);
 }
 
 
 export function toggleAIPanel({ documentImpl = globalThis.document } = {}) {
-    const panel = documentImpl?.getElementById?.('ai-panel');
-    if (!panel) return false;
-    panel.classList.toggle('hidden');
-    return true;
+    const legacyPanel = documentImpl?.getElementById?.('ai-panel');
+    if (legacyPanel) {
+        legacyPanel.classList.toggle('hidden');
+        return true;
+    }
+    return toggleBackgroundWorkPanel({ documentImpl });
+}
+
+
+export function toggleBackgroundWorkPanel({ documentImpl = globalThis.document } = {}) {
+    return toggleBackgroundWorkPanelCore({ documentImpl });
+}
+
+
+export function bindBackgroundWorkPanel({ documentImpl = globalThis.document } = {}) {
+    return bindBackgroundWorkPanelCore({ documentImpl });
 }
 
 

@@ -48,6 +48,7 @@ const REQUIRED_API = [
     "mosaicShuffle",
     "setMosaicStrategy",
     "toggleAIPanel",
+    "toggleBackgroundWorkPanel",
     "saveSettings",
     "applyRecommendedCache",
     "resetSettings",
@@ -88,7 +89,7 @@ const PAGE_SENTINELS = {
     "/people": [".people-page", "#people-status-line", "#people-most-seen"],
     "/library": [".library-container", "#rankings-grid", "#library-bar"],
     "/rankings": [".library-container", "#rankings-grid", "#library-bar"],
-    "/compare": [".compare-container", "#mosaic-grid", "#compare-bar", "#ai-panel"],
+    "/compare": [".compare-container", "#mosaic-grid", "#compare-bar", "#background-work-panel"],
 };
 const AI_STATUS_FIELD_SELECTORS = {
     "/library": [
@@ -105,9 +106,7 @@ const AI_STATUS_FIELD_SELECTORS = {
         "#ai-embed-count",
         "#ai-embed-total",
         "#ai-model-state",
-        "#ai-panel-embed-text",
-        "#ai-panel-model-text",
-        "#ai-panel-predictions-text",
+        "#background-work-panel-rows",
     ],
 };
 const SMOKE_WORKFLOW_CONTRACT = [
@@ -189,9 +188,9 @@ const SMOKE_WORKFLOW_CONTRACT = [
         pageSelectors: {
             "/": ["#model-install-status", "#fast-index-status", "#deep-search-worker-status"],
             "/settings": ["#model-install-status", "#fast-index-status", "#deep-search-worker-status"],
-            "/library": ["#bar-ai", "#ai-embed-count", "#ai-model-state"],
-            "/rankings": ["#bar-ai", "#ai-embed-count", "#ai-model-state"],
-            "/compare": ["#bar-ai", "#ai-embed-count", "#ai-model-state", "#ai-panel"],
+            "/library": ["#bar-work", "#ai-embed-count", "#ai-model-state", "#background-work-panel"],
+            "/rankings": ["#bar-work", "#ai-embed-count", "#ai-model-state", "#background-work-panel"],
+            "/compare": ["#bar-work", "#ai-embed-count", "#ai-model-state", "#background-work-panel"],
         },
     },
 ];
@@ -779,14 +778,14 @@ function readinessExpression(pagePath) {
                 throw new Error("missing page sentinels: " + missingSelectors.join(", "));
             }
             if (${JSON.stringify(pagePath)} === "/compare") {
-                const panel = document.querySelector("#ai-panel");
+                const panel = document.querySelector("#background-work-panel");
                 const wasHidden = panel?.classList.contains("hidden");
-                api.toggleAIPanel();
+                api.toggleBackgroundWorkPanel();
                 const toggledHidden = panel?.classList.contains("hidden");
-                api.toggleAIPanel();
+                api.toggleBackgroundWorkPanel();
                 const restoredHidden = panel?.classList.contains("hidden");
                 if (wasHidden === toggledHidden || restoredHidden !== wasHidden) {
-                    throw new Error("PhotoArchive.toggleAIPanel did not toggle and restore #ai-panel");
+                    throw new Error("PhotoArchive.toggleBackgroundWorkPanel did not toggle and restore #background-work-panel");
                 }
             }
             return {

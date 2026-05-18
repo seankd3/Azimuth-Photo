@@ -4015,6 +4015,8 @@ class ModularContractTests(unittest.TestCase):
             ai_status = fh.read()
         with open(os.path.join(base_dir, "static", "js", "ai", "poller.js"), encoding="utf-8") as fh:
             ai_poller = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "work", "status_panel.js"), encoding="utf-8") as fh:
+            work_status_panel = fh.read()
         with open(os.path.join(base_dir, "static", "js", "catalog", "status.js"), encoding="utf-8") as fh:
             catalog_status = fh.read()
         with open(os.path.join(base_dir, "static", "js", "query_state.js"), encoding="utf-8") as fh:
@@ -4361,6 +4363,8 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("export function deepSearchQueryListHtml", ai_status)
         self.assertIn("export function modelInstallDisplay", ai_status)
         self.assertIn("export function toggleAIPanel", ai_status)
+        self.assertIn("export function toggleBackgroundWorkPanel", ai_status)
+        self.assertIn("export function bindBackgroundWorkPanel", ai_status)
         self.assertIn("export function deepSearchWorkerText", ai_status)
         self.assertIn("export function deepSearchImageStatusText", ai_status)
         self.assertIn("export function deepSearchQueryStatusText", ai_status)
@@ -4368,6 +4372,10 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from './status.js';", ai_poller)
         self.assertIn("initVisibilityRefresh?.();", ai_poller)
         self.assertIn("handleVisible", ai_poller)
+        self.assertIn("export function backgroundProcessRows", work_status_panel)
+        self.assertIn("export function renderBackgroundWorkPanel", work_status_panel)
+        self.assertIn("export function renderBackgroundWorkSummary", work_status_panel)
+        self.assertIn("export function bindBackgroundWorkPanel", work_status_panel)
         self.assertIn("export function sourceState", catalog_status)
         self.assertIn("export function setScanBusy", catalog_status)
         self.assertIn("export function catalogSourcesHtml", catalog_sources)
@@ -7822,7 +7830,10 @@ assert.deepEqual(calls, methodNames.map((name) => [name, [`${name}-arg`]]));
         base_dir = os.path.dirname(__file__)
         script = r"""
 import assert from 'node:assert/strict';
-import { toggleAIPanel } from './static/js/ai/status.js';
+import {
+    toggleAIPanel,
+    toggleBackgroundWorkPanel,
+} from './static/js/ai/status.js';
 
 const panel = {
     hidden: false,
@@ -7833,8 +7844,18 @@ const panel = {
         },
     },
 };
+const workPanel = {
+    hidden: false,
+    classList: {
+        toggle(name) {
+            assert.equal(name, 'hidden');
+            workPanel.hidden = !workPanel.hidden;
+        },
+    },
+};
 const document = {
     getElementById(id) {
+        if (id === 'background-work-panel') return workPanel;
         return id === 'ai-panel' ? panel : null;
     },
 };
@@ -7844,6 +7865,8 @@ assert.equal(panel.hidden, true);
 assert.equal(toggleAIPanel({ documentImpl: document }), true);
 assert.equal(panel.hidden, false);
 assert.equal(toggleAIPanel({ documentImpl: { getElementById: () => null } }), false);
+assert.equal(toggleBackgroundWorkPanel({ documentImpl: document }), true);
+assert.equal(workPanel.hidden, true);
 """
         subprocess.run(
             ["node", "--input-type=module", "-e", script],
@@ -7870,13 +7893,19 @@ const bridge = createLegacySharedRuntimeBridge({
         calls.push(['toggleAIPanel', args]);
         return true;
     },
+    toggleBackgroundWorkPanelImpl: (...args) => {
+        calls.push(['toggleBackgroundWorkPanel', args]);
+        return true;
+    },
 });
 
 assert.deepEqual(bridge.fetchJson('/api/test', { defaultValue: null }), { ok: true });
 assert.equal(bridge.toggleAIPanel({ panel: true }), true);
+assert.equal(bridge.toggleBackgroundWorkPanel({ work: true }), true);
 assert.deepEqual(calls, [
     ['fetchJson', ['/api/test', { defaultValue: null }]],
     ['toggleAIPanel', [{ panel: true }]],
+    ['toggleBackgroundWorkPanel', [{ work: true }]],
 ]);
 """
         subprocess.run(
@@ -8005,17 +8034,17 @@ assert.deepEqual(calls, [
 import assert from 'node:assert/strict';
 import { createAIStatusPoller } from './static/js/ai/poller.js';
 
-const barAI = { style: { display: '' } };
+const barWork = { style: { display: '' }, dataset: {}, addEventListener() {} };
 const document = {
     hidden: false,
     getElementById(id) {
-        return id === 'bar-ai' ? barAI : null;
+        return id === 'bar-work' ? barWork : null;
     },
 };
 const timers = [];
 const clearedTimers = [];
 let initVisibilityCalls = 0;
-let fetchCalls = 0;
+let aiFetchCalls = 0;
 const rendered = [];
 
 const poller = createAIStatusPoller({
@@ -8033,14 +8062,21 @@ const poller = createAIStatusPoller({
         timer.cleared = true;
     },
     fetchImpl: async (url) => {
+        if (url === '/api/cache/status') {
+            return {
+                async json() {
+                    return { pregen: {}, disk: { tiers: {} } };
+                },
+            };
+        }
         assert.equal(url, '/api/ai/status');
-        fetchCalls += 1;
+        aiFetchCalls += 1;
         return {
             async json() {
                 return {
                     model_installed: true,
-                    worker_state: fetchCalls === 1 ? 'embedding' : 'idle',
-                    embedded: fetchCalls,
+                    worker_state: aiFetchCalls === 1 ? 'embedding' : 'idle',
+                    embedded: aiFetchCalls,
                     total_images: 10,
                 };
             },
@@ -8048,6 +8084,7 @@ const poller = createAIStatusPoller({
     },
     renderStatus: (data, options) => {
         assert.equal(options.documentImpl, document);
+        assert.deepEqual(options.cacheStatus, { pregen: {}, disk: { tiers: {} } });
         rendered.push(data);
     },
     activePollMs: 11,
@@ -8066,7 +8103,7 @@ assert.equal(initVisibilityCalls, 2);
 assert.equal(timers.length, 1);
 
 await timers.shift().callback();
-assert.equal(fetchCalls, 1);
+assert.equal(aiFetchCalls, 1);
 assert.equal(rendered.length, 1);
 assert.equal(rendered[0].worker_state, 'embedding');
 assert.equal(timers.length, 1);
@@ -8096,7 +8133,7 @@ const failingPoller = createAIStatusPoller({
 document.hidden = false;
 failingPoller.start(0);
 await timers.pop().callback();
-assert.equal(barAI.style.display, 'none');
+assert.equal(barWork.style.display, 'none');
 assert.equal(timers.at(-1).delayMs, 30000);
 """
         subprocess.run(

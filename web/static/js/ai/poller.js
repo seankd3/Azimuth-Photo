@@ -1,5 +1,6 @@
 import {
     aiStatusPollDelay,
+    bindBackgroundWorkPanel,
     renderAIStatusWidgets,
 } from './status.js';
 
@@ -15,6 +16,7 @@ export function createAIStatusPoller({
     pollDelay = aiStatusPollDelay,
     renderStatus = renderAIStatusWidgets,
     statusUrl = '/api/ai/status',
+    cacheStatusUrl = '/api/cache/status',
     activePollMs = DEFAULT_ACTIVE_POLL_MS,
     idlePollMs = DEFAULT_IDLE_POLL_MS,
 } = {}) {
@@ -38,13 +40,19 @@ export function createAIStatusPoller({
         pollInFlight = true;
         let nextDelay = idlePollMs;
         try {
-            const res = await fetchImpl(statusUrl);
-            const data = await res.json();
+            const [res, cacheRes] = await Promise.all([
+                fetchImpl(statusUrl),
+                fetchImpl(cacheStatusUrl),
+            ]);
+            const [data, cacheStatus] = await Promise.all([
+                res.json(),
+                cacheRes.json(),
+            ]);
             nextDelay = pollDelay(data, { activePollMs, idlePollMs });
-            renderStatus(data, { documentImpl });
+            renderStatus(data, { documentImpl, cacheStatus });
         } catch {
-            const aiSection = documentImpl?.getElementById?.('bar-ai');
-            if (aiSection) aiSection.style.display = 'none';
+            const workSection = documentImpl?.getElementById?.('bar-work');
+            if (workSection) workSection.style.display = 'none';
         } finally {
             pollInFlight = false;
             schedule(nextDelay);
@@ -53,6 +61,7 @@ export function createAIStatusPoller({
 
     function start(initialDelayMs = 0) {
         initVisibilityRefresh?.();
+        bindBackgroundWorkPanel({ documentImpl });
         if (pollingStarted) return;
         pollingStarted = true;
         schedule(initialDelayMs);

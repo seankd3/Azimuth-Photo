@@ -47,6 +47,9 @@ UI-settings loader glue.
 `ui.js` owns shared toast, confirm-modal, shortcut overlay, bottom-bar
 measurement, visibility-refresh wiring, visual-row navigation math, formatting,
 and escaping helpers.
+`work/status_panel.js` owns the shared bottom-bar background-work summary,
+expanded process rows, ETA/progress rendering, and panel toggle used by Library
+and Compare.
 `warmup.js` owns the browser image preloader, image probe, timeout,
 warm-cache helpers, background warmup scheduling, warmup URL extraction,
 request warming, and image-tier warm batching used by the legacy
