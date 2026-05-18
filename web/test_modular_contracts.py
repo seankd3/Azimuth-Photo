@@ -3845,6 +3845,8 @@ class ModularContractTests(unittest.TestCase):
             legacy = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "batch_bridge.js"), encoding="utf-8") as fh:
             legacy_batch_bridge = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "legacy", "compare_flow_bridge.js"), encoding="utf-8") as fh:
+            legacy_compare_flow_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "date_scrubber_bridge.js"), encoding="utf-8") as fh:
             legacy_date_scrubber_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "export_bridge.js"), encoding="utf-8") as fh:
@@ -4054,6 +4056,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../catalog/home_scan.js';", legacy)
         self.assertIn("from '../catalog/scan_entrypoint.js';", legacy)
         self.assertIn("from './batch_bridge.js';", legacy)
+        self.assertIn("from './compare_flow_bridge.js';", legacy)
         self.assertIn("from './date_scrubber_bridge.js';", legacy)
         self.assertIn("from './export_bridge.js';", legacy)
         self.assertIn("from './filter_query_bridge.js';", legacy)
@@ -4076,12 +4079,16 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../compare/pair_controller.js';", legacy)
         self.assertIn("from '../compare/view.js';", legacy)
         self.assertIn("from '../compare/mode_controller.js';", legacy)
-        self.assertIn("from '../compare/action_controller.js';", legacy)
+        self.assertNotIn("from '../compare/action_controller.js';", legacy)
+        self.assertIn("from '../compare/action_controller.js';", legacy_compare_flow_bridge)
+        self.assertIn("export function createLegacyCompareFlowBridge", legacy_compare_flow_bridge)
         self.assertIn("from '../compare/mosaic_action_controller.js';", legacy)
         self.assertIn("from '../compare/mosaic_render_controller.js';", legacy)
         self.assertIn("from '../compare/mosaic_replacements.js';", legacy)
-        self.assertIn("from '../compare/propagation.js';", legacy)
-        self.assertIn("from '../compare/status_controller.js';", legacy)
+        self.assertNotIn("from '../compare/propagation.js';", legacy)
+        self.assertIn("from '../compare/propagation.js';", legacy_compare_flow_bridge)
+        self.assertNotIn("from '../compare/status_controller.js';", legacy)
+        self.assertIn("from '../compare/status_controller.js';", legacy_compare_flow_bridge)
         self.assertIn("from '../compare/mosaic.js';", legacy)
         self.assertIn("from '../compare/query.js';", legacy)
         self.assertIn("from '../compare/page_controller.js';", legacy)
@@ -7754,6 +7761,175 @@ assert.deepEqual(events, [
     ['coverage', 20, 5],
     ['roll', 'counter', 19, 23],
     ['badge', 3],
+]);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_legacy_compare_flow_bridge_node_probe_preserves_status_action_and_propagation_glue(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createLegacyCompareFlowBridge } from './static/js/legacy/compare_flow_bridge.js';
+
+const events = [];
+const compareStats = { ranking_signal_count: 4 };
+const mosaicImages = [{ id: 1 }, { id: 2 }];
+const comparePairs = [{ left: { id: 1 }, right: { id: 2 } }];
+let mosaicPropagationCounts = null;
+let compareBusy = false;
+let undoCount = 0;
+let compareActionSeq = 0;
+let compareIndex = 0;
+let compareMode = 'swiss';
+
+const bridge = createLegacyCompareFlowBridge({
+    fetchImpl: 'fetch-token',
+    getCompareStats: () => compareStats,
+    getMosaicImages: () => mosaicImages,
+    setMosaicPropagationCounts: (counts) => {
+        mosaicPropagationCounts = counts;
+        events.push(['counts', counts]);
+    },
+    getCompareBusy: () => compareBusy,
+    setCompareBusy: (value) => {
+        compareBusy = value;
+        events.push(['busy', value]);
+    },
+    setUndoCount: (value) => {
+        undoCount = value;
+        events.push(['undo-count', value]);
+    },
+    incrementUndoCount: () => {
+        undoCount += 1;
+        events.push(['undo-inc', undoCount]);
+        return undoCount;
+    },
+    incrementCompareActionSeq: () => {
+        compareActionSeq += 1;
+        events.push(['seq', compareActionSeq]);
+        return compareActionSeq;
+    },
+    getCompareActionSeq: () => compareActionSeq,
+    getCompareIndex: () => compareIndex,
+    setCompareIndex: (value) => {
+        compareIndex = value;
+        events.push(['index', value]);
+    },
+    getComparePairs: () => comparePairs,
+    getCompareMode: () => compareMode,
+    showComparePair: () => events.push(['pair', compareIndex]),
+    showToast: (message) => events.push(['toast', message]),
+    createCompareStatusControllerImpl: (options) => {
+        events.push(['status-init', options.getCompareStats() === compareStats, options.fetchImpl]);
+        return {
+            bumpRankingSignals: (signalDelta, directDelta = 0) => {
+                events.push(['bump', signalDelta, directDelta]);
+                compareStats.ranking_signal_count += signalDelta;
+                return compareStats.ranking_signal_count;
+            },
+            updateCompareProgress: () => {
+                events.push(['progress', compareStats.ranking_signal_count]);
+                return compareStats.ranking_signal_count;
+            },
+            renderCoverageBar: (stats) => {
+                events.push(['coverage', stats.ranking_signal_count]);
+                return true;
+            },
+            mergeCoverageStats: (stats) => {
+                events.push(['merge', stats.ranking_signal_count]);
+                return stats;
+            },
+            updateCoverageBar: () => {
+                events.push(['coverage-update']);
+                return true;
+            },
+            rollUpCounter: (el, from, to) => {
+                events.push(['roll', el, from, to]);
+                return to;
+            },
+            fetchPropagationCount: (directCount = 0) => {
+                events.push(['propagation', directCount]);
+                return directCount + 10;
+            },
+            showPropagationBadge: (count) => {
+                events.push(['badge', count]);
+                return true;
+            },
+        };
+    },
+    precomputePropagationCountsImpl: (images, { onCounts }) => {
+        events.push(['precompute', images.map((image) => image.id)]);
+        onCounts({ 1: 3, 2: 5 });
+        return 'precomputed';
+    },
+    createCompareActionControllerImpl: (options) => {
+        events.push(['action-init', options.getComparePairs() === comparePairs, options.getCompareMode()]);
+        return {
+            submitComparison: (side) => {
+                events.push(['submit', side]);
+                options.setUndoCount(0);
+                options.incrementCompareActionSeq();
+                options.setCompareBusy(true);
+                options.fetchPropagationCount(1);
+                options.bumpRankingSignals(2, 1);
+                options.updateCompareProgress();
+                options.setCompareBusy(false);
+                return true;
+            },
+            undoComparison: async () => {
+                events.push(['undo']);
+                options.incrementUndoCount();
+                options.showToast('undone');
+                return true;
+            },
+        };
+    },
+});
+
+assert.equal(bridge.precomputePropagation(), 'precomputed');
+assert.deepEqual(mosaicPropagationCounts, { 1: 3, 2: 5 });
+assert.equal(bridge.renderCoverageBar(), true);
+assert.equal(bridge.mergeCoverageStats({ ranking_signal_count: 7 }).ranking_signal_count, 7);
+assert.equal(bridge.updateCoverageBar(), true);
+assert.equal(bridge.rollUpCounter('counter', 1, 4), 4);
+assert.equal(bridge.fetchPropagationCount(2), 12);
+assert.equal(bridge.showPropagationBadge(6), true);
+assert.equal(bridge.submitComparison('left'), true);
+assert.equal(await bridge.undoComparison(), true);
+assert.equal(compareBusy, false);
+assert.equal(undoCount, 1);
+assert.equal(compareActionSeq, 1);
+assert.equal(compareStats.ranking_signal_count, 6);
+
+assert.deepEqual(events, [
+    ['status-init', true, 'fetch-token'],
+    ['action-init', true, 'swiss'],
+    ['precompute', [1, 2]],
+    ['counts', { 1: 3, 2: 5 }],
+    ['coverage', 4],
+    ['merge', 7],
+    ['coverage-update'],
+    ['roll', 'counter', 1, 4],
+    ['propagation', 2],
+    ['badge', 6],
+    ['submit', 'left'],
+    ['undo-count', 0],
+    ['seq', 1],
+    ['busy', true],
+    ['propagation', 1],
+    ['bump', 2, 1],
+    ['progress', 6],
+    ['busy', false],
+    ['undo'],
+    ['undo-inc', 1],
+    ['toast', 'undone'],
 ]);
 """
         subprocess.run(

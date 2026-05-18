@@ -52,13 +52,6 @@ import {
 } from '../compare/view.js';
 import { createCompareModeController } from '../compare/mode_controller.js';
 import {
-    createCompareActionController,
-} from '../compare/action_controller.js';
-import {
-    precomputePropagationCounts,
-} from '../compare/propagation.js';
-import { createCompareStatusController } from '../compare/status_controller.js';
-import {
     INITIAL_RANKINGS_PAGE_SIZE,
     LIBRARY_NEIGHBOR_LIMIT,
     RANKINGS_PAGE_SIZE,
@@ -79,6 +72,7 @@ import { createFindSimilarAction } from '../library/similar.js';
 import { createPeopleApi } from '../people/controller.js';
 import { createSettingsPageController } from '../settings/page.js';
 import { createLegacyBatchBridge } from './batch_bridge.js';
+import { createLegacyCompareFlowBridge } from './compare_flow_bridge.js';
 import { createLegacyDateScrubberBridge } from './date_scrubber_bridge.js';
 import { createLegacyExportBridge } from './export_bridge.js';
 import { createLegacyFilterQueryBridge } from './filter_query_bridge.js';
@@ -415,52 +409,13 @@ const legacyPhotoArchive = (() => {
         return compareImageController.adoptCompareTier(img, imgEl, side, tier, cachedOnly, token, timeoutMs);
     }
 
-    const compareStatusController = createCompareStatusController({
-        getCompareStats: () => compareStats,
+    const compareFlowBridge = createLegacyCompareFlowBridge({
         fetchImpl: fetch,
-    });
-
-    function bumpRankingSignals(signalDelta, directDelta = 0) {
-        return compareStatusController.bumpRankingSignals(signalDelta, directDelta);
-    }
-
-    function updateCompareProgress() {
-        return compareStatusController.updateCompareProgress();
-    }
-
-    function renderCoverageBar(stats = compareStats) {
-        return compareStatusController.renderCoverageBar(stats);
-    }
-
-    function mergeCoverageStats(stats) {
-        return compareStatusController.mergeCoverageStats(stats);
-    }
-
-    function updateCoverageBar() {
-        return compareStatusController.updateCoverageBar();
-    }
-
-    function rollUpCounter(el, from, to) {
-        return compareStatusController.rollUpCounter(el, from, to);
-    }
-
-    function precomputePropagation() {
-        precomputePropagationCounts(mosaicImages, {
-            onCounts: (counts) => {
-                mosaicPropagationCounts = counts;
-            },
-        });
-    }
-
-    function fetchPropagationCount(directCount = 0) {
-        return compareStatusController.fetchPropagationCount(directCount);
-    }
-
-    function showPropagationBadge(count) {
-        return compareStatusController.showPropagationBadge(count);
-    }
-
-    const compareActionController = createCompareActionController({
+        getCompareStats: () => compareStats,
+        getMosaicImages: () => mosaicImages,
+        setMosaicPropagationCounts: (counts) => {
+            mosaicPropagationCounts = counts;
+        },
         getCompareBusy: () => compareBusy,
         setCompareBusy: (busy) => { compareBusy = busy; },
         setUndoCount: (value) => { undoCount = value; },
@@ -473,17 +428,50 @@ const legacyPhotoArchive = (() => {
         getCompareMode: () => compareMode,
         showComparePair,
         showToast,
-        fetchPropagationCount,
-        bumpRankingSignals,
-        updateCompareProgress,
     });
 
+    function bumpRankingSignals(signalDelta, directDelta = 0) {
+        return compareFlowBridge.bumpRankingSignals(signalDelta, directDelta);
+    }
+
+    function updateCompareProgress() {
+        return compareFlowBridge.updateCompareProgress();
+    }
+
+    function renderCoverageBar(stats = compareStats) {
+        return compareFlowBridge.renderCoverageBar(stats);
+    }
+
+    function mergeCoverageStats(stats) {
+        return compareFlowBridge.mergeCoverageStats(stats);
+    }
+
+    function updateCoverageBar() {
+        return compareFlowBridge.updateCoverageBar();
+    }
+
+    function rollUpCounter(el, from, to) {
+        return compareFlowBridge.rollUpCounter(el, from, to);
+    }
+
+    function precomputePropagation() {
+        return compareFlowBridge.precomputePropagation();
+    }
+
+    function fetchPropagationCount(directCount = 0) {
+        return compareFlowBridge.fetchPropagationCount(directCount);
+    }
+
+    function showPropagationBadge(count) {
+        return compareFlowBridge.showPropagationBadge(count);
+    }
+
     function submitComparison(side) {
-        return compareActionController.submitComparison(side);
+        return compareFlowBridge.submitComparison(side);
     }
 
     async function undoComparison() {
-        return compareActionController.undoComparison();
+        return compareFlowBridge.undoComparison();
     }
 
     function selectMosaicCell(index, cells) {

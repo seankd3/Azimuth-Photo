@@ -134,6 +134,9 @@ parsing, returned ELO application, undo POST/result parsing, and undo toast text
 propagation-count request helpers.
 `compare/status_controller.js` owns Compare progress, coverage-stat refresh,
 ranking-signal mutation, propagation-count application, and status UI glue.
+`legacy/compare_flow_bridge.js` owns the legacy Compare status/propagation and
+submit/undo facade that connects the compatibility module to those Compare
+controllers.
 `compare/mosaic.js` owns Mosaic grid sizing/rendering, progressive cell tier
 upgrades, pick request/result helpers, and replacement-index selection.
 `compare/status.js` owns Compare pool/progress labels, ranking-signal count
