@@ -1,4 +1,13 @@
 from collections.abc import Callable
+import time as _time
+
+from data.repositories import cache_entries as cache_entry_repository
+from data.repositories import catalog as catalog_repository
+from data.repositories import embeddings as embedding_repository
+from data.repositories import filter_options as filter_options_repository
+from data.repositories import ratings as rating_repository
+from data.repositories import rankings as ranking_repository
+from data.repositories import stats as stats_repository
 
 
 class CacheInvalidationBus:
@@ -109,3 +118,148 @@ def embedding_batch_stored(_model_key: str, _image_ids: list[int]) -> None:
 def invalidate_interaction_response_cache() -> None:
     compare_service, *_ = _configured()
     compare_service.invalidate_interaction_response_cache()
+
+
+def invalidate_stats_cache() -> None:
+    stats_repository.invalidate_full_stats_cache()
+    invalidate_past_matchups_cache()
+    stats_repository.invalidate_catalog_image_counts_cache()
+    invalidate_catalog_cache()
+    invalidate_facet_caches()
+    invalidate_ranking_count_cache()
+    invalidate_rankable_image_ids_cache()
+    invalidate_embedding_count_cache()
+    invalidate_active_source_ids_cache()
+
+
+def invalidate_ai_status_counts_cache() -> None:
+    stats_repository.invalidate_ai_status_counts_cache()
+
+
+def invalidate_catalog_summary_cache() -> None:
+    catalog_repository.invalidate_catalog_summary_cache()
+
+
+def invalidate_rating_stats_cache() -> None:
+    stats_repository.invalidate_full_stats_cache()
+    invalidate_past_matchups_cache()
+    invalidate_catalog_summary_cache()
+    invalidate_rating_facet_caches()
+    invalidate_rating_ranking_count_cache()
+    invalidate_ai_status_counts_cache()
+
+
+def increment_cached_int(mapping: dict, key: str, delta: int, *, cap: int | None = None) -> None:
+    if key not in mapping:
+        return
+    value = max(0, int(mapping.get(key) or 0) + int(delta))
+    if cap is not None:
+        value = min(value, cap)
+    mapping[key] = value
+
+
+def patch_direct_rating_stats_cache(pair_delta: int, rated_image_delta: int) -> None:
+    pair_delta = int(pair_delta or 0)
+    rated_image_delta = int(rated_image_delta or 0)
+    active_cap = None
+    stats_cache = stats_repository._stats_cache
+    if stats_cache["data"] and _time.time() < stats_cache["expires"]:
+        stats = stats_cache["data"]
+        active_cap = int(stats.get("active_images") or stats.get("total_images") or 0)
+        for key in (
+            "total_comparisons",
+            "total_catalog_comparisons",
+            "direct_comparison_rows",
+            "direct_catalog_comparison_rows",
+            "ranking_signal_count",
+            "catalog_ranking_signal_count",
+        ):
+            increment_cached_int(stats, key, pair_delta)
+        increment_cached_int(stats, "rated_images", rated_image_delta, cap=active_cap)
+        invalidate_catalog_summary_cache()
+    else:
+        stats_repository.invalidate_full_stats_cache()
+        invalidate_catalog_summary_cache()
+
+    stats_repository.patch_ai_status_direct_rating_counts(
+        pair_delta,
+        rated_image_delta,
+        active_cap=active_cap,
+    )
+
+    invalidate_rating_facet_caches()
+    invalidate_rating_ranking_count_cache()
+
+
+def invalidate_filter_options_cache() -> None:
+    filter_options_repository.invalidate_filter_options_cache()
+
+
+def clear_filter_options_cache() -> None:
+    filter_options_repository.clear_filter_options_cache()
+
+
+def invalidate_catalog_cache() -> None:
+    catalog_repository.invalidate_catalog_cache()
+
+
+def invalidate_facet_caches() -> None:
+    ranking_repository.invalidate_facet_caches()
+
+
+def invalidate_visible_facet_caches(cache_root: str | None = None, size: str | None = None) -> None:
+    ranking_repository.invalidate_visible_facet_caches(cache_root, size)
+
+
+def invalidate_rating_facet_caches() -> None:
+    ranking_repository.invalidate_rating_facet_caches()
+
+
+def invalidate_ranking_count_cache() -> None:
+    ranking_repository.invalidate_ranking_count_cache()
+    rating_repository.invalidate_visible_pairing_pool_counts_cache()
+
+
+cache_scope_matches = ranking_repository.cache_scope_matches
+
+
+def invalidate_visible_cache_dependent_counts(
+    cache_root: str | None = None,
+    size: str | None = None,
+) -> None:
+    ranking_repository.invalidate_visible_cache_dependent_counts(cache_root, size)
+    rating_repository.invalidate_visible_pairing_pool_counts_cache(cache_root, size)
+
+
+def invalidate_rating_ranking_count_cache() -> None:
+    ranking_repository.invalidate_rating_ranking_count_cache()
+
+
+def invalidate_cached_image_ids_cache(
+    cache_root: str | None = None,
+    size: str | None = None,
+) -> None:
+    invalidate_visible_cache_dependent_counts(cache_root, size)
+    invalidate_visible_facet_caches(cache_root, size)
+    cache_entry_repository.invalidate_cached_image_ids_cache(cache_root=cache_root, size=size)
+
+
+def note_cached_image_ids_added(cache_root: str, size: str, image_ids) -> None:
+    cache_entry_repository.note_cached_image_ids_added(cache_root, size, image_ids)
+
+
+def invalidate_rankable_image_ids_cache() -> None:
+    ranking_repository.invalidate_rankable_image_ids_cache()
+
+
+def invalidate_embedding_count_cache() -> None:
+    embedding_repository.invalidate_embedding_count_cache()
+    invalidate_ai_status_counts_cache()
+
+
+def invalidate_active_source_ids_cache() -> None:
+    catalog_repository.invalidate_active_source_ids_cache()
+
+
+def invalidate_past_matchups_cache() -> None:
+    rating_repository.invalidate_past_matchups_cache()

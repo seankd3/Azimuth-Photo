@@ -2,6 +2,7 @@ import aiosqlite
 import os
 import time as _time
 
+from core import cache_events
 from data import connection as data_connection
 from data import schema as data_schema
 from data.repositories import cache_entries as cache_entry_repository
@@ -110,145 +111,94 @@ def _chunked(values: list[int], chunk_size: int = 500):
 
 
 def _invalidate_stats_cache():
-    stats_repository.invalidate_full_stats_cache()
-    _invalidate_past_matchups_cache()
-    stats_repository.invalidate_catalog_image_counts_cache()
-    _invalidate_catalog_cache()
-    _invalidate_facet_caches()
-    _invalidate_ranking_count_cache()
-    _invalidate_rankable_image_ids_cache()
-    _invalidate_embedding_count_cache()
-    _invalidate_active_source_ids_cache()
+    cache_events.invalidate_stats_cache()
 
 
 def _invalidate_ai_status_counts_cache():
-    stats_repository.invalidate_ai_status_counts_cache()
+    cache_events.invalidate_ai_status_counts_cache()
 
 
 def _invalidate_catalog_summary_cache():
-    catalog_repository.invalidate_catalog_summary_cache()
+    cache_events.invalidate_catalog_summary_cache()
 
 
 def _invalidate_rating_stats_cache():
-    stats_repository.invalidate_full_stats_cache()
-    _invalidate_past_matchups_cache()
-    _invalidate_catalog_summary_cache()
-    _invalidate_rating_facet_caches()
-    _invalidate_rating_ranking_count_cache()
-    _invalidate_ai_status_counts_cache()
+    cache_events.invalidate_rating_stats_cache()
 
 
 def _increment_cached_int(mapping: dict, key: str, delta: int, *, cap: int | None = None):
-    if key not in mapping:
-        return
-    value = max(0, int(mapping.get(key) or 0) + int(delta))
-    if cap is not None:
-        value = min(value, cap)
-    mapping[key] = value
+    cache_events.increment_cached_int(mapping, key, delta, cap=cap)
 
 
 def _patch_direct_rating_stats_cache(pair_delta: int, rated_image_delta: int):
     """Keep hot stats caches valid after direct Compare/Mosaic writes."""
-    pair_delta = int(pair_delta or 0)
-    rated_image_delta = int(rated_image_delta or 0)
-    active_cap = None
-    if _stats_cache["data"] and _time.time() < _stats_cache["expires"]:
-        stats = _stats_cache["data"]
-        active_cap = int(stats.get("active_images") or stats.get("total_images") or 0)
-        for key in (
-            "total_comparisons",
-            "total_catalog_comparisons",
-            "direct_comparison_rows",
-            "direct_catalog_comparison_rows",
-            "ranking_signal_count",
-            "catalog_ranking_signal_count",
-        ):
-            _increment_cached_int(stats, key, pair_delta)
-        _increment_cached_int(stats, "rated_images", rated_image_delta, cap=active_cap)
-        _invalidate_catalog_summary_cache()
-    else:
-        stats_repository.invalidate_full_stats_cache()
-        _invalidate_catalog_summary_cache()
-
-    stats_repository.patch_ai_status_direct_rating_counts(
-        pair_delta,
-        rated_image_delta,
-        active_cap=active_cap,
-    )
-
-    _invalidate_rating_facet_caches()
-    _invalidate_rating_ranking_count_cache()
+    cache_events.patch_direct_rating_stats_cache(pair_delta, rated_image_delta)
 
 
 def _invalidate_filter_options_cache():
-    filter_options_repository.invalidate_filter_options_cache()
+    cache_events.invalidate_filter_options_cache()
     _sync_filter_options_refreshing_facade()
 
 
 def clear_filter_options_cache():
-    filter_options_repository.clear_filter_options_cache()
+    cache_events.clear_filter_options_cache()
     _sync_filter_options_refreshing_facade()
 
 
 def _invalidate_catalog_cache():
-    catalog_repository.invalidate_catalog_cache()
+    cache_events.invalidate_catalog_cache()
 
 
 def _invalidate_facet_caches():
-    ranking_repository.invalidate_facet_caches()
+    cache_events.invalidate_facet_caches()
 
 
 def _invalidate_visible_facet_caches(cache_root: str | None = None, size: str | None = None):
-    ranking_repository.invalidate_visible_facet_caches(cache_root, size)
+    cache_events.invalidate_visible_facet_caches(cache_root, size)
 
 
 def _invalidate_rating_facet_caches():
-    ranking_repository.invalidate_rating_facet_caches()
+    cache_events.invalidate_rating_facet_caches()
 
 
 def _invalidate_ranking_count_cache():
-    ranking_repository.invalidate_ranking_count_cache()
-    rating_repository.invalidate_visible_pairing_pool_counts_cache()
+    cache_events.invalidate_ranking_count_cache()
 
 
-_cache_scope_matches = ranking_repository.cache_scope_matches
+_cache_scope_matches = cache_events.cache_scope_matches
 
 
 def _invalidate_visible_cache_dependent_counts(cache_root: str | None = None, size: str | None = None):
-    ranking_repository.invalidate_visible_cache_dependent_counts(cache_root, size)
-    rating_repository.invalidate_visible_pairing_pool_counts_cache(cache_root, size)
+    cache_events.invalidate_visible_cache_dependent_counts(cache_root, size)
 
 
 def _invalidate_rating_ranking_count_cache():
-    ranking_repository.invalidate_rating_ranking_count_cache()
+    cache_events.invalidate_rating_ranking_count_cache()
 
 
 def invalidate_cached_image_ids_cache(cache_root: str | None = None, size: str | None = None):
-    _invalidate_visible_cache_dependent_counts(cache_root, size)
-    _invalidate_visible_facet_caches(cache_root, size)
-    cache_entry_repository.invalidate_cached_image_ids_cache(cache_root=cache_root, size=size)
+    cache_events.invalidate_cached_image_ids_cache(cache_root, size)
 
 
 def note_cached_image_ids_added(cache_root: str, size: str, image_ids) -> None:
     """Patch hot cached-ID sets after append-only cache writes."""
-    cache_entry_repository.note_cached_image_ids_added(cache_root, size, image_ids)
+    cache_events.note_cached_image_ids_added(cache_root, size, image_ids)
 
 
 def _invalidate_rankable_image_ids_cache():
-    ranking_repository.invalidate_rankable_image_ids_cache()
+    cache_events.invalidate_rankable_image_ids_cache()
 
 
 def _invalidate_embedding_count_cache():
-    embedding_repository.invalidate_embedding_count_cache()
-    _invalidate_ai_status_counts_cache()
+    cache_events.invalidate_embedding_count_cache()
 
 
 def _invalidate_active_source_ids_cache():
-    catalog_repository.invalidate_active_source_ids_cache()
+    cache_events.invalidate_active_source_ids_cache()
 
 
 def _invalidate_past_matchups_cache():
-    rating_repository.invalidate_past_matchups_cache()
+    cache_events.invalidate_past_matchups_cache()
 
 
 def invalidate_stats_cache():
