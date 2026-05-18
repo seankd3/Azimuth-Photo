@@ -792,14 +792,31 @@ async def backfill_legacy_aspect_ratios(conn) -> None:
     )
 
 
+async def _executescript_in_transaction(conn, script: str) -> None:
+    try:
+        await conn.executescript(f"BEGIN;\n{script}\nCOMMIT;")
+    except Exception:
+        try:
+            await conn.rollback()
+        except Exception:
+            pass
+        raise
+
+
 async def apply_schema_and_migrations(conn, *, db_exists: bool) -> None:
     if db_exists:
         await prepare_existing_database_for_schema(conn)
-    await conn.executescript(SCHEMA)
-    await ensure_compatibility_columns(conn)
-    await ensure_compatibility_indexes(conn)
-    await backfill_legacy_aspect_ratios(conn)
-    await conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+    await _executescript_in_transaction(conn, SCHEMA)
+    try:
+        await conn.execute("BEGIN")
+        await ensure_compatibility_columns(conn)
+        await ensure_compatibility_indexes(conn)
+        await backfill_legacy_aspect_ratios(conn)
+        await conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+        await conn.commit()
+    except Exception:
+        await conn.rollback()
+        raise
 
 
 async def normalize_legacy_image_state(conn) -> bool:
