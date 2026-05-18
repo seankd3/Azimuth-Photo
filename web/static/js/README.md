@@ -56,8 +56,8 @@ selects, plus the behavior behind the legacy `setFilter`, `clearLibraryFilters`,
 reloads the correct Library, map, Mosaic, or Compare surface after filter
 changes while delegating pure filter mutations to `library/filters.js`.
 `library/sort.js` owns Library sort keys and sort state conversion.
-`library/search_state.js` owns Library/search session persistence for sort,
-search query, deep-search flag, and search-specific sort state.
+`library/search_state.js` owns Library/search session persistence keys and
+helpers for sort, search query, deep-search flag, and search-specific sort state.
 `library/search_controls.js` owns Library and Compare search/sort DOM control
 rendering.
 `library/search_controller.js` owns Library search input debounce, clear-search,
@@ -73,8 +73,8 @@ compatibility facade for selected-image export.
 construction/opening for JSON and CSV downloads.
 `library/display.js` owns Library card flag, tier, similarity, info-line, and date labels.
 `library/rank_cards.js` owns Library ranking-card and date-header DOM construction.
-`library/shell.js` owns Library empty-state display, scroll persistence,
-back-to-top visibility, and scroll-to-card helpers.
+`library/shell.js` owns Library empty-state display, scroll persistence keys and
+helpers, back-to-top visibility, and scroll-to-card helpers.
 `library/date_scrubber.js` owns Library date-scrubber fetch orchestration, DOM
 rendering, active group highlighting, offset math, jump-to-group loading, and
 scroll tracking.

@@ -93,6 +93,10 @@ import {
 } from '../library/pagination.js';
 import { createLibrarySortController } from '../library/sort_controller.js';
 import {
+    SEARCH_DEEP_STORAGE_KEY,
+    SEARCH_SORT_STORAGE_KEY,
+    SEARCH_STORAGE_KEY,
+    SORT_STORAGE_KEY,
     clearPersistedSearchState as clearPersistedSearchStateCore,
     restoreSearchSortState as restoreSearchSortStateCore,
     restoreSearchState as restoreSearchStateCore,
@@ -124,6 +128,8 @@ import { exportRankings as exportRankingsCore } from '../export/actions.js';
 import { eloToStars } from '../library/display.js';
 import { appendLibraryRankCards } from '../library/rank_cards.js';
 import {
+    SCROLL_OFFSET_STORAGE_KEY,
+    SCROLL_POS_STORAGE_KEY,
     hideLibraryEmptyState as hideLibraryEmptyStateCore,
     libraryScrollRoot as libraryScrollRootCore,
     restoreScrollPosition as restoreScrollPositionCore,
@@ -634,12 +640,6 @@ const legacyPhotoArchive = (() => {
     let pendingScrollRestoreOffset = 0;
     let thumbHeight = 220;
     let libraryImages = [];
-    const SORT_STORAGE_KEY = 'pa_sort';
-    const SEARCH_STORAGE_KEY = 'pa_search_query';
-    const SEARCH_SORT_STORAGE_KEY = 'pa_search_sort';
-    const SEARCH_DEEP_STORAGE_KEY = 'pa_search_deep';
-    const SCROLL_POS_STORAGE_KEY = 'pa_scroll_pos';
-    const SCROLL_OFFSET_STORAGE_KEY = 'pa_scroll_offset';
     const EMPTY_FILTERS = { ...EMPTY_FILTERS_CORE };
     let filters = { ...EMPTY_FILTERS };
 

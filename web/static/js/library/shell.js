@@ -1,3 +1,7 @@
+export const SCROLL_POS_STORAGE_KEY = 'pa_scroll_pos';
+export const SCROLL_OFFSET_STORAGE_KEY = 'pa_scroll_offset';
+
+
 export function hideLibraryEmptyState() {
     document.getElementById('library-empty')?.classList.add('hidden');
 }

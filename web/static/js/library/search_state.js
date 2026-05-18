@@ -4,6 +4,12 @@ import {
 } from './sort.js';
 
 
+export const SORT_STORAGE_KEY = 'pa_sort';
+export const SEARCH_STORAGE_KEY = 'pa_search_query';
+export const SEARCH_SORT_STORAGE_KEY = 'pa_search_sort';
+export const SEARCH_DEEP_STORAGE_KEY = 'pa_search_deep';
+
+
 function safeStorageOp(callback, fallback = null) {
     try {
         return callback();
