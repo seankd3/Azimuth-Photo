@@ -9,6 +9,7 @@ import tempfile
 import unittest
 
 from fastapi.routing import APIRoute
+import numpy as np
 
 import app as app_module
 import ai_models
@@ -1154,6 +1155,8 @@ class ModularContractTests(unittest.TestCase):
         self.assertIs(search_service.resolve_cached_deep_search, constraints.resolve_cached_deep_search)
         self.assertIs(search_service.encode_text_with_config, constraints.encode_text_with_config)
         self.assertTrue(callable(constraints._CONFIG.get("get_deep_search_query_embedding")))
+        self.assertTrue(callable(constraints._CONFIG.get("get_cached_semantic_search_results")))
+        self.assertTrue(callable(constraints._CONFIG.get("store_cached_semantic_search_results")))
 
         constraints._text_search_resolution_cache[("probe", False)] = {"data": {}, "expires": 1}
         constraints._deep_search_query_record_cache["probe"] = 1
@@ -1245,6 +1248,107 @@ class ModularContractTests(unittest.TestCase):
             query_constraints._text_search_resolution_cache_ttl_seconds = old_ttl
             query_constraints.clear_text_search_caches()
 
+    def test_core_text_search_uses_persistent_cache_before_text_encoder(self):
+        query_constraints.clear_text_search_caches()
+        calls = []
+
+        async def fake_resolve_deep(_query, *, allow_cold_load=True):
+            calls.append(("deep", allow_cold_load))
+            return None
+
+        async def fake_result_cache(query, model_key, threshold):
+            calls.append(("cache", query, model_key, threshold))
+            return {"scores": {7: 0.91, 9: 0.74}}
+
+        def fail_encode(*_args, **_kwargs):
+            raise AssertionError("semantic result cache should avoid text encoding")
+
+        async def run_probe():
+            return await query_constraints.resolve_text_search(
+                " night ",
+                resolve_deep_search=fake_resolve_deep,
+                encode_text=fail_encode,
+                get_cached_semantic_search_results=fake_result_cache,
+                extension_search_terms=set(),
+                fast_search_embedding_config=lambda: {"model_key": "fast-model"},
+                get_settings=lambda: {"search_similarity_threshold": 0.4},
+            )
+
+        try:
+            result = asyncio.run(run_probe())
+        finally:
+            query_constraints.clear_text_search_caches()
+
+        self.assertEqual(result["search_mode"], "embedding")
+        self.assertEqual(result["id_filter"], {7, 9})
+        self.assertTrue(result["semantic_results_cached"])
+        self.assertEqual(
+            calls,
+            [
+                ("deep", False),
+                ("cache", "night", "fast-model", 0.4),
+            ],
+        )
+
+    def test_core_text_search_stores_live_fast_embedding_results(self):
+        embed_cache = importlib.import_module("embed_cache")
+        embedding_worker = importlib.import_module("embedding_worker")
+        old_get_matrix = embed_cache.get_matrix
+        old_ensure = embedding_worker.ensure_model_loaded_for_search
+        query_constraints.clear_text_search_caches()
+        calls = []
+
+        async def fake_resolve_deep(_query, *, allow_cold_load=True):
+            return None
+
+        async def fake_result_cache(query, model_key, threshold):
+            calls.append(("cache", query, model_key, threshold))
+            return None
+
+        async def fake_store(query, model_key, threshold, scores, *, source="fast"):
+            calls.append(("store", query, model_key, threshold, dict(scores), source))
+
+        async def fake_get_matrix():
+            return [1, 2, 3], np.array(
+                [[0.8, 0.0], [0.2, 0.0], [0.95, 0.0]],
+                dtype=np.float32,
+            )
+
+        def fake_encode(_encoder, _query, _config):
+            return np.array([1.0, 0.0], dtype=np.float32)
+
+        async def run_probe():
+            return await query_constraints.resolve_text_search(
+                "night",
+                resolve_deep_search=fake_resolve_deep,
+                encode_text=fake_encode,
+                get_cached_semantic_search_results=fake_result_cache,
+                store_cached_semantic_search_results=fake_store,
+                extension_search_terms=set(),
+                fast_search_embedding_config=lambda: {"model_key": "fast-model"},
+                get_settings=lambda: {"search_similarity_threshold": 0.5},
+            )
+
+        try:
+            embed_cache.get_matrix = fake_get_matrix
+            embedding_worker.ensure_model_loaded_for_search = lambda: None
+            result = asyncio.run(run_probe())
+        finally:
+            embed_cache.get_matrix = old_get_matrix
+            embedding_worker.ensure_model_loaded_for_search = old_ensure
+            query_constraints.clear_text_search_caches()
+
+        self.assertEqual(result["search_mode"], "embedding")
+        self.assertEqual(result["id_filter"], {1, 3})
+        self.assertFalse(result["semantic_results_cached"])
+        self.assertEqual(
+            calls,
+            [
+                ("cache", "night", "fast-model", 0.5),
+                ("store", "night", "fast-model", 0.5, {1: 0.800000011920929, 3: 0.949999988079071}, "fast"),
+            ],
+        )
+
     def test_core_deep_query_record_ttl_provider_controls_record_cache(self):
         old_ttl = query_constraints._deep_search_query_record_cache_ttl_seconds
         old_config = dict(query_constraints._CONFIG)
@@ -1309,6 +1413,8 @@ class ModularContractTests(unittest.TestCase):
         self.assertIs(db._cache_entry_count_cache, cache_entries._cache_entry_count_cache)
         self.assertTrue(callable(embeddings.store_embeddings_batch))
         self.assertTrue(callable(embeddings.store_deep_search_query_embedding))
+        self.assertTrue(callable(embeddings.get_cached_semantic_search_results))
+        self.assertTrue(callable(embeddings.store_cached_semantic_search_results))
         self.assertTrue(callable(embeddings.embedding_count_cached))
         self.assertTrue(callable(embeddings.invalidate_embedding_count_cache))
         self.assertTrue(callable(cache_events.invalidate_embedding_count_cache))

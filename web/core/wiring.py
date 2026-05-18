@@ -433,6 +433,22 @@ def configure_query_constraints(
         ),
         metadata_search_image_ids=lambda query: db.metadata_search_image_ids(query),
         get_deep_search_query_embedding=lambda query, model_key: db.get_deep_search_query_embedding(query, model_key),
+        get_cached_semantic_search_results=(
+            lambda query, model_key, threshold: db.get_cached_semantic_search_results(
+                query,
+                model_key,
+                threshold,
+            )
+        ),
+        store_cached_semantic_search_results=(
+            lambda query, model_key, threshold, scores, **kwargs: db.store_cached_semantic_search_results(
+                query,
+                model_key,
+                threshold,
+                scores,
+                **kwargs,
+            )
+        ),
         fast_search_embedding_config=settings.fast_search_embedding_config,
         get_settings=settings.get_settings,
         parse_people_ids=db.parse_people_ids,

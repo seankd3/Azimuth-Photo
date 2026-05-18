@@ -290,6 +290,33 @@ async def get_deep_search_query_embedding(query: str, model_key: str) -> bytes |
     )
 
 
+async def get_cached_semantic_search_results(query: str, model_key: str, threshold) -> dict | None:
+    return await embedding_repository.get_cached_semantic_search_results(
+        DB_PATH,
+        query,
+        model_key,
+        threshold,
+    )
+
+
+async def store_cached_semantic_search_results(
+    query: str,
+    model_key: str,
+    threshold,
+    scores: dict[int, float],
+    *,
+    source: str = "fast",
+) -> dict | None:
+    return await embedding_repository.store_cached_semantic_search_results(
+        DB_PATH,
+        query,
+        model_key,
+        threshold,
+        scores,
+        source=source,
+    )
+
+
 async def store_deep_search_query_embedding(config: dict, query: str, blob: bytes):
     normalized = await embedding_repository.store_deep_search_query_embedding(
         DB_PATH,

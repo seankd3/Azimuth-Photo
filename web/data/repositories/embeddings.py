@@ -1,5 +1,6 @@
 """Embedding and deep-search query SQL helpers."""
 
+import json
 import time as _time
 
 from data import connection
@@ -21,6 +22,21 @@ def normalize_deep_search_query(query: str) -> str:
 
 def deep_search_query_key(query: str) -> str:
     return normalize_deep_search_query(query).casefold()
+
+
+def semantic_result_threshold_key(threshold) -> str:
+    return f"{float(threshold or 0.0):.6f}"
+
+
+async def _searchable_embedding_count_on_conn(conn, model_key: str) -> int:
+    cursor = await conn.execute(
+        "SELECT COUNT(*) AS c FROM embeddings_by_model e "
+        "JOIN images i ON e.image_id = i.id "
+        "JOIN catalog_sources s ON s.id = i.source_id "
+        "WHERE e.model_key = ? AND s.included = 1 AND i.missing_at IS NULL",
+        (model_key,),
+    )
+    return int((await cursor.fetchone())["c"] or 0)
 
 
 async def ensure_embedding_model_tables(
@@ -192,6 +208,113 @@ async def get_deep_search_query_embedding(db_path: str, query: str, model_key: s
         )
         row = await cursor.fetchone()
         return row["embedding"] if row else None
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+
+
+async def get_cached_semantic_search_results(
+    db_path: str,
+    query: str,
+    model_key: str,
+    threshold,
+) -> dict | None:
+    normalized = normalize_deep_search_query(query)
+    if not normalized:
+        return None
+    key = normalized.casefold()
+    threshold_key = semantic_result_threshold_key(threshold)
+    conn = await connection.open_async(db_path)
+    try:
+        embedding_count = await _searchable_embedding_count_on_conn(conn, model_key)
+        cursor = await conn.execute(
+            "SELECT query, embedding_count, result_count, scores_json, source, updated_at "
+            "FROM semantic_search_result_cache "
+            "WHERE model_key = ? AND query_key = ? AND threshold_key = ?",
+            (model_key, key, threshold_key),
+        )
+        row = await cursor.fetchone()
+        if row is None or int(row["embedding_count"] or 0) != embedding_count:
+            return None
+        pairs = json.loads(row["scores_json"] or "[]")
+        scores = {
+            int(image_id): float(score)
+            for image_id, score in pairs
+        }
+        return {
+            "query": row["query"],
+            "model_key": model_key,
+            "threshold": float(threshold or 0.0),
+            "embedding_count": embedding_count,
+            "result_count": int(row["result_count"] or len(scores)),
+            "scores": scores,
+            "id_filter": set(scores),
+            "source": row["source"],
+            "updated_at": float(row["updated_at"] or 0.0),
+        }
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+
+
+async def store_cached_semantic_search_results(
+    db_path: str,
+    query: str,
+    model_key: str,
+    threshold,
+    scores: dict[int, float],
+    *,
+    source: str = "fast",
+) -> dict | None:
+    normalized = normalize_deep_search_query(query)
+    if not normalized:
+        return None
+    key = normalized.casefold()
+    threshold_key = semantic_result_threshold_key(threshold)
+    source = source if source in {"fast", "deep"} else "fast"
+    score_pairs = [
+        [int(image_id), float(score)]
+        for image_id, score in sorted(scores.items())
+    ]
+    now = _time.time()
+    conn = await connection.open_async(db_path)
+    try:
+        embedding_count = await _searchable_embedding_count_on_conn(conn, model_key)
+        await conn.execute(
+            "INSERT INTO semantic_search_result_cache "
+            "(model_key, query_key, query, threshold_key, threshold, embedding_count, "
+            "result_count, scores_json, source, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(model_key, query_key, threshold_key) DO UPDATE SET "
+            "query = excluded.query, "
+            "threshold = excluded.threshold, "
+            "embedding_count = excluded.embedding_count, "
+            "result_count = excluded.result_count, "
+            "scores_json = excluded.scores_json, "
+            "source = excluded.source, "
+            "updated_at = excluded.updated_at",
+            (
+                model_key,
+                key,
+                normalized,
+                threshold_key,
+                float(threshold or 0.0),
+                embedding_count,
+                len(score_pairs),
+                json.dumps(score_pairs, separators=(",", ":")),
+                source,
+                now,
+                now,
+            ),
+        )
+        await conn.commit()
+        return {
+            "query": normalized,
+            "model_key": model_key,
+            "threshold": float(threshold or 0.0),
+            "embedding_count": embedding_count,
+            "result_count": len(score_pairs),
+            "source": source,
+            "updated_at": now,
+        }
     finally:
         await connection.close_async(conn, db_path=db_path)
 
@@ -443,15 +566,7 @@ async def count_embeddings_for_model(
         )
         await ensure_embedding_model_row(conn, embedding_config)
         if online_only:
-            cursor = await conn.execute(
-                "SELECT COUNT(*) AS c FROM embeddings_by_model e "
-                "JOIN images i ON e.image_id = i.id "
-                "JOIN catalog_sources s ON s.id = i.source_id "
-                "WHERE e.model_key = ? AND s.included = 1 "
-                "AND i.missing_at IS NULL",
-                (model_key,),
-            )
-            return int((await cursor.fetchone())["c"] or 0)
+            return await _searchable_embedding_count_on_conn(conn, model_key)
 
         active = int((catalog_counts or {}).get("active_images") or 0)
         if active <= 0:

@@ -326,6 +326,24 @@ CREATE TABLE IF NOT EXISTS deep_search_query_embeddings (
 CREATE INDEX IF NOT EXISTS idx_deep_search_query_embeddings_query
 ON deep_search_query_embeddings(query_key);
 
+CREATE TABLE IF NOT EXISTS semantic_search_result_cache (
+    model_key TEXT NOT NULL REFERENCES embedding_models(model_key),
+    query_key TEXT NOT NULL,
+    query TEXT NOT NULL,
+    threshold_key TEXT NOT NULL,
+    threshold REAL NOT NULL,
+    embedding_count INTEGER NOT NULL,
+    result_count INTEGER NOT NULL,
+    scores_json TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'fast',
+    created_at REAL NOT NULL DEFAULT (strftime('%s', 'now')),
+    updated_at REAL NOT NULL DEFAULT (strftime('%s', 'now')),
+    PRIMARY KEY (model_key, query_key, threshold_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_semantic_search_result_cache_updated
+ON semantic_search_result_cache(updated_at DESC);
+
 CREATE TABLE IF NOT EXISTS cache_entries (
     cache_root TEXT NOT NULL,
     size TEXT NOT NULL,
@@ -656,6 +674,7 @@ REQUIRED_TABLES = {
     "embeddings_by_model",
     "deep_search_queries",
     "deep_search_query_embeddings",
+    "semantic_search_result_cache",
     "cache_entries",
     "cache_metadata",
     "people",
@@ -718,6 +737,7 @@ REQUIRED_INDEXES = {
     "idx_embeddings_by_model_image_id",
     "idx_deep_search_queries_pinned_updated",
     "idx_deep_search_query_embeddings_query",
+    "idx_semantic_search_result_cache_updated",
     "idx_cache_entries_root_size_bytes",
     "idx_cache_entries_root_size_accessed_id",
     "idx_people_status_seen",
