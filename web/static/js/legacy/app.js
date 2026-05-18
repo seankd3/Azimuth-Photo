@@ -132,7 +132,25 @@ const legacyPhotoArchive = (() => {
         imageAspectRatio,
         eloToStars,
     });
-    const { handleWarmTiersApplied } = loupeBridge;
+    const {
+        closeLightbox,
+        ensureLibraryImageIndex,
+        focusLoupe,
+        getMediaStatus,
+        handleWarmTiersApplied,
+        initLoupeInteraction,
+        lightboxNext,
+        lightboxPrev,
+        loupeFocusableElements,
+        loupeTierUrl,
+        openLightbox,
+        openStandaloneLightbox,
+        preloadImageWithTimeout,
+        primeMediaStatuses,
+        renderLoupeStatusLine,
+        trapLoupeFocus,
+        updateLoupeFlagDisplay,
+    } = loupeBridge;
     const warmups = createWarmupManager({
         fetchJsonImpl: fetchJson,
         preloadImageWithTimeout,
@@ -1189,70 +1207,6 @@ const legacyPhotoArchive = (() => {
     }
 
     loupeBridge.initController();
-
-    function openLightbox(img) {
-        return loupeBridge.openLightbox(img);
-    }
-
-    function openStandaloneLightbox(img) {
-        return loupeBridge.openStandaloneLightbox(img);
-    }
-
-    async function getMediaStatus(imageId, { force = false } = {}) {
-        return loupeBridge.getMediaStatus(imageId, { force });
-    }
-
-    function primeMediaStatuses(imageIds) {
-        return loupeBridge.primeMediaStatuses(imageIds);
-    }
-
-    function loupeTierUrl(tier, imageId, cachedOnly = false) {
-        return loupeBridge.loupeTierUrl(tier, imageId, cachedOnly);
-    }
-
-    function updateLoupeFlagDisplay(flag) {
-        return loupeBridge.updateLoupeFlagDisplay(flag);
-    }
-
-    function renderLoupeStatusLine(flag) {
-        return loupeBridge.renderLoupeStatusLine(flag);
-    }
-
-    function focusLoupe() {
-        return loupeBridge.focusLoupe();
-    }
-
-    function loupeFocusableElements(loupe) {
-        return loupeBridge.loupeFocusableElements(loupe);
-    }
-
-    function trapLoupeFocus(e) {
-        return loupeBridge.trapLoupeFocus(e);
-    }
-
-    function preloadImageWithTimeout(url, priority, timeoutMs) {
-        return loupeBridge.preloadImageWithTimeout(url, priority, timeoutMs);
-    }
-
-    function initLoupeInteraction() {
-        return loupeBridge.initLoupeInteraction();
-    }
-
-    async function ensureLibraryImageIndex(index) {
-        return loupeBridge.ensureLibraryImageIndex(index);
-    }
-
-    function lightboxNext() {
-        return loupeBridge.lightboxNext();
-    }
-
-    function lightboxPrev() {
-        return loupeBridge.lightboxPrev();
-    }
-
-    function closeLightbox() {
-        return loupeBridge.closeLightbox();
-    }
 
     const setThumbSize = createThumbnailSizeHandler({
         getMosaicSize: () => mosaicSize,
