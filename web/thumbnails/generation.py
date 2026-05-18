@@ -202,6 +202,87 @@ def planned_thumbnail_sizes(
     return needed
 
 
+def generate_missing_thumbnails(
+    filepath: str,
+    requested_size: str,
+    image_id: int,
+    *,
+    include_smaller_tiers: bool,
+    hot: bool,
+    allow_stale_fallback: bool,
+    planned_thumbnail_sizes,
+    sizes: dict[str, int],
+    load_source_image,
+    queue_orientation,
+    resize_to_long_side,
+    build_source_signature,
+    encode_and_cache_thumbnail,
+    mark_source_missing_from_error,
+    thumbnail_retry_after: dict,
+    thumbnail_retry_seconds: float,
+    now_provider=time.time,
+    log=print,
+):
+    needed_sizes = planned_thumbnail_sizes(
+        filepath,
+        image_id,
+        requested_size,
+        include_smaller_tiers=include_smaller_tiers,
+        allow_stale_fallback=allow_stale_fallback,
+    )
+    if not needed_sizes:
+        return None
+
+    img = None
+    current = None
+    requested_data = None
+
+    try:
+        max_target = max(sizes[size] for size in needed_sizes)
+        prefer_draft = max_target <= sizes["sm"]
+        img = load_source_image(filepath, max_target, prefer_draft=prefer_draft)
+        queue_orientation(image_id, img)
+
+        current = img
+        for size in needed_sizes:
+            variant = resize_to_long_side(current, sizes[size])
+            source_signature = build_source_signature(filepath, size, image_id)
+            variant, data, _written = encode_and_cache_thumbnail(
+                size,
+                image_id,
+                source_signature,
+                variant,
+                hot=hot,
+            )
+            if size == requested_size:
+                requested_data = data
+
+            if current is not img:
+                current.close()
+            current = variant
+    except Exception as exc:
+        source_missing = mark_source_missing_from_error(filepath, image_id, exc)
+        if not source_missing:
+            retry_until = now_provider() + thumbnail_retry_seconds
+            for size in needed_sizes:
+                source_signature = build_source_signature(filepath, size, image_id)
+                thumbnail_retry_after[(size, image_id, source_signature)] = retry_until
+            log(f"Thumbnail error for {filepath}: {exc}")
+        return None
+    finally:
+        if current is not None and current is not img:
+            try:
+                current.close()
+            except Exception:
+                pass
+        if img is not None:
+            try:
+                img.close()
+            except Exception:
+                pass
+    return requested_data
+
+
 def load_embedding_image(
     filepath: str,
     image_id: int,

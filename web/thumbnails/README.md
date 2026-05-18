@@ -11,7 +11,8 @@ in-memory thumbnail LRU operations. `disk_store.py` owns stateless disk path,
 marker-safety, temp cleanup, and index helpers; `maintenance.py` wires those
 helpers to the active cache root while preserving source-safe marker behavior.
 `generation.py` owns source image loading, resizing, JPEG encoding/cache-write
-helpers, orientation extraction, thumbnail generation planning, and embedding input image loading.
+helpers, orientation extraction, thumbnail generation planning, single-image
+thumbnail generation, and embedding input image loading.
 `source_identity.py` owns source stat caching, catalog/source signatures,
 missing-source probes, and thumbnail HTTP cache header payloads.
 `data_providers.py` owns app-injected DB/cache

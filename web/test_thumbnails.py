@@ -1331,6 +1331,104 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
             thumbnails._disk_allocations.clear()
             thumbnails._disk_allocations.update(old_allocations)
 
+    def test_generate_missing_thumbnails_remains_facaded_from_generation_module(self):
+        path = os.path.join(self.tempdir.name, "generate-missing.jpg")
+        image_id = 9
+
+        def planned(filepath, item_id, requested_size, **kwargs):
+            self.assertEqual((filepath, item_id, requested_size), (path, image_id, "sm"))
+            self.assertTrue(kwargs["include_smaller_tiers"])
+            self.assertFalse(kwargs["allow_stale_fallback"])
+            return ["md", "sm"]
+
+        def source_signature(filepath, size, item_id):
+            return f"{filepath}:{size}:{item_id}"
+
+        def make_helpers(calls):
+            def load_source(filepath, max_target, *, prefer_draft):
+                calls.append(("load", filepath, max_target, prefer_draft))
+                return Image.new("RGB", (40, 20), color=(20, 40, 60))
+
+            def queue_orientation(item_id, img):
+                calls.append(("orientation", item_id, img.size))
+
+            def resize(img, target):
+                calls.append(("resize", target))
+                return img.copy()
+
+            def encode(size, item_id, signature, variant, *, hot):
+                calls.append(("encode", size, item_id, signature, hot))
+                return variant, f"{size}-bytes".encode("ascii"), True
+
+            return load_source, queue_orientation, resize, encode
+
+        direct_calls = []
+        direct_load, direct_queue, direct_resize, direct_encode = make_helpers(direct_calls)
+        direct_retry = {}
+        direct_result = thumbnail_generation.generate_missing_thumbnails(
+            path,
+            "sm",
+            image_id,
+            include_smaller_tiers=True,
+            hot=True,
+            allow_stale_fallback=False,
+            planned_thumbnail_sizes=planned,
+            sizes=thumbnails.SIZES,
+            load_source_image=direct_load,
+            queue_orientation=direct_queue,
+            resize_to_long_side=direct_resize,
+            build_source_signature=source_signature,
+            encode_and_cache_thumbnail=direct_encode,
+            mark_source_missing_from_error=lambda *_args: False,
+            thumbnail_retry_after=direct_retry,
+            thumbnail_retry_seconds=thumbnails.THUMBNAIL_RETRY_SECONDS,
+            now_provider=lambda: 100.0,
+            log=lambda _message: None,
+        )
+
+        old_planned = thumbnails._planned_thumbnail_sizes
+        old_load_source = thumbnails._load_source_image
+        old_queue_orientation = thumbnails._queue_orientation
+        old_resize = thumbnails._resize_to_long_side
+        old_build_source_signature = thumbnails._build_source_signature
+        old_encode = thumbnails._encode_and_cache_thumbnail
+        old_mark_missing = thumbnails._mark_source_missing_from_error
+        old_retry_after = thumbnails._thumbnail_retry_after
+        try:
+            facade_calls = []
+            facade_load, facade_queue, facade_resize, facade_encode = make_helpers(facade_calls)
+            thumbnails._planned_thumbnail_sizes = planned
+            thumbnails._load_source_image = facade_load
+            thumbnails._queue_orientation = facade_queue
+            thumbnails._resize_to_long_side = facade_resize
+            thumbnails._build_source_signature = source_signature
+            thumbnails._encode_and_cache_thumbnail = facade_encode
+            thumbnails._mark_source_missing_from_error = lambda *_args: False
+            thumbnails._thumbnail_retry_after = {}
+
+            facade_result = thumbnails._generate_missing_thumbnails_sync(
+                path,
+                "sm",
+                image_id,
+                include_smaller_tiers=True,
+                hot=True,
+                allow_stale_fallback=False,
+            )
+
+            self.assertEqual(facade_result, direct_result)
+            self.assertEqual(facade_result, b"sm-bytes")
+            self.assertEqual(facade_calls, direct_calls)
+            self.assertEqual(thumbnails._thumbnail_retry_after, direct_retry)
+        finally:
+            thumbnails._planned_thumbnail_sizes = old_planned
+            thumbnails._load_source_image = old_load_source
+            thumbnails._queue_orientation = old_queue_orientation
+            thumbnails._resize_to_long_side = old_resize
+            thumbnails._build_source_signature = old_build_source_signature
+            thumbnails._encode_and_cache_thumbnail = old_encode
+            thumbnails._mark_source_missing_from_error = old_mark_missing
+            thumbnails._thumbnail_retry_after = old_retry_after
+
     def _cache_original_now(self, image_id: int, path: str):
         signature = thumbnails._build_source_signature(path, thumbnails.FULL_TIER, image_id)
         return thumbnails._cache_full_image_sync(path, image_id, signature, hot=False)

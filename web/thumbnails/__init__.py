@@ -769,64 +769,24 @@ def _generate_missing_thumbnails_sync(
     hot: bool = False,
     allow_stale_fallback: bool = True,
 ):
-    needed_sizes = _planned_thumbnail_sizes(
+    return generation.generate_missing_thumbnails(
         filepath,
-        image_id,
         requested_size,
+        image_id,
         include_smaller_tiers=include_smaller_tiers,
+        hot=hot,
         allow_stale_fallback=allow_stale_fallback,
+        planned_thumbnail_sizes=_planned_thumbnail_sizes,
+        sizes=SIZES,
+        load_source_image=_load_source_image,
+        queue_orientation=_queue_orientation,
+        resize_to_long_side=_resize_to_long_side,
+        build_source_signature=_build_source_signature,
+        encode_and_cache_thumbnail=_encode_and_cache_thumbnail,
+        mark_source_missing_from_error=_mark_source_missing_from_error,
+        thumbnail_retry_after=_thumbnail_retry_after,
+        thumbnail_retry_seconds=THUMBNAIL_RETRY_SECONDS,
     )
-    if not needed_sizes:
-        return None
-
-    img = None
-    current = None
-    requested_data = None
-
-    try:
-        max_target = max(SIZES[size] for size in needed_sizes)
-        prefer_draft = max_target <= SIZES["sm"]
-        img = _load_source_image(filepath, max_target, prefer_draft=prefer_draft)
-        _queue_orientation(image_id, img)
-
-        current = img
-        for size in needed_sizes:
-            variant = _resize_to_long_side(current, SIZES[size])
-            source_signature = _build_source_signature(filepath, size, image_id)
-            variant, data, _written = _encode_and_cache_thumbnail(
-                size,
-                image_id,
-                source_signature,
-                variant,
-                hot=hot,
-            )
-            if size == requested_size:
-                requested_data = data
-
-            if current is not img:
-                current.close()
-            current = variant
-    except Exception as e:
-        source_missing = _mark_source_missing_from_error(filepath, image_id, e)
-        if not source_missing:
-            retry_until = time.time() + THUMBNAIL_RETRY_SECONDS
-            for size in needed_sizes:
-                source_signature = _build_source_signature(filepath, size, image_id)
-                _thumbnail_retry_after[(size, image_id, source_signature)] = retry_until
-            print(f"Thumbnail error for {filepath}: {e}")
-        return None
-    finally:
-        if current is not None and current is not img:
-            try:
-                current.close()
-            except Exception:
-                pass
-        if img is not None:
-            try:
-                img.close()
-            except Exception:
-                pass
-    return requested_data
 
 
 def _generate_thumbnail_set_sync(
