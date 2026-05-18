@@ -94,6 +94,8 @@ selects, plus the behavior behind the legacy `setFilter`, `clearLibraryFilters`,
 reloads the correct Library, map, Mosaic, or Compare surface after filter
 changes while delegating pure filter mutations to `library/filters.js`.
 `library/sort.js` owns Library sort keys and sort state conversion.
+`legacy/library_sort_bridge.js` owns the legacy Library sort-control facade
+around the extracted Library sort controller.
 `library/search_state.js` owns Library/search session persistence keys and
 helpers for sort, search query, deep-search flag, and search-specific sort state.
 `library/search_controls.js` owns Library and Compare search/sort DOM control

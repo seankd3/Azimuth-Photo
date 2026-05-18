@@ -23,7 +23,6 @@ import {
     RANKINGS_PAGE_SIZE,
     currentLibraryPageSize as currentLibraryPageSizeCore,
 } from '../library/pagination.js';
-import { createLibrarySortController } from '../library/sort_controller.js';
 import { eloToStars } from '../library/display.js';
 import { appendLibraryRankCards } from '../library/rank_cards.js';
 import {
@@ -53,6 +52,7 @@ import {
 import { createLegacyLibraryInitBridge } from './library_init_bridge.js';
 import { createLegacyLibraryFilterBridge } from './library_filter_bridge.js';
 import { createLegacyLibraryMapBridge } from './library_map_bridge.js';
+import { createLegacyLibrarySortBridge } from './library_sort_bridge.js';
 import { createLegacyLoupeBridge } from './loupe_bridge.js';
 import { createLegacyMosaicBridge } from './mosaic_bridge.js';
 import { createLegacyPeopleBridge } from './people_bridge.js';
@@ -702,7 +702,7 @@ const legacyPhotoArchive = (() => {
         return filterQueryBridge.rankingQueryString({ queryState, limit, offset, sort });
     }
 
-    const librarySortController = createLibrarySortController({
+    const librarySortBridge = createLegacyLibrarySortBridge({
         getSortField: () => sortField,
         getSortDesc: () => sortDesc,
         setRankingsSortValue: (value) => { rankingsSort = value; },
@@ -716,7 +716,7 @@ const legacyPhotoArchive = (() => {
         setRankingsSort,
         setSortField,
         toggleSortDir,
-    } = librarySortController;
+    } = librarySortBridge;
 
     const searchActionBridge = createLegacySearchActionBridge({
         documentImpl: document,

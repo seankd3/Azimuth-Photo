@@ -3873,6 +3873,8 @@ class ModularContractTests(unittest.TestCase):
             legacy_library_filter_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "library_map_bridge.js"), encoding="utf-8") as fh:
             legacy_library_map_bridge = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "legacy", "library_sort_bridge.js"), encoding="utf-8") as fh:
+            legacy_library_sort_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "loupe_bridge.js"), encoding="utf-8") as fh:
             legacy_loupe_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "mosaic_bridge.js"), encoding="utf-8") as fh:
@@ -4096,6 +4098,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from './library_init_bridge.js';", legacy)
         self.assertIn("from './library_map_bridge.js';", legacy)
         self.assertIn("from './library_shell_bridge.js';", legacy)
+        self.assertIn("from './library_sort_bridge.js';", legacy)
         self.assertIn("from './loupe_bridge.js';", legacy)
         self.assertIn("from './mosaic_bridge.js';", legacy)
         self.assertIn("from './people_bridge.js';", legacy)
@@ -4152,7 +4155,9 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("export function createLegacyLoupeBridge", legacy_loupe_bridge)
         self.assertIn("from '../library/sort.js';", legacy_search_sort_bridge)
         self.assertIn("from '../library/pagination.js';", legacy)
-        self.assertIn("from '../library/sort_controller.js';", legacy)
+        self.assertNotIn("from '../library/sort_controller.js';", legacy)
+        self.assertIn("from '../library/sort_controller.js';", legacy_library_sort_bridge)
+        self.assertIn("export function createLegacyLibrarySortBridge", legacy_library_sort_bridge)
         self.assertIn("from '../library/search_state.js';", legacy_search_sort_bridge)
         self.assertIn("from '../library/search_controls.js';", legacy_search_sort_bridge)
         self.assertIn("export function createLegacySearchSortBridge", legacy_search_sort_bridge)
@@ -7420,6 +7425,56 @@ events.length = 0;
 sortField = 'similarity';
 assert.equal(controller.toggleSortDir(), false);
 assert.deepEqual(events, []);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_legacy_library_sort_bridge_node_probe_preserves_sort_facade(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createLegacyLibrarySortBridge } from './static/js/legacy/library_sort_bridge.js';
+
+const expected = {
+    getSortField: () => 'elo',
+    getSortDesc: () => true,
+    setRankingsSortValue: () => {},
+    applySortState: () => {},
+    resetLibraryResults: () => {},
+    clearDateGroups: () => {},
+    loadRankings: () => {},
+    updateDateScrubber: () => {},
+};
+const dependencyNames = Object.keys(expected);
+const methodNames = ['setRankingsSort', 'setSortField', 'toggleSortDir'];
+const calls = [];
+
+const bridge = createLegacyLibrarySortBridge({
+    ...expected,
+    createLibrarySortControllerImpl: (deps) => {
+        for (const name of dependencyNames) {
+            assert.strictEqual(deps[name], expected[name], `${name} dependency`);
+        }
+        return Object.fromEntries(methodNames.map((name) => [
+            name,
+            (...args) => {
+                calls.push([name, args]);
+                return `${name}-result`;
+            },
+        ]));
+    },
+});
+
+for (const name of methodNames) {
+    assert.equal(bridge[name](`${name}-arg`), `${name}-result`);
+}
+assert.deepEqual(calls, methodNames.map((name) => [name, [`${name}-arg`]]));
 """
         subprocess.run(
             ["node", "--input-type=module", "-e", script],
