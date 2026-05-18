@@ -13,6 +13,8 @@ import app as app_module  # noqa: E402
 import db  # noqa: E402
 import embed_cache  # noqa: E402
 import embedding_worker  # noqa: E402
+import settings  # noqa: E402
+import thumbnails  # noqa: E402
 from features.compare import service as compare_service  # noqa: E402
 from thumbnails import cache_entries as thumbnail_cache_entries  # noqa: E402
 
@@ -67,10 +69,10 @@ class ApiShapeTests(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
         self.old_db_path = db.DB_PATH
-        self.old_settings_path = app_module.settings.SETTINGS_PATH
-        self.old_settings_state = app_module.settings._settings
-        self.old_cache_dir = app_module.thumbnails.SSD_CACHE_DIR
-        self.old_prefetch_images = app_module.thumbnails.prefetch_images
+        self.old_settings_path = settings.SETTINGS_PATH
+        self.old_settings_state = settings._settings
+        self.old_cache_dir = thumbnails.SSD_CACHE_DIR
+        self.old_prefetch_images = thumbnails.prefetch_images
         self.old_encode_text = embedding_worker.encode_text
         self.old_get_matrix = embed_cache.get_matrix
         self.old_get_index = embed_cache.get_index
@@ -82,14 +84,14 @@ class ApiShapeTests(unittest.TestCase):
         os.environ["PHOTOARCHIVE_SMOKE_MODE"] = "1"
         db.DB_PATH = os.path.join(self.tempdir.name, "api-shapes.db")
         thumbnail_cache_entries._persistent_conn = None
-        app_module.settings.SETTINGS_PATH = os.path.join(self.tempdir.name, "settings.local.json")
-        app_module.settings._settings = None
-        app_module.thumbnails.SSD_CACHE_DIR = os.path.join(self.tempdir.name, "cache")
+        settings.SETTINGS_PATH = os.path.join(self.tempdir.name, "settings.local.json")
+        settings._settings = None
+        thumbnails.SSD_CACHE_DIR = os.path.join(self.tempdir.name, "cache")
         db.invalidate_stats_cache()
         db.invalidate_cached_image_ids_cache()
         db.clear_filter_options_cache()
         asyncio.run(db.init_db())
-        app_module.settings.save_settings({"deep_search_schedule_enabled": False})
+        settings.save_settings({"deep_search_schedule_enabled": False})
         compare_service._pairing_cache.update({"data": None, "valid": False})
         compare_service._matchups_cache.update({"data": None, "valid": False})
 
@@ -99,7 +101,7 @@ class ApiShapeTests(unittest.TestCase):
         async def no_model_load():
             return False
 
-        app_module.thumbnails.prefetch_images = noop_prefetch
+        thumbnails.prefetch_images = noop_prefetch
         embedding_worker.ensure_model_loaded_for_search = no_model_load
         self.source_id = self._create_source()
         self.ids = self._create_images()
@@ -107,7 +109,7 @@ class ApiShapeTests(unittest.TestCase):
 
     def tearDown(self):
         self.client.close()
-        app_module.thumbnails.prefetch_images = self.old_prefetch_images
+        thumbnails.prefetch_images = self.old_prefetch_images
         embedding_worker.encode_text = self.old_encode_text
         embedding_worker.ensure_model_loaded_for_search = self.old_ensure_model_loaded_for_search
         embed_cache.get_matrix = self.old_get_matrix
@@ -116,9 +118,9 @@ class ApiShapeTests(unittest.TestCase):
         if thumbnail_cache_entries._persistent_conn is not None:
             thumbnail_cache_entries._persistent_conn.close()
         thumbnail_cache_entries._persistent_conn = self.old_thumbnail_persistent_conn
-        app_module.thumbnails.SSD_CACHE_DIR = self.old_cache_dir
-        app_module.settings.SETTINGS_PATH = self.old_settings_path
-        app_module.settings._settings = self.old_settings_state
+        thumbnails.SSD_CACHE_DIR = self.old_cache_dir
+        settings.SETTINGS_PATH = self.old_settings_path
+        settings._settings = self.old_settings_state
         if self.old_smoke_mode is None:
             os.environ.pop("PHOTOARCHIVE_SMOKE_MODE", None)
         else:
@@ -253,7 +255,7 @@ class ApiShapeTests(unittest.TestCase):
                         "(cache_root, size, image_id, path, source_signature, size_bytes, last_accessed, created_at) "
                         "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                         (
-                            app_module.thumbnails.SSD_CACHE_DIR,
+                            thumbnails.SSD_CACHE_DIR,
                             size,
                             image_id,
                             os.path.join(self.tempdir.name, f"{size}-{image_id}.jpg"),

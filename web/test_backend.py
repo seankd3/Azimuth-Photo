@@ -2,25 +2,34 @@ import asyncio
 from datetime import datetime
 import io
 import inspect
+import json
 import os
 import sqlite3
 import sys
 import tempfile
 from types import SimpleNamespace
+import time
 import unittest
 from zoneinfo import ZoneInfo
 
 import numpy as np
+from fastapi import BackgroundTasks
+from fastapi.responses import FileResponse
 from starlette.requests import Request
 from starlette.responses import Response
 
 sys.path.insert(0, os.path.dirname(__file__))
 import app as app_module  # noqa: E402
+import ai_models  # noqa: E402
 import db  # noqa: E402
 import embedding_worker  # noqa: E402
 import elo_propagation  # noqa: E402
 import face_worker  # noqa: E402
 import scanner  # noqa: E402
+import settings  # noqa: E402
+import thumbnails  # noqa: E402
+from core import app_factory  # noqa: E402
+from core import background as background_runtime  # noqa: E402
 from core import cache_events  # noqa: E402
 from core import query_constraints  # noqa: E402
 from data.repositories import filter_options as filter_options_repository  # noqa: E402
@@ -76,19 +85,19 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.old_ensure_model_loaded_for_search = embedding_worker.ensure_model_loaded_for_search
         self.old_start_search_model_load = embedding_worker.start_search_model_load
         self.old_embedding_manual_pause = embedding_worker.get_worker_status()["manual_pause"]
-        self.old_prefetch_images = app_module.thumbnails.prefetch_images
-        self.old_schedule_full_image_cache = app_module.thumbnails.schedule_full_image_cache
-        self.old_has_cached_fast = app_module.thumbnails.has_cached_fast
-        self.old_fast_disk_path_entry = app_module.thumbnails.fast_disk_path_entry
-        self.old_fast_disk_read_entry = app_module.thumbnails.fast_disk_read_entry
+        self.old_prefetch_images = thumbnails.prefetch_images
+        self.old_schedule_full_image_cache = thumbnails.schedule_full_image_cache
+        self.old_has_cached_fast = thumbnails.has_cached_fast
+        self.old_fast_disk_path_entry = thumbnails.fast_disk_path_entry
+        self.old_fast_disk_read_entry = thumbnails.fast_disk_read_entry
         self.old_thumbnail_persistent_conn = thumbnail_cache_entries._persistent_conn
-        self.old_settings_path = app_module.settings.SETTINGS_PATH
-        self.old_settings_state = app_module.settings._settings
+        self.old_settings_path = settings.SETTINGS_PATH
+        self.old_settings_state = settings._settings
 
         db.DB_PATH = os.path.join(self.tempdir.name, "photoarchive-test.db")
         thumbnail_cache_entries._persistent_conn = None
-        app_module.settings.SETTINGS_PATH = os.path.join(self.tempdir.name, "settings.local.json")
-        app_module.settings._settings = None
+        settings.SETTINGS_PATH = os.path.join(self.tempdir.name, "settings.local.json")
+        settings._settings = None
         db.invalidate_stats_cache()
         db.invalidate_cached_image_ids_cache()
         db._invalidate_past_matchups_cache()
@@ -114,7 +123,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             return False
 
         compare_routes._schedule_pairing_propagation = close_scheduled
-        app_module.thumbnails.prefetch_images = noop_prefetch
+        thumbnails.prefetch_images = noop_prefetch
         embedding_worker.ensure_model_loaded_for_search = no_model_load_for_search
         embedding_worker.start_search_model_load = lambda: False
 
@@ -130,16 +139,16 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             embedding_worker.pause_embedding_worker()
         else:
             embedding_worker.resume_embedding_worker()
-        app_module.thumbnails.prefetch_images = self.old_prefetch_images
-        app_module.thumbnails.schedule_full_image_cache = self.old_schedule_full_image_cache
-        app_module.thumbnails.has_cached_fast = self.old_has_cached_fast
-        app_module.thumbnails.fast_disk_path_entry = self.old_fast_disk_path_entry
-        app_module.thumbnails.fast_disk_read_entry = self.old_fast_disk_read_entry
+        thumbnails.prefetch_images = self.old_prefetch_images
+        thumbnails.schedule_full_image_cache = self.old_schedule_full_image_cache
+        thumbnails.has_cached_fast = self.old_has_cached_fast
+        thumbnails.fast_disk_path_entry = self.old_fast_disk_path_entry
+        thumbnails.fast_disk_read_entry = self.old_fast_disk_read_entry
         if thumbnail_cache_entries._persistent_conn is not None:
             thumbnail_cache_entries._persistent_conn.close()
         thumbnail_cache_entries._persistent_conn = self.old_thumbnail_persistent_conn
-        app_module.settings.SETTINGS_PATH = self.old_settings_path
-        app_module.settings._settings = self.old_settings_state
+        settings.SETTINGS_PATH = self.old_settings_path
+        settings._settings = self.old_settings_state
         db.DB_PATH = self.old_db_path
         db.invalidate_stats_cache()
         db.invalidate_cached_image_ids_cache()
@@ -212,7 +221,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
                 "(cache_root, size, image_id, path, source_signature, size_bytes, last_accessed, created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
-                    app_module.thumbnails.SSD_CACHE_DIR,
+                    thumbnails.SSD_CACHE_DIR,
                     size,
                     image_id,
                     os.path.join(self.tempdir.name, f"{size}-{image_id}.jpg"),
@@ -294,7 +303,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
         pending = await db.count_images_needing_faces(
             model_id=model_id,
-            cache_root=app_module.thumbnails.SSD_CACHE_DIR,
+            cache_root=thumbnails.SSD_CACHE_DIR,
         )
         self.assertEqual(pending, 1)
 
@@ -310,7 +319,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         )
         pending = await db.count_images_needing_faces(
             model_id=model_id,
-            cache_root=app_module.thumbnails.SSD_CACHE_DIR,
+            cache_root=thumbnails.SSD_CACHE_DIR,
         )
         self.assertEqual(pending, 0)
 
@@ -539,7 +548,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         )
         deep_matrix /= np.linalg.norm(deep_matrix, axis=1, keepdims=True)
         fast_matrix /= np.linalg.norm(fast_matrix, axis=1, keepdims=True)
-        deep_key = app_module.settings.deep_search_embedding_config()["model_key"]
+        deep_key = settings.deep_search_embedding_config()["model_key"]
         calls = []
 
         async def fake_get_matrix(model_key=None):
@@ -575,7 +584,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             ],
             dtype=np.float32,
         )
-        deep_key = app_module.settings.deep_search_embedding_config()["model_key"]
+        deep_key = settings.deep_search_embedding_config()["model_key"]
         calls = []
 
         async def fake_get_matrix(model_key=None):
@@ -803,7 +812,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
                 {"id": 2, "elo": 1300.0, "comparisons": 2},
             ],
         })
-        expires = app_module.time.monotonic() + 1.0
+        expires = time.monotonic() + 1.0
         compare_service._visible_pairing_candidates_cache["test:md:2:elo"] = {
             "data": [
                 {"id": 1, "elo": 1200.0, "comparisons": 0},
@@ -865,13 +874,13 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(await db.get_embedding_count(), 1)
 
-        app_module.settings.save_settings({
+        settings.save_settings({
             "embed_model_preset": "qwen3-vl-embedding-8b",
             "embed_model_dir": "/tmp/stale-2b-path",
         })
         db._invalidate_embedding_count_cache()
         still_fast_key = db.active_embedding_model_key()
-        deep_config = app_module.settings.deep_search_embedding_config()
+        deep_config = settings.deep_search_embedding_config()
 
         self.assertEqual(still_fast_key, fast_key)
         self.assertNotEqual(deep_config["model_key"], fast_key)
@@ -899,20 +908,20 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await db.get_embedding_count(), 1)
 
     async def test_qwen8b_preset_is_authoritative(self):
-        saved = app_module.settings.save_settings({
+        saved = settings.save_settings({
             "embed_model_preset": "qwen3-vl-embedding-8b",
             "embed_model_dir": "/tmp/stale-2b-path",
             "embed_model_dim": 2048,
         })
         presets = {
             preset["key"]: preset
-            for preset in app_module.settings.settings_metadata()["embedding_model_presets"]
+            for preset in settings.settings_metadata()["embedding_model_presets"]
         }
 
         self.assertEqual(saved["embed_model_id"], "Qwen/Qwen3-VL-Embedding-8B")
         self.assertEqual(saved["embed_model_dim"], 4096)
         self.assertEqual(saved["embed_model_dir"], presets["qwen3-vl-embedding-8b"]["model_dir"])
-        self.assertTrue(app_module.settings.embedding_model_key(saved).endswith(":4096"))
+        self.assertTrue(settings.embedding_model_key(saved).endswith(":4096"))
 
     async def test_init_db_migrates_legacy_comparison_action_id_before_indexes(self):
         original_path = db.DB_PATH
@@ -1131,7 +1140,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         filters = {
             "sort": "filename",
             "visible_thumb_size": "sm",
-            "cache_root": app_module.thumbnails.SSD_CACHE_DIR,
+            "cache_root": thumbnails.SSD_CACHE_DIR,
         }
 
         repository_rows = await rankings.rankings(
@@ -1187,7 +1196,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             limit=10,
             file_type="jpg",
             visible_thumb_size="md",
-            cache_root=app_module.thumbnails.SSD_CACHE_DIR,
+            cache_root=thumbnails.SSD_CACHE_DIR,
         )
         options = await db.get_filter_options()
 
@@ -1303,7 +1312,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         visible_landscape = await self._image(source["id"], "visible-landscape.jpg")
         hidden_landscape = await self._image(source["id"], "hidden-landscape.jpg")
         portrait = await self._image(source["id"], "portrait.jpg")
-        cache_root = app_module.thumbnails.SSD_CACHE_DIR
+        cache_root = thumbnails.SSD_CACHE_DIR
         conn = await db.get_db()
         try:
             await conn.executemany(
@@ -1399,7 +1408,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             sort="elo",
             orientation="landscape",
             visible_thumb_size="md",
-            cache_root=app_module.thumbnails.SSD_CACHE_DIR,
+            cache_root=thumbnails.SSD_CACHE_DIR,
         )
 
         self.assertEqual([row["id"] for row in rows], [visible_high, visible_low])
@@ -1431,13 +1440,13 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             limit=10,
             sort="filename",
             visible_thumb_size="sm",
-            cache_root=app_module.thumbnails.SSD_CACHE_DIR,
+            cache_root=thumbnails.SSD_CACHE_DIR,
         )
         camera_rows = await db.get_rankings(
             limit=10,
             sort="camera",
             visible_thumb_size="sm",
-            cache_root=app_module.thumbnails.SSD_CACHE_DIR,
+            cache_root=thumbnails.SSD_CACHE_DIR,
         )
 
         self.assertEqual([row["id"] for row in filename_rows], [visible_b, visible_c])
@@ -1454,7 +1463,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
         rows = await db.get_visible_images_for_pairing(
             "sm",
-            app_module.thumbnails.SSD_CACHE_DIR,
+            thumbnails.SSD_CACHE_DIR,
             include_card_metadata=False,
             limit=10,
             order="least_compared",
@@ -1476,7 +1485,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
                 "  WHERE c.cache_root = ? AND c.size = ? AND c.image_id = i.id"
                 ") "
                 "ORDER BY i.comparisons ASC, i.elo DESC LIMIT 10",
-                (app_module.thumbnails.SSD_CACHE_DIR, "sm"),
+                (thumbnails.SSD_CACHE_DIR, "sm"),
             ).fetchall()
         finally:
             raw.close()
@@ -1518,13 +1527,13 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         visible_repository_rows = await ratings.visible_images_for_pairing(
             db.DB_PATH,
             "sm",
-            app_module.thumbnails.SSD_CACHE_DIR,
+            thumbnails.SSD_CACHE_DIR,
             include_card_metadata=False,
             order="cache",
         )
         visible_facade_rows = await db.get_visible_images_for_pairing(
             "sm",
-            app_module.thumbnails.SSD_CACHE_DIR,
+            thumbnails.SSD_CACHE_DIR,
             include_card_metadata=False,
             order="cache",
         )
@@ -1606,21 +1615,21 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
         count = await db.count_rankings(
             visible_thumb_size="sm",
-            cache_root=app_module.thumbnails.SSD_CACHE_DIR,
+            cache_root=thumbnails.SSD_CACHE_DIR,
         )
         self.assertEqual(count, 1)
 
         await self._cache_entry(second, "sm")
         stale_count = await db.count_rankings(
             visible_thumb_size="sm",
-            cache_root=app_module.thumbnails.SSD_CACHE_DIR,
+            cache_root=thumbnails.SSD_CACHE_DIR,
         )
         self.assertEqual(stale_count, 1)
 
         db.invalidate_cached_image_ids_cache()
         refreshed_count = await db.count_rankings(
             visible_thumb_size="sm",
-            cache_root=app_module.thumbnails.SSD_CACHE_DIR,
+            cache_root=thumbnails.SSD_CACHE_DIR,
         )
         self.assertEqual(refreshed_count, 2)
 
@@ -1634,7 +1643,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
         count = await db.count_rankings(
             visible_thumb_size="sm",
-            cache_root=app_module.thumbnails.SSD_CACHE_DIR,
+            cache_root=thumbnails.SSD_CACHE_DIR,
         )
 
         self.assertEqual(count, 2)
@@ -1645,7 +1654,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         second = await self._image(source["id"], "cache-count-2.jpg")
         await self._cache_entry(first, "sm")
 
-        root = app_module.thumbnails.SSD_CACHE_DIR
+        root = thumbnails.SSD_CACHE_DIR
         self.assertEqual(await db._cache_entry_count("sm", root), 1)
         self.assertEqual(
             await cache_entry_repository.cache_entry_count_cached(
@@ -1978,7 +1987,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await conn.close()
         db.invalidate_stats_cache()
-        root = app_module.thumbnails.SSD_CACHE_DIR
+        root = thumbnails.SSD_CACHE_DIR
         for image_id in (feb, jan, no_date):
             await self._cache_entry(image_id, "sm")
 
@@ -2050,7 +2059,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await conn.close()
         db.invalidate_stats_cache()
-        root = app_module.thumbnails.SSD_CACHE_DIR
+        root = thumbnails.SSD_CACHE_DIR
         for image_id in (visible_gps, visible_no_gps):
             await self._cache_entry(image_id, "sm")
 
@@ -2158,7 +2167,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(await db.get_unembedded_images(limit=10)), 2)
         md_ready = await db.get_unembedded_images(
             limit=10,
-            md_cache_root=app_module.thumbnails.SSD_CACHE_DIR,
+            md_cache_root=thumbnails.SSD_CACHE_DIR,
         )
         self.assertEqual([row["id"] for row in md_ready], [active_a, active_b])
         self.assertEqual(
@@ -2170,7 +2179,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         )
         sm_ready = await db.get_unembedded_images(
             limit=10,
-            md_cache_root=app_module.thumbnails.SSD_CACHE_DIR,
+            md_cache_root=thumbnails.SSD_CACHE_DIR,
             cache_size="sm",
         )
         self.assertEqual(
@@ -2199,11 +2208,11 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([row["id"] for row in await db.get_active_images_for_pairing()], [image_id])
         self.assertEqual(await db.get_past_matchups(), set())
         self.assertIsInstance(
-            await db.get_date_groups(visible_thumb_size="sm", cache_root=app_module.thumbnails.SSD_CACHE_DIR),
+            await db.get_date_groups(visible_thumb_size="sm", cache_root=thumbnails.SSD_CACHE_DIR),
             list,
         )
 
-        markers = await db.get_map_markers(visible_thumb_size="sm", cache_root=app_module.thumbnails.SSD_CACHE_DIR)
+        markers = await db.get_map_markers(visible_thumb_size="sm", cache_root=thumbnails.SSD_CACHE_DIR)
         self.assertEqual(markers["total_count"], 1)
         self.assertEqual(markers["gps_total_count"], 0)
 
@@ -2329,28 +2338,28 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         db.invalidate_cached_image_ids_cache()
         self.assertIn(
             image_id,
-            await db.get_cached_image_id_set("sm", app_module.thumbnails.SSD_CACHE_DIR),
+            await db.get_cached_image_id_set("sm", thumbnails.SSD_CACHE_DIR),
         )
 
         await db.purge_source_catalog_data(source["id"])
 
         self.assertNotIn(
             image_id,
-            await db.get_cached_image_id_set("sm", app_module.thumbnails.SSD_CACHE_DIR),
+            await db.get_cached_image_id_set("sm", thumbnails.SSD_CACHE_DIR),
         )
 
     async def test_thumbnail_store_invalidates_cached_image_id_cache(self):
         source = await self._source("thumb-store-source")
         image_id = await self._image(source["id"], "new-cache.jpg")
         thumbnail_cache_entries._persistent_conn = None
-        old_allocations = dict(app_module.thumbnails._disk_allocations)
-        app_module.thumbnails._disk_allocations["sm"] = 10_000
+        old_allocations = dict(thumbnails._disk_allocations)
+        thumbnails._disk_allocations["sm"] = 10_000
         thumbnail_cache_entries._tier_byte_totals.clear()
         db.invalidate_cached_image_ids_cache()
         try:
             self.assertNotIn(
                 image_id,
-                await db.get_cached_image_id_set("sm", app_module.thumbnails.SSD_CACHE_DIR),
+                await db.get_cached_image_id_set("sm", thumbnails.SSD_CACHE_DIR),
             )
 
             thumbnail_cache_entries._store_disk_entry(
@@ -2363,20 +2372,20 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertIn(
                 image_id,
-                await db.get_cached_image_id_set("sm", app_module.thumbnails.SSD_CACHE_DIR),
+                await db.get_cached_image_id_set("sm", thumbnails.SSD_CACHE_DIR),
             )
         finally:
-            app_module.thumbnails._disk_allocations.clear()
-            app_module.thumbnails._disk_allocations.update(old_allocations)
+            thumbnails._disk_allocations.clear()
+            thumbnails._disk_allocations.update(old_allocations)
             thumbnail_cache_entries._tier_byte_totals.clear()
 
     async def test_thumbnail_write_queue_flush_invalidates_cached_image_id_cache(self):
         source = await self._source("thumb-flush-source")
         image_id = await self._image(source["id"], "queued-cache.jpg")
         thumbnail_cache_entries._persistent_conn = None
-        old_allocations = dict(app_module.thumbnails._disk_allocations)
+        old_allocations = dict(thumbnails._disk_allocations)
         old_queue = list(thumbnail_cache_entries._write_queue)
-        app_module.thumbnails._disk_allocations["sm"] = 10_000
+        thumbnails._disk_allocations["sm"] = 10_000
         thumbnail_cache_entries._tier_byte_totals.clear()
         with thumbnail_cache_entries._write_queue_lock:
             thumbnail_cache_entries._write_queue.clear()
@@ -2384,7 +2393,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         try:
             self.assertNotIn(
                 image_id,
-                await db.get_cached_image_id_set("sm", app_module.thumbnails.SSD_CACHE_DIR),
+                await db.get_cached_image_id_set("sm", thumbnails.SSD_CACHE_DIR),
             )
 
             with thumbnail_cache_entries._write_queue_lock:
@@ -2395,25 +2404,25 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
                         "sig-sm",
                         os.path.join(self.tempdir.name, "queued-cache-sm.jpg"),
                         123,
-                        app_module.thumbnails._current_time(),
+                        thumbnails._current_time(),
                     )
                 )
             self.assertTrue(thumbnail_cache_entries._flush_write_queue())
 
             self.assertIn(
                 image_id,
-                await db.get_cached_image_id_set("sm", app_module.thumbnails.SSD_CACHE_DIR),
+                await db.get_cached_image_id_set("sm", thumbnails.SSD_CACHE_DIR),
             )
         finally:
-            app_module.thumbnails._disk_allocations.clear()
-            app_module.thumbnails._disk_allocations.update(old_allocations)
+            thumbnails._disk_allocations.clear()
+            thumbnails._disk_allocations.update(old_allocations)
             thumbnail_cache_entries._tier_byte_totals.clear()
             with thumbnail_cache_entries._write_queue_lock:
                 thumbnail_cache_entries._write_queue.clear()
                 thumbnail_cache_entries._write_queue.extend(old_queue)
 
     async def test_thumbnail_append_preserves_visible_facet_cache(self):
-        root = app_module.thumbnails.SSD_CACHE_DIR
+        root = thumbnails.SSD_CACHE_DIR
         key = db._facet_cache_key(visible_thumb_size="sm", cache_root=root)
         cached_groups = [{"date": "2026-05", "label": "May 2026", "count": 1}]
         db._date_groups_cache[key] = {"data": cached_groups, "expires": db._time.time() + 30.0}
@@ -2425,7 +2434,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(key, db._map_markers_cache)
 
     async def test_thumbnail_append_preserves_visible_count_cache(self):
-        root = app_module.thumbnails.SSD_CACHE_DIR
+        root = thumbnails.SSD_CACHE_DIR
         key = db._ranking_count_cache_key(visible_thumb_size="sm", cache_root=root)
         db._ranking_count_cache[key] = {"value": 12, "expires": db._time.time() + 30.0}
 
@@ -2504,27 +2513,27 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
         date_groups = await db.get_date_groups(
             visible_thumb_size="sm",
-            cache_root=app_module.thumbnails.SSD_CACHE_DIR,
+            cache_root=thumbnails.SSD_CACHE_DIR,
         )
         self.assertEqual(date_groups, [])
         markers = await db.get_map_markers(
             visible_thumb_size="sm",
-            cache_root=app_module.thumbnails.SSD_CACHE_DIR,
+            cache_root=thumbnails.SSD_CACHE_DIR,
         )
         self.assertEqual(markers["markers"], [])
 
         await self._cache_entry(image_id, "sm")
-        db.invalidate_cached_image_ids_cache(app_module.thumbnails.SSD_CACHE_DIR, "sm")
+        db.invalidate_cached_image_ids_cache(thumbnails.SSD_CACHE_DIR, "sm")
 
         date_groups = await db.get_date_groups(
             visible_thumb_size="sm",
-            cache_root=app_module.thumbnails.SSD_CACHE_DIR,
+            cache_root=thumbnails.SSD_CACHE_DIR,
         )
         self.assertEqual(date_groups[0]["date"], "2024-01")
         self.assertGreaterEqual(db.FACET_CACHE_TTL_SECONDS, 30.0)
         markers = await db.get_map_markers(
             visible_thumb_size="sm",
-            cache_root=app_module.thumbnails.SSD_CACHE_DIR,
+            cache_root=thumbnails.SSD_CACHE_DIR,
         )
         self.assertEqual([marker["id"] for marker in markers["markers"]], [image_id])
 
@@ -2546,7 +2555,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
         markers = await db.get_map_markers(
             visible_thumb_size="sm",
-            cache_root=app_module.thumbnails.SSD_CACHE_DIR,
+            cache_root=thumbnails.SSD_CACHE_DIR,
         )
 
         self.assertEqual([marker["id"] for marker in markers["markers"]], [visible])
@@ -2563,7 +2572,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
         markers = await db.get_map_markers(
             visible_thumb_size="sm",
-            cache_root=app_module.thumbnails.SSD_CACHE_DIR,
+            cache_root=thumbnails.SSD_CACHE_DIR,
         )
 
         self.assertEqual(markers["markers"], [])
@@ -2639,7 +2648,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             await release.wait()
             return 0
 
-        app_module.thumbnails.prefetch_images = blocking_prefetch
+        thumbnails.prefetch_images = blocking_prefetch
         try:
             result = await asyncio.wait_for(
                 compare_routes.mosaic_next(n=2, strategy="random"),
@@ -2665,7 +2674,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             await release.wait()
             return 0
 
-        app_module.thumbnails.prefetch_images = blocking_prefetch
+        thumbnails.prefetch_images = blocking_prefetch
         try:
             result = await asyncio.wait_for(library_routes.api_rankings(limit=2), timeout=0.5)
             self.assertEqual(len(result["images"]), 2)
@@ -2688,7 +2697,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             await release.wait()
             return 0
 
-        app_module.thumbnails.prefetch_images = blocking_prefetch
+        thumbnails.prefetch_images = blocking_prefetch
         try:
             result = await asyncio.wait_for(compare_routes.compare_next(n=1, mode="swiss"), timeout=0.5)
             self.assertEqual(len(result["pairs"]), 1)
@@ -2699,13 +2708,13 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_thumbnail_memory_warm_reads_cached_sm_md_and_lg(self):
         calls = []
-        app_module.thumbnails._last_user_activity = app_module.thumbnails.time.monotonic() - 30.0
+        thumbnails._last_user_activity = thumbnails.time.monotonic() - 30.0
 
         def fake_read(size, image_id, source_signature=None, *, populate_memory=False):
             calls.append((size, image_id, source_signature, populate_memory))
             return ("sig", b"jpeg")
 
-        app_module.thumbnails.fast_disk_read_entry = fake_read
+        thumbnails.fast_disk_read_entry = fake_read
 
         media_warm.schedule_cached_thumbnail_memory_warm(
             [{"id": 10}, {"id": 11}],
@@ -2734,13 +2743,13 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
     async def test_result_thumbnail_memory_warm_reads_small_batch_while_active(self):
         calls = []
         rows = [{"id": idx} for idx in range(1001, 1010)]
-        app_module.thumbnails._last_user_activity = app_module.thumbnails.time.monotonic()
+        thumbnails._last_user_activity = thumbnails.time.monotonic()
 
         def fake_read(size, image_id, source_signature=None, *, populate_memory=False):
             calls.append((size, image_id, populate_memory))
             return ("sig", b"jpeg")
 
-        app_module.thumbnails.fast_disk_read_entry = fake_read
+        thumbnails.fast_disk_read_entry = fake_read
 
         media_warm.schedule_result_thumbnail_memory_warm(rows)
         deadline = asyncio.get_running_loop().time() + 0.5
@@ -2789,7 +2798,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
         rows = await db.get_visible_images_for_pairing(
             "md",
-            app_module.thumbnails.SSD_CACHE_DIR,
+            thumbnails.SSD_CACHE_DIR,
             include_card_metadata=False,
             limit=10,
         )
@@ -2814,7 +2823,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
         matchups = await db.get_visible_past_matchups(
             "md",
-            app_module.thumbnails.SSD_CACHE_DIR,
+            thumbnails.SSD_CACHE_DIR,
         )
 
         self.assertIn((visible_a, visible_b), matchups)
@@ -3055,7 +3064,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
         filters = {
             "visible_thumb_size": "sm",
-            "cache_root": app_module.thumbnails.SSD_CACHE_DIR,
+            "cache_root": thumbnails.SSD_CACHE_DIR,
         }
         counts = await db.get_catalog_image_counts()
 
@@ -3069,7 +3078,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         )
 
         id_filter = {beta, gamma}
-        cached_visible_ids = set(await db.get_cached_image_id_set("sm", app_module.thumbnails.SSD_CACHE_DIR))
+        cached_visible_ids = set(await db.get_cached_image_id_set("sm", thumbnails.SSD_CACHE_DIR))
         self.assertEqual(
             await rankings.count_rankings_uncached(
                 db.DB_PATH,
@@ -3091,7 +3100,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         embedding_worker.encode_text = lambda _query, _config=None: None
         query_constraints._text_search_resolution_cache.clear()
 
-        result = await app_module._runtime_services.resolve_text_search("sunset")
+        result = await app_module.app.state.photoarchive_shell.runtime_services.resolve_text_search("sunset")
 
         self.assertEqual(result["search_mode"], "metadata")
         self.assertEqual(result["id_filter"], {match})
@@ -3246,8 +3255,8 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         for image_id in (match, miss):
             await self._cache_entry(image_id, "sm")
 
-        app_module.settings.save_settings({"embed_model_preset": "qwen3-vl-embedding-8b"})
-        fast_config = app_module.settings.fast_search_embedding_config()
+        settings.save_settings({"embed_model_preset": "qwen3-vl-embedding-8b"})
+        fast_config = settings.fast_search_embedding_config()
         calls = []
         image_ids = [match, miss]
         matrix = np.array([[0.90, 0.10], [0.10, 0.90]], dtype=np.float32)
@@ -3407,7 +3416,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
         result = await search_routes.api_search(q="sunset portrait", limit=10)
         pending = await db.get_pending_deep_search_queries(
-            app_module.settings.deep_search_embedding_config(),
+            settings.deep_search_embedding_config(),
             [],
             limit=10,
         )
@@ -3600,7 +3609,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             await conn.close()
 
         self.assertIsNotNone(row)
-        self.assertLessEqual(len(row["query"]), app_module.settings.MAX_DEEP_SEARCH_TERM_LENGTH)
+        self.assertLessEqual(len(row["query"]), settings.MAX_DEEP_SEARCH_TERM_LENGTH)
         self.assertEqual(result["query"], row["query"])
 
     async def test_uncached_deep_search_queues_without_loading_active_model(self):
@@ -3620,7 +3629,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         rankings = await library_routes.api_rankings(q=query, deep=True, sort="similarity", limit=10)
         search = await search_routes.api_search(q=query, deep=True, limit=10)
         pending = await db.get_pending_deep_search_queries(
-            app_module.settings.deep_search_embedding_config(),
+            settings.deep_search_embedding_config(),
             [],
             limit=10,
         )
@@ -3649,7 +3658,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         mosaic = await compare_routes.mosaic_next(q=query, deep=True, n=5)
         compare = await compare_routes.compare_next(q=query, deep=True, n=2)
         pending = await db.get_pending_deep_search_queries(
-            app_module.settings.deep_search_embedding_config(),
+            settings.deep_search_embedding_config(),
             [],
             limit=10,
         )
@@ -3669,7 +3678,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         for image_id in (match, miss):
             await self._cache_entry(image_id, "sm")
 
-        config = app_module.settings.deep_search_embedding_config()
+        config = settings.deep_search_embedding_config()
         dimension = int(config["dimension"])
         query_vec = np.zeros((dimension,), dtype=np.float32)
         query_vec[0] = 1.0
@@ -3712,7 +3721,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([img["id"] for img in result["images"]], [match])
 
     async def test_normal_search_does_not_cold_load_cached_deep_index(self):
-        config = app_module.settings.deep_search_embedding_config()
+        config = settings.deep_search_embedding_config()
         dimension = int(config["dimension"])
         query_vec = np.zeros((dimension,), dtype=np.float32)
         query_vec[0] = 1.0
@@ -3744,7 +3753,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         for image_id in (match, miss):
             await self._cache_entry(image_id, "sm")
 
-        deep_key = app_module.settings.deep_search_embedding_config()["model_key"]
+        deep_key = settings.deep_search_embedding_config()["model_key"]
         image_ids = [match, miss]
         similarities = np.array([0.95, 0.10], dtype=np.float32)
         old_resolve_cached_deep_search = query_constraints.resolve_cached_deep_search
@@ -3782,7 +3791,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             await self._cache_entry(image_id, "sm")
 
         query = "deep ready later"
-        config = app_module.settings.deep_search_embedding_config()
+        config = settings.deep_search_embedding_config()
         dimension = int(config["dimension"])
         query_vec = np.zeros((dimension,), dtype=np.float32)
         query_vec[0] = 1.0
@@ -3808,7 +3817,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(library_service._rankings_response_cache)
         query_constraints._text_search_resolution_cache[("stale", True)] = {
             "data": {"search_mode": "metadata"},
-            "expires": app_module.time.monotonic() + 300,
+            "expires": time.monotonic() + 300,
         }
 
         await db.store_deep_search_query_embedding(config, query, query_vec.tobytes())
@@ -3828,7 +3837,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         second = await self._image(source["id"], "second-deep-vector.jpg")
 
         query = "expanding deep index"
-        config = app_module.settings.deep_search_embedding_config()
+        config = settings.deep_search_embedding_config()
         dimension = int(config["dimension"])
         query_vec = np.zeros((dimension,), dtype=np.float32)
         query_vec[0] = 1.0
@@ -3841,7 +3850,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         await db.store_embeddings_batch([(first, first_vec.tobytes())], embedding_config=config)
         query_constraints._text_search_resolution_cache.clear()
 
-        first_resolution = await app_module._runtime_services.resolve_text_search(query, deep=True)
+        first_resolution = await app_module.app.state.photoarchive_shell.runtime_services.resolve_text_search(query, deep=True)
 
         self.assertEqual(first_resolution["id_filter"], {first})
         self.assertTrue(query_constraints._text_search_resolution_cache)
@@ -3850,7 +3859,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(query_constraints._text_search_resolution_cache)
 
-        second_resolution = await app_module._runtime_services.resolve_text_search(query, deep=True)
+        second_resolution = await app_module.app.state.photoarchive_shell.runtime_services.resolve_text_search(query, deep=True)
 
         self.assertEqual(second_resolution["search_mode"], "deep_embedding")
         self.assertEqual(second_resolution["id_filter"], {first, second})
@@ -3898,7 +3907,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         active_vec = np.ones((2048,), dtype=np.float32)
         await db.store_embeddings_batch([(image_id, active_vec.tobytes())])
 
-        deep_config = app_module.settings.deep_search_embedding_config()
+        deep_config = settings.deep_search_embedding_config()
         pending_before = await db.get_unembedded_images(
             limit=10,
             embedding_config=deep_config,
@@ -3931,7 +3940,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             await release.wait()
             return 0
 
-        app_module.thumbnails.prefetch_images = blocking_prefetch
+        thumbnails.prefetch_images = blocking_prefetch
         try:
             result = await asyncio.wait_for(search_routes.api_search(q="sunset", limit=10), timeout=0.5)
             self.assertEqual([img["id"] for img in result["images"]], [match])
@@ -4032,8 +4041,8 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         async def fake_schedule_full(filepath, image_id, *, hot=True):
             full_calls.append({"id": image_id, "hot": hot, "filepath": filepath})
 
-        app_module.thumbnails.prefetch_images = fake_prefetch
-        app_module.thumbnails.schedule_full_image_cache = fake_schedule_full
+        thumbnails.prefetch_images = fake_prefetch
+        thumbnails.schedule_full_image_cache = fake_schedule_full
 
         result = await media_routes.warm_images(JsonRequest({
             "tiers": {
@@ -4075,8 +4084,8 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             memory_reads.append((size, image_id, source_signature, populate_memory))
             return ("sig", b"jpeg")
 
-        app_module.thumbnails.prefetch_images = fake_prefetch
-        app_module.thumbnails.fast_disk_read_entry = fake_read
+        thumbnails.prefetch_images = fake_prefetch
+        thumbnails.fast_disk_read_entry = fake_read
         media_warm._thumbnail_memory_warm_inflight.clear()
 
         result = await media_routes.warm_images(JsonRequest({"tiers": {"md": [cached, uncached]}}))
@@ -4099,7 +4108,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         async def locked_prefetch(*_args, **_kwargs):
             raise sqlite3.OperationalError("database is locked")
 
-        app_module.thumbnails.prefetch_images = locked_prefetch
+        thumbnails.prefetch_images = locked_prefetch
 
         result = await media_routes.warm_images(JsonRequest({"tiers": {"md": [image_id]}}))
 
@@ -4112,7 +4121,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         async def locked_full(*_args, **_kwargs):
             raise sqlite3.OperationalError("database is locked")
 
-        app_module.thumbnails.schedule_full_image_cache = locked_full
+        thumbnails.schedule_full_image_cache = locked_full
 
         result = await media_routes.warm_images(JsonRequest({"tiers": {"full": [image_id]}}))
 
@@ -4123,12 +4132,12 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             return image_id == 42 and size == "md"
 
         def fake_fast_disk_path_entry(size, image_id):
-            if image_id == 42 and size == app_module.thumbnails.FULL_TIER:
+            if image_id == 42 and size == thumbnails.FULL_TIER:
                 return ("sig", "/tmp/full.jpg")
             return None
 
-        app_module.thumbnails.has_cached_fast = fake_has_cached_fast
-        app_module.thumbnails.fast_disk_path_entry = fake_fast_disk_path_entry
+        thumbnails.has_cached_fast = fake_has_cached_fast
+        thumbnails.fast_disk_path_entry = fake_fast_disk_path_entry
 
         result = await media_routes.image_media_status(42)
 
@@ -4145,24 +4154,24 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         def fake_fast_disk_path_entry(_size, _image_id):
             return None
 
-        old_has_cached_fast = app_module.thumbnails.has_cached_fast
-        old_fast_disk_path_entry = app_module.thumbnails.fast_disk_path_entry
-        app_module.thumbnails.has_cached_fast = fake_has_cached_fast
-        app_module.thumbnails.fast_disk_path_entry = fake_fast_disk_path_entry
+        old_has_cached_fast = thumbnails.has_cached_fast
+        old_fast_disk_path_entry = thumbnails.fast_disk_path_entry
+        thumbnails.has_cached_fast = fake_has_cached_fast
+        thumbnails.fast_disk_path_entry = fake_fast_disk_path_entry
         try:
             result = await media_routes.images_media_status(JsonRequest({"ids": [42, "42", "bad", 43]}))
         finally:
-            app_module.thumbnails.has_cached_fast = old_has_cached_fast
-            app_module.thumbnails.fast_disk_path_entry = old_fast_disk_path_entry
+            thumbnails.has_cached_fast = old_has_cached_fast
+            thumbnails.fast_disk_path_entry = old_fast_disk_path_entry
 
         self.assertEqual([status["id"] for status in result["statuses"]], [42, 43])
         self.assertTrue(result["statuses"][0]["tiers"]["sm"]["cached"])
         self.assertFalse(result["statuses"][1]["tiers"]["sm"]["cached"])
 
     async def test_thumbnail_matching_disk_etag_returns_304_without_reading_file(self):
-        old_memory_get = app_module.thumbnails._memory_get_entry_fast
-        old_path_entry = app_module.thumbnails.fast_disk_path_entry
-        old_read_entry = app_module.thumbnails.fast_disk_read_entry
+        old_memory_get = thumbnails._memory_get_entry_fast
+        old_path_entry = thumbnails.fast_disk_path_entry
+        old_read_entry = thumbnails.fast_disk_read_entry
 
         def fake_memory_get(_size, _image_id):
             return None
@@ -4175,9 +4184,9 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         def fail_read(*_args, **_kwargs):
             raise AssertionError("matching ETag should not read thumbnail bytes")
 
-        app_module.thumbnails._memory_get_entry_fast = fake_memory_get
-        app_module.thumbnails.fast_disk_path_entry = fake_path_entry
-        app_module.thumbnails.fast_disk_read_entry = fail_read
+        thumbnails._memory_get_entry_fast = fake_memory_get
+        thumbnails.fast_disk_path_entry = fake_path_entry
+        thumbnails.fast_disk_read_entry = fail_read
         try:
             response = await media_routes.serve_thumbnail(
                 HeaderRequest({"if-none-match": '"sig-42"'}),
@@ -4185,16 +4194,16 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
                 42,
             )
         finally:
-            app_module.thumbnails._memory_get_entry_fast = old_memory_get
-            app_module.thumbnails.fast_disk_path_entry = old_path_entry
-            app_module.thumbnails.fast_disk_read_entry = old_read_entry
+            thumbnails._memory_get_entry_fast = old_memory_get
+            thumbnails.fast_disk_path_entry = old_path_entry
+            thumbnails.fast_disk_read_entry = old_read_entry
 
         self.assertEqual(response.status_code, 304)
 
     async def test_cached_lg_thumbnail_uses_file_response_without_reading_bytes(self):
-        old_memory_get = app_module.thumbnails._memory_get_entry_fast
-        old_path_entry = app_module.thumbnails.fast_disk_path_entry
-        old_read_entry = app_module.thumbnails.fast_disk_read_entry
+        old_memory_get = thumbnails._memory_get_entry_fast
+        old_path_entry = thumbnails.fast_disk_path_entry
+        old_read_entry = thumbnails.fast_disk_read_entry
         thumb_path = os.path.join(self.tempdir.name, "lg.jpg")
         with open(thumb_path, "wb") as f:
             f.write(b"jpeg")
@@ -4210,67 +4219,67 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         def fail_read(*_args, **_kwargs):
             raise AssertionError("cached lg thumbnails should stream from disk")
 
-        app_module.thumbnails._memory_get_entry_fast = fake_memory_get
-        app_module.thumbnails.fast_disk_path_entry = fake_path_entry
-        app_module.thumbnails.fast_disk_read_entry = fail_read
+        thumbnails._memory_get_entry_fast = fake_memory_get
+        thumbnails.fast_disk_path_entry = fake_path_entry
+        thumbnails.fast_disk_read_entry = fail_read
         try:
             response = await media_routes.serve_thumbnail(HeaderRequest(), "lg", 42, cached=True)
         finally:
-            app_module.thumbnails._memory_get_entry_fast = old_memory_get
-            app_module.thumbnails.fast_disk_path_entry = old_path_entry
-            app_module.thumbnails.fast_disk_read_entry = old_read_entry
+            thumbnails._memory_get_entry_fast = old_memory_get
+            thumbnails.fast_disk_path_entry = old_path_entry
+            thumbnails.fast_disk_read_entry = old_read_entry
 
-        self.assertIsInstance(response, app_module.FileResponse)
+        self.assertIsInstance(response, FileResponse)
         self.assertEqual(response.headers.get("etag"), '"sig-42"')
 
     async def test_cached_full_image_uses_file_response_without_image_lookup(self):
-        old_path_entry = app_module.thumbnails.fast_disk_path_entry
+        old_path_entry = thumbnails.fast_disk_path_entry
         old_get_image = image_repository.get_image_by_id
         full_path = os.path.join(self.tempdir.name, "full.jpg")
         with open(full_path, "wb") as f:
             f.write(b"jpeg")
 
         def fake_path_entry(size, image_id):
-            self.assertEqual(size, app_module.thumbnails.FULL_TIER)
+            self.assertEqual(size, thumbnails.FULL_TIER)
             self.assertEqual(image_id, 42)
             return ("full-sig-42", full_path)
 
         async def fail_get_image(_db_path, _image_id):
             raise AssertionError("cached full image should not hit image lookup")
 
-        app_module.thumbnails.fast_disk_path_entry = fake_path_entry
+        thumbnails.fast_disk_path_entry = fake_path_entry
         image_repository.get_image_by_id = fail_get_image
         try:
-            response = await media_routes.serve_full_image(HeaderRequest(), 42, app_module.BackgroundTasks())
+            response = await media_routes.serve_full_image(HeaderRequest(), 42, BackgroundTasks())
         finally:
-            app_module.thumbnails.fast_disk_path_entry = old_path_entry
+            thumbnails.fast_disk_path_entry = old_path_entry
             image_repository.get_image_by_id = old_get_image
 
-        self.assertIsInstance(response, app_module.FileResponse)
+        self.assertIsInstance(response, FileResponse)
         self.assertEqual(response.headers.get("etag"), '"full-sig-42"')
 
     async def test_cached_full_image_matching_etag_returns_304_without_image_lookup(self):
-        old_path_entry = app_module.thumbnails.fast_disk_path_entry
+        old_path_entry = thumbnails.fast_disk_path_entry
         old_get_image = image_repository.get_image_by_id
 
         def fake_path_entry(size, image_id):
-            self.assertEqual(size, app_module.thumbnails.FULL_TIER)
+            self.assertEqual(size, thumbnails.FULL_TIER)
             self.assertEqual(image_id, 42)
             return ("full-sig-42", "/tmp/unused-full.jpg")
 
         async def fail_get_image(_db_path, _image_id):
             raise AssertionError("matching full ETag should not hit image lookup")
 
-        app_module.thumbnails.fast_disk_path_entry = fake_path_entry
+        thumbnails.fast_disk_path_entry = fake_path_entry
         image_repository.get_image_by_id = fail_get_image
         try:
             response = await media_routes.serve_full_image(
                 HeaderRequest({"if-none-match": '"full-sig-42"'}),
                 42,
-                app_module.BackgroundTasks(),
+                BackgroundTasks(),
             )
         finally:
-            app_module.thumbnails.fast_disk_path_entry = old_path_entry
+            thumbnails.fast_disk_path_entry = old_path_entry
             image_repository.get_image_by_id = old_get_image
 
         self.assertEqual(response.status_code, 304)
@@ -4294,7 +4303,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         cache_stats = {
             "memory": {"used_bytes": 0, "limit_bytes": 1, "tiers": {}},
             "disk": {
-                "root": app_module.thumbnails.SSD_CACHE_DIR,
+                "root": thumbnails.SSD_CACHE_DIR,
                 "limit_bytes": 1000,
                 "used_bytes": 460,
                 "tiers": {
@@ -4327,12 +4336,12 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
                 "replacement_mode": False,
             }
 
-        old_cache_stats = app_module.thumbnails.cache_stats
-        old_pregen_status = app_module.thumbnails.get_pregen_status
+        old_cache_stats = thumbnails.cache_stats
+        old_pregen_status = thumbnails.get_pregen_status
         old_recommendations = cache_status_service._cache_recommendations
         try:
-            app_module.thumbnails.cache_stats = lambda: cache_stats
-            app_module.thumbnails.get_pregen_status = fake_pregen_status
+            thumbnails.cache_stats = lambda: cache_stats
+            thumbnails.get_pregen_status = fake_pregen_status
             cache_status_service._cache_recommendations = (
                 lambda _cache, eligible, total, browser, estimates=None: {
                     "eligible_images": eligible,
@@ -4344,8 +4353,8 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
             result = await cache_status_service.build_cache_status(ahead=0)
         finally:
-            app_module.thumbnails.cache_stats = old_cache_stats
-            app_module.thumbnails.get_pregen_status = old_pregen_status
+            thumbnails.cache_stats = old_cache_stats
+            thumbnails.get_pregen_status = old_pregen_status
             cache_status_service._cache_recommendations = old_recommendations
 
         self.assertEqual(captured, {"target_total": 2, "original_total": 1})
@@ -4368,9 +4377,9 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
                 }
             }
         }
-        archive_estimates = {"needed_bytes": {app_module.thumbnails.FULL_TIER: 10000}}
+        archive_estimates = {"needed_bytes": {thumbnails.FULL_TIER: 10000}}
 
-        result = app_module.thumbnails._original_cache_status(
+        result = thumbnails._original_cache_status(
             stats,
             original_total=100,
             archive_estimates=archive_estimates,
@@ -4421,11 +4430,11 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("preview", result)
 
     async def test_interaction_cache_warmup_starts_quickly_after_startup(self):
-        self.assertLessEqual(app_module.INTERACTION_CACHE_WARMUP_DELAY_SECONDS, 0.05)
+        self.assertLessEqual(app_factory.INTERACTION_CACHE_WARMUP_DELAY_SECONDS, 0.05)
         self.assertGreaterEqual(compare_service._visible_pairing_candidates_cache_ttl_seconds, 5.0)
 
     async def test_light_startup_warmup_does_not_cold_load_deep_diverse_mosaic(self):
-        startup_source = inspect.getsource(app_module.background_runtime.run_startup)
+        startup_source = inspect.getsource(background_runtime.run_startup)
         light_warmup = startup_source.split(
             "async def _warm_light_startup_caches():",
             1,
@@ -4435,7 +4444,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('strategy="explore"', light_warmup)
 
     async def test_startup_warms_fast_search_model_and_matrix_even_when_ai_work_is_deferred(self):
-        startup_source = inspect.getsource(app_module.background_runtime.run_startup)
+        startup_source = inspect.getsource(background_runtime.run_startup)
 
         self.assertIn("pause_embedding_worker", startup_source)
         self.assertIn("start_search_model_load", startup_source)
@@ -4515,15 +4524,16 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 cancelled.set()
 
-        task = app_module._track_background_task(waits_forever())
-        self.assertIn(task, app_module._BACKGROUND_TASKS)
+        shell = app_module.app.state.photoarchive_shell
+        task = shell.track_background_task(waits_forever())
+        self.assertIn(task, shell.background_tasks)
         await asyncio.sleep(0)
 
-        await app_module.shutdown()
+        await shell.lifecycle.shutdown()
 
         self.assertTrue(cancelled.is_set())
         self.assertTrue(task.cancelled())
-        self.assertEqual(app_module._BACKGROUND_TASKS, set())
+        self.assertEqual(shell.background_tasks, set())
 
     async def test_ui_settings_returns_default_loupe_cache_status(self):
         result = await settings_routes.api_ui_settings()
@@ -4531,17 +4541,17 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, {"settings": {"show_loupe_cache_status": True}})
 
     async def test_loupe_cache_status_setting_persists(self):
-        saved = app_module.settings.save_settings({"show_loupe_cache_status": False})
+        saved = settings.save_settings({"show_loupe_cache_status": False})
         self.assertFalse(saved["show_loupe_cache_status"])
 
-        reloaded = app_module.settings.load_settings(force=True)
+        reloaded = settings.load_settings(force=True)
         result = await settings_routes.api_ui_settings()
 
         self.assertFalse(reloaded["show_loupe_cache_status"])
         self.assertEqual(result, {"settings": {"show_loupe_cache_status": False}})
 
     async def test_deep_search_terms_are_normalized_and_persisted(self):
-        saved = app_module.settings.save_settings({
+        saved = settings.save_settings({
             "deep_search_terms": [
                 " Crane ",
                 "crane",
@@ -4552,7 +4562,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(saved["deep_search_terms"], ["Crane", "black and white portraits"])
 
-        reloaded = app_module.settings.load_settings(force=True)
+        reloaded = settings.load_settings(force=True)
 
         self.assertEqual(reloaded["deep_search_terms"], ["Crane", "black and white portraits"])
 
@@ -4612,7 +4622,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(refreshed["settings"]["deep_search_terms"], ["crane", "cat in cafe window"])
 
     async def test_deep_search_schedule_defaults_to_weekday_central_work_hours(self):
-        normalized = app_module.settings.normalize_settings({})
+        normalized = settings.normalize_settings({})
 
         self.assertTrue(normalized["deep_search_schedule_enabled"])
         self.assertEqual(normalized["deep_search_schedule_days"], ["mon", "tue", "wed", "thu", "fri"])
@@ -4621,41 +4631,41 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(normalized["deep_search_schedule_timezone"], "America/Chicago")
 
     async def test_background_work_mode_defaults_and_normalizes(self):
-        normalized = app_module.settings.normalize_settings({})
+        normalized = settings.normalize_settings({})
         self.assertEqual(normalized["background_work_mode"], "balanced")
 
-        saved = app_module.settings.save_settings({"background_work_mode": "MAX"})
+        saved = settings.save_settings({"background_work_mode": "MAX"})
         self.assertEqual(saved["background_work_mode"], "max")
 
-        fallback = app_module.settings.save_settings({"background_work_mode": "turbo"})
+        fallback = settings.save_settings({"background_work_mode": "turbo"})
         self.assertEqual(fallback["background_work_mode"], "balanced")
 
     async def test_settings_metadata_lists_background_work_modes(self):
-        metadata = app_module.settings.settings_metadata()
+        metadata = settings.settings_metadata()
         modes = metadata["background_work_modes"]
 
         self.assertEqual([mode["key"] for mode in modes], ["browse", "balanced", "max"])
         self.assertTrue(all(mode.get("label") for mode in modes))
 
     async def test_deep_search_schedule_status_uses_weekday_central_window(self):
-        config = app_module.settings.normalize_settings({})
+        config = settings.normalize_settings({})
 
         monday_morning = datetime(2026, 5, 18, 8, 0, tzinfo=ZoneInfo("America/Chicago"))
         monday_evening = datetime(2026, 5, 18, 17, 0, tzinfo=ZoneInfo("America/Chicago"))
         saturday_morning = datetime(2026, 5, 16, 8, 0, tzinfo=ZoneInfo("America/Chicago"))
 
-        self.assertTrue(app_module.settings.deep_search_schedule_status(config, monday_morning)["active"])
+        self.assertTrue(settings.deep_search_schedule_status(config, monday_morning)["active"])
         self.assertEqual(
-            app_module.settings.deep_search_schedule_status(config, monday_evening)["reason"],
+            settings.deep_search_schedule_status(config, monday_evening)["reason"],
             "outside_time_window",
         )
         self.assertEqual(
-            app_module.settings.deep_search_schedule_status(config, saturday_morning)["reason"],
+            settings.deep_search_schedule_status(config, saturday_morning)["reason"],
             "outside_selected_days",
         )
 
     async def test_deep_search_schedule_is_normalized_and_persisted(self):
-        saved = app_module.settings.save_settings({
+        saved = settings.save_settings({
             "deep_search_schedule_enabled": "true",
             "deep_search_schedule_days": ["Friday", "monday", "bad", "fri"],
             "deep_search_schedule_start": "7:00",
@@ -4669,7 +4679,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(saved["deep_search_schedule_end"], "16:00")
         self.assertEqual(saved["deep_search_schedule_timezone"], "America/Chicago")
 
-        reloaded = app_module.settings.load_settings(force=True)
+        reloaded = settings.load_settings(force=True)
 
         self.assertEqual(reloaded["deep_search_schedule_days"], ["mon", "fri"])
         self.assertEqual(reloaded["deep_search_schedule_timezone"], "America/Chicago")
@@ -4677,8 +4687,8 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
     async def test_ai_status_reports_fast_and_deep_embedding_indexes(self):
         source = await self._source()
         image_id = await self._image(source["id"], "dual-index.jpg")
-        fast_config = app_module.settings.fast_search_embedding_config()
-        deep_config = app_module.settings.deep_search_embedding_config()
+        fast_config = settings.fast_search_embedding_config()
+        deep_config = settings.deep_search_embedding_config()
 
         await db.store_embeddings_batch([(image_id, b"fast-vector")], embedding_config=fast_config)
         await db.store_embeddings_batch([(image_id, b"deep-vector")], embedding_config=deep_config)
@@ -4702,8 +4712,8 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(deep_queries["ready query"]["cached"])
 
     async def test_ai_status_reports_deep_model_install_progress_on_deep_index(self):
-        fast_config = app_module.settings.fast_search_embedding_config()
-        deep_config = app_module.settings.deep_search_embedding_config()
+        fast_config = settings.fast_search_embedding_config()
+        deep_config = settings.deep_search_embedding_config()
         install_state = {
             "running": True,
             "status": "downloading",
@@ -4715,7 +4725,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             "finished_at": None,
             "last_error": "",
         }
-        old_get_model_status = app_module.ai_models.get_model_status
+        old_get_model_status = ai_models.get_model_status
 
         def fake_get_model_status(config=None):
             cfg = config or fast_config
@@ -4729,12 +4739,12 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
                 "install": dict(install_state),
             }
 
-        app_module.ai_models.get_model_status = fake_get_model_status
+        ai_models.get_model_status = fake_get_model_status
         ai_routes.invalidate_ai_status_response_cache()
         try:
             status = await ai_routes.build_ai_status(force=True)
         finally:
-            app_module.ai_models.get_model_status = old_get_model_status
+            ai_models.get_model_status = old_get_model_status
             ai_routes.invalidate_ai_status_response_cache()
 
         indexes = status["embedding_indexes"]
@@ -4745,8 +4755,8 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("8B", indexes["deep"]["install_message"])
 
     async def test_install_model_reports_conflict_when_other_model_is_downloading(self):
-        fast_config = app_module.settings.fast_search_embedding_config()
-        old_start_model_install = app_module.ai_models.start_model_install
+        fast_config = settings.fast_search_embedding_config()
+        old_start_model_install = ai_models.start_model_install
         install_state = {
             "running": True,
             "status": "downloading",
@@ -4759,13 +4769,13 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             "last_error": "",
         }
 
-        app_module.ai_models.start_model_install = lambda _config: dict(install_state)
+        ai_models.start_model_install = lambda _config: dict(install_state)
         try:
             response = await ai_routes.api_install_ai_model(role="deep")
         finally:
-            app_module.ai_models.start_model_install = old_start_model_install
+            ai_models.start_model_install = old_start_model_install
 
-        body = app_module.json.loads(response.body)
+        body = json.loads(response.body)
         self.assertEqual(response.status_code, 409)
         self.assertFalse(body["ok"])
         self.assertIn("already running", body["error"])
@@ -4781,17 +4791,17 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response["ai_status"]["worker_message"], "AI work deferred by startup setting.")
 
     async def test_settings_reads_do_not_expose_cached_state(self):
-        first = app_module.settings.get_settings()
+        first = settings.get_settings()
         first["thumb_quality"] = 40
         first["deep_search_terms"].append("mutated")
 
-        second = app_module.settings.get_settings()
+        second = settings.get_settings()
 
         self.assertNotEqual(second["thumb_quality"], 40)
         self.assertNotIn("mutated", second["deep_search_terms"])
 
     async def test_template_context_versions_static_assets(self):
-        context = app_module._template_context(HeaderRequest())
+        context = app_module.app.state.photoarchive_shell.template_context(HeaderRequest())
 
         self.assertIn("static_version", context)
         self.assertTrue(str(context["static_version"]).isdigit())
@@ -4832,7 +4842,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             "model_status": {},
             "ai_status": {},
             "catalog": {},
-            **app_module.settings.settings_metadata(),
+            **settings.settings_metadata(),
         }
         fresh = {
             "settings": {"thumb_quality": 80},
@@ -4840,7 +4850,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
             "model_status": {},
             "ai_status": {},
             "catalog": {},
-            **app_module.settings.settings_metadata(),
+            **settings.settings_metadata(),
         }
         settings_status._settings_response_cache["data"] = stale
         settings_status._settings_response_cache["expires"] = 0
@@ -4896,11 +4906,11 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
     async def test_search_runtime_settings_invalidate_cached_search_results(self):
         library_service._rankings_response_cache[("stale",)] = {
             "data": {"images": []},
-            "expires": app_module.time.monotonic() + 100,
+            "expires": time.monotonic() + 100,
         }
         query_constraints._text_search_resolution_cache[("stale", False)] = {
             "data": {"search_mode": "embedding"},
-            "expires": app_module.time.monotonic() + 100,
+            "expires": time.monotonic() + 100,
         }
 
         await settings_routes.api_save_settings(JsonRequest({"search_similarity_threshold": 0.55}))
@@ -4909,10 +4919,10 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(query_constraints._text_search_resolution_cache)
 
     async def test_thumbnail_disk_stats_cache_protects_nested_tiers(self):
-        first = app_module.thumbnails.cache_stats()
+        first = thumbnails.cache_stats()
 
         first["disk"]["tiers"]["sm"]["count"] = 999999
-        second = app_module.thumbnails.cache_stats()
+        second = thumbnails.cache_stats()
 
         self.assertNotEqual(second["disk"]["tiers"]["sm"]["count"], 999999)
 
@@ -4929,7 +4939,7 @@ class BackendRankingTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(second["governor"].get("reason"), "mutated")
 
     async def test_ai_status_response_cache_returns_stale_while_refreshing(self):
-        model_status = app_module.ai_models.get_model_status()
+        model_status = ai_models.get_model_status()
         ai_routes._ai_status_response_cache.update({
             "data": {
                 "embedded": 1,

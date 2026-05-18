@@ -11,8 +11,14 @@ import unittest
 from fastapi.routing import APIRoute
 
 import app as app_module
+import ai_models
 import db
+import settings
+import thumbnails
+from fastapi import BackgroundTasks
 from core import cache_events
+from core import app_factory
+from core import background as background_runtime
 from core import query_constraints
 
 
@@ -165,11 +171,11 @@ class ModularContractTests(unittest.TestCase):
         self.assertTrue(callable(embed_cache._active_embedding_model_key))
         self.assertTrue(callable(embed_cache._db_path))
 
-        old_active_key = app_module.db.active_embedding_model_key
-        old_db_path = app_module.db.DB_PATH
+        old_active_key = db.active_embedding_model_key
+        old_db_path = db.DB_PATH
         try:
-            app_module.db.active_embedding_model_key = lambda: "late-bound-model"
-            app_module.db.DB_PATH = "/tmp/photoarchive-late-bound.db"
+            db.active_embedding_model_key = lambda: "late-bound-model"
+            db.DB_PATH = "/tmp/photoarchive-late-bound.db"
 
             self.assertEqual(embed_cache._target_model_key(), "late-bound-model")
             self.assertEqual(
@@ -181,8 +187,8 @@ class ModularContractTests(unittest.TestCase):
                 ],
             )
         finally:
-            app_module.db.active_embedding_model_key = old_active_key
-            app_module.db.DB_PATH = old_db_path
+            db.active_embedding_model_key = old_active_key
+            db.DB_PATH = old_db_path
 
     def test_elo_propagation_uses_app_injected_db_providers(self):
         elo_propagation = importlib.import_module("elo_propagation")
@@ -199,10 +205,10 @@ class ModularContractTests(unittest.TestCase):
         self.assertTrue(callable(elo_propagation._get_db))
         self.assertTrue(callable(elo_propagation._invalidate_rating_stats_cache))
 
-        old_active_key = app_module.db.active_embedding_model_key
-        old_get_images = app_module.db.get_active_images_by_ids
-        old_get_db = app_module.db.get_db
-        old_invalidate = app_module.db.invalidate_rating_stats_cache
+        old_active_key = db.active_embedding_model_key
+        old_get_images = db.get_active_images_by_ids
+        old_get_db = db.get_db
+        old_invalidate = db.invalidate_rating_stats_cache
         calls = []
 
         class FakeConnection:
@@ -217,10 +223,10 @@ class ModularContractTests(unittest.TestCase):
             return FakeConnection()
 
         try:
-            app_module.db.active_embedding_model_key = lambda: "late-bound-fast"
-            app_module.db.get_active_images_by_ids = fake_get_images
-            app_module.db.get_db = fake_get_db
-            app_module.db.invalidate_rating_stats_cache = lambda: calls.append(("invalidate",))
+            db.active_embedding_model_key = lambda: "late-bound-fast"
+            db.get_active_images_by_ids = fake_get_images
+            db.get_db = fake_get_db
+            db.invalidate_rating_stats_cache = lambda: calls.append(("invalidate",))
 
             self.assertEqual(elo_propagation._active_embedding_model_key(), "late-bound-fast")
             self.assertEqual(
@@ -230,10 +236,10 @@ class ModularContractTests(unittest.TestCase):
             self.assertIsInstance(asyncio.run(elo_propagation._get_db()), FakeConnection)
             elo_propagation._invalidate_rating_stats_cache()
         finally:
-            app_module.db.active_embedding_model_key = old_active_key
-            app_module.db.get_active_images_by_ids = old_get_images
-            app_module.db.get_db = old_get_db
-            app_module.db.invalidate_rating_stats_cache = old_invalidate
+            db.active_embedding_model_key = old_active_key
+            db.get_active_images_by_ids = old_get_images
+            db.get_db = old_get_db
+            db.invalidate_rating_stats_cache = old_invalidate
 
         self.assertEqual(calls, [("images", [3, 4]), ("db",), ("invalidate",)])
 
@@ -261,14 +267,14 @@ class ModularContractTests(unittest.TestCase):
             self.assertTrue(callable(getattr(embedding_worker, name)))
 
         old_providers = {
-            "get_deep_search_cache_status": app_module.db.get_deep_search_cache_status,
-            "get_catalog_image_counts": app_module.db.get_catalog_image_counts,
-            "count_embeddings_for_model": app_module.db.count_embeddings_for_model,
-            "get_unembedded_images": app_module.db.get_unembedded_images,
-            "get_pending_deep_search_queries": app_module.db.get_pending_deep_search_queries,
-            "store_deep_search_query_embedding": app_module.db.store_deep_search_query_embedding,
-            "store_embeddings_batch": app_module.db.store_embeddings_batch,
-            "get_embedding_count": app_module.db.get_embedding_count,
+            "get_deep_search_cache_status": db.get_deep_search_cache_status,
+            "get_catalog_image_counts": db.get_catalog_image_counts,
+            "count_embeddings_for_model": db.count_embeddings_for_model,
+            "get_unembedded_images": db.get_unembedded_images,
+            "get_pending_deep_search_queries": db.get_pending_deep_search_queries,
+            "store_deep_search_query_embedding": db.store_deep_search_query_embedding,
+            "store_embeddings_batch": db.store_embeddings_batch,
+            "get_embedding_count": db.get_embedding_count,
         }
         calls = []
         config = {"model_key": "model"}
@@ -304,14 +310,14 @@ class ModularContractTests(unittest.TestCase):
             return 6
 
         try:
-            app_module.db.get_deep_search_cache_status = fake_deep_status
-            app_module.db.get_catalog_image_counts = fake_catalog_counts
-            app_module.db.count_embeddings_for_model = fake_count_embeddings
-            app_module.db.get_unembedded_images = fake_unembedded
-            app_module.db.get_pending_deep_search_queries = fake_pending
-            app_module.db.store_deep_search_query_embedding = fake_store_query
-            app_module.db.store_embeddings_batch = fake_store_batch
-            app_module.db.get_embedding_count = fake_embedding_count
+            db.get_deep_search_cache_status = fake_deep_status
+            db.get_catalog_image_counts = fake_catalog_counts
+            db.count_embeddings_for_model = fake_count_embeddings
+            db.get_unembedded_images = fake_unembedded
+            db.get_pending_deep_search_queries = fake_pending
+            db.store_deep_search_query_embedding = fake_store_query
+            db.store_embeddings_batch = fake_store_batch
+            db.get_embedding_count = fake_embedding_count
 
             self.assertEqual(
                 asyncio.run(embedding_worker._get_deep_search_cache_status(config, ["crane"])),
@@ -329,7 +335,7 @@ class ModularContractTests(unittest.TestCase):
             self.assertEqual(asyncio.run(embedding_worker._get_embedding_count()), 6)
         finally:
             for name, provider in old_providers.items():
-                setattr(app_module.db, name, provider)
+                setattr(db, name, provider)
 
         self.assertEqual(
             calls,
@@ -1142,8 +1148,8 @@ class ModularContractTests(unittest.TestCase):
         self.assertTrue(callable(app_factory.configure_query_constraints))
         self.assertFalse(hasattr(app_module, "_resolve_text_search"))
         self.assertFalse(hasattr(app_module, "_resolve_library_constraints"))
-        self.assertTrue(callable(app_module._runtime_services.resolve_text_search))
-        self.assertTrue(callable(app_module._runtime_services.resolve_library_constraints))
+        self.assertTrue(callable(app_module.app.state.photoarchive_shell.runtime_services.resolve_text_search))
+        self.assertTrue(callable(app_module.app.state.photoarchive_shell.runtime_services.resolve_library_constraints))
         self.assertIs(search_service.normalize_search_query, constraints.normalize_search_query)
         self.assertIs(search_service.resolve_cached_deep_search, constraints.resolve_cached_deep_search)
         self.assertIs(search_service.encode_text_with_config, constraints.encode_text_with_config)
@@ -1173,7 +1179,7 @@ class ModularContractTests(unittest.TestCase):
                 constraints._CONFIG["get_deep_search_query_embedding"] = old_embedding_provider
 
         self.assertIsNone(result)
-        self.assertEqual(calls, [("deep provider probe", app_module.settings.deep_search_embedding_config()["model_key"])])
+        self.assertEqual(calls, [("deep provider probe", settings.deep_search_embedding_config()["model_key"])])
 
         old_config = dict(constraints._CONFIG)
         try:
@@ -1191,7 +1197,7 @@ class ModularContractTests(unittest.TestCase):
             constraints._CONFIG.update(old_config)
             constraints.sync_configured_ttls()
 
-        old_db_deep_embedding = app_module.db.get_deep_search_query_embedding
+        old_db_deep_embedding = db.get_deep_search_query_embedding
         calls = []
 
         async def fake_db_get_deep_search_query_embedding(query, model_key):
@@ -1199,13 +1205,13 @@ class ModularContractTests(unittest.TestCase):
             return None
 
         try:
-            app_module.db.get_deep_search_query_embedding = fake_db_get_deep_search_query_embedding
+            db.get_deep_search_query_embedding = fake_db_get_deep_search_query_embedding
             result = asyncio.run(constraints.resolve_cached_deep_search("late bound probe"))
         finally:
-            app_module.db.get_deep_search_query_embedding = old_db_deep_embedding
+            db.get_deep_search_query_embedding = old_db_deep_embedding
 
         self.assertIsNone(result)
-        self.assertEqual(calls, [("late bound probe", app_module.settings.deep_search_embedding_config()["model_key"])])
+        self.assertEqual(calls, [("late bound probe", settings.deep_search_embedding_config()["model_key"])])
 
     def test_core_text_search_ttl_provider_controls_resolution_cache(self):
         old_ttl = query_constraints._text_search_resolution_cache_ttl_seconds
@@ -1225,8 +1231,8 @@ class ModularContractTests(unittest.TestCase):
                 "record_query": fake_record,
                 "resolve_deep_search": fake_resolve_deep,
                 "extension_search_terms": set(),
-                "fast_search_embedding_config": app_module.settings.fast_search_embedding_config,
-                "get_settings": app_module.settings.get_settings,
+                "fast_search_embedding_config": settings.fast_search_embedding_config,
+                "get_settings": settings.get_settings,
             }
             await query_constraints.resolve_text_search("ttl probe", deep=True, **kwargs)
             await query_constraints.resolve_text_search("ttl probe", deep=True, **kwargs)
@@ -1516,10 +1522,10 @@ class ModularContractTests(unittest.TestCase):
         self.assertTrue(callable(face_worker._store_face_scan_result))
         self.assertTrue(callable(face_worker._cluster_unassigned_faces))
 
-        old_count = app_module.db.count_images_needing_faces
-        old_get = app_module.db.get_images_needing_faces
-        old_store = app_module.db.store_face_scan_result
-        old_cluster = app_module.db.cluster_unassigned_faces
+        old_count = db.count_images_needing_faces
+        old_get = db.get_images_needing_faces
+        old_store = db.store_face_scan_result
+        old_cluster = db.cluster_unassigned_faces
         calls = []
 
         async def fake_count(**kwargs):
@@ -1539,10 +1545,10 @@ class ModularContractTests(unittest.TestCase):
             return {"assigned": 1}
 
         try:
-            app_module.db.count_images_needing_faces = fake_count
-            app_module.db.get_images_needing_faces = fake_get
-            app_module.db.store_face_scan_result = fake_store
-            app_module.db.cluster_unassigned_faces = fake_cluster
+            db.count_images_needing_faces = fake_count
+            db.get_images_needing_faces = fake_get
+            db.store_face_scan_result = fake_store
+            db.cluster_unassigned_faces = fake_cluster
 
             self.assertEqual(
                 asyncio.run(face_worker._count_images_needing_faces(model_id="m", cache_root="/cache")),
@@ -1561,10 +1567,10 @@ class ModularContractTests(unittest.TestCase):
                 {"assigned": 1},
             )
         finally:
-            app_module.db.count_images_needing_faces = old_count
-            app_module.db.get_images_needing_faces = old_get
-            app_module.db.store_face_scan_result = old_store
-            app_module.db.cluster_unassigned_faces = old_cluster
+            db.count_images_needing_faces = old_count
+            db.get_images_needing_faces = old_get
+            db.store_face_scan_result = old_store
+            db.cluster_unassigned_faces = old_cluster
 
         self.assertEqual(
             calls,
@@ -1922,7 +1928,7 @@ class ModularContractTests(unittest.TestCase):
                 list_deep_search_queries=fake_list_deep_search_queries,
             )
             ai_routes.invalidate_ai_status_response_cache()
-            model_status = app_module.ai_models.get_model_status()
+            model_status = ai_models.get_model_status()
             response = asyncio.run(ai_routes.build_ai_status(model_status, force=True))
             for name in config_names:
                 setattr(ai_routes, name, None)
@@ -1934,7 +1940,7 @@ class ModularContractTests(unittest.TestCase):
                 setattr(ai_routes, name, value)
             ai_routes.invalidate_ai_status_response_cache()
 
-        deep_key = app_module.settings.deep_search_embedding_config()["model_key"]
+        deep_key = settings.deep_search_embedding_config()["model_key"]
         self.assertEqual(response["embedded"], 4)
         self.assertEqual(response["total_images"], 10)
         self.assertEqual(response["embedding_indexes"]["deep"]["embedded"], 6)
@@ -2429,20 +2435,20 @@ class ModularContractTests(unittest.TestCase):
             "_elo_propagation",
         )
         old_config = {name: getattr(cache_events, name) for name in config_names}
-        old_embedding_listeners = list(app_module.db._embedding_batch_listeners)
-        old_deep_query_listeners = list(app_module.db._deep_search_query_embedding_listeners)
+        old_embedding_listeners = list(db._embedding_batch_listeners)
+        old_deep_query_listeners = list(db._deep_search_query_embedding_listeners)
         try:
             for name in config_names:
                 setattr(cache_events, name, None)
-            app_module.db._embedding_batch_listeners[:] = []
-            app_module.db._deep_search_query_embedding_listeners[:] = []
+            db._embedding_batch_listeners[:] = []
+            db._deep_search_query_embedding_listeners[:] = []
 
             app_factory.create_base_app(base_dir=os.path.dirname(__file__))
             self.assertTrue(all(getattr(cache_events, name) is None for name in config_names))
-            self.assertNotIn(cache_events.embedding_batch_stored, app_module.db._embedding_batch_listeners)
+            self.assertNotIn(cache_events.embedding_batch_stored, db._embedding_batch_listeners)
             self.assertNotIn(
                 cache_events.deep_search_query_embedding_stored,
-                app_module.db._deep_search_query_embedding_listeners,
+                db._deep_search_query_embedding_listeners,
             )
 
             app_factory.create_app(base_dir=os.path.dirname(__file__))
@@ -2455,16 +2461,16 @@ class ModularContractTests(unittest.TestCase):
             self.assertIs(cache_events._duplicates_cache, search_service._duplicates_cache)
             self.assertIs(cache_events._collections_cache, search_service._collections_cache)
             self.assertIs(cache_events._elo_propagation, elo_propagation)
-            self.assertIn(cache_events.embedding_batch_stored, app_module.db._embedding_batch_listeners)
+            self.assertIn(cache_events.embedding_batch_stored, db._embedding_batch_listeners)
             self.assertIn(
                 cache_events.deep_search_query_embedding_stored,
-                app_module.db._deep_search_query_embedding_listeners,
+                db._deep_search_query_embedding_listeners,
             )
         finally:
             for name, value in old_config.items():
                 setattr(cache_events, name, value)
-            app_module.db._embedding_batch_listeners[:] = old_embedding_listeners
-            app_module.db._deep_search_query_embedding_listeners[:] = old_deep_query_listeners
+            db._embedding_batch_listeners[:] = old_embedding_listeners
+            db._deep_search_query_embedding_listeners[:] = old_deep_query_listeners
 
     def test_search_routes_use_injected_db_backed_providers(self):
         base_dir = os.path.dirname(__file__)
@@ -2802,7 +2808,7 @@ class ModularContractTests(unittest.TestCase):
 
             thumb_response = asyncio.run(media_routes.serve_thumbnail(HeaderRequest(), "sm", 7))
             full_response = asyncio.run(
-                media_routes.serve_full_image(HeaderRequest(), 8, app_module.BackgroundTasks())
+                media_routes.serve_full_image(HeaderRequest(), 8, BackgroundTasks())
             )
             warm_response = asyncio.run(media_routes.warm_images(JsonRequest()))
         finally:
@@ -3102,13 +3108,13 @@ class ModularContractTests(unittest.TestCase):
         background = importlib.import_module("core.background")
         old_value = os.environ.pop("PHOTOARCHIVE_SMOKE_MODE", None)
         try:
-            self.assertFalse(app_module._smoke_mode_enabled())
+            self.assertFalse(background_runtime.smoke_mode_enabled())
             self.assertFalse(background.smoke_mode_enabled())
             os.environ["PHOTOARCHIVE_SMOKE_MODE"] = "1"
-            self.assertTrue(app_module._smoke_mode_enabled())
+            self.assertTrue(background_runtime.smoke_mode_enabled())
             self.assertTrue(background.smoke_mode_enabled())
             os.environ["PHOTOARCHIVE_SMOKE_MODE"] = "0"
-            self.assertFalse(app_module._smoke_mode_enabled())
+            self.assertFalse(background_runtime.smoke_mode_enabled())
             self.assertFalse(background.smoke_mode_enabled())
         finally:
             if old_value is None:
@@ -3258,23 +3264,19 @@ class ModularContractTests(unittest.TestCase):
             self.assertNotIn("import db", contents)
             self.assertNotIn("db.", contents)
 
-        self.assertIs(app_module.background_runtime, background)
-        self.assertIsInstance(app_module._background_task_tracker, background.BackgroundTaskTracker)
-        self.assertIs(app_module._background_task_tracker, app_module._app_shell.background_task_tracker)
-        self.assertIs(app_module._BACKGROUND_TASKS, app_module._app_shell.background_tasks)
-        self.assertIs(app_module._IDLE_ACTIVITY_EXCLUDED_PATHS, background.IDLE_ACTIVITY_EXCLUDED_PATHS)
+        shell = app_module.app.state.photoarchive_shell
+        self.assertIs(background_runtime, background)
+        self.assertIsInstance(shell.background_task_tracker, background.BackgroundTaskTracker)
+        self.assertIs(shell.background_tasks, shell.background_task_tracker.tasks)
+        self.assertIs(shell.idle_activity_excluded_paths, background.IDLE_ACTIVITY_EXCLUDED_PATHS)
         self.assertTrue(callable(background.install_idle_activity_middleware))
-        self.assertTrue(callable(app_module.track_idle_activity))
-        self.assertIs(app_module.track_idle_activity, app_module._app_shell.idle_activity_middleware)
+        self.assertTrue(callable(shell.idle_activity_middleware))
         self.assertTrue(callable(background.run_startup))
         self.assertTrue(callable(background.run_shutdown))
         self.assertTrue(callable(background.track_idle_activity))
-        self.assertIsInstance(app_module._lifecycle, app_factory.AppLifecycleHandlers)
-        self.assertIs(app_module._lifecycle, app_module._app_shell.lifecycle)
-        self.assertIs(app_module.startup, app_module._lifecycle.startup)
-        self.assertIs(app_module.shutdown, app_module._lifecycle.shutdown)
-        self.assertIs(app_module.startup, app_module.app.router.on_startup[-1])
-        self.assertIs(app_module.shutdown, app_module.app.router.on_shutdown[-1])
+        self.assertIsInstance(shell.lifecycle, app_factory.AppLifecycleHandlers)
+        self.assertIs(shell.lifecycle.startup, app_module.app.router.on_startup[-1])
+        self.assertIs(shell.lifecycle.shutdown, app_module.app.router.on_shutdown[-1])
         factory_app = app_factory.create_app(base_dir=os.path.dirname(__file__))
         self.assertGreater(len(factory_app.router.on_startup), 0)
         self.assertGreater(len(factory_app.router.on_shutdown), 0)
@@ -3308,28 +3310,18 @@ class ModularContractTests(unittest.TestCase):
         helpers = importlib.import_module("helpers")
         scanner = importlib.import_module("scanner")
 
-        self.assertIsInstance(app_module._app_shell, app_factory.AppShell)
-        self.assertIs(app_module.app, app_module._app_shell.app)
-        self.assertIs(app_module.templates, app_module._app_shell.templates)
-        self.assertIs(app_module._static_assets, app_module._app_shell.static_assets)
-        self.assertEqual(app_module._GIT_COMMIT, app_module._app_shell.git_commit)
-        self.assertIs(app_module._static_version.__self__, app_module._app_shell)
-        self.assertEqual(app_module._static_version.__func__, app_factory.AppShell.static_version)
-        self.assertIs(app_module._template_context.__self__, app_module._app_shell)
-        self.assertEqual(app_module._template_context.__func__, app_factory.AppShell.template_context)
-        self.assertIs(app_module._warm_templates.__self__, app_module._app_shell)
-        self.assertEqual(app_module._warm_templates.__func__, app_factory.AppShell.warm_templates)
-        self.assertTrue(callable(app_module._app_shell.install_idle_activity_middleware))
-        self.assertTrue(callable(app_module._app_shell.idle_activity_middleware))
-        self.assertIs(
-            app_module._IDLE_ACTIVITY_EXCLUDED_PATHS,
-            app_module._app_shell.idle_activity_excluded_paths,
-        )
-        self.assertIs(app_module._track_background_task.__self__, app_module._app_shell)
-        self.assertEqual(
-            app_module._track_background_task.__func__,
-            app_factory.AppShell.track_background_task,
-        )
+        shell = app_module.app.state.photoarchive_shell
+        self.assertIsInstance(shell, app_factory.AppShell)
+        self.assertIs(app_module.app, shell.app)
+        self.assertIsInstance(shell.templates, type(page_routes._templates))
+        self.assertEqual(shell.static_assets.git_commit, shell.git_commit)
+        self.assertEqual(shell.static_version.__func__, app_factory.AppShell.static_version)
+        self.assertEqual(shell.template_context.__func__, app_factory.AppShell.template_context)
+        self.assertEqual(shell.warm_templates.__func__, app_factory.AppShell.warm_templates)
+        self.assertTrue(callable(shell.install_idle_activity_middleware))
+        self.assertTrue(callable(shell.idle_activity_middleware))
+        self.assertIs(shell.idle_activity_excluded_paths, background_runtime.IDLE_ACTIVITY_EXCLUDED_PATHS)
+        self.assertEqual(shell.track_background_task.__func__, app_factory.AppShell.track_background_task)
         self.assertTrue(callable(app_factory.create_base_app))
         self.assertTrue(callable(app_factory.create_app))
         self.assertTrue(callable(app_factory.create_app_shell))
@@ -3635,9 +3627,10 @@ class ModularContractTests(unittest.TestCase):
 
     def test_smoke_mode_startup_skips_archive_initialization(self):
         old_value = os.environ.get("PHOTOARCHIVE_SMOKE_MODE")
-        old_init_db = app_module.db.init_db
-        old_configure = app_module.thumbnails.configure
-        old_warm_templates = app_module._warm_templates
+        old_init_db = db.init_db
+        old_configure = thumbnails.configure
+        warm_templates_sentinel = object()
+        old_warm_templates = getattr(app_module, "_warm_templates", warm_templates_sentinel)
         calls = []
 
         async def fail_init_db():
@@ -3648,11 +3641,11 @@ class ModularContractTests(unittest.TestCase):
 
         try:
             os.environ["PHOTOARCHIVE_SMOKE_MODE"] = "1"
-            app_module.db.init_db = fail_init_db
-            app_module.thumbnails.configure = fail_configure
+            db.init_db = fail_init_db
+            thumbnails.configure = fail_configure
             app_module._warm_templates = lambda: calls.append("warm")
 
-            asyncio.run(app_module.startup())
+            asyncio.run(app_module.app.state.photoarchive_shell.lifecycle.startup())
 
             self.assertEqual(calls, ["warm"])
         finally:
@@ -3660,9 +3653,12 @@ class ModularContractTests(unittest.TestCase):
                 os.environ.pop("PHOTOARCHIVE_SMOKE_MODE", None)
             else:
                 os.environ["PHOTOARCHIVE_SMOKE_MODE"] = old_value
-            app_module.db.init_db = old_init_db
-            app_module.thumbnails.configure = old_configure
-            app_module._warm_templates = old_warm_templates
+            db.init_db = old_init_db
+            thumbnails.configure = old_configure
+            if old_warm_templates is warm_templates_sentinel:
+                delattr(app_module, "_warm_templates")
+            else:
+                app_module._warm_templates = old_warm_templates
 
     def test_frontend_module_bootstrap_preserves_global_contract(self):
         base_dir = os.path.dirname(__file__)
@@ -8663,12 +8659,12 @@ assert.deepEqual(loadingEvents.slice(-2), [['set', 2], ['cancel-clear']]);
             self.assertNotIn("import db", contents)
             self.assertNotIn("db.", contents)
 
-        old_path = app_module.db.DB_PATH
+        old_path = db.DB_PATH
         try:
-            app_module.db.DB_PATH = "/tmp/photoarchive-thumbnail-provider.db"
+            db.DB_PATH = "/tmp/photoarchive-thumbnail-provider.db"
             self.assertEqual(data_providers.db_path(), "/tmp/photoarchive-thumbnail-provider.db")
         finally:
-            app_module.db.DB_PATH = old_path
+            db.DB_PATH = old_path
 
     def test_db_facade_uses_mutable_db_path(self):
         async def create_marker(path):
