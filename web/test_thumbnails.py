@@ -1575,6 +1575,48 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
         for size in thumbnails.THUMB_TIERS:
             self.assertTrue(os.path.exists(thumbnails._thumbnail_disk_path(size, 1)))
 
+    def test_bulk_generation_remains_facaded_from_generation_module(self):
+        path = self._make_image()
+        direct_signatures, file_size, _mtime = self._catalog_signatures(path, image_id=101)
+        facade_signatures, _file_size, _mtime = self._catalog_signatures(path, image_id=102)
+
+        direct_metrics = thumbnail_generation.generate_thumbnail_set(
+            path,
+            101,
+            direct_signatures,
+            source_bytes=file_size,
+            sizes=thumbnails.SIZES,
+            thumb_tiers=thumbnails.THUMB_TIERS,
+            full_tier=thumbnails.FULL_TIER,
+            load_source_image=thumbnails._load_source_image,
+            load_source_image_from_bytes=thumbnails._load_source_image_from_bytes,
+            queue_orientation=thumbnails._queue_orientation,
+            resize_to_long_side=thumbnails._resize_to_long_side,
+            encode_and_cache_thumbnail=thumbnails._encode_and_cache_thumbnail,
+            cache_full_image_sync=thumbnails._cache_full_image_sync,
+            cache_full_image_bytes_sync=thumbnails._cache_full_image_bytes_sync,
+            mark_source_missing_from_error=thumbnails._mark_source_missing_from_error,
+            fast_disk_has=thumbnails.fast_disk_has,
+            is_browser_displayable_original=thumbnails.is_browser_displayable_original,
+            thumbnail_retry_after=thumbnails._thumbnail_retry_after,
+            thumbnail_retry_seconds=thumbnails.THUMBNAIL_RETRY_SECONDS,
+        )
+        facade_metrics = thumbnails._generate_thumbnail_set_sync(
+            path,
+            102,
+            facade_signatures,
+            source_bytes=file_size,
+        )
+
+        self.assertEqual(direct_metrics["source_reads"], facade_metrics["source_reads"])
+        self.assertEqual(direct_metrics["thumbnails_written"], facade_metrics["thumbnails_written"])
+        self.assertEqual(direct_metrics["source_bytes"], facade_metrics["source_bytes"])
+        self.assertEqual(direct_metrics["source_read_failures"], facade_metrics["source_read_failures"])
+        self.assertEqual(direct_metrics["originals_written"], facade_metrics["originals_written"])
+        for size in thumbnails.THUMB_TIERS:
+            self.assertTrue(os.path.exists(thumbnails._thumbnail_disk_path(size, 101)))
+            self.assertTrue(os.path.exists(thumbnails._thumbnail_disk_path(size, 102)))
+
     def test_bulk_generation_reuses_source_bytes_for_original_cache(self):
         path = self._make_image()
         signatures, file_size, _mtime = self._catalog_signatures(path)

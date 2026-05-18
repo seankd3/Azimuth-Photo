@@ -8632,6 +8632,7 @@ assert.deepEqual(loadingEvents.slice(-2), [['set', 2], ['cancel-clear']]);
         self.assertTrue(callable(disk_store.lookup_index_entry))
         self.assertTrue(callable(full_cache.cache_full_image))
         self.assertTrue(callable(full_cache.cache_full_image_bytes))
+        self.assertTrue(callable(generation.generate_thumbnail_set))
         self.assertTrue(callable(generation.resize_to_long_side))
         self.assertTrue(callable(generation.thumbnail_jpeg_bytes))
         self.assertIs(thumbnails._load_raw_preview, generation.load_raw_preview)

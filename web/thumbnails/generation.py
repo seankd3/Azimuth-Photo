@@ -283,6 +283,157 @@ def generate_missing_thumbnails(
     return requested_data
 
 
+def generate_thumbnail_set(
+    filepath: str,
+    image_id: int,
+    size_signatures: dict[str, str],
+    *,
+    source_bytes: int | None = None,
+    full_item: dict | None = None,
+    hot: bool = False,
+    sizes: dict[str, int],
+    thumb_tiers: tuple[str, ...],
+    full_tier: str,
+    load_source_image,
+    load_source_image_from_bytes,
+    queue_orientation,
+    resize_to_long_side,
+    encode_and_cache_thumbnail,
+    cache_full_image_sync,
+    cache_full_image_bytes_sync,
+    mark_source_missing_from_error,
+    fast_disk_has,
+    is_browser_displayable_original,
+    thumbnail_retry_after: dict,
+    thumbnail_retry_seconds: float,
+    now_provider=time.time,
+    monotonic_provider=time.monotonic,
+    log=print,
+) -> dict:
+    """Generate cache tiers for one image during a single warm-up pass."""
+    needed_sizes = [
+        size for size in sorted(size_signatures, key=lambda tier: sizes[tier], reverse=True)
+        if size in thumb_tiers
+    ]
+    metrics = {
+        "source_reads": 0,
+        "thumbnails_written": 0,
+        "source_bytes": 0,
+        "read_seconds": 0.0,
+        "decode_encode_seconds": 0.0,
+        "source_read_failures": 0,
+        "originals_written": 0,
+    }
+    if not needed_sizes and not full_item:
+        return metrics
+
+    img = None
+    current = None
+    source_data = None
+    try:
+        if needed_sizes:
+            max_target = max(sizes[size] for size in needed_sizes)
+            prefer_draft = max_target <= sizes["sm"]
+            read_started = monotonic_provider()
+            if (
+                full_item
+                and full_item.get("filepath") == filepath
+                and is_browser_displayable_original(filepath)
+            ):
+                with open(filepath, "rb") as f:
+                    source_data = f.read()
+                img = load_source_image_from_bytes(
+                    filepath,
+                    source_data,
+                    max_target,
+                    prefer_draft=prefer_draft,
+                )
+                metrics["source_bytes"] = len(source_data)
+            else:
+                img = load_source_image(filepath, max_target, prefer_draft=prefer_draft)
+                metrics["source_bytes"] = int(source_bytes or 0)
+            metrics["read_seconds"] = max(0.0, monotonic_provider() - read_started)
+            metrics["source_reads"] = 1
+            queue_orientation(image_id, img)
+
+            process_started = monotonic_provider()
+            current = img
+            for size in needed_sizes:
+                source_signature = size_signatures[size]
+                if fast_disk_has(size, image_id, source_signature):
+                    continue
+
+                variant = resize_to_long_side(current, sizes[size])
+                variant, _data, written = encode_and_cache_thumbnail(
+                    size,
+                    image_id,
+                    source_signature,
+                    variant,
+                    hot=hot,
+                )
+                if written:
+                    metrics["thumbnails_written"] += 1
+
+                if current is not img:
+                    current.close()
+                current = variant
+            metrics["decode_encode_seconds"] = max(0.0, monotonic_provider() - process_started)
+
+        if full_item:
+            full_id = int(full_item["id"])
+            if source_data is not None:
+                result = cache_full_image_bytes_sync(
+                    full_item["filepath"],
+                    full_id,
+                    full_item["signature"],
+                    source_data,
+                    hot=False,
+                    room_prechecked=True,
+                )
+            else:
+                full_started = monotonic_provider()
+                result = cache_full_image_sync(
+                    full_item["filepath"],
+                    full_id,
+                    full_item["signature"],
+                    hot=False,
+                    room_prechecked=True,
+                )
+                full_seconds = max(0.0, monotonic_provider() - full_started)
+                if result != full_item["filepath"]:
+                    metrics["read_seconds"] += full_seconds
+                    metrics["source_bytes"] += int(full_item.get("source_size") or 0)
+                    if metrics["source_reads"] <= 0:
+                        metrics["source_reads"] = 1
+            if result != full_item["filepath"] and fast_disk_has(
+                full_tier,
+                full_id,
+                full_item["signature"],
+            ):
+                metrics["originals_written"] = 1
+    except Exception as exc:
+        source_missing = mark_source_missing_from_error(filepath, image_id, exc)
+        if not source_missing:
+            retry_until = now_provider() + thumbnail_retry_seconds
+            for size in needed_sizes:
+                source_signature = size_signatures[size]
+                thumbnail_retry_after[(size, image_id, source_signature)] = retry_until
+            log(f"Thumbnail bulk error for {filepath}: {exc}")
+        metrics["source_read_failures"] = 1
+    finally:
+        if current is not None and current is not img:
+            try:
+                current.close()
+            except Exception:
+                pass
+        if img is not None:
+            try:
+                img.close()
+            except Exception:
+                pass
+    return metrics
+
+
 def load_embedding_image(
     filepath: str,
     image_id: int,
