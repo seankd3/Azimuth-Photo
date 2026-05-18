@@ -2,6 +2,10 @@ import { appendFilterParams } from '../query_state.js';
 import { appendSearchParams } from '../search/query.js';
 
 
+export const MOSAIC_NEIGHBOR_LIMIT = 8;
+export const COMPARE_NEIGHBOR_PAIRS = 4;
+
+
 export function buildMosaicUrl({
     strategy,
     queryState,

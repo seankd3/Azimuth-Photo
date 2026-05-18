@@ -16,7 +16,8 @@ warm-cache helpers, background warmup scheduling, warmup URL extraction,
 request warming, and image-tier warm batching used by the legacy
 compatibility module.
 `warmup_neighbors.js` owns Library/Compare cross-view and neighbor-request
-warmup scheduling while legacy keeps current view, query, and paging state.
+warmup scheduling constants while legacy keeps current view, query, and paging
+state.
 `api.js` owns small shared request helpers as fetch calls move out of
 `legacy/app.js`. `query_state.js` owns pure filter-state normalization, URL
 parameter helpers, Library URL-state syncing, and filter-neighbor state generation.
@@ -46,8 +47,8 @@ indicator text.
 `loupe/interaction.js` owns Loupe mouse drag, click-to-zoom, wheel zoom, and
 resize interaction binding while legacy keeps the page state facade.
 `library/query.js` owns Library rankings query-string construction.
-`library/pagination.js` owns Library rankings page-size constants and
-scroll-restore page-size math.
+`library/pagination.js` owns Library rankings page-size and neighbor-limit
+constants plus scroll-restore page-size math.
 `library/filters.js` owns Library filter session persistence, URL/session
 restore precedence, DOM application for filter buttons, stars, flags, and
 selects, plus the behavior behind the legacy `setFilter`, `clearLibraryFilters`,
@@ -83,7 +84,8 @@ scrolling, and visual-row navigation wiring.
 `library/map.js` owns Library map library loading, info/error display, and popup DOM construction.
 `library/map_controller.js` owns Library map-view state, grid/map toggle behavior,
 marker loading, marker-layer replacement, and map-bound fitting.
-`compare/query.js` owns Compare and Mosaic API query-string construction.
+`compare/query.js` owns Compare/Mosaic neighbor-count constants and API
+query-string construction.
 `compare/navigation.js` owns Mosaic keyboard cell selection and visual-row navigation wiring.
 `compare/mode_controller.js` owns Compare/Mosaic mode and strategy switching
 glue while legacy keeps pair and mosaic state.

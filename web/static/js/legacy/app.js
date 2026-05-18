@@ -24,6 +24,10 @@ import {
 } from '../query_state.js';
 import { createQueryController } from '../query_controller.js';
 import {
+    COMPARE_NEIGHBOR_PAIRS,
+    MOSAIC_NEIGHBOR_LIMIT,
+} from '../compare/query.js';
+import {
     activeMetadataFilterCount as activeMetadataFilterCountCore,
     hasActiveFilters,
     updateMetadataFilterButton as updateMetadataFilterButtonCore,
@@ -45,7 +49,10 @@ import {
     loadImageProbe,
     withTimeout,
 } from '../warmup.js';
-import { createNeighborWarmupController } from '../warmup_neighbors.js';
+import {
+    DEFAULT_CROSS_VIEW_WARM_DELAY_MS,
+    createNeighborWarmupController,
+} from '../warmup_neighbors.js';
 import { createThumbnailSizeHandler } from '../thumbnail_size.js';
 import {
     mosaicSizeFromThumbHeight,
@@ -88,6 +95,7 @@ import {
 } from '../library/sort.js';
 import {
     INITIAL_RANKINGS_PAGE_SIZE,
+    LIBRARY_NEIGHBOR_LIMIT,
     RANKINGS_PAGE_SIZE,
     currentLibraryPageSize as currentLibraryPageSizeCore,
 } from '../library/pagination.js';
@@ -186,10 +194,6 @@ const legacyPhotoArchive = (() => {
 
     // --- Rankings State ---
     let rankingsOffset = 0;
-    const CROSS_VIEW_WARM_DELAY_MS = 1000;
-    const LIBRARY_NEIGHBOR_LIMIT = 24;
-    const MOSAIC_NEIGHBOR_LIMIT = 8;
-    const COMPARE_NEIGHBOR_PAIRS = 4;
     let loupeController = null;
     const mediaStatusController = createMediaStatusController({
         client: createMediaStatusClient({ maxAgeMs: 15000 }),
@@ -846,7 +850,7 @@ const legacyPhotoArchive = (() => {
         initialRankingsPageSize: INITIAL_RANKINGS_PAGE_SIZE,
         rankingsPageSize: RANKINGS_PAGE_SIZE,
         compareNeighborPairs: COMPARE_NEIGHBOR_PAIRS,
-        crossViewWarmDelayMs: CROSS_VIEW_WARM_DELAY_MS,
+        crossViewWarmDelayMs: DEFAULT_CROSS_VIEW_WARM_DELAY_MS,
     });
 
     function scheduleCrossViewWarmup(fromView) {

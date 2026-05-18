@@ -1,5 +1,6 @@
 export const INITIAL_RANKINGS_PAGE_SIZE = 48;
 export const RANKINGS_PAGE_SIZE = 100;
+export const LIBRARY_NEIGHBOR_LIMIT = 24;
 
 
 export function currentLibraryPageSize({
