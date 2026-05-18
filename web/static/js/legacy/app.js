@@ -73,36 +73,12 @@ import {
 } from '../loupe/tiers.js';
 import { createLoupeController } from '../loupe/controller.js';
 import {
-    SORT_KEYS,
-    sortValueForState,
-} from '../library/sort.js';
-import {
     INITIAL_RANKINGS_PAGE_SIZE,
     LIBRARY_NEIGHBOR_LIMIT,
     RANKINGS_PAGE_SIZE,
     currentLibraryPageSize as currentLibraryPageSizeCore,
 } from '../library/pagination.js';
 import { createLibrarySortController } from '../library/sort_controller.js';
-import {
-    SEARCH_DEEP_STORAGE_KEY,
-    SEARCH_SORT_STORAGE_KEY,
-    SEARCH_STORAGE_KEY,
-    SORT_STORAGE_KEY,
-    clearPersistedSearchState as clearPersistedSearchStateCore,
-    restoreSearchSortState as restoreSearchSortStateCore,
-    restoreSearchState as restoreSearchStateCore,
-    restoreSortState as restoreSortStateCore,
-    saveSearchSortState as saveSearchSortStateCore,
-    saveSearchState as saveSearchStateCore,
-    saveSortState as saveSortStateCore,
-} from '../library/search_state.js';
-import {
-    syncSortControls as syncSortControlsCore,
-    updateCompareSearchIndicator as updateCompareSearchIndicatorCore,
-    updateSearchControls as updateSearchControlsCore,
-    updateSimilaritySortOption as updateSimilaritySortOptionCore,
-    updateSortDirIcon as updateSortDirIconCore,
-} from '../library/search_controls.js';
 import {
     applySearchQueryChange as applySearchQueryChangeCore,
     clearSearch as clearSearchCore,
@@ -162,6 +138,7 @@ import { createSettingsPageController } from '../settings/page.js';
 import { createUiSettingsLoader } from '../settings/ui_settings.js';
 import { createLegacyFilterQueryBridge } from './filter_query_bridge.js';
 import { createLegacyPublicApi } from './public_api.js';
+import { createLegacySearchSortBridge } from './search_sort_bridge.js';
 
 const legacyPhotoArchive = (() => {
     // --- Compare Mode State ---
@@ -841,112 +818,76 @@ const legacyPhotoArchive = (() => {
         return hasActiveTextSearchCore(value);
     }
 
+    const searchSortBridge = createLegacySearchSortBridge({
+        documentImpl: document,
+        storage: sessionStorage,
+        locationImpl: window.location,
+        getSearchQuery: () => searchQuery,
+        setSearchQuery: (value) => {
+            searchQuery = value;
+        },
+        getDeepSearchRequested: () => deepSearchRequested,
+        setDeepSearchRequested: (value) => {
+            deepSearchRequested = value;
+        },
+        getSortField: () => sortField,
+        setSortField: (value) => {
+            sortField = value;
+        },
+        getSortDesc: () => sortDesc,
+        setSortDesc: (value) => {
+            sortDesc = value;
+        },
+        setRankingsSort: (value) => {
+            rankingsSort = value;
+        },
+        hasActiveTextSearch,
+        syncLibraryUrlState,
+        afterCompareSearchIndicator: updateBottomBarHeightVar,
+    });
+
     function applySortState(field, desc, { persist = true, persistSearch = true } = {}) {
-        if (!SORT_KEYS[field]) return;
-        sortField = field;
-        sortDesc = Boolean(desc);
-        rankingsSort = sortValueForState(sortField, sortDesc);
-        syncSortControls();
-        if (persist && sortField !== 'similarity') saveSortState();
-        if (persistSearch && hasActiveTextSearch()) saveSearchSortState();
+        return searchSortBridge.applySortState(field, desc, { persist, persistSearch });
     }
 
     function saveSortState() {
-        saveSortStateCore({
-            storage: sessionStorage,
-            storageKey: SORT_STORAGE_KEY,
-            field: sortField,
-            desc: sortDesc,
-        });
-        syncLibraryUrlState();
+        return searchSortBridge.saveSortState();
     }
 
     function saveSearchState() {
-        saveSearchStateCore({
-            storage: sessionStorage,
-            searchKey: SEARCH_STORAGE_KEY,
-            deepKey: SEARCH_DEEP_STORAGE_KEY,
-            searchQuery,
-            deepSearchRequested,
-            hasActiveTextSearch,
-        });
+        return searchSortBridge.saveSearchState();
     }
 
     function saveSearchSortState() {
-        saveSearchSortStateCore({
-            storage: sessionStorage,
-            storageKey: SEARCH_SORT_STORAGE_KEY,
-            searchQuery,
-            field: sortField,
-            desc: sortDesc,
-            hasActiveTextSearch,
-        });
+        return searchSortBridge.saveSearchSortState();
     }
 
     function clearPersistedSearchState() {
-        clearPersistedSearchStateCore({
-            storage: sessionStorage,
-            searchKey: SEARCH_STORAGE_KEY,
-            searchSortKey: SEARCH_SORT_STORAGE_KEY,
-            deepKey: SEARCH_DEEP_STORAGE_KEY,
-        });
+        return searchSortBridge.clearPersistedSearchState();
     }
 
     function restoreSortState() {
-        const restored = restoreSortStateCore({
-            storage: sessionStorage,
-            storageKey: SORT_STORAGE_KEY,
-            locationSearch: window.location.search,
-        });
-        if (restored) {
-            applySortState(restored.field, restored.desc, { persist: false, persistSearch: false });
-        }
+        return searchSortBridge.restoreSortState();
     }
 
     function restoreSearchSortState() {
-        return restoreSearchSortStateCore({
-            storage: sessionStorage,
-            storageKey: SEARCH_SORT_STORAGE_KEY,
-        });
+        return searchSortBridge.restoreSearchSortState();
     }
 
     function restoreSearchState() {
-        const restored = restoreSearchStateCore({
-            storage: sessionStorage,
-            searchKey: SEARCH_STORAGE_KEY,
-            deepKey: SEARCH_DEEP_STORAGE_KEY,
-        });
-        searchQuery = restored.searchQuery;
-        deepSearchRequested = restored.deepSearchRequested;
-        updateSimilaritySortOption();
-        if (hasActiveTextSearch()) {
-            const restoredSort = restoreSearchSortState() || { field: 'similarity', desc: true };
-            applySortState(restoredSort.field, restoredSort.desc, { persist: false });
-        }
-        updateSearchControls();
+        return searchSortBridge.restoreSearchState();
     }
 
     function updateSearchControls() {
-        updateSearchControlsCore({
-            searchQuery,
-            deepSearchRequested,
-            sortField,
-            sortDesc,
-            hasActiveTextSearch,
-            afterCompareSearchIndicator: updateBottomBarHeightVar,
-        });
+        return searchSortBridge.updateSearchControls();
     }
 
     function updateCompareSearchIndicator() {
-        updateCompareSearchIndicatorCore({
-            searchQuery,
-            active: hasActiveTextSearch(),
-            afterUpdate: updateBottomBarHeightVar,
-        });
+        return searchSortBridge.updateCompareSearchIndicator();
     }
 
     function syncSortControls() {
-        syncSortControlsCore({ sortField, sortDesc });
+        return searchSortBridge.syncSortControls();
     }
 
     function rankingQueryString({
@@ -1051,7 +992,7 @@ const legacyPhotoArchive = (() => {
     function initRankings() { initLibrary(); }
 
     function updateSimilaritySortOption() {
-        updateSimilaritySortOptionCore({ active: hasActiveTextSearch() });
+        return searchSortBridge.updateSimilaritySortOption();
     }
 
     function clearSearch() {
@@ -1092,7 +1033,7 @@ const legacyPhotoArchive = (() => {
     }
 
     function updateSortDirIcon() {
-        updateSortDirIconCore({ sortDesc });
+        return searchSortBridge.updateSortDirIcon();
     }
 
     function clearSearchDebounceTimer() {

@@ -3845,6 +3845,8 @@ class ModularContractTests(unittest.TestCase):
             legacy = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "filter_query_bridge.js"), encoding="utf-8") as fh:
             legacy_filter_query_bridge = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "legacy", "search_sort_bridge.js"), encoding="utf-8") as fh:
+            legacy_search_sort_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "api.js"), encoding="utf-8") as fh:
             api_module = fh.read()
         with open(os.path.join(base_dir, "static", "js", "ai", "status.js"), encoding="utf-8") as fh:
@@ -4034,6 +4036,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../catalog/home_scan.js';", legacy)
         self.assertIn("from '../catalog/scan_entrypoint.js';", legacy)
         self.assertIn("from './filter_query_bridge.js';", legacy)
+        self.assertIn("from './search_sort_bridge.js';", legacy)
         self.assertIn("from '../query_state.js';", legacy_filter_query_bridge)
         self.assertIn("from '../query_controller.js';", legacy_filter_query_bridge)
         self.assertIn("from '../filters.js';", legacy_filter_query_bridge)
@@ -4057,11 +4060,12 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../compare/keyboard.js';", legacy)
         self.assertIn("from '../loupe/tiers.js';", legacy)
         self.assertIn("from '../loupe/controller.js';", legacy)
-        self.assertIn("from '../library/sort.js';", legacy)
+        self.assertIn("from '../library/sort.js';", legacy_search_sort_bridge)
         self.assertIn("from '../library/pagination.js';", legacy)
         self.assertIn("from '../library/sort_controller.js';", legacy)
-        self.assertIn("from '../library/search_state.js';", legacy)
-        self.assertIn("from '../library/search_controls.js';", legacy)
+        self.assertIn("from '../library/search_state.js';", legacy_search_sort_bridge)
+        self.assertIn("from '../library/search_controls.js';", legacy_search_sort_bridge)
+        self.assertIn("export function createLegacySearchSortBridge", legacy_search_sort_bridge)
         self.assertIn("from '../library/search_controller.js';", legacy)
         self.assertIn("from '../library/flags.js';", legacy)
         self.assertIn("from '../library/batch_controller.js';", legacy)
@@ -5199,6 +5203,125 @@ sortDesc = true;
 assert.equal(bridge.currentSearchMode(), 'library');
 assert.equal(bridge.filterQueryString(), 'flag=picked');
 assert.equal(bridge.hasActiveLibraryFilters(), true);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_legacy_search_sort_bridge_node_probe_preserves_state_storage_and_controls(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createLegacySearchSortBridge } from './static/js/legacy/search_sort_bridge.js';
+
+const storage = {
+    items: new Map(),
+    getItem(key) {
+        return this.items.has(key) ? this.items.get(key) : null;
+    },
+    setItem(key, value) {
+        this.items.set(key, String(value));
+    },
+    removeItem(key) {
+        this.items.delete(key);
+    },
+};
+const documentImpl = {
+    getElementById() {
+        return null;
+    },
+    createElement() {
+        throw new Error('not expected without a sort select');
+    },
+};
+let searchQuery = '';
+let deepSearchRequested = false;
+let sortField = 'elo';
+let sortDesc = true;
+let rankingsSort = 'elo';
+let syncCalls = 0;
+let bottomBarCalls = 0;
+
+const bridge = createLegacySearchSortBridge({
+    documentImpl,
+    storage,
+    locationImpl: {
+        search: '?sort=date_taken&dir=asc',
+    },
+    getSearchQuery: () => searchQuery,
+    setSearchQuery: value => {
+        searchQuery = value;
+    },
+    getDeepSearchRequested: () => deepSearchRequested,
+    setDeepSearchRequested: value => {
+        deepSearchRequested = Boolean(value);
+    },
+    getSortField: () => sortField,
+    setSortField: value => {
+        sortField = value;
+    },
+    getSortDesc: () => sortDesc,
+    setSortDesc: value => {
+        sortDesc = Boolean(value);
+    },
+    setRankingsSort: value => {
+        rankingsSort = value;
+    },
+    hasActiveTextSearch: value => Boolean(value && value !== '__similar__'),
+    syncLibraryUrlState: () => {
+        syncCalls += 1;
+    },
+    afterCompareSearchIndicator: () => {
+        bottomBarCalls += 1;
+    },
+});
+
+bridge.restoreSortState();
+assert.equal(sortField, 'date_taken');
+assert.equal(sortDesc, false);
+assert.equal(rankingsSort, 'date_taken_asc');
+assert.equal(syncCalls, 0);
+
+searchQuery = 'golden hour';
+deepSearchRequested = true;
+bridge.saveSearchState();
+assert.equal(storage.getItem('pa_search_query'), 'golden hour');
+assert.equal(storage.getItem('pa_search_deep'), '1');
+
+bridge.applySortState('similarity', true, { persist: false });
+assert.equal(sortField, 'similarity');
+assert.equal(sortDesc, true);
+assert.equal(rankingsSort, 'similarity');
+bridge.saveSearchSortState();
+assert.deepEqual(JSON.parse(storage.getItem('pa_search_sort')), {
+    field: 'similarity',
+    desc: true,
+});
+
+bridge.clearPersistedSearchState();
+assert.equal(storage.getItem('pa_search_query'), null);
+assert.equal(storage.getItem('pa_search_deep'), null);
+assert.equal(storage.getItem('pa_search_sort'), null);
+
+storage.setItem('pa_search_query', 'crane');
+storage.setItem('pa_search_deep', '1');
+storage.setItem('pa_search_sort', JSON.stringify({ field: 'similarity', desc: true }));
+sortField = 'elo';
+sortDesc = true;
+rankingsSort = 'elo';
+bridge.restoreSearchState();
+assert.equal(searchQuery, 'crane');
+assert.equal(deepSearchRequested, true);
+assert.equal(sortField, 'similarity');
+assert.equal(rankingsSort, 'similarity');
+bridge.updateSearchControls();
+bridge.updateCompareSearchIndicator();
+assert.equal(bottomBarCalls, 0);
 """
         subprocess.run(
             ["node", "--input-type=module", "-e", script],

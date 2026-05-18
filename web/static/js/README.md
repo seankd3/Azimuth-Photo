@@ -9,7 +9,9 @@ frontend monolith behind compatibility wrappers. `legacy/public_api.js` owns the
 exported compatibility method table that backs `window.PhotoArchive.*`.
 `legacy/filter_query_bridge.js` owns the legacy filter/query state bridge that
 connects Library, Mosaic, and Compare URL construction to the extracted filter
-and query modules.
+and query modules. `legacy/search_sort_bridge.js` owns the legacy search/sort
+state bridge that connects persisted search state and sort-control rendering to
+the extracted Library modules.
 
 `ui.js` owns shared toast, confirm-modal, shortcut overlay, bottom-bar
 measurement, visibility-refresh wiring, visual-row navigation math, formatting,
@@ -64,7 +66,7 @@ changes while delegating pure filter mutations to `library/filters.js`.
 `library/search_state.js` owns Library/search session persistence keys and
 helpers for sort, search query, deep-search flag, and search-specific sort state.
 `library/search_controls.js` owns Library and Compare search/sort DOM control
-rendering.
+rendering; legacy wires both through `legacy/search_sort_bridge.js`.
 `library/search_controller.js` owns Library search input debounce, clear-search,
 and deep-search control flow.
 `library/similar.js` owns the Library "find similar" action, similar-results
