@@ -14,6 +14,7 @@ import db  # noqa: E402
 import embed_cache  # noqa: E402
 import embedding_worker  # noqa: E402
 from features.compare import service as compare_service  # noqa: E402
+from thumbnails import cache_entries as thumbnail_cache_entries  # noqa: E402
 
 
 CARD_KEYS = {
@@ -75,8 +76,12 @@ class ApiShapeTests(unittest.TestCase):
         self.old_get_index = embed_cache.get_index
         self.old_get_vector = embed_cache.get_vector
         self.old_ensure_model_loaded_for_search = embedding_worker.ensure_model_loaded_for_search
+        self.old_thumbnail_persistent_conn = thumbnail_cache_entries._persistent_conn
+        self.old_smoke_mode = os.environ.get("PHOTOARCHIVE_SMOKE_MODE")
 
+        os.environ["PHOTOARCHIVE_SMOKE_MODE"] = "1"
         db.DB_PATH = os.path.join(self.tempdir.name, "api-shapes.db")
+        thumbnail_cache_entries._persistent_conn = None
         app_module.settings.SETTINGS_PATH = os.path.join(self.tempdir.name, "settings.local.json")
         app_module.settings._settings = None
         app_module.thumbnails.SSD_CACHE_DIR = os.path.join(self.tempdir.name, "cache")
@@ -108,9 +113,16 @@ class ApiShapeTests(unittest.TestCase):
         embed_cache.get_matrix = self.old_get_matrix
         embed_cache.get_index = self.old_get_index
         embed_cache.get_vector = self.old_get_vector
+        if thumbnail_cache_entries._persistent_conn is not None:
+            thumbnail_cache_entries._persistent_conn.close()
+        thumbnail_cache_entries._persistent_conn = self.old_thumbnail_persistent_conn
         app_module.thumbnails.SSD_CACHE_DIR = self.old_cache_dir
         app_module.settings.SETTINGS_PATH = self.old_settings_path
         app_module.settings._settings = self.old_settings_state
+        if self.old_smoke_mode is None:
+            os.environ.pop("PHOTOARCHIVE_SMOKE_MODE", None)
+        else:
+            os.environ["PHOTOARCHIVE_SMOKE_MODE"] = self.old_smoke_mode
         db.DB_PATH = self.old_db_path
         db.invalidate_stats_cache()
         db.invalidate_cached_image_ids_cache()
