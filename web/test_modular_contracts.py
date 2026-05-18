@@ -4152,6 +4152,9 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("export function createLegacyCompareKeyboardBridge", legacy_compare_keyboard_bridge)
         self.assertIn("from '../loupe/tiers.js';", legacy_loupe_bridge)
         self.assertIn("from '../loupe/controller.js';", legacy_loupe_bridge)
+        self.assertNotIn("from '../library/display.js';", legacy)
+        self.assertIn("from '../library/display.js';", legacy_loupe_bridge)
+        self.assertIn("from '../media_metadata.js';", legacy_loupe_bridge)
         self.assertIn("export function createLegacyLoupeBridge", legacy_loupe_bridge)
         self.assertIn("from '../library/sort.js';", legacy_search_sort_bridge)
         self.assertIn("from '../library/pagination.js';", legacy)
@@ -4177,7 +4180,8 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../export/actions.js';", legacy_export_bridge)
         self.assertIn("export function createLegacyExportBridge", legacy_export_bridge)
         self.assertIn("from '../library/similar.js';", legacy)
-        self.assertIn("from '../library/display.js';", legacy)
+        self.assertNotIn("from '../library/display.js';", legacy)
+        self.assertIn("from '../library/display.js';", legacy_loupe_bridge)
         self.assertIn("from '../library/rank_cards.js';", legacy)
         self.assertNotIn("from '../library/shell.js';", legacy)
         self.assertIn("from '../library/shell.js';", legacy_library_shell_bridge)
@@ -5781,14 +5785,14 @@ const bridge = createLegacyLoupeBridge({
     preloadImage: (url, priority) => Promise.resolve({ url, priority }),
     withTimeoutImpl: async (promise, timeoutMs) => ({ ...(await promise), timeoutMs }),
     getUiSettings: () => ({ show_loupe_cache_status: true }),
-    imageAspectRatio: () => 1.5,
-    eloToStars: () => 4,
 });
 
 assert.equal(bridge.getController(), null);
 bridge.initController();
 assert.equal(bridge.getController(), fakeController);
 assert.equal(typeof capturedOptions.getMediaStatus, 'function');
+assert.equal(capturedOptions.imageAspectRatio({ aspect_ratio: 1.25 }), 1.25);
+assert.equal(capturedOptions.eloToStars(1400, 4), 4);
 assert.equal(capturedOptions.getSearchQuery(), 'crane');
 assert.deepEqual(await capturedOptions.preloadImageWithTimeout('/thumb.jpg', 'high', 50), {
     url: '/thumb.jpg',

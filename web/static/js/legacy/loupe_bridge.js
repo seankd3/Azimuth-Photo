@@ -4,6 +4,8 @@ import {
     createMediaStatusClient,
     createMediaStatusController,
 } from '../media_status.js';
+import { imageAspectRatio } from '../media_metadata.js';
+import { eloToStars } from '../library/display.js';
 
 export function createLegacyLoupeBridge({
     mediaStatusClient = createMediaStatusClient({ maxAgeMs: 15000 }),
@@ -19,8 +21,6 @@ export function createLegacyLoupeBridge({
     preloadImage,
     withTimeoutImpl,
     getUiSettings,
-    imageAspectRatio,
-    eloToStars,
 } = {}) {
     let loupeController = null;
     const mediaStatusController = createMediaStatusController({

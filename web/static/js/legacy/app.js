@@ -23,11 +23,9 @@ import {
     RANKINGS_PAGE_SIZE,
     currentLibraryPageSize as currentLibraryPageSizeCore,
 } from '../library/pagination.js';
-import { eloToStars } from '../library/display.js';
 import { appendLibraryRankCards } from '../library/rank_cards.js';
 import {
     formatDateTime,
-    imageAspectRatio,
 } from '../media_metadata.js';
 import {
     hasActiveTextSearch as hasActiveTextSearchCore,
@@ -93,8 +91,6 @@ const legacyPhotoArchive = (() => {
         preloadImage: (...args) => preloadImage(...args),
         withTimeoutImpl: withTimeout,
         getUiSettings: () => uiRuntimeBridge.getUiSettings(),
-        imageAspectRatio,
-        eloToStars,
     });
     const {
         closeLightbox,
