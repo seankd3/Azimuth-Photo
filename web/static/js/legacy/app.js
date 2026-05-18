@@ -73,18 +73,6 @@ import {
 } from '../library/search_controller.js';
 import { eloToStars } from '../library/display.js';
 import { appendLibraryRankCards } from '../library/rank_cards.js';
-import {
-    dateGroupOffset as dateGroupOffsetCore,
-    findDateGroupHeader as findDateGroupHeaderCore,
-    isDateSortValue,
-    jumpToDateGroup as jumpToDateGroupCore,
-    renderDateScrubber as renderDateScrubberCore,
-    setActiveDateScrubberGroup as setActiveDateScrubberGroupCore,
-    setupDateScrubberScrollTracking as setupDateScrubberScrollTrackingCore,
-    syncDateScrubberVisibility as syncDateScrubberVisibilityCore,
-    teardownDateScrubberScrollTracking as teardownDateScrubberScrollTrackingCore,
-    createDateScrubberController,
-} from '../library/date_scrubber.js';
 import { bindLibraryKeyboard } from '../library/keyboard.js';
 import { createLibraryMapController } from '../library/map_controller.js';
 import {
@@ -98,6 +86,7 @@ import { createFindSimilarAction } from '../library/similar.js';
 import { createPeopleApi } from '../people/controller.js';
 import { createSettingsPageController } from '../settings/page.js';
 import { createLegacyBatchBridge } from './batch_bridge.js';
+import { createLegacyDateScrubberBridge } from './date_scrubber_bridge.js';
 import { createLegacyExportBridge } from './export_bridge.js';
 import { createLegacyFilterQueryBridge } from './filter_query_bridge.js';
 import { createLegacyFlagBridge } from './flag_bridge.js';
@@ -718,31 +707,39 @@ const legacyPhotoArchive = (() => {
         return libraryShellBridge.scrollLibraryContainerToElement(el, behavior);
     }
 
-    function syncDateScrubberVisibility() {
-        return syncDateScrubberVisibilityCore({
-            documentImpl: document,
-            currentLibraryView,
-            isDateScrubberActive,
-        });
-    }
-
-    const dateScrubberController = createDateScrubberController({
+    const dateScrubberBridge = createLegacyDateScrubberBridge({
         documentImpl: document,
         windowImpl: window,
         fetchImpl: fetch,
-        isActive: isDateScrubberActive,
-        getQueryString: () => filterQueryString(currentQueryState()),
-        getSortValue: () => rankingsSort,
-        getGroups: () => dateGroupsData,
+        currentLibraryView,
+        currentSearchMode,
+        currentQueryString: () => filterQueryString(currentQueryState()),
+        getRankingsSort: () => rankingsSort,
+        getDateGroups: () => dateGroupsData,
         setGroups: (groups) => { dateGroupsData = groups; },
-        nextGeneration: () => ++dateScrubberGeneration,
-        isCurrentGeneration: (gen) => gen === dateScrubberGeneration,
-        onJump: jumpToDateGroup,
-        setupScrollObserver: () => setupDateScrubberScrollTracking(),
-        syncVisibility: syncDateScrubberVisibility,
-        teardownScrollTracking: teardownDateScrubberScrollTracking,
-        renderDateScrubberImpl: renderDateScrubberCore,
+        nextDateScrubberGeneration: () => ++dateScrubberGeneration,
+        isCurrentDateScrubberGeneration: (gen) => gen === dateScrubberGeneration,
+        libraryScrollRoot,
+        scrollLibraryContainerToElement,
+        resetForDateOffset: (offset) => {
+            const gen = ++dateJumpGeneration;
+            libraryRequestGeneration++;
+            rankingsOffset = offset;
+            rankingsExhausted = false;
+            libraryImages = [];
+            lastDateGroup = null;
+            rankingsLoading = false;
+            rankingsLoadPromise = null;
+            selectedLibraryIndex = -1;
+            return gen;
+        },
+        isCurrentDateJump: (gen) => gen === dateJumpGeneration,
+        loadRankings,
     });
+
+    function syncDateScrubberVisibility() {
+        return dateScrubberBridge.syncDateScrubberVisibility();
+    }
 
     const neighborWarmups = createNeighborWarmupController({
         getMosaicStrategy: () => mosaicStrategy,
@@ -1136,68 +1133,47 @@ const legacyPhotoArchive = (() => {
     }
 
     function isDateSortActive() {
-        return isDateSortValue(rankingsSort);
+        return dateScrubberBridge.isDateSortActive();
     }
 
     function isDateScrubberActive() {
-        return isDateSortActive() && currentSearchMode() === 'library';
+        return dateScrubberBridge.isDateScrubberActive();
     }
 
     function findDateGroupHeader(group) {
-        return findDateGroupHeaderCore(group);
+        return dateScrubberBridge.findDateGroupHeader(group);
     }
 
     function dateGroupOffset(group) {
-        return dateGroupOffsetCore(dateGroupsData, group);
+        return dateScrubberBridge.dateGroupOffset(group);
     }
 
     function setActiveDateScrubberGroup(group) {
-        setActiveDateScrubberGroupCore(group);
+        return dateScrubberBridge.setActiveDateScrubberGroup(group);
     }
 
     function teardownDateScrubberScrollTracking() {
-        teardownDateScrubberScrollTrackingCore();
+        return dateScrubberBridge.teardownDateScrubberScrollTracking();
     }
 
     function setupDateScrubberScrollTracking() {
-        setupDateScrubberScrollTrackingCore({ scrollRoot: libraryScrollRoot() });
+        return dateScrubberBridge.setupDateScrubberScrollTracking();
     }
 
     async function jumpToDateGroup(group) {
-        return jumpToDateGroupCore(group, {
-            isActive: isDateScrubberActive,
-            findHeader: findDateGroupHeader,
-            setActiveGroup: setActiveDateScrubberGroup,
-            scrollToElement: scrollLibraryContainerToElement,
-            getOffset: dateGroupOffset,
-            resetForOffset: (offset) => {
-                const gen = ++dateJumpGeneration;
-                libraryRequestGeneration++;
-                rankingsOffset = offset;
-                rankingsExhausted = false;
-                libraryImages = [];
-                lastDateGroup = null;
-                rankingsLoading = false;
-                rankingsLoadPromise = null;
-                selectedLibraryIndex = -1;
-                return gen;
-            },
-            isCurrentJump: (gen) => gen === dateJumpGeneration,
-            loadRankings,
-            scrollRoot: libraryScrollRoot,
-        });
+        return dateScrubberBridge.jumpToDateGroup(group);
     }
 
     async function updateDateScrubber() {
-        return dateScrubberController.updateDateScrubber();
+        return dateScrubberBridge.updateDateScrubber();
     }
 
     function renderDateScrubber() {
-        return dateScrubberController.renderDateScrubber();
+        return dateScrubberBridge.renderDateScrubber();
     }
 
     function setupScrubberScrollObserver() {
-        return dateScrubberController.setupScrubberScrollObserver();
+        return dateScrubberBridge.setupScrubberScrollObserver();
     }
 
     function selectLibraryCard(index, cards) {

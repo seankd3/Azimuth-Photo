@@ -3845,6 +3845,8 @@ class ModularContractTests(unittest.TestCase):
             legacy = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "batch_bridge.js"), encoding="utf-8") as fh:
             legacy_batch_bridge = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "legacy", "date_scrubber_bridge.js"), encoding="utf-8") as fh:
+            legacy_date_scrubber_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "export_bridge.js"), encoding="utf-8") as fh:
             legacy_export_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "filter_query_bridge.js"), encoding="utf-8") as fh:
@@ -4048,6 +4050,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../catalog/home_scan.js';", legacy)
         self.assertIn("from '../catalog/scan_entrypoint.js';", legacy)
         self.assertIn("from './batch_bridge.js';", legacy)
+        self.assertIn("from './date_scrubber_bridge.js';", legacy)
         self.assertIn("from './export_bridge.js';", legacy)
         self.assertIn("from './filter_query_bridge.js';", legacy)
         self.assertIn("from './flag_bridge.js';", legacy)
@@ -4104,7 +4107,9 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../library/shell.js';", legacy_library_shell_bridge)
         self.assertIn("from '../library/navigation.js';", legacy_library_shell_bridge)
         self.assertIn("export function createLegacyLibraryShellBridge", legacy_library_shell_bridge)
-        self.assertIn("from '../library/date_scrubber.js';", legacy)
+        self.assertNotIn("from '../library/date_scrubber.js';", legacy)
+        self.assertIn("from '../library/date_scrubber.js';", legacy_date_scrubber_bridge)
+        self.assertIn("export function createLegacyDateScrubberBridge", legacy_date_scrubber_bridge)
         self.assertNotIn("from '../library/navigation.js';", legacy)
         self.assertIn("from '../library/map_controller.js';", legacy)
         self.assertIn("from '../library/filters.js';", legacy_filter_query_bridge)
@@ -6027,6 +6032,180 @@ assert.deepEqual(calls, [[
         sort: 'date_desc',
     },
 ]]);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_legacy_date_scrubber_bridge_node_probe_preserves_state_facade(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createLegacyDateScrubberBridge } from './static/js/legacy/date_scrubber_bridge.js';
+
+const documentImpl = { id: 'doc' };
+const windowImpl = { id: 'win' };
+const fetchImpl = async () => {};
+const scrollRoot = { id: 'root' };
+const groups = [{ date: '2024-01', count: 2 }, { date: '2023-12', count: 5 }];
+let sort = 'date_taken';
+let mode = 'library';
+let generation = 0;
+let jumpGeneration = 0;
+let controllerOptions = null;
+const sortChecks = [];
+const calls = [];
+
+const renderDateScrubberImpl = () => {};
+const bridge = createLegacyDateScrubberBridge({
+    documentImpl,
+    windowImpl,
+    fetchImpl,
+    createDateScrubberControllerImpl: (options) => {
+        controllerOptions = options;
+        return {
+            updateDateScrubber: async () => {
+                calls.push(['controllerUpdate']);
+                return 'updated';
+            },
+            renderDateScrubber: () => {
+                calls.push(['controllerRender']);
+                return 'rendered';
+            },
+            setupScrubberScrollObserver: () => {
+                calls.push(['controllerObserver']);
+                return 'observed';
+            },
+        };
+    },
+    dateGroupOffsetImpl: (passedGroups, group) => {
+        calls.push(['offset', passedGroups === groups, group]);
+        return 7;
+    },
+    findDateGroupHeaderImpl: (group, passedDocument) => {
+        calls.push(['find', group, passedDocument === documentImpl]);
+        return { id: `h-${group}` };
+    },
+    isDateSortValueImpl: (value) => {
+        sortChecks.push(value);
+        return value === 'date_taken' || value === 'date_taken_asc';
+    },
+    jumpToDateGroupImpl: async (group, options) => {
+        calls.push(['jumpActive', options.isActive()]);
+        const header = options.findHeader('2023-12');
+        const offset = options.getOffset('2023-12');
+        const gen = options.resetForOffset(offset);
+        calls.push([
+            'jump',
+            group,
+            header.id,
+            offset,
+            gen,
+            options.isCurrentJump(gen),
+            options.scrollRoot() === scrollRoot,
+            options.documentImpl === documentImpl,
+        ]);
+        options.setActiveGroup('2023-12');
+        options.scrollToElement({ id: 'target' }, 'auto');
+        await options.loadRankings(true);
+        return 'jumped';
+    },
+    renderDateScrubberImpl,
+    setActiveDateScrubberGroupImpl: (group, passedDocument) => {
+        calls.push(['setActive', group, passedDocument === documentImpl]);
+    },
+    setupDateScrubberScrollTrackingImpl: (options) => {
+        calls.push(['setupTracking', options.scrollRoot === scrollRoot, options.documentImpl === documentImpl]);
+        return 'tracking';
+    },
+    syncDateScrubberVisibilityImpl: (options) => {
+        calls.push(['sync', options.documentImpl === documentImpl, options.currentLibraryView(), options.isDateScrubberActive()]);
+        return 'synced';
+    },
+    teardownDateScrubberScrollTrackingImpl: () => {
+        calls.push(['teardownTracking']);
+    },
+    currentLibraryView: () => 'grid',
+    currentSearchMode: () => mode,
+    currentQueryString: () => 'flag=picked',
+    getRankingsSort: () => sort,
+    getDateGroups: () => groups,
+    setDateGroups: (nextGroups) => calls.push(['setGroups', nextGroups.length]),
+    nextDateScrubberGeneration: () => ++generation,
+    isCurrentDateScrubberGeneration: (gen) => gen === generation,
+    libraryScrollRoot: () => scrollRoot,
+    scrollLibraryContainerToElement: (el, behavior) => calls.push(['scrollToElement', el.id, behavior]),
+    resetForDateOffset: (offset) => {
+        calls.push(['reset', offset]);
+        jumpGeneration += 1;
+        return jumpGeneration;
+    },
+    isCurrentDateJump: (gen) => gen === jumpGeneration,
+    loadRankings: async (force) => calls.push(['loadRankings', force]),
+});
+
+assert.equal(controllerOptions.documentImpl, documentImpl);
+assert.equal(controllerOptions.windowImpl, windowImpl);
+assert.equal(controllerOptions.fetchImpl, fetchImpl);
+assert.equal(controllerOptions.isActive, bridge.isDateScrubberActive);
+assert.equal(controllerOptions.getQueryString(), 'flag=picked');
+assert.equal(controllerOptions.getSortValue(), 'date_taken');
+assert.equal(controllerOptions.getGroups(), groups);
+controllerOptions.setGroups([{ date: '2025-01' }]);
+assert.equal(controllerOptions.nextGeneration(), 1);
+assert.equal(controllerOptions.isCurrentGeneration(1), true);
+assert.equal(controllerOptions.onJump, bridge.jumpToDateGroup);
+assert.equal(controllerOptions.setupScrollObserver, bridge.setupDateScrubberScrollTracking);
+assert.equal(controllerOptions.syncVisibility, bridge.syncDateScrubberVisibility);
+assert.equal(controllerOptions.teardownScrollTracking, bridge.teardownDateScrubberScrollTracking);
+assert.equal(controllerOptions.renderDateScrubberImpl, renderDateScrubberImpl);
+
+assert.equal(bridge.isDateSortActive(), true);
+assert.equal(bridge.isDateScrubberActive(), true);
+mode = 'compare';
+assert.equal(bridge.isDateScrubberActive(), false);
+mode = 'library';
+sort = 'elo';
+assert.equal(bridge.isDateScrubberActive(), false);
+sort = 'date_taken_asc';
+
+assert.equal(bridge.syncDateScrubberVisibility(), 'synced');
+assert.equal(bridge.findDateGroupHeader('2024-01').id, 'h-2024-01');
+assert.equal(bridge.dateGroupOffset('2023-12'), 7);
+bridge.setActiveDateScrubberGroup('2023-12');
+bridge.teardownDateScrubberScrollTracking();
+assert.equal(bridge.setupDateScrubberScrollTracking(), 'tracking');
+assert.equal(await bridge.jumpToDateGroup('2023-12'), 'jumped');
+assert.equal(await bridge.updateDateScrubber(), 'updated');
+assert.equal(bridge.renderDateScrubber(), 'rendered');
+assert.equal(bridge.setupScrubberScrollObserver(), 'observed');
+
+assert.deepEqual(sortChecks.slice(0, 4), ['date_taken', 'date_taken', 'date_taken', 'elo']);
+assert.deepEqual(calls, [
+    ['setGroups', 1],
+    ['sync', true, 'grid', true],
+    ['find', '2024-01', true],
+    ['offset', true, '2023-12'],
+    ['setActive', '2023-12', true],
+    ['teardownTracking'],
+    ['setupTracking', true, true],
+    ['jumpActive', true],
+    ['find', '2023-12', true],
+    ['offset', true, '2023-12'],
+    ['reset', 7],
+    ['jump', '2023-12', 'h-2023-12', 7, 1, true, true, true],
+    ['setActive', '2023-12', true],
+    ['scrollToElement', 'target', 'auto'],
+    ['loadRankings', true],
+    ['controllerUpdate'],
+    ['controllerRender'],
+    ['controllerObserver'],
+]);
 """
         subprocess.run(
             ["node", "--input-type=module", "-e", script],

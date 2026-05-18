@@ -17,7 +17,9 @@ the extracted export helper to current Library query/sort state.
 controller facade for Library card selection, batch flagging, and selected-image
 export. `legacy/library_shell_bridge.js` owns the legacy Library shell and card
 keyboard-selection facade around scroll persistence, empty state, and card
-navigation. `legacy/loupe_bridge.js` owns the legacy Loupe controller and
+navigation. `legacy/date_scrubber_bridge.js` owns the legacy Library date
+scrubber state facade around date grouping, jumping, visibility, and scroll
+tracking. `legacy/loupe_bridge.js` owns the legacy Loupe controller and
 media-status facade wiring. `legacy/search_sort_bridge.js` owns the legacy
 search/sort state bridge that connects persisted search state and sort-control
 rendering to the extracted Library modules. `legacy/ui_runtime_bridge.js` owns
