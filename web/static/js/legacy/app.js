@@ -51,8 +51,8 @@ import { createNeighborWarmupController } from '../warmup_neighbors.js';
 import { createThumbnailSizeHandler } from '../thumbnail_size.js';
 import {
     mosaicSizeFromThumbHeight,
-    mosaicThumbHeightForSize,
 } from '../compare/mosaic.js';
+import { createComparePageController } from '../compare/page_controller.js';
 import { createMosaicActionController } from '../compare/mosaic_action_controller.js';
 import { createMosaicRenderController } from '../compare/mosaic_render_controller.js';
 import {
@@ -442,29 +442,6 @@ const legacyPhotoArchive = (() => {
 
     // ==================== COMPARE MODE ====================
 
-    async function initCompare() {
-        initBottomBarMeasurement();
-        startAIStatusPolling(750, { immediate: true });
-        document.addEventListener('keydown', handleCompareKey);
-        window.addEventListener('resize', scheduleMosaicRender);
-        document.getElementById('compare-left').addEventListener('click', () => submitComparison('left'));
-        document.getElementById('compare-right').addEventListener('click', () => submitComparison('right'));
-        // Set slider to match default mosaic size (12 images → slider ~168)
-        const slider = document.getElementById('thumb-size');
-        if (slider) {
-            slider.value = mosaicThumbHeightForSize(mosaicSize);
-        }
-        restoreFilters();
-        restoreSearchState();
-        initSearchInputControls();
-        setCompareMode('mosaic');
-        setTimeout(() => {
-            loadFolderList();
-            scheduleFilterOptionsLoad();
-        }, 500);
-        initStarHover();
-    }
-
     const comparePairController = createComparePairController({
         getCompareMode: () => compareMode,
         getCompareIndex: () => compareIndex,
@@ -617,6 +594,26 @@ const legacyPhotoArchive = (() => {
 
     function setCompareMode(mode) {
         return compareModeController.setCompareMode(mode);
+    }
+
+    const comparePageController = createComparePageController({
+        getMosaicSize: () => mosaicSize,
+        initBottomBarMeasurement,
+        startAIStatusPolling,
+        handleCompareKey,
+        scheduleMosaicRender,
+        submitComparison,
+        restoreFilters,
+        restoreSearchState,
+        initSearchInputControls,
+        setCompareMode,
+        loadFolderList,
+        scheduleFilterOptionsLoad,
+        initStarHover,
+    });
+
+    async function initCompare() {
+        return comparePageController.initCompare();
     }
 
     function showCompareEmpty() {

@@ -3866,6 +3866,8 @@ class ModularContractTests(unittest.TestCase):
             compare_navigation = fh.read()
         with open(os.path.join(base_dir, "static", "js", "compare", "keyboard.js"), encoding="utf-8") as fh:
             compare_keyboard = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "compare", "page_controller.js"), encoding="utf-8") as fh:
+            compare_page_controller = fh.read()
         with open(os.path.join(base_dir, "static", "js", "compare", "image_controller.js"), encoding="utf-8") as fh:
             compare_image_controller = fh.read()
         with open(os.path.join(base_dir, "static", "js", "compare", "images.js"), encoding="utf-8") as fh:
@@ -4008,6 +4010,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../compare/propagation.js';", legacy)
         self.assertIn("from '../compare/status_controller.js';", legacy)
         self.assertIn("from '../compare/mosaic.js';", legacy)
+        self.assertIn("from '../compare/page_controller.js';", legacy)
         self.assertIn("from '../compare/keyboard.js';", legacy)
         self.assertIn("from '../loupe/tiers.js';", legacy)
         self.assertIn("from '../loupe/controller.js';", legacy)
@@ -4115,6 +4118,9 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("export function createCompareKeyboardHandler", compare_keyboard)
         self.assertIn("getSelectedMosaicIndex", compare_keyboard)
         self.assertIn("submitComparison('left')", compare_keyboard)
+        self.assertIn("export function createComparePageController", compare_page_controller)
+        self.assertIn("from './mosaic.js';", compare_page_controller)
+        self.assertIn("startAIStatusPolling(750, { immediate: true })", compare_page_controller)
         self.assertIn("export function createCompareImageController", compare_image_controller)
         self.assertIn("from './images.js';", compare_image_controller)
         self.assertIn("displayedTiers", compare_image_controller)
@@ -7435,6 +7441,98 @@ events.length = 0;
 mosaicFilling = true;
 enqueued.at(-1).options.onDrop();
 assert.deepEqual(events, [['retry-filling', false]]);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_compare_page_controller_node_probe_preserves_init_flow(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createComparePageController } from './static/js/compare/page_controller.js';
+
+const events = [];
+function node(id) {
+    return {
+        id,
+        value: null,
+        handlers: {},
+        addEventListener(event, handler) {
+            events.push(['element-listener', id, event]);
+            this.handlers[event] = handler;
+        },
+    };
+}
+
+const nodes = {
+    'compare-left': node('compare-left'),
+    'compare-right': node('compare-right'),
+    'thumb-size': node('thumb-size'),
+};
+const timers = [];
+const controller = createComparePageController({
+    documentImpl: {
+        addEventListener(event, handler) {
+            events.push(['document-listener', event, handler]);
+        },
+        getElementById: (id) => nodes[id] || null,
+    },
+    windowImpl: {
+        addEventListener(event, handler) {
+            events.push(['window-listener', event, handler]);
+        },
+    },
+    setTimeoutImpl: (handler, ms) => {
+        timers.push({ handler, ms });
+        events.push(['timeout', ms]);
+    },
+    getMosaicSize: () => 12,
+    initBottomBarMeasurement: () => events.push('bottom'),
+    startAIStatusPolling: (delay, options) => events.push(['ai', delay, options]),
+    handleCompareKey: () => events.push('key'),
+    scheduleMosaicRender: () => events.push('resize'),
+    submitComparison: (side) => events.push(['submit', side]),
+    restoreFilters: () => events.push('filters'),
+    restoreSearchState: () => events.push('search'),
+    initSearchInputControls: () => events.push('search-controls'),
+    setCompareMode: (mode) => events.push(['mode', mode]),
+    loadFolderList: () => events.push('folders'),
+    scheduleFilterOptionsLoad: () => events.push('filter-options'),
+    initStarHover: () => events.push('stars'),
+});
+
+await controller.initCompare();
+
+assert.equal(nodes['thumb-size'].value, 288);
+assert.deepEqual(events, [
+    'bottom',
+    ['ai', 750, { immediate: true }],
+    ['document-listener', 'keydown', events[2][2]],
+    ['window-listener', 'resize', events[3][2]],
+    ['element-listener', 'compare-left', 'click'],
+    ['element-listener', 'compare-right', 'click'],
+    'filters',
+    'search',
+    'search-controls',
+    ['mode', 'mosaic'],
+    ['timeout', 500],
+    'stars',
+]);
+
+nodes['compare-left'].handlers.click();
+nodes['compare-right'].handlers.click();
+assert.deepEqual(events.slice(-2), [['submit', 'left'], ['submit', 'right']]);
+
+assert.equal(timers.length, 1);
+assert.equal(timers[0].ms, 500);
+timers[0].handler();
+assert.deepEqual(events.slice(-2), ['folders', 'filter-options']);
 """
         subprocess.run(
             ["node", "--input-type=module", "-e", script],
