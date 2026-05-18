@@ -41,7 +41,6 @@ import {
     hasActiveTextSearch as hasActiveTextSearchCore,
 } from '../search/query.js';
 import { createFindSimilarAction } from '../library/similar.js';
-import { createSettingsPageController } from '../settings/page.js';
 import { createLegacyBatchBridge } from './batch_bridge.js';
 import { createLegacyCatalogScanBridge } from './catalog_scan_bridge.js';
 import { createLegacyCompareDisplayBridge } from './compare_display_bridge.js';
@@ -64,6 +63,7 @@ import { createLegacyPeopleBridge } from './people_bridge.js';
 import { createLegacyPublicApi } from './public_api.js';
 import { createLegacySearchActionBridge } from './search_action_bridge.js';
 import { createLegacySearchSortBridge } from './search_sort_bridge.js';
+import { createLegacySettingsPageBridge } from './settings_page_bridge.js';
 import { createLegacyUiActionBridge } from './ui_action_bridge.js';
 import { createLegacyUiRuntimeBridge } from './ui_runtime_bridge.js';
 
@@ -1079,7 +1079,7 @@ const legacyPhotoArchive = (() => {
 
     // ==================== SETTINGS ====================
 
-    const settingsPage = createSettingsPageController({
+    const settingsPage = createLegacySettingsPageBridge({
         showToast,
         showConfirmModal,
         formatBytes,
