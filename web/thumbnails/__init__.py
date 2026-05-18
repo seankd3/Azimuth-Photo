@@ -1293,15 +1293,17 @@ async def flush_orientation_updates():
 
 
 def _set_pregen_state(state: str, message: str = "", phase: str | None = None, error: str = ""):
-    _pregen_status["enabled"] = PREGENERATE_ON_IDLE
-    _pregen_status["manual_mode"] = _pregen_manual_mode
-    _pregen_status["manual_pause"] = _pregen_manual_pause
-    _pregen_status["state"] = state
-    _pregen_status["message"] = message
-    _pregen_status["active_phase"] = phase
-    _pregen_status["last_error"] = error
-    if _pregen_status["started_at"] is None and state == "running":
-        _pregen_status["started_at"] = _current_time()
+    pregen.set_state(
+        _pregen_status,
+        state,
+        message=message,
+        phase=phase,
+        error=error,
+        enabled=PREGENERATE_ON_IDLE,
+        manual_mode=_pregen_manual_mode,
+        manual_pause=_pregen_manual_pause,
+        now_provider=_current_time,
+    )
 
 
 def _sync_pregen_bookkeeping_from_facade() -> None:

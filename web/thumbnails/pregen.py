@@ -1,3 +1,4 @@
+import time
 from collections import deque
 
 
@@ -30,6 +31,31 @@ def update_cursor_from_row(cursor: dict, row) -> None:
     cursor["source_id"] = int(row["source_id"] or 0)
     cursor["filepath"] = str(row["filepath"] or "")
     cursor["id"] = int(row["id"] or 0)
+
+
+def set_state(
+    pregen_state: dict,
+    state: str,
+    message: str = "",
+    phase: str | None = None,
+    error: str = "",
+    *,
+    enabled: bool,
+    manual_mode: bool,
+    manual_pause: bool,
+    now_provider=None,
+) -> None:
+    if now_provider is None:
+        now_provider = time.time
+    pregen_state["enabled"] = enabled
+    pregen_state["manual_mode"] = manual_mode
+    pregen_state["manual_pause"] = manual_pause
+    pregen_state["state"] = state
+    pregen_state["message"] = message
+    pregen_state["active_phase"] = phase
+    pregen_state["last_error"] = error
+    if pregen_state["started_at"] is None and state == "running":
+        pregen_state["started_at"] = now_provider()
 
 
 def history_entry(

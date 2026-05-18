@@ -125,6 +125,74 @@ class ThumbnailRuntimeFacadeTests(unittest.TestCase):
 
 
 class ThumbnailPregenFacadeTests(unittest.TestCase):
+    def test_pregen_state_mutation_remains_facaded_from_pregen_module(self):
+        base_status = {
+            "enabled": True,
+            "manual_mode": False,
+            "manual_pause": False,
+            "state": "idle",
+            "message": "",
+            "active_phase": None,
+            "started_at": None,
+            "last_generated_at": None,
+            "generated_this_session": 0,
+            "last_error": "",
+        }
+        old_status = thumbnails._pregen_status
+        old_enabled = thumbnails.PREGENERATE_ON_IDLE
+        old_manual_mode = thumbnails._pregen_manual_mode
+        old_manual_pause = thumbnails._pregen_manual_pause
+        old_current_time = thumbnails._current_time
+        try:
+            direct_status = dict(base_status)
+            thumbnail_pregen.set_state(
+                direct_status,
+                "running",
+                message="warming",
+                phase="bulk",
+                enabled=False,
+                manual_mode=True,
+                manual_pause=False,
+                now_provider=lambda: 55.5,
+            )
+
+            thumbnails._pregen_status = dict(base_status)
+            thumbnails.PREGENERATE_ON_IDLE = False
+            thumbnails._pregen_manual_mode = True
+            thumbnails._pregen_manual_pause = False
+            thumbnails._current_time = lambda: 55.5
+
+            thumbnails._set_pregen_state("running", "warming", "bulk")
+
+            self.assertEqual(thumbnails._pregen_status, direct_status)
+            self.assertEqual(thumbnails._pregen_status["started_at"], 55.5)
+
+            thumbnail_pregen.set_state(
+                direct_status,
+                "paused",
+                message="paused",
+                error="manual",
+                enabled=True,
+                manual_mode=False,
+                manual_pause=True,
+                now_provider=lambda: 99.0,
+            )
+            thumbnails.PREGENERATE_ON_IDLE = True
+            thumbnails._pregen_manual_mode = False
+            thumbnails._pregen_manual_pause = True
+            thumbnails._current_time = lambda: 99.0
+
+            thumbnails._set_pregen_state("paused", "paused", error="manual")
+
+            self.assertEqual(thumbnails._pregen_status, direct_status)
+            self.assertEqual(thumbnails._pregen_status["started_at"], 55.5)
+        finally:
+            thumbnails._pregen_status = old_status
+            thumbnails.PREGENERATE_ON_IDLE = old_enabled
+            thumbnails._pregen_manual_mode = old_manual_mode
+            thumbnails._pregen_manual_pause = old_manual_pause
+            thumbnails._current_time = old_current_time
+
     def test_decision_helpers_remain_facaded_from_pregen_module(self):
         calls = []
 
