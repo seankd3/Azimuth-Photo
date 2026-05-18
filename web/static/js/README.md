@@ -136,6 +136,8 @@ facade that connects compatibility state to Compare pair and image controllers.
 navigation facade around the extracted Compare keyboard and navigation helpers.
 `legacy/compare_mode_bridge.js` owns the legacy Compare/Mosaic mode and
 strategy-switching facade around the extracted Compare mode controller.
+`legacy/compare_page_bridge.js` owns the legacy Compare page initialization
+facade around the extracted Compare page controller.
 `legacy/mosaic_bridge.js` owns the legacy Mosaic render, replacement-buffer,
 pick-action, and batch-load facade around the extracted Mosaic controllers.
 `compare/mosaic_action_controller.js` owns Mosaic pick orchestration,

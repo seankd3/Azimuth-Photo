@@ -3855,6 +3855,8 @@ class ModularContractTests(unittest.TestCase):
             legacy_compare_keyboard_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "compare_mode_bridge.js"), encoding="utf-8") as fh:
             legacy_compare_mode_bridge = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "legacy", "compare_page_bridge.js"), encoding="utf-8") as fh:
+            legacy_compare_page_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "date_scrubber_bridge.js"), encoding="utf-8") as fh:
             legacy_date_scrubber_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "export_bridge.js"), encoding="utf-8") as fh:
@@ -4085,6 +4087,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from './compare_flow_bridge.js';", legacy)
         self.assertIn("from './compare_keyboard_bridge.js';", legacy)
         self.assertIn("from './compare_mode_bridge.js';", legacy)
+        self.assertIn("from './compare_page_bridge.js';", legacy)
         self.assertIn("from './date_scrubber_bridge.js';", legacy)
         self.assertIn("from './export_bridge.js';", legacy)
         self.assertIn("from './filter_query_bridge.js';", legacy)
@@ -4138,7 +4141,9 @@ class ModularContractTests(unittest.TestCase):
         self.assertNotIn("from '../compare/mosaic.js';", legacy)
         self.assertIn("from '../compare/mosaic.js';", legacy_thumbnail_size_bridge)
         self.assertIn("from '../compare/query.js';", legacy)
-        self.assertIn("from '../compare/page_controller.js';", legacy)
+        self.assertNotIn("from '../compare/page_controller.js';", legacy)
+        self.assertIn("from '../compare/page_controller.js';", legacy_compare_page_bridge)
+        self.assertIn("export function createLegacyComparePageBridge", legacy_compare_page_bridge)
         self.assertNotIn("from '../compare/keyboard.js';", legacy)
         self.assertIn("from '../compare/keyboard.js';", legacy_compare_keyboard_bridge)
         self.assertIn("export function createLegacyCompareKeyboardBridge", legacy_compare_keyboard_bridge)
@@ -9967,6 +9972,60 @@ assert.equal(timers.length, 1);
 assert.equal(timers[0].ms, 500);
 timers[0].handler();
 assert.deepEqual(events.slice(-2), ['folders', 'filter-options']);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_legacy_compare_page_bridge_node_probe_preserves_init_facade(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createLegacyComparePageBridge } from './static/js/legacy/compare_page_bridge.js';
+
+const expected = {
+    documentImpl: { addEventListener: () => {}, getElementById: () => null },
+    windowImpl: { addEventListener: () => {} },
+    setTimeoutImpl: () => {},
+    getMosaicSize: () => 12,
+    initBottomBarMeasurement: () => {},
+    startAIStatusPolling: () => {},
+    handleCompareKey: () => {},
+    scheduleMosaicRender: () => {},
+    submitComparison: () => {},
+    restoreFilters: () => {},
+    restoreSearchState: () => {},
+    initSearchInputControls: () => {},
+    setCompareMode: () => {},
+    loadFolderList: () => {},
+    scheduleFilterOptionsLoad: () => {},
+    initStarHover: () => {},
+};
+const dependencyNames = Object.keys(expected);
+const calls = [];
+
+const bridge = createLegacyComparePageBridge({
+    ...expected,
+    createComparePageControllerImpl: (deps) => {
+        for (const name of dependencyNames) {
+            assert.strictEqual(deps[name], expected[name], `${name} dependency`);
+        }
+        return {
+            initCompare: (...args) => {
+                calls.push(args);
+                return 'init-result';
+            },
+        };
+    },
+});
+
+assert.equal(bridge.initCompare('arg'), 'init-result');
+assert.deepEqual(calls, [['arg']]);
 """
         subprocess.run(
             ["node", "--input-type=module", "-e", script],

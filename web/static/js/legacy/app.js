@@ -14,7 +14,6 @@ import {
     DEFAULT_CROSS_VIEW_WARM_DELAY_MS,
     createNeighborWarmupController,
 } from '../warmup_neighbors.js';
-import { createComparePageController } from '../compare/page_controller.js';
 import {
     showCompareEmpty as showCompareEmptyCore,
 } from '../compare/view.js';
@@ -41,6 +40,7 @@ import { createLegacyCompareDisplayBridge } from './compare_display_bridge.js';
 import { createLegacyCompareFlowBridge } from './compare_flow_bridge.js';
 import { createLegacyCompareKeyboardBridge } from './compare_keyboard_bridge.js';
 import { createLegacyCompareModeBridge } from './compare_mode_bridge.js';
+import { createLegacyComparePageBridge } from './compare_page_bridge.js';
 import { createLegacyDateScrubberBridge } from './date_scrubber_bridge.js';
 import { createLegacyExportBridge } from './export_bridge.js';
 import { createLegacyFilterQueryBridge } from './filter_query_bridge.js';
@@ -431,7 +431,10 @@ const legacyPhotoArchive = (() => {
         return compareModeBridge.setCompareMode(mode);
     }
 
-    const comparePageController = createComparePageController({
+    const comparePageBridge = createLegacyComparePageBridge({
+        documentImpl: document,
+        windowImpl: window,
+        setTimeoutImpl: setTimeout,
         getMosaicSize: () => mosaicSize,
         initBottomBarMeasurement,
         startAIStatusPolling,
@@ -448,7 +451,7 @@ const legacyPhotoArchive = (() => {
     });
 
     async function initCompare() {
-        return comparePageController.initCompare();
+        return comparePageBridge.initCompare();
     }
 
     function showCompareEmpty() {
