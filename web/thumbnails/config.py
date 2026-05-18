@@ -89,6 +89,7 @@ MEMORY_CACHE_PROFILES = {
     "balanced": {"sm": 0.20, "md": 0.45, "lg": 0.35},
     "original_heavy": {"sm": 0.15, "md": 0.45, "lg": 0.40},
 }
+VALID_CACHE_PROFILES = frozenset(SSD_REMAINDER_PROFILES)
 
 
 def normalize_ratios(values: dict[str, float], tiers: tuple[str, ...]) -> dict[str, float]:
@@ -252,4 +253,76 @@ def cache_budget_config(
         "memory_ratios": memory_ratios,
         "ssd_allocations": dict(disk_allocations),
         "memory_allocations": allocate_by_ratios(memory_cache_bytes, memory_ratios, THUMB_TIERS),
+    }
+
+
+def runtime_config_values(
+    config: dict,
+    *,
+    current_sizes: dict[str, int],
+    current_thumb_quality: int,
+    current_browser_cache_max_age: int,
+    current_browser_cache_stale_while_revalidate: int,
+    current_cache_profile: str,
+    current_pregenerate_on_idle: bool,
+    current_generate_batch: int,
+    current_ssd_cache_dir: str,
+    current_executor_workers: int,
+    current_prefetch_workers: int,
+    as_bool,
+) -> dict:
+    memory_cache_gb = config.get("memory_cache_gb")
+    if memory_cache_gb is None:
+        try:
+            memory_cache_gb = float(config.get("memory_cache_mb", 512)) / 1024.0
+        except (TypeError, ValueError):
+            memory_cache_gb = 0.5
+    try:
+        memory_cache_bytes = max(0, int(float(memory_cache_gb) * 1024 * 1024 * 1024))
+    except (TypeError, ValueError):
+        memory_cache_bytes = int(0.5 * 1024 * 1024 * 1024)
+
+    profile = str(config.get("cache_profile", current_cache_profile)).strip().lower()
+    disk_cache_dir = (
+        config.get("ssd_cache_dir")
+        or config.get("disk_cache_dir")
+        or current_ssd_cache_dir
+    )
+    return {
+        "replace_thumbnail_cache": as_bool(config.get("_replace_thumbnail_cache"), False),
+        "sizes": {
+            "sm": int(config.get("thumb_size_sm", current_sizes["sm"])),
+            "md": int(config.get("thumb_size_md", current_sizes["md"])),
+            "lg": int(config.get("thumb_size_lg", current_sizes["lg"])),
+        },
+        "thumb_quality": int(
+            config.get("thumb_quality", config.get("jpeg_quality", current_thumb_quality))
+        ),
+        "browser_cache_max_age": int(
+            config.get("browser_cache_max_age", current_browser_cache_max_age)
+        ),
+        "browser_cache_stale_while_revalidate": int(
+            config.get(
+                "browser_cache_stale_while_revalidate",
+                current_browser_cache_stale_while_revalidate,
+            )
+        ),
+        "memory_cache_bytes": memory_cache_bytes,
+        "ssd_cache_bytes": max(0, int(config.get("ssd_cache_gb", 10))) * 1024 * 1024 * 1024,
+        "cache_profile": profile if profile in VALID_CACHE_PROFILES else "original_heavy",
+        "pregenerate_on_idle": as_bool(
+            config.get("pregenerate_on_idle"),
+            current_pregenerate_on_idle,
+        ),
+        "pregenerate_generate_batch": max(
+            4,
+            min(64, int(config.get("pregen_generate_batch", current_generate_batch))),
+        ),
+        "pregenerate_batch_pause_seconds": max(
+            0.0,
+            min(5.0, float(config.get("pregen_batch_pause_ms", 250)) / 1000.0),
+        ),
+        "ssd_cache_dir": os.path.abspath(str(disk_cache_dir).strip() or current_ssd_cache_dir),
+        "user_workers": int(config.get("user_workers", current_executor_workers)),
+        "prefetch_workers": int(config.get("prefetch_workers", current_prefetch_workers)),
     }

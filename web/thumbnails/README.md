@@ -4,7 +4,8 @@
 keep the same import path while the engine is split apart.
 
 `config.py` owns thumbnail default constants, extension sets, cache profiles,
-quality sizing, and pure budget-allocation math. `config_metadata.py` owns the
+runtime setting parsing, quality sizing, and pure budget-allocation math.
+`config_metadata.py` owns the
 persistent thumbnail-config signature and stale-cache transition metadata.
 `budget.py` owns the runtime archive-estimate adapter that samples cache metadata for those budget helpers.
 `memory_store.py` owns the

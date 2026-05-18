@@ -1374,48 +1374,33 @@ def configure(config: dict):
 
     _flush_write_queue()
     old_cache_dir = SSD_CACHE_DIR
-    replace_thumbnail_cache = _as_bool(config.get("_replace_thumbnail_cache"), False)
+    parsed_config = thumbnail_config.runtime_config_values(
+        config,
+        current_sizes=SIZES,
+        current_thumb_quality=THUMB_QUALITY,
+        current_browser_cache_max_age=BROWSER_CACHE_MAX_AGE,
+        current_browser_cache_stale_while_revalidate=BROWSER_CACHE_STALE_WHILE_REVALIDATE,
+        current_cache_profile=CACHE_PROFILE,
+        current_pregenerate_on_idle=PREGENERATE_ON_IDLE,
+        current_generate_batch=PREGENERATE_GENERATE_BATCH,
+        current_ssd_cache_dir=SSD_CACHE_DIR,
+        current_executor_workers=_executor_workers,
+        current_prefetch_workers=_prefetch_workers_count,
+        as_bool=_as_bool,
+    )
+    replace_thumbnail_cache = parsed_config["replace_thumbnail_cache"]
 
-    SIZES["sm"] = int(config.get("thumb_size_sm", SIZES["sm"]))
-    SIZES["md"] = int(config.get("thumb_size_md", SIZES["md"]))
-    SIZES["lg"] = int(config.get("thumb_size_lg", SIZES["lg"]))
-    THUMB_QUALITY = int(config.get("thumb_quality", config.get("jpeg_quality", THUMB_QUALITY)))
-    BROWSER_CACHE_MAX_AGE = int(config.get("browser_cache_max_age", BROWSER_CACHE_MAX_AGE))
-    BROWSER_CACHE_STALE_WHILE_REVALIDATE = int(
-        config.get(
-            "browser_cache_stale_while_revalidate",
-            BROWSER_CACHE_STALE_WHILE_REVALIDATE,
-        )
-    )
-    memory_cache_gb = config.get("memory_cache_gb")
-    if memory_cache_gb is None:
-        try:
-            memory_cache_gb = float(config.get("memory_cache_mb", 512)) / 1024.0
-        except (TypeError, ValueError):
-            memory_cache_gb = 0.5
-    try:
-        MEMORY_CACHE_BYTES = max(0, int(float(memory_cache_gb) * 1024 * 1024 * 1024))
-    except (TypeError, ValueError):
-        MEMORY_CACHE_BYTES = int(0.5 * 1024 * 1024 * 1024)
-    SSD_CACHE_BYTES = max(0, int(config.get("ssd_cache_gb", 10))) * 1024 * 1024 * 1024
-    profile = str(config.get("cache_profile", CACHE_PROFILE)).strip().lower()
-    CACHE_PROFILE = profile if profile in {"browse_fast", "balanced", "original_heavy"} else "original_heavy"
-    PREGENERATE_ON_IDLE = _as_bool(config.get("pregenerate_on_idle"), PREGENERATE_ON_IDLE)
-    PREGENERATE_GENERATE_BATCH = max(
-        4,
-        min(64, int(config.get("pregen_generate_batch", PREGENERATE_GENERATE_BATCH))),
-    )
-    PREGENERATE_BATCH_PAUSE_SECONDS = max(
-        0.0,
-        min(5.0, float(config.get("pregen_batch_pause_ms", 250)) / 1000.0),
-    )
-
-    disk_cache_dir = (
-        config.get("ssd_cache_dir")
-        or config.get("disk_cache_dir")
-        or SSD_CACHE_DIR
-    )
-    SSD_CACHE_DIR = os.path.abspath(str(disk_cache_dir).strip() or SSD_CACHE_DIR)
+    SIZES.update(parsed_config["sizes"])
+    THUMB_QUALITY = parsed_config["thumb_quality"]
+    BROWSER_CACHE_MAX_AGE = parsed_config["browser_cache_max_age"]
+    BROWSER_CACHE_STALE_WHILE_REVALIDATE = parsed_config["browser_cache_stale_while_revalidate"]
+    MEMORY_CACHE_BYTES = parsed_config["memory_cache_bytes"]
+    SSD_CACHE_BYTES = parsed_config["ssd_cache_bytes"]
+    CACHE_PROFILE = parsed_config["cache_profile"]
+    PREGENERATE_ON_IDLE = parsed_config["pregenerate_on_idle"]
+    PREGENERATE_GENERATE_BATCH = parsed_config["pregenerate_generate_batch"]
+    PREGENERATE_BATCH_PAUSE_SECONDS = parsed_config["pregenerate_batch_pause_seconds"]
+    SSD_CACHE_DIR = parsed_config["ssd_cache_dir"]
     if SSD_CACHE_DIR != old_cache_dir:
         _clear_disk_index()
         _tier_byte_totals.clear()
@@ -1441,12 +1426,12 @@ def configure(config: dict):
     with _cache_lock:
         _enforce_memory_budget_locked()
 
-    user_workers = int(config.get("user_workers", _executor_workers))
+    user_workers = parsed_config["user_workers"]
     if user_workers != _executor_workers:
         _executor = _replace_executor(_executor, user_workers, "thumb")
         _executor_workers = user_workers
 
-    prefetch_workers = int(config.get("prefetch_workers", _prefetch_workers_count))
+    prefetch_workers = parsed_config["prefetch_workers"]
     if prefetch_workers != _prefetch_workers_count:
         _prefetch_executor = _replace_executor(
             _prefetch_executor,

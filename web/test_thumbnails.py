@@ -35,6 +35,54 @@ class ThumbnailConfigFacadeTests(unittest.TestCase):
         self.assertEqual(thumbnail_config.SSD_CACHE_BYTES, 10 * 1024 * 1024 * 1024)
         self.assertIsInstance(thumbnails.SSD_CACHE_BYTES, int)
 
+    def test_config_module_parses_runtime_settings_like_facade(self):
+        parsed = thumbnail_config.runtime_config_values(
+            {
+                "_replace_thumbnail_cache": "yes",
+                "thumb_size_sm": "320",
+                "thumb_size_md": "1440",
+                "thumb_size_lg": "2880",
+                "jpeg_quality": "88",
+                "browser_cache_max_age": "12",
+                "browser_cache_stale_while_revalidate": "34",
+                "memory_cache_mb": "256",
+                "ssd_cache_gb": "3",
+                "cache_profile": "not-a-profile",
+                "pregenerate_on_idle": "false",
+                "pregen_generate_batch": "99",
+                "pregen_batch_pause_ms": "9000",
+                "disk_cache_dir": "relative-cache",
+                "user_workers": "7",
+                "prefetch_workers": "8",
+            },
+            current_sizes={"sm": 400, "md": 1920, "lg": 3840},
+            current_thumb_quality=92,
+            current_browser_cache_max_age=100,
+            current_browser_cache_stale_while_revalidate=200,
+            current_cache_profile="balanced",
+            current_pregenerate_on_idle=True,
+            current_generate_batch=16,
+            current_ssd_cache_dir="/tmp/current-cache",
+            current_executor_workers=4,
+            current_prefetch_workers=6,
+            as_bool=thumbnails._as_bool,
+        )
+
+        self.assertTrue(parsed["replace_thumbnail_cache"])
+        self.assertEqual(parsed["sizes"], {"sm": 320, "md": 1440, "lg": 2880})
+        self.assertEqual(parsed["thumb_quality"], 88)
+        self.assertEqual(parsed["browser_cache_max_age"], 12)
+        self.assertEqual(parsed["browser_cache_stale_while_revalidate"], 34)
+        self.assertEqual(parsed["memory_cache_bytes"], 256 * 1024 * 1024)
+        self.assertEqual(parsed["ssd_cache_bytes"], 3 * 1024 * 1024 * 1024)
+        self.assertEqual(parsed["cache_profile"], "original_heavy")
+        self.assertFalse(parsed["pregenerate_on_idle"])
+        self.assertEqual(parsed["pregenerate_generate_batch"], 64)
+        self.assertEqual(parsed["pregenerate_batch_pause_seconds"], 5.0)
+        self.assertEqual(parsed["ssd_cache_dir"], os.path.abspath("relative-cache"))
+        self.assertEqual(parsed["user_workers"], 7)
+        self.assertEqual(parsed["prefetch_workers"], 8)
+
     def test_config_metadata_module_owns_signature_transition(self):
         with tempfile.TemporaryDirectory() as tempdir:
             db_path = os.path.join(tempdir, "metadata.db")

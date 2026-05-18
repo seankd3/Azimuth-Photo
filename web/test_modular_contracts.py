@@ -10474,6 +10474,7 @@ assert.deepEqual(loadingEvents.slice(-2), [['set', 2], ['cancel-clear']]);
 
         self.assertTrue(callable(thumbnail_config.allocate_disk_budget))
         self.assertTrue(callable(thumbnail_config.cache_budget_config))
+        self.assertTrue(callable(thumbnail_config.runtime_config_values))
         self.assertTrue(callable(config_metadata.sync_thumb_config_metadata))
         self.assertIs(thumbnails._normalize_ratios, thumbnail_config.normalize_ratios)
         self.assertIs(thumbnails._allocate_by_ratios, thumbnail_config.allocate_by_ratios)
