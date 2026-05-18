@@ -7877,6 +7877,87 @@ assert.equal(workPanel.hidden, true);
         )
 
     @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_background_work_summary_only_shows_active_work(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import {
+    backgroundProcessRows,
+    renderBackgroundWorkSummary,
+} from './static/js/work/status_panel.js';
+
+const elements = new Map();
+function element(id) {
+    if (!elements.has(id)) {
+        elements.set(id, {
+            textContent: '',
+            className: '',
+            title: '',
+            style: {
+                display: '',
+                values: {},
+                setProperty(name, value) {
+                    this.values[name] = value;
+                },
+            },
+            querySelector(selector) {
+                return selector === '.bar-ai-label' ? element('bar-work-label') : null;
+            },
+        });
+    }
+    return elements.get(id);
+}
+const document = { getElementById: (id) => element(id) };
+
+const pausedStatus = {
+    embedded: 9,
+    total_images: 10,
+    remaining: 1,
+    model_installed: true,
+    worker_state: 'paused',
+    embedding_manual_pause: true,
+    embedding_indexes: {
+        fast: { embedded: 9, total_images: 10, remaining: 1, worker_state: 'paused', manual_pause: true },
+        deep: { embedded: 8, total_images: 10, remaining: 2, worker_state: 'paused' },
+    },
+};
+renderBackgroundWorkSummary(pausedStatus, {
+    cacheStatus: { pregen: { state: 'idle' }, disk: { tiers: {} } },
+    documentImpl: document,
+});
+assert.equal(element('bar-work').style.display, 'none');
+assert.equal(element('ai-model-state').textContent, '');
+
+const loadingStatus = {
+    ...pausedStatus,
+    worker_state: 'loading_model',
+    worker_message: 'Loading 2B search model',
+    embedding_manual_pause: true,
+    embedding_indexes: {
+        fast: { embedded: 9, total_images: 10, remaining: 1, worker_state: 'loading_model', manual_pause: true },
+        deep: { embedded: 8, total_images: 10, remaining: 2, worker_state: 'paused' },
+    },
+};
+const rows = backgroundProcessRows(loadingStatus, {});
+assert.equal(rows[0].tone, 'active');
+assert.equal(rows[0].state, 'Loading Model');
+renderBackgroundWorkSummary(loadingStatus, { documentImpl: document });
+assert.equal(element('bar-work').style.display, '');
+assert.equal(element('bar-work-label').textContent, 'Daily Search');
+assert.equal(element('ai-model-state').textContent, 'Loading Model');
+assert.equal(element('ai-model-state').className, 'bar-ai-state embedding');
+assert.equal(element('ai-embed-count').textContent, '9');
+assert.equal(element('ai-embed-total').textContent, '10');
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
     def test_legacy_shared_runtime_bridge_node_probe_preserves_fetch_and_ai_facades(self):
         base_dir = os.path.dirname(__file__)
         script = r"""

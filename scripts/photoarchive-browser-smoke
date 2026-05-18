@@ -96,11 +96,13 @@ const AI_STATUS_FIELD_SELECTORS = {
         "#ai-embed-count",
         "#ai-embed-total",
         "#ai-model-state",
+        "#background-work-panel-rows",
     ],
     "/rankings": [
         "#ai-embed-count",
         "#ai-embed-total",
         "#ai-model-state",
+        "#background-work-panel-rows",
     ],
     "/compare": [
         "#ai-embed-count",

@@ -9,6 +9,11 @@ function clampPct(value) {
     return Math.max(0, Math.min(100, pct));
 }
 
+function workStateLabel(state, fallback = 'Working') {
+    const value = String(state || fallback).replace(/_/g, ' ').trim() || fallback;
+    return value.replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
 function processState({
     done = 0,
     total = 0,
@@ -28,16 +33,16 @@ function processState({
     const complete = totalNum > 0 && remainingNum <= 0;
     if (!installed) return { tone: 'missing', label: 'Missing', detail: message || 'Install needed', eta: '-' };
     if (installing) return { tone: 'active', label: 'Installing', detail: message || 'Downloading model', eta: '-' };
-    if (complete) return { tone: 'done', label: 'Complete', detail: `${doneNum.toLocaleString()} ready`, eta: 'Done' };
-    if (paused) return { tone: 'paused', label: 'Paused', detail: `${remainingNum.toLocaleString()} remaining`, eta: 'Paused' };
     if (active) {
         return {
             tone: 'active',
-            label: String(state || 'Working').replace(/_/g, ' '),
+            label: workStateLabel(state),
             detail: Number(rate || 0) > 0 ? formatRatePerMinute(rate) : (message || 'Measuring rate'),
             eta: etaSeconds ? formatEta(etaSeconds) : 'Measuring',
         };
     }
+    if (complete) return { tone: 'done', label: 'Complete', detail: `${doneNum.toLocaleString()} ready`, eta: 'Done' };
+    if (paused) return { tone: 'paused', label: 'Paused', detail: `${remainingNum.toLocaleString()} remaining`, eta: 'Paused' };
     return { tone: 'idle', label: 'Waiting', detail: `${remainingNum.toLocaleString()} remaining`, eta: '-' };
 }
 
@@ -78,6 +83,9 @@ export function backgroundProcessRows(aiStatus = {}, cacheStatus = {}) {
     const originalDone = Number(originals.count ?? fullTier.progress_count ?? fullTier.count ?? 0);
     const cacheActive = pregen.state === 'running';
     const cachePaused = Boolean(pregen.manual_pause);
+    const fastWorkerState = String(fast.worker_state || aiStatus.worker_state || '');
+    const fastMessage = fast.worker_message || aiStatus.worker_message;
+    const deepWorkerState = String(deep.worker_state || '');
 
     const fastState = processState({
         done: fast.embedded,
@@ -85,12 +93,12 @@ export function backgroundProcessRows(aiStatus = {}, cacheStatus = {}) {
         remaining: fast.remaining,
         etaSeconds: aiStatus.eta_seconds,
         rate: aiStatus.recent_images_per_min || aiStatus.overall_images_per_min,
-        paused: Boolean(fast.manual_pause ?? aiStatus.embedding_manual_pause),
-        active: fast.worker_state === 'embedding' || fast.worker_state === 'loading_model' || aiStatus.worker_state === 'embedding',
+        paused: Boolean(fast.manual_pause ?? aiStatus.embedding_manual_pause) && fastWorkerState !== 'loading_model',
+        active: ['embedding', 'loading_model'].includes(fastWorkerState),
         installing: Boolean(fast.installing || aiStatus.installing),
         installed: Boolean(fast.installed ?? aiStatus.model_installed ?? true),
-        state: fast.worker_state || aiStatus.worker_state,
-        message: fast.worker_message || aiStatus.worker_message,
+        state: fastWorkerState,
+        message: fastWorkerState === 'loading_model' ? (fastMessage || 'Loading 2B search model') : fastMessage,
     });
     const deepState = processState({
         done: deep.embedded,
@@ -98,11 +106,11 @@ export function backgroundProcessRows(aiStatus = {}, cacheStatus = {}) {
         remaining: deep.remaining,
         etaSeconds: null,
         rate: 0,
-        paused: deep.worker_state === 'paused',
-        active: ['embedding', 'loading_model', 'scheduled'].includes(String(deep.worker_state || '')),
+        paused: deepWorkerState === 'paused',
+        active: ['embedding', 'loading_model', 'scheduled'].includes(deepWorkerState),
         installing: Boolean(deep.installing),
         installed: Boolean(deep.installed ?? true),
-        state: deep.worker_state,
+        state: deepWorkerState,
         message: deep.worker_message || `${Number(deep.embedded_queries || 0).toLocaleString()} cached queries`,
     });
     const previewState = processState({
@@ -176,6 +184,11 @@ export function backgroundProcessRows(aiStatus = {}, cacheStatus = {}) {
     ];
 }
 
+export function activeBackgroundWorkRow(aiStatus = {}, cacheStatus = {}) {
+    const rows = backgroundProcessRows(aiStatus, cacheStatus || {});
+    return rows.find((row) => row.tone === 'active') || null;
+}
+
 export function renderBackgroundWorkPanel(aiStatus = {}, {
     cacheStatus = null,
     documentImpl = globalThis.document,
@@ -188,40 +201,38 @@ export function renderBackgroundWorkPanel(aiStatus = {}, {
 }
 
 export function renderBackgroundWorkSummary(aiStatus = {}, {
+    cacheStatus = null,
     documentImpl = globalThis.document,
 } = {}) {
     const total = Number(aiStatus.total_images ?? aiStatus.total_kept ?? 0);
     const embedded = Number(aiStatus.embedded || 0);
-    const pct = total > 0 ? clampPct((embedded / total) * 100) : 0;
+    const activeRow = activeBackgroundWorkRow(aiStatus, cacheStatus || {});
+    const pct = activeRow ? clampPct(activeRow.pct) : 0;
     const countEl = documentImpl?.getElementById?.('ai-embed-count');
     const totalEl = documentImpl?.getElementById?.('ai-embed-total');
     const stateEl = documentImpl?.getElementById?.('ai-model-state');
     const workEl = documentImpl?.getElementById?.('bar-work');
-    if (countEl) countEl.textContent = embedded.toLocaleString();
-    if (totalEl) totalEl.textContent = total.toLocaleString();
-    if (workEl) workEl.style.setProperty('--work-progress', `${pct}%`);
+    const labelEl = workEl?.querySelector?.('.bar-ai-label');
+    if (workEl) {
+        workEl.style.setProperty('--work-progress', `${pct}%`);
+        workEl.style.display = activeRow ? '' : 'none';
+        workEl.title = activeRow
+            ? `${activeRow.label}: ${activeRow.state}`
+            : 'No active background work';
+    }
+    if (labelEl) labelEl.textContent = activeRow ? activeRow.label : 'Work';
+    if (countEl) countEl.textContent = activeRow ? Number(activeRow.done || 0).toLocaleString() : '';
+    if (totalEl) totalEl.textContent = activeRow ? Number(activeRow.total || 0).toLocaleString() : '';
     if (stateEl) {
-        if (aiStatus.installing) {
-            stateEl.textContent = 'Installing';
+        if (activeRow) {
+            stateEl.textContent = activeRow.state;
             stateEl.className = 'bar-ai-state embedding';
-        } else if (!aiStatus.model_installed) {
-            stateEl.textContent = 'Install';
-            stateEl.className = 'bar-ai-state';
-        } else if (!aiStatus.worker_ready && aiStatus.worker_state === 'loading_model') {
-            stateEl.textContent = 'Loading';
-            stateEl.className = 'bar-ai-state embedding';
-        } else if (Number(aiStatus.remaining || 0) > 0) {
-            stateEl.textContent = 'Embedding';
-            stateEl.className = 'bar-ai-state embedding';
-        } else if (embedded > 0) {
-            stateEl.textContent = 'Ready';
-            stateEl.className = 'bar-ai-state trained';
         } else {
             stateEl.textContent = '';
             stateEl.className = 'bar-ai-state';
         }
     }
-    return { totalImages: total };
+    return { totalImages: total, activeRow };
 }
 
 export async function fetchBackgroundWorkCacheStatus({

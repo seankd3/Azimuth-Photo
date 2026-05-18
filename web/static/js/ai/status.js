@@ -23,8 +23,11 @@ export function aiStatusPollDelay(data, {
 }
 
 
-export function renderAIBottomBarStatus(data = {}, { documentImpl = globalThis.document } = {}) {
-    return renderBackgroundWorkSummary(data, { documentImpl });
+export function renderAIBottomBarStatus(data = {}, {
+    cacheStatus = null,
+    documentImpl = globalThis.document,
+} = {}) {
+    return renderBackgroundWorkSummary(data, { cacheStatus, documentImpl });
 }
 
 
