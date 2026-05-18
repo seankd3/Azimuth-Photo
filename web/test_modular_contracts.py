@@ -3849,6 +3849,8 @@ class ModularContractTests(unittest.TestCase):
             legacy_compare_display_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "compare_flow_bridge.js"), encoding="utf-8") as fh:
             legacy_compare_flow_bridge = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "legacy", "compare_keyboard_bridge.js"), encoding="utf-8") as fh:
+            legacy_compare_keyboard_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "date_scrubber_bridge.js"), encoding="utf-8") as fh:
             legacy_date_scrubber_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "export_bridge.js"), encoding="utf-8") as fh:
@@ -4062,6 +4064,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from './batch_bridge.js';", legacy)
         self.assertIn("from './compare_display_bridge.js';", legacy)
         self.assertIn("from './compare_flow_bridge.js';", legacy)
+        self.assertIn("from './compare_keyboard_bridge.js';", legacy)
         self.assertIn("from './date_scrubber_bridge.js';", legacy)
         self.assertIn("from './export_bridge.js';", legacy)
         self.assertIn("from './filter_query_bridge.js';", legacy)
@@ -4080,7 +4083,8 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../media_status.js';", legacy_loupe_bridge)
         self.assertIn("from '../media_metadata.js';", legacy)
         self.assertIn("from '../thumbnail_size.js';", legacy)
-        self.assertIn("from '../compare/navigation.js';", legacy)
+        self.assertNotIn("from '../compare/navigation.js';", legacy)
+        self.assertIn("from '../compare/navigation.js';", legacy_compare_keyboard_bridge)
         self.assertNotIn("from '../compare/image_controller.js';", legacy)
         self.assertIn("from '../compare/image_controller.js';", legacy_compare_display_bridge)
         self.assertNotIn("from '../compare/pair_controller.js';", legacy)
@@ -4105,7 +4109,9 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("from '../compare/mosaic.js';", legacy)
         self.assertIn("from '../compare/query.js';", legacy)
         self.assertIn("from '../compare/page_controller.js';", legacy)
-        self.assertIn("from '../compare/keyboard.js';", legacy)
+        self.assertNotIn("from '../compare/keyboard.js';", legacy)
+        self.assertIn("from '../compare/keyboard.js';", legacy_compare_keyboard_bridge)
+        self.assertIn("export function createLegacyCompareKeyboardBridge", legacy_compare_keyboard_bridge)
         self.assertIn("from '../loupe/tiers.js';", legacy_loupe_bridge)
         self.assertIn("from '../loupe/controller.js';", legacy_loupe_bridge)
         self.assertIn("export function createLegacyLoupeBridge", legacy_loupe_bridge)
@@ -6890,6 +6896,139 @@ assert.deepEqual(events.at(-1), ['submit', 'left']);
 const undoEvent = key('ArrowUp');
 handler(undoEvent);
 assert.deepEqual(events.at(-1), ['undo']);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_legacy_compare_keyboard_bridge_node_probe_preserves_state_and_key_handler(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createLegacyCompareKeyboardBridge } from './static/js/legacy/compare_keyboard_bridge.js';
+
+const cells = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
+const images = [{ id: 7 }, { id: 8 }, { id: 9 }];
+let selected = -1;
+let mode = 'mosaic';
+const events = [];
+const timers = [];
+const windowImpl = { location: { href: '' } };
+const documentImpl = {
+    querySelectorAll(selector) {
+        events.push(['query', selector]);
+        return selector === '.mosaic-cell' ? cells : [];
+    },
+};
+
+const bridge = createLegacyCompareKeyboardBridge({
+    documentImpl,
+    windowImpl,
+    setTimeoutImpl: (fn, ms) => {
+        events.push(['timer', ms]);
+        timers.push({ fn, ms });
+    },
+    getCompareMode: () => mode,
+    getSelectedMosaicIndex: () => selected,
+    setSelectedMosaicIndex: (index) => {
+        selected = index;
+        events.push(['selected', index]);
+    },
+    getMosaicImages: () => images,
+    mosaicClick: (id) => events.push(['pick', id]),
+    undoComparison: () => events.push(['undo']),
+    submitComparison: (side) => events.push(['submit', side]),
+    selectMosaicCellImpl: (index, nextCells) => {
+        assert.equal(nextCells, cells);
+        events.push(['select-core', index]);
+        return index;
+    },
+    deselectMosaicCellImpl: (nextCells) => {
+        assert.equal(nextCells, cells);
+        events.push(['deselect-core']);
+        return -1;
+    },
+    findMosaicCellInDirectionImpl: (nextCells, current, direction) => {
+        assert.equal(nextCells, cells);
+        events.push(['find-core', current, direction]);
+        return current + direction;
+    },
+});
+
+assert.equal(bridge.selectMosaicCell(2, cells), 2);
+assert.equal(selected, 2);
+assert.equal(bridge.findMosaicCellInDirection(cells, 2, -1), 1);
+assert.equal(bridge.deselectMosaicCell(cells), -1);
+assert.equal(selected, -1);
+
+events.length = 0;
+const handler = bridge.handleCompareKey;
+function key(name, tagName = 'DIV') {
+    let prevented = false;
+    return {
+        key: name,
+        target: { tagName },
+        preventDefault: () => { prevented = true; },
+        get prevented() { return prevented; },
+    };
+}
+
+const tabEvent = key('Tab');
+handler(tabEvent);
+assert.equal(tabEvent.prevented, true);
+assert.equal(windowImpl.location.href, '/library');
+
+const firstArrow = key('ArrowRight');
+handler(firstArrow);
+assert.equal(firstArrow.prevented, true);
+assert.equal(selected, 0);
+
+const downArrow = key('ArrowDown');
+handler(downArrow);
+assert.equal(downArrow.prevented, true);
+assert.equal(selected, 1);
+
+const enterEvent = key('Enter');
+handler(enterEvent);
+assert.equal(enterEvent.prevented, true);
+assert.equal(timers[0].ms, 200);
+timers[0].fn();
+assert.equal(selected, 1);
+
+const escapeEvent = key('Escape');
+handler(escapeEvent);
+assert.equal(escapeEvent.prevented, true);
+assert.equal(selected, -1);
+
+mode = 'swiss';
+const rightEvent = key('ArrowRight');
+handler(rightEvent);
+assert.equal(rightEvent.prevented, false);
+
+assert.deepEqual(events, [
+    ['query', '.mosaic-cell'],
+    ['select-core', 0],
+    ['selected', 0],
+    ['query', '.mosaic-cell'],
+    ['find-core', 0, 1],
+    ['select-core', 1],
+    ['selected', 1],
+    ['query', '.mosaic-cell'],
+    ['pick', 8],
+    ['timer', 200],
+    ['query', '.mosaic-cell'],
+    ['select-core', 1],
+    ['selected', 1],
+    ['query', '.mosaic-cell'],
+    ['deselect-core'],
+    ['selected', -1],
+    ['submit', 'right'],
+]);
 """
         subprocess.run(
             ["node", "--input-type=module", "-e", script],

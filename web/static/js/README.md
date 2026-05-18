@@ -118,6 +118,8 @@ prefetch, pair image-token freshness, and pair-status side effects.
 displayed tier state, media-status lookup, tier probing, and tier URL injection.
 `legacy/compare_display_bridge.js` owns the legacy Compare pair/image display
 facade that connects compatibility state to Compare pair and image controllers.
+`legacy/compare_keyboard_bridge.js` owns the legacy Compare/Mosaic keyboard
+navigation facade around the extracted Compare keyboard and navigation helpers.
 `legacy/mosaic_bridge.js` owns the legacy Mosaic render, replacement-buffer,
 pick-action, and batch-load facade around the extracted Mosaic controllers.
 `compare/mosaic_action_controller.js` owns Mosaic pick orchestration,

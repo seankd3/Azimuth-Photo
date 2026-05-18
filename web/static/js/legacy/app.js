@@ -32,12 +32,6 @@ import {
 } from '../compare/mosaic.js';
 import { createComparePageController } from '../compare/page_controller.js';
 import {
-    deselectMosaicCell as deselectMosaicCellCore,
-    findMosaicCellInDirection as findMosaicCellInDirectionCore,
-    selectMosaicCell as selectMosaicCellCore,
-} from '../compare/navigation.js';
-import { createCompareKeyboardHandler } from '../compare/keyboard.js';
-import {
     showCompareEmpty as showCompareEmptyCore,
 } from '../compare/view.js';
 import { createCompareModeController } from '../compare/mode_controller.js';
@@ -64,6 +58,7 @@ import { createSettingsPageController } from '../settings/page.js';
 import { createLegacyBatchBridge } from './batch_bridge.js';
 import { createLegacyCompareDisplayBridge } from './compare_display_bridge.js';
 import { createLegacyCompareFlowBridge } from './compare_flow_bridge.js';
+import { createLegacyCompareKeyboardBridge } from './compare_keyboard_bridge.js';
 import { createLegacyDateScrubberBridge } from './date_scrubber_bridge.js';
 import { createLegacyExportBridge } from './export_bridge.js';
 import { createLegacyFilterQueryBridge } from './filter_query_bridge.js';
@@ -423,30 +418,21 @@ const legacyPhotoArchive = (() => {
         return compareFlowBridge.undoComparison();
     }
 
-    function selectMosaicCell(index, cells) {
-        const selected = selectMosaicCellCore(index, cells);
-        if (selected !== null) selectedMosaicIndex = selected;
-    }
-
-    function deselectMosaicCell(cells) {
-        selectedMosaicIndex = deselectMosaicCellCore(cells);
-    }
-
-    function findMosaicCellInDirection(cells, currentIdx, direction) {
-        return findMosaicCellInDirectionCore(cells, currentIdx, direction);
-    }
-
-    const handleCompareKey = createCompareKeyboardHandler({
+    const compareKeyboardBridge = createLegacyCompareKeyboardBridge({
         getCompareMode: () => compareMode,
         getSelectedMosaicIndex: () => selectedMosaicIndex,
+        setSelectedMosaicIndex: (index) => { selectedMosaicIndex = index; },
         getMosaicImages: () => mosaicImages,
-        selectMosaicCell,
-        deselectMosaicCell,
-        findMosaicCellInDirection,
         mosaicClick,
         undoComparison,
         submitComparison,
     });
+    const {
+        deselectMosaicCell,
+        findMosaicCellInDirection,
+        handleCompareKey,
+        selectMosaicCell,
+    } = compareKeyboardBridge;
 
     function setCompareMode(mode) {
         return compareModeController.setCompareMode(mode);
