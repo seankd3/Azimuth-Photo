@@ -3845,6 +3845,8 @@ class ModularContractTests(unittest.TestCase):
             legacy = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "batch_bridge.js"), encoding="utf-8") as fh:
             legacy_batch_bridge = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "legacy", "catalog_scan_bridge.js"), encoding="utf-8") as fh:
+            legacy_catalog_scan_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "compare_display_bridge.js"), encoding="utf-8") as fh:
             legacy_compare_display_bridge = fh.read()
         with open(os.path.join(base_dir, "static", "js", "legacy", "compare_flow_bridge.js"), encoding="utf-8") as fh:
@@ -4061,9 +4063,12 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("Object.assign(compatibilityTarget, PhotoArchive);", bootstrap)
         self.assertIn("from '../api.js';", legacy)
         self.assertIn("from '../ai/poller.js';", legacy_ui_runtime_bridge)
-        self.assertIn("from '../catalog/home_scan.js';", legacy)
-        self.assertIn("from '../catalog/scan_entrypoint.js';", legacy)
+        self.assertNotIn("from '../catalog/home_scan.js';", legacy)
+        self.assertIn("from '../catalog/home_scan.js';", legacy_catalog_scan_bridge)
+        self.assertNotIn("from '../catalog/scan_entrypoint.js';", legacy)
+        self.assertIn("from '../catalog/scan_entrypoint.js';", legacy_catalog_scan_bridge)
         self.assertIn("from './batch_bridge.js';", legacy)
+        self.assertIn("from './catalog_scan_bridge.js';", legacy)
         self.assertIn("from './compare_display_bridge.js';", legacy)
         self.assertIn("from './compare_flow_bridge.js';", legacy)
         self.assertIn("from './compare_keyboard_bridge.js';", legacy)
@@ -4204,6 +4209,7 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn("fetchImpl('/api/scan/status'", catalog_home_scan)
         self.assertIn("export function createScanEntrypoint", catalog_scan_entrypoint)
         self.assertIn("documentImpl.getElementById('folder-input')", catalog_scan_entrypoint)
+        self.assertIn("export function createLegacyCatalogScanBridge", legacy_catalog_scan_bridge)
         self.assertIn("export function createCatalogApi", catalog_controller)
         self.assertIn("from './status.js';", catalog_controller)
         self.assertIn("from './sources.js';", catalog_controller)
@@ -10193,6 +10199,78 @@ assert.deepEqual(calls, ['home']);
 hasFolderInput = false;
 assert.equal(entrypoint.startScan(), 'settings-result');
 assert.deepEqual(calls, ['home', 'settings']);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=base_dir,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is required for browser-module probes")
+    def test_legacy_catalog_scan_bridge_node_probe_preserves_scan_facade(self):
+        base_dir = os.path.dirname(__file__)
+        script = r"""
+import assert from 'node:assert/strict';
+import { createLegacyCatalogScanBridge } from './static/js/legacy/catalog_scan_bridge.js';
+
+const events = [];
+const documentImpl = { getElementById: () => null };
+const fetchImpl = async () => ({ ok: true, json: async () => ({}) });
+const setIntervalImpl = () => 1;
+const clearIntervalImpl = () => {};
+const setTimeoutImpl = () => 2;
+const locationImpl = { reload: () => events.push('reload') };
+const settingsScan = () => {
+    events.push('settings');
+    return 'settings-result';
+};
+
+const bridge = createLegacyCatalogScanBridge({
+    documentImpl,
+    fetchImpl,
+    setIntervalImpl,
+    clearIntervalImpl,
+    setTimeoutImpl,
+    locationImpl,
+    settingsScan,
+    createHomeScanControllerImpl: (options) => {
+        assert.equal(options.documentImpl, documentImpl);
+        assert.equal(options.fetchImpl, fetchImpl);
+        assert.equal(options.setIntervalImpl, setIntervalImpl);
+        assert.equal(options.clearIntervalImpl, clearIntervalImpl);
+        assert.equal(options.setTimeoutImpl, setTimeoutImpl);
+        assert.equal(options.locationImpl, locationImpl);
+        events.push('home-init');
+        return {
+            startScan() {
+                events.push('home');
+                return 'home-result';
+            },
+        };
+    },
+    createScanEntrypointImpl: (options) => {
+        assert.equal(options.documentImpl, documentImpl);
+        assert.equal(options.settingsScan, settingsScan);
+        assert.equal(typeof options.homeScan.startScan, 'function');
+        events.push('entrypoint-init');
+        return {
+            startScan() {
+                events.push('entrypoint');
+                return options.homeScan.startScan();
+            },
+        };
+    },
+});
+
+assert.equal(bridge.startScan(), 'home-result');
+assert.deepEqual(events, [
+    'home-init',
+    'entrypoint-init',
+    'entrypoint',
+    'home',
+]);
 """
         subprocess.run(
             ["node", "--input-type=module", "-e", script],

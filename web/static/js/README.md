@@ -7,6 +7,8 @@ the cache-busting query string into this folder and imports `bootstrap.js`.
 During migration it imports `legacy/app.js`, which contains the old no-build
 frontend monolith behind compatibility wrappers. `legacy/public_api.js` owns the
 exported compatibility method table that backs `window.PhotoArchive.*`.
+`legacy/catalog_scan_bridge.js` owns the legacy home/settings scan entrypoint
+facade around the extracted Catalog scan controllers.
 `legacy/filter_query_bridge.js` owns the legacy filter/query state bridge that
 connects Library, Mosaic, and Compare URL construction to the extracted filter
 and query modules. `legacy/flag_bridge.js` owns the legacy Library image-flag

@@ -9,8 +9,6 @@ import {
 } from '../ui.js';
 import { fetchJson } from '../api.js';
 import { toggleAIPanel } from '../ai/status.js';
-import { createHomeScanController } from '../catalog/home_scan.js';
-import { createScanEntrypoint } from '../catalog/scan_entrypoint.js';
 import {
     COMPARE_NEIGHBOR_PAIRS,
     MOSAIC_NEIGHBOR_LIMIT,
@@ -55,6 +53,7 @@ import { createFindSimilarAction } from '../library/similar.js';
 import { createPeopleApi } from '../people/controller.js';
 import { createSettingsPageController } from '../settings/page.js';
 import { createLegacyBatchBridge } from './batch_bridge.js';
+import { createLegacyCatalogScanBridge } from './catalog_scan_bridge.js';
 import { createLegacyCompareDisplayBridge } from './compare_display_bridge.js';
 import { createLegacyCompareFlowBridge } from './compare_flow_bridge.js';
 import { createLegacyCompareKeyboardBridge } from './compare_keyboard_bridge.js';
@@ -1118,15 +1117,13 @@ const legacyPhotoArchive = (() => {
         pauseAllWork,
         resumeAllWork,
     } = settingsPage;
-    const homeScan = createHomeScanController();
-    const scanEntrypoint = createScanEntrypoint({
+    const catalogScanBridge = createLegacyCatalogScanBridge({
         documentImpl: document,
-        homeScan,
         settingsScan: startSettingsScan,
     });
 
     function startScan() {
-        return scanEntrypoint.startScan();
+        return catalogScanBridge.startScan();
     }
 
     // ==================== UTILITIES ====================
