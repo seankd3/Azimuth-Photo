@@ -1,23 +1,43 @@
 # photoArchive
 
-photoArchive is a local-first photo archive for browsing, searching, ranking, and organizing large personal photo collections. It is built for real working libraries: external drives, many thousands of images, slow storage, long background jobs, and a need for fast day-to-day interaction.
+photoArchive is a local-first photo library for people with large folders of real
+photos: external drives, RAW files, years of exports, slow storage, and a need to
+browse, search, rank, and organize without uploading the archive anywhere.
 
-Everything runs on your machine. Source photos and videos are treated as source-of-truth media and are never modified or deleted by the app.
+The app runs on your machine. It indexes your source folders, stores its own
+catalog and caches, and never edits or deletes your original photo files.
 
-## Current Features
+## Current State
 
-- **Library**: dense justified grid, map view, Lightroom-style loupe with filmstrip, keyboard navigation, flags, stars, metadata filters, folder filters, People filters, similarity search, and JSON/CSV export.
-- **Compare**: Mosaic, Swiss A/B, and Top 50 ranking modes backed by Elo scoring. Mosaic lets one pick record many ranking signals at once.
-- **People**: local face scanning, review queues, labels, merges, ignored faces, and People filters that work alongside Library search and filters.
-- **Semantic search**: fast daily search with Qwen3-VL-Embedding-2B, plus scheduled deep search with Qwen3-VL-Embedding-8B for saved/cached terms.
-- **Search result caching**: repeated semantic searches can return from a persistent SQLite result cache, so common searches stay fast after the first successful embedding pass.
-- **Similarity and duplicates**: whole-image embedding search powers "find similar", duplicate discovery, and visual grouping.
-- **Ranking intelligence**: Elo propagation nudges visually similar under-ranked images after a comparison, while direct comparisons remain the source of confidence.
-- **Cache-aware browsing**: RAM and SSD thumbnail/original caches keep active Library, Loupe, Compare, and Mosaic browsing responsive even when source media lives on slower storage.
-- **Background work controls**: Settings and the bottom bar show embedding, deep-search, preview-cache, and original-cache progress with rates, ETAs, and pause/resume controls.
-- **No build frontend**: browser-native HTML/CSS/JavaScript modules, no Vite, no TypeScript, no bundling.
+photoArchive is a Linux-first desktop web app. The main screens are:
 
-## Quick Start
+- **Catalog**: add photo folders, scan/rescan sources, manage cache settings,
+  install local AI models, tune background work, and review status.
+- **Library**: browse the archive in a fast grid or map view, sort and filter
+  results, search, flag picks/rejects, open a full-screen loupe, and export.
+- **Compare**: rank photos with Mosaic, Swiss A/B, or Top 50 comparison modes.
+- **People**: run local face detection, label people, merge suggested matches,
+  ignore unwanted groups, and filter the Library by person.
+
+Supported scanned file types are `.jpg`, `.jpeg`, `.png`, `.dng`, `.cr3`,
+`.tif`, `.tiff`, and `.webp`.
+
+## Requirements
+
+- Python 3.11+
+- Linux, currently the primary target
+- Enough local disk for the SQLite catalog, thumbnails, optional original-image
+  cache copies, and optional AI models
+- An NVIDIA GPU is strongly recommended for semantic search, deep search, and
+  large embedding runs
+- Internet access for first-time Hugging Face model downloads, unless models are
+  already present locally
+
+The app can still catalog and browse images without AI models installed. Semantic
+search, similarity, duplicate discovery, deep search, and embedding-backed ranking
+helpers become useful after the embedding index is built.
+
+## Install
 
 ```bash
 git clone https://github.com/Sean-Kenneth-Doherty/photo-archive.git
@@ -25,110 +45,209 @@ cd photo-archive/web
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-
-cd ..
-./scripts/photoarchive-server restart
 ```
 
-Open `http://127.0.0.1:8000`, go to Catalog or Settings, and add the folder that contains your photos.
+## Run
 
-The server helper respects:
+From the repo root:
 
-- `PHOTOARCHIVE_HOST` default `127.0.0.1`
-- `PHOTOARCHIVE_PORT` default `8000`
-- `PHOTOARCHIVE_MAX_LOG_BYTES` for `.run/server.log` rotation
+```bash
+./scripts/photoarchive-server start
+```
 
-You can also run the app directly:
+Open:
+
+```text
+http://127.0.0.1:8000
+```
+
+Useful server commands:
+
+```bash
+./scripts/photoarchive-server status
+./scripts/photoarchive-server logs
+./scripts/photoarchive-server restart
+./scripts/photoarchive-server stop
+```
+
+The helper uses these environment variables:
+
+- `PHOTOARCHIVE_HOST`, default `127.0.0.1`
+- `PHOTOARCHIVE_PORT`, default `8000`
+- `PHOTOARCHIVE_MAX_LOG_BYTES`, default `10485760`
+
+You can also run FastAPI directly:
 
 ```bash
 cd web
 .venv/bin/uvicorn app:app --host 127.0.0.1 --port 8000
 ```
 
-## Requirements
+## First Run
 
-- Python 3.11+
-- Linux is the primary development target
-- SQLite, Pillow, FastAPI, and the packages in `web/requirements.txt`
-- NVIDIA GPU strongly recommended for embedding work
-- Local model storage for Qwen embedding models
+1. Open the app. The root page opens the Catalog screen.
+2. In **Catalog Sources**, choose a folder or use tree browse, then select
+   **Add + Scan**.
+3. Leave **Computer Work Mode** on **Light Background** for normal use. Switch to
+   **Browse** when you want maximum UI responsiveness, or **Max Work** for
+   overnight cache/model/index building.
+4. Go to **Library** once photos appear. Use the grid first; switch to map view
+   when your photos have GPS metadata.
+5. Use **Compare** when you want the app to learn which images are better.
+6. Install the 2B AI model from Catalog when you want semantic search. Install
+   the 8B model only if you want heavier scheduled deep-search results.
 
-The app still works without AI models installed, but semantic search, similarity, deep search, duplicate detection, and embedding-backed ranking features will be unavailable or degraded until models are present.
+## Catalog And Settings
 
-## Main Workflow
+Catalog is the control room for the app:
 
-1. **Add catalog sources** in Catalog or Settings. The scanner indexes file paths and metadata without touching the original files.
-2. **Browse Library** with cache-backed thumbnails, search, filters, People filters, map view, and Loupe.
-3. **Flag and filter** images as picked, unflagged, or rejected. Flags are organizational filters, not source-file operations.
-4. **Rank in Compare** using Mosaic, Swiss A/B, or Top 50.
-5. **Return to Library** to search, inspect ranked results, filter the archive, and export.
+- Add source folders with **Choose Folder**, **Tree Browse**, or a typed path.
+- Rescan a source when files change on disk.
+- Remove a source from the active catalog. Source removal is about catalog/cache
+  state; it does not delete the original photo folder.
+- Pick a background-work mode: **Browse**, **Light Background**, or **Max Work**.
+- Install the local 2B daily-search model and optional 8B deep-search model.
+- Configure People recognition and review the local face model status.
+- Save deep-search terms to precompute on a schedule.
+- Tune thumbnail sizes, JPEG quality, RAM cache, SSD cache, cache profile, and
+  idle cache warming.
+- Clear generated cache files when you want previews rebuilt.
 
-## Search And AI
+## Library
 
-photoArchive uses two embedding surfaces:
+Library is for everyday browsing and culling:
 
-- **Daily Search, 2B**: the fast Qwen3-VL-Embedding-2B index used for normal semantic search and interactive work.
-- **Deep Search, 8B**: a scheduled Qwen3-VL-Embedding-8B index for smarter saved terms and overnight/max-work runs.
+- Sort by rating, confidence, date taken, date modified, file size, resolution,
+  camera, or filename.
+- Search with text. When embeddings are ready, searches can use local semantic
+  image search; otherwise metadata still works.
+- Use **Deep Search** after 8B deep-search terms have been indexed.
+- Filter by orientation, ranked/unranked/confident status, flag, minimum stars,
+  person, folder, date, file type, camera, and lens.
+- Switch between **Grid** and **Map**.
+- Use the thumbnail-size slider to make the grid denser or more inspectable.
+- Open the loupe with Enter or by selecting a photo. The loupe has a filmstrip,
+  progressive image loading, zoom, pan, metadata overlay, and optional cache
+  status.
+- Flag images as picked, unflagged, or rejected.
+- Use **Select** for batch flagging and selected-image JSON/CSV export.
+- Export the current ranked/filtered result set as JSON or CSV.
 
-The intended behavior is fast foreground work and heavy background work:
+Keyboard shortcuts:
 
-- the 2B model warms on normal app startup;
-- the app can show fast 2B results first;
-- repeated semantic searches are cached in SQLite;
-- deep 8B work can run later and update cached intelligence without blocking normal browsing.
+- Library: arrow keys navigate, Enter opens the loupe, `P` picks, `X` rejects,
+  `U` clears the flag, Tab jumps to Compare, Esc clears selection.
+- Loupe: left/right moves through photos, scroll zooms, Esc closes.
 
-Settings exposes model install/status, embedding progress, deep-search query status, cache health, and background-work mode. The Library and Compare bottom bar includes a compact Work panel with colored progress bars and ETAs.
+## Compare
 
-## Data And Safety
+Compare builds ranking signal from your choices:
 
-Runtime data lives under `web/` by default:
+- **Mosaic** shows a grid; pick the best image and the app records one winner
+  against the visible alternatives. This is the fastest way to cover a library.
+- **Swiss** shows A/B matchups chosen to improve ranking confidence.
+- **Top 50** focuses comparison work on the current best images.
+- Mosaic strategies control the pool: **Diverse**, **Explore**, **Compete**,
+  **Top Cut**, and **Random**.
+- Search and filters in Compare limit the comparison pool just like Library.
+- **Shuffle** refreshes Mosaic candidates.
+- Undo is available from the toolbar or the up-arrow shortcut.
+- The bottom bar shows rank-signal count, pool size, coverage, and background
+  work status.
 
-- `photoarchive.db`: SQLite catalog, metadata, ratings, comparisons, People data, embeddings, and search result caches
-- `.thumbcache/`: generated thumbnails and optional browser-readable hot original copies
-- `.models/`: local AI models
-- `settings.local.json`: machine-local runtime settings
-- `.run/server.log`: local server log
+## People
 
-These generated paths are gitignored. Source photos/videos are not mutated. Cached originals are copies used for fast browser access, not replacements for archive media.
+People recognition is local:
 
-## Architecture
+- Face detection runs from app-generated cached previews.
+- The People page groups results into **Most Seen**, **Named People**, **Needs
+  Review**, and **Other Faces**.
+- Add labels to people you recognize.
+- Merge suggested duplicates when two groups are the same person.
+- Ignore unwanted groups.
+- Use People filters in Library and Compare to narrow browsing/ranking to a
+  person.
+
+## Search, Similarity, And AI
+
+photoArchive uses two embedding indexes:
+
+- **Daily Search**: Qwen3-VL-Embedding-2B, intended for normal interactive
+  semantic search.
+- **Deep Search**: Qwen3-VL-Embedding-8B, intended for scheduled saved-query work
+  when the computer has time.
+
+The 2B model is the practical starting point. After installation, photoArchive
+builds embeddings in the background and search quality improves as more images
+are indexed. Deep Search uses saved terms from Catalog and returns smarter cached
+results when the 8B work is ready.
+
+Advanced local API surfaces also exist for similar images, duplicates, EXIF, and
+collections:
 
 ```text
-web/
-  app.py                 compatibility entrypoint for uvicorn app:app
-  core/                  app factory, request/response helpers, query constraints, cache fanout
-  features/              vertical page/API workflows such as library, compare, people, cache, settings
-  data/                  schema, SQLite connection helpers, domain repositories
-  db.py                  compatibility facade over data repositories
-  embedding_worker.py    background embedding and deep-search worker
-  embed_cache.py         in-memory embedding matrices for search/similarity paths
-  thumbnails/            thumbnail generation, cache budgets, pregen workers, status
-  static/js/             no-build browser modules plus the legacy compatibility bridge
-  templates/             FastAPI/Jinja page templates and shared partials
+/api/similar/{image_id}
+/api/duplicates
+/api/image/{image_id}/exif
+/api/collections
 ```
 
-New feature workflow code should live in `web/features/<feature>/`. Shared app shell and cross-feature helpers belong in `web/core/`. Domain SQL belongs in `web/data/repositories/`, with `web/db.py` kept as the compatibility facade during migration.
+## Background Work
 
-The browser remains no-build native JavaScript. Public URLs, JSON response shapes, settings keys, and `window.PhotoArchive.*` compatibility are intentionally preserved while the older frontend drains out of `web/static/js/legacy/app.js`.
+The bottom **Work** panel appears in Library and Compare. It summarizes active
+background jobs such as embedding, deep search, preview cache warming, original
+cache warming, and People scanning. Use Catalog's work mode to decide whether the
+app should prioritize browsing responsiveness or background throughput.
 
-## Testing
+## Data And Privacy
 
-Common checks:
+Runtime data lives under `web/` by default and is ignored by git:
+
+- `photoarchive.db`: SQLite catalog, ratings, comparisons, metadata, People data,
+  embeddings, and search caches
+- `.thumbcache/`: generated thumbnails and optional fast local copies of original
+  images for browser viewing
+- `.models/`: locally downloaded AI models
+- `settings.local.json`: machine-local settings
+- `.run/server.log`: server log
+
+Original photo folders remain the source of truth. Generated thumbnails, cached
+original copies, model files, and database rows can be rebuilt.
+
+## Troubleshooting
+
+- If the server helper says the virtualenv is missing, rerun the install steps in
+  `web/`.
+- If the port is busy, stop the old server or run with `PHOTOARCHIVE_PORT=8001`.
+- If semantic search is unavailable, check Catalog's AI model and embedding index
+  status.
+- If Library feels slow while the app is building, switch **Computer Work Mode**
+  to **Browse**.
+- If People stays empty, make sure preview caching and People scanning are
+  enabled and that cached previews have had time to build.
+- If previews look stale after changing thumbnail settings, use Catalog's cache
+  controls to refresh or clear generated cache.
+
+Quick health checks:
+
+```bash
+curl http://127.0.0.1:8000/api/dev/status
+curl http://127.0.0.1:8000/api/ai/status
+curl http://127.0.0.1:8000/api/cache/status
+```
+
+## Development
+
+The frontend is browser-native HTML, CSS, and JavaScript. There is no Vite,
+TypeScript, or bundled build step.
+
+Useful checks:
 
 ```bash
 cd web
 .venv/bin/python -m unittest
 cd ..
 scripts/photoarchive-browser-smoke --base-url http://127.0.0.1:8000
-```
-
-For quick server checks:
-
-```bash
-./scripts/photoarchive-server status
-curl http://127.0.0.1:8000/api/dev/status
-curl http://127.0.0.1:8000/api/ai/status
-curl http://127.0.0.1:8000/api/cache/status
 ```
 
 ## License

@@ -14,8 +14,84 @@
 
     <div class="work-banner" id="work-banner"></div>
 
+    <section class="work-banner setup-guide" id="setup-guide" aria-labelledby="setup-guide-title">
+        <div class="work-banner-head">
+            <div>
+                <div class="work-banner-title" id="setup-guide-title">Setup Guide</div>
+                <div class="settings-help-text">Fast path to a usable local archive. The advanced controls stay available below.</div>
+            </div>
+            <div class="work-row-eta" id="setup-guide-summary">Loading setup status...</div>
+        </div>
+        <div class="embedding-index-grid">
+            <a class="embedding-index-panel setup-step" href="#catalog-sources-section" data-setup-step="catalog">
+                <div class="embedding-index-header">
+                    <div>
+                        <div class="embedding-index-title">1. Add Sources</div>
+                        <div class="embedding-index-subtitle">Point photoArchive at the folders it should index.</div>
+                    </div>
+                    <span class="embedding-index-badge missing" id="setup-step-catalog-badge">Next</span>
+                </div>
+                <div class="embedding-index-status" id="setup-step-catalog-detail">Choose a folder to begin.</div>
+            </a>
+            <a class="embedding-index-panel setup-step" href="#catalog-sources-section" data-setup-step="scan">
+                <div class="embedding-index-header">
+                    <div>
+                        <div class="embedding-index-title">2. Scan Catalog</div>
+                        <div class="embedding-index-subtitle">Populate the Library without touching source files.</div>
+                    </div>
+                    <span class="embedding-index-badge missing" id="setup-step-scan-badge">Waiting</span>
+                </div>
+                <div class="embedding-index-status" id="setup-step-scan-detail">Add a source first.</div>
+            </a>
+            <a class="embedding-index-panel setup-step" href="#work-mode-section" data-setup-step="work">
+                <div class="embedding-index-header">
+                    <div>
+                        <div class="embedding-index-title">3. Work Mode</div>
+                        <div class="embedding-index-subtitle">Choose foreground responsiveness or background throughput.</div>
+                    </div>
+                    <span class="embedding-index-badge ready" id="setup-step-work-badge">Ready</span>
+                </div>
+                <div class="embedding-index-status" id="setup-step-work-detail">Light Background is the default.</div>
+            </a>
+            <a class="embedding-index-panel setup-step" href="#image-cache-section" data-setup-step="cache">
+                <div class="embedding-index-header">
+                    <div>
+                        <div class="embedding-index-title">4. Image Cache</div>
+                        <div class="embedding-index-subtitle">Confirm RAM/SSD budget for fast browsing.</div>
+                    </div>
+                    <span class="embedding-index-badge ready" id="setup-step-cache-badge">Ready</span>
+                </div>
+                <div class="embedding-index-status" id="setup-step-cache-detail">Defaults are loaded.</div>
+            </a>
+            <a class="embedding-index-panel setup-step" href="#ai-model-section" data-setup-step="ai">
+                <div class="embedding-index-header">
+                    <div>
+                        <div class="embedding-index-title">5. Daily Search</div>
+                        <div class="embedding-index-subtitle">Optional local 2B semantic-search model.</div>
+                    </div>
+                    <span class="embedding-index-badge scheduled" id="setup-step-ai-badge">Optional</span>
+                </div>
+                <div class="embedding-index-status" id="setup-step-ai-detail">Install when you want semantic search.</div>
+            </a>
+            <a class="embedding-index-panel setup-step" href="#people-recognition-section" data-setup-step="people">
+                <div class="embedding-index-header">
+                    <div>
+                        <div class="embedding-index-title">6. People</div>
+                        <div class="embedding-index-subtitle">Optional local face grouping from cached previews.</div>
+                    </div>
+                    <span class="embedding-index-badge scheduled" id="setup-step-people-badge">Optional</span>
+                </div>
+                <div class="embedding-index-status" id="setup-step-people-detail">Enable after the catalog has previews.</div>
+            </a>
+        </div>
+        <div class="work-banner-actions">
+            <a class="bar-btn bar-btn-link" href="/library">Open Library</a>
+            <a class="bar-btn bar-btn-link" href="/compare">Open Compare</a>
+        </div>
+    </section>
+
     <form class="settings-grid" id="settings-form">
-        <section class="settings-card">
+        <section class="settings-card" id="catalog-sources-section">
             <h2>Catalog Sources</h2>
             <p class="settings-card-copy">Folders included in this catalog. Removing a folder can either hide its photos while keeping catalog data, or delete the folder’s catalog rows and generated cache.</p>
             <label class="settings-field">
@@ -45,7 +121,7 @@
             <div class="catalog-source-list" id="catalog-source-list"></div>
         </section>
 
-        <section class="settings-card settings-card-wide">
+        <section class="settings-card settings-card-wide" id="work-mode-section">
             <h2>Computer Work Mode</h2>
             <p class="settings-card-copy">Choose how much background work photoArchive is allowed to do while you use the computer.</p>
             <input id="background_work_mode" type="hidden">
@@ -72,7 +148,7 @@
             </div>
         </section>
 
-        <section class="settings-card">
+        <section class="settings-card" id="ai-model-section">
             <h2>AI Model</h2>
             <p class="settings-card-copy">Install the model once from Hugging Face here, then the app will load it locally from disk for offline embeddings and search.</p>
             <label class="settings-field">
@@ -112,7 +188,7 @@
             </div>
         </section>
 
-        <section class="settings-card">
+        <section class="settings-card" id="people-recognition-section">
             <h2>People Recognition</h2>
             <p class="settings-card-copy">Local face detection runs in the background from cached previews. Person labels stay in the catalog.</p>
             <label class="settings-field">
@@ -147,7 +223,7 @@
             </div>
         </section>
 
-        <section class="settings-card settings-card-wide">
+        <section class="settings-card settings-card-wide" id="embedding-indexes-section">
             <h2>Embedding Indexes</h2>
             <p class="settings-card-copy">Normal search uses the fast 2B index immediately. Ready deep-cache terms can use the scheduled 8B index without loading the model during search.</p>
             <div class="embedding-index-grid">
@@ -185,7 +261,7 @@
             </div>
         </section>
 
-        <section class="settings-card settings-card-wide">
+        <section class="settings-card settings-card-wide" id="deep-search-section">
             <h2>Deep Search Cache</h2>
             <p class="settings-card-copy">Saved searches that should be ready for the smarter 8B index when the deep worker has time to run.</p>
             <label class="settings-checkbox">
@@ -232,7 +308,7 @@
             <div class="deep-search-term-list" id="deep-search-term-list"></div>
         </section>
 
-        <section class="settings-card">
+        <section class="settings-card" id="thumbnail-output-section">
             <h2>Thumbnail Output</h2>
             <p class="settings-card-copy">Larger sizes improve fidelity but cost more CPU, disk, and bandwidth.</p>
             <div class="settings-split-grid">
@@ -269,7 +345,7 @@
             </div>
         </section>
 
-        <section class="settings-card settings-card-wide">
+        <section class="settings-card settings-card-wide" id="image-cache-section">
             <h2>Image Cache</h2>
             <p class="settings-card-copy">Set how much fast storage photoArchive can use. The app chooses the right mix of grid previews, loupe previews, high-res previews, and originals automatically.</p>
             <div class="cache-summary" id="cache-tier-guide">

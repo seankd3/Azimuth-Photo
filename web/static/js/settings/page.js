@@ -1,4 +1,5 @@
 import { createCatalogApi } from '../catalog/controller.js';
+import { renderCatalogSources as renderCatalogSourcesCore } from '../catalog/sources.js';
 import { renderCacheTierGuide } from '../cache/guide.js';
 import {
     backgroundWorkStatusText,
@@ -18,6 +19,7 @@ import { renderPeopleSettingsStatus } from './people_status.js';
 import { workBannerHtml } from './work_banner.js';
 import {
     backgroundWorkModeLabel,
+    cacheProfileLabel,
     THUMB_OUTPUT_FIELDS,
 } from './display.js';
 import {
@@ -83,6 +85,152 @@ export function createSettingsPageController({
     let settingsPoller = null;
     let settingsPageData = null;
 
+    function formatSetupCount(value) {
+        return Math.max(0, Number(value || 0)).toLocaleString();
+    }
+
+    function setSetupStep(step, { badge, badgeClass, detail }) {
+        const badgeEl = documentImpl.getElementById(`setup-step-${step}-badge`);
+        const detailEl = documentImpl.getElementById(`setup-step-${step}-detail`);
+        if (badgeEl) {
+            badgeEl.className = `embedding-index-badge ${badgeClass || ''}`.trim();
+            badgeEl.textContent = badge;
+        }
+        if (detailEl) {
+            detailEl.textContent = detail;
+        }
+    }
+
+    function renderSetupGuide(data = {}) {
+        const guide = documentImpl.getElementById('setup-guide');
+        if (!guide) return;
+
+        const settings = data.settings || {};
+        const catalog = data.catalog || {};
+        const stats = catalog.stats || {};
+        const sources = Array.isArray(catalog.sources) ? catalog.sources : [];
+        const activeSources = sources.filter((source) => source.included !== false);
+        const onlineSources = activeSources.filter((source) => source.online !== false);
+        const activeImages = Math.max(0, Number(stats.active_images ?? stats.total_images ?? 0) || 0);
+        const catalogImages = Math.max(0, Number(stats.total_catalog_images ?? stats.total_images ?? activeImages) || 0);
+
+        const summaryEl = documentImpl.getElementById('setup-guide-summary');
+        if (summaryEl) {
+            if (activeImages > 0) {
+                summaryEl.textContent = `${formatSetupCount(activeImages)} active photos ready`;
+            } else if (activeSources.length > 0) {
+                summaryEl.textContent = 'Source added; scan will populate Library';
+            } else {
+                summaryEl.textContent = 'Add a source folder to begin';
+            }
+        }
+
+        setSetupStep('catalog', activeSources.length > 0 ? {
+            badge: 'Ready',
+            badgeClass: 'ready',
+            detail: `${formatSetupCount(activeSources.length)} source${activeSources.length === 1 ? '' : 's'} configured; ${formatSetupCount(onlineSources.length)} online.`,
+        } : {
+            badge: 'Next',
+            badgeClass: 'missing',
+            detail: 'Choose a mounted photo folder, then add it as a catalog source.',
+        });
+
+        setSetupStep('scan', activeImages > 0 ? {
+            badge: 'Ready',
+            badgeClass: 'ready',
+            detail: `${formatSetupCount(activeImages)} active photos; ${formatSetupCount(catalogImages)} catalog rows tracked.`,
+        } : activeSources.length > 0 ? {
+            badge: 'Scan',
+            badgeClass: 'scheduled',
+            detail: 'Run Add + Scan or Rescan to fill the Library.',
+        } : {
+            badge: 'Waiting',
+            badgeClass: 'missing',
+            detail: 'Add a source before scanning.',
+        });
+
+        const workMode = settings.background_work_mode || selectedBackgroundWorkMode();
+        setSetupStep('work', {
+            badge: 'Ready',
+            badgeClass: 'ready',
+            detail: `${backgroundWorkModeLabel(workMode)} mode selected.`,
+        });
+
+        const memoryGb = Number(settings.memory_cache_gb ?? 0);
+        const ssdGb = Number(settings.ssd_cache_gb ?? 0);
+        setSetupStep('cache', {
+            badge: 'Ready',
+            badgeClass: 'ready',
+            detail: `${memoryGb.toLocaleString()} GB RAM, ${ssdGb.toLocaleString()} GB SSD, ${cacheProfileLabel(settings.cache_profile)} priority.`,
+        });
+
+        const aiStatus = data.ai_status || {};
+        const fastIndex = aiStatus.embedding_indexes?.fast || {};
+        const modelStatus = data.model_status || {};
+        const install = modelStatus.install || {};
+        const fastInstalled = Boolean(fastIndex.installed || aiStatus.model_installed || modelStatus.installed);
+        const fastInstalling = Boolean(fastIndex.installing || aiStatus.installing || install.running);
+        const fastTotal = Math.max(0, Number(fastIndex.total_images ?? activeImages) || 0);
+        const fastEmbedded = Math.max(0, Number(fastIndex.embedded ?? aiStatus.embedded ?? 0) || 0);
+        const fastRemaining = Math.max(0, Number(fastIndex.remaining ?? Math.max(fastTotal - fastEmbedded, 0)) || 0);
+        if (fastInstalling) {
+            setSetupStep('ai', {
+                badge: 'Installing',
+                badgeClass: 'scheduled',
+                detail: install.message || 'Model install is running.',
+            });
+        } else if (fastInstalled && activeImages > 0 && fastRemaining > 0) {
+            setSetupStep('ai', {
+                badge: 'Indexing',
+                badgeClass: 'scheduled',
+                detail: `${formatSetupCount(fastRemaining)} of ${formatSetupCount(fastTotal)} images left for Daily Search.`,
+            });
+        } else if (fastInstalled) {
+            setSetupStep('ai', {
+                badge: 'Ready',
+                badgeClass: 'ready',
+                detail: activeImages > 0 ? 'Daily Search is installed and ready.' : 'Model is installed; indexing starts after scan.',
+            });
+        } else {
+            setSetupStep('ai', {
+                badge: 'Optional',
+                badgeClass: 'scheduled',
+                detail: 'Install the 2B model when you want semantic search and similarity.',
+            });
+        }
+
+        const peopleStatus = data.people_status || {};
+        const peopleCounts = peopleStatus.counts || {};
+        const peopleEnabled = settings.people_scan_enabled !== false && peopleStatus.active !== false;
+        const detectedFaces = Math.max(0, Number(peopleCounts.detected_faces || 0) || 0);
+        const peopleCount = Math.max(0, Number(peopleCounts.people || 0) || 0);
+        if (!peopleEnabled) {
+            setSetupStep('people', {
+                badge: 'Optional',
+                badgeClass: 'scheduled',
+                detail: 'People scanning is disabled.',
+            });
+        } else if (detectedFaces > 0) {
+            setSetupStep('people', {
+                badge: 'Ready',
+                badgeClass: 'ready',
+                detail: `${formatSetupCount(peopleCount)} people, ${formatSetupCount(detectedFaces)} detected faces.`,
+            });
+        } else if (activeImages > 0) {
+            setSetupStep('people', {
+                badge: 'Enabled',
+                badgeClass: 'scheduled',
+                detail: 'Enabled; scans cached previews as they become available.',
+            });
+        } else {
+            setSetupStep('people', {
+                badge: 'Optional',
+                badgeClass: 'scheduled',
+                detail: 'Enabled by default; useful after catalog scan and preview cache.',
+            });
+        }
+    }
+
     function renderBackgroundWorkStatus(cacheStats, aiStatus) {
         const statusEl = documentImpl.getElementById('background-work-governor-status');
         const heavyEl = documentImpl.getElementById('background-work-heavy-status');
@@ -97,8 +245,19 @@ export function createSettingsPageController({
         }
     }
 
+    function renderCatalogSourcesForSettings(catalog) {
+        const sources = renderCatalogSourcesCore(catalog);
+        settingsPageData = {
+            ...(settingsPageData || {}),
+            catalog: catalog || {},
+        };
+        renderSetupGuide(settingsPageData);
+        return sources;
+    }
+
     const catalogApi = createCatalogApi({
         getFallbackStats: () => settingsPageData?.catalog?.stats || {},
+        renderCatalogSources: renderCatalogSourcesForSettings,
         setSettingsStatus,
         showToast,
     });
@@ -133,6 +292,7 @@ export function createSettingsPageController({
         renderWorkBanner(data.ai_status, data.cache_stats);
         renderCacheTierGuide(data.cache_stats, data.settings);
         if (data.catalog) renderCatalogSources(data.catalog);
+        renderSetupGuide(data);
         updateCacheProfileHint();
     }
 
