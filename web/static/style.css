@@ -1509,6 +1509,7 @@ body.library-shell .library-container::-webkit-scrollbar-thumb:hover {
 .work-row {
     display: grid;
     gap: 6px;
+    min-width: 0;
 }
 
 .work-row-head {
@@ -1551,12 +1552,24 @@ body.library-shell .library-container::-webkit-scrollbar-thumb:hover {
     gap: 8px;
     color: #8e949b;
     font-size: 12px;
+    min-width: 0;
+}
+
+.work-row-detail > span:first-child {
+    min-width: 0;
+    flex: 1 1 auto;
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow-wrap: anywhere;
 }
 
 .work-row-eta {
     color: #cdd3da;
     font-size: 14px;
     font-weight: 600;
+    flex: 0 0 auto;
 }
 
 .work-banner-done {
