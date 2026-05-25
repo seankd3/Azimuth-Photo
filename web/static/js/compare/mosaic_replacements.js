@@ -2,7 +2,19 @@ export const MOSAIC_REPLACEMENT_TARGET = 24;
 export const MOSAIC_REPLACEMENT_FETCH_MIN = 12;
 export const MOSAIC_REPLACEMENT_LOW_WATER = 8;
 export const MOSAIC_REPLACEMENT_PROBE_CONCURRENCY = 4;
-export const MOSAIC_REPLACEMENT_PRELOAD_TIMEOUT_MS = 900;
+export const MOSAIC_REPLACEMENT_PRELOAD_TIMEOUT_MS = 120;
+
+
+async function responseDataOrError(response, fallbackMessage) {
+    let data = {};
+    try {
+        data = await response.json();
+    } catch {}
+    if (!response.ok || data.error || data.ok === false) {
+        throw new Error(data.error || fallbackMessage);
+    }
+    return data;
+}
 
 
 export function createMosaicReplacementBuffer({
@@ -45,7 +57,7 @@ export function createMosaicReplacementBuffer({
                     ...getMosaicReplacements().map(img => img.id),
                 ].join(',');
                 const res = await fetchImpl(buildMosaicUrl({ n: needed, exclude: excludeIds }));
-                const data = await res.json();
+                const data = await responseDataOrError(res, 'Mosaic replacements unavailable');
                 if (!isCurrent(generation, renderToken)) return;
                 if (data.stats) {
                     setCompareStats(data.stats);
@@ -68,12 +80,16 @@ export function createMosaicReplacementBuffer({
                         priority: 'auto',
                         timeoutMs: replacementPreloadTimeoutMs,
                     });
-                    if (!probe.ok || !isCurrent(generation, renderToken)) return;
+                    if (!isCurrent(generation, renderToken)) return;
+                    if (!probe.ok && !probe.timedOut) return;
                     const currentGrid = new Set(getMosaicImages().map((entry) => entry.id));
                     const replacements = getMosaicReplacements();
                     if (currentGrid.has(img.id) || replacements.some((entry) => entry.id === img.id)) return;
                     if (replacements.length >= replacementTarget) return;
-                    replacements.push(img);
+                    replacements.push({
+                        ...img,
+                        cache_probe_deferred: Boolean(probe.timedOut),
+                    });
                     readyCount++;
                 };
 
@@ -91,6 +107,7 @@ export function createMosaicReplacementBuffer({
             }
         }, {
             generation,
+            priority: 'high',
             onDrop: () => {
                 setMosaicFilling(false);
             },

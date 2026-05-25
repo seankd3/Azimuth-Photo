@@ -1,9 +1,22 @@
 export function propagationCountsFromPayload(payload = {}) {
     const counts = {};
     for (const [id, count] of Object.entries(payload.counts || {})) {
-        counts[parseInt(id)] = count;
+        const imageId = Number.parseInt(id, 10);
+        if (Number.isFinite(imageId)) counts[imageId] = Number(count || 0);
     }
     return counts;
+}
+
+
+async function responseDataOrError(response, fallbackMessage) {
+    let data = {};
+    try {
+        data = await response.json();
+    } catch {}
+    if (!response.ok || data.error || data.ok === false) {
+        throw new Error(data.error || fallbackMessage);
+    }
+    return data;
 }
 
 
@@ -17,7 +30,8 @@ export function precomputePropagationCounts(images = [], {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ grid_ids: gridIds }),
-    }).then(r => r.json()).then(data => {
+    }).then(r => responseDataOrError(r, 'Propagation prediction failed')).then(data => {
+        if (!data.counts || typeof data.counts !== 'object') return;
         onCounts(propagationCountsFromPayload(data));
     }).catch(() => {});
     return true;
@@ -30,7 +44,7 @@ export function fetchPropagationCount(directCount = 0, {
     onBadge = () => {},
 } = {}) {
     if (!fetchImpl) return false;
-    fetchImpl('/api/propagation/last').then(r => r.json()).then(data => {
+    fetchImpl('/api/propagation/last').then(r => responseDataOrError(r, 'Propagation count failed')).then(data => {
         const propagated = Number(data.count || 0);
         const total = Number(directCount || 0) + propagated;
         if (total > 0) {

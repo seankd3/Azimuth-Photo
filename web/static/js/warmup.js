@@ -52,12 +52,13 @@ export function loadImageProbe(url, { priority = 'auto', timeoutMs = 0 } = {}) {
         const img = new Image();
         let settled = false;
         let timer = null;
-        const finish = (ok) => {
+        const finish = (ok, timedOut = false) => {
             if (settled) return;
             settled = true;
             if (timer) clearTimeout(timer);
             resolve({
                 ok,
+                timedOut,
                 url: img.src,
                 width: img.naturalWidth || 0,
                 height: img.naturalHeight || 0,
@@ -67,7 +68,7 @@ export function loadImageProbe(url, { priority = 'auto', timeoutMs = 0 } = {}) {
         if ('fetchPriority' in img) img.fetchPriority = priority;
         img.onload = () => finish(Boolean(img.naturalWidth && img.naturalHeight));
         img.onerror = () => finish(false);
-        if (timeoutMs > 0) timer = setTimeout(() => finish(false), timeoutMs);
+        if (timeoutMs > 0) timer = setTimeout(() => finish(false, true), timeoutMs);
         img.src = url;
     });
 }
@@ -160,8 +161,13 @@ export function createWarmupManager({
         }
     }
 
-    function enqueueWarmup(task, { generation = warmupGeneration, onDrop = null } = {}) {
-        warmupQueue.push({ task, generation, onDrop });
+    function enqueueWarmup(task, { generation = warmupGeneration, onDrop = null, priority = 'normal' } = {}) {
+        const item = { task, generation, onDrop };
+        if (priority === 'high') {
+            warmupQueue.unshift(item);
+        } else {
+            warmupQueue.push(item);
+        }
         pumpWarmupQueue();
     }
 
@@ -213,6 +219,7 @@ export function createWarmupManager({
         if (fetchJsonImpl) return fetchJsonImpl(url, { defaultValue: null });
         try {
             const res = await fetchImpl(url);
+            if (!res.ok) return null;
             return await res.json();
         } catch {
             return null;
@@ -270,7 +277,8 @@ export function createWarmupManager({
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ tiers: payload }),
             keepalive: true,
-        }).then(() => {
+        }).then((response) => {
+            if (!response.ok) throw new Error('warm request failed');
             onWarmTiersApplied(payload);
         }).catch(() => {});
     }

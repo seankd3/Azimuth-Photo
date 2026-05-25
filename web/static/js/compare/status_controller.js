@@ -12,6 +12,19 @@ import {
 
 
 export const COVERAGE_STATS_THROTTLE_MS = 30000;
+export const COVERAGE_STATS_RETRY_MS = 5000;
+
+
+async function responseDataOrError(response, fallbackMessage) {
+    let data = {};
+    try {
+        data = await response.json();
+    } catch {}
+    if (!response.ok || data.error || data.ok === false) {
+        throw new Error(data.error || fallbackMessage);
+    }
+    return data;
+}
 
 
 export function createCompareStatusController({
@@ -19,6 +32,7 @@ export function createCompareStatusController({
     fetchImpl = globalThis.fetch,
     nowImpl = () => Date.now(),
     coverageStatsThrottleMs = COVERAGE_STATS_THROTTLE_MS,
+    coverageStatsRetryMs = COVERAGE_STATS_RETRY_MS,
     bumpRankingSignalsImpl = bumpRankingSignalsCore,
     mergeCoverageStatsImpl = mergeCoverageStatsCore,
     renderCompareProgressImpl = renderCompareProgressCore,
@@ -65,13 +79,15 @@ export function createCompareStatusController({
         }
         coverageStatsLastFetched = now;
         coverageStatsFetchPromise = fetchImpl('/api/stats')
-            .then((res) => res.json())
+            .then((res) => responseDataOrError(res, 'Coverage stats unavailable'))
             .then((stats) => {
                 mergeCoverageStats(stats);
                 renderCoverageBar(stats);
                 updateCompareProgress();
             })
-            .catch(() => {})
+            .catch(() => {
+                coverageStatsLastFetched = nowImpl() - Math.max(0, coverageStatsThrottleMs - coverageStatsRetryMs);
+            })
             .finally(() => {
                 coverageStatsFetchPromise = null;
             });
