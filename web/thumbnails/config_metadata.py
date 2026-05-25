@@ -7,6 +7,11 @@ def thumb_config_signature(cache_version: str, sizes: dict[str, int], thumb_qual
     return f"{cache_version}|{sizes['sm']}|{sizes['md']}|{sizes['lg']}|{thumb_quality}"
 
 
+def _is_sqlite_lock(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    return "database is locked" in text or "database table is locked" in text or "database schema is locked" in text
+
+
 def sync_thumb_config_metadata(
     new_signature: str,
     *,
@@ -25,8 +30,9 @@ def sync_thumb_config_metadata(
     reset_pregen_full_cursor: Callable[[], object],
 ) -> dict:
     with meta_lock:
-        conn = db_connect()
+        conn = None
         try:
+            conn = db_connect()
             row = conn.execute(
                 "SELECT thumb_config_signature, thumb_config_changed_at, replace_stale_thumbnails "
                 "FROM cache_metadata WHERE cache_root = ?",
@@ -35,8 +41,15 @@ def sync_thumb_config_metadata(
             previous_signature = row["thumb_config_signature"] if row else current_signature
             previous_changed_at = float(row["thumb_config_changed_at"]) if row else current_changed_at
             previous_replace_stale = bool(row["replace_stale_thumbnails"]) if row else current_replace_stale
+        except Exception as exc:
+            if not _is_sqlite_lock(exc):
+                raise
+            previous_signature = current_signature
+            previous_changed_at = current_changed_at
+            previous_replace_stale = current_replace_stale
         finally:
-            conn.close()
+            if conn is not None:
+                conn.close()
 
     changed = bool(previous_signature and previous_signature != new_signature)
     if changed:
@@ -52,8 +65,9 @@ def sync_thumb_config_metadata(
         replace_stale = previous_replace_stale
 
     with meta_lock:
-        conn = db_connect()
+        conn = None
         try:
+            conn = db_connect()
             conn.execute(
                 "INSERT OR REPLACE INTO cache_metadata "
                 "(cache_root, thumb_config_signature, thumb_config_changed_at, replace_stale_thumbnails) "
@@ -66,8 +80,17 @@ def sync_thumb_config_metadata(
                 ),
             )
             conn.commit()
+        except Exception as exc:
+            if conn is not None:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+            if not _is_sqlite_lock(exc):
+                raise
         finally:
-            conn.close()
+            if conn is not None:
+                conn.close()
 
     return {
         "last_signature": new_signature,
