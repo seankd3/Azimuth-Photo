@@ -1,3 +1,9 @@
+"""Compatibility facade for thumbnail helpers.
+
+Do Not Add New Logic Here: put implementation in the owning thumbnail modules
+and keep this package facade as stable exports for existing callers.
+"""
+
 import asyncio
 import os
 import sqlite3
@@ -5,7 +11,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-import resource_governor
+from core import work_coordination
 from data import connection as data_connection
 from PIL import Image
 from . import budget as thumbnail_budget
@@ -67,7 +73,7 @@ _orientation_lock = threading.Lock()
 _last_user_activity = time.monotonic()
 _prefetching = False
 _pregen_manual_mode = False
-_pregen_manual_pause = False
+_pregen_manual_pause = True
 _pregen_scan_offsets = {tier: 0 for tier in THUMB_TIERS}
 _pregen_bulk_cursor = {"source_id": 0, "filepath": "", "id": 0}
 _pregen_full_cursor = {"source_id": 0, "filepath": "", "id": 0}
@@ -75,11 +81,11 @@ _last_thumb_config_signature = ""
 _thumb_config_changed_at = 0.0
 _replace_stale_thumbnails = False
 _pregen_status = {
-    "enabled": True,
+    "enabled": False,
     "manual_mode": False,
     "manual_pause": False,
-    "state": "idle",
-    "message": "",
+    "state": "paused",
+    "message": "Previews is stopped until you start it from Background Work.",
     "active_phase": None,
     "started_at": None,
     "last_generated_at": None,
@@ -238,7 +244,17 @@ def _allocate_disk_budget(total_bytes: int) -> dict[str, int]:
     )
 
 
+def _ensure_disk_allocations() -> None:
+    global _disk_allocations
+    if SSD_CACHE_BYTES <= 0:
+        return
+    if any(int(value or 0) > 0 for value in _disk_allocations.values()):
+        return
+    _disk_allocations = _allocate_disk_budget(SSD_CACHE_BYTES)
+
+
 def _background_tier_budget(size: str, archive_estimates: dict | None = None) -> int:
+    _ensure_disk_allocations()
     budget = int(_disk_allocations.get(size, 0) or 0)
     estimates = archive_estimates or _cache_archive_estimates()
     return thumbnail_budget.background_tier_budget(
@@ -252,6 +268,7 @@ def _background_tier_budget(size: str, archive_estimates: dict | None = None) ->
 
 
 def cache_budget_config() -> dict:
+    _ensure_disk_allocations()
     return thumbnail_budget.cache_budget_config(
         profile=CACHE_PROFILE,
         memory_cache_bytes=MEMORY_CACHE_BYTES,
@@ -1188,7 +1205,7 @@ async def _run_pregen_bulk_batch(generate_batch: int | None = None) -> int:
         disk_allocations=_disk_allocations,
         is_prefetching=lambda: _prefetching,
         is_manual_paused=lambda: _pregen_manual_pause,
-        should_yield_to_foreground=_pregen_should_yield_to_foreground,
+        should_pause_for_priority=_pregen_should_pause_for_priority,
         flush_write_queue=_flush_write_queue,
         cache_metadata_backoff_active=_cache_metadata_backoff_active,
         bulk_tier_budgets=_bulk_tier_budgets,
@@ -1214,7 +1231,7 @@ async def _run_full_warm_batch(generate_batch: int | None = None) -> int:
         disk_allocations=_disk_allocations,
         is_prefetching=lambda: _prefetching,
         is_manual_paused=lambda: _pregen_manual_pause,
-        should_yield_to_foreground=_pregen_should_yield_to_foreground,
+        should_pause_for_priority=_pregen_should_pause_for_priority,
         flush_write_queue=_flush_write_queue,
         cache_metadata_backoff_active=_cache_metadata_backoff_active,
         full_tier_room=_full_tier_room,
@@ -1234,6 +1251,7 @@ _copy_disk_stats = thumbnail_status.copy_disk_stats
 
 
 def cache_stats() -> dict:
+    _ensure_disk_allocations()
     return thumbnail_status.cache_stats(
         memory_stats=_memory_stats,
         current_time=_current_time,
@@ -1418,10 +1436,12 @@ def configure(config: dict):
     _disk_allocations = _allocate_disk_budget(SSD_CACHE_BYTES)
     _invalidate_disk_stats_cache()
 
-    if not PREGENERATE_ON_IDLE and not _pregen_manual_mode:
+    if not _pregen_manual_mode:
         _pregen_manual_pause = True
-    elif PREGENERATE_ON_IDLE and not _pregen_manual_mode:
-        _pregen_manual_pause = False
+        _set_pregen_state(
+            "paused",
+            "Previews is stopped until you start it from Background Work.",
+        )
 
     with _cache_lock:
         _enforce_memory_budget_locked()
@@ -1469,19 +1489,21 @@ def _pregen_generate_batch_for_decision(decision) -> int:
 
 
 def _pregen_background_decision():
-    return pregen.background_decision(
-        get_idle_seconds(),
-        work_mode_provider=_background_work_mode,
-        decision_provider=resource_governor.get_background_decision,
+    return pregen.BackgroundDecision(
+        mode="manual",
+        intensity=1.0,
+        pause=False,
+        sleep_seconds=0.0,
+        thumbnail_batch_size=PREGENERATE_GENERATE_BATCH,
+        thumbnail_pause_seconds=PREGENERATE_BATCH_PAUSE_SECONDS,
+        embedding_pause_seconds=PREGENERATE_BATCH_PAUSE_SECONDS,
+        reason="manual background work",
+        checked_at=time.time(),
     )
 
 
-def _background_work_mode() -> str:
-    return pregen.background_work_mode()
-
-
-def _pregen_should_yield_to_foreground() -> bool:
-    return pregen.should_yield_to_foreground(_background_work_mode)
+def _pregen_should_pause_for_priority() -> bool:
+    return False
 
 
 async def run_prefetch_worker():
@@ -1498,7 +1520,7 @@ async def run_prefetch_worker():
         sleep=asyncio.sleep,
         flush_write_queue=lambda: _flush_write_queue(),
         flush_orientation_updates=lambda: flush_orientation_updates(),
-        should_yield_to_foreground=lambda: _pregen_should_yield_to_foreground(),
+        should_pause_for_priority=lambda: _pregen_should_pause_for_priority(),
         background_decision=lambda: _pregen_background_decision(),
         generate_batch_for_decision=lambda decision: _pregen_generate_batch_for_decision(decision),
         pregen_status=_pregen_status,

@@ -3,6 +3,18 @@ import { renderDirectoryBrowser } from './directory.js';
 let catalogBrowsePath = '';
 
 
+async function responseDataOrError(response, fallbackMessage) {
+    let data = {};
+    try {
+        data = await response.json();
+    } catch {}
+    if (!response.ok || data.error || data.ok === false) {
+        throw new Error(data.error || fallbackMessage);
+    }
+    return data;
+}
+
+
 export function currentCatalogBrowsePath() {
     return catalogBrowsePath;
 }
@@ -23,7 +35,7 @@ export async function browseDirectory(path = '', { fetchImpl = fetch, showToast 
     try {
         const query = path ? `?path=${encodeURIComponent(path)}` : '';
         const res = await fetchImpl(`/api/catalog/browse${query}`);
-        const data = await res.json();
+        const data = await responseDataOrError(res, 'Directory browse failed');
         catalogBrowsePath = data.path || '';
         renderDirectoryBrowser(data);
     } catch (err) {
@@ -68,12 +80,11 @@ export async function chooseCatalogFolder({
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ path: currentPath }),
         });
-        const data = await res.json();
+        const data = await responseDataOrError(res, 'Native folder chooser is unavailable');
         if (data.cancelled) {
             setSettingsStatus?.('Folder selection cancelled.', 'muted');
             return;
         }
-        if (!res.ok || !data.ok) throw new Error(data.error || 'Native folder chooser is unavailable');
         selectBrowsedDirectory(data.path);
         catalogBrowsePath = data.path || catalogBrowsePath;
         setSettingsStatus?.('Folder selected. Add + Scan when ready.', 'success');

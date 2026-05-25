@@ -1,10 +1,4 @@
-import {
-    deepSearchImageStatusText,
-    deepSearchQueryListHtml,
-    deepSearchQueryStatusText,
-    deepSearchWorkerText,
-    modelInstallDisplay,
-} from '../ai/status.js';
+import { modelInstallDisplay } from '../ai/status.js';
 import { embeddingIndexDisplay } from './display.js';
 
 
@@ -28,7 +22,9 @@ export function renderEmbeddingIndex(role, index) {
     const meterEl = document.getElementById(`${role}-index-meter`);
     const progressEl = document.getElementById(`${role}-index-progress`);
     const statusEl = document.getElementById(`${role}-index-status`);
-    if (!modelEl && !badgeEl && !meterEl && !progressEl && !statusEl) return;
+    const actionEl = document.getElementById(`${role}-index-actions`);
+    const installBtn = document.getElementById(`${role}-index-install-btn`);
+    if (!modelEl && !badgeEl && !meterEl && !progressEl && !statusEl && !actionEl && !installBtn) return;
 
     const display = embeddingIndexDisplay(role, index || {});
     if (modelEl) {
@@ -45,20 +41,19 @@ export function renderEmbeddingIndex(role, index) {
     if (statusEl) {
         statusEl.textContent = display.statusText;
     }
-}
-
-
-export function renderDeepSearchQueryList(queries) {
-    const el = document.getElementById('deep-search-query-list');
-    if (!el) return;
-    el.innerHTML = deepSearchQueryListHtml(queries);
+    if (installBtn) {
+        installBtn.disabled = Boolean(index?.installed || index?.installing);
+        installBtn.textContent = index?.installing ? 'Installing' : 'Install Model';
+    }
+    if (actionEl) {
+        actionEl.hidden = Boolean(index?.installed);
+    }
 }
 
 
 export function renderAISettingsStatus(aiStatus) {
     if (!aiStatus) return;
-    const indexes = aiStatus.embedding_indexes || {};
-    renderEmbeddingIndex('fast', indexes.fast || {
+    const activeIndex = aiStatus.embedding_index || {
         model_id: aiStatus.model_id,
         dimension: aiStatus.model_dimension,
         installed: aiStatus.model_installed,
@@ -68,23 +63,13 @@ export function renderAISettingsStatus(aiStatus) {
         progress_pct: aiStatus.progress_pct,
         worker_state: aiStatus.worker_state,
         worker_message: aiStatus.worker_message,
-    });
-    renderEmbeddingIndex('deep', indexes.deep || {});
-    const deep = aiStatus.deep_search || {};
-    const deepIndex = indexes.deep || {};
-    renderDeepSearchQueryList(deepIndex.queries || []);
-    const workerEl = document.getElementById('deep-search-worker-status');
-    const imageEl = document.getElementById('deep-search-image-status');
-    const queryEl = document.getElementById('deep-search-query-status');
-    if (workerEl) {
-        workerEl.textContent = deepSearchWorkerText(deep);
-    }
-    if (imageEl) {
-        imageEl.textContent = deepSearchImageStatusText(deepIndex, deep);
-    }
-    if (queryEl) {
-        queryEl.textContent = deepSearchQueryStatusText(deepIndex, deep);
-    }
+    };
+    renderEmbeddingIndex('active', activeIndex);
+    const progressEl = document.getElementById('active-index-progress');
+    const statusEl = document.getElementById('active-index-status');
+    const display = embeddingIndexDisplay('active', activeIndex);
+    if (progressEl) progressEl.textContent = display.progressText;
+    if (statusEl) statusEl.textContent = display.statusText;
 }
 
 
@@ -102,10 +87,6 @@ export function renderEmbeddingModelPresets(presets) {
         option.dataset.modelDir = preset.model_dir;
         select.appendChild(option);
     }
-    const custom = document.createElement('option');
-    custom.value = 'custom';
-    custom.textContent = 'Custom model';
-    select.appendChild(custom);
     select.dataset.populated = '1';
 }
 

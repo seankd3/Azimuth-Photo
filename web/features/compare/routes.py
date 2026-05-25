@@ -1,4 +1,6 @@
+import asyncio
 import uuid
+import time
 from collections.abc import Awaitable, Callable
 
 from fastapi import APIRouter, Request
@@ -6,6 +8,7 @@ from fastapi.responses import JSONResponse
 
 import elo_propagation
 from core.requests import json_object, positive_int
+from data import connection as data_connection
 
 
 router = APIRouter()
@@ -26,6 +29,18 @@ _compare_next_handler: NextHandler | None = None
 _record_active_mosaic_pick: RecordMosaicPick | None = None
 _record_active_comparison: RecordComparison | None = None
 _undo_last_comparison: UndoComparison | None = None
+USER_WRITE_TIMEOUT_SECONDS = 5.0
+_user_write_lock: asyncio.Lock | None = None
+_user_write_lock_loop: asyncio.AbstractEventLoop | None = None
+
+
+def _user_write_lock_for_loop() -> asyncio.Lock:
+    global _user_write_lock, _user_write_lock_loop
+    loop = asyncio.get_running_loop()
+    if _user_write_lock is None or _user_write_lock_loop is not loop:
+        _user_write_lock = asyncio.Lock()
+        _user_write_lock_loop = loop
+    return _user_write_lock
 
 
 def configure(
@@ -77,24 +92,46 @@ async def mosaic_next(
 ):
     if _mosaic_next_handler is None:
         raise RuntimeError("Compare routes are not configured")
-    return await _mosaic_next_handler(
-        n=n,
-        exclude=exclude,
-        strategy=strategy,
-        grid_elo=grid_elo,
-        orientation=orientation,
-        compared=compared,
-        min_stars=min_stars,
-        folder=folder,
-        flag=flag,
-        date_taken=date_taken,
-        file_type=file_type,
-        camera=camera,
-        lens=lens,
-        q=q,
-        deep=deep,
-        people=people,
-    )
+    started = time.perf_counter()
+    try:
+        with data_connection.sqlite_timeout(0.25):
+            response = await _mosaic_next_handler(
+                n=n,
+                exclude=exclude,
+                strategy=strategy,
+                grid_elo=grid_elo,
+                orientation=orientation,
+                compared=compared,
+                min_stars=min_stars,
+                folder=folder,
+                flag=flag,
+                date_taken=date_taken,
+                file_type=file_type,
+                camera=camera,
+                lens=lens,
+                q=q,
+                deep=deep,
+                people=people,
+            )
+    except Exception as exc:
+        if not data_connection.is_sqlite_locked_error(exc):
+            raise
+        return {
+            "images": [],
+            "total_images": 0,
+            "visible_images": 0,
+            "hidden_pending_thumbnails": 0,
+            "total_kept": 0,
+            "stats": {"filtered_pool": 0, "filtered_pool_visible": 0, "filtered_pool_total": 0},
+            "status_stale": True,
+            "counts_stale": True,
+            "candidate_source": "sqlite_busy",
+            "latency_ms": round((time.perf_counter() - started) * 1000, 1),
+        }
+    if isinstance(response, dict):
+        response.setdefault("status_stale", False)
+        response.setdefault("latency_ms", round((time.perf_counter() - started) * 1000, 1))
+    return response
 
 
 @router.post("/api/mosaic/pick")
@@ -128,11 +165,24 @@ async def mosaic_pick(request: Request):
         other_ids.append(loser_id)
 
     action_id = uuid.uuid4().hex
-    result = await _record_active_mosaic_pick(picked_id, other_ids, action_id)
+    try:
+        async with _user_write_lock_for_loop():
+            with data_connection.sqlite_timeout(USER_WRITE_TIMEOUT_SECONDS):
+                result = await _record_active_mosaic_pick(picked_id, other_ids, action_id)
+    except Exception as exc:
+        if not data_connection.is_sqlite_locked_error(exc):
+            raise
+        return JSONResponse(
+            {
+                "error": "Database is busy; pick was not saved",
+                "status_stale": True,
+            },
+            status_code=503,
+        )
     if not result.get("ok"):
         return JSONResponse(
             {
-                "error": "Images must exist in an active online catalog",
+                "error": "Images must exist in an active catalog",
                 "image_ids": result.get("missing_ids", []),
             },
             status_code=400,
@@ -164,7 +214,12 @@ async def mosaic_pick(request: Request):
 @router.get("/api/propagation/last")
 async def propagation_last():
     """Return the number of images affected by the last Elo propagation."""
-    return {"count": elo_propagation.last_propagation_count}
+    from core import propagation_queue
+
+    return {
+        "count": elo_propagation.last_propagation_count,
+        "queue": propagation_queue.status(),
+    }
 
 
 @router.post("/api/propagation/predict")
@@ -189,22 +244,44 @@ async def compare_next(
 ):
     if _compare_next_handler is None:
         raise RuntimeError("Compare routes are not configured")
-    return await _compare_next_handler(
-        n=n,
-        mode=mode,
-        orientation=orientation,
-        compared=compared,
-        min_stars=min_stars,
-        folder=folder,
-        flag=flag,
-        date_taken=date_taken,
-        file_type=file_type,
-        camera=camera,
-        lens=lens,
-        q=q,
-        deep=deep,
-        people=people,
-    )
+    started = time.perf_counter()
+    try:
+        with data_connection.sqlite_timeout(0.25):
+            response = await _compare_next_handler(
+                n=n,
+                mode=mode,
+                orientation=orientation,
+                compared=compared,
+                min_stars=min_stars,
+                folder=folder,
+                flag=flag,
+                date_taken=date_taken,
+                file_type=file_type,
+                camera=camera,
+                lens=lens,
+                q=q,
+                deep=deep,
+                people=people,
+            )
+    except Exception as exc:
+        if not data_connection.is_sqlite_locked_error(exc):
+            raise
+        return {
+            "pairs": [],
+            "total_images": 0,
+            "visible_images": 0,
+            "hidden_pending_thumbnails": 0,
+            "total_kept": 0,
+            "stats": {"filtered_pool": 0, "filtered_pool_visible": 0, "filtered_pool_total": 0},
+            "status_stale": True,
+            "counts_stale": True,
+            "candidate_source": "sqlite_busy",
+            "latency_ms": round((time.perf_counter() - started) * 1000, 1),
+        }
+    if isinstance(response, dict):
+        response.setdefault("status_stale", False)
+        response.setdefault("latency_ms", round((time.perf_counter() - started) * 1000, 1))
+    return response
 
 
 @router.post("/api/compare")
@@ -223,10 +300,23 @@ async def submit_comparison(request: Request):
         return JSONResponse({"error": "Winner and loser must be different images"}, status_code=400)
 
     action_id = uuid.uuid4().hex
-    result = await _record_active_comparison(winner_id, loser_id, mode, action_id=action_id)
+    try:
+        async with _user_write_lock_for_loop():
+            with data_connection.sqlite_timeout(USER_WRITE_TIMEOUT_SECONDS):
+                result = await _record_active_comparison(winner_id, loser_id, mode, action_id=action_id)
+    except Exception as exc:
+        if not data_connection.is_sqlite_locked_error(exc):
+            raise
+        return JSONResponse(
+            {
+                "error": "Database is busy; comparison was not saved",
+                "status_stale": True,
+            },
+            status_code=503,
+        )
     if not result:
         return JSONResponse(
-            {"error": "Images must exist in an active online catalog"},
+            {"error": "Images must exist in an active catalog"},
             status_code=400,
         )
 

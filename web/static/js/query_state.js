@@ -1,3 +1,5 @@
+import { appendSearchParams, searchModeForQuery } from './search/query.js';
+
 export const EMPTY_FILTERS = {
     orientation: '',
     compared: '',
@@ -142,15 +144,20 @@ export function syncLibraryUrlState({
     filters = EMPTY_FILTERS,
     sortField = 'elo',
     sortDesc = true,
+    searchQuery = '',
+    searchMode = searchModeForQuery(searchQuery),
     historyImpl = globalThis.window?.history || globalThis.history,
     locationImpl = globalThis.window?.location || globalThis.location,
 } = {}) {
     if (!historyImpl?.replaceState || !locationImpl) return;
     const params = new URLSearchParams(locationImpl.search);
     FILTER_QUERY_KEYS.forEach(key => params.delete(key));
+    params.delete('q');
+    params.delete('deep');
     params.delete('sort');
     params.delete('dir');
     appendFilterParams(params, filters);
+    appendSearchParams(params, { searchMode, searchQuery });
     if (sortField !== 'similarity') {
         params.set('sort', sortField);
         params.set('dir', sortDesc ? 'desc' : 'asc');

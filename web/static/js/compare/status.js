@@ -14,7 +14,24 @@ export function visibleTotalLabel(visible, total) {
 }
 
 
+function numericStat(...values) {
+    for (const value of values) {
+        const num = Number(value);
+        if (Number.isFinite(num)) return num;
+    }
+    return 0;
+}
+
+
+export function isDirectUncomparedPool(stats = {}) {
+    return stats.pool_metric === 'direct_uncompared';
+}
+
+
 export function poolVisibleCount(stats = {}) {
+    if (isDirectUncomparedPool(stats)) {
+        return numericStat(stats.direct_uncompared_visible, stats.filtered_pool_visible);
+    }
     return Number(
         stats.filtered_pool_visible
         ?? stats.visible_images
@@ -27,6 +44,9 @@ export function poolVisibleCount(stats = {}) {
 
 export function poolTotalCount(stats = {}) {
     const visible = poolVisibleCount(stats);
+    if (isDirectUncomparedPool(stats)) {
+        return numericStat(stats.direct_uncompared_total, stats.filtered_pool_total, visible);
+    }
     return Number(
         stats.filtered_pool_total
         ?? stats.total_images
@@ -34,6 +54,11 @@ export function poolTotalCount(stats = {}) {
         ?? stats.filtered_pool
         ?? visible
     );
+}
+
+
+export function poolLabel(stats = {}) {
+    return isDirectUncomparedPool(stats) ? 'uncompared' : 'images';
 }
 
 
@@ -69,7 +94,9 @@ export function renderCompareProgress({
     const total = rankingSignalCount(stats);
     const compEl = documentImpl.getElementById('compare-stat-comparisons');
     const poolEl = documentImpl.getElementById('compare-stat-pool');
+    const poolLabelEl = documentImpl.getElementById('compare-stat-pool-label');
     if (poolEl) poolEl.textContent = visibleTotalLabel(poolVisibleCount(stats), poolTotalCount(stats));
+    if (poolLabelEl) poolLabelEl.textContent = poolLabel(stats);
     if (updateCoverageBarImpl) updateCoverageBarImpl();
     if (!compEl) return displayedComparisons;
 
@@ -84,6 +111,16 @@ export function renderCompareProgress({
 
 
 export function coveragePercent(stats = {}) {
+    if (isDirectUncomparedPool(stats)) {
+        const totalImages = numericStat(
+            stats.direct_uncompared_pool_total,
+            stats.filtered_pool_total,
+            stats.total_images,
+        );
+        const uncomparedImages = numericStat(stats.direct_uncompared_total, stats.direct_uncompared_visible);
+        const pct = totalImages > 0 ? Math.round((uncomparedImages / totalImages) * 100) : 0;
+        return Math.max(0, Math.min(100, pct));
+    }
     const totalImages = Number(stats.total_images || 0);
     const ratedImages = Number(stats.rated_images || 0);
     const pct = totalImages > 0 ? Math.round((ratedImages / totalImages) * 100) : 0;
@@ -97,7 +134,7 @@ export function renderCoverageBar(stats = {}) {
     if (!fill || !label) return false;
     const clamped = coveragePercent(stats);
     fill.style.width = `${clamped}%`;
-    label.textContent = `${clamped}% ranked`;
+    label.textContent = `${clamped}% ${isDirectUncomparedPool(stats) ? 'uncompared' : 'ranked'}`;
     return true;
 }
 

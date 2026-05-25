@@ -1,6 +1,11 @@
 const version = new URL(import.meta.url).searchParams.get('v') || '';
 const suffix = version ? `?v=${encodeURIComponent(version)}` : '';
-const legacyModule = await import(`./legacy/app.js${suffix}`);
+const [{ installAppShellControls }, legacyModule] = await Promise.all([
+    import(`./work/status_panel.js${suffix}`),
+    import(`./legacy/app.js${suffix}`),
+]);
+
+installAppShellControls();
 
 const PhotoArchive = legacyModule.default;
 const compatibilityTarget = (

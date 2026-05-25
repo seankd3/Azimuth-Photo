@@ -1,3 +1,5 @@
+// Do Not Add New Logic Here: this file assembles compatibility exports for
+// older browser globals. Put new page behavior in the owning module.
 import { createLegacyBatchBridge } from './batch_bridge.js';
 import { createLegacyCatalogScanBridge } from './catalog_scan_bridge.js';
 import { createLegacyCompareDisplayBridge } from './compare_display_bridge.js';
@@ -38,7 +40,7 @@ const legacyPhotoArchive = (() => {
     // --- Compare Mode State ---
     let comparePairs = [];
     let compareIndex = 0;
-    let compareMode = 'swiss';
+    let compareMode = 'mosaic';
     let compareModeTransitionToken = 0;
     let compareBusy = false;
     let compareActionSeq = 0;
@@ -72,6 +74,10 @@ const legacyPhotoArchive = (() => {
     } = sharedHelpersBridge;
     const loupeBridge = createLegacyLoupeBridge({
         getLibraryImages: () => libraryImages,
+        getLibraryPoolTotal: () => Math.max(
+            libraryImages.length,
+            Number(compareStats.filtered_pool_visible ?? compareStats.filtered_pool ?? 0) || 0
+        ),
         getSearchQuery: () => searchQuery,
         getRankingsExhausted: () => rankingsExhausted,
         loadRankings,
@@ -432,9 +438,18 @@ const legacyPhotoArchive = (() => {
         restoreSearchState,
         initSearchInputControls,
         setCompareMode,
+        setMosaicStrategy,
+        mosaicShuffle,
         loadFolderList,
         scheduleFilterOptionsLoad,
         initStarHover,
+        clearSearch,
+        setFilter,
+        toggleMetadataFilters,
+        toggleFilter,
+        toggleStar,
+        setThumbSize: (...args) => setThumbSize(...args),
+        toggleBackgroundWorkPanel,
     });
 
     async function initCompare() {
@@ -455,11 +470,10 @@ const legacyPhotoArchive = (() => {
     let dateScrubberGeneration = 0;
     let dateJumpGeneration = 0;
     let searchQuery = '';
-    let deepSearchRequested = false;
-    let lastDeepSearchNoticeQuery = '';
     let rankingsLoading = false;
     let rankingsLoadPromise = null;
     let rankingsExhausted = false;
+    let deferredRankingsRetryTimer = null;
     let libraryRequestGeneration = 0;
     let pendingScrollRestoreOffset = 0;
     let thumbHeight = 220;
@@ -470,7 +484,6 @@ const legacyPhotoArchive = (() => {
         storage: sessionStorage,
         locationImpl: window.location,
         getSearchQuery: () => searchQuery,
-        getDeepSearchRequested: () => deepSearchRequested,
         getSortField: () => sortField,
         getSortDesc: () => sortDesc,
         getRankingsSort: () => rankingsSort,
@@ -522,8 +535,16 @@ const legacyPhotoArchive = (() => {
         hasActiveLibraryFilters,
         clearSearch,
         clearLibraryFilters,
+        getFilteredPoolVisible: () => Number(
+            compareStats.filtered_pool_visible ?? compareStats.filtered_pool ?? 0
+        ) || 0,
+        getRankingsLoading: () => rankingsLoading,
+        getRankingsExhausted: () => rankingsExhausted,
+        getCurrentLibraryView: currentLibraryView,
+        onLoadMoreRankings: () => { loadRankings(); },
     });
     const {
+        bindLibraryLoadMoreButton,
         deselectLibraryCard,
         findCardInDirection,
         hideLibraryEmptyState,
@@ -535,14 +556,23 @@ const legacyPhotoArchive = (() => {
         selectLibraryCard,
         updateBackToTopButton,
         updateLibraryEmptyState,
+        updateLibraryLoadMore,
     } = libraryShellBridge;
 
     function currentLibraryPageSize() {
-        return sharedHelpersBridge.currentLibraryPageSize({ rankingsOffset, pendingScrollRestoreOffset });
+        return sharedHelpersBridge.currentLibraryPageSize({
+            rankingsOffset,
+            pendingScrollRestoreOffset,
+            hasActiveSearch: hasActiveTextSearch(searchQuery),
+        });
     }
 
     function resetLibraryResults({ clearBatch = false } = {}) {
         clearWarmups();
+        if (deferredRankingsRetryTimer) {
+            clearTimeout(deferredRankingsRetryTimer);
+            deferredRankingsRetryTimer = null;
+        }
         libraryRequestGeneration++;
         rankingsOffset = 0;
         rankingsExhausted = false;
@@ -552,6 +582,7 @@ const legacyPhotoArchive = (() => {
         rankingsLoadPromise = null;
         selectedLibraryIndex = -1;
         hideLibraryEmptyState();
+        updateLibraryLoadMore();
         if (clearBatch) clearBatchSelection();
     }
 
@@ -642,10 +673,6 @@ const legacyPhotoArchive = (() => {
         setSearchQuery: (value) => {
             searchQuery = value;
         },
-        getDeepSearchRequested: () => deepSearchRequested,
-        setDeepSearchRequested: (value) => {
-            deepSearchRequested = value;
-        },
         getSortField: () => sortField,
         setSortField: (value) => {
             sortField = value;
@@ -711,10 +738,6 @@ const legacyPhotoArchive = (() => {
         setSearchQuery: (value) => {
             searchQuery = value;
         },
-        getDeepSearchRequested: () => deepSearchRequested,
-        setDeepSearchRequested: (value) => {
-            deepSearchRequested = value;
-        },
         getSortField: () => sortField,
         hasActiveTextSearch,
         saveSearchState,
@@ -734,10 +757,6 @@ const legacyPhotoArchive = (() => {
 
     function clearSearch() {
         return searchActionBridge.clearSearch();
-    }
-
-    function runDeepSearch() {
-        return searchActionBridge.runDeepSearch();
     }
 
     const flagBridge = createLegacyFlagBridge({
@@ -768,6 +787,7 @@ const legacyPhotoArchive = (() => {
 
     async function loadRankingsBatch(clearFirst = false) {
         rankingsLoading = true;
+        updateLibraryLoadMore({ loading: true });
         const requestGeneration = libraryRequestGeneration;
         const requestOffset = rankingsOffset;
         const limit = currentLibraryPageSize();
@@ -779,18 +799,42 @@ const legacyPhotoArchive = (() => {
         });
         try {
             const data = (requestOffset === 0 ? takeWarmCache(`library:${url}`) : null) || await fetchWarmJson(url);
-            if (!data) return 0;
+            if (!data) {
+                updateLibraryEmptyState({ loadError: libraryImages.length === 0 });
+                return 0;
+            }
             if (requestGeneration !== libraryRequestGeneration) return 0;
-            if (
-                requestOffset === 0 &&
-                data.deep_requested &&
-                !data.deep_search_cached &&
-                data.fallback_reason === 'deep_search_not_cached' &&
-                searchQuery &&
-                searchQuery !== lastDeepSearchNoticeQuery
-            ) {
-                lastDeepSearchNoticeQuery = searchQuery;
-                showToast('Deep Search queued. Showing quick results until the 8B cache is ready.');
+            const images = Array.isArray(data.images) ? data.images : [];
+            if (requestOffset === 0 && data.taste_available === false && images.length === 0) {
+                const grid = document.getElementById('rankings-grid');
+                if (clearFirst && grid) grid.innerHTML = '';
+                rankingsExhausted = true;
+                updateLibraryEmptyState({
+                    tasteUnavailable: true,
+                    tasteFallbackReason: data.fallback_reason || '',
+                });
+                updateLibraryLoadMore();
+                return 0;
+            }
+            if (data.status_stale && images.length === 0) {
+                rankingsExhausted = false;
+                updateLibraryEmptyState({
+                    isDeferred: libraryImages.length === 0,
+                    latencyMs: data.latency_ms,
+                });
+                if (!deferredRankingsRetryTimer) {
+                    deferredRankingsRetryTimer = setTimeout(() => {
+                        deferredRankingsRetryTimer = null;
+                        if (requestGeneration === libraryRequestGeneration && !document.hidden) {
+                            loadRankings(clearFirst);
+                        }
+                    }, 900);
+                }
+                return 0;
+            }
+            if (deferredRankingsRetryTimer) {
+                clearTimeout(deferredRankingsRetryTimer);
+                deferredRankingsRetryTimer = null;
             }
             if (requestOffset === 0 && typeof data.total_images === 'number') {
                 const visible = Number(data.visible_images ?? data.total_images ?? 0);
@@ -804,6 +848,11 @@ const legacyPhotoArchive = (() => {
                 updateCompareProgress();
             }
             const grid = document.getElementById('rankings-grid');
+            if (requestOffset === 0 && grid?.dataset.fallbackRendered === '1') {
+                window.__photoArchiveLibraryFallbackDisabled = true;
+                grid.innerHTML = '';
+                delete grid.dataset.fallbackRendered;
+            }
             if (clearFirst) { grid.innerHTML = ''; selectedLibraryIndex = -1; lastDateGroup = null; }
             const rowH = thumbHeight;
 
@@ -812,7 +861,7 @@ const legacyPhotoArchive = (() => {
             const baseIndex = libraryImages.length;
             const appendResult = appendLibraryRankCards({
                 fragment: frag,
-                images: data.images,
+                images,
                 rankingsOffset,
                 baseIndex,
                 rankingsSort,
@@ -823,23 +872,27 @@ const legacyPhotoArchive = (() => {
                 onCardClick: handleCardClick,
             });
             lastDateGroup = appendResult.lastDateGroup;
-            libraryImages.push(...data.images);
+            libraryImages.push(...images);
             grid.appendChild(frag);
 
-            rankingsOffset += data.images.length;
-            if (data.images.length < limit) {
+            rankingsOffset += images.length;
+            if (images.length < limit) {
                 rankingsExhausted = true;
             }
-            if (data.images.length > 0) {
+            if (images.length > 0) {
                 // Always warm neighbors — not just on first load
                 scheduleLibraryNeighborWarmup();
                 if (requestOffset === 0) scheduleCrossViewWarmup('library');
                 if (isDateScrubberActive()) setupScrubberScrollObserver();
             }
             updateLibraryEmptyState();
-            return data.images.length;
+            updateLibraryLoadMore();
+            return images.length;
         } finally {
-            if (requestGeneration === libraryRequestGeneration) rankingsLoading = false;
+            if (requestGeneration === libraryRequestGeneration) {
+                rankingsLoading = false;
+                updateLibraryLoadMore();
+            }
         }
     }
 
@@ -930,7 +983,6 @@ const legacyPhotoArchive = (() => {
         getCompareStats: () => compareStats,
         setCompareStats: (stats) => { compareStats = stats; },
         setSearchQuery: (query) => { searchQuery = query; },
-        setDeepSearchRequested: (requested) => { deepSearchRequested = requested; },
         bumpLibraryRequestGeneration: () => ++libraryRequestGeneration,
         getLibraryRequestGeneration: () => libraryRequestGeneration,
         closeLightbox,
@@ -940,6 +992,7 @@ const legacyPhotoArchive = (() => {
         clearBatchSelection,
         updateCompareProgress,
         openLightbox,
+        showToast,
     });
 
 
@@ -1049,14 +1102,32 @@ const legacyPhotoArchive = (() => {
         batchFlag,
         clearBatchSelection,
         saveScrollPosition,
+        scrollToTop,
+        bindLibraryLoadMoreButton,
         initLoupeInteraction,
         initSearchInputControls,
+        clearSearch,
+        setFilter,
+        toggleMetadataFilters,
+        toggleFilter,
+        toggleStar,
+        setThumbSize,
+        toggleBackgroundWorkPanel,
+        setSortField,
+        toggleSortDir,
+        toggleBatchMode,
+        exportRankings,
+        setLibraryView,
     });
     const { initLibrary, initRankings } = libraryInitBridge;
 
     // ==================== PEOPLE ====================
 
-    const peopleApi = createLegacyPeopleBridge({ showToast });
+    const peopleApi = createLegacyPeopleBridge({
+        showToast,
+        initBottomBarMeasurement,
+        startAIStatusPolling,
+    });
     const {
         initPeople,
         labelPerson,
@@ -1076,6 +1147,7 @@ const legacyPhotoArchive = (() => {
         formatBytes,
         initVisibilityRefresh,
         initBottomBarMeasurement,
+        startAIStatusPolling,
     });
     const {
         initSettings,
@@ -1113,6 +1185,13 @@ const legacyPhotoArchive = (() => {
         return catalogScanBridge.startScan();
     }
 
+    document.addEventListener('click', (event) => {
+        const control = event.target?.closest?.('[data-action="start-scan"]');
+        if (!control) return;
+        event.preventDefault();
+        startScan();
+    });
+
     // ==================== UTILITIES ====================
 
     const preloadImage = createImagePreloader({ limit: 240, concurrency: 8 });
@@ -1141,7 +1220,6 @@ const legacyPhotoArchive = (() => {
         hideConfirmModal,
         scrollToTop,
         clearSearch,
-        runDeepSearch,
         setCompareMode,
         setRankingsSort,
         setSortField,

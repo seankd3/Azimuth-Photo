@@ -33,7 +33,6 @@ _duplicates_cache: dict | None = None
 _collections_cache: dict | None = None
 _elo_propagation = None
 embedding_batch_listeners = []
-deep_search_query_embedding_listeners = []
 
 
 def register_embedding_batch_listener(listener) -> None:
@@ -41,23 +40,10 @@ def register_embedding_batch_listener(listener) -> None:
         embedding_batch_listeners.append(listener)
 
 
-def register_deep_search_query_embedding_listener(listener) -> None:
-    if listener not in deep_search_query_embedding_listeners:
-        deep_search_query_embedding_listeners.append(listener)
-
-
 def notify_embedding_batch_stored(model_key: str, image_ids: list[int]) -> None:
     for listener in list(embedding_batch_listeners):
         try:
             listener(model_key, image_ids)
-        except Exception:
-            pass
-
-
-def notify_deep_search_query_embedding_stored(model_key: str, query: str) -> None:
-    for listener in list(deep_search_query_embedding_listeners):
-        try:
-            listener(model_key, query)
         except Exception:
             pass
 
@@ -116,12 +102,6 @@ def invalidate_rankings_cache() -> None:
     _, library_service, query_constraints, *_ = _configured()
     library_service.invalidate_rankings_response_cache()
     query_constraints.clear_text_search_caches()
-
-
-def deep_search_query_embedding_stored(_model_key: str, _query: str) -> None:
-    _, _, _, invalidate_ai_status_response_cache, _, _, _ = _configured()
-    invalidate_rankings_cache()
-    invalidate_ai_status_response_cache()
 
 
 def invalidate_vector_derived_caches() -> None:

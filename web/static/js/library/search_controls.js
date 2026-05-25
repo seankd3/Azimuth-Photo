@@ -65,7 +65,6 @@ export function updateCompareSearchIndicator({
 export function updateSearchControls({
     documentImpl = document,
     searchQuery = '',
-    deepSearchRequested = false,
     sortField = 'elo',
     sortDesc = true,
     hasActiveTextSearch = defaultHasActiveTextSearch,
@@ -73,15 +72,8 @@ export function updateSearchControls({
 } = {}) {
     const input = documentImpl.getElementById('search-input');
     const clearBtn = documentImpl.getElementById('search-clear');
-    const deepBtn = documentImpl.getElementById('deep-search-btn');
     if (input && searchQuery !== SIMILAR_SEARCH_SENTINEL) input.value = searchQuery;
     if (clearBtn) clearBtn.classList.toggle('hidden', !searchQuery);
-    if (deepBtn) {
-        const inputQuery = ((input && input.value) || '').trim();
-        const activeTextSearch = hasActiveTextSearch(inputQuery || searchQuery);
-        deepBtn.disabled = !activeTextSearch;
-        deepBtn.classList.toggle('active', activeTextSearch && deepSearchRequested);
-    }
     updateSimilaritySortOption({
         documentImpl,
         active: hasActiveTextSearch(searchQuery),

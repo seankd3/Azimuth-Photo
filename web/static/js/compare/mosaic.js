@@ -95,13 +95,15 @@ export function renderMosaicGrid({
         cell.onclick = () => onPick(img.id);
 
         const imageEl = documentImpl.createElement('img');
-        imageEl.src = img.thumb_url;
         imageEl.alt = img.filename || '';
         imageEl.dataset.tierRank = '0';
-        imageEl.onload = () => {
+        const markLoaded = () => {
             imageEl.classList.add('loaded');
             cell.classList.remove('skeleton-cell');
         };
+        imageEl.onload = markLoaded;
+        imageEl.src = img.thumb_url;
+        if (imageEl.complete && imageEl.naturalWidth > 0) markLoaded();
         cell.appendChild(imageEl);
         preloadImage(img.thumb_url);
         frag.appendChild(cell);
@@ -140,12 +142,16 @@ export async function upgradeMosaicCellImage(cell, img, rowH, token, {
     if (token !== getRenderToken() || !cell.isConnected || cell.dataset.id !== String(img.id)) return false;
 
     const tiers = status?.tiers || {};
-    const cachedBest = tiers.lg?.cached ? 'lg' : tiers.md?.cached ? 'md' : null;
+    const targetTier = rowH >= 360 ? 'lg' : 'md';
+    const cachedBest = (
+        targetTier === 'lg' && tiers.lg?.cached
+            ? 'lg'
+            : tiers.md?.cached ? 'md' : null
+    );
     if (cachedBest) {
         await adoptTier(cell, img, cachedBest, true, token, 900);
     }
 
-    const targetTier = rowH >= 360 ? 'lg' : 'md';
     await adoptTier(cell, img, 'md', false, token, LOUPE_TIER_TIMEOUTS.md);
     if (targetTier === 'lg') {
         await adoptTier(cell, img, 'lg', false, token, LOUPE_TIER_TIMEOUTS.lg);
@@ -174,6 +180,8 @@ export async function adoptMosaicTier(cell, img, tier, cachedOnly, token, timeou
     if (rank <= Number(imgEl.dataset.tierRank || 0)) return false;
     imgEl.dataset.tierRank = String(rank);
     imgEl.src = result.url;
+    imgEl.classList.add('loaded');
+    cell.classList.remove('skeleton-cell');
     return true;
 }
 
@@ -215,7 +223,15 @@ export async function parseMosaicPickResponse(res) {
         payload = await res.json();
     } catch {}
     if (!res.ok || payload.ok === false) {
-        throw new Error(payload.error || 'Failed to save pick');
+        const error = new Error(payload.error || 'Failed to save pick');
+        error.status = Number(res.status || 0);
+        error.payload = payload;
+        error.statusStale = Boolean(payload.status_stale || res.status === 503);
+        error.retryable = (
+            error.statusStale ||
+            [408, 409, 425, 429, 500, 502, 503, 504].includes(error.status)
+        );
+        throw error;
     }
     return payload;
 }
@@ -224,9 +240,10 @@ export async function parseMosaicPickResponse(res) {
 export function postMosaicPick(winnerId, loserIds, {
     fetchImpl = globalThis.fetch,
     setTimeoutImpl = globalThis.setTimeout,
+    retryDelays = [160, 420, 900, 1600, 3000, 5000, 8000],
 } = {}) {
     return new Promise((resolve) => {
-        setTimeoutImpl(() => {
+        const attempt = (attemptIndex = 0) => {
             Promise.resolve()
                 .then(() => fetchImpl('/api/mosaic/pick', {
                     method: 'POST',
@@ -236,8 +253,16 @@ export function postMosaicPick(winnerId, loserIds, {
                 .then(parseMosaicPickResponse)
                 .then(
                     (payload) => resolve({ ok: true, payload }),
-                    (error) => resolve({ ok: false, error }),
+                    (error) => {
+                        const retryable = error.retryable || error.statusStale || error.name === 'TypeError';
+                        if (retryable && attemptIndex < retryDelays.length) {
+                            setTimeoutImpl(() => attempt(attemptIndex + 1), retryDelays[attemptIndex]);
+                            return;
+                        }
+                        resolve({ ok: false, error });
+                    },
                 );
-        }, 0);
+        };
+        setTimeoutImpl(() => attempt(0), 0);
     });
 }

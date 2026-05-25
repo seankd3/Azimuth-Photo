@@ -6,7 +6,6 @@ import shutil
 import time
 from collections.abc import Awaitable, Callable
 
-import resource_governor
 import thumbnails
 from core import requests as request_helpers
 from core import responses as response_helpers
@@ -239,6 +238,58 @@ def _copy_cache_status_response(status: dict) -> dict:
     return response_helpers.copy_cache_status_response(status)
 
 
+def cached_cache_status(ahead: int = 0, *, stale_reason: str = "refresh_deferred") -> dict | None:
+    ahead = request_helpers.clamp_int(ahead, 0, 0, _cache_status_ahead_limit)
+    cached = _cache_status_cache.get((ahead,))
+    if not cached or cached.get("data") is None:
+        return None
+    response = _copy_cache_status_response(cached["data"])
+    response["counts_stale"] = True
+    response["status_stale"] = True
+    response["stale_reason"] = stale_reason
+    return response
+
+
+def deferred_cache_status(ahead: int = 0, *, reason: str = "refresh_deferred") -> dict:
+    ahead = request_helpers.clamp_int(ahead, 0, 0, _cache_status_ahead_limit)
+    cache_root = _cache_root()
+    return {
+        "memory": {"limit_bytes": 0, "used_bytes": 0, "tiers": {}, "utilization_pct": 0.0},
+        "disk": {
+            "root": cache_root,
+            "limit_bytes": 0,
+            "used_bytes": 0,
+            "tiers": {},
+            "utilization_pct": 0.0,
+        },
+        "eligible_images": 0,
+        "browser_original_images": 0,
+        "recommendations": {
+            "eligible_images": 0,
+            "total_images": 0,
+            "browser_original_images": 0,
+            "budget": thumbnails.cache_budget_config(),
+            "tiers": {},
+        },
+        "pregen": {
+            "enabled": False,
+            "manual_mode": False,
+            "manual_pause": False,
+            "state": "stale",
+            "message": "Cache status refresh is still catching up.",
+            "preview": {"count": 0, "total": 0, "remaining": 0, "image_remaining": 0, "progress_pct": 0.0},
+            "originals": {"count": 0, "total": 0, "remaining": 0, "progress_pct": 0.0},
+        },
+        "system_resources": _system_resource_status(cache_root),
+        "total": 0,
+        "cached": 0,
+        "window": ahead,
+        "counts_stale": True,
+        "status_stale": True,
+        "stale_reason": reason,
+    }
+
+
 def _cache_status_ttl(result: dict) -> float:
     pregen = result.get("pregen") or {}
     if pregen.get("state") == "running":
@@ -354,9 +405,6 @@ async def build_cache_status(
             archive_estimates,
         ),
         "system_resources": _system_resource_status(_cache_root()),
-        "governor": resource_governor.get_background_decision(
-            thumbnails.get_idle_seconds()
-        ).to_dict(),
     }
 
     if ahead > 0:

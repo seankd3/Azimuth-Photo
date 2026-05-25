@@ -21,7 +21,6 @@ export function createLegacyFilterQueryBridge({
     storage,
     locationImpl,
     getSearchQuery,
-    getDeepSearchRequested,
     getSortField,
     getSortDesc,
     getRankingsSort,
@@ -85,7 +84,6 @@ export function createLegacyFilterQueryBridge({
     const queryController = createQueryController({
         getFilters: currentFilterState,
         getSearchQuery,
-        getDeepSearchRequested,
         getSortField,
         getSortDesc,
         getRankingsSort,
@@ -101,6 +99,7 @@ export function createLegacyFilterQueryBridge({
             filters: currentFilterState(),
             sortField: getSortField(),
             sortDesc: getSortDesc(),
+            searchQuery: getSearchQuery(),
         });
     }
 

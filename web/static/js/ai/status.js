@@ -1,16 +1,22 @@
-import { escapeHtml } from '../ui.js';
 import {
     bindBackgroundWorkPanel as bindBackgroundWorkPanelCore,
+    ingestBackgroundWorkPoll,
     renderBackgroundWorkPanel,
     renderBackgroundWorkSummary,
     toggleBackgroundWorkPanel as toggleBackgroundWorkPanelCore,
 } from '../work/status_panel.js';
 
+export { ingestBackgroundWorkPoll };
+
 export function aiStatusPollDelay(data, {
     activePollMs = 5000,
     idlePollMs = 30000,
+    cacheStatus = null,
+    peopleStatus = null,
 } = {}) {
     const workerState = String(data?.worker_state || '');
+    const peopleWorkerState = String(peopleStatus?.worker?.state || '');
+    const cacheWorkerState = String(cacheStatus?.pregen?.state || '');
     if (workerState === 'error' || data?.worker_error || !data?.model_installed) {
         return idlePollMs;
     }
@@ -18,6 +24,13 @@ export function aiStatusPollDelay(data, {
         data?.installing
         || workerState === 'loading_model'
         || workerState === 'embedding'
+        || cacheWorkerState === 'running'
+        || cacheStatus?.counts_stale
+        || cacheStatus?.status_stale
+        || peopleWorkerState === 'installing'
+        || peopleWorkerState === 'scanning'
+        || peopleStatus?.counts_stale
+        || peopleStatus?.status_stale
     );
     return active ? activePollMs : idlePollMs;
 }
@@ -25,9 +38,10 @@ export function aiStatusPollDelay(data, {
 
 export function renderAIBottomBarStatus(data = {}, {
     cacheStatus = null,
+    peopleStatus = null,
     documentImpl = globalThis.document,
 } = {}) {
-    return renderBackgroundWorkSummary(data, { cacheStatus, documentImpl });
+    return renderBackgroundWorkSummary(data, { cacheStatus, peopleStatus, documentImpl });
 }
 
 
@@ -49,7 +63,7 @@ export function renderAIPanelStatus(data = {}, {
             modelText.textContent = data.install_message || `Installing ${data.model_id}`;
             modelText.className = 'ai-panel-value';
         } else if (!data.model_installed) {
-            modelText.textContent = `Model not installed. Open Settings to install ${data.model_id}.`;
+            modelText.textContent = `Model not installed. Open Catalog to install ${data.model_id}.`;
             modelText.className = 'ai-panel-value';
         } else if (data.worker_state === 'loading_model') {
             modelText.textContent = data.worker_message || `Loading ${data.model_id}`;
@@ -73,9 +87,19 @@ export function renderAIPanelStatus(data = {}, {
 
 
 export function renderAIStatusWidgets(data = {}, options = {}) {
-    const { totalImages } = renderAIBottomBarStatus(data, options);
-    renderAIPanelStatus(data, { ...options, totalImages });
-    renderBackgroundWorkPanel(data, options);
+    const merged = ingestBackgroundWorkPoll(
+        data,
+        options.cacheStatus,
+        options.peopleStatus,
+    );
+    const renderOptions = {
+        ...options,
+        cacheStatus: merged.cacheStatus,
+        peopleStatus: merged.peopleStatus,
+    };
+    const { totalImages } = renderAIBottomBarStatus(merged.aiStatus, renderOptions);
+    renderAIPanelStatus(merged.aiStatus, { ...renderOptions, totalImages });
+    renderBackgroundWorkPanel(merged.aiStatus, renderOptions);
 }
 
 
@@ -99,25 +123,6 @@ export function bindBackgroundWorkPanel({ documentImpl = globalThis.document } =
 }
 
 
-export function deepSearchQueryListHtml(queries) {
-    const items = Array.isArray(queries) ? queries.slice(0, 60) : [];
-    if (!items.length) {
-        return '<span class="settings-help-text">No deep-search terms queued yet.</span>';
-    }
-    return items.map((item) => {
-        const cached = Boolean(item.cached);
-        const cls = cached ? 'cached' : 'pending';
-        const state = cached ? 'ready' : 'pending';
-        return `
-                <span class="deep-search-query ${cls}">
-                    <span>${escapeHtml(item.query || '')}</span>
-                    <span class="deep-search-query-state">${state}</span>
-                </span>
-            `;
-    }).join('');
-}
-
-
 export function modelInstallDisplay(modelStatus = {}) {
     const install = modelStatus.install || {};
     const installApplies = Boolean(install.model_dir && modelStatus.model_dir && install.model_dir === modelStatus.model_dir);
@@ -132,7 +137,7 @@ export function modelInstallDisplay(modelStatus = {}) {
     if (install.running) {
         return {
             statusText: 'Installer busy',
-            messageText: `${install.model_id || 'Another model'} is installing. The 2B install can start after it finishes.`,
+            messageText: `${install.model_id || 'Another model'} is installing. This install can start after it finishes.`,
             buttonDisabled: true,
             buttonText: 'Installer Busy',
         };
@@ -159,25 +164,4 @@ export function modelInstallDisplay(modelStatus = {}) {
         buttonDisabled: false,
         buttonText: 'Save + Install Model',
     };
-}
-
-
-export function deepSearchWorkerText(deep = {}) {
-    const state = deep.state ? String(deep.state).replace(/_/g, ' ') : 'waiting';
-    return deep.message ? `${state}: ${deep.message}` : state;
-}
-
-
-export function deepSearchImageStatusText(deepIndex = {}, deep = {}) {
-    const embedded = Number(deepIndex.embedded ?? deep.embedded_images ?? 0).toLocaleString();
-    const total = Number(deepIndex.total_images ?? deep.total_images ?? 0).toLocaleString();
-    const pending = Number(deepIndex.remaining ?? deep.pending_images ?? 0).toLocaleString();
-    return `${embedded} / ${total} indexed, ${pending} pending`;
-}
-
-
-export function deepSearchQueryStatusText(deepIndex = {}, deep = {}) {
-    const embedded = Number(deepIndex.embedded_queries ?? deep.embedded_queries ?? 0).toLocaleString();
-    const pending = Number(deepIndex.pending_queries ?? deep.pending_queries ?? 0).toLocaleString();
-    return `${embedded} ready, ${pending} pending`;
 }

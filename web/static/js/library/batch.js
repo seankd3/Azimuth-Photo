@@ -4,13 +4,13 @@ import { batchExport as exportSelectedImages } from '../export/actions.js';
 export function batchBarHtml(selectedCount) {
     return `
                 <span>${selectedCount} selected</span>
-                <button class="batch-flag-btn flag-picked" onclick="PhotoArchive.batchFlag('picked')">P</button>
-                <button class="batch-flag-btn flag-unflagged" onclick="PhotoArchive.batchFlag('unflagged')">U</button>
-                <button class="batch-flag-btn flag-rejected" onclick="PhotoArchive.batchFlag('rejected')">X</button>
+                <button class="batch-flag-btn flag-picked" data-batch-action="flag" data-flag="picked">P</button>
+                <button class="batch-flag-btn flag-unflagged" data-batch-action="flag" data-flag="unflagged">U</button>
+                <button class="batch-flag-btn flag-rejected" data-batch-action="flag" data-flag="rejected">X</button>
                 <span class="batch-divider"></span>
-                <button onclick="PhotoArchive.batchExport('json')">Export JSON</button>
-                <button onclick="PhotoArchive.batchExport('csv')">Export CSV</button>
-                <button class="batch-cancel" onclick="PhotoArchive.clearBatchSelection()">✕</button>
+                <button data-batch-action="export" data-format="json">Export JSON</button>
+                <button data-batch-action="export" data-format="csv">Export CSV</button>
+                <button class="batch-cancel" data-batch-action="clear">✕</button>
             `;
 }
 

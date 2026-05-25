@@ -14,10 +14,22 @@ export function initLoupeInteraction({
     applyTransform,
     updateZoomIndicator,
     requestFullImage,
+    closeLightbox = () => {},
 } = {}) {
     const wrap = documentImpl.getElementById('loupe-image-wrap');
     const img = documentImpl.getElementById('loupe-img');
-    if (!wrap || !img) return;
+    if (!wrap || !img) return false;
+    if (wrap.dataset.loupeInteractionBound === '1') return true;
+    wrap.dataset.loupeInteractionBound = '1';
+
+    const closeBtn = documentImpl.querySelector('[data-action="close-loupe"]');
+    if (closeBtn && closeBtn.dataset.loupeCloseBound !== '1') {
+        closeBtn.dataset.loupeCloseBound = '1';
+        closeBtn.addEventListener('click', (event) => {
+            event.preventDefault();
+            closeLightbox();
+        });
+    }
 
     let dragMoved = false;
     let dragging = false;
@@ -100,4 +112,5 @@ export function initLoupeInteraction({
             updateZoomIndicator();
         }
     });
+    return true;
 }

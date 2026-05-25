@@ -21,7 +21,7 @@ _install_state = {
 
 
 def _snapshot_config(config: dict | None = None) -> dict:
-    cfg = config or settings.fast_search_embedding_config()
+    cfg = config or settings.active_embedding_config()
     return {
         "model_id": cfg.get("embed_model_id") or cfg["model_id"],
         "revision": cfg.get("embed_model_revision") or cfg.get("revision", "main"),

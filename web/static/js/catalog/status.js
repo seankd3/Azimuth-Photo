@@ -1,7 +1,23 @@
 export function sourceState(source) {
-    if (!source?.included) return { label: 'Removed', cls: 'removed' };
-    if (!source?.online) return { label: 'Offline', cls: 'offline' };
-    return { label: 'Online', cls: 'online' };
+    if (!source?.included) {
+        return {
+            label: 'Removed',
+            cls: 'removed',
+            help: 'Hidden from Library and Compare until restored.',
+        };
+    }
+    if (!source?.online) {
+        return {
+            label: 'Offline',
+            cls: 'offline',
+            help: 'Drive not reachable right now. Cached browsing, search, ranking, and People data remain available.',
+        };
+    }
+    return {
+        label: 'Online',
+        cls: 'online',
+        help: 'Drive is reachable for rescans and any previews that still need source files.',
+    };
 }
 
 

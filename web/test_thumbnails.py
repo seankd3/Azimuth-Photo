@@ -433,10 +433,12 @@ class ThumbnailJobsFacadeTests(unittest.TestCase):
                 has_cached=lambda _size, _filepath, _image_id: False,
                 ensure_thumbnail_with_executor=ensure_thumbnail_with_executor,
                 prefetch_executor="prefetch-executor",
-                create_task=lambda task: created_tasks.append(task),
+                create_task=lambda task: created_tasks.append(asyncio.create_task(task)) or created_tasks[-1],
             )
+            await asyncio.gather(*created_tasks)
 
             stale_scheduled = []
+            created_tasks.clear()
             stale_result = await thumbnail_jobs.prefetch_images(
                 [{"id": 5, "filepath": "fresh.jpg"}],
                 "md",
@@ -454,8 +456,9 @@ class ThumbnailJobsFacadeTests(unittest.TestCase):
                     stale_scheduled.append((args, kwargs)) or "stale-task"
                 ),
                 prefetch_executor="prefetch-executor",
-                create_task=lambda task: created_tasks.append(task),
+                create_task=lambda task: created_tasks.append(asyncio.create_task(task)) or created_tasks[-1],
             )
+            await asyncio.gather(*created_tasks)
 
             return result, scheduled, touches, created_tasks, stale_result, stale_scheduled
 
@@ -467,7 +470,7 @@ class ThumbnailJobsFacadeTests(unittest.TestCase):
             [("needed.jpg", "md", 4, "prefetch-executor", True, True, True)],
         )
         self.assertEqual(touches, [("md", 2, None)])
-        self.assertEqual(created_tasks, ["task:4", "stale-task"])
+        self.assertEqual(len(created_tasks), 1)
         self.assertEqual(stale_result, 1)
         self.assertEqual(stale_scheduled[0][0], ("fresh.jpg", "md", 5, "prefetch-executor"))
         self.assertEqual(
@@ -552,9 +555,9 @@ class ThumbnailPregenFacadeTests(unittest.TestCase):
     def test_decision_helpers_remain_facaded_from_pregen_module(self):
         calls = []
 
-        def decision_provider(idle_seconds, *, work_mode):
-            calls.append((idle_seconds, work_mode))
-            return {"decision": work_mode}
+        def decision_provider():
+            calls.append("called")
+            return {"decision": "manual"}
 
         decision = type("Decision", (), {"pause": False, "thumbnail_batch_size": 12})()
         old_batch = thumbnails.PREGENERATE_GENERATE_BATCH
@@ -570,22 +573,12 @@ class ThumbnailPregenFacadeTests(unittest.TestCase):
         self.assertEqual(
             thumbnail_pregen.background_decision(
                 12.5,
-                work_mode_provider=lambda: "max",
                 decision_provider=decision_provider,
             ),
-            {"decision": "max"},
+            {"decision": "manual"},
         )
-        self.assertEqual(calls, [(12.5, "max")])
-        self.assertEqual(
-            thumbnail_pregen.background_work_mode(lambda: {"background_work_mode": "browse"}),
-            "browse",
-        )
-        self.assertEqual(
-            thumbnail_pregen.background_work_mode(lambda: {"background_work_mode": "invalid"}),
-            "balanced",
-        )
-        self.assertTrue(thumbnail_pregen.should_yield_to_foreground(lambda: "browse"))
-        self.assertFalse(thumbnail_pregen.should_yield_to_foreground(lambda: "balanced"))
+        self.assertEqual(calls, ["called"])
+        self.assertFalse(thumbnail_pregen.should_pause_for_priority())
 
     def test_session_bookkeeping_remains_facaded_from_pregen_module(self):
         old_history = thumbnails._pregen_history
@@ -1106,7 +1099,7 @@ class ThumbnailStatusPayloadTests(unittest.TestCase):
         )
 
         self.assertEqual(result["state"], "running")
-        self.assertEqual(result["governor"]["effective_thumbnail_batch_size"], 7)
+        self.assertNotIn("governor", result)
         self.assertEqual(result["idle_seconds"], 12.35)
         self.assertEqual(result["phases"]["sm"]["count"], 2)
         self.assertTrue(result["phases"]["sm"]["replacement_mode"])
@@ -1152,10 +1145,6 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
         self.old_pregen_manual_pause = thumbnails._pregen_manual_pause
         self.old_last_user_activity = thumbnails._last_user_activity
         self.old_disk_stats_cache = dict(thumbnails._disk_stats_cache)
-        self.old_background_work_mode = thumbnails._background_work_mode
-        self.old_read_load_1m = thumbnails.resource_governor._read_load_1m
-        self.old_read_meminfo = thumbnails.resource_governor._read_meminfo
-        self.old_cpu_count = thumbnails.resource_governor.os.cpu_count
 
         thumbnails.SSD_CACHE_DIR = self.tempdir.name
         self.db_path = os.path.join(self.tempdir.name, "thumbnail-cache-test.db")
@@ -1211,14 +1200,6 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
         thumbnails._prefetching = True
         thumbnails._pregen_manual_mode = True
         thumbnails._pregen_manual_pause = False
-        thumbnails._background_work_mode = lambda: "balanced"
-        thumbnails.resource_governor.os.cpu_count = lambda: 8
-        thumbnails.resource_governor._read_load_1m = lambda: 1.0
-        thumbnails.resource_governor._read_meminfo = lambda: {
-            "MemAvailable": 10 * 1024 ** 3,
-            "SwapTotal": 10 * 1024 ** 3,
-            "SwapFree": 10 * 1024 ** 3,
-        }
         thumbnails._last_user_activity = thumbnails.time.monotonic() - 30.0
         thumbnails._reset_pregen_bulk_cursor()
         thumbnails._reset_pregen_full_cursor()
@@ -1246,10 +1227,6 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
         thumbnails._prefetching = self.old_prefetching
         thumbnails._pregen_manual_mode = self.old_pregen_manual_mode
         thumbnails._pregen_manual_pause = self.old_pregen_manual_pause
-        thumbnails._background_work_mode = self.old_background_work_mode
-        thumbnails.resource_governor._read_load_1m = self.old_read_load_1m
-        thumbnails.resource_governor._read_meminfo = self.old_read_meminfo
-        thumbnails.resource_governor.os.cpu_count = self.old_cpu_count
         thumbnails._last_user_activity = self.old_last_user_activity
         thumbnails._clear_memory_cache()
         thumbnails._clear_disk_index()
@@ -2429,27 +2406,7 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
         self.assertEqual(source_size, file_size)
         self.assertEqual(calls, [])
 
-    def test_background_governor_uses_light_mode_during_activity(self):
-        thumbnails.note_user_activity()
-
-        decision = thumbnails.resource_governor.get_background_decision(
-            thumbnails.get_idle_seconds(),
-            work_mode="balanced",
-        )
-
-        self.assertEqual(decision.reason, "light background")
-        self.assertFalse(decision.pause)
-        self.assertEqual(decision.thumbnail_batch_size, 2)
-
-    def test_pregeneration_batch_pauses_in_browse_mode(self):
-        thumbnails._background_work_mode = lambda: "browse"
-        thumbnails.note_user_activity()
-
-        warmed = asyncio.run(thumbnails._run_pregen_bulk_batch(generate_batch=10))
-
-        self.assertEqual(warmed, 0)
-
-    def test_light_background_uses_small_batch_during_activity(self):
+    def test_manual_pregen_decision_uses_configured_batch_after_activity(self):
         old_batch = thumbnails.PREGENERATE_GENERATE_BATCH
         try:
             thumbnails.PREGENERATE_GENERATE_BATCH = 64
@@ -2457,48 +2414,30 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
 
             decision = thumbnails._pregen_background_decision()
 
-            self.assertEqual(decision.reason, "light background")
+            self.assertEqual(decision.reason, "manual background work")
             self.assertFalse(decision.pause)
-            self.assertEqual(thumbnails._pregen_generate_batch_for_decision(decision), 2)
+            self.assertEqual(thumbnails._pregen_generate_batch_for_decision(decision), 64)
         finally:
             thumbnails.PREGENERATE_GENERATE_BATCH = old_batch
 
-    def test_pregeneration_yields_only_in_browse_mode(self):
+    def test_pregeneration_does_not_pause_for_priority_after_activity(self):
         thumbnails.note_user_activity()
 
-        self.assertFalse(thumbnails._pregen_should_yield_to_foreground())
+        self.assertFalse(thumbnails._pregen_should_pause_for_priority())
 
-        thumbnails._background_work_mode = lambda: "browse"
-
-        self.assertTrue(thumbnails._pregen_should_yield_to_foreground())
-
-    def test_full_warmup_pauses_in_browse_mode(self):
-        thumbnails._background_work_mode = lambda: "browse"
-        thumbnails.note_user_activity()
-        thumbnails._disk_allocations[thumbnails.FULL_TIER] = 64 * 1024 * 1024
-
-        warmed = asyncio.run(thumbnails._run_full_warm_batch(generate_batch=10))
-
-        self.assertEqual(warmed, 0)
-
-    def test_prefetch_worker_caps_governor_batch_to_configured_batch(self):
+    def test_prefetch_worker_caps_manual_batch_to_configured_batch(self):
         old_batch = thumbnails.PREGENERATE_GENERATE_BATCH
         try:
             thumbnails.PREGENERATE_GENERATE_BATCH = 16
-            decision = thumbnails.resource_governor.BackgroundDecision(
-                mode="normal",
+            decision = thumbnail_pregen.BackgroundDecision(
+                mode="manual",
                 intensity=0.75,
                 pause=False,
                 sleep_seconds=0.0,
                 thumbnail_batch_size=64,
                 thumbnail_pause_seconds=0.05,
                 embedding_pause_seconds=0.25,
-                reason="system healthy",
-                load_1m=1.0,
-                cpu_count=8,
-                available_memory_gb=12.0,
-                swap_used_pct=0.0,
-                idle_seconds=120.0,
+                reason="manual background work",
                 checked_at=1.0,
             )
 
@@ -2513,7 +2452,7 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
         old_run_full = thumbnails._run_full_warm_batch
         old_flush_write_queue = thumbnails._flush_write_queue
         old_flush_orientation = thumbnails.flush_orientation_updates
-        old_should_yield = thumbnails._pregen_should_yield_to_foreground
+        old_should_pause = thumbnails._pregen_should_pause_for_priority
         old_background_decision = thumbnails._pregen_background_decision
         old_no_progress_limit = thumbnails.PREGENERATE_NO_PROGRESS_SCAN_LIMIT
         try:
@@ -2544,20 +2483,15 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
                 return False
 
             def fake_decision():
-                return thumbnails.resource_governor.BackgroundDecision(
-                    mode="normal",
+                return thumbnail_pregen.BackgroundDecision(
+                    mode="manual",
                     intensity=0.45,
                     pause=False,
                     sleep_seconds=0.0,
                     thumbnail_batch_size=8,
                     thumbnail_pause_seconds=0.01,
                     embedding_pause_seconds=0.25,
-                    reason="system healthy",
-                    load_1m=1.0,
-                    cpu_count=8,
-                    available_memory_gb=12.0,
-                    swap_used_pct=0.0,
-                    idle_seconds=120.0,
+                    reason="manual background work",
                     checked_at=1.0,
                 )
 
@@ -2570,7 +2504,7 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
             thumbnails._run_full_warm_batch = fake_run_full
             thumbnails._flush_write_queue = lambda: True
             thumbnails.flush_orientation_updates = fake_flush_orientation
-            thumbnails._pregen_should_yield_to_foreground = fake_should_yield
+            thumbnails._pregen_should_pause_for_priority = fake_should_yield
             thumbnails._pregen_background_decision = fake_decision
             thumbnails.asyncio.sleep = fake_sleep
 
@@ -2585,11 +2519,11 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
             thumbnails._run_full_warm_batch = old_run_full
             thumbnails._flush_write_queue = old_flush_write_queue
             thumbnails.flush_orientation_updates = old_flush_orientation
-            thumbnails._pregen_should_yield_to_foreground = old_should_yield
+            thumbnails._pregen_should_pause_for_priority = old_should_pause
             thumbnails._pregen_background_decision = old_background_decision
             thumbnails.PREGENERATE_NO_PROGRESS_SCAN_LIMIT = old_no_progress_limit
 
-    def test_pregen_status_reports_current_governor_decision(self):
+    def test_pregen_status_omits_governor_decision(self):
         old_batch = thumbnails.PREGENERATE_GENERATE_BATCH
         try:
             thumbnails.PREGENERATE_GENERATE_BATCH = 16
@@ -2597,8 +2531,8 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
 
             status = thumbnails.get_pregen_status(target_total=0, stats=thumbnails.cache_stats())
 
-            self.assertEqual(status["governor"]["reason"], "light background")
-            self.assertEqual(status["governor"]["effective_thumbnail_batch_size"], 2)
+            self.assertNotIn("governor", status)
+            self.assertEqual(status["state"], thumbnails._pregen_status["state"])
         finally:
             thumbnails.PREGENERATE_GENERATE_BATCH = old_batch
 

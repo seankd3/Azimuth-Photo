@@ -70,6 +70,13 @@ export function libraryCardInfoLine(img, rank, showRank, sort) {
     if (showRank) {
         return `<span class="rank-number">#${rank}</span><span class="rank-elo">${escapeHtml(img.elo)}</span>`;
     }
+    if (sort === 'taste') {
+        const rawScore = Number(img.taste_score);
+        const label = Number.isFinite(rawScore)
+            ? `${Math.round(Math.max(0, Math.min(1, (rawScore + 1) / 2)) * 100)}% taste`
+            : 'Taste pending';
+        return `<span class="rank-elo">${escapeHtml(img.elo)}</span><span class="rank-comparisons">${escapeHtml(label)}</span>`;
+    }
     if (sort === 'date_taken' || sort === 'date_taken_asc') {
         const label = formatShortDate(img.date_taken) || 'No date';
         return `<span class="rank-elo">${escapeHtml(img.elo)}</span><span class="rank-comparisons">${escapeHtml(label)}</span>`;

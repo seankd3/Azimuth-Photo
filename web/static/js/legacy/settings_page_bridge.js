@@ -7,6 +7,7 @@ export function createLegacySettingsPageBridge({
     formatBytes,
     initVisibilityRefresh,
     initBottomBarMeasurement,
+    startAIStatusPolling = () => {},
     createSettingsPageControllerImpl = createSettingsPageController,
 } = {}) {
     const settingsPage = createSettingsPageControllerImpl({
@@ -15,6 +16,7 @@ export function createLegacySettingsPageBridge({
         formatBytes,
         initVisibilityRefresh,
         initBottomBarMeasurement,
+        startAIStatusPolling,
     });
 
     return {

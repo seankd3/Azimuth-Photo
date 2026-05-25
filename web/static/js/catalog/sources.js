@@ -4,7 +4,14 @@ import { sourceState } from './status.js';
 
 
 export function catalogSourcesHtml(sources = []) {
-    if (!sources.length) return '<div class="catalog-empty">No folders added yet.</div>';
+    if (!sources.length) {
+        return `
+                <div class="catalog-empty">
+                    <strong>No folders added yet.</strong>
+                    <span>Choose a photo folder above, then use Add + Scan to populate Library.</span>
+                </div>
+            `;
+    }
     return sources.map((source) => {
         const state = sourceState(source);
         const count = Number(source.image_count || 0).toLocaleString();
@@ -17,14 +24,15 @@ export function catalogSourcesHtml(sources = []) {
                     <div class="catalog-source-main">
                         <div class="catalog-source-title">
                             <strong>${escapeHtml(source.display_name || source.path)}</strong>
-                            <span class="catalog-source-state ${state.cls}">${state.label}</span>
+                            <span class="catalog-source-state ${state.cls} has-tooltip" data-tooltip="${escapeHtml(state.help || '')}">${state.label}</span>
                         </div>
                         <code>${escapeHtml(source.path)}</code>
                         <div class="catalog-source-meta">${active} active · ${count} catalog · ${escapeHtml(lastScan)}</div>
+                        ${source.included && !source.online ? '<div class="catalog-source-note">Cached Library, Compare, search, and People views remain available while the drive is offline.</div>' : ''}
                     </div>
                     <div class="catalog-source-actions">
-                        <button class="bar-btn" type="button" ${canScan} onclick="PhotoArchive.rescanCatalogSource(${source.id})">${restoreLabel}</button>
-                        <button class="bar-btn danger" type="button" onclick="PhotoArchive.openRemoveSourceDialog(${source.id})">Remove</button>
+                        <button class="bar-btn has-tooltip" type="button" ${canScan} data-action="rescan-catalog-source" data-source-id="${escapeHtml(source.id)}" data-tooltip="Look for new, changed, or missing photos in this folder.">${restoreLabel}</button>
+                        <button class="bar-btn danger has-tooltip" type="button" data-action="open-remove-source-dialog" data-source-id="${escapeHtml(source.id)}" data-tooltip="Remove this folder from active views or delete its catalog/cache rows. Originals stay on disk.">Remove</button>
                     </div>
                 </div>
             `;
@@ -57,9 +65,9 @@ export function openRemoveSourceDialog(source) {
                 <h2>Remove Folder</h2>
                 <p>${escapeHtml(source.path)}</p>
                 <div class="catalog-remove-actions">
-                    <button class="bar-btn" type="button" onclick="PhotoArchive.removeCatalogSource(${source.id}, 'keep')">Remove Folder, Keep Catalog Data</button>
-                    <button class="bar-btn danger" type="button" onclick="PhotoArchive.removeCatalogSource(${source.id}, 'delete')">Remove Folder and Delete Catalog Data</button>
-                    <button class="bar-btn" type="button" onclick="PhotoArchive.closeRemoveSourceDialog()">Cancel</button>
+                    <button class="bar-btn" type="button" data-action="remove-catalog-source" data-source-id="${escapeHtml(source.id)}" data-policy="keep">Remove Folder, Keep Catalog Data</button>
+                    <button class="bar-btn danger" type="button" data-action="remove-catalog-source" data-source-id="${escapeHtml(source.id)}" data-policy="delete">Remove Folder and Delete Catalog Data</button>
+                    <button class="bar-btn" type="button" data-action="close-remove-source-dialog">Cancel</button>
                 </div>
             </div>
         `;

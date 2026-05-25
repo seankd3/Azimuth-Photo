@@ -32,13 +32,12 @@ def active_source_join(image_alias: str = "i", source_alias: str = "s") -> str:
 
 
 def active_source_condition(source_alias: str = "s") -> str:
-    return f"{source_alias}.included = 1 AND {source_alias}.online = 1"
+    return f"{source_alias}.included = 1"
 
 
 def active_image_condition(image_alias: str = "i", source_alias: str = "s") -> str:
     return (
         f"{source_alias}.included = 1 "
-        f"AND {source_alias}.online = 1 "
         f"AND {image_alias}.missing_at IS NULL"
     )
 
@@ -47,7 +46,7 @@ async def active_source_id_set(db_path: str) -> frozenset[int]:
     conn = await connection.open_async(db_path)
     try:
         cursor = await conn.execute(
-            "SELECT id FROM catalog_sources WHERE included = 1 AND online = 1"
+            "SELECT id FROM catalog_sources WHERE included = 1"
         )
         return frozenset(int(row["id"]) for row in await cursor.fetchall())
     finally:

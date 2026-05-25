@@ -82,6 +82,9 @@ export function restoreFilters({
         if (urlFilters) {
             setFilters?.(urlFilters);
             applyFilterUiState?.(urlFilters);
+            try {
+                storage?.setItem(storageKey, JSON.stringify(urlFilters));
+            } catch {}
             return urlFilters;
         }
 

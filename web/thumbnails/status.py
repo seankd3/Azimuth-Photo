@@ -261,13 +261,10 @@ def pregen_status(
         else None
     )
     replacement_mode = any(phase["replacement_mode"] for phase in phases.values())
-    decision = pregen_background_decision()
-    governor_status = decision.to_dict()
-    governor_status["effective_thumbnail_batch_size"] = pregen_generate_batch_for_decision(decision)
+    del pregen_background_decision, pregen_generate_batch_for_decision
 
     return {
         **dict(pregen_state),
-        "governor": governor_status,
         "idle_seconds": round(max(0.0, idle_seconds), 2),
         "phases": phases,
         "preview": preview,

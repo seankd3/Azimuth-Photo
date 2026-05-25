@@ -1,102 +1,54 @@
 {% extends "base.html" %}
 {% block title %}photoArchive — Compare{% endblock %}
 {% block body_class %}with-bottom-bar compare-shell{% endblock %}
+{% block active_nav %}compare{% endblock %}
 {% block navbar %}{% endblock %}
 {% block content %}
 <div class="compare-container">
-    <!-- A/B mode -->
-    <div class="compare-images hidden" id="compare-images">
-        <div class="compare-side" id="compare-left">
-            <img id="compare-left-img" src="" alt="Left image">
-            <div class="compare-info" id="compare-left-info"></div>
-        </div>
-        <div class="compare-divider"></div>
-        <div class="compare-side" id="compare-right">
-            <img id="compare-right-img" src="" alt="Right image">
-            <div class="compare-info" id="compare-right-info"></div>
-        </div>
-    </div>
-
-    <!-- Mosaic mode -->
     <div class="mosaic-container" id="mosaic-container">
         <div class="mosaic-grid" id="mosaic-grid"></div>
     </div>
 
     <div class="compare-empty hidden" id="compare-empty">
         <h2>Not enough images to compare</h2>
-        <p>You need at least 2 images in the comparison pool. <a href="/library">Back to Library.</a></p>
+        <p>You need at least 2 visible photos in the comparison pool. Add photos in Catalog or clear filters in this toolbar.</p>
+        <div class="compare-empty-actions">
+            <a class="btn-primary" href="/catalog">Open Catalog</a>
+            <a class="btn-secondary" href="/library">Open Library</a>
+        </div>
     </div>
 </div>
 {% endblock %}
 
 {% block bottom_bar %}
-<footer class="bottom-bar" id="compare-bar">
-    <div class="bar-section bar-modes">
-        <div class="toggle-group toggle-group-sm">
-            <button type="button" id="mode-mosaic" class="active" onclick="PhotoArchive.setCompareMode('mosaic')">Mosaic</button>
-            <button type="button" id="mode-swiss" onclick="PhotoArchive.setCompareMode('swiss')">Swiss</button>
-            <button type="button" id="mode-topn" onclick="PhotoArchive.setCompareMode('topn')">Top 50</button>
+<footer class="bottom-bar command-bar" id="compare-bar" aria-label="Application controls">
+    <div class="bar-row bar-row-main" data-command-layout="culling-workbench">
+        <div class="bar-section bar-context bar-strategies" id="bar-strategies" data-command-zone="mode-tools">
+            <div class="toggle-group toggle-group-sm">
+                <button type="button" id="strategy-diverse" class="active has-tooltip" data-mosaic-strategy="diverse" title="Maximize visual variety in the grid" data-tooltip="Mix visually different photos so each pick teaches the ranking more.">Diverse</button>
+                <button type="button" id="strategy-explore" class="has-tooltip" data-mosaic-strategy="explore" title="Favor unseen images" data-tooltip="Show photos that need more ranking signal. Good early in a catalog.">Explore</button>
+                <button type="button" id="strategy-compete" class="has-tooltip" data-mosaic-strategy="compete" title="Match similar Elo levels" data-tooltip="Compare photos at similar rating levels to refine close calls.">Compete</button>
+                <button type="button" id="strategy-random" class="has-tooltip" data-mosaic-strategy="random" title="Uniform random" data-tooltip="Sample the pool without ranking strategy. Useful as a reset.">Random</button>
+            </div>
+            <button type="button" class="bar-btn has-tooltip" data-action="mosaic-shuffle" data-tooltip="Refresh the visible Mosaic candidates without recording a pick.">Shuffle</button>
         </div>
-    </div>
-    <div class="bar-divider"></div>
-    <div class="bar-section bar-strategies" id="bar-strategies">
-        <div class="toggle-group toggle-group-sm">
-            <button type="button" id="strategy-diverse" class="active" onclick="PhotoArchive.setMosaicStrategy('diverse')" title="Maximize visual variety in the grid">Diverse</button>
-            <button type="button" id="strategy-explore" onclick="PhotoArchive.setMosaicStrategy('explore')" title="Favor unseen images">Explore</button>
-            <button type="button" id="strategy-compete" onclick="PhotoArchive.setMosaicStrategy('compete')" title="Match similar Elo levels">Compete</button>
-            <button type="button" id="strategy-top" onclick="PhotoArchive.setMosaicStrategy('top')" title="Top 50 images only">Top Cut</button>
-            <button type="button" id="strategy-random" onclick="PhotoArchive.setMosaicStrategy('random')" title="Uniform random">Random</button>
+        {% include '_bottom_bar_search.html' %}
+        <div class="bar-section bar-summary bar-stats" data-command-zone="status">
+            <span id="compare-stat-comparisons" class="bar-stat-num">0</span><span id="propagation-badge" class="propagation-badge"></span> rank signals
+            <span class="bar-dot">&middot;</span>
+            <span id="compare-stat-pool" class="bar-stat-num">0</span> <span id="compare-stat-pool-label">images</span>
         </div>
-        <button type="button" class="bar-btn" onclick="PhotoArchive.mosaicShuffle()">Shuffle</button>
-    </div>
-    <div class="bar-section bar-hints" id="bar-hints">
-        <span class="key">←</span> Left
-        <span class="key">→</span> Right
-        <span class="key">↑</span> Undo
-    </div>
-    <div class="bar-divider"></div>
-    <div class="bar-section bar-search">
-        <div class="bar-search-field">
-            <input type="text" id="search-input" class="bar-search-input" placeholder="Search..."
-                   autocomplete="off" spellcheck="false">
-            <button type="button" class="search-clear-sm hidden" id="search-clear" onclick="PhotoArchive.clearSearch()" aria-label="Clear search">&times;</button>
+        <div class="bar-section bar-coverage" data-command-zone="mode-tools">
+            <div class="coverage-bar has-tooltip" title="Ranking coverage" data-tooltip="How much of the current comparison pool has ranking signal.">
+                <div class="coverage-fill" id="coverage-fill"></div>
+            </div>
+            <span class="coverage-label" id="coverage-label"></span>
         </div>
-        <button type="button" class="deep-search-btn" id="deep-search-btn" onclick="PhotoArchive.runDeepSearch()" disabled>
-            Deep Search
-        </button>
+        {% include '_bottom_bar_nav.html' %}
+        {% include '_bottom_bar_work.html' %}
     </div>
-    <div class="bar-divider"></div>
-    {% include '_filters.html' %}
-    <div class="bar-divider"></div>
-    <div class="bar-section bar-stats">
-        <span id="compare-stat-comparisons" class="bar-stat-num">0</span><span id="propagation-badge" class="propagation-badge"></span> rank signals
-        <span class="bar-dot">&middot;</span>
-        <span id="compare-stat-pool" class="bar-stat-num">0</span> images
-    </div>
-    <div class="bar-section bar-coverage">
-        <div class="coverage-bar" title="Ranking coverage">
-            <div class="coverage-fill" id="coverage-fill"></div>
-        </div>
-        <span class="coverage-label" id="coverage-label"></span>
-    </div>
-    <div class="bar-divider"></div>
-    <div class="bar-section">
-        <a href="/settings" class="bar-btn bar-btn-link">Settings</a>
-    </div>
-    <div class="bar-section bar-hints">
-        ↑↓←→ navigate · Enter pick · Tab library · Esc clear
-    </div>
-    <div class="bar-section bar-nav">
-        <a href="/compare" class="bar-link active">Compare</a>
-        <a href="/library" class="bar-link">Library</a>
-        <a href="/people" class="bar-link">People</a>
-    </div>
-    <div class="bar-divider"></div>
-    <div class="bar-section bar-ai bar-work" id="bar-work">
-        <span class="bar-ai-label">Work</span>
-        <span id="ai-embed-count">—</span>/<span id="ai-embed-total">—</span>
-        <span id="ai-model-state" class="bar-ai-state"></span>
-        {% include '_background_work_panel.html' %}
+    <div class="bar-row bar-row-filters">
+        {% include '_filters.html' %}
     </div>
 </footer>
 {% endblock %}

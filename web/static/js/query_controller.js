@@ -16,7 +16,6 @@ import { searchModeForQuery } from './search/query.js';
 export function createQueryController({
     getFilters,
     getSearchQuery,
-    getDeepSearchRequested,
     getSortField,
     getSortDesc,
     getRankingsSort,
@@ -42,7 +41,6 @@ export function createQueryController({
             sort: overrides.sort || sortValueForState(field, desc),
             searchMode: mode,
             searchQuery: query,
-            deepSearch: Boolean(overrides.deepSearch ?? (mode === 'search' && getDeepSearchRequested())),
         };
     }
 

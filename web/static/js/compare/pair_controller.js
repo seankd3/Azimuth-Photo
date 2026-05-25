@@ -28,13 +28,18 @@ export function createComparePairController({
         const data = (useCache ? takeWarmCache(`compare:${url}`) : null) || await fetchWarmJson(url);
         if (!data) return null;
         setCompareStats(data.stats || {});
+        const pairs = Array.isArray(data.pairs) ? data.pairs : [];
 
-        if (data.pairs.length === 0 && getComparePairs().length === 0) {
+        if (data.status_stale && pairs.length === 0) {
+            return data;
+        }
+
+        if (pairs.length === 0 && getComparePairs().length === 0) {
             showCompareEmpty();
             return data;
         }
 
-        for (const pair of data.pairs) {
+        for (const pair of pairs) {
             getComparePairs().push(pair);
             preloadImage(pair.left.thumb_url);
             preloadImage(pair.right.thumb_url);

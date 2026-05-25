@@ -4,6 +4,7 @@ import {
     MOSAIC_REPLACEMENT_LOW_WATER,
     createMosaicReplacementBuffer,
 } from '../compare/mosaic_replacements.js';
+import { showCompareMosaic as showCompareMosaicCore } from '../compare/view.js';
 
 export function createLegacyMosaicBridge({
     documentImpl = document,
@@ -47,17 +48,29 @@ export function createLegacyMosaicBridge({
     precomputePropagation,
     scheduleCompareNeighborWarmup,
     scheduleCrossViewWarmup,
+    showCompareMosaic = () => showCompareMosaicCore({ documentImpl }),
     showCompareEmpty,
     setUndoCount,
     bumpRankingSignals,
     fetchPropagationCount,
     showPropagationBadge,
     showToast,
+    setTimeoutImpl = globalThis.setTimeout,
+    clearTimeoutImpl = globalThis.clearTimeout,
+    deferredRetryMs = 900,
     createMosaicRenderControllerImpl = createMosaicRenderController,
     createMosaicReplacementBufferImpl = createMosaicReplacementBuffer,
     createMosaicActionControllerImpl = createMosaicActionController,
     replacementLowWater = MOSAIC_REPLACEMENT_LOW_WATER,
 } = {}) {
+    let deferredMosaicRetryTimer = null;
+
+    function clearDeferredMosaicRetry() {
+        if (!deferredMosaicRetryTimer) return;
+        clearTimeoutImpl?.(deferredMosaicRetryTimer);
+        deferredMosaicRetryTimer = null;
+    }
+
     const mosaicRenderController = createMosaicRenderControllerImpl({
         getMosaicImages,
         getCompareMode,
@@ -150,7 +163,7 @@ export function createLegacyMosaicBridge({
         return mosaicActionController.mosaicClick(id);
     }
 
-    async function loadMosaicBatch() {
+    async function loadMosaicBatch({ retrying = false } = {}) {
         const url = buildMosaicUrl({ n: getMosaicSize() });
         const data = (
             getMosaicStrategy() !== 'diverse'
@@ -160,24 +173,40 @@ export function createLegacyMosaicBridge({
         if (!data) return undefined;
         setCompareStats(data.stats || {});
         updateCompareProgress();
+        const images = Array.isArray(data.images) ? data.images : [];
 
-        if (data.images.length < 2) {
+        if (data.status_stale && images.length === 0) {
+            if (!getMosaicImages().length && !retrying) {
+                showToast?.('Compare is waiting for the catalog database. Retrying shortly.');
+            }
+            if (!deferredMosaicRetryTimer) {
+                deferredMosaicRetryTimer = setTimeoutImpl?.(() => {
+                    deferredMosaicRetryTimer = null;
+                    return Promise.resolve(loadMosaicBatch({ retrying: true })).catch(() => {});
+                }, deferredRetryMs);
+            }
+            return data;
+        }
+        clearDeferredMosaicRetry();
+
+        if (images.length < 2) {
             showCompareEmpty();
             return undefined;
         }
 
-        setMosaicImages(data.images);
-        setMosaicAge(new Array(data.images.length).fill(0));
+        showCompareMosaic();
+        setMosaicImages(images);
+        setMosaicAge(new Array(images.length).fill(0));
         setMosaicPickCount(0);
         setMosaicReplacements([]);
         setMosaicFilling(false);
         setMosaicBusy(false);
-        const images = getMosaicImages();
-        primeMediaStatuses(images.map((img) => img.id));
+        const currentImages = getMosaicImages();
+        primeMediaStatuses(currentImages.map((img) => img.id));
         renderMosaic();
         warmImageTiers({
-            md: images.map((img) => img.id),
-            lg: images.map((img) => img.id),
+            md: currentImages.map((img) => img.id),
+            lg: currentImages.map((img) => img.id),
         });
         mosaicFillReplacements();
         precomputePropagation();

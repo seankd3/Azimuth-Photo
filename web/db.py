@@ -1,3 +1,9 @@
+"""Compatibility facade for database helpers.
+
+Do Not Add New Logic Here: put SQL in ``data.repositories`` modules and keep
+this module as a stable delegate for older callers during the migration.
+"""
+
 import aiosqlite
 import os
 import time as _time
@@ -20,23 +26,14 @@ import settings
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "photoarchive.db")
 _embedding_batch_listeners = cache_events.embedding_batch_listeners
-_deep_search_query_embedding_listeners = cache_events.deep_search_query_embedding_listeners
 
 
 def register_embedding_batch_listener(listener):
     cache_events.register_embedding_batch_listener(listener)
 
 
-def register_deep_search_query_embedding_listener(listener):
-    cache_events.register_deep_search_query_embedding_listener(listener)
-
-
 def _notify_embedding_batch_stored(model_key: str, image_ids: list[int]):
     cache_events.notify_embedding_batch_stored(model_key, image_ids)
-
-
-def _notify_deep_search_query_embedding_stored(model_key: str, query: str):
-    cache_events.notify_deep_search_query_embedding_stored(model_key, query)
 
 
 EXPECTED_EMBEDDING_DIM = data_schema.EXPECTED_EMBEDDING_DIM
@@ -82,7 +79,7 @@ FILTER_OPTIONS_CACHE_TTL_SECONDS = filter_options_repository.FILTER_OPTIONS_CACH
 
 
 def active_embedding_config() -> dict:
-    return settings.fast_search_embedding_config()
+    return settings.active_embedding_config()
 
 
 def active_embedding_model_key() -> str:
@@ -238,7 +235,7 @@ async def _check_embedding_dimension(conn):
 
 
 def _legacy_embedding_model_key() -> str:
-    return settings.embedding_model_key(settings.DEFAULT_SETTINGS)
+    return active_embedding_model_key()
 
 
 def _embedding_repository_kwargs() -> dict:
@@ -257,46 +254,37 @@ async def _ensure_embedding_model_tables(conn):
     )
 
 
+def _retain_active_embedding_cache() -> None:
+    try:
+        import embed_cache
+
+        embed_cache.retain_only(active_embedding_model_key())
+    except Exception:
+        pass
+
+
 _ensure_embedding_model_row = embedding_repository.ensure_embedding_model_row
 
 
-def normalize_deep_search_query(query: str) -> str:
-    return embedding_repository.normalize_deep_search_query(query)
-
-
-def deep_search_query_key(query: str) -> str:
-    return embedding_repository.deep_search_query_key(query)
-
-
-async def record_deep_search_query(query: str, *, source: str = "search", pinned: bool = False) -> dict | None:
-    return await embedding_repository.record_deep_search_query(
-        DB_PATH,
-        query,
-        source=source,
-        pinned=pinned,
-    )
-
-
-async def sync_deep_search_terms(terms: list[str] | tuple[str, ...] | None):
-    normalized_terms = settings.normalize_deep_search_terms(terms or [])
-    await embedding_repository.sync_deep_search_terms(DB_PATH, normalized_terms)
-
-
-async def get_deep_search_query_embedding(query: str, model_key: str) -> bytes | None:
-    return await embedding_repository.get_deep_search_query_embedding(
-        DB_PATH,
-        query,
-        model_key,
-    )
+async def purge_retired_embedding_data() -> dict:
+    conn = await get_db()
+    try:
+        _ensured_embedding_model_keys.clear()
+        result = await embedding_repository.purge_retired_embedding_data(
+            conn,
+            active_config=active_embedding_config(),
+        )
+    finally:
+        await conn.close()
+    _invalidate_embedding_count_cache()
+    _invalidate_ai_status_counts_cache()
+    _retain_active_embedding_cache()
+    return result
 
 
 async def get_cached_semantic_search_results(query: str, model_key: str, threshold) -> dict | None:
-    return await embedding_repository.get_cached_semantic_search_results(
-        DB_PATH,
-        query,
-        model_key,
-        threshold,
-    )
+    del query, model_key, threshold
+    return None
 
 
 async def store_cached_semantic_search_results(
@@ -307,53 +295,24 @@ async def store_cached_semantic_search_results(
     *,
     source: str = "fast",
 ) -> dict | None:
-    return await embedding_repository.store_cached_semantic_search_results(
+    del query, model_key, threshold, scores, source
+    return None
+
+
+async def get_search_query_embedding(config: dict, query: str) -> bytes | None:
+    return await embedding_repository.get_search_query_embedding(
         DB_PATH,
-        query,
-        model_key,
-        threshold,
-        scores,
-        source=source,
+        config=config,
+        query=query,
     )
 
 
-async def store_deep_search_query_embedding(config: dict, query: str, blob: bytes):
-    normalized = await embedding_repository.store_deep_search_query_embedding(
+async def store_search_query_embedding(config: dict, query: str, blob: bytes):
+    return await embedding_repository.store_search_query_embedding(
         DB_PATH,
         config=config,
         query=query,
         blob=blob,
-    )
-    if normalized:
-        _notify_deep_search_query_embedding_stored(config["model_key"], normalized)
-
-
-async def get_pending_deep_search_queries(config: dict, terms=None, limit: int = 16) -> list[dict]:
-    if terms is not None:
-        await sync_deep_search_terms(terms)
-    limit = max(1, min(int(limit or 16), 128))
-    return await embedding_repository.get_pending_deep_search_queries(
-        DB_PATH,
-        config=config,
-        limit=limit,
-    )
-
-
-async def get_deep_search_cache_status(config: dict, terms=None) -> dict:
-    if terms is not None:
-        await sync_deep_search_terms(terms)
-    return await embedding_repository.get_deep_search_cache_status(
-        DB_PATH,
-        config=config,
-    )
-
-
-async def list_deep_search_queries(config: dict, limit: int = 200) -> list[dict]:
-    limit = max(1, min(int(limit or 200), 500))
-    return await embedding_repository.list_deep_search_queries(
-        DB_PATH,
-        config=config,
-        limit=limit,
     )
 
 
@@ -371,6 +330,12 @@ async def init_db():
             await _normalize_legacy_image_state(db)
             await _refresh_source_online_states_on_conn(db)
             await _check_embedding_dimension(db)
+            _ensured_embedding_model_keys.clear()
+            await embedding_repository.purge_retired_embedding_data(
+                db,
+                active_config=active_embedding_config(),
+            )
+            _retain_active_embedding_cache()
             await _ensure_metadata_fts(db)
             await db.commit()
             return
@@ -378,6 +343,12 @@ async def init_db():
         await _migrate_catalog_sources(db)
         await _refresh_source_online_states_on_conn(db)
         await _ensure_embedding_model_tables(db)
+        _ensured_embedding_model_keys.clear()
+        await embedding_repository.purge_retired_embedding_data(
+            db,
+            active_config=active_embedding_config(),
+        )
+        _retain_active_embedding_cache()
         await _ensure_metadata_fts(db)
         await db.commit()
     finally:
@@ -816,6 +787,16 @@ async def get_people_review(limit: int = 24, long_tail_threshold: int = 1) -> di
     return await people_repository.get_people_review(
         DB_PATH,
         limit=limit,
+        long_tail_threshold=long_tail_threshold,
+        face_model_id=str(current_settings.get("face_model_id") or "buffalo_l"),
+        cache_root=str(current_settings.get("ssd_cache_dir") or ""),
+    )
+
+
+async def get_people_status_counts(long_tail_threshold: int = 1) -> dict:
+    current_settings = settings.get_settings()
+    return await people_repository.get_people_status_counts(
+        DB_PATH,
         long_tail_threshold=long_tail_threshold,
         face_model_id=str(current_settings.get("face_model_id") or "buffalo_l"),
         cache_root=str(current_settings.get("ssd_cache_dir") or ""),

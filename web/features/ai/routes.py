@@ -6,9 +6,7 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 import ai_models
-import resource_governor
 import settings
-import thumbnails
 from core import responses as response_helpers
 
 
@@ -21,8 +19,6 @@ InvalidateStatus = Callable[[], None]
 _invalidate_settings_response_cache: InvalidateStatus | None = None
 _get_ai_status_counts: AsyncDictBuilder | None = None
 _count_embeddings_for_model: AsyncIntBuilder | None = None
-_get_deep_search_cache_status: AsyncDictBuilder | None = None
-_list_deep_search_queries: AsyncListBuilder | None = None
 _ai_status_response_cache: dict[str, dict | tuple | float | None] = {"data": None, "key": None, "expires": 0}
 _ai_status_response_cache_ttl_seconds = 5.0
 _ai_status_response_refreshing = False
@@ -33,20 +29,15 @@ def configure(
     invalidate_settings_response_cache: InvalidateStatus,
     get_ai_status_counts: AsyncDictBuilder,
     count_embeddings_for_model: AsyncIntBuilder,
-    get_deep_search_cache_status: AsyncDictBuilder,
-    list_deep_search_queries: AsyncListBuilder,
     build_ai_status: BuildAiStatus | None = None,
     invalidate_ai_status_response_cache: InvalidateStatus | None = None,
 ) -> None:
     del build_ai_status, invalidate_ai_status_response_cache
     global _invalidate_settings_response_cache, _get_ai_status_counts
-    global _count_embeddings_for_model, _get_deep_search_cache_status
-    global _list_deep_search_queries
+    global _count_embeddings_for_model
     _invalidate_settings_response_cache = invalidate_settings_response_cache
     _get_ai_status_counts = get_ai_status_counts
     _count_embeddings_for_model = count_embeddings_for_model
-    _get_deep_search_cache_status = get_deep_search_cache_status
-    _list_deep_search_queries = list_deep_search_queries
 
 
 def _configured() -> InvalidateStatus:
@@ -54,8 +45,6 @@ def _configured() -> InvalidateStatus:
         _invalidate_settings_response_cache is None
         or _get_ai_status_counts is None
         or _count_embeddings_for_model is None
-        or _get_deep_search_cache_status is None
-        or _list_deep_search_queries is None
     ):
         raise RuntimeError("AI routes are not configured")
     return _invalidate_settings_response_cache
@@ -131,10 +120,8 @@ async def build_ai_status(model_status: dict | None = None, *, force: bool = Fal
     embedded = counts["embedded"]
     total_images = counts["total_images"]
     remaining = max(total_images - embedded, 0)
-    fast_config = settings.fast_search_embedding_config()
-    deep_config = settings.deep_search_embedding_config()
-    fast_model_status = ai_models.get_model_status(fast_config)
-    deep_model_status = ai_models.get_model_status(deep_config)
+    active_config = settings.active_embedding_config()
+    active_model_status = ai_models.get_model_status(active_config)
 
     def index_install_fields(status: dict) -> dict:
         install = status.get("install") or {}
@@ -187,9 +174,6 @@ async def build_ai_status(model_status: dict | None = None, *, force: bool = Fal
             "oom_backoffs": 0,
             "last_oom_at": None,
             "batch_growth_paused_until": None,
-            "governor": resource_governor.get_background_decision(
-                thumbnails.get_idle_seconds()
-            ).to_dict(),
         }
 
     compared = int(counts.get("rated_images") or 0)
@@ -199,58 +183,22 @@ async def build_ai_status(model_status: dict | None = None, *, force: bool = Fal
     effective_rate = recent_rate if recent_rate > 0 else overall_rate
     eta_seconds = int((remaining / effective_rate) * 60) if remaining > 0 and effective_rate > 0 else None
     progress_pct = round((embedded / total_images) * 100, 1) if total_images > 0 else 0.0
-    deep_embedded = (
-        await _count_embeddings_for_model(deep_config, online_only=True)
-        if total_images > 0
-        else 0
-    )
-    deep_remaining = max(total_images - deep_embedded, 0)
-    deep_progress_pct = round((deep_embedded / total_images) * 100, 1) if total_images > 0 else 0.0
-    try:
-        deep_cache_counts = await _get_deep_search_cache_status(deep_config, None)
-        deep_queries = await _list_deep_search_queries(deep_config)
-    except Exception:
-        deep_cache_counts = {"pending_queries": 0, "embedded_queries": 0}
-        deep_queries = []
-    deep_worker = worker_status.get("deep_search") or {}
-    embedding_indexes = {
-        "fast": {
-            "role": "fast",
-            "label": "Daily Search",
-            "description": "Fast 2B image and text embeddings for normal browsing.",
-            "model_id": fast_config["model_id"],
-            "model_key": fast_config["model_key"],
-            "model_dir": fast_config["model_dir"],
-            "dimension": int(fast_config["dimension"]),
-            **index_install_fields(fast_model_status),
-            "embedded": embedded,
-            "total_images": total_images,
-            "remaining": remaining,
-            "progress_pct": progress_pct,
-            "worker_state": worker_status["state"],
-            "worker_message": worker_status["message"],
-            "manual_pause": bool(worker_status.get("manual_pause")),
-        },
-        "deep": {
-            "role": "deep",
-            "label": "Deep Search",
-            "description": "Smarter scheduled 8B image index and saved-query cache.",
-            "model_id": deep_config["model_id"],
-            "model_key": deep_config["model_key"],
-            "model_dir": deep_config["model_dir"],
-            "dimension": int(deep_config["dimension"]),
-            **index_install_fields(deep_model_status),
-            "embedded": deep_embedded,
-            "total_images": total_images,
-            "remaining": deep_remaining,
-            "progress_pct": deep_progress_pct,
-            "worker_state": deep_worker.get("state") or "idle",
-            "worker_message": deep_worker.get("message") or "",
-            "schedule": deep_worker.get("schedule") or settings.deep_search_schedule_status(settings.get_settings()),
-            "pending_queries": int(deep_cache_counts.get("pending_queries") or 0),
-            "embedded_queries": int(deep_cache_counts.get("embedded_queries") or 0),
-            "queries": deep_queries,
-        },
+    embedding_index = {
+        "role": "active",
+        "label": "Search",
+        "description": "Active local image and text embedding index.",
+        "model_id": active_config["model_id"],
+        "model_key": active_config["model_key"],
+        "model_dir": active_config["model_dir"],
+        "dimension": int(active_config["dimension"]),
+        **index_install_fields(active_model_status),
+        "embedded": embedded,
+        "total_images": total_images,
+        "remaining": remaining,
+        "progress_pct": progress_pct,
+        "worker_state": worker_status["state"],
+        "worker_message": worker_status["message"],
+        "manual_pause": bool(worker_status.get("manual_pause")),
     }
 
     response = {
@@ -302,12 +250,8 @@ async def build_ai_status(model_status: dict | None = None, *, force: bool = Fal
         "oom_backoffs": worker_status.get("oom_backoffs", 0),
         "last_oom_at": worker_status.get("last_oom_at"),
         "batch_growth_paused_until": worker_status.get("batch_growth_paused_until"),
-        "deep_search": worker_status.get("deep_search") or {},
-        "embedding_indexes": embedding_indexes,
+        "embedding_index": embedding_index,
         "eta_seconds": eta_seconds,
-        "governor": worker_status.get("governor") or resource_governor.get_background_decision(
-            thumbnails.get_idle_seconds()
-        ).to_dict(),
     }
     _ai_status_response_cache["data"] = _copy_ai_status_response(response)
     _ai_status_response_cache["key"] = cache_key
@@ -335,6 +279,11 @@ async def api_resume_embeddings():
         import embedding_worker
     except ImportError:
         return JSONResponse({"error": "Embeddings not available"}, status_code=503)
+    try:
+        import thumbnails
+        thumbnails.start_pregeneration()
+    except ImportError:
+        pass
     embedding_worker.resume_embedding_worker()
     invalidate_ai_status_response_cache()
     invalidate_settings_response_cache()
@@ -343,13 +292,20 @@ async def api_resume_embeddings():
 
 @router.post("/api/ai/model/install")
 async def api_install_ai_model(role: str = "fast"):
+    del role
     _configured()
-    selected_role = "deep" if str(role or "").lower() == "deep" else "fast"
-    install_config = (
-        settings.deep_search_embedding_config()
-        if selected_role == "deep"
-        else settings.fast_search_embedding_config()
-    )
+    selected_role = "active"
+    install_config = settings.active_embedding_config()
+    existing_status = ai_models.get_model_status(install_config)
+    if existing_status.get("installed"):
+        return {
+            "ok": True,
+            "role": selected_role,
+            "already_installed": True,
+            "install": existing_status.get("install", {}),
+            "model_status": existing_status,
+            "ai_status": await build_ai_status(force=True),
+        }
     state = ai_models.start_model_install(install_config)
     active_install_dir = str(state.get("model_dir") or "")
     requested_install_dir = str(install_config["model_dir"] or "")

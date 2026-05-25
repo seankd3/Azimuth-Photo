@@ -5,8 +5,7 @@ import time
 from collections.abc import Callable
 
 import photo_metadata
-import resource_governor
-import thumbnails
+from core import work_coordination
 from data.repositories import images as image_repository
 
 
@@ -15,6 +14,17 @@ Invalidator = Callable[[], None]
 
 _db_path: DbPathProvider | None = None
 _invalidate_filter_options_cache: Invalidator | None = None
+_metadata_manual_pause = True
+_status = {
+    "state": "paused",
+    "message": "Catalog metadata is paused until you start it from Background Work.",
+    "last_error": "",
+    "last_batch_size": 0,
+    "last_batch_seconds": 0.0,
+    "last_run_at": None,
+    "orientation_scanned": 0,
+    "metadata_scanned": 0,
+}
 
 
 def configure(
@@ -37,6 +47,28 @@ def _invalidate_filter_options() -> None:
     if _invalidate_filter_options_cache is None:
         raise RuntimeError("Catalog metadata workers are not configured")
     _invalidate_filter_options_cache()
+
+
+def pause_catalog_metadata() -> dict:
+    global _metadata_manual_pause
+    _metadata_manual_pause = True
+    _status.update(state="paused", message="Catalog metadata is paused.", last_error="")
+    return catalog_metadata_status()
+
+
+def resume_catalog_metadata() -> dict:
+    global _metadata_manual_pause
+    _metadata_manual_pause = False
+    _status.update(state="waiting", message="Catalog metadata will scan the catalog.", last_error="")
+    return catalog_metadata_status()
+
+
+def catalog_metadata_status() -> dict:
+    return {
+        "active": not _metadata_manual_pause,
+        "manual_pause": _metadata_manual_pause,
+        "worker": dict(_status),
+    }
 
 
 async def get_unclassified_images(limit: int = 200):
@@ -84,21 +116,38 @@ async def classify_orientations_background():
 
     while True:
         try:
-            decision = resource_governor.get_background_decision(thumbnails.get_idle_seconds())
-            if decision.pause:
-                await asyncio.sleep(decision.sleep_seconds)
+            if _metadata_manual_pause:
+                _status.update(
+                    state="paused",
+                    message="Catalog metadata is paused.",
+                    last_error="",
+                )
+                await asyncio.sleep(10)
                 continue
 
-            batch_limit = max(10, min(200, int(200 * max(decision.intensity, 0.1))))
+            batch_limit = 200
             rows = await get_unclassified_images(limit=batch_limit)
             if not rows:
+                _status.update(state="idle", message="Orientations are caught up.", last_error="")
                 await asyncio.sleep(5)
                 continue
-            results = await loop.run_in_executor(None, _classify_batch, rows)
+            started = time.perf_counter()
+            _status.update(state="running", message=f"Classifying {len(rows)} image orientations.")
+            with work_coordination.manual_bulk("catalog_metadata"):
+                results = await loop.run_in_executor(None, _classify_batch, rows)
             if results:
                 await batch_set_orientations(results)
-            await asyncio.sleep(max(0.05, decision.embedding_pause_seconds))
+            _status.update(
+                state="running",
+                message=f"Classified {len(results)} image orientations.",
+                last_batch_size=len(results),
+                last_batch_seconds=round(time.perf_counter() - started, 3),
+                last_run_at=time.time(),
+                orientation_scanned=int(_status.get("orientation_scanned") or 0) + len(results),
+            )
+            await asyncio.sleep(0.05)
         except Exception as e:
+            _status.update(state="error", message="Orientation classifier failed.", last_error=str(e))
             print(f"Orientation classifier error: {e}")
             await asyncio.sleep(5)
 
@@ -151,22 +200,39 @@ async def scan_metadata_background():
 
     while True:
         try:
-            decision = resource_governor.get_background_decision(thumbnails.get_idle_seconds())
-            if decision.pause:
-                await asyncio.sleep(decision.sleep_seconds)
+            if _metadata_manual_pause:
+                _status.update(
+                    state="paused",
+                    message="Catalog metadata is paused.",
+                    last_error="",
+                )
+                await asyncio.sleep(10)
                 continue
 
-            batch_limit = max(10, min(100, int(100 * max(decision.intensity, 0.1))))
+            batch_limit = 100
             rows = await get_images_needing_metadata(
                 limit=batch_limit,
                 metadata_version=photo_metadata.METADATA_EXTRACTOR_VERSION,
             )
             if not rows:
+                _status.update(state="idle", message="Catalog metadata is caught up.", last_error="")
                 await asyncio.sleep(10)
                 continue
-            updates = await loop.run_in_executor(None, _extract_batch, rows)
+            started = time.perf_counter()
+            _status.update(state="running", message=f"Scanning metadata for {len(rows)} images.")
+            with work_coordination.manual_bulk("catalog_metadata"):
+                updates = await loop.run_in_executor(None, _extract_batch, rows)
             await batch_update_metadata(updates)
-            await asyncio.sleep(max(0.05, decision.embedding_pause_seconds))
+            _status.update(
+                state="running",
+                message=f"Scanned metadata for {len(updates)} images.",
+                last_batch_size=len(updates),
+                last_batch_seconds=round(time.perf_counter() - started, 3),
+                last_run_at=time.time(),
+                metadata_scanned=int(_status.get("metadata_scanned") or 0) + len(updates),
+            )
+            await asyncio.sleep(0.05)
         except Exception as e:
+            _status.update(state="error", message="Metadata scanner failed.", last_error=str(e))
             print(f"Metadata scanner error: {e}")
             await asyncio.sleep(10)

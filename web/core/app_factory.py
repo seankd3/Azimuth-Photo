@@ -1,6 +1,5 @@
 import asyncio
 import os
-import sys
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -28,18 +27,6 @@ from features.settings import routes as settings_routes
 
 DEFAULT_TEMPLATE_WARMUP = ("settings.html", "library.html", "compare.html", "people.html")
 INTERACTION_CACHE_WARMUP_DELAY_SECONDS = 0.05
-
-
-def _app_compat_value(name: str, default):
-    module = sys.modules.get("app")
-    if module is not None and hasattr(module, name):
-        return getattr(module, name)
-    return default
-
-
-def _app_compat_callable(name: str, default):
-    value = _app_compat_value(name, default)
-    return value if callable(value) else default
 
 
 @dataclass(frozen=True)
@@ -111,7 +98,6 @@ class AppLifecycleDependencies:
     warm_templates: Callable[[], Any]
     thumbnails: Any
     settings: Any
-    resource_governor: Any
     face_worker: Any
     init_db: Callable[[], Awaitable[Any]]
     get_filter_options: Callable[[], Awaitable[dict]]
@@ -193,7 +179,7 @@ def create_base_app(*, base_dir: str | None = None, title: str = "photoArchive")
     root = base_dir or os.path.dirname(os.path.dirname(__file__))
     app = FastAPI(title=title)
     app.add_middleware(SelectiveGZipMiddleware, minimum_size=1000)
-    app.add_middleware(StaticCacheHeadersMiddleware, max_age=86400)
+    app.add_middleware(StaticCacheHeadersMiddleware, max_age=300)
     app.mount("/static", StaticFiles(directory=os.path.join(root, "static")), name="static")
     return app
 
@@ -216,7 +202,6 @@ def register_app_lifecycle(shell: AppShell, dependencies: AppLifecycleDependenci
             warm_templates=dependencies.warm_templates,
             thumbnails=dependencies.thumbnails,
             settings=dependencies.settings,
-            resource_governor=dependencies.resource_governor,
             face_worker=dependencies.face_worker,
             track_background_task=shell.track_background_task,
             init_db=dependencies.init_db,
@@ -408,7 +393,6 @@ def configure_compare_routes(
 def configure_query_constraints(
     *,
     text_search_resolution_cache_ttl_seconds: Callable[[], float],
-    deep_search_query_record_cache_ttl_seconds: Callable[[], float],
     invalidate_ai_status_response_cache: Callable[[], None] | None = None,
     invalidate_settings_response_cache: Callable[[], None] | None = None,
 ) -> None:
@@ -416,7 +400,6 @@ def configure_query_constraints(
 
     wiring.configure_query_constraints(
         text_search_resolution_cache_ttl_seconds=text_search_resolution_cache_ttl_seconds,
-        deep_search_query_record_cache_ttl_seconds=deep_search_query_record_cache_ttl_seconds,
         invalidate_ai_status_response_cache=invalidate_ai_status_response_cache,
         invalidate_settings_response_cache=invalidate_settings_response_cache,
     )
@@ -466,40 +449,17 @@ def configure_app_runtime_services(shell: AppShell) -> AppRuntimeServices:
         cache_events.invalidate_interaction_response_cache()
 
     def schedule_pairing_propagation(coro) -> None:
-        async def _runner():
-            try:
-                await coro
-            except Exception as exc:
-                print(f"Elo propagation error: {exc}")
-            finally:
-                invalidate_pairing_cache()
+        from core import propagation_queue
 
-        asyncio.create_task(_runner())
+        propagation_queue.schedule(coro, invalidate_callback=invalidate_pairing_cache)
 
     async def resolve_text_search(q: str, *, deep: bool = False) -> dict:
         return await query_constraints.resolve_configured_text_search(
             q,
             deep=deep,
-            record_query=_app_compat_callable(
-                "_record_deep_search_query",
-                query_constraints.record_configured_deep_search_query,
-            ),
-            resolve_deep_search=_app_compat_callable(
-                "_resolve_cached_deep_search",
-                query_constraints.resolve_cached_deep_search,
-            ),
-            encode_text=_app_compat_callable(
-                "_encode_text_with_config",
-                query_constraints.encode_text_with_config,
-            ),
-            start_model_load=_app_compat_callable(
-                "_start_search_model_load",
-                query_constraints.start_search_model_load,
-            ),
-            apply_metadata_ids=_app_compat_callable(
-                "_apply_metadata_search_ids",
-                query_constraints.apply_configured_metadata_search_ids,
-            ),
+            encode_text=query_constraints.encode_text_with_config,
+            start_model_load=query_constraints.start_search_model_load,
+            apply_metadata_ids=query_constraints.apply_configured_metadata_search_ids,
         )
 
     async def resolve_library_constraints(q: str = "", *, people: str = "", deep: bool = False) -> dict:
@@ -507,7 +467,7 @@ def configure_app_runtime_services(shell: AppShell) -> AppRuntimeServices:
             q=q,
             people=people,
             deep=deep,
-            resolve_text_search=_app_compat_callable("_resolve_text_search", resolve_text_search),
+            resolve_text_search=resolve_text_search,
         )
 
     configure_compare_service(
@@ -519,31 +479,15 @@ def configure_app_runtime_services(shell: AppShell) -> AppRuntimeServices:
         schedule_cached_thumbnail_memory_warm=media_warm.schedule_cached_thumbnail_memory_warm,
     )
     configure_query_constraints(
-        text_search_resolution_cache_ttl_seconds=lambda: _app_compat_value(
-            "_text_search_resolution_cache_ttl_seconds",
-            query_constraints._text_search_resolution_cache_ttl_seconds,
-        ),
-        deep_search_query_record_cache_ttl_seconds=lambda: _app_compat_value(
-            "_deep_search_query_record_cache_ttl_seconds",
-            query_constraints._deep_search_query_record_cache_ttl_seconds,
-        ),
+        text_search_resolution_cache_ttl_seconds=lambda: query_constraints._text_search_resolution_cache_ttl_seconds,
         invalidate_ai_status_response_cache=ai_routes.invalidate_ai_status_response_cache,
         invalidate_settings_response_cache=settings_status.invalidate_settings_response_cache,
     )
     configure_compare_routes(
-        schedule_pairing_propagation=lambda coro: _app_compat_callable(
-            "_schedule_pairing_propagation",
-            schedule_pairing_propagation,
-        )(coro),
+        schedule_pairing_propagation=schedule_pairing_propagation,
         invalidate_pairing_cache=invalidate_pairing_cache,
-        mosaic_next_handler=lambda **kwargs: _app_compat_callable(
-            "_mosaic_next_impl",
-            compare_service.mosaic_next_impl,
-        )(**kwargs),
-        compare_next_handler=lambda **kwargs: _app_compat_callable(
-            "_compare_next_impl",
-            compare_service.compare_next_impl,
-        )(**kwargs),
+        mosaic_next_handler=lambda **kwargs: compare_service.mosaic_next_impl(**kwargs),
+        compare_next_handler=lambda **kwargs: compare_service.compare_next_impl(**kwargs),
     )
     configure_library_service(
         resolve_library_constraints=resolve_library_constraints,
@@ -552,10 +496,7 @@ def configure_app_runtime_services(shell: AppShell) -> AppRuntimeServices:
         normalize_search_query=query_constraints.normalize_search_query,
         schedule_thumbnail_prefetch=media_warm.schedule_thumbnail_prefetch,
         schedule_result_thumbnail_memory_warm=media_warm.schedule_result_thumbnail_memory_warm,
-        rankings_response_cache_ttl_seconds=lambda: _app_compat_value(
-            "_rankings_response_cache_ttl_seconds",
-            library_service._rankings_response_cache_ttl_seconds,
-        ),
+        rankings_response_cache_ttl_seconds=lambda: library_service._rankings_response_cache_ttl_seconds,
     )
     configure_export_routes(
         resolve_library_constraints=resolve_library_constraints,
@@ -563,24 +504,15 @@ def configure_app_runtime_services(shell: AppShell) -> AppRuntimeServices:
     )
     configure_settings_routes(
         settings_response_cache=settings_status._settings_response_cache,
-        settings_response_cache_ttl_seconds=lambda: _app_compat_value(
-            "_settings_response_cache_ttl_seconds",
-            settings_status._settings_response_cache_ttl_seconds,
-        ),
-        build_settings_response=lambda: _app_compat_callable(
-            "_build_settings_response",
-            settings_status.build_settings_response,
-        )(),
+        settings_response_cache_ttl_seconds=lambda: settings_status._settings_response_cache_ttl_seconds,
+        build_settings_response=lambda: settings_status.build_settings_response(),
         copy_settings_response=settings_status.copy_settings_response,
         track_background_task=shell.track_background_task,
         get_refreshing=settings_status.get_settings_response_refreshing,
         set_refreshing=settings_status.set_settings_response_refreshing,
         build_cache_status=cache_status_service.build_cache_status,
         build_ai_status=ai_routes.build_ai_status,
-        people_status_payload=lambda: _app_compat_callable(
-            "_people_status_payload",
-            people_routes.people_status_payload,
-        )(),
+        people_status_payload=lambda: people_routes.people_status_payload(),
         invalidate_image_flag_caches=invalidate_image_flag_caches,
         invalidate_pairing_cache=invalidate_pairing_cache,
         invalidate_cache_status_cache=cache_status_service.invalidate_cache_status_cache,
@@ -606,7 +538,6 @@ def configure_app_runtime_services(shell: AppShell) -> AppRuntimeServices:
 def configure_app_lifecycle(shell: AppShell) -> AppLifecycleHandlers:
     import db
     import face_worker
-    import resource_governor
     import settings
     import thumbnails
     from features.cache import status as cache_status_service
@@ -621,10 +552,9 @@ def configure_app_lifecycle(shell: AppShell) -> AppLifecycleHandlers:
         shell,
         AppLifecycleDependencies(
             smoke_mode_enabled=background_runtime.smoke_mode_enabled,
-            warm_templates=lambda: _app_compat_callable("_warm_templates", shell.warm_templates)(),
+            warm_templates=shell.warm_templates,
             thumbnails=thumbnails,
             settings=settings,
-            resource_governor=resource_governor,
             face_worker=face_worker,
             init_db=lambda: db.init_db(),
             get_filter_options=lambda: db.get_filter_options(),

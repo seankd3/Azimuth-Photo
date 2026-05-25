@@ -18,6 +18,24 @@ export function createBatchSelectionController({
     let batchMode = false;
     const batchSelected = new Set();
     let lastClickedIndex = -1;
+    if (documentImpl?.body?.dataset?.paBatchBarBound !== '1') {
+        if (documentImpl?.body?.dataset) {
+            documentImpl.body.dataset.paBatchBarBound = '1';
+        }
+        documentImpl?.addEventListener?.('click', (event) => {
+            const control = event.target?.closest?.('#batch-bar [data-batch-action]');
+            if (!control) return;
+            event.preventDefault();
+            const action = control.dataset.batchAction;
+            if (action === 'flag') {
+                api.batchFlag(control.dataset.flag || 'unflagged');
+            } else if (action === 'export') {
+                api.batchExport(control.dataset.format || 'json');
+            } else if (action === 'clear') {
+                api.clearBatchSelection();
+            }
+        });
+    }
 
     const api = {
         isBatchMode: () => batchMode,

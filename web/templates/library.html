@@ -1,19 +1,26 @@
 {% extends "base.html" %}
 {% block title %}photoArchive — Library{% endblock %}
 {% block body_class %}with-bottom-bar library-shell{% endblock %}
+{% block active_nav %}library{% endblock %}
 {% block navbar %}{% endblock %}
 {% block content %}
 <div class="library-container">
     <div class="rankings-grid" id="rankings-grid">
     </div>
+    <div class="library-load-more hidden" id="library-load-more">
+        <button type="button" class="btn-secondary library-load-more-btn" id="library-load-more-btn">Load more</button>
+        <p class="library-load-more-meta hidden" id="library-load-more-meta"></p>
+    </div>
     <div class="library-empty hidden" id="library-empty">
         <p class="library-empty-text" id="library-empty-text"></p>
+        <p class="library-empty-detail" id="library-empty-detail"></p>
         <button type="button" class="btn-primary library-empty-action" id="library-empty-action"></button>
     </div>
     <div class="map-container hidden" id="map-container"></div>
 
     <!-- Loupe view (full screen + filmstrip) -->
     <div class="loupe hidden" id="loupe" role="dialog" aria-modal="true" aria-label="Image viewer">
+        <button type="button" class="loupe-close-btn" data-action="close-loupe" aria-label="Close viewer (Esc)">&times;</button>
         <div class="loupe-main">
             <div class="loupe-image-wrap" id="loupe-image-wrap" tabindex="-1">
                 <img id="loupe-img" src="" alt="" draggable="false">
@@ -31,71 +38,49 @@
             <div class="filmstrip-scroll" id="filmstrip-scroll"></div>
         </div>
     </div>
-    <button type="button" class="back-to-top hidden" id="back-to-top" onclick="PhotoArchive.scrollToTop()" aria-label="Back to top">↑</button>
+    <button type="button" class="back-to-top hidden" id="back-to-top" data-action="scroll-to-top" aria-label="Back to top">↑</button>
 </div>
 {% endblock %}
 
 {% block bottom_bar %}
-<footer class="bottom-bar" id="library-bar">
-    <div class="bar-section bar-sorts" id="sort-toggles">
-        <select id="sort-field" class="bar-select" onchange="PhotoArchive.setSortField(this.value)">
-            <option value="elo">Rating</option>
-            <option value="comparisons">Confidence</option>
-            <option value="date_taken">Date Taken</option>
-            <option value="date_modified">Date Modified</option>
-            <option value="file_size">File Size</option>
-            <option value="resolution">Resolution</option>
-            <option value="camera">Camera</option>
-            <option value="filename">Filename</option>
-        </select>
-        <button type="button" class="filter-icon sort-dir-btn" id="sort-dir-btn" onclick="PhotoArchive.toggleSortDir()" title="Toggle sort direction" aria-label="Toggle sort direction">
-            <svg width="14" height="14" viewBox="0 0 14 14">
-                <path d="M4 2v10M4 10l-2.5-2.5M4 10l2.5-2.5M10 12V2M10 4l-2.5 2.5M10 4l2.5 2.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-        </button>
-    </div>
-    <div class="bar-divider"></div>
-    <div class="bar-section bar-search">
-        <div class="bar-search-field">
-            <input type="text" id="search-input" class="bar-search-input" placeholder="Search..."
-                   autocomplete="off" spellcheck="false">
-            <button type="button" class="search-clear-sm hidden" id="search-clear" onclick="PhotoArchive.clearSearch()" aria-label="Clear search">&times;</button>
+<footer class="bottom-bar command-bar" id="library-bar" aria-label="Application controls">
+    <div class="bar-row bar-row-main" data-command-layout="culling-workbench">
+        <div class="bar-section bar-context bar-sorts" id="sort-toggles" data-command-zone="mode-tools">
+            <select id="sort-field" class="bar-select" data-action="set-sort-field">
+                <option value="elo">Rating</option>
+                <option value="taste">Taste</option>
+                <option value="comparisons">Confidence</option>
+                <option value="date_taken">Date Taken</option>
+                <option value="date_modified">Date Modified</option>
+                <option value="file_size">File Size</option>
+                <option value="resolution">Resolution</option>
+                <option value="camera">Camera</option>
+                <option value="filename">Filename</option>
+            </select>
+            <button type="button" class="filter-icon sort-dir-btn has-tooltip" id="sort-dir-btn" data-action="toggle-sort-dir" title="Toggle sort direction" aria-label="Toggle sort direction" data-tooltip="Reverse the current sort order.">
+                <svg width="14" height="14" viewBox="0 0 14 14">
+                    <path d="M4 2v10M4 10l-2.5-2.5M4 10l2.5-2.5M10 12V2M10 4l-2.5 2.5M10 4l2.5 2.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+            </button>
         </div>
-        <button type="button" class="deep-search-btn" id="deep-search-btn" onclick="PhotoArchive.runDeepSearch()" disabled>
-            Deep Search
-        </button>
+        {% include '_bottom_bar_search.html' %}
+        <div class="bar-section bar-summary bar-stats" data-command-zone="status">
+            <span id="compare-stat-pool" class="bar-stat-num">0</span> images
+        </div>
+        <div class="bar-section bar-context bar-export" data-command-zone="mode-tools">
+            <button type="button" class="bar-btn has-tooltip" data-action="toggle-batch-mode" data-tooltip="Select multiple photos for batch flagging or selected export.">Select</button>
+            <button type="button" class="bar-btn has-tooltip" data-action="export-rankings" data-format="json" data-tooltip="Export the current Library result set as JSON.">JSON</button>
+            <button type="button" class="bar-btn has-tooltip" data-action="export-rankings" data-format="csv" data-tooltip="Export the current Library result set as CSV.">CSV</button>
+        </div>
+        <div class="bar-section bar-view-toggle" data-command-zone="mode-tools">
+            <button type="button" class="bar-btn view-btn active has-tooltip" id="view-grid-btn" data-action="set-library-view" data-view="grid" data-tooltip="Show photos in a fast browsing grid.">Grid</button>
+            <button type="button" class="bar-btn view-btn has-tooltip" id="view-map-btn" data-action="set-library-view" data-view="map" data-tooltip="Show photos with GPS metadata on the map.">Map</button>
+        </div>
+        {% include '_bottom_bar_nav.html' %}
+        {% include '_bottom_bar_work.html' %}
     </div>
-    <div class="bar-divider"></div>
-    {% include '_filters.html' %}
-    <div class="bar-divider"></div>
-    <div class="bar-section bar-stats">
-        <span id="compare-stat-pool" class="bar-stat-num">0</span> images
-    </div>
-    <div class="bar-divider"></div>
-    <div class="bar-section bar-export">
-        <button type="button" class="bar-btn" onclick="PhotoArchive.toggleBatchMode()">Select</button>
-        <button type="button" class="bar-btn" onclick="PhotoArchive.exportRankings('json')">JSON</button>
-        <button type="button" class="bar-btn" onclick="PhotoArchive.exportRankings('csv')">CSV</button>
-        <a href="/settings" class="bar-btn bar-btn-link">Settings</a>
-    </div>
-    <div class="bar-section bar-hints">
-        ↑↓←→ navigate · Enter view · Tab compare · Esc clear
-    </div>
-    <div class="bar-section bar-view-toggle">
-        <button type="button" class="bar-btn view-btn active" id="view-grid-btn" onclick="PhotoArchive.setLibraryView('grid')">Grid</button>
-        <button type="button" class="bar-btn view-btn" id="view-map-btn" onclick="PhotoArchive.setLibraryView('map')">Map</button>
-    </div>
-    <div class="bar-section bar-nav">
-        <a href="/compare" class="bar-link">Compare</a>
-        <a href="/library" class="bar-link active">Library</a>
-        <a href="/people" class="bar-link">People</a>
-    </div>
-    <div class="bar-divider"></div>
-    <div class="bar-section bar-ai bar-work" id="bar-work">
-        <span class="bar-ai-label">Work</span>
-        <span id="ai-embed-count">—</span>/<span id="ai-embed-total">—</span>
-        <span id="ai-model-state" class="bar-ai-state"></span>
-        {% include '_background_work_panel.html' %}
+    <div class="bar-row bar-row-filters">
+        {% include '_filters.html' %}
     </div>
 </footer>
 {% endblock %}
@@ -103,5 +88,136 @@
 {% block scripts %}
 <script>
     window.__photoArchiveWhenReady((api) => api.initLibrary());
+</script>
+<script>
+    (() => {
+        const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;',
+        }[char]));
+
+        const showLoadFailure = (message) => {
+            const empty = document.getElementById('library-empty');
+            const text = document.getElementById('library-empty-text');
+            const detail = document.getElementById('library-empty-detail');
+            const action = document.getElementById('library-empty-action');
+            if (!empty || !text || !action) return;
+            empty.classList.remove('hidden');
+            text.textContent = 'Library could not load photos';
+            if (detail) detail.textContent = message || 'The photo list request failed.';
+            action.textContent = 'Refresh';
+            action.onclick = () => location.reload();
+        };
+
+        const fallbackPageSize = 48;
+        let fallbackOffset = 0;
+        let fallbackLoading = false;
+        let fallbackDone = false;
+        let fallbackObserver = null;
+
+        const cardHtml = (image, absoluteIndex) => {
+            const ar = Number(image.aspect_ratio || 1.5);
+            const width = Math.max(120, Math.round(220 * ar));
+            const rank = absoluteIndex + 1;
+            const elo = Number(image.elo || 0);
+            const title = escapeHtml(image.filename || `Image ${image.id}`);
+            const thumb = escapeHtml(image.thumb_url || `/api/thumb/sm/${image.id}`);
+            return `
+                <div class="rank-card skeleton-cell" data-fallback-card="1" data-image-id="${escapeHtml(image.id)}" data-ar="${escapeHtml(ar)}" style="height:220px;flex-grow:${escapeHtml(ar)};flex-basis:${width}px" title="${title}">
+                    <img src="${thumb}" alt="${title}" loading="eager" fetchpriority="high" onload="this.classList.add('loaded'); this.parentElement.classList.remove('skeleton-cell')">
+                    <div class="rank-card-info"><span class="rank-number">#${rank}</span><span class="rank-elo">${elo ? elo.toFixed(1) : ''}</span></div>
+                </div>
+            `;
+        };
+
+        const ensureFallbackPaging = () => {
+            const grid = document.getElementById('rankings-grid');
+            const root = document.querySelector('.library-container');
+            if (!grid || !root || document.getElementById('library-fallback-sentinel')) return;
+            const sentinel = document.createElement('div');
+            sentinel.id = 'library-fallback-sentinel';
+            sentinel.style.height = '1px';
+            grid.after(sentinel);
+
+            const loadIfNearBottom = () => {
+                if (window.__photoArchiveLibraryFallbackDisabled) return;
+                const remaining = root.scrollHeight - root.scrollTop - root.clientHeight;
+                if (remaining < 900) loadFallbackPage();
+            };
+            root.addEventListener('scroll', loadIfNearBottom, { passive: true });
+            fallbackObserver = new IntersectionObserver((entries) => {
+                if (entries.some((entry) => entry.isIntersecting)) loadFallbackPage();
+            }, { root, rootMargin: '900px 0px' });
+            fallbackObserver.observe(sentinel);
+        };
+
+        const loadFallbackPage = async ({ reset = false } = {}) => {
+            if (window.__photoArchiveLibraryFallbackDisabled || fallbackLoading || (!reset && fallbackDone)) return;
+            const grid = document.getElementById('rankings-grid');
+            if (!grid) return;
+            fallbackLoading = true;
+            try {
+                if (reset) {
+                    fallbackOffset = 0;
+                    fallbackDone = false;
+                    grid.innerHTML = '';
+                }
+                const response = await fetch(`/api/rankings?limit=${fallbackPageSize}&offset=${fallbackOffset}&sort=elo`, {
+                    cache: 'no-store',
+                });
+                if (!response.ok) throw new Error(`Rankings returned ${response.status}`);
+                const data = await response.json();
+                const images = Array.isArray(data.images) ? data.images : [];
+                if (!images.length) {
+                    fallbackDone = true;
+                    if (fallbackOffset === 0) showLoadFailure('The photo list returned no images.');
+                    return;
+                }
+                grid.dataset.fallbackRendered = '1';
+                grid.insertAdjacentHTML('beforeend', images.map((image, index) => (
+                    cardHtml(image, fallbackOffset + index)
+                )).join(''));
+                fallbackOffset += images.length;
+                fallbackDone = images.length < fallbackPageSize;
+                const stat = document.getElementById('compare-stat-pool');
+                if (stat) {
+                    const visible = Number(data.visible_images ?? images.length);
+                    const total = Number(data.total_images ?? visible);
+                    stat.textContent = total && total !== visible
+                        ? `${visible.toLocaleString()} / ${total.toLocaleString()}`
+                        : visible.toLocaleString();
+                }
+                document.getElementById('library-empty')?.classList.add('hidden');
+                ensureFallbackPaging();
+            } catch (error) {
+                showLoadFailure(error?.message || String(error));
+            } finally {
+                fallbackLoading = false;
+            }
+        };
+
+        const fallbackLoadLibrary = async () => {
+            const grid = document.getElementById('rankings-grid');
+            if (!grid || grid.querySelector('.rank-card')) return;
+            await loadFallbackPage({ reset: true });
+        };
+
+        document.getElementById('rankings-grid')?.addEventListener('click', (event) => {
+            if (window.__photoArchiveLibraryFallbackDisabled) return;
+            const card = event.target.closest?.('.rank-card[data-fallback-card="1"][data-image-id]');
+            if (!card || card.closest('#rankings-grid') !== event.currentTarget) return;
+            event.preventDefault?.();
+            window.PhotoArchiveReady?.then?.((api) => {
+                if (typeof api.openLightboxById === 'function') {
+                    api.openLightboxById(card.dataset.imageId);
+                }
+            });
+        });
+
+        window.setTimeout(fallbackLoadLibrary, 2500);
+    })();
 </script>
 {% endblock %}

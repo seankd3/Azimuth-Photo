@@ -56,6 +56,7 @@ def image_card(
     *,
     elo_value=_MISSING,
     similarity=_MISSING,
+    taste_score=_MISSING,
     date_group=_MISSING,
 ) -> dict:
     image_id = _as_int(_get(image, "id"))
@@ -73,6 +74,8 @@ def image_card(
     }
     if similarity is not _MISSING:
         card["similarity"] = None if similarity is None else round(_as_float(similarity), 4)
+    if taste_score is not _MISSING:
+        card["taste_score"] = None if taste_score is None else round(_as_float(taste_score), 4)
     if date_group is not _MISSING:
         card["date_group"] = date_group or ""
     return card
@@ -144,8 +147,6 @@ def copy_cache_status_response(status: dict) -> dict:
             if isinstance(pregen.get(key), dict):
                 pregen[key] = dict(pregen[key])
         copied["pregen"] = pregen
-    if isinstance(status.get("governor"), dict):
-        copied["governor"] = dict(status["governor"])
     if isinstance(status.get("system_resources"), dict):
         resources = dict(status["system_resources"])
         if isinstance(resources.get("disk"), dict):
@@ -181,9 +182,9 @@ def copy_rankings_response(response: dict) -> dict:
 
 def copy_settings_response(response: dict, *, copy_ai_status, copy_cache_status) -> dict:
     copied = dict(response)
-    for key in ("settings", "model_status", "catalog", "defaults"):
+    for key in ("settings", "model_status", "catalog", "defaults", "metadata_status"):
         if isinstance(response.get(key), dict):
-            copied[key] = dict(response[key])
+            copied[key] = copy.deepcopy(response[key])
     if isinstance(response.get("ai_status"), dict):
         copied["ai_status"] = copy_ai_status(response["ai_status"])
     if isinstance(response.get("people_status"), dict):
@@ -198,10 +199,6 @@ def copy_settings_response(response: dict, *, copy_ai_status, copy_cache_status)
         copied["catalog"] = catalog
     if isinstance(response.get("cache_profiles"), list):
         copied["cache_profiles"] = list(response["cache_profiles"])
-    if isinstance(response.get("background_work_modes"), list):
-        copied["background_work_modes"] = [
-            dict(mode) for mode in response["background_work_modes"]
-        ]
     if isinstance(response.get("embedding_model_presets"), list):
         copied["embedding_model_presets"] = [
             dict(preset) for preset in response["embedding_model_presets"]
@@ -213,10 +210,8 @@ def copy_ai_status_response(response: dict) -> dict:
     copied = dict(response)
     if isinstance(response.get("last_batch_stage_seconds"), dict):
         copied["last_batch_stage_seconds"] = dict(response["last_batch_stage_seconds"])
-    if isinstance(response.get("governor"), dict):
-        copied["governor"] = dict(response["governor"])
-    if isinstance(response.get("deep_search"), dict):
-        copied["deep_search"] = copy.deepcopy(response["deep_search"])
     if isinstance(response.get("embedding_indexes"), dict):
         copied["embedding_indexes"] = copy.deepcopy(response["embedding_indexes"])
+    if isinstance(response.get("embedding_index"), dict):
+        copied["embedding_index"] = dict(response["embedding_index"])
     return copied

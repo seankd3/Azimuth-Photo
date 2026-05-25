@@ -312,7 +312,7 @@ async def ai_status_source_counts(db_path: str) -> dict:
         cursor = await conn.execute(
             "SELECT "
             "COALESCE(SUM(image_count), 0) AS catalog_images, "
-            "COALESCE(SUM(CASE WHEN included = 1 AND online = 1 THEN active_image_count ELSE 0 END), 0) AS active_images, "
+            "COALESCE(SUM(CASE WHEN included = 1 THEN active_image_count ELSE 0 END), 0) AS active_images, "
             "COALESCE(SUM(CASE WHEN included = 0 THEN image_count ELSE 0 END), 0) AS removed_images, "
             "COALESCE(SUM(CASE WHEN included = 1 AND online = 0 THEN image_count ELSE 0 END), 0) AS offline_images "
             "FROM catalog_sources"
@@ -409,10 +409,7 @@ async def ai_status_counts_cached(
     embedded = (
         0
         if active <= 0
-        else await count_embeddings_for_model(
-            active_embedding_config(),
-            online_only=True,
-        )
+        else await get_embedding_count()
     )
     result = await ai_status_counts(
         db_path,

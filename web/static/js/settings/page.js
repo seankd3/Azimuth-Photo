@@ -1,10 +1,7 @@
 import { createCatalogApi } from '../catalog/controller.js';
 import { renderCatalogSources as renderCatalogSourcesCore } from '../catalog/sources.js';
 import { renderCacheTierGuide } from '../cache/guide.js';
-import {
-    backgroundWorkStatusText,
-    setSettingsStatus,
-} from './status.js';
+import { setSettingsStatus } from './status.js';
 import {
     renderAutoTuningStatus,
     renderCacheSettingsStatus,
@@ -18,7 +15,6 @@ import {
 import { renderPeopleSettingsStatus } from './people_status.js';
 import { workBannerHtml } from './work_banner.js';
 import {
-    backgroundWorkModeLabel,
     cacheProfileLabel,
     THUMB_OUTPUT_FIELDS,
 } from './display.js';
@@ -26,10 +22,6 @@ import {
     collectSettingsForm as collectSettingsFormCore,
     populateSettingsForm as populateSettingsFormCore,
     rememberThumbnailOutput,
-    renderDeepSearchSchedule,
-    renderDeepSearchTerms,
-    selectedBackgroundWorkMode,
-    setBackgroundWorkMode,
     updateCacheProfileHint,
     updateThumbnailChangeNotice,
 } from './form.js';
@@ -38,28 +30,14 @@ import { createSettingsApi } from './controller.js';
 
 const SETTINGS_FIELDS = [
     'embed_model_preset',
-    'embed_model_id',
-    'embed_model_revision',
-    'embed_model_dir',
-    'embed_model_dim',
     'thumb_size_sm',
     'thumb_size_md',
     'thumb_size_lg',
     'thumb_quality',
     'memory_cache_gb',
-    'background_work_mode',
     'cache_profile',
     'ssd_cache_dir',
     'ssd_cache_gb',
-    'pregenerate_on_idle',
-    'embed_batch_size',
-    'defer_ai_on_startup',
-    'deep_search_terms',
-    'deep_search_schedule_enabled',
-    'deep_search_schedule_days',
-    'deep_search_schedule_start',
-    'deep_search_schedule_end',
-    'deep_search_schedule_timezone',
     'search_similarity_threshold',
     'show_loupe_cache_status',
     'face_model_id',
@@ -69,6 +47,90 @@ const SETTINGS_FIELDS = [
     'face_merge_suggestion_threshold',
 ];
 const SETTINGS_META_POLL_MS = 30000;
+const SETTINGS_STATUS_TIMEOUT_MS = 5000;
+
+
+function staleSettingsStatus(kind, latencyMs = SETTINGS_STATUS_TIMEOUT_MS) {
+    if (kind === 'cache') {
+        return {
+            pregen: {},
+            disk: { tiers: {} },
+            memory: { tiers: {} },
+            counts_stale: true,
+            status_stale: true,
+            latency_ms: latencyMs,
+            active: false,
+        };
+    }
+    if (kind === 'people') {
+        return {
+            active: false,
+            worker: { state: 'stale' },
+            counts: { pending_cached_images: 0, scan: {} },
+            counts_stale: true,
+            status_stale: true,
+            latency_ms: latencyMs,
+        };
+    }
+    if (kind === 'catalog') {
+        return {
+            sources: [],
+            stats: {},
+            counts_stale: true,
+            status_stale: true,
+            latency_ms: latencyMs,
+        };
+    }
+    return {
+        embedding_index: {},
+        worker_state: 'stale',
+        counts_stale: true,
+        status_stale: true,
+        embedding_manual_pause: true,
+        latency_ms: latencyMs,
+    };
+}
+
+
+async function fetchSettingsStatusJson(url, {
+    fetchImpl,
+    kind,
+    timeoutMs = SETTINGS_STATUS_TIMEOUT_MS,
+}) {
+    const started = Date.now();
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    let timer = null;
+    try {
+        const timeout = new Promise((_, reject) => {
+            timer = globalThis.setTimeout(() => {
+                controller?.abort?.();
+                reject(new Error('status timeout'));
+            }, Math.max(50, Number(timeoutMs) || SETTINGS_STATUS_TIMEOUT_MS));
+        });
+        const request = fetchImpl(url, controller ? { signal: controller.signal } : undefined)
+            .then((res) => {
+                if (!res?.ok) throw new Error('status request failed');
+                return res.json();
+            });
+        return await Promise.race([request, timeout]);
+    } catch {
+        return staleSettingsStatus(kind, Math.max(0, Date.now() - started));
+    } finally {
+        if (timer) globalThis.clearTimeout(timer);
+    }
+}
+
+
+async function responseDataOrError(response, fallbackMessage) {
+    let data = {};
+    try {
+        data = await response.json();
+    } catch {}
+    if (!response.ok || data.error || data.ok === false) {
+        throw new Error(data.error || fallbackMessage);
+    }
+    return data;
+}
 
 
 export function createSettingsPageController({
@@ -77,6 +139,7 @@ export function createSettingsPageController({
     formatBytes,
     initVisibilityRefresh,
     initBottomBarMeasurement,
+    startAIStatusPolling = () => {},
     fetchImpl = globalThis.fetch,
     documentImpl = globalThis.document,
     setIntervalImpl = globalThis.setInterval,
@@ -149,13 +212,6 @@ export function createSettingsPageController({
             detail: 'Add a source before scanning.',
         });
 
-        const workMode = settings.background_work_mode || selectedBackgroundWorkMode();
-        setSetupStep('work', {
-            badge: 'Ready',
-            badgeClass: 'ready',
-            detail: `${backgroundWorkModeLabel(workMode)} mode selected.`,
-        });
-
         const memoryGb = Number(settings.memory_cache_gb ?? 0);
         const ssdGb = Number(settings.ssd_cache_gb ?? 0);
         setSetupStep('cache', {
@@ -165,37 +221,37 @@ export function createSettingsPageController({
         });
 
         const aiStatus = data.ai_status || {};
-        const fastIndex = aiStatus.embedding_indexes?.fast || {};
+        const activeIndex = aiStatus.embedding_index || {};
         const modelStatus = data.model_status || {};
         const install = modelStatus.install || {};
-        const fastInstalled = Boolean(fastIndex.installed || aiStatus.model_installed || modelStatus.installed);
-        const fastInstalling = Boolean(fastIndex.installing || aiStatus.installing || install.running);
-        const fastTotal = Math.max(0, Number(fastIndex.total_images ?? activeImages) || 0);
-        const fastEmbedded = Math.max(0, Number(fastIndex.embedded ?? aiStatus.embedded ?? 0) || 0);
-        const fastRemaining = Math.max(0, Number(fastIndex.remaining ?? Math.max(fastTotal - fastEmbedded, 0)) || 0);
-        if (fastInstalling) {
+        const activeInstalled = Boolean(activeIndex.installed || aiStatus.model_installed || modelStatus.installed);
+        const activeInstalling = Boolean(activeIndex.installing || aiStatus.installing || install.running);
+        const activeTotal = Math.max(0, Number(activeIndex.total_images ?? activeImages) || 0);
+        const activeEmbedded = Math.max(0, Number(activeIndex.embedded ?? aiStatus.embedded ?? 0) || 0);
+        const activeRemaining = Math.max(0, Number(activeIndex.remaining ?? Math.max(activeTotal - activeEmbedded, 0)) || 0);
+        if (activeInstalling) {
             setSetupStep('ai', {
                 badge: 'Installing',
                 badgeClass: 'scheduled',
                 detail: install.message || 'Model install is running.',
             });
-        } else if (fastInstalled && activeImages > 0 && fastRemaining > 0) {
+        } else if (activeInstalled && activeImages > 0 && activeRemaining > 0) {
             setSetupStep('ai', {
                 badge: 'Indexing',
                 badgeClass: 'scheduled',
-                detail: `${formatSetupCount(fastRemaining)} of ${formatSetupCount(fastTotal)} images left for Daily Search.`,
+                detail: `${formatSetupCount(activeRemaining)} of ${formatSetupCount(activeTotal)} images left for AI embeddings/search.`,
             });
-        } else if (fastInstalled) {
+        } else if (activeInstalled) {
             setSetupStep('ai', {
                 badge: 'Ready',
                 badgeClass: 'ready',
-                detail: activeImages > 0 ? 'Daily Search is installed and ready.' : 'Model is installed; indexing starts after scan.',
+                detail: activeImages > 0 ? 'AI embeddings/search is installed and ready.' : 'Model is installed; indexing starts after scan.',
             });
         } else {
             setSetupStep('ai', {
                 badge: 'Optional',
                 badgeClass: 'scheduled',
-                detail: 'Install the 2B model when you want semantic search and similarity.',
+                detail: 'Install the selected model when you want semantic search and similarity.',
             });
         }
 
@@ -228,20 +284,6 @@ export function createSettingsPageController({
                 badgeClass: 'scheduled',
                 detail: 'Enabled by default; useful after catalog scan and preview cache.',
             });
-        }
-    }
-
-    function renderBackgroundWorkStatus(cacheStats, aiStatus) {
-        const statusEl = documentImpl.getElementById('background-work-governor-status');
-        const heavyEl = documentImpl.getElementById('background-work-heavy-status');
-        const workMode = selectedBackgroundWorkMode();
-        const modeLabel = backgroundWorkModeLabel(workMode);
-        const status = backgroundWorkStatusText(cacheStats, aiStatus, modeLabel);
-        if (statusEl) {
-            statusEl.textContent = status.governorText;
-        }
-        if (heavyEl) {
-            heavyEl.textContent = status.heavyText;
         }
     }
 
@@ -288,18 +330,17 @@ export function createSettingsPageController({
         renderModelStatus(data.model_status);
         renderAISettingsStatus(data.ai_status);
         renderPeopleSettingsStatus(data.people_status);
-        renderBackgroundWorkStatus(data.cache_stats, data.ai_status);
-        renderWorkBanner(data.ai_status, data.cache_stats);
+        renderWorkBanner(data.ai_status, data.cache_stats, data.people_status);
         renderCacheTierGuide(data.cache_stats, data.settings);
         if (data.catalog) renderCatalogSources(data.catalog);
         renderSetupGuide(data);
         updateCacheProfileHint();
     }
 
-    function renderWorkBanner(aiStatus, cacheStatus) {
+    function renderWorkBanner(aiStatus, cacheStatus, peopleStatus = null) {
         const el = documentImpl.getElementById('work-banner');
         if (!el) return;
-        el.innerHTML = workBannerHtml(aiStatus, cacheStatus);
+        el.innerHTML = workBannerHtml(aiStatus, cacheStatus, peopleStatus);
     }
 
     function populateSettingsForm(settings) {
@@ -340,9 +381,108 @@ export function createSettingsPageController({
         resumeAllWork,
     } = settingsApi;
 
+    function bindSettingsActions() {
+        if (documentImpl.body?.dataset?.paSettingsActionsBound === '1') return;
+        if (documentImpl.body?.dataset) {
+            documentImpl.body.dataset.paSettingsActionsBound = '1';
+        }
+        documentImpl.addEventListener('click', (event) => {
+            const control = event.target?.closest?.('[data-action]');
+            if (!control) return;
+            const action = control.dataset.action;
+            const sourceId = Number(control.dataset.sourceId || 0);
+            const path = control.dataset.path || '';
+            const handled = true;
+            switch (action) {
+                case 'choose-catalog-folder':
+                    event.preventDefault();
+                    chooseCatalogFolder();
+                    break;
+                case 'toggle-directory-browser':
+                    event.preventDefault();
+                    toggleDirectoryBrowser();
+                    break;
+                case 'add-catalog-source':
+                    event.preventDefault();
+                    addCatalogSource();
+                    break;
+                case 'browse-directory-parent':
+                    event.preventDefault();
+                    browseDirectoryParent();
+                    break;
+                case 'use-browsed-directory':
+                    event.preventDefault();
+                    useBrowsedDirectory();
+                    break;
+                case 'browse-directory':
+                    event.preventDefault();
+                    browseDirectory(path || '/');
+                    break;
+                case 'select-browsed-directory':
+                    event.preventDefault();
+                    selectBrowsedDirectory(path);
+                    break;
+                case 'rescan-catalog-source':
+                    event.preventDefault();
+                    rescanCatalogSource(sourceId);
+                    break;
+                case 'open-remove-source-dialog':
+                    event.preventDefault();
+                    openRemoveSourceDialog(sourceId);
+                    break;
+                case 'remove-catalog-source':
+                    event.preventDefault();
+                    removeCatalogSource(sourceId, control.dataset.policy || 'keep');
+                    break;
+                case 'close-remove-source-dialog':
+                    event.preventDefault();
+                    closeRemoveSourceDialog();
+                    break;
+                case 'install-ai-model':
+                    event.preventDefault();
+                    installAIModel();
+                    break;
+                case 'pause-embeddings':
+                    event.preventDefault();
+                    pauseEmbeddings();
+                    break;
+                case 'resume-embeddings':
+                    event.preventDefault();
+                    resumeEmbeddings();
+                    break;
+                case 'apply-recommended-cache':
+                    event.preventDefault();
+                    applyRecommendedCache();
+                    break;
+                case 'pause-all-work':
+                    event.preventDefault();
+                    pauseAllWork();
+                    break;
+                case 'resume-all-work':
+                    event.preventDefault();
+                    resumeAllWork();
+                    break;
+                case 'save-settings':
+                    event.preventDefault();
+                    saveSettings();
+                    break;
+                case 'reset-settings':
+                    event.preventDefault();
+                    resetSettings();
+                    break;
+                case 'clear-thumbnail-cache':
+                    event.preventDefault();
+                    clearThumbnailCache();
+                    break;
+                default:
+                    if (!handled) event.preventDefault();
+            }
+        });
+    }
+
     async function loadSettingsPage(showStatus = true) {
         const res = await fetchImpl('/api/settings');
-        const data = await res.json();
+        const data = await responseDataOrError(res, 'Settings unavailable');
         settingsPageData = data;
         renderEmbeddingModelPresets(data.embedding_model_presets || []);
         populateSettingsForm(data.settings || {});
@@ -358,21 +498,21 @@ export function createSettingsPageController({
     async function refreshSettingsMeta() {
         if (documentImpl.hidden) return settingsPageData || {};
         if (!settingsPageData) return loadSettingsPage(false);
-        const [cacheRes, aiRes, peopleRes] = await Promise.all([
-            fetchImpl('/api/cache/status'),
-            fetchImpl('/api/ai/status'),
-            fetchImpl('/api/people/status'),
+        const [cacheStats, aiStatus, peopleStatus, catalogStatus] = await Promise.all([
+            fetchSettingsStatusJson('/api/cache/status', { fetchImpl, kind: 'cache' }),
+            fetchSettingsStatusJson('/api/ai/status', { fetchImpl, kind: 'ai' }),
+            fetchSettingsStatusJson('/api/people/status', { fetchImpl, kind: 'people' }),
+            fetchSettingsStatusJson('/api/catalog', { fetchImpl, kind: 'catalog' }),
         ]);
-        const [cacheStats, aiStatus, peopleStatus] = await Promise.all([
-            cacheRes.json(),
-            aiRes.json(),
-            peopleRes.json(),
-        ]);
+        const catalog = catalogStatus?.counts_stale && settingsPageData?.catalog
+            ? settingsPageData.catalog
+            : catalogStatus;
         const data = {
             ...settingsPageData,
             cache_stats: cacheStats,
             ai_status: aiStatus,
             people_status: peopleStatus,
+            catalog,
         };
         renderSettingsMeta(data);
         return data;
@@ -386,6 +526,8 @@ export function createSettingsPageController({
     async function initSettings() {
         initVisibilityRefresh();
         initBottomBarMeasurement();
+        startAIStatusPolling(750, { immediate: true });
+        bindSettingsActions();
         const form = documentImpl.getElementById('settings-form');
         if (form) {
             form.addEventListener('submit', (e) => {
@@ -394,38 +536,20 @@ export function createSettingsPageController({
             });
         }
         documentImpl.getElementById('cache_profile')?.addEventListener('change', updateCacheProfileHint);
-        for (const input of documentImpl.querySelectorAll('input[name="background_work_mode_choice"]')) {
-            input.addEventListener('change', () => setBackgroundWorkMode(input.value));
-        }
         documentImpl.getElementById('embed_model_preset')?.addEventListener('change', applySelectedEmbeddingPreset);
-        documentImpl.getElementById('deep_search_terms')?.addEventListener('input', (event) => {
-            renderDeepSearchTerms(event.target.value);
-        });
-        documentImpl.getElementById('deep_search_schedule_enabled')?.addEventListener('change', () => renderDeepSearchSchedule());
-        documentImpl.getElementById('deep_search_schedule_start')?.addEventListener('input', () => renderDeepSearchSchedule());
-        documentImpl.getElementById('deep_search_schedule_end')?.addEventListener('input', () => renderDeepSearchSchedule());
-        documentImpl.getElementById('deep_search_schedule_timezone')?.addEventListener('change', () => renderDeepSearchSchedule());
-        for (const input of documentImpl.querySelectorAll('[data-deep-search-day]')) {
-            input.addEventListener('change', () => renderDeepSearchSchedule());
-        }
         for (const field of THUMB_OUTPUT_FIELDS) {
             documentImpl.getElementById(field)?.addEventListener('input', updateThumbnailChangeNotice);
         }
 
         try {
-            const settingsData = await loadSettingsPage(false);
-            renderCatalogSources(settingsData.catalog || {});
-            const stats = settingsData.catalog?.stats || {};
+            await loadSettingsPage(false);
             const folderInput = documentImpl.getElementById('scan-folder');
-            const totalEl = documentImpl.getElementById('scan-total-images');
-            if (totalEl) totalEl.textContent = Number(stats.active_images ?? stats.total_images ?? 0).toLocaleString();
             try {
                 const folderRes = await fetchImpl('/api/scan/folder');
-                const folderData = await folderRes.json();
+                const folderData = await responseDataOrError(folderRes, 'Scan folder unavailable');
                 if (folderInput && folderData.folder) folderInput.value = folderData.folder;
             } catch {}
-
-            setSettingsStatus('Ready. Save to apply changes immediately.', 'muted');
+            setSettingsStatus('Ready. Use Background Work for per-job pause/resume controls; Save applies Catalog settings.', 'muted');
             if (settingsPoller) clearIntervalImpl(settingsPoller);
             settingsPoller = setIntervalImpl(() => refreshSettingsMeta().catch(() => {}), SETTINGS_META_POLL_MS);
         } catch (err) {

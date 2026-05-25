@@ -1,9 +1,3 @@
-export const BACKGROUND_WORK_MODES = ['browse', 'balanced', 'max'];
-export const BACKGROUND_WORK_MODE_LABELS = {
-    browse: 'Browse',
-    balanced: 'Light Background',
-    max: 'Max Work',
-};
 export const THUMB_OUTPUT_FIELDS = ['thumb_size_sm', 'thumb_size_md', 'thumb_size_lg', 'thumb_quality'];
 export const THUMB_OUTPUT_LABELS = {
     thumb_size_sm: 'small size',
@@ -11,17 +5,6 @@ export const THUMB_OUTPUT_LABELS = {
     thumb_size_lg: 'large size',
     thumb_quality: 'JPEG quality',
 };
-
-
-export function normalizeBackgroundWorkMode(value) {
-    const mode = String(value || '').trim().toLowerCase();
-    return BACKGROUND_WORK_MODES.includes(mode) ? mode : 'balanced';
-}
-
-
-export function backgroundWorkModeLabel(mode) {
-    return BACKGROUND_WORK_MODE_LABELS[mode] || mode;
-}
 
 
 export function cacheProfileLabel(profile) {
@@ -77,9 +60,6 @@ export function embeddingIndexDisplay(role, index = {}) {
     const pct = total > 0 ? Math.max(0, Math.min(100, Number(index?.progress_pct || (embedded / total) * 100))) : 0;
     const dimension = Number(index?.dimension || 0);
     const message = index?.install_message || index?.worker_message || '';
-    const queryText = role === 'deep'
-        ? ` · ${Number(index?.embedded_queries || 0).toLocaleString()} cached queries, ${Number(index?.pending_queries || 0).toLocaleString()} pending`
-        : '';
     return {
         modelText: index?.model_id
             ? `${index.model_id}${dimension ? ` · ${dimension.toLocaleString()}d` : ''}`
@@ -87,20 +67,19 @@ export function embeddingIndexDisplay(role, index = {}) {
         badge: badgeStateForIndex(index || {}),
         pct,
         progressText: `${embedded.toLocaleString()} / ${total.toLocaleString()} images · ${pct.toFixed(1)}%`,
-        statusText: `${remaining.toLocaleString()} images remaining${queryText}${message ? ` · ${message}` : ''}`,
+        statusText: `${remaining.toLocaleString()} images remaining${message ? ` · ${message}` : ''}`,
     };
 }
 
 
-export function effectiveFastModelSettings(settings = {}, fastIndex = null) {
-    if (!fastIndex?.model_id) return settings || {};
+export function effectiveFastModelSettings(settings = {}, activeIndex = null) {
+    if (!activeIndex?.model_id) return settings || {};
     return {
         ...(settings || {}),
-        embed_model_preset: 'qwen3-vl-embedding-2b',
-        embed_model_id: fastIndex.model_id,
+        embed_model_id: activeIndex.model_id,
         embed_model_revision: 'main',
-        embed_model_dir: fastIndex.model_dir,
-        embed_model_dim: fastIndex.dimension,
+        embed_model_dir: activeIndex.model_dir,
+        embed_model_dim: activeIndex.dimension,
     };
 }
 

@@ -15,6 +15,23 @@ export function showCompareEmpty({ documentImpl = globalThis.document } = {}) {
 }
 
 
+export function showCompareMosaic({ documentImpl = globalThis.document } = {}) {
+    const images = byId(documentImpl, 'compare-images');
+    const mosaic = byId(documentImpl, 'mosaic-container');
+    const empty = byId(documentImpl, 'compare-empty');
+    const hints = byId(documentImpl, 'compare-hints');
+    const strategies = byId(documentImpl, 'bar-strategies');
+    if (images) images.classList.add('hidden');
+    if (empty) empty.classList.add('hidden');
+    if (hints) hints.classList.add('hidden');
+    if (strategies) strategies.classList.remove('hidden');
+    if (mosaic) {
+        mosaic.classList.remove('hidden');
+        mosaic.classList.remove('fading');
+    }
+}
+
+
 export function setCompareModeView(mode, {
     documentImpl = globalThis.document,
     transitionMs = 150,

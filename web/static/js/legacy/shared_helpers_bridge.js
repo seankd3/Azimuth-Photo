@@ -8,6 +8,7 @@ import {
     INITIAL_RANKINGS_PAGE_SIZE,
     LIBRARY_NEIGHBOR_LIMIT,
     RANKINGS_PAGE_SIZE,
+    SEARCH_RANKINGS_PAGE_SIZE,
     currentLibraryPageSize,
 } from '../library/pagination.js';
 import { formatDateTime } from '../media_metadata.js';
@@ -19,6 +20,7 @@ export function createLegacySharedHelpersBridge({
     initialRankingsPageSize = INITIAL_RANKINGS_PAGE_SIZE,
     libraryNeighborLimit = LIBRARY_NEIGHBOR_LIMIT,
     rankingsPageSize = RANKINGS_PAGE_SIZE,
+    searchRankingsPageSize = SEARCH_RANKINGS_PAGE_SIZE,
     crossViewWarmDelayMs = DEFAULT_CROSS_VIEW_WARM_DELAY_MS,
     currentLibraryPageSizeImpl = currentLibraryPageSize,
     formatDateTimeImpl = formatDateTime,
@@ -34,6 +36,7 @@ export function createLegacySharedHelpersBridge({
         libraryNeighborLimit,
         mosaicNeighborLimit,
         rankingsPageSize,
+        searchRankingsPageSize,
         currentLibraryPageSize: (...args) => currentLibraryPageSizeImpl(...args),
         showCompareEmpty: (...args) => showCompareEmptyImpl(...args),
     };

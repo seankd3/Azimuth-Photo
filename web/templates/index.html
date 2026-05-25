@@ -9,7 +9,7 @@
         <div class="input-group">
             <input type="text" id="folder-input" placeholder="Enter folder path (e.g. /home/user/Photos)"
                    value="{{ folder or '' }}" autocomplete="off">
-            <button type="button" id="scan-btn" onclick="PhotoArchive.startScan()">Scan Folder</button>
+            <button type="button" id="scan-btn" data-action="start-scan">Scan Folder</button>
         </div>
         <div id="scan-progress" class="scan-progress hidden">
             <div class="progress-bar">

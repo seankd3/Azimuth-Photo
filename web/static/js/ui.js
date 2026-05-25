@@ -76,6 +76,16 @@ let visibilityListenerAdded = false;
 export function initShortcutOverlay() {
     if (shortcutOverlayInitialized) return;
     document.addEventListener('keydown', handleShortcutOverlayKey);
+    document.addEventListener('click', (event) => {
+        const action = event.target?.closest?.('[data-action]')?.dataset?.action;
+        if (action === 'hide-shortcuts') {
+            event.preventDefault();
+            hideShortcuts();
+        } else if (action === 'hide-confirm-modal') {
+            event.preventDefault();
+            hideConfirmModal();
+        }
+    });
     shortcutOverlayInitialized = true;
 }
 

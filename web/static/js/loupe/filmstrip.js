@@ -20,10 +20,11 @@ export function clearFilmstrip({
     documentImpl = document,
     images = [],
     lightboxIndex = -1,
+    poolTotal = images.length,
 } = {}) {
     const scroll = documentImpl.getElementById('filmstrip-scroll');
     if (scroll) scroll.innerHTML = '';
-    updateFilmstripCounter({ documentImpl, images, lightboxIndex });
+    updateFilmstripCounter({ documentImpl, images, lightboxIndex, poolTotal });
     filmstripBuiltFor = null;
     filmstripWindowStart = 0;
     filmstripWindowEnd = 0;
@@ -34,11 +35,13 @@ export function updateFilmstripCounter({
     documentImpl = document,
     images = [],
     lightboxIndex = -1,
+    poolTotal = images.length,
 } = {}) {
     const counter = documentImpl.getElementById('filmstrip-counter');
     if (!counter) return '';
+    const total = Math.max(images.length, Number(poolTotal || 0) || 0);
     const text = lightboxIndex >= 0 && images.length
-        ? `${lightboxIndex + 1} / ${images.length}`
+        ? `${lightboxIndex + 1} / ${total}`
         : '';
     counter.textContent = text;
     return text;
@@ -49,13 +52,14 @@ export function buildFilmstrip({
     documentImpl = document,
     images = [],
     lightboxIndex = -1,
+    poolTotal = images.length,
     onSelect = null,
     requestAnimationFrameImpl = defaultRequestAnimationFrame,
     windowRadius = 55,
 } = {}) {
     const scroll = documentImpl.getElementById('filmstrip-scroll');
     if (!scroll) return false;
-    updateFilmstripCounter({ documentImpl, images, lightboxIndex });
+    updateFilmstripCounter({ documentImpl, images, lightboxIndex, poolTotal });
     if (lightboxIndex < 0) {
         clearFilmstrip({ documentImpl, images, lightboxIndex });
         return false;
@@ -114,6 +118,7 @@ export function updateFilmstripActive({
     documentImpl = document,
     images = [],
     lightboxIndex = -1,
+    poolTotal = images.length,
     onSelect = null,
     requestAnimationFrameImpl = defaultRequestAnimationFrame,
     windowRadius = 55,
@@ -121,7 +126,7 @@ export function updateFilmstripActive({
     const scroll = documentImpl.getElementById('filmstrip-scroll');
     if (!scroll) return false;
     if (lightboxIndex < 0) return false;
-    updateFilmstripCounter({ documentImpl, images, lightboxIndex });
+    updateFilmstripCounter({ documentImpl, images, lightboxIndex, poolTotal });
     if (lightboxIndex < filmstripWindowStart || lightboxIndex >= filmstripWindowEnd) {
         return buildFilmstrip({
             documentImpl,

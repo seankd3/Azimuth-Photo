@@ -89,7 +89,7 @@ export function createSettingsApi({
         resumeEmbeddings: async () => {
             await resumeEmbeddings(embeddingActionOptions());
         },
-        installAIModel: async (role = 'fast') => {
+        installAIModel: async (role = 'active') => {
             await installAIModel(role, {
                 ...settingsActionOptions(),
                 renderAISettingsStatus,
@@ -99,11 +99,9 @@ export function createSettingsApi({
         applyRecommendedCache: () => {
             const profileInput = documentImpl?.getElementById?.('cache_profile');
             const memoryInput = documentImpl?.getElementById?.('memory_cache_gb');
-            const warmInput = documentImpl?.getElementById?.('pregenerate_on_idle');
             const pageData = getSettingsPageData() || {};
             if (profileInput) profileInput.value = 'original_heavy';
             if (memoryInput) memoryInput.value = recommendedMemoryGb(pageData.settings || {});
-            if (warmInput) warmInput.checked = true;
             updateCacheProfileHint();
             api.saveSettings();
         },

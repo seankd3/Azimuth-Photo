@@ -1,6 +1,7 @@
 import asyncio
 import io
 import os
+import time
 from collections.abc import Awaitable, Callable
 
 from fastapi import APIRouter, Request
@@ -10,6 +11,7 @@ import face_worker
 import settings
 import thumbnails
 from core.requests import json_object, positive_int
+from data import connection as data_connection
 
 
 router = APIRouter()
@@ -17,6 +19,7 @@ AsyncDictBuilder = Callable[..., Awaitable[dict]]
 AsyncOptionalDictBuilder = Callable[..., Awaitable[dict | None]]
 
 _get_people_review: AsyncDictBuilder | None = None
+_get_people_status_counts: AsyncDictBuilder | None = None
 _get_face_thumbnail_context: AsyncOptionalDictBuilder | None = None
 _label_person: AsyncDictBuilder | None = None
 _merge_people: AsyncDictBuilder | None = None
@@ -29,6 +32,7 @@ _ignore_person: AsyncDictBuilder | None = None
 def configure(
     *,
     get_people_review: AsyncDictBuilder,
+    get_people_status_counts: AsyncDictBuilder | None = None,
     get_face_thumbnail_context: AsyncOptionalDictBuilder,
     label_person: AsyncDictBuilder,
     merge_people: AsyncDictBuilder,
@@ -37,10 +41,11 @@ def configure(
     ignore_face: AsyncDictBuilder,
     ignore_person: AsyncDictBuilder,
 ) -> None:
-    global _get_people_review, _get_face_thumbnail_context, _label_person
+    global _get_people_review, _get_people_status_counts, _get_face_thumbnail_context, _label_person
     global _merge_people, _reject_merge_suggestion, _assign_face
     global _ignore_face, _ignore_person
     _get_people_review = get_people_review
+    _get_people_status_counts = get_people_status_counts
     _get_face_thumbnail_context = get_face_thumbnail_context
     _label_person = label_person
     _merge_people = merge_people
@@ -65,20 +70,62 @@ def _configured():
         raise RuntimeError("People routes are not configured")
 
 
+_people_status_counts_cache: dict[str, object] = {"counts": None, "expires": 0.0}
+_people_status_counts_cache_ttl_seconds = 10.0
+
+
+def _minimal_people_counts(worker: dict) -> dict:
+    return {
+        "people": 0,
+        "named_people": 0,
+        "unknown_people": 0,
+        "detected_faces": 0,
+        "pending_cached_images": int(worker.get("pending_cached_images") or 0),
+        "other_faces": 0,
+        "merge_suggestions": 0,
+        "scan": {},
+    }
+
+
+async def _fast_people_counts(worker: dict) -> tuple[dict, bool]:
+    if _get_people_status_counts is None:
+        _configured()
+        review = await _get_people_review(limit=12)
+        return dict(review.get("counts", {}) if isinstance(review, dict) else {}), False
+
+    try:
+        with data_connection.sqlite_timeout(0.25):
+            counts = await asyncio.wait_for(_get_people_status_counts(), timeout=0.75)
+    except Exception as exc:
+        if not (
+            data_connection.is_sqlite_locked_error(exc)
+            or isinstance(exc, TimeoutError)
+            or isinstance(exc, asyncio.TimeoutError)
+        ):
+            raise
+        cached = _people_status_counts_cache.get("counts")
+        counts = dict(cached) if isinstance(cached, dict) else _minimal_people_counts(worker)
+        return counts, True
+
+    counts = dict(counts or {})
+    _people_status_counts_cache["counts"] = counts
+    _people_status_counts_cache["expires"] = time.time() + _people_status_counts_cache_ttl_seconds
+    return counts, False
+
+
 async def people_status_payload(review: dict | None = None) -> dict:
+    started = time.perf_counter()
     config = settings.get_settings()
     worker = face_worker.get_worker_status()
+    counts_stale = False
     if review is None:
-        try:
-            _configured()
-            review = await _get_people_review(limit=12)
-        except Exception:
-            review = {}
-    counts = dict(review.get("counts", {}) if isinstance(review, dict) else {})
+        counts, counts_stale = await _fast_people_counts(worker)
+    else:
+        counts = dict(review.get("counts", {}) if isinstance(review, dict) else {})
     counts.setdefault("pending_cached_images", int(worker.get("pending_cached_images") or 0))
     return {
-        "active": bool(config.get("people_scan_enabled", True)),
-        "automatic": True,
+        "active": bool(config.get("people_scan_enabled", True)) and not face_worker.manual_pause_active(),
+        "automatic": False,
         "auto_install": bool(config.get("people_auto_install", True)),
         "model_id": config.get("face_model_id") or "buffalo_l",
         "model_dir": config.get("face_model_dir") or "",
@@ -92,6 +139,9 @@ async def people_status_payload(review: dict | None = None) -> dict:
         "model_license": face_worker.FACE_MODEL_LICENSE_TEXT,
         "worker": worker,
         "counts": counts,
+        "counts_stale": counts_stale,
+        "status_stale": counts_stale,
+        "latency_ms": round((time.perf_counter() - started) * 1000, 1),
     }
 
 
@@ -193,6 +243,7 @@ async def api_people_scan_pause():
 
 @router.post("/api/people/scan/resume")
 async def api_people_scan_resume():
+    thumbnails.start_pregeneration()
     face_worker.resume_face_worker()
     return {"ok": True, "status": await people_status_payload()}
 
@@ -228,7 +279,11 @@ async def api_merge_people(request: Request):
 @router.post("/api/people/merge-suggestions/{suggestion_id}/reject")
 async def api_reject_people_merge(suggestion_id: int):
     _configured()
-    return await _reject_merge_suggestion(suggestion_id)
+    result = await _reject_merge_suggestion(suggestion_id)
+    if not isinstance(result, dict) or not result.get("ok"):
+        error = result.get("error") if isinstance(result, dict) else ""
+        return JSONResponse({"error": error or "Could not reject suggestion"}, status_code=400)
+    return result
 
 
 @router.post("/api/people/faces/{face_id}/assign")
@@ -247,10 +302,18 @@ async def api_assign_face(face_id: int, request: Request):
 @router.post("/api/people/faces/{face_id}/ignore")
 async def api_ignore_face(face_id: int):
     _configured()
-    return await _ignore_face(face_id)
+    result = await _ignore_face(face_id)
+    if not isinstance(result, dict) or not result.get("ok"):
+        error = result.get("error") if isinstance(result, dict) else ""
+        return JSONResponse({"error": error or "Could not ignore face"}, status_code=400)
+    return result
 
 
 @router.post("/api/people/{person_id}/ignore")
 async def api_ignore_person(person_id: int):
     _configured()
-    return await _ignore_person(person_id)
+    result = await _ignore_person(person_id)
+    if not isinstance(result, dict) or not result.get("ok"):
+        error = result.get("error") if isinstance(result, dict) else ""
+        return JSONResponse({"error": error or "Could not ignore person"}, status_code=400)
+    return result

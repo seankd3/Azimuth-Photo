@@ -6,12 +6,12 @@ export function setSettingsStatus(message, tone = '') {
 }
 
 
-export function backgroundWorkStatusText(cacheStats, aiStatus, modeLabel) {
-    const governor = cacheStats?.governor || aiStatus?.governor || {};
-    const state = governor.pause ? 'paused' : (governor.mode || 'ready');
-    const reason = governor.reason ? `: ${governor.reason}` : '';
+export function backgroundWorkStatusText(cacheStats, aiStatus) {
+    const cacheState = cacheStats?.pregen?.state || 'paused';
+    const aiState = aiStatus?.worker_state || 'paused';
+    const running = cacheState === 'running' || aiState === 'embedding' || aiState === 'loading_model';
     return {
-        governorText: `${modeLabel} · ${state}${reason}`,
-        heavyText: governor.pause ? 'paused' : 'enabled',
+        statusText: running ? 'Manual work is running' : 'Manual work is paused',
+        heavyText: running ? 'running' : 'paused',
     };
 }

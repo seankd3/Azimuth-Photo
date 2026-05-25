@@ -1,12 +1,13 @@
 {% extends "base.html" %}
 {% block title %}photoArchive — People{% endblock %}
-{% block body_class %}people-shell{% endblock %}
+{% block body_class %}with-bottom-bar people-shell{% endblock %}
 {% block active_nav %}people{% endblock %}
+{% block navbar %}{% endblock %}
 {% block content %}
 <div class="people-page">
     <header class="people-header">
         <div>
-            <h1>People</h1>
+            <h1>People <span class="help-tip" tabindex="0" role="img" aria-label="People help" data-tooltip="People groups are built locally from cached previews. Add labels, merge duplicate groups, or ignore groups you do not need."></span></h1>
             <div class="people-status-line" id="people-status-line">Loading People...</div>
             <div class="people-license-line" id="people-license-line"></div>
         </div>
@@ -14,21 +15,21 @@
 
     <section class="people-section">
         <div class="people-section-head">
-            <h2>Most Seen</h2>
+            <h2>Most Seen <span class="help-tip" tabindex="0" role="img" aria-label="Most Seen help" data-tooltip="The largest face groups, usually the fastest place to label familiar people."></span></h2>
         </div>
         <div class="people-grid" id="people-most-seen"></div>
     </section>
 
     <section class="people-section">
         <div class="people-section-head">
-            <h2>Named People</h2>
+            <h2>Named People <span class="help-tip" tabindex="0" role="img" aria-label="Named People help" data-tooltip="Groups you have labeled. Selecting a person can filter the Library to photos containing them."></span></h2>
         </div>
         <div class="people-grid" id="people-named"></div>
     </section>
 
     <section class="people-section">
         <div class="people-section-head">
-            <h2>Needs Review</h2>
+            <h2>Needs Review <span class="help-tip" tabindex="0" role="img" aria-label="Needs Review help" data-tooltip="Suggested merges where the app thinks two groups may be the same person."></span></h2>
         </div>
         <div class="people-review-list" id="people-needs-review"></div>
     </section>
@@ -38,6 +39,20 @@
         <div class="people-grid" id="people-other"></div>
     </details>
 </div>
+{% endblock %}
+
+{% block bottom_bar %}
+<footer class="bottom-bar" id="people-bar" aria-label="Application controls">
+    <div class="bar-section bar-summary bar-stats">
+        People
+    </div>
+    <div class="bar-section bar-hints">
+        Enter label · Merge duplicates · Open Library filtered to a person
+    </div>
+    {% include '_bottom_bar_nav.html' %}
+    <div class="bar-divider"></div>
+    {% include '_bottom_bar_work.html' %}
+</footer>
 {% endblock %}
 
 {% block scripts %}

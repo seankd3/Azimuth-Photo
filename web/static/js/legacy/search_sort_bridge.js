@@ -3,7 +3,6 @@ import {
     sortValueForState,
 } from '../library/sort.js';
 import {
-    SEARCH_DEEP_STORAGE_KEY,
     SEARCH_SORT_STORAGE_KEY,
     SEARCH_STORAGE_KEY,
     SORT_STORAGE_KEY,
@@ -29,8 +28,6 @@ export function createLegacySearchSortBridge({
     locationImpl,
     getSearchQuery,
     setSearchQuery,
-    getDeepSearchRequested,
-    setDeepSearchRequested,
     getSortField,
     setSortField,
     getSortDesc,
@@ -64,11 +61,10 @@ export function createLegacySearchSortBridge({
         saveSearchStateCore({
             storage,
             searchKey: SEARCH_STORAGE_KEY,
-            deepKey: SEARCH_DEEP_STORAGE_KEY,
             searchQuery: getSearchQuery(),
-            deepSearchRequested: getDeepSearchRequested(),
             hasActiveTextSearch,
         });
+        syncLibraryUrlState();
     }
 
     function saveSearchSortState() {
@@ -87,8 +83,8 @@ export function createLegacySearchSortBridge({
             storage,
             searchKey: SEARCH_STORAGE_KEY,
             searchSortKey: SEARCH_SORT_STORAGE_KEY,
-            deepKey: SEARCH_DEEP_STORAGE_KEY,
         });
+        syncLibraryUrlState();
     }
 
     function restoreSortState() {
@@ -113,15 +109,15 @@ export function createLegacySearchSortBridge({
         const restored = restoreSearchStateCore({
             storage,
             searchKey: SEARCH_STORAGE_KEY,
-            deepKey: SEARCH_DEEP_STORAGE_KEY,
+            locationSearch: locationImpl?.search || '',
         });
         setSearchQuery(restored.searchQuery);
-        setDeepSearchRequested(restored.deepSearchRequested);
         updateSimilaritySortOption();
         if (hasActiveTextSearch(getSearchQuery())) {
             const restoredSort = restoreSearchSortState() || { field: 'similarity', desc: true };
             applySortState(restoredSort.field, restoredSort.desc, { persist: false });
         }
+        syncLibraryUrlState();
         updateSearchControls();
     }
 
@@ -129,7 +125,6 @@ export function createLegacySearchSortBridge({
         updateSearchControlsCore({
             documentImpl,
             searchQuery: getSearchQuery(),
-            deepSearchRequested: getDeepSearchRequested(),
             sortField: getSortField(),
             sortDesc: getSortDesc(),
             hasActiveTextSearch,

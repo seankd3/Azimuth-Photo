@@ -12,6 +12,7 @@ nudges images that haven't been extensively compared yet.
 import asyncio
 from collections.abc import Awaitable, Callable
 import logging
+import sqlite3
 from typing import Any
 
 import numpy as np
@@ -39,6 +40,8 @@ SIMILARITY_THRESHOLD = 0.70   # minimum cosine similarity to propagate
 MAX_NEIGHBORS = 100           # long tail — cubic scaling makes weak matches near-zero anyway
 PROPAGATION_DECAY = 0.3       # scale factor (0.3 = propagated change is 30% of direct)
 MAX_DIRECT_COMPARISONS = 50   # allow propagation to well-compared images (cubic scaling keeps it safe)
+PROPAGATION_LOCK_RETRIES = 3
+PROPAGATION_LOCK_RETRY_SECONDS = 1.0
 
 
 def configure(
@@ -66,6 +69,30 @@ def _configured(provider, name: str):
     return provider
 
 
+def _is_sqlite_locked(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    return (
+        isinstance(exc, sqlite3.OperationalError)
+        or "sqlite" in type(exc).__module__.lower()
+    ) and (
+        "database is locked" in text
+        or "database table is locked" in text
+        or "database schema is locked" in text
+    )
+
+
+async def _run_with_lock_retries(label: str, operation):
+    for attempt in range(PROPAGATION_LOCK_RETRIES + 1):
+        try:
+            return await operation()
+        except Exception as exc:
+            if _is_sqlite_locked(exc) and attempt < PROPAGATION_LOCK_RETRIES:
+                await asyncio.sleep(PROPAGATION_LOCK_RETRY_SECONDS * (attempt + 1))
+                continue
+            log.warning("%s propagation error: %s", label, exc)
+            return None
+
+
 def invalidate_prediction_cache():
     global _prediction_cache_key, _prediction_cache_counts
     _prediction_cache_key = None
@@ -74,45 +101,17 @@ def invalidate_prediction_cache():
 
 def compare_embedding_model_key() -> str:
     """Return the embedding surface Compare uses for vector propagation."""
-    return settings.deep_search_embedding_config()["model_key"]
+    return _configured(_active_embedding_model_key, "active_embedding_model_key")()
 
 
 async def _get_compare_matrix(required_ids=()):
-    """
-    Prefer the smarter 8B embedding surface for Compare vector math.
-
-    If the deep index is still being backfilled and lacks the current images,
-    fall back to the active fast index so direct comparison workflows keep
-    producing propagation instead of going inert.
-    """
-    preferred_key = compare_embedding_model_key()
-    try:
-        image_ids, matrix = await embed_cache.get_matrix(preferred_key)
-        id_to_idx = embed_cache.get_index(preferred_key)
-    except Exception as exc:
-        log.warning("Compare deep embedding matrix unavailable: %s", exc)
-        image_ids, matrix, id_to_idx = None, None, {}
-    required = [int(image_id) for image_id in required_ids]
-    if (
-        image_ids is not None
-        and matrix is not None
-        and all(image_id in id_to_idx for image_id in required)
-    ):
-        return preferred_key, image_ids, matrix, id_to_idx
-
-    if image_ids is not None and matrix is not None:
-        missing_count = sum(1 for image_id in required if image_id not in id_to_idx)
-        if missing_count:
-            log.debug(
-                "Compare deep embedding matrix missing %s required images; falling back to active index",
-                missing_count,
-            )
-
-    fallback_key = _configured(_active_embedding_model_key, "active_embedding_model_key")()
-    image_ids, matrix = await embed_cache.get_matrix()
+    """Load the active embedding matrix used by Compare vector math."""
+    model_key = compare_embedding_model_key()
+    image_ids, matrix = await embed_cache.get_matrix(model_key)
     if image_ids is None or matrix is None:
-        return fallback_key, None, None, {}
-    return fallback_key, image_ids, matrix, embed_cache.get_index()
+        return model_key, None, None, {}
+    id_to_idx = embed_cache.get_index(model_key)
+    return model_key, image_ids, matrix, id_to_idx
 
 
 def _nonlinear_weight(similarity: float) -> float:
@@ -301,142 +300,156 @@ async def predict_propagation(grid_ids: list[int]) -> dict[int, int]:
         return {gid: 0 for gid in grid_ids}
 
 
-async def propagate_comparison(winner_id: int, loser_id: int, k: float, action_id: str | None = None):
+async def _propagate_comparison_once(winner_id: int, loser_id: int, k: float, action_id: str | None = None):
     """
     After a direct comparison, propagate scaled Elo changes to similar images.
     Called as a fire-and-forget background task.
     """
+    _, image_ids, matrix, id_to_idx = await _get_compare_matrix((winner_id, loser_id))
+    if image_ids is None:
+        return  # no embeddings available yet
+
+    # Find similar images for winner and loser
+    winner_neighbors = _find_similar(winner_id, image_ids, matrix, id_to_idx, SIMILARITY_THRESHOLD, MAX_NEIGHBORS)
+    loser_neighbors = _find_similar(loser_id, image_ids, matrix, id_to_idx, SIMILARITY_THRESHOLD, MAX_NEIGHBORS)
+
+    if not winner_neighbors and not loser_neighbors:
+        return
+
+    # Collect all neighbor IDs to fetch their current state
+    all_neighbor_ids = list({nid for nid, _ in winner_neighbors + loser_neighbors})
+    neighbors = await _configured(_get_active_images_by_ids, "get_active_images_by_ids")(all_neighbor_ids)
+
+    conn = await _configured(_get_db, "get_db")()
     try:
-        _, image_ids, matrix, id_to_idx = await _get_compare_matrix((winner_id, loser_id))
-        if image_ids is None:
-            return  # no embeddings available yet
+        deltas = {}
 
-        # Find similar images for winner and loser
-        winner_neighbors = _find_similar(winner_id, image_ids, matrix, id_to_idx, SIMILARITY_THRESHOLD, MAX_NEIGHBORS)
-        loser_neighbors = _find_similar(loser_id, image_ids, matrix, id_to_idx, SIMILARITY_THRESHOLD, MAX_NEIGHBORS)
+        # Boost images similar to the winner
+        for neighbor_id, similarity in winner_neighbors:
+            if neighbor_id == loser_id:
+                continue
+            weight = _nonlinear_weight(similarity)
+            boost = k * weight * PROPAGATION_DECAY
+            deltas[neighbor_id] = deltas.get(neighbor_id, 0.0) + boost
 
-        if not winner_neighbors and not loser_neighbors:
-            return
+        # Penalize images similar to the loser
+        for neighbor_id, similarity in loser_neighbors:
+            if neighbor_id == winner_id:
+                continue
+            weight = _nonlinear_weight(similarity)
+            penalty = k * weight * PROPAGATION_DECAY
+            deltas[neighbor_id] = deltas.get(neighbor_id, 0.0) - penalty
 
-        # Collect all neighbor IDs to fetch their current state
-        all_neighbor_ids = list({nid for nid, _ in winner_neighbors + loser_neighbors})
-        neighbors = await _configured(_get_active_images_by_ids, "get_active_images_by_ids")(all_neighbor_ids)
-
-        conn = await _configured(_get_db, "get_db")()
-        try:
-            deltas = {}
-
-            # Boost images similar to the winner
-            for neighbor_id, similarity in winner_neighbors:
-                if neighbor_id == loser_id:
-                    continue
-                weight = _nonlinear_weight(similarity)
-                boost = k * weight * PROPAGATION_DECAY
-                deltas[neighbor_id] = deltas.get(neighbor_id, 0.0) + boost
-
-            # Penalize images similar to the loser
-            for neighbor_id, similarity in loser_neighbors:
-                if neighbor_id == winner_id:
-                    continue
-                weight = _nonlinear_weight(similarity)
-                penalty = k * weight * PROPAGATION_DECAY
-                deltas[neighbor_id] = deltas.get(neighbor_id, 0.0) - penalty
-
-            global last_propagation_count
-            updated = await _apply_propagation_deltas(
-                conn,
-                neighbors,
-                deltas,
-                action_id=action_id,
-            )
-            if updated:
-                await conn.commit()
-                _configured(_invalidate_rating_stats_cache, "invalidate_rating_stats_cache")()
-                last_propagation_count = updated
-                log.debug(f"Propagated Elo to {updated} neighbors "
-                         f"(winner={winner_id}, loser={loser_id})")
-            else:
-                last_propagation_count = 0
-        finally:
-            await conn.close()
-
-    except Exception as e:
-        log.warning(f"Elo propagation error: {e}")
+        global last_propagation_count
+        updated = await _apply_propagation_deltas(
+            conn,
+            neighbors,
+            deltas,
+            action_id=action_id,
+        )
+        if updated:
+            await conn.commit()
+            _configured(_invalidate_rating_stats_cache, "invalidate_rating_stats_cache")()
+            last_propagation_count = updated
+            log.debug(f"Propagated Elo to {updated} neighbors "
+                     f"(winner={winner_id}, loser={loser_id})")
+        else:
+            last_propagation_count = 0
+    finally:
+        await conn.close()
 
 
-async def propagate_mosaic(winner_id: int, loser_ids: list[int], k: float, action_id: str | None = None):
+async def propagate_comparison(winner_id: int, loser_id: int, k: float, action_id: str | None = None):
+    """
+    After a direct comparison, propagate scaled Elo changes to similar images.
+    Called through the write-behind queue in normal request handling.
+    """
+    return await _run_with_lock_retries(
+        "Elo",
+        lambda: _propagate_comparison_once(winner_id, loser_id, k, action_id=action_id),
+    )
+
+
+async def _propagate_mosaic_once(winner_id: int, loser_ids: list[int], k: float, action_id: str | None = None):
     """
     Propagate after a mosaic pick. Boost images similar to the winner,
     and penalize images similar to the losers. This makes each mosaic
     pick dramatically more powerful by also affecting look-alikes of
     every image on the grid.
     """
-    try:
-        _, image_ids, matrix, id_to_idx = await _get_compare_matrix((winner_id, *loser_ids))
-        if image_ids is None:
-            return
+    _, image_ids, matrix, id_to_idx = await _get_compare_matrix((winner_id, *loser_ids))
+    if image_ids is None:
+        return
 
-        involved = {winner_id} | set(loser_ids)
+    involved = {winner_id} | set(loser_ids)
 
-        # Find neighbors for winner AND all losers
-        winner_neighbors = _find_similar(winner_id, image_ids, matrix, id_to_idx, SIMILARITY_THRESHOLD, MAX_NEIGHBORS)
-        loser_neighbor_lists = []
-        for lid in loser_ids:
-            loser_neighbors = _find_similar(lid, image_ids, matrix, id_to_idx, SIMILARITY_THRESHOLD, MAX_NEIGHBORS)
-            loser_neighbor_lists.append(loser_neighbors)
+    # Find neighbors for winner AND all losers
+    winner_neighbors = _find_similar(winner_id, image_ids, matrix, id_to_idx, SIMILARITY_THRESHOLD, MAX_NEIGHBORS)
+    loser_neighbor_lists = []
+    for lid in loser_ids:
+        loser_neighbors = _find_similar(lid, image_ids, matrix, id_to_idx, SIMILARITY_THRESHOLD, MAX_NEIGHBORS)
+        loser_neighbor_lists.append(loser_neighbors)
 
-        all_neighbor_ids = set()
-        for nid, _ in winner_neighbors:
+    all_neighbor_ids = set()
+    for nid, _ in winner_neighbors:
+        all_neighbor_ids.add(nid)
+    for ln in loser_neighbor_lists:
+        for nid, _ in ln:
             all_neighbor_ids.add(nid)
-        for ln in loser_neighbor_lists:
-            for nid, _ in ln:
-                all_neighbor_ids.add(nid)
 
-        if not all_neighbor_ids:
-            return
+    if not all_neighbor_ids:
+        return
 
-        neighbors = await _configured(_get_active_images_by_ids, "get_active_images_by_ids")(list(all_neighbor_ids))
+    neighbors = await _configured(_get_active_images_by_ids, "get_active_images_by_ids")(list(all_neighbor_ids))
 
-        conn = await _configured(_get_db, "get_db")()
-        try:
-            deltas = {}
+    conn = await _configured(_get_db, "get_db")()
+    try:
+        deltas = {}
 
-            # Boost images similar to the winner
-            for neighbor_id, similarity in winner_neighbors:
+        # Boost images similar to the winner
+        for neighbor_id, similarity in winner_neighbors:
+            if neighbor_id in involved:
+                continue
+            weight = _nonlinear_weight(similarity)
+            boost = k * weight * PROPAGATION_DECAY
+            deltas[neighbor_id] = deltas.get(neighbor_id, 0.0) + boost
+
+        # Penalize images similar to losers (scaled down since each
+        # loser only lost to the winner, not to each other)
+        loser_scale = 1.0 / max(len(loser_ids), 1)
+        for loser_neighbors in loser_neighbor_lists:
+            for neighbor_id, similarity in loser_neighbors:
                 if neighbor_id in involved:
                     continue
                 weight = _nonlinear_weight(similarity)
-                boost = k * weight * PROPAGATION_DECAY
-                deltas[neighbor_id] = deltas.get(neighbor_id, 0.0) + boost
+                penalty = k * weight * PROPAGATION_DECAY * loser_scale
+                deltas[neighbor_id] = deltas.get(neighbor_id, 0.0) - penalty
 
-            # Penalize images similar to losers (scaled down since each
-            # loser only lost to the winner, not to each other)
-            loser_scale = 1.0 / max(len(loser_ids), 1)
-            for loser_neighbors in loser_neighbor_lists:
-                for neighbor_id, similarity in loser_neighbors:
-                    if neighbor_id in involved:
-                        continue
-                    weight = _nonlinear_weight(similarity)
-                    penalty = k * weight * PROPAGATION_DECAY * loser_scale
-                    deltas[neighbor_id] = deltas.get(neighbor_id, 0.0) - penalty
+        global last_propagation_count
+        updated = await _apply_propagation_deltas(
+            conn,
+            neighbors,
+            deltas,
+            action_id=action_id,
+        )
+        if updated:
+            await conn.commit()
+            _configured(_invalidate_rating_stats_cache, "invalidate_rating_stats_cache")()
+            last_propagation_count = updated
+            log.debug(f"Propagated mosaic to {updated} neighbors "
+                     f"(winner={winner_id}, {len(loser_ids)} losers)")
+        else:
+            last_propagation_count = 0
+    finally:
+        await conn.close()
 
-            global last_propagation_count
-            updated = await _apply_propagation_deltas(
-                conn,
-                neighbors,
-                deltas,
-                action_id=action_id,
-            )
-            if updated:
-                await conn.commit()
-                _configured(_invalidate_rating_stats_cache, "invalidate_rating_stats_cache")()
-                last_propagation_count = updated
-                log.debug(f"Propagated mosaic to {updated} neighbors "
-                         f"(winner={winner_id}, {len(loser_ids)} losers)")
-            else:
-                last_propagation_count = 0
-        finally:
-            await conn.close()
 
-    except Exception as e:
-        log.warning(f"Mosaic propagation error: {e}")
+async def propagate_mosaic(winner_id: int, loser_ids: list[int], k: float, action_id: str | None = None):
+    """
+    Propagate after a mosaic pick. Boost images similar to the winner,
+    and penalize images similar to the losers.
+    """
+    return await _run_with_lock_retries(
+        "Mosaic",
+        lambda: _propagate_mosaic_once(winner_id, loser_ids, k, action_id=action_id),
+    )

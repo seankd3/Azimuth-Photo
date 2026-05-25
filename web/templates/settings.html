@@ -2,11 +2,12 @@
 {% block title %}photoArchive — Catalog{% endblock %}
 {% block body_class %}with-bottom-bar settings-shell{% endblock %}
 {% block active_nav %}catalog{% endblock %}
+{% block navbar %}{% endblock %}
 {% block content %}
 <div class="settings-page">
     <div class="settings-hero">
         <div>
-            <h1>Catalog</h1>
+            <h1>Catalog <span class="help-tip" tabindex="0" role="img" aria-label="Catalog help" data-tooltip="Start here: add folders, scan photos, tune cache, and turn on optional local AI features."></span></h1>
             <p>Manage catalog folders, scan progress, thumbnail caching, preferences, and the local AI model.</p>
         </div>
         <div class="settings-status" id="settings-status">Loading current settings…</div>
@@ -17,7 +18,7 @@
     <section class="work-banner setup-guide" id="setup-guide" aria-labelledby="setup-guide-title">
         <div class="work-banner-head">
             <div>
-                <div class="work-banner-title" id="setup-guide-title">Setup Guide</div>
+                <div class="work-banner-title" id="setup-guide-title">Setup Guide <span class="help-tip" tabindex="0" role="img" aria-label="Setup guide help" data-tooltip="These steps show the fastest path from an empty install to a browsable, searchable local archive."></span></div>
                 <div class="settings-help-text">Fast path to a usable local archive. The advanced controls stay available below.</div>
             </div>
             <div class="work-row-eta" id="setup-guide-summary">Loading setup status...</div>
@@ -43,20 +44,10 @@
                 </div>
                 <div class="embedding-index-status" id="setup-step-scan-detail">Add a source first.</div>
             </a>
-            <a class="embedding-index-panel setup-step" href="#work-mode-section" data-setup-step="work">
-                <div class="embedding-index-header">
-                    <div>
-                        <div class="embedding-index-title">3. Work Mode</div>
-                        <div class="embedding-index-subtitle">Choose foreground responsiveness or background throughput.</div>
-                    </div>
-                    <span class="embedding-index-badge ready" id="setup-step-work-badge">Ready</span>
-                </div>
-                <div class="embedding-index-status" id="setup-step-work-detail">Light Background is the default.</div>
-            </a>
             <a class="embedding-index-panel setup-step" href="#image-cache-section" data-setup-step="cache">
                 <div class="embedding-index-header">
                     <div>
-                        <div class="embedding-index-title">4. Image Cache</div>
+                        <div class="embedding-index-title">3. Image Cache</div>
                         <div class="embedding-index-subtitle">Confirm RAM/SSD budget for fast browsing.</div>
                     </div>
                     <span class="embedding-index-badge ready" id="setup-step-cache-badge">Ready</span>
@@ -66,8 +57,8 @@
             <a class="embedding-index-panel setup-step" href="#ai-model-section" data-setup-step="ai">
                 <div class="embedding-index-header">
                     <div>
-                        <div class="embedding-index-title">5. Daily Search</div>
-                        <div class="embedding-index-subtitle">Optional local 2B semantic-search model.</div>
+                        <div class="embedding-index-title">4. AI embeddings/search</div>
+                        <div class="embedding-index-subtitle">Optional local semantic search model.</div>
                     </div>
                     <span class="embedding-index-badge scheduled" id="setup-step-ai-badge">Optional</span>
                 </div>
@@ -76,7 +67,7 @@
             <a class="embedding-index-panel setup-step" href="#people-recognition-section" data-setup-step="people">
                 <div class="embedding-index-header">
                     <div>
-                        <div class="embedding-index-title">6. People</div>
+                        <div class="embedding-index-title">5. People</div>
                         <div class="embedding-index-subtitle">Optional local face grouping from cached previews.</div>
                     </div>
                     <span class="embedding-index-badge scheduled" id="setup-step-people-badge">Optional</span>
@@ -92,22 +83,22 @@
 
     <form class="settings-grid" id="settings-form">
         <section class="settings-card" id="catalog-sources-section">
-            <h2>Catalog Sources</h2>
+            <h2>Catalog Sources <span class="help-tip" tabindex="0" role="img" aria-label="Catalog sources help" data-tooltip="Source folders are watched by the catalog, but photoArchive never edits or deletes your original files."></span></h2>
             <p class="settings-card-copy">Folders included in this catalog. Removing a folder can either hide its photos while keeping catalog data, or delete the folder’s catalog rows and generated cache.</p>
             <label class="settings-field">
                 <span>Add folder</span>
                 <input id="scan-folder" type="text" spellcheck="false" autocomplete="off">
             </label>
             <div class="settings-actions">
-                <button class="bar-btn" type="button" id="choose-folder-btn" onclick="PhotoArchive.chooseCatalogFolder()">Choose Folder</button>
-                <button class="bar-btn subtle" type="button" onclick="PhotoArchive.toggleDirectoryBrowser()">Tree Browse</button>
-                <button class="bar-btn" type="button" id="scan-btn" onclick="PhotoArchive.addCatalogSource()">Add + Scan</button>
+                <button class="bar-btn has-tooltip" type="button" id="choose-folder-btn" data-action="choose-catalog-folder" data-tooltip="Open the system folder picker when your browser supports it.">Choose Folder</button>
+                <button class="bar-btn subtle has-tooltip" type="button" data-action="toggle-directory-browser" data-tooltip="Browse readable folders from inside the app when the picker is unavailable.">Tree Browse</button>
+                <button class="bar-btn has-tooltip" type="button" id="scan-btn" data-action="add-catalog-source" data-tooltip="Add this folder to the catalog and scan supported photo files.">Add + Scan</button>
             </div>
             <div class="directory-browser hidden" id="directory-browser">
                 <div class="directory-browser-roots" id="directory-browser-roots"></div>
                 <div class="directory-browser-path">
-                    <button class="bar-btn" type="button" onclick="PhotoArchive.browseDirectoryParent()">Up</button>
-                    <button class="bar-btn" type="button" onclick="PhotoArchive.useBrowsedDirectory()">Use This Folder</button>
+                    <button class="bar-btn" type="button" data-action="browse-directory-parent">Up</button>
+                    <button class="bar-btn" type="button" data-action="use-browsed-directory">Use This Folder</button>
                     <div class="directory-crumbs" id="directory-browser-current">—</div>
                 </div>
                 <div class="directory-browser-list" id="directory-browser-list"></div>
@@ -121,75 +112,28 @@
             <div class="catalog-source-list" id="catalog-source-list"></div>
         </section>
 
-        <section class="settings-card settings-card-wide" id="work-mode-section">
-            <h2>Computer Work Mode</h2>
-            <p class="settings-card-copy">Choose how much background work photoArchive is allowed to do while you use the computer.</p>
-            <input id="background_work_mode" type="hidden">
-            <div class="work-mode-picker" id="background-work-mode-picker">
-                <label class="work-mode-option" data-work-mode-option="browse">
-                    <input type="radio" name="background_work_mode_choice" value="browse">
-                    <span class="work-mode-title">Browse</span>
-                    <span class="work-mode-copy">Pause background builders so Library, Compare, and Mosaic stay responsive.</span>
-                </label>
-                <label class="work-mode-option" data-work-mode-option="balanced">
-                    <input type="radio" name="background_work_mode_choice" value="balanced">
-                    <span class="work-mode-title">Light Background</span>
-                    <span class="work-mode-copy">Trickle cache, embeddings, and People work in small batches while you use the app.</span>
-                </label>
-                <label class="work-mode-option" data-work-mode-option="max">
-                    <input type="radio" name="background_work_mode_choice" value="max">
-                    <span class="work-mode-title">Max Work</span>
-                    <span class="work-mode-copy">Use larger background batches for overnight or away-from-desk builds.</span>
-                </label>
-            </div>
-            <div class="settings-metric-list">
-                <div>Background governor: <strong id="background-work-governor-status">—</strong></div>
-                <div>Background work: <strong id="background-work-heavy-status">—</strong></div>
-            </div>
-        </section>
-
         <section class="settings-card" id="ai-model-section">
-            <h2>AI Model</h2>
-            <p class="settings-card-copy">Install the model once from Hugging Face here, then the app will load it locally from disk for offline embeddings and search.</p>
+            <h2>AI Model <span class="help-tip" tabindex="0" role="img" aria-label="AI model help" data-tooltip="The selected local model enables semantic search and similarity after it downloads and indexes your photos."></span></h2>
+            <p class="settings-card-copy">Choose one local embedding model. The app uses that model for semantic search, similarity, and Compare propagation.</p>
             <label class="settings-field">
                 <span>Model preset</span>
-                <select id="embed_model_preset" disabled></select>
-            </label>
-            <label class="settings-field">
-                <span>Model ID</span>
-                <input id="embed_model_id" type="text" spellcheck="false" autocomplete="off" readonly>
-            </label>
-            <label class="settings-field">
-                <span>Revision</span>
-                <input id="embed_model_revision" type="text" spellcheck="false" autocomplete="off" readonly>
-            </label>
-            <label class="settings-field">
-                <span>Local model directory</span>
-                <input id="embed_model_dir" type="text" spellcheck="false" autocomplete="off" readonly>
-            </label>
-            <label class="settings-field">
-                <span>Embedding dimensions</span>
-                <input id="embed_model_dim" type="number" min="64" max="4096" step="64" readonly>
-            </label>
-            <label class="settings-field">
-                <span>Embedding batch target</span>
-                <input id="embed_batch_size" type="number" min="1" max="32" step="1">
-            </label>
-            <label class="settings-checkbox">
-                <input id="defer_ai_on_startup" type="checkbox">
-                <span>Defer background embedding work on launch. Daily search model still warms on app load.</span>
+                <select id="embed_model_preset"></select>
             </label>
             <div class="settings-metric-list">
                 <div>Install status: <strong id="model-install-status">—</strong></div>
+                <div>Image index: <strong id="active-index-progress">—</strong></div>
+                <div>Worker: <strong id="active-index-status">—</strong></div>
                 <div id="model-install-message">—</div>
             </div>
             <div class="settings-actions">
-                <button class="bar-btn" type="button" id="install-model-btn" onclick="PhotoArchive.installAIModel('fast')">Save + Install 2B Model</button>
+                <button class="bar-btn" type="button" id="install-model-btn" data-action="install-ai-model">Save + Install Model</button>
+                <button class="bar-btn subtle" type="button" data-action="pause-embeddings">Pause</button>
+                <button class="bar-btn subtle" type="button" data-action="resume-embeddings">Resume</button>
             </div>
         </section>
 
         <section class="settings-card" id="people-recognition-section">
-            <h2>People Recognition</h2>
+            <h2>People Recognition <span class="help-tip" tabindex="0" role="img" aria-label="People recognition help" data-tooltip="Face detection runs locally from cached previews. Labels stay in your local catalog."></span></h2>
             <p class="settings-card-copy">Local face detection runs in the background from cached previews. Person labels stay in the catalog.</p>
             <label class="settings-field">
                 <span>Face model ID</span>
@@ -223,93 +167,8 @@
             </div>
         </section>
 
-        <section class="settings-card settings-card-wide" id="embedding-indexes-section">
-            <h2>Embedding Indexes</h2>
-            <p class="settings-card-copy">Normal search uses the fast 2B index immediately. Ready deep-cache terms can use the scheduled 8B index without loading the model during search.</p>
-            <div class="embedding-index-grid">
-                <div class="embedding-index-panel">
-                    <div class="embedding-index-header">
-                        <div>
-                            <div class="embedding-index-title">Daily Search</div>
-                            <div class="embedding-index-subtitle" id="fast-index-model">—</div>
-                        </div>
-                        <span class="embedding-index-badge" id="fast-index-badge">—</span>
-                    </div>
-                    <div class="embedding-index-meter" aria-hidden="true">
-                        <span id="fast-index-meter"></span>
-                    </div>
-                    <div class="embedding-index-progress" id="fast-index-progress">—</div>
-                    <div class="embedding-index-status" id="fast-index-status">—</div>
-                </div>
-                <div class="embedding-index-panel">
-                    <div class="embedding-index-header">
-                        <div>
-                            <div class="embedding-index-title">Deep Search</div>
-                            <div class="embedding-index-subtitle" id="deep-index-model">—</div>
-                        </div>
-                        <span class="embedding-index-badge" id="deep-index-badge">—</span>
-                    </div>
-                    <div class="embedding-index-meter" aria-hidden="true">
-                        <span id="deep-index-meter"></span>
-                    </div>
-                    <div class="embedding-index-progress" id="deep-index-progress">—</div>
-                    <div class="embedding-index-status" id="deep-index-status">—</div>
-                    <div class="settings-actions embedding-index-actions">
-                        <button class="bar-btn" type="button" onclick="PhotoArchive.installAIModel('deep')">Install 8B</button>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <section class="settings-card settings-card-wide" id="deep-search-section">
-            <h2>Deep Search Cache</h2>
-            <p class="settings-card-copy">Saved searches that should be ready for the smarter 8B index when the deep worker has time to run.</p>
-            <label class="settings-checkbox">
-                <input id="deep_search_schedule_enabled" type="checkbox">
-                <span>Run deep search work on a schedule</span>
-            </label>
-            <div class="deep-search-schedule-grid">
-                <label class="settings-field">
-                    <span>Start</span>
-                    <input id="deep_search_schedule_start" type="time" step="60">
-                </label>
-                <label class="settings-field">
-                    <span>Stop</span>
-                    <input id="deep_search_schedule_end" type="time" step="60">
-                </label>
-                <label class="settings-field">
-                    <span>Timezone</span>
-                    <select id="deep_search_schedule_timezone">
-                        <option value="America/Chicago">Central time</option>
-                    </select>
-                </label>
-            </div>
-            <div class="deep-search-day-picker" id="deep-search-day-picker">
-                <label><input type="checkbox" data-deep-search-day="mon">Mon</label>
-                <label><input type="checkbox" data-deep-search-day="tue">Tue</label>
-                <label><input type="checkbox" data-deep-search-day="wed">Wed</label>
-                <label><input type="checkbox" data-deep-search-day="thu">Thu</label>
-                <label><input type="checkbox" data-deep-search-day="fri">Fri</label>
-                <label><input type="checkbox" data-deep-search-day="sat">Sat</label>
-                <label><input type="checkbox" data-deep-search-day="sun">Sun</label>
-            </div>
-            <div class="settings-help-text" id="deep-search-schedule-summary">Runs Monday-Friday, 7:00 AM-4:00 PM Central time.</div>
-            <div class="settings-metric-list">
-                <div>Deep worker: <strong id="deep-search-worker-status">—</strong></div>
-                <div>8B image index: <strong id="deep-search-image-status">—</strong></div>
-                <div>8B query cache: <strong id="deep-search-query-status">—</strong></div>
-            </div>
-            <div class="deep-search-query-list" id="deep-search-query-list"></div>
-            <label class="settings-field">
-                <span>Searches to precompute</span>
-                <textarea id="deep_search_terms" rows="8" spellcheck="false" autocomplete="off" placeholder="cranes in fog&#10;black and white portraits&#10;favorite cafe photos"></textarea>
-            </label>
-            <div class="settings-help-text">One search per line. Duplicates are collapsed when settings are saved.</div>
-            <div class="deep-search-term-list" id="deep-search-term-list"></div>
-        </section>
-
         <section class="settings-card" id="thumbnail-output-section">
-            <h2>Thumbnail Output</h2>
+            <h2>Thumbnail Output <span class="help-tip" tabindex="0" role="img" aria-label="Thumbnail output help" data-tooltip="These settings control generated preview files, not your originals. Larger previews improve inspection at the cost of disk and CPU."></span></h2>
             <p class="settings-card-copy">Larger sizes improve fidelity but cost more CPU, disk, and bandwidth.</p>
             <div class="settings-split-grid">
                 <label class="settings-field">
@@ -346,7 +205,7 @@
         </section>
 
         <section class="settings-card settings-card-wide" id="image-cache-section">
-            <h2>Image Cache</h2>
+            <h2>Image Cache <span class="help-tip" tabindex="0" role="img" aria-label="Image cache help" data-tooltip="Cache space is used for fast previews and optional local original copies. It can be rebuilt at any time."></span></h2>
             <p class="settings-card-copy">Set how much fast storage photoArchive can use. The app chooses the right mix of grid previews, loupe previews, high-res previews, and originals automatically.</p>
             <div class="cache-summary" id="cache-tier-guide">
                 <div class="cache-summary-head">
@@ -354,7 +213,7 @@
                         <strong id="cache-health-title">Checking cache…</strong>
                         <span id="cache-health-subtitle">Looking at RAM and SSD coverage.</span>
                     </div>
-                    <button class="bar-btn" type="button" onclick="PhotoArchive.applyRecommendedCache()">Apply Defaults</button>
+                    <button class="bar-btn" type="button" data-action="apply-recommended-cache">Apply Defaults</button>
                 </div>
                 <div class="cache-friendly-grid" id="cache-tier-table"></div>
                 <div class="cache-advice" id="cache-storage-advice"></div>
@@ -378,10 +237,6 @@
                 </label>
             </div>
             <div class="settings-help-text" id="cache-profile-hint">photoArchive fills the basics first, then spends leftover SSD space according to this priority.</div>
-            <label class="settings-checkbox">
-                <input id="pregenerate_on_idle" type="checkbox">
-                <span>Warm image cache in the background</span>
-            </label>
             <label class="settings-checkbox">
                 <input id="show_loupe_cache_status" type="checkbox">
                 <span>Show loupe cache status beside metadata.</span>
@@ -421,20 +276,19 @@
 {% endblock %}
 
 {% block bottom_bar %}
-<footer class="bottom-bar" id="settings-bar">
-    <div class="bar-section">
-        <button class="bar-btn" type="button" onclick="PhotoArchive.saveSettings()">Save</button>
-        <button class="bar-btn" type="button" onclick="PhotoArchive.resetSettings()">Reset Defaults</button>
-        <button class="bar-btn" type="button" onclick="PhotoArchive.clearThumbnailCache()">Clear Cache</button>
+<footer class="bottom-bar" id="settings-bar" aria-label="Application controls">
+    <div class="bar-section bar-context bar-settings-actions">
+        <button class="bar-btn has-tooltip" type="button" data-action="save-settings" data-tooltip="Save all Catalog settings and apply them to new work.">Save</button>
+        <button class="bar-btn has-tooltip" type="button" data-action="reset-settings" data-tooltip="Restore app defaults. Your photo folders and originals are not changed.">Reset Defaults</button>
+        <button class="bar-btn has-tooltip" type="button" data-action="clear-thumbnail-cache" data-tooltip="Clear generated previews so the app can rebuild them. Originals are not touched.">Clear Cache</button>
     </div>
     <div class="bar-divider"></div>
-    <div class="bar-section bar-settings-note">
+    <div class="bar-section bar-summary bar-settings-note">
         Changes apply immediately to new thumbnail requests.
     </div>
-    <div class="bar-section bar-nav">
-        <a href="/compare" class="bar-link">Compare</a>
-        <a href="/library" class="bar-link">Library</a>
-    </div>
+    {% include '_bottom_bar_nav.html' %}
+    <div class="bar-divider"></div>
+    {% include '_bottom_bar_work.html' %}
 </footer>
 {% endblock %}
 

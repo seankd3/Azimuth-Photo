@@ -12,7 +12,6 @@ export function createLegacyLibrarySimilarBridge({
     getCompareStats,
     setCompareStats,
     setSearchQuery,
-    setDeepSearchRequested,
     bumpLibraryRequestGeneration,
     getLibraryRequestGeneration,
     closeLightbox,
@@ -22,6 +21,7 @@ export function createLegacyLibrarySimilarBridge({
     clearBatchSelection,
     updateCompareProgress,
     openLightbox,
+    showToast,
     createFindSimilarActionImpl = createFindSimilarAction,
 } = {}) {
     return createFindSimilarActionImpl({
@@ -36,7 +36,6 @@ export function createLegacyLibrarySimilarBridge({
         getCompareStats,
         setCompareStats,
         setSearchQuery,
-        setDeepSearchRequested,
         bumpLibraryRequestGeneration,
         getLibraryRequestGeneration,
         closeLightbox,
@@ -46,5 +45,6 @@ export function createLegacyLibrarySimilarBridge({
         clearBatchSelection,
         updateCompareProgress,
         openLightbox,
+        showToast,
     });
 }

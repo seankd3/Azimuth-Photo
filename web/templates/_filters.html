@@ -1,81 +1,80 @@
-<div class="bar-section bar-filters">
-    <div class="filter-group" title="Orientation">
-        <button type="button" class="filter-icon" onclick="PhotoArchive.toggleFilter('orientation','landscape',this)" title="Landscape" aria-label="Landscape orientation">
-            <svg width="18" height="13" viewBox="0 0 18 13"><rect x=".5" y=".5" width="17" height="12" rx="1.5" fill="none" stroke="currentColor" stroke-width="1"/></svg>
-        </button>
-        <button type="button" class="filter-icon" onclick="PhotoArchive.toggleFilter('orientation','portrait',this)" title="Portrait" aria-label="Portrait orientation">
-            <svg width="11" height="15" viewBox="0 0 11 15"><rect x=".5" y=".5" width="10" height="14" rx="1.5" fill="none" stroke="currentColor" stroke-width="1"/></svg>
-        </button>
-    </div>
-    <div class="filter-sep"></div>
-    <div class="filter-group" title="Ranked status">
-        <button type="button" class="filter-icon" onclick="PhotoArchive.toggleFilter('compared','compared',this)" title="Ranked" aria-label="Show ranked">
-            <svg width="13" height="13" viewBox="0 0 13 13"><path d="M2.5 6.5l2.5 3 5.5-6" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </button>
-        <button type="button" class="filter-icon" onclick="PhotoArchive.toggleFilter('compared','uncompared',this)" title="Unranked" aria-label="Show unranked">
-            <svg width="13" height="13" viewBox="0 0 13 13"><line x1="3" y1="3" x2="10" y2="10" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><line x1="10" y1="3" x2="3" y2="10" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
-        </button>
-        <button type="button" class="filter-icon" onclick="PhotoArchive.toggleFilter('compared','confident',this)" title="High confidence (10+)" aria-label="High confidence">
-            <svg width="13" height="13" viewBox="0 0 13 13"><path d="M2 7l2.5 3 6-6.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 4.5l2.5 3" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </button>
-    </div>
-    <div class="filter-sep"></div>
-    <div class="filter-group" title="Flag">
-        <button type="button" class="filter-icon filter-flag" data-flag="picked" onclick="PhotoArchive.toggleFilter('flag','picked',this)" title="Picked" aria-label="Picked">P</button>
-        <button type="button" class="filter-icon filter-flag" data-flag="unflagged" onclick="PhotoArchive.toggleFilter('flag','unflagged',this)" title="Unflagged" aria-label="Unflagged">U</button>
-        <button type="button" class="filter-icon filter-flag" data-flag="rejected" onclick="PhotoArchive.toggleFilter('flag','rejected',this)" title="Rejected" aria-label="Rejected">X</button>
-    </div>
-    <div class="filter-sep"></div>
-    <div class="filter-group filter-stars" title="Minimum rating">
-        <button type="button" class="filter-star" data-star="1" onclick="PhotoArchive.toggleStar(1)" aria-label="1 star">&#9734;</button>
-        <button type="button" class="filter-star" data-star="2" onclick="PhotoArchive.toggleStar(2)" aria-label="2 stars">&#9734;</button>
-        <button type="button" class="filter-star" data-star="3" onclick="PhotoArchive.toggleStar(3)" aria-label="3 stars">&#9734;</button>
-        <button type="button" class="filter-star" data-star="4" onclick="PhotoArchive.toggleStar(4)" aria-label="4 stars">&#9734;</button>
-        <button type="button" class="filter-star" data-star="5" onclick="PhotoArchive.toggleStar(5)" aria-label="5 stars">&#9734;</button>
-    </div>
-    <div class="filter-sep"></div>
-    <select id="filter-people" class="bar-select" onchange="PhotoArchive.setFilter('people', this.value)">
+<div class="bar-section bar-filters" aria-label="Filters">
+    <select id="filter-people" class="bar-select" data-filter-control="select" data-filter-key="people" title="Filter by labeled person">
         <option value="">All People</option>
     </select>
-    <div class="filter-sep"></div>
-    <select id="filter-folder" class="bar-select" onchange="PhotoArchive.setFilter('folder', this.value)">
+    <select id="filter-folder" class="bar-select" data-filter-control="select" data-filter-key="folder" title="Filter by catalog folder">
         <option value="">All Folders</option>
     </select>
     <div class="metadata-filter-wrap">
-        <button type="button" id="metadata-filter-btn" class="bar-btn metadata-filter-btn"
-                onclick="PhotoArchive.toggleMetadataFilters()" aria-expanded="false">
+        <button type="button" id="metadata-filter-btn" class="bar-btn metadata-filter-btn has-tooltip"
+                data-action="toggle-metadata-filters" aria-expanded="false" data-tooltip="Open date, type, camera, and lens filters.">
             Metadata
         </button>
         <div id="metadata-filter-panel" class="metadata-filter-panel hidden">
             <label>
                 <span>Date</span>
-                <select id="filter-taken" class="bar-select" onchange="PhotoArchive.setFilter('taken', this.value)">
+                <select id="filter-taken" class="bar-select" data-filter-control="select" data-filter-key="taken">
                     <option value="">All Dates</option>
                 </select>
             </label>
             <label>
                 <span>Type</span>
-                <select id="filter-type" class="bar-select" onchange="PhotoArchive.setFilter('fileType', this.value)">
+                <select id="filter-type" class="bar-select" data-filter-control="select" data-filter-key="fileType">
                     <option value="">All Types</option>
                 </select>
             </label>
             <label>
                 <span>Camera</span>
-                <select id="filter-camera" class="bar-select metadata-select" onchange="PhotoArchive.setFilter('camera', this.value)">
+                <select id="filter-camera" class="bar-select metadata-select" data-filter-control="select" data-filter-key="camera">
                     <option value="">All Cameras</option>
                 </select>
             </label>
             <label>
                 <span>Lens</span>
-                <select id="filter-lens" class="bar-select metadata-select metadata-select-wide" onchange="PhotoArchive.setFilter('lens', this.value)">
+                <select id="filter-lens" class="bar-select metadata-select metadata-select-wide" data-filter-control="select" data-filter-key="lens">
                     <option value="">All Lenses</option>
                 </select>
             </label>
         </div>
     </div>
+    <div class="filter-sep"></div>
+    <div class="filter-group" title="Orientation">
+        <button type="button" class="filter-icon has-tooltip" data-filter-control="toggle" data-filter-key="orientation" data-filter-value="landscape" title="Landscape" aria-label="Landscape orientation" data-tooltip="Show landscape photos.">
+            <svg width="18" height="13" viewBox="0 0 18 13"><rect x=".5" y=".5" width="17" height="12" rx="1.5" fill="none" stroke="currentColor" stroke-width="1"/></svg>
+        </button>
+        <button type="button" class="filter-icon has-tooltip" data-filter-control="toggle" data-filter-key="orientation" data-filter-value="portrait" title="Portrait" aria-label="Portrait orientation" data-tooltip="Show portrait photos.">
+            <svg width="11" height="15" viewBox="0 0 11 15"><rect x=".5" y=".5" width="10" height="14" rx="1.5" fill="none" stroke="currentColor" stroke-width="1"/></svg>
+        </button>
+    </div>
+    <div class="filter-sep"></div>
+    <div class="filter-group" title="Ranked status">
+        <button type="button" class="filter-icon has-tooltip" data-filter-control="toggle" data-filter-key="compared" data-filter-value="compared" title="Ranked" aria-label="Show ranked" data-tooltip="Show photos that already have rank signals.">
+            <svg width="13" height="13" viewBox="0 0 13 13"><path d="M2.5 6.5l2.5 3 5.5-6" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <button type="button" class="filter-icon has-tooltip" data-filter-control="toggle" data-filter-key="compared" data-filter-value="uncompared" title="Unranked" aria-label="Show unranked" data-tooltip="Show photos that still need comparisons.">
+            <svg width="13" height="13" viewBox="0 0 13 13"><line x1="3" y1="3" x2="10" y2="10" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><line x1="10" y1="3" x2="3" y2="10" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+        </button>
+        <button type="button" class="filter-icon has-tooltip" data-filter-control="toggle" data-filter-key="compared" data-filter-value="confident" title="High confidence (10+)" aria-label="High confidence" data-tooltip="Show photos with enough comparisons to be more stable.">
+            <svg width="13" height="13" viewBox="0 0 13 13"><path d="M2 7l2.5 3 6-6.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 4.5l2.5 3" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+    </div>
+    <div class="filter-sep"></div>
+    <div class="filter-group" title="Flag">
+        <button type="button" class="filter-icon filter-flag has-tooltip" data-flag="picked" data-filter-control="toggle" data-filter-key="flag" data-filter-value="picked" title="Picked" aria-label="Picked" data-tooltip="Show picked photos.">P</button>
+        <button type="button" class="filter-icon filter-flag has-tooltip" data-flag="unflagged" data-filter-control="toggle" data-filter-key="flag" data-filter-value="unflagged" title="Unflagged" aria-label="Unflagged" data-tooltip="Show photos with no pick/reject flag.">U</button>
+        <button type="button" class="filter-icon filter-flag has-tooltip" data-flag="rejected" data-filter-control="toggle" data-filter-key="flag" data-filter-value="rejected" title="Rejected" aria-label="Rejected" data-tooltip="Show rejected photos.">X</button>
+    </div>
+    <div class="filter-sep"></div>
+    <div class="filter-group filter-stars" title="Minimum rating">
+        <button type="button" class="filter-star has-tooltip" data-star="1" aria-label="1 star" data-tooltip="Show photos rated at least 1 star.">&#9734;</button>
+        <button type="button" class="filter-star has-tooltip" data-star="2" aria-label="2 stars" data-tooltip="Show photos rated at least 2 stars.">&#9734;</button>
+        <button type="button" class="filter-star has-tooltip" data-star="3" aria-label="3 stars" data-tooltip="Show photos rated at least 3 stars.">&#9734;</button>
+        <button type="button" class="filter-star has-tooltip" data-star="4" aria-label="4 stars" data-tooltip="Show photos rated at least 4 stars.">&#9734;</button>
+        <button type="button" class="filter-star has-tooltip" data-star="5" aria-label="5 stars" data-tooltip="Show photos rated 5 stars.">&#9734;</button>
+    </div>
 </div>
 <div class="bar-divider"></div>
-<div class="bar-section bar-size">
+<div class="bar-section bar-size has-tooltip" data-tooltip="Adjust thumbnail size. Smaller is denser; larger is easier to inspect.">
     <input type="range" id="thumb-size" class="bar-slider" min="120" max="400" value="220"
-           oninput="PhotoArchive.setThumbSize(this.value)" title="Thumbnail size" aria-label="Thumbnail size">
+           data-action="set-thumb-size" title="Thumbnail size" aria-label="Thumbnail size">
 </div>

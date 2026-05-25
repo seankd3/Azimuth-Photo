@@ -206,7 +206,7 @@ async def filter_options(
             "JOIN catalog_sources s ON s.id = i.source_id "
             "WHERE p.status != 'ignored' "
             "AND p.merged_into_person_id IS NULL "
-            "AND s.included = 1 AND s.online = 1 "
+            "AND s.included = 1 "
             f"AND {image_source_clause}"
             "i.status IN ('kept', 'maybe') "
             "AND i.missing_at IS NULL "

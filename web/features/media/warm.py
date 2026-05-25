@@ -3,8 +3,8 @@
 import asyncio
 
 import helpers as app_helpers
-import resource_governor
 import thumbnails
+from core import work_coordination
 
 
 _thumbnail_prefetch_inflight: set[str] = set()
@@ -33,8 +33,6 @@ def schedule_cached_thumbnail_memory_warm(
     rows,
     size: str,
     limit: int,
-    *,
-    active_min_warm: int | None = None,
 ):
     if size not in ("sm", "md", "lg") or not rows or limit <= 0:
         return
@@ -53,18 +51,8 @@ def schedule_cached_thumbnail_memory_warm(
 
     def _warm():
         warmed = 0
-        min_before_yield = limit if active_min_warm is None else max(1, min(int(active_min_warm or 1), limit))
         for image_id in image_ids:
             if warmed >= limit:
-                break
-            decision = resource_governor.get_background_decision(thumbnails.get_idle_seconds())
-            if decision.pause and warmed >= min_before_yield:
-                break
-            mode_limit = limit if decision.work_mode == "max" else max(
-                min_before_yield,
-                min(limit, int(decision.thumbnail_batch_size or 1)),
-            )
-            if warmed >= mode_limit:
                 break
             if thumbnails._memory_get_entry_fast(size, image_id) is not None:
                 continue
@@ -73,6 +61,7 @@ def schedule_cached_thumbnail_memory_warm(
 
     async def _run_warm():
         try:
+            await work_coordination.wait_for_lane(work_coordination.AMBIENT_WARMING)
             await asyncio.to_thread(_warm)
         except Exception:
             pass
@@ -87,13 +76,13 @@ def schedule_result_thumbnail_memory_warm(rows, *, sm_limit: int = 48, md_limit:
         return
     row_count = len(rows)
     schedule_cached_thumbnail_memory_warm(
-        rows, "sm", limit=min(row_count, sm_limit), active_min_warm=12
+        rows, "sm", limit=min(row_count, sm_limit)
     )
     schedule_cached_thumbnail_memory_warm(
-        rows, "md", limit=min(row_count, md_limit), active_min_warm=6
+        rows, "md", limit=min(row_count, md_limit)
     )
     schedule_cached_thumbnail_memory_warm(
-        rows, "lg", limit=min(row_count, lg_limit), active_min_warm=6
+        rows, "lg", limit=min(row_count, lg_limit)
     )
 
 

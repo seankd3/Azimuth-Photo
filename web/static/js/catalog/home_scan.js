@@ -10,6 +10,17 @@ export function createHomeScanController({
 } = {}) {
     let scanPoller = null;
 
+    async function responseDataOrError(response, fallbackMessage) {
+        let data = {};
+        try {
+            data = await response.json();
+        } catch {}
+        if (!response.ok || data.error || data.ok === false) {
+            throw new Error(data.error || fallbackMessage);
+        }
+        return data;
+    }
+
     function setButtonBusy(button, busy) {
         if (!button) return;
         button.disabled = busy;
@@ -48,34 +59,48 @@ export function createHomeScanController({
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ folder }),
             });
-            if (!response.ok) {
-                const error = await response.json();
-                showError(statusText, progress, button, error.error || 'Scan failed');
-                return;
-            }
+            await responseDataOrError(response, 'Scan failed');
 
             if (scanPoller) clearIntervalImpl(scanPoller);
+            let statusFailures = 0;
             scanPoller = setIntervalImpl(async () => {
-                const status = await (await fetchImpl('/api/scan/status')).json();
-                statusText?.classList?.remove('scan-error');
-                if (statusText) {
-                    statusText.textContent = `Found ${status.total_found} images, inserted ${status.total_inserted}...`;
-                }
-                if (fill) {
-                    fill.style.width = status.total_found > 0
-                        ? `${(status.total_inserted / status.total_found * 100)}%`
-                        : '0%';
-                }
-
-                if (status.done) {
-                    clearIntervalImpl(scanPoller);
-                    scanPoller = null;
+                try {
+                    const status = await responseDataOrError(
+                        await fetchImpl('/api/scan/status'),
+                        'Scan status unavailable',
+                    );
+                    statusFailures = 0;
                     statusText?.classList?.remove('scan-error');
                     if (statusText) {
-                        statusText.textContent = `Done! ${status.total_inserted} images ready.`;
+                        statusText.textContent = `Found ${status.total_found} images, inserted ${status.total_inserted}...`;
                     }
-                    setButtonBusy(button, false);
-                    setTimeoutImpl(() => locationImpl.reload(), reloadDelayMs);
+                    if (fill) {
+                        fill.style.width = status.total_found > 0
+                            ? `${(status.total_inserted / status.total_found * 100)}%`
+                            : '0%';
+                    }
+
+                    if (status.done) {
+                        clearIntervalImpl(scanPoller);
+                        scanPoller = null;
+                        statusText?.classList?.remove('scan-error');
+                        if (statusText) {
+                            statusText.textContent = `Done! ${status.total_inserted} images ready.`;
+                        }
+                        setButtonBusy(button, false);
+                        setTimeoutImpl(() => locationImpl.reload(), reloadDelayMs);
+                    }
+                } catch (error) {
+                    statusFailures += 1;
+                    if (statusText) {
+                        statusText.textContent = `Scan status unavailable: ${error.message}. Retrying...`;
+                        statusText.classList.add('scan-error');
+                    }
+                    if (statusFailures >= 5) {
+                        clearIntervalImpl(scanPoller);
+                        scanPoller = null;
+                        showError(statusText, progress, button, `Scan status unavailable: ${error.message}`);
+                    }
                 }
             }, pollMs);
         } catch (error) {

@@ -199,7 +199,7 @@ async def get_images_needing_faces(
             "JOIN catalog_sources s ON s.id = i.source_id "
             "JOIN cache_entries c ON c.image_id = i.id "
             "LEFT JOIN face_scan_images fsi ON fsi.image_id = i.id AND fsi.model_id = ? "
-            "WHERE s.included = 1 AND s.online = 1 AND i.status IN ('kept', 'maybe') "
+            "WHERE s.included = 1 AND i.status IN ('kept', 'maybe') "
             "AND i.missing_at IS NULL "
             "AND c.cache_root = ? "
             f"AND c.size IN ({placeholders}) "
@@ -233,26 +233,40 @@ async def count_images_needing_faces(
 ) -> int:
     conn = await connection.open_async(db_path)
     try:
-        cache_sizes = ("lg", "md", "sm")
-        placeholders = ",".join("?" for _ in cache_sizes)
-        cursor = await conn.execute(
-            "SELECT COUNT(DISTINCT i.id) AS count "
-            "FROM images i "
-            "JOIN catalog_sources s ON s.id = i.source_id "
-            "JOIN cache_entries c ON c.image_id = i.id "
-            "LEFT JOIN face_scan_images fsi ON fsi.image_id = i.id AND fsi.model_id = ? "
-            "WHERE s.included = 1 AND s.online = 1 AND i.status IN ('kept', 'maybe') "
-            "AND i.missing_at IS NULL "
-            "AND c.cache_root = ? "
-            f"AND c.size IN ({placeholders}) "
-            "AND (fsi.image_id IS NULL OR (fsi.status = 'error' AND fsi.scanned_at < ?))",
-            [model_id, cache_root, *cache_sizes, _time.time() - int(retry_after_seconds)],
+        return await count_images_needing_faces_on_conn(
+            conn,
+            model_id=model_id,
+            cache_root=cache_root,
+            retry_after_seconds=retry_after_seconds,
         )
-        row = await cursor.fetchone()
-        return int(row["count"] or 0) if row else 0
     finally:
         await connection.close_async(conn, db_path=db_path)
 
+
+async def count_images_needing_faces_on_conn(
+    conn,
+    *,
+    model_id: str,
+    cache_root: str,
+    retry_after_seconds: int = 86400,
+) -> int:
+    cache_sizes = ("lg", "md", "sm")
+    placeholders = ",".join("?" for _ in cache_sizes)
+    cursor = await conn.execute(
+        "SELECT COUNT(DISTINCT i.id) AS count "
+        "FROM images i "
+        "JOIN catalog_sources s ON s.id = i.source_id "
+        "JOIN cache_entries c ON c.image_id = i.id "
+        "LEFT JOIN face_scan_images fsi ON fsi.image_id = i.id AND fsi.model_id = ? "
+        "WHERE s.included = 1 AND i.status IN ('kept', 'maybe') "
+        "AND i.missing_at IS NULL "
+        "AND c.cache_root = ? "
+        f"AND c.size IN ({placeholders}) "
+        "AND (fsi.image_id IS NULL OR (fsi.status = 'error' AND fsi.scanned_at < ?))",
+        [model_id, cache_root, *cache_sizes, _time.time() - int(retry_after_seconds)],
+    )
+    row = await cursor.fetchone()
+    return int(row["count"] or 0) if row else 0
 
 async def store_face_scan_result(
     db_path: str,
@@ -454,6 +468,227 @@ async def cluster_unassigned_faces(
     }
 
 
+_ACTIVE_PEOPLE_CTE = (
+    "WITH active_people AS ("
+    "SELECT p.id, p.name, p.status, p.representative_face_id, "
+    "COUNT(DISTINCT pim.image_id) AS photo_count, "
+    "COALESCE(SUM(pim.face_count), 0) AS face_count, "
+    "COALESCE(MAX(pim.best_quality), 0) AS best_quality, "
+    "COALESCE(MAX(pim.latest_face_at), p.updated_at) AS latest_face_at, "
+    "CASE WHEN p.status = 'named' OR TRIM(COALESCE(p.name, '')) != '' THEN 1 ELSE 0 END AS is_named "
+    "FROM people p "
+    "LEFT JOIN person_image_membership pim ON pim.person_id = p.id "
+    "WHERE p.merged_into_person_id IS NULL AND p.status != 'ignored' "
+    "GROUP BY p.id "
+    "HAVING COALESCE(SUM(pim.face_count), 0) > 0"
+    ") "
+)
+
+_ACTIVE_PEOPLE_COLUMNS = (
+    "id, name, status, representative_face_id, photo_count, face_count, "
+    "best_quality, latest_face_at, is_named"
+)
+
+_UNKNOWN_PEOPLE_ORDER = (
+    "photo_count DESC, face_count DESC, best_quality DESC, latest_face_at DESC, id ASC"
+)
+
+_NAMED_PEOPLE_ORDER = (
+    "CASE WHEN TRIM(COALESCE(name, '')) = '' THEN printf('person %012d', id) "
+    "ELSE LOWER(TRIM(name)) END ASC, photo_count DESC, id ASC"
+)
+
+
+async def _active_people_rows(
+    conn,
+    *,
+    where_sql: str = "1 = 1",
+    params: list | tuple | None = None,
+    order_sql: str = _UNKNOWN_PEOPLE_ORDER,
+    limit: int | None = None,
+    offset: int = 0,
+) -> list[dict]:
+    query = (
+        f"{_ACTIVE_PEOPLE_CTE} "
+        f"SELECT {_ACTIVE_PEOPLE_COLUMNS} FROM active_people "
+        f"WHERE {where_sql} "
+        f"ORDER BY {order_sql}"
+    )
+    query_params = list(params or [])
+    if limit is not None:
+        query += " LIMIT ? OFFSET ?"
+        query_params.extend([max(0, int(limit)), max(0, int(offset))])
+    cursor = await conn.execute(query, query_params)
+    return [dict(row) for row in await cursor.fetchall()]
+
+
+async def _active_people_rows_by_id(conn, person_ids: set[int]) -> list[dict]:
+    ids = tuple(sorted({int(person_id) for person_id in person_ids if int(person_id) > 0}))
+    if not ids:
+        return []
+    placeholders = ",".join("?" for _ in ids)
+    return await _active_people_rows(
+        conn,
+        where_sql=f"id IN ({placeholders})",
+        params=list(ids),
+        order_sql="id ASC",
+    )
+
+
+async def _hydrate_people_rows(conn, rows: list[dict]) -> list[dict]:
+    if not rows:
+        return []
+
+    representative_ids = sorted({
+        int(row.get("representative_face_id") or 0)
+        for row in rows
+        if int(row.get("representative_face_id") or 0) > 0
+    })
+    face_by_id: dict[int, dict] = {}
+    if representative_ids:
+        placeholders = ",".join("?" for _ in representative_ids)
+        cursor = await conn.execute(
+            "SELECT fd.id AS face_id, fd.image_id, i.filename, "
+            "fd.bbox_x, fd.bbox_y, fd.bbox_w, fd.bbox_h, fd.cache_path "
+            "FROM face_detections fd JOIN images i ON i.id = fd.image_id "
+            f"WHERE fd.id IN ({placeholders})",
+            representative_ids,
+        )
+        face_by_id = {int(row["face_id"]): dict(row) for row in await cursor.fetchall()}
+
+    fallback_person_ids = [
+        int(row["id"])
+        for row in rows
+        if int(row.get("representative_face_id") or 0) <= 0
+        or int(row.get("representative_face_id") or 0) not in face_by_id
+    ]
+    best_face_by_person: dict[int, dict] = {}
+    if fallback_person_ids:
+        placeholders = ",".join("?" for _ in fallback_person_ids)
+        cursor = await conn.execute(
+            "SELECT fa.person_id, fd.id AS face_id, fd.image_id, i.filename, "
+            "fd.bbox_x, fd.bbox_y, fd.bbox_w, fd.bbox_h, fd.cache_path "
+            "FROM face_detections fd "
+            "JOIN face_assignments fa ON fa.face_id = fd.id "
+            "JOIN images i ON i.id = fd.image_id "
+            f"WHERE fa.person_id IN ({placeholders}) AND fa.active = 1 AND fd.ignored = 0 "
+            "ORDER BY fa.person_id ASC, fd.quality DESC, fd.confidence DESC, fd.updated_at DESC",
+            fallback_person_ids,
+        )
+        for face_row in await cursor.fetchall():
+            person_id = int(face_row["person_id"])
+            if person_id not in best_face_by_person:
+                best_face_by_person[person_id] = dict(face_row)
+
+    hydrated: list[dict] = []
+    for row in rows:
+        person_id = int(row["id"])
+        face_id = int(row.get("representative_face_id") or 0)
+        face_row = face_by_id.get(face_id) or best_face_by_person.get(person_id)
+        image_id = int(face_row["image_id"]) if face_row else 0
+        representative_face_id = int(face_row["face_id"]) if face_row else 0
+        name = str(row.get("name") or "").strip()
+        label = name or f"Person {person_id}"
+        hydrated.append({
+            "id": person_id,
+            "name": name,
+            "label": label,
+            "status": str(row.get("status") or "unknown"),
+            "photo_count": int(row.get("photo_count") or 0),
+            "face_count": int(row.get("face_count") or 0),
+            "best_quality": round(float(row.get("best_quality") or 0.0), 4),
+            "latest_face_at": float(row.get("latest_face_at") or 0.0),
+            "representative_face_id": representative_face_id,
+            "representative_image_id": image_id,
+            "representative_filename": str(face_row["filename"] or "") if face_row else "",
+            "representative_bbox": {
+                "x": round(float(face_row["bbox_x"] or 0.0), 2) if face_row else 0.0,
+                "y": round(float(face_row["bbox_y"] or 0.0), 2) if face_row else 0.0,
+                "w": round(float(face_row["bbox_w"] or 0.0), 2) if face_row else 0.0,
+                "h": round(float(face_row["bbox_h"] or 0.0), 2) if face_row else 0.0,
+            },
+            "face_thumb_url": (
+                f"/api/people/faces/{representative_face_id}/thumb"
+                if representative_face_id > 0
+                else ""
+            ),
+            "image_thumb_url": f"/api/thumb/sm/{image_id}" if image_id > 0 else "",
+            "thumb_url": f"/api/thumb/sm/{image_id}" if image_id > 0 else "",
+        })
+    return hydrated
+
+
+async def _people_counts_on_conn(
+    conn,
+    *,
+    long_tail_threshold: int,
+    face_model_id: str,
+    cache_root: str,
+    visible_most_seen_count: int = 0,
+) -> dict:
+    cursor = await conn.execute(
+        f"{_ACTIVE_PEOPLE_CTE} "
+        "SELECT COUNT(*) AS people, "
+        "COALESCE(SUM(CASE WHEN is_named = 1 THEN 1 ELSE 0 END), 0) AS named_people, "
+        "COALESCE(SUM(CASE WHEN is_named = 0 THEN 1 ELSE 0 END), 0) AS unknown_people "
+        "FROM active_people"
+    )
+    row = await cursor.fetchone()
+    people_count = int(row["people"] or 0) if row else 0
+    named_count = int(row["named_people"] or 0) if row else 0
+    unknown_count = int(row["unknown_people"] or 0) if row else 0
+
+    status_cursor = await conn.execute(
+        "SELECT status, COUNT(*) AS count FROM face_scan_images GROUP BY status"
+    )
+    scan_counts = {
+        str(row["status"] or "unknown"): int(row["count"] or 0)
+        for row in await status_cursor.fetchall()
+    }
+    pending_faces = await count_images_needing_faces_on_conn(
+        conn,
+        model_id=face_model_id,
+        cache_root=cache_root,
+    )
+    face_cursor = await conn.execute(
+        "SELECT COUNT(*) AS count FROM face_detections WHERE ignored = 0"
+    )
+    detected_faces = int((await face_cursor.fetchone())["count"] or 0)
+    suggestion_cursor = await conn.execute(
+        "SELECT COUNT(*) AS count FROM people_merge_suggestions WHERE status = 'pending'"
+    )
+    merge_suggestions = int((await suggestion_cursor.fetchone())["count"] or 0)
+    return {
+        "people": people_count,
+        "named_people": named_count,
+        "unknown_people": unknown_count,
+        "detected_faces": detected_faces,
+        "pending_cached_images": pending_faces,
+        "other_faces": max(0, unknown_count - max(0, int(visible_most_seen_count))),
+        "merge_suggestions": merge_suggestions,
+        "scan": scan_counts,
+    }
+
+
+async def get_people_status_counts(
+    db_path: str,
+    *,
+    long_tail_threshold: int = 1,
+    face_model_id: str,
+    cache_root: str,
+) -> dict:
+    conn = await connection.open_async(db_path)
+    try:
+        return await _people_counts_on_conn(
+            conn,
+            long_tail_threshold=long_tail_threshold,
+            face_model_id=face_model_id,
+            cache_root=cache_root,
+        )
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+
+
 async def get_people_review(
     db_path: str,
     *,
@@ -465,83 +700,39 @@ async def get_people_review(
     safe_limit = max(1, min(int(limit or 24), 100))
     conn = await connection.open_async(db_path)
     try:
-        cursor = await conn.execute(
-            "SELECT p.id, p.name, p.status, p.representative_face_id, "
-            "COUNT(DISTINCT pim.image_id) AS photo_count, "
-            "COALESCE(SUM(pim.face_count), 0) AS face_count, "
-            "COALESCE(MAX(pim.best_quality), 0) AS best_quality, "
-            "COALESCE(MAX(pim.latest_face_at), p.updated_at) AS latest_face_at "
-            "FROM people p "
-            "LEFT JOIN person_image_membership pim ON pim.person_id = p.id "
-            "WHERE p.merged_into_person_id IS NULL AND p.status != 'ignored' "
-            "GROUP BY p.id "
-            "HAVING face_count > 0 "
-            "ORDER BY photo_count DESC, face_count DESC, best_quality DESC, latest_face_at DESC",
+        most_seen_rows = await _active_people_rows(
+            conn,
+            where_sql="is_named = 0 AND photo_count > ?",
+            params=[int(long_tail_threshold)],
+            order_sql=_UNKNOWN_PEOPLE_ORDER,
+            limit=safe_limit,
         )
-        rows = [dict(row) for row in await cursor.fetchall()]
+        most_seen_ids = {int(row["id"]) for row in most_seen_rows}
 
-        async def hydrate(row: dict) -> dict:
-            face_id = int(row.get("representative_face_id") or 0)
-            face_row = None
-            if face_id > 0:
-                cursor = await conn.execute(
-                    "SELECT fd.id AS face_id, fd.image_id, i.filename, "
-                    "fd.bbox_x, fd.bbox_y, fd.bbox_w, fd.bbox_h, fd.cache_path "
-                    "FROM face_detections fd JOIN images i ON i.id = fd.image_id "
-                    "WHERE fd.id = ?",
-                    (face_id,),
-                )
-                face_row = await cursor.fetchone()
-            if face_row is None:
-                cursor = await conn.execute(
-                    "SELECT fd.id AS face_id, fd.image_id, i.filename, "
-                    "fd.bbox_x, fd.bbox_y, fd.bbox_w, fd.bbox_h, fd.cache_path "
-                    "FROM face_detections fd "
-                    "JOIN face_assignments fa ON fa.face_id = fd.id "
-                    "JOIN images i ON i.id = fd.image_id "
-                    "WHERE fa.person_id = ? AND fa.active = 1 AND fd.ignored = 0 "
-                    "ORDER BY fd.quality DESC LIMIT 1",
-                    (int(row["id"]),),
-                )
-                face_row = await cursor.fetchone()
-            image_id = int(face_row["image_id"]) if face_row else 0
-            representative_face_id = int(face_row["face_id"]) if face_row else 0
-            name = str(row.get("name") or "").strip()
-            label = name or f"Person {int(row['id'])}"
-            return {
-                "id": int(row["id"]),
-                "name": name,
-                "label": label,
-                "status": str(row.get("status") or "unknown"),
-                "photo_count": int(row.get("photo_count") or 0),
-                "face_count": int(row.get("face_count") or 0),
-                "best_quality": round(float(row.get("best_quality") or 0.0), 4),
-                "latest_face_at": float(row.get("latest_face_at") or 0.0),
-                "representative_face_id": representative_face_id,
-                "representative_image_id": image_id,
-                "representative_filename": str(face_row["filename"] or "") if face_row else "",
-                "representative_bbox": {
-                    "x": round(float(face_row["bbox_x"] or 0.0), 2) if face_row else 0.0,
-                    "y": round(float(face_row["bbox_y"] or 0.0), 2) if face_row else 0.0,
-                    "w": round(float(face_row["bbox_w"] or 0.0), 2) if face_row else 0.0,
-                    "h": round(float(face_row["bbox_h"] or 0.0), 2) if face_row else 0.0,
-                },
-                "face_thumb_url": (
-                    f"/api/people/faces/{representative_face_id}/thumb"
-                    if representative_face_id > 0
-                    else ""
-                ),
-                "image_thumb_url": f"/api/thumb/sm/{image_id}" if image_id > 0 else "",
-                "thumb_url": f"/api/thumb/sm/{image_id}" if image_id > 0 else "",
-            }
+        named_rows = await _active_people_rows(
+            conn,
+            where_sql="is_named = 1",
+            order_sql=_NAMED_PEOPLE_ORDER,
+            limit=safe_limit,
+        )
 
-        people = [await hydrate(row) for row in rows]
-        people_by_id = {person["id"]: person for person in people}
-        named = [person for person in people if person["status"] == "named" or person["name"]]
-        unknown = [person for person in people if person["status"] != "named" and not person["name"]]
-        most_seen = [person for person in unknown if person["photo_count"] > long_tail_threshold][:safe_limit]
-        most_seen_ids = {person["id"] for person in most_seen}
-        other_faces = [person for person in unknown if person["id"] not in most_seen_ids]
+        other_where = "is_named = 0"
+        other_params: list[int] = []
+        if most_seen_ids:
+            placeholders = ",".join("?" for _ in most_seen_ids)
+            other_where += f" AND id NOT IN ({placeholders})"
+            other_params.extend(sorted(most_seen_ids))
+        other_rows = await _active_people_rows(
+            conn,
+            where_sql=other_where,
+            params=other_params,
+            order_sql=_UNKNOWN_PEOPLE_ORDER,
+            limit=safe_limit,
+        )
+
+        visible_rows_by_id: dict[int, dict] = {}
+        for row in [*most_seen_rows, *named_rows, *other_rows]:
+            visible_rows_by_id.setdefault(int(row["id"]), row)
 
         cursor = await conn.execute(
             "SELECT ms.id, ms.source_person_id, ms.target_person_id, ms.confidence, "
@@ -553,8 +744,28 @@ async def get_people_review(
             "ORDER BY ms.confidence DESC, ms.updated_at DESC LIMIT ?",
             (safe_limit,),
         )
+        suggestion_rows = [dict(row) for row in await cursor.fetchall()]
+        suggestion_person_ids = {
+            int(row["source_person_id"])
+            for row in suggestion_rows
+            if int(row["source_person_id"] or 0) > 0
+        } | {
+            int(row["target_person_id"])
+            for row in suggestion_rows
+            if int(row["target_person_id"] or 0) > 0
+        }
+        missing_suggestion_ids = suggestion_person_ids - set(visible_rows_by_id)
+        for row in await _active_people_rows_by_id(conn, missing_suggestion_ids):
+            visible_rows_by_id[int(row["id"])] = row
+
+        hydrated_people = await _hydrate_people_rows(conn, list(visible_rows_by_id.values()))
+        people_by_id = {person["id"]: person for person in hydrated_people}
+        most_seen = [people_by_id[int(row["id"])] for row in most_seen_rows if int(row["id"]) in people_by_id]
+        named = [people_by_id[int(row["id"])] for row in named_rows if int(row["id"]) in people_by_id]
+        other_faces = [people_by_id[int(row["id"])] for row in other_rows if int(row["id"]) in people_by_id]
+
         suggestions = []
-        for row in await cursor.fetchall():
+        for row in suggestion_rows:
             source_id = int(row["source_person_id"])
             target_id = int(row["target_person_id"])
             source_person = people_by_id.get(source_id)
@@ -577,39 +788,22 @@ async def get_people_review(
                 ),
                 "confidence": round(float(row["confidence"] or 0.0), 4),
             })
-        status_cursor = await conn.execute(
-            "SELECT status, COUNT(*) AS count FROM face_scan_images GROUP BY status"
-        )
-        scan_counts = {
-            str(row["status"] or "unknown"): int(row["count"] or 0)
-            for row in await status_cursor.fetchall()
-        }
-        pending_faces = await count_images_needing_faces(
-            db_path,
-            model_id=face_model_id,
+
+        counts = await _people_counts_on_conn(
+            conn,
+            long_tail_threshold=int(long_tail_threshold),
+            face_model_id=face_model_id,
             cache_root=cache_root,
+            visible_most_seen_count=len(most_seen),
         )
-        face_cursor = await conn.execute(
-            "SELECT COUNT(*) AS count FROM face_detections WHERE ignored = 0"
-        )
-        detected_faces = int((await face_cursor.fetchone())["count"] or 0)
         return {
             "sections": {
                 "most_seen": most_seen,
-                "named_people": sorted(named, key=lambda p: (p["label"].lower(), -p["photo_count"])),
+                "named_people": named,
                 "needs_review": suggestions,
-                "other_faces": other_faces[:safe_limit],
+                "other_faces": other_faces,
             },
-            "counts": {
-                "people": len(people),
-                "named_people": len(named),
-                "unknown_people": len(unknown),
-                "detected_faces": detected_faces,
-                "pending_cached_images": pending_faces,
-                "other_faces": len(other_faces),
-                "merge_suggestions": len(suggestions),
-                "scan": scan_counts,
-            },
+            "counts": counts,
             "ranking_policy": "distinct_photo_count_first",
             "identity_policy": "face_embeddings_only",
             "source_files_preserved": True,
@@ -668,21 +862,38 @@ async def merge_people(db_path: str, source_person_id: int, target_person_id: in
         if len(canonical) < 2:
             return {"ok": False, "error": "People already resolve to the same identity."}
         source_id, target_id = canonical[0], canonical[1]
+        cursor = await conn.execute(
+            "SELECT id, name FROM people WHERE id IN (?, ?)",
+            (source_id, target_id),
+        )
+        names = {
+            int(row["id"]): str(row["name"] or "").strip()
+            for row in await cursor.fetchall()
+        }
+        source_name = names.get(source_id, "")
+        target_name = names.get(target_id, "")
+        now = _time.time()
         await conn.execute(
             "UPDATE face_assignments SET person_id = ?, source = 'merge', assigned_at = ? "
             "WHERE person_id = ?",
-            (target_id, _time.time(), source_id),
+            (target_id, now, source_id),
         )
+        if source_name and not target_name:
+            await conn.execute(
+                "UPDATE people SET name = ?, status = 'named', updated_at = ? "
+                "WHERE id = ? AND merged_into_person_id IS NULL",
+                (source_name, now, target_id),
+            )
         await conn.execute(
             "UPDATE people SET status = 'merged', merged_into_person_id = ?, updated_at = ? "
             "WHERE id = ?",
-            (target_id, _time.time(), source_id),
+            (target_id, now, source_id),
         )
         await conn.execute(
             "UPDATE people_merge_suggestions SET status = 'merged', updated_at = ? "
             "WHERE (source_person_id = ? AND target_person_id = ?) "
             "OR (source_person_id = ? AND target_person_id = ?)",
-            (_time.time(), source_id, target_id, target_id, source_id),
+            (now, source_id, target_id, target_id, source_id),
         )
         await refresh_people_membership_on_conn(conn, (source_id, target_id))
         await conn.commit()

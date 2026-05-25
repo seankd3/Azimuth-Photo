@@ -1,6 +1,7 @@
 export function peopleWorkerLabel(status) {
     const worker = status?.worker || {};
-    const state = String(worker.state || 'idle').replace(/_/g, ' ');
+    const rawState = String(worker.state || 'idle').replace(/_/g, ' ');
+    const state = rawState || 'idle';
     const batch = Number(worker.last_batch_size || 0);
     const pending = Number(worker.pending_cached_images || status?.counts?.pending_cached_images || 0);
     const faces = Number(worker.session_detected_faces || 0);

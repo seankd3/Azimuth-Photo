@@ -1,7 +1,9 @@
 from collections.abc import Awaitable, Callable
+import time
 
 from fastapi import APIRouter, Request
 
+from data import connection as data_connection
 from features.library import service as library_service
 
 
@@ -28,24 +30,45 @@ async def api_rankings(
 ):
     if _rankings_handler is None:
         raise RuntimeError("Library routes are not configured")
-    return await _rankings_handler(
-        limit=limit,
-        offset=offset,
-        sort=sort,
-        orientation=orientation,
-        compared=compared,
-        min_stars=min_stars,
-        folder=folder,
-        flag=flag,
-        date_taken=date_taken,
-        file_type=file_type,
-        camera=camera,
-        lens=lens,
-        q=q,
-        deep=deep,
-        people=people,
-        request=request,
-    )
+    started = time.perf_counter()
+    try:
+        with data_connection.sqlite_timeout(0.25):
+            response = await _rankings_handler(
+                limit=limit,
+                offset=offset,
+                sort=sort,
+                orientation=orientation,
+                compared=compared,
+                min_stars=min_stars,
+                folder=folder,
+                flag=flag,
+                date_taken=date_taken,
+                file_type=file_type,
+                camera=camera,
+                lens=lens,
+                q=q,
+                deep=deep,
+                people=people,
+                request=request,
+            )
+    except Exception as exc:
+        if not data_connection.is_sqlite_locked_error(exc):
+            raise
+        return {
+            "images": [],
+            "total_images": 0,
+            "visible_images": 0,
+            "hidden_pending_thumbnails": 0,
+            "total_kept": 0,
+            "status_stale": True,
+            "counts_stale": True,
+            "candidate_source": "sqlite_busy",
+            "latency_ms": round((time.perf_counter() - started) * 1000, 1),
+        }
+    if isinstance(response, dict):
+        response.setdefault("status_stale", False)
+        response.setdefault("latency_ms", round((time.perf_counter() - started) * 1000, 1))
+    return response
 
 
 @router.get("/api/date-groups")

@@ -8,6 +8,7 @@ export const SORT_KEYS = {
     camera: { desc: 'camera_desc', asc: 'camera', defaultDesc: false },
     filename: { desc: 'filename_desc', asc: 'filename', defaultDesc: false },
     similarity: { desc: 'similarity', asc: 'similarity', defaultDesc: true },
+    taste: { desc: 'taste', asc: 'taste', defaultDesc: true },
 };
 
 

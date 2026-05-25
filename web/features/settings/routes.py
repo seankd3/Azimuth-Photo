@@ -11,6 +11,7 @@ from core.requests import json_object
 from data.repositories import catalog as catalog_repository
 from data.repositories import embeddings as embedding_repository
 from data.repositories import images as image_repository
+from features.catalog import metadata as catalog_metadata
 from features.settings import status as settings_status
 
 
@@ -133,13 +134,6 @@ def _configured_db_path() -> str:
     return _db_path()
 
 
-async def _sync_deep_search_terms(terms) -> None:
-    await embedding_repository.sync_deep_search_terms(
-        _configured_db_path(),
-        settings.normalize_deep_search_terms(terms or []),
-    )
-
-
 async def _catalog_summary_payload() -> dict:
     _configured()
     return await catalog_repository.catalog_summary_cached(
@@ -234,8 +228,7 @@ async def api_save_settings(request: Request):
     if error:
         return error
     current = settings.get_settings()
-    saved = settings.save_settings(body)
-    await _sync_deep_search_terms(saved.get("deep_search_terms") or [])
+    saved = settings.save_settings({**current, **body})
     model_changed = any(
         current.get(field) != saved.get(field)
         for field in ("embed_model_id", "embed_model_revision", "embed_model_dir", "embed_model_dim")
@@ -264,19 +257,15 @@ async def api_save_settings(request: Request):
         and str(body.get("thumbnail_cache_policy", "keep")).strip().lower() == "replace"
     )
     thumbnails.configure({**saved, "_replace_thumbnail_cache": replace_thumbnail_cache})
-    if current.get("defer_ai_on_startup") != saved.get("defer_ai_on_startup"):
-        try:
-            import embedding_worker
-            if saved.get("defer_ai_on_startup"):
-                embedding_worker.pause_embedding_worker("AI work deferred by startup setting.")
-            else:
-                embedding_worker.resume_embedding_worker()
-        except Exception:
-            pass
     if model_changed:
         try:
             import embedding_worker
             embedding_worker._text_cache.clear()
+        except Exception:
+            pass
+        try:
+            import db
+            await db.purge_retired_embedding_data()
         except Exception:
             pass
         _invalidate_vector_derived_caches()
@@ -294,6 +283,7 @@ async def api_save_settings(request: Request):
         "model_status": ai_models.get_model_status(),
         "ai_status": await _build_ai_status(),
         "people_status": await _people_status_payload(),
+        "metadata_status": catalog_metadata.catalog_metadata_status(),
         "catalog": await _catalog_summary_payload(),
     }
 
@@ -301,8 +291,8 @@ async def api_save_settings(request: Request):
 @router.post("/api/settings/reset")
 async def api_reset_settings():
     _configured()
+    current = settings.get_settings()
     saved = settings.reset_settings()
-    await _sync_deep_search_terms(saved.get("deep_search_terms") or [])
     thumbnails.configure(saved)
     try:
         import embed_cache
@@ -311,6 +301,15 @@ async def api_reset_settings():
         embedding_worker._text_cache.clear()
     except Exception:
         pass
+    if any(
+        current.get(field) != saved.get(field)
+        for field in ("embed_model_id", "embed_model_revision", "embed_model_dir", "embed_model_dim")
+    ):
+        try:
+            import db
+            await db.purge_retired_embedding_data()
+        except Exception:
+            pass
     _invalidate_rankings_cache()
     _invalidate_cache_status_cache()
     _invalidate_ai_status_response_cache()
@@ -323,5 +322,6 @@ async def api_reset_settings():
         "model_status": ai_models.get_model_status(),
         "ai_status": await _build_ai_status(),
         "people_status": await _people_status_payload(),
+        "metadata_status": catalog_metadata.catalog_metadata_status(),
         "catalog": await _catalog_summary_payload(),
     }

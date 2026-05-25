@@ -18,6 +18,7 @@ import time
 from typing import Any
 
 import settings
+from core import work_coordination
 
 
 FACE_MODEL_LICENSE_TEXT = (
@@ -30,7 +31,6 @@ WORKER_SLEEP_SECONDS = 20
 
 @dataclass(frozen=True)
 class PeopleBackgroundDecision:
-    work_mode: str
     mode: str
     pause: bool
     sleep_seconds: float
@@ -38,7 +38,7 @@ class PeopleBackgroundDecision:
     thumbnail_pause_seconds: float
     embedding_pause_seconds: float
     reason: str
-    idle_policy: str = "work_mode_only"
+    idle_policy: str = "manual_people_scan"
     load_1m: float = 0.0
     cpu_count: int = 1
     available_memory_gb: float = 0.0
@@ -47,13 +47,13 @@ class PeopleBackgroundDecision:
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
-        data["can_start_heavy_work"] = not self.pause
+        data["can_start_heavy_work"] = not self.pause and self.mode != "paused"
         return data
 
 _status_lock = threading.Lock()
 _status: dict[str, Any] = {
     "state": "idle",
-    "message": "People recognition has not scanned cached previews yet.",
+    "message": "People has not scanned cached previews yet.",
     "ready": False,
     "running": False,
     "model_id": "buffalo_l",
@@ -75,6 +75,8 @@ _status: dict[str, Any] = {
 _face_app = None
 _face_app_key: tuple[str, str, int] | None = None
 _scan_now = False
+_face_manual_pause = True
+_face_manual_pause_message = "People is stopped until you start it from Background Work."
 AsyncDictProvider = Callable[..., Awaitable[dict[str, Any]]]
 AsyncIntProvider = Callable[..., Awaitable[int]]
 AsyncListProvider = Callable[..., Awaitable[list[dict[str, Any]]]]
@@ -116,112 +118,51 @@ def _set_status(**updates: Any) -> None:
 
 def get_worker_status() -> dict[str, Any]:
     with _status_lock:
-        return dict(_status)
+        status = dict(_status)
+    status["manual_pause"] = _face_manual_pause
+    return status
+
+
+def manual_pause_active() -> bool:
+    return _face_manual_pause
 
 
 def request_scan_now() -> dict[str, Any]:
     global _scan_now
     _scan_now = True
-    _set_status(message="People recognition scan requested.")
+    _set_status(message="People scan requested.")
     return get_worker_status()
 
 
 def pause_face_worker() -> None:
-    current = settings.get_settings()
-    settings.save_settings({**current, "people_scan_enabled": False})
-    _set_status(state="paused", ready=False, message="People recognition is paused.")
+    global _face_manual_pause, _face_manual_pause_message
+    _face_manual_pause = True
+    _face_manual_pause_message = "People is stopped."
+    work_coordination.release_manual_owner("people")
+    _set_status(state="paused", ready=False, message=_face_manual_pause_message)
 
 
 def resume_face_worker() -> None:
-    current = settings.get_settings()
-    settings.save_settings({**current, "people_scan_enabled": True})
+    global _face_manual_pause, _face_manual_pause_message
+    _face_manual_pause = False
+    _face_manual_pause_message = ""
+    work_coordination.claim_manual_owner("people")
     request_scan_now()
-    _set_status(state="idle", message="People recognition will scan cached previews.")
-
-
-def _normal_work_mode(value: Any) -> str:
-    mode = str(value or "").strip().lower()
-    if mode in {"browse", "balanced", "max"}:
-        return mode
-    return "balanced"
+    _set_status(state="idle", message="People will scan cached previews.")
 
 
 def _people_background_decision(config: dict[str, Any]) -> PeopleBackgroundDecision:
-    work_mode = _normal_work_mode(config.get("background_work_mode"))
-    base = None
-    try:
-        import resource_governor
-
-        # People recognition follows the explicit Work Mode setting. Use a high
-        # idle value so activity does not suppress Light Background mode, while
-        # keeping the governor's memory/load pressure checks.
-        base = resource_governor.get_background_decision(999999.0, work_mode=work_mode)
-    except Exception:
-        base = None
-
-    if base is not None and base.pause and base.reason in {"swap pressure", "low available memory", "browse mode"}:
-        return PeopleBackgroundDecision(
-            work_mode=work_mode,
-            mode="paused",
-            pause=True,
-            sleep_seconds=float(base.sleep_seconds or 10.0),
-            thumbnail_batch_size=0,
-            thumbnail_pause_seconds=float(base.thumbnail_pause_seconds or 5.0),
-            embedding_pause_seconds=float(base.embedding_pause_seconds or 5.0),
-            reason=str(base.reason or "paused"),
-            load_1m=float(base.load_1m or 0.0),
-            cpu_count=int(base.cpu_count or 1),
-            available_memory_gb=float(base.available_memory_gb or 0.0),
-            swap_used_pct=float(base.swap_used_pct or 0.0),
-            checked_at=float(base.checked_at or time.time()),
-        )
-
-    if work_mode == "browse":
-        return PeopleBackgroundDecision(
-            work_mode=work_mode,
-            mode="paused",
-            pause=True,
-            sleep_seconds=10.0,
-            thumbnail_batch_size=0,
-            thumbnail_pause_seconds=5.0,
-            embedding_pause_seconds=5.0,
-            reason="browse mode",
-            checked_at=time.time(),
-        )
-
-    base_mode = str(getattr(base, "mode", "") or "normal")
-    base_reason = str(getattr(base, "reason", "") or "work mode enabled")
-    if work_mode == "max":
-        return PeopleBackgroundDecision(
-            work_mode=work_mode,
-            mode=base_mode if base_mode in {"normal", "gentle"} else "normal",
-            pause=False,
-            sleep_seconds=0.0,
-            thumbnail_batch_size=16 if base_mode != "gentle" else 8,
-            thumbnail_pause_seconds=0.05 if base_mode != "gentle" else 0.5,
-            embedding_pause_seconds=0.05 if base_mode != "gentle" else 0.5,
-            reason=base_reason,
-            load_1m=float(getattr(base, "load_1m", 0.0) or 0.0),
-            cpu_count=int(getattr(base, "cpu_count", 1) or 1),
-            available_memory_gb=float(getattr(base, "available_memory_gb", 0.0) or 0.0),
-            swap_used_pct=float(getattr(base, "swap_used_pct", 0.0) or 0.0),
-            checked_at=float(getattr(base, "checked_at", time.time()) or time.time()),
-        )
-
+    del config
     return PeopleBackgroundDecision(
-        work_mode="balanced",
-        mode="gentle" if base_mode == "gentle" else "light",
+        mode="normal",
         pause=False,
         sleep_seconds=0.0,
-        thumbnail_batch_size=1 if base_mode == "gentle" else 2,
-        thumbnail_pause_seconds=3.0 if base_mode == "gentle" else 1.5,
-        embedding_pause_seconds=3.0 if base_mode == "gentle" else 1.5,
-        reason="light background" if base_mode != "gentle" else base_reason,
-        load_1m=float(getattr(base, "load_1m", 0.0) or 0.0),
-        cpu_count=int(getattr(base, "cpu_count", 1) or 1),
-        available_memory_gb=float(getattr(base, "available_memory_gb", 0.0) or 0.0),
-        swap_used_pct=float(getattr(base, "swap_used_pct", 0.0) or 0.0),
-        checked_at=float(getattr(base, "checked_at", time.time()) or time.time()),
+        thumbnail_batch_size=16,
+        thumbnail_pause_seconds=0.0,
+        embedding_pause_seconds=0.0,
+        reason="people scan enabled",
+        idle_policy="manual_people_scan",
+        checked_at=time.time(),
     )
 
 
@@ -330,11 +271,11 @@ async def run_face_worker() -> None:
                 model_dir=str(config.get("face_model_dir") or ""),
                 auto_install=bool(config.get("people_auto_install", True)),
             )
-            if not bool(config.get("people_scan_enabled", True)):
+            if _face_manual_pause or not bool(config.get("people_scan_enabled", True)):
                 _set_status(
                     state="paused",
                     ready=False,
-                    message="People recognition is paused.",
+                    message=_face_manual_pause_message or "People is stopped.",
                     last_error="",
                 )
                 await asyncio.sleep(WORKER_SLEEP_SECONDS)
@@ -357,30 +298,16 @@ async def run_face_worker() -> None:
 
             if pending <= 0:
                 _scan_now = False
+                work_coordination.release_manual_owner("people")
                 _set_status(
                     state="idle",
                     ready=True,
-                    message="People recognition is caught up on cached previews.",
+                    message="People is caught up on cached previews.",
                     last_batch_size=0,
                     last_batch_seconds=0.0,
                     last_scan_at=time.time(),
                 )
                 await asyncio.sleep(WORKER_SLEEP_SECONDS)
-                continue
-
-            if decision.pause and not _scan_now:
-                _set_status(
-                    state="waiting",
-                    ready=True,
-                    message=(
-                        f"People recognition has {pending} cached previews queued; "
-                        f"waiting because {decision.reason} is active."
-                    ),
-                    last_batch_size=0,
-                    last_batch_seconds=0.0,
-                    last_scan_at=time.time(),
-                )
-                await asyncio.sleep(max(1.0, float(decision.sleep_seconds or WORKER_SLEEP_SECONDS)))
                 continue
 
             batch_limit = 4
@@ -398,10 +325,11 @@ async def run_face_worker() -> None:
             )
             _scan_now = False
             if not rows:
+                work_coordination.release_manual_owner("people")
                 _set_status(
                     state="idle",
                     ready=True,
-                    message="People recognition is caught up on cached previews.",
+                    message="People is caught up on cached previews.",
                     last_batch_size=0,
                     last_batch_seconds=0.0,
                     last_scan_at=time.time(),
@@ -413,43 +341,46 @@ async def run_face_worker() -> None:
             _set_status(
                 state="scanning",
                 ready=True,
-                message=f"People recognition is scanning {len(rows)} of {pending} queued cached previews.",
+                message=f"People is scanning {len(rows)} of {pending} queued cached previews.",
                 last_error="",
             )
-            await loop.run_in_executor(None, _load_face_app, config)
+            await work_coordination.wait_for_manual_turn("people")
+            with work_coordination.manual_bulk("people"):
+                await loop.run_in_executor(None, _load_face_app, config)
 
-            for row in rows:
-                image_id = int(row["id"])
-                cache_path = str(row.get("cache_path") or "")
-                try:
-                    faces = await loop.run_in_executor(None, _detect_faces, cache_path, config)
-                    await _configured(
-                        _store_face_scan_result,
-                        "store_face_scan_result",
-                    )(
-                        image_id=image_id,
-                        model_id=model_id,
-                        cache_path=cache_path,
-                        faces=faces,
-                        status="scanned",
-                    )
-                    scanned += 1
-                    detected += len(faces)
-                except Exception as exc:
-                    await _configured(
-                        _store_face_scan_result,
-                        "store_face_scan_result",
-                    )(
-                        image_id=image_id,
-                        model_id=model_id,
-                        cache_path=cache_path,
-                        faces=[],
-                        status="error",
-                        error=str(exc),
-                    )
-                    _set_status(last_error=str(exc))
-                if decision.embedding_pause_seconds > 0:
-                    await asyncio.sleep(float(decision.embedding_pause_seconds))
+            with work_coordination.manual_bulk("people"):
+                for row in rows:
+                    image_id = int(row["id"])
+                    cache_path = str(row.get("cache_path") or "")
+                    try:
+                        faces = await loop.run_in_executor(None, _detect_faces, cache_path, config)
+                        await _configured(
+                            _store_face_scan_result,
+                            "store_face_scan_result",
+                        )(
+                            image_id=image_id,
+                            model_id=model_id,
+                            cache_path=cache_path,
+                            faces=faces,
+                            status="scanned",
+                        )
+                        scanned += 1
+                        detected += len(faces)
+                    except Exception as exc:
+                        await _configured(
+                            _store_face_scan_result,
+                            "store_face_scan_result",
+                        )(
+                            image_id=image_id,
+                            model_id=model_id,
+                            cache_path=cache_path,
+                            faces=[],
+                            status="error",
+                            error=str(exc),
+                        )
+                        _set_status(last_error=str(exc))
+                    if decision.embedding_pause_seconds > 0:
+                        await asyncio.sleep(float(decision.embedding_pause_seconds))
 
             cluster = await _configured(
                 _cluster_unassigned_faces,
@@ -491,7 +422,7 @@ async def run_face_worker() -> None:
             _set_status(
                 state="error",
                 ready=False,
-                message="People recognition is unavailable.",
+                message="People is unavailable.",
                 last_error=str(exc),
                 last_batch_seconds=round(time.perf_counter() - started, 3),
                 last_scan_at=time.time(),

@@ -15,7 +15,6 @@ export function searchModeForQuery(searchQuery = '') {
 export function appendSearchParams(params, state = {}) {
     if (state.searchMode === 'search' && state.searchQuery) {
         params.set('q', state.searchQuery);
-        if (state.deepSearch) params.set('deep', '1');
     }
     return params;
 }

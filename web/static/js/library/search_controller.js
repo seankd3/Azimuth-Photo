@@ -11,7 +11,6 @@ function clearSearchTimer(clearSearchDebounce = null) {
 export function applySearchQueryChange(query, {
     getSearchQuery = () => '',
     setSearchQuery = () => {},
-    setDeepSearchRequested = () => {},
     getSortField = () => '',
     hasActiveTextSearch = value => Boolean(value),
     saveSearchState = () => {},
@@ -27,7 +26,6 @@ export function applySearchQueryChange(query, {
     const trimmed = String(query || '').trim();
     const wasSearching = hasActiveTextSearch(getSearchQuery());
     setSearchQuery(trimmed);
-    setDeepSearchRequested(false);
     if (hasActiveTextSearch(trimmed)) {
         saveSearchState();
         updateSimilaritySortOption();
@@ -67,11 +65,6 @@ export function initSearchInputControls({
     input.addEventListener('input', (e) => {
         clearTimeoutImpl(getSearchDebounce());
         e.target.classList.add('searching');
-        const deepBtn = documentImpl.getElementById('deep-search-btn');
-        if (deepBtn) {
-            deepBtn.disabled = !hasActiveTextSearch(e.target.value.trim());
-            deepBtn.classList.remove('active');
-        }
         const timer = setTimeoutImpl(() => {
             e.target.classList.remove('searching');
             setSearchDebounce(null);
@@ -91,16 +84,15 @@ export function clearSearch({
     clearSearchDebounce = null,
     getSortField = () => '',
     setSearchQuery = () => {},
-    setDeepSearchRequested = () => {},
     clearPersistedSearchState = () => {},
     restoreSortState = () => {},
     applySortState = () => {},
     updateSearchControls = () => {},
     reloadForFilters = () => {},
+    updateDateScrubber = () => {},
 } = {}) {
     const wasSimilaritySort = getSortField() === 'similarity';
     setSearchQuery('');
-    setDeepSearchRequested(false);
     clearSearchTimer(clearSearchDebounce);
     clearPersistedSearchState();
     if (wasSimilaritySort) {
@@ -118,45 +110,5 @@ export function clearSearch({
     if (sortToggles) sortToggles.style.opacity = '';
     updateSearchControls();
     reloadForFilters();
-}
-
-
-export function runDeepSearch({
-    documentImpl = globalThis.document,
-    clearSearchDebounce = null,
-    getSearchQuery = () => '',
-    setSearchQuery = () => {},
-    setDeepSearchRequested = () => {},
-    getSortField = () => '',
-    hasActiveTextSearch = value => Boolean(value),
-    saveSearchState = () => {},
-    updateSimilaritySortOption = () => {},
-    applySortState = () => {},
-    saveSearchSortState = () => {},
-    updateSearchControls = () => {},
-    reloadForFilters = () => {},
-    updateDateScrubber = () => {},
-} = {}) {
-    const input = searchInput(documentImpl);
-    const query = ((input && input.value) || getSearchQuery() || '').trim();
-    if (!query || query === '__similar__') {
-        if (input) input.focus();
-        return false;
-    }
-    const wasSearching = hasActiveTextSearch(getSearchQuery());
-    clearSearchTimer(clearSearchDebounce);
-    if (input) input.classList.remove('searching');
-    setSearchQuery(query);
-    setDeepSearchRequested(true);
-    saveSearchState();
-    updateSimilaritySortOption();
-    if (!wasSearching || getSortField() !== 'similarity') {
-        applySortState('similarity', true, { persist: false });
-    } else {
-        saveSearchSortState();
-    }
-    updateSearchControls();
-    reloadForFilters();
     updateDateScrubber();
-    return true;
 }

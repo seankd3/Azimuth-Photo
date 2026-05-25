@@ -28,7 +28,7 @@
         <div class="shortcut-overlay-card">
             <div class="shortcut-overlay-header">
                 <span>Keyboard Shortcuts</span>
-                <button type="button" class="shortcut-overlay-close" onclick="PhotoArchive.hideShortcuts()" aria-label="Close">&times;</button>
+                <button type="button" class="shortcut-overlay-close" data-action="hide-shortcuts" aria-label="Close">&times;</button>
             </div>
             <div class="shortcut-overlay-body">
                 <div class="shortcut-group">
@@ -62,7 +62,7 @@
             <h3 class="confirm-modal-title" id="confirm-modal-title"></h3>
             <p class="confirm-modal-text" id="confirm-modal-text"></p>
             <div class="confirm-modal-actions">
-                <button type="button" class="btn-secondary" onclick="PhotoArchive.hideConfirmModal()">Cancel</button>
+                <button type="button" class="btn-secondary" data-action="hide-confirm-modal">Cancel</button>
                 <button type="button" class="btn-danger" id="confirm-modal-confirm">Confirm</button>
             </div>
         </div>

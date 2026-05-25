@@ -260,7 +260,6 @@ async def warm_images(request: Request):
                 hot_rows,
                 tier,
                 limit=len(hot_rows),
-                active_min_warm=len(hot_rows),
             )
         cached_ids = await _cached_image_ids(requested[tier], tier)
         if not cached_ids:

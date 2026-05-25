@@ -27,6 +27,7 @@ _FILTERED_SWISS_PAIR_WINDOW = 256
 _FILTERED_MOSAIC_WINDOW = 192
 _MOSAIC_EXPLORE_WINDOW = 768
 _MOSAIC_DIVERSE_WINDOW = 1536
+_DIRECT_UNCOMPARED_FILTER = "direct_uncompared"
 
 _invalidate_rankings_cache: Callable[[], None] | None = None
 _invalidate_interaction_response_cache: Callable[[], None] | None = None
@@ -363,6 +364,7 @@ async def filtered_visible_ranked_candidates(
     size: str,
     *,
     limit: int,
+    sort: str = "elo",
     orientation: str = "",
     compared: str = "",
     min_stars: int = 0,
@@ -376,7 +378,7 @@ async def filtered_visible_ranked_candidates(
     cache_root = _configured_cache_root()
     cache_key = (
         f"filtered:{_configured_db_signature()}:{cache_root}:{size}:{max(1, int(limit))}:"
-        f"{orientation}:{compared}:{int(min_stars or 0)}:{folder}:{flag}:"
+        f"{sort}:{orientation}:{compared}:{int(min_stars or 0)}:{folder}:{flag}:"
         f"{date_taken}:{file_type}:{camera}:{lens}"
     )
     now = time.monotonic()
@@ -398,6 +400,7 @@ async def filtered_visible_ranked_candidates(
                         await load_filtered_visible_ranked_candidates(
                             size,
                             limit=limit,
+                            sort=sort,
                             orientation=orientation,
                             compared=compared,
                             min_stars=min_stars,
@@ -433,6 +436,7 @@ async def filtered_visible_ranked_candidates(
     result_rows, filtered_total, visible_count = await load_filtered_visible_ranked_candidates(
         size,
         limit=limit,
+        sort=sort,
         orientation=orientation,
         compared=compared,
         min_stars=min_stars,
@@ -457,6 +461,7 @@ async def load_filtered_visible_ranked_candidates(
     size: str,
     *,
     limit: int,
+    sort: str = "elo",
     orientation: str = "",
     compared: str = "",
     min_stars: int = 0,
@@ -517,7 +522,7 @@ async def load_filtered_visible_ranked_candidates(
     rows = await _configured(_get_rankings)(
         limit=normalized_limit,
         offset=0,
-        sort="elo",
+        sort=sort,
         orientation=orientation,
         compared=compared,
         min_stars=min_stars,
@@ -546,7 +551,9 @@ async def search_visible_ranked_candidates(
     *,
     limit: int,
     search: dict,
+    sort: str = "elo",
     exclude_ids: set[int] | None = None,
+    force_exact_counts: bool = False,
     orientation: str = "",
     compared: str = "",
     min_stars: int = 0,
@@ -562,7 +569,7 @@ async def search_visible_ranked_candidates(
     fetch_limit = max(1, int(limit)) + min(len(exclude_ids), 200)
     id_filter = search.get("id_filter")
     text_query = search.get("text_query") or ""
-    exact_counts = not (text_query and id_filter is None)
+    exact_counts = bool(force_exact_counts) or not (text_query and id_filter is None)
     if exact_counts:
         total_task = asyncio.create_task(
             _configured(_count_rankings)(
@@ -590,7 +597,7 @@ async def search_visible_ranked_candidates(
     rows = await _configured(_get_rankings)(
         limit=fetch_limit,
         offset=0,
-        sort="elo",
+        sort=sort,
         orientation=orientation,
         compared=compared,
         min_stars=min_stars,
@@ -635,6 +642,15 @@ async def warm_filtered_visible_ranked_candidates(
         pass
 
 
+def candidate_value(candidate, key: str, default=None):
+    if hasattr(candidate, "get"):
+        return candidate.get(key, default)
+    try:
+        return candidate[key]
+    except (KeyError, IndexError, TypeError):
+        return default
+
+
 def metadata_text_match(image: dict, query: str) -> bool:
     needle = (query or "").strip().lower()
     if not needle:
@@ -648,7 +664,7 @@ def metadata_text_match(image: dict, query: str) -> bool:
         "lens",
         "file_ext",
     )
-    return any(needle in str(image.get(field) or "").lower() for field in fields)
+    return any(needle in str(candidate_value(image, field, "") or "").lower() for field in fields)
 
 
 def apply_text_search_constraint(candidates: list[dict], search: dict) -> list[dict]:
@@ -657,9 +673,85 @@ def apply_text_search_constraint(candidates: list[dict], search: dict) -> list[d
     id_filter = search.get("id_filter")
     if id_filter is not None:
         search_ids = {int(image_id) for image_id in id_filter}
-        return [c for c in candidates if int(c.get("id") or 0) in search_ids]
+        return [c for c in candidates if int(candidate_value(c, "id", 0) or 0) in search_ids]
     text_query = search.get("text_query") or ""
     return [c for c in candidates if metadata_text_match(c, text_query)]
+
+
+async def add_explore_uncompared_stats(
+    stats: dict,
+    *,
+    strategy: str,
+    size: str,
+    filtered_total: int,
+    visible_count: int,
+    search: dict,
+    orientation: str = "",
+    compared: str = "",
+    min_stars: int = 0,
+    folder: str = "",
+    flag: str = "",
+    date_taken: str = "",
+    file_type: str = "",
+    camera: str = "",
+    lens: str = "",
+) -> dict:
+    """Attach direct user-uncompared pool counts for Explore mode."""
+    if strategy != "explore" or compared:
+        return stats
+
+    count_kwargs = {
+        "orientation": orientation,
+        "compared": _DIRECT_UNCOMPARED_FILTER,
+        "min_stars": min_stars,
+        "folder": folder,
+        "flag": flag,
+        "date_taken": date_taken,
+        "file_type": file_type,
+        "camera": camera,
+        "lens": lens,
+        "id_filter": search.get("id_filter"),
+        "text_query": search.get("text_query") or "",
+    }
+    cache_root = _configured_cache_root()
+    total_task = asyncio.create_task(_configured(_count_rankings)(**count_kwargs))
+    visible_task = asyncio.create_task(
+        _configured(_count_rankings)(
+            **count_kwargs,
+            visible_thumb_size=size,
+            cache_root=cache_root,
+        )
+    )
+    direct_total = await total_task
+    direct_visible = await visible_task
+    stats.update({
+        "pool_metric": "direct_uncompared",
+        "direct_uncompared_total": int(direct_total),
+        "direct_uncompared_visible": int(direct_visible),
+        "direct_uncompared_pool_total": int(filtered_total or 0),
+        "direct_uncompared_pool_visible": int(visible_count or 0),
+    })
+    return stats
+
+
+def lowest_comparison_candidate_pool(candidates: list[dict], count: int) -> list[dict]:
+    if len(candidates) <= count:
+        return candidates
+    target_size = min(len(candidates), max(1, int(count)))
+    sorted_candidates = sorted(
+        candidates,
+        key=lambda img: (
+            int(candidate_value(img, "comparisons", 0) or 0),
+            int(candidate_value(img, "propagated_updates", 0) or 0),
+            -float(candidate_value(img, "elo", 1200.0) or 1200.0),
+            int(candidate_value(img, "id", 0) or 0),
+        ),
+    )
+    cutoff = int(candidate_value(sorted_candidates[target_size - 1], "comparisons", 0) or 0)
+    return [
+        img for img in sorted_candidates
+        if int(candidate_value(img, "comparisons", 0) or 0) <= cutoff
+    ]
 
 
 def has_candidate_filters(
@@ -701,14 +793,9 @@ async def diverse_sample(candidates: list[dict], count: int) -> list[dict]:
         import numpy as np
         import embed_cache
 
-        try:
-            deep_key = elo_propagation.compare_embedding_model_key()
-            image_ids, matrix = await embed_cache.get_matrix(deep_key)
-            id_to_idx = embed_cache.get_index(deep_key)
-        except Exception:
-            image_ids, matrix = None, None
-            id_to_idx = {}
-
+        model_key = elo_propagation.compare_embedding_model_key()
+        image_ids, matrix = await embed_cache.get_matrix(model_key)
+        id_to_idx = embed_cache.get_index(model_key)
         if image_ids is None:
             image_ids, matrix = embed_cache.get_warm_matrix()
             if image_ids is None:
@@ -849,6 +936,9 @@ async def mosaic_next_impl(
     q: str = "", deep: bool = False, people: str = "",
 ):
     """Get active images for mosaic ranking with configurable sampling strategy."""
+    candidate_source = "mosaic_window"
+    cache_hit = False
+    counts_stale = False
     exclude_ids = set()
     if exclude:
         exclude_ids = {int(x) for x in exclude.split(",") if x.strip().isdigit()}
@@ -879,7 +969,7 @@ async def mosaic_next_impl(
         search=search,
     )
     response_cache_key = None
-    if default_pool_only and not exclude_ids and strategy in {"explore", "diverse"}:
+    if default_pool_only and not exclude_ids and strategy == "explore":
         response_cache_key = (
             "mosaic_next",
             _configured_db_signature(),
@@ -890,6 +980,10 @@ async def mosaic_next_impl(
         cached_response = _interaction_response_cache.get(response_cache_key)
         if cached_response and cached_response["expires"] > time.monotonic():
             response = response_helpers.copy_interaction_response(cached_response["data"])
+            response["candidate_source"] = "response_cache"
+            response["cache_hit"] = True
+            response.setdefault("counts_stale", False)
+            response.setdefault("reservoir_remaining", 0)
             _configured_schedule_cached_thumbnail_memory_warm(
                 response.get("images") or [],
                 "sm",
@@ -897,20 +991,22 @@ async def mosaic_next_impl(
             )
             return response
     if default_pool_only and strategy != "top":
+        candidate_source = f"default_{strategy}_reservoir"
         counts_task = asyncio.create_task(
             _configured(_get_visible_pairing_pool_counts)("sm", _configured_cache_root())
         )
         if strategy == "explore":
+            candidate_source = "default_explore_least_compared"
             candidates = await default_visible_pairing_candidates(
                 "sm",
                 limit=max(_MOSAIC_EXPLORE_WINDOW, n * 80),
-                order="cache",
+                order="least_compared",
             )
         elif strategy == "diverse":
+            candidate_source = "default_diverse_universe"
             candidates = await default_visible_pairing_candidates(
                 "sm",
-                limit=max(_MOSAIC_DIVERSE_WINDOW, n * 120),
-                order="least_compared",
+                order="cache",
                 include_card_metadata=False,
             )
         else:
@@ -922,10 +1018,12 @@ async def mosaic_next_impl(
         filtered_total = int(counts.get("active_images") or 0)
         stats = response_helpers.interaction_pool_stats(filtered_total, visible_count)
     elif strategy != "top" and not query_constraints.search_constraint_active(search):
+        candidate_source = "filtered_reservoir"
         stats = None
         candidates, filtered_total, visible_count = await filtered_visible_ranked_candidates(
             "sm",
             limit=max(_FILTERED_MOSAIC_WINDOW, n * 40),
+            sort="least_compared" if strategy == "explore" else "elo",
             orientation=orientation,
             compared=compared,
             min_stars=min_stars,
@@ -936,17 +1034,35 @@ async def mosaic_next_impl(
             camera=camera,
             lens=lens,
         )
+        if strategy == "diverse" and visible_count > len(candidates):
+            candidate_source = "filtered_diverse_universe"
+            candidates, filtered_total, visible_count = await filtered_visible_ranked_candidates(
+                "sm",
+                limit=visible_count,
+                orientation=orientation,
+                compared=compared,
+                min_stars=min_stars,
+                folder=folder,
+                flag=flag,
+                date_taken=date_taken,
+                file_type=file_type,
+                camera=camera,
+                lens=lens,
+            )
         if exclude_ids:
             candidates = [row for row in candidates if int(row["id"]) not in exclude_ids]
             filtered_total = max(0, int(filtered_total) - len(exclude_ids))
             visible_count = max(0, int(visible_count) - len(exclude_ids))
     elif strategy != "top" and query_constraints.search_constraint_active(search):
+        candidate_source = "search_reservoir"
         stats = None
         candidates, filtered_total, visible_count = await search_visible_ranked_candidates(
             "sm",
             limit=max(_FILTERED_MOSAIC_WINDOW, n * 40),
             search=search,
+            sort="least_compared" if strategy == "explore" else "elo",
             exclude_ids=exclude_ids,
+            force_exact_counts=strategy == "diverse",
             orientation=orientation,
             compared=compared,
             min_stars=min_stars,
@@ -957,7 +1073,26 @@ async def mosaic_next_impl(
             camera=camera,
             lens=lens,
         )
+        if strategy == "diverse" and visible_count > len(candidates):
+            candidate_source = "search_diverse_universe"
+            candidates, filtered_total, visible_count = await search_visible_ranked_candidates(
+                "sm",
+                limit=visible_count,
+                search=search,
+                exclude_ids=exclude_ids,
+                force_exact_counts=True,
+                orientation=orientation,
+                compared=compared,
+                min_stars=min_stars,
+                folder=folder,
+                flag=flag,
+                date_taken=date_taken,
+                file_type=file_type,
+                camera=camera,
+                lens=lens,
+            )
     else:
+        candidate_source = "full_candidate_scan"
         stats = None
         if strategy == "top":
             images = await _configured(_get_top_images)(limit=50)
@@ -982,7 +1117,7 @@ async def mosaic_next_impl(
         visible_count = len(candidates)
 
     if len(candidates) < 2 and default_pool_only and strategy == "explore" and visible_count > len(candidates):
-        candidates = await default_visible_pairing_candidates("sm")
+        candidates = await default_visible_pairing_candidates("sm", order="least_compared")
         if exclude_ids:
             candidates = [row for row in candidates if int(row["id"]) not in exclude_ids]
         visible_count = len(candidates)
@@ -992,6 +1127,23 @@ async def mosaic_next_impl(
         stats["filtered_pool"] = visible_count
         stats["filtered_pool_visible"] = visible_count
         stats["filtered_pool_total"] = filtered_total
+        await add_explore_uncompared_stats(
+            stats,
+            strategy=strategy,
+            size="sm",
+            filtered_total=filtered_total,
+            visible_count=visible_count,
+            search=search,
+            orientation=orientation,
+            compared=compared,
+            min_stars=min_stars,
+            folder=folder,
+            flag=flag,
+            date_taken=date_taken,
+            file_type=file_type,
+            camera=camera,
+            lens=lens,
+        )
         response = {
             "images": [],
             **response_helpers.visibility_counts(filtered_total, visible_count),
@@ -999,9 +1151,11 @@ async def mosaic_next_impl(
             "stats": stats,
             "search_mode": search["search_mode"],
             "ai_unavailable": search["ai_unavailable"],
-            "deep_requested": search.get("deep_requested", False),
-            "deep_search_cached": search.get("deep_search_cached", False),
             "fallback_reason": search.get("fallback_reason", ""),
+            "candidate_source": candidate_source,
+            "counts_stale": counts_stale,
+            "cache_hit": cache_hit,
+            "reservoir_remaining": 0,
         }
         if response_cache_key is not None:
             _interaction_response_cache[response_cache_key] = {
@@ -1014,13 +1168,14 @@ async def mosaic_next_impl(
     count = min(n, len(candidates))
 
     def effective_elo(img):
-        return img["elo"] or 1200.0
+        return candidate_value(img, "elo", 1200.0) or 1200.0
 
     if strategy == "diverse":
         sample = await diverse_sample(candidates, count)
     else:
         if strategy == "explore":
-            weights = [1.0 / (img["comparisons"] + 1) for img in candidates]
+            candidates = lowest_comparison_candidate_pool(candidates, count)
+            weights = [1.0 / (int(candidate_value(img, "comparisons", 0) or 0) + 1) for img in candidates]
         elif strategy == "compete" and grid_elo > 0:
             weights = [1.0 / (abs(effective_elo(img) - grid_elo) + 50) for img in candidates]
         elif strategy == "top":
@@ -1063,6 +1218,23 @@ async def mosaic_next_impl(
     stats["filtered_pool"] = visible_count
     stats["filtered_pool_visible"] = visible_count
     stats["filtered_pool_total"] = filtered_total
+    await add_explore_uncompared_stats(
+        stats,
+        strategy=strategy,
+        size="sm",
+        filtered_total=filtered_total,
+        visible_count=visible_count,
+        search=search,
+        orientation=orientation,
+        compared=compared,
+        min_stars=min_stars,
+        folder=folder,
+        flag=flag,
+        date_taken=date_taken,
+        file_type=file_type,
+        camera=camera,
+        lens=lens,
+    )
     response = {
         "images": result,
         **response_helpers.visibility_counts(filtered_total, visible_count),
@@ -1070,9 +1242,11 @@ async def mosaic_next_impl(
         "stats": stats,
         "search_mode": search["search_mode"],
         "ai_unavailable": search["ai_unavailable"],
-        "deep_requested": search.get("deep_requested", False),
-        "deep_search_cached": search.get("deep_search_cached", False),
         "fallback_reason": search.get("fallback_reason", ""),
+        "candidate_source": candidate_source,
+        "counts_stale": counts_stale,
+        "cache_hit": cache_hit,
+        "reservoir_remaining": max(0, len(candidates) - len(result)),
     }
     if response_cache_key is not None:
         _interaction_response_cache[response_cache_key] = {
@@ -1088,6 +1262,9 @@ async def compare_next_impl(
     flag: str = "", date_taken: str = "", file_type: str = "", camera: str = "", lens: str = "",
     q: str = "", deep: bool = False, people: str = "",
 ):
+    candidate_source = "compare_window"
+    cache_hit = False
+    counts_stale = False
     search = await _configured_resolve_library_constraints(q, people=people, deep=deep)
     default_limited_candidates = False
     ranked_candidate_order = False
@@ -1114,8 +1291,14 @@ async def compare_next_impl(
         )
         cached_response = _interaction_response_cache.get(response_cache_key)
         if cached_response and cached_response["expires"] > time.monotonic():
-            return response_helpers.copy_interaction_response(cached_response["data"])
+            response = response_helpers.copy_interaction_response(cached_response["data"])
+            response["candidate_source"] = "response_cache"
+            response["cache_hit"] = True
+            response.setdefault("counts_stale", False)
+            response.setdefault("reservoir_remaining", 0)
+            return response
     if not has_filters and mode != "topn":
+        candidate_source = f"default_{mode}_reservoir"
         counts_task = asyncio.create_task(
             _configured(_get_visible_pairing_pool_counts)("md", _configured_cache_root())
         )
@@ -1134,6 +1317,7 @@ async def compare_next_impl(
         filtered_total = int(counts.get("active_images") or 0)
         stats = response_helpers.interaction_pool_stats(filtered_total, visible_count)
     elif mode != "topn" and not query_constraints.search_constraint_active(search):
+        candidate_source = "filtered_reservoir"
         stats = None
         image_dicts, filtered_total, visible_count = await filtered_visible_ranked_candidates(
             "md",
@@ -1153,6 +1337,7 @@ async def compare_next_impl(
         )
         ranked_candidate_order = True
     elif mode != "topn" and query_constraints.search_constraint_active(search):
+        candidate_source = "search_reservoir"
         stats = None
         image_dicts, filtered_total, visible_count = await search_visible_ranked_candidates(
             "md",
@@ -1173,6 +1358,7 @@ async def compare_next_impl(
         )
         ranked_candidate_order = True
     else:
+        candidate_source = "topn_reservoir" if mode == "topn" else "full_candidate_scan"
         stats = None
         past_task = None
         if mode == "topn":
@@ -1208,9 +1394,11 @@ async def compare_next_impl(
             "stats": stats,
             "search_mode": search["search_mode"],
             "ai_unavailable": search["ai_unavailable"],
-            "deep_requested": search.get("deep_requested", False),
-            "deep_search_cached": search.get("deep_search_cached", False),
             "fallback_reason": search.get("fallback_reason", ""),
+            "candidate_source": candidate_source,
+            "counts_stale": counts_stale,
+            "cache_hit": cache_hit,
+            "reservoir_remaining": 0,
         }
         if response_cache_key is not None:
             _interaction_response_cache[response_cache_key] = {
@@ -1291,9 +1479,11 @@ async def compare_next_impl(
         "stats": stats,
         "search_mode": search["search_mode"],
         "ai_unavailable": search["ai_unavailable"],
-        "deep_requested": search.get("deep_requested", False),
-        "deep_search_cached": search.get("deep_search_cached", False),
         "fallback_reason": search.get("fallback_reason", ""),
+        "candidate_source": candidate_source,
+        "counts_stale": counts_stale,
+        "cache_hit": cache_hit,
+        "reservoir_remaining": max(0, len(image_dicts) - len(pair_rows)),
     }
     if response_cache_key is not None:
         _interaction_response_cache[response_cache_key] = {

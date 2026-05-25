@@ -3,6 +3,9 @@
 import asyncio
 from collections.abc import Callable
 from functools import partial
+import inspect
+
+from core import work_coordination
 
 
 def has_cached(
@@ -178,6 +181,13 @@ async def prefetch_images(
     if size not in sizes or not images:
         return 0
 
+    async def schedule_ambient_ensure(*args, **kwargs):
+        await work_coordination.wait_for_lane(work_coordination.AMBIENT_WARMING)
+        result = ensure_thumbnail_with_executor(*args, **kwargs)
+        if inspect.isawaitable(result):
+            return await result
+        return result
+
     scheduled = 0
     for img in images:
         if limit is not None and scheduled >= limit:
@@ -196,7 +206,7 @@ async def prefetch_images(
 
         if not require_current:
             create_task(
-                ensure_thumbnail_with_executor(
+                schedule_ambient_ensure(
                     filepath,
                     size,
                     image_id,
@@ -221,7 +231,7 @@ async def prefetch_images(
                 touch_cached(size, filepath, image_id)
             continue
         create_task(
-            ensure_thumbnail_with_executor(
+            schedule_ambient_ensure(
                 filepath,
                 size,
                 image_id,

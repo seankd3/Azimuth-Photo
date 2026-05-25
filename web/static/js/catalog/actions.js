@@ -1,6 +1,18 @@
 let scanPoller = null;
 
 
+async function responseDataOrError(response, fallbackMessage) {
+    let data = {};
+    try {
+        data = await response.json();
+    } catch {}
+    if (!response.ok || data.error || data.ok === false) {
+        throw new Error(data.error || fallbackMessage);
+    }
+    return data;
+}
+
+
 export async function loadCatalogSources({
     fetchImpl = fetch,
     renderCatalogSources,
@@ -8,7 +20,7 @@ export async function loadCatalogSources({
 } = {}) {
     try {
         const res = await fetchImpl('/api/catalog');
-        const data = await res.json();
+        const data = await responseDataOrError(res, 'Could not load catalog sources');
         renderCatalogSources?.(data);
         return data;
     } catch (err) {
@@ -27,11 +39,13 @@ export async function pollScanUntilDone({
     setSettingsStatus,
 } = {}) {
     if (scanPoller) clearIntervalImpl(scanPoller);
+    let statusFailures = 0;
     setScanBusy?.(true);
     scanPoller = setIntervalImpl(async () => {
         try {
             const res = await fetchImpl('/api/scan/status');
-            const data = await res.json();
+            const data = await responseDataOrError(res, 'Scan status unavailable');
+            statusFailures = 0;
             const countEl = document.getElementById('scan-progress-count');
             if (countEl) countEl.textContent = Number(data.total_found || 0).toLocaleString();
             if (!data.scanning) {
@@ -45,7 +59,18 @@ export async function pollScanUntilDone({
                     setSettingsStatus?.(`Scan complete. ${Number(data.total_found || 0).toLocaleString()} photos found.`, 'success');
                 }
             }
-        } catch {}
+        } catch (err) {
+            statusFailures += 1;
+            if (statusFailures === 1) {
+                setSettingsStatus?.(`Scan status unavailable: ${err.message}. Retrying...`, 'error');
+            }
+            if (statusFailures >= 5) {
+                clearIntervalImpl(scanPoller);
+                scanPoller = null;
+                setScanBusy?.(false);
+                setSettingsStatus?.(`Scan status unavailable: ${err.message}. Refresh Catalog to check the latest state.`, 'error');
+            }
+        }
     }, 1000);
 }
 
@@ -70,8 +95,7 @@ export async function addCatalogSource({
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ path: folder, scan: true }),
         });
-        const data = await res.json();
-        if (!res.ok || !data.ok) throw new Error(data.error || 'Could not add folder');
+        const data = await responseDataOrError(res, 'Could not add folder');
         renderCatalogSources?.(data.catalog || { sources: [data.source], stats: fallbackStats || {} });
         pollScanUntilDoneImpl?.();
     } catch (err) {
@@ -91,8 +115,7 @@ export async function rescanCatalogSource(sourceId, {
     setSettingsStatus?.('Starting folder scan...', 'muted');
     try {
         const res = await fetchImpl(`/api/catalog/sources/${sourceId}/rescan`, { method: 'POST' });
-        const data = await res.json();
-        if (!res.ok || !data.ok) throw new Error(data.error || 'Could not start scan');
+        await responseDataOrError(res, 'Could not start scan');
         pollScanUntilDoneImpl?.();
     } catch (err) {
         setSettingsStatus?.(`Scan failed to start: ${err.message}`, 'error');
@@ -116,8 +139,7 @@ export async function removeCatalogSource(sourceId, mode, {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ mode }),
         });
-        const data = await res.json();
-        if (!res.ok || !data.ok) throw new Error(data.error || 'Remove failed');
+        const data = await responseDataOrError(res, 'Remove failed');
         renderCatalogSources?.(data.catalog);
         setSettingsStatus?.(
             mode === 'delete'

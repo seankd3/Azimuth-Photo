@@ -2,7 +2,6 @@ import {
     applySearchQueryChange as applySearchQueryChangeCore,
     clearSearch as clearSearchCore,
     initSearchInputControls as initSearchInputControlsCore,
-    runDeepSearch as runDeepSearchCore,
 } from '../library/search_controller.js';
 
 export function createLegacySearchActionBridge({
@@ -10,8 +9,6 @@ export function createLegacySearchActionBridge({
     clearTimeoutImpl = clearTimeout,
     getSearchQuery = () => '',
     setSearchQuery = () => {},
-    getDeepSearchRequested = () => false,
-    setDeepSearchRequested = () => {},
     getSortField = () => '',
     hasActiveTextSearch,
     saveSearchState,
@@ -26,7 +23,6 @@ export function createLegacySearchActionBridge({
     initSearchInputControlsImpl = initSearchInputControlsCore,
     applySearchQueryChangeImpl = applySearchQueryChangeCore,
     clearSearchImpl = clearSearchCore,
-    runDeepSearchImpl = runDeepSearchCore,
 } = {}) {
     let searchDebounce = null;
 
@@ -39,8 +35,6 @@ export function createLegacySearchActionBridge({
         return {
             getSearchQuery,
             setSearchQuery,
-            setDeepSearchRequested,
-            getDeepSearchRequested,
             getSortField,
             hasActiveTextSearch,
             saveSearchState,
@@ -79,19 +73,10 @@ export function createLegacySearchActionBridge({
         });
     }
 
-    function runDeepSearch() {
-        return runDeepSearchImpl({
-            ...context(),
-            documentImpl,
-            clearSearchDebounce: clearSearchDebounceTimer,
-        });
-    }
-
     return {
         clearSearch,
         clearSearchDebounceTimer,
         context,
         initSearchInputControls,
-        runDeepSearch,
     };
 }

@@ -31,19 +31,16 @@ export function createCompareModeController({
     }
 
     function setCompareMode(mode) {
+        const nextMode = 'mosaic';
         clearWarmups();
-        setCompareModeValue(mode);
+        setCompareModeValue(nextMode);
         const transitionToken = incrementTransitionToken();
-        setCompareModeViewImpl(mode, {
+        setCompareModeViewImpl(nextMode, {
             transitionToken,
             isCurrentTransition,
             onMosaic: () => {
                 incrementCompareImageToken();
                 loadMosaicBatch();
-            },
-            onPair: () => {
-                resetComparePairs();
-                fetchComparePairs().then(() => showComparePair());
             },
         });
     }

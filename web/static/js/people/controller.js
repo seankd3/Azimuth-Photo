@@ -27,16 +27,29 @@ export function createPeopleApi({
 } = {}) {
     const reloadPeople = (...args) => loadPeople(...args);
     const actionOptions = () => ({ loadPeople: reloadPeople, showToast });
+    const apiLabelPerson = (personId) => labelPerson(personId, actionOptions());
+    const apiMergePeople = (sourcePersonId, targetPersonId) => (
+        mergePeople(sourcePersonId, targetPersonId, actionOptions())
+    );
+    const apiRejectPeopleMerge = (suggestionId) => rejectPeopleMerge(suggestionId, actionOptions());
+    const apiIgnorePerson = (personId) => ignorePerson(personId, actionOptions());
+    const apiFilterLibraryByPerson = (...args) => filterLibraryByPerson(...args);
     return {
-        initPeople: (...args) => initPeople(...args),
+        initPeople: (options = {}) => initPeople({
+            ...(options || {}),
+            labelPerson: apiLabelPerson,
+            mergePeople: apiMergePeople,
+            rejectPeopleMerge: apiRejectPeopleMerge,
+            ignorePerson: apiIgnorePerson,
+            filterLibraryByPerson: apiFilterLibraryByPerson,
+            useFallbackThumbImpl: useFallbackThumb,
+        }),
         rememberPeopleLabelDraft: (...args) => rememberPeopleLabelDraft(...args),
         useFallbackThumb: (...args) => useFallbackThumb(...args),
-        labelPerson: (personId) => labelPerson(personId, actionOptions()),
-        mergePeople: (sourcePersonId, targetPersonId) => (
-            mergePeople(sourcePersonId, targetPersonId, actionOptions())
-        ),
-        rejectPeopleMerge: (suggestionId) => rejectPeopleMerge(suggestionId, actionOptions()),
-        ignorePerson: (personId) => ignorePerson(personId, actionOptions()),
-        filterLibraryByPerson: (...args) => filterLibraryByPerson(...args),
+        labelPerson: apiLabelPerson,
+        mergePeople: apiMergePeople,
+        rejectPeopleMerge: apiRejectPeopleMerge,
+        ignorePerson: apiIgnorePerson,
+        filterLibraryByPerson: apiFilterLibraryByPerson,
     };
 }

@@ -67,6 +67,7 @@ export function createLoupeController({
     clearTimeoutImpl = globalThis.clearTimeout?.bind(globalThis) || (() => {}),
     fetchImpl = globalThis.fetch ? defaultFetch : null,
     getLibraryImages = () => [],
+    getLibraryPoolTotal = () => getLibraryImages().length,
     getSearchQuery = () => '',
     getRankingsExhausted = () => true,
     loadRankings = async () => 0,
@@ -102,6 +103,7 @@ export function createLoupeController({
     let loupeCurrentMediaStatus = null;
     let loupeLoadingTierRank = -1;
     let loupePreviousFocus = null;
+    let loupeInteractionReady = false;
     const loupeTierProbes = new Set();
 
     function getLightboxIndex() {
@@ -133,6 +135,7 @@ export function createLoupeController({
             documentImpl,
             images: getLibraryImages(),
             lightboxIndex,
+            poolTotal: getLibraryPoolTotal(),
         });
     }
 
@@ -141,6 +144,7 @@ export function createLoupeController({
             documentImpl,
             images: getLibraryImages(),
             lightboxIndex,
+            poolTotal: getLibraryPoolTotal(),
         });
     }
 
@@ -155,6 +159,7 @@ export function createLoupeController({
             documentImpl,
             images: getLibraryImages(),
             lightboxIndex,
+            poolTotal: getLibraryPoolTotal(),
             requestAnimationFrameImpl,
             windowRadius: filmstripWindowRadius,
             onSelect: handleFilmstripSelect,
@@ -166,6 +171,7 @@ export function createLoupeController({
             documentImpl,
             images: getLibraryImages(),
             lightboxIndex,
+            poolTotal: getLibraryPoolTotal(),
             requestAnimationFrameImpl,
             windowRadius: filmstripWindowRadius,
             onSelect: handleFilmstripSelect,
@@ -246,6 +252,7 @@ export function createLoupeController({
         const loupe = documentImpl?.getElementById?.('loupe');
         const loupeImg = documentImpl?.getElementById?.('loupe-img');
         if (!loupe || !loupeImg) return false;
+        ensureLoupeInteraction();
         if (loupeHideTimer) {
             clearTimeoutImpl(loupeHideTimer);
             loupeHideTimer = null;
@@ -276,6 +283,17 @@ export function createLoupeController({
         loupeApplyImageSize();
 
         documentImpl?.body?.classList?.add('loupe-open');
+        try {
+            const bar = documentImpl?.querySelector?.('.bottom-bar');
+            if (bar) {
+                documentImpl.documentElement.style.setProperty(
+                    '--current-bottom-bar-height',
+                    `${bar.offsetHeight}px`,
+                );
+            }
+        } catch {
+            // Keep the last measured bottom-bar height when layout probing fails.
+        }
         const loupeWasHidden = loupe.classList.contains('hidden');
         if (loupeWasHidden) {
             loupePreviousFocus = documentImpl.activeElement;
@@ -589,8 +607,14 @@ export function createLoupeController({
         return nextPan;
     }
 
+    function ensureLoupeInteraction() {
+        if (loupeInteractionReady) return true;
+        loupeInteractionReady = Boolean(initLoupeInteraction());
+        return loupeInteractionReady;
+    }
+
     function initLoupeInteraction() {
-        return initLoupeInteractionCore({
+        const bound = initLoupeInteractionCore({
             documentImpl,
             windowImpl,
             getPan: () => ({ x: loupePanX, y: loupePanY }),
@@ -609,7 +633,10 @@ export function createLoupeController({
             applyTransform: loupeApplyTransform,
             updateZoomIndicator,
             requestFullImage: requestLoupeFullImage,
+            closeLightbox,
         });
+        loupeInteractionReady = Boolean(bound);
+        return bound;
     }
 
     function closeLightbox() {
@@ -620,9 +647,7 @@ export function createLoupeController({
             loupe.classList.remove('loupe-visible');
             if (loupeHideTimer) clearTimeoutImpl(loupeHideTimer);
             loupeHideTimer = setTimeoutImpl(() => {
-                if (!documentImpl?.body?.classList?.contains('loupe-open')) {
-                    loupe.classList.add('hidden');
-                }
+                loupe.classList.add('hidden');
                 loupeHideTimer = null;
             }, 150);
         }

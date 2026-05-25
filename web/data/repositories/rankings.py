@@ -255,6 +255,8 @@ def ranking_filter_parts(
             "i.comparisons = 0 AND COALESCE(i.propagated_updates, 0) = 0 "
             "AND ABS(COALESCE(i.elo, 1200.0) - 1200.0) <= 0.0001"
         )
+    elif compared == "direct_uncompared":
+        conditions.append("COALESCE(i.comparisons, 0) = 0")
     elif compared == "confident":
         conditions.append("i.comparisons >= 10")
 

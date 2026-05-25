@@ -2,12 +2,19 @@ import {
     SORT_KEYS,
     sortStateFromValue,
 } from './sort.js';
+import { FILTER_QUERY_KEYS } from '../query_state.js';
 
 
 export const SORT_STORAGE_KEY = 'pa_sort';
 export const SEARCH_STORAGE_KEY = 'pa_search_query';
 export const SEARCH_SORT_STORAGE_KEY = 'pa_search_sort';
-export const SEARCH_DEEP_STORAGE_KEY = 'pa_search_deep';
+
+const EXPLICIT_LIBRARY_QUERY_KEYS = [
+    ...FILTER_QUERY_KEYS,
+    'sort',
+    'dir',
+    'deep',
+];
 
 
 function safeStorageOp(callback, fallback = null) {
@@ -34,22 +41,14 @@ export function saveSortState({
 export function saveSearchState({
     storage = sessionStorage,
     searchKey,
-    deepKey,
     searchQuery = '',
-    deepSearchRequested = false,
     hasActiveTextSearch,
 } = {}) {
     safeStorageOp(() => {
         if (hasActiveTextSearch?.(searchQuery)) {
             storage.setItem(searchKey, searchQuery);
-            if (deepSearchRequested) {
-                storage.setItem(deepKey, '1');
-            } else {
-                storage.removeItem(deepKey);
-            }
         } else {
             storage.removeItem(searchKey);
-            storage.removeItem(deepKey);
         }
     });
 }
@@ -77,12 +76,10 @@ export function clearPersistedSearchState({
     storage = sessionStorage,
     searchKey,
     searchSortKey,
-    deepKey,
 } = {}) {
     safeStorageOp(() => {
         storage.removeItem(searchKey);
         storage.removeItem(searchSortKey);
-        storage.removeItem(deepKey);
     });
 }
 
@@ -131,13 +128,18 @@ export function restoreSearchSortState({
 export function restoreSearchState({
     storage = sessionStorage,
     searchKey,
-    deepKey,
+    locationSearch = globalThis.window?.location?.search || globalThis.location?.search || '',
 } = {}) {
     return safeStorageOp(() => {
-        const searchQuery = (storage.getItem(searchKey) || '').trim();
-        return {
-            searchQuery,
-            deepSearchRequested: Boolean(searchQuery && storage.getItem(deepKey) === '1'),
-        };
-    }, { searchQuery: '', deepSearchRequested: false });
+        const urlParams = new URLSearchParams(locationSearch);
+        let restoredSearch = '';
+        if (urlParams.has('q')) {
+            restoredSearch = urlParams.get('q') || '';
+        } else if (!EXPLICIT_LIBRARY_QUERY_KEYS.some(key => urlParams.has(key))) {
+            restoredSearch = storage.getItem(searchKey) || '';
+        }
+        const searchQuery = restoredSearch.trim();
+        storage.removeItem('pa_search_deep');
+        return { searchQuery };
+    }, { searchQuery: '' });
 }

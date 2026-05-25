@@ -2,33 +2,63 @@
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import os
 import sqlite3
 import tempfile
 
 import aiosqlite
 
+_sqlite_timeout_seconds = contextvars.ContextVar("photoarchive_sqlite_timeout_seconds", default=None)
 
-async def open_async(db_path: str, *, timeout: int = 30) -> aiosqlite.Connection:
+
+def _effective_timeout(timeout: float | None) -> float:
+    if timeout is not None:
+        return float(timeout)
+    context_timeout = _sqlite_timeout_seconds.get()
+    if context_timeout is not None:
+        return float(context_timeout)
+    return 30.0
+
+
+@contextlib.contextmanager
+def sqlite_timeout(seconds: float):
+    token = _sqlite_timeout_seconds.set(max(0.001, float(seconds)))
+    try:
+        yield
+    finally:
+        _sqlite_timeout_seconds.reset(token)
+
+
+def is_sqlite_locked_error(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    return "database is locked" in text or "database table is locked" in text or "database schema is locked" in text
+
+
+async def open_async(db_path: str, *, timeout: float | None = None) -> aiosqlite.Connection:
     """Open an async SQLite connection with the row shape expected by callers."""
 
-    conn = await aiosqlite.connect(db_path, timeout=timeout)
+    effective_timeout = _effective_timeout(timeout)
+    conn = await aiosqlite.connect(db_path, timeout=effective_timeout)
     conn.row_factory = aiosqlite.Row
+    await conn.execute(f"PRAGMA busy_timeout={int(effective_timeout * 1000)}")
     return conn
 
 
 def open_sync(
     db_path: str,
     *,
-    timeout: int = 30,
+    timeout: float | None = None,
     row_factory=sqlite3.Row,
 ) -> sqlite3.Connection:
     """Open a sync SQLite connection for worker-side bounded queries."""
 
-    conn = sqlite3.connect(db_path, timeout=timeout)
+    effective_timeout = _effective_timeout(timeout)
+    conn = sqlite3.connect(db_path, timeout=effective_timeout)
     if row_factory is not None:
         conn.row_factory = row_factory
-    conn.execute("PRAGMA busy_timeout=30000")
+    conn.execute(f"PRAGMA busy_timeout={int(effective_timeout * 1000)}")
     return conn
 
 

@@ -1,0 +1,185 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PYTHON="$ROOT/web/.venv/bin/python"
+NODE_BIN="${NODE:-node}"
+MODE="unit"
+AREA=""
+
+declare -A AREA_TARGETS=(
+    [background-work]="test_ui_contracts"
+    [ai-search]="test_search test_embedding_worker"
+    [previews]="test_cache_status test_thumbnails"
+    [people-work]="test_people"
+    [compare]="test_compare"
+    [settings]="test_settings_status"
+    [frontend]="test_ui_contracts"
+    [search]="test_search test_embedding_worker"
+    [cache]="test_cache_status test_thumbnails"
+    [people]="test_people"
+)
+
+declare -A AREA_DESCRIPTIONS=(
+    [background-work]="Background Work UI contracts, status-panel syntax, and smoke expectations"
+    [ai-search]="Search/query constraints, search routes/service, and embedding worker query-cache behavior"
+    [previews]="Preview/cache status, cache routes, and thumbnail pregeneration"
+    [people-work]="People routes, worker, and status behavior"
+    [compare]="Compare routes and service behavior"
+    [settings]="Settings/status behavior"
+    [frontend]="Alias for background-work"
+    [search]="Alias for ai-search"
+    [cache]="Alias for previews"
+    [people]="Alias for people-work"
+)
+
+usage() {
+    cat <<'USAGE'
+Usage: photoarchive-check [--quick|--unit|--full] [--area AREA] [--list-areas]
+
+  --quick   Run diff whitespace checks, Python compile, and JS syntax.
+  --unit    Run quick checks plus the unit suite. This is the default.
+  --full    Run unit checks plus the opt-in browser smoke test against PHOTOARCHIVE_SMOKE_URL.
+  --area    After quick checks, run a focused unit subset for one subsystem.
+  --list-areas
+            Print available focused areas and their target test modules.
+
+Focused areas:
+  background-work, ai-search, previews, people-work, compare, settings
+  compatibility aliases: frontend, search, cache, people
+USAGE
+}
+
+list_areas() {
+    local area
+    for area in background-work ai-search previews people-work compare settings frontend search cache people; do
+        printf "%-16s %s\n    %s\n" "$area" "${AREA_TARGETS[$area]}" "${AREA_DESCRIPTIONS[$area]}"
+    done
+}
+
+while (($#)); do
+    case "$1" in
+        --quick)
+            MODE="quick"
+            ;;
+        --unit)
+            MODE="unit"
+            ;;
+        --full)
+            MODE="full"
+            ;;
+        --area)
+            if [[ $# -lt 2 || "$2" == --* ]]; then
+                echo "--area requires a value." >&2
+                usage >&2
+                exit 1
+            fi
+            AREA="$2"
+            shift
+            ;;
+        --list-areas)
+            list_areas
+            exit 0
+            ;;
+        --help|-h)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "Unknown argument: $1" >&2
+            usage >&2
+            exit 1
+            ;;
+    esac
+    shift
+done
+
+if [[ ! -x "$PYTHON" ]]; then
+    echo "Missing $PYTHON. Run: cd web && python -m venv .venv && .venv/bin/pip install -r requirements.txt" >&2
+    exit 1
+fi
+
+if ! command -v "$NODE_BIN" >/dev/null 2>&1; then
+    echo "Missing node runtime for JavaScript syntax checks." >&2
+    exit 1
+fi
+
+unit_targets_for_area() {
+    if [[ -z "$1" ]]; then
+        return 0
+    fi
+    if [[ -n "${AREA_TARGETS[$1]:-}" ]]; then
+        echo "${AREA_TARGETS[$1]}"
+        return 0
+    fi
+    echo "Unknown area: $1" >&2
+    usage >&2
+    exit 1
+}
+
+run_quick_checks() {
+    git -C "$ROOT" diff --check
+    git -C "$ROOT" diff --cached --check
+
+    mapfile -t py_files < <(cd "$ROOT" && rg --files web -g '*.py' -g '!web/.venv/**' -g '!web/.models/**')
+    if ((${#py_files[@]})); then
+        (cd "$ROOT" && "$PYTHON" -m py_compile "${py_files[@]}")
+    fi
+
+    while IFS= read -r js_file; do
+        "$NODE_BIN" --check "$ROOT/$js_file"
+    done < <(cd "$ROOT" && rg --files web/static -g '*.js')
+}
+
+run_unit_checks() {
+    local targets
+    targets="$(unit_targets_for_area "$AREA")"
+    if [[ -n "$targets" ]]; then
+        # shellcheck disable=SC2086
+        (cd "$ROOT/web" && "$PYTHON" -m unittest $targets)
+        if [[ "$AREA" == "background-work" || "$AREA" == "frontend" ]]; then
+            run_background_work_smoke_if_available
+        fi
+    else
+        (cd "$ROOT/web" && "$PYTHON" -m unittest)
+    fi
+}
+
+run_background_work_smoke_if_available() {
+    local base_url="${PHOTOARCHIVE_SMOKE_URL:-http://127.0.0.1:8000}"
+    if "$PYTHON" - "$base_url" <<'PY'
+import sys
+import urllib.request
+
+url = sys.argv[1].rstrip("/") + "/api/dev/status"
+try:
+    with urllib.request.urlopen(url, timeout=0.75) as response:
+        ok = 200 <= response.status < 500
+except Exception:
+    ok = False
+sys.exit(0 if ok else 1)
+PY
+    then
+        "$ROOT/scripts/photoarchive-browser-smoke" --base-url "$base_url"
+    else
+        echo "Skipping Background Work browser smoke: no server available at $base_url."
+    fi
+}
+
+run_browser_smoke() {
+    (cd "$ROOT/web" && PHOTOARCHIVE_BROWSER_SMOKE=1 "$PYTHON" -m unittest test_browser_smoke)
+}
+
+run_quick_checks
+
+case "$MODE" in
+    quick)
+        ;;
+    unit)
+        run_unit_checks
+        ;;
+    full)
+        run_unit_checks
+        run_browser_smoke
+        ;;
+esac

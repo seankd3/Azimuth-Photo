@@ -7,9 +7,7 @@ import settings
 
 
 _text_search_resolution_cache: dict[tuple, dict] = {}
-_deep_search_query_record_cache: dict[str, float] = {}
 _text_search_resolution_cache_ttl_seconds = 300.0
-_deep_search_query_record_cache_ttl_seconds = 300.0
 _CONFIG: dict[str, object] = {}
 
 
@@ -42,7 +40,6 @@ def _call_dependency(name: str, *args, **kwargs):
 
 def sync_configured_ttls() -> None:
     global _text_search_resolution_cache_ttl_seconds
-    global _deep_search_query_record_cache_ttl_seconds
 
     text_ttl = _CONFIG.get("text_search_resolution_cache_ttl_seconds")
     if callable(text_ttl):
@@ -50,113 +47,15 @@ def sync_configured_ttls() -> None:
     elif text_ttl is not None:
         _text_search_resolution_cache_ttl_seconds = float(text_ttl)
 
-    record_ttl = _CONFIG.get("deep_search_query_record_cache_ttl_seconds")
-    if callable(record_ttl):
-        _deep_search_query_record_cache_ttl_seconds = float(record_ttl())
-    elif record_ttl is not None:
-        _deep_search_query_record_cache_ttl_seconds = float(record_ttl)
-
 
 def clear_text_search_caches() -> None:
     _text_search_resolution_cache.clear()
-    _deep_search_query_record_cache.clear()
 
 
 def normalize_search_query(query: str) -> str:
     normalized = " ".join(str(query or "").split())
-    max_length = int(getattr(settings, "MAX_DEEP_SEARCH_TERM_LENGTH", 160))
+    max_length = 160
     return normalized[:max_length].strip()
-
-
-async def resolve_cached_deep_search(
-    query: str,
-    *,
-    allow_cold_load: bool = True,
-    get_deep_search_query_embedding=None,
-    get_cached_semantic_search_results=None,
-    store_cached_semantic_search_results=None,
-) -> dict | None:
-    normalized_query = normalize_search_query(query)
-    if not normalized_query:
-        return None
-    try:
-        deep_config = settings.deep_search_embedding_config()
-        threshold = settings.get_settings().get("search_similarity_threshold", 0.35)
-        result_cache_provider = (
-            get_cached_semantic_search_results
-            or _optional_dependency("get_cached_semantic_search_results")
-        )
-        if callable(result_cache_provider):
-            try:
-                cached_results = await result_cache_provider(
-                    normalized_query,
-                    deep_config["model_key"],
-                    threshold,
-                )
-            except Exception:
-                cached_results = None
-            if cached_results is not None:
-                scores = dict(cached_results.get("scores") or {})
-                return {
-                    "id_filter": set(scores.keys()),
-                    "scores": scores,
-                    "image_ids": None,
-                    "similarities": None,
-                    "search_mode": "deep_embedding",
-                    "deep_model_key": deep_config["model_key"],
-                    "semantic_results_cached": True,
-                }
-
-        embedding_provider = get_deep_search_query_embedding or _dependency("get_deep_search_query_embedding")
-        blob = await embedding_provider(
-            normalized_query,
-            deep_config["model_key"],
-        )
-        if blob is None:
-            return None
-        import embed_cache
-        import embedding_worker
-        import numpy as np
-
-        text_vec = embedding_worker.blob_to_vec(blob)
-        if allow_cold_load:
-            image_ids, matrix = await embed_cache.get_matrix(deep_config["model_key"])
-        else:
-            image_ids, matrix = embed_cache.get_warm_matrix(deep_config["model_key"])
-        if image_ids is None or matrix is None or matrix.shape[1] != text_vec.shape[0]:
-            return None
-        similarities = matrix @ text_vec
-        matching_indices = np.flatnonzero(similarities >= threshold)
-        scores = {
-            int(image_ids[int(i)]): float(similarities[int(i)])
-            for i in matching_indices
-        }
-        result_cache_store = (
-            store_cached_semantic_search_results
-            or _optional_dependency("store_cached_semantic_search_results")
-        )
-        if callable(result_cache_store):
-            try:
-                await result_cache_store(
-                    normalized_query,
-                    deep_config["model_key"],
-                    threshold,
-                    scores,
-                    source="deep",
-                )
-            except Exception:
-                pass
-        return {
-            "id_filter": set(scores.keys()),
-            "scores": scores,
-            "image_ids": image_ids,
-            "similarities": similarities,
-            "search_mode": "deep_embedding",
-            "deep_model_key": deep_config["model_key"],
-            "semantic_results_cached": False,
-        }
-    except Exception:
-        return None
 
 
 def encode_text_with_config(encoder, query: str, config: dict):
@@ -178,54 +77,12 @@ def start_search_model_load(embedding_worker) -> bool:
         return False
 
 
-async def record_deep_search_query(
-    query: str,
-    *,
-    record_query,
-    extension_search_terms: set[str],
-    invalidate_ai_status_response_cache,
-    invalidate_settings_response_cache,
-    normalize_query=normalize_search_query,
-) -> None:
-    normalized_query = normalize_query(query)
-    if not normalized_query:
-        return
-    extension_query = normalized_query.lower().lstrip(".")
-    if extension_query in extension_search_terms:
-        return
-    cache_key = normalized_query.casefold()
-    now = time.monotonic()
-    if _deep_search_query_record_cache.get(cache_key, 0.0) > now:
-        return
-    try:
-        await record_query(normalized_query)
-        _deep_search_query_record_cache[cache_key] = (
-            now + _deep_search_query_record_cache_ttl_seconds
-        )
-        invalidate_ai_status_response_cache()
-        invalidate_settings_response_cache()
-    except Exception:
-        pass
-
-
 async def apply_metadata_search_ids(result: dict, normalized_query: str, *, metadata_search_image_ids) -> None:
     metadata_ids = await metadata_search_image_ids(normalized_query)
     if metadata_ids is not None:
         result["id_filter"] = metadata_ids
         if not metadata_ids:
             result["text_query"] = ""
-
-
-async def record_configured_deep_search_query(query: str) -> None:
-    sync_configured_ttls()
-    await record_deep_search_query(
-        query,
-        record_query=_dependency("record_deep_search_query"),
-        extension_search_terms=_dependency("extension_search_terms"),
-        invalidate_ai_status_response_cache=_dependency("invalidate_ai_status_response_cache"),
-        invalidate_settings_response_cache=_dependency("invalidate_settings_response_cache"),
-        normalize_query=normalize_search_query,
-    )
 
 
 async def apply_configured_metadata_search_ids(result: dict, normalized_query: str) -> None:
@@ -241,21 +98,19 @@ async def resolve_text_search(
     *,
     deep: bool = False,
     normalize_query=normalize_search_query,
-    record_query=None,
-    resolve_deep_search=resolve_cached_deep_search,
     encode_text=encode_text_with_config,
     start_model_load=start_search_model_load,
     apply_metadata_ids=None,
-    get_cached_semantic_search_results=None,
-    store_cached_semantic_search_results=None,
+    get_search_query_embedding=None,
+    store_search_query_embedding=None,
     extension_search_terms: set[str],
-    fast_search_embedding_config,
     get_settings,
+    active_embedding_config=None,
+    fast_search_embedding_config=None,
 ) -> dict:
     """Resolve a text query into either embedding IDs or metadata fallback text."""
+    del deep
     normalized_query = normalize_query(q)
-    deep_requested = bool(deep)
-    cache_key = (normalized_query.casefold(), deep_requested)
     result = {
         "active": bool(normalized_query),
         "id_filter": None,
@@ -263,21 +118,25 @@ async def resolve_text_search(
         "text_query": "",
         "search_mode": "",
         "ai_unavailable": False,
-        "deep_requested": deep_requested,
-        "deep_search_cached": False,
-        "semantic_results_cached": False,
         "fallback_reason": "",
     }
     if not normalized_query:
         return result
 
     extension_query = normalized_query.lower().lstrip(".")
+    config_provider = active_embedding_config or fast_search_embedding_config
+    if config_provider is None:
+        raise RuntimeError("resolve_text_search requires active_embedding_config")
+    active_config = config_provider()
+    threshold = get_settings().get("search_similarity_threshold", 0.35)
+    cache_key = (
+        normalized_query.casefold(),
+        active_config["model_key"],
+        f"{float(threshold or 0.0):.6f}",
+    )
     cached = _text_search_resolution_cache.get(cache_key)
     if cached and cached["expires"] > time.monotonic():
         return dict(cached["data"])
-
-    if extension_query not in extension_search_terms and record_query is not None:
-        await record_query(normalized_query)
 
     if extension_query in extension_search_terms:
         result.update({
@@ -290,70 +149,10 @@ async def resolve_text_search(
         }
         return result
 
-    deep_search = await resolve_deep_search(
-        normalized_query,
-        allow_cold_load=deep_requested,
-    )
-    if deep_search is not None:
-        result.update({
-            "id_filter": deep_search["id_filter"],
-            "scores": deep_search["scores"],
-            "search_mode": deep_search["search_mode"],
-            "deep_search_cached": True,
-            "semantic_results_cached": bool(deep_search.get("semantic_results_cached")),
-        })
-        _text_search_resolution_cache[cache_key] = {
-            "data": dict(result),
-            "expires": time.monotonic() + _text_search_resolution_cache_ttl_seconds,
-        }
-        return result
-
-    if deep_requested:
-        result.update({
-            "text_query": normalized_query,
-            "search_mode": "metadata",
-            "ai_unavailable": True,
-            "fallback_reason": "deep_search_not_cached",
-        })
-        _text_search_resolution_cache[cache_key] = {
-            "data": dict(result),
-            "expires": time.monotonic() + _text_search_resolution_cache_ttl_seconds,
-        }
-        return result
-
-    fast_config = fast_search_embedding_config()
-    config = get_settings()
-    threshold = config.get("search_similarity_threshold", 0.35)
-    result_cache_provider = (
-        get_cached_semantic_search_results
-        or _optional_dependency("get_cached_semantic_search_results")
-    )
-    if callable(result_cache_provider):
-        try:
-            cached_results = await result_cache_provider(
-                normalized_query,
-                fast_config["model_key"],
-                threshold,
-            )
-        except Exception:
-            cached_results = None
-        if cached_results is not None:
-            scores = dict(cached_results.get("scores") or {})
-            result.update({
-                "id_filter": set(scores.keys()),
-                "scores": scores,
-                "search_mode": "embedding",
-                "semantic_results_cached": True,
-            })
-            _text_search_resolution_cache[cache_key] = {
-                "data": dict(result),
-                "expires": time.monotonic() + _text_search_resolution_cache_ttl_seconds,
-            }
-            return result
-
     try:
         import embedding_worker
         import embed_cache
+        import numpy as np
 
         default_loader = (
             getattr(embedding_worker.ensure_model_loaded_for_search, "__module__", "")
@@ -362,13 +161,31 @@ async def resolve_text_search(
         if default_loader and importlib.util.find_spec("torch") is None:
             raise RuntimeError("torch is not installed")
 
-        text_vec = await asyncio.get_event_loop().run_in_executor(
-            None,
-            encode_text,
-            embedding_worker.encode_text,
-            normalized_query,
-            fast_config,
-        )
+        text_vec = None
+        if get_search_query_embedding is not None:
+            cached_blob = await get_search_query_embedding(active_config, normalized_query)
+            if cached_blob:
+                cached_vec = np.frombuffer(cached_blob, dtype=np.float32).copy()
+                if cached_vec.shape[0] == int(active_config["dimension"]):
+                    text_vec = cached_vec
+
+        if text_vec is None:
+            text_vec = await asyncio.get_event_loop().run_in_executor(
+                None,
+                encode_text,
+                embedding_worker.encode_text,
+                normalized_query,
+                active_config,
+            )
+            if text_vec is not None and store_search_query_embedding is not None:
+                text_arr = np.asarray(text_vec, dtype=np.float32)
+                if text_arr.shape[0] == int(active_config["dimension"]):
+                    await store_search_query_embedding(
+                        active_config,
+                        normalized_query,
+                        text_arr.tobytes(),
+                    )
+                    text_vec = text_arr
         if text_vec is None and start_model_load(embedding_worker):
             result.update({
                 "text_query": normalized_query,
@@ -380,30 +197,14 @@ async def resolve_text_search(
                 await apply_metadata_ids(result, normalized_query)
             return result
         if text_vec is not None:
-            image_ids, matrix = await embed_cache.get_matrix()
-            if image_ids is not None:
+            image_ids, matrix = await embed_cache.get_matrix(active_config["model_key"])
+            if image_ids is not None and matrix is not None and matrix.shape[1] == text_vec.shape[0]:
                 similarities = matrix @ text_vec
-                import numpy as np
                 matching_indices = np.flatnonzero(similarities >= threshold)
                 scores = {
                     int(image_ids[int(i)]): float(similarities[int(i)])
                     for i in matching_indices
                 }
-                result_cache_store = (
-                    store_cached_semantic_search_results
-                    or _optional_dependency("store_cached_semantic_search_results")
-                )
-                if callable(result_cache_store):
-                    try:
-                        await result_cache_store(
-                            normalized_query,
-                            fast_config["model_key"],
-                            threshold,
-                            scores,
-                            source="fast",
-                        )
-                    except Exception:
-                        pass
                 result.update({
                     "id_filter": set(scores.keys()),
                     "scores": scores,
@@ -435,8 +236,6 @@ async def resolve_configured_text_search(
     q: str,
     *,
     deep: bool = False,
-    record_query=None,
-    resolve_deep_search=None,
     encode_text=None,
     start_model_load=None,
     apply_metadata_ids=None,
@@ -446,15 +245,20 @@ async def resolve_configured_text_search(
         q,
         deep=deep,
         normalize_query=normalize_search_query,
-        record_query=record_query or record_configured_deep_search_query,
-        resolve_deep_search=resolve_deep_search or resolve_cached_deep_search,
         encode_text=encode_text or encode_text_with_config,
         start_model_load=start_model_load or start_search_model_load,
         apply_metadata_ids=apply_metadata_ids or apply_configured_metadata_search_ids,
-        get_cached_semantic_search_results=_optional_dependency("get_cached_semantic_search_results"),
-        store_cached_semantic_search_results=_optional_dependency("store_cached_semantic_search_results"),
+        get_search_query_embedding=(
+            _optional_dependency("get_search_query_embedding")
+        ),
+        store_search_query_embedding=(
+            _optional_dependency("store_search_query_embedding")
+        ),
         extension_search_terms=_dependency("extension_search_terms"),
-        fast_search_embedding_config=_dependency("fast_search_embedding_config"),
+        active_embedding_config=(
+            _optional_dependency("active_embedding_config")
+            or _dependency("fast_search_embedding_config")
+        ),
         get_settings=_dependency("get_settings"),
     )
 

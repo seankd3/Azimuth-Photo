@@ -24,9 +24,9 @@ _preload_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="embed-
 
 import ai_models
 import embed_cache
-import resource_governor
 import settings
 import thumbnails
+from core import work_coordination
 
 log = logging.getLogger("embedding_worker")
 log.setLevel(logging.INFO)
@@ -42,6 +42,9 @@ EMBED_SPEED_WINDOW_SECONDS = 1800
 EMBED_CANDIDATE_MULTIPLIER = 16
 EMBED_RETRY_SECONDS = 600
 MODEL_LOAD_FAILURE_RETRY_SECONDS = 300
+STARTUP_DEFER_PAUSE_MESSAGE = "AI work deferred by startup setting."
+STARTUP_DEFER_PAUSE_REASON = "startup_defer"
+USER_PAUSE_REASON = "user"
 
 # Module-level reference for text search (set by run_embedding_worker on startup)
 _model = None
@@ -86,22 +89,11 @@ _worker_status = {
     "last_oom_at": None,
     "batch_growth_paused_until": None,
 }
-_deep_search_status = {
-    "state": "idle",
-    "message": "",
-    "model_key": "",
-    "model_id": "",
-    "dimension": 0,
-    "schedule": {},
-    "pending_queries": 0,
-    "embedded_queries": 0,
-    "last_embedded_at": None,
-    "last_batch_seconds": 0.0,
-    "last_error": "",
-}
 _embedding_history = deque()
 _embed_retry_after: dict[int, float] = {}
-_embedding_manual_pause = False
+_embedding_manual_pause = True
+_embedding_manual_pause_message = "Search is stopped until you start it from Background Work."
+_embedding_pause_reason = ""
 _batch_control = {
     "active_batch_size": INITIAL_EMBED_BATCH_SIZE,
     "successful_batches": 0,
@@ -114,43 +106,30 @@ AsyncDictProvider = Callable[..., Awaitable[dict[str, Any]]]
 AsyncIntProvider = Callable[..., Awaitable[int]]
 AsyncListProvider = Callable[..., Awaitable[list[dict[str, Any]]]]
 AsyncNoneProvider = Callable[..., Awaitable[None]]
-_get_deep_search_cache_status: AsyncDictProvider | None = None
 _get_catalog_image_counts: AsyncDictProvider | None = None
 _count_embeddings_for_model: AsyncIntProvider | None = None
 _get_unembedded_images: AsyncListProvider | None = None
-_get_pending_deep_search_queries: AsyncListProvider | None = None
-_store_deep_search_query_embedding: AsyncNoneProvider | None = None
 _store_embeddings_batch: AsyncNoneProvider | None = None
 _get_embedding_count: AsyncIntProvider | None = None
 
 
 def configure(
     *,
-    get_deep_search_cache_status: AsyncDictProvider | None = None,
     get_catalog_image_counts: AsyncDictProvider | None = None,
     count_embeddings_for_model: AsyncIntProvider | None = None,
     get_unembedded_images: AsyncListProvider | None = None,
-    get_pending_deep_search_queries: AsyncListProvider | None = None,
-    store_deep_search_query_embedding: AsyncNoneProvider | None = None,
     store_embeddings_batch: AsyncNoneProvider | None = None,
     get_embedding_count: AsyncIntProvider | None = None,
 ) -> None:
-    global _get_deep_search_cache_status, _get_catalog_image_counts
+    global _get_catalog_image_counts
     global _count_embeddings_for_model, _get_unembedded_images
-    global _get_pending_deep_search_queries, _store_deep_search_query_embedding
     global _store_embeddings_batch, _get_embedding_count
-    if get_deep_search_cache_status is not None:
-        _get_deep_search_cache_status = get_deep_search_cache_status
     if get_catalog_image_counts is not None:
         _get_catalog_image_counts = get_catalog_image_counts
     if count_embeddings_for_model is not None:
         _count_embeddings_for_model = count_embeddings_for_model
     if get_unembedded_images is not None:
         _get_unembedded_images = get_unembedded_images
-    if get_pending_deep_search_queries is not None:
-        _get_pending_deep_search_queries = get_pending_deep_search_queries
-    if store_deep_search_query_embedding is not None:
-        _store_deep_search_query_embedding = store_deep_search_query_embedding
     if store_embeddings_batch is not None:
         _store_embeddings_batch = store_embeddings_batch
     if get_embedding_count is not None:
@@ -186,15 +165,6 @@ def _refresh_batch_status(config: dict | None = None) -> tuple[int, int]:
         "batch_growth_paused_until": _batch_control.get("growth_paused_until"),
     })
     return active, target
-
-
-def _background_embed_batch_size(active_batch_size: int, decision) -> int:
-    if getattr(decision, "pause", False):
-        return 0
-    if getattr(decision, "work_mode", "balanced") == "max":
-        return max(1, int(active_batch_size or 1))
-    governor_batch = int(getattr(decision, "thumbnail_batch_size", 1) or 1)
-    return max(1, min(int(active_batch_size or 1), governor_batch, 2))
 
 
 def _note_successful_embedding_batch(config: dict | None = None):
@@ -236,6 +206,15 @@ def _is_cuda_oom_error(error) -> bool:
         "outofmemoryerror" in name
         or "cuda out of memory" in text
         or ("cuda" in text and "out of memory" in text)
+    )
+
+
+def _is_sqlite_locked_error(error) -> bool:
+    text = str(error).lower()
+    return (
+        "database is locked" in text
+        or "database table is locked" in text
+        or "database schema is locked" in text
     )
 
 
@@ -371,20 +350,37 @@ def get_worker_status() -> dict:
     _refresh_batch_status()
     _recompute_speed_metrics()
     _worker_status["manual_pause"] = _embedding_manual_pause
-    return {**_worker_status, "deep_search": dict(_deep_search_status)}
+    return dict(_worker_status)
 
 
-def pause_embedding_worker(message: str = "Embedding paused by user.") -> dict:
-    global _embedding_manual_pause
+def _manual_pause_message() -> str:
+    return _embedding_manual_pause_message or "Search is stopped."
+
+
+def _pause_reason_for_message(message: str) -> str:
+    if message == STARTUP_DEFER_PAUSE_MESSAGE:
+        return STARTUP_DEFER_PAUSE_REASON
+    return USER_PAUSE_REASON
+
+
+def pause_embedding_worker(message: str = "Search is stopped.") -> dict:
+    global _embedding_manual_pause, _embedding_manual_pause_message, _embedding_pause_reason
     _embedding_manual_pause = True
+    _embedding_manual_pause_message = message
+    _embedding_pause_reason = _pause_reason_for_message(message)
+    work_coordination.release_manual_owner("embeddings")
     _set_worker_status("paused", message, ready=_model is not None)
     return get_worker_status()
 
 
 def resume_embedding_worker() -> dict:
-    global _embedding_manual_pause
+    global _embedding_manual_pause, _embedding_manual_pause_message, _embedding_pause_reason
     _embedding_manual_pause = False
-    _set_worker_status("idle", "Embedding will resume automatically.", ready=_model is not None)
+    _embedding_manual_pause_message = ""
+    _embedding_pause_reason = ""
+    work_coordination.claim_manual_owner("embeddings")
+    _clear_model_load_failure()
+    _set_worker_status("idle", "Search will run from Background Work.", ready=_model is not None)
     return get_worker_status()
 
 
@@ -419,7 +415,7 @@ def _load_model(model_dir: str, model_id: str):
 
 
 def _target_embedding_dim() -> int:
-    config = settings.fast_search_embedding_config()
+    config = settings.active_embedding_config()
     return int(config.get("embed_model_dim") or EMBEDDING_DIM)
 
 
@@ -511,7 +507,7 @@ def _get_model_load_lock():
 
 
 def search_model_ready(config: dict | None = None) -> bool:
-    config = config or settings.fast_search_embedding_config()
+    config = config or settings.active_embedding_config()
     return _model_is_current(*_model_values(config))
 
 
@@ -525,7 +521,7 @@ def start_search_model_load() -> bool:
     """Start warming the 2B search model without blocking the caller."""
     global _search_model_load_task
 
-    config = settings.fast_search_embedding_config()
+    config = settings.active_embedding_config()
     model_dir, model_id, model_revision = _model_values(config)
     if _model_is_current(model_dir, model_id, model_revision):
         return True
@@ -591,7 +587,7 @@ async def _ensure_model_loaded_for_config(config: dict, reason: str) -> bool:
 
 async def ensure_model_loaded_for_search() -> bool:
     """Load the embedding model for an explicit user search request."""
-    return await _ensure_model_loaded_for_config(settings.fast_search_embedding_config(), "search")
+    return await _ensure_model_loaded_for_config(settings.active_embedding_config(), "search")
 
 
 def _load_image_for_embedding(image_id: int, path: str):
@@ -671,7 +667,7 @@ _TEXT_CACHE_MAX = 100
 
 def encode_text(query: str, config: dict | None = None) -> np.ndarray | None:
     """Encode a text query into an embedding. Cached for repeat queries."""
-    config = config or settings.fast_search_embedding_config()
+    config = config or settings.active_embedding_config()
     model_dir, model_id, model_revision = _model_values(config)
     if not _model_is_current(model_dir, model_id, model_revision):
         return None
@@ -689,286 +685,6 @@ def encode_text(query: str, config: dict | None = None) -> np.ndarray | None:
         _text_cache.pop(next(iter(_text_cache)))  # evict oldest
     _text_cache[cache_key] = vec
     return vec
-
-
-def _update_deep_search_status(state: str, message: str = "", **extra) -> dict:
-    config = settings.deep_search_embedding_config()
-    _deep_search_status.update({
-        "state": state,
-        "message": message,
-        "model_key": config["model_key"],
-        "model_id": config["model_id"],
-        "dimension": int(config["dimension"]),
-        "last_error": "",
-        **extra,
-    })
-    return dict(_deep_search_status)
-
-
-async def process_deep_search_cache_once(*, force: bool = False, limit: int = 16) -> dict:
-    """Embed queued deep-search text queries with the fixed 8B model."""
-    app_config = settings.get_settings()
-    deep_config = settings.deep_search_embedding_config()
-    schedule = settings.deep_search_schedule_status(app_config)
-    _deep_search_status.update({"schedule": schedule})
-
-    status = await _configured(
-        _get_deep_search_cache_status,
-        "get_deep_search_cache_status",
-    )(
-        deep_config,
-        app_config.get("deep_search_terms") or [],
-    )
-    catalog_counts = await _configured(_get_catalog_image_counts, "get_catalog_image_counts")()
-    total_images = int(catalog_counts.get("active_images") or 0)
-    embedded_images = await _configured(
-        _count_embeddings_for_model,
-        "count_embeddings_for_model",
-    )(deep_config)
-    pending_images = max(0, total_images - embedded_images)
-    _deep_search_status.update({
-        "pending_queries": status["pending_queries"],
-        "embedded_queries": status["embedded_queries"],
-        "pending_images": pending_images,
-        "embedded_images": embedded_images,
-        "total_images": total_images,
-    })
-
-    startup_deferred = (
-        _embedding_manual_pause
-        and _worker_status.get("message") == "AI work deferred by startup setting."
-    )
-    if _embedding_manual_pause and not force and not (startup_deferred and schedule["active"]):
-        return _update_deep_search_status(
-            "paused",
-            "Deep search cache paused by AI pause control.",
-            schedule=schedule,
-            sleep_seconds=30,
-        )
-    if not force and not schedule["active"]:
-        return _update_deep_search_status(
-            "scheduled",
-            "Waiting for the deep search schedule window.",
-            schedule=schedule,
-            sleep_seconds=300,
-        )
-    if status["pending_queries"] <= 0 and pending_images <= 0:
-        return _update_deep_search_status(
-            "idle",
-            "Deep search cache is up to date.",
-            schedule=schedule,
-            sleep_seconds=300,
-        )
-
-    decision = resource_governor.get_background_decision(thumbnails.get_idle_seconds())
-    if not force and decision.pause:
-        return _update_deep_search_status(
-            "throttled",
-            f"Deep search paused: {decision.reason}.",
-            schedule=schedule,
-            governor=decision.to_dict(),
-            sleep_seconds=decision.sleep_seconds,
-        )
-
-    model_dir = deep_config["model_dir"]
-    model_id = deep_config["model_id"]
-    model_revision = deep_config["revision"]
-    if not ai_models.model_files_present(model_dir):
-        return _update_deep_search_status(
-            "waiting_for_model",
-            f"Install {model_id} to build the deep search cache.",
-            schedule=schedule,
-            sleep_seconds=600,
-        )
-    if (
-        not force
-        and not _model_is_current(model_dir, model_id, model_revision)
-        and not decision.can_start_heavy_work
-    ):
-        return _update_deep_search_status(
-            "throttled",
-            f"Deep search model loading deferred: {decision.reason}.",
-            schedule=schedule,
-            governor=decision.to_dict(),
-            sleep_seconds=max(30, decision.sleep_seconds),
-        )
-
-    active_batch_size, _target_batch_size = _refresh_batch_status(deep_config)
-    governed_batch_size = _background_embed_batch_size(active_batch_size, decision)
-    candidate_limit = max(
-        1,
-        governed_batch_size * EMBED_CANDIDATE_MULTIPLIER,
-        governed_batch_size + len(_embed_retry_after),
-    )
-    query_started = time.perf_counter()
-    image_candidates = await _configured(_get_unembedded_images, "get_unembedded_images")(
-        limit=candidate_limit,
-        md_cache_root=thumbnails.SSD_CACHE_DIR,
-        cache_size="sm",
-        embedding_config=deep_config,
-    )
-    query_seconds = time.perf_counter() - query_started
-    unembedded_images, cooled_down, next_retry_at = _select_ready_candidates(image_candidates)
-    _worker_status.update({
-        "last_candidate_query_seconds": round(query_seconds, 3),
-        "last_candidate_count": len(image_candidates),
-        "last_candidate_window_size": candidate_limit,
-        "last_ready_count": len(unembedded_images),
-        "last_cooled_down_count": cooled_down,
-        "next_retry_at": next_retry_at,
-    })
-
-    pending = await _configured(
-        _get_pending_deep_search_queries,
-        "get_pending_deep_search_queries",
-    )(
-        deep_config,
-        app_config.get("deep_search_terms") or [],
-        limit=limit,
-    )
-    if not pending and not unembedded_images:
-        if pending_images > 0:
-            message = "Waiting for small thumbnails before deep-indexing images."
-            sleep_seconds = 120
-            if cooled_down:
-                wait_for = max(1, int(next_retry_at - time.time())) if next_retry_at else 30
-                message = f"Waiting to retry {cooled_down} deep-index image candidates."
-                sleep_seconds = min(wait_for, 120)
-            return _update_deep_search_status(
-                "waiting_for_cache",
-                message,
-                schedule=schedule,
-                pending_queries=status["pending_queries"],
-                embedded_queries=status["embedded_queries"],
-                pending_images=pending_images,
-                embedded_images=embedded_images,
-                total_images=total_images,
-                sleep_seconds=sleep_seconds,
-            )
-        return _update_deep_search_status(
-            "idle",
-            "Deep search cache is up to date.",
-            schedule=schedule,
-            sleep_seconds=300,
-        )
-    if not await _ensure_model_loaded_for_config(deep_config, "deep search cache"):
-        return _update_deep_search_status(
-            "error",
-            "Deep search model could not be loaded.",
-            schedule=schedule,
-            last_error=_worker_status.get("last_error", ""),
-            sleep_seconds=300,
-        )
-
-    loop = asyncio.get_running_loop()
-    if unembedded_images:
-        _set_worker_status(
-            "embedding",
-            f"Deep-indexing {len(unembedded_images)} images with {model_id}…",
-            ready=True,
-            config=deep_config,
-        )
-        await _process_embedding_candidates(
-            loop,
-            _model,
-            unembedded_images,
-            max_batch_size=governed_batch_size,
-            batch_pause_seconds=max(
-                0.0,
-                min(5.0, float(app_config.get("embed_batch_pause_ms", 250)) / 1000.0),
-            ),
-            embedding_config=deep_config,
-        )
-
-    started = time.perf_counter()
-    embedded = 0
-    first_error = ""
-    for row in pending:
-        if _embedding_manual_pause and not force and not startup_deferred:
-            break
-        try:
-            vec = await loop.run_in_executor(_embed_executor, encode_text, row["query"], deep_config)
-            if vec is None:
-                first_error = "model unavailable"
-                continue
-            await _configured(
-                _store_deep_search_query_embedding,
-                "store_deep_search_query_embedding",
-            )(deep_config, row["query"], vec_to_blob(vec))
-            embedded += 1
-        except Exception as exc:
-            first_error = first_error or f"{type(exc).__name__}: {exc}"
-
-    elapsed = time.perf_counter() - started
-    refreshed = await _configured(
-        _get_deep_search_cache_status,
-        "get_deep_search_cache_status",
-    )(
-        deep_config,
-        app_config.get("deep_search_terms") or [],
-    )
-    embedded_images = await _configured(
-        _count_embeddings_for_model,
-        "count_embeddings_for_model",
-    )(deep_config)
-    pending_images = max(0, total_images - embedded_images)
-    if embedded:
-        return _update_deep_search_status(
-            "embedding",
-            f"Embedded {embedded} deep search queries.",
-            schedule=schedule,
-            pending_queries=refreshed["pending_queries"],
-            embedded_queries=refreshed["embedded_queries"],
-            pending_images=pending_images,
-            embedded_images=embedded_images,
-            total_images=total_images,
-            last_embedded_at=time.time(),
-            last_batch_seconds=round(elapsed, 3),
-            sleep_seconds=5 if (refreshed["pending_queries"] or pending_images) else 120,
-        )
-    if unembedded_images:
-        return _update_deep_search_status(
-            "embedding",
-            f"Deep-indexed image batch with {model_id}.",
-            schedule=schedule,
-            pending_queries=refreshed["pending_queries"],
-            embedded_queries=refreshed["embedded_queries"],
-            pending_images=pending_images,
-            embedded_images=embedded_images,
-            total_images=total_images,
-            last_embedded_at=time.time(),
-            last_batch_seconds=round(elapsed, 3),
-            sleep_seconds=5 if pending_images else 120,
-        )
-    return _update_deep_search_status(
-        "error" if first_error else "idle",
-        first_error or "Deep search cache is up to date.",
-        schedule=schedule,
-        pending_queries=refreshed["pending_queries"],
-        embedded_queries=refreshed["embedded_queries"],
-        pending_images=pending_images,
-        embedded_images=embedded_images,
-        total_images=total_images,
-        last_batch_seconds=round(elapsed, 3),
-        last_error=first_error,
-        sleep_seconds=120,
-    )
-
-
-async def run_deep_search_worker():
-    while True:
-        try:
-            result = await process_deep_search_cache_once()
-            await asyncio.sleep(max(5, min(900, int(result.get("sleep_seconds") or 300))))
-        except Exception as exc:
-            _update_deep_search_status(
-                "error",
-                f"Deep search worker error: {exc}",
-                last_error=f"{type(exc).__name__}: {exc}",
-                sleep_seconds=300,
-            )
-            log.error(f"Deep search worker error: {exc}", exc_info=True)
-            await asyncio.sleep(300)
 
 
 def vec_to_blob(vec: np.ndarray) -> bytes:
@@ -1195,36 +911,22 @@ async def run_embedding_worker():
     while True:
         try:
             app_config = settings.get_settings()
-            config = {**app_config, **settings.fast_search_embedding_config()}
+            config = {**app_config, **settings.active_embedding_config()}
             model_id = config["embed_model_id"]
             model_revision = config["embed_model_revision"]
             model_dir = config["embed_model_dir"]
-            decision = resource_governor.get_background_decision(thumbnails.get_idle_seconds())
-            _worker_status["governor"] = decision.to_dict()
             batch_pause_seconds = max(
                 0.0,
                 min(
                     5.0,
-                    max(
-                        float(config.get("embed_batch_pause_ms", 250)) / 1000.0,
-                        decision.embedding_pause_seconds,
-                    ),
+                    float(config.get("embed_batch_pause_ms", 250)) / 1000.0,
                 ),
             )
             model_installed = ai_models.model_files_present(model_dir)
 
             if _embedding_manual_pause:
-                _set_worker_status("paused", "Embedding paused by user.", ready=_model is not None)
+                _set_worker_status("paused", _manual_pause_message(), ready=_model is not None)
                 await asyncio.sleep(1)
-                continue
-
-            if decision.pause:
-                _set_worker_status(
-                    "throttled",
-                    f"Background embedding paused: {decision.reason}.",
-                    ready=_model is not None,
-                )
-                await asyncio.sleep(decision.sleep_seconds)
                 continue
 
             if not model_installed:
@@ -1261,15 +963,6 @@ async def run_embedding_worker():
                 )
                 await asyncio.sleep(min(wait_for, 30))
                 continue
-            if needs_model_load and not decision.can_start_heavy_work:
-                _set_worker_status(
-                    "throttled",
-                    f"Model loading deferred by Work Mode: {decision.reason}.",
-                    ready=False,
-                )
-                await asyncio.sleep(max(5.0, decision.embedding_pause_seconds))
-                continue
-
             if needs_model_load:
                 async with _get_model_load_lock():
                     if not _model_is_current(model_dir, model_id, model_revision):
@@ -1277,7 +970,9 @@ async def run_embedding_worker():
                             continue
                         _set_worker_status("loading_model", f"Loading {model_id} from disk…", ready=False)
                         try:
-                            _model = await loop.run_in_executor(_embed_executor, _load_model, model_dir, model_id)
+                            await work_coordination.wait_for_manual_turn("embeddings")
+                            with work_coordination.manual_bulk("embeddings"):
+                                _model = await loop.run_in_executor(_embed_executor, _load_model, model_dir, model_id)
                             _loaded_model_dir = model_dir
                             _loaded_model_id = model_id
                             _loaded_model_revision = model_revision
@@ -1294,7 +989,7 @@ async def run_embedding_worker():
 
             # Phase 1: Embed unembedded images with pipelined CPU/GPU
             active_batch_size, _target_batch_size = _refresh_batch_status(config)
-            governed_batch_size = _background_embed_batch_size(active_batch_size, decision)
+            governed_batch_size = max(1, int(active_batch_size or 1))
             candidate_limit = max(
                 1,
                 governed_batch_size * EMBED_CANDIDATE_MULTIPLIER,
@@ -1318,18 +1013,20 @@ async def run_embedding_worker():
                 "next_retry_at": next_retry_at,
             })
             if unembedded:
+                await work_coordination.wait_for_manual_turn("embeddings")
                 _set_worker_status(
                     "embedding",
                     f"Embedding {len(unembedded)} images in batches up to {governed_batch_size}…",
                     ready=True,
                 )
-                result = await _process_embedding_candidates(
-                    loop,
-                    _model,
-                    unembedded,
-                    max_batch_size=governed_batch_size,
-                    batch_pause_seconds=batch_pause_seconds,
-                )
+                with work_coordination.manual_bulk("embeddings"):
+                    result = await _process_embedding_candidates(
+                        loop,
+                        _model,
+                        unembedded,
+                        max_batch_size=governed_batch_size,
+                        batch_pause_seconds=batch_pause_seconds,
+                    )
 
                 if result["failed"] and not result["stored"]:
                     sample_error = result.get("first_error") or "image unavailable"
@@ -1350,12 +1047,23 @@ async def run_embedding_worker():
                 await asyncio.sleep(min(wait_for, 10))
                 continue
 
+            work_coordination.release_manual_owner("embeddings")
             _set_worker_status("idle", "Waiting for new images…", ready=True)
             await asyncio.sleep(2)
 
         except Exception as e:
+            if _is_sqlite_locked_error(e):
+                _set_worker_status(
+                    "embedding",
+                    "Waiting for the catalog database to finish another write.",
+                    ready=_model is not None,
+                    last_error="",
+                )
+                log.info("Embedding worker waiting for SQLite write lock")
+                await asyncio.sleep(2)
+                continue
             if isinstance(e, (ImportError, ModuleNotFoundError)):
-                config = settings.fast_search_embedding_config()
+                config = settings.active_embedding_config()
                 _note_model_load_failure(
                     config["embed_model_dir"],
                     config["embed_model_id"],

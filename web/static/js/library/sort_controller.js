@@ -42,7 +42,7 @@ export function createLibrarySortController({
 
     function toggleSortDir() {
         const sortField = getSortField();
-        if (sortField === 'similarity') return false;
+        if (sortField === 'similarity' || sortField === 'taste') return false;
         applySortState(sortField, !getSortDesc());
         reloadSortedResults();
         return true;

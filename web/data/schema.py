@@ -5,7 +5,7 @@ import os
 from data.repositories import catalog as catalog_repository
 
 EXPECTED_EMBEDDING_DIM = 2048  # Qwen3-VL-Embedding-2B native dimension
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS catalog_sources (
@@ -299,50 +299,20 @@ CREATE TABLE IF NOT EXISTS embeddings_by_model (
 CREATE INDEX IF NOT EXISTS idx_embeddings_by_model_image_id
 ON embeddings_by_model(image_id);
 
-CREATE TABLE IF NOT EXISTS deep_search_queries (
-    query_key TEXT PRIMARY KEY,
-    query TEXT NOT NULL,
-    source TEXT NOT NULL DEFAULT 'search',
-    use_count INTEGER NOT NULL DEFAULT 0,
-    pinned INTEGER NOT NULL DEFAULT 0,
-    created_at REAL NOT NULL DEFAULT (strftime('%s', 'now')),
-    last_used_at REAL DEFAULT NULL,
-    updated_at REAL NOT NULL DEFAULT (strftime('%s', 'now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_deep_search_queries_pinned_updated
-ON deep_search_queries(pinned DESC, updated_at DESC);
-
-CREATE TABLE IF NOT EXISTS deep_search_query_embeddings (
+CREATE TABLE IF NOT EXISTS search_query_embeddings (
     model_key TEXT NOT NULL REFERENCES embedding_models(model_key),
-    query_key TEXT NOT NULL REFERENCES deep_search_queries(query_key),
+    query_key TEXT NOT NULL,
+    query TEXT NOT NULL,
     embedding BLOB NOT NULL,
     dimension INTEGER NOT NULL,
     created_at REAL NOT NULL DEFAULT (strftime('%s', 'now')),
+    last_used_at REAL NOT NULL DEFAULT (strftime('%s', 'now')),
     updated_at REAL NOT NULL DEFAULT (strftime('%s', 'now')),
     PRIMARY KEY (model_key, query_key)
 );
 
-CREATE INDEX IF NOT EXISTS idx_deep_search_query_embeddings_query
-ON deep_search_query_embeddings(query_key);
-
-CREATE TABLE IF NOT EXISTS semantic_search_result_cache (
-    model_key TEXT NOT NULL REFERENCES embedding_models(model_key),
-    query_key TEXT NOT NULL,
-    query TEXT NOT NULL,
-    threshold_key TEXT NOT NULL,
-    threshold REAL NOT NULL,
-    embedding_count INTEGER NOT NULL,
-    result_count INTEGER NOT NULL,
-    scores_json TEXT NOT NULL,
-    source TEXT NOT NULL DEFAULT 'fast',
-    created_at REAL NOT NULL DEFAULT (strftime('%s', 'now')),
-    updated_at REAL NOT NULL DEFAULT (strftime('%s', 'now')),
-    PRIMARY KEY (model_key, query_key, threshold_key)
-);
-
-CREATE INDEX IF NOT EXISTS idx_semantic_search_result_cache_updated
-ON semantic_search_result_cache(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_search_query_embeddings_used
+ON search_query_embeddings(last_used_at DESC);
 
 CREATE TABLE IF NOT EXISTS cache_entries (
     cache_root TEXT NOT NULL,
@@ -672,9 +642,7 @@ REQUIRED_TABLES = {
     "embeddings",
     "embedding_models",
     "embeddings_by_model",
-    "deep_search_queries",
-    "deep_search_query_embeddings",
-    "semantic_search_result_cache",
+    "search_query_embeddings",
     "cache_entries",
     "cache_metadata",
     "people",
@@ -735,9 +703,7 @@ REQUIRED_INDEXES = {
     "idx_images_active_camera_sort_desc",
     "idx_images_rating_signal_cover",
     "idx_embeddings_by_model_image_id",
-    "idx_deep_search_queries_pinned_updated",
-    "idx_deep_search_query_embeddings_query",
-    "idx_semantic_search_result_cache_updated",
+    "idx_search_query_embeddings_used",
     "idx_cache_entries_root_size_bytes",
     "idx_cache_entries_root_size_accessed_id",
     "idx_people_status_seen",
@@ -829,6 +795,12 @@ async def apply_schema_and_migrations(conn, *, db_exists: bool) -> None:
     await _executescript_in_transaction(conn, SCHEMA)
     try:
         await conn.execute("BEGIN")
+        for table in (
+            "semantic_search_result_cache",
+            "deep_search_query_embeddings",
+            "deep_search_queries",
+        ):
+            await conn.execute(f"DROP TABLE IF EXISTS {table}")
         await ensure_compatibility_columns(conn)
         await ensure_compatibility_indexes(conn)
         await backfill_legacy_aspect_ratios(conn)

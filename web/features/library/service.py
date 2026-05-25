@@ -5,14 +5,18 @@ import json
 import time
 from collections.abc import Awaitable, Callable, Collection
 
+import numpy as np
 from fastapi.responses import Response
 
+import embed_cache
 import helpers as app_helpers
 from core import responses as response_helpers
+from features.library import taste as taste_service
 
 
 _rankings_response_cache: dict[tuple, dict] = {}
 _rankings_response_cache_ttl_seconds = 1800.0
+MAX_RANKINGS_LIMIT = 5000
 
 _resolve_library_constraints: Callable[..., object] | None = None
 _cache_root: Callable[[], str] | None = None
@@ -223,7 +227,7 @@ async def api_rankings_impl(
     camera: str = "", lens: str = "", q: str = "", deep: bool = False, people: str = "",
     request=None,
 ):
-    limit = _configured_clamp_int(limit, 100, 1, 500)
+    limit = _configured_clamp_int(limit, 100, 1, MAX_RANKINGS_LIMIT)
     offset = _configured_clamp_int(offset, 0, 0, 1_000_000)
     search = await _configured_resolve_library_constraints(q, people=people, deep=deep)
     search_ids = search["id_filter"]
@@ -242,8 +246,6 @@ async def api_rankings_impl(
                 "total_kept": 0,
                 "search_mode": search_mode,
                 "ai_unavailable": search["ai_unavailable"],
-                "deep_requested": search.get("deep_requested", False),
-                "deep_search_cached": search.get("deep_search_cached", False),
                 "fallback_reason": search.get("fallback_reason", ""),
             }
 
@@ -254,7 +256,7 @@ async def api_rankings_impl(
         and not search_scores
         and search.get("fallback_reason") != "model_loading"
     )
-    cacheable_embedding_search = search_mode in {"embedding", "deep_embedding"}
+    cacheable_embedding_search = search_mode == "embedding"
     cacheable_search = cacheable_metadata_search or cacheable_embedding_search
     normalized_search_query = _configured_normalize_search_query(q) if search["active"] else ""
     if not search["active"] or cacheable_search:
@@ -278,8 +280,6 @@ async def api_rankings_impl(
             text_query if cacheable_metadata_search else normalized_search_query if cacheable_embedding_search else "",
             search_mode if cacheable_search else "",
             bool(search["ai_unavailable"]) if cacheable_search else False,
-            bool(search.get("deep_requested")),
-            bool(search.get("deep_search_cached")),
             str(search.get("fallback_reason") or ""),
         )
         cached = _rankings_response_cache.get(rankings_cache_key)
@@ -288,6 +288,108 @@ async def api_rankings_impl(
             if request is not None and cached.get("json") is not None:
                 return Response(content=cached["json"], media_type="application/json")
             return copy_rankings_response(cached["data"])
+
+    if sort == "taste":
+        taste = await taste_service.taste_vector()
+        taste_fields = {
+            "taste_available": bool(taste.get("available")),
+            "taste_signal_count": int(taste.get("signal_count") or 0),
+            "fallback_reason": str(taste.get("fallback_reason") or ""),
+        }
+        if not taste.get("available"):
+            response = {
+                "images": [],
+                **response_helpers.visibility_counts(0, 0),
+                "total_kept": 0,
+                "search_mode": search_mode,
+                "ai_unavailable": search["ai_unavailable"],
+                **taste_fields,
+            }
+            if rankings_cache_key is not None:
+                cache_rankings_response(rankings_cache_key, response)
+            return response
+
+        total_task = asyncio.create_task(
+            _configured(_count_rankings)(
+                orientation=orientation, compared=compared, min_stars=min_stars,
+                folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
+                camera=camera, lens=lens, id_filter=search_ids, text_query=text_query,
+            )
+        )
+        visible_images = await _configured(_count_rankings)(
+            orientation=orientation, compared=compared, min_stars=min_stars,
+            folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
+            camera=camera, lens=lens,
+            id_filter=search_ids,
+            visible_thumb_size="sm", cache_root=_configured_cache_root(),
+            text_query=text_query,
+        )
+        total_images = await total_task
+        if visible_images <= 0:
+            response = {
+                "images": [],
+                **response_helpers.visibility_counts(total_images, visible_images),
+                "total_kept": total_images,
+                "search_mode": search_mode,
+                "ai_unavailable": search["ai_unavailable"],
+                **taste_fields,
+            }
+            if rankings_cache_key is not None:
+                cache_rankings_response(rankings_cache_key, response)
+            return response
+
+        images = await _configured(_get_rankings)(
+            limit=visible_images, offset=0, sort="elo",
+            orientation=orientation, compared=compared, min_stars=min_stars,
+            folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
+            camera=camera, lens=lens,
+            id_filter=search_ids,
+            visible_thumb_size="sm", cache_root=_configured_cache_root(),
+            text_query=text_query,
+        )
+        _image_ids, matrix = await embed_cache.get_matrix(taste.get("model_key"))
+        id_to_idx = embed_cache.get_index(taste.get("model_key"))
+        taste_vector = taste.get("vector")
+        all_results = []
+        for img in images:
+            data = dict(img)
+            score = None
+            idx = id_to_idx.get(data["id"])
+            if matrix is not None and taste_vector is not None and idx is not None:
+                vec = matrix[idx]
+                norm = float(np.linalg.norm(vec))
+                if norm > 0:
+                    score = float(np.dot(vec, taste_vector) / norm)
+            all_results.append(
+                app_helpers.image_card(data, "sm", taste_score=score)
+            )
+        all_results.sort(
+            key=lambda x: (
+                x.get("taste_score") is not None,
+                x.get("taste_score") if x.get("taste_score") is not None else -2.0,
+                x.get("elo", 0),
+            ),
+            reverse=True,
+        )
+        page = all_results[offset:offset + limit]
+        if page:
+            _configured_schedule_thumbnail_prefetch(
+                [{"id": row["id"], "filepath": ""} for row in page],
+                "sm",
+                limit=min(len(page), 48),
+            )
+            _configured_schedule_result_thumbnail_memory_warm(page)
+        response = {
+            "images": page,
+            **response_helpers.visibility_counts(total_images, visible_images),
+            "total_kept": total_images,
+            "search_mode": search_mode,
+            "ai_unavailable": search["ai_unavailable"],
+            **taste_fields,
+        }
+        if rankings_cache_key is not None:
+            cache_rankings_response(rankings_cache_key, response)
+        return response
 
     if sort == "similarity" and search_scores:
         total_task = asyncio.create_task(
@@ -336,8 +438,6 @@ async def api_rankings_impl(
             "total_kept": total_images,
             "search_mode": search_mode,
             "ai_unavailable": search["ai_unavailable"],
-            "deep_requested": search.get("deep_requested", False),
-            "deep_search_cached": search.get("deep_search_cached", False),
             "fallback_reason": search.get("fallback_reason", ""),
         }
         if rankings_cache_key is not None:
@@ -351,8 +451,6 @@ async def api_rankings_impl(
             "total_kept": 0,
             "search_mode": search_mode,
             "ai_unavailable": search["ai_unavailable"],
-            "deep_requested": search.get("deep_requested", False),
-            "deep_search_cached": search.get("deep_search_cached", False),
             "fallback_reason": search.get("fallback_reason", ""),
         }
         if rankings_cache_key is not None:
@@ -466,8 +564,6 @@ async def api_rankings_impl(
         "total_kept": total_images,
         "search_mode": search_mode,
         "ai_unavailable": search["ai_unavailable"],
-        "deep_requested": search.get("deep_requested", False),
-        "deep_search_cached": search.get("deep_search_cached", False),
         "fallback_reason": search.get("fallback_reason", ""),
     }
     if rankings_cache_key is not None:

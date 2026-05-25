@@ -121,7 +121,14 @@ async def api_search(
     _configured()
     query = _normalize_search_query(q)
     if not query:
-        return {"images": [], "query": query, **_visibility_counts(0, 0)}
+        return {
+            "images": [],
+            "query": query,
+            "search_mode": "",
+            "ai_unavailable": False,
+            "fallback_reason": "",
+            **_visibility_counts(0, 0),
+        }
     limit = _clamp_int(limit, 50, 1, 500)
     response = await _api_rankings(
         limit=limit,

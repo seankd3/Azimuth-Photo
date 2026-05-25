@@ -74,7 +74,6 @@ async def run_startup(
     warm_templates,
     thumbnails,
     settings,
-    resource_governor,
     face_worker,
     track_background_task,
     init_db,
@@ -112,13 +111,6 @@ async def run_startup(
         return
     await init_db()
     thumbnails.configure(settings.load_settings())
-
-    async def _warm_embed_cache():
-        try:
-            import embed_cache
-            await embed_cache.get_matrix()
-        except Exception:
-            pass
 
     async def _cleanup_stale_cache_temps_when_quiet():
         await asyncio.to_thread(thumbnails.cleanup_stale_cache_temps)
@@ -197,19 +189,10 @@ async def run_startup(
             return_exceptions=True,
         )
 
-    async def _wait_for_background_window(min_idle_seconds: float = 60.0):
-        while True:
-            decision = resource_governor.get_background_decision(thumbnails.get_idle_seconds())
-            if not decision.pause:
-                return
-            await asyncio.sleep(max(1.0, decision.sleep_seconds or 1.0))
-
     track_background_task(_warm_light_startup_caches())
-    track_background_task(_warm_embed_cache())
 
     async def _warm_priority_interaction_caches():
         await asyncio.sleep(0.5)
-        await _wait_for_background_window()
         await asyncio.gather(
             get_stats(),
             get_filter_options(),
@@ -243,32 +226,25 @@ async def run_startup(
 
     track_background_task(_warm_priority_interaction_caches())
 
-    async def _start_background_after_ready(coro_factory, delay: float = 5.0):
+    async def _start_background_daemon(coro_factory, delay: float = 5.0):
         await asyncio.sleep(delay)
         await coro_factory()
 
-    track_background_task(_start_background_after_ready(thumbnails.run_prefetch_worker))
-    track_background_task(_start_background_after_ready(_cleanup_stale_cache_temps_when_quiet, delay=20.0))
-    track_background_task(_start_background_after_ready(classify_orientations_background))
-    track_background_task(_start_background_after_ready(scan_metadata_background))
+    track_background_task(_start_background_daemon(thumbnails.run_prefetch_worker))
+    track_background_task(_start_background_daemon(_cleanup_stale_cache_temps_when_quiet, delay=20.0))
+    track_background_task(_start_background_daemon(classify_orientations_background))
+    track_background_task(_start_background_daemon(scan_metadata_background))
     try:
         import embedding_worker
-        if settings.get_settings().get("defer_ai_on_startup", True):
-            embedding_worker.pause_embedding_worker("AI work deferred by startup setting.")
-        try:
-            embedding_worker.start_search_model_load()
-        except Exception:
-            pass
-        track_background_task(_start_background_after_ready(embedding_worker.run_embedding_worker))
-        track_background_task(_start_background_after_ready(embedding_worker.run_deep_search_worker, delay=15.0))
+        embedding_worker.pause_embedding_worker("Search is stopped until you start it from Background Work.")
+        track_background_task(_start_background_daemon(embedding_worker.run_embedding_worker))
     except ImportError:
         pass  # AI features disabled - missing dependencies
 
-    track_background_task(_start_background_after_ready(face_worker.run_face_worker, delay=25.0))
+    track_background_task(_start_background_daemon(face_worker.run_face_worker, delay=25.0))
 
     async def _warm_interaction_caches():
         await asyncio.sleep(interaction_cache_warmup_delay_seconds)
-        await _wait_for_background_window()
         await asyncio.gather(
             get_ai_status_counts(),
             get_visible_orientation_pairing_pool_counts("md", cache_root(), "landscape"),
@@ -314,9 +290,3 @@ async def run_startup(
             return_exceptions=True,
         )
     track_background_task(_warm_interaction_caches())
-
-    async def _warm_embed_cache_when_quiet():
-        await asyncio.sleep(120.0)
-        await _wait_for_background_window()
-        await _warm_embed_cache()
-    track_background_task(_warm_embed_cache_when_quiet())

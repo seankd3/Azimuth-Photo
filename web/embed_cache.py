@@ -214,16 +214,33 @@ def _load_embeddings_sync(expected_count: int, model_key: str):
     return image_ids, matrix
 
 
-def _remove_snapshot_sync():
+def _remove_snapshot_sync(keep_model_key: str | None = None):
+    keep_paths = set(_snapshot_paths(keep_model_key)) if keep_model_key else set()
     try:
         for filename in os.listdir(SNAPSHOT_DIR):
-            if filename.endswith((".matrix.npy", ".image_ids.npy", ".meta.json")):
-                try:
-                    os.remove(os.path.join(SNAPSHOT_DIR, filename))
-                except OSError:
-                    pass
+            path = os.path.join(SNAPSHOT_DIR, filename)
+            if path in keep_paths:
+                continue
+            if not filename.endswith((".matrix.npy", ".image_ids.npy", ".meta.json")):
+                continue
+            try:
+                os.remove(path)
+            except OSError:
+                pass
     except OSError:
         pass
+
+
+def retain_only(model_key: str):
+    """Drop stale in-memory caches and snapshot files for inactive models."""
+    global _cache
+    target = str(model_key or "")
+    for key in list(_caches):
+        if key != target:
+            _caches.pop(key, None)
+    _cache = _caches.get(target) or _empty_cache(target)
+    _caches[target] = _cache
+    _remove_snapshot_sync(keep_model_key=target)
 
 
 async def get_matrix(model_key: str | None = None):

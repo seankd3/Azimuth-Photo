@@ -11,6 +11,7 @@ export function createLegacyLoupeBridge({
     mediaStatusClient = createMediaStatusClient({ maxAgeMs: 15000 }),
     createLoupeControllerImpl = createLoupeController,
     getLibraryImages,
+    getLibraryPoolTotal,
     getSearchQuery,
     getRankingsExhausted,
     loadRankings,
@@ -37,6 +38,7 @@ export function createLegacyLoupeBridge({
     function initController() {
         loupeController = createLoupeControllerImpl({
             getLibraryImages,
+            getLibraryPoolTotal,
             getSearchQuery,
             getRankingsExhausted,
             loadRankings,

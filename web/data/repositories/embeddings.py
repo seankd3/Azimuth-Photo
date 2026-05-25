@@ -1,6 +1,5 @@
-"""Embedding and deep-search query SQL helpers."""
+"""Embedding SQL helpers."""
 
-import json
 import time as _time
 
 from data import connection
@@ -16,16 +15,8 @@ def invalidate_embedding_count_cache() -> None:
     _embedding_count_cache["expires"] = 0
 
 
-def normalize_deep_search_query(query: str) -> str:
+def normalize_search_query(query: str) -> str:
     return " ".join(str(query or "").split())
-
-
-def deep_search_query_key(query: str) -> str:
-    return normalize_deep_search_query(query).casefold()
-
-
-def semantic_result_threshold_key(threshold) -> str:
-    return f"{float(threshold or 0.0):.6f}"
 
 
 async def _searchable_embedding_count_on_conn(conn, model_key: str) -> int:
@@ -39,26 +30,13 @@ async def _searchable_embedding_count_on_conn(conn, model_key: str) -> int:
     return int((await cursor.fetchone())["c"] or 0)
 
 
-async def _online_embedding_count_on_conn(conn, model_key: str, legacy_model_key: str) -> int:
-    if model_key == legacy_model_key:
-        cursor = await conn.execute(
-            "WITH model_image_ids AS ("
-            "  SELECT image_id FROM embeddings_by_model WHERE model_key = ? "
-            "  UNION "
-            "  SELECT image_id FROM embeddings"
-            ") "
-            "SELECT COUNT(*) AS c FROM model_image_ids e "
-            "JOIN images i ON e.image_id = i.id "
-            "JOIN catalog_sources s ON s.id = i.source_id "
-            "WHERE s.included = 1 AND s.online = 1 AND i.missing_at IS NULL",
-            (model_key,),
-        )
-        return int((await cursor.fetchone())["c"] or 0)
+async def _online_embedding_count_on_conn(conn, model_key: str, legacy_model_key: str = "") -> int:
+    del legacy_model_key
     cursor = await conn.execute(
         "SELECT COUNT(*) AS c FROM embeddings_by_model e "
         "JOIN images i ON e.image_id = i.id "
         "JOIN catalog_sources s ON s.id = i.source_id "
-        "WHERE e.model_key = ? AND s.included = 1 AND s.online = 1 "
+        "WHERE e.model_key = ? AND s.included = 1 "
         "AND i.missing_at IS NULL",
         (model_key,),
     )
@@ -73,38 +51,10 @@ async def ensure_embedding_model_tables(
     legacy_model_key: str,
     ensured_keys: set[str],
 ) -> None:
+    del default_settings, legacy_model_key
     active_model_key = active_config["model_key"]
-    legacy_model_id = default_settings["embed_model_id"]
-    legacy_revision = default_settings["embed_model_revision"]
-    legacy_dimension = int(default_settings["embed_model_dim"])
     if active_model_key in ensured_keys:
-        cursor = await conn.execute(
-            "SELECT 1 FROM embeddings e "
-            "WHERE NOT EXISTS ("
-            "  SELECT 1 FROM embeddings_by_model bm "
-            "  WHERE bm.model_key = ? AND bm.image_id = e.image_id"
-            ") LIMIT 1",
-            (legacy_model_key,),
-        )
-        if await cursor.fetchone() is None:
-            return
-    cursor = await conn.execute(
-        "SELECT model_key FROM embedding_models WHERE model_key IN (?, ?)",
-        (active_model_key, legacy_model_key),
-    )
-    existing_keys = {row["model_key"] for row in await cursor.fetchall()}
-    if active_model_key in existing_keys and legacy_model_key in existing_keys:
-        cursor = await conn.execute(
-            "SELECT 1 FROM embeddings e "
-            "WHERE NOT EXISTS ("
-            "  SELECT 1 FROM embeddings_by_model bm "
-            "  WHERE bm.model_key = ? AND bm.image_id = e.image_id"
-            ") LIMIT 1",
-            (legacy_model_key,),
-        )
-        if await cursor.fetchone() is None:
-            ensured_keys.add(active_model_key)
-            return
+        return
     await conn.execute(
         "INSERT OR IGNORE INTO embedding_models "
         "(model_key, model_id, revision, dimension) VALUES (?, ?, ?, ?)",
@@ -114,17 +64,6 @@ async def ensure_embedding_model_tables(
             active_config["revision"],
             active_config["dimension"],
         ),
-    )
-    await conn.execute(
-        "INSERT OR IGNORE INTO embedding_models "
-        "(model_key, model_id, revision, dimension) VALUES (?, ?, ?, ?)",
-        (legacy_model_key, legacy_model_id, legacy_revision, legacy_dimension),
-    )
-    await conn.execute(
-        "INSERT OR IGNORE INTO embeddings_by_model "
-        "(model_key, image_id, embedding, dimension, created_at) "
-        "SELECT ?, image_id, embedding, ?, created_at FROM embeddings",
-        (legacy_model_key, legacy_dimension),
     )
     await conn.commit()
     ensured_keys.add(active_model_key)
@@ -143,217 +82,72 @@ async def ensure_embedding_model_row(conn, config: dict) -> None:
     )
 
 
-async def record_deep_search_query(
-    db_path: str,
-    query: str,
-    *,
-    source: str = "search",
-    pinned: bool = False,
-) -> dict | None:
-    normalized = normalize_deep_search_query(query)
+async def purge_retired_embedding_data(conn, *, active_config: dict) -> dict:
+    await ensure_embedding_model_row(conn, active_config)
+    active_key = active_config["model_key"]
+    counts = {}
+    for name, sql, params in (
+        (
+            "inactive_embeddings",
+            "DELETE FROM embeddings_by_model WHERE model_key != ?",
+            (active_key,),
+        ),
+        ("legacy_embeddings", "DELETE FROM embeddings", ()),
+        (
+            "inactive_search_query_embeddings",
+            "DELETE FROM search_query_embeddings WHERE model_key != ?",
+            (active_key,),
+        ),
+        (
+            "inactive_models",
+            "DELETE FROM embedding_models WHERE model_key != ?",
+            (active_key,),
+        ),
+    ):
+        cursor = await conn.execute(sql, params)
+        counts[name] = max(0, int(cursor.rowcount or 0))
+    await conn.commit()
+    return counts
+
+
+async def get_search_query_embedding(db_path: str, *, config: dict, query: str) -> bytes | None:
+    normalized = normalize_search_query(query)
     if not normalized:
         return None
     key = normalized.casefold()
     now = _time.time()
-    source = source if source in {"search", "settings"} else "search"
-    pinned_value = 1 if pinned else 0
-    conn = await connection.open_async(db_path)
-    try:
-        await conn.execute(
-            "INSERT INTO deep_search_queries "
-            "(query_key, query, source, use_count, pinned, created_at, last_used_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT(query_key) DO UPDATE SET "
-            "query = excluded.query, "
-            "source = CASE WHEN excluded.pinned = 1 THEN excluded.source ELSE deep_search_queries.source END, "
-            "use_count = deep_search_queries.use_count + excluded.use_count, "
-            "pinned = CASE WHEN excluded.pinned = 1 THEN 1 ELSE deep_search_queries.pinned END, "
-            "last_used_at = COALESCE(excluded.last_used_at, deep_search_queries.last_used_at), "
-            "updated_at = excluded.updated_at",
-            (
-                key,
-                normalized,
-                source,
-                0 if pinned else 1,
-                pinned_value,
-                now,
-                None if pinned else now,
-                now,
-            ),
-        )
-        await conn.commit()
-        return {"query_key": key, "query": normalized}
-    finally:
-        await connection.close_async(conn, db_path=db_path)
-
-
-async def sync_deep_search_terms(db_path: str, normalized_terms: list[str]) -> None:
-    desired = {term.casefold(): term for term in normalized_terms}
     conn = await connection.open_async(db_path)
     try:
         cursor = await conn.execute(
-            "SELECT query_key, query FROM deep_search_queries WHERE pinned = 1"
-        )
-        current = {
-            str(row["query_key"]): str(row["query"])
-            for row in await cursor.fetchall()
-        }
-        if current == desired:
-            return
-
-        await conn.execute("UPDATE deep_search_queries SET pinned = 0 WHERE pinned = 1")
-        now = _time.time()
-        for term in normalized_terms:
-            key = term.casefold()
-            await conn.execute(
-                "INSERT INTO deep_search_queries "
-                "(query_key, query, source, use_count, pinned, created_at, last_used_at, updated_at) "
-                "VALUES (?, ?, 'settings', 0, 1, ?, NULL, ?) "
-                "ON CONFLICT(query_key) DO UPDATE SET "
-                "query = excluded.query, "
-                "source = 'settings', "
-                "pinned = 1, "
-                "updated_at = excluded.updated_at",
-                (key, term, now, now),
-            )
-        await conn.commit()
-    finally:
-        await connection.close_async(conn, db_path=db_path)
-
-
-async def get_deep_search_query_embedding(db_path: str, query: str, model_key: str) -> bytes | None:
-    key = deep_search_query_key(query)
-    if not key:
-        return None
-    conn = await connection.open_async(db_path)
-    try:
-        cursor = await conn.execute(
-            "SELECT embedding FROM deep_search_query_embeddings "
+            "SELECT embedding, dimension FROM search_query_embeddings "
             "WHERE model_key = ? AND query_key = ?",
-            (model_key, key),
+            (config["model_key"], key),
         )
         row = await cursor.fetchone()
-        return row["embedding"] if row else None
-    finally:
-        await connection.close_async(conn, db_path=db_path)
-
-
-async def get_cached_semantic_search_results(
-    db_path: str,
-    query: str,
-    model_key: str,
-    threshold,
-) -> dict | None:
-    normalized = normalize_deep_search_query(query)
-    if not normalized:
-        return None
-    key = normalized.casefold()
-    threshold_key = semantic_result_threshold_key(threshold)
-    conn = await connection.open_async(db_path)
-    try:
-        embedding_count = await _searchable_embedding_count_on_conn(conn, model_key)
-        cursor = await conn.execute(
-            "SELECT query, embedding_count, result_count, scores_json, source, updated_at "
-            "FROM semantic_search_result_cache "
-            "WHERE model_key = ? AND query_key = ? AND threshold_key = ?",
-            (model_key, key, threshold_key),
-        )
-        row = await cursor.fetchone()
-        if row is None or int(row["embedding_count"] or 0) != embedding_count:
+        if row is None:
             return None
-        pairs = json.loads(row["scores_json"] or "[]")
-        scores = {
-            int(image_id): float(score)
-            for image_id, score in pairs
-        }
-        return {
-            "query": row["query"],
-            "model_key": model_key,
-            "threshold": float(threshold or 0.0),
-            "embedding_count": embedding_count,
-            "result_count": int(row["result_count"] or len(scores)),
-            "scores": scores,
-            "id_filter": set(scores),
-            "source": row["source"],
-            "updated_at": float(row["updated_at"] or 0.0),
-        }
-    finally:
-        await connection.close_async(conn, db_path=db_path)
-
-
-async def store_cached_semantic_search_results(
-    db_path: str,
-    query: str,
-    model_key: str,
-    threshold,
-    scores: dict[int, float],
-    *,
-    source: str = "fast",
-) -> dict | None:
-    normalized = normalize_deep_search_query(query)
-    if not normalized:
-        return None
-    key = normalized.casefold()
-    threshold_key = semantic_result_threshold_key(threshold)
-    source = source if source in {"fast", "deep"} else "fast"
-    score_pairs = [
-        [int(image_id), float(score)]
-        for image_id, score in sorted(scores.items())
-    ]
-    now = _time.time()
-    conn = await connection.open_async(db_path)
-    try:
-        embedding_count = await _searchable_embedding_count_on_conn(conn, model_key)
+        if int(row["dimension"] or 0) != int(config["dimension"]):
+            return None
         await conn.execute(
-            "INSERT INTO semantic_search_result_cache "
-            "(model_key, query_key, query, threshold_key, threshold, embedding_count, "
-            "result_count, scores_json, source, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT(model_key, query_key, threshold_key) DO UPDATE SET "
-            "query = excluded.query, "
-            "threshold = excluded.threshold, "
-            "embedding_count = excluded.embedding_count, "
-            "result_count = excluded.result_count, "
-            "scores_json = excluded.scores_json, "
-            "source = excluded.source, "
-            "updated_at = excluded.updated_at",
-            (
-                model_key,
-                key,
-                normalized,
-                threshold_key,
-                float(threshold or 0.0),
-                embedding_count,
-                len(score_pairs),
-                json.dumps(score_pairs, separators=(",", ":")),
-                source,
-                now,
-                now,
-            ),
+            "UPDATE search_query_embeddings SET last_used_at = ? "
+            "WHERE model_key = ? AND query_key = ?",
+            (now, config["model_key"], key),
         )
         await conn.commit()
-        return {
-            "query": normalized,
-            "model_key": model_key,
-            "threshold": float(threshold or 0.0),
-            "embedding_count": embedding_count,
-            "result_count": len(score_pairs),
-            "source": source,
-            "updated_at": now,
-        }
+        return row["embedding"]
     finally:
         await connection.close_async(conn, db_path=db_path)
 
 
-async def store_deep_search_query_embedding(
+async def store_search_query_embedding(
     db_path: str,
     *,
     config: dict,
     query: str,
     blob: bytes,
 ) -> str | None:
-    normalized = normalize_deep_search_query(query)
-    if not normalized:
+    normalized = normalize_search_query(query)
+    if not normalized or not blob:
         return None
     key = normalized.casefold()
     now = _time.time()
@@ -361,109 +155,28 @@ async def store_deep_search_query_embedding(
     try:
         await ensure_embedding_model_row(conn, config)
         await conn.execute(
-            "INSERT INTO deep_search_queries "
-            "(query_key, query, source, use_count, pinned, created_at, updated_at) "
-            "VALUES (?, ?, 'search', 0, 0, ?, ?) "
-            "ON CONFLICT(query_key) DO UPDATE SET "
+            "INSERT INTO search_query_embeddings "
+            "(model_key, query_key, query, embedding, dimension, created_at, last_used_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(model_key, query_key) DO UPDATE SET "
             "query = excluded.query, "
+            "embedding = excluded.embedding, "
+            "dimension = excluded.dimension, "
+            "last_used_at = excluded.last_used_at, "
             "updated_at = excluded.updated_at",
-            (key, normalized, now, now),
-        )
-        await conn.execute(
-            "INSERT OR REPLACE INTO deep_search_query_embeddings "
-            "(model_key, query_key, embedding, dimension, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, COALESCE((SELECT created_at FROM deep_search_query_embeddings "
-            "WHERE model_key = ? AND query_key = ?), ?), ?)",
             (
                 config["model_key"],
                 key,
+                normalized,
                 blob,
                 int(config["dimension"]),
-                config["model_key"],
-                key,
+                now,
                 now,
                 now,
             ),
         )
         await conn.commit()
         return normalized
-    finally:
-        await connection.close_async(conn, db_path=db_path)
-
-
-async def get_pending_deep_search_queries(
-    db_path: str,
-    *,
-    config: dict,
-    limit: int,
-) -> list[dict]:
-    conn = await connection.open_async(db_path)
-    try:
-        cursor = await conn.execute(
-            "SELECT q.query_key, q.query, q.source, q.use_count, q.pinned, q.last_used_at, q.updated_at "
-            "FROM deep_search_queries q "
-            "WHERE NOT EXISTS ("
-            "  SELECT 1 FROM deep_search_query_embeddings e "
-            "  WHERE e.model_key = ? AND e.query_key = q.query_key"
-            ") "
-            "ORDER BY q.pinned DESC, q.last_used_at IS NULL ASC, q.last_used_at DESC, q.updated_at DESC "
-            "LIMIT ?",
-            (config["model_key"], limit),
-        )
-        return [dict(row) for row in await cursor.fetchall()]
-    finally:
-        await connection.close_async(conn, db_path=db_path)
-
-
-async def get_deep_search_cache_status(db_path: str, *, config: dict) -> dict:
-    conn = await connection.open_async(db_path)
-    try:
-        cursor = await conn.execute(
-            "SELECT COUNT(*) AS total, "
-            "SUM(CASE WHEN pinned = 1 THEN 1 ELSE 0 END) AS pinned, "
-            "SUM(CASE WHEN use_count > 0 THEN 1 ELSE 0 END) AS used "
-            "FROM deep_search_queries"
-        )
-        query_counts = await cursor.fetchone()
-        cursor = await conn.execute(
-            "SELECT COUNT(*) AS embedded FROM deep_search_query_embeddings WHERE model_key = ?",
-            (config["model_key"],),
-        )
-        embedded = int((await cursor.fetchone())["embedded"] or 0)
-        total = int(query_counts["total"] or 0)
-        return {
-            "model_key": config["model_key"],
-            "model_id": config["model_id"],
-            "dimension": int(config["dimension"]),
-            "total_queries": total,
-            "pinned_queries": int(query_counts["pinned"] or 0),
-            "used_queries": int(query_counts["used"] or 0),
-            "embedded_queries": embedded,
-            "pending_queries": max(0, total - embedded),
-        }
-    finally:
-        await connection.close_async(conn, db_path=db_path)
-
-
-async def list_deep_search_queries(db_path: str, *, config: dict, limit: int) -> list[dict]:
-    conn = await connection.open_async(db_path)
-    try:
-        cursor = await conn.execute(
-            "SELECT q.query, q.source, q.use_count, q.pinned, q.last_used_at, q.updated_at, "
-            "e.updated_at AS embedded_at "
-            "FROM deep_search_queries q "
-            "LEFT JOIN deep_search_query_embeddings e "
-            "ON e.model_key = ? AND e.query_key = q.query_key "
-            "ORDER BY q.pinned DESC, e.updated_at IS NULL DESC, q.last_used_at DESC, q.updated_at DESC "
-            "LIMIT ?",
-            (config["model_key"], limit),
-        )
-        rows = []
-        for row in await cursor.fetchall():
-            item = dict(row)
-            item["cached"] = item.get("embedded_at") is not None
-            rows.append(item)
-        return rows
     finally:
         await connection.close_async(conn, db_path=db_path)
 
@@ -538,6 +251,7 @@ async def store_embeddings_batch(
     ensured_keys: set[str],
     default_model_key: str,
 ) -> list[int]:
+    del default_model_key
     if not rows:
         return []
     model_key = embedding_config["model_key"]
@@ -557,11 +271,6 @@ async def store_embeddings_batch(
             "(model_key, image_id, embedding, dimension) VALUES (?, ?, ?, ?)",
             [(model_key, image_id, blob, dimension) for image_id, blob in rows],
         )
-        if model_key == default_model_key:
-            await conn.executemany(
-                "INSERT OR REPLACE INTO embeddings (image_id, embedding) VALUES (?, ?)",
-                rows,
-            )
         await conn.commit()
         return [int(image_id) for image_id, _blob in rows]
     finally:

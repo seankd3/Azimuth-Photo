@@ -3,6 +3,8 @@
 import asyncio
 from functools import partial
 
+from core import work_coordination
+
 
 async def run_pregen_bulk_batch(
     generate_batch: int | None = None,
@@ -14,7 +16,7 @@ async def run_pregen_bulk_batch(
     disk_allocations: dict[str, int],
     is_prefetching,
     is_manual_paused,
-    should_yield_to_foreground,
+    should_pause_for_priority,
     flush_write_queue,
     cache_metadata_backoff_active,
     bulk_tier_budgets,
@@ -48,7 +50,7 @@ async def run_pregen_bulk_batch(
     while len(pending) < generate_batch and scanned_batches < max_scan_batches:
         if not is_prefetching() or is_manual_paused():
             break
-        if should_yield_to_foreground():
+        if should_pause_for_priority():
             break
 
         rows = await pregen_bulk_candidate_batch(scan_batch)
@@ -64,7 +66,7 @@ async def run_pregen_bulk_batch(
         for row in rows:
             if not is_prefetching() or is_manual_paused():
                 break
-            if should_yield_to_foreground():
+            if should_pause_for_priority():
                 break
             size_signatures, source_size = bulk_candidate_signatures(row, tier_room, tier_budgets)
             full_item = (
@@ -121,11 +123,11 @@ async def run_pregen_bulk_batch(
         for task in asyncio.as_completed(tasks):
             idx += 1
             completed += record_pregen_result(await task)
-            if idx % 8 == 0 and not should_yield_to_foreground():
+            if idx % 8 == 0 and not should_pause_for_priority():
                 await asyncio.to_thread(flush_write_queue)
-        if should_yield_to_foreground():
+        if should_pause_for_priority():
             break
-    if not should_yield_to_foreground():
+    if not should_pause_for_priority():
         await asyncio.to_thread(flush_write_queue)
     if completed <= 0:
         return -1
@@ -142,7 +144,7 @@ async def run_full_warm_batch(
     disk_allocations: dict[str, int],
     is_prefetching,
     is_manual_paused,
-    should_yield_to_foreground,
+    should_pause_for_priority,
     flush_write_queue,
     cache_metadata_backoff_active,
     full_tier_room,
@@ -175,7 +177,7 @@ async def run_full_warm_batch(
     while len(pending) < generate_batch and scanned_batches < max_scan_batches:
         if not is_prefetching() or is_manual_paused():
             break
-        if should_yield_to_foreground():
+        if should_pause_for_priority():
             break
 
         rows = await pregen_full_candidate_batch(scan_batch)
@@ -191,7 +193,7 @@ async def run_full_warm_batch(
         for row in rows:
             if not is_prefetching() or is_manual_paused():
                 break
-            if should_yield_to_foreground():
+            if should_pause_for_priority():
                 break
             item = full_candidate_signature(row, full_room, full_budget)
             if item is None:
@@ -239,7 +241,7 @@ async def run_full_warm_batch(
                 pregen_state["last_generated_at"] = current_time()
                 pregen_state["generated_this_session"] += 1
                 record_pregen_batch(1, thumbnails_written=0, source_bytes=item_bytes)
-        if should_yield_to_foreground():
+        if should_pause_for_priority():
             break
     return originals_written
 
@@ -256,7 +258,7 @@ async def run_prefetch_worker_loop(
     sleep,
     flush_write_queue,
     flush_orientation_updates,
-    should_yield_to_foreground,
+    should_pause_for_priority,
     background_decision,
     generate_batch_for_decision,
     pregen_status: dict,
@@ -276,19 +278,17 @@ async def run_prefetch_worker_loop(
 
     while is_prefetching():
         try:
-            foreground_active = should_yield_to_foreground()
-            if not foreground_active:
-                await asyncio.to_thread(flush_write_queue)
-                await flush_orientation_updates()
+            await asyncio.to_thread(flush_write_queue)
+            await flush_orientation_updates()
 
             if is_manual_paused():
-                set_pregen_state("paused", "Pre-generation paused by user.")
+                set_pregen_state("paused", "Previews is stopped.")
                 no_progress_scan_passes = 0
                 await sleep(1)
                 continue
 
-            if not is_manual_mode() and not pregen_on_idle():
-                set_pregen_state("disabled", "Background cache warming is disabled in Settings.")
+            if not is_manual_mode():
+                set_pregen_state("paused", "Previews is stopped until you start it from Background Work.")
                 no_progress_scan_passes = 0
                 await sleep(2)
                 continue
@@ -304,23 +304,11 @@ async def run_prefetch_worker_loop(
                 await sleep(5)
                 continue
 
-            if foreground_active or should_yield_to_foreground():
-                set_pregen_state(
-                    "throttled",
-                    "Background cache warming is paused in Browse mode.",
-                )
-                no_progress_scan_passes = 0
-                await sleep(1)
-                continue
-
             decision = background_decision()
             generate_batch = generate_batch_for_decision(decision)
-            governor_status = decision.to_dict()
-            governor_status["effective_thumbnail_batch_size"] = generate_batch
-            pregen_status["governor"] = governor_status
             if decision.pause:
                 set_pregen_state(
-                    "throttled",
+                    "waiting",
                     f"Background work paused: {decision.reason}.",
                 )
                 no_progress_scan_passes = 0
@@ -342,7 +330,8 @@ async def run_prefetch_worker_loop(
                     f"Bulk warming preview cache ({decision.mode}: {decision.reason})...",
                     phase="previews",
                 )
-                generated = await run_pregen_bulk_batch(generate_batch=generate_batch)
+                with work_coordination.manual_bulk("cache"):
+                    generated = await run_pregen_bulk_batch(generate_batch=generate_batch)
 
                 await flush_orientation_updates()
 
@@ -352,9 +341,10 @@ async def run_prefetch_worker_loop(
                     f"Warming original SSD cache ({decision.mode}: {decision.reason})...",
                     phase=full_tier,
                 )
-                full_generated = await run_full_warm_batch(
-                    generate_batch=max(1, min(8, generate_batch)),
-                )
+                with work_coordination.manual_bulk("cache"):
+                    full_generated = await run_full_warm_batch(
+                        generate_batch=max(1, min(8, generate_batch)),
+                    )
                 generated = full_generated if full_generated != 0 else generated
 
             if generated == 0:

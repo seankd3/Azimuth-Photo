@@ -32,10 +32,23 @@ export function toggleMetadataFilters({ loadFilterOptions } = {}) {
 }
 
 
+async function responseDataOrError(response, fallbackMessage) {
+    let data = {};
+    try {
+        data = await response.json();
+    } catch {}
+    if (!response.ok || data.error || data.ok === false) {
+        throw new Error(data.error || fallbackMessage);
+    }
+    return data;
+}
+
+
 export function loadFolderList({ filters = {}, fetchImpl = fetch } = {}) {
-    return fetchImpl('/api/folders?max_depth=0').then(r => r.json()).then(data => {
+    return fetchImpl('/api/folders?max_depth=0').then(r => responseDataOrError(r, 'Folders unavailable')).then(data => {
         const sel = document.getElementById('filter-folder');
         if (!sel || !data.folders) return;
+        sel.innerHTML = '<option value="">All Folders</option>';
         const topFolders = data.folders;
         for (const f of topFolders) {
             const opt = document.createElement('option');
@@ -77,7 +90,7 @@ export function loadFilterOptions({
 } = {}) {
     if (filterOptionsLoaded) return Promise.resolve();
     if (filterOptionsPromise) return filterOptionsPromise;
-    filterOptionsPromise = fetchImpl('/api/filter-options').then(r => r.json()).then(data => {
+    filterOptionsPromise = fetchImpl('/api/filter-options').then(r => responseDataOrError(r, 'Filter options unavailable')).then(data => {
         const takenSel = document.getElementById('filter-taken');
         if (takenSel) {
             const current = filters.taken || '';

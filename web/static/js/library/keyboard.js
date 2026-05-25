@@ -24,7 +24,7 @@ export function bindLibraryKeyboard({
         if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
         const loupe = documentImpl.getElementById('loupe');
-        const loupeOpen = loupe && !loupe.classList.contains('hidden');
+        const loupeOpen = loupe?.classList?.contains('loupe-visible');
 
         if (loupeOpen) {
             if (e.key === 'ArrowRight') { e.preventDefault(); lightboxNext(); }

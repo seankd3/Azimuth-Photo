@@ -232,6 +232,9 @@ export function createDateScrubberController({
         try {
             const response = await fetchImpl(url);
             const data = await response.json();
+            if (!response.ok || data.error || data.ok === false) {
+                throw new Error(data.error || 'Date groups unavailable');
+            }
             if (!isCurrentGeneration(gen)) return false;
 
             const groups = data.groups || [];

@@ -133,7 +133,7 @@ async def visible_images_for_pairing(
         )
         where_sql = (
             "WHERE i.status IN ('kept', 'maybe') "
-            "AND s.included = 1 AND s.online = 1 AND i.missing_at IS NULL "
+            "AND s.included = 1 AND i.missing_at IS NULL "
             "AND EXISTS ("
             "  SELECT 1 FROM cache_entries c "
             "  WHERE c.cache_root = ? AND c.size = ? AND c.image_id = i.id"
@@ -147,7 +147,8 @@ async def visible_images_for_pairing(
         )
         where_sql = (
             "WHERE c.cache_root = ? AND c.size = ? "
-            "AND s.included = 1 AND s.online = 1 AND i.missing_at IS NULL "
+            "AND i.status IN ('kept', 'maybe') "
+            "AND s.included = 1 AND i.missing_at IS NULL "
         )
     conn = await connection.open_async(db_path)
     try:

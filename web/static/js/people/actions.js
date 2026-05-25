@@ -1,6 +1,18 @@
 import { forgetPeopleLabelDraft } from './page.js';
 
 
+async function responseDataOrError(response, fallbackMessage) {
+    let data = {};
+    try {
+        data = await response.json();
+    } catch {}
+    if (!response.ok || data.error || data.ok === false) {
+        throw new Error(data.error || fallbackMessage);
+    }
+    return data;
+}
+
+
 export async function labelPerson(personId, { loadPeople, showToast, fetchImpl = fetch } = {}) {
     const input = document.getElementById(`person-label-${personId}`);
     const name = (input?.value || '').trim();
@@ -14,14 +26,13 @@ export async function labelPerson(personId, { loadPeople, showToast, fetchImpl =
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name }),
         });
-        const data = await res.json();
-        if (!res.ok || data.error) throw new Error(data.error || 'Label failed');
+        await responseDataOrError(res, 'Label failed');
         forgetPeopleLabelDraft(personId);
         if (input) {
             input.value = name;
             input.dataset.serverName = name;
         }
-        await loadPeople?.();
+        await loadPeople?.({ force: true });
         showToast?.('Person labeled');
     } catch (err) {
         showToast?.(err.message || 'Label failed');
@@ -36,9 +47,8 @@ export async function mergePeople(sourcePersonId, targetPersonId, { loadPeople, 
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ source_person_id: sourcePersonId, target_person_id: targetPersonId }),
         });
-        const data = await res.json();
-        if (!res.ok || data.error) throw new Error(data.error || 'Merge failed');
-        await loadPeople?.();
+        await responseDataOrError(res, 'Merge failed');
+        await loadPeople?.({ force: true });
         showToast?.('People merged');
     } catch (err) {
         showToast?.(err.message || 'Merge failed');
@@ -48,22 +58,24 @@ export async function mergePeople(sourcePersonId, targetPersonId, { loadPeople, 
 
 export async function rejectPeopleMerge(suggestionId, { loadPeople, showToast, fetchImpl = fetch } = {}) {
     try {
-        await fetchImpl(`/api/people/merge-suggestions/${suggestionId}/reject`, { method: 'POST' });
-        await loadPeople?.();
+        const res = await fetchImpl(`/api/people/merge-suggestions/${suggestionId}/reject`, { method: 'POST' });
+        await responseDataOrError(res, 'Reject failed');
+        await loadPeople?.({ force: true });
         showToast?.('Merge rejected');
-    } catch {
-        showToast?.('Reject failed');
+    } catch (err) {
+        showToast?.(err.message || 'Reject failed');
     }
 }
 
 
 export async function ignorePerson(personId, { loadPeople, showToast, fetchImpl = fetch } = {}) {
     try {
-        await fetchImpl(`/api/people/${personId}/ignore`, { method: 'POST' });
-        await loadPeople?.();
+        const res = await fetchImpl(`/api/people/${personId}/ignore`, { method: 'POST' });
+        await responseDataOrError(res, 'Ignore failed');
+        await loadPeople?.({ force: true });
         showToast?.('Person ignored');
-    } catch {
-        showToast?.('Ignore failed');
+    } catch (err) {
+        showToast?.(err.message || 'Ignore failed');
     }
 }
 

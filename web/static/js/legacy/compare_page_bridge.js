@@ -14,9 +14,18 @@ export function createLegacyComparePageBridge({
     restoreSearchState,
     initSearchInputControls,
     setCompareMode,
+    setMosaicStrategy,
+    mosaicShuffle,
     loadFolderList,
     scheduleFilterOptionsLoad,
     initStarHover,
+    clearSearch,
+    setFilter,
+    toggleMetadataFilters,
+    toggleFilter,
+    toggleStar,
+    setThumbSize,
+    toggleBackgroundWorkPanel,
     createComparePageControllerImpl = createComparePageController,
 } = {}) {
     const controller = createComparePageControllerImpl({
@@ -33,9 +42,18 @@ export function createLegacyComparePageBridge({
         restoreSearchState,
         initSearchInputControls,
         setCompareMode,
+        setMosaicStrategy,
+        mosaicShuffle,
         loadFolderList,
         scheduleFilterOptionsLoad,
         initStarHover,
+        clearSearch,
+        setFilter,
+        toggleMetadataFilters,
+        toggleFilter,
+        toggleStar,
+        setThumbSize,
+        toggleBackgroundWorkPanel,
     });
 
     return {

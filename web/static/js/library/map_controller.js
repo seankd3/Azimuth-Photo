@@ -9,6 +9,18 @@ import {
 } from './map.js';
 
 
+async function responseDataOrError(response, fallbackMessage) {
+    let data = {};
+    try {
+        data = await response.json();
+    } catch {}
+    if (!response.ok || data.error || data.ok === false) {
+        throw new Error(data.error || fallbackMessage);
+    }
+    return data;
+}
+
+
 export function createLibraryMapController({
     documentImpl = document,
     windowImpl = window,
@@ -88,7 +100,7 @@ export function createLibraryMapController({
         }
 
         fetchImpl(`/api/image/${imageId}/exif`)
-            .then((response) => response.json())
+            .then((response) => responseDataOrError(response, 'Could not open image'))
             .then((data) => {
                 const exif = data.exif || {};
                 openStandaloneLightbox({
@@ -136,14 +148,16 @@ export function createLibraryMapController({
         const query = mapParams.toString();
         const url = `/api/map/markers${query ? `?${query}` : ''}`;
         try {
-            const data = await fetchImpl(url).then(r => r.json());
+            const response = await fetchImpl(url);
+            const data = await responseDataOrError(response, 'Map markers could not be loaded');
             if (requestGeneration !== mapRequestGeneration) return;
             if (mapMarkerLayer) {
                 mapInstance.removeLayer(mapMarkerLayer);
             }
             mapMarkerLayer = leaflet.markerClusterGroup();
 
-            for (const m of data.markers) {
+            const markers = Array.isArray(data.markers) ? data.markers : [];
+            for (const m of markers) {
                 const marker = leaflet.marker([m.lat, m.lng]);
                 marker.bindPopup(buildMapPopup(m, { openImageById: openLightboxById }), { maxWidth: 200 });
                 mapMarkerLayer.addLayer(marker);
@@ -152,7 +166,7 @@ export function createLibraryMapController({
 
             renderMapInfo(container, data);
 
-            if (data.markers.length > 0 && mapZoom === 2) {
+            if (markers.length > 0 && mapZoom === 2) {
                 mapInstance.fitBounds(mapMarkerLayer.getBounds(), { padding: [30, 30] });
             }
         } catch (e) {

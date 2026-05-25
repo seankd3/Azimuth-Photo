@@ -28,20 +28,9 @@ def configure_database_backed_providers() -> None:
         db_path=lambda: db.DB_PATH,
     )
     embedding_worker.configure(
-        get_deep_search_cache_status=lambda config, terms=None: db.get_deep_search_cache_status(config, terms),
         get_catalog_image_counts=lambda: db.get_catalog_image_counts(),
         count_embeddings_for_model=lambda config, **kwargs: db.count_embeddings_for_model(config, **kwargs),
         get_unembedded_images=lambda **kwargs: db.get_unembedded_images(**kwargs),
-        get_pending_deep_search_queries=lambda config, terms=None, **kwargs: db.get_pending_deep_search_queries(
-            config,
-            terms,
-            **kwargs,
-        ),
-        store_deep_search_query_embedding=lambda config, query, blob: db.store_deep_search_query_embedding(
-            config,
-            query,
-            blob,
-        ),
         store_embeddings_batch=lambda rows, **kwargs: db.store_embeddings_batch(rows, **kwargs),
         get_embedding_count=lambda: db.get_embedding_count(),
     )
@@ -93,6 +82,7 @@ def configure_people_routes() -> None:
 
     people_routes.configure(
         get_people_review=lambda **kwargs: db.get_people_review(**kwargs),
+        get_people_status_counts=lambda **kwargs: db.get_people_status_counts(**kwargs),
         get_face_thumbnail_context=lambda face_id: db.get_face_thumbnail_context(face_id),
         label_person=lambda person_id, name: db.label_person(person_id, name),
         merge_people=lambda source_person_id, target_person_id: db.merge_people(
@@ -144,8 +134,6 @@ def configure_status_media_search_providers() -> None:
         invalidate_settings_response_cache=settings_status.invalidate_settings_response_cache,
         get_ai_status_counts=lambda: db.get_ai_status_counts(),
         count_embeddings_for_model=lambda config, **kwargs: db.count_embeddings_for_model(config, **kwargs),
-        get_deep_search_cache_status=lambda config, terms=None: db.get_deep_search_cache_status(config, terms),
-        list_deep_search_queries=lambda config: db.list_deep_search_queries(config),
     )
 
 
@@ -167,7 +155,6 @@ def configure_cache_events() -> None:
         elo_propagation=elo_propagation,
     )
     db.register_embedding_batch_listener(cache_events.embedding_batch_stored)
-    db.register_deep_search_query_embedding_listener(cache_events.deep_search_query_embedding_stored)
 
 
 def configure_catalog_routes() -> None:
@@ -240,7 +227,12 @@ def configure_library_service(
 ) -> None:
     import db
     from features.library import service as library_service
+    from features.library import taste as taste_service
 
+    taste_service.configure(
+        db_path=lambda: db.DB_PATH,
+        db_signature=lambda: db.DB_PATH,
+    )
     library_service.configure(
         resolve_library_constraints=resolve_library_constraints,
         cache_root=cache_root,
@@ -413,7 +405,6 @@ def configure_compare_routes(
 def configure_query_constraints(
     *,
     text_search_resolution_cache_ttl_seconds,
-    deep_search_query_record_cache_ttl_seconds,
     invalidate_ai_status_response_cache=None,
     invalidate_settings_response_cache=None,
 ) -> None:
@@ -423,7 +414,6 @@ def configure_query_constraints(
     from features.settings import status as settings_status
 
     query_constraints.configure(
-        record_deep_search_query=lambda query: db.record_deep_search_query(query),
         extension_search_terms=db.IMAGE_EXTENSION_SEARCH_TERMS,
         invalidate_ai_status_response_cache=(
             invalidate_ai_status_response_cache or ai_routes.invalidate_ai_status_response_cache
@@ -432,29 +422,14 @@ def configure_query_constraints(
             invalidate_settings_response_cache or settings_status.invalidate_settings_response_cache
         ),
         metadata_search_image_ids=lambda query: db.metadata_search_image_ids(query),
-        get_deep_search_query_embedding=lambda query, model_key: db.get_deep_search_query_embedding(query, model_key),
-        get_cached_semantic_search_results=(
-            lambda query, model_key, threshold: db.get_cached_semantic_search_results(
-                query,
-                model_key,
-                threshold,
-            )
-        ),
-        store_cached_semantic_search_results=(
-            lambda query, model_key, threshold, scores, **kwargs: db.store_cached_semantic_search_results(
-                query,
-                model_key,
-                threshold,
-                scores,
-                **kwargs,
-            )
-        ),
+        active_embedding_config=settings.active_embedding_config,
         fast_search_embedding_config=settings.fast_search_embedding_config,
         get_settings=settings.get_settings,
         parse_people_ids=db.parse_people_ids,
         get_people_image_id_filter=lambda people_ids: db.get_people_image_id_filter(people_ids),
         text_search_resolution_cache_ttl_seconds=text_search_resolution_cache_ttl_seconds,
-        deep_search_query_record_cache_ttl_seconds=deep_search_query_record_cache_ttl_seconds,
+        get_search_query_embedding=db.get_search_query_embedding,
+        store_search_query_embedding=db.store_search_query_embedding,
     )
 
 

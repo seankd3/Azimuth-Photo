@@ -5,6 +5,18 @@ const peopleLabelDrafts = new Map();
 let peoplePoller = null;
 
 
+async function responseDataOrError(response, fallbackMessage) {
+    let data = {};
+    try {
+        data = await response.json();
+    } catch {}
+    if (!response.ok || data.error || data.ok === false) {
+        throw new Error(data.error || fallbackMessage);
+    }
+    return data;
+}
+
+
 export function snapshotPeopleLabelDrafts() {
     const active = document.activeElement;
     let focusedDraft = null;
@@ -105,31 +117,118 @@ export function renderPeople(data) {
 }
 
 
-export async function loadPeople({ fetchImpl = fetch } = {}) {
+function peopleLabelInputFocused() {
+    return Boolean(document.querySelector('.people-label-row input:focus'));
+}
+
+function bindPeopleActions({
+    documentImpl = document,
+    labelPerson = () => {},
+    mergePeople = () => {},
+    rejectPeopleMerge = () => {},
+    ignorePerson = () => {},
+    filterLibraryByPerson = () => {},
+    useFallbackThumbImpl = useFallbackThumb,
+} = {}) {
+    if (documentImpl.body?.dataset?.paPeopleActionsBound === '1') return;
+    if (documentImpl.body?.dataset) {
+        documentImpl.body.dataset.paPeopleActionsBound = '1';
+    }
+    documentImpl.addEventListener('input', (event) => {
+        const input = event.target?.closest?.('.people-label-row input[data-person-id]');
+        if (!input) return;
+        rememberPeopleLabelDraft(Number(input.dataset.personId || 0), input.value);
+    });
+    documentImpl.addEventListener('click', (event) => {
+        const control = event.target?.closest?.('[data-people-action]');
+        if (!control) return;
+        event.preventDefault();
+        const personId = Number(control.dataset.personId || 0);
+        switch (control.dataset.peopleAction) {
+            case 'filter-library':
+                filterLibraryByPerson(personId);
+                break;
+            case 'label':
+                labelPerson(personId);
+                break;
+            case 'ignore':
+                ignorePerson(personId);
+                break;
+            case 'merge':
+                mergePeople(
+                    Number(control.dataset.sourcePersonId || 0),
+                    Number(control.dataset.targetPersonId || 0)
+                );
+                break;
+            case 'reject-merge':
+                rejectPeopleMerge(Number(control.dataset.suggestionId || 0));
+                break;
+        }
+    });
+    documentImpl.addEventListener('error', (event) => {
+        const img = event.target;
+        if (!img?.matches?.('img[data-fallback-src]')) return;
+        useFallbackThumbImpl(img);
+    }, true);
+}
+
+
+export async function loadPeople({ fetchImpl = fetch, force = false } = {}) {
     const statusEl = document.getElementById('people-status-line');
-    if (statusEl && !document.querySelector('.people-label-row input:focus')) {
+    const labelFocused = peopleLabelInputFocused();
+    if (statusEl && !labelFocused) {
         statusEl.textContent = 'Loading People...';
+    }
+    if (labelFocused && !force) {
+        try {
+            const statusRes = await fetchImpl('/api/people/status');
+            const status = await responseDataOrError(statusRes, 'People status unavailable');
+            const counts = status.counts || {};
+            if (statusEl) {
+                const detected = Number(counts.detected_faces || 0).toLocaleString();
+                const people = Number(counts.people || 0).toLocaleString();
+                statusEl.textContent = `${peopleWorkerLabel(status)} · ${people} people · ${detected} faces`;
+            }
+        } catch {}
+        return null;
     }
     try {
         const res = await fetchImpl('/api/people?limit=48');
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'People load failed');
+        const data = await responseDataOrError(res, 'People load failed');
         renderPeople(data);
+        return data;
     } catch (err) {
         if (statusEl) statusEl.textContent = `People unavailable: ${err.message}`;
+        return null;
     }
 }
 
 
 export function initPeople({
     loadPeopleImpl = loadPeople,
+    documentImpl = document,
     setIntervalImpl = setInterval,
     clearIntervalImpl = clearInterval,
+    labelPerson = () => {},
+    mergePeople = () => {},
+    rejectPeopleMerge = () => {},
+    ignorePerson = () => {},
+    filterLibraryByPerson = () => {},
+    useFallbackThumbImpl = useFallbackThumb,
     intervalMs = 10000,
 } = {}) {
+    bindPeopleActions({
+        documentImpl,
+        labelPerson,
+        mergePeople,
+        rejectPeopleMerge,
+        ignorePerson,
+        filterLibraryByPerson,
+        useFallbackThumbImpl,
+    });
     loadPeopleImpl();
     if (peoplePoller) clearIntervalImpl(peoplePoller);
     peoplePoller = setIntervalImpl(() => {
-        if (!document.hidden) loadPeopleImpl();
+        if (!documentImpl.hidden) loadPeopleImpl();
     }, intervalMs);
 }

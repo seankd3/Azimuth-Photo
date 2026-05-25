@@ -91,7 +91,7 @@ class ApiShapeTests(unittest.TestCase):
         db.invalidate_cached_image_ids_cache()
         db.clear_filter_options_cache()
         asyncio.run(db.init_db())
-        settings.save_settings({"deep_search_schedule_enabled": False})
+        settings.save_settings({})
         compare_service._pairing_cache.update({"data": None, "valid": False})
         compare_service._matchups_cache.update({"data": None, "valid": False})
 
@@ -268,7 +268,7 @@ class ApiShapeTests(unittest.TestCase):
             conn.execute(
                 "UPDATE catalog_sources SET image_count = ("
                 "  SELECT COUNT(*) FROM images WHERE images.source_id = catalog_sources.id"
-                "), active_image_count = CASE WHEN included = 1 AND online = 1 THEN ("
+                "), active_image_count = CASE WHEN included = 1 THEN ("
                 "  SELECT COUNT(*) FROM images "
                 "  WHERE images.source_id = catalog_sources.id AND images.missing_at IS NULL"
                 ") ELSE 0 END WHERE id = ?",
@@ -498,7 +498,7 @@ class ApiShapeTests(unittest.TestCase):
         ai_data = ai_response.json()
         self.assertIn("worker_state", ai_data)
         self.assertIn("model_id", ai_data)
-        self.assertIn("embedding_indexes", ai_data)
+        self.assertIn("embedding_index", ai_data)
 
     def test_media_status_endpoint_shapes(self):
         single_response = self.client.get(f"/api/image/{self.ids[0]}/media-status")

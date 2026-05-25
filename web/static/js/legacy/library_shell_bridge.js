@@ -11,6 +11,10 @@ import {
     updateLibraryEmptyState as updateLibraryEmptyStateCore,
 } from '../library/shell.js';
 import {
+    bindLibraryLoadMoreButton as bindLibraryLoadMoreButtonCore,
+    updateLibraryLoadMore as updateLibraryLoadMoreCore,
+} from '../library/load_more.js';
+import {
     deselectLibraryCard as deselectLibraryCardCore,
     findCardInDirection as findCardInDirectionCore,
     selectLibraryCard as selectLibraryCardCore,
@@ -28,6 +32,8 @@ export function createLegacyLibraryShellBridge({
     saveScrollPositionImpl = saveScrollPositionCore,
     restoreScrollPositionImpl = restoreScrollPositionCore,
     updateBackToTopButtonImpl = updateBackToTopButtonCore,
+    updateLibraryLoadMoreImpl = updateLibraryLoadMoreCore,
+    bindLibraryLoadMoreButtonImpl = bindLibraryLoadMoreButtonCore,
     scrollToTopImpl = scrollToTopCore,
     scrollLibraryContainerToElementImpl = scrollLibraryContainerToElementCore,
     selectLibraryCardImpl = selectLibraryCardCore,
@@ -43,16 +49,22 @@ export function createLegacyLibraryShellBridge({
     hasActiveLibraryFilters,
     clearSearch,
     clearLibraryFilters,
+    getFilteredPoolVisible = () => 0,
+    getRankingsLoading = () => false,
+    getRankingsExhausted = () => false,
+    getCurrentLibraryView = () => 'grid',
+    onLoadMoreRankings = () => {},
 } = {}) {
     return {
         hideLibraryEmptyState: () => hideLibraryEmptyStateImpl(),
-        updateLibraryEmptyState: () => updateLibraryEmptyStateImpl({
+        updateLibraryEmptyState: (options = {}) => updateLibraryEmptyStateImpl({
             hasImages: getImages().length > 0,
             searchQuery: getSearchQuery(),
             hasActiveTextSearch,
             hasActiveLibraryFilters,
             clearSearch,
             clearLibraryFilters,
+            ...options,
         }),
         libraryScrollRoot: () => libraryScrollRootImpl(),
         saveScrollPosition: () => saveScrollPositionImpl({
@@ -68,6 +80,18 @@ export function createLegacyLibraryShellBridge({
             scrollOffsetStorageKey: SCROLL_OFFSET_STORAGE_KEY,
         }),
         updateBackToTopButton: () => updateBackToTopButtonImpl(),
+        updateLibraryLoadMore: (options = {}) => updateLibraryLoadMoreImpl({
+            shownCount: getImages().length,
+            totalCount: getFilteredPoolVisible(),
+            loading: getRankingsLoading(),
+            exhausted: getRankingsExhausted(),
+            hasActiveSearch: hasActiveTextSearch?.(getSearchQuery()),
+            viewMode: getCurrentLibraryView(),
+            ...options,
+        }),
+        bindLibraryLoadMoreButton: () => bindLibraryLoadMoreButtonImpl({
+            onLoadMore: onLoadMoreRankings,
+        }),
         scrollToTop: () => scrollToTopImpl(),
         scrollLibraryContainerToElement: (el, behavior = 'smooth') => scrollLibraryContainerToElementImpl(el, behavior),
         selectLibraryCard: (index, cards) => {

@@ -1,14 +1,15 @@
 <div class="background-work-panel hidden" id="background-work-panel">
     <div class="background-work-panel-header">
         <span class="background-work-panel-title">Background Work</span>
-        <button type="button" class="background-work-panel-close" onclick="PhotoArchive.toggleBackgroundWorkPanel()" aria-label="Close background work panel">&times;</button>
+        <button type="button" class="background-work-panel-close" data-action="toggle-background-work-panel" aria-label="Close background work panel">&times;</button>
     </div>
     <div class="background-work-panel-body">
         <div class="background-work-panel-rows" id="background-work-panel-rows">
             <div class="background-work-empty">Loading background work...</div>
         </div>
+        <div class="background-work-panel-note hidden" id="background-work-panel-note"></div>
         <div class="background-work-panel-foot">
-            <a href="/settings" class="background-work-panel-link">Settings</a>
+            <a href="/catalog" class="background-work-panel-link">Catalog</a>
         </div>
     </div>
 </div>

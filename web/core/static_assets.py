@@ -8,7 +8,6 @@ class StaticAssetContext:
         self.app_dir = app_dir
         self.repo_dir = repo_dir or os.path.dirname(app_dir)
         self.started_at = started_at if started_at is not None else time.time()
-        self._static_version: str | None = None
         self.git_commit = self._git_commit()
 
     def _git_commit(self) -> str | None:
@@ -24,8 +23,6 @@ class StaticAssetContext:
             return None
 
     def static_version(self) -> str:
-        if self._static_version is not None:
-            return self._static_version
         static_dir = os.path.join(self.app_dir, "static")
         try:
             mtimes = [os.path.getmtime(os.path.join(static_dir, "style.css"))]
@@ -33,10 +30,9 @@ class StaticAssetContext:
                 for filename in files:
                     if filename.endswith(".js"):
                         mtimes.append(os.path.getmtime(os.path.join(root, filename)))
-            self._static_version = str(int(max(mtimes)))
+            return str(int(max(mtimes)))
         except OSError:
-            self._static_version = str(int(self.started_at))
-        return self._static_version
+            return str(int(self.started_at))
 
     def template_context(self, request) -> dict:
         return {"request": request, "static_version": self.static_version()}

@@ -49,6 +49,18 @@ function similarPoolStats(data) {
 }
 
 
+async function responseDataOrError(response, fallbackMessage) {
+    let data = {};
+    try {
+        data = await response.json();
+    } catch {}
+    if (!response.ok || data.error || data.ok === false) {
+        throw new Error(data.error || fallbackMessage);
+    }
+    return data;
+}
+
+
 export function createFindSimilarAction({
     documentImpl = document,
     fetchImpl = fetch,
@@ -61,7 +73,6 @@ export function createFindSimilarAction({
     getCompareStats = () => ({}),
     setCompareStats = () => {},
     setSearchQuery = () => {},
-    setDeepSearchRequested = () => {},
     bumpLibraryRequestGeneration = () => 0,
     getLibraryRequestGeneration = () => 0,
     closeLightbox = () => {},
@@ -71,45 +82,55 @@ export function createFindSimilarAction({
     clearBatchSelection = () => {},
     updateCompareProgress = () => {},
     openLightbox = () => {},
+    showToast = () => {},
 } = {}) {
     return async function findSimilar() {
         const libraryImages = getLibraryImages();
         const lightboxIndex = getLightboxIndex();
         if (lightboxIndex < 0 || lightboxIndex >= libraryImages.length) return;
         const img = libraryImages[lightboxIndex];
+
+        const requestGeneration = bumpLibraryRequestGeneration();
+        let data;
+        try {
+            const res = await fetchImpl(`/api/similar/${img.id}?limit=100`);
+            data = await responseDataOrError(res, 'Similar search failed');
+        } catch (err) {
+            if (requestGeneration === getLibraryRequestGeneration()) {
+                showToast(err.message || 'Similar search failed');
+            }
+            return;
+        }
+        if (requestGeneration !== getLibraryRequestGeneration()) return;
+
         closeLightbox();
         clearWarmups();
-
         setSearchQuery('__similar__');
-        setDeepSearchRequested(false);
         clearPersistedSearchState();
         setSimilarSearchControls(img.filename, { documentImpl });
         updateDateScrubber();
 
-        const requestGeneration = bumpLibraryRequestGeneration();
         clearBatchSelection();
         setLibraryImages([]);
         setRankingsOffset(0);
         setRankingsExhausted(true);
         const grid = documentImpl.getElementById('rankings-grid');
+        if (!grid) return;
         grid.innerHTML = '';
-
-        const res = await fetchImpl(`/api/similar/${img.id}?limit=100`);
-        const data = await res.json();
-        if (requestGeneration !== getLibraryRequestGeneration()) return;
+        const images = Array.isArray(data.images) ? data.images : [];
         setCompareStats({
             ...getCompareStats(),
             ...similarPoolStats(data),
         });
         updateCompareProgress();
 
-        renderSimilarCards(data.images, {
+        renderSimilarCards(images, {
             documentImpl,
             grid,
             thumbHeight: getThumbHeight(),
             openLightbox,
         });
-        setLibraryImages(data.images.slice());
-        setRankingsOffset(data.images.length);
+        setLibraryImages(images.slice());
+        setRankingsOffset(images.length);
     };
 }

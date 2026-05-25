@@ -5,8 +5,8 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(__file__))
 import helpers  # noqa: E402
-import resource_governor  # noqa: E402
 from core import responses as response_helpers  # noqa: E402
+from core import work_coordination  # noqa: E402
 
 
 class ImageHelperTests(unittest.TestCase):
@@ -195,98 +195,36 @@ class ImageHelperTests(unittest.TestCase):
         self.assertIn(("active", (2, 3)), calls)
 
 
-class ResourceGovernorTests(unittest.TestCase):
-    def setUp(self):
-        self.old_read_load_1m = resource_governor._read_load_1m
-        self.old_read_meminfo = resource_governor._read_meminfo
-        self.old_cpu_count = resource_governor.os.cpu_count
-
+class WorkCoordinationTests(unittest.TestCase):
     def tearDown(self):
-        resource_governor._read_load_1m = self.old_read_load_1m
-        resource_governor._read_meminfo = self.old_read_meminfo
-        resource_governor.os.cpu_count = self.old_cpu_count
+        for kind in list(work_coordination.status()["manual_active"]):
+            work_coordination.finish_manual_bulk(kind)
 
-    def test_system_busy_uses_small_thumbnail_batches(self):
-        resource_governor.os.cpu_count = lambda: 8
-        resource_governor._read_load_1m = lambda: 8.2
-        resource_governor._read_meminfo = lambda: {
-            "MemAvailable": 10 * 1024 ** 3,
-            "SwapTotal": 10 * 1024 ** 3,
-            "SwapFree": 10 * 1024 ** 3,
-        }
+    def test_manual_bulk_marks_ambient_warming_as_waiting(self):
+        self.assertFalse(work_coordination.manual_bulk_active())
+        self.assertTrue(work_coordination.ambient_warming_allowed())
 
-        decision = resource_governor.get_background_decision(idle_seconds=120, work_mode="balanced")
+        with work_coordination.manual_bulk("cache"):
+            status = work_coordination.status()
 
-        self.assertEqual(decision.reason, "system busy")
-        self.assertEqual(decision.work_mode, "balanced")
-        self.assertEqual(decision.thumbnail_batch_size, 1)
-        self.assertGreaterEqual(decision.thumbnail_pause_seconds, 3.0)
+            self.assertTrue(work_coordination.manual_bulk_active())
+            self.assertFalse(work_coordination.ambient_warming_allowed())
+            self.assertEqual(status["lanes"]["manual_bulk"]["state"], "running")
+            self.assertEqual(status["lanes"]["ambient_warming"]["state"], "waiting")
+            self.assertEqual(status["manual_active"], ["cache"])
 
-    def test_light_mode_ignores_recent_activity_with_small_batches(self):
-        resource_governor.os.cpu_count = lambda: 8
-        resource_governor._read_load_1m = lambda: 1.0
-        resource_governor._read_meminfo = lambda: {
-            "MemAvailable": 10 * 1024 ** 3,
-            "SwapTotal": 10 * 1024 ** 3,
-            "SwapFree": 10 * 1024 ** 3,
-        }
+        self.assertFalse(work_coordination.manual_bulk_active())
 
-        decision = resource_governor.get_background_decision(idle_seconds=30, work_mode="balanced")
+    def test_user_visible_lane_never_waits_for_manual_bulk(self):
+        async def run():
+            with work_coordination.manual_bulk("embeddings"):
+                await work_coordination.wait_for_lane(work_coordination.USER_VISIBLE)
+                return work_coordination.status()
 
-        self.assertEqual(decision.reason, "light background")
-        self.assertFalse(decision.pause)
-        self.assertEqual(decision.thumbnail_batch_size, 2)
-        self.assertGreaterEqual(decision.thumbnail_pause_seconds, 1.5)
-        self.assertTrue(decision.can_start_heavy_work)
+        status = asyncio.run(run())
 
-    def test_healthy_system_uses_bounded_thumbnail_batches(self):
-        resource_governor.os.cpu_count = lambda: 8
-        resource_governor._read_load_1m = lambda: 1.0
-        resource_governor._read_meminfo = lambda: {
-            "MemAvailable": 10 * 1024 ** 3,
-            "SwapTotal": 10 * 1024 ** 3,
-            "SwapFree": 10 * 1024 ** 3,
-        }
-
-        decision = resource_governor.get_background_decision(idle_seconds=120, work_mode="balanced")
-
-        self.assertEqual(decision.reason, "light background")
-        self.assertEqual(decision.mode, "light")
-        self.assertEqual(decision.thumbnail_batch_size, 2)
-        self.assertFalse(decision.pause)
-
-    def test_browse_mode_pauses_background_compute(self):
-        resource_governor.os.cpu_count = lambda: 8
-        resource_governor._read_load_1m = lambda: 1.0
-        resource_governor._read_meminfo = lambda: {
-            "MemAvailable": 10 * 1024 ** 3,
-            "SwapTotal": 10 * 1024 ** 3,
-            "SwapFree": 10 * 1024 ** 3,
-        }
-
-        decision = resource_governor.get_background_decision(idle_seconds=999, work_mode="browse")
-
-        self.assertEqual(decision.reason, "browse mode")
-        self.assertTrue(decision.pause)
-        self.assertFalse(decision.can_start_heavy_work)
-        self.assertEqual(decision.thumbnail_batch_size, 0)
-
-    def test_max_mode_uses_larger_batches_when_healthy(self):
-        resource_governor.os.cpu_count = lambda: 8
-        resource_governor._read_load_1m = lambda: 1.0
-        resource_governor._read_meminfo = lambda: {
-            "MemAvailable": 10 * 1024 ** 3,
-            "SwapTotal": 10 * 1024 ** 3,
-            "SwapFree": 10 * 1024 ** 3,
-        }
-
-        decision = resource_governor.get_background_decision(idle_seconds=20, work_mode="max")
-
-        self.assertEqual(decision.work_mode, "max")
-        self.assertEqual(decision.reason, "system healthy")
-        self.assertFalse(decision.pause)
-        self.assertTrue(decision.can_start_heavy_work)
-        self.assertGreater(decision.thumbnail_batch_size, 8)
+        self.assertEqual(status["lanes"]["user_visible"]["state"], "ready")
+        self.assertEqual(status["lanes"]["manual_bulk"]["active"], ["embeddings"])
 
 
 if __name__ == "__main__":

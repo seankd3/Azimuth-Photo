@@ -2,6 +2,9 @@ import asyncio
 import os
 import shutil
 import threading
+from functools import partial
+
+from core import work_coordination
 
 
 def has_room(
@@ -155,11 +158,13 @@ async def run_full_image_job(
     source_signature = build_source_signature(filepath, full_tier, image_id)
     return await loop.run_in_executor(
         executor,
-        cache_full_image_sync,
-        filepath,
-        image_id,
-        source_signature,
-        hot,
+        partial(
+            cache_full_image_sync,
+            filepath,
+            image_id,
+            source_signature,
+            hot=hot,
+        ),
     )
 
 
@@ -203,7 +208,11 @@ async def schedule_full_image_cache(
     if task is not None:
         return
 
-    task = asyncio.create_task(run_full_image_job(filepath, image_id, hot))
+    async def run_when_warmers_have_turn():
+        await work_coordination.wait_for_lane(work_coordination.AMBIENT_WARMING)
+        return await run_full_image_job(filepath, image_id, hot)
+
+    task = asyncio.create_task(run_when_warmers_have_turn())
     inflight[inflight_key] = task
 
     async def release_when_done():

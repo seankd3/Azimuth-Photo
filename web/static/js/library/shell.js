@@ -9,6 +9,11 @@ export function hideLibraryEmptyState() {
 
 export function updateLibraryEmptyState({
     hasImages = false,
+    isDeferred = false,
+    loadError = false,
+    tasteUnavailable = false,
+    tasteFallbackReason = '',
+    latencyMs = 0,
     searchQuery = '',
     hasActiveTextSearch,
     hasActiveLibraryFilters,
@@ -18,6 +23,7 @@ export function updateLibraryEmptyState({
 } = {}) {
     const empty = document.getElementById('library-empty');
     const text = document.getElementById('library-empty-text');
+    const detail = document.getElementById('library-empty-detail');
     const action = document.getElementById('library-empty-action');
     if (!empty || !text || !action) return;
     if (hasImages) {
@@ -26,17 +32,40 @@ export function updateLibraryEmptyState({
     }
 
     empty.classList.remove('hidden');
-    if (hasActiveTextSearch?.(searchQuery)) {
+    if (loadError) {
+        text.textContent = 'Library could not load photos';
+        if (detail) detail.textContent = 'The photo list request failed. Refresh the page to try again.';
+        action.textContent = 'Refresh';
+        action.onclick = () => { location.reload(); };
+    } else if (tasteUnavailable) {
+        text.textContent = 'Taste sorting needs more signal';
+        if (detail) detail.textContent = tasteFallbackReason || 'Make more direct Compare choices and wait for embeddings on those photos.';
+        action.textContent = 'Compare Photos';
+        action.onclick = () => { location.href = '/compare'; };
+    } else if (isDeferred) {
+        text.textContent = 'Library is catching up';
+        if (detail) {
+            const latency = Number(latencyMs || 0);
+            detail.textContent = latency > 0
+                ? `The catalog database is busy. Retrying after a ${latency.toFixed(0)}ms stale response.`
+                : 'The catalog database is busy. Retrying shortly.';
+        }
+        action.textContent = 'Open Catalog';
+        action.onclick = () => { location.href = '/catalog'; };
+    } else if (hasActiveTextSearch?.(searchQuery)) {
         text.textContent = `No results for '${searchQuery}'`;
+        if (detail) detail.textContent = 'Try a broader search, clear filters, or wait for AI embeddings/search indexing to finish.';
         action.textContent = 'Clear Search';
         action.onclick = () => clearSearch?.();
     } else if (hasActiveLibraryFilters?.()) {
         text.textContent = 'No photos match these filters';
+        if (detail) detail.textContent = 'One of the active filters is hiding everything in the current Library view.';
         action.textContent = 'Clear Filters';
         action.onclick = () => clearLibraryFilters?.();
     } else {
         text.textContent = 'No photos in your catalog yet';
-        action.textContent = 'Scan Folder';
+        if (detail) detail.textContent = 'Add a source folder in Catalog, then scan it to populate Library.';
+        action.textContent = 'Open Catalog';
         action.onclick = () => { location.href = '/catalog'; };
     }
 }
@@ -74,12 +103,16 @@ export function restoreScrollPosition({
     const savedOffset = sessionStorageImpl.getItem(scrollOffsetStorageKey);
     if (saved !== null && savedOffset !== null) {
         const offset = Number(savedOffset);
-        if (Number.isFinite(offset)) setRankingsOffset?.(Math.max(Number(getRankingsOffset?.() || 0), offset));
+        const currentOffset = Number(getRankingsOffset?.() || 0);
+        if (Number.isFinite(offset) && offset >= 0 && offset <= currentOffset) {
+            setRankingsOffset?.(Math.max(currentOffset, offset));
+        }
         const root = libraryScrollRoot();
-        if (root) {
+        const scrollTop = Number(saved);
+        if (root && Number.isFinite(scrollTop) && offset <= currentOffset) {
             requestAnimationFrameImpl(() => {
                 requestAnimationFrameImpl(() => {
-                    root.scrollTop = Number(saved);
+                    root.scrollTop = Math.max(0, scrollTop);
                 });
             });
         }
