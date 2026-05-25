@@ -5,9 +5,11 @@ function byId(documentImpl, id) {
 
 export function showCompareEmpty({ documentImpl = globalThis.document } = {}) {
     const images = byId(documentImpl, 'compare-images');
+    const mosaic = byId(documentImpl, 'mosaic-container');
     const empty = byId(documentImpl, 'compare-empty');
     const hints = byId(documentImpl, 'compare-hints');
     if (images) images.classList.add('hidden');
+    if (mosaic) mosaic.classList.add('hidden');
     if (hints) hints.classList.add('hidden');
     if (empty) empty.classList.remove('hidden');
 }
