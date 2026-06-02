@@ -11,12 +11,14 @@ from starlette.middleware.gzip import GZipMiddleware
 
 from core import background as background_runtime
 from core.static_assets import StaticAssetContext, warm_templates
+from features.access import routes as access_routes
 from features.ai import routes as ai_routes
 from features.cache import routes as cache_routes
 from features.catalog import routes as catalog_routes
 from features.compare import routes as compare_routes
 from features.dev import routes as dev_routes
 from features.export import routes as export_routes
+from features.imports import routes as imports_routes
 from features.library import routes as library_routes
 from features.media import routes as media_routes
 from features.pages import routes as page_routes
@@ -636,6 +638,7 @@ def create_app_shell(
     object.__setattr__(shell, "runtime_services", configure_app_runtime_services(shell))
     page_routes.configure(templates=templates, template_context=shell.template_context)
     app.include_router(page_routes.router)
+    app.include_router(access_routes.router)
     app.include_router(people_routes.router)
     dev_routes.configure(started_at=static_assets.started_at, git_commit=static_assets.git_commit)
     app.include_router(dev_routes.router)
@@ -644,6 +647,7 @@ def create_app_shell(
     app.include_router(media_routes.router)
     app.include_router(library_routes.router)
     app.include_router(export_routes.router)
+    app.include_router(imports_routes.router)
     app.include_router(search_routes.router)
     app.include_router(settings_routes.router)
     app.include_router(cache_routes.router)

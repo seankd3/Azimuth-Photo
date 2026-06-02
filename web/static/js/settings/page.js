@@ -1,4 +1,6 @@
 import { createCatalogApi } from '../catalog/controller.js';
+import { createCatalogImportController } from '../catalog/imports.js';
+import { createRemoteAccessController } from '../catalog/remote_access.js';
 import { renderCatalogSources as renderCatalogSourcesCore } from '../catalog/sources.js';
 import { renderCacheTierGuide } from '../cache/guide.js';
 import { setSettingsStatus } from './status.js';
@@ -45,6 +47,7 @@ const SETTINGS_FIELDS = [
     'face_detection_size',
     'face_similarity_threshold',
     'face_merge_suggestion_threshold',
+    'import_root',
 ];
 const SETTINGS_META_POLL_MS = 30000;
 const SETTINGS_STATUS_TIMEOUT_MS = 5000;
@@ -351,6 +354,29 @@ export function createSettingsPageController({
         return collectSettingsFormCore({ fields: SETTINGS_FIELDS, settingsPageData });
     }
 
+    const importController = createCatalogImportController({
+        setSettingsStatus,
+        showToast,
+        refreshSettingsMeta: () => refreshSettingsMetaIfActive(),
+    });
+    const {
+        initImportPanel,
+        selectFiles: selectImportFiles,
+        selectFolder: selectImportFolder,
+        startImport,
+        updateDestinationMode,
+    } = importController;
+
+    const remoteAccessController = createRemoteAccessController({
+        setSettingsStatus,
+        showToast,
+    });
+    const {
+        copyRemoteUrl,
+        initRemoteAccessPanel,
+        loadRemoteAccess,
+    } = remoteAccessController;
+
     const settingsApi = createSettingsApi({
         collectSettingsForm,
         populateSettingsForm,
@@ -405,6 +431,26 @@ export function createSettingsPageController({
                 case 'add-catalog-source':
                     event.preventDefault();
                     addCatalogSource();
+                    break;
+                case 'select-import-files':
+                    event.preventDefault();
+                    selectImportFiles();
+                    break;
+                case 'select-import-folder':
+                    event.preventDefault();
+                    selectImportFolder();
+                    break;
+                case 'start-import':
+                    event.preventDefault();
+                    startImport();
+                    break;
+                case 'copy-remote-url':
+                    event.preventDefault();
+                    copyRemoteUrl();
+                    break;
+                case 'refresh-remote-access':
+                    event.preventDefault();
+                    loadRemoteAccess();
                     break;
                 case 'browse-directory-parent':
                     event.preventDefault();
@@ -528,6 +574,8 @@ export function createSettingsPageController({
         initBottomBarMeasurement();
         startAIStatusPolling(750, { immediate: true });
         bindSettingsActions();
+        initRemoteAccessPanel();
+        initImportPanel();
         const form = documentImpl.getElementById('settings-form');
         if (form) {
             form.addEventListener('submit', (e) => {
@@ -536,6 +584,7 @@ export function createSettingsPageController({
             });
         }
         documentImpl.getElementById('cache_profile')?.addEventListener('change', updateCacheProfileHint);
+        documentImpl.getElementById('import-destination-mode')?.addEventListener('change', updateDestinationMode);
         documentImpl.getElementById('embed_model_preset')?.addEventListener('change', applySelectedEmbeddingPreset);
         for (const field of THUMB_OUTPUT_FIELDS) {
             documentImpl.getElementById(field)?.addEventListener('input', updateThumbnailChangeNotice);

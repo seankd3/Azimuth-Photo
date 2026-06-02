@@ -1,4 +1,4 @@
-import { appendFilterParams } from '../query_state.js';
+import { appendFilterParams, appendScopeParams } from '../query_state.js';
 import { appendSearchParams } from '../search/query.js';
 
 
@@ -15,5 +15,6 @@ export function rankingQueryString({
     params.set('sort', sort || state.sort);
     appendFilterParams(params, state.filters);
     appendSearchParams(params, state);
+    appendScopeParams(params, state);
     return params.toString();
 }

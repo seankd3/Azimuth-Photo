@@ -33,6 +33,10 @@ export function createLegacyFilterQueryBridge({
     const EMPTY_FILTERS = { ...EMPTY_FILTERS_CORE };
     let filters = { ...EMPTY_FILTERS };
 
+    function currentImportBatch() {
+        return new URLSearchParams(locationImpl?.search || '').get('import_batch') || '';
+    }
+
     function normalizeFilterState(state = {}) {
         return normalizeFilterStateCore(state);
     }
@@ -92,6 +96,7 @@ export function createLegacyFilterQueryBridge({
         libraryNeighborLimit,
         mosaicNeighborLimit,
         compareNeighborPairs,
+        getImportBatch: currentImportBatch,
     });
 
     function syncLibraryUrlState() {

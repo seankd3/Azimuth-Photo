@@ -10,6 +10,10 @@ DEFAULT_EMBED_MODEL_PRESET_KEY = "qwen3-vl-embedding-8b"
 LEGACY_2B_PRESET_KEY = "qwen3-vl-embedding-2b"
 
 
+def _default_import_root() -> str:
+    return os.path.join(os.path.expanduser("~"), "Pictures", "photoArchive Imports")
+
+
 def _default_model_dir(model_id: str) -> str:
     safe = model_id.replace("/", "--").replace("\\", "--").replace(":", "-")
     return os.path.join(WEB_DIR, ".models", safe)
@@ -44,6 +48,7 @@ DEFAULT_SETTINGS = {
     "face_detection_size": 640,
     "face_similarity_threshold": 0.52,
     "face_merge_suggestion_threshold": 0.62,
+    "import_root": _default_import_root(),
 }
 
 EMBED_MODEL_PRESETS = {
@@ -232,6 +237,19 @@ def _resolve_cache_dir(path: str, default: str) -> str:
     return value
 
 
+def _resolve_user_dir(path: str, default: str) -> str:
+    value = (path or "").strip()
+    if not value:
+        return default
+    value = os.path.expanduser(value)
+    if not os.path.isabs(value):
+        value = os.path.join(os.path.expanduser("~"), value)
+    value = os.path.abspath(value)
+    if value == os.path.sep:
+        return default
+    return value
+
+
 def _settings_version(raw: dict) -> int:
     try:
         return int(raw.get("settings_version") or 0)
@@ -325,6 +343,10 @@ def normalize_settings(raw: dict | None) -> dict:
     normalized["face_model_dir"] = _resolve_cache_dir(
         raw.get("face_model_dir", normalized["face_model_dir"]),
         DEFAULT_SETTINGS["face_model_dir"],
+    )
+    normalized["import_root"] = _resolve_user_dir(
+        raw.get("import_root", normalized["import_root"]),
+        DEFAULT_SETTINGS["import_root"],
     )
 
     profile = str(raw.get("cache_profile", normalized["cache_profile"])).strip().lower()

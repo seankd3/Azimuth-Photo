@@ -7,10 +7,31 @@ RUN_DIR="$WEB/.run"
 PIDFILE="$RUN_DIR/photoarchive.pid"
 LOGFILE="$RUN_DIR/server.log"
 MAX_LOG_BYTES="${PHOTOARCHIVE_MAX_LOG_BYTES:-10485760}"
-HOST="${PHOTOARCHIVE_HOST:-127.0.0.1}"
+ACCESS="${PHOTOARCHIVE_ACCESS:-local}"
+resolve_tailscale_host() {
+    if ! command -v tailscale >/dev/null 2>&1; then
+        echo "PHOTOARCHIVE_ACCESS=tailscale requires the tailscale CLI." >&2
+        return 1
+    fi
+    local ip
+    ip="$(tailscale ip -4 2>/dev/null | head -n 1 | tr -d '[:space:]')"
+    if [[ -z "$ip" ]]; then
+        echo "Tailscale is not ready. Start Tailscale before starting photoArchive in tailscale mode." >&2
+        return 1
+    fi
+    printf '%s\n' "$ip"
+}
+
+if [[ "$ACCESS" == "tailscale" ]]; then
+    HOST="${PHOTOARCHIVE_HOST:-$(resolve_tailscale_host)}"
+else
+    HOST="${PHOTOARCHIVE_HOST:-127.0.0.1}"
+fi
 PORT="${PHOTOARCHIVE_PORT:-8000}"
 STOP_TIMEOUT_SECONDS="${PHOTOARCHIVE_STOP_TIMEOUT_SECONDS:-4}"
 URL="http://${HOST}:${PORT}"
+export PHOTOARCHIVE_ACCESS="$ACCESS"
+export PHOTOARCHIVE_HOST="$HOST" PHOTOARCHIVE_PORT="$PORT"
 UVICORN="$WEB/.venv/bin/uvicorn"
 MATCH_PATTERN="$WEB/.venv/bin/python .*uvicorn app:app --host ${HOST} --port ${PORT}"
 
@@ -40,6 +61,13 @@ print_status() {
     pids="$(find_pids | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
     printf 'repo: %s\n' "$ROOT"
     printf 'url:  %s\n' "$URL"
+    if [[ "$ACCESS" == "tailscale" ]] && command -v tailscale >/dev/null 2>&1; then
+        local dns_name
+        dns_name="$(tailscale status --json 2>/dev/null | python -c 'import json,sys; data=json.load(sys.stdin); print((data.get("Self") or {}).get("DNSName", "").rstrip("."))' 2>/dev/null || true)"
+        if [[ -n "$dns_name" ]]; then
+            printf 'tail: http://%s:%s\n' "$dns_name" "$PORT"
+        fi
+    fi
     printf 'log:  %s\n' "$LOGFILE"
     if [[ -n "$pids" ]]; then
         printf 'pids: %s\n' "$pids"

@@ -34,6 +34,7 @@ _get_stats: Callable[[], Awaitable[dict]] | None = None
 _count_rankings: Callable[..., Awaitable[int]] | None = None
 _get_rankings: Callable[..., Awaitable[list]] | None = None
 _get_visible_pairing_pool_counts: Callable[..., Awaitable[dict]] | None = None
+_get_import_batch_image_ids: Callable[[int], Awaitable[set[int] | None]] | None = None
 
 
 def configure(
@@ -77,6 +78,11 @@ def configure(
     _get_rankings = get_rankings
     _get_visible_pairing_pool_counts = get_visible_pairing_pool_counts
     _rankings_response_cache_ttl_seconds_provider = rankings_response_cache_ttl_seconds
+
+
+def configure_import_batches(*, get_import_batch_image_ids: Callable[[int], Awaitable[set[int] | None]]) -> None:
+    global _get_import_batch_image_ids
+    _get_import_batch_image_ids = get_import_batch_image_ids
 
 
 def invalidate_rankings_response_cache() -> None:
@@ -133,6 +139,31 @@ def _configured_rankings_response_cache_ttl_seconds() -> float:
     return float(_rankings_response_cache_ttl_seconds)
 
 
+def _normalized_import_batch_id(value) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+async def _combined_import_batch_filter(current_ids, import_batch: int = 0):
+    batch_id = _normalized_import_batch_id(import_batch)
+    if batch_id <= 0:
+        return current_ids
+    if _get_import_batch_image_ids is None:
+        raise RuntimeError("Library service is not configured")
+    batch_ids = await _get_import_batch_image_ids(batch_id)
+    if batch_ids is None:
+        return set()
+    if current_ids is None:
+        return set(batch_ids)
+    return set(int(image_id) for image_id in current_ids).intersection(batch_ids)
+
+
+def _visible_thumb_size_for_scope(import_batch: int = 0) -> str:
+    return "" if _normalized_import_batch_id(import_batch) else "sm"
+
+
 def copy_rankings_response(response: dict) -> dict:
     return response_helpers.copy_rankings_response(response)
 
@@ -159,8 +190,11 @@ async def date_groups_payload(
     people: str = "",
     q: str = "",
     deep: bool = False,
+    import_batch: int = 0,
 ) -> dict:
     search = await _configured_resolve_library_constraints(q, people=people, deep=deep)
+    search_ids = await _combined_import_batch_filter(search.get("id_filter"), import_batch)
+    visible_thumb_size = _visible_thumb_size_for_scope(import_batch)
     groups = await _configured(_get_date_groups)(
         orientation=orientation,
         compared=compared,
@@ -171,9 +205,9 @@ async def date_groups_payload(
         file_type=file_type,
         camera=camera,
         lens=lens,
-        visible_thumb_size="sm",
+        visible_thumb_size=visible_thumb_size,
         cache_root=_configured_cache_root(),
-        id_filter=search.get("id_filter"),
+        id_filter=search_ids,
         text_query=search.get("text_query") or "",
     )
     return {"groups": groups}
@@ -193,8 +227,11 @@ async def map_markers_payload(
     people: str = "",
     q: str = "",
     deep: bool = False,
+    import_batch: int = 0,
 ) -> dict:
     search = await _configured_resolve_library_constraints(q, people=people, deep=deep)
+    search_ids = await _combined_import_batch_filter(search.get("id_filter"), import_batch)
+    visible_thumb_size = _visible_thumb_size_for_scope(import_batch)
     return await _configured(_get_map_markers)(
         orientation=orientation,
         compared=compared,
@@ -205,9 +242,9 @@ async def map_markers_payload(
         file_type=file_type,
         camera=camera,
         lens=lens,
-        visible_thumb_size="sm",
+        visible_thumb_size=visible_thumb_size,
         cache_root=_configured_cache_root(),
-        id_filter=search.get("id_filter"),
+        id_filter=search_ids,
         text_query=search.get("text_query") or "",
     )
 
@@ -225,15 +262,16 @@ async def api_rankings_impl(
     orientation: str = "", compared: str = "", min_stars: int = 0,
     folder: str = "", flag: str = "", date_taken: str = "", file_type: str = "",
     camera: str = "", lens: str = "", q: str = "", deep: bool = False, people: str = "",
-    request=None,
+    import_batch: int = 0, request=None,
 ):
     limit = _configured_clamp_int(limit, 100, 1, MAX_RANKINGS_LIMIT)
     offset = _configured_clamp_int(offset, 0, 0, 1_000_000)
     search = await _configured_resolve_library_constraints(q, people=people, deep=deep)
-    search_ids = search["id_filter"]
+    search_ids = await _combined_import_batch_filter(search["id_filter"], import_batch)
     search_scores = search["scores"]
     search_mode = search["search_mode"]
     text_query = search["text_query"]
+    visible_thumb_size = _visible_thumb_size_for_scope(import_batch)
     if search_mode == "metadata" and text_query and not search_ids and not file_type:
         extension_query = text_query.lower().lstrip(".")
         if extension_query in _configured(_extension_search_terms)():
@@ -281,6 +319,7 @@ async def api_rankings_impl(
             search_mode if cacheable_search else "",
             bool(search["ai_unavailable"]) if cacheable_search else False,
             str(search.get("fallback_reason") or ""),
+            _normalized_import_batch_id(import_batch),
         )
         cached = _rankings_response_cache.get(rankings_cache_key)
         if cached and cached["expires"] > time.monotonic():
@@ -321,7 +360,7 @@ async def api_rankings_impl(
             folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
             camera=camera, lens=lens,
             id_filter=search_ids,
-            visible_thumb_size="sm", cache_root=_configured_cache_root(),
+            visible_thumb_size=visible_thumb_size, cache_root=_configured_cache_root(),
             text_query=text_query,
         )
         total_images = await total_task
@@ -344,7 +383,7 @@ async def api_rankings_impl(
             folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
             camera=camera, lens=lens,
             id_filter=search_ids,
-            visible_thumb_size="sm", cache_root=_configured_cache_root(),
+            visible_thumb_size=visible_thumb_size, cache_root=_configured_cache_root(),
             text_query=text_query,
         )
         _image_ids, matrix = await embed_cache.get_matrix(taste.get("model_key"))
@@ -404,7 +443,7 @@ async def api_rankings_impl(
             folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
             camera=camera, lens=lens,
             id_filter=search_ids,
-            visible_thumb_size="sm", cache_root=_configured_cache_root(),
+            visible_thumb_size=visible_thumb_size, cache_root=_configured_cache_root(),
             text_query=text_query,
         )
         total_images = await total_task
@@ -414,7 +453,7 @@ async def api_rankings_impl(
             folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
             camera=camera, lens=lens,
             id_filter=search_ids,
-            visible_thumb_size="sm", cache_root=_configured_cache_root(),
+            visible_thumb_size=visible_thumb_size, cache_root=_configured_cache_root(),
             text_query=text_query,
         )
         all_results = []
@@ -471,6 +510,7 @@ async def api_rankings_impl(
             search_ids is not None,
             search.get("people_active"),
             text_query,
+            _normalized_import_batch_id(import_batch),
         )
     )
     if unfiltered_rankings:
@@ -497,7 +537,7 @@ async def api_rankings_impl(
                     folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
                     camera=camera, lens=lens,
                     id_filter=search_ids,
-                    visible_thumb_size="sm", cache_root=_configured_cache_root(),
+                    visible_thumb_size=visible_thumb_size, cache_root=_configured_cache_root(),
                     text_query=text_query,
                 )
             )
@@ -507,7 +547,7 @@ async def api_rankings_impl(
         folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
         camera=camera, lens=lens,
         id_filter=search_ids,
-        visible_thumb_size="sm", cache_root=_configured_cache_root(),
+        visible_thumb_size=visible_thumb_size, cache_root=_configured_cache_root(),
         text_query=text_query,
     )
     if unfiltered_rankings:
@@ -536,7 +576,7 @@ async def api_rankings_impl(
                         folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
                         camera=camera, lens=lens,
                         id_filter=search_ids,
-                        visible_thumb_size="sm", cache_root=_configured_cache_root(),
+                        visible_thumb_size=visible_thumb_size, cache_root=_configured_cache_root(),
                         text_query=text_query,
                     )
                 )

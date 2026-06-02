@@ -1,4 +1,4 @@
-import { appendFilterParams } from '../query_state.js';
+import { appendFilterParams, appendScopeParams } from '../query_state.js';
 import { appendSearchParams } from '../search/query.js';
 
 
@@ -20,6 +20,7 @@ export function buildMosaicUrl({
     params.set('grid_elo', String(gridElo));
     appendFilterParams(params, state.filters);
     appendSearchParams(params, state);
+    appendScopeParams(params, state);
     if (exclude) params.set('exclude', exclude);
     return `/api/mosaic/next?${params.toString()}`;
 }
@@ -36,5 +37,6 @@ export function buildCompareUrl({
     params.set('mode', mode);
     appendFilterParams(params, state.filters);
     appendSearchParams(params, state);
+    appendScopeParams(params, state);
     return `/api/compare/next?${params.toString()}`;
 }

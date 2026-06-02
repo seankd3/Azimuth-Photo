@@ -1,5 +1,6 @@
 import {
     buildFilterNeighborStates,
+    appendScopeParams,
     filterParams,
     filterQueryString,
     normalizeFilterState,
@@ -24,6 +25,7 @@ export function createQueryController({
     libraryNeighborLimit,
     mosaicNeighborLimit,
     compareNeighborPairs,
+    getImportBatch = () => '',
 } = {}) {
     function currentSearchMode() {
         return searchModeForQuery(getSearchQuery?.() || '');
@@ -41,6 +43,7 @@ export function createQueryController({
             sort: overrides.sort || sortValueForState(field, desc),
             searchMode: mode,
             searchQuery: query,
+            importBatch: overrides.importBatch ?? getImportBatch(),
         };
     }
 
@@ -49,7 +52,9 @@ export function createQueryController({
     }
 
     function currentFilterQueryString(state = currentQueryState()) {
-        return filterQueryString(state);
+        const params = new URLSearchParams(filterQueryString(state));
+        appendScopeParams(params, state);
+        return params.toString();
     }
 
     function currentFilterNeighborStates(baseState = getFilters()) {

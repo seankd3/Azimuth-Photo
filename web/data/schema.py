@@ -5,7 +5,7 @@ import os
 from data.repositories import catalog as catalog_repository
 
 EXPECTED_EMBEDDING_DIM = 2048  # Qwen3-VL-Embedding-2B native dimension
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS catalog_sources (
@@ -345,6 +345,38 @@ CREATE TABLE IF NOT EXISTS cache_metadata (
     replace_stale_thumbnails INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS import_batches (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending',
+    destination_mode TEXT NOT NULL DEFAULT 'date_shoot',
+    destination_root TEXT NOT NULL DEFAULT '',
+    destination_path TEXT NOT NULL DEFAULT '',
+    source_id INTEGER DEFAULT NULL REFERENCES catalog_sources(id),
+    preserve_structure INTEGER NOT NULL DEFAULT 0,
+    total_files INTEGER NOT NULL DEFAULT 0,
+    imported_files INTEGER NOT NULL DEFAULT 0,
+    skipped_files INTEGER NOT NULL DEFAULT 0,
+    collision_count INTEGER NOT NULL DEFAULT 0,
+    error TEXT NOT NULL DEFAULT '',
+    created_at REAL NOT NULL DEFAULT (strftime('%s', 'now')),
+    completed_at REAL DEFAULT NULL
+);
+
+CREATE TABLE IF NOT EXISTS import_batch_images (
+    batch_id INTEGER NOT NULL REFERENCES import_batches(id) ON DELETE CASCADE,
+    image_id INTEGER NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+    filepath TEXT NOT NULL,
+    original_name TEXT NOT NULL DEFAULT '',
+    imported_at REAL NOT NULL DEFAULT (strftime('%s', 'now')),
+    PRIMARY KEY (batch_id, image_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_import_batches_created
+ON import_batches(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_import_batch_images_image
+ON import_batch_images(image_id, batch_id);
+
 CREATE TABLE IF NOT EXISTS people (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL DEFAULT '',
@@ -645,6 +677,8 @@ REQUIRED_TABLES = {
     "search_query_embeddings",
     "cache_entries",
     "cache_metadata",
+    "import_batches",
+    "import_batch_images",
     "people",
     "face_detections",
     "face_assignments",
@@ -706,6 +740,8 @@ REQUIRED_INDEXES = {
     "idx_search_query_embeddings_used",
     "idx_cache_entries_root_size_bytes",
     "idx_cache_entries_root_size_accessed_id",
+    "idx_import_batches_created",
+    "idx_import_batch_images_image",
     "idx_people_status_seen",
     "idx_face_detections_image_model",
     "idx_face_detections_status_model",

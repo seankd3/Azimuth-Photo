@@ -26,7 +26,7 @@ async def api_rankings(
     orientation: str = "", compared: str = "", min_stars: int = 0,
     folder: str = "", flag: str = "", date_taken: str = "", file_type: str = "",
     camera: str = "", lens: str = "", q: str = "", deep: bool = False, people: str = "",
-    request: Request = None,
+    import_batch: int = 0, request: Request = None,
 ):
     if _rankings_handler is None:
         raise RuntimeError("Library routes are not configured")
@@ -49,6 +49,7 @@ async def api_rankings(
                 q=q,
                 deep=deep,
                 people=people,
+                import_batch=import_batch,
                 request=request,
             )
     except Exception as exc:
@@ -76,6 +77,7 @@ async def api_date_groups(
     orientation: str = "", compared: str = "", min_stars: int = 0,
     folder: str = "", flag: str = "", date_taken: str = "", file_type: str = "",
     camera: str = "", lens: str = "", people: str = "", q: str = "", deep: bool = False,
+    import_batch: int = 0,
 ):
     """Return date groups with counts for the scrubber, respecting active filters."""
     return await library_service.date_groups_payload(
@@ -90,6 +92,7 @@ async def api_date_groups(
         lens=lens,
         people=people,
         q=q,
+        import_batch=import_batch,
         deep=deep,
     )
 
@@ -99,6 +102,7 @@ async def api_map_markers(
     orientation: str = "", compared: str = "", min_stars: int = 0,
     folder: str = "", flag: str = "", date_taken: str = "", file_type: str = "",
     camera: str = "", lens: str = "", people: str = "", q: str = "", deep: bool = False,
+    import_batch: int = 0,
 ):
     """Return images with GPS data for map display."""
     return await library_service.map_markers_payload(
@@ -113,6 +117,7 @@ async def api_map_markers(
         lens=lens,
         people=people,
         q=q,
+        import_batch=import_batch,
         deep=deep,
     )
 

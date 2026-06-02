@@ -17,6 +17,7 @@ from data.repositories.common import chunked as _chunked
 from data.repositories import embeddings as embedding_repository
 from data.repositories import filter_options as filter_options_repository
 from data.repositories import images as image_repository
+from data.repositories import imports as import_repository
 from data.repositories import metadata_search as metadata_search_repository
 from data.repositories import people as people_repository
 from data.repositories import ratings as rating_repository
@@ -497,6 +498,10 @@ async def purge_source_catalog_data(source_id: int) -> dict:
 
 async def get_recent_active_images(limit: int = 10):
     return await image_repository.get_recent_active_images(DB_PATH, limit)
+
+
+async def get_import_batch_image_ids(batch_id: int) -> set[int] | None:
+    return await import_repository.import_batch_image_ids(DB_PATH, batch_id)
 
 
 async def set_image_status(image_id: int, status: str):

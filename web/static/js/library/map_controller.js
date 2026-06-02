@@ -1,4 +1,4 @@
-import { appendFilterParams } from '../query_state.js';
+import { appendFilterParams, appendScopeParams } from '../query_state.js';
 import { appendSearchParams } from '../search/query.js';
 import {
     buildMapPopup,
@@ -145,6 +145,7 @@ export function createLibraryMapController({
 
         const mapParams = appendFilterParams(new URLSearchParams(), currentFilterState?.());
         appendSearchParams(mapParams, currentQueryState?.());
+        appendScopeParams(mapParams, currentQueryState?.());
         const query = mapParams.toString();
         const url = `/api/map/markers${query ? `?${query}` : ''}`;
         try {

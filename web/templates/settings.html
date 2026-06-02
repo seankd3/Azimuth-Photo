@@ -82,11 +82,93 @@
     </section>
 
     <form class="settings-grid" id="settings-form">
+        <section class="settings-card settings-card-wide remote-access-card" id="remote-access-card">
+            <h2>Remote Access <span class="help-tip" tabindex="0" role="img" aria-label="Remote access help" data-tooltip="Use the same photoArchive interface from another computer through Tailscale. Omarchy still runs the app and stores the archive."></span></h2>
+            <p class="settings-card-copy">Open the full photoArchive console from your Windows laptop through Tailscale.</p>
+            <div class="remote-access-layout">
+                <div>
+                    <strong id="remote-access-title">Checking Tailscale...</strong>
+                    <div class="settings-help-text" id="remote-access-detail">Looking for the private Omarchy address.</div>
+                </div>
+                <label class="settings-field remote-access-url-field">
+                    <span>Tailscale URL</span>
+                    <input id="remote-access-url" type="text" readonly spellcheck="false">
+                </label>
+                <div class="settings-actions remote-access-actions">
+                    <button class="bar-btn" type="button" data-action="copy-remote-url">Copy URL</button>
+                    <button class="bar-btn subtle" type="button" data-action="refresh-remote-access">Refresh</button>
+                </div>
+            </div>
+        </section>
+
+        <section class="settings-card settings-card-wide import-card" id="import-section">
+            <h2>Import <span class="help-tip" tabindex="0" role="img" aria-label="Import help" data-tooltip="Copy photos from this browser into Omarchy, add them to the catalog, then open the new import in Library."></span></h2>
+            <p class="settings-card-copy">Copy photos from the laptop into the Omarchy archive.</p>
+            <input id="import-file-input" class="hidden" type="file" multiple accept="image/*,.dng,.cr3,.tif,.tiff,.webp">
+            <input id="import-folder-input" class="hidden" type="file" multiple webkitdirectory directory>
+            <div class="import-layout">
+                <div class="import-drop-zone" id="import-drop-zone" role="button" tabindex="0">
+                    <strong>Drop photos here</strong>
+                    <span id="import-selection-summary">No photos selected</span>
+                    <div class="settings-actions import-source-actions">
+                        <button class="bar-btn" type="button" data-action="select-import-files">Choose Files</button>
+                        <button class="bar-btn subtle" type="button" data-action="select-import-folder">Choose Folder</button>
+                    </div>
+                </div>
+                <div class="import-controls">
+                    <div class="settings-split-grid">
+                        <label class="settings-field">
+                            <span>Shoot date</span>
+                            <input id="import-shoot-date" type="date">
+                        </label>
+                        <label class="settings-field">
+                            <span>Shoot name</span>
+                            <input id="import-shoot-name" type="text" placeholder="Weekend trip" autocomplete="off">
+                        </label>
+                    </div>
+                    <label class="settings-field">
+                        <span>Destination style</span>
+                        <select id="import-destination-mode">
+                            <option value="date_shoot">Date + shoot folder</option>
+                            <option value="preset">Destination preset</option>
+                            <option value="manual">Manual Omarchy folder</option>
+                        </select>
+                    </label>
+                    <div data-import-mode-panel="date_shoot">
+                        <label class="settings-field">
+                            <span>Import inbox</span>
+                            <input id="import_root" type="text" spellcheck="false" autocomplete="off">
+                        </label>
+                    </div>
+                    <div class="hidden" data-import-mode-panel="preset">
+                        <label class="settings-field">
+                            <span>Preset</span>
+                            <select id="import-preset-path"></select>
+                        </label>
+                    </div>
+                    <div class="hidden" data-import-mode-panel="manual">
+                        <label class="settings-field">
+                            <span>Omarchy folder</span>
+                            <input id="import-manual-destination" type="text" spellcheck="false" autocomplete="off" placeholder="/home/sean/Pictures/Archive">
+                        </label>
+                    </div>
+                    <label class="settings-checkbox">
+                        <input id="import-preserve-structure" type="checkbox" checked>
+                        <span>Preserve folder structure when importing a folder.</span>
+                    </label>
+                    <div class="settings-actions">
+                        <button class="bar-btn" type="button" id="import-start-btn" data-action="start-import" disabled>Import to Omarchy</button>
+                        <span class="settings-help-text" id="import-status">Choose photos to import.</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
         <section class="settings-card" id="catalog-sources-section">
-            <h2>Catalog Sources <span class="help-tip" tabindex="0" role="img" aria-label="Catalog sources help" data-tooltip="Source folders are watched by the catalog, but photoArchive never edits or deletes your original files."></span></h2>
-            <p class="settings-card-copy">Folders included in this catalog. Removing a folder can either hide its photos while keeping catalog data, or delete the folder’s catalog rows and generated cache.</p>
+            <h2>Omarchy Folders <span class="help-tip" tabindex="0" role="img" aria-label="Omarchy folders help" data-tooltip="These folders live on Omarchy and are watched by the catalog. Use Import above to copy laptop photos into Omarchy."></span></h2>
+            <p class="settings-card-copy">Server-side folders included in this catalog. Removing a folder can either hide its photos while keeping catalog data, or delete the folder’s catalog rows and generated cache.</p>
             <label class="settings-field">
-                <span>Add folder</span>
+                <span>Add Omarchy folder</span>
                 <input id="scan-folder" type="text" spellcheck="false" autocomplete="off">
             </label>
             <div class="settings-actions">

@@ -26,6 +26,10 @@ export const FILTER_QUERY_KEYS = [
     'people',
 ];
 
+export const SCOPE_QUERY_KEYS = [
+    'import_batch',
+];
+
 export function normalizeFilterState(state = {}) {
     return {
         orientation: state.orientation || '',
@@ -53,6 +57,13 @@ export function appendFilterParams(params, state = EMPTY_FILTERS) {
     if (normalized.camera) params.set('camera', normalized.camera);
     if (normalized.lens) params.set('lens', normalized.lens);
     if (normalized.people) params.set('people', normalized.people);
+    return params;
+}
+
+
+export function appendScopeParams(params, state = {}) {
+    const importBatch = state.importBatch || state.import_batch || '';
+    if (importBatch) params.set('import_batch', importBatch);
     return params;
 }
 

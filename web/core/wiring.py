@@ -5,6 +5,7 @@ from features.cache import routes as cache_routes
 from features.catalog import routes as catalog_routes
 from features.compare import routes as compare_routes
 from features.export import routes as export_routes
+from features.imports import routes as imports_routes
 from features.library import routes as library_routes
 from features.media import routes as media_routes
 from features.people import routes as people_routes
@@ -179,10 +180,14 @@ def configure_catalog_routes() -> None:
 
 
 def configure_library_routes() -> None:
+    import db
     from features.library import service as library_service
 
     library_routes.configure(
         rankings_handler=lambda **kwargs: library_service.api_rankings_impl(**kwargs),
+    )
+    library_service.configure_import_batches(
+        get_import_batch_image_ids=lambda batch_id: db.get_import_batch_image_ids(batch_id),
     )
 
 
