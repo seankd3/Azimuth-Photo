@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ANDROID_DIR="$ROOT/android"
+SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}}"
+GRADLE_VERSION="${PHOTOARCHIVE_GRADLE_VERSION:-8.10.2}"
+DIST_DIR="$ANDROID_DIR/.gradle-dist"
+GRADLE_DIR="$DIST_DIR/gradle-${GRADLE_VERSION}"
+GRADLE_ZIP="$DIST_DIR/gradle-${GRADLE_VERSION}-bin.zip"
+GRADLE_USER_HOME="${PHOTOARCHIVE_GRADLE_USER_HOME:-$ANDROID_DIR/.gradle}"
+
+if [[ ! -d "$ANDROID_DIR" ]]; then
+    echo "Missing Android project at $ANDROID_DIR" >&2
+    exit 1
+fi
+
+if [[ ! -f "$SDK_ROOT/platforms/android-35/android.jar" ]]; then
+    echo "Android SDK platform 35 was not found under $SDK_ROOT." >&2
+    echo "Set ANDROID_HOME or install platform android-35." >&2
+    exit 1
+fi
+
+if command -v gradle >/dev/null 2>&1; then
+    GRADLE_BIN="$(command -v gradle)"
+else
+    GRADLE_BIN="$GRADLE_DIR/bin/gradle"
+    if [[ ! -x "$GRADLE_BIN" ]]; then
+        mkdir -p "$DIST_DIR"
+        if [[ ! -f "$GRADLE_ZIP" ]]; then
+            if ! command -v curl >/dev/null 2>&1; then
+                echo "gradle is not installed and curl is unavailable for downloading Gradle." >&2
+                exit 1
+            fi
+            echo "Downloading Gradle ${GRADLE_VERSION}..."
+            curl -L --fail --output "$GRADLE_ZIP" \
+                "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip"
+        fi
+        if ! command -v unzip >/dev/null 2>&1; then
+            echo "unzip is required to unpack Gradle." >&2
+            exit 1
+        fi
+        unzip -q "$GRADLE_ZIP" -d "$DIST_DIR"
+    fi
+fi
+
+export ANDROID_HOME="$SDK_ROOT"
+export ANDROID_SDK_ROOT="$SDK_ROOT"
+export GRADLE_USER_HOME
+
+if [[ $# -eq 0 ]]; then
+    set -- :app:assembleDebug
+fi
+
+cd "$ANDROID_DIR"
+"$GRADLE_BIN" "$@"
+

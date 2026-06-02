@@ -15,6 +15,12 @@ web/*.db-shm
 web/*.db-wal
 __pycache__/
 
+# Android
+android/.gradle/
+android/.gradle-dist/
+android/build/
+android/app/build/
+
 # Tools
 .codex
 .gstack/
