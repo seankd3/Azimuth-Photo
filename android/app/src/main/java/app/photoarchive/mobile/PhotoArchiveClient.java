@@ -36,6 +36,11 @@ final class PhotoArchiveClient {
         void onError(String message);
     }
 
+    interface StatusCallback {
+        void onSuccess(ConnectionStatus status);
+        void onError(String message);
+    }
+
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
 
     void fetchPhotos(String serverUrl, String query, int offset, int limit, PhotosCallback callback) {
@@ -54,6 +59,17 @@ final class PhotoArchiveClient {
             try {
                 ImportResult result = postImport(context, serverUrl, uris);
                 runOnMain(() -> callback.onSuccess(result.imported, result.skipped));
+            } catch (Exception error) {
+                runOnMain(() -> callback.onError(cleanMessage(error)));
+            }
+        });
+    }
+
+    void checkConnection(String serverUrl, StatusCallback callback) {
+        executor.execute(() -> {
+            try {
+                ConnectionStatus status = requestStatus(serverUrl);
+                runOnMain(() -> callback.onSuccess(status));
             } catch (Exception error) {
                 runOnMain(() -> callback.onError(cleanMessage(error)));
             }
@@ -86,6 +102,11 @@ final class PhotoArchiveClient {
         }
         int total = json.optInt("total_images", photos.size() + offset);
         return new PhotoPage(photos, total, json.optBoolean("status_stale", false));
+    }
+
+    private ConnectionStatus requestStatus(String serverUrl) throws Exception {
+        JSONObject json = new JSONObject(get(normalize(serverUrl) + "/api/rankings?sort=date_taken&limit=1&offset=0"));
+        return new ConnectionStatus(json.optInt("total_images", 0), json.optBoolean("status_stale", false));
     }
 
     private ImportResult postImport(Context context, String serverUrl, List<Uri> uris) throws Exception {

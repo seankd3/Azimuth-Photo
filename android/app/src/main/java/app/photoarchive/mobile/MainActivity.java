@@ -7,7 +7,6 @@ import android.content.ClipData;
 import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.Typeface;
-import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
 import android.text.InputType;
@@ -32,17 +31,13 @@ public class MainActivity extends Activity {
     private static final int PAGE_SIZE = 90;
     private static final int PICK_IMPORT_PHOTOS = 3001;
 
-    private final int colorBackground = Color.rgb(12, 13, 14);
-    private final int colorPanel = Color.rgb(24, 25, 27);
-    private final int colorTile = Color.rgb(34, 37, 40);
-    private final int colorText = Color.rgb(242, 242, 242);
-    private final int colorMuted = Color.rgb(160, 166, 173);
-    private final int colorAccent = Color.rgb(144, 199, 255);
+    private final AppTheme theme = new AppTheme();
 
     private ServerSettings serverSettings;
     private PhotoArchiveClient client;
     private ImageLoader imageLoader;
     private PhotoAdapter adapter;
+    private BottomNav bottomNav;
 
     private String serverUrl;
     private String activeQuery = "";
@@ -54,6 +49,7 @@ public class MainActivity extends Activity {
     private TextView titleView;
     private TextView subtitleView;
     private TextView serverChip;
+    private TextView statusLine;
     private TextView emptyView;
     private ProgressBar progressBar;
     private EditText searchInput;
@@ -66,11 +62,12 @@ public class MainActivity extends Activity {
         serverUrl = serverSettings.load();
         client = new PhotoArchiveClient();
         imageLoader = new ImageLoader();
-        adapter = new PhotoAdapter(this, imageLoader, () -> serverUrl, colorTile, colorMuted);
+        adapter = new PhotoAdapter(this, imageLoader, () -> serverUrl, theme.tile, theme.muted);
 
-        getWindow().setStatusBarColor(colorBackground);
-        getWindow().setNavigationBarColor(colorBackground);
+        getWindow().setStatusBarColor(theme.background);
+        getWindow().setNavigationBarColor(theme.background);
         buildInterface();
+        checkServer();
         loadFresh();
     }
 
@@ -84,74 +81,86 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode != PICK_IMPORT_PHOTOS || resultCode != RESULT_OK || data == null) {
-            return;
-        }
+        if (requestCode != PICK_IMPORT_PHOTOS || resultCode != RESULT_OK || data == null) return;
         List<Uri> uris = selectedUris(data);
-        if (uris.isEmpty()) {
-            return;
-        }
-        importPhotos(uris);
+        if (!uris.isEmpty()) confirmImport(uris);
     }
 
     private void buildInterface() {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(colorBackground);
+        root.setBackgroundColor(theme.background);
         setContentView(root);
 
+        root.addView(buildHeader(), new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+        ));
+        root.addView(buildContent(), new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0,
+                1
+        ));
+
+        bottomNav = new BottomNav(
+                this,
+                theme,
+                this::showArchive,
+                this::focusSearch,
+                this::choosePhotosToImport,
+                this::showServerDialog
+        );
+        root.addView(bottomNav.view(), new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+        ));
+    }
+
+    private LinearLayout buildHeader() {
         LinearLayout top = new LinearLayout(this);
         top.setOrientation(LinearLayout.VERTICAL);
         top.setPadding(dp(16), dp(14), dp(16), dp(10));
-        root.addView(top, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-        ));
 
         LinearLayout titleRow = new LinearLayout(this);
         titleRow.setGravity(Gravity.CENTER_VERTICAL);
-        top.addView(titleRow, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-        ));
+        top.addView(titleRow);
 
-        titleView = new TextView(this);
-        titleView.setText("Photos");
-        titleView.setTextColor(colorText);
-        titleView.setTextSize(28);
-        titleView.setTypeface(Typeface.DEFAULT_BOLD);
+        titleView = theme.label(this, "Archive", 28, theme.text, true);
         titleRow.addView(titleView, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
 
-        serverChip = chip("Omarchy");
+        serverChip = theme.chip(this, "Omarchy");
         serverChip.setOnClickListener(view -> showServerDialog());
         titleRow.addView(serverChip);
 
-        subtitleView = new TextView(this);
-        subtitleView.setTextColor(colorMuted);
-        subtitleView.setTextSize(14);
-        subtitleView.setPadding(0, dp(6), 0, dp(10));
+        subtitleView = theme.label(this, "Self-hosted through photoArchive", 14, theme.muted, false);
+        subtitleView.setPadding(0, dp(6), 0, dp(6));
         top.addView(subtitleView);
 
+        statusLine = theme.label(this, "Checking server...", 12, theme.muted, false);
+        statusLine.setPadding(0, 0, 0, dp(10));
+        top.addView(statusLine);
+
+        top.addView(buildSearchRow());
+        return top;
+    }
+
+    private LinearLayout buildSearchRow() {
         LinearLayout searchRow = new LinearLayout(this);
         searchRow.setGravity(Gravity.CENTER_VERTICAL);
-        searchRow.setPadding(0, 0, 0, dp(4));
-        top.addView(searchRow, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-        ));
 
         searchInput = new EditText(this);
         searchInput.setSingleLine(true);
-        searchInput.setHint("Search people, places, filenames");
+        searchInput.setHint("People, places, filenames");
         searchInput.setHintTextColor(Color.rgb(118, 124, 131));
-        searchInput.setTextColor(colorText);
+        searchInput.setTextColor(theme.text);
         searchInput.setTextSize(15);
         searchInput.setInputType(InputType.TYPE_CLASS_TEXT);
         searchInput.setImeOptions(EditorInfo.IME_ACTION_SEARCH);
         searchInput.setPadding(dp(14), 0, dp(14), 0);
-        searchInput.setBackground(roundRect(Color.rgb(22, 23, 25), dp(16), Color.rgb(48, 51, 55), 1));
+        searchInput.setBackground(theme.roundRect(Color.rgb(22, 23, 25), dp(16), Color.rgb(48, 51, 55), 1));
         searchInput.setOnEditorActionListener((view, actionId, event) -> {
             if (actionId == EditorInfo.IME_ACTION_SEARCH) {
+                bottomNav.setActive("Search");
                 loadFresh();
                 return true;
             }
@@ -159,21 +168,19 @@ public class MainActivity extends Activity {
         });
         searchRow.addView(searchInput, new LinearLayout.LayoutParams(0, dp(46), 1));
 
-        Button searchButton = actionButton("Search");
-        searchButton.setOnClickListener(view -> loadFresh());
-        LinearLayout.LayoutParams searchButtonParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                dp(46)
-        );
-        searchButtonParams.setMargins(dp(8), 0, 0, 0);
-        searchRow.addView(searchButton, searchButtonParams);
+        Button searchButton = theme.actionButton(this, "Search");
+        searchButton.setOnClickListener(view -> {
+            bottomNav.setActive("Search");
+            loadFresh();
+        });
+        LinearLayout.LayoutParams buttonParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(46));
+        buttonParams.setMargins(dp(8), 0, 0, 0);
+        searchRow.addView(searchButton, buttonParams);
+        return searchRow;
+    }
 
+    private FrameLayout buildContent() {
         FrameLayout content = new FrameLayout(this);
-        root.addView(content, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                0,
-                1
-        ));
 
         gridView = new GridView(this);
         gridView.setNumColumns(3);
@@ -182,13 +189,12 @@ public class MainActivity extends Activity {
         gridView.setHorizontalSpacing(dp(2));
         gridView.setPadding(dp(2), dp(2), dp(2), dp(96));
         gridView.setClipToPadding(false);
-        gridView.setBackgroundColor(colorBackground);
+        gridView.setBackgroundColor(theme.background);
         gridView.setAdapter(adapter);
         gridView.setOnItemClickListener((parent, view, position, id) -> openPhoto((Photo) adapter.getItem(position)));
         gridView.setOnScrollListener(new AbsListView.OnScrollListener() {
             @Override
             public void onScrollStateChanged(AbsListView view, int scrollState) {
-                // No-op.
             }
 
             @Override
@@ -203,9 +209,7 @@ public class MainActivity extends Activity {
                 FrameLayout.LayoutParams.MATCH_PARENT
         ));
 
-        emptyView = new TextView(this);
-        emptyView.setTextColor(colorMuted);
-        emptyView.setTextSize(16);
+        emptyView = theme.label(this, "", 16, theme.muted, false);
         emptyView.setGravity(Gravity.CENTER);
         emptyView.setPadding(dp(32), dp(32), dp(32), dp(32));
         emptyView.setVisibility(TextView.GONE);
@@ -219,27 +223,25 @@ public class MainActivity extends Activity {
         FrameLayout.LayoutParams progressParams = new FrameLayout.LayoutParams(dp(48), dp(48));
         progressParams.gravity = Gravity.CENTER;
         content.addView(progressBar, progressParams);
+        return content;
+    }
 
-        LinearLayout bottom = new LinearLayout(this);
-        bottom.setGravity(Gravity.CENTER);
-        bottom.setPadding(dp(12), dp(8), dp(12), dp(12));
-        bottom.setBackgroundColor(Color.rgb(18, 19, 21));
-        root.addView(bottom, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-        ));
+    private void showArchive() {
+        titleView.setText("Archive");
+        bottomNav.setActive("Archive");
+        searchInput.setText("");
+        loadFresh();
+    }
 
-        bottom.addView(bottomButton("Photos", () -> {
-            searchInput.setText("");
-            loadFresh();
-        }), bottomButtonParams());
-        bottom.addView(bottomButton("Search", () -> searchInput.requestFocus()), bottomButtonParams());
-        bottom.addView(bottomButton("Import", this::choosePhotosToImport), bottomButtonParams());
-        bottom.addView(bottomButton("Server", this::showServerDialog), bottomButtonParams());
+    private void focusSearch() {
+        titleView.setText("Search");
+        bottomNav.setActive("Search");
+        searchInput.requestFocus();
     }
 
     private void loadFresh() {
         activeQuery = searchInput.getText().toString().trim();
+        titleView.setText(activeQuery.isEmpty() ? "Archive" : "Search");
         offset = 0;
         totalImages = 0;
         endReached = false;
@@ -260,22 +262,14 @@ public class MainActivity extends Activity {
             public void onSuccess(PhotoPage page) {
                 loading = false;
                 progressBar.setVisibility(ProgressBar.GONE);
-                if (firstPage) {
-                    adapter.clear();
-                }
+                if (firstPage) adapter.clear();
                 adapter.addPhotos(page.photos);
                 offset += page.photos.size();
                 totalImages = page.totalImages;
                 endReached = page.photos.isEmpty() || offset >= Math.max(page.totalImages, offset);
                 prefetchNextFew(page.photos);
                 updateSummary(null);
-                if (adapter.getCount() == 0) {
-                    showEmpty(activeQuery.isEmpty()
-                            ? "No photos found on this server yet."
-                            : "No matches for \"" + activeQuery + "\".");
-                } else {
-                    emptyView.setVisibility(TextView.GONE);
-                }
+                showEmptyIfNeeded();
             }
 
             @Override
@@ -283,11 +277,31 @@ public class MainActivity extends Activity {
                 loading = false;
                 progressBar.setVisibility(ProgressBar.GONE);
                 updateSummary(null);
+                statusLine.setTextColor(Color.rgb(255, 167, 167));
+                statusLine.setText("Offline: " + message);
                 if (adapter.getCount() == 0) {
-                    showEmpty("Cannot reach photoArchive.\n\n" + message);
+                    showEmpty("Cannot reach photoArchive.\n\nCheck that Tailscale and the Omarchy server are running.");
                 } else {
                     Toast.makeText(MainActivity.this, message, Toast.LENGTH_LONG).show();
                 }
+            }
+        });
+    }
+
+    private void checkServer() {
+        statusLine.setTextColor(theme.muted);
+        statusLine.setText("Checking server...");
+        client.checkConnection(serverUrl, new PhotoArchiveClient.StatusCallback() {
+            @Override
+            public void onSuccess(ConnectionStatus status) {
+                statusLine.setTextColor(status.stale ? theme.muted : theme.good);
+                statusLine.setText(String.format(Locale.US, "Connected privately. %,d photos available.", status.totalImages));
+            }
+
+            @Override
+            public void onError(String message) {
+                statusLine.setTextColor(Color.rgb(255, 167, 167));
+                statusLine.setText("Offline: " + message);
             }
         });
     }
@@ -311,46 +325,57 @@ public class MainActivity extends Activity {
         spinnerParams.gravity = Gravity.CENTER;
         frame.addView(spinner, spinnerParams);
 
+        frame.addView(photoInfoPanel(photo, dialog), infoPanelParams());
+        imageLoader.loadInto(photo.previewUrl(serverUrl), imageView, Color.BLACK, () -> spinner.setVisibility(ProgressBar.GONE));
+        dialog.show();
+    }
+
+    private LinearLayout photoInfoPanel(Photo photo, Dialog dialog) {
         LinearLayout info = new LinearLayout(this);
         info.setOrientation(LinearLayout.VERTICAL);
         info.setPadding(dp(18), dp(14), dp(18), dp(20));
         info.setBackgroundColor(Color.argb(210, 0, 0, 0));
 
-        TextView name = new TextView(this);
-        name.setText(photo.filename);
-        name.setTextColor(Color.WHITE);
-        name.setTextSize(17);
-        name.setTypeface(Typeface.DEFAULT_BOLD);
+        TextView name = theme.label(this, photo.filename, 17, Color.WHITE, true);
         info.addView(name);
 
-        TextView detail = new TextView(this);
-        detail.setText(photo.detailLine());
-        detail.setTextColor(Color.rgb(210, 214, 218));
-        detail.setTextSize(13);
+        TextView detail = theme.label(this, photo.detailLine(), 13, Color.rgb(210, 214, 218), false);
         detail.setPadding(0, dp(4), 0, dp(10));
         info.addView(detail);
 
-        Button close = actionButton("Close");
+        Button close = theme.actionButton(this, "Close");
         close.setOnClickListener(view -> dialog.dismiss());
         info.addView(close, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(42)));
+        return info;
+    }
 
-        FrameLayout.LayoutParams infoParams = new FrameLayout.LayoutParams(
+    private FrameLayout.LayoutParams infoPanelParams() {
+        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT
         );
-        infoParams.gravity = Gravity.BOTTOM;
-        frame.addView(info, infoParams);
-
-        imageLoader.loadInto(photo.previewUrl(serverUrl), imageView, Color.BLACK, () -> spinner.setVisibility(ProgressBar.GONE));
-        dialog.show();
+        params.gravity = Gravity.BOTTOM;
+        return params;
     }
 
     private void choosePhotosToImport() {
+        titleView.setText("Import");
+        bottomNav.setActive("Import");
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("image/*");
         intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
         startActivityForResult(Intent.createChooser(intent, "Choose photos for Omarchy"), PICK_IMPORT_PHOTOS);
+    }
+
+    private void confirmImport(List<Uri> uris) {
+        String count = uris.size() + " photo" + (uris.size() == 1 ? "" : "s");
+        new AlertDialog.Builder(this)
+                .setTitle("Import to Omarchy")
+                .setMessage("Send " + count + " into photoArchive. Originals stay on this phone; the server receives a copy.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Import", (dialog, which) -> importPhotos(uris))
+                .show();
     }
 
     private void importPhotos(List<Uri> uris) {
@@ -360,7 +385,9 @@ public class MainActivity extends Activity {
             @Override
             public void onSuccess(int imported, int skipped) {
                 progressBar.setVisibility(ProgressBar.GONE);
-                Toast.makeText(MainActivity.this, "Imported " + imported + " photo" + (imported == 1 ? "" : "s") + ".", Toast.LENGTH_LONG).show();
+                String skippedText = skipped > 0 ? " " + skipped + " already existed." : "";
+                Toast.makeText(MainActivity.this, "Imported " + imported + " photo" + (imported == 1 ? "" : "s") + "." + skippedText, Toast.LENGTH_LONG).show();
+                checkServer();
                 loadFresh();
             }
 
@@ -388,6 +415,8 @@ public class MainActivity extends Activity {
     }
 
     private void showServerDialog() {
+        titleView.setText("Server");
+        bottomNav.setActive("Server");
         EditText input = new EditText(this);
         input.setSingleLine(true);
         input.setInputType(InputType.TYPE_TEXT_VARIATION_URI);
@@ -396,7 +425,7 @@ public class MainActivity extends Activity {
 
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("Self-hosted server")
-                .setMessage("Use your Omarchy Tailscale URL. The app stores this URL locally and talks directly to photoArchive.")
+                .setMessage("Use your Omarchy Tailscale URL. The app stores only this URL and talks directly to photoArchive.")
                 .setView(input)
                 .setNegativeButton("Cancel", null)
                 .setNeutralButton("Use Omarchy", null)
@@ -420,6 +449,7 @@ public class MainActivity extends Activity {
         serverUrl = normalized;
         serverSettings.save(serverUrl);
         adapter.notifyDataSetChanged();
+        checkServer();
         loadFresh();
     }
 
@@ -436,6 +466,16 @@ public class MainActivity extends Activity {
         serverChip.setText(serverUrl.replace("http://", "").replace("https://", ""));
     }
 
+    private void showEmptyIfNeeded() {
+        if (adapter.getCount() == 0) {
+            showEmpty(activeQuery.isEmpty()
+                    ? "No photos found on this server yet."
+                    : "No matches for \"" + activeQuery + "\".");
+        } else {
+            emptyView.setVisibility(TextView.GONE);
+        }
+    }
+
     private void showEmpty(String message) {
         emptyView.setText(message);
         emptyView.setVisibility(TextView.VISIBLE);
@@ -448,53 +488,7 @@ public class MainActivity extends Activity {
         }
     }
 
-    private TextView chip(String text) {
-        TextView view = new TextView(this);
-        view.setText(text);
-        view.setTextColor(colorAccent);
-        view.setTextSize(12);
-        view.setSingleLine(true);
-        view.setPadding(dp(12), dp(7), dp(12), dp(7));
-        view.setBackground(roundRect(Color.rgb(22, 25, 29), dp(18), Color.rgb(58, 69, 82), 1));
-        return view;
-    }
-
-    private Button actionButton(String text) {
-        Button button = new Button(this);
-        button.setText(text);
-        button.setAllCaps(false);
-        button.setTextColor(colorText);
-        button.setTextSize(13);
-        button.setPadding(dp(12), 0, dp(12), 0);
-        button.setBackground(roundRect(Color.rgb(37, 39, 43), dp(10), Color.rgb(54, 57, 62), 1));
-        return button;
-    }
-
-    private TextView bottomButton(String text, Runnable action) {
-        TextView button = new TextView(this);
-        button.setText(text);
-        button.setTextColor(colorText);
-        button.setTextSize(13);
-        button.setGravity(Gravity.CENTER);
-        button.setTypeface(Typeface.DEFAULT_BOLD);
-        button.setPadding(dp(8), dp(10), dp(8), dp(10));
-        button.setOnClickListener(view -> action.run());
-        return button;
-    }
-
-    private LinearLayout.LayoutParams bottomButtonParams() {
-        return new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1);
-    }
-
-    private GradientDrawable roundRect(int fill, int radius, int strokeColor, int strokeWidth) {
-        GradientDrawable drawable = new GradientDrawable();
-        drawable.setColor(fill);
-        drawable.setCornerRadius(radius);
-        drawable.setStroke(strokeWidth, strokeColor);
-        return drawable;
-    }
-
     private int dp(float value) {
-        return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
+        return theme.dp(this, value);
     }
 }
