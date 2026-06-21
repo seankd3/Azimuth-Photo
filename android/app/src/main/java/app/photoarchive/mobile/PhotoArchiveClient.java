@@ -59,6 +59,21 @@ final class PhotoArchiveClient {
         void onError(String message);
     }
 
+    interface CompareCallback {
+        void onSuccess(List<Photo[]> pairs);
+        void onError(String message);
+    }
+
+    interface CompareResultCallback {
+        void onSuccess(double winnerElo, double loserElo);
+        void onError(String message);
+    }
+
+    interface UndoCallback {
+        void onSuccess();
+        void onError(String message);
+    }
+
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
 
     void fetchPhotos(String serverUrl, String query, int offset, int limit,
@@ -122,6 +137,39 @@ final class PhotoArchiveClient {
             try {
                 DownloadResult result = downloadBytes(url);
                 runOnMain(() -> callback.onSuccess(result.data, result.contentType));
+            } catch (Exception error) {
+                runOnMain(() -> callback.onError(cleanMessage(error)));
+            }
+        });
+    }
+
+    void fetchComparePair(String serverUrl, CompareCallback callback) {
+        executor.execute(() -> {
+            try {
+                List<Photo[]> pairs = requestComparePair(serverUrl);
+                runOnMain(() -> callback.onSuccess(pairs));
+            } catch (Exception error) {
+                runOnMain(() -> callback.onError(cleanMessage(error)));
+            }
+        });
+    }
+
+    void submitComparison(String serverUrl, int winnerId, int loserId, CompareResultCallback callback) {
+        executor.execute(() -> {
+            try {
+                double[] elos = postComparison(serverUrl, winnerId, loserId);
+                runOnMain(() -> callback.onSuccess(elos[0], elos[1]));
+            } catch (Exception error) {
+                runOnMain(() -> callback.onError(cleanMessage(error)));
+            }
+        });
+    }
+
+    void undoComparison(String serverUrl, UndoCallback callback) {
+        executor.execute(() -> {
+            try {
+                postUndo(serverUrl);
+                runOnMain(callback::onSuccess);
             } catch (Exception error) {
                 runOnMain(() -> callback.onError(cleanMessage(error)));
             }
@@ -229,6 +277,80 @@ final class PhotoArchiveClient {
                     if (read > 0) output.write(buffer, 0, read);
                 }
                 return new DownloadResult(output.toByteArray(), contentType);
+            }
+        } finally {
+            if (connection != null) connection.disconnect();
+        }
+    }
+
+    private List<Photo[]> requestComparePair(String serverUrl) throws Exception {
+        String url = normalize(serverUrl) + "/api/compare/next?n=1&mode=swiss";
+        JSONObject json = new JSONObject(get(url));
+        JSONArray pairs = json.optJSONArray("pairs");
+        List<Photo[]> result = new ArrayList<>();
+        if (pairs != null) {
+            for (int i = 0; i < pairs.length(); i++) {
+                JSONObject pair = pairs.optJSONObject(i);
+                if (pair == null) continue;
+                JSONArray images = pair.optJSONArray("images");
+                if (images == null || images.length() < 2) continue;
+                Photo a = Photo.fromJson(images.getJSONObject(0));
+                Photo b = Photo.fromJson(images.getJSONObject(1));
+                result.add(new Photo[]{a, b});
+            }
+        }
+        return result;
+    }
+
+    private double[] postComparison(String serverUrl, int winnerId, int loserId) throws Exception {
+        String urlString = normalize(serverUrl) + "/api/compare";
+        HttpURLConnection connection = null;
+        try {
+            connection = (HttpURLConnection) new URL(urlString).openConnection();
+            connection.setConnectTimeout(10_000);
+            connection.setReadTimeout(15_000);
+            connection.setRequestMethod("POST");
+            connection.setDoOutput(true);
+            connection.setRequestProperty("Content-Type", "application/json");
+            connection.setRequestProperty("Accept", "application/json");
+
+            String body = "{\"winner_id\":" + winnerId + ",\"loser_id\":" + loserId + ",\"mode\":\"swiss\"}";
+            try (OutputStream out = connection.getOutputStream()) {
+                out.write(body.getBytes("UTF-8"));
+            }
+
+            int code = connection.getResponseCode();
+            String responseBody = readAll(code >= 400 ? connection.getErrorStream() : connection.getInputStream());
+            if (code < 200 || code >= 300) {
+                throw new IllegalStateException(responseBody.isEmpty() ? "Server returned " + code : responseBody);
+            }
+            JSONObject json = new JSONObject(responseBody);
+            return new double[]{json.optDouble("winner_elo", 0), json.optDouble("loser_elo", 0)};
+        } finally {
+            if (connection != null) connection.disconnect();
+        }
+    }
+
+    private void postUndo(String serverUrl) throws Exception {
+        String urlString = normalize(serverUrl) + "/api/compare/undo";
+        HttpURLConnection connection = null;
+        try {
+            connection = (HttpURLConnection) new URL(urlString).openConnection();
+            connection.setConnectTimeout(10_000);
+            connection.setReadTimeout(15_000);
+            connection.setRequestMethod("POST");
+            connection.setDoOutput(true);
+            connection.setRequestProperty("Content-Type", "application/json");
+            connection.setRequestProperty("Accept", "application/json");
+
+            try (OutputStream out = connection.getOutputStream()) {
+                out.write("{}".getBytes("UTF-8"));
+            }
+
+            int code = connection.getResponseCode();
+            String responseBody = readAll(code >= 400 ? connection.getErrorStream() : connection.getInputStream());
+            if (code < 200 || code >= 300) {
+                throw new IllegalStateException(responseBody.isEmpty() ? "Server returned " + code : responseBody);
             }
         } finally {
             if (connection != null) connection.disconnect();
