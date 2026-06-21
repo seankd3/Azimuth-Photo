@@ -11,6 +11,8 @@ import android.os.Handler;
 import android.os.Looper;
 import android.text.InputType;
 import android.view.Gravity;
+import android.view.View;
+import android.view.ViewGroup;
 import android.view.inputmethod.EditorInfo;
 import android.widget.AbsListView;
 import android.widget.Button;
@@ -39,6 +41,9 @@ public class MainActivity extends Activity {
     private ImageLoader imageLoader;
     private PhotoAdapter adapter;
     private BottomNav bottomNav;
+
+    private CompareView compareView;
+    private FrameLayout contentFrame;
 
     private String serverUrl;
     private String activeQuery = "";
@@ -118,7 +123,7 @@ public class MainActivity extends Activity {
                 this::showArchive,
                 this::focusSearch,
                 this::choosePhotosToImport,
-                this::showServerDialog
+                this::showCompare
         );
         root.addView(bottomNav.view(), new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -207,6 +212,7 @@ public class MainActivity extends Activity {
 
     private FrameLayout buildContent() {
         FrameLayout content = new FrameLayout(this);
+        contentFrame = content;
 
         gridView = new GridView(this);
         gridView.setNumColumns(3);
@@ -259,11 +265,47 @@ public class MainActivity extends Activity {
         return content;
     }
 
+    private void removeCompareView() {
+        if (compareView != null) {
+            View cv = compareView.getView();
+            if (cv.getParent() != null) {
+                ((ViewGroup) cv.getParent()).removeView(cv);
+            }
+        }
+        gridView.setVisibility(View.VISIBLE);
+    }
+
     private void showArchive() {
+        removeCompareView();
         titleView.setText("Archive");
         bottomNav.setActive("Archive");
         searchInput.setText("");
         loadFresh();
+    }
+
+    private void showCompare() {
+        titleView.setText("Compare");
+        bottomNav.setActive("Compare");
+        hideKeyboard();
+
+        gridView.setVisibility(View.GONE);
+        emptyView.setVisibility(View.GONE);
+        progressBar.setVisibility(View.GONE);
+
+        if (compareView == null) {
+            compareView = new CompareView(this, client, imageLoader, theme, () -> serverUrl);
+        }
+
+        View cv = compareView.getView();
+        if (cv.getParent() != null) {
+            ((ViewGroup) cv.getParent()).removeView(cv);
+        }
+        contentFrame.addView(cv, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT));
+
+        compareView.loadNextPair();
+        subtitleView.setText("Tap the better photo");
     }
 
     private void triggerRefresh() {
@@ -273,6 +315,7 @@ public class MainActivity extends Activity {
     }
 
     private void focusSearch() {
+        removeCompareView();
         titleView.setText("Search");
         bottomNav.setActive("Search");
         searchInput.requestFocus();
@@ -426,6 +469,7 @@ public class MainActivity extends Activity {
     }
 
     private void choosePhotosToImport() {
+        removeCompareView();
         titleView.setText("Import");
         bottomNav.setActive("Import");
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
@@ -482,8 +526,6 @@ public class MainActivity extends Activity {
     }
 
     private void showServerDialog() {
-        titleView.setText("Server");
-        bottomNav.setActive("Server");
         EditText input = new EditText(this);
         input.setSingleLine(true);
         input.setInputType(InputType.TYPE_TEXT_VARIATION_URI);

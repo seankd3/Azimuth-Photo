@@ -12,15 +12,15 @@ final class BottomNav {
     private final TextView photos;
     private final TextView search;
     private final TextView importButton;
-    private final TextView server;
+    private final TextView compare;
 
-    BottomNav(Context context, AppTheme theme, Runnable onPhotos, Runnable onSearch, Runnable onImport, Runnable onServer) {
+    BottomNav(Context context, AppTheme theme, Runnable onPhotos, Runnable onSearch, Runnable onImport, Runnable onCompare) {
         this.context = context;
         this.theme = theme;
         photos = button("Archive", onPhotos);
         search = button("Search", onSearch);
         importButton = button("Import", onImport);
-        server = button("Server", onServer);
+        compare = button("Compare", onCompare);
     }
 
     LinearLayout view() {
@@ -31,7 +31,7 @@ final class BottomNav {
         bottom.addView(photos, params());
         bottom.addView(search, params());
         bottom.addView(importButton, params());
-        bottom.addView(server, params());
+        bottom.addView(compare, params());
         setActive("Archive");
         return bottom;
     }
@@ -40,7 +40,7 @@ final class BottomNav {
         mark(photos, "Archive".equals(label));
         mark(search, "Search".equals(label));
         mark(importButton, "Import".equals(label));
-        mark(server, "Server".equals(label));
+        mark(compare, "Compare".equals(label));
     }
 
     private TextView button(String text, Runnable action) {
