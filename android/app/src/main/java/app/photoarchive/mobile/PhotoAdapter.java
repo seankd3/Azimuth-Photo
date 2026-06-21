@@ -162,7 +162,7 @@ final class PhotoAdapter extends BaseAdapter {
         holder.month.setText(showMonth(position) ? photo.monthLabel() : "");
         holder.month.setVisibility(showMonth(position) && !photo.monthLabel().isEmpty() ? View.VISIBLE : View.GONE);
         holder.image.setContentDescription(photo.filename);
-        imageLoader.loadInto(photo.thumbUrl(serverUrlProvider.serverUrl()), holder.image, tileColor);
+        imageLoader.loadInto(photo.smallThumbUrl(serverUrlProvider.serverUrl()), holder.image, tileColor);
 
         if ("picked".equals(photo.flag)) {
             holder.flagBadge.setText("♥");

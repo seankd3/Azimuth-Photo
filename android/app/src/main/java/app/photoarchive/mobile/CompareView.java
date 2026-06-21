@@ -94,8 +94,8 @@ final class CompareView {
     private void showPair() {
         String serverUrl = serverUrlProvider.serverUrl();
 
-        imageLoader.loadInto(currentA.previewUrl(serverUrl), imageA, theme.tile);
-        imageLoader.loadInto(currentB.previewUrl(serverUrl), imageB, theme.tile);
+        imageLoader.loadInto(currentA.thumbUrl(serverUrl), imageA, theme.tile);
+        imageLoader.loadInto(currentB.thumbUrl(serverUrl), imageB, theme.tile);
 
         String rankA = currentA.comparisons > 0
                 ? String.format(Locale.US, "Rank %,d", (int) currentA.elo)

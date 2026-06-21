@@ -74,6 +74,10 @@ final class Photo {
         );
     }
 
+    String smallThumbUrl(String serverUrl) {
+        return resolve(serverUrl, "/api/thumb/sm/" + id);
+    }
+
     String thumbUrl(String serverUrl) {
         return resolve(serverUrl, "/api/thumb/md/" + id);
     }

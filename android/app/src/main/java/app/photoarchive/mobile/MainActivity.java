@@ -665,7 +665,7 @@ public class MainActivity extends Activity {
     private void prefetchNextFew(List<Photo> photos) {
         int count = Math.min(photos.size(), 12);
         for (int i = 0; i < count; i++) {
-            imageLoader.prefetch(photos.get(i).thumbUrl(serverUrl));
+            imageLoader.prefetch(photos.get(i).smallThumbUrl(serverUrl));
         }
     }
 
