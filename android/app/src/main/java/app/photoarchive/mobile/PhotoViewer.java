@@ -2,9 +2,14 @@ package app.photoarchive.mobile;
 
 import android.app.Activity;
 import android.app.Dialog;
+import android.content.ContentValues;
+import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.net.Uri;
+import android.os.Build;
+import android.provider.MediaStore;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
@@ -13,7 +18,9 @@ import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
+import android.widget.Toast;
 
+import java.io.OutputStream;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -174,6 +181,18 @@ final class PhotoViewer {
         pickParams.setMargins(0, 0, dp(6), 0);
         buttonRow.addView(pickButton, pickParams);
 
+        Button shareButton = theme.actionButton(activity, "Share");
+        shareButton.setOnClickListener(view -> sharePhoto());
+        LinearLayout.LayoutParams shareParams = new LinearLayout.LayoutParams(0, dp(42), 1);
+        shareParams.setMargins(0, 0, dp(6), 0);
+        buttonRow.addView(shareButton, shareParams);
+
+        Button saveButton = theme.actionButton(activity, "Save");
+        saveButton.setOnClickListener(view -> savePhotoToGallery());
+        LinearLayout.LayoutParams saveParams = new LinearLayout.LayoutParams(0, dp(42), 1);
+        saveParams.setMargins(0, 0, dp(6), 0);
+        buttonRow.addView(saveButton, saveParams);
+
         Button close = theme.actionButton(activity, "Close");
         close.setOnClickListener(view -> dialog.dismiss());
         buttonRow.addView(close, new LinearLayout.LayoutParams(0, dp(42), 1));
@@ -318,6 +337,96 @@ final class PhotoViewer {
         pair.addView(valueView);
 
         row.addView(pair);
+    }
+
+    private void sharePhoto() {
+        Photo photo = photos.get(position);
+        String url = photo.previewUrl(serverUrlProvider.serverUrl());
+        Toast.makeText(activity, "Preparing share...", Toast.LENGTH_SHORT).show();
+
+        client.downloadImage(url, new PhotoArchiveClient.DownloadCallback() {
+            @Override
+            public void onSuccess(byte[] data, String contentType) {
+                Uri uri = saveToMediaStore(photo.filename, mimeFromContentType(contentType), data);
+                if (uri == null) {
+                    Toast.makeText(activity, "Could not prepare image for sharing",
+                            Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                Intent share = new Intent(Intent.ACTION_SEND);
+                share.setType(mimeFromContentType(contentType));
+                share.putExtra(Intent.EXTRA_STREAM, uri);
+                share.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                activity.startActivity(Intent.createChooser(share, "Share photo"));
+            }
+
+            @Override
+            public void onError(String message) {
+                Toast.makeText(activity, "Share failed: " + message,
+                        Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
+
+    private void savePhotoToGallery() {
+        Photo photo = photos.get(position);
+        String serverUrl = serverUrlProvider.serverUrl();
+        String fullUrl = serverUrl + "/api/full/" + photo.id;
+        Toast.makeText(activity, "Downloading full resolution...", Toast.LENGTH_SHORT).show();
+
+        client.downloadImage(fullUrl, new PhotoArchiveClient.DownloadCallback() {
+            @Override
+            public void onSuccess(byte[] data, String contentType) {
+                Uri uri = saveToMediaStore(photo.filename, mimeFromContentType(contentType), data);
+                if (uri != null) {
+                    Toast.makeText(activity, "Saved to gallery", Toast.LENGTH_SHORT).show();
+                } else {
+                    Toast.makeText(activity, "Could not save image",
+                            Toast.LENGTH_SHORT).show();
+                }
+            }
+
+            @Override
+            public void onError(String message) {
+                Toast.makeText(activity, "Save failed: " + message,
+                        Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
+
+    private Uri saveToMediaStore(String filename, String mimeType, byte[] data) {
+        try {
+            ContentValues values = new ContentValues();
+            values.put(MediaStore.Images.Media.DISPLAY_NAME, filename);
+            values.put(MediaStore.Images.Media.MIME_TYPE, mimeType);
+            if (Build.VERSION.SDK_INT >= 29) {
+                values.put(MediaStore.Images.Media.IS_PENDING, 1);
+            }
+            Uri imageUri = activity.getContentResolver().insert(
+                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
+            if (imageUri == null) return null;
+
+            try (OutputStream out = activity.getContentResolver().openOutputStream(imageUri)) {
+                if (out == null) return null;
+                out.write(data);
+            }
+
+            if (Build.VERSION.SDK_INT >= 29) {
+                ContentValues update = new ContentValues();
+                update.put(MediaStore.Images.Media.IS_PENDING, 0);
+                activity.getContentResolver().update(imageUri, update, null, null);
+            }
+            return imageUri;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static String mimeFromContentType(String contentType) {
+        if (contentType == null) return "image/jpeg";
+        int semicolon = contentType.indexOf(';');
+        String mime = semicolon >= 0 ? contentType.substring(0, semicolon).trim() : contentType.trim();
+        return mime.isEmpty() ? "image/jpeg" : mime;
     }
 
     private void loadPhoto() {
