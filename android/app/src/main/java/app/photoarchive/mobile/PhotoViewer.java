@@ -16,6 +16,7 @@ import android.widget.TextView;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 final class PhotoViewer {
 
@@ -27,6 +28,7 @@ final class PhotoViewer {
     private final List<Photo> photos;
     private final ServerUrlProvider serverUrlProvider;
     private final ImageLoader imageLoader;
+    private final PhotoArchiveClient client;
     private final AppTheme theme;
 
     private int position;
@@ -37,15 +39,23 @@ final class PhotoViewer {
     private LinearLayout infoPanel;
     private TextView nameView;
     private TextView detailView;
+    private TextView dimensionView;
+    private Button rejectButton;
+    private Button pickButton;
+    private LinearLayout exifPanel;
+    private boolean exifVisible = false;
+    private Map<String, String> cachedExif;
     private boolean chromeVisible = true;
 
     PhotoViewer(Activity activity, List<Photo> photos, int position,
-                ServerUrlProvider serverUrlProvider, ImageLoader imageLoader, AppTheme theme) {
+                ServerUrlProvider serverUrlProvider, ImageLoader imageLoader,
+                PhotoArchiveClient client, AppTheme theme) {
         this.activity = activity;
         this.photos = photos;
         this.position = Math.max(0, Math.min(position, photos.size() - 1));
         this.serverUrlProvider = serverUrlProvider;
         this.imageLoader = imageLoader;
+        this.client = client;
         this.theme = theme;
     }
 
@@ -131,17 +141,183 @@ final class PhotoViewer {
         info.setBackgroundColor(Color.argb(210, 0, 0, 0));
 
         nameView = theme.label(activity, "", 17, Color.WHITE, true);
+        nameView.setOnClickListener(view -> toggleExif());
         info.addView(nameView);
 
         detailView = theme.label(activity, "", 13, Color.rgb(210, 214, 218), false);
-        detailView.setPadding(0, dp(4), 0, dp(10));
+        detailView.setPadding(0, dp(4), 0, 0);
         info.addView(detailView);
+
+        dimensionView = theme.label(activity, "", 12, theme.muted, false);
+        dimensionView.setPadding(0, dp(2), 0, dp(10));
+        info.addView(dimensionView);
+
+        exifPanel = new LinearLayout(activity);
+        exifPanel.setOrientation(LinearLayout.VERTICAL);
+        exifPanel.setPadding(0, dp(6), 0, dp(10));
+        exifPanel.setVisibility(View.GONE);
+        info.addView(exifPanel);
+
+        LinearLayout buttonRow = new LinearLayout(activity);
+        buttonRow.setOrientation(LinearLayout.HORIZONTAL);
+        buttonRow.setGravity(Gravity.CENTER_VERTICAL);
+
+        rejectButton = theme.actionButton(activity, "✕ Reject");
+        rejectButton.setOnClickListener(view -> flagPhoto("rejected"));
+        LinearLayout.LayoutParams rejectParams = new LinearLayout.LayoutParams(0, dp(42), 1);
+        rejectParams.setMargins(0, 0, dp(6), 0);
+        buttonRow.addView(rejectButton, rejectParams);
+
+        pickButton = theme.actionButton(activity, "♡ Pick");
+        pickButton.setOnClickListener(view -> flagPhoto("picked"));
+        LinearLayout.LayoutParams pickParams = new LinearLayout.LayoutParams(0, dp(42), 1);
+        pickParams.setMargins(0, 0, dp(6), 0);
+        buttonRow.addView(pickButton, pickParams);
 
         Button close = theme.actionButton(activity, "Close");
         close.setOnClickListener(view -> dialog.dismiss());
-        info.addView(close, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, dp(42)));
+        buttonRow.addView(close, new LinearLayout.LayoutParams(0, dp(42), 1));
+
+        info.addView(buttonRow, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
         return info;
+    }
+
+    private void flagPhoto(String flag) {
+        Photo photo = photos.get(position);
+        String currentFlag = photo.flag;
+        String newFlag = currentFlag.equals(flag) ? "unflagged" : flag;
+        String serverUrl = serverUrlProvider.serverUrl();
+
+        client.setFlag(serverUrl, photo.id, newFlag, new PhotoArchiveClient.FlagCallback() {
+            @Override
+            public void onSuccess(String resultFlag) {
+                photo.flag = resultFlag;
+                updateFlagButtons(resultFlag);
+            }
+
+            @Override
+            public void onError(String message) {
+                android.widget.Toast.makeText(activity, "Flag failed: " + message,
+                        android.widget.Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
+
+    private void updateFlagButtons(String flag) {
+        if ("rejected".equals(flag)) {
+            rejectButton.setBackground(theme.roundRect(
+                    Color.rgb(220, 80, 80), dp(10), Color.rgb(220, 80, 80), 0));
+            rejectButton.setTextColor(Color.WHITE);
+            pickButton.setBackground(theme.roundRect(
+                    Color.rgb(37, 39, 43), dp(10), Color.rgb(54, 57, 62), 1));
+            pickButton.setTextColor(theme.text);
+        } else if ("picked".equals(flag)) {
+            pickButton.setBackground(theme.roundRect(
+                    theme.good, dp(10), theme.good, 0));
+            pickButton.setTextColor(Color.BLACK);
+            rejectButton.setBackground(theme.roundRect(
+                    Color.rgb(37, 39, 43), dp(10), Color.rgb(54, 57, 62), 1));
+            rejectButton.setTextColor(theme.text);
+        } else {
+            rejectButton.setBackground(theme.roundRect(
+                    Color.rgb(37, 39, 43), dp(10), Color.rgb(54, 57, 62), 1));
+            rejectButton.setTextColor(theme.text);
+            pickButton.setBackground(theme.roundRect(
+                    Color.rgb(37, 39, 43), dp(10), Color.rgb(54, 57, 62), 1));
+            pickButton.setTextColor(theme.text);
+        }
+    }
+
+    private void toggleExif() {
+        if (exifVisible) {
+            exifPanel.setVisibility(View.GONE);
+            exifVisible = false;
+            return;
+        }
+
+        if (cachedExif != null) {
+            showExifData(cachedExif);
+            return;
+        }
+
+        Photo photo = photos.get(position);
+        String serverUrl = serverUrlProvider.serverUrl();
+        client.fetchExif(serverUrl, photo.id, new PhotoArchiveClient.ExifCallback() {
+            @Override
+            public void onSuccess(Map<String, String> exif) {
+                cachedExif = exif;
+                showExifData(exif);
+            }
+
+            @Override
+            public void onError(String message) {
+                android.widget.Toast.makeText(activity, "EXIF: " + message,
+                        android.widget.Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
+
+    private void showExifData(Map<String, String> exif) {
+        exifPanel.removeAllViews();
+
+        addExifRow(exif, "aperture", "Aperture", "shutter_speed", "Shutter", "iso", "ISO", "focal_length", "Focal Length");
+        addExifRow(exif, "dimensions", "Dimensions", "file_size", "File Size");
+        addExifRow(exif, "camera_make", "Camera Make", "camera_model", "Camera Model", "lens", "Lens");
+
+        String lat = exif.get("latitude");
+        String lon = exif.get("longitude");
+        if (lat != null && lon != null && !"0".equals(lat) && !"0.0".equals(lat)) {
+            LinearLayout gpsRow = new LinearLayout(activity);
+            gpsRow.setOrientation(LinearLayout.HORIZONTAL);
+            gpsRow.setPadding(0, dp(4), 0, 0);
+            addExifPair(gpsRow, "GPS", lat + ", " + lon);
+            exifPanel.addView(gpsRow);
+        }
+
+        exifPanel.setVisibility(View.VISIBLE);
+        exifVisible = true;
+    }
+
+    private void addExifRow(Map<String, String> exif, String... keysAndLabels) {
+        LinearLayout row = new LinearLayout(activity);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setPadding(0, dp(4), 0, 0);
+        boolean hasValues = false;
+
+        for (int i = 0; i < keysAndLabels.length; i += 2) {
+            String key = keysAndLabels[i];
+            String label = keysAndLabels[i + 1];
+            String value = exif.get(key);
+            if (value != null && !value.isEmpty() && !"null".equals(value)) {
+                addExifPair(row, label, value);
+                hasValues = true;
+            }
+        }
+
+        if (hasValues) {
+            exifPanel.addView(row);
+        }
+    }
+
+    private void addExifPair(LinearLayout row, String label, String value) {
+        LinearLayout pair = new LinearLayout(activity);
+        pair.setOrientation(LinearLayout.VERTICAL);
+        pair.setPadding(0, 0, dp(16), 0);
+
+        TextView labelView = new TextView(activity);
+        labelView.setText(label);
+        labelView.setTextColor(theme.muted);
+        labelView.setTextSize(11);
+        pair.addView(labelView);
+
+        TextView valueView = new TextView(activity);
+        valueView.setText(value);
+        valueView.setTextColor(theme.text);
+        valueView.setTextSize(13);
+        pair.addView(valueView);
+
+        row.addView(pair);
     }
 
     private void loadPhoto() {
@@ -154,6 +330,17 @@ final class PhotoViewer {
         counter.setText(String.format(Locale.US, "%,d of %,d", position + 1, photos.size()));
         nameView.setText(photo.filename);
         detailView.setText(photo.detailLine());
+
+        String dimLine = photo.dimensionLine();
+        dimensionView.setText(dimLine);
+        dimensionView.setVisibility(dimLine.isEmpty() ? View.GONE : View.VISIBLE);
+
+        updateFlagButtons(photo.flag);
+
+        cachedExif = null;
+        exifVisible = false;
+        exifPanel.removeAllViews();
+        exifPanel.setVisibility(View.GONE);
 
         prefetchAdjacent();
     }
