@@ -53,7 +53,7 @@ final class PhotoAdapter extends BaseAdapter {
     }
 
     List<Photo> getPhotos() {
-        return new ArrayList<>(photos);
+        return photos;
     }
 
     int indexOf(Photo photo) {

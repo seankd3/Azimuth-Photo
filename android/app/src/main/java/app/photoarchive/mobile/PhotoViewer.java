@@ -31,6 +31,10 @@ final class PhotoViewer {
         String serverUrl();
     }
 
+    interface OnDismissListener {
+        void onDismiss();
+    }
+
     private final Activity activity;
     private final List<Photo> photos;
     private final ServerUrlProvider serverUrlProvider;
@@ -53,6 +57,11 @@ final class PhotoViewer {
     private boolean exifVisible = false;
     private Map<String, String> cachedExif;
     private boolean chromeVisible = true;
+    private OnDismissListener dismissListener;
+
+    void setOnDismissListener(OnDismissListener l) {
+        this.dismissListener = l;
+    }
 
     PhotoViewer(Activity activity, List<Photo> photos, int position,
                 ServerUrlProvider serverUrlProvider, ImageLoader imageLoader,
@@ -129,6 +138,9 @@ final class PhotoViewer {
         });
 
         dialog.setContentView(frame);
+        dialog.setOnDismissListener(d -> {
+            if (dismissListener != null) dismissListener.onDismiss();
+        });
         dialog.setOnKeyListener((d, keyCode, event) -> {
             if (keyCode == KeyEvent.KEYCODE_BACK && event.getAction() == KeyEvent.ACTION_UP) {
                 dialog.dismiss();

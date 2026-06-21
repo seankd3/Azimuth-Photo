@@ -418,7 +418,9 @@ public class MainActivity extends Activity {
 
     private void openPhoto(Photo photo) {
         int position = adapter.indexOf(photo);
-        new PhotoViewer(this, adapter.getPhotos(), position, () -> serverUrl, imageLoader, client, theme).show();
+        PhotoViewer viewer = new PhotoViewer(this, adapter.getPhotos(), position, () -> serverUrl, imageLoader, client, theme);
+        viewer.setOnDismissListener(() -> adapter.notifyDataSetChanged());
+        viewer.show();
     }
 
     private void choosePhotosToImport() {
