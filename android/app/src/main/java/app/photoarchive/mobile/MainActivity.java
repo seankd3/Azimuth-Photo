@@ -2,11 +2,9 @@ package app.photoarchive.mobile;
 
 import android.app.Activity;
 import android.app.AlertDialog;
-import android.app.Dialog;
 import android.content.ClipData;
 import android.content.Intent;
 import android.graphics.Color;
-import android.graphics.Typeface;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
@@ -19,7 +17,6 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.GridView;
-import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
@@ -53,6 +50,8 @@ public class MainActivity extends Activity {
     private boolean endReached = false;
     private boolean reconnectScheduled = false;
     private int reconnectAttempts = 0;
+    private boolean atTop = true;
+    private boolean refreshing = false;
 
     private TextView titleView;
     private TextView subtitleView;
@@ -222,10 +221,17 @@ public class MainActivity extends Activity {
         gridView.setOnScrollListener(new AbsListView.OnScrollListener() {
             @Override
             public void onScrollStateChanged(AbsListView view, int scrollState) {
+                if (scrollState == SCROLL_STATE_IDLE && atTop && view.getChildCount() > 0) {
+                    android.view.View first = view.getChildAt(0);
+                    if (view.getFirstVisiblePosition() == 0 && first.getTop() >= view.getPaddingTop()) {
+                        triggerRefresh();
+                    }
+                }
             }
 
             @Override
             public void onScroll(AbsListView view, int firstVisibleItem, int visibleItemCount, int totalItemCount) {
+                atTop = firstVisibleItem == 0;
                 if (totalItemCount > 0 && firstVisibleItem + visibleItemCount >= totalItemCount - 12) {
                     loadNextPage(false);
                 }
@@ -257,6 +263,12 @@ public class MainActivity extends Activity {
         titleView.setText("Archive");
         bottomNav.setActive("Archive");
         searchInput.setText("");
+        loadFresh();
+    }
+
+    private void triggerRefresh() {
+        if (refreshing) return;
+        refreshing = true;
         loadFresh();
     }
 
@@ -324,6 +336,7 @@ public class MainActivity extends Activity {
             @Override
             public void onSuccess(PhotoPage page) {
                 loading = false;
+                refreshing = false;
                 progressBar.setVisibility(ProgressBar.GONE);
                 resetConnectionState();
                 if (firstPage) adapter.clear();
@@ -339,6 +352,7 @@ public class MainActivity extends Activity {
             @Override
             public void onError(String message) {
                 loading = false;
+                refreshing = false;
                 progressBar.setVisibility(ProgressBar.GONE);
                 updateSummary(null);
                 showReconnectingState();
@@ -403,55 +417,8 @@ public class MainActivity extends Activity {
     }
 
     private void openPhoto(Photo photo) {
-        Dialog dialog = new Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen);
-        FrameLayout frame = new FrameLayout(this);
-        frame.setBackgroundColor(Color.BLACK);
-        dialog.setContentView(frame);
-
-        ImageView imageView = new ImageView(this);
-        imageView.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        imageView.setBackgroundColor(Color.BLACK);
-        frame.addView(imageView, new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT
-        ));
-
-        ProgressBar spinner = new ProgressBar(this);
-        FrameLayout.LayoutParams spinnerParams = new FrameLayout.LayoutParams(dp(48), dp(48));
-        spinnerParams.gravity = Gravity.CENTER;
-        frame.addView(spinner, spinnerParams);
-
-        frame.addView(photoInfoPanel(photo, dialog), infoPanelParams());
-        imageLoader.loadInto(photo.previewUrl(serverUrl), imageView, Color.BLACK, () -> spinner.setVisibility(ProgressBar.GONE));
-        dialog.show();
-    }
-
-    private LinearLayout photoInfoPanel(Photo photo, Dialog dialog) {
-        LinearLayout info = new LinearLayout(this);
-        info.setOrientation(LinearLayout.VERTICAL);
-        info.setPadding(dp(18), dp(14), dp(18), dp(20));
-        info.setBackgroundColor(Color.argb(210, 0, 0, 0));
-
-        TextView name = theme.label(this, photo.filename, 17, Color.WHITE, true);
-        info.addView(name);
-
-        TextView detail = theme.label(this, photo.detailLine(), 13, Color.rgb(210, 214, 218), false);
-        detail.setPadding(0, dp(4), 0, dp(10));
-        info.addView(detail);
-
-        Button close = theme.actionButton(this, "Close");
-        close.setOnClickListener(view -> dialog.dismiss());
-        info.addView(close, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(42)));
-        return info;
-    }
-
-    private FrameLayout.LayoutParams infoPanelParams() {
-        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT
-        );
-        params.gravity = Gravity.BOTTOM;
-        return params;
+        int position = adapter.indexOf(photo);
+        new PhotoViewer(this, adapter.getPhotos(), position, () -> serverUrl, imageLoader, theme).show();
     }
 
     private void choosePhotosToImport() {
