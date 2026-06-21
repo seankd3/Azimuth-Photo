@@ -122,7 +122,29 @@ final class PhotoAdapter extends BaseAdapter {
             nameParams.gravity = Gravity.BOTTOM;
             frame.addView(name, nameParams);
 
-            holder = new Holder(image, month, name);
+            TextView flagBadge = new TextView(context);
+            flagBadge.setTextSize(12);
+            flagBadge.setTypeface(Typeface.DEFAULT_BOLD);
+            flagBadge.setPadding(dp(5), dp(2), dp(5), dp(2));
+            flagBadge.setBackground(pill());
+            FrameLayout.LayoutParams flagParams = new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT
+            );
+            flagParams.gravity = Gravity.END | Gravity.TOP;
+            flagParams.setMargins(dp(6), dp(6), dp(6), dp(6));
+            flagBadge.setVisibility(View.GONE);
+            frame.addView(flagBadge, flagParams);
+
+            View rejectOverlay = new View(context);
+            rejectOverlay.setBackgroundColor(Color.argb(100, 0, 0, 0));
+            rejectOverlay.setVisibility(View.GONE);
+            frame.addView(rejectOverlay, new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT
+            ));
+
+            holder = new Holder(image, month, name, flagBadge, rejectOverlay);
             frame.setTag(holder);
             convertView = frame;
         } else {
@@ -141,6 +163,22 @@ final class PhotoAdapter extends BaseAdapter {
         holder.month.setVisibility(showMonth(position) && !photo.monthLabel().isEmpty() ? View.VISIBLE : View.GONE);
         holder.image.setContentDescription(photo.filename);
         imageLoader.loadInto(photo.thumbUrl(serverUrlProvider.serverUrl()), holder.image, tileColor);
+
+        if ("picked".equals(photo.flag)) {
+            holder.flagBadge.setText("♥");
+            holder.flagBadge.setTextColor(Color.rgb(126, 217, 160));
+            holder.flagBadge.setVisibility(View.VISIBLE);
+            holder.rejectOverlay.setVisibility(View.GONE);
+        } else if ("rejected".equals(photo.flag)) {
+            holder.flagBadge.setText("✕");
+            holder.flagBadge.setTextColor(Color.rgb(220, 80, 80));
+            holder.flagBadge.setVisibility(View.VISIBLE);
+            holder.rejectOverlay.setVisibility(View.VISIBLE);
+        } else {
+            holder.flagBadge.setVisibility(View.GONE);
+            holder.rejectOverlay.setVisibility(View.GONE);
+        }
+
         return convertView;
     }
 
@@ -166,11 +204,15 @@ final class PhotoAdapter extends BaseAdapter {
         final ImageView image;
         final TextView month;
         final TextView name;
+        final TextView flagBadge;
+        final View rejectOverlay;
 
-        Holder(ImageView image, TextView month, TextView name) {
+        Holder(ImageView image, TextView month, TextView name, TextView flagBadge, View rejectOverlay) {
             this.image = image;
             this.month = month;
             this.name = name;
+            this.flagBadge = flagBadge;
+            this.rejectOverlay = rejectOverlay;
         }
     }
 }
