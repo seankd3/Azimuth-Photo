@@ -19,6 +19,9 @@ against the verified Tailscale URL, and, when adb plus a device are available,
 installs and launches the app, captures a screenshot, dumps the UI tree, and
 fails if the app lands in an offline state.
 
+Without a connected device, it still runs a no-phone Android smoke test through
+Robolectric against the live local photoArchive server.
+
 Environment:
   PHOTOARCHIVE_PORT                  Server port, default 8000.
   PHOTOARCHIVE_ANDROID_SERVER_URL    Override tested server URL.
@@ -126,6 +129,27 @@ require_server() {
     exit 1
 }
 
+require_local_server() {
+    local local_url="http://127.0.0.1:${PORT}/api/rankings?limit=1&sort=date_taken"
+    if curl -fsS --max-time 4 "$local_url" >"$ARTIFACT_DIR/server-local-health.json"; then
+        return
+    fi
+
+    echo "Starting local photoArchive for no-phone Android smoke..."
+    PHOTOARCHIVE_ACCESS=local PHOTOARCHIVE_PORT="$PORT" "$ROOT/scripts/photoarchive-server" start >/tmp/photoarchive-android-local-server.log 2>&1 || true
+
+    for _ in {1..80}; do
+        if curl -fsS --max-time 4 "$local_url" >"$ARTIFACT_DIR/server-local-health.json"; then
+            return
+        fi
+        sleep 0.5
+    done
+
+    echo "photoArchive did not become reachable at $local_url" >&2
+    cat /tmp/photoarchive-android-local-server.log >&2 || true
+    exit 1
+}
+
 find_adb() {
     if [[ -n "$ADB" && -x "$ADB" ]]; then
         printf '%s\n' "$ADB"
@@ -186,12 +210,25 @@ run_device_smoke() {
     fi
 }
 
+run_no_phone_smoke() {
+    require_local_server
+    echo "Running no-phone Android app smoke against http://127.0.0.1:${PORT}..."
+    PHOTOARCHIVE_ANDROID_SERVER_URL="http://127.0.0.1:${PORT}" "$ROOT/scripts/photoarchive-android-build" \
+        -PphotoArchiveDefaultServerUrl="http://127.0.0.1:${PORT}" \
+        :app:testDebugUnitTest \
+        >"$ARTIFACT_DIR/no-phone-smoke.log" 2>&1 || {
+            cat "$ARTIFACT_DIR/no-phone-smoke.log" >&2
+            exit 1
+        }
+}
+
 SERVER_URL="$(server_url)"
 HEALTH_URL="$(health_url_for_host)"
 
 echo "Server URL for APK: $SERVER_URL"
 echo "Host health check:   $HEALTH_URL"
 require_server "$HEALTH_URL"
+run_no_phone_smoke
 
 PHOTOARCHIVE_ANDROID_SERVER_URL="$SERVER_URL" "$ROOT/scripts/photoarchive-android-build" \
     -PphotoArchiveDefaultServerUrl="$SERVER_URL" \

@@ -48,10 +48,13 @@ From the repo root on Omarchy:
 ./scripts/photoarchive-android-e2e
 ```
 
-This verifies the photoArchive server over Tailscale, builds the APK against the
-verified URL, and copies the result to `outputs/photoarchive-android-debug.apk`.
-If `adb` and an authorized Android device are available, it also installs,
-launches, captures a screenshot/UI dump/logcat, and fails if the app is offline.
+This verifies the photoArchive server over Tailscale, runs a no-phone Android
+smoke test against the live local server, builds the APK against the verified
+URL, and copies the result to `outputs/photoarchive-android-debug.apk`.
+
+If `adb` and an authorized Android device or working emulator are available, it
+also installs, launches, captures a screenshot/UI dump/logcat, and fails if the
+app is offline.
 
 Use the hard gate before handing the APK to someone:
 

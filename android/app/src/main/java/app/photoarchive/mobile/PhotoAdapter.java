@@ -64,6 +64,9 @@ final class PhotoAdapter extends BaseAdapter {
 
     @Override
     public long getItemId(int position) {
+        if (position < 0 || position >= photos.size()) {
+            return position;
+        }
         return photos.get(position).id;
     }
 
