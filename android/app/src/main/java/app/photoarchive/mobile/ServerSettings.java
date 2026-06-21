@@ -4,7 +4,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 
 final class ServerSettings {
-    static final String DEFAULT_SERVER_URL = "http://omarchy.tail0eeded.ts.net:8000";
+    static final String DEFAULT_SERVER_URL = BuildConfig.DEFAULT_SERVER_URL;
 
     private static final String PREFS = "photoarchive-mobile";
     private static final String KEY_SERVER_URL = "server_url";
