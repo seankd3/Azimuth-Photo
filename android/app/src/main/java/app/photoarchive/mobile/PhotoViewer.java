@@ -53,6 +53,7 @@ final class PhotoViewer {
     private Map<String, String> cachedExif;
     private boolean chromeVisible = true;
     private OnDismissListener dismissListener;
+    private final android.os.Handler mainHandler = new android.os.Handler(android.os.Looper.getMainLooper());
 
     void setOnDismissListener(OnDismissListener l) {
         this.dismissListener = l;
@@ -419,6 +420,8 @@ final class PhotoViewer {
         if (position < photos.size() - 1) {
             position++;
             loadPhoto();
+        } else {
+            showEdgeBounce();
         }
     }
 
@@ -426,7 +429,15 @@ final class PhotoViewer {
         if (position > 0) {
             position--;
             loadPhoto();
+        } else {
+            showEdgeBounce();
         }
+    }
+
+    private void showEdgeBounce() {
+        counter.setTextColor(theme.accent);
+        mainHandler.postDelayed(() -> counter.setTextColor(Color.WHITE), 300);
+        imageView.performHapticFeedback(android.view.HapticFeedbackConstants.REJECT);
     }
 
     private void toggleChrome() {
