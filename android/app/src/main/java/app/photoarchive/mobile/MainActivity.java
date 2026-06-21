@@ -49,6 +49,7 @@ public class MainActivity extends Activity {
     private String activeQuery = "";
     private String activeSort = "date_taken";
     private String activeOrientation = "";
+    private String activeFlag = "";
     private int offset = 0;
     private int totalImages = 0;
     private boolean loading = false;
@@ -63,6 +64,7 @@ public class MainActivity extends Activity {
     private TextView serverChip;
     private TextView sortChip;
     private TextView orientationChip;
+    private TextView flagChip;
     private TextView statusLine;
     private TextView emptyView;
     private ProgressBar progressBar;
@@ -150,6 +152,14 @@ public class MainActivity extends Activity {
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         orientationMargin.setMargins(0, 0, dp(6), 0);
         orientationChip.setLayoutParams(orientationMargin);
+
+        flagChip = theme.chip(this, "All");
+        flagChip.setOnClickListener(view -> cycleFlag());
+        titleRow.addView(flagChip);
+        LinearLayout.LayoutParams flagMargin = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        flagMargin.setMargins(0, 0, dp(6), 0);
+        flagChip.setLayoutParams(flagMargin);
 
         sortChip = theme.chip(this, "Date ↓");
         sortChip.setOnClickListener(view -> cycleSort());
@@ -357,6 +367,24 @@ public class MainActivity extends Activity {
         loadFresh();
     }
 
+    private void cycleFlag() {
+        switch (activeFlag) {
+            case "":
+                activeFlag = "picked";
+                flagChip.setText("♥ Picks");
+                break;
+            case "picked":
+                activeFlag = "rejected";
+                flagChip.setText("✕ Rejects");
+                break;
+            default:
+                activeFlag = "";
+                flagChip.setText("All");
+                break;
+        }
+        loadFresh();
+    }
+
     private void loadFresh() {
         hideKeyboard();
         searchInput.clearFocus();
@@ -377,7 +405,7 @@ public class MainActivity extends Activity {
         progressBar.setVisibility(ProgressBar.VISIBLE);
         updateSummary("Loading from Omarchy...");
 
-        client.fetchPhotos(serverUrl, activeQuery, offset, PAGE_SIZE, activeSort, activeOrientation, new PhotoArchiveClient.PhotosCallback() {
+        client.fetchPhotos(serverUrl, activeQuery, offset, PAGE_SIZE, activeSort, activeOrientation, activeFlag, new PhotoArchiveClient.PhotosCallback() {
             @Override
             public void onSuccess(PhotoPage page) {
                 loading = false;

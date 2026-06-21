@@ -77,10 +77,10 @@ final class PhotoArchiveClient {
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
 
     void fetchPhotos(String serverUrl, String query, int offset, int limit,
-                     String sort, String orientation, PhotosCallback callback) {
+                     String sort, String orientation, String flag, PhotosCallback callback) {
         executor.execute(() -> {
             try {
-                PhotoPage page = requestPhotos(serverUrl, query, offset, limit, sort, orientation);
+                PhotoPage page = requestPhotos(serverUrl, query, offset, limit, sort, orientation, flag);
                 runOnMain(() -> callback.onSuccess(page));
             } catch (Exception error) {
                 runOnMain(() -> callback.onError(cleanMessage(error)));
@@ -181,7 +181,7 @@ final class PhotoArchiveClient {
     }
 
     private PhotoPage requestPhotos(String serverUrl, String query, int offset, int limit,
-                                    String sort, String orientation) throws Exception {
+                                    String sort, String orientation, String flag) throws Exception {
         StringBuilder url = new StringBuilder(normalize(serverUrl));
         url.append("/api/rankings?sort=").append(URLEncoder.encode(sort != null ? sort : "date_taken", "UTF-8"));
         url.append("&limit=").append(limit);
@@ -191,6 +191,9 @@ final class PhotoArchiveClient {
         }
         if (orientation != null && !orientation.isEmpty()) {
             url.append("&orientation=").append(URLEncoder.encode(orientation, "UTF-8"));
+        }
+        if (flag != null && !flag.isEmpty()) {
+            url.append("&flag=").append(URLEncoder.encode(flag, "UTF-8"));
         }
 
         JSONObject json = new JSONObject(get(url.toString()));
