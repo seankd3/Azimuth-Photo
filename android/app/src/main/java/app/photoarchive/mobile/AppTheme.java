@@ -15,6 +15,7 @@ final class AppTheme {
     final int muted = Color.rgb(160, 166, 173);
     final int accent = Color.rgb(144, 199, 255);
     final int good = Color.rgb(126, 217, 160);
+    final int surface = Color.rgb(18, 19, 21);
 
     TextView chip(Context context, String text) {
         TextView view = new TextView(context);

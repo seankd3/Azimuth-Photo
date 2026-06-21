@@ -45,6 +45,8 @@ public class MainActivity extends Activity {
 
     private String serverUrl;
     private String activeQuery = "";
+    private String activeSort = "date_taken";
+    private String activeOrientation = "";
     private int offset = 0;
     private int totalImages = 0;
     private boolean loading = false;
@@ -55,6 +57,8 @@ public class MainActivity extends Activity {
     private TextView titleView;
     private TextView subtitleView;
     private TextView serverChip;
+    private TextView sortChip;
+    private TextView orientationChip;
     private TextView statusLine;
     private TextView emptyView;
     private ProgressBar progressBar;
@@ -134,6 +138,22 @@ public class MainActivity extends Activity {
 
         titleView = theme.label(this, "Archive", 28, theme.text, true);
         titleRow.addView(titleView, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+
+        orientationChip = theme.chip(this, "All");
+        orientationChip.setOnClickListener(view -> cycleOrientation());
+        titleRow.addView(orientationChip);
+        LinearLayout.LayoutParams orientationMargin = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        orientationMargin.setMargins(0, 0, dp(6), 0);
+        orientationChip.setLayoutParams(orientationMargin);
+
+        sortChip = theme.chip(this, "Date ↓");
+        sortChip.setOnClickListener(view -> cycleSort());
+        titleRow.addView(sortChip);
+        LinearLayout.LayoutParams sortMargin = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        sortMargin.setMargins(0, 0, dp(6), 0);
+        sortChip.setLayoutParams(sortMargin);
 
         serverChip = theme.chip(this, "Omarchy");
         serverChip.setOnClickListener(view -> showServerDialog());
@@ -246,6 +266,42 @@ public class MainActivity extends Activity {
         searchInput.requestFocus();
     }
 
+    private void cycleSort() {
+        switch (activeSort) {
+            case "date_taken":
+                activeSort = "elo";
+                sortChip.setText("Rank ↓");
+                break;
+            case "elo":
+                activeSort = "filename";
+                sortChip.setText("Name ↓");
+                break;
+            default:
+                activeSort = "date_taken";
+                sortChip.setText("Date ↓");
+                break;
+        }
+        loadFresh();
+    }
+
+    private void cycleOrientation() {
+        switch (activeOrientation) {
+            case "":
+                activeOrientation = "landscape";
+                orientationChip.setText("Landscape");
+                break;
+            case "landscape":
+                activeOrientation = "portrait";
+                orientationChip.setText("Portrait");
+                break;
+            default:
+                activeOrientation = "";
+                orientationChip.setText("All");
+                break;
+        }
+        loadFresh();
+    }
+
     private void loadFresh() {
         activeQuery = searchInput.getText().toString().trim();
         titleView.setText(activeQuery.isEmpty() ? "Archive" : "Search");
@@ -264,7 +320,7 @@ public class MainActivity extends Activity {
         progressBar.setVisibility(ProgressBar.VISIBLE);
         updateSummary("Loading from Omarchy...");
 
-        client.fetchPhotos(serverUrl, activeQuery, offset, PAGE_SIZE, new PhotoArchiveClient.PhotosCallback() {
+        client.fetchPhotos(serverUrl, activeQuery, offset, PAGE_SIZE, activeSort, activeOrientation, new PhotoArchiveClient.PhotosCallback() {
             @Override
             public void onSuccess(PhotoPage page) {
                 loading = false;

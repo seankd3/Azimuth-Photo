@@ -52,6 +52,17 @@ final class PhotoAdapter extends BaseAdapter {
         notifyDataSetChanged();
     }
 
+    List<Photo> getPhotos() {
+        return new ArrayList<>(photos);
+    }
+
+    int indexOf(Photo photo) {
+        for (int i = 0; i < photos.size(); i++) {
+            if (photos.get(i).id == photo.id) return i;
+        }
+        return 0;
+    }
+
     @Override
     public int getCount() {
         return photos.size();
