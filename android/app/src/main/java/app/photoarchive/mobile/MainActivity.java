@@ -234,6 +234,11 @@ public class MainActivity extends Activity {
         gridView.setBackgroundColor(theme.background);
         gridView.setAdapter(adapter);
         gridView.setOnItemClickListener((parent, view, position, id) -> openPhoto((Photo) adapter.getItem(position)));
+        gridView.setOnItemLongClickListener((parent, view, pos, id) -> {
+            Photo photo = (Photo) adapter.getItem(pos);
+            showQuickActions(photo);
+            return true;
+        });
         gridView.setOnScrollListener(new AbsListView.OnScrollListener() {
             @Override
             public void onScrollStateChanged(AbsListView view, int scrollState) {
@@ -494,6 +499,45 @@ public class MainActivity extends Activity {
         PhotoViewer viewer = new PhotoViewer(this, adapter.getPhotos(), position, () -> serverUrl, imageLoader, client, theme);
         viewer.setOnDismissListener(() -> adapter.notifyDataSetChanged());
         viewer.show();
+    }
+
+    private void showQuickActions(Photo photo) {
+        String pickLabel = "picked".equals(photo.flag) ? "Unflag" : "♥ Pick";
+        String rejectLabel = "rejected".equals(photo.flag) ? "Unflag" : "✕ Reject";
+
+        new AlertDialog.Builder(this)
+                .setTitle(photo.filename)
+                .setItems(new String[]{pickLabel, rejectLabel, "Share"}, (dialog, which) -> {
+                    switch (which) {
+                        case 0:
+                            String pickFlag = "picked".equals(photo.flag) ? "unflagged" : "picked";
+                            quickFlag(photo, pickFlag);
+                            break;
+                        case 1:
+                            String rejectFlag = "rejected".equals(photo.flag) ? "unflagged" : "rejected";
+                            quickFlag(photo, rejectFlag);
+                            break;
+                        case 2:
+                            MediaHelper.sharePhoto(this, client, photo, serverUrl);
+                            break;
+                    }
+                })
+                .show();
+    }
+
+    private void quickFlag(Photo photo, String flag) {
+        client.setFlag(serverUrl, photo.id, flag, new PhotoArchiveClient.FlagCallback() {
+            @Override
+            public void onSuccess(String resultFlag) {
+                photo.flag = resultFlag;
+                adapter.notifyDataSetChanged();
+            }
+
+            @Override
+            public void onError(String message) {
+                Toast.makeText(MainActivity.this, "Flag failed: " + message, Toast.LENGTH_SHORT).show();
+            }
+        });
     }
 
     private void choosePhotosToImport() {
