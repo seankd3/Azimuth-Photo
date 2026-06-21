@@ -20,8 +20,11 @@ import java.net.URLEncoder;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -38,6 +41,21 @@ final class PhotoArchiveClient {
 
     interface StatusCallback {
         void onSuccess(ConnectionStatus status);
+        void onError(String message);
+    }
+
+    interface FlagCallback {
+        void onSuccess(String flag);
+        void onError(String message);
+    }
+
+    interface ExifCallback {
+        void onSuccess(Map<String, String> exif);
+        void onError(String message);
+    }
+
+    interface DownloadCallback {
+        void onSuccess(byte[] data, String contentType);
         void onError(String message);
     }
 
@@ -71,6 +89,39 @@ final class PhotoArchiveClient {
             try {
                 ConnectionStatus status = requestStatus(serverUrl);
                 runOnMain(() -> callback.onSuccess(status));
+            } catch (Exception error) {
+                runOnMain(() -> callback.onError(cleanMessage(error)));
+            }
+        });
+    }
+
+    void setFlag(String serverUrl, int imageId, String flag, FlagCallback callback) {
+        executor.execute(() -> {
+            try {
+                postFlag(serverUrl, imageId, flag);
+                runOnMain(() -> callback.onSuccess(flag));
+            } catch (Exception error) {
+                runOnMain(() -> callback.onError(cleanMessage(error)));
+            }
+        });
+    }
+
+    void fetchExif(String serverUrl, int imageId, ExifCallback callback) {
+        executor.execute(() -> {
+            try {
+                Map<String, String> exif = requestExif(serverUrl, imageId);
+                runOnMain(() -> callback.onSuccess(exif));
+            } catch (Exception error) {
+                runOnMain(() -> callback.onError(cleanMessage(error)));
+            }
+        });
+    }
+
+    void downloadImage(String url, DownloadCallback callback) {
+        executor.execute(() -> {
+            try {
+                DownloadResult result = downloadBytes(url);
+                runOnMain(() -> callback.onSuccess(result.data, result.contentType));
             } catch (Exception error) {
                 runOnMain(() -> callback.onError(cleanMessage(error)));
             }
@@ -112,6 +163,76 @@ final class PhotoArchiveClient {
     private ConnectionStatus requestStatus(String serverUrl) throws Exception {
         JSONObject json = new JSONObject(get(normalize(serverUrl) + "/api/rankings?sort=date_taken&limit=1&offset=0"));
         return new ConnectionStatus(json.optInt("total_images", 0), json.optBoolean("status_stale", false));
+    }
+
+    private void postFlag(String serverUrl, int imageId, String flag) throws Exception {
+        String urlString = normalize(serverUrl) + "/api/image/" + imageId + "/flag";
+        HttpURLConnection connection = null;
+        try {
+            connection = (HttpURLConnection) new URL(urlString).openConnection();
+            connection.setConnectTimeout(10_000);
+            connection.setReadTimeout(15_000);
+            connection.setRequestMethod("POST");
+            connection.setDoOutput(true);
+            connection.setRequestProperty("Content-Type", "application/json");
+            connection.setRequestProperty("Accept", "application/json");
+
+            String body = "{\"flag\":\"" + flag + "\"}";
+            try (OutputStream out = connection.getOutputStream()) {
+                out.write(body.getBytes("UTF-8"));
+            }
+
+            int code = connection.getResponseCode();
+            String responseBody = readAll(code >= 400 ? connection.getErrorStream() : connection.getInputStream());
+            if (code < 200 || code >= 300) {
+                throw new IllegalStateException(responseBody.isEmpty() ? "Server returned " + code : responseBody);
+            }
+        } finally {
+            if (connection != null) connection.disconnect();
+        }
+    }
+
+    private Map<String, String> requestExif(String serverUrl, int imageId) throws Exception {
+        String urlString = normalize(serverUrl) + "/api/image/" + imageId + "/exif";
+        String body = get(urlString);
+        JSONObject json = new JSONObject(body);
+        Map<String, String> exif = new LinkedHashMap<>();
+        Iterator<String> keys = json.keys();
+        while (keys.hasNext()) {
+            String key = keys.next();
+            Object value = json.opt(key);
+            if (value != null && !JSONObject.NULL.equals(value)) {
+                exif.put(key, String.valueOf(value));
+            }
+        }
+        return exif;
+    }
+
+    private DownloadResult downloadBytes(String urlString) throws Exception {
+        HttpURLConnection connection = null;
+        try {
+            connection = (HttpURLConnection) new URL(urlString).openConnection();
+            connection.setConnectTimeout(10_000);
+            connection.setReadTimeout(60_000);
+            connection.setRequestProperty("Accept", "image/*");
+            int code = connection.getResponseCode();
+            if (code < 200 || code >= 300) {
+                throw new IllegalStateException("Server returned " + code);
+            }
+            String contentType = connection.getContentType();
+            if (contentType == null) contentType = "image/jpeg";
+            try (InputStream input = connection.getInputStream();
+                 ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+                byte[] buffer = new byte[64 * 1024];
+                int read;
+                while ((read = input.read(buffer)) >= 0) {
+                    if (read > 0) output.write(buffer, 0, read);
+                }
+                return new DownloadResult(output.toByteArray(), contentType);
+            }
+        } finally {
+            if (connection != null) connection.disconnect();
+        }
     }
 
     private ImportResult postImport(Context context, String serverUrl, List<Uri> uris) throws Exception {
@@ -281,6 +402,16 @@ final class PhotoArchiveClient {
         ImportResult(int imported, int skipped) {
             this.imported = imported;
             this.skipped = skipped;
+        }
+    }
+
+    private static final class DownloadResult {
+        final byte[] data;
+        final String contentType;
+
+        DownloadResult(byte[] data, String contentType) {
+            this.data = data;
+            this.contentType = contentType;
         }
     }
 }
