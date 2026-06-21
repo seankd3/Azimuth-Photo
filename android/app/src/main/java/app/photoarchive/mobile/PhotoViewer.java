@@ -219,6 +219,9 @@ final class PhotoViewer {
     }
 
     private void flagPhoto(String flag) {
+        if (rejectButton != null) {
+            rejectButton.performHapticFeedback(android.view.HapticFeedbackConstants.CONTEXT_CLICK);
+        }
         Photo photo = photos.get(position);
         String currentFlag = photo.flag;
         String newFlag = currentFlag.equals(flag) ? "unflagged" : flag;

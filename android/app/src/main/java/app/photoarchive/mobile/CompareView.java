@@ -119,6 +119,7 @@ final class CompareView {
     private void pickWinner(Photo winner, Photo loser, FrameLayout winnerFrame, FrameLayout loserFrame) {
         if (submitting || currentA == null || currentB == null) return;
         submitting = true;
+        winnerFrame.performHapticFeedback(android.view.HapticFeedbackConstants.CONTEXT_CLICK);
 
         winnerFrame.setForeground(flashOverlay(Color.argb(80, 76, 175, 80)));
         loserFrame.setForeground(flashOverlay(Color.argb(80, 244, 67, 54)));

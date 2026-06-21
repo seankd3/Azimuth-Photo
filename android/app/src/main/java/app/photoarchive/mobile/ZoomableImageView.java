@@ -78,6 +78,7 @@ final class ZoomableImageView extends ImageView {
 
             @Override
             public boolean onDoubleTap(MotionEvent e) {
+                performHapticFeedback(android.view.HapticFeedbackConstants.CONTEXT_CLICK);
                 if (isZoomed()) {
                     resetZoom();
                 } else {
@@ -166,6 +167,7 @@ final class ZoomableImageView extends ImageView {
                         if (Math.abs(vy) > SWIPE_DOWN_VELOCITY_THRESHOLD && vy > 0 && Math.abs(vy) > Math.abs(vx)) {
                             swipeListener.onSwipeDown();
                         } else if (Math.abs(vx) > SWIPE_VELOCITY_THRESHOLD) {
+                            performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK);
                             if (vx < 0) {
                                 swipeListener.onSwipeLeft();
                             } else {
