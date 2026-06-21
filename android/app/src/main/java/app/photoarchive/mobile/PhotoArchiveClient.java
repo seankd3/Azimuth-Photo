@@ -43,10 +43,11 @@ final class PhotoArchiveClient {
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
 
-    void fetchPhotos(String serverUrl, String query, int offset, int limit, PhotosCallback callback) {
+    void fetchPhotos(String serverUrl, String query, int offset, int limit,
+                     String sort, String orientation, PhotosCallback callback) {
         executor.execute(() -> {
             try {
-                PhotoPage page = requestPhotos(serverUrl, query, offset, limit);
+                PhotoPage page = requestPhotos(serverUrl, query, offset, limit, sort, orientation);
                 runOnMain(() -> callback.onSuccess(page));
             } catch (Exception error) {
                 runOnMain(() -> callback.onError(cleanMessage(error)));
@@ -80,13 +81,17 @@ final class PhotoArchiveClient {
         executor.shutdownNow();
     }
 
-    private PhotoPage requestPhotos(String serverUrl, String query, int offset, int limit) throws Exception {
+    private PhotoPage requestPhotos(String serverUrl, String query, int offset, int limit,
+                                    String sort, String orientation) throws Exception {
         StringBuilder url = new StringBuilder(normalize(serverUrl));
-        url.append("/api/rankings?sort=date_taken");
+        url.append("/api/rankings?sort=").append(URLEncoder.encode(sort != null ? sort : "date_taken", "UTF-8"));
         url.append("&limit=").append(limit);
         url.append("&offset=").append(offset);
         if (query != null && !query.trim().isEmpty()) {
             url.append("&q=").append(URLEncoder.encode(query.trim(), "UTF-8"));
+        }
+        if (orientation != null && !orientation.isEmpty()) {
+            url.append("&orientation=").append(URLEncoder.encode(orientation, "UTF-8"));
         }
 
         JSONObject json = new JSONObject(get(url.toString()));
