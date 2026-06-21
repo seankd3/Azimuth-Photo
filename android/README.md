@@ -61,3 +61,14 @@ Use the hard gate before handing the APK to someone:
 ```bash
 ./scripts/photoarchive-android-e2e --require-device
 ```
+
+## Release
+
+For the normal invisible loop, run:
+
+```bash
+./scripts/photoarchive-android-release
+```
+
+It runs the end-to-end gate, rebuilds the APK, verifies the public download URL
+serves that exact file, and prints the phone link plus hash.

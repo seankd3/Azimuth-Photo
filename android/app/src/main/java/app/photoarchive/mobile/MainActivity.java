@@ -9,6 +9,8 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.inputmethod.EditorInfo;
@@ -30,8 +32,10 @@ import java.util.Locale;
 public class MainActivity extends Activity {
     private static final int PAGE_SIZE = 90;
     private static final int PICK_IMPORT_PHOTOS = 3001;
+    private static final int[] RECONNECT_DELAYS_MS = {1_500, 3_000, 6_000, 12_000, 20_000, 30_000};
 
     private final AppTheme theme = new AppTheme();
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     private ServerSettings serverSettings;
     private PhotoArchiveClient client;
@@ -45,6 +49,8 @@ public class MainActivity extends Activity {
     private int totalImages = 0;
     private boolean loading = false;
     private boolean endReached = false;
+    private boolean reconnectScheduled = false;
+    private int reconnectAttempts = 0;
 
     private TextView titleView;
     private TextView subtitleView;
@@ -74,6 +80,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        mainHandler.removeCallbacksAndMessages(null);
         client.shutdown();
         imageLoader.shutdown();
     }
@@ -262,6 +269,7 @@ public class MainActivity extends Activity {
             public void onSuccess(PhotoPage page) {
                 loading = false;
                 progressBar.setVisibility(ProgressBar.GONE);
+                resetConnectionState();
                 if (firstPage) adapter.clear();
                 adapter.addPhotos(page.photos);
                 offset += page.photos.size();
@@ -277,12 +285,12 @@ public class MainActivity extends Activity {
                 loading = false;
                 progressBar.setVisibility(ProgressBar.GONE);
                 updateSummary(null);
-                statusLine.setTextColor(Color.rgb(255, 167, 167));
-                statusLine.setText("Offline: " + message);
+                showReconnectingState();
                 if (adapter.getCount() == 0) {
-                    showEmpty("Cannot reach photoArchive.\n\nCheck that Tailscale and the Omarchy server are running.");
+                    showEmpty("Connecting to Omarchy...");
+                    scheduleReconnect();
                 } else {
-                    Toast.makeText(MainActivity.this, message, Toast.LENGTH_LONG).show();
+                    scheduleReconnect();
                 }
             }
         });
@@ -294,16 +302,48 @@ public class MainActivity extends Activity {
         client.checkConnection(serverUrl, new PhotoArchiveClient.StatusCallback() {
             @Override
             public void onSuccess(ConnectionStatus status) {
+                resetConnectionState();
                 statusLine.setTextColor(status.stale ? theme.muted : theme.good);
                 statusLine.setText(String.format(Locale.US, "Connected privately. %,d photos available.", status.totalImages));
             }
 
             @Override
             public void onError(String message) {
-                statusLine.setTextColor(Color.rgb(255, 167, 167));
-                statusLine.setText("Offline: " + message);
+                showReconnectingState();
+                scheduleReconnect();
             }
         });
+    }
+
+    private void showReconnectingState() {
+        statusLine.setTextColor(theme.muted);
+        statusLine.setText("Connecting to Omarchy...");
+        if (adapter.getCount() == 0) {
+            subtitleView.setText("Self-hosted through photoArchive");
+        }
+    }
+
+    private void scheduleReconnect() {
+        if (reconnectScheduled) return;
+        int index = Math.min(reconnectAttempts, RECONNECT_DELAYS_MS.length - 1);
+        int delayMs = RECONNECT_DELAYS_MS[index];
+        reconnectAttempts++;
+        reconnectScheduled = true;
+        mainHandler.postDelayed(() -> {
+            reconnectScheduled = false;
+            checkServer();
+            if (adapter.getCount() == 0) {
+                loadFresh();
+            } else {
+                loadNextPage(false);
+            }
+        }, delayMs);
+    }
+
+    private void resetConnectionState() {
+        reconnectAttempts = 0;
+        reconnectScheduled = false;
+        mainHandler.removeCallbacksAndMessages(null);
     }
 
     private void openPhoto(Photo photo) {

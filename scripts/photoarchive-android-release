@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+APK="$ROOT/outputs/photoarchive-android-debug.apk"
+ARTIFACT_DIR="${PHOTOARCHIVE_ANDROID_RELEASE_ARTIFACTS:-$ROOT/outputs/android-release}"
+DOWNLOAD_URL="${PHOTOARCHIVE_ANDROID_DOWNLOAD_URL:-https://omarchy.tail0eeded.ts.net/photoarchive-apk/photoarchive.apk}"
+
+mkdir -p "$ARTIFACT_DIR"
+
+"$ROOT/scripts/photoarchive-android-e2e" >"$ARTIFACT_DIR/release.log" 2>&1 || {
+    cat "$ARTIFACT_DIR/release.log" >&2
+    exit 1
+}
+
+if [[ ! -f "$APK" ]]; then
+    echo "Missing release APK at $APK" >&2
+    exit 1
+fi
+
+LOCAL_HASH="$(sha256sum "$APK" | awk '{print $1}')"
+CHECK_APK="$ARTIFACT_DIR/download-check.apk"
+
+curl -fsSL --max-time 30 "$DOWNLOAD_URL" -o "$CHECK_APK"
+REMOTE_HASH="$(sha256sum "$CHECK_APK" | awk '{print $1}')"
+
+if [[ "$LOCAL_HASH" != "$REMOTE_HASH" ]]; then
+    echo "Published APK is stale." >&2
+    echo "local:  $LOCAL_HASH $APK" >&2
+    echo "remote: $REMOTE_HASH $DOWNLOAD_URL" >&2
+    exit 1
+fi
+
+cat <<EOF
+photoArchive Android is ready.
+Download: $DOWNLOAD_URL
+SHA-256:  $LOCAL_HASH
+EOF
