@@ -315,6 +315,8 @@ public class MainActivity extends Activity {
     }
 
     private void loadFresh() {
+        hideKeyboard();
+        searchInput.clearFocus();
         activeQuery = searchInput.getText().toString().trim();
         titleView.setText(activeQuery.isEmpty() ? "Archive" : "Search");
         offset = 0;
@@ -550,6 +552,14 @@ public class MainActivity extends Activity {
         int count = Math.min(photos.size(), 12);
         for (int i = 0; i < count; i++) {
             imageLoader.prefetch(photos.get(i).thumbUrl(serverUrl));
+        }
+    }
+
+    private void hideKeyboard() {
+        android.view.inputmethod.InputMethodManager imm =
+                (android.view.inputmethod.InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+        if (imm != null && searchInput != null) {
+            imm.hideSoftInputFromWindow(searchInput.getWindowToken(), 0);
         }
     }
 
