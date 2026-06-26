@@ -13,6 +13,7 @@ from data import connection as data_connection
 from data import schema as data_schema
 from data.repositories import cache_entries as cache_entry_repository
 from data.repositories import catalog as catalog_repository
+from data.repositories import collections as collection_repository
 from data.repositories.common import chunked as _chunked
 from data.repositories import embeddings as embedding_repository
 from data.repositories import filter_options as filter_options_repository
@@ -502,6 +503,26 @@ async def get_recent_active_images(limit: int = 10):
 
 async def get_import_batch_image_ids(batch_id: int) -> set[int] | None:
     return await import_repository.import_batch_image_ids(DB_PATH, batch_id)
+
+
+async def create_collection(**kwargs):
+    return await collection_repository.create_collection(DB_PATH, **kwargs)
+
+
+async def list_collections():
+    return await collection_repository.list_collections(DB_PATH)
+
+
+async def get_collection(collection_id: int, **kwargs):
+    return await collection_repository.get_collection(DB_PATH, collection_id, **kwargs)
+
+
+async def add_collection_images(collection_id: int, image_ids: list[int]):
+    return await collection_repository.add_images(DB_PATH, collection_id, image_ids)
+
+
+async def remove_collection_images(collection_id: int, image_ids: list[int]):
+    return await collection_repository.remove_images(DB_PATH, collection_id, image_ids)
 
 
 async def set_image_status(image_id: int, status: str):

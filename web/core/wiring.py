@@ -3,6 +3,7 @@
 from features.ai import routes as ai_routes
 from features.cache import routes as cache_routes
 from features.catalog import routes as catalog_routes
+from features.collections import routes as collection_routes
 from features.compare import routes as compare_routes
 from features.export import routes as export_routes
 from features.imports import routes as imports_routes
@@ -217,6 +218,18 @@ def configure_search_routes() -> None:
         batch_update_metadata=lambda updates: db.batch_update_metadata(updates),
         duplicates_cache=search_service._duplicates_cache,
         collections_cache=search_service._collections_cache,
+    )
+
+
+def configure_collection_routes() -> None:
+    import db
+
+    collection_routes.configure(
+        create_collection=lambda **kwargs: db.create_collection(**kwargs),
+        list_collections=lambda: db.list_collections(),
+        get_collection=lambda collection_id, **kwargs: db.get_collection(collection_id, **kwargs),
+        add_collection_images=lambda collection_id, image_ids: db.add_collection_images(collection_id, image_ids),
+        remove_collection_images=lambda collection_id, image_ids: db.remove_collection_images(collection_id, image_ids),
     )
 
 

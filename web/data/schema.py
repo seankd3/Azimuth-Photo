@@ -5,7 +5,7 @@ import os
 from data.repositories import catalog as catalog_repository
 
 EXPECTED_EMBEDDING_DIM = 2048  # Qwen3-VL-Embedding-2B native dimension
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS catalog_sources (
@@ -377,6 +377,32 @@ ON import_batches(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_import_batch_images_image
 ON import_batch_images(image_id, batch_id);
 
+CREATE TABLE IF NOT EXISTS collections (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    visibility TEXT NOT NULL DEFAULT 'private',
+    status TEXT NOT NULL DEFAULT 'draft',
+    cover_image_id INTEGER REFERENCES images(id) DEFAULT NULL,
+    created_at REAL NOT NULL DEFAULT (strftime('%s', 'now')),
+    updated_at REAL NOT NULL DEFAULT (strftime('%s', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS collection_images (
+    collection_id INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+    image_id INTEGER NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL DEFAULT 0,
+    added_at REAL NOT NULL DEFAULT (strftime('%s', 'now')),
+    PRIMARY KEY (collection_id, image_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_collections_updated
+ON collections(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_collection_images_image
+ON collection_images(image_id, collection_id);
+CREATE INDEX IF NOT EXISTS idx_collection_images_position
+ON collection_images(collection_id, position, added_at);
+
 CREATE TABLE IF NOT EXISTS people (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL DEFAULT '',
@@ -679,6 +705,8 @@ REQUIRED_TABLES = {
     "cache_metadata",
     "import_batches",
     "import_batch_images",
+    "collections",
+    "collection_images",
     "people",
     "face_detections",
     "face_assignments",
@@ -742,6 +770,9 @@ REQUIRED_INDEXES = {
     "idx_cache_entries_root_size_accessed_id",
     "idx_import_batches_created",
     "idx_import_batch_images_image",
+    "idx_collections_updated",
+    "idx_collection_images_image",
+    "idx_collection_images_position",
     "idx_people_status_seen",
     "idx_face_detections_image_model",
     "idx_face_detections_status_model",

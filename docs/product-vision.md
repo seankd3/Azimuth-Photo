@@ -11,6 +11,8 @@ enough that private photos stay private by default.
 The product can eventually be useful to other people, but the first priority is
 to make it excellent for Sean's actual workflow.
 
+The execution order lives in [Product Roadmap](product-roadmap.md).
+
 ## What It Should Feel Like
 
 - Open the phone app and see the whole archive without thinking about where the

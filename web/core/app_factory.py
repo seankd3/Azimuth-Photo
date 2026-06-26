@@ -15,6 +15,7 @@ from features.access import routes as access_routes
 from features.ai import routes as ai_routes
 from features.cache import routes as cache_routes
 from features.catalog import routes as catalog_routes
+from features.collections import routes as collection_routes
 from features.compare import routes as compare_routes
 from features.dev import routes as dev_routes
 from features.export import routes as export_routes
@@ -635,6 +636,7 @@ def create_app_shell(
     wiring.configure_catalog_routes()
     wiring.configure_library_routes()
     wiring.configure_search_routes()
+    wiring.configure_collection_routes()
     object.__setattr__(shell, "runtime_services", configure_app_runtime_services(shell))
     page_routes.configure(templates=templates, template_context=shell.template_context)
     app.include_router(page_routes.router)
@@ -646,6 +648,7 @@ def create_app_shell(
     app.include_router(compare_routes.router)
     app.include_router(media_routes.router)
     app.include_router(library_routes.router)
+    app.include_router(collection_routes.router)
     app.include_router(export_routes.router)
     app.include_router(imports_routes.router)
     app.include_router(search_routes.router)
