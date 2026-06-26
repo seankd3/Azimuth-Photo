@@ -91,6 +91,8 @@ cd web
 
 ## Documentation
 
+- [Product vision](docs/product-vision.md): north star, product principles,
+  sharing model, and staged goals.
 - [Getting started](docs/getting-started.md): install, run, first scan,
   Background Work, and the first useful workflow.
 - [Feature guide](docs/features.md): Catalog, Library, Compare, People, search,
