@@ -98,6 +98,23 @@ class UiContractsTests(BackendTestCase):
         self.assertIn("Taste sorting needs more signal", shell)
         self.assertIn("data.taste_available === false", app_js)
 
+    async def test_library_selection_reveals_collection_action(self):
+        base_dir = os.path.dirname(__file__)
+        with open(os.path.join(base_dir, "static", "js", "library", "batch.js"), encoding="utf-8") as fh:
+            batch_js = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "library", "batch_controller.js"), encoding="utf-8") as fh:
+            batch_controller = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "library", "collection_sheet.js"), encoding="utf-8") as fh:
+            collection_sheet = fh.read()
+        with open(os.path.join(base_dir, "static", "style.css"), encoding="utf-8") as fh:
+            styles = fh.read()
+
+        self.assertIn('data-batch-action="collection"', batch_js)
+        self.assertIn("createCollectionSheetController", batch_controller)
+        self.assertIn("/api/user-collections", collection_sheet)
+        self.assertIn("Add to collection", collection_sheet)
+        self.assertIn(".collection-sheet", styles)
+
     async def test_loupe_filmstrip_uses_visible_library_pool_total(self):
         base_dir = os.path.dirname(__file__)
         with open(os.path.join(base_dir, "static", "js", "loupe", "controller.js"), encoding="utf-8") as fh:

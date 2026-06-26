@@ -8,6 +8,7 @@ export function batchBarHtml(selectedCount) {
                 <button class="batch-flag-btn flag-unflagged" data-batch-action="flag" data-flag="unflagged">U</button>
                 <button class="batch-flag-btn flag-rejected" data-batch-action="flag" data-flag="rejected">X</button>
                 <span class="batch-divider"></span>
+                <button data-batch-action="collection">Add to collection</button>
                 <button data-batch-action="export" data-format="json">Export JSON</button>
                 <button data-batch-action="export" data-format="csv">Export CSV</button>
                 <button class="batch-cancel" data-batch-action="clear">✕</button>

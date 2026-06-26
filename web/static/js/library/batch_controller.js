@@ -6,6 +6,7 @@ import {
     toggleBatchMode as toggleBatchModeCore,
     updateBatchBar as updateBatchBarCore,
 } from './batch.js';
+import { createCollectionSheetController } from './collection_sheet.js';
 
 
 export function createBatchSelectionController({
@@ -18,6 +19,12 @@ export function createBatchSelectionController({
     let batchMode = false;
     const batchSelected = new Set();
     let lastClickedIndex = -1;
+    const collectionSheet = createCollectionSheetController({
+        documentImpl,
+        getSelectedImageIds: () => api.selectedImageIds(),
+        clearSelection: () => api.clearBatchSelection(),
+        showToast,
+    });
     if (documentImpl?.body?.dataset?.paBatchBarBound !== '1') {
         if (documentImpl?.body?.dataset) {
             documentImpl.body.dataset.paBatchBarBound = '1';
@@ -29,6 +36,8 @@ export function createBatchSelectionController({
             const action = control.dataset.batchAction;
             if (action === 'flag') {
                 api.batchFlag(control.dataset.flag || 'unflagged');
+            } else if (action === 'collection') {
+                api.addToCollection();
             } else if (action === 'export') {
                 api.batchExport(control.dataset.format || 'json');
             } else if (action === 'clear') {
@@ -92,6 +101,9 @@ export function createBatchSelectionController({
         },
         batchExport: (format) => {
             batchExportCore(format, { imageIds: api.selectedImageIds() });
+        },
+        addToCollection: () => {
+            collectionSheet.open();
         },
     };
 
