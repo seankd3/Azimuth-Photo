@@ -14,8 +14,10 @@ from data.repositories import stats as stats_repository
 router = APIRouter()
 ResolveLibraryConstraints = Callable[..., Awaitable[dict]]
 DbPathProvider = Callable[[], str]
+GetImportBatchImageIds = Callable[[int], Awaitable[set[int] | None]]
 _resolve_library_constraints: ResolveLibraryConstraints | None = None
 _db_path: DbPathProvider | None = None
+_get_import_batch_image_ids: GetImportBatchImageIds | None = None
 
 EXPORT_FIELD_NAMES = (
     "rank",
@@ -44,10 +46,12 @@ def configure(
     *,
     resolve_library_constraints: ResolveLibraryConstraints,
     db_path: DbPathProvider,
+    get_import_batch_image_ids: GetImportBatchImageIds | None = None,
 ) -> None:
-    global _resolve_library_constraints, _db_path
+    global _resolve_library_constraints, _db_path, _get_import_batch_image_ids
     _resolve_library_constraints = resolve_library_constraints
     _db_path = db_path
+    _get_import_batch_image_ids = get_import_batch_image_ids
 
 
 def _configured_db_path() -> str:
@@ -73,6 +77,7 @@ async def _get_export_images(
     q: str,
     deep: bool,
     people: str,
+    import_batch: int = 0,
 ):
     db_path = _configured_db_path()
     if ids:
@@ -84,6 +89,17 @@ async def _get_export_images(
         raise RuntimeError("Export routes are not configured")
     limit = clamp_int(limit, 10000, 1, 50000)
     search = await _resolve_library_constraints(q, people=people, deep=deep)
+    id_filter = search.get("id_filter")
+    if import_batch > 0:
+        if _get_import_batch_image_ids is None:
+            raise RuntimeError("Export routes are not configured")
+        batch_ids = await _get_import_batch_image_ids(import_batch)
+        if batch_ids is None:
+            id_filter = set()
+        elif id_filter is None:
+            id_filter = set(batch_ids)
+        else:
+            id_filter = {int(image_id) for image_id in id_filter}.intersection(batch_ids)
     db_sort = "elo" if sort == "similarity" else sort
     return await ranking_repository.rankings(
         db_path,
@@ -100,7 +116,7 @@ async def _get_export_images(
         file_type=file_type,
         camera=camera,
         lens=lens,
-        id_filter=search.get("id_filter"),
+        id_filter=id_filter,
         text_query=search.get("text_query") or "",
     )
 
@@ -135,6 +151,7 @@ async def export_rankings(
     orientation: str = "", compared: str = "", min_stars: int = 0,
     folder: str = "", flag: str = "", date_taken: str = "", file_type: str = "",
     camera: str = "", lens: str = "", q: str = "", deep: bool = False, people: str = "",
+    import_batch: int = 0,
 ):
     images = await _get_export_images(
         ids=ids,
@@ -152,6 +169,7 @@ async def export_rankings(
         q=q,
         deep=deep,
         people=people,
+        import_batch=import_batch,
     )
     data = [_export_row(index + 1, dict(image)) for index, image in enumerate(images)]
 

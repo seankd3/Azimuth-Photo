@@ -412,12 +412,14 @@ def configure_export_routes(
     *,
     resolve_library_constraints: export_routes.ResolveLibraryConstraints,
     db_path: export_routes.DbPathProvider,
+    get_import_batch_image_ids: export_routes.GetImportBatchImageIds | None = None,
 ) -> None:
     from core import wiring
 
     wiring.configure_export_routes(
         resolve_library_constraints=resolve_library_constraints,
         db_path=db_path,
+        get_import_batch_image_ids=get_import_batch_image_ids,
     )
 
 
@@ -504,6 +506,7 @@ def configure_app_runtime_services(shell: AppShell) -> AppRuntimeServices:
     configure_export_routes(
         resolve_library_constraints=resolve_library_constraints,
         db_path=lambda: db.DB_PATH,
+        get_import_batch_image_ids=lambda batch_id: db.get_import_batch_image_ids(batch_id),
     )
     configure_settings_routes(
         settings_response_cache=settings_status._settings_response_cache,

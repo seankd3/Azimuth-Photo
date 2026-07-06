@@ -455,8 +455,10 @@ def configure_export_routes(
     *,
     resolve_library_constraints,
     db_path,
+    get_import_batch_image_ids=None,
 ) -> None:
     export_routes.configure(
         resolve_library_constraints=resolve_library_constraints,
         db_path=db_path,
+        get_import_batch_image_ids=get_import_batch_image_ids,
     )
