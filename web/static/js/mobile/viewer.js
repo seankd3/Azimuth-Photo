@@ -1,0 +1,396 @@
+// GP-class photo viewer on a pure-black canvas.
+// Gesture grammar (from the One prototype):
+//   2 fingers  → live pinch zoom + pan (midpoint-anchored)
+//   1 finger   → pan when zoomed · swipe down/left/right at 1x
+//   double-tap → 1x ↔ 2.5x at the tap point
+// Flags are real writes with undo.
+
+import { thumbUrl } from './api.js';
+import { applyFlags } from './flags.js';
+import { byId, on } from './state.js';
+import { openCollectionSheet, openSheet } from './selection.js';
+
+let root = null;
+let stage = null;
+let img = null;
+let cap = null;
+
+let openState = false;
+let list = [];
+let index = -1;
+let needMore = null;
+let loadToken = 0;
+
+let zScale = 1;
+let tx = 0;
+let ty = 0;
+let zoomed = false;
+
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+}[c]));
+
+function current() {
+    return list[index] || null;
+}
+
+function applyT() {
+    img.style.transform = `translate(${tx}px, ${ty}px) scale(${zScale})`;
+}
+
+function clampPan() {
+    const rect = stage.getBoundingClientRect();
+    const maxX = (rect.width * (zScale - 1)) / 2;
+    const maxY = (rect.height * (zScale - 1)) / 2;
+    tx = clamp(tx, -maxX, maxX);
+    ty = clamp(ty, -maxY, maxY);
+}
+
+function resetZoom() {
+    zScale = 1;
+    tx = 0;
+    ty = 0;
+    zoomed = false;
+    root.classList.remove('zoomed');
+    img.style.transform = '';
+}
+
+function setZoomTo(scale, clientX, clientY) {
+    const rect = stage.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    zScale = scale;
+    tx = (cx - clientX) * (scale - 1);
+    ty = (cy - clientY) * (scale - 1);
+    clampPan();
+    zoomed = scale > 1;
+    root.classList.toggle('zoomed', zoomed);
+    if (zoomed) loadLg();
+    applyT();
+}
+
+function loadLg() {
+    const image = current();
+    if (!image) return;
+    const token = loadToken;
+    const lg = new Image();
+    lg.decoding = 'async';
+    lg.onload = () => {
+        if (token === loadToken) img.src = lg.src;
+    };
+    lg.src = thumbUrl('lg', image.id);
+}
+
+function preload(offset) {
+    const neighbor = list[index + offset];
+    if (neighbor) {
+        const pre = new Image();
+        pre.src = thumbUrl('md', neighbor.id);
+    }
+}
+
+function showCurrent() {
+    const image = current();
+    if (!image) return;
+    loadToken += 1;
+    resetZoom();
+    img.src = thumbUrl('md', image.id);
+    loadLg();
+    const date = image.date_taken ? String(image.date_taken).slice(0, 16).replace('T', ' · ') : '';
+    cap.textContent = [image.filename, date].filter(Boolean).join('  —  ');
+    syncFlagButtons();
+    preload(1);
+    preload(-1);
+    if (needMore && index >= list.length - 5) needMore();
+}
+
+function syncFlagButtons() {
+    const image = current();
+    const flag = image ? (byId.get(Number(image.id)) || image).flag || 'unflagged' : 'unflagged';
+    document.getElementById('mv-pick').classList.toggle('on-pick', flag === 'picked');
+    document.getElementById('mv-reject').classList.toggle('on-reject', flag === 'rejected');
+}
+
+function nav(dir) {
+    const next = index + dir;
+    if (next < 0 || next >= list.length) return;
+    index = next;
+    showCurrent();
+}
+
+export function openViewer(imageList, startIndex, { loadMore = null } = {}) {
+    list = imageList;
+    index = startIndex;
+    needMore = loadMore;
+    openState = true;
+    root.hidden = false;
+    document.body.style.overflow = 'hidden';
+    showCurrent();
+}
+
+export function closeViewer() {
+    if (!openState) return;
+    openState = false;
+    root.hidden = true;
+    root.style.background = '';
+    img.style.transform = '';
+    document.body.style.overflow = '';
+}
+
+function infoSheet() {
+    const image = current();
+    if (!image) return;
+    const fmtBytes = (b) => {
+        if (b == null) return '—';
+        const units = ['B', 'KB', 'MB', 'GB'];
+        let v = Number(b);
+        let i = 0;
+        while (v >= 1024 && i < units.length - 1) {
+            v /= 1024;
+            i += 1;
+        }
+        return `${v >= 10 ? v.toFixed(0) : v.toFixed(1)} ${units[i]}`;
+    };
+    const rows = [
+        ['File', image.filename],
+        ['Taken', image.date_taken || 'Undated'],
+        ['Camera', [image.camera_make, image.camera_model].filter(Boolean).join(' ') || '—'],
+        ['Lens', image.lens || '—'],
+        ['Size', `${image.width || '?'} × ${image.height || '?'} · ${fmtBytes(image.file_size)}`],
+        ['Flag', image.flag || 'unflagged'],
+    ];
+    openSheet(
+        '<h3>Info</h3><div class="sheet-meta">'
+        + rows.map(([k, v]) => `<div><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('')
+        + '</div>'
+    );
+}
+
+/* ---------- touch gesture grammar ---------- */
+function installGestures() {
+    let gest = null;
+    let sw = null;
+    let pin = null;
+    let lastTapT = 0;
+    let lastTapX = 0;
+    let lastTapY = 0;
+    const tdist = (a, b) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+
+    stage.addEventListener('touchstart', (e) => {
+        if (e.touches.length === 2) {
+            const [a, b] = [e.touches[0], e.touches[1]];
+            gest = 'pinch';
+            pin = {
+                d0: tdist(a, b), s0: zScale, tx0: tx, ty0: ty,
+                mx0: (a.clientX + b.clientX) / 2, my0: (a.clientY + b.clientY) / 2,
+            };
+            sw = null;
+            root.classList.add('dragging');
+            return;
+        }
+        if (e.touches.length !== 1) return;
+        const t = e.touches[0];
+        if (zoomed) {
+            gest = 'pan';
+            sw = { x: t.clientX, y: t.clientY, tx0: tx, ty0: ty, moved: 0 };
+            root.classList.add('dragging');
+        } else {
+            gest = 'swipe';
+            sw = { x: t.clientX, y: t.clientY, mode: null, res: 0 };
+        }
+    }, { passive: true });
+
+    stage.addEventListener('touchmove', (e) => {
+        if (gest === 'pinch' && pin && e.touches.length === 2) {
+            const [a, b] = [e.touches[0], e.touches[1]];
+            const rect = stage.getBoundingClientRect();
+            const cx = rect.left + rect.width / 2;
+            const cy = rect.top + rect.height / 2;
+            const mx = (a.clientX + b.clientX) / 2;
+            const my = (a.clientY + b.clientY) / 2;
+            const s = clamp(pin.s0 * tdist(a, b) / pin.d0, 1, 5);
+            const p0x = (pin.mx0 - cx - pin.tx0) / pin.s0;
+            const p0y = (pin.my0 - cy - pin.ty0) / pin.s0;
+            zScale = s;
+            tx = (mx - cx) - p0x * s;
+            ty = (my - cy) - p0y * s;
+            clampPan();
+            if (s > 1.15) loadLg();
+            applyT();
+            return;
+        }
+        if (gest === 'pan' && sw && e.touches.length === 1) {
+            const t = e.touches[0];
+            sw.moved = Math.max(sw.moved || 0, Math.hypot(t.clientX - sw.x, t.clientY - sw.y));
+            tx = sw.tx0 + (t.clientX - sw.x);
+            ty = sw.ty0 + (t.clientY - sw.y);
+            clampPan();
+            applyT();
+            return;
+        }
+        if (gest === 'swipe' && sw && e.touches.length === 1) {
+            const t = e.touches[0];
+            let dx = t.clientX - sw.x;
+            const dy = t.clientY - sw.y;
+            if (!sw.mode) {
+                if (Math.abs(dy) > 14 && Math.abs(dy) > Math.abs(dx)) sw.mode = dy > 0 ? 'down' : 'up';
+                else if (Math.abs(dx) > 14) sw.mode = 'h';
+                if (sw.mode) root.classList.add('dragging');
+            }
+            if (sw.mode === 'down') {
+                const p = clamp(dy / 300, 0, 1);
+                img.style.transform = `translateY(${Math.max(0, dy)}px) scale(${1 - p * 0.12})`;
+                root.style.background = `rgba(0,0,0,${1 - p * 0.6})`;
+            } else if (sw.mode === 'h') {
+                if ((index <= 0 && dx > 0) || (index >= list.length - 1 && dx < 0)) dx *= 0.35;
+                sw.res = dx;
+                img.style.transform = `translateX(${dx}px)`;
+            }
+        }
+    }, { passive: true });
+
+    stage.addEventListener('touchend', (e) => {
+        if (gest === 'pinch') {
+            pin = null;
+            const settle = () => {
+                if (zScale <= 1.05) resetZoom();
+                else {
+                    zoomed = true;
+                    root.classList.add('zoomed');
+                    loadLg();
+                }
+            };
+            if (e.touches.length === 1) {
+                settle();
+                if (zoomed) {
+                    const t = e.touches[0];
+                    gest = 'pan';
+                    sw = { x: t.clientX, y: t.clientY, tx0: tx, ty0: ty };
+                    return;
+                }
+            } else {
+                settle();
+            }
+            gest = null;
+            sw = null;
+            root.classList.remove('dragging');
+            return;
+        }
+        if (gest === 'pan') {
+            if (e.touches.length === 0) {
+                if (sw && (sw.moved || 0) < 10 && e.changedTouches.length) {
+                    const t = e.changedTouches[0];
+                    const now = Date.now();
+                    if (now - lastTapT < 300 && Math.hypot(t.clientX - lastTapX, t.clientY - lastTapY) < 40) {
+                        lastTapT = 0;
+                        resetZoom();
+                    } else {
+                        lastTapT = now;
+                        lastTapX = t.clientX;
+                        lastTapY = t.clientY;
+                    }
+                }
+                gest = null;
+                sw = null;
+                root.classList.remove('dragging');
+            }
+            return;
+        }
+        if (gest === 'swipe' && sw) {
+            const t = e.changedTouches[0];
+            const dx = t.clientX - sw.x;
+            const dy = t.clientY - sw.y;
+            root.classList.remove('dragging');
+            root.style.background = '';
+            if (!sw.mode) {
+                const now = Date.now();
+                if (now - lastTapT < 300 && Math.hypot(t.clientX - lastTapX, t.clientY - lastTapY) < 40) {
+                    lastTapT = 0;
+                    if (zoomed) resetZoom();
+                    else setZoomTo(2.5, t.clientX, t.clientY);
+                } else {
+                    lastTapT = now;
+                    lastTapX = t.clientX;
+                    lastTapY = t.clientY;
+                }
+                gest = null;
+                sw = null;
+                return;
+            }
+            if (sw.mode === 'down' && dy > 90) {
+                closeViewer();
+            } else if (sw.mode === 'up' && dy < -60) {
+                img.style.transform = '';
+                infoSheet();
+            } else if (sw.mode === 'h' && Math.abs(sw.res) > 70) {
+                img.style.transform = '';
+                const dir = dx < 0 ? 1 : -1;
+                nav(dir);
+            } else {
+                img.style.transform = '';
+            }
+            gest = null;
+            sw = null;
+        }
+    }, { passive: true });
+
+    stage.addEventListener('touchcancel', () => {
+        gest = null;
+        sw = null;
+        pin = null;
+        root.classList.remove('dragging');
+        root.style.background = '';
+        if (zoomed) {
+            clampPan();
+            applyT();
+        } else {
+            img.style.transform = '';
+        }
+    }, { passive: true });
+}
+
+export function initViewer() {
+    root = document.getElementById('m-viewer');
+    stage = document.getElementById('mv-stage');
+    img = document.getElementById('mv-img');
+    cap = document.getElementById('mv-cap');
+
+    document.getElementById('mv-close').addEventListener('click', closeViewer);
+    document.getElementById('mv-pick').addEventListener('click', () => {
+        const image = current();
+        if (image) applyFlags([image.id], 'picked');
+    });
+    document.getElementById('mv-reject').addEventListener('click', () => {
+        const image = current();
+        if (image) applyFlags([image.id], 'rejected');
+    });
+    document.getElementById('mv-unflag').addEventListener('click', () => {
+        const image = current();
+        if (image) applyFlags([image.id], 'unflagged');
+    });
+    document.getElementById('mv-coll').addEventListener('click', () => {
+        const image = current();
+        if (image) openCollectionSheet([Number(image.id)]);
+    });
+    document.getElementById('mv-info').addEventListener('click', infoSheet);
+
+    window.addEventListener('keydown', (e) => {
+        if (!openState) return;
+        if (e.key === 'Escape') closeViewer();
+        else if (e.key === 'ArrowRight') nav(1);
+        else if (e.key === 'ArrowLeft') nav(-1);
+    });
+
+    on('flags', syncFlagButtons);
+    installGestures();
+}
+
+export function viewerCollectionTarget() {
+    const image = current();
+    return image ? [Number(image.id)] : [];
+}
+
+export function viewerIsOpen() {
+    return openState;
+}

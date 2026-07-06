@@ -1,0 +1,25 @@
+{
+    "name": "photoArchive",
+    "short_name": "photoArchive",
+    "description": "Your photo archive: instant timeline, search, refine, collections.",
+    "start_url": "/m",
+    "scope": "/",
+    "display": "standalone",
+    "orientation": "portrait",
+    "background_color": "#141517",
+    "theme_color": "#141517",
+    "icons": [
+        {
+            "src": "/static/icons/icon.svg",
+            "sizes": "any",
+            "type": "image/svg+xml",
+            "purpose": "any"
+        },
+        {
+            "src": "/static/icons/icon.svg",
+            "sizes": "any",
+            "type": "image/svg+xml",
+            "purpose": "maskable"
+        }
+    ]
+}

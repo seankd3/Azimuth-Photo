@@ -1,10 +1,16 @@
+import os
+
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 
 
 router = APIRouter()
 _templates = None
 _template_context = None
+_STATIC_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "static",
+)
 
 
 def configure(*, templates, template_context) -> None:
@@ -52,4 +58,22 @@ async def settings_page(request: Request):
 @router.get("/catalog", response_class=HTMLResponse)
 async def catalog_page(request: Request):
     return _render(request, "settings.html")
+
+
+@router.get("/m", response_class=HTMLResponse)
+async def mobile_page(request: Request):
+    return _render(request, "mobile.html")
+
+
+@router.get("/sw.js")
+async def service_worker():
+    """Serve the mobile service worker from the site root so it can claim scope /."""
+    return FileResponse(
+        os.path.join(_STATIC_DIR, "sw.js"),
+        media_type="application/javascript",
+        headers={
+            "Service-Worker-Allowed": "/",
+            "Cache-Control": "no-cache",
+        },
+    )
 

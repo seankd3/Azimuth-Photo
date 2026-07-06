@@ -1,0 +1,97 @@
+// Shared mobile app state: the single current scope, the selection,
+// and a tiny event bus that keeps the modules decoupled.
+
+const listeners = new Map();
+
+export function on(event, fn) {
+    if (!listeners.has(event)) listeners.set(event, []);
+    listeners.get(event).push(fn);
+}
+
+export function emit(event, payload) {
+    for (const fn of listeners.get(event) || []) {
+        try {
+            fn(payload);
+        } catch (error) {
+            console.error(`mobile ${event} listener failed`, error);
+        }
+    }
+}
+
+// One current scope at a time (charter: Scope is a noun, the app has exactly one).
+export const scope = {
+    q: '',
+    people: '',
+    flag: '',
+    fileType: '',
+    camera: '',
+    label: '',
+    thumb: '',
+};
+
+export function scopeActive() {
+    return Boolean(scope.q || scope.people || scope.flag || scope.fileType || scope.camera);
+}
+
+export function scopeParams(extra = {}) {
+    const params = new URLSearchParams();
+    if (scope.q) params.set('q', scope.q);
+    if (scope.people) params.set('people', scope.people);
+    if (scope.flag) params.set('flag', scope.flag);
+    if (scope.fileType) params.set('file_type', scope.fileType);
+    if (scope.camera) params.set('camera', scope.camera);
+    for (const [key, value] of Object.entries(extra)) {
+        if (value !== undefined && value !== null && value !== '') params.set(key, String(value));
+    }
+    return params;
+}
+
+export function setScope(patch) {
+    scope.q = '';
+    scope.people = '';
+    scope.flag = '';
+    scope.fileType = '';
+    scope.camera = '';
+    scope.label = '';
+    scope.thumb = '';
+    Object.assign(scope, patch);
+    emit('scope', scope);
+}
+
+export function patchScope(patch) {
+    Object.assign(scope, patch);
+    emit('scope', scope);
+}
+
+export function clearScope() {
+    setScope({});
+}
+
+// Selection (corner-check model, long-press to enter).
+export const selection = new Set();
+export const selState = { mode: false };
+
+export function selectionChanged() {
+    if (!selection.size) selState.mode = false;
+    emit('selection', selection);
+}
+
+export function clearSelection() {
+    selection.clear();
+    selState.mode = false;
+    emit('selection', selection);
+}
+
+// Registry of every image object the app has seen, by id.
+// Timeline pages, collection drill-ins, and refine sets all feed it,
+// so flag writes can consult previous values for undo.
+export const byId = new Map();
+
+export function rememberImages(images) {
+    for (const img of images || []) {
+        if (img && img.id != null) byId.set(Number(img.id), img);
+    }
+}
+
+// Tab switching is owned by bootstrap; modules call through this hook.
+export const nav = { setTab: () => {} };

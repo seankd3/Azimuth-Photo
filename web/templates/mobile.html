@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="color-scheme" content="dark">
+    <meta name="theme-color" content="#141517">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>photoArchive</title>
+    <link rel="manifest" href="/static/manifest.webmanifest">
+    <link rel="icon" href="/static/icons/icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="/static/icons/icon.svg">
+    <link rel="stylesheet" href="/static/mobile.css?v={{ static_version }}">
+</head>
+<body data-tab="photos">
+    <div id="m-offline" hidden>Offline — changes need a connection</div>
+
+    <main id="m-tabs">
+        <section id="tab-photos" class="m-tab active">
+            <div id="m-timeline"></div>
+            <div id="m-sentinel"></div>
+            <div id="m-end" hidden>End of scope</div>
+        </section>
+        <section id="tab-search" class="m-tab"><div id="m-search"></div></section>
+        <section id="tab-refine" class="m-tab"><div id="m-refine"></div></section>
+        <section id="tab-library" class="m-tab"><div id="m-library"></div></section>
+    </main>
+
+    <!-- Photos-tab chrome -->
+    <div id="m-monthpill" aria-hidden="true"></div>
+    <button id="m-zoomctl" aria-label="Change grid zoom level">&#9638;</button>
+    <div id="m-scopebar"></div>
+    <div id="m-scrub"><div class="ms-handle">&#8801;</div></div>
+    <div id="scrub-bubble"></div>
+
+    <!-- selection bar -->
+    <div id="m-selbar">
+        <button class="msb-x" id="msb-clear" aria-label="Clear selection">&#10005;</button>
+        <span class="msb-count" id="msb-count">0 selected</span>
+        <button class="msb-act" id="msb-pick"><span class="g">&#9733;</span>Pick</button>
+        <button class="msb-act" id="msb-reject"><span class="g">&#10005;</span>Reject</button>
+        <button class="msb-act" id="msb-coll" aria-label="Add to collection"><span class="g">&#8862;</span></button>
+        <button class="msb-act" id="msb-more" aria-label="More actions"><span class="g">&#8943;</span></button>
+    </div>
+
+    <!-- bottom sheet (collections picker, info, menus) -->
+    <div id="m-sheet-scrim" hidden></div>
+    <div id="m-sheet" role="dialog" aria-modal="true" hidden></div>
+
+    <!-- viewer -->
+    <div id="m-viewer" role="dialog" aria-modal="true" aria-label="Photo viewer" hidden>
+        <div id="mv-stage">
+            <img id="mv-img" alt="" fetchpriority="high" decoding="async">
+            <div id="mv-cap"></div>
+            <button id="mv-close" aria-label="Close viewer">&#10005;</button>
+        </div>
+        <div id="mv-bar">
+            <button id="mv-pick" aria-label="Pick">&#9733;</button>
+            <button id="mv-reject" aria-label="Reject">&#10005;</button>
+            <button id="mv-unflag" aria-label="Unflag">&#9675;</button>
+            <button id="mv-coll" aria-label="Add to collection">&#8862;</button>
+            <button id="mv-info" aria-label="Photo info">&#9432;</button>
+        </div>
+    </div>
+
+    <!-- undo-first toast -->
+    <div id="m-toast" role="status" aria-live="polite">
+        <span class="t-msg" id="m-toast-msg"></span>
+        <button class="t-undo" id="m-toast-undo">Undo</button>
+    </div>
+
+    <nav id="m-tabbar">
+        <button data-tab="photos" class="active"><span class="tb-glyph">&#9638;</span>Photos</button>
+        <button data-tab="search"><span class="tb-glyph">&#8981;</span>Search</button>
+        <button data-tab="refine"><span class="tb-glyph">&#9670;</span>Refine</button>
+        <button data-tab="library"><span class="tb-glyph">&#9636;</span>Library</button>
+    </nav>
+
+    <a id="m-dl" download hidden></a>
+
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', function () {
+                navigator.serviceWorker.register('/sw.js').catch(function () {});
+            });
+        }
+    </script>
+    <script type="module" src="/static/js/mobile/bootstrap.js?v={{ static_version }}"></script>
+</body>
+</html>
