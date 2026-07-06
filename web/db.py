@@ -1081,6 +1081,14 @@ async def rank_quality(orientation: str = "", compared: str = "", min_stars: int
     )
 
 
+async def date_histogram(**kwargs) -> dict:
+    return await ranking_repository.date_histogram(DB_PATH, **kwargs)
+
+
+async def scope_counts(**kwargs) -> dict:
+    return await ranking_repository.scope_counts(DB_PATH, **kwargs)
+
+
 async def count_rankings(orientation: str = "", compared: str = "", min_stars: int = 0,
                          folder: str = "", flag: str = "", date_taken: str = "",
                          file_type: str = "", camera: str = "", lens: str = "",

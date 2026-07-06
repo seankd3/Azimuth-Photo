@@ -97,6 +97,55 @@ async def api_date_groups(
     )
 
 
+@router.get("/api/date-histogram")
+async def api_date_histogram(
+    orientation: str = "", compared: str = "", min_stars: int = 0,
+    folder: str = "", flag: str = "", date_taken: str = "", file_type: str = "",
+    camera: str = "", lens: str = "", people: str = "", q: str = "", deep: bool = False,
+    import_batch: int = 0,
+):
+    """Return whole-scope month counts for the timeline scrubber and month view."""
+    return await library_service.date_histogram_payload(
+        orientation=orientation,
+        compared=compared,
+        min_stars=min_stars,
+        folder=folder,
+        flag=flag,
+        date_taken=date_taken,
+        file_type=file_type,
+        camera=camera,
+        lens=lens,
+        people=people,
+        q=q,
+        import_batch=import_batch,
+        deep=deep,
+    )
+
+
+@router.get("/api/counts")
+async def api_counts(
+    orientation: str = "", compared: str = "", min_stars: int = 0,
+    folder: str = "", date_taken: str = "", file_type: str = "",
+    camera: str = "", lens: str = "", people: str = "", q: str = "", deep: bool = False,
+    import_batch: int = 0,
+):
+    """Return cheap total/picked/rejected counts for the scope in one call."""
+    return await library_service.scope_counts_payload(
+        orientation=orientation,
+        compared=compared,
+        min_stars=min_stars,
+        folder=folder,
+        date_taken=date_taken,
+        file_type=file_type,
+        camera=camera,
+        lens=lens,
+        people=people,
+        q=q,
+        import_batch=import_batch,
+        deep=deep,
+    )
+
+
 @router.get("/api/map/markers")
 async def api_map_markers(
     orientation: str = "", compared: str = "", min_stars: int = 0,

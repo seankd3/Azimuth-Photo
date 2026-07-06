@@ -34,6 +34,8 @@ _get_stats: Callable[[], Awaitable[dict]] | None = None
 _count_rankings: Callable[..., Awaitable[int]] | None = None
 _get_rankings: Callable[..., Awaitable[list]] | None = None
 _get_rank_quality: Callable[..., Awaitable[dict]] | None = None
+_get_date_histogram: Callable[..., Awaitable[dict]] | None = None
+_get_scope_counts: Callable[..., Awaitable[dict]] | None = None
 _get_visible_pairing_pool_counts: Callable[..., Awaitable[dict]] | None = None
 _get_import_batch_image_ids: Callable[[int], Awaitable[set[int] | None]] | None = None
 
@@ -57,6 +59,8 @@ def configure(
     get_visible_pairing_pool_counts: Callable[..., Awaitable[dict]],
     rankings_response_cache_ttl_seconds: Callable[[], float] | None = None,
     get_rank_quality: Callable[..., Awaitable[dict]] | None = None,
+    get_date_histogram: Callable[..., Awaitable[dict]] | None = None,
+    get_scope_counts: Callable[..., Awaitable[dict]] | None = None,
 ) -> None:
     global _resolve_library_constraints, _cache_root, _clamp_int, _normalize_search_query
     global _schedule_thumbnail_prefetch, _schedule_result_thumbnail_memory_warm
@@ -64,6 +68,7 @@ def configure(
     global _extension_search_terms, _db_signature, _get_date_groups, _get_map_markers
     global _get_filter_options, _get_stats, _count_rankings, _get_rankings
     global _get_visible_pairing_pool_counts, _get_rank_quality
+    global _get_date_histogram, _get_scope_counts
     _resolve_library_constraints = resolve_library_constraints
     _cache_root = cache_root
     _clamp_int = clamp_int
@@ -80,6 +85,8 @@ def configure(
     _get_rankings = get_rankings
     _get_visible_pairing_pool_counts = get_visible_pairing_pool_counts
     _get_rank_quality = get_rank_quality
+    _get_date_histogram = get_date_histogram
+    _get_scope_counts = get_scope_counts
     _rankings_response_cache_ttl_seconds_provider = rankings_response_cache_ttl_seconds
 
 
@@ -247,6 +254,70 @@ async def map_markers_payload(
         lens=lens,
         visible_thumb_size=visible_thumb_size,
         cache_root=_configured_cache_root(),
+        id_filter=search_ids,
+        text_query=search.get("text_query") or "",
+    )
+
+
+async def date_histogram_payload(
+    *,
+    orientation: str = "",
+    compared: str = "",
+    min_stars: int = 0,
+    folder: str = "",
+    flag: str = "",
+    date_taken: str = "",
+    file_type: str = "",
+    camera: str = "",
+    lens: str = "",
+    people: str = "",
+    q: str = "",
+    deep: bool = False,
+    import_batch: int = 0,
+) -> dict:
+    search = await _configured_resolve_library_constraints(q, people=people, deep=deep)
+    search_ids = await _combined_import_batch_filter(search.get("id_filter"), import_batch)
+    return await _configured(_get_date_histogram)(
+        orientation=orientation,
+        compared=compared,
+        min_stars=min_stars,
+        folder=folder,
+        flag=flag,
+        date_taken=date_taken,
+        file_type=file_type,
+        camera=camera,
+        lens=lens,
+        id_filter=search_ids,
+        text_query=search.get("text_query") or "",
+    )
+
+
+async def scope_counts_payload(
+    *,
+    orientation: str = "",
+    compared: str = "",
+    min_stars: int = 0,
+    folder: str = "",
+    date_taken: str = "",
+    file_type: str = "",
+    camera: str = "",
+    lens: str = "",
+    people: str = "",
+    q: str = "",
+    deep: bool = False,
+    import_batch: int = 0,
+) -> dict:
+    search = await _configured_resolve_library_constraints(q, people=people, deep=deep)
+    search_ids = await _combined_import_batch_filter(search.get("id_filter"), import_batch)
+    return await _configured(_get_scope_counts)(
+        orientation=orientation,
+        compared=compared,
+        min_stars=min_stars,
+        folder=folder,
+        date_taken=date_taken,
+        file_type=file_type,
+        camera=camera,
+        lens=lens,
         id_filter=search_ids,
         text_query=search.get("text_query") or "",
     )

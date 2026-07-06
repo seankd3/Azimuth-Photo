@@ -90,6 +90,14 @@ IMAGE_EXTENSION_SEARCH_TERMS = {
     "avif", "bmp", "gif", "jpeg", "jpg", "png", "webp",
     "arw", "cr2", "cr3", "dng", "nef", "orf", "raf", "rw2",
 }
+# file_type accepts group aliases as well as literal extensions.
+FILE_TYPE_GROUPS = {
+    "raw": ("arw", "cr2", "cr3", "dng", "nef", "orf", "raf", "rw2"),
+    "jpg": ("jpg", "jpeg"),
+    "jpeg": ("jpg", "jpeg"),
+    "tif": ("tif", "tiff"),
+    "tiff": ("tif", "tiff"),
+}
 IMAGE_ROW_SELECT = (
     "i.id, i.source_id, i.filename, i.filepath, i.elo, i.comparisons, "
     "i.propagated_updates, "
@@ -282,10 +290,12 @@ def ranking_filter_parts(
 
     if file_type:
         normalized_type = file_type.lower().lstrip(".")
+        group_exts = FILE_TYPE_GROUPS.get(normalized_type, (normalized_type,))
+        variants = [variant for ext in group_exts for variant in (ext, f".{ext}")]
         conditions.append("i.file_ext IS NOT NULL")
         conditions.append("i.file_ext != ''")
-        conditions.append("LOWER(i.file_ext) IN (?, ?)")
-        params.extend([normalized_type, f".{normalized_type}"])
+        conditions.append(f"LOWER(i.file_ext) IN ({','.join('?' for _ in variants)})")
+        params.extend(variants)
 
     if camera:
         conditions.append(
@@ -1001,6 +1011,144 @@ async def rank_quality(
             "percent": round((well_ranked / total) * 100) if total else 0,
             "min_signals": RANK_QUALITY_MIN_SIGNALS,
         }
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+
+
+async def date_histogram(
+    db_path: str,
+    *,
+    orientation: str = "",
+    compared: str = "",
+    min_stars: int = 0,
+    folder: str = "",
+    flag: str = "",
+    date_taken: str = "",
+    file_type: str = "",
+    camera: str = "",
+    lens: str = "",
+    id_filter: set | None = None,
+    text_query: str = "",
+) -> dict:
+    """Month histogram for the whole filtered scope.
+
+    Powers the timeline scrubber and month view without paging photos:
+    returns per-month counts plus an undated bucket.
+    """
+    conditions, params = ranking_filter_parts(
+        orientation=orientation,
+        compared=compared,
+        min_stars=min_stars,
+        folder=folder,
+        flag=flag,
+        date_taken=date_taken,
+        file_type=file_type,
+        camera=camera,
+        lens=lens,
+        text_query=text_query,
+    )
+    select = (
+        "SELECT substr(i.date_taken, 1, 7) AS month, COUNT(*) AS count "
+        "FROM images i JOIN catalog_sources s ON s.id = i.source_id WHERE "
+    )
+    conn = await connection.open_async(db_path)
+    try:
+        buckets: dict[str, int] = {}
+        undated = 0
+
+        async def accumulate(where: str, query_params: list) -> None:
+            nonlocal undated
+            cursor = await conn.execute(select + where + " GROUP BY month", query_params)
+            for row in await cursor.fetchall():
+                month = row["month"]
+                count = int(row["count"] or 0)
+                if month and len(month) == 7:
+                    buckets[month] = buckets.get(month, 0) + count
+                else:
+                    undated += count
+
+        if id_filter is not None:
+            ids = list(dict.fromkeys(int(image_id) for image_id in id_filter))
+            for chunk in _chunked(ids, 900):
+                placeholders = ",".join("?" for _ in chunk)
+                await accumulate(
+                    " AND ".join(conditions + [f"i.id IN ({placeholders})"]),
+                    [*params, *chunk],
+                )
+        else:
+            await accumulate(" AND ".join(conditions), list(params))
+
+        months = [
+            {"month": month, "count": count}
+            for month, count in sorted(buckets.items(), reverse=True)
+        ]
+        return {
+            "months": months,
+            "undated": undated,
+            "total": sum(buckets.values()) + undated,
+        }
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+
+
+async def scope_counts(
+    db_path: str,
+    *,
+    orientation: str = "",
+    compared: str = "",
+    min_stars: int = 0,
+    folder: str = "",
+    date_taken: str = "",
+    file_type: str = "",
+    camera: str = "",
+    lens: str = "",
+    id_filter: set | None = None,
+    text_query: str = "",
+) -> dict:
+    """Cheap total/picked/rejected counts for a scope in one query."""
+    conditions, params = ranking_filter_parts(
+        orientation=orientation,
+        compared=compared,
+        min_stars=min_stars,
+        folder=folder,
+        date_taken=date_taken,
+        file_type=file_type,
+        camera=camera,
+        lens=lens,
+        text_query=text_query,
+    )
+    select = (
+        "SELECT COUNT(*) AS total, "
+        "SUM(CASE WHEN i.flag = 'picked' THEN 1 ELSE 0 END) AS picked, "
+        "SUM(CASE WHEN i.flag = 'rejected' THEN 1 ELSE 0 END) AS rejected "
+        "FROM images i JOIN catalog_sources s ON s.id = i.source_id WHERE "
+    )
+    conn = await connection.open_async(db_path)
+    try:
+        total = 0
+        picked = 0
+        rejected = 0
+
+        async def accumulate(where: str, query_params: list) -> None:
+            nonlocal total, picked, rejected
+            cursor = await conn.execute(select + where, query_params)
+            row = await cursor.fetchone()
+            total += int(row["total"] or 0)
+            picked += int(row["picked"] or 0)
+            rejected += int(row["rejected"] or 0)
+
+        if id_filter is not None:
+            ids = list(dict.fromkeys(int(image_id) for image_id in id_filter))
+            for chunk in _chunked(ids, 900):
+                placeholders = ",".join("?" for _ in chunk)
+                await accumulate(
+                    " AND ".join(conditions + [f"i.id IN ({placeholders})"]),
+                    [*params, *chunk],
+                )
+        else:
+            await accumulate(" AND ".join(conditions), list(params))
+
+        return {"total": total, "picked": picked, "rejected": rejected}
     finally:
         await connection.close_async(conn, db_path=db_path)
 

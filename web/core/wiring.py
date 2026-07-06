@@ -267,6 +267,8 @@ def configure_library_service(
         count_rankings=lambda **kwargs: db.count_rankings(**kwargs),
         get_rankings=lambda **kwargs: db.get_rankings(**kwargs),
         get_rank_quality=lambda **kwargs: db.rank_quality(**kwargs),
+        get_date_histogram=lambda **kwargs: db.date_histogram(**kwargs),
+        get_scope_counts=lambda **kwargs: db.scope_counts(**kwargs),
         get_visible_pairing_pool_counts=lambda size, cache_root: db.get_visible_pairing_pool_counts(
             size,
             cache_root,
