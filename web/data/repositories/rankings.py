@@ -298,13 +298,18 @@ def ranking_filter_parts(
         params.append(lens)
 
     if text_query:
-        escaped = (
-            text_query.strip()
-            .replace("\\", "\\\\")
-            .replace("%", "\\%")
-            .replace("_", "\\_")
-        )
-        if escaped:
+        # Each whitespace token must match at least one metadata field, so
+        # multi-word queries narrow results instead of requiring one field to
+        # contain the entire phrase.
+        for token in text_query.strip().split():
+            escaped = (
+                token
+                .replace("\\", "\\\\")
+                .replace("%", "\\%")
+                .replace("_", "\\_")
+            )
+            if not escaped:
+                continue
             extension_query = escaped.lower().lstrip(".")
             if extension_query in IMAGE_EXTENSION_SEARCH_TERMS:
                 conditions.append("i.file_ext IS NOT NULL")

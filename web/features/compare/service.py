@@ -652,8 +652,8 @@ def candidate_value(candidate, key: str, default=None):
 
 
 def metadata_text_match(image: dict, query: str) -> bool:
-    needle = (query or "").strip().lower()
-    if not needle:
+    tokens = (query or "").strip().lower().split()
+    if not tokens:
         return True
     fields = (
         "filename",
@@ -664,7 +664,11 @@ def metadata_text_match(image: dict, query: str) -> bool:
         "lens",
         "file_ext",
     )
-    return any(needle in str(candidate_value(image, field, "") or "").lower() for field in fields)
+    # Every token must match at least one field, so multi-word queries like
+    # "canon 85mm 2024" narrow the result instead of requiring one field to
+    # contain the whole phrase.
+    values = [str(candidate_value(image, field, "") or "").lower() for field in fields]
+    return all(any(token in value for value in values) for token in tokens)
 
 
 def apply_text_search_constraint(candidates: list[dict], search: dict) -> list[dict]:

@@ -1,9 +1,13 @@
 import asyncio
 import inspect
 import importlib.util
+import logging
 import time
 
 import settings
+
+
+logger = logging.getLogger(__name__)
 
 
 _text_search_resolution_cache: dict[tuple, dict] = {}
@@ -205,10 +209,27 @@ async def resolve_text_search(
                     int(image_ids[int(i)]): float(similarities[int(i)])
                     for i in matching_indices
                 }
+                # Hybrid search: exact metadata matches (filename, camera,
+                # lens, date, folder) always count and rank ahead of
+                # semantic-only matches, so specific multi-word queries keep
+                # working even when the embedding match is weak.
+                metadata_ids = None
+                if apply_metadata_ids is not None:
+                    metadata_probe = {"id_filter": None, "text_query": ""}
+                    try:
+                        await apply_metadata_ids(metadata_probe, normalized_query)
+                        metadata_ids = metadata_probe.get("id_filter")
+                    except Exception:
+                        metadata_ids = None
+                if metadata_ids:
+                    top_score = max(scores.values(), default=0.0)
+                    for image_id in metadata_ids:
+                        image_id = int(image_id)
+                        scores[image_id] = max(scores.get(image_id, 0.0), top_score + 1.0)
                 result.update({
                     "id_filter": set(scores.keys()),
                     "scores": scores,
-                    "search_mode": "embedding",
+                    "search_mode": "hybrid" if metadata_ids else "embedding",
                 })
                 _text_search_resolution_cache[cache_key] = {
                     "data": dict(result),
@@ -216,7 +237,11 @@ async def resolve_text_search(
                 }
                 return result
     except Exception:
-        pass
+        logger.warning(
+            "Semantic search failed for %r; falling back to metadata search",
+            normalized_query,
+            exc_info=True,
+        )
 
     result.update({
         "text_query": normalized_query,

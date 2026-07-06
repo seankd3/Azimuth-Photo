@@ -5,7 +5,17 @@ from data.repositories.common import chunked as _chunked
 
 
 def metadata_fts_query(text_query: str) -> str:
-    return '"' + (text_query or "").replace('"', '""') + '"'
+    """Build an FTS query that ANDs per-word substring terms.
+
+    Each token becomes its own quoted term so multi-word queries match across
+    different fields/positions instead of requiring one exact phrase. Tokens
+    under 3 characters are dropped (the trigram tokenizer cannot match them);
+    the LIKE refinement applied downstream still enforces them.
+    """
+    tokens = [t for t in (text_query or "").split() if len(t) >= 3]
+    if not tokens:
+        return '"' + (text_query or "").replace('"', '""') + '"'
+    return " ".join('"' + token.replace('"', '""') + '"' for token in tokens)
 
 
 async def metadata_search_image_ids(
