@@ -195,8 +195,10 @@ a:hover {
 
 .has-tooltip:hover::after,
 .has-tooltip:focus-visible::after,
+.has-tooltip.tooltip-open::after,
 .help-tip:hover::after,
-.help-tip:focus-visible::after {
+.help-tip:focus-visible::after,
+.help-tip.tooltip-open::after {
     display: block;
     opacity: 1;
     transform: translate(-50%, 0);
@@ -211,8 +213,10 @@ a:hover {
 
 .bottom-bar .has-tooltip:hover::after,
 .bottom-bar .has-tooltip:focus-visible::after,
+.bottom-bar .has-tooltip.tooltip-open::after,
 .bottom-bar .help-tip:hover::after,
-.bottom-bar .help-tip:focus-visible::after {
+.bottom-bar .help-tip:focus-visible::after,
+.bottom-bar .help-tip.tooltip-open::after {
     transform: translate(-50%, 0);
 }
 
@@ -1737,7 +1741,7 @@ button:disabled {
 }
 
 .mosaic-cell.mosaic-replacing::after {
-    content: none;
+    content: "";
     position: absolute;
     inset: 50% auto auto 50%;
     width: 22px;
@@ -3763,6 +3767,10 @@ body.library-shell.date-scrubber-active .date-group-header {
     font-weight: 600;
 }
 
+.library-container.batch-bar-active {
+    padding-top: var(--bar-height);
+}
+
 .batch-bar button {
     padding: 4px 12px;
     font-size: 12px;
@@ -4488,5 +4496,50 @@ body.library-shell.date-scrubber-active .date-group-header {
 
     .remote-access-actions {
         justify-content: flex-start;
+    }
+}
+
+@media (max-width: 480px) {
+    .navbar {
+        flex-wrap: wrap;
+        height: auto;
+        min-height: 48px;
+        padding: 4px 10px;
+    }
+    .nav-links {
+        flex-wrap: wrap;
+        gap: 12px;
+    }
+    .shortcut-overlay-body {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Touch usability */
+@media (pointer: coarse) {
+    .filter-icon,
+    .bar-btn {
+        min-width: 40px;
+        min-height: 40px;
+    }
+    .filter-star {
+        min-width: 40px;
+        min-height: 40px;
+        padding: 6px 8px;
+    }
+    .search-clear-sm {
+        min-width: 40px;
+        min-height: 40px;
+        padding: 8px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .bar-search-input,
+    .bar-select {
+        font-size: 16px;
+    }
+    .rank-card-info {
+        opacity: 1;
     }
 }

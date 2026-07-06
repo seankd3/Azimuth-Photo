@@ -1,5 +1,9 @@
 import { forgetPeopleLabelDraft } from './page.js';
 
+let labelInFlight = false;
+let mergeInFlight = false;
+let ignoreInFlight = false;
+
 
 async function responseDataOrError(response, fallbackMessage) {
     let data = {};
@@ -20,6 +24,8 @@ export async function labelPerson(personId, { loadPeople, showToast, fetchImpl =
         input?.focus();
         return;
     }
+    if (labelInFlight) return;
+    labelInFlight = true;
     try {
         const res = await fetchImpl(`/api/people/${personId}/label`, {
             method: 'POST',
@@ -36,11 +42,15 @@ export async function labelPerson(personId, { loadPeople, showToast, fetchImpl =
         showToast?.('Person labeled');
     } catch (err) {
         showToast?.(err.message || 'Label failed');
+    } finally {
+        labelInFlight = false;
     }
 }
 
 
 export async function mergePeople(sourcePersonId, targetPersonId, { loadPeople, showToast, fetchImpl = fetch } = {}) {
+    if (mergeInFlight) return;
+    mergeInFlight = true;
     try {
         const res = await fetchImpl('/api/people/merge', {
             method: 'POST',
@@ -52,6 +62,8 @@ export async function mergePeople(sourcePersonId, targetPersonId, { loadPeople, 
         showToast?.('People merged');
     } catch (err) {
         showToast?.(err.message || 'Merge failed');
+    } finally {
+        mergeInFlight = false;
     }
 }
 
@@ -69,6 +81,8 @@ export async function rejectPeopleMerge(suggestionId, { loadPeople, showToast, f
 
 
 export async function ignorePerson(personId, { loadPeople, showToast, fetchImpl = fetch } = {}) {
+    if (ignoreInFlight) return;
+    ignoreInFlight = true;
     try {
         const res = await fetchImpl(`/api/people/${personId}/ignore`, { method: 'POST' });
         await responseDataOrError(res, 'Ignore failed');
@@ -76,6 +90,8 @@ export async function ignorePerson(personId, { loadPeople, showToast, fetchImpl 
         showToast?.('Person ignored');
     } catch (err) {
         showToast?.(err.message || 'Ignore failed');
+    } finally {
+        ignoreInFlight = false;
     }
 }
 

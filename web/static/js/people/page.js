@@ -139,6 +139,13 @@ function bindPeopleActions({
         if (!input) return;
         rememberPeopleLabelDraft(Number(input.dataset.personId || 0), input.value);
     });
+    documentImpl.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter') return;
+        const input = event.target?.closest?.('.people-label-row input[data-person-id]');
+        if (!input) return;
+        event.preventDefault();
+        labelPerson(Number(input.dataset.personId || 0));
+    });
     documentImpl.addEventListener('click', (event) => {
         const control = event.target?.closest?.('[data-people-action]');
         if (!control) return;
@@ -176,7 +183,7 @@ function bindPeopleActions({
 export async function loadPeople({ fetchImpl = fetch, force = false } = {}) {
     const statusEl = document.getElementById('people-status-line');
     const labelFocused = peopleLabelInputFocused();
-    if (statusEl && !labelFocused) {
+    if (statusEl && !labelFocused && !statusEl.textContent.trim()) {
         statusEl.textContent = 'Loading People...';
     }
     if (labelFocused && !force) {

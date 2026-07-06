@@ -25,10 +25,10 @@
     <div class="bar-row bar-row-main" data-command-layout="culling-workbench">
         <div class="bar-section bar-context bar-strategies" id="bar-strategies" data-command-zone="mode-tools">
             <div class="toggle-group toggle-group-sm">
-                <button type="button" id="strategy-diverse" class="active has-tooltip" data-mosaic-strategy="diverse" title="Maximize visual variety in the grid" data-tooltip="Mix visually different photos so each pick teaches the ranking more.">Diverse</button>
-                <button type="button" id="strategy-explore" class="has-tooltip" data-mosaic-strategy="explore" title="Favor unseen images" data-tooltip="Show photos that need more ranking signal. Good early in a catalog.">Explore</button>
-                <button type="button" id="strategy-compete" class="has-tooltip" data-mosaic-strategy="compete" title="Match similar Elo levels" data-tooltip="Compare photos at similar rating levels to refine close calls.">Compete</button>
-                <button type="button" id="strategy-random" class="has-tooltip" data-mosaic-strategy="random" title="Uniform random" data-tooltip="Sample the pool without ranking strategy. Useful as a reset.">Random</button>
+                <button type="button" id="strategy-diverse" class="active has-tooltip" data-mosaic-strategy="diverse" data-tooltip="Mix visually different photos so each pick teaches the ranking more.">Diverse</button>
+                <button type="button" id="strategy-explore" class="has-tooltip" data-mosaic-strategy="explore" data-tooltip="Show photos that need more ranking signal. Good early in a catalog.">Explore</button>
+                <button type="button" id="strategy-compete" class="has-tooltip" data-mosaic-strategy="compete" data-tooltip="Compare photos at similar rating levels to refine close calls.">Compete</button>
+                <button type="button" id="strategy-random" class="has-tooltip" data-mosaic-strategy="random" data-tooltip="Sample the pool without ranking strategy. Useful as a reset.">Random</button>
             </div>
             <button type="button" class="bar-btn has-tooltip" data-action="mosaic-shuffle" data-tooltip="Refresh the visible Mosaic candidates without recording a pick.">Shuffle</button>
         </div>
@@ -39,7 +39,7 @@
             <span id="compare-stat-pool" class="bar-stat-num">0</span> <span id="compare-stat-pool-label">images</span>
         </div>
         <div class="bar-section bar-coverage" data-command-zone="mode-tools">
-            <div class="coverage-bar has-tooltip" title="Ranking coverage" data-tooltip="How much of the current comparison pool has ranking signal.">
+            <div class="coverage-bar has-tooltip" data-tooltip="How much of the current comparison pool has ranking signal.">
                 <div class="coverage-fill" id="coverage-fill"></div>
             </div>
             <span class="coverage-label" id="coverage-label"></span>

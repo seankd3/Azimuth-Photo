@@ -59,6 +59,14 @@ export function handleShortcutOverlayKey(event) {
         hideShortcuts();
         return;
     }
+    const confirmModal = document.getElementById('confirm-modal');
+    const confirmVisible = confirmModal && !confirmModal.classList.contains('hidden');
+    if (confirmVisible && event.key === 'Escape') {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        hideConfirmModal();
+        return;
+    }
     if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') return;
     if (event.key === '?' || (event.key === '/' && event.shiftKey)) {
         event.preventDefault();
@@ -85,6 +93,11 @@ export function initShortcutOverlay() {
             event.preventDefault();
             hideConfirmModal();
         }
+        const helpTip = event.target?.closest?.('.help-tip');
+        document.querySelectorAll('.tooltip-open').forEach((el) => {
+            if (el !== helpTip) el.classList.remove('tooltip-open');
+        });
+        helpTip?.classList.toggle('tooltip-open');
     });
     shortcutOverlayInitialized = true;
 }

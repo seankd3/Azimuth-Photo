@@ -48,6 +48,7 @@ export function createCollectionSheetController({
 } = {}) {
     let host = null;
     let collections = [];
+    let submitting = false;
 
     const selectedIds = () => getSelectedImageIds().map(Number).filter(Boolean);
 
@@ -84,34 +85,48 @@ export function createCollectionSheetController({
         renderList();
     }
 
-    async function createCollection(name) {
+    async function createCollection(name, button = null) {
         const imageIds = selectedIds();
-        if (!imageIds.length) return;
-        const response = await fetchImpl('/api/user-collections', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, image_ids: imageIds }),
-        });
-        if (!response.ok) throw new Error('Collection could not be created');
-        const data = await response.json();
-        showToast(`Added ${imageIds.length} to ${data.collection?.name || name}`);
-        clearSelection();
-        close();
+        if (!imageIds.length || submitting) return;
+        submitting = true;
+        if (button) button.disabled = true;
+        try {
+            const response = await fetchImpl('/api/user-collections', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, image_ids: imageIds }),
+            });
+            if (!response.ok) throw new Error('Collection could not be created');
+            const data = await response.json();
+            showToast(`Added ${imageIds.length} to ${data.collection?.name || name}`);
+            clearSelection();
+            close();
+        } finally {
+            submitting = false;
+            if (button) button.disabled = false;
+        }
     }
 
-    async function addToCollection(collectionId) {
+    async function addToCollection(collectionId, button = null) {
         const imageIds = selectedIds();
-        if (!imageIds.length) return;
-        const response = await fetchImpl(`/api/user-collections/${collectionId}/images`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ image_ids: imageIds }),
-        });
-        if (!response.ok) throw new Error('Photos could not be added');
-        const data = await response.json();
-        showToast(`Added ${imageIds.length} to ${data.collection?.name || 'collection'}`);
-        clearSelection();
-        close();
+        if (!imageIds.length || submitting) return;
+        submitting = true;
+        if (button) button.disabled = true;
+        try {
+            const response = await fetchImpl(`/api/user-collections/${collectionId}/images`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image_ids: imageIds }),
+            });
+            if (!response.ok) throw new Error('Photos could not be added');
+            const data = await response.json();
+            showToast(`Added ${imageIds.length} to ${data.collection?.name || 'collection'}`);
+            clearSelection();
+            close();
+        } finally {
+            submitting = false;
+            if (button) button.disabled = false;
+        }
     }
 
     function close() {
@@ -145,7 +160,7 @@ export function createCollectionSheetController({
         const row = event.target?.closest?.('[data-collection-id]');
         if (!row || !host?.contains(row)) return;
         event.preventDefault();
-        addToCollection(row.dataset.collectionId).catch(error => {
+        addToCollection(row.dataset.collectionId, row).catch(error => {
             setStatus(error?.message || 'Photos could not be added');
         });
     });
@@ -160,7 +175,7 @@ export function createCollectionSheetController({
             input?.focus();
             return;
         }
-        createCollection(name).catch(error => {
+        createCollection(name, form.querySelector('button[type="submit"]')).catch(error => {
             setStatus(error?.message || 'Collection could not be created');
         });
     });

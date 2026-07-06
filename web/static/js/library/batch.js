@@ -20,6 +20,7 @@ export function updateBatchBar(selectedCount, {
     documentImpl = document,
 } = {}) {
     let bar = documentImpl.getElementById('batch-bar');
+    const container = documentImpl.querySelector('.library-container');
     if (selectedCount > 0) {
         if (!bar) {
             bar = documentImpl.createElement('div');
@@ -28,8 +29,10 @@ export function updateBatchBar(selectedCount, {
             documentImpl.body.appendChild(bar);
         }
         bar.innerHTML = batchBarHtml(selectedCount);
-    } else if (bar) {
-        bar.remove();
+        container?.classList.add('batch-bar-active');
+    } else {
+        bar?.remove();
+        container?.classList.remove('batch-bar-active');
     }
 }
 

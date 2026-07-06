@@ -1,4 +1,5 @@
 let scanPoller = null;
+let addSourceInFlight = false;
 
 
 async function responseDataOrError(response, fallbackMessage) {
@@ -86,8 +87,11 @@ export async function addCatalogSource({
 } = {}) {
     const folderInput = document.getElementById('scan-folder');
     const folder = folderInput?.value?.trim();
-    if (!folder) return;
+    if (!folder || addSourceInFlight) return;
 
+    addSourceInFlight = true;
+    const addButton = document.getElementById('scan-btn');
+    if (addButton) addButton.disabled = true;
     setSettingsStatus?.('Adding folder and starting scan...', 'muted');
     try {
         const res = await fetchImpl('/api/catalog/sources', {
@@ -102,6 +106,9 @@ export async function addCatalogSource({
         setScanBusy?.(false);
         setSettingsStatus?.(`Add folder failed: ${err.message}`, 'error');
         showToast?.('Add folder failed');
+    } finally {
+        addSourceInFlight = false;
+        if (addButton) addButton.disabled = false;
     }
 }
 
