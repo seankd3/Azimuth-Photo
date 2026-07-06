@@ -155,6 +155,10 @@ async def api_search(
     return response
 
 
+def _matvec(matrix, vec):
+    return matrix @ vec
+
+
 @router.get("/api/similar/{image_id}")
 async def api_similar(image_id: int, limit: int = 50):
     """Find visually similar images using embedding cosine similarity."""
@@ -173,7 +177,8 @@ async def api_similar(image_id: int, limit: int = 50):
     if source_vec is None:
         return JSONResponse({"error": "Image not embedded yet"}, status_code=404)
 
-    similarities = matrix @ source_vec
+    # The matvec is CPU-bound numpy work; keep it off the event loop.
+    similarities = await asyncio.to_thread(_matvec, matrix, source_vec)
     visible_rows, visible_images, total_images = await _visible_embedding_page(
         image_ids,
         similarities,

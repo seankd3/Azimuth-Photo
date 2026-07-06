@@ -81,6 +81,18 @@ def start_search_model_load(embedding_worker) -> bool:
         return False
 
 
+def _similarity_scores(matrix, text_vec, image_ids, threshold) -> dict[int, float]:
+    """Score the embedding matrix against a text vector (CPU-heavy; run off-loop)."""
+    import numpy as np
+
+    similarities = matrix @ text_vec
+    matching_indices = np.flatnonzero(similarities >= threshold)
+    return {
+        int(image_ids[int(i)]): float(similarities[int(i)])
+        for i in matching_indices
+    }
+
+
 async def apply_metadata_search_ids(result: dict, normalized_query: str, *, metadata_search_image_ids) -> None:
     metadata_ids = await metadata_search_image_ids(normalized_query)
     if metadata_ids is not None:
@@ -203,12 +215,16 @@ async def resolve_text_search(
         if text_vec is not None:
             image_ids, matrix = await embed_cache.get_matrix(active_config["model_key"])
             if image_ids is not None and matrix is not None and matrix.shape[1] == text_vec.shape[0]:
-                similarities = matrix @ text_vec
-                matching_indices = np.flatnonzero(similarities >= threshold)
-                scores = {
-                    int(image_ids[int(i)]): float(similarities[int(i)])
-                    for i in matching_indices
-                }
+                # The matvec + score extraction is CPU-bound numpy work that
+                # can take a while on a large archive; keep it off the loop.
+                scores = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    _similarity_scores,
+                    matrix,
+                    text_vec,
+                    image_ids,
+                    threshold,
+                )
                 # Hybrid search: exact metadata matches (filename, camera,
                 # lens, date, folder) always count and rank ahead of
                 # semantic-only matches, so specific multi-word queries keep

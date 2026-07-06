@@ -6,16 +6,33 @@ from collections.abc import Callable
 
 class MemoryThumbnailStore:
     def __init__(self, tiers: tuple[str, ...]):
+        # Global LRU order (also aliased externally); per-tier mirrors keep
+        # tier-scoped eviction O(1) instead of scanning every key.
         self.cache: OrderedDict[tuple[str, int], tuple[str, bytes]] = OrderedDict()
         self.cache_bytes = 0
         self.tier_bytes = {size: 0 for size in tiers}
+        self._tier_order: dict[str, OrderedDict[tuple[str, int], None]] = {
+            size: OrderedDict() for size in tiers
+        }
+
+    def _tier_order_dict(self, size: str) -> OrderedDict:
+        order = self._tier_order.get(size)
+        if order is None:
+            order = self._tier_order.setdefault(size, OrderedDict())
+        return order
+
+    def _touch(self, key: tuple[str, int]) -> None:
+        self.cache.move_to_end(key)
+        order = self._tier_order.get(key[0])
+        if order is not None and key in order:
+            order.move_to_end(key)
 
     def get_entry_fast(self, size: str, image_id: int) -> tuple[str, bytes] | None:
         key = (size, image_id)
         entry = self.cache.get(key)
         if entry is None:
             return None
-        self.cache.move_to_end(key)
+        self._touch(key)
         return entry
 
     def get_fast(self, size: str, image_id: int) -> bytes | None:
@@ -31,7 +48,7 @@ class MemoryThumbnailStore:
         if cached_signature != source_signature:
             self.remove(key)
             return None
-        self.cache.move_to_end(key)
+        self._touch(key)
         return data
 
     def remove(self, key: tuple[str, int]) -> bool:
@@ -39,16 +56,23 @@ class MemoryThumbnailStore:
         if entry is None:
             return False
         size = key[0]
+        order = self._tier_order.get(size)
+        if order is not None:
+            order.pop(key, None)
         data_len = len(entry[1])
         self.cache_bytes -= data_len
         self.tier_bytes[size] = max(0, self.tier_bytes.get(size, 0) - data_len)
         return True
 
     def evict_oldest(self, size: str | None = None) -> bool:
-        for key in list(self.cache.keys()):
-            if size is None or key[0] == size:
-                return self.remove(key)
-        return False
+        if size is None:
+            if not self.cache:
+                return False
+            return self.remove(next(iter(self.cache)))
+        order = self._tier_order.get(size)
+        if not order:
+            return False
+        return self.remove(next(iter(order)))
 
     def enforce_budget(
         self,
@@ -86,6 +110,9 @@ class MemoryThumbnailStore:
         self.remove(key)
         self.cache[key] = (source_signature, data)
         self.cache.move_to_end(key)
+        order = self._tier_order_dict(size)
+        order[key] = None
+        order.move_to_end(key)
         data_len = len(data)
         self.cache_bytes += data_len
         self.tier_bytes[size] = self.tier_bytes.get(size, 0) + data_len
@@ -98,6 +125,8 @@ class MemoryThumbnailStore:
         entries_cleared = len(self.cache)
         bytes_cleared = self.cache_bytes
         self.cache.clear()
+        for order in self._tier_order.values():
+            order.clear()
         self.cache_bytes = 0
         for size in tiers:
             self.tier_bytes[size] = 0
@@ -108,8 +137,11 @@ class MemoryThumbnailStore:
         }
 
     def clear_tiers(self, tiers: tuple[str, ...]) -> None:
-        for key in list(self.cache.keys()):
-            if key[0] in tiers:
+        for size in tiers:
+            order = self._tier_order.get(size)
+            if not order:
+                continue
+            for key in list(order.keys()):
                 self.remove(key)
 
     def clear_image_ids(self, image_ids: set[int]) -> None:

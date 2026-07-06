@@ -29,7 +29,9 @@ class _Providers:
 _providers: _Providers | None = None
 
 # Write-behind queue for cache DB entries. This reduces metadata lock contention.
-_write_queue: list[tuple[str, int, str, str, int, float]] = []
+# Entries are (size, image_id, source_signature, path, size_bytes, access_time)
+# with an optional trailing "touch" marker for LRU-touch-only entries.
+_write_queue: list[tuple] = []
 _write_queue_lock = threading.Lock()
 _WRITE_FLUSH_SIZE = 96
 
@@ -150,6 +152,10 @@ def _db_connect() -> sqlite3.Connection:
     return _persistent_conn
 
 
+def _is_touch_entry(entry: tuple) -> bool:
+    return len(entry) > 6 and entry[6] == "touch"
+
+
 def _note_cache_metadata_lock():
     global _cache_metadata_retry_after, _cache_metadata_lock_failures
     _cache_metadata_lock_failures = min(_cache_metadata_lock_failures + 1, 6)
@@ -257,11 +263,8 @@ def _enforce_all_disk_budgets():
     providers = _p()
     with providers.meta_lock:
         conn = _db_connect()
-        try:
-            for size in providers.all_tiers():
-                _enforce_tier_budget_locked(conn, size)
-        finally:
-            conn.close()
+        for size in providers.all_tiers():
+            _enforce_tier_budget_locked(conn, size)
 
 
 def _get_disk_entry(
@@ -275,8 +278,9 @@ def _get_disk_entry(
     if not cache_root or providers.disk_allocations().get(size, 0) <= 0:
         return None
 
+    pending_touch: tuple | None = None
+    result: sqlite3.Row | None = None
     with providers.meta_lock:
-        conn = None
         try:
             conn = _db_connect()
             row = conn.execute(
@@ -310,32 +314,29 @@ def _get_disk_entry(
                         raise
                 return None
             if touch:
-                try:
-                    conn.execute(
-                        "UPDATE cache_entries SET last_accessed = ? "
-                        "WHERE cache_root = ? AND size = ? AND image_id = ?",
-                        (providers.current_time(), cache_root, size, image_id),
-                    )
-                    conn.commit()
-                except sqlite3.OperationalError as exc:
-                    try:
-                        conn.rollback()
-                    except Exception:
-                        pass
-                    if not providers.sqlite_locked(exc):
-                        raise
-                    _note_cache_metadata_lock()
+                # Route the LRU touch through the write-behind queue instead
+                # of an inline UPDATE+commit; timestamps may lag by one flush.
+                pending_touch = (
+                    size,
+                    image_id,
+                    row["source_signature"],
+                    row["path"],
+                    int(row["size_bytes"]),
+                    providers.current_time(),
+                    "touch",
+                )
             _index_disk_entry(size, image_id, row["path"], row["source_signature"])
-            return row
+            result = row
         except sqlite3.OperationalError as exc:
             if providers.sqlite_locked(exc):
                 _note_cache_metadata_lock()
                 return None
             raise
-        finally:
-            close = getattr(conn, "close", None) if conn is not None else None
-            if close is not None:
-                close()
+    if pending_touch is not None:
+        with _write_queue_lock:
+            _write_queue.append(pending_touch)
+        _maybe_flush_write_queue()
+    return result
 
 
 def touch_cached_signature(size: str, image_id: int, source_signature: str | None = None) -> bool:
@@ -372,10 +373,6 @@ def touch_cached_signature(size: str, image_id: int, source_signature: str | Non
                 _note_cache_metadata_lock()
                 return False
             raise
-        finally:
-            close = getattr(conn, "close", None) if conn is not None else None
-            if close is not None:
-                close()
 
 
 def _build_disk_path_index() -> bool:
@@ -392,13 +389,10 @@ def _build_disk_path_index() -> bool:
     try:
         with providers.meta_lock:
             conn = _db_connect()
-            try:
-                rows = conn.execute(
-                    "SELECT size, image_id, path, source_signature FROM cache_entries WHERE cache_root = ?",
-                    (cache_root,),
-                ).fetchall()
-            finally:
-                conn.close()
+            rows = conn.execute(
+                "SELECT size, image_id, path, source_signature FROM cache_entries WHERE cache_root = ?",
+                (cache_root,),
+            ).fetchall()
     except sqlite3.OperationalError as exc:
         if providers.sqlite_locked(exc):
             _note_cache_metadata_lock()
@@ -568,42 +562,39 @@ def _store_disk_entry(
     access_time = providers.cache_access_time(hot=hot)
     with providers.meta_lock:
         conn = _db_connect()
-        try:
-            previous = conn.execute(
-                "SELECT cache_root, size, image_id, path, size_bytes FROM cache_entries "
-                "WHERE cache_root = ? AND size = ? AND image_id = ?",
-                (cache_root, size, image_id),
-            ).fetchone()
-            old_bytes = 0
-            removed_cache_ids = []
-            if previous is not None:
-                old_bytes = int(previous["size_bytes"])
-                if previous["path"] != path:
-                    removed_cache_ids.append(int(previous["image_id"]))
-                    _remove_cache_entry_locked(conn, previous)
+        previous = conn.execute(
+            "SELECT cache_root, size, image_id, path, size_bytes FROM cache_entries "
+            "WHERE cache_root = ? AND size = ? AND image_id = ?",
+            (cache_root, size, image_id),
+        ).fetchone()
+        old_bytes = 0
+        removed_cache_ids = []
+        if previous is not None:
+            old_bytes = int(previous["size_bytes"])
+            if previous["path"] != path:
+                removed_cache_ids.append(int(previous["image_id"]))
+                _remove_cache_entry_locked(conn, previous)
 
-            conn.execute(
-                "INSERT OR REPLACE INTO cache_entries "
-                "(cache_root, size, image_id, path, source_signature, size_bytes, last_accessed, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    cache_root,
-                    size,
-                    image_id,
-                    path,
-                    source_signature,
-                    int(size_bytes),
-                    access_time,
-                    now,
-                ),
-            )
-            if size in _tier_byte_totals:
-                _tier_byte_totals[size] += int(size_bytes) - old_bytes
-            removed_cache_ids.extend(_enforce_tier_budget_locked(conn, size))
-            conn.commit()
-            _invalidate_disk_stats_cache(soft=True)
-        finally:
-            conn.close()
+        conn.execute(
+            "INSERT OR REPLACE INTO cache_entries "
+            "(cache_root, size, image_id, path, source_signature, size_bytes, last_accessed, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                cache_root,
+                size,
+                image_id,
+                path,
+                source_signature,
+                int(size_bytes),
+                access_time,
+                now,
+            ),
+        )
+        if size in _tier_byte_totals:
+            _tier_byte_totals[size] += int(size_bytes) - old_bytes
+        removed_cache_ids.extend(_enforce_tier_budget_locked(conn, size))
+        conn.commit()
+        _invalidate_disk_stats_cache(soft=True)
         _index_disk_entry(size, image_id, path, source_signature)
         if removed_cache_ids:
             providers.invalidate_cached_image_ids_cache(cache_root=cache_root, size=size)
@@ -640,7 +631,14 @@ def _flush_write_queue() -> bool:
             return True
         latest = {}
         for entry in _write_queue:
-            latest[(entry[0], entry[1])] = entry
+            key = (entry[0], entry[1])
+            existing = latest.get(key)
+            if _is_touch_entry(entry) and existing is not None:
+                # Keep the pending entry's data; only bump its access time so
+                # a touch never clobbers a queued store with stale row data.
+                latest[key] = existing[:5] + (entry[5],) + existing[6:]
+            else:
+                latest[key] = entry
         batch = list(latest.values())
         _write_queue.clear()
 
@@ -654,7 +652,17 @@ def _flush_write_queue() -> bool:
             now = providers.current_time()
             removed_by_size: dict[str, list[int]] = {}
             added_by_size: dict[str, list[int]] = {}
-            for size, image_id, source_signature, path, size_bytes, access_time in batch:
+            for entry in batch:
+                size, image_id, source_signature, path, size_bytes, access_time = entry[:6]
+                if _is_touch_entry(entry):
+                    # LRU touch: only bump last_accessed; never rewrite the row
+                    # (preserves created_at and tier byte accounting).
+                    conn.execute(
+                        "UPDATE cache_entries SET last_accessed = ? "
+                        "WHERE cache_root = ? AND size = ? AND image_id = ?",
+                        (access_time, cache_root, size, image_id),
+                    )
+                    continue
                 previous = conn.execute(
                     "SELECT cache_root, size, image_id, path, size_bytes FROM cache_entries "
                     "WHERE cache_root = ? AND size = ? AND image_id = ?",
@@ -705,10 +713,6 @@ def _flush_write_queue() -> bool:
                 _note_cache_metadata_lock()
                 return False
             raise
-        finally:
-            close = getattr(conn, "close", None) if conn is not None else None
-            if close is not None:
-                close()
 
 
 def _maybe_flush_write_queue():

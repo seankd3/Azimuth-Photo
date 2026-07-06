@@ -63,6 +63,56 @@ async def run_thumbnail_job(
     )
 
 
+def _probe_cached_sync(
+    size: str,
+    image_id: int,
+    source_signature: str,
+    allow_stale_fallback: bool,
+    memory_get: Callable[[str, int, str], bytes | None],
+    fast_disk_read_entry: Callable[..., tuple[str, bytes] | None],
+    read_disk_thumbnail: Callable[[str, int, str], bytes | None],
+) -> bytes | None:
+    """Sync cache probe (memory, disk index, disk DB); run via to_thread."""
+    cached = memory_get(size, image_id, source_signature)
+    if cached is not None:
+        return cached
+    disk_entry = fast_disk_read_entry(
+        size,
+        image_id,
+        None if allow_stale_fallback else source_signature,
+    )
+    if disk_entry is not None:
+        return disk_entry[1]
+    return read_disk_thumbnail(size, image_id, source_signature)
+
+
+def _probe_before_generate_sync(
+    filepath: str,
+    size: str,
+    image_id: int,
+    allow_stale_fallback: bool,
+    build_source_signature: Callable[[str, str, int], str],
+    memory_get: Callable[[str, int, str], bytes | None],
+    fast_disk_read_entry: Callable[..., tuple[str, bytes] | None],
+    read_disk_thumbnail: Callable[[str, int, str], bytes | None],
+    source_missing: Callable[[str], bool],
+) -> tuple[str, bytes | None, bool]:
+    """Signature build + cache probe + source stat, bundled off the loop."""
+    source_signature = build_source_signature(filepath, size, image_id)
+    cached = _probe_cached_sync(
+        size,
+        image_id,
+        source_signature,
+        allow_stale_fallback,
+        memory_get,
+        fast_disk_read_entry,
+        read_disk_thumbnail,
+    )
+    if cached is not None:
+        return source_signature, cached, False
+    return source_signature, None, source_missing(filepath)
+
+
 async def ensure_thumbnail_with_executor(
     filepath: str,
     size: str,
@@ -85,23 +135,23 @@ async def ensure_thumbnail_with_executor(
     if note_activity:
         note_user_activity()
 
-    source_signature = build_source_signature(filepath, size, image_id)
-    cached = memory_get(size, image_id, source_signature)
-    if cached is not None:
-        return cached
-
-    disk_entry = fast_disk_read_entry(
+    # Signature build, cache probe, and source stat are sync stat/file/SQLite
+    # work; keep them off the event loop.
+    source_signature, cached, missing = await asyncio.to_thread(
+        _probe_before_generate_sync,
+        filepath,
         size,
         image_id,
-        None if allow_stale_fallback else source_signature,
+        allow_stale_fallback,
+        build_source_signature,
+        memory_get,
+        fast_disk_read_entry,
+        read_disk_thumbnail,
+        source_missing,
     )
-    if disk_entry is not None:
-        return disk_entry[1]
-
-    cached = read_disk_thumbnail(size, image_id, source_signature)
     if cached is not None:
         return cached
-    if source_missing(filepath):
+    if missing:
         return b""
 
     inflight_key = ("thumb", image_id, source_signature)
@@ -128,17 +178,17 @@ async def ensure_thumbnail_with_executor(
     if generated:
         return generated
 
-    cached = memory_get(size, image_id, source_signature)
-    if cached is not None:
-        return cached
-    disk_entry = fast_disk_read_entry(
+    cached = await asyncio.to_thread(
+        _probe_cached_sync,
         size,
         image_id,
-        None if allow_stale_fallback else source_signature,
+        source_signature,
+        allow_stale_fallback,
+        memory_get,
+        fast_disk_read_entry,
+        read_disk_thumbnail,
     )
-    if disk_entry is not None:
-        return disk_entry[1]
-    return read_disk_thumbnail(size, image_id, source_signature) or b""
+    return cached or b""
 
 
 async def get_thumbnail(
@@ -201,7 +251,8 @@ async def prefetch_images(
             continue
         if not require_current and fast_disk_has(size, image_id):
             if hot:
-                touch_cached_signature(size, image_id, None)
+                # Sync SQLite write; keep it off the event loop.
+                await asyncio.to_thread(touch_cached_signature, size, image_id, None)
             continue
 
         if not require_current:
@@ -224,7 +275,8 @@ async def prefetch_images(
             continue
         if fast_disk_has(size, image_id, source_signature):
             if hot:
-                touch_cached_signature(size, image_id, source_signature)
+                # Sync SQLite write; keep it off the event loop.
+                await asyncio.to_thread(touch_cached_signature, size, image_id, source_signature)
             continue
         if has_cached(size, filepath, image_id):
             if hot:

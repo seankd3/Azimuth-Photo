@@ -252,8 +252,10 @@ async def predict_propagation(grid_ids: list[int]) -> dict[int, int]:
             return dict(_prediction_cache_counts)
 
         grid_set = set(grid_ids)
-        # Precompute neighbors for every grid image
-        neighbors_by_id = _find_similar_batch(
+        # Precompute neighbors for every grid image. The big matmul is
+        # CPU-bound numpy work; keep it off the event loop.
+        neighbors_by_id = await asyncio.to_thread(
+            _find_similar_batch,
             grid_ids,
             image_ids,
             matrix,
@@ -312,9 +314,13 @@ async def _propagate_comparison_once(winner_id: int, loser_id: int, k: float, ac
     if image_ids is None:
         return  # no embeddings available yet
 
-    # Find similar images for winner and loser
-    winner_neighbors = _find_similar(winner_id, image_ids, matrix, id_to_idx, SIMILARITY_THRESHOLD, MAX_NEIGHBORS)
-    loser_neighbors = _find_similar(loser_id, image_ids, matrix, id_to_idx, SIMILARITY_THRESHOLD, MAX_NEIGHBORS)
+    # Find similar images for winner and loser (CPU-bound matvec; off-loop)
+    winner_neighbors = await asyncio.to_thread(
+        _find_similar, winner_id, image_ids, matrix, id_to_idx, SIMILARITY_THRESHOLD, MAX_NEIGHBORS
+    )
+    loser_neighbors = await asyncio.to_thread(
+        _find_similar, loser_id, image_ids, matrix, id_to_idx, SIMILARITY_THRESHOLD, MAX_NEIGHBORS
+    )
 
     if not winner_neighbors and not loser_neighbors:
         return
@@ -386,11 +392,15 @@ async def _propagate_mosaic_once(winner_id: int, loser_ids: list[int], k: float,
 
     involved = {winner_id} | set(loser_ids)
 
-    # Find neighbors for winner AND all losers
-    winner_neighbors = _find_similar(winner_id, image_ids, matrix, id_to_idx, SIMILARITY_THRESHOLD, MAX_NEIGHBORS)
+    # Find neighbors for winner AND all losers (CPU-bound matvecs; off-loop)
+    winner_neighbors = await asyncio.to_thread(
+        _find_similar, winner_id, image_ids, matrix, id_to_idx, SIMILARITY_THRESHOLD, MAX_NEIGHBORS
+    )
     loser_neighbor_lists = []
     for lid in loser_ids:
-        loser_neighbors = _find_similar(lid, image_ids, matrix, id_to_idx, SIMILARITY_THRESHOLD, MAX_NEIGHBORS)
+        loser_neighbors = await asyncio.to_thread(
+            _find_similar, lid, image_ids, matrix, id_to_idx, SIMILARITY_THRESHOLD, MAX_NEIGHBORS
+        )
         loser_neighbor_lists.append(loser_neighbors)
 
     all_neighbor_ids = set()
