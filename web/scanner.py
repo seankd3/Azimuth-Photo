@@ -62,6 +62,24 @@ def walk_images(folder: str):
                 yield f, filepath, file_ext, file_size, file_modified_at
 
 
+def try_begin_scan() -> bool:
+    """Synchronously claim the scanner before any await.
+
+    Callers that check scan_state and then await before create_task leave a
+    window where a second request also passes the check; claiming the flag
+    synchronously closes it. Release with release_scan_claim() if starting
+    the scan task fails after a successful claim.
+    """
+    if scan_state["scanning"]:
+        return False
+    scan_state["scanning"] = True
+    return True
+
+
+def release_scan_claim() -> None:
+    scan_state["scanning"] = False
+
+
 async def scan_folder(folder: str, source_id: int | None = None, on_batch=None):
     """Scan a folder for images and insert them into the database in batches."""
     scan_state["scanning"] = True

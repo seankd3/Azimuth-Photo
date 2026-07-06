@@ -142,10 +142,14 @@ async def start_scan(request: Request):
     if not folder or not os.path.isdir(folder):
         return JSONResponse({"error": "Invalid folder path"}, status_code=400)
 
-    if scanner.scan_state["scanning"]:
+    if not scanner.try_begin_scan():
         return JSONResponse({"error": "Scan already in progress"}, status_code=409)
 
-    source = await _configured(_add_or_restore_source)(folder)
+    try:
+        source = await _configured(_add_or_restore_source)(folder)
+    except Exception:
+        scanner.release_scan_claim()
+        raise
     asyncio.create_task(
         scanner.scan_folder(source["path"], source_id=source["id"], on_batch=scan_prefetch_on_batch)
     )
@@ -429,10 +433,15 @@ async def api_add_catalog_source(request: Request):
     scan = body.get("scan", True)
     if not folder or not os.path.isdir(catalog_repository.normalize_source_path(folder)):
         return JSONResponse({"error": "Invalid folder path"}, status_code=400)
-    if scan and scanner.scan_state["scanning"]:
+    if scan and not scanner.try_begin_scan():
         return JSONResponse({"error": "Scan already in progress"}, status_code=409)
 
-    source = await _configured(_add_or_restore_source)(folder)
+    try:
+        source = await _configured(_add_or_restore_source)(folder)
+    except Exception:
+        if scan:
+            scanner.release_scan_claim()
+        raise
     if scan:
         asyncio.create_task(
             scanner.scan_folder(source["path"], source_id=source["id"], on_batch=scan_prefetch_on_batch)
@@ -453,10 +462,14 @@ async def api_rescan_catalog_source(source_id: int):
         return JSONResponse({"error": "Source not found"}, status_code=404)
     if not os.path.isdir(source["path"]):
         return JSONResponse({"error": "Source folder is offline"}, status_code=400)
-    if scanner.scan_state["scanning"]:
+    if not scanner.try_begin_scan():
         return JSONResponse({"error": "Scan already in progress"}, status_code=409)
 
-    restored = await _configured(_add_or_restore_source)(source["path"])
+    try:
+        restored = await _configured(_add_or_restore_source)(source["path"])
+    except Exception:
+        scanner.release_scan_claim()
+        raise
     asyncio.create_task(
         scanner.scan_folder(restored["path"], source_id=restored["id"], on_batch=scan_prefetch_on_batch)
     )
