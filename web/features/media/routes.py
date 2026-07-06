@@ -89,9 +89,19 @@ async def serve_thumbnail(request: Request, size: str, image_id: int, cached: bo
 
     data = await thumbnails.get_thumbnail(image["filepath"], size, image_id)
     if not data:
+        # Distinguish an unreachable source (spun-down or unplugged drive)
+        # from a genuine generation failure so the UI can react sensibly.
+        source_exists = await asyncio.to_thread(os.path.exists, image["filepath"])
+        if not source_exists:
+            return JSONResponse(
+                {"error": "Source file unavailable", "reason": "source_offline"},
+                status_code=404,
+            )
         return JSONResponse({"error": "Thumbnail generation failed"}, status_code=500)
 
-    headers = thumbnails.response_headers(image["filepath"], size, image_id)
+    # response_headers stats the original file; keep slow/offline disks off
+    # the event loop so one sleeping drive can't stall every request.
+    headers = await asyncio.to_thread(thumbnails.response_headers, image["filepath"], size, image_id)
     return Response(content=data, media_type="image/jpeg", headers=headers)
 
 
@@ -122,16 +132,24 @@ async def serve_full_image(request: Request, image_id: int, background_tasks: Ba
 
     ext = os.path.splitext(image["filepath"])[1].lower()
     if ext not in _browser_image_extensions:
-        headers = thumbnails.response_headers(image["filepath"], "lg", image_id)
+        headers = await asyncio.to_thread(thumbnails.response_headers, image["filepath"], "lg", image_id)
         if request_etag == headers["ETag"]:
             return Response(status_code=304, headers=headers)
 
         data = await thumbnails.get_thumbnail(image["filepath"], "lg", image_id)
         if not data:
+            source_exists = await asyncio.to_thread(os.path.exists, image["filepath"])
+            if not source_exists:
+                return JSONResponse(
+                    {"error": "Source file unavailable", "reason": "source_offline"},
+                    status_code=404,
+                )
             return JSONResponse({"error": "Preview generation failed"}, status_code=500)
         return Response(content=data, media_type="image/jpeg", headers=headers)
 
-    headers = thumbnails.response_headers(image["filepath"], thumbnails.FULL_TIER, image_id)
+    headers = await asyncio.to_thread(
+        thumbnails.response_headers, image["filepath"], thumbnails.FULL_TIER, image_id
+    )
     if request_etag == headers["ETag"]:
         return Response(status_code=304, headers=headers)
 
@@ -140,7 +158,7 @@ async def serve_full_image(request: Request, image_id: int, background_tasks: Ba
         path = image["filepath"]
         background_tasks.add_task(thumbnails.schedule_full_image_cache, image["filepath"], image_id)
 
-    if not path or not os.path.exists(path):
+    if not path or not await asyncio.to_thread(os.path.exists, path):
         return JSONResponse({"error": "Full image unavailable"}, status_code=404)
 
     return FileResponse(path, headers=headers)

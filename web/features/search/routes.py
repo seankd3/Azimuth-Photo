@@ -197,6 +197,36 @@ async def api_similar(image_id: int, limit: int = 50):
     }
 
 
+def _scan_duplicate_pairs(matrix, image_ids, cached_sm_ids, threshold, batch_size, limit, n):
+    pairs = []
+    total_pairs = 0
+    hidden_pairs = 0
+    for start in range(0, n, batch_size):
+        end = min(start + batch_size, n)
+        chunk_sims = matrix[start:end] @ matrix.T
+        for i_local in range(end - start):
+            i = start + i_local
+            j_start = max(i + 1, 0)
+            row = chunk_sims[i_local, j_start:]
+            above = (row >= threshold).nonzero()[0]
+            for offset in above:
+                j = j_start + int(offset)
+                id_a = int(image_ids[i])
+                id_b = int(image_ids[j])
+                total_pairs += 1
+                if id_a in cached_sm_ids and id_b in cached_sm_ids:
+                    pairs.append((id_a, id_b, float(row[int(offset)])))
+                else:
+                    hidden_pairs += 1
+                if len(pairs) >= limit:
+                    break
+            if len(pairs) >= limit:
+                break
+        if len(pairs) >= limit:
+            break
+    return pairs, total_pairs, hidden_pairs
+
+
 @router.get("/api/duplicates")
 async def api_duplicates(threshold: float = 0.95, limit: int = 100):
     """Find near-duplicate image pairs using embedding similarity."""
@@ -227,32 +257,11 @@ async def api_duplicates(threshold: float = 0.95, limit: int = 100):
     if _duplicates_cache["key"] == cache_key and _duplicates_cache["data"] is not None:
         return copy.deepcopy(_duplicates_cache["data"])
 
-    pairs = []
-    total_pairs = 0
-    hidden_pairs = 0
-    for start in range(0, n, batch_size):
-        end = min(start + batch_size, n)
-        chunk_sims = matrix[start:end] @ matrix.T
-        for i_local in range(end - start):
-            i = start + i_local
-            j_start = max(i + 1, 0)
-            row = chunk_sims[i_local, j_start:]
-            above = (row >= threshold).nonzero()[0]
-            for offset in above:
-                j = j_start + int(offset)
-                id_a = int(image_ids[i])
-                id_b = int(image_ids[j])
-                total_pairs += 1
-                if id_a in cached_sm_ids and id_b in cached_sm_ids:
-                    pairs.append((id_a, id_b, float(row[int(offset)])))
-                else:
-                    hidden_pairs += 1
-                if len(pairs) >= limit:
-                    break
-            if len(pairs) >= limit:
-                break
-        if len(pairs) >= limit:
-            break
+    # The pairwise similarity sweep is O(n^2) CPU/numpy work that can take
+    # seconds on a large archive; run it off the event loop.
+    pairs, total_pairs, hidden_pairs = await asyncio.to_thread(
+        _scan_duplicate_pairs, matrix, image_ids, cached_sm_ids, threshold, batch_size, limit, n
+    )
 
     all_ids = list({p[0] for p in pairs} | {p[1] for p in pairs})
     images = await _get_active_images_by_ids(all_ids) if all_ids else {}
@@ -290,7 +299,9 @@ async def api_exif(image_id: int):
         return JSONResponse({"error": "Image not found"}, status_code=404)
 
     try:
-        exif = photo_metadata.extract_image_metadata(image["filepath"])
+        # Full EXIF parsing reads the original file (possibly a large RAW on
+        # a slow disk); keep it off the event loop.
+        exif = await asyncio.to_thread(photo_metadata.extract_image_metadata, image["filepath"])
     except Exception:
         exif = {}
 
