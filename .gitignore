@@ -25,3 +25,7 @@ android/app/build/
 .codex
 .gstack/
 .claude/
+
+# Local audits and build outputs
+cleanup/
+outputs/
