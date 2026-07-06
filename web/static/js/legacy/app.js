@@ -47,6 +47,24 @@ const legacyPhotoArchive = (() => {
     let undoCount = 0;
     let compareStats = {};
     let compareImageToken = 0;
+    // Batch/replacement responses carry pool stats only; keep catalog-level
+    // coverage counters so the ranking-signals counter doesn't reset to zero
+    // until the next /api/stats merge.
+    const COMPARE_STATS_CARRYOVER_KEYS = [
+        'ranking_signal_count',
+        'total_comparisons',
+        'direct_comparison_rows',
+        'rated_images',
+    ];
+    const replaceCompareStats = (stats) => {
+        const next = stats || {};
+        for (const key of COMPARE_STATS_CARRYOVER_KEYS) {
+            if (next[key] === undefined && compareStats && compareStats[key] !== undefined) {
+                next[key] = compareStats[key];
+            }
+        }
+        compareStats = next;
+    };
     const compareDisplayedTier = { left: -1, right: -1 };
 
     // --- Rankings State ---
@@ -190,7 +208,7 @@ const legacyPhotoArchive = (() => {
         setMosaicPropagationCounts: (counts) => { mosaicPropagationCounts = counts; },
         getCompareMode: () => compareMode,
         getCompareStats: () => compareStats,
-        setCompareStats: (stats) => { compareStats = stats; },
+        setCompareStats: replaceCompareStats,
         buildMosaicUrl,
         takeWarmCache,
         fetchWarmJson,
@@ -296,7 +314,7 @@ const legacyPhotoArchive = (() => {
         setCompareIndex: (index) => { compareIndex = index; },
         getComparePairs: () => comparePairs,
         setComparePairs: (pairs) => { comparePairs = pairs; },
-        setCompareStats: (stats) => { compareStats = stats; },
+        setCompareStats: replaceCompareStats,
         incrementCompareImageToken: () => ++compareImageToken,
         getCompareImageToken: () => compareImageToken,
         buildCompareUrl,
@@ -981,7 +999,7 @@ const legacyPhotoArchive = (() => {
         setRankingsExhausted: (exhausted) => { rankingsExhausted = exhausted; },
         getThumbHeight: () => thumbHeight,
         getCompareStats: () => compareStats,
-        setCompareStats: (stats) => { compareStats = stats; },
+        setCompareStats: replaceCompareStats,
         setSearchQuery: (query) => { searchQuery = query; },
         bumpLibraryRequestGeneration: () => ++libraryRequestGeneration,
         getLibraryRequestGeneration: () => libraryRequestGeneration,
@@ -1076,7 +1094,7 @@ const legacyPhotoArchive = (() => {
         setPendingScrollRestoreOffset: (value) => { pendingScrollRestoreOffset = value; },
         loadUiSettings,
         loadRankings,
-        setCompareStats: (stats) => { compareStats = stats; },
+        setCompareStats: replaceCompareStats,
         updateCompareProgress,
         loadFolderList,
         scheduleFilterOptionsLoad,
