@@ -514,6 +514,40 @@ async def purge_source_catalog_data(db_path: str, source_id: int) -> dict:
                     chunk,
                 )
                 await conn.execute(
+                    f"DELETE FROM propagation_updates WHERE image_id IN ({placeholders})",
+                    chunk,
+                )
+                await conn.execute(
+                    f"DELETE FROM collection_images WHERE image_id IN ({placeholders})",
+                    chunk,
+                )
+                await conn.execute(
+                    f"DELETE FROM import_batch_images WHERE image_id IN ({placeholders})",
+                    chunk,
+                )
+                await conn.execute(
+                    f"DELETE FROM face_assignments WHERE face_id IN ("
+                    f"SELECT id FROM face_detections WHERE image_id IN ({placeholders}))",
+                    chunk,
+                )
+                await conn.execute(
+                    f"DELETE FROM face_detections WHERE image_id IN ({placeholders})",
+                    chunk,
+                )
+                await conn.execute(
+                    f"DELETE FROM person_image_membership WHERE image_id IN ({placeholders})",
+                    chunk,
+                )
+                await conn.execute(
+                    f"DELETE FROM face_scan_images WHERE image_id IN ({placeholders})",
+                    chunk,
+                )
+                await conn.execute(
+                    f"UPDATE collections SET cover_image_id = NULL "
+                    f"WHERE cover_image_id IN ({placeholders})",
+                    chunk,
+                )
+                await conn.execute(
                     f"DELETE FROM images WHERE id IN ({placeholders})",
                     chunk,
                 )
