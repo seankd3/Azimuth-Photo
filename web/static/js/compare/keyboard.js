@@ -14,8 +14,9 @@ export function createCompareKeyboardHandler({
     libraryPath = '/library',
 } = {}) {
     return function handleCompareKey(e) {
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
         const tagName = e.target?.tagName;
-        if (tagName === 'INPUT' || tagName === 'TEXTAREA') return;
+        if (tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT' || e.target?.isContentEditable) return;
 
         if (e.key === 'Tab') {
             e.preventDefault();
@@ -28,6 +29,14 @@ export function createCompareKeyboardHandler({
             if (!cells.length) return;
 
             const selectedMosaicIndex = getSelectedMosaicIndex();
+
+            // ArrowUp with no cell selected is the advertised undo shortcut;
+            // it must win over arrow-key cell selection.
+            if (e.key === 'ArrowUp' && selectedMosaicIndex < 0) {
+                e.preventDefault();
+                undoComparison();
+                return;
+            }
 
             if (e.key === 'ArrowRight' || e.key === 'ArrowLeft' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
                 e.preventDefault();
@@ -54,10 +63,6 @@ export function createCompareKeyboardHandler({
             } else if (e.key === 'Escape' && selectedMosaicIndex >= 0) {
                 e.preventDefault();
                 deselectMosaicCell(cells);
-            }
-            if (e.key === 'ArrowUp' && getSelectedMosaicIndex() < 0) {
-                e.preventDefault();
-                undoComparison();
             }
             return;
         }

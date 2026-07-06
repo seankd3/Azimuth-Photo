@@ -21,7 +21,9 @@ export function bindLibraryKeyboard({
     if (!documentImpl?.addEventListener) return;
 
     documentImpl.addEventListener('keydown', (e) => {
-        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
+        const tagName = e.target?.tagName;
+        if (tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT' || e.target?.isContentEditable) return;
 
         const loupe = documentImpl.getElementById('loupe');
         const loupeOpen = loupe?.classList?.contains('loupe-visible');
