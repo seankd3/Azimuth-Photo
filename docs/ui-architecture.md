@@ -4,6 +4,18 @@ This is the design charter for photoArchive's interface. Every UI change should
 be checkable against it. The reference implementation of this architecture is
 the "photoArchive One" prototype; the production UI is converging toward it.
 
+## The two bars
+
+- **Mobile: Google Photos replacement.** The phone experience is judged against
+  Google Photos — instant timeline, effortless search, people, one-thumb
+  viewer, long-press selection. Where Google Photos has cloud lock-in, we have
+  Tailscale + local truth. Where it has Memories, we have Refine and Best-of.
+- **Desktop: Lightroom Classic replacement** for everything except developing —
+  culling, organizing, ranking, and notably stronger publishing tools
+  (collections to share links to website galleries).
+- Editing/develop is explicitly out of scope for now; if it ever lands, it is
+  one more overlay verb on Photo, not a new module.
+
 ## The grammar
 
 The interface is built from a small, closed grammar. Features are expressed in
