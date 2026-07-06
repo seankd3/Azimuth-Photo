@@ -771,18 +771,21 @@ async def undo_last_comparison(db_path: str) -> dict | None:
         propagation_rows = []
         if action_id:
             cursor = await conn.execute(
-                "SELECT image_id, elo_before, propagated_updates_before "
+                "SELECT image_id, elo_before, propagated_updates_before, delta "
                 "FROM propagation_updates WHERE action_id = ? ORDER BY id ASC",
                 (action_id,),
             )
             propagation_rows = await cursor.fetchall()
 
+        # Subtract the recorded delta instead of restoring the absolute
+        # elo_before snapshot, so ratings written by other actions between
+        # propagation and undo are preserved.
         for row in propagation_rows:
             await conn.execute(
-                "UPDATE images SET elo = ?, propagated_updates = ? WHERE id = ?",
+                "UPDATE images SET elo = COALESCE(elo, 0) - ?, "
+                "propagated_updates = MAX(COALESCE(propagated_updates, 1) - 1, 0) WHERE id = ?",
                 (
-                    float(row["elo_before"]),
-                    int(row["propagated_updates_before"]),
+                    float(row["delta"]),
                     int(row["image_id"]),
                 ),
             )

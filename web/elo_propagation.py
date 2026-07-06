@@ -200,7 +200,7 @@ async def _apply_propagation_deltas(
         before_elo = float(neighbor["elo"])
         before_count = int(neighbor.get("propagated_updates") or 0)
         after_elo = before_elo + float(delta)
-        updates.append((after_elo, neighbor_id))
+        updates.append((float(delta), neighbor_id))
         if action_id:
             history_rows.append((
                 action_id,
@@ -228,8 +228,11 @@ async def _apply_propagation_deltas(
             history_rows,
         )
 
+    # Relative update: a compare pick committed between our stale read and this
+    # write must not be reverted by an absolute `elo = before + delta` value.
     await conn.executemany(
-        "UPDATE images SET elo = ?, propagated_updates = COALESCE(propagated_updates, 0) + 1 WHERE id = ?",
+        "UPDATE images SET elo = COALESCE(elo, 0) + ?, "
+        "propagated_updates = COALESCE(propagated_updates, 0) + 1 WHERE id = ?",
         updates,
     )
     return len(updates)
