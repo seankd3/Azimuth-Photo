@@ -34,9 +34,37 @@ The app runs at `http://127.0.0.1:8000` by default.
 - `/library` and `/rankings` render Library.
 - `/compare` renders Compare.
 - `/people` renders People.
+- `/m` renders the installable mobile app; `/sw.js` serves its service worker
+  at scope `/`.
 - `/static/*` serves browser assets.
 
 Feature APIs live under product-specific route modules in `web/features/`.
+Public routes and their methods are contract-tested in
+`web/test_modular_contracts.py` — register new routes there.
+
+## Mobile App & PWA
+
+The phone experience is a standalone PWA, held to the bars in
+[`ui-architecture.md`](ui-architecture.md) (mobile = Google Photos
+replacement; desktop = Lightroom Classic replacement).
+
+- Shell: `web/templates/mobile.html` (does not extend `base.html`),
+  `web/static/mobile.css`, modules under `web/static/js/mobile/`
+  (timeline, viewer, refine, search, library, selection, scrubber, flags,
+  state, api, toast, bootstrap).
+- PWA assets: `web/static/manifest.webmanifest`, `web/static/icons/icon.svg`,
+  `web/static/sw.js` (shell precache, stale-while-revalidate thumbnails,
+  network-only for other APIs, offline fallback to cached `/m`).
+- Service workers require a secure context. On the tailnet the app is served
+  over HTTPS via `tailscale serve --https=8443` →
+  `https://omarchy.tail0eeded.ts.net:8443/m`. Plain `:8000` works but without
+  the service worker/install flow. Port 443 is a PUBLIC Funnel serving an
+  unrelated APK page — never reconfigure it.
+- Timeline endpoints: `/api/date-histogram` (whole-scope month counts driving
+  the scrubber and month view) and `/api/counts` (total/picked/rejected per
+  scope); `file_type` accepts `raw`/`jpg`/`tif` group aliases.
+- All mobile writes go through the same APIs as desktop (flags, mosaic picks,
+  collections) — there is no mobile-only write path.
 
 ## Where To Edit
 
@@ -54,6 +82,7 @@ authoritative product anchor for Search, Previews, and People background work.
 | Thumbnail/cache status and pregen | `web/thumbnails/`, `web/features/cache/` | Keep facade exports stable while moving implementation into owning modules. |
 | Settings and composed status payloads | `web/features/settings/`, `web/settings.py` | Settings responses are cached defensively and invalidated by named events. |
 | Bottom bar, background work panel, shared browser shell | `web/templates/_bottom_bar_*.html`, `web/static/js/work/`, `web/static/js/ui.js`, `web/static/style.css` | The measured bottom bar height is the shared layout contract. |
+| Mobile app (timeline, viewer, refine, PWA) | `web/static/js/mobile/`, `web/templates/mobile.html`, `web/static/mobile.css`, `web/static/sw.js` | Check `ui-architecture.md` first; bump the SW cache version when shell assets change. |
 | Legacy browser globals | `web/static/js/legacy/` | Compatibility exports only; put new page behavior in the owning module. |
 | Tests and fixtures | `web/test_support.py`, feature-owned `web/test_*.py` files | Keep shared setup in test support and put behavior tests near their product owner. |
 

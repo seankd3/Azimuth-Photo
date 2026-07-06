@@ -27,6 +27,9 @@ private photos, real archive paths, or personal metadata.
   similarity lookup, and duplicate discovery.
 - **Group people** with local face detection, labels, merge suggestions, and
   Library/Compare person filters.
+- **Take it mobile** with an installable phone app at `/m`: a fast timeline of
+  the whole archive, search, one-thumb ranking, and collections — served from
+  your own machine, no cloud.
 
 Supported scanned file types are `.jpg`, `.jpeg`, `.png`, `.dng`, `.cr3`,
 `.tif`, `.tiff`, and `.webp`.
@@ -89,10 +92,26 @@ cd web
 6. Use **Compare** when you want the app to learn which images are better.
 7. Install the local AI model from Catalog when you want semantic search.
 
+## Mobile App
+
+Open `/m` on your phone for the installable mobile app: a timeline of the
+whole archive, search, one-thumb ranking, and collections, all writing to the
+same local catalog. Installing it as an app (with offline support) requires
+HTTPS; on a Tailscale network one command provides that with a real
+certificate:
+
+```bash
+tailscale serve --bg --https=8443 http://127.0.0.1:8000
+```
+
+Then install from `https://<machine>.<tailnet>.ts.net:8443/m`.
+
 ## Documentation
 
 - [Product vision](docs/product-vision.md): north star, product principles,
   sharing model, and staged goals.
+- [UI architecture](docs/ui-architecture.md): the design charter — interface
+  grammar, extensibility rules, and experience bars for desktop and mobile.
 - [Getting started](docs/getting-started.md): install, run, first scan,
   Background Work, and the first useful workflow.
 - [Feature guide](docs/features.md): Catalog, Library, Compare, People, search,
