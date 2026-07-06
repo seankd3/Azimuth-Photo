@@ -64,6 +64,7 @@ export function createLegacyMosaicBridge({
     replacementLowWater = MOSAIC_REPLACEMENT_LOW_WATER,
 } = {}) {
     let deferredMosaicRetryTimer = null;
+    let mosaicLoadSeq = 0;
 
     function clearDeferredMosaicRetry() {
         if (!deferredMosaicRetryTimer) return;
@@ -164,13 +165,28 @@ export function createLegacyMosaicBridge({
     }
 
     async function loadMosaicBatch({ retrying = false } = {}) {
+        const loadSeq = ++mosaicLoadSeq;
         const url = buildMosaicUrl({ n: getMosaicSize() });
         const data = (
             getMosaicStrategy() !== 'diverse'
                 ? takeWarmCache(`compare:${url}`)
                 : null
         ) || await fetchWarmJson(url);
-        if (!data) return undefined;
+        // A newer load (shuffle, strategy switch) started while we awaited;
+        // let it own the grid instead of overwriting it with stale results.
+        if (loadSeq !== mosaicLoadSeq) return undefined;
+        if (!data) {
+            if (!retrying) {
+                showToast?.('Compare could not load photos. Retrying shortly.');
+            }
+            if (!deferredMosaicRetryTimer) {
+                deferredMosaicRetryTimer = setTimeoutImpl?.(() => {
+                    deferredMosaicRetryTimer = null;
+                    return Promise.resolve(loadMosaicBatch({ retrying: true })).catch(() => {});
+                }, deferredRetryMs);
+            }
+            return undefined;
+        }
         setCompareStats(data.stats || {});
         updateCompareProgress();
         const images = Array.isArray(data.images) ? data.images : [];
