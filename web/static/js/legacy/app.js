@@ -817,11 +817,11 @@ const legacyPhotoArchive = (() => {
         });
         try {
             const data = (requestOffset === 0 ? takeWarmCache(`library:${url}`) : null) || await fetchWarmJson(url);
+            if (requestGeneration !== libraryRequestGeneration) return 0;
             if (!data) {
                 updateLibraryEmptyState({ loadError: libraryImages.length === 0 });
                 return 0;
             }
-            if (requestGeneration !== libraryRequestGeneration) return 0;
             const images = Array.isArray(data.images) ? data.images : [];
             if (requestOffset === 0 && data.taste_available === false && images.length === 0) {
                 const grid = document.getElementById('rankings-grid');
@@ -882,7 +882,8 @@ const legacyPhotoArchive = (() => {
                 }
             }
             const grid = document.getElementById('rankings-grid');
-            if (requestOffset === 0 && grid?.dataset.fallbackRendered === '1') {
+            if (!grid) return 0;
+            if (requestOffset === 0 && grid.dataset.fallbackRendered === '1') {
                 window.__photoArchiveLibraryFallbackDisabled = true;
                 grid.innerHTML = '';
                 delete grid.dataset.fallbackRendered;

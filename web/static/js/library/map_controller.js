@@ -167,7 +167,10 @@ export function createLibraryMapController({
 
             renderMapInfo(container, data);
 
-            if (markers.length > 0 && mapZoom === 2) {
+            // Read the live zoom so reloads while in map view (e.g. filter
+            // changes) do not clobber the user's pan/zoom with fitBounds.
+            const liveZoom = typeof mapInstance.getZoom === 'function' ? mapInstance.getZoom() : mapZoom;
+            if (markers.length > 0 && liveZoom === 2) {
                 mapInstance.fitBounds(mapMarkerLayer.getBounds(), { padding: [30, 30] });
             }
         } catch (e) {

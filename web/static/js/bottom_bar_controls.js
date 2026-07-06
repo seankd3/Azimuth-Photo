@@ -19,10 +19,11 @@ export function bindSharedBottomBarControls({
     toggleStar = () => {},
     setThumbSize = () => {},
 } = {}) {
-    const clearBtn = documentImpl?.querySelector?.('[data-action="clear-search"]');
-    bindOnce(clearBtn, 'paClearSearchBound', 'click', (event) => {
-        event.preventDefault();
-        clearSearch();
+    all(documentImpl, '[data-action="clear-search"]').forEach((clearBtn) => {
+        bindOnce(clearBtn, 'paClearSearchBound', 'click', (event) => {
+            event.preventDefault();
+            clearSearch();
+        });
     });
 
     all(documentImpl, '[data-filter-control="select"][data-filter-key]').forEach((select) => {

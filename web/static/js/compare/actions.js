@@ -61,7 +61,8 @@ export function undoComparisonCount(result = {}) {
 
 export async function parseUndoComparisonResult(res) {
     if (!res.ok) {
-        return { ok: false, result: null, comparisonsUndone: 0 };
+        const body = await responseJsonOrEmpty(res);
+        return { ok: false, result: null, comparisonsUndone: 0, error: body.error || '' };
     }
     const result = await res.json();
     return {

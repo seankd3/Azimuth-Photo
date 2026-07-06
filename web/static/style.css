@@ -290,6 +290,12 @@ h2 .help-tip,
     min-width: 0;
 }
 
+/* While the Background Work panel is open, lift the whole bar above the
+   loupe; the bar's stacking context otherwise caps the panel at --z-bar. */
+.bottom-bar.work-panel-open {
+    z-index: calc(var(--z-lightbox) + 1);
+}
+
 .command-bar {
     min-height: calc(var(--bar-height) + 38px);
     align-items: stretch;
@@ -1259,7 +1265,7 @@ button:disabled {
 
 .workflow-steps {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
     gap: 16px;
 }
 
@@ -1428,19 +1434,11 @@ button:disabled {
     padding: 4px 4px 0 4px;
 }
 
-.compare-images {
-    flex: 1;
-    display: flex;
-    gap: 4px;
-    min-height: 0;
-    overflow: hidden;
-}
-
-.compare-images, .mosaic-container {
+.mosaic-container {
     transition: opacity var(--duration-normal) ease-out;
 }
 
-.compare-images.fading, .mosaic-container.fading {
+.mosaic-container.fading {
     opacity: 0;
 }
 
@@ -1469,24 +1467,6 @@ button:disabled {
     justify-content: center;
     gap: 10px;
     margin-top: 18px;
-}
-
-.compare-side {
-    flex: 1;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    border-radius: var(--radius-lg);
-    transition: background 0.15s;
-    padding: 8px;
-}
-
-.compare-side:hover {
-    background: var(--bg-input);
-    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
 }
 
 .shortcut-overlay {
@@ -1631,32 +1611,6 @@ button:disabled {
 }
 
 .btn-danger:hover { opacity: 0.9; }
-
-.compare-side img {
-    max-width: 100%;
-    max-height: calc(100% - 28px);
-    object-fit: contain;
-    border-radius: var(--radius-sm);
-    transition: opacity 0.1s;
-}
-
-.compare-side img.fading {
-    opacity: 0;
-}
-
-.compare-divider {
-    width: 2px;
-    background: var(--bg-interactive);
-    align-self: stretch;
-}
-
-.compare-info {
-    color: var(--text-subtle);
-    font-size: 12px;
-    margin-top: 8px;
-    text-align: center;
-    flex-shrink: 0;
-}
 
 
 /* Mosaic ranking mode */
@@ -2891,48 +2845,6 @@ body.library-shell .library-container::-webkit-scrollbar-thumb:hover {
 .compare-search-clear:hover {
     color: var(--text-primary);
     border-color: var(--accent);
-}
-
-.library-search {
-    position: relative;
-    margin: 0 0 8px;
-}
-
-.library-search input {
-    width: 100%;
-    padding: 10px 40px 10px 16px;
-    background: var(--bg-elevated);
-    border: 1px solid var(--border-default);
-    border-radius: var(--radius-lg);
-    color: var(--text-primary);
-    font-size: 14px;
-    outline: none;
-    transition: border-color 0.15s;
-}
-
-.library-search input:focus {
-    border-color: var(--accent);
-}
-
-.library-search input::placeholder {
-    color: #777;
-}
-
-.search-clear {
-    position: absolute;
-    right: 12px;
-    top: 50%;
-    transform: translateY(-50%);
-    background: none;
-    border: none;
-    color: var(--text-subtle);
-    font-size: 18px;
-    cursor: pointer;
-    padding: 4px;
-}
-
-.search-clear:hover {
-    color: #aaa;
 }
 
 .rank-similarity {

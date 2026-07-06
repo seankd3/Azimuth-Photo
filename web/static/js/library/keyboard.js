@@ -75,6 +75,9 @@ export function bindLibraryKeyboard({
             if (hasBatchSelection()) batchFlag('unflagged');
             else setCurrentLibraryFlag('unflagged');
         } else if (e.key === 'Escape') {
+            // While the collection sheet is open it owns Escape (its own
+            // listener closes it); do not also clear the batch selection.
+            if (documentImpl.querySelector('.collection-sheet-host')) return;
             e.preventDefault();
             if (hasBatchSelection()) clearBatchSelection();
             else if (selectedLibraryIndex >= 0) deselectLibraryCard(cards);

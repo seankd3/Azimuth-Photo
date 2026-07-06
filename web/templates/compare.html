@@ -33,6 +33,12 @@
             <button type="button" class="bar-btn has-tooltip" data-action="mosaic-shuffle" data-tooltip="Refresh the visible Mosaic candidates without recording a pick.">Shuffle</button>
         </div>
         {% include '_bottom_bar_search.html' %}
+        <div class="bar-section compare-search-active hidden" id="compare-search-active" data-command-zone="status">
+            <span class="compare-search-label">Search</span>
+            <span class="compare-search-query" id="compare-search-query"></span>
+            <button type="button" class="compare-search-clear" data-action="clear-search" aria-label="Clear search">&times;</button>
+        </div>
+        <div class="bar-divider"></div>
         <div class="bar-section bar-summary bar-stats" data-command-zone="status">
             <span id="compare-stat-comparisons" class="bar-stat-num">0</span><span id="propagation-badge" class="propagation-badge"></span> rank signals
             <span class="bar-dot">&middot;</span>

@@ -24,7 +24,11 @@ export function createThumbnailSizeHandler({
     clearWarmups,
     loadMosaicBatch,
     setThumbHeight,
+    setTimeoutImpl = globalThis.setTimeout,
+    clearTimeoutImpl = globalThis.clearTimeout,
+    mosaicReloadDelayMs = 200,
 } = {}) {
+    let mosaicReloadTimer = null;
     return function setThumbSize(value) {
         const thumbHeight = Number.parseInt(value, 10);
         setThumbHeight?.(thumbHeight);
@@ -33,9 +37,15 @@ export function createThumbnailSizeHandler({
         if (mosaicGrid) {
             const newSize = mosaicSizeFromThumbHeight(thumbHeight);
             if (newSize !== getMosaicSize()) {
-                clearWarmups();
                 setMosaicSize(newSize);
-                loadMosaicBatch();
+                // Debounce the expensive reload so a slider drag does not
+                // trigger clearWarmups + loadMosaicBatch on every input event.
+                if (mosaicReloadTimer !== null) clearTimeoutImpl(mosaicReloadTimer);
+                mosaicReloadTimer = setTimeoutImpl(() => {
+                    mosaicReloadTimer = null;
+                    clearWarmups();
+                    loadMosaicBatch();
+                }, mosaicReloadDelayMs);
             }
             return thumbHeight;
         }

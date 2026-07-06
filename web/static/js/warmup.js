@@ -280,7 +280,13 @@ export function createWarmupManager({
         }).then((response) => {
             if (!response.ok) throw new Error('warm request failed');
             onWarmTiersApplied(payload);
-        }).catch(() => {});
+        }).catch(() => {
+            // Unmark ids from a failed warm so the dedupe window does not
+            // suppress retries for tiers that were never actually warmed.
+            for (const [tier, ids] of Object.entries(payload)) {
+                for (const id of ids) recentWarmTierIds.delete(`${tier}:${id}`);
+            }
+        });
     }
 
     async function warmRequests(key, token, generation, requests) {

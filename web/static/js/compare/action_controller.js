@@ -62,13 +62,16 @@ export function createCompareActionController({
         if (getCompareBusy()) return false;
         const undoCount = incrementUndoCount();
         if (undoCount > 3) {
+            setUndoCount(undoCount - 1);
             showToast('Maximum undo reached');
             return false;
         }
         setCompareBusy(true);
+        let undoSucceeded = false;
         try {
             const result = await postUndoComparisonImpl();
             if (result.ok) {
+                undoSucceeded = true;
                 const comparisonsUndone = result.comparisonsUndone;
                 bumpRankingSignals(-comparisonsUndone, -comparisonsUndone);
                 updateCompareProgress();
@@ -79,11 +82,13 @@ export function createCompareActionController({
                     showToast(undoComparisonToastTextImpl(comparisonsUndone));
                 }
             } else {
-                showToast('Undo failed');
+                showToast(result.error || 'Undo failed');
             }
         } catch {
             showToast('Undo failed');
         } finally {
+            // Only successful undos count toward the undo limit.
+            if (!undoSucceeded) setUndoCount(undoCount - 1);
             setCompareBusy(false);
         }
         return true;

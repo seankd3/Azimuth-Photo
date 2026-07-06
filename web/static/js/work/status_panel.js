@@ -890,6 +890,10 @@ function syncBackgroundWorkTrigger(documentImpl = globalThis.document) {
     const open = !panel.classList.contains('hidden');
     trigger.setAttribute('aria-expanded', String(open));
     trigger.title = open ? 'Close Background Work' : 'Open Background Work';
+    // The bottom bar's own z-index creates a stacking context that would
+    // trap the panel below an open loupe; raise the bar while the panel
+    // is open (see .bottom-bar.work-panel-open in style.css).
+    panel.closest?.('.bottom-bar')?.classList?.toggle('work-panel-open', open);
 }
 
 function handleBackgroundWorkDocumentClick(event, documentImpl = globalThis.document) {

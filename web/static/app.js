@@ -14,6 +14,13 @@ function createPhotoArchivePlaceholder() {
                     throw new Error(`PhotoArchive.${prop} is not available`);
                 }
                 return fn(...args);
+            }).catch((error) => {
+                // Surface failures instead of leaving a silent unhandled
+                // rejection (callers of the placeholder rarely handle it).
+                console.error(`PhotoArchive.${prop} failed:`, error);
+                import(`./js/ui.js${suffix}`)
+                    .then((ui) => ui.showToast?.(`Action failed: ${prop}`))
+                    .catch(() => {});
             });
         },
     });

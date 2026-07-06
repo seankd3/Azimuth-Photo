@@ -3,6 +3,7 @@ import { peopleWorkerLabel } from './labels.js';
 
 const peopleLabelDrafts = new Map();
 let peoplePoller = null;
+let peopleLoadGeneration = 0;
 
 
 async function responseDataOrError(response, fallbackMessage) {
@@ -181,6 +182,9 @@ function bindPeopleActions({
 
 
 export async function loadPeople({ fetchImpl = fetch, force = false } = {}) {
+    // Sequence requests so slow poller responses cannot overwrite the
+    // results of a later force reload (e.g. right after a merge).
+    const requestGeneration = ++peopleLoadGeneration;
     const statusEl = document.getElementById('people-status-line');
     const labelFocused = peopleLabelInputFocused();
     if (statusEl && !labelFocused && !statusEl.textContent.trim()) {
@@ -202,9 +206,11 @@ export async function loadPeople({ fetchImpl = fetch, force = false } = {}) {
     try {
         const res = await fetchImpl('/api/people?limit=48');
         const data = await responseDataOrError(res, 'People load failed');
+        if (requestGeneration !== peopleLoadGeneration) return null;
         renderPeople(data);
         return data;
     } catch (err) {
+        if (requestGeneration !== peopleLoadGeneration) return null;
         if (statusEl) statusEl.textContent = `People unavailable: ${err.message}`;
         return null;
     }
