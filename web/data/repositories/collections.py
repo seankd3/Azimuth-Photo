@@ -50,7 +50,7 @@ async def create_collection(
                 clean_description,
                 _normalize_visibility(visibility),
                 _normalize_status(status),
-                image_ids[0] if image_ids else None,
+                None,
                 now,
                 now,
             ),
@@ -58,6 +58,9 @@ async def create_collection(
         collection_id = int(cursor.lastrowid)
         if image_ids:
             await _insert_members(conn, collection_id, image_ids, now=now)
+            # Cover comes from the members that actually exist, not the raw
+            # request ids, so an invalid first id can't leave a dangling cover.
+            await _ensure_cover(conn, collection_id)
         await conn.commit()
     finally:
         await data_connection.close_async(conn, db_path=db_path)
@@ -188,22 +191,25 @@ async def _insert_members(conn, collection_id: int, image_ids: list[int], *, now
         (int(collection_id),),
     )
     next_position = int((await cursor.fetchone())[0]) + 1
-    existing_cursor = await conn.execute(
-        "SELECT id FROM images WHERE id IN ({})".format(",".join("?" for _ in image_ids)),
-        image_ids,
-    )
-    existing_ids = {int(row["id"]) for row in await existing_cursor.fetchall()}
+    existing_ids: set[int] = set()
+    for ids in chunked(image_ids):
+        existing_cursor = await conn.execute(
+            "SELECT id FROM images WHERE id IN ({})".format(",".join("?" for _ in ids)),
+            ids,
+        )
+        existing_ids.update(int(row["id"]) for row in await existing_cursor.fetchall())
     rows = []
     for image_id in image_ids:
         if image_id not in existing_ids:
             continue
         rows.append((int(collection_id), image_id, next_position, now))
         next_position += 1
-    await conn.executemany(
-        "INSERT OR IGNORE INTO collection_images (collection_id, image_id, position, added_at) "
-        "VALUES (?, ?, ?, ?)",
-        rows,
-    )
+    for row_chunk in chunked(rows):
+        await conn.executemany(
+            "INSERT OR IGNORE INTO collection_images (collection_id, image_id, position, added_at) "
+            "VALUES (?, ?, ?, ?)",
+            row_chunk,
+        )
 
 
 async def _ensure_cover(conn, collection_id: int) -> None:

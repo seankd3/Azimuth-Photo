@@ -22,11 +22,11 @@ class CollectionTests(BackendTestCase):
         second = await self._image(source["id"], "second.jpg")
 
         created = await collection_routes.api_create_collection(
-            {
-                "name": "Japan selects",
-                "description": "Photos worth editing and sharing.",
-                "image_ids": [first, second, first, 999999],
-            }
+            collection_routes.CreateCollectionBody(
+                name="Japan selects",
+                description="Photos worth editing and sharing.",
+                image_ids=[first, second, first, 999999],
+            )
         )
 
         collection = created["collection"]
@@ -44,7 +44,10 @@ class CollectionTests(BackendTestCase):
         detail = await collection_routes.api_collection(collection["id"])
         self.assertEqual([image["id"] for image in detail["collection"]["images"]], [first, second])
 
-        updated = await collection_routes.api_remove_collection_images(collection["id"], {"image_ids": [first]})
+        updated = await collection_routes.api_remove_collection_images_post(
+            collection["id"],
+            collection_routes.CollectionImagesBody(image_ids=[first]),
+        )
         self.assertTrue(updated["ok"])
         self.assertEqual(updated["collection"]["image_count"], 1)
         self.assertEqual(updated["collection"]["cover_image_id"], second)
