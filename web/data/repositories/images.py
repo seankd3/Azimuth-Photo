@@ -1,6 +1,7 @@
 """Image lookup queries used by media, export, search, and compare flows."""
 
 from data import connection
+from data.repositories.common import chunked
 
 
 async def get_image_by_id(db_path: str, image_id: int):
@@ -18,10 +19,13 @@ async def get_images_by_ids(db_path: str, image_ids: list[int]) -> dict[int, dic
     ids = list(image_ids)
     conn = await connection.open_async(db_path)
     try:
-        placeholders = ",".join("?" for _ in ids)
-        cursor = await conn.execute(f"SELECT * FROM images WHERE id IN ({placeholders})", ids)
-        rows = await cursor.fetchall()
-        return {row["id"]: dict(row) for row in rows}
+        results: dict[int, dict] = {}
+        for chunk in chunked(ids):
+            placeholders = ",".join("?" for _ in chunk)
+            cursor = await conn.execute(f"SELECT * FROM images WHERE id IN ({placeholders})", chunk)
+            for row in await cursor.fetchall():
+                results[row["id"]] = dict(row)
+        return results
     finally:
         await connection.close_async(conn, db_path=db_path)
 
@@ -32,16 +36,19 @@ async def get_active_images_by_ids(db_path: str, image_ids: list[int]) -> dict[i
     unique_ids = list(dict.fromkeys(int(image_id) for image_id in image_ids))
     conn = await connection.open_async(db_path)
     try:
-        placeholders = ",".join("?" for _ in unique_ids)
-        cursor = await conn.execute(
-            f"SELECT i.* FROM images i NOT INDEXED "
-            f"JOIN catalog_sources s ON s.id = i.source_id "
-            f"WHERE s.included = 1 AND i.missing_at IS NULL "
-            f"AND i.id IN ({placeholders})",
-            unique_ids,
-        )
-        rows = await cursor.fetchall()
-        return {row["id"]: dict(row) for row in rows}
+        results: dict[int, dict] = {}
+        for chunk in chunked(unique_ids):
+            placeholders = ",".join("?" for _ in chunk)
+            cursor = await conn.execute(
+                f"SELECT i.* FROM images i NOT INDEXED "
+                f"JOIN catalog_sources s ON s.id = i.source_id "
+                f"WHERE s.included = 1 AND i.missing_at IS NULL "
+                f"AND i.id IN ({placeholders})",
+                chunk,
+            )
+            for row in await cursor.fetchall():
+                results[row["id"]] = dict(row)
+        return results
     finally:
         await connection.close_async(conn, db_path=db_path)
 

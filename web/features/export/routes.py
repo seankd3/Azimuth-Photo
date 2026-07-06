@@ -81,7 +81,7 @@ async def _get_export_images(
 ):
     db_path = _configured_db_path()
     if ids:
-        id_list = [int(x) for x in ids.split(",") if x.strip().isdigit()]
+        id_list = [int(x) for x in ids.split(",") if x.strip().isdigit()][:50000]
         images_dict = await image_repository.get_images_by_ids(db_path, id_list)
         return [images_dict[i] for i in id_list if i in images_dict]
 
