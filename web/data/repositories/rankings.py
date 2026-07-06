@@ -925,6 +925,86 @@ async def count_rankings_with_id_filter_on_conn(
     return total
 
 
+RANK_QUALITY_MIN_SIGNALS = 3
+
+
+async def rank_quality(
+    db_path: str,
+    *,
+    orientation: str = "",
+    compared: str = "",
+    min_stars: int = 0,
+    folder: str = "",
+    flag: str = "",
+    date_taken: str = "",
+    file_type: str = "",
+    camera: str = "",
+    lens: str = "",
+    id_filter: set | None = None,
+    text_query: str = "",
+) -> dict:
+    """Summarize how well the filtered set is ranked.
+
+    An image counts as well-ranked once its direct comparisons plus
+    propagated updates reach RANK_QUALITY_MIN_SIGNALS.
+    """
+    conditions, params = ranking_filter_parts(
+        orientation=orientation,
+        compared=compared,
+        min_stars=min_stars,
+        folder=folder,
+        flag=flag,
+        date_taken=date_taken,
+        file_type=file_type,
+        camera=camera,
+        lens=lens,
+        text_query=text_query,
+    )
+    signals = "COALESCE(i.comparisons, 0) + COALESCE(i.propagated_updates, 0)"
+    select = (
+        f"SELECT COUNT(*) AS total, "
+        f"SUM(CASE WHEN {signals} >= ? THEN 1 ELSE 0 END) AS well_ranked, "
+        f"AVG({signals}) AS avg_signals "
+        f"FROM images i JOIN catalog_sources s ON s.id = i.source_id WHERE "
+    )
+    conn = await connection.open_async(db_path)
+    try:
+        total = 0
+        well_ranked = 0
+        signal_sum = 0.0
+        if id_filter is not None:
+            ids = list(dict.fromkeys(int(image_id) for image_id in id_filter))
+            for chunk in _chunked(ids, 900):
+                placeholders = ",".join("?" for _ in chunk)
+                cursor = await conn.execute(
+                    select + " AND ".join(conditions + [f"i.id IN ({placeholders})"]),
+                    [RANK_QUALITY_MIN_SIGNALS, *params, *chunk],
+                )
+                row = await cursor.fetchone()
+                chunk_total = int(row["total"] or 0)
+                total += chunk_total
+                well_ranked += int(row["well_ranked"] or 0)
+                signal_sum += float(row["avg_signals"] or 0.0) * chunk_total
+        else:
+            cursor = await conn.execute(
+                select + " AND ".join(conditions),
+                [RANK_QUALITY_MIN_SIGNALS, *params],
+            )
+            row = await cursor.fetchone()
+            total = int(row["total"] or 0)
+            well_ranked = int(row["well_ranked"] or 0)
+            signal_sum = float(row["avg_signals"] or 0.0) * total
+        return {
+            "total": total,
+            "well_ranked": well_ranked,
+            "avg_signals": round(signal_sum / total, 2) if total else 0.0,
+            "percent": round((well_ranked / total) * 100) if total else 0,
+            "min_signals": RANK_QUALITY_MIN_SIGNALS,
+        }
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+
+
 def _date_group_label(date_group: str) -> str:
     if date_group:
         try:

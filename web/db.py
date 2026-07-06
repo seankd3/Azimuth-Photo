@@ -1061,6 +1061,26 @@ async def _count_rankings_uncached(orientation: str = "", compared: str = "", mi
     )
 
 
+async def rank_quality(orientation: str = "", compared: str = "", min_stars: int = 0,
+                       folder: str = "", flag: str = "", date_taken: str = "",
+                       file_type: str = "", camera: str = "", lens: str = "",
+                       id_filter: set = None, text_query: str = "") -> dict:
+    return await ranking_repository.rank_quality(
+        DB_PATH,
+        orientation=orientation,
+        compared=compared,
+        min_stars=min_stars,
+        folder=folder,
+        flag=flag,
+        date_taken=date_taken,
+        file_type=file_type,
+        camera=camera,
+        lens=lens,
+        id_filter=id_filter,
+        text_query=text_query,
+    )
+
+
 async def count_rankings(orientation: str = "", compared: str = "", min_stars: int = 0,
                          folder: str = "", flag: str = "", date_taken: str = "",
                          file_type: str = "", camera: str = "", lens: str = "",

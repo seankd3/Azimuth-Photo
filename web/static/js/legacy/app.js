@@ -865,6 +865,22 @@ const legacyPhotoArchive = (() => {
                 };
                 updateCompareProgress();
             }
+            if (requestOffset === 0) {
+                const qualityEl = document.getElementById('sort-quality');
+                const quality = data.sort_quality;
+                if (qualityEl) {
+                    if (quality && Number(quality.total) > 0) {
+                        const pct = Number(quality.percent) || 0;
+                        qualityEl.textContent = `${pct}% sorted`;
+                        qualityEl.classList.remove('hidden');
+                        qualityEl.classList.toggle('sort-quality-low', pct < 34);
+                        qualityEl.classList.toggle('sort-quality-mid', pct >= 34 && pct < 67);
+                        qualityEl.classList.toggle('sort-quality-high', pct >= 67);
+                    } else {
+                        qualityEl.classList.add('hidden');
+                    }
+                }
+            }
             const grid = document.getElementById('rankings-grid');
             if (requestOffset === 0 && grid?.dataset.fallbackRendered === '1') {
                 window.__photoArchiveLibraryFallbackDisabled = true;

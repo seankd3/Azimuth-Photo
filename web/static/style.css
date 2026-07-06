@@ -3851,6 +3851,22 @@ body.library-shell.date-scrubber-active .date-group-header {
     color: var(--text-primary);
 }
 
+.bar-sort-quality {
+    margin-left: 8px;
+    padding: 1px 7px;
+    border-radius: var(--radius-pill);
+    border: 1px solid var(--border-strong);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+.bar-sort-quality.sort-quality-low { color: #d98c5f; border-color: #d98c5f55; }
+.bar-sort-quality.sort-quality-mid { color: #d9c45f; border-color: #d9c45f55; }
+.bar-sort-quality.sort-quality-high { color: var(--success); border-color: rgba(68, 170, 153, 0.4); }
+
 .collection-sheet-header {
     display: flex;
     align-items: flex-start;

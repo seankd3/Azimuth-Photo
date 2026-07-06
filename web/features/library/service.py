@@ -33,6 +33,7 @@ _get_filter_options: Callable[[], Awaitable[dict]] | None = None
 _get_stats: Callable[[], Awaitable[dict]] | None = None
 _count_rankings: Callable[..., Awaitable[int]] | None = None
 _get_rankings: Callable[..., Awaitable[list]] | None = None
+_get_rank_quality: Callable[..., Awaitable[dict]] | None = None
 _get_visible_pairing_pool_counts: Callable[..., Awaitable[dict]] | None = None
 _get_import_batch_image_ids: Callable[[int], Awaitable[set[int] | None]] | None = None
 
@@ -55,13 +56,14 @@ def configure(
     get_rankings: Callable[..., Awaitable[list]],
     get_visible_pairing_pool_counts: Callable[..., Awaitable[dict]],
     rankings_response_cache_ttl_seconds: Callable[[], float] | None = None,
+    get_rank_quality: Callable[..., Awaitable[dict]] | None = None,
 ) -> None:
     global _resolve_library_constraints, _cache_root, _clamp_int, _normalize_search_query
     global _schedule_thumbnail_prefetch, _schedule_result_thumbnail_memory_warm
     global _rankings_response_cache_ttl_seconds_provider
     global _extension_search_terms, _db_signature, _get_date_groups, _get_map_markers
     global _get_filter_options, _get_stats, _count_rankings, _get_rankings
-    global _get_visible_pairing_pool_counts
+    global _get_visible_pairing_pool_counts, _get_rank_quality
     _resolve_library_constraints = resolve_library_constraints
     _cache_root = cache_root
     _clamp_int = clamp_int
@@ -77,6 +79,7 @@ def configure(
     _count_rankings = count_rankings
     _get_rankings = get_rankings
     _get_visible_pairing_pool_counts = get_visible_pairing_pool_counts
+    _get_rank_quality = get_rank_quality
     _rankings_response_cache_ttl_seconds_provider = rankings_response_cache_ttl_seconds
 
 
@@ -541,6 +544,17 @@ async def api_rankings_impl(
                     text_query=text_query,
                 )
             )
+    quality_task = None
+    if offset == 0 and _get_rank_quality is not None:
+        quality_task = asyncio.create_task(
+            _get_rank_quality(
+                orientation=orientation, compared=compared, min_stars=min_stars,
+                folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
+                camera=camera, lens=lens,
+                id_filter=search_ids,
+                text_query=text_query,
+            )
+        )
     images = await _configured(_get_rankings)(
         limit=limit, offset=offset, sort=db_sort,
         orientation=orientation, compared=compared, min_stars=min_stars,
@@ -606,6 +620,11 @@ async def api_rankings_impl(
         "ai_unavailable": search["ai_unavailable"],
         "fallback_reason": search.get("fallback_reason", ""),
     }
+    if quality_task is not None:
+        try:
+            response["sort_quality"] = await quality_task
+        except Exception:
+            pass
     if rankings_cache_key is not None:
         cache_rankings_response(rankings_cache_key, response)
     return response
