@@ -1091,6 +1091,7 @@ async def get_unembedded_images(
     md_cache_root: str = "",
     cache_size: str = "md",
     embedding_config: dict | None = None,
+    after_id: int = 0,
 ):
     """Get kept/maybe images that don't have CLIP embeddings yet."""
     embedding_config = embedding_config or active_embedding_config()
@@ -1101,6 +1102,7 @@ async def get_unembedded_images(
         limit=limit,
         md_cache_root=md_cache_root,
         cache_size=cache_size,
+        after_id=after_id,
     )
 
 

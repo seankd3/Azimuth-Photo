@@ -41,6 +41,7 @@ EMBED_SPEED_WINDOW_SECONDS = 1800
 EMBED_CANDIDATE_MULTIPLIER = 16
 EMBED_RETRY_SECONDS = 600
 MODEL_LOAD_FAILURE_RETRY_SECONDS = 300
+EMBED_COUNT_LOG_INTERVAL_BATCHES = 20
 STARTUP_DEFER_PAUSE_MESSAGE = "AI work deferred by startup setting."
 STARTUP_DEFER_PAUSE_REASON = "startup_defer"
 USER_PAUSE_REASON = "user"
@@ -93,6 +94,8 @@ _embed_retry_after: dict[int, float] = {}
 _embedding_manual_pause = True
 _embedding_manual_pause_message = "Search is stopped until you start it from Background Work."
 _embedding_pause_reason = ""
+_unembedded_candidate_cursor = {"model_key": "", "after_id": 0}
+_embedding_count_log_batches = 0
 _batch_control = {
     "active_batch_size": INITIAL_EMBED_BATCH_SIZE,
     "successful_batches": 0,
@@ -698,6 +701,20 @@ def _row_image_ref(row) -> tuple[int, str]:
     return int(row["id"]), row["filepath"]
 
 
+def _candidate_cursor_after_id(model_key: str) -> int:
+    if _unembedded_candidate_cursor.get("model_key") != model_key:
+        _unembedded_candidate_cursor["model_key"] = model_key
+        _unembedded_candidate_cursor["after_id"] = 0
+    return int(_unembedded_candidate_cursor.get("after_id") or 0)
+
+
+def _advance_candidate_cursor(rows) -> None:
+    if not rows:
+        _unembedded_candidate_cursor["after_id"] = 0
+        return
+    _unembedded_candidate_cursor["after_id"] = max(int(row["id"]) for row in rows)
+
+
 def _schedule_preload(loop, rows):
     image_refs = [_row_image_ref(row) for row in rows]
     return loop.run_in_executor(_preload_executor, _timed_preload_images, image_refs)
@@ -711,6 +728,24 @@ async def _discard_preload_future(future):
     except Exception:
         return
     _close_preloaded_images(valid)
+
+
+async def _log_stored_embedding_batch(batch_size: int, embedding_config: dict | None) -> None:
+    global _embedding_count_log_batches
+    _embedding_count_log_batches += 1
+    if _embedding_count_log_batches < EMBED_COUNT_LOG_INTERVAL_BATCHES:
+        log.info(f"Embedded {batch_size} images")
+        return
+
+    _embedding_count_log_batches = 0
+    if embedding_config:
+        embedded_count = await _configured(
+            _count_embeddings_for_model,
+            "count_embeddings_for_model",
+        )(embedding_config)
+    else:
+        embedded_count = await _configured(_get_embedding_count, "get_embedding_count")()
+    log.info(f"Embedded {batch_size} images (total: {embedded_count})")
 
 
 async def _process_embedding_candidates(
@@ -851,14 +886,7 @@ async def _process_embedding_candidates(
                 ))
             except Exception as exc:
                 log.warning(f"Warm embedding cache update skipped: {exc}")
-            if embedding_config:
-                embedded_count = await _configured(
-                    _count_embeddings_for_model,
-                    "count_embeddings_for_model",
-                )(embedding_config)
-            else:
-                embedded_count = await _configured(_get_embedding_count, "get_embedding_count")()
-            log.info(f"Embedded {len(batch)} images (total: {embedded_count})")
+            await _log_stored_embedding_batch(len(batch), embedding_config)
             _note_successful_embedding_batch(embedding_config)
         store_seconds = time.perf_counter() - store_started
 
@@ -994,12 +1022,15 @@ async def run_embedding_worker():
                 governed_batch_size + len(_embed_retry_after),
             )
             cache_size = "sm" if int(config.get("embed_model_dim", 0) or 0) > 2048 else "md"
+            cursor_after_id = _candidate_cursor_after_id(_model_key_for_config(config))
             query_started = time.perf_counter()
             candidates = await _configured(_get_unembedded_images, "get_unembedded_images")(
                 limit=candidate_limit,
                 md_cache_root=thumbnails.SSD_CACHE_DIR,
                 cache_size=cache_size,
+                after_id=cursor_after_id,
             )
+            _advance_candidate_cursor(candidates)
             query_seconds = time.perf_counter() - query_started
             unembedded, cooled_down, next_retry_at = _select_ready_candidates(candidates)
             _worker_status.update({
@@ -1024,6 +1055,7 @@ async def run_embedding_worker():
                         unembedded,
                         max_batch_size=governed_batch_size,
                         batch_pause_seconds=batch_pause_seconds,
+                        embedding_config=config,
                     )
 
                 if result["failed"] and not result["stored"]:

@@ -192,8 +192,11 @@ async def get_unembedded_images(
     limit: int,
     md_cache_root: str = "",
     cache_size: str = "md",
+    after_id: int = 0,
 ):
     model_key = embedding_config["model_key"]
+    after_id = max(0, int(after_id or 0))
+    after_id_filter = "AND i.id > ? " if after_id else ""
     conn = await connection.open_async(db_path)
     try:
         await ensure_embedding_model_tables(
@@ -213,13 +216,20 @@ async def get_unembedded_images(
                 "  ON c.cache_root = ? AND c.size = ? AND c.image_id = i.id "
                 "WHERE s.included = 1 "
                 "AND i.missing_at IS NULL "
+                f"{after_id_filter}"
                 "AND NOT EXISTS ("
                 "  SELECT 1 FROM embeddings_by_model e "
                 "  WHERE e.model_key = ? AND e.image_id = i.id"
                 ") "
                 "ORDER BY i.id ASC "
                 "LIMIT ?",
-                (md_cache_root, cache_size, model_key, limit),
+                (
+                    md_cache_root,
+                    cache_size,
+                    *((after_id,) if after_id else ()),
+                    model_key,
+                    limit,
+                ),
             )
         else:
             cursor = await conn.execute(
@@ -227,13 +237,18 @@ async def get_unembedded_images(
                 "JOIN catalog_sources s ON s.id = i.source_id "
                 "WHERE s.included = 1 "
                 "AND i.missing_at IS NULL "
+                f"{after_id_filter}"
                 "AND NOT EXISTS ("
                 "  SELECT 1 FROM embeddings_by_model e "
                 "  WHERE e.model_key = ? AND e.image_id = i.id"
                 ") "
                 "ORDER BY i.id ASC "
                 "LIMIT ?",
-                (model_key, limit),
+                (
+                    *((after_id,) if after_id else ()),
+                    model_key,
+                    limit,
+                ),
             )
         return await cursor.fetchall()
     finally:
