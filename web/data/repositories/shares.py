@@ -29,6 +29,14 @@ def _share_summary(row) -> dict:
     }
 
 
+def _favorite_summary(row) -> dict:
+    return {
+        "image_id": int(row["image_id"]),
+        "client_name": row["client_name"],
+        "created_at": float(row["created_at"]),
+    }
+
+
 def _active_unexpired_clause(alias: str = "s") -> str:
     return f"{alias}.revoked_at IS NULL AND ({alias}.expires_at IS NULL OR {alias}.expires_at > ?)"
 
@@ -47,10 +55,14 @@ async def create_or_rotate_share(
     try:
         if not await _collection_exists(conn, collection_id):
             return None
+        previous_share_id = None
         if not rotate:
             active = await _active_share_on_conn(conn, collection_id)
             if active is not None:
                 return active
+        else:
+            active = await _active_share_on_conn(conn, collection_id)
+            previous_share_id = int(active["id"]) if active is not None else None
         await conn.execute(
             "UPDATE collection_shares SET revoked_at = ? "
             "WHERE collection_id = ? AND revoked_at IS NULL",
@@ -65,9 +77,21 @@ async def create_or_rotate_share(
                     "VALUES (?, ?, ?, ?, NULL, ?)",
                     (collection_id, token, now, expires_at, password_hash),
                 )
+                share_id = int(cursor.lastrowid)
+                if previous_share_id is not None:
+                    await conn.execute(
+                        """
+                        INSERT OR IGNORE INTO share_favorites
+                            (share_id, image_id, client_name, created_at)
+                        SELECT ?, image_id, client_name, created_at
+                        FROM share_favorites
+                        WHERE share_id = ?
+                        """,
+                        (share_id, previous_share_id),
+                    )
                 await conn.commit()
                 return {
-                    "id": int(cursor.lastrowid),
+                    "id": share_id,
                     "collection_id": collection_id,
                     "token": token,
                     "created_at": now,
@@ -176,6 +200,7 @@ async def resolve_token(db_path: str, token: str) -> dict | None:
             SELECT
                 c.*,
                 s.token,
+                s.id AS share_id,
                 s.password_hash,
                 s.created_at AS share_created_at,
                 s.expires_at AS share_expires_at,
@@ -244,9 +269,100 @@ async def token_allows_image(db_path: str, token: str, image_id: int) -> bool:
         await data_connection.close_async(conn, db_path=db_path)
 
 
+async def set_favorite(
+    db_path: str,
+    share_id: int,
+    image_id: int,
+    on: bool,
+    client_name: str | None = None,
+) -> bool:
+    now = time.time()
+    clean_name = (client_name or "").strip()[:120] or None
+    conn = await data_connection.open_async(db_path)
+    try:
+        if not await _share_contains_image(conn, int(share_id), int(image_id)):
+            return False
+        if on:
+            await conn.execute(
+                """
+                INSERT INTO share_favorites (share_id, image_id, client_name, created_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(share_id, image_id) DO UPDATE SET
+                    client_name = COALESCE(excluded.client_name, share_favorites.client_name)
+                """,
+                (int(share_id), int(image_id), clean_name, now),
+            )
+        else:
+            await conn.execute(
+                "DELETE FROM share_favorites WHERE share_id = ? AND image_id = ?",
+                (int(share_id), int(image_id)),
+            )
+        await conn.commit()
+        return True
+    finally:
+        await data_connection.close_async(conn, db_path=db_path)
+
+
+async def list_favorites(db_path: str, share_id: int) -> list[dict]:
+    conn = await data_connection.open_async(db_path)
+    try:
+        cursor = await conn.execute(
+            """
+            SELECT image_id, client_name, created_at
+            FROM share_favorites
+            WHERE share_id = ?
+            ORDER BY created_at ASC, image_id ASC
+            """,
+            (int(share_id),),
+        )
+        return [_favorite_summary(row) for row in await cursor.fetchall()]
+    finally:
+        await data_connection.close_async(conn, db_path=db_path)
+
+
+async def favorites_for_collection(db_path: str, collection_id: int) -> list[dict]:
+    conn = await data_connection.open_async(db_path)
+    try:
+        active = await _active_share_on_conn(conn, int(collection_id))
+        if active is None:
+            return []
+        cursor = await conn.execute(
+            """
+            SELECT sf.image_id, sf.client_name, sf.created_at
+            FROM share_favorites sf
+            JOIN collection_images ci
+                ON ci.collection_id = ?
+                AND ci.image_id = sf.image_id
+            WHERE sf.share_id = ?
+            ORDER BY sf.created_at ASC, sf.image_id ASC
+            """,
+            (int(collection_id), int(active["id"])),
+        )
+        return [_favorite_summary(row) for row in await cursor.fetchall()]
+    finally:
+        await data_connection.close_async(conn, db_path=db_path)
+
+
 async def _collection_exists(conn, collection_id: int) -> bool:
     cursor = await conn.execute("SELECT 1 FROM collections WHERE id = ?", (int(collection_id),))
     return await cursor.fetchone() is not None
+
+
+async def _share_contains_image(conn, share_id: int, image_id: int) -> bool:
+    cursor = await conn.execute(
+        """
+        SELECT EXISTS(
+            SELECT 1
+            FROM collection_shares s
+            JOIN collection_images ci ON ci.collection_id = s.collection_id
+            WHERE s.id = ?
+            AND ci.image_id = ?
+        ) AS allowed
+        """,
+        (int(share_id), int(image_id)),
+    )
+    row = await cursor.fetchone()
+    return bool(row["allowed"] if row else 0)
 
 
 async def _active_share_on_conn(conn, collection_id: int) -> dict | None:

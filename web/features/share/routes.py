@@ -21,6 +21,9 @@ SetSharePassword = Callable[[int, str | None], Awaitable[dict | None]]
 RecordShareView = Callable[[str], Awaitable[dict | None]]
 ResolveToken = Callable[[str], Awaitable[dict | None]]
 TokenAllowsImage = Callable[[str, int], Awaitable[bool]]
+SetFavorite = Callable[..., Awaitable[bool]]
+ListFavorites = Callable[[int], Awaitable[list[dict]]]
+FavoritesForCollection = Callable[[int], Awaitable[list[dict]]]
 ThumbnailResponse = Callable[..., Awaitable[Response]]
 
 _templates: Jinja2Templates | None = None
@@ -31,6 +34,9 @@ _set_share_password: SetSharePassword | None = None
 _record_share_view: RecordShareView | None = None
 _resolve_token: ResolveToken | None = None
 _token_allows_image: TokenAllowsImage | None = None
+_set_favorite: SetFavorite | None = None
+_list_favorites: ListFavorites | None = None
+_favorites_for_collection: FavoritesForCollection | None = None
 _thumbnail_response: ThumbnailResponse | None = None
 
 
@@ -39,6 +45,12 @@ class ShareBody(BaseModel):
     expires_in_days: int | None = Field(default=None, ge=1, le=3660)
     password: str | None = None
     clear_password: bool = False
+
+
+class FavoriteBody(BaseModel):
+    image_id: int
+    on: bool
+    name: str | None = None
 
 
 def configure(
@@ -51,11 +63,15 @@ def configure(
     record_share_view: RecordShareView,
     resolve_token: ResolveToken,
     token_allows_image: TokenAllowsImage,
+    set_favorite: SetFavorite,
+    list_favorites: ListFavorites,
+    favorites_for_collection: FavoritesForCollection,
     thumbnail_response: ThumbnailResponse,
 ) -> None:
     global _templates, _create_or_rotate_share, _get_share, _revoke_share
     global _set_share_password, _record_share_view, _resolve_token
-    global _token_allows_image, _thumbnail_response
+    global _token_allows_image, _set_favorite, _list_favorites
+    global _favorites_for_collection, _thumbnail_response
     _templates = templates
     _create_or_rotate_share = create_or_rotate_share
     _get_share = get_share
@@ -64,6 +80,9 @@ def configure(
     _record_share_view = record_share_view
     _resolve_token = resolve_token
     _token_allows_image = token_allows_image
+    _set_favorite = set_favorite
+    _list_favorites = list_favorites
+    _favorites_for_collection = favorites_for_collection
     _thumbnail_response = thumbnail_response
 
 
@@ -77,6 +96,9 @@ def _configured() -> None:
         or _record_share_view is None
         or _resolve_token is None
         or _token_allows_image is None
+        or _set_favorite is None
+        or _list_favorites is None
+        or _favorites_for_collection is None
         or _thumbnail_response is None
     ):
         raise RuntimeError("Share routes are not configured")
@@ -140,6 +162,10 @@ def _gallery_payload(token: str, collection: dict | None) -> dict:
         "date_range": _date_subtitle(collection),
         "images": images,
     }
+
+
+def _favorite_ids(favorites: list[dict]) -> list[int]:
+    return [int(row["image_id"]) for row in favorites]
 
 
 def _password_hash_for_payload(payload: ShareBody) -> str | None:
@@ -214,6 +240,17 @@ async def api_revoke_share(collection_id: int):
     return {"ok": True}
 
 
+@router.get("/api/user-collections/{collection_id}/share/favorites")
+async def api_share_favorites(collection_id: int):
+    _configured()
+    favorites = await _favorites_for_collection(collection_id)
+    owner_favorites = [
+        {"image_id": int(row["image_id"]), "created_at": float(row["created_at"])}
+        for row in favorites
+    ]
+    return {"favorites": owner_favorites, "count": len(owner_favorites)}
+
+
 @router.get("/s/{token}", response_class=HTMLResponse)
 async def public_share_gallery(token: str, request: Request):
     _configured()
@@ -256,6 +293,34 @@ async def public_share_gallery(token: str, request: Request):
         await _record_share_view(token)
         auth.set_view_cookie(response, token, request=request)
     return _public_response(response)
+
+
+@router.get("/s/{token}/favorites")
+async def public_share_favorites(token: str, request: Request):
+    _configured()
+    collection = await _resolve_token(token)
+    if collection is None or not auth.is_unlocked(request, collection):
+        return _public_response(JSONResponse({"error": "Not found"}, status_code=404))
+    favorites = await _list_favorites(int(collection["share_id"]))
+    return _public_response(JSONResponse({"favorites": _favorite_ids(favorites)}))
+
+
+@router.post("/s/{token}/favorite")
+async def public_share_favorite(token: str, payload: FavoriteBody, request: Request):
+    _configured()
+    collection = await _resolve_token(token)
+    if collection is None or not auth.is_unlocked(request, collection):
+        return _public_response(JSONResponse({"error": "Not found"}, status_code=404))
+    ok = await _set_favorite(
+        int(collection["share_id"]),
+        int(payload.image_id),
+        bool(payload.on),
+        client_name=payload.name,
+    )
+    if not ok:
+        return _public_response(JSONResponse({"error": "Not found"}, status_code=404))
+    favorites = await _list_favorites(int(collection["share_id"]))
+    return _public_response(JSONResponse({"ok": True, "favorites": _favorite_ids(favorites)}))
 
 
 @router.post("/s/{token}/unlock")

@@ -89,6 +89,15 @@ async def delete_collection(db_path: str, collection_id: int) -> bool:
     try:
         if not await _collection_exists(conn, collection_id):
             return False
+        await conn.execute(
+            """
+            DELETE FROM share_favorites
+            WHERE share_id IN (
+                SELECT id FROM collection_shares WHERE collection_id = ?
+            )
+            """,
+            (int(collection_id),),
+        )
         await conn.execute("DELETE FROM collection_images WHERE collection_id = ?", (int(collection_id),))
         await conn.execute("DELETE FROM collection_shares WHERE collection_id = ?", (int(collection_id),))
         await conn.execute("DELETE FROM collections WHERE id = ?", (int(collection_id),))

@@ -5,13 +5,14 @@
 
 import {
     createCollection, fetchJson, getAiStatus, getCacheStatus, getCatalog, getCollection, getCounts,
-    createCollectionShare, deleteCollection, getCollectionShare, getPeopleStatus, listCollections,
+    createCollectionShare, deleteCollection, getCollectionShare, getCollectionShareFavorites, getPeopleStatus, listCollections,
     renameCollection, revokeCollectionShare, setBackgroundWork, thumbUrl,
 } from './api.js';
 import { nav, on, rememberImages, setScope, clearScope } from './state.js';
 import { openSheet, closeSheet } from './selection.js';
 import { showToast } from './toast.js';
 import { openViewer } from './viewer.js';
+import { applyFlags } from './flags.js';
 
 // Matches RANK_QUALITY_MIN_SIGNALS in data/repositories/rankings.py.
 const SORT_QUALITY_MIN_SIGNALS = 3;
@@ -585,6 +586,32 @@ function shareStatsLine(share) {
     return `Opened ${fmtInt(count)} ${count === 1 ? 'time' : 'times'} · last ${formatRelativeShareDate(share.last_viewed_at)}`;
 }
 
+function clientPickIds(pickData) {
+    return ((pickData && pickData.favorites) || [])
+        .map((row) => Number(row && row.image_id))
+        .filter((id) => id > 0);
+}
+
+function sharePicksRow(pickData) {
+    const ids = clientPickIds(pickData);
+    const count = Number(pickData?.count ?? ids.length);
+    return `<button class="sheet-row" id="ml-share-apply-picks" ${ids.length ? '' : 'disabled'}>`
+        + '<span class="g">♡</span>'
+        + '<span class="body">Client picks</span>'
+        + `<span class="n num">${fmtInt(count)}</span></button>`;
+}
+
+async function applyShareFavoritesAsPicks(coll, ids) {
+    if (!ids.length) {
+        showToast('No client picks yet');
+        return;
+    }
+    const data = await getCollection(coll.id, 1000);
+    rememberImages((data && data.collection && data.collection.images) || []);
+    closeSheet();
+    await applyFlags(ids, 'picked');
+}
+
 function shareExpiryControl() {
     return '<label class="share-expiry">Expires <select class="sheet-input" id="ml-share-expiry">'
         + '<option value="">Never</option>'
@@ -625,12 +652,13 @@ async function copyOrShareLink(url, title) {
 async function openCollectionShareSheet(coll) {
     let sheet = openSheet(`<h3>Share ${esc(coll.name)}</h3><div class="ms-empty">Loading…</div>`);
     const data = await getCollectionShare(coll.id);
-    renderCollectionShareSheet(coll, data && data.share);
+    await renderCollectionShareSheet(coll, data && data.share);
     sheet = document.getElementById('m-sheet');
     return sheet;
 }
 
-function renderCollectionShareSheet(coll, share) {
+async function renderCollectionShareSheet(coll, share) {
+    const pickData = share ? await getCollectionShareFavorites(coll.id) : null;
     const sheet = openSheet(
         `<h3>Share ${esc(coll.name)}</h3>`
         + (share
@@ -639,6 +667,7 @@ function renderCollectionShareSheet(coll, share) {
                 + `<div><span>Created</span><b>${esc(formatShareDate(share.created_at))}</b></div>`
                 + `<div><span>Expires</span><b>${esc(formatShareDate(share.expires_at))}</b></div>`
                 + `<div><span>Stats</span><b>${esc(shareStatsLine(share))}</b></div></div>`
+                + sharePicksRow(pickData)
                 + sharePasswordControl(share)
                 + '<button class="sheet-btn" id="ml-share-copy">Share…</button>'
                 + '<button class="sheet-row" id="ml-share-rotate"><span class="g">↻</span>Rotate link</button>'
@@ -650,7 +679,9 @@ function renderCollectionShareSheet(coll, share) {
                 + sharePasswordControl(null)
                 + '<button class="sheet-btn" id="ml-share-create">Create share link</button>')
     );
+    const pickIds = clientPickIds(pickData);
     sheet.querySelector('#ml-share-copy')?.addEventListener('click', () => copyOrShareLink(share.url, coll.name));
+    sheet.querySelector('#ml-share-apply-picks')?.addEventListener('click', () => applyShareFavoritesAsPicks(coll, pickIds));
     sheet.querySelector('#ml-share-create')?.addEventListener('click', async () => {
         const value = sheet.querySelector('#ml-share-expiry')?.value || '';
         const password = sheet.querySelector('#ml-share-password')?.value || '';

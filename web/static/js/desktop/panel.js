@@ -1,13 +1,13 @@
 import {
-    addToCollection, createCollection, getCatalog, getCollectionSuggestions,
-    createCollectionShare, deleteCollection, getCollectionShare, listCollections,
+    addToCollection, createCollection, getCatalog, getCollection, getCollectionSuggestions,
+    createCollectionShare, deleteCollection, getCollectionShare, getCollectionShareFavorites, listCollections,
     removeFromCollection, renameCollection, revokeCollectionShare, thumbUrl,
 } from './api.js';
 import { loadCollectionImageIds } from './scope_data.js';
 import {
-    on, scope, scopeParams, setLeftCollapsed, setScope, viewState,
+    byId, on, scope, scopeParams, selection, selectionChanged, setLeftCollapsed, setScope, viewState,
 } from './state.js';
-import { selectedIds, setCollectionPicker } from './selection.js';
+import { applyFlags, selectedIds, setCollectionPicker } from './selection.js';
 import { showToast } from './toast.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
 import { downloadExport, openExportMenu } from './export_menu.js';
@@ -201,6 +201,54 @@ function shareStatsLine(share) {
     return `Opened ${fmt(count)} ${count === 1 ? 'time' : 'times'} · last ${formatRelativeShareDate(share.last_viewed_at)}`;
 }
 
+function clientPickIds(pickData) {
+    return ((pickData && pickData.favorites) || [])
+        .map((row) => Number(row && row.image_id))
+        .filter((id) => id > 0);
+}
+
+function sharePicksRow(pickData) {
+    const ids = clientPickIds(pickData);
+    const count = Number(pickData?.count ?? ids.length);
+    return '<div class="share-picks">'
+        + `<span>Client picks: <b>${fmt(count)}</b></span>`
+        + '<div>'
+        + `<button id="share-view-picks" type="button" ${ids.length ? '' : 'disabled'}>View picks</button>`
+        + `<button id="share-apply-picks" type="button" ${ids.length ? '' : 'disabled'}>Apply as picks</button>`
+        + '</div></div>';
+}
+
+async function rememberCollectionImages(collectionId) {
+    const data = await getCollection(collectionId, { limit: 1000 });
+    const images = (data && data.collection && data.collection.images) || [];
+    for (const image of images) {
+        if (image && image.id != null) byId.set(Number(image.id), image);
+    }
+}
+
+function selectClientPicks(ids) {
+    if (!ids.length) {
+        showToast('No client picks yet');
+        return;
+    }
+    const before = new Set(selection);
+    selection.clear();
+    ids.forEach((id) => selection.add(id));
+    const changed = [...new Set([...before, ...selection])];
+    selectionChanged(changed);
+    closeShareOverlay();
+    showToast(`${fmt(ids.length)} client picks selected`);
+}
+
+async function applyClientPicks(collectionId, ids) {
+    if (!ids.length) {
+        showToast('No client picks yet');
+        return;
+    }
+    await rememberCollectionImages(collectionId);
+    await applyFlags(ids, 'picked');
+}
+
 function sharePasswordControls(share) {
     const canSave = Boolean(share);
     const isProtected = Boolean(share?.protected);
@@ -260,12 +308,14 @@ async function copyShareUrl(url) {
 
 async function renderShareOverlay(collectionId, name, share = null) {
     ensureShareOverlay();
+    const pickData = share ? await getCollectionShareFavorites(collectionId) : null;
     const body = share
         ? '<div class="share-link-row"><input id="share-url" readonly value="' + esc(share.url || '') + '"><button id="share-copy" type="button">Copy</button></div>'
             + '<div class="share-meta">'
             + `<div><span>Created</span><b>${esc(formatShareDate(share.created_at))}</b></div>`
             + `<div><span>Expires</span><b>${esc(formatShareDate(share.expires_at))}</b></div></div>`
             + `<div class="share-stats">${esc(shareStatsLine(share))}</div>`
+            + sharePicksRow(pickData)
             + sharePasswordControls(share)
             + '<div class="share-actions"><button id="share-rotate" type="button">Rotate link</button><button id="share-revoke" type="button">Revoke</button></div>'
         : '<p class="share-empty">Create a private gallery link for this collection.</p>'
@@ -276,8 +326,11 @@ async function renderShareOverlay(collectionId, name, share = null) {
         + '<div class="mo-head"><h2 id="share-title">Share ' + esc(name) + '</h2><button type="button" id="share-close" aria-label="Close">×</button></div>'
         + '<div class="mo-body">' + body + '</div></div>';
     shareOverlay.hidden = false;
+    const pickIds = clientPickIds(pickData);
     shareOverlay.querySelector('#share-close')?.addEventListener('click', closeShareOverlay);
     shareOverlay.querySelector('#share-copy')?.addEventListener('click', () => copyShareUrl(share.url));
+    shareOverlay.querySelector('#share-view-picks')?.addEventListener('click', () => selectClientPicks(pickIds));
+    shareOverlay.querySelector('#share-apply-picks')?.addEventListener('click', () => applyClientPicks(collectionId, pickIds));
     shareOverlay.querySelector('#share-create')?.addEventListener('click', async () => {
         const value = shareOverlay.querySelector('#share-expiry')?.value || '';
         const password = shareOverlay.querySelector('#share-password')?.value || '';

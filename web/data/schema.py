@@ -5,7 +5,7 @@ import os
 from data.repositories import catalog as catalog_repository
 
 EXPECTED_EMBEDDING_DIM = 2048  # Qwen3-VL-Embedding-2B native dimension
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS catalog_sources (
@@ -409,6 +409,15 @@ CREATE TABLE IF NOT EXISTS collection_shares (
     last_viewed_at REAL DEFAULT NULL
 );
 
+CREATE TABLE IF NOT EXISTS share_favorites (
+    id INTEGER PRIMARY KEY,
+    share_id INTEGER NOT NULL REFERENCES collection_shares(id),
+    image_id INTEGER NOT NULL,
+    client_name TEXT NULL,
+    created_at REAL NOT NULL,
+    UNIQUE(share_id, image_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_collections_updated
 ON collections(updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_collection_images_image
@@ -417,6 +426,8 @@ CREATE INDEX IF NOT EXISTS idx_collection_images_position
 ON collection_images(collection_id, position, added_at);
 CREATE INDEX IF NOT EXISTS idx_collection_shares_active
 ON collection_shares(collection_id, revoked_at);
+CREATE INDEX IF NOT EXISTS idx_share_favorites_share
+ON share_favorites(share_id);
 
 CREATE TABLE IF NOT EXISTS people (
     id INTEGER PRIMARY KEY,
@@ -730,6 +741,7 @@ REQUIRED_TABLES = {
     "collections",
     "collection_images",
     "collection_shares",
+    "share_favorites",
     "people",
     "face_detections",
     "face_assignments",
@@ -798,6 +810,7 @@ REQUIRED_INDEXES = {
     "idx_collection_images_image",
     "idx_collection_images_position",
     "idx_collection_shares_active",
+    "idx_share_favorites_share",
     "idx_people_status_seen",
     "idx_face_detections_image_model",
     "idx_face_detections_status_model",

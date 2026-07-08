@@ -255,6 +255,14 @@ def configure_share_routes(*, templates) -> None:
         record_share_view=lambda token: db.record_share_view(token),
         resolve_token=lambda token: db.resolve_share_token(token),
         token_allows_image=lambda token, image_id: db.share_token_allows_image(token, image_id),
+        set_favorite=lambda share_id, image_id, on, client_name=None: db.set_share_favorite(
+            share_id,
+            image_id,
+            on,
+            client_name=client_name,
+        ),
+        list_favorites=lambda share_id: db.list_share_favorites(share_id),
+        favorites_for_collection=lambda collection_id: db.favorites_for_collection(collection_id),
         thumbnail_response=media_routes.thumbnail_response,
     )
 

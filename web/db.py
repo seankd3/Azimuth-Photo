@@ -502,6 +502,29 @@ async def share_token_allows_image(token: str, image_id: int) -> bool:
     return await share_repository.token_allows_image(DB_PATH, token, image_id)
 
 
+async def set_share_favorite(
+    share_id: int,
+    image_id: int,
+    on: bool,
+    client_name: str | None = None,
+) -> bool:
+    return await share_repository.set_favorite(
+        DB_PATH,
+        share_id,
+        image_id,
+        on,
+        client_name=client_name,
+    )
+
+
+async def list_share_favorites(share_id: int) -> list[dict]:
+    return await share_repository.list_favorites(DB_PATH, share_id)
+
+
+async def favorites_for_collection(collection_id: int) -> list[dict]:
+    return await share_repository.favorites_for_collection(DB_PATH, collection_id)
+
+
 async def set_image_status(image_id: int, status: str):
     await image_repository.set_image_status(DB_PATH, image_id, status)
     _invalidate_past_matchups_cache()

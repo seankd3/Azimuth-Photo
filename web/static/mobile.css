@@ -882,6 +882,8 @@ body[data-tab="photos"] #m-scrub { display: block; }
     color: var(--text);
 }
 .sheet-row:active { background: rgba(255, 255, 255, .05); }
+.sheet-row:disabled { color: var(--text-3); opacity: .55; }
+.sheet-row:disabled:active { background: transparent; }
 .sheet-row .g { width: 24px; text-align: center; color: var(--text-2); flex: none; }
 .sheet-row .n { margin-left: auto; font-size: 12px; color: var(--text-3); flex: none; }
 .sheet-input {

@@ -176,6 +176,10 @@ export async function getCollectionShare(collectionId) {
     return fetchJson(`/api/user-collections/${collectionId}/share`, { defaultValue: null });
 }
 
+export async function getCollectionShareFavorites(collectionId) {
+    return fetchJson(`/api/user-collections/${collectionId}/share/favorites`, { defaultValue: { favorites: [], count: 0 } });
+}
+
 export async function createCollectionShare(
     collectionId,
     {

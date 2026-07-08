@@ -28,6 +28,14 @@ class ShareTests(BackendTestCase):
             record_share_view=lambda token: db.record_share_view(token),
             resolve_token=lambda token: db.resolve_share_token(token),
             token_allows_image=lambda token, image_id: db.share_token_allows_image(token, image_id),
+            set_favorite=lambda share_id, image_id, on, client_name=None: db.set_share_favorite(
+                share_id,
+                image_id,
+                on,
+                client_name=client_name,
+            ),
+            list_favorites=lambda share_id: db.list_share_favorites(share_id),
+            favorites_for_collection=lambda collection_id: db.favorites_for_collection(collection_id),
             thumbnail_response=self._thumbnail_response,
         )
 
@@ -106,6 +114,37 @@ class ShareTests(BackendTestCase):
         self.assertTrue(await db.share_token_allows_image(share["token"], first))
         self.assertFalse(await db.share_token_allows_image(share["token"], third))
 
+    async def test_share_favorite_set_unset_and_list(self):
+        collection, first, second, _third = await self._collection_with_images()
+        share = await db.create_or_rotate_share(collection["id"])
+
+        self.assertTrue(await db.set_share_favorite(share["id"], first, True, client_name="Client"))
+        self.assertTrue(await db.set_share_favorite(share["id"], second, True))
+        self.assertTrue(await db.set_share_favorite(share["id"], first, False))
+        favorites = await db.list_share_favorites(share["id"])
+
+        self.assertEqual([row["image_id"] for row in favorites], [second])
+        self.assertIsNotNone(favorites[0]["created_at"])
+
+    async def test_share_favorite_requires_collection_member(self):
+        collection, _first, _second, third = await self._collection_with_images()
+        share = await db.create_or_rotate_share(collection["id"])
+
+        self.assertFalse(await db.set_share_favorite(share["id"], third, True))
+        self.assertEqual(await db.list_share_favorites(share["id"]), [])
+
+    async def test_share_rotate_carries_favorites_forward(self):
+        collection, first, second, _third = await self._collection_with_images()
+        share = await db.create_or_rotate_share(collection["id"])
+        await db.set_share_favorite(share["id"], first, True)
+        await db.set_share_favorite(share["id"], second, True)
+
+        rotated = await db.create_or_rotate_share(collection["id"], rotate=True)
+        favorites = await db.favorites_for_collection(collection["id"])
+
+        self.assertNotEqual(share["id"], rotated["id"])
+        self.assertEqual([row["image_id"] for row in favorites], [first, second])
+
     async def test_public_gallery_returns_200_and_404(self):
         collection, *_ = await self._collection_with_images()
         share = await db.create_or_rotate_share(collection["id"])
@@ -127,6 +166,68 @@ class ShareTests(BackendTestCase):
         self.assertEqual(missing.status_code, 404)
         self.assertIn("Share unavailable", missing.text)
         self.assertEqual(missing.headers.get("referrer-policy"), "no-referrer")
+
+    async def test_public_favorite_routes_and_owner_count(self):
+        collection, first, second, third = await self._collection_with_images()
+        share = await db.create_or_rotate_share(collection["id"])
+
+        def probe():
+            client = TestClient(app_module.app)
+            try:
+                initial = client.get(f"/s/{share['token']}/favorites")
+                first_on = client.post(
+                    f"/s/{share['token']}/favorite",
+                    json={"image_id": first, "on": True, "name": "Client"},
+                )
+                second_on = client.post(
+                    f"/s/{share['token']}/favorite",
+                    json={"image_id": second, "on": True},
+                )
+                not_member = client.post(
+                    f"/s/{share['token']}/favorite",
+                    json={"image_id": third, "on": True},
+                )
+                owner = client.get(f"/api/user-collections/{collection['id']}/share/favorites")
+                return initial, first_on, second_on, not_member, owner
+            finally:
+                client.close()
+
+        initial, first_on, second_on, not_member, owner = await asyncio.to_thread(probe)
+
+        self.assertEqual(initial.status_code, 200)
+        self.assertEqual(initial.json(), {"favorites": []})
+        self.assertEqual(first_on.status_code, 200)
+        self.assertEqual(first_on.json()["favorites"], [first])
+        self.assertEqual(second_on.status_code, 200)
+        self.assertEqual(second_on.json()["favorites"], [first, second])
+        self.assertEqual(not_member.status_code, 404)
+        self.assertEqual(not_member.headers.get("referrer-policy"), "no-referrer")
+        self.assertEqual(owner.status_code, 200)
+        self.assertEqual(owner.json()["count"], 2)
+        self.assertEqual([row["image_id"] for row in owner.json()["favorites"]], [first, second])
+
+    async def test_public_favorite_route_rejects_locked_share_without_cookie(self):
+        collection, first, *_ = await self._collection_with_images()
+        share = await db.create_or_rotate_share(
+            collection["id"],
+            password_hash=share_auth.hash_password("open-sesame"),
+        )
+
+        def probe():
+            client = TestClient(app_module.app)
+            try:
+                return client.post(
+                    f"/s/{share['token']}/favorite",
+                    json={"image_id": first, "on": True},
+                )
+            finally:
+                client.close()
+
+        response = await asyncio.to_thread(probe)
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.headers.get("referrer-policy"), "no-referrer")
+        self.assertEqual(await db.list_share_favorites(share["id"]), [])
 
     async def test_protected_share_unlocks_media_and_counts_one_view_per_cookie(self):
         collection, first, *_ = await self._collection_with_images()
