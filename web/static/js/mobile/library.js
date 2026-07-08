@@ -4,7 +4,7 @@
 // each member's ranking signals.
 
 import {
-    createCollection, getCatalog, getCollection, getCounts,
+    createCollection, fetchJson, getCatalog, getCollection, getCounts,
     listCollections, thumbUrl,
 } from './api.js';
 import { nav, on, rememberImages, setScope, clearScope } from './state.js';
@@ -14,23 +14,33 @@ import { openViewer } from './viewer.js';
 
 // Matches RANK_QUALITY_MIN_SIGNALS in data/repositories/rankings.py.
 const SORT_QUALITY_MIN_SIGNALS = 3;
+const DISMISSED_SUGGESTIONS_KEY = 'pa_m_dismissed_suggestions';
+const TOAST_ACTION_RESET_MS = 6200;
 
 let root = null;
 let built = false;
 let counts = null;
 let collections = null;
 let catalog = null;
+let suggestions = null;
+let suggestionsLoading = false;
+let suggestionsLoaded = false;
+let showingCollection = false;
 const sortedPctCache = new Map();
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 }[c]));
 const fmtInt = (n) => (n == null ? '…' : Number(n).toLocaleString('en-US'));
+const suggestionFingerprint = (s) => `${s.kind || ''}|${s.cover_image_id || ''}|${s.count || 0}`;
+const suggestionGlyph = (kind) => (kind === 'event' ? '◷' : '◇');
 
 /* ---------- main render ---------- */
 function render() {
+    showingCollection = false;
     const colls = collections || [];
-    let html = '<div class="ml-head"><h3>Collections</h3></div><div class="m-lib-grid">';
+    let html = renderSuggestions();
+    html += '<div class="ml-head"><h3>Collections</h3></div><div class="m-lib-grid">';
     colls.forEach((c, i) => {
         const pct = sortedPctCache.get(c.id);
         const pctLabel = pct == null ? '' : ` · ${pct}% sorted`;
@@ -67,6 +77,7 @@ function render() {
 
     root.innerHTML = html;
 
+    bindSuggestions();
     for (const el of root.querySelectorAll('.m-lib-card[data-ci]')) {
         el.addEventListener('click', () => {
             const coll = colls[Number(el.dataset.ci)];
@@ -82,6 +93,146 @@ function render() {
             nav.setTab('photos');
         });
     }
+}
+
+/* ---------- suggestions ---------- */
+function getDismissedSuggestions() {
+    try {
+        const values = JSON.parse(localStorage.getItem(DISMISSED_SUGGESTIONS_KEY) || '[]');
+        return Array.isArray(values) ? values.filter((v) => typeof v === 'string') : [];
+    } catch {
+        return [];
+    }
+}
+
+function setDismissedSuggestions(values) {
+    localStorage.setItem(DISMISSED_SUGGESTIONS_KEY, JSON.stringify(values.slice(-100)));
+}
+
+function dismissSuggestionFingerprint(fingerprint) {
+    const values = getDismissedSuggestions().filter((value) => value !== fingerprint);
+    values.push(fingerprint);
+    setDismissedSuggestions(values);
+}
+
+function restoreSuggestionFingerprint(fingerprint) {
+    setDismissedSuggestions(getDismissedSuggestions().filter((value) => value !== fingerprint));
+}
+
+function visibleSuggestions() {
+    const dismissed = new Set(getDismissedSuggestions());
+    return (suggestions || []).filter((s) => !dismissed.has(suggestionFingerprint(s)));
+}
+
+function renderSuggestions() {
+    if (suggestionsLoading && suggestions == null) {
+        return '<div class="ml-suggest-row ml-suggest-loading">'
+            + '<div class="ml-suggest-card skel"></div>'
+            + '<div class="ml-suggest-card skel"></div></div>';
+    }
+
+    const visible = visibleSuggestions();
+    if (!visible.length) return '';
+
+    let html = '<div class="ml-head ml-suggest-head"><h3>Suggested</h3></div><div class="ml-suggest-row">';
+    visible.forEach((s, i) => {
+        const count = Number(s.count) || 0;
+        html += `<article class="ml-suggest-card" data-si="${i}">`
+            + `<div class="ml-suggest-cover">${s.cover_image_id ? `<img loading="lazy" decoding="async" src="${esc(thumbUrl('md', s.cover_image_id))}" alt="">` : suggestionGlyph(s.kind)}</div>`
+            + '<div class="ml-suggest-body">'
+            + `<b><span class="g">${suggestionGlyph(s.kind)}</span>${esc(s.title)}</b>`
+            + `<span>${esc(s.subtitle || `${fmtInt(count)} photos`)}</span></div>`
+            + '<div class="ml-suggest-actions">'
+            + '<button class="ml-suggest-create" type="button">Create</button>'
+            + '<button class="ml-suggest-dismiss" type="button" aria-label="Dismiss suggestion">×</button></div>'
+            + '</article>';
+    });
+    html += '</div>';
+    return html;
+}
+
+async function loadSuggestionsOnce() {
+    if (suggestionsLoaded || suggestionsLoading) return;
+    suggestionsLoading = true;
+    if (!showingCollection) render();
+    const data = await fetchJson('/api/collections/suggestions', { defaultValue: null });
+    if (data == null) {
+        console.error('collection suggestions failed');
+        suggestions = [];
+    } else {
+        suggestions = data.suggestions || [];
+    }
+    suggestionsLoaded = true;
+    suggestionsLoading = false;
+    if (!showingCollection) render();
+}
+
+function setToastActionLabel(label) {
+    const button = document.getElementById('m-toast-undo');
+    if (button) button.textContent = label;
+}
+
+function showActionToast(message, label, action) {
+    let resetTimer = null;
+    setToastActionLabel(label);
+    showToast(message, {
+        undo: () => {
+            clearTimeout(resetTimer);
+            setToastActionLabel('Undo');
+            action();
+        },
+    });
+    resetTimer = setTimeout(() => setToastActionLabel('Undo'), TOAST_ACTION_RESET_MS);
+}
+
+function bindSuggestions() {
+    const visible = visibleSuggestions();
+    for (const card of root.querySelectorAll('.ml-suggest-card[data-si]')) {
+        const suggestion = visible[Number(card.dataset.si)];
+        if (!suggestion) continue;
+        card.querySelector('.ml-suggest-create').addEventListener('click', () => createSuggestion(suggestion));
+        card.querySelector('.ml-suggest-dismiss').addEventListener('click', () => dismissSuggestion(suggestion));
+    }
+}
+
+async function createSuggestion(suggestion) {
+    const fingerprint = suggestionFingerprint(suggestion);
+    dismissSuggestionFingerprint(fingerprint);
+    render();
+
+    const result = await createCollection(
+        suggestion.title,
+        suggestion.image_ids || [],
+        suggestion.subtitle || ''
+    );
+    if (!(result && result.ok)) {
+        restoreSuggestionFingerprint(fingerprint);
+        render();
+        showToast("Couldn't create collection");
+        return;
+    }
+
+    const created = result.collection || null;
+    collections = null;
+    counts = null;
+    try {
+        await loadAll();
+    } catch (error) {
+        console.error('collection refresh failed', error);
+    }
+    showActionToast('Collection created', 'View', () => {
+        if (created) openCollectionView(created);
+    });
+}
+
+function dismissSuggestion(suggestion) {
+    const fingerprint = suggestionFingerprint(suggestion);
+    dismissSuggestionFingerprint(fingerprint);
+    render();
+    showActionToast('Dismissed', 'Undo', () => {
+        restoreSuggestionFingerprint(fingerprint);
+        render();
+    });
 }
 
 /* ---------- data ---------- */
@@ -141,6 +292,7 @@ function newCollectionSheet() {
 
 /* ---------- collection drill-in ---------- */
 async function openCollectionView(coll) {
+    showingCollection = true;
     root.innerHTML =
         `<div class="ml-head"><h3>${esc(coll.name)}</h3><button class="ml-back" id="ml-back">‹ Library</button></div>`
         + `<div class="ml-coll-grid">${'<div class="skel-cell"></div>'.repeat(9)}</div>`;
@@ -180,10 +332,11 @@ export function showLibrary() {
     if (!built) {
         built = true;
         render();
-        loadAll();
+        loadAll().then(loadSuggestionsOnce, loadSuggestionsOnce);
     } else if (counts == null) {
-        loadAll();
+        loadAll().then(loadSuggestionsOnce, loadSuggestionsOnce);
     } else {
         render();
+        loadSuggestionsOnce();
     }
 }

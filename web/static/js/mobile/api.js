@@ -79,10 +79,10 @@ export async function getCollection(collectionId, limit = 500) {
     return fetchJson(`/api/user-collections/${collectionId}?limit=${limit}`, { defaultValue: null });
 }
 
-export async function createCollection(name, imageIds = []) {
+export async function createCollection(name, imageIds = [], description = '') {
     return postJson('/api/user-collections', {
         name,
-        description: '',
+        description,
         image_ids: imageIds,
     });
 }
