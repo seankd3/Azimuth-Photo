@@ -173,6 +173,49 @@ function formatShareDate(value) {
     });
 }
 
+function formatRelativeShareDate(value) {
+    if (value == null) return 'never';
+    const date = new Date(Number(value) * 1000);
+    if (Number.isNaN(date.getTime())) return 'unknown';
+    const diffSeconds = Math.round((date.getTime() - Date.now()) / 1000);
+    const ranges = [
+        ['year', 31536000],
+        ['month', 2592000],
+        ['week', 604800],
+        ['day', 86400],
+        ['hour', 3600],
+        ['minute', 60],
+    ];
+    const formatter = new Intl.RelativeTimeFormat([], { numeric: 'auto' });
+    for (const [unit, seconds] of ranges) {
+        if (Math.abs(diffSeconds) >= seconds) {
+            return formatter.format(Math.round(diffSeconds / seconds), unit);
+        }
+    }
+    return formatter.format(diffSeconds, 'second');
+}
+
+function shareStatsLine(share) {
+    const count = Number(share?.view_count || 0);
+    if (!count) return 'Never opened';
+    return `Opened ${fmt(count)} ${count === 1 ? 'time' : 'times'} · last ${formatRelativeShareDate(share.last_viewed_at)}`;
+}
+
+function sharePasswordControls(share) {
+    const canSave = Boolean(share);
+    const isProtected = Boolean(share?.protected);
+    return '<div class="share-password-row">'
+        + '<div class="share-password-head"><span>Password</span>'
+        + (isProtected ? '<b class="share-badge">Protected</b>' : '')
+        + '</div>'
+        + '<div class="share-link-row">'
+        + `<input id="share-password" type="password" autocomplete="new-password" placeholder="${isProtected ? 'Protected' : 'No password'}">`
+        + (canSave ? `<button id="share-password-save" type="button">${isProtected ? 'Change' : 'Set'}</button>` : '')
+        + '</div>'
+        + (isProtected ? '<button class="share-remove-password" id="share-password-clear" type="button">Remove password</button>' : '')
+        + '</div>';
+}
+
 function shareExpiryOptions() {
     return '<label class="share-expiry">Expires <select id="share-expiry">'
         + '<option value="">Never</option>'
@@ -222,9 +265,12 @@ async function renderShareOverlay(collectionId, name, share = null) {
             + '<div class="share-meta">'
             + `<div><span>Created</span><b>${esc(formatShareDate(share.created_at))}</b></div>`
             + `<div><span>Expires</span><b>${esc(formatShareDate(share.expires_at))}</b></div></div>`
+            + `<div class="share-stats">${esc(shareStatsLine(share))}</div>`
+            + sharePasswordControls(share)
             + '<div class="share-actions"><button id="share-rotate" type="button">Rotate link</button><button id="share-revoke" type="button">Revoke</button></div>'
         : '<p class="share-empty">Create a private gallery link for this collection.</p>'
             + shareExpiryOptions()
+            + sharePasswordControls(null)
             + '<div class="share-actions"><button id="share-create" type="button">Create share link</button></div>';
     shareOverlay.innerHTML = '<div class="modal-card share-card" role="dialog" aria-modal="true" aria-labelledby="share-title">'
         + '<div class="mo-head"><h2 id="share-title">Share ' + esc(name) + '</h2><button type="button" id="share-close" aria-label="Close">×</button></div>'
@@ -234,14 +280,40 @@ async function renderShareOverlay(collectionId, name, share = null) {
     shareOverlay.querySelector('#share-copy')?.addEventListener('click', () => copyShareUrl(share.url));
     shareOverlay.querySelector('#share-create')?.addEventListener('click', async () => {
         const value = shareOverlay.querySelector('#share-expiry')?.value || '';
+        const password = shareOverlay.querySelector('#share-password')?.value || '';
         const result = await createCollectionShare(collectionId, {
             expiresInDays: value ? Number(value) : null,
+            ...(password ? { password } : {}),
         });
         if (result && result.ok) {
             showToast('Share link created');
             await renderShareOverlay(collectionId, name, result.share);
         } else {
             showToast("Couldn't create share link");
+        }
+    });
+    shareOverlay.querySelector('#share-password-save')?.addEventListener('click', async () => {
+        if (!share) return;
+        const password = shareOverlay.querySelector('#share-password')?.value || '';
+        if (!password) {
+            showToast('Enter a password');
+            return;
+        }
+        const result = await createCollectionShare(collectionId, { password });
+        if (result && result.ok) {
+            showToast(share.protected ? 'Password changed' : 'Password set');
+            await renderShareOverlay(collectionId, name, result.share);
+        } else {
+            showToast("Couldn't save password");
+        }
+    });
+    shareOverlay.querySelector('#share-password-clear')?.addEventListener('click', async () => {
+        const result = await createCollectionShare(collectionId, { clearPassword: true });
+        if (result && result.ok) {
+            showToast('Password removed');
+            await renderShareOverlay(collectionId, name, result.share);
+        } else {
+            showToast("Couldn't remove password");
         }
     });
     bindShareConfirmButton('#share-rotate', 'Confirm rotate', async () => {

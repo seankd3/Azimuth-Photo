@@ -18,6 +18,14 @@ def _share_summary(row) -> dict:
         "created_at": float(row["created_at"]),
         "expires_at": float(row["expires_at"]) if row["expires_at"] is not None else None,
         "revoked_at": float(row["revoked_at"]) if row["revoked_at"] is not None else None,
+        "password_hash": row["password_hash"],
+        "view_count": int(row["view_count"] or 0),
+        "first_viewed_at": (
+            float(row["first_viewed_at"]) if row["first_viewed_at"] is not None else None
+        ),
+        "last_viewed_at": (
+            float(row["last_viewed_at"]) if row["last_viewed_at"] is not None else None
+        ),
     }
 
 
@@ -31,6 +39,7 @@ async def create_or_rotate_share(
     *,
     expires_at: float | None = None,
     rotate: bool = False,
+    password_hash: str | None = None,
 ) -> dict | None:
     collection_id = int(collection_id)
     now = time.time()
@@ -51,9 +60,10 @@ async def create_or_rotate_share(
             token = secrets.token_urlsafe(24)
             try:
                 cursor = await conn.execute(
-                    "INSERT INTO collection_shares (collection_id, token, created_at, expires_at, revoked_at) "
-                    "VALUES (?, ?, ?, ?, NULL)",
-                    (collection_id, token, now, expires_at),
+                    "INSERT INTO collection_shares "
+                    "(collection_id, token, created_at, expires_at, revoked_at, password_hash) "
+                    "VALUES (?, ?, ?, ?, NULL, ?)",
+                    (collection_id, token, now, expires_at, password_hash),
                 )
                 await conn.commit()
                 return {
@@ -63,6 +73,10 @@ async def create_or_rotate_share(
                     "created_at": now,
                     "expires_at": expires_at,
                     "revoked_at": None,
+                    "password_hash": password_hash,
+                    "view_count": 0,
+                    "first_viewed_at": None,
+                    "last_viewed_at": None,
                 }
             except sqlite3.IntegrityError:
                 continue
@@ -93,6 +107,63 @@ async def revoke_share(db_path: str, collection_id: int) -> bool:
         await data_connection.close_async(conn, db_path=db_path)
 
 
+async def set_share_password(
+    db_path: str,
+    collection_id: int,
+    password_hash: str | None,
+) -> dict | None:
+    conn = await data_connection.open_async(db_path)
+    try:
+        active = await _active_share_on_conn(conn, int(collection_id))
+        if active is None:
+            return None
+        await conn.execute(
+            """
+            UPDATE collection_shares
+            SET password_hash = ?
+            WHERE id = ?
+            """,
+            (password_hash, int(active["id"])),
+        )
+        await conn.commit()
+        return await _active_share_on_conn(conn, int(collection_id))
+    finally:
+        await data_connection.close_async(conn, db_path=db_path)
+
+
+async def record_share_view(db_path: str, token: str) -> dict | None:
+    token = (token or "").strip()
+    if not token:
+        return None
+    now = time.time()
+    conn = await data_connection.open_async(db_path)
+    try:
+        await conn.execute(
+            f"""
+            UPDATE collection_shares
+            SET view_count = COALESCE(view_count, 0) + 1,
+                first_viewed_at = COALESCE(first_viewed_at, ?),
+                last_viewed_at = ?
+            WHERE token = ? AND {_active_unexpired_clause("collection_shares")}
+            """,
+            (now, now, token, now),
+        )
+        await conn.commit()
+        cursor = await conn.execute(
+            """
+            SELECT *
+            FROM collection_shares
+            WHERE token = ?
+            LIMIT 1
+            """,
+            (token,),
+        )
+        row = await cursor.fetchone()
+        return _share_summary(row) if row is not None else None
+    finally:
+        await data_connection.close_async(conn, db_path=db_path)
+
+
 async def resolve_token(db_path: str, token: str) -> dict | None:
     token = (token or "").strip()
     if not token:
@@ -105,8 +176,12 @@ async def resolve_token(db_path: str, token: str) -> dict | None:
             SELECT
                 c.*,
                 s.token,
+                s.password_hash,
                 s.created_at AS share_created_at,
                 s.expires_at AS share_expires_at,
+                s.view_count,
+                s.first_viewed_at,
+                s.last_viewed_at,
                 COUNT(ci.image_id) AS image_count,
                 MIN(i.date_taken) AS date_min,
                 MAX(i.date_taken) AS date_max
@@ -123,6 +198,9 @@ async def resolve_token(db_path: str, token: str) -> dict | None:
         if row is None:
             return None
         collection = dict(row)
+        collection["created_at"] = row["share_created_at"]
+        collection["expires_at"] = row["share_expires_at"]
+        collection["revoked_at"] = None
         images_cursor = await conn.execute(
             """
             SELECT

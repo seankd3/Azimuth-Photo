@@ -248,6 +248,11 @@ def configure_share_routes(*, templates) -> None:
         create_or_rotate_share=lambda collection_id, **kwargs: db.create_or_rotate_share(collection_id, **kwargs),
         get_share=lambda collection_id: db.get_collection_share(collection_id),
         revoke_share=lambda collection_id: db.revoke_collection_share(collection_id),
+        set_share_password=lambda collection_id, password_hash: db.set_collection_share_password(
+            collection_id,
+            password_hash,
+        ),
+        record_share_view=lambda token: db.record_share_view(token),
         resolve_token=lambda token: db.resolve_share_token(token),
         token_allows_image=lambda token, image_id: db.share_token_allows_image(token, image_id),
         thumbnail_response=media_routes.thumbnail_response,

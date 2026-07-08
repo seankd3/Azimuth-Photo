@@ -171,7 +171,7 @@ async def build_settings_response() -> dict:
         people_status_task,
     )
     return {
-        "settings": settings.get_settings(),
+        "settings": settings.public_settings(),
         "cache_stats": cache_status,
         "model_status": model_status,
         "ai_status": ai_status,

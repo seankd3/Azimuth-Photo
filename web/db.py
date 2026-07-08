@@ -462,12 +462,19 @@ async def collection_image_ids(collection_id: int, *, limit: int = 2000) -> list
     return await collection_repository.collection_image_ids(DB_PATH, collection_id, limit=limit)
 
 
-async def create_or_rotate_share(collection_id: int, *, expires_at: float | None = None, rotate: bool = False):
+async def create_or_rotate_share(
+    collection_id: int,
+    *,
+    expires_at: float | None = None,
+    rotate: bool = False,
+    password_hash: str | None = None,
+):
     return await share_repository.create_or_rotate_share(
         DB_PATH,
         collection_id,
         expires_at=expires_at,
         rotate=rotate,
+        password_hash=password_hash,
     )
 
 
@@ -477,6 +484,14 @@ async def get_collection_share(collection_id: int):
 
 async def revoke_collection_share(collection_id: int) -> bool:
     return await share_repository.revoke_share(DB_PATH, collection_id)
+
+
+async def set_collection_share_password(collection_id: int, password_hash: str | None):
+    return await share_repository.set_share_password(DB_PATH, collection_id, password_hash)
+
+
+async def record_share_view(token: str):
+    return await share_repository.record_share_view(DB_PATH, token)
 
 
 async def resolve_share_token(token: str):

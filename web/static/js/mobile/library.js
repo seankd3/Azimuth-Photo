@@ -557,12 +557,52 @@ function formatShareDate(value) {
     });
 }
 
+function formatRelativeShareDate(value) {
+    if (value == null) return 'never';
+    const date = new Date(Number(value) * 1000);
+    if (Number.isNaN(date.getTime())) return 'unknown';
+    const diffSeconds = Math.round((date.getTime() - Date.now()) / 1000);
+    const ranges = [
+        ['year', 31536000],
+        ['month', 2592000],
+        ['week', 604800],
+        ['day', 86400],
+        ['hour', 3600],
+        ['minute', 60],
+    ];
+    const formatter = new Intl.RelativeTimeFormat([], { numeric: 'auto' });
+    for (const [unit, seconds] of ranges) {
+        if (Math.abs(diffSeconds) >= seconds) {
+            return formatter.format(Math.round(diffSeconds / seconds), unit);
+        }
+    }
+    return formatter.format(diffSeconds, 'second');
+}
+
+function shareStatsLine(share) {
+    const count = Number(share?.view_count || 0);
+    if (!count) return 'Never opened';
+    return `Opened ${fmtInt(count)} ${count === 1 ? 'time' : 'times'} · last ${formatRelativeShareDate(share.last_viewed_at)}`;
+}
+
 function shareExpiryControl() {
     return '<label class="share-expiry">Expires <select class="sheet-input" id="ml-share-expiry">'
         + '<option value="">Never</option>'
         + '<option value="7">7 days</option>'
         + '<option value="30">30 days</option>'
         + '</select></label>';
+}
+
+function sharePasswordControl(share) {
+    const isProtected = Boolean(share?.protected);
+    return '<div class="share-password-mobile">'
+        + '<div class="share-password-mobile-head"><span>Password</span>'
+        + (isProtected ? '<b>Protected</b>' : '')
+        + '</div>'
+        + `<input class="sheet-input" id="ml-share-password" type="password" autocomplete="new-password" placeholder="${isProtected ? 'Protected' : 'No password'}">`
+        + (share ? `<button class="sheet-row" id="ml-share-password-save"><span class="g">⌁</span>${isProtected ? 'Change password' : 'Set password'}</button>` : '')
+        + (isProtected ? '<button class="sheet-row" id="ml-share-password-clear"><span class="g">✕</span>Remove password</button>' : '')
+        + '</div>';
 }
 
 async function copyOrShareLink(url, title) {
@@ -597,7 +637,9 @@ function renderCollectionShareSheet(coll, share) {
             ? '<div class="sheet-meta">'
                 + `<div><span>Link</span><b>${esc(share.url)}</b></div>`
                 + `<div><span>Created</span><b>${esc(formatShareDate(share.created_at))}</b></div>`
-                + `<div><span>Expires</span><b>${esc(formatShareDate(share.expires_at))}</b></div></div>`
+                + `<div><span>Expires</span><b>${esc(formatShareDate(share.expires_at))}</b></div>`
+                + `<div><span>Stats</span><b>${esc(shareStatsLine(share))}</b></div></div>`
+                + sharePasswordControl(share)
                 + '<button class="sheet-btn" id="ml-share-copy">Share…</button>'
                 + '<button class="sheet-row" id="ml-share-rotate"><span class="g">↻</span>Rotate link</button>'
                 + '<div class="sheet-confirm" id="ml-share-rotate-confirm" hidden>Invalidate old link? <button data-yes="1">Yes</button><button data-no="1">No</button></div>'
@@ -605,19 +647,45 @@ function renderCollectionShareSheet(coll, share) {
                 + '<div class="sheet-confirm" id="ml-share-revoke-confirm" hidden>Revoke link? <button data-yes="1">Yes</button><button data-no="1">No</button></div>'
             : '<div class="ms-empty">Create a private gallery link for this collection.</div>'
                 + shareExpiryControl()
+                + sharePasswordControl(null)
                 + '<button class="sheet-btn" id="ml-share-create">Create share link</button>')
     );
     sheet.querySelector('#ml-share-copy')?.addEventListener('click', () => copyOrShareLink(share.url, coll.name));
     sheet.querySelector('#ml-share-create')?.addEventListener('click', async () => {
         const value = sheet.querySelector('#ml-share-expiry')?.value || '';
+        const password = sheet.querySelector('#ml-share-password')?.value || '';
         const result = await createCollectionShare(coll.id, {
             expiresInDays: value ? Number(value) : null,
+            ...(password ? { password } : {}),
         });
         if (result && result.ok) {
             showToast('Share link created');
             renderCollectionShareSheet(coll, result.share);
         } else {
             showToast("Couldn't create share link");
+        }
+    });
+    sheet.querySelector('#ml-share-password-save')?.addEventListener('click', async () => {
+        const password = sheet.querySelector('#ml-share-password')?.value || '';
+        if (!password) {
+            showToast('Enter a password');
+            return;
+        }
+        const result = await createCollectionShare(coll.id, { password });
+        if (result && result.ok) {
+            showToast(share.protected ? 'Password changed' : 'Password set');
+            renderCollectionShareSheet(coll, result.share);
+        } else {
+            showToast("Couldn't save password");
+        }
+    });
+    sheet.querySelector('#ml-share-password-clear')?.addEventListener('click', async () => {
+        const result = await createCollectionShare(coll.id, { clearPassword: true });
+        if (result && result.ok) {
+            showToast('Password removed');
+            renderCollectionShareSheet(coll, result.share);
+        } else {
+            showToast("Couldn't remove password");
         }
     });
     bindSheetConfirm(sheet, '#ml-share-rotate', '#ml-share-rotate-confirm', async () => {

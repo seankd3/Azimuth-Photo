@@ -229,6 +229,7 @@ async def api_save_settings(request: Request):
     body, error = await json_object(request)
     if error:
         return error
+    body = {key: value for key, value in body.items() if key not in settings.PRIVATE_SETTING_KEYS}
     current = settings.get_settings()
     saved = settings.save_settings({**current, **body})
     model_changed = any(
@@ -283,7 +284,7 @@ async def api_save_settings(request: Request):
     _invalidate_settings_response_cache()
     return {
         "ok": True,
-        "settings": saved,
+        "settings": settings.public_settings(saved),
         "cache_stats": await _build_cache_status(ahead=0, force=True),
         "model_status": ai_models.get_model_status(),
         "ai_status": await _build_ai_status(),
@@ -325,7 +326,7 @@ async def api_reset_settings():
     face_worker.request_scan_now()
     return {
         "ok": True,
-        "settings": saved,
+        "settings": settings.public_settings(saved),
         "cache_stats": await _build_cache_status(ahead=0, force=True),
         "model_status": ai_models.get_model_status(),
         "ai_status": await _build_ai_status(),

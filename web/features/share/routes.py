@@ -1,11 +1,15 @@
+import asyncio
 import os
 import time
 from collections.abc import Awaitable, Callable
+from urllib.parse import parse_qs
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
+
+from features.share import auth
 
 
 router = APIRouter()
@@ -13,6 +17,8 @@ router = APIRouter()
 CreateOrRotateShare = Callable[..., Awaitable[dict | None]]
 GetShare = Callable[[int], Awaitable[dict | None]]
 RevokeShare = Callable[[int], Awaitable[bool]]
+SetSharePassword = Callable[[int, str | None], Awaitable[dict | None]]
+RecordShareView = Callable[[str], Awaitable[dict | None]]
 ResolveToken = Callable[[str], Awaitable[dict | None]]
 TokenAllowsImage = Callable[[str, int], Awaitable[bool]]
 ThumbnailResponse = Callable[..., Awaitable[Response]]
@@ -21,6 +27,8 @@ _templates: Jinja2Templates | None = None
 _create_or_rotate_share: CreateOrRotateShare | None = None
 _get_share: GetShare | None = None
 _revoke_share: RevokeShare | None = None
+_set_share_password: SetSharePassword | None = None
+_record_share_view: RecordShareView | None = None
 _resolve_token: ResolveToken | None = None
 _token_allows_image: TokenAllowsImage | None = None
 _thumbnail_response: ThumbnailResponse | None = None
@@ -29,6 +37,8 @@ _thumbnail_response: ThumbnailResponse | None = None
 class ShareBody(BaseModel):
     rotate: bool = False
     expires_in_days: int | None = Field(default=None, ge=1, le=3660)
+    password: str | None = None
+    clear_password: bool = False
 
 
 def configure(
@@ -37,16 +47,21 @@ def configure(
     create_or_rotate_share: CreateOrRotateShare,
     get_share: GetShare,
     revoke_share: RevokeShare,
+    set_share_password: SetSharePassword,
+    record_share_view: RecordShareView,
     resolve_token: ResolveToken,
     token_allows_image: TokenAllowsImage,
     thumbnail_response: ThumbnailResponse,
 ) -> None:
     global _templates, _create_or_rotate_share, _get_share, _revoke_share
-    global _resolve_token, _token_allows_image, _thumbnail_response
+    global _set_share_password, _record_share_view, _resolve_token
+    global _token_allows_image, _thumbnail_response
     _templates = templates
     _create_or_rotate_share = create_or_rotate_share
     _get_share = get_share
     _revoke_share = revoke_share
+    _set_share_password = set_share_password
+    _record_share_view = record_share_view
     _resolve_token = resolve_token
     _token_allows_image = token_allows_image
     _thumbnail_response = thumbnail_response
@@ -58,6 +73,8 @@ def _configured() -> None:
         or _create_or_rotate_share is None
         or _get_share is None
         or _revoke_share is None
+        or _set_share_password is None
+        or _record_share_view is None
         or _resolve_token is None
         or _token_allows_image is None
         or _thumbnail_response is None
@@ -78,6 +95,10 @@ def _share_payload(request: Request, share: dict | None) -> dict | None:
         "url": _share_url(request, share["token"]),
         "created_at": share["created_at"],
         "expires_at": share["expires_at"],
+        "protected": bool(share.get("password_hash")),
+        "view_count": int(share.get("view_count") or 0),
+        "first_viewed_at": share.get("first_viewed_at"),
+        "last_viewed_at": share.get("last_viewed_at"),
     }
 
 
@@ -121,16 +142,56 @@ def _gallery_payload(token: str, collection: dict | None) -> dict:
     }
 
 
+def _password_hash_for_payload(payload: ShareBody) -> str | None:
+    if payload.clear_password:
+        return None
+    if payload.password is None:
+        return None
+    return auth.hash_password(payload.password)
+
+
+def _has_password_change(payload: ShareBody) -> bool:
+    return payload.password is not None or payload.clear_password
+
+
+def _is_password_only_update(payload: ShareBody) -> bool:
+    return (
+        not payload.rotate
+        and payload.expires_in_days is None
+        and _has_password_change(payload)
+    )
+
+
+async def _form_password(request: Request) -> str:
+    try:
+        form = await request.form()
+        return str(form.get("password") or "")
+    except Exception:
+        body = (await request.body()).decode("utf-8", errors="replace")
+        return str((parse_qs(body).get("password") or [""])[0])
+
+
 @router.post("/api/user-collections/{collection_id}/share")
 async def api_create_share(collection_id: int, payload: ShareBody, request: Request):
     _configured()
+    if _is_password_only_update(payload):
+        active = await _get_share(collection_id)
+        if active is not None:
+            share = await _set_share_password(collection_id, _password_hash_for_payload(payload))
+            return {"ok": True, "share": _share_payload(request, share)}
+
     expires_at = None
     if payload.expires_in_days is not None:
         expires_at = time.time() + (payload.expires_in_days * 86400)
+    password_hash = _password_hash_for_payload(payload) if _has_password_change(payload) else None
+    if payload.rotate and not _has_password_change(payload):
+        active = await _get_share(collection_id)
+        password_hash = active.get("password_hash") if active else None
     share = await _create_or_rotate_share(
         collection_id,
         expires_at=expires_at,
         rotate=payload.rotate,
+        password_hash=password_hash,
     )
     if share is None:
         return JSONResponse({"error": "Collection not found"}, status_code=404)
@@ -158,18 +219,60 @@ async def public_share_gallery(token: str, request: Request):
     _configured()
     collection = await _resolve_token(token)
     status_code = 200 if collection is not None else 404
+    locked = bool(collection is not None and not auth.is_unlocked(request, collection))
+    if locked:
+        response = _templates.TemplateResponse(
+            request,
+            "share_gallery.html",
+            {
+                "not_found": False,
+                "locked": True,
+                "unlock_error": request.query_params.get("e") == "1",
+                "token": token,
+                "collection_name": collection.get("name") or "Protected share",
+                "photo_count": int(collection.get("image_count") or 0),
+                "date_range": _date_subtitle(collection),
+            },
+            status_code=status_code,
+        )
+        return _public_response(response)
+
     page = _gallery_payload(token, collection)
     response = _templates.TemplateResponse(
         request,
         "share_gallery.html",
         {
             "not_found": collection is None,
+            "locked": False,
+            "token": token,
             "collection_name": page["name"],
             "photo_count": page["photo_count"],
             "date_range": page["date_range"],
             "gallery_json": page,
         },
         status_code=status_code,
+    )
+    if collection is not None and not request.cookies.get(auth.VIEW_COOKIE_NAME):
+        await _record_share_view(token)
+        auth.set_view_cookie(response, token, request=request)
+    return _public_response(response)
+
+
+@router.post("/s/{token}/unlock")
+async def public_share_unlock(token: str, request: Request):
+    _configured()
+    collection = await _resolve_token(token)
+    password = await _form_password(request)
+    if collection is None or not auth.verify_password(password, collection.get("password_hash")):
+        await asyncio.sleep(0.4)
+        return _public_response(RedirectResponse(f"/s/{token}?e=1", status_code=303))
+
+    response = RedirectResponse(f"/s/{token}", status_code=303)
+    auth.set_unlock_cookie(
+        response,
+        token,
+        auth.cookie_value(token, collection["password_hash"]),
+        request=request,
     )
     return _public_response(response)
 
@@ -178,6 +281,9 @@ async def public_share_gallery(token: str, request: Request):
 async def public_share_thumbnail(request: Request, token: str, size: str, image_id: int):
     _configured()
     if size not in {"sm", "md", "lg"}:
+        return _public_response(JSONResponse({"error": "Not found"}, status_code=404))
+    collection = await _resolve_token(token)
+    if collection is None or not auth.is_unlocked(request, collection):
         return _public_response(JSONResponse({"error": "Not found"}, status_code=404))
     allowed = await _token_allows_image(token, image_id)
     if not allowed:
@@ -189,6 +295,9 @@ async def public_share_thumbnail(request: Request, token: str, size: str, image_
 @router.get("/s/{token}/img/{image_id}")
 async def public_share_image(request: Request, token: str, image_id: int):
     _configured()
+    collection = await _resolve_token(token)
+    if collection is None or not auth.is_unlocked(request, collection):
+        return _public_response(JSONResponse({"error": "Not found"}, status_code=404))
     allowed = await _token_allows_image(token, image_id)
     if not allowed:
         return _public_response(JSONResponse({"error": "Not found"}, status_code=404))

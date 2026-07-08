@@ -899,6 +899,21 @@ body[data-tab="photos"] #m-scrub { display: block; }
 .sheet-input:focus { border-color: var(--accent-lin); }
 .share-expiry { display: grid; gap: 6px; margin: 8px 0; color: var(--text-3); font-size: 12px; }
 .share-expiry select.sheet-input { width: 100%; }
+.share-password-mobile { margin: 10px 0; }
+.share-password-mobile-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    color: var(--text-3);
+    font-size: 12px;
+}
+.share-password-mobile-head b {
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 2px 8px;
+    color: var(--accent);
+    font-size: 11px;
+}
 .sheet-btn {
     width: 100%;
     min-height: 48px;

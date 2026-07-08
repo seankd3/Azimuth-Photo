@@ -5,6 +5,7 @@ from fastapi.responses import Response
 from fastapi.testclient import TestClient
 
 from test_support import *  # noqa: F401,F403
+from features.share import auth as share_auth
 from features.share import routes as share_routes
 
 
@@ -20,6 +21,11 @@ class ShareTests(BackendTestCase):
             ),
             get_share=lambda collection_id: db.get_collection_share(collection_id),
             revoke_share=lambda collection_id: db.revoke_collection_share(collection_id),
+            set_share_password=lambda collection_id, password_hash: db.set_collection_share_password(
+                collection_id,
+                password_hash,
+            ),
+            record_share_view=lambda token: db.record_share_view(token),
             resolve_token=lambda token: db.resolve_share_token(token),
             token_allows_image=lambda token, image_id: db.share_token_allows_image(token, image_id),
             thumbnail_response=self._thumbnail_response,
@@ -50,6 +56,26 @@ class ShareTests(BackendTestCase):
 
     async def test_share_create_returns_none_for_missing_collection(self):
         self.assertIsNone(await db.create_or_rotate_share(999999))
+
+    async def test_password_hash_roundtrip(self):
+        stored = share_auth.hash_password("correct horse")
+
+        self.assertTrue(share_auth.verify_password("correct horse", stored))
+        self.assertFalse(share_auth.verify_password("wrong horse", stored))
+        self.assertTrue(stored.startswith("scrypt$"))
+
+    async def test_share_password_can_update_without_rotating(self):
+        collection, *_ = await self._collection_with_images()
+        share = await db.create_or_rotate_share(collection["id"])
+        password_hash = share_auth.hash_password("gallery")
+
+        updated = await db.set_collection_share_password(collection["id"], password_hash)
+        cleared = await db.set_collection_share_password(collection["id"], None)
+
+        self.assertEqual(updated["token"], share["token"])
+        self.assertEqual(updated["password_hash"], password_hash)
+        self.assertEqual(cleared["token"], share["token"])
+        self.assertIsNone(cleared["password_hash"])
 
     async def test_share_revoke_disables_resolution(self):
         collection, *_ = await self._collection_with_images()
@@ -101,6 +127,55 @@ class ShareTests(BackendTestCase):
         self.assertEqual(missing.status_code, 404)
         self.assertIn("Share unavailable", missing.text)
         self.assertEqual(missing.headers.get("referrer-policy"), "no-referrer")
+
+    async def test_protected_share_unlocks_media_and_counts_one_view_per_cookie(self):
+        collection, first, *_ = await self._collection_with_images()
+        password_hash = share_auth.hash_password("open-sesame")
+        share = await db.create_or_rotate_share(collection["id"], password_hash=password_hash)
+
+        def probe():
+            client = TestClient(app_module.app)
+            try:
+                locked = client.get(f"/s/{share['token']}")
+                blocked_thumb = client.get(f"/s/{share['token']}/thumb/sm/{first}")
+                wrong = client.post(
+                    f"/s/{share['token']}/unlock",
+                    data={"password": "nope"},
+                    follow_redirects=False,
+                )
+                right = client.post(
+                    f"/s/{share['token']}/unlock",
+                    data={"password": "open-sesame"},
+                    follow_redirects=False,
+                )
+                gallery = client.get(f"/s/{share['token']}")
+                again = client.get(f"/s/{share['token']}")
+                thumb = client.get(f"/s/{share['token']}/thumb/sm/{first}")
+                return locked, blocked_thumb, wrong, right, gallery, again, thumb
+            finally:
+                client.close()
+
+        locked, blocked_thumb, wrong, right, gallery, again, thumb = await asyncio.to_thread(probe)
+        active = await db.get_collection_share(collection["id"])
+
+        self.assertEqual(locked.status_code, 200)
+        self.assertIn("Unlock", locked.text)
+        self.assertNotIn("gallery-data", locked.text)
+        self.assertNotIn(f"/s/{share['token']}/thumb", locked.text)
+        self.assertEqual(blocked_thumb.status_code, 404)
+        self.assertEqual(wrong.status_code, 303)
+        self.assertTrue(wrong.headers.get("location", "").endswith("?e=1"))
+        self.assertEqual(right.status_code, 303)
+        self.assertIn("pa_s=", right.headers.get("set-cookie", ""))
+        self.assertEqual(gallery.status_code, 200)
+        self.assertIn("gallery-data", gallery.text)
+        self.assertIn("first.jpg", gallery.text)
+        self.assertEqual(again.status_code, 200)
+        self.assertEqual(thumb.status_code, 200)
+        self.assertEqual(thumb.content, b"thumb-%d" % first)
+        self.assertEqual(active["view_count"], 1)
+        self.assertIsNotNone(active["first_viewed_at"])
+        self.assertIsNotNone(active["last_viewed_at"])
 
     async def test_public_thumb_rejects_non_member_image(self):
         collection, _first, _second, third = await self._collection_with_images()

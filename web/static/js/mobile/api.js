@@ -113,10 +113,23 @@ export async function getCollectionShare(collectionId) {
     return fetchJson(`/api/user-collections/${collectionId}/share`, { defaultValue: null });
 }
 
-export async function createCollectionShare(collectionId, { rotate = false, expiresInDays = null } = {}) {
-    return postJson(`/api/user-collections/${collectionId}/share`, {
+export async function createCollectionShare(
+    collectionId,
+    {
+        rotate = false,
+        expiresInDays = null,
+        password = undefined,
+        clearPassword = false,
+    } = {},
+) {
+    const payload = {
         rotate,
         expires_in_days: expiresInDays,
+    };
+    if (password !== undefined) payload.password = password;
+    if (clearPassword) payload.clear_password = true;
+    return postJson(`/api/user-collections/${collectionId}/share`, {
+        ...payload,
     });
 }
 

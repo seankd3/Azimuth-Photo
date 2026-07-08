@@ -402,7 +402,11 @@ CREATE TABLE IF NOT EXISTS collection_shares (
     token TEXT NOT NULL UNIQUE,
     created_at REAL NOT NULL,
     expires_at REAL DEFAULT NULL,
-    revoked_at REAL DEFAULT NULL
+    revoked_at REAL DEFAULT NULL,
+    password_hash TEXT DEFAULT NULL,
+    view_count INTEGER NOT NULL DEFAULT 0,
+    first_viewed_at REAL DEFAULT NULL,
+    last_viewed_at REAL DEFAULT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_collections_updated
@@ -547,6 +551,13 @@ CATALOG_SOURCE_COMPAT_COLUMNS = (
     ("last_scan_at", "REAL DEFAULT NULL"),
     ("last_seen_at", "REAL DEFAULT NULL"),
     ("removed_at", "REAL DEFAULT NULL"),
+)
+
+COLLECTION_SHARE_COMPAT_COLUMNS = (
+    ("password_hash", "TEXT DEFAULT NULL"),
+    ("view_count", "INTEGER NOT NULL DEFAULT 0"),
+    ("first_viewed_at", "REAL DEFAULT NULL"),
+    ("last_viewed_at", "REAL DEFAULT NULL"),
 )
 
 COMPAT_INDEX_SQL = (
@@ -764,6 +775,7 @@ REQUIRED_COLUMNS = {
     },
     "comparisons": {"action_id"},
     "cache_metadata": {"replace_stale_thumbnails"},
+    "collection_shares": {"password_hash", "view_count", "first_viewed_at", "last_viewed_at"},
 }
 
 REQUIRED_INDEXES = {
@@ -842,6 +854,7 @@ async def ensure_compatibility_columns(conn) -> None:
     )
     await _add_columns_if_missing(conn, "comparisons", (("action_id", "TEXT DEFAULT NULL"),))
     await _add_columns_if_missing(conn, "catalog_sources", CATALOG_SOURCE_COMPAT_COLUMNS)
+    await _add_columns_if_missing(conn, "collection_shares", COLLECTION_SHARE_COMPAT_COLUMNS)
 
 
 async def ensure_compatibility_indexes(conn) -> None:

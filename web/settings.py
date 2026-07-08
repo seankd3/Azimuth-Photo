@@ -49,7 +49,10 @@ DEFAULT_SETTINGS = {
     "face_similarity_threshold": 0.52,
     "face_merge_suggestion_threshold": 0.62,
     "import_root": _default_import_root(),
+    "share_cookie_secret": "",
 }
+
+PRIVATE_SETTING_KEYS = {"share_cookie_secret"}
 
 EMBED_MODEL_PRESETS = {
     "qwen3-vl-embedding-8b": {
@@ -383,6 +386,7 @@ def normalize_settings(raw: dict | None) -> dict:
     normalized["show_loupe_cache_status"] = bool(
         raw.get("show_loupe_cache_status", normalized["show_loupe_cache_status"])
     )
+    normalized["share_cookie_secret"] = str(raw.get("share_cookie_secret") or "").strip()
     normalized.update(_derive_runtime_tuning(normalized["memory_cache_gb"]))
     normalized["prefetch_workers"] = min(
         normalized["prefetch_workers"],
@@ -415,6 +419,13 @@ def get_settings() -> dict:
     return load_settings()
 
 
+def public_settings(raw: dict | None = None) -> dict:
+    values = _copy_settings(raw if isinstance(raw, dict) else get_settings())
+    for key in PRIVATE_SETTING_KEYS:
+        values.pop(key, None)
+    return values
+
+
 def save_settings(raw: dict | None) -> dict:
     global _settings
     normalized = normalize_settings(raw)
@@ -442,9 +453,12 @@ def reset_settings() -> dict:
 
 
 def settings_metadata() -> dict:
+    defaults = _copy_settings(DEFAULT_SETTINGS)
+    for key in PRIVATE_SETTING_KEYS:
+        defaults.pop(key, None)
     return {
         "settings_path": SETTINGS_PATH,
-        "defaults": _copy_settings(DEFAULT_SETTINGS),
+        "defaults": defaults,
         "cache_profiles": list(CACHE_PROFILES),
         "embedding_model_presets": [
             {"key": key, **value, "model_dir": _default_model_dir(value["model_id"])}

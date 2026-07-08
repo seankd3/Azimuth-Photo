@@ -14,6 +14,7 @@
       --muted: #9a9a97;
       --line: rgba(232, 232, 230, .12);
       --accent: #7aa8d4;
+      --danger: #e19393;
       --row: 220px;
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
@@ -34,6 +35,16 @@
     .tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; z-index: 2; }
     .empty { min-height: 58vh; display: grid; place-items: center; text-align: center; }
     .empty h1 { font-size: clamp(28px, 6vw, 54px); }
+    .locked-wrap { min-height: calc(100vh - 72px); display: grid; place-items: center; }
+    .lock-card { width: min(360px, 100%); padding: 28px; border: 1px solid var(--line); border-radius: 8px; background: rgba(255,255,255,.035); box-shadow: 0 24px 64px rgba(0,0,0,.28); text-align: center; }
+    .lock-glyph { width: 44px; height: 44px; margin: 0 auto 16px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 50%; color: var(--accent); font-size: 19px; }
+    .lock-card h1 { font-size: 24px; line-height: 1.1; overflow-wrap: anywhere; }
+    .lock-card .sub { margin-bottom: 20px; }
+    .unlock-form { display: grid; gap: 10px; }
+    .unlock-form input { width: 100%; height: 46px; border: 1px solid var(--line); border-radius: 6px; background: #0f1012; color: var(--text); font: inherit; font-size: 16px; outline: 0; padding: 0 12px; }
+    .unlock-form input:focus { border-color: var(--accent); }
+    .unlock-form button { height: 46px; border: 0; border-radius: 6px; background: var(--accent); color: #0d1114; font: inherit; font-weight: 680; cursor: pointer; }
+    .unlock-error { min-height: 19px; margin: 0; color: var(--danger); font-size: 13px; }
     .lightbox[hidden] { display: none; }
     .lightbox { position: fixed; inset: 0; z-index: 20; background: #000; display: grid; grid-template-rows: auto 1fr auto; padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); touch-action: none; }
     .lb-bar { height: 48px; display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
@@ -67,6 +78,19 @@
           <p>This link may have expired or been revoked.</p>
         </div>
       </section>
+    {% elif locked %}
+      <section class="locked-wrap">
+        <div class="lock-card">
+          <div class="lock-glyph" aria-hidden="true">&#128274;</div>
+          <h1>{{ collection_name }}</h1>
+          {% if date_range %}<div class="sub">{{ date_range }}</div>{% endif %}
+          <form class="unlock-form" method="post" action="/s/{{ token }}/unlock">
+            <input name="password" type="password" placeholder="Password" autocomplete="current-password" autofocus required>
+            <button type="submit">Unlock</button>
+            <p class="unlock-error">{% if unlock_error %}That password did not unlock this share.{% endif %}</p>
+          </form>
+        </div>
+      </section>
     {% else %}
       <header>
         <div>
@@ -78,6 +102,7 @@
       <section class="grid" id="grid" aria-label="{{ collection_name }} photos"></section>
     {% endif %}
   </main>
+  {% if not not_found and not locked %}
   <div class="lightbox" id="lightbox" hidden>
     <div class="lb-bar">
       <button id="close" type="button" aria-label="Close">×</button>
@@ -178,5 +203,6 @@
       renderGrid();
     })();
   </script>
+  {% endif %}
 </body>
 </html>
