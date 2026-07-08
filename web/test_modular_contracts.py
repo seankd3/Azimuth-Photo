@@ -79,6 +79,7 @@ PUBLIC_ROUTE_CONTRACT = {
     ("GET", "/api/rankings"),
     ("GET", "/api/date-groups"),
     ("GET", "/api/date-histogram"),
+    ("GET", "/api/collections/suggestions"),
     ("GET", "/api/counts"),
     ("GET", "/api/map/markers"),
     ("GET", "/api/filter-options"),

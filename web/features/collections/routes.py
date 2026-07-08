@@ -10,6 +10,7 @@ CreateCollection = Callable[..., Awaitable[dict]]
 ListCollections = Callable[[], Awaitable[list[dict]]]
 GetCollection = Callable[..., Awaitable[dict | None]]
 MutateCollectionImages = Callable[[int, list[int]], Awaitable[dict | None]]
+GetSuggestions = Callable[[], Awaitable[dict]]
 
 MAX_IMAGE_IDS_PER_REQUEST = 10000
 
@@ -18,6 +19,7 @@ _list_collections: ListCollections | None = None
 _get_collection: GetCollection | None = None
 _add_collection_images: MutateCollectionImages | None = None
 _remove_collection_images: MutateCollectionImages | None = None
+_get_suggestions: GetSuggestions | None = None
 
 
 class CreateCollectionBody(BaseModel):
@@ -39,14 +41,16 @@ def configure(
     get_collection: GetCollection,
     add_collection_images: MutateCollectionImages,
     remove_collection_images: MutateCollectionImages,
+    get_suggestions: GetSuggestions | None = None,
 ) -> None:
     global _create_collection, _list_collections, _get_collection
-    global _add_collection_images, _remove_collection_images
+    global _add_collection_images, _remove_collection_images, _get_suggestions
     _create_collection = create_collection
     _list_collections = list_collections
     _get_collection = get_collection
     _add_collection_images = add_collection_images
     _remove_collection_images = remove_collection_images
+    _get_suggestions = get_suggestions
 
 
 def _configured() -> None:
@@ -77,6 +81,14 @@ async def api_create_collection(payload: CreateCollectionBody):
         status=payload.status,
     )
     return {"ok": True, "collection": collection}
+
+
+@router.get("/api/collections/suggestions")
+async def api_collection_suggestions():
+    _configured()
+    if _get_suggestions is None:
+        return {"suggestions": []}
+    return await _get_suggestions()
 
 
 @router.get("/api/user-collections/{collection_id}")

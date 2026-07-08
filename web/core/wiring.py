@@ -222,6 +222,7 @@ def configure_search_routes() -> None:
 
 def configure_collection_routes() -> None:
     import db
+    from features.collections import suggestions as collection_suggestions
 
     collection_routes.configure(
         create_collection=lambda **kwargs: db.create_collection(**kwargs),
@@ -229,6 +230,10 @@ def configure_collection_routes() -> None:
         get_collection=lambda collection_id, **kwargs: db.get_collection(collection_id, **kwargs),
         add_collection_images=lambda collection_id, image_ids: db.add_collection_images(collection_id, image_ids),
         remove_collection_images=lambda collection_id, image_ids: db.remove_collection_images(collection_id, image_ids),
+        get_suggestions=lambda: collection_suggestions.collection_suggestions(
+            db.DB_PATH,
+            db_signature=db.DB_PATH,
+        ),
     )
 
 
