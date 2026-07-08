@@ -104,15 +104,12 @@ def _rows_to_matrix(rows, *, overallocate: bool = True):
 
 
 def _db_file_signature() -> list[list[str | int]]:
-    signature = []
     db_path = _configured(_db_path, "db_path")()
-    for path in (db_path, f"{db_path}-wal", f"{db_path}-shm"):
-        try:
-            stat = os.stat(path)
-            signature.append([os.path.basename(path), stat.st_size, stat.st_mtime_ns])
-        except OSError:
-            signature.append([os.path.basename(path), -1, -1])
-    return signature
+    try:
+        stat = os.stat(db_path)
+        return [[os.path.basename(db_path), stat.st_size, stat.st_mtime_ns]]
+    except OSError:
+        return [[os.path.basename(db_path), -1, -1]]
 
 
 def _snapshot_paths(model_key: str):

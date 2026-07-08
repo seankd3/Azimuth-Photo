@@ -97,11 +97,13 @@ def invalidate_rankings_cache() -> None:
     query_constraints.clear_text_search_caches()
 
 
-def invalidate_vector_derived_caches() -> None:
+def invalidate_vector_derived_caches(*, invalidate_embedding_matrix: bool = True) -> None:
     *_, duplicates_cache, collections_cache, elo_propagation = _configured()
     duplicates_cache.update({"key": None, "data": None})
     collections_cache.update({"key": None, "data": None})
     elo_propagation.invalidate_prediction_cache()
+    if not invalidate_embedding_matrix:
+        return
     try:
         import embed_cache
         embed_cache.invalidate()
@@ -113,7 +115,7 @@ def embedding_batch_stored(_model_key: str, _image_ids: list[int]) -> None:
     _, _, _, invalidate_ai_status_response_cache, _, _, _ = _configured()
     invalidate_rankings_cache()
     invalidate_ai_status_response_cache()
-    invalidate_vector_derived_caches()
+    invalidate_vector_derived_caches(invalidate_embedding_matrix=False)
 
 
 def invalidate_interaction_response_cache() -> None:

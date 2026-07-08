@@ -1,5 +1,5 @@
 import asyncio
-import copy
+import json
 from collections.abc import Awaitable, Callable
 
 from fastapi import APIRouter
@@ -254,13 +254,11 @@ async def api_duplicates(threshold: float = 0.95, limit: int = 100):
         _db_signature(),
         round(float(threshold), 4),
         int(limit),
-        id(matrix),
         len(image_ids),
         len(cached_sm_ids),
-        hash(frozenset(cached_sm_ids)),
     )
     if _duplicates_cache["key"] == cache_key and _duplicates_cache["data"] is not None:
-        return copy.deepcopy(_duplicates_cache["data"])
+        return json.loads(_duplicates_cache["data"])
 
     # The pairwise similarity sweep is O(n^2) CPU/numpy work that can take
     # seconds on a large archive; run it off the event loop.
@@ -289,7 +287,7 @@ async def api_duplicates(threshold: float = 0.95, limit: int = 100):
         "hidden_pending_thumbnails": hidden_pairs,
     }
     _duplicates_cache["key"] = cache_key
-    _duplicates_cache["data"] = copy.deepcopy(response)
+    _duplicates_cache["data"] = json.dumps(response, separators=(",", ":"))
     return response
 
 

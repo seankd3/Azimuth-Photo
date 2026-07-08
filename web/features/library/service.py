@@ -16,6 +16,7 @@ from features.library import taste as taste_service
 
 _rankings_response_cache: dict[tuple, dict] = {}
 _rankings_response_cache_ttl_seconds = 1800.0
+_rankings_response_cache_max_entries = 256
 MAX_RANKINGS_LIMIT = 5000
 
 _resolve_library_constraints: Callable[..., object] | None = None
@@ -184,6 +185,8 @@ def cache_rankings_response(cache_key, response: dict) -> None:
         "json": json.dumps(response, separators=(",", ":")).encode("utf-8"),
         "expires": time.monotonic() + _configured_rankings_response_cache_ttl_seconds(),
     }
+    while len(_rankings_response_cache) > _rankings_response_cache_max_entries:
+        del _rankings_response_cache[next(iter(_rankings_response_cache))]
 
 
 async def date_groups_payload(
