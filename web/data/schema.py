@@ -5,7 +5,7 @@ import os
 from data.repositories import catalog as catalog_repository
 
 EXPECTED_EMBEDDING_DIM = 2048  # Qwen3-VL-Embedding-2B native dimension
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS catalog_sources (
@@ -396,12 +396,23 @@ CREATE TABLE IF NOT EXISTS collection_images (
     PRIMARY KEY (collection_id, image_id)
 );
 
+CREATE TABLE IF NOT EXISTS collection_shares (
+    id INTEGER PRIMARY KEY,
+    collection_id INTEGER NOT NULL REFERENCES collections(id),
+    token TEXT NOT NULL UNIQUE,
+    created_at REAL NOT NULL,
+    expires_at REAL DEFAULT NULL,
+    revoked_at REAL DEFAULT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_collections_updated
 ON collections(updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_collection_images_image
 ON collection_images(image_id, collection_id);
 CREATE INDEX IF NOT EXISTS idx_collection_images_position
 ON collection_images(collection_id, position, added_at);
+CREATE INDEX IF NOT EXISTS idx_collection_shares_active
+ON collection_shares(collection_id, revoked_at);
 
 CREATE TABLE IF NOT EXISTS people (
     id INTEGER PRIMARY KEY,
@@ -707,6 +718,7 @@ REQUIRED_TABLES = {
     "import_batch_images",
     "collections",
     "collection_images",
+    "collection_shares",
     "people",
     "face_detections",
     "face_assignments",
@@ -773,6 +785,7 @@ REQUIRED_INDEXES = {
     "idx_collections_updated",
     "idx_collection_images_image",
     "idx_collection_images_position",
+    "idx_collection_shares_active",
     "idx_people_status_seen",
     "idx_face_detections_image_model",
     "idx_face_detections_status_model",

@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="referrer" content="no-referrer">
+  <title>{{ collection_name }}</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #141517;
+      --photo-bg: #000;
+      --text: #e8e8e6;
+      --muted: #9a9a97;
+      --line: rgba(232, 232, 230, .12);
+      --accent: #7aa8d4;
+      --row: 220px;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html, body { min-height: 100%; margin: 0; background: var(--bg); color: var(--text); }
+    body { padding: max(28px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(32px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
+    .shell { width: min(1420px, 100%); margin: 0 auto; }
+    header { display: flex; align-items: end; justify-content: space-between; gap: 24px; padding: 4px 0 22px; border-bottom: 1px solid var(--line); }
+    h1 { margin: 0; font-size: clamp(26px, 4vw, 46px); line-height: 1; font-weight: 680; letter-spacing: 0; }
+    .sub, .count, .empty p { color: var(--muted); font-size: 14px; line-height: 1.45; }
+    .sub { margin-top: 8px; }
+    .count { font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .grid { display: flex; flex-wrap: wrap; gap: 5px; padding-top: 18px; }
+    .tile { position: relative; flex-grow: calc(var(--ar) * 100); flex-basis: calc(var(--ar) * var(--row)); height: var(--row); min-width: 86px; background: var(--photo-bg); overflow: hidden; border: 0; padding: 0; cursor: zoom-in; }
+    .grid::after { content: ""; flex-grow: 999999; min-width: 10%; }
+    .tile img { width: 100%; height: 100%; object-fit: cover; opacity: 0; transform: scale(1.015); transition: opacity .22s ease, transform .22s ease; }
+    .tile img.loaded { opacity: 1; transform: scale(1); }
+    .tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; z-index: 2; }
+    .empty { min-height: 58vh; display: grid; place-items: center; text-align: center; }
+    .empty h1 { font-size: clamp(28px, 6vw, 54px); }
+    .lightbox[hidden] { display: none; }
+    .lightbox { position: fixed; inset: 0; z-index: 20; background: #000; display: grid; grid-template-rows: auto 1fr auto; padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); touch-action: none; }
+    .lb-bar { height: 48px; display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+    .lb-bar a, .lb-bar button { min-width: 44px; min-height: 44px; color: var(--text); border: 0; background: transparent; font: inherit; text-decoration: none; display: grid; place-items: center; border-radius: 6px; }
+    .lb-bar a { margin-left: auto; padding: 0 12px; color: var(--accent); }
+    .lb-bar button:hover, .lb-bar a:hover { background: rgba(255,255,255,.08); }
+    .stage { min-height: 0; display: grid; place-items: center; overflow: hidden; }
+    .stage img { max-width: 100%; max-height: 100%; object-fit: contain; opacity: 0; transition: opacity .18s ease; }
+    .stage img.loaded { opacity: 1; }
+    .caption { min-height: 34px; color: var(--muted); font-size: 13px; display: flex; align-items: center; justify-content: center; text-align: center; overflow-wrap: anywhere; }
+    .nav { position: fixed; top: 50%; width: 52px; height: 72px; margin-top: -36px; border: 0; border-radius: 6px; background: rgba(255,255,255,.06); color: var(--text); font-size: 34px; display: grid; place-items: center; }
+    .nav:hover { background: rgba(255,255,255,.12); }
+    .prev { left: max(12px, env(safe-area-inset-left)); }
+    .next { right: max(12px, env(safe-area-inset-right)); }
+    @media (max-width: 720px) {
+      body { padding-top: max(18px, env(safe-area-inset-top)); }
+      header { align-items: start; flex-direction: column; gap: 8px; padding-bottom: 16px; }
+      .grid { gap: 3px; }
+      .tile { --row: 118px; flex-basis: calc(var(--ar) * var(--row)); min-width: 31%; }
+      .nav { display: none; }
+      .lb-bar { height: 52px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    {% if not_found %}
+      <section class="empty">
+        <div>
+          <h1>Share unavailable</h1>
+          <p>This link may have expired or been revoked.</p>
+        </div>
+      </section>
+    {% else %}
+      <header>
+        <div>
+          <h1>{{ collection_name }}</h1>
+          {% if date_range %}<div class="sub">{{ date_range }}</div>{% endif %}
+        </div>
+        <div class="count">{{ photo_count }} photo{% if photo_count != 1 %}s{% endif %}</div>
+      </header>
+      <section class="grid" id="grid" aria-label="{{ collection_name }} photos"></section>
+    {% endif %}
+  </main>
+  <div class="lightbox" id="lightbox" hidden>
+    <div class="lb-bar">
+      <button id="close" type="button" aria-label="Close">×</button>
+      <span id="counter"></span>
+      <a id="full" href="#" target="_blank" rel="noopener noreferrer">View full size</a>
+    </div>
+    <button class="nav prev" id="prev" type="button" aria-label="Previous">‹</button>
+    <div class="stage"><img id="stage-img" alt=""></div>
+    <button class="nav next" id="next" type="button" aria-label="Next">›</button>
+    <div class="caption" id="caption"></div>
+  </div>
+  <script type="application/json" id="gallery-data">{{ gallery_json | tojson }}</script>
+  <script>
+    (() => {
+      const data = JSON.parse(document.getElementById('gallery-data').textContent || '{}');
+      const images = Array.isArray(data.images) ? data.images : [];
+      const grid = document.getElementById('grid');
+      const lightbox = document.getElementById('lightbox');
+      const stageImg = document.getElementById('stage-img');
+      const counter = document.getElementById('counter');
+      const caption = document.getElementById('caption');
+      const full = document.getElementById('full');
+      let index = 0;
+      let touchStart = null;
+
+      function renderGrid() {
+        if (!grid) return;
+        grid.innerHTML = images.map((image, i) => (
+          `<button class="tile" style="--ar:${Math.max(.45, Math.min(2.4, Number(image.aspect_ratio) || 1.5))}" data-i="${i}" aria-label="${escapeHtml(image.filename)}">`
+          + `<img loading="lazy" decoding="async" src="${image.thumb}" alt="">`
+          + '</button>'
+        )).join('');
+        grid.querySelectorAll('img').forEach((img) => {
+          if (img.complete) img.classList.add('loaded');
+          img.addEventListener('load', () => img.classList.add('loaded'), { once: true });
+        });
+        grid.addEventListener('click', (event) => {
+          const tile = event.target.closest('.tile[data-i]');
+          if (tile) openAt(Number(tile.dataset.i));
+        });
+      }
+
+      function escapeHtml(value) {
+        return String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
+          '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[c]));
+      }
+
+      function openAt(nextIndex) {
+        if (!images.length) return;
+        index = (nextIndex + images.length) % images.length;
+        const image = images[index];
+        lightbox.hidden = false;
+        stageImg.classList.remove('loaded');
+        stageImg.alt = image.filename || '';
+        stageImg.src = image.preview;
+        counter.textContent = `${index + 1} / ${images.length}`;
+        caption.textContent = image.filename || '';
+        full.href = image.full;
+        document.body.style.overflow = 'hidden';
+        document.getElementById('close').focus({ preventScroll: true });
+      }
+
+      function close() {
+        lightbox.hidden = true;
+        stageImg.removeAttribute('src');
+        document.body.style.overflow = '';
+      }
+
+      function move(delta) {
+        if (!lightbox.hidden) openAt(index + delta);
+      }
+
+      stageImg.addEventListener('load', () => stageImg.classList.add('loaded'));
+      document.getElementById('close').addEventListener('click', close);
+      document.getElementById('prev').addEventListener('click', () => move(-1));
+      document.getElementById('next').addEventListener('click', () => move(1));
+      document.addEventListener('keydown', (event) => {
+        if (lightbox.hidden) return;
+        if (event.key === 'Escape') close();
+        if (event.key === 'ArrowLeft') move(-1);
+        if (event.key === 'ArrowRight') move(1);
+      });
+      lightbox.addEventListener('touchstart', (event) => {
+        const touch = event.changedTouches[0];
+        touchStart = touch ? { x: touch.clientX, y: touch.clientY } : null;
+      }, { passive: true });
+      lightbox.addEventListener('touchend', (event) => {
+        if (!touchStart) return;
+        const touch = event.changedTouches[0];
+        const dx = touch.clientX - touchStart.x;
+        const dy = touch.clientY - touchStart.y;
+        touchStart = null;
+        if (Math.abs(dy) > 80 && Math.abs(dy) > Math.abs(dx) * 1.2 && dy > 0) close();
+        else if (Math.abs(dx) > 56 && Math.abs(dx) > Math.abs(dy)) move(dx < 0 ? 1 : -1);
+      }, { passive: true });
+
+      renderGrid();
+    })();
+  </script>
+</body>
+</html>

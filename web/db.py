@@ -14,6 +14,7 @@ from data import schema as data_schema
 from data.repositories import cache_entries as cache_entry_repository
 from data.repositories import catalog as catalog_repository
 from data.repositories import collections as collection_repository
+from data.repositories import shares as share_repository
 from data.repositories import embeddings as embedding_repository
 from data.repositories import filter_options as filter_options_repository
 from data.repositories import images as image_repository
@@ -459,6 +460,31 @@ async def remove_collection_images(collection_id: int, image_ids: list[int]):
 
 async def collection_image_ids(collection_id: int, *, limit: int = 2000) -> list[int] | None:
     return await collection_repository.collection_image_ids(DB_PATH, collection_id, limit=limit)
+
+
+async def create_or_rotate_share(collection_id: int, *, expires_at: float | None = None, rotate: bool = False):
+    return await share_repository.create_or_rotate_share(
+        DB_PATH,
+        collection_id,
+        expires_at=expires_at,
+        rotate=rotate,
+    )
+
+
+async def get_collection_share(collection_id: int):
+    return await share_repository.get_share(DB_PATH, collection_id)
+
+
+async def revoke_collection_share(collection_id: int) -> bool:
+    return await share_repository.revoke_share(DB_PATH, collection_id)
+
+
+async def resolve_share_token(token: str):
+    return await share_repository.resolve_token(DB_PATH, token)
+
+
+async def share_token_allows_image(token: str, image_id: int) -> bool:
+    return await share_repository.token_allows_image(DB_PATH, token, image_id)
 
 
 async def set_image_status(image_id: int, status: str):

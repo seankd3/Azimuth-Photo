@@ -51,6 +51,10 @@ def _cache_headers(signature: str) -> dict:
 
 @router.get("/api/thumb/{size}/{image_id}")
 async def serve_thumbnail(request: Request, size: str, image_id: int, cached: bool = False):
+    return await thumbnail_response(request, size, image_id, cached=cached)
+
+
+async def thumbnail_response(request: Request, size: str, image_id: int, cached: bool = False):
     if size not in thumbnails.SIZES:
         return JSONResponse({"error": "Invalid size"}, status_code=400)
 

@@ -10,6 +10,7 @@ from features.library import routes as library_routes
 from features.media import routes as media_routes
 from features.people import routes as people_routes
 from features.search import routes as search_routes
+from features.share import routes as share_routes
 from features.settings import routes as settings_routes
 
 
@@ -236,6 +237,20 @@ def configure_collection_routes() -> None:
             db.DB_PATH,
             db_signature=db.DB_PATH,
         ),
+    )
+
+
+def configure_share_routes(*, templates) -> None:
+    import db
+
+    share_routes.configure(
+        templates=templates,
+        create_or_rotate_share=lambda collection_id, **kwargs: db.create_or_rotate_share(collection_id, **kwargs),
+        get_share=lambda collection_id: db.get_collection_share(collection_id),
+        revoke_share=lambda collection_id: db.revoke_collection_share(collection_id),
+        resolve_token=lambda token: db.resolve_share_token(token),
+        token_allows_image=lambda token, image_id: db.share_token_allows_image(token, image_id),
+        thumbnail_response=media_routes.thumbnail_response,
     )
 
 
