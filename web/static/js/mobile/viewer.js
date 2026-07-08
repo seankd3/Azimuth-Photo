@@ -5,10 +5,11 @@
 //   double-tap → 1x ↔ 2.5x at the tap point
 // Flags are real writes with undo.
 
-import { thumbUrl } from './api.js';
+import { getExif, getSimilar, thumbUrl } from './api.js';
 import { applyFlags } from './flags.js';
-import { byId, on } from './state.js';
-import { openCollectionSheet, openSheet } from './selection.js';
+import { byId, nav as appNav, on, rememberImages, setScope } from './state.js';
+import { closeSheet, openCollectionSheet, openSheet } from './selection.js';
+import { showToast } from './toast.js';
 
 let root = null;
 let stage = null;
@@ -160,11 +161,58 @@ function infoSheet() {
         ['Size', `${image.width || '?'} × ${image.height || '?'} · ${fmtBytes(image.file_size)}`],
         ['Flag', image.flag || 'unflagged'],
     ];
-    openSheet(
-        '<h3>Info</h3><div class="sheet-meta">'
+    const sheet = openSheet(
+        '<h3>Info</h3>'
+        + '<button class="sheet-row" id="mv-similar"><span class="g">⌕</span>Find similar</button>'
+        + '<div class="sheet-meta">'
         + rows.map(([k, v]) => `<div><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('')
         + '</div>'
+        + '<details class="sheet-details"><summary>More details</summary>'
+        + '<div class="sheet-meta" id="mv-exif"><div><span>Loading</span><b>…</b></div></div></details>'
     );
+    sheet.querySelector('#mv-similar').addEventListener('click', async () => {
+        const data = await getSimilar(image.id, 100);
+        const results = (data && data.images) || [];
+        if (!results.length) {
+            showToast('No similar photos found');
+            return;
+        }
+        rememberImages(results);
+        setScope({
+            similarId: String(image.id),
+            similarImages: results,
+            label: `Similar to ${image.filename || `photo ${image.id}`}`,
+        });
+        closeSheet();
+        closeViewer();
+        appNav.setTab('photos');
+        showToast(`${results.length} similar photos`);
+    });
+    loadExifDetails(sheet, image.id);
+}
+
+function detailValue(value) {
+    if (value == null || value === '') return '—';
+    if (Array.isArray(value)) return value.join(', ');
+    if (typeof value === 'object') return JSON.stringify(value);
+    return String(value);
+}
+
+async function loadExifDetails(sheet, imageId) {
+    const target = sheet.querySelector('#mv-exif');
+    if (!target) return;
+    const data = await getExif(imageId);
+    const exif = (data && data.exif) || {};
+    const entries = Object.entries(exif)
+        .filter(([, value]) => value != null && value !== '')
+        .sort(([a], [b]) => a.localeCompare(b));
+    if (!entries.length) {
+        target.innerHTML = '<div><span>Details</span><b>No EXIF found</b></div>';
+        return;
+    }
+    target.innerHTML = entries.map(([key, value]) =>
+        `<div><span>${esc(key.replaceAll('_', ' '))}</span><b>${esc(detailValue(value))}</b></div>`
+    ).join('');
 }
 
 /* ---------- touch gesture grammar ---------- */

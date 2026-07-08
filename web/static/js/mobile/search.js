@@ -2,8 +2,10 @@
 // /api/people + people= scope param), category chips backed by the
 // raw|jpg|tif file_type group aliases and flag scopes.
 
-import { getFilterOptions, getPeople } from './api.js';
+import { getFilterOptions, getPeople, ignorePerson, labelPerson } from './api.js';
 import { nav, setScope } from './state.js';
+import { closeSheet, openSheet } from './selection.js';
+import { showToast } from './toast.js';
 
 const RECENT_KEY = 'pa-m-recent-searches';
 
@@ -38,8 +40,59 @@ function commitSearch(raw) {
     const q = String(raw || '').trim();
     if (!q) return;
     rememberSearch(q);
+    const operator = q.match(/^(camera|lens):(.+)$/i);
+    if (operator) {
+        const kind = operator[1].toLowerCase();
+        const value = operator[2].trim();
+        if (!value) return;
+        setScope({
+            [kind]: value,
+            label: `${kind}:${value}`,
+        });
+        nav.setTab('photos');
+        return;
+    }
     setScope({ q, label: q });
     nav.setTab('photos');
+}
+
+function openPersonSheet(person) {
+    const name = person.label || person.name || 'Person';
+    const sheet = openSheet(
+        `<h3>${esc(name)}</h3>`
+        + '<input class="sheet-input" id="mp-name" type="text" autocomplete="off" placeholder="Name">'
+        + '<button class="sheet-btn" id="mp-save">Rename</button>'
+        + '<button class="sheet-row" id="mp-ignore"><span class="g">✕</span>Ignore this person</button>'
+    );
+    const input = sheet.querySelector('#mp-name');
+    input.value = name === 'Person' ? '' : name;
+    sheet.querySelector('#mp-save').addEventListener('click', async () => {
+        const next = input.value.trim();
+        if (!next) return;
+        closeSheet();
+        const result = await labelPerson(person.id, next);
+        if (result && result.ok) {
+            showToast(`Renamed to “${next}”`);
+            people = null;
+            built = false;
+            showSearch();
+        } else {
+            showToast("Couldn't rename person");
+        }
+    });
+    sheet.querySelector('#mp-ignore').addEventListener('click', async () => {
+        closeSheet();
+        const result = await ignorePerson(person.id);
+        if (result && result.ok) {
+            showToast('Ignored person');
+            people = null;
+            built = false;
+            showSearch();
+        } else {
+            showToast("Couldn't ignore person");
+        }
+    });
+    input.focus();
 }
 
 function render() {
@@ -61,7 +114,10 @@ function render() {
         '<div id="ms-field"><span class="g">⌕</span>'
         + '<input id="ms-input" type="search" enterkeyhint="search" placeholder="Search your photos"'
         + ' autocomplete="off" spellcheck="false" aria-label="Search photos">'
-        + '<button id="ms-clear" aria-label="Clear search" style="display:none">✕</button></div>';
+        + '<button id="ms-clear" aria-label="Clear search" style="display:none">✕</button></div>'
+        + '<div class="ms-hints">'
+        + '<span>camera:Sony</span><span>lens:35mm</span>'
+        + '</div>';
 
     html += '<div class="ms-sec"><h3>People</h3><div id="ms-people">';
     if (!ppl) {
@@ -90,6 +146,7 @@ function render() {
         + chip('data-type="tif"', '▣', 'TIFFs', countFor('tif'))
         + chip('data-flag="picked"', '★', 'Picked', null)
         + chip('data-flag="rejected"', '✕', 'Rejected', null)
+        + chip('data-stars="4"', '★', '4+ stars', null)
         + cams.map((c, i) => chip(`data-cam="${i}"`, '▧', c.camera, c.count)).join('')
         + '</div></div>';
 
@@ -120,7 +177,29 @@ function render() {
     });
 
     for (const el of root.querySelectorAll('.m-person[data-pi]')) {
+        let pressTimer = null;
+        let longPressed = false;
+        const clearPress = () => {
+            clearTimeout(pressTimer);
+            pressTimer = null;
+        };
+        el.addEventListener('pointerdown', () => {
+            longPressed = false;
+            clearPress();
+            pressTimer = setTimeout(() => {
+                const p = ppl && ppl[Number(el.dataset.pi)];
+                if (!p) return;
+                longPressed = true;
+                if (navigator.vibrate) navigator.vibrate(10);
+                openPersonSheet(p);
+            }, 520);
+        });
+        el.addEventListener('pointermove', clearPress);
+        el.addEventListener('pointerup', clearPress);
+        el.addEventListener('pointercancel', clearPress);
+        el.addEventListener('contextmenu', (e) => e.preventDefault());
         el.addEventListener('click', () => {
+            if (longPressed) return;
             const p = ppl && ppl[Number(el.dataset.pi)];
             if (!p) return;
             setScope({
@@ -149,6 +228,13 @@ function render() {
             const cam = cams[Number(el.dataset.cam)];
             if (!cam) return;
             setScope({ camera: cam.camera, label: cam.camera });
+            nav.setTab('photos');
+        });
+    }
+    for (const el of root.querySelectorAll('.ms-chip[data-stars]')) {
+        el.addEventListener('click', () => {
+            const stars = el.dataset.stars;
+            setScope({ minStars: stars, label: `${stars}+ stars` });
             nav.setTab('photos');
         });
     }

@@ -27,6 +27,14 @@ export async function getRankings(params) {
     return fetchJson(`/api/rankings?${params.toString()}`, { defaultValue: null });
 }
 
+export async function getSimilar(imageId, limit = 100) {
+    return fetchJson(`/api/similar/${imageId}?limit=${limit}`, { defaultValue: null });
+}
+
+export async function getExif(imageId) {
+    return fetchJson(`/api/image/${imageId}/exif`, { defaultValue: null });
+}
+
 export async function getDateHistogram(params) {
     return fetchJson(`/api/date-histogram?${params.toString()}`, { defaultValue: null });
 }
@@ -105,6 +113,46 @@ export async function getCatalog() {
 
 export async function getFilterOptions() {
     return fetchJson('/api/filter-options', { defaultValue: null });
+}
+
+export async function labelPerson(personId, name) {
+    return postJson(`/api/people/${personId}/label`, { name });
+}
+
+export async function ignorePerson(personId) {
+    return postJson(`/api/people/${personId}/ignore`, {});
+}
+
+export async function getAiStatus() {
+    return fetchJson('/api/ai/status', { defaultValue: null });
+}
+
+export async function getCacheStatus() {
+    return fetchJson('/api/cache/status', { defaultValue: null });
+}
+
+export async function getPeopleStatus() {
+    return fetchJson('/api/people/status', { defaultValue: null });
+}
+
+export async function setBackgroundWork(kind, action) {
+    const urls = {
+        ai: {
+            pause: '/api/ai/embeddings/pause',
+            resume: '/api/ai/embeddings/resume',
+        },
+        cache: {
+            pause: '/api/cache/pregen/stop',
+            resume: '/api/cache/pregen/start',
+        },
+        people: {
+            pause: '/api/people/scan/pause',
+            resume: '/api/people/scan/resume',
+        },
+    };
+    const url = urls[kind] && urls[kind][action];
+    if (!url) return null;
+    return postJson(url, {});
 }
 
 export function exportUrl(imageIds, format = 'csv') {

@@ -4,8 +4,8 @@
 // each member's ranking signals.
 
 import {
-    createCollection, fetchJson, getCatalog, getCollection, getCounts,
-    listCollections, thumbUrl,
+    createCollection, fetchJson, getAiStatus, getCacheStatus, getCatalog, getCollection, getCounts,
+    getPeopleStatus, listCollections, setBackgroundWork, thumbUrl,
 } from './api.js';
 import { nav, on, rememberImages, setScope, clearScope } from './state.js';
 import { openSheet, closeSheet } from './selection.js';
@@ -26,6 +26,9 @@ let suggestions = null;
 let suggestionsLoading = false;
 let suggestionsLoaded = false;
 let showingCollection = false;
+let workStatus = null;
+let workPollTimer = null;
+let workLoading = false;
 const sortedPctCache = new Map();
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
@@ -75,9 +78,12 @@ function render() {
     }
     html += '</div>';
 
+    html += renderWorkRows();
+
     root.innerHTML = html;
 
     bindSuggestions();
+    bindWorkRows();
     for (const el of root.querySelectorAll('.m-lib-card[data-ci]')) {
         el.addEventListener('click', () => {
             const coll = colls[Number(el.dataset.ci)];
@@ -93,6 +99,165 @@ function render() {
             nav.setTab('photos');
         });
     }
+}
+
+/* ---------- background work glass box ---------- */
+const pct = (value) => (value == null ? null : Math.max(0, Math.min(100, Number(value) || 0)));
+
+function workRows() {
+    const ai = workStatus && workStatus.ai;
+    const cache = workStatus && workStatus.cache;
+    const peopleStatus = workStatus && workStatus.people;
+    const cachePregen = (cache && cache.pregen) || {};
+    const preview = cachePregen.preview || {};
+    const peopleWorker = (peopleStatus && peopleStatus.worker) || {};
+    return [
+        {
+            key: 'ai',
+            glyph: '⌕',
+            title: 'AI embeddings',
+            progress: pct(ai && ai.progress_pct),
+            detail: ai
+                ? `${fmtInt(ai.embedded)} / ${fmtInt(ai.total_images)} indexed`
+                : 'Checking status…',
+            paused: Boolean(ai && ai.embedding_manual_pause),
+            running: Boolean(ai && ['embedding', 'loading_model'].includes(ai.worker_state)),
+        },
+        {
+            key: 'cache',
+            glyph: '▧',
+            title: 'Cache pregen',
+            progress: pct(preview.progress_pct),
+            detail: cache
+                ? `${fmtInt(preview.count)} / ${fmtInt(preview.total)} previews`
+                : 'Checking status…',
+            paused: Boolean(cachePregen.manual_pause),
+            running: cachePregen.state === 'running',
+        },
+        {
+            key: 'people',
+            glyph: '◉',
+            title: 'People scan',
+            progress: null,
+            detail: peopleStatus
+                ? `${fmtInt((peopleStatus.counts || {}).people)} people · ${fmtInt((peopleStatus.counts || {}).pending_cached_images)} pending`
+                : 'Checking status…',
+            paused: Boolean(peopleStatus && !peopleStatus.active),
+            running: Boolean(peopleStatus && peopleStatus.active && peopleWorker.state !== 'idle'),
+        },
+    ];
+}
+
+function renderWorkRows() {
+    const rows = workRows();
+    return '<div class="ms-sec ml-work" style="padding-left:0;padding-right:0"><h3>Background work</h3>'
+        + rows.map((row) => {
+            const status = row.running ? 'Running' : row.paused ? 'Paused' : 'Idle';
+            const meter = row.progress == null
+                ? ''
+                : `<span class="ml-work-meter"><span style="width:${row.progress}%"></span></span>`;
+            return `<button class="m-lib-row ml-work-row" data-work="${row.key}">`
+                + `<span class="g">${row.glyph}</span><span class="body">${row.title}`
+                + `<span class="sub num">${row.detail}</span></span>${meter}`
+                + `<span class="n">${status}</span></button>`;
+        }).join('')
+        + '</div>';
+}
+
+function bindWorkRows() {
+    for (const row of root.querySelectorAll('.ml-work-row[data-work]')) {
+        row.addEventListener('click', () => openWorkSheet(row.dataset.work));
+    }
+}
+
+function workPayload(kind) {
+    const rows = workRows();
+    return rows.find((row) => row.key === kind) || null;
+}
+
+function detailsForWork(kind) {
+    if (kind === 'ai') {
+        const ai = workStatus && workStatus.ai;
+        return {
+            title: 'AI embeddings',
+            rows: [
+                ['State', ai && ai.worker_state],
+                ['Progress', ai ? `${fmtInt(ai.embedded)} / ${fmtInt(ai.total_images)} (${ai.progress_pct || 0}%)` : '—'],
+                ['Remaining', ai && ai.remaining],
+                ['Rate', ai && ai.recent_images_per_min ? `${Math.round(ai.recent_images_per_min)} / min` : '—'],
+                ['Message', ai && ai.worker_message],
+            ],
+        };
+    }
+    if (kind === 'cache') {
+        const pregen = (workStatus && workStatus.cache && workStatus.cache.pregen) || {};
+        const preview = pregen.preview || {};
+        return {
+            title: 'Cache pregen',
+            rows: [
+                ['State', pregen.state],
+                ['Progress', `${fmtInt(preview.count)} / ${fmtInt(preview.total)} (${preview.progress_pct || 0}%)`],
+                ['Remaining', preview.remaining],
+                ['Message', pregen.message],
+            ],
+        };
+    }
+    const peopleStatus = workStatus && workStatus.people;
+    const counts = (peopleStatus && peopleStatus.counts) || {};
+    const worker = (peopleStatus && peopleStatus.worker) || {};
+    return {
+        title: 'People scan',
+        rows: [
+            ['State', worker.state || (peopleStatus && peopleStatus.active ? 'active' : 'paused')],
+            ['People', counts.people],
+            ['Faces', counts.detected_faces],
+            ['Pending', counts.pending_cached_images],
+            ['Model', peopleStatus && peopleStatus.model_id],
+        ],
+    };
+}
+
+function openWorkSheet(kind) {
+    const row = workPayload(kind);
+    const details = detailsForWork(kind);
+    const action = row && row.paused ? 'resume' : 'pause';
+    const sheet = openSheet(
+        `<h3>${esc(details.title)}</h3>`
+        + '<div class="sheet-meta">'
+        + details.rows.map(([k, v]) => `<div><span>${esc(k)}</span><b>${esc(v == null || v === '' ? '—' : v)}</b></div>`).join('')
+        + '</div>'
+        + `<button class="sheet-btn" id="ml-work-action">${action === 'resume' ? 'Resume' : 'Pause'}</button>`
+    );
+    sheet.querySelector('#ml-work-action').addEventListener('click', async () => {
+        closeSheet();
+        const result = await setBackgroundWork(kind, action);
+        showToast(result && result.ok ? `${details.title} ${action === 'resume' ? 'resumed' : 'paused'}` : "Couldn't update background work");
+        await loadWorkStatus();
+    });
+}
+
+async function loadWorkStatus() {
+    if (workLoading) return;
+    workLoading = true;
+    const [ai, cache, peopleStatus] = await Promise.all([
+        getAiStatus(),
+        getCacheStatus(),
+        getPeopleStatus(),
+    ]);
+    workStatus = { ai, cache, people: peopleStatus };
+    workLoading = false;
+    if (!showingCollection) render();
+}
+
+function startWorkPolling() {
+    clearInterval(workPollTimer);
+    loadWorkStatus();
+    workPollTimer = setInterval(loadWorkStatus, 10000);
+}
+
+function stopWorkPolling() {
+    clearInterval(workPollTimer);
+    workPollTimer = null;
 }
 
 /* ---------- suggestions ---------- */
@@ -326,9 +491,14 @@ export function initLibrary() {
     on('flags', () => {
         counts = null;   // flag writes change picked/rejected counts
     });
+    on('tab', (tab) => {
+        if (tab === 'library') startWorkPolling();
+        else stopWorkPolling();
+    });
 }
 
 export function showLibrary() {
+    startWorkPolling();
     if (!built) {
         built = true;
         render();

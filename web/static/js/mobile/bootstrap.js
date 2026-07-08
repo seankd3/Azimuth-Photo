@@ -1,7 +1,7 @@
 // Mobile app entry: four tabs (Photos / Search / Refine / Library),
 // offline awareness, and the timeline pinch-zoom fallback.
 
-import { nav } from './state.js';
+import { emit, nav } from './state.js';
 import { initToast } from './toast.js';
 import { initTimeline, stepZoom } from './timeline.js';
 import { initScrubber } from './scrubber.js';
@@ -22,6 +22,7 @@ function setTab(tab) {
     for (const btn of document.querySelectorAll('#m-tabbar button')) {
         btn.classList.toggle('active', btn.dataset.tab === tab);
     }
+    emit('tab', tab);
     if (tab === 'search') showSearch();
     else if (tab === 'refine') showRefine();
     else if (tab === 'library') showLibrary();

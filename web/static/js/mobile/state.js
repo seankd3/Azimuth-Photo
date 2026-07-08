@@ -25,12 +25,19 @@ export const scope = {
     flag: '',
     fileType: '',
     camera: '',
+    lens: '',
+    minStars: '',
+    similarId: '',
+    similarImages: null,
     label: '',
     thumb: '',
 };
 
 export function scopeActive() {
-    return Boolean(scope.q || scope.people || scope.flag || scope.fileType || scope.camera);
+    return Boolean(
+        scope.q || scope.people || scope.flag || scope.fileType || scope.camera
+        || scope.lens || scope.minStars || scope.similarId
+    );
 }
 
 export function scopeParams(extra = {}) {
@@ -40,6 +47,8 @@ export function scopeParams(extra = {}) {
     if (scope.flag) params.set('flag', scope.flag);
     if (scope.fileType) params.set('file_type', scope.fileType);
     if (scope.camera) params.set('camera', scope.camera);
+    if (scope.lens) params.set('lens', scope.lens);
+    if (scope.minStars) params.set('min_stars', scope.minStars);
     for (const [key, value] of Object.entries(extra)) {
         if (value !== undefined && value !== null && value !== '') params.set(key, String(value));
     }
@@ -52,6 +61,10 @@ export function setScope(patch) {
     scope.flag = '';
     scope.fileType = '';
     scope.camera = '';
+    scope.lens = '';
+    scope.minStars = '';
+    scope.similarId = '';
+    scope.similarImages = null;
     scope.label = '';
     scope.thumb = '';
     Object.assign(scope, patch);

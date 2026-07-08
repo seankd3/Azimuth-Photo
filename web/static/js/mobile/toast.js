@@ -18,6 +18,9 @@ export function showToast(message, { undo = null, duration = 6000 } = {}) {
     msg.textContent = message;
     currentUndo = undo;
     undoBtn.hidden = !undo;
+    root.style.setProperty('--toast-duration', `${duration}ms`);
+    root.classList.remove('on');
+    void root.offsetWidth;
     root.classList.add('on');
     clearTimeout(hideTimer);
     hideTimer = setTimeout(hideToast, duration);

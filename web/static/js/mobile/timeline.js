@@ -35,6 +35,7 @@ let loadingPrev = false;
 let endReached = false;
 let flatIds = [];
 let suppressClickUntil = 0;
+let currentSortQuality = null;
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -58,6 +59,7 @@ function fmtDayHead(d) {
 
 export function monthLabel(key) {
     if (key === 'undated') return 'Undated';
+    if (key === 'similar') return scope.label || 'Similar';
     const [year, month] = key.split('-');
     return `${FULL_MONTHS[Number(month) - 1]} ${year}`;
 }
@@ -175,6 +177,24 @@ function appendImages(batch) {
         flatIds.push(Number(img.id));
     }
     timeline.appendChild(frag);
+    timeline.classList.toggle('selmode', selState.mode);
+    updateDayChecks();
+}
+
+function renderFixedImages(batch) {
+    timeline.classList.toggle('m-z5', zoomIdx === 1);
+    timeline.innerHTML = '';
+    flatIds = [];
+    const sec = mkDaySection('fixed', null);
+    sec.dataset.month = 'similar';
+    const head = sec.querySelector('.m-day-head h3');
+    if (head) head.textContent = scope.label || 'Results';
+    const grid = sec.querySelector('.m-day-grid');
+    for (const img of batch) {
+        grid.appendChild(cellFor(img, flatIds.length));
+        flatIds.push(Number(img.id));
+    }
+    timeline.appendChild(sec);
     timeline.classList.toggle('selmode', selState.mode);
     updateDayChecks();
 }
@@ -337,9 +357,24 @@ export async function reload() {
     flatIds = [];
     startOffset = 0;
     endReached = false;
+    currentSortQuality = null;
     endEl.hidden = true;
     renderSkeleton();
     renderScopeBar();
+    if (scope.similarImages) {
+        if (gen !== generation) return;
+        images = scope.similarImages;
+        rememberImages(images);
+        histogram = { months: [], undated: 0, total: images.length };
+        monthOffsets = [];
+        renderFixedImages(images);
+        endReached = true;
+        endEl.hidden = true;
+        renderScopeBar();
+        updateMonthPill(false);
+        pane.scrollTop = 0;
+        return;
+    }
     const [, page] = await Promise.all([
         loadHistogram(),
         getRankings(rankingParams(0)),
@@ -349,6 +384,7 @@ export async function reload() {
     timeline.classList.toggle('m-z5', zoomIdx === 1);
     if (page && Array.isArray(page.images)) {
         images = page.images;
+        currentSortQuality = page.sort_quality || null;
         rememberImages(images);
         if (zoomIdx === 2) renderMonths();
         else appendImages(images);
@@ -463,12 +499,22 @@ function renderScopeBar() {
     if (scope.flag) html += chip('flag', scope.flag === 'picked' ? 'Picked' : 'Rejected', 'flag');
     if (scope.fileType) html += chip('type', scope.fileType.toUpperCase(), 'fileType');
     if (scope.camera) html += chip('camera', scope.camera, 'camera');
+    if (scope.lens) html += chip('lens', scope.lens, 'lens');
+    if (scope.minStars) html += chip('rating', `${scope.minStars}+ stars`, 'minStars');
+    if (scope.similarId) html += chip('similar', scope.label || 'Similar', 'similarId');
     html += `<span class="m-scope-count num">${fmtInt(histogram.total)} photos</span>`;
+    if (currentSortQuality && Number(currentSortQuality.total) > 0) {
+        html += `<span class="m-scope-quality num">${fmtInt(currentSortQuality.percent)}% sorted</span>`;
+    }
     bar.innerHTML = html;
     for (const x of bar.querySelectorAll('.chip-x')) {
         x.addEventListener('click', () => {
             const field = x.dataset.clear;
             scope[field] = '';
+            if (field === 'similarId') {
+                scope.similarImages = null;
+                scope.label = '';
+            }
             if (field === 'people') {
                 scope.thumb = '';
                 scope.label = '';
