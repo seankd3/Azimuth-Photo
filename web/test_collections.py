@@ -1,4 +1,5 @@
 from test_support import *  # noqa: F401,F403
+from features.collections import suggestions as collection_suggestions
 from features.collections import routes as collection_routes
 
 
@@ -13,6 +14,10 @@ class CollectionTests(BackendTestCase):
             remove_collection_images=lambda collection_id, image_ids: db.remove_collection_images(
                 collection_id,
                 image_ids,
+            ),
+            get_suggestions=lambda: collection_suggestions.collection_suggestions(
+                db.DB_PATH,
+                db_signature=db.DB_PATH,
             ),
         )
 
@@ -56,6 +61,27 @@ class CollectionTests(BackendTestCase):
         response = await collection_routes.api_collection(999999)
 
         self.assertEqual(response.status_code, 404)
+
+    async def test_collection_suggestions_route_returns_suggestions_shape(self):
+        source = await self._source()
+        first = await self._image(source["id"], "event-first.jpg")
+        second = await self._image(source["id"], "event-second.jpg")
+        conn = await db.get_db()
+        try:
+            await conn.executemany(
+                "UPDATE images SET date_taken = ? WHERE id = ?",
+                [
+                    ("2025-01-10 09:00:00", first),
+                    ("2025-01-10 09:30:00", second),
+                ],
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        response = await collection_routes.api_collection_suggestions()
+
+        self.assertEqual(response, {"suggestions": []})
 
 
 class SuggestionGroupingTests(unittest.TestCase):

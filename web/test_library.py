@@ -886,6 +886,61 @@ class LibraryTests(BackendTestCase):
         await db.batch_set_image_flags([second], "picked")
         self.assertEqual(await db.count_rankings(flag="picked"), 2)
 
+    async def test_date_histogram_route_counts_months_undated_and_total(self):
+        source = await self._source()
+        january_first = await self._image(source["id"], "january-first.jpg")
+        january_second = await self._image(source["id"], "january-second.jpg")
+        february = await self._image(source["id"], "february.jpg")
+        march = await self._image(source["id"], "march.jpg")
+        await self._image(source["id"], "undated.jpg")
+        conn = await db.get_db()
+        try:
+            await conn.executemany(
+                "UPDATE images SET date_taken = ? WHERE id = ?",
+                [
+                    ("2025-01-03 10:00:00", january_first),
+                    ("2025-01-20 18:30:00", january_second),
+                    ("2025-02-14 08:15:00", february),
+                    ("2025-03-01 22:00:00", march),
+                ],
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+        db.invalidate_stats_cache()
+
+        response = await library_routes.api_date_histogram()
+
+        self.assertEqual(response["months"], [
+            {"month": "2025-03", "count": 1},
+            {"month": "2025-02", "count": 1},
+            {"month": "2025-01", "count": 2},
+        ])
+        self.assertEqual(response["undated"], 1)
+        self.assertEqual(response["total"], 5)
+
+    async def test_counts_route_counts_total_picked_and_rejected(self):
+        source = await self._source()
+        picked = await self._image(source["id"], "picked.jpg")
+        rejected_first = await self._image(source["id"], "rejected-first.jpg")
+        rejected_second = await self._image(source["id"], "rejected-second.jpg")
+        await self._image(source["id"], "unflagged.jpg")
+        conn = await db.get_db()
+        try:
+            await conn.execute("UPDATE images SET flag = 'picked' WHERE id = ?", (picked,))
+            await conn.execute(
+                "UPDATE images SET flag = 'rejected' WHERE id IN (?, ?)",
+                (rejected_first, rejected_second),
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+        db.invalidate_stats_cache()
+
+        response = await library_routes.api_counts()
+
+        self.assertEqual(response, {"total": 4, "picked": 1, "rejected": 2})
+
     async def test_expired_stats_cache_returns_stale_while_refreshing(self):
         stale_stats = {"total_images": 1, "active_images": 1}
         fresh_stats = {"total_images": 2, "active_images": 2}
