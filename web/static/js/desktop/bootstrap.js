@@ -14,6 +14,7 @@ import { initFilters } from './filters.js';
 import { initImporter } from './importer.js';
 import { initSimilar } from './similar.js';
 import { initGridContextMenu } from './context_menu.js';
+import { initExportMenu } from './export_menu.js';
 
 async function boot() {
     initState();
@@ -24,6 +25,7 @@ async function boot() {
     initImporter();
     initSimilar();
     initGridContextMenu();
+    initExportMenu();
     initOmnibox();
     initLoupe();
     initRefine();

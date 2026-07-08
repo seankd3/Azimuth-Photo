@@ -568,6 +568,8 @@ body[data-tab="photos"] #m-scrub { display: block; }
     color: var(--text-3);
 }
 .ml-head .ml-back { color: var(--accent); font-size: 13px; min-height: 44px; padding: 0 6px; }
+.ml-head .ml-more { width: 44px; height: 44px; border-radius: 50%; color: var(--text-2); font-size: 20px; }
+.ml-head .ml-more:active { background: rgba(255, 255, 255, .06); }
 .ml-suggest-head { padding-top: 2px; }
 .ml-suggest-row {
     display: flex;
@@ -905,6 +907,18 @@ body[data-tab="photos"] #m-scrub { display: block; }
     font-size: 14px;
 }
 .sheet-btn:disabled { opacity: .4; }
+.sheet-confirm {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    min-height: 52px;
+    padding: 4px;
+    color: var(--text);
+}
+.sheet-confirm[hidden] { display: none; }
+.sheet-confirm button { min-width: 64px; height: 40px; border-radius: var(--r-card); color: var(--accent); }
+.sheet-confirm button:active { background: rgba(255, 255, 255, .06); }
 .sheet-meta { padding: 2px 4px; font-size: 13px; color: var(--text-2); }
 .sheet-meta b { color: var(--text); font-weight: 600; text-align: right; overflow-wrap: anywhere; }
 .sheet-meta div { padding: 5px 0; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; gap: 12px; }

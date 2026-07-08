@@ -5,7 +5,7 @@
 
 import {
     createCollection, fetchJson, getAiStatus, getCacheStatus, getCatalog, getCollection, getCounts,
-    getPeopleStatus, listCollections, setBackgroundWork, thumbUrl,
+    deleteCollection, getPeopleStatus, listCollections, renameCollection, setBackgroundWork, thumbUrl,
 } from './api.js';
 import { nav, on, rememberImages, setScope, clearScope } from './state.js';
 import { openSheet, closeSheet } from './selection.js';
@@ -459,9 +459,10 @@ function newCollectionSheet() {
 async function openCollectionView(coll) {
     showingCollection = true;
     root.innerHTML =
-        `<div class="ml-head"><h3>${esc(coll.name)}</h3><button class="ml-back" id="ml-back">‹ Library</button></div>`
+        `<div class="ml-head"><button class="ml-back" id="ml-back">‹ Library</button><h3>${esc(coll.name)}</h3><button class="ml-more" id="ml-more" aria-label="Collection actions">⋯</button></div>`
         + `<div class="ml-coll-grid">${'<div class="skel-cell"></div>'.repeat(9)}</div>`;
     root.querySelector('#ml-back').addEventListener('click', render);
+    root.querySelector('#ml-more').addEventListener('click', () => openCollectionActionsSheet(coll));
 
     const data = await getCollection(coll.id, 1000);
     const images = (data && data.collection && data.collection.images) || [];
@@ -473,17 +474,71 @@ async function openCollectionView(coll) {
         + '</figure>'
     ).join('');
     root.innerHTML =
-        `<div class="ml-head"><h3>${esc(coll.name)}</h3><button class="ml-back" id="ml-back">‹ Library</button></div>`
+        `<div class="ml-head"><button class="ml-back" id="ml-back">‹ Library</button><h3>${esc(coll.name)}</h3><button class="ml-more" id="ml-more" aria-label="Collection actions">⋯</button></div>`
         + `<div class="ms-empty">${fmtInt(images.length)} photos${pct == null ? '' : ` · ${pct}% sorted`}</div>`
         + `<div class="ml-coll-grid">${grid || '<div class="ms-empty" style="grid-column:span 3">Empty collection.</div>'}</div>`;
     root.querySelector('#ml-back').addEventListener('click', () => {
         render();
         loadAll();
     });
+    root.querySelector('#ml-more').addEventListener('click', () => openCollectionActionsSheet(coll));
     root.querySelector('.ml-coll-grid').addEventListener('click', (e) => {
         const cell = e.target.closest('.mcell[data-i]');
         if (cell) openViewer(images, Number(cell.dataset.i));
     });
+}
+
+function openCollectionActionsSheet(coll) {
+    const sheet = openSheet(
+        `<h3>${esc(coll.name)}</h3>`
+        + '<input class="sheet-input" id="ml-rename-name" type="text" autocomplete="off">'
+        + '<button class="sheet-btn" id="ml-rename-save">Save name</button>'
+        + '<button class="sheet-row" id="ml-delete"><span class="g">✕</span>Delete collection</button>'
+        + '<div class="sheet-confirm" id="ml-delete-confirm" hidden>Delete? <button data-yes="1">Yes</button><button data-no="1">No</button></div>'
+    );
+    const input = sheet.querySelector('#ml-rename-name');
+    input.value = coll.name || '';
+    sheet.querySelector('#ml-rename-save').addEventListener('click', async () => {
+        const next = input.value.trim();
+        if (!next || next === coll.name) return;
+        closeSheet();
+        const result = await renameCollection(coll.id, next);
+        if (result && result.ok) {
+            showToast(`Renamed to “${next}”`);
+            collections = null;
+            coll.name = next;
+            await loadAll();
+            openCollectionView(coll);
+        } else {
+            showToast("Couldn't rename collection");
+        }
+    });
+    const deleteButton = sheet.querySelector('#ml-delete');
+    const confirm = sheet.querySelector('#ml-delete-confirm');
+    deleteButton.addEventListener('click', () => {
+        deleteButton.hidden = true;
+        confirm.hidden = false;
+        confirm.querySelector('[data-yes]')?.focus();
+    });
+    confirm.querySelector('[data-no]')?.addEventListener('click', () => {
+        confirm.hidden = true;
+        deleteButton.hidden = false;
+    });
+    confirm.querySelector('[data-yes]')?.addEventListener('click', async () => {
+        closeSheet();
+        const result = await deleteCollection(coll.id);
+        if (result && result.ok) {
+            showToast(`Deleted “${coll.name}”`);
+            collections = null;
+            counts = null;
+            showingCollection = false;
+            await loadAll();
+        } else {
+            showToast("Couldn't delete collection");
+        }
+    });
+    input.focus();
+    input.select();
 }
 
 export function initLibrary() {

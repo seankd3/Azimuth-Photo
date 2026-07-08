@@ -8,6 +8,14 @@ const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 }[c]));
 const fmt = (n) => Number(n || 0).toLocaleString('en-US');
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function dateLabel(value) {
+    if (value === 'undated') return 'Undated';
+    const match = String(value || '').match(/^(\d{4})-(\d{2})$/);
+    if (!match) return value;
+    return `${MONTHS[Number(match[2]) - 1] || match[2]} ${match[1]}`;
+}
 
 function chipHtml(key, label, extra = '') {
     return `<span class="chip" data-facet="${key}">${extra}<span>${esc(label)}</span><button class="chip-x" aria-label="Remove ${esc(label)}">×</button></span>`;
@@ -22,7 +30,7 @@ function renderChips() {
     if (scope.people) chips.push(chipHtml('people', scope.personLabel || 'Person', scope.personThumb ? `<img src="${esc(scope.personThumb)}" alt="">` : ''));
     if (scope.flag) chips.push(chipHtml('flag', scope.flag === 'picked' ? 'Picked' : scope.flag === 'rejected' ? 'Rejected' : 'Unflagged'));
     if (scope.folder) chips.push(chipHtml('folder', scope.folder.split('/').filter(Boolean).pop() || scope.folder));
-    if (scope.date_taken) chips.push(chipHtml('date_taken', scope.date_taken === 'undated' ? 'Undated' : scope.date_taken));
+    if (scope.date_taken) chips.push(chipHtml('date_taken', dateLabel(scope.date_taken)));
     if (scope.file_type) chips.push(chipHtml('file_type', String(scope.file_type).toUpperCase()));
     if (scope.camera) chips.push(chipHtml('camera', `camera:${scope.camera}`));
     if (scope.lens) chips.push(chipHtml('lens', `lens:${scope.lens}`));

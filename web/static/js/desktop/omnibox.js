@@ -1,10 +1,10 @@
 import { getPeople } from './api.js';
 import {
-    emit, on, setScope, setSort, toggleBestOf,
+    emit, on, scope, setScope, setSort, toggleBestOf,
 } from './state.js';
 import { scopeTokenHtml } from './contextbar.js';
 import {
-    exportCurrentScope, requestNewCollection, toggleLeftPanel,
+    exportCurrentScope, requestDeleteCurrentCollection, requestNewCollection, requestRenameCurrentCollection, toggleLeftPanel,
 } from './panel.js';
 import { switchLens } from './lenses.js';
 
@@ -24,7 +24,10 @@ const COMMANDS = [
     { glyph: '★', label: 'Toggle Best-of', kbd: 'B', run: toggleBestOf },
     { glyph: '⇩', label: 'Export CSV', run: () => exportCurrentScope('csv') },
     { glyph: '⇩', label: 'Export JSON', run: () => exportCurrentScope('json') },
+    { glyph: '⇩', label: 'Download files (zip)', run: () => exportCurrentScope('zip', 'original') },
     { glyph: '⊞', label: 'New collection', run: requestNewCollection },
+    { glyph: '⊞', label: 'Rename this collection', when: () => Boolean(scope.collectionId), run: requestRenameCurrentCollection },
+    { glyph: '⊞', label: 'Delete this collection', when: () => Boolean(scope.collectionId), run: requestDeleteCurrentCollection },
     { glyph: '▦', label: 'Switch lens: Grid', kbd: 'G', run: () => switchLens('grid') },
     { glyph: '☰', label: 'Switch lens: Events', kbd: 'E', run: () => switchLens('events') },
     { glyph: '◉', label: 'Switch lens: People', kbd: 'O', run: () => switchLens('people') },
@@ -94,7 +97,7 @@ async function build() {
     if (input.value.startsWith('>')) {
         rows.push({ head: 'Commands' });
         const query = input.value.slice(1);
-        for (const command of COMMANDS.filter((item) => fuzzy(item.label, query))) {
+        for (const command of COMMANDS.filter((item) => (!item.when || item.when()) && fuzzy(item.label, query))) {
             rows.push(command);
         }
         if (rows.length === 1) rows.push({ empty: 'No matching command.' });

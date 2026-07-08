@@ -344,7 +344,14 @@ export function describeScope() {
     if (scope.flag === 'unflagged') return 'Unflagged';
     if (scope.flag === 'rejected') return 'Rejected';
     if (scope.folder) return scope.folder.split('/').filter(Boolean).pop() || scope.folder;
-    if (scope.date_taken) return scope.date_taken === 'undated' ? 'Undated' : scope.date_taken;
+    if (scope.date_taken) {
+        const match = String(scope.date_taken).match(/^(\d{4})-(\d{2})$/);
+        if (match) {
+            const month = new Date(Number(match[1]), Number(match[2]) - 1, 1).toLocaleDateString(undefined, { month: 'short' });
+            return `${month} ${match[1]}`;
+        }
+        return scope.date_taken === 'undated' ? 'Undated' : scope.date_taken;
+    }
     if (scope.file_type) return String(scope.file_type).toUpperCase();
     if (scope.camera) return `camera:${scope.camera}`;
     if (scope.lens) return `lens:${scope.lens}`;

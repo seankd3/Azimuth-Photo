@@ -9,6 +9,7 @@ import { on, rememberImages, scope, scopeActive, scopeParams } from './state.js'
 import { showToast } from './toast.js';
 
 const RING_CIRCUMFERENCE = 62.83;
+const MAX_SCOPED_IDS = 2000;
 
 let root = null;
 let built = false;
@@ -83,6 +84,10 @@ function renderQuality(quality) {
 }
 
 async function refreshQuality() {
+    if (scope.similarImages && scope.similarImages.length) {
+        renderQuality(null);
+        return;
+    }
     const data = await getRankings(scopeParams({ limit: 1, offset: 0, sort: 'elo' }));
     if (data && data.sort_quality) renderQuality(data.sort_quality);
 }
@@ -113,7 +118,12 @@ function renderSet() {
 }
 
 function fetchSet(excludeIds = []) {
-    return mosaicNext(need(), scopeParams(), excludeIds.join(','));
+    const params = scopeParams();
+    if (scope.similarImages && scope.similarImages.length) {
+        const ids = scope.similarImages.map((img) => Number(img.id)).filter((id) => id > 0).slice(0, MAX_SCOPED_IDS);
+        params.set('ids', ids.join(','));
+    }
+    return mosaicNext(need(), params, excludeIds.join(','));
 }
 
 function prefetchNext() {

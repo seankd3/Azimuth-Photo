@@ -1,10 +1,14 @@
-import { getFilterOptions, getFolders, getPeople } from './api.js';
-import { on, scope, setScope } from './state.js';
+import { getDateHistogram, getFilterOptions, getFolders, getPeople } from './api.js';
+import { byId, on, scope, scopeParams, setScope } from './state.js';
+import { loadCollectionImages } from './scope_data.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
 
 let popover = null;
 let loaded = false;
 let loading = false;
+let expandedYear = '';
+let monthsLoading = false;
+const monthsByYear = new Map();
 let options = {
     people: [],
     folders: [],
@@ -19,6 +23,7 @@ const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 }[c]));
 const fmt = (n) => Number(n || 0).toLocaleString('en-US');
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 function personLabel(person) {
     return person.label || person.name || person.display_name || `Person ${person.id}`;
@@ -85,11 +90,84 @@ function renderPeople() {
 }
 
 function renderDate() {
-    const yearRows = optionRows(options.years, 'date_taken', (item) => item.year || item.value, (item) => item.year || item.value);
+    const yearRows = (options.years || []).map((item) => {
+        const year = String(item.year || item.value || '');
+        if (!year) return '';
+        const active = String(scope.date_taken || '') === year;
+        const expanded = expandedYear === year;
+        const months = monthsByYear.get(year) || [];
+        const monthRows = expanded
+            ? '<div class="filter-months">'
+                + (monthsLoading && !months.length ? '<div class="filter-empty">Loading months…</div>' : months.map((month) => {
+                    const activeMonth = scope.date_taken === month.value;
+                    return `<button class="filter-row filter-month ${activeMonth ? 'active' : ''}" data-key="date_taken" data-value="${month.value}">`
+                        + `<span>${esc(month.label)}</span><span class="num">${fmt(month.count)}</span></button>`;
+                }).join('') || '<div class="filter-empty">No months in this year.</div>')
+                + '</div>'
+            : '';
+        return `<button class="filter-row ${active ? 'active' : ''}" data-key="date_taken" data-value="${esc(year)}" data-year="${esc(year)}">`
+            + `<span>${esc(year)}</span><span class="num">${esc(countLabel(item))}</span></button>${monthRows}`;
+    }).join('');
     const undated = Number(options.undated || 0) > 0
         ? `<button class="filter-row ${scope.date_taken === 'undated' ? 'active' : ''}" data-key="date_taken" data-value="undated"><span>Undated</span><span class="num">${fmt(options.undated)}</span></button>`
         : '';
     return selectBlock('Date', yearRows + undated, 'data-filter-section="date"');
+}
+
+function monthLabel(value) {
+    const [year, month] = String(value || '').split('-');
+    const index = Number(month) - 1;
+    return index >= 0 && index < MONTHS.length ? `${MONTHS[index]} ${year}` : value;
+}
+
+function monthFromDate(value) {
+    if (!value) return '';
+    const match = String(value).match(/^(\d{4})-(\d{2})/);
+    return match ? `${match[1]}-${match[2]}` : '';
+}
+
+async function scopedMonthCounts(year) {
+    if (scope.collectionId) {
+        const images = await loadCollectionImages(scope.collectionId);
+        return images.reduce((acc, img) => {
+            const month = monthFromDate(img.date_taken);
+            if (month.startsWith(`${year}-`)) acc.set(month, (acc.get(month) || 0) + 1);
+            return acc;
+        }, new Map());
+    }
+    if (scope.similarIds.length) {
+        return scope.similarIds.map(Number).reduce((acc, id) => {
+            const img = byId.get(id);
+            const month = monthFromDate(img && img.date_taken);
+            if (month.startsWith(`${year}-`)) acc.set(month, (acc.get(month) || 0) + 1);
+            return acc;
+        }, new Map());
+    }
+    const params = scopeParams();
+    params.delete('sort');
+    params.delete('date_taken');
+    const data = await getDateHistogram(params);
+    return (data && data.months ? data.months : []).reduce((acc, item) => {
+        const month = item.month || '';
+        if (month.startsWith(`${year}-`)) acc.set(month, Number(item.count) || 0);
+        return acc;
+    }, new Map());
+}
+
+async function expandYear(year) {
+    expandedYear = expandedYear === year ? '' : year;
+    if (!expandedYear || monthsByYear.has(year)) {
+        render();
+        return;
+    }
+    monthsLoading = true;
+    render();
+    const counts = await scopedMonthCounts(year);
+    monthsByYear.set(year, [...counts.entries()]
+        .sort((a, b) => b[0].localeCompare(a[0]))
+        .map(([value, count]) => ({ value, count, label: monthLabel(value) })));
+    monthsLoading = false;
+    render();
 }
 
 function renderRanked() {
@@ -149,6 +227,7 @@ function bindRows() {
         row.addEventListener('click', () => {
             const key = row.dataset.key;
             const value = scope[key] === row.dataset.value ? '' : row.dataset.value;
+            if (row.dataset.year) expandYear(row.dataset.year);
             if (key === 'people') {
                 const person = options.people.find((item) => String(item.id) === String(value));
                 selectValue(key, value, {

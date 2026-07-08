@@ -1,6 +1,6 @@
 import {
     addToCollection, createCollection, getCatalog, getCollectionSuggestions,
-    listCollections, removeFromCollection, thumbUrl,
+    deleteCollection, listCollections, removeFromCollection, renameCollection, thumbUrl,
 } from './api.js';
 import { loadCollectionImageIds } from './scope_data.js';
 import {
@@ -9,6 +9,7 @@ import {
 import { selectedIds, setCollectionPicker } from './selection.js';
 import { showToast } from './toast.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
+import { downloadExport, openExportMenu } from './export_menu.js';
 
 const DISMISSED_KEY = 'pa_d_dismissed_suggestions';
 let collections = [];
@@ -16,6 +17,8 @@ let catalog = null;
 let suggestions = null;
 let suggestionsLoading = false;
 let drawerOpen = false;
+let collectionMenu = null;
+let collectionMenuReturn = null;
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -52,12 +55,19 @@ function renderCollections() {
         return;
     }
     host.innerHTML = collections.map((c) => (
-        `<button class="nav-row coll-row ${String(scope.collectionId || '') === String(c.id) ? 'active' : ''}" data-coll-id="${c.id}" data-coll-name="${esc(c.name)}">`
+        `<div class="nav-row coll-row ${String(scope.collectionId || '') === String(c.id) ? 'active' : ''}" data-coll-id="${c.id}" data-coll-name="${esc(c.name)}" role="button" tabindex="0">`
         + `<span class="coll-cover">${c.cover_image_id ? `<img src="${esc(thumbUrl('sm', c.cover_image_id))}" alt="">` : '⊞'}</span>`
-        + `<span class="nr-label">${esc(c.name)}</span><span class="nr-count">${fmt(c.image_count)}</span></button>`
+        + `<span class="nr-label">${esc(c.name)}</span><span class="nr-count">${fmt(c.image_count)}</span>`
+        + '<button class="coll-menu-btn" type="button" aria-label="Collection actions">⋯</button></div>'
     )).join('');
     for (const row of host.querySelectorAll('.coll-row')) {
         row.addEventListener('click', () => {
+            setScope({ collectionId: row.dataset.collId, collectionName: row.dataset.collName || 'Collection' });
+            closeLeftDrawer();
+        });
+        row.addEventListener('keydown', (event) => {
+            if (event.target.closest('.coll-menu-btn') || (event.key !== 'Enter' && event.key !== ' ')) return;
+            event.preventDefault();
             setScope({ collectionId: row.dataset.collId, collectionName: row.dataset.collName || 'Collection' });
             closeLeftDrawer();
         });
@@ -73,7 +83,141 @@ function renderCollections() {
             const ids = selectedIds();
             if (ids.length) await addImagesToCollection(Number(row.dataset.collId), ids);
         });
+        const menuButton = row.querySelector('.coll-menu-btn');
+        menuButton?.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            openCollectionMenu(row, menuButton);
+        });
+        menuButton?.addEventListener('keydown', (event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
+            event.stopPropagation();
+            openCollectionMenu(row, menuButton);
+        });
     }
+}
+
+function ensureCollectionMenu() {
+    if (collectionMenu) return collectionMenu;
+    collectionMenu = document.createElement('div');
+    collectionMenu.id = 'collection-pop-menu';
+    collectionMenu.className = 'pop-menu grid-pop-menu';
+    collectionMenu.setAttribute('role', 'menu');
+    collectionMenu.hidden = true;
+    document.body.appendChild(collectionMenu);
+    collectionMenu.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            closeCollectionMenu();
+        }
+    });
+    return collectionMenu;
+}
+
+function positionCollectionMenu(anchor) {
+    const rect = anchor.getBoundingClientRect();
+    const menuRect = collectionMenu.getBoundingClientRect();
+    const left = Math.max(8, Math.min(window.innerWidth - menuRect.width - 8, rect.left));
+    const top = Math.max(8, Math.min(window.innerHeight - menuRect.height - 8, rect.bottom + 6));
+    collectionMenu.style.left = `${left}px`;
+    collectionMenu.style.top = `${top}px`;
+}
+
+function closeCollectionMenu() {
+    if (!collectionMenu || collectionMenu.hidden) return;
+    collectionMenu.hidden = true;
+    releaseFocus(collectionMenu);
+    if (collectionMenuReturn && document.contains(collectionMenuReturn) && collectionMenuReturn.focus) {
+        collectionMenuReturn.focus({ preventScroll: true });
+    }
+}
+
+function collectionById(collectionId) {
+    return collections.find((item) => Number(item.id) === Number(collectionId)) || null;
+}
+
+function openCollectionMenu(row, anchor) {
+    ensureCollectionMenu();
+    releaseFocus(collectionMenu);
+    collectionMenuReturn = anchor;
+    const id = Number(row.dataset.collId);
+    const name = row.dataset.collName || 'Collection';
+    collectionMenu.innerHTML = '<div class="pm-group"><button data-act="rename">Rename</button><button data-act="delete">Delete</button></div>';
+    collectionMenu.hidden = false;
+    positionCollectionMenu(anchor);
+    trapFocus(collectionMenu, collectionMenu.querySelector('button'));
+    for (const button of collectionMenu.querySelectorAll('[data-act]')) {
+        button.addEventListener('click', () => {
+            const action = button.dataset.act;
+            closeCollectionMenu();
+            if (action === 'rename') startCollectionRename(id);
+            if (action === 'delete') startCollectionDelete(id, name);
+        });
+    }
+}
+
+function startCollectionRename(collectionId) {
+    const row = document.querySelector(`.coll-row[data-coll-id="${collectionId}"]`);
+    const coll = collectionById(collectionId);
+    if (!row || !coll) return;
+    row.outerHTML = `<form class="coll-rename-form" data-rename-coll="${collectionId}">`
+        + `<input value="${esc(coll.name)}" maxlength="160" autocomplete="off" aria-label="Collection name">`
+        + '<button type="submit">Save</button></form>';
+    const form = document.querySelector(`.coll-rename-form[data-rename-coll="${collectionId}"]`);
+    const input = form.querySelector('input');
+    const cancel = () => renderCollections();
+    const submit = async () => {
+        const name = input.value.trim();
+        if (!name || name === coll.name) {
+            cancel();
+            return;
+        }
+        const result = await renameCollection(collectionId, name);
+        if (result && result.ok) {
+            showToast(`Renamed to “${name}”`);
+            if (String(scope.collectionId || '') === String(collectionId)) {
+                setScope({ collectionId, collectionName: name }, { merge: true });
+            }
+            await loadCollections();
+        } else {
+            showToast("Couldn't rename collection");
+            renderCollections();
+        }
+    };
+    form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        submit();
+    });
+    input.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            cancel();
+        }
+    });
+    input.focus();
+    input.select();
+}
+
+function startCollectionDelete(collectionId, name = 'Collection') {
+    const row = document.querySelector(`.coll-row[data-coll-id="${collectionId}"]`);
+    if (!row) return;
+    row.outerHTML = `<div class="coll-confirm" data-delete-coll="${collectionId}">Delete? `
+        + '<button data-yes="1">Yes</button> / <button data-no="1">No</button></div>';
+    const confirm = document.querySelector(`.coll-confirm[data-delete-coll="${collectionId}"]`);
+    confirm.querySelector('[data-no]')?.addEventListener('click', renderCollections);
+    confirm.querySelector('[data-yes]')?.addEventListener('click', async () => {
+        const result = await deleteCollection(collectionId);
+        if (result && result.ok) {
+            showToast(`Deleted “${name}”`);
+            if (String(scope.collectionId || '') === String(collectionId)) setScope({});
+            await loadCollections();
+        } else {
+            showToast("Couldn't delete collection");
+            renderCollections();
+        }
+    });
+    confirm.querySelector('[data-yes]')?.focus();
 }
 
 function renderSuggestions() {
@@ -255,28 +399,36 @@ export async function openCollectionPicker(imageIds, { onDone = null } = {}) {
     trapFocus(picker, picker.querySelector('input'));
 }
 
-export async function exportCurrentScope(format = 'csv') {
+export async function exportCurrentScope(format = 'csv', size = '') {
     const params = scopeParams({ format });
+    if (size) params.set('size', size);
     if (viewState.bestOf && viewState.bestOfLimit != null) {
         params.set('sort', 'elo');
         params.set('limit', String(viewState.bestOfLimit));
     }
+    let count = viewState.bestOf && viewState.bestOfLimit != null ? viewState.bestOfLimit : viewState.visibleImages;
     if (scope.collectionId) {
         const ids = await loadCollectionImageIds(scope.collectionId);
         if (!ids.length) {
             showToast('Collection is empty');
             return;
         }
+        count = ids.length;
         params.set('ids', ids.join(','));
     }
     if (scope.similarIds.length) {
-        params.set('ids', scope.similarIds.map(Number).filter((id) => id > 0).join(','));
+        const ids = scope.similarIds.map(Number).filter((id) => id > 0);
+        count = ids.length;
+        params.set('ids', ids.join(','));
     }
-    const link = document.getElementById('download-link');
-    link.href = `/api/export?${params.toString()}`;
-    link.download = `photoarchive-export.${format}`;
-    link.click();
-    showToast(`Exporting current view as ${format.toUpperCase()}`);
+    downloadExport(params, {
+        count: format === 'zip' ? count : 0,
+        message: format === 'zip' ? 'Preparing current view zip' : `Exporting current view as ${format.toUpperCase()}`,
+    });
+}
+
+export function openScopeExportMenu(anchor) {
+    openExportMenu(anchor, ({ format, size }) => exportCurrentScope(format, size));
 }
 
 export function openLeftDrawer() {
@@ -321,6 +473,24 @@ export function requestNewCollection() {
     document.getElementById('new-coll-name').focus();
 }
 
+export function requestRenameCurrentCollection() {
+    if (!scope.collectionId) {
+        showToast('Open a collection first');
+        return;
+    }
+    if (narrowPanel()) openLeftDrawer();
+    startCollectionRename(scope.collectionId);
+}
+
+export function requestDeleteCurrentCollection() {
+    if (!scope.collectionId) {
+        showToast('Open a collection first');
+        return;
+    }
+    if (narrowPanel()) openLeftDrawer();
+    startCollectionDelete(scope.collectionId, scope.collectionName || 'Collection');
+}
+
 export async function initPanel() {
     setCollectionPicker(openCollectionPicker);
     document.getElementById('shell').classList.toggle('left-collapsed', viewState.leftCollapsed);
@@ -329,7 +499,13 @@ export async function initPanel() {
     window.matchMedia('(max-width: 880px)').addEventListener('change', (event) => {
         if (!event.matches) closeLeftDrawer();
     });
-    document.getElementById('export-view').addEventListener('click', () => exportCurrentScope('csv'));
+    ensureCollectionMenu();
+    document.addEventListener('pointerdown', (event) => {
+        if (!collectionMenu || collectionMenu.hidden || collectionMenu.contains(event.target) || event.target.closest('.coll-menu-btn')) return;
+        closeCollectionMenu();
+    });
+    window.addEventListener('resize', closeCollectionMenu);
+    document.getElementById('export-view').addEventListener('click', (event) => openScopeExportMenu(event.currentTarget));
     document.getElementById('new-coll-btn').addEventListener('click', requestNewCollection);
     document.getElementById('new-coll-form').addEventListener('submit', async (event) => {
         event.preventDefault();

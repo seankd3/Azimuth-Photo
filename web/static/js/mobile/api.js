@@ -95,6 +95,14 @@ export async function createCollection(name, imageIds = [], description = '') {
     });
 }
 
+export async function renameCollection(collectionId, name) {
+    return postJson(`/api/user-collections/${collectionId}/rename`, { name });
+}
+
+export async function deleteCollection(collectionId) {
+    return postJson(`/api/user-collections/${collectionId}/delete`, {});
+}
+
 export async function addToCollection(collectionId, imageIds) {
     return postJson(`/api/user-collections/${collectionId}/images`, { image_ids: imageIds });
 }
@@ -155,6 +163,8 @@ export async function setBackgroundWork(kind, action) {
     return postJson(url, {});
 }
 
-export function exportUrl(imageIds, format = 'csv') {
-    return `/api/export?format=${format}&ids=${imageIds.join(',')}`;
+export function exportUrl(imageIds, format = 'csv', size = '') {
+    const params = new URLSearchParams({ format, ids: imageIds.join(',') });
+    if (size) params.set('size', size);
+    return `/api/export?${params.toString()}`;
 }

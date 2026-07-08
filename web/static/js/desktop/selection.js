@@ -3,6 +3,7 @@ import {
 } from './state.js';
 import { writeFlags } from './api.js';
 import { showToast } from './toast.js';
+import { downloadExport, openExportMenu } from './export_menu.js';
 
 let collectionPicker = null;
 
@@ -83,14 +84,17 @@ export async function applyFlags(rawIds, flag) {
     });
 }
 
-function exportSelection() {
+function exportSelection(anchor) {
     const imageIds = ids();
     if (!imageIds.length) return;
-    const link = document.getElementById('download-link');
-    link.href = `/api/export?format=csv&ids=${imageIds.join(',')}`;
-    link.download = 'photoarchive-export.csv';
-    link.click();
-    showToast(`Exporting ${imageIds.length} photos`);
+    openExportMenu(anchor, ({ format, size }) => {
+        const params = new URLSearchParams({ format, ids: imageIds.join(',') });
+        if (size) params.set('size', size);
+        downloadExport(params, {
+            count: format === 'zip' ? imageIds.length : 0,
+            message: format === 'zip' ? `Preparing ${imageIds.length} files` : `Exporting ${imageIds.length} photos as ${format.toUpperCase()}`,
+        });
+    });
 }
 
 function render({ imageIds = null } = {}) {
@@ -130,6 +134,6 @@ export function initSelection() {
     document.getElementById('sel-collection').addEventListener('click', () => {
         if (collectionPicker) collectionPicker(ids(), { onDone: clearSelection });
     });
-    document.getElementById('sel-export').addEventListener('click', exportSelection);
+    document.getElementById('sel-export').addEventListener('click', (event) => exportSelection(event.currentTarget));
     document.getElementById('sel-close').addEventListener('click', clearSelection);
 }

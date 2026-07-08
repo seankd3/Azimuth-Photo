@@ -13,6 +13,7 @@ import { showToast } from './toast.js';
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 }[c]));
+const ZIP_EXPORT_MAX = 2000;
 
 /* ---------- bottom sheet ---------- */
 let sheetOpen = false;
@@ -103,13 +104,17 @@ export async function openCollectionSheet(rawIds, { onDone = null } = {}) {
 }
 
 /* ---------- export ---------- */
-export function exportImages(ids, format = 'csv') {
+export function exportImages(ids, format = 'csv', size = '') {
     if (!ids.length) return;
+    if (format === 'zip' && ids.length > ZIP_EXPORT_MAX) {
+        showToast(`Zip export is limited to ${ZIP_EXPORT_MAX.toLocaleString('en-US')} photos`);
+        return;
+    }
     const anchor = document.getElementById('m-dl');
-    anchor.href = exportUrl(ids, format);
-    anchor.download = `photoarchive-export.${format}`;
+    anchor.href = exportUrl(ids, format, size);
+    anchor.download = format === 'zip' ? 'photoarchive-export.zip' : `photoarchive-export.${format}`;
     anchor.click();
-    showToast(`Exporting ${ids.length} photos…`);
+    showToast(format === 'zip' ? `Preparing ${ids.length} files…` : `Exporting ${ids.length} photos…`);
 }
 
 /* ---------- selection bar ---------- */
@@ -144,12 +149,14 @@ export function initSelection() {
             + '<button class="sheet-row" data-act="unflag"><span class="g">○</span>Unflag</button>'
             + '<button class="sheet-row" data-act="csv"><span class="g">⤓</span>Export CSV</button>'
             + '<button class="sheet-row" data-act="json"><span class="g">⤓</span>Export JSON</button>'
+            + '<button class="sheet-row" data-act="zip"><span class="g">⤓</span>Download files (zip)</button>'
         );
         for (const row of sheet.querySelectorAll('.sheet-row[data-act]')) {
             row.addEventListener('click', () => {
                 closeSheet();
                 clearSelection();
                 if (row.dataset.act === 'unflag') applyFlags(ids, 'unflagged');
+                else if (row.dataset.act === 'zip') exportImages(ids, 'zip', 'original');
                 else exportImages(ids, row.dataset.act);
             });
         }

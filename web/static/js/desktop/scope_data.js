@@ -43,7 +43,7 @@ export async function loadScopePage({ limit = 100, offset = 0, sort = null } = {
     return getRankings(params);
 }
 
-export async function loadCollectionImageIds(collectionId = scope.collectionId) {
+export async function loadCollectionImages(collectionId = scope.collectionId) {
     if (!collectionId) return [];
     const first = await getCollection(collectionId, { limit: 1000, offset: 0 });
     const collection = first && first.collection;
@@ -59,5 +59,10 @@ export async function loadCollectionImageIds(collectionId = scope.collectionId) 
         offset += incoming.length;
     }
     rememberImages(images);
+    return images;
+}
+
+export async function loadCollectionImageIds(collectionId = scope.collectionId) {
+    const images = await loadCollectionImages(collectionId);
     return images.map((img) => Number(img.id)).filter((id) => id > 0);
 }

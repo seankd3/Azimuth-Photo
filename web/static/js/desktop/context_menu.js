@@ -1,7 +1,7 @@
 import { emit, on, selection } from './state.js';
 import { applyFlags } from './selection.js';
 import { openCollectionPicker } from './panel.js';
-import { showToast } from './toast.js';
+import { downloadExport } from './export_menu.js';
 
 let menu = null;
 let returnEl = null;
@@ -29,14 +29,17 @@ function ensureMenu() {
     return menu;
 }
 
-function exportIds(ids) {
+function exportIds(ids, format = 'csv', size = '') {
     const imageIds = ids.map(Number).filter((id) => id > 0);
     if (!imageIds.length) return;
-    const link = document.getElementById('download-link');
-    link.href = `/api/export?format=csv&ids=${imageIds.join(',')}`;
-    link.download = 'photoarchive-export.csv';
-    link.click();
-    showToast(`Exporting ${imageIds.length} photo${imageIds.length === 1 ? '' : 's'}`);
+    const params = new URLSearchParams({ format, ids: imageIds.join(',') });
+    if (size) params.set('size', size);
+    downloadExport(params, {
+        count: format === 'zip' ? imageIds.length : 0,
+        message: format === 'zip'
+            ? `Preparing ${imageIds.length} file${imageIds.length === 1 ? '' : 's'}`
+            : `Exporting ${imageIds.length} photo${imageIds.length === 1 ? '' : 's'} as ${format.toUpperCase()}`,
+    });
 }
 
 function render() {
@@ -49,7 +52,13 @@ function render() {
         + `<button data-act="collection">⊞ Add ${count > 1 ? `${count} to collection` : 'to collection'}</button>`
         + '<button data-act="loupe">Open in Loupe</button>'
         + '<button data-act="similar">≈ Find similar</button>'
-        + `<button data-act="export">⇩ Export ${count > 1 ? 'selection' : 'photo'}</button>`
+        + '</div><div class="pm-group">'
+        + `<div class="pm-label">Export ${count > 1 ? 'selection' : 'photo'}</div>`
+        + '<button data-act="export-csv">⇩ CSV</button>'
+        + '<button data-act="export-json">⇩ JSON</button>'
+        + '<button data-act="export-zip-original">Download files · Original</button>'
+        + '<button data-act="export-zip-lg">Download files · Large</button>'
+        + '<button data-act="export-zip-md">Download files · Medium</button>'
         + '</div>';
     for (const button of menu.querySelectorAll('[data-act]')) {
         button.addEventListener('click', () => run(button.dataset.act));
@@ -65,7 +74,9 @@ function run(action) {
     else if (action === 'collection') openCollectionPicker(ids);
     else if (action === 'loupe') emit('loupe:open', { id: target.id, index: target.index });
     else if (action === 'similar') emit('similar:find', { imageId: target.id });
-    else if (action === 'export') exportIds(ids);
+    else if (action === 'export-csv') exportIds(ids, 'csv');
+    else if (action === 'export-json') exportIds(ids, 'json');
+    else if (action.startsWith('export-zip-')) exportIds(ids, 'zip', action.replace('export-zip-', ''));
 }
 
 function clampPosition(x, y) {

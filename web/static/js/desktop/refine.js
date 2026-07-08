@@ -19,6 +19,7 @@ let startedAt = 0;
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 }[c]));
+const MAX_SCOPED_IDS = 2000;
 
 function need() {
     return mode === 'duel' ? 2 : 4;
@@ -74,6 +75,10 @@ function renderSet() {
 }
 
 async function refreshQuality() {
+    if (scope.collectionId || scope.similarIds.length) {
+        document.getElementById('refine-quality').textContent = '';
+        return;
+    }
     const data = await getRankings(refineParams({ limit: 1, offset: 0, sort: 'elo' }));
     if (!data) return;
     setRankingsMeta({ visibleImages: data.visible_images, sortQuality: data.sort_quality });
@@ -87,7 +92,10 @@ function fetchSet(excludeIds = []) {
     const avgElo = currentSet.length
         ? currentSet.reduce((sum, img) => sum + (Number(img.elo) || 1200), 0) / currentSet.length
         : 0;
-    return mosaicNext(need(), refineParams(), excludeIds.join(','), strategy, avgElo);
+    const params = refineParams();
+    if (scope.collectionId) params.set('collection_id', String(scope.collectionId));
+    if (scope.similarIds.length) params.set('ids', scope.similarIds.map(Number).filter((id) => id > 0).slice(0, MAX_SCOPED_IDS).join(','));
+    return mosaicNext(need(), params, excludeIds.join(','), strategy, avgElo);
 }
 
 function prefetch() {
@@ -191,8 +199,12 @@ export async function undoRefine() {
 
 export function openRefine() {
     if (open) return;
-    if (scope.collectionId || scope.similarIds.length || scope.import_batch) {
-        showToast('Refine needs backend filtering for this view first.');
+    if (scope.import_batch) {
+        showToast('Refine is not available for import batches yet.');
+        return;
+    }
+    if (scope.similarIds.length > MAX_SCOPED_IDS) {
+        showToast(`Refine is limited to ${MAX_SCOPED_IDS.toLocaleString('en-US')} similar photos`);
         return;
     }
     open = true;

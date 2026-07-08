@@ -140,6 +140,14 @@ export async function createCollection(name, imageIds = [], description = '') {
     return postJson('/api/user-collections', { name, description, image_ids: imageIds });
 }
 
+export async function renameCollection(collectionId, name) {
+    return postJson(`/api/user-collections/${collectionId}/rename`, { name });
+}
+
+export async function deleteCollection(collectionId) {
+    return postJson(`/api/user-collections/${collectionId}/delete`);
+}
+
 export async function addToCollection(collectionId, imageIds) {
     return postJson(`/api/user-collections/${collectionId}/images`, { image_ids: imageIds });
 }
