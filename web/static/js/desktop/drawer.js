@@ -1,7 +1,8 @@
 import {
     addCatalogSource, clearCache, getAiStatus, getCacheStatus, getCatalog, getPeopleStatus,
-    getRemoteAccess, getScanStatus, pauseAiEmbeddings, pausePeopleScan, removeCatalogSource,
-    rescanCatalogSource, resumeAiEmbeddings, resumePeopleScan, startCachePregen, stopCachePregen,
+    getRemoteAccess, getScanStatus, getSettings, installAiModel, pauseAiEmbeddings,
+    pausePeopleScan, removeCatalogSource, rescanCatalogSource, resetSettings, resumeAiEmbeddings,
+    resumePeopleScan, saveSettings, startCachePregen, stopCachePregen,
 } from './api.js';
 import {
     on, patchPrefs, setThumbSize, viewState,
@@ -12,6 +13,7 @@ import { showToast } from './toast.js';
 let open = false;
 let drawerTimer = null;
 let activityTimer = null;
+let installTimer = null;
 let scanTimer = null;
 let scanSourceId = null;
 let catalog = null;
@@ -19,6 +21,34 @@ let aiStatus = null;
 let cacheStatus = null;
 let peopleStatus = null;
 let remoteAccess = null;
+let settingsPageData = null;
+let savedSettings = {};
+let draftSettings = {};
+let dirtySettings = new Set();
+let openSettingSections = new Set();
+let resetConfirmArmed = false;
+
+const MODEL_SAVE_FIELDS = ['embed_model_preset', 'embed_model_id', 'embed_model_revision', 'embed_model_dir', 'embed_model_dim'];
+const THUMB_FIELDS = ['thumb_size_sm', 'thumb_size_md', 'thumb_size_lg', 'thumb_quality'];
+const SETTING_DEFS = {
+    embed_model_preset: { type: 'select' },
+    memory_cache_gb: { type: 'number', min: 0, max: 64, step: 0.25, unit: 'GB' },
+    ssd_cache_gb: { type: 'number', min: 0, max: 4096, step: 1, unit: 'GB' },
+    cache_profile: { type: 'select' },
+    ssd_cache_dir: { type: 'text' },
+    search_similarity_threshold: { type: 'number', min: 0.1, max: 0.8, step: 0.05 },
+    show_loupe_cache_status: { type: 'checkbox' },
+    import_root: { type: 'text' },
+    thumb_size_sm: { type: 'number', min: 64, max: 4096, step: 1, unit: 'px' },
+    thumb_size_md: { type: 'number', min: 128, max: 8192, step: 1, unit: 'px' },
+    thumb_size_lg: { type: 'number', min: 128, max: 8192, step: 1, unit: 'px' },
+    thumb_quality: { type: 'number', min: 40, max: 100, step: 1, unit: '%' },
+    face_model_id: { type: 'text' },
+    face_model_dir: { type: 'text' },
+    face_detection_size: { type: 'number', min: 160, max: 1280, step: 32, unit: 'px' },
+    face_similarity_threshold: { type: 'number', min: 0.1, max: 0.9, step: 0.01 },
+    face_merge_suggestion_threshold: { type: 'number', min: 0.1, max: 0.95, step: 0.01 },
+};
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -48,6 +78,108 @@ function progress(done, total) {
     return t > 0 ? pct((d / t) * 100) : 0;
 }
 
+function applySettingsData(data, { preserveDirtyExcept = null } = {}) {
+    if (!data) return;
+    const previousDraft = { ...draftSettings };
+    const previousDirty = new Set(dirtySettings);
+    settingsPageData = data;
+    savedSettings = { ...(data.settings || {}) };
+    draftSettings = { ...savedSettings };
+    dirtySettings = new Set();
+    if (preserveDirtyExcept) {
+        for (const field of previousDirty) {
+            if (preserveDirtyExcept.has(field)) continue;
+            draftSettings[field] = previousDraft[field];
+            if (!sameSettingValue(field, draftSettings[field], savedSettings[field])) dirtySettings.add(field);
+        }
+    }
+    aiStatus = data.ai_status || aiStatus;
+    cacheStatus = data.cache_stats || cacheStatus;
+    peopleStatus = data.people_status || peopleStatus;
+    catalog = data.catalog || catalog;
+    resetConfirmArmed = false;
+}
+
+function settingValue(field) {
+    if (Object.prototype.hasOwnProperty.call(draftSettings, field)) return draftSettings[field];
+    if (Object.prototype.hasOwnProperty.call(savedSettings, field)) return savedSettings[field];
+    return '';
+}
+
+function normalizeSettingValue(field, value) {
+    const def = SETTING_DEFS[field] || {};
+    if (def.type === 'checkbox') return Boolean(value);
+    if (def.type === 'number') {
+        const n = Number(value);
+        if (!Number.isFinite(n)) return 0;
+        return n;
+    }
+    return String(value == null ? '' : value);
+}
+
+function sameSettingValue(field, left, right) {
+    const def = SETTING_DEFS[field] || {};
+    if (def.type === 'number') return Number(left) === Number(right);
+    if (def.type === 'checkbox') return Boolean(left) === Boolean(right);
+    return String(left == null ? '' : left) === String(right == null ? '' : right);
+}
+
+function setDraftSetting(field, value) {
+    draftSettings[field] = normalizeSettingValue(field, value);
+    if (sameSettingValue(field, draftSettings[field], savedSettings[field])) dirtySettings.delete(field);
+    else dirtySettings.add(field);
+    resetConfirmArmed = false;
+}
+
+function embeddingPresetConfig(key = settingValue('embed_model_preset')) {
+    const preset = (settingsPageData && settingsPageData.embedding_model_presets || [])
+        .find((item) => item.key === key);
+    if (!preset) return { embed_model_preset: key || '' };
+    return {
+        embed_model_preset: preset.key,
+        embed_model_id: preset.model_id,
+        embed_model_revision: preset.revision || 'main',
+        embed_model_dir: preset.model_dir,
+        embed_model_dim: Number(preset.dimension || 0),
+    };
+}
+
+function collectModelSettings() {
+    return embeddingPresetConfig(settingValue('embed_model_preset'));
+}
+
+function collectDirtySettings() {
+    const payload = {};
+    for (const field of dirtySettings) {
+        payload[field] = draftSettings[field];
+    }
+    if (dirtySettings.has('embed_model_preset')) Object.assign(payload, collectModelSettings());
+    if (THUMB_FIELDS.some((field) => dirtySettings.has(field))) {
+        payload.thumbnail_cache_policy = document.querySelector('input[name="drawer_thumbnail_cache_policy"]:checked')?.value || 'keep';
+    }
+    return payload;
+}
+
+function recommendedMemoryGb(settings = {}) {
+    const systemRam = Number(settings.system_memory_gb || 0);
+    if (systemRam >= 32) return 4;
+    if (systemRam >= 16) return 2;
+    if (systemRam >= 8) return 1;
+    return 0.5;
+}
+
+function drawerEditing() {
+    const body = document.getElementById('drawer-body');
+    const active = document.activeElement;
+    if (!body || !active || !body.contains(active)) return false;
+    return ['INPUT', 'SELECT', 'TEXTAREA'].includes(active.tagName);
+}
+
+function hasInvalidSetting() {
+    const body = document.getElementById('drawer-body');
+    return Boolean(body && body.querySelector('[data-setting-field]:invalid'));
+}
+
 function activeProgress() {
     const ai = pct(aiStatus && aiStatus.progress_pct);
     const pregen = cacheStatus && cacheStatus.pregen ? cacheStatus.pregen : {};
@@ -58,6 +190,43 @@ function activeProgress() {
         ? pct(worker.progress_pct)
         : progress(counts.detected_faces || counts.people || 0, (counts.detected_faces || 0) + (counts.pending_cached_images || 0));
     return { ai, cache, people };
+}
+
+function modelStateLine(status = aiStatus || {}) {
+    const index = status.embedding_index || {};
+    const state = String(index.worker_state || status.worker_state || '').replace(/_/g, ' ');
+    if (index.installing || status.installing) return `installing${index.install_message || status.install_message ? ` · ${index.install_message || status.install_message}` : ''}`;
+    if (state === 'loading model' || state === 'loading') return `loading${index.worker_message || status.worker_message ? ` · ${index.worker_message || status.worker_message}` : ''}`;
+    if (state === 'error' || status.worker_error) return `error${status.worker_error ? ` · ${status.worker_error}` : ''}`;
+    if (index.installed || status.model_installed) {
+        const remaining = Number(index.remaining ?? status.remaining ?? 0);
+        if (remaining <= 0) return 'ready';
+        return `${state || 'indexing'} · ${fmt(remaining)} remaining`;
+    }
+    return 'not installed';
+}
+
+function modelLine() {
+    const status = aiStatus || {};
+    const index = status.embedding_index || {};
+    const modelId = index.model_id || status.model_id || settingValue('embed_model_preset') || 'No model selected';
+    const dim = Number(index.dimension || status.model_dimension || 0);
+    return `${modelId}${dim ? ` · ${fmt(dim)}d` : ''} · ${modelStateLine(status)}`;
+}
+
+function cacheUsageLine() {
+    const memory = (cacheStatus && cacheStatus.memory) || {};
+    const disk = (cacheStatus && cacheStatus.disk) || {};
+    const pregen = (cacheStatus && cacheStatus.pregen) || {};
+    return `RAM ${bytes(memory.used_bytes)} / ${bytes(memory.limit_bytes)} · SSD ${bytes(disk.used_bytes)} / ${bytes(disk.limit_bytes)} · ${pregen.state || 'idle'}`;
+}
+
+function peopleLine() {
+    const worker = (peopleStatus && peopleStatus.worker) || {};
+    const counts = (peopleStatus && peopleStatus.counts) || {};
+    const pending = Number(counts.pending_cached_images || 0);
+    const faces = Number(counts.detected_faces || counts.people || 0);
+    return `${fmt(faces)} faces · ${pending ? `${fmt(pending)} pending · ` : ''}${worker.state || 'idle'}`;
 }
 
 function statusText(name, data) {
@@ -193,6 +362,132 @@ function renderRemote() {
         + '</div></section>';
 }
 
+function detailsSection(title, body) {
+    return '<details class="dr-sec dr-details">'
+        .replace('>', `${openSettingSections.has(title) ? ' open' : ''}>`)
+        + `<summary><span>${esc(title)}</span></summary>`
+        + `<div class="dr-details-body">${body}</div></details>`;
+}
+
+function settingInput(field, label, { hint = '' } = {}) {
+    const def = SETTING_DEFS[field] || {};
+    const value = settingValue(field);
+    const dirty = dirtySettings.has(field) ? ' dirty' : '';
+    const unit = def.unit ? `<em>${esc(def.unit)}</em>` : '';
+    const attrs = [
+        `id="drawer-setting-${field}"`,
+        `data-setting-field="${field}"`,
+        def.type === 'number' ? 'type="number"' : 'type="text"',
+        def.min != null ? `min="${def.min}"` : '',
+        def.max != null ? `max="${def.max}"` : '',
+        def.step != null ? `step="${def.step}"` : '',
+        def.type === 'text' ? 'spellcheck="false" autocomplete="off"' : '',
+    ].filter(Boolean).join(' ');
+    return `<label class="setting-row${dirty}" for="drawer-setting-${field}">`
+        + `<span><b>${esc(label)}</b>${unit}</span>`
+        + `<input class="drawer-input" ${attrs} value="${esc(value)}">`
+        + `${hint ? `<small>${esc(hint)}</small>` : ''}</label>`;
+}
+
+function settingSelect(field, label, options) {
+    const value = String(settingValue(field));
+    const dirty = dirtySettings.has(field) ? ' dirty' : '';
+    return `<label class="setting-row${dirty}" for="drawer-setting-${field}">`
+        + `<span><b>${esc(label)}</b></span>`
+        + `<select id="drawer-setting-${field}" data-setting-field="${field}">`
+        + options.map((option) => `<option value="${esc(option.value)}"${String(option.value) === value ? ' selected' : ''}>${esc(option.label)}</option>`).join('')
+        + '</select></label>';
+}
+
+function settingToggle(field, label) {
+    return '<label class="setting-toggle">'
+        + `<span>${esc(label)}</span>`
+        + `<input type="checkbox" data-setting-field="${field}" ${settingValue(field) ? 'checked' : ''}>`
+        + '<i></i></label>';
+}
+
+function renderAiSettings() {
+    const presets = (settingsPageData && settingsPageData.embedding_model_presets || []).map((preset) => ({
+        value: preset.key,
+        label: preset.label || preset.key,
+    }));
+    const presetSelect = settingSelect('embed_model_preset', 'Model preset', presets.length ? presets : [
+        { value: settingValue('embed_model_preset'), label: settingValue('embed_model_preset') || 'Current preset' },
+    ]);
+    return detailsSection('AI model',
+        `<div class="setting-status">${esc(modelLine())}</div>`
+        + presetSelect
+        + settingInput('search_similarity_threshold', 'Search threshold')
+        + '<div class="setting-actions">'
+        + '<button class="btn primary" id="drawer-install-model" type="button">Save & install</button>'
+        + '</div>');
+}
+
+function renderImageCacheSettings() {
+    return detailsSection('Image cache',
+        `<div class="setting-status">${esc(cacheUsageLine())}</div>`
+        + '<div class="settings-two">'
+        + settingInput('memory_cache_gb', 'RAM budget')
+        + settingInput('ssd_cache_gb', 'SSD budget')
+        + '</div>'
+        + settingSelect('cache_profile', 'Cache profile', [
+            { value: 'original_heavy', label: 'Best quality' },
+            { value: 'balanced', label: 'Balanced' },
+            { value: 'browse_fast', label: 'Fastest browsing' },
+        ])
+        + '<div class="setting-actions">'
+        + '<button class="mini-btn" id="drawer-cache-defaults" type="button">Apply defaults</button>'
+        + '</div>'
+        + '<details class="setting-subdetails"><summary>Advanced</summary>'
+        + settingInput('ssd_cache_dir', 'Cache location')
+        + settingInput('import_root', 'Import inbox')
+        + settingToggle('show_loupe_cache_status', 'Show loupe cache status')
+        + '</details>');
+}
+
+function renderThumbnailSettings() {
+    return detailsSection('Thumbnail output',
+        '<div class="settings-two">'
+        + settingInput('thumb_size_sm', 'Small long side')
+        + settingInput('thumb_size_md', 'Medium long side')
+        + settingInput('thumb_size_lg', 'Large long side')
+        + settingInput('thumb_quality', 'JPEG quality')
+        + '</div>'
+        + '<div class="thumb-policy" role="radiogroup" aria-label="Existing previews policy">'
+        + '<label><input type="radio" name="drawer_thumbnail_cache_policy" value="keep" checked> Keep existing previews</label>'
+        + '<label><input type="radio" name="drawer_thumbnail_cache_policy" value="replace"> Replace existing previews in the background</label>'
+        + '</div>');
+}
+
+function renderPeopleSettings() {
+    return detailsSection('People recognition',
+        `<div class="setting-status">${esc(peopleLine())}</div>`
+        + settingInput('face_model_id', 'Face model ID')
+        + settingInput('face_model_dir', 'Model directory')
+        + '<div class="settings-two">'
+        + settingInput('face_detection_size', 'Detection size')
+        + settingInput('face_similarity_threshold', 'Cluster threshold')
+        + settingInput('face_merge_suggestion_threshold', 'Merge threshold')
+        + '</div>');
+}
+
+function renderSettingsSections() {
+    if (!settingsPageData) {
+        return '<section class="dr-sec"><h3>Settings</h3><div class="muted">Loading settings...</div></section>';
+    }
+    return renderAiSettings() + renderImageCacheSettings() + renderThumbnailSettings() + renderPeopleSettings();
+}
+
+function renderSettingsSaveBar() {
+    const count = dirtySettings.size;
+    const invalid = hasInvalidSetting();
+    return '<div class="drawer-savebar" role="group" aria-label="Settings actions">'
+        + `<span id="drawer-save-state">${count ? `${fmt(count)} dirty field${count === 1 ? '' : 's'}` : 'No unsaved settings'}</span>`
+        + `<button class="btn primary" id="drawer-save-settings" type="button" ${count && !invalid ? '' : 'disabled'}>Save settings</button>`
+        + `<button class="mini-btn danger" id="drawer-reset-settings" type="button">${resetConfirmArmed ? 'Confirm reset' : 'Reset defaults'}</button>`
+        + '</div>';
+}
+
 function checkbox(key, label) {
     return `<div class="pref-row"><label for="pref-${key}">${esc(label)}</label><input id="pref-${key}" type="checkbox" data-pref="${key}" ${viewState.prefs[key] ? 'checked' : ''}></div>`;
 }
@@ -214,21 +509,24 @@ function renderPrefs() {
 function renderDrawer() {
     const body = document.getElementById('drawer-body');
     if (!body) return;
-    body.innerHTML = renderSources() + renderWork() + renderStorage() + renderRemote() + renderPrefs();
+    openSettingSections = new Set(Array.from(body.querySelectorAll('.dr-details[open] summary span'))
+        .map((el) => el.textContent || ''));
+    body.innerHTML = renderSources() + renderWork() + renderSettingsSections() + renderStorage() + renderRemote() + renderPrefs() + renderSettingsSaveBar();
     bindDrawerActions();
 }
 
 async function refreshDrawer() {
-    const [nextCatalog, ai, cache, people, remote] = await Promise.all([
-        getCatalog(), getAiStatus(), getCacheStatus(), getPeopleStatus(), getRemoteAccess(),
-    ]);
+    const requests = [getCatalog(), getAiStatus(), getCacheStatus(), getPeopleStatus(), getRemoteAccess()];
+    if (!settingsPageData) requests.push(getSettings());
+    const [nextCatalog, ai, cache, people, remote, settingsData] = await Promise.all(requests);
+    if (settingsData) applySettingsData(settingsData);
     catalog = nextCatalog || catalog;
     aiStatus = ai || aiStatus;
     cacheStatus = cache || cacheStatus;
     peopleStatus = people || peopleStatus;
     remoteAccess = remote || remoteAccess;
     renderActivity();
-    renderDrawer();
+    if (!drawerEditing()) renderDrawer();
 }
 
 async function pollScanUntilDone(sourceId) {
@@ -277,8 +575,156 @@ async function handleRemove(card, mode) {
     } else showToast('Source could not be removed');
 }
 
+function updateSaveBar() {
+    const save = document.getElementById('drawer-save-settings');
+    const reset = document.getElementById('drawer-reset-settings');
+    const state = document.getElementById('drawer-save-state');
+    const invalid = hasInvalidSetting();
+    if (save) save.disabled = !dirtySettings.size || invalid;
+    if (reset) reset.textContent = resetConfirmArmed ? 'Confirm reset' : 'Reset defaults';
+    if (state) {
+        if (invalid) state.textContent = 'Check highlighted values';
+        else state.textContent = dirtySettings.size
+            ? `${fmt(dirtySettings.size)} dirty field${dirtySettings.size === 1 ? '' : 's'}`
+            : 'No unsaved settings';
+    }
+    for (const input of document.querySelectorAll('[data-setting-field]')) {
+        input.closest('.setting-row')?.classList.toggle('dirty', dirtySettings.has(input.dataset.settingField));
+    }
+}
+
+function bindSettingInputs(body) {
+    for (const details of body.querySelectorAll('.dr-details')) {
+        details.addEventListener('toggle', () => {
+            const title = details.querySelector('summary span')?.textContent || '';
+            if (!title) return;
+            if (details.open) openSettingSections.add(title);
+            else openSettingSections.delete(title);
+        });
+    }
+    for (const input of body.querySelectorAll('[data-setting-field]')) {
+        const field = input.dataset.settingField;
+        input.addEventListener('input', () => {
+            const value = input.type === 'checkbox' ? input.checked : input.value;
+            setDraftSetting(field, value);
+            updateSaveBar();
+        });
+        input.addEventListener('change', () => {
+            const value = input.type === 'checkbox' ? input.checked : input.value;
+            setDraftSetting(field, value);
+            updateSaveBar();
+        });
+    }
+    for (const input of body.querySelectorAll('input[name="drawer_thumbnail_cache_policy"]')) {
+        input.addEventListener('change', updateSaveBar);
+    }
+}
+
+function applyCacheDefaults() {
+    const defaults = (settingsPageData && settingsPageData.defaults) || {};
+    const next = {
+        memory_cache_gb: recommendedMemoryGb(settingsPageData.settings || savedSettings),
+        ssd_cache_gb: defaults.ssd_cache_gb ?? 100,
+        cache_profile: defaults.cache_profile || 'original_heavy',
+    };
+    for (const [field, value] of Object.entries(next)) {
+        setDraftSetting(field, value);
+        const input = document.querySelector(`[data-setting-field="${field}"]`);
+        if (input) input.value = String(value);
+    }
+    updateSaveBar();
+    showToast('Cache defaults applied; save settings to keep them');
+}
+
+async function saveDrawerSettings() {
+    if (!dirtySettings.size) return;
+    if (hasInvalidSetting()) {
+        showToast('Check settings values before saving');
+        updateSaveBar();
+        return;
+    }
+    const result = await saveSettings(collectDirtySettings());
+    if (result && result.ok) {
+        applySettingsData(result);
+        renderActivity();
+        renderDrawer();
+        showToast('Settings saved');
+    } else {
+        showToast('Settings could not be saved');
+    }
+}
+
+async function resetDrawerSettings() {
+    if (!resetConfirmArmed) {
+        resetConfirmArmed = true;
+        updateSaveBar();
+        return;
+    }
+    const result = await resetSettings();
+    if (result && result.ok) {
+        applySettingsData(result);
+        renderActivity();
+        renderDrawer();
+        showToast('Settings reset — undo unavailable');
+    } else {
+        resetConfirmArmed = false;
+        updateSaveBar();
+        showToast('Settings could not be reset');
+    }
+}
+
+function aiInstallActive(status = aiStatus || {}) {
+    const index = status.embedding_index || {};
+    const installStatus = String(index.install_status || status.install_status || '').toLowerCase();
+    return Boolean(index.installing || status.installing || ['starting', 'downloading', 'installing'].includes(installStatus));
+}
+
+function pollModelInstall() {
+    clearInterval(installTimer);
+    const tick = async () => {
+        const status = await getAiStatus();
+        if (status) aiStatus = status;
+        renderActivity();
+        if (open && !drawerEditing()) renderDrawer();
+        if (!aiInstallActive(status)) {
+            clearInterval(installTimer);
+            installTimer = null;
+        }
+    };
+    tick();
+    installTimer = setInterval(tick, 1500);
+}
+
+async function saveAndInstallModel() {
+    const button = document.getElementById('drawer-install-model');
+    if (button) button.disabled = true;
+    const modelFields = new Set(MODEL_SAVE_FIELDS);
+    const saveData = await saveSettings(collectModelSettings());
+    if (!saveData || !saveData.ok) {
+        showToast('Model settings could not be saved');
+        if (button) button.disabled = false;
+        return;
+    }
+    applySettingsData(saveData, { preserveDirtyExcept: modelFields });
+    const installData = await installAiModel('active');
+    if (installData && installData.ok) {
+        aiStatus = installData.ai_status || aiStatus;
+        showToast(installData.already_installed ? 'Model already installed' : 'Model install started');
+        pollModelInstall();
+    } else {
+        showToast('Model install could not start');
+    }
+    renderActivity();
+    renderDrawer();
+}
+
 function bindDrawerActions() {
     const body = document.getElementById('drawer-body');
+    bindSettingInputs(body);
+    body.querySelector('#drawer-cache-defaults')?.addEventListener('click', applyCacheDefaults);
+    body.querySelector('#drawer-save-settings')?.addEventListener('click', saveDrawerSettings);
+    body.querySelector('#drawer-reset-settings')?.addEventListener('click', resetDrawerSettings);
+    body.querySelector('#drawer-install-model')?.addEventListener('click', saveAndInstallModel);
     body.querySelector('#add-source-form')?.addEventListener('submit', async (event) => {
         event.preventDefault();
         const input = event.currentTarget.querySelector('input[name="path"]');
@@ -353,6 +799,8 @@ function startDrawerPolling() {
 function stopDrawerPolling() {
     clearInterval(drawerTimer);
     drawerTimer = null;
+    clearInterval(installTimer);
+    installTimer = null;
 }
 
 export function openSystemDrawer() {

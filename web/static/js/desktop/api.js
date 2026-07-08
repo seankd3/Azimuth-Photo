@@ -88,6 +88,22 @@ export async function getAiStatus() {
     return fetchJson('/api/ai/status', { defaultValue: null });
 }
 
+export async function getSettings() {
+    return fetchJson('/api/settings', { defaultValue: null });
+}
+
+export async function saveSettings(fields) {
+    return postJson('/api/settings', fields || {});
+}
+
+export async function resetSettings() {
+    return postJson('/api/settings/reset');
+}
+
+export async function installAiModel(role = 'active') {
+    return postJson(`/api/ai/model/install?role=${encodeURIComponent(role || 'active')}`);
+}
+
 export async function pauseAiEmbeddings() {
     return postJson('/api/ai/embeddings/pause');
 }
