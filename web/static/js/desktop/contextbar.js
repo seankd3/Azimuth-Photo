@@ -1,0 +1,120 @@
+import {
+    clearFacet, describeScope, emit, on, scope, setBestOf, setSort, setThumbSize, toggleBestOf, viewState,
+} from './state.js';
+import { toggleLeftPanel } from './panel.js';
+import { showToast } from './toast.js';
+
+const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+}[c]));
+const fmt = (n) => Number(n || 0).toLocaleString('en-US');
+
+function chipHtml(key, label, extra = '') {
+    return `<span class="chip" data-facet="${key}">${extra}<span>${esc(label)}</span><button class="chip-x" aria-label="Remove ${esc(label)}">×</button></span>`;
+}
+
+function renderChips() {
+    const chips = [];
+    if (scope.similarIds.length) chips.push(chipHtml('similarIds', scope.similarLabel || 'Similar photos'));
+    if (scope.q) chips.push(chipHtml('q', `“${scope.q}”`));
+    if (scope.collectionId) chips.push(chipHtml('collectionId', `Collection · ${scope.collectionName || 'Untitled'}`));
+    if (scope.import_batch) chips.push(chipHtml('import_batch', scope.importBatchLabel || `Import ${scope.import_batch}`));
+    if (scope.people) chips.push(chipHtml('people', scope.personLabel || 'Person', scope.personThumb ? `<img src="${esc(scope.personThumb)}" alt="">` : ''));
+    if (scope.flag) chips.push(chipHtml('flag', scope.flag === 'picked' ? 'Picked' : scope.flag === 'rejected' ? 'Rejected' : 'Unflagged'));
+    if (scope.folder) chips.push(chipHtml('folder', scope.folder.split('/').filter(Boolean).pop() || scope.folder));
+    if (scope.date_taken) chips.push(chipHtml('date_taken', scope.date_taken === 'undated' ? 'Undated' : scope.date_taken));
+    if (scope.file_type) chips.push(chipHtml('file_type', String(scope.file_type).toUpperCase()));
+    if (scope.camera) chips.push(chipHtml('camera', `camera:${scope.camera}`));
+    if (scope.lens) chips.push(chipHtml('lens', `lens:${scope.lens}`));
+    if (scope.orientation) chips.push(chipHtml('orientation', scope.orientation));
+    if (scope.compared) {
+        const labels = { compared: 'Ranked', uncompared: 'Unranked', confident: 'High confidence' };
+        chips.push(chipHtml('compared', labels[scope.compared] || scope.compared));
+    }
+    if (scope.min_stars) chips.push(chipHtml('min_stars', `${scope.min_stars}+ stars`));
+    if (viewState.bestOf) chips.push(chipHtml('bestOf', 'Best of'));
+    document.getElementById('ctx-crumbs').innerHTML = chips.join('');
+    for (const chip of document.querySelectorAll('.chip[data-facet]')) {
+        chip.querySelector('.chip-x').addEventListener('click', () => {
+            if (chip.dataset.facet === 'bestOf') {
+                setBestOf(false);
+            } else {
+                clearFacet(chip.dataset.facet);
+            }
+        });
+    }
+}
+
+function renderQuality() {
+    const wrap = document.getElementById('quality-wrap');
+    const label = document.getElementById('quality-label');
+    const fill = document.querySelector('#quality-bar i');
+    const quality = viewState.sortQuality;
+    const pct = quality && quality.percent != null ? Number(quality.percent) : null;
+    wrap.classList.toggle('on', pct != null);
+    if (pct == null) return;
+    label.textContent = `${Math.round(pct)}% sorted`;
+    fill.style.width = `${Math.max(0, Math.min(100, pct))}%`;
+}
+
+function render() {
+    renderChips();
+    renderQuality();
+    if (viewState.bestOf) {
+        const shown = viewState.bestOfLimit == null ? viewState.images.length : viewState.bestOfLimit;
+        const total = viewState.bestOfTotal || viewState.visibleImages;
+        document.getElementById('ctx-count').innerHTML = `Top <b>${fmt(shown)}</b> of ${fmt(total)}`;
+    } else {
+        document.getElementById('ctx-count').innerHTML = `<b>${fmt(viewState.visibleImages)}</b> photos`;
+    }
+    document.getElementById('btn-bestof').classList.toggle('active', viewState.bestOf);
+    document.getElementById('sort-select').value = scope.sort || 'elo';
+    document.getElementById('thumb-size').value = String(viewState.thumbSize);
+}
+
+function adjustThumbWithWheel(event) {
+    if (!(event.ctrlKey || event.metaKey)) return;
+    event.preventDefault();
+    const before = document.elementFromPoint(event.clientX, event.clientY);
+    const cell = before && before.closest ? before.closest('.cell[data-id]') : null;
+    const top = cell ? cell.getBoundingClientRect().top : null;
+    const next = viewState.thumbSize + (event.deltaY > 0 ? -10 : 10);
+    setThumbSize(next);
+    requestAnimationFrame(() => {
+        if (!cell || top == null) return;
+        const after = cell.getBoundingClientRect().top;
+        document.getElementById('canvas').scrollTop += after - top;
+    });
+}
+
+export function initContextbar() {
+    document.getElementById('btn-left-drawer').addEventListener('click', toggleLeftPanel);
+    document.getElementById('btn-refine').addEventListener('click', () => emit('refine:open'));
+    document.getElementById('btn-filter').addEventListener('click', () => emit('filters:toggle'));
+    document.getElementById('btn-bestof').addEventListener('click', toggleBestOf);
+    document.getElementById('sort-select').addEventListener('change', (event) => {
+        setSort(event.target.value || 'elo');
+    });
+    document.getElementById('thumb-size').addEventListener('input', (event) => setThumbSize(event.target.value));
+    document.getElementById('canvas').addEventListener('wheel', adjustThumbWithWheel, { passive: false });
+    on('scope', render);
+    on('meta', render);
+    on('bestof', render);
+    on('bestof:unsupported', () => showToast('Collection Best of needs backend collection filtering first.'));
+    on('thumbsize', render);
+    on('images', render);
+    render();
+}
+
+export function scopeTokenHtml() {
+    const count = viewState.visibleImages ? `<span class="tk-count">- ${fmt(viewState.visibleImages)}</span>` : '';
+    if (scope.people) {
+        const img = scope.personThumb ? `<img src="${esc(scope.personThumb)}" alt="">` : '<span class="tk-glyph">◉</span>';
+        return `<span class="scope-token">${img}<b>${esc(scope.personLabel || 'Person')}</b>${count}</span>`;
+    }
+    if (scope.collectionId) return `<span class="scope-token"><span class="tk-glyph">⊞</span><b>${esc(scope.collectionName || 'Collection')}</b>${count}</span>`;
+    if (scope.import_batch) return `<span class="scope-token"><span class="tk-glyph">＋</span><b>${esc(scope.importBatchLabel || `Import ${scope.import_batch}`)}</b>${count}</span>`;
+    if (scope.similarIds.length) return `<span class="scope-token"><span class="tk-glyph">≈</span><b>${esc(scope.similarLabel || 'Similar photos')}</b>${count}</span>`;
+    if (scope.q) return `<span class="scope-token"><span class="tk-glyph">⌕</span><b>“${esc(scope.q)}”</b>${count}</span>`;
+    return `<span class="scope-token"><span class="tk-glyph">⌂</span><b>${esc(describeScope())}</b>${count}</span>`;
+}

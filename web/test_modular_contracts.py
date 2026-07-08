@@ -22,6 +22,7 @@ PUBLIC_ROUTE_CONTRACT = {
     ("GET", "/settings"),
     ("GET", "/catalog"),
     ("GET", "/m"),
+    ("GET", "/d"),
     ("GET", "/sw.js"),
     ("GET", "/api/dev/status"),
     ("GET", "/api/people/status"),

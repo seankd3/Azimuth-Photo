@@ -65,6 +65,11 @@ async def mobile_page(request: Request):
     return _render(request, "mobile.html")
 
 
+@router.get("/d", response_class=HTMLResponse)
+async def desktop_page(request: Request):
+    return _render(request, "desktop.html")
+
+
 @router.get("/sw.js")
 async def service_worker():
     """Serve the mobile service worker from the site root so it can claim scope /."""
@@ -76,4 +81,3 @@ async def service_worker():
             "Cache-Control": "no-cache",
         },
     )
-
