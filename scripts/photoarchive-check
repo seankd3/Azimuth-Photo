@@ -21,7 +21,7 @@ declare -A AREA_TARGETS=(
 )
 
 declare -A AREA_DESCRIPTIONS=(
-    [background-work]="Background Work UI contracts, status-panel syntax, and smoke expectations"
+    [background-work]="Frontend shell contracts and browser smoke expectations"
     [ai-search]="Search/query constraints, search routes/service, and embedding worker query-cache behavior"
     [previews]="Preview/cache status, cache routes, and thumbnail pregeneration"
     [people-work]="People routes, worker, and status behavior"
@@ -162,7 +162,7 @@ PY
     then
         "$ROOT/scripts/photoarchive-browser-smoke" --base-url "$base_url"
     else
-        echo "Skipping Background Work browser smoke: no server available at $base_url."
+        echo "Skipping frontend browser smoke: no server available at $base_url."
     fi
 }
 

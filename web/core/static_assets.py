@@ -25,14 +25,16 @@ class StaticAssetContext:
     def static_version(self) -> str:
         static_dir = os.path.join(self.app_dir, "static")
         try:
-            mtimes = [os.path.getmtime(os.path.join(static_dir, "style.css"))]
+            mtimes = []
             for root, _dirs, files in os.walk(static_dir):
                 for filename in files:
-                    if filename.endswith(".js"):
+                    if filename.endswith((".css", ".js")):
                         mtimes.append(os.path.getmtime(os.path.join(root, filename)))
-            return str(int(max(mtimes)))
+            if mtimes:
+                return str(int(max(mtimes)))
         except OSError:
-            return str(int(self.started_at))
+            pass
+        return str(int(self.started_at))
 
     def template_context(self, request) -> dict:
         return {"request": request, "static_version": self.static_version()}

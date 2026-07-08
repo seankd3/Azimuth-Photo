@@ -30,10 +30,7 @@ The app runs at `http://127.0.0.1:8000` by default.
 
 ## Main Routes
 
-- `/`, `/settings`, and `/catalog` render the Catalog/setup screen.
-- `/library` and `/rankings` render Library.
-- `/compare` renders Compare.
-- `/people` renders People.
+- `/` renders the desktop app shell; `/d` is the explicit desktop alias.
 - `/m` renders the installable mobile app; `/sw.js` serves its service worker
   at scope `/`.
 - `/static/*` serves browser assets.
@@ -48,7 +45,7 @@ The phone experience is a standalone PWA, held to the bars in
 [`ui-architecture.md`](ui-architecture.md) (mobile = Google Photos
 replacement; desktop = Lightroom Classic replacement).
 
-- Shell: `web/templates/mobile.html` (does not extend `base.html`),
+- Shell: `web/templates/mobile.html`,
   `web/static/mobile.css`, modules under `web/static/js/mobile/`
   (timeline, viewer, refine, search, library, selection, scrubber, flags,
   state, api, toast, bootstrap).
@@ -74,16 +71,15 @@ authoritative product anchor for Search, Previews, and People background work.
 
 | Change | Start here | Notes |
 | --- | --- | --- |
-| Catalog setup, source folders, scans | `web/features/catalog/`, `web/data/repositories/catalog.py` | Keep folder/source SQL in repositories and route parsing in routes. |
-| Library rankings, filters, maps, dates | `web/features/library/`, `web/data/repositories/rankings.py`, `web/data/repositories/filter_options.py` | Preserve cached/offline browsing behavior and visible-count semantics. |
-| Compare pair and mosaic workflows | `web/features/compare/`, `web/elo_propagation.py`, `web/data/repositories/ratings.py` | Routes validate requests; services/repositories own candidate pools and rating writes. |
-| People review, labels, merges, scan status | `web/features/people/`, `web/data/repositories/people.py`, `web/face_worker.py` | Source photos are never modified; face crops come from cached previews. |
+| Desktop app shell, lenses, panels, import, settings drawer | `web/templates/desktop.html`, `web/static/desktop.css`, `web/static/js/desktop/` | `/` and `/d` render this shell; keep page behavior in focused desktop modules. |
+| Catalog setup, source folders, scans | `web/features/catalog/`, `web/data/repositories/catalog.py`, `web/static/js/desktop/drawer.js` | Keep folder/source SQL in repositories and route parsing in routes. |
+| Library rankings, filters, maps, dates | `web/features/library/`, `web/data/repositories/rankings.py`, `web/data/repositories/filter_options.py`, `web/static/js/desktop/` | Preserve cached/offline browsing behavior and visible-count semantics. |
+| Compare pair and mosaic workflows | `web/features/compare/`, `web/elo_propagation.py`, `web/data/repositories/ratings.py`, `web/static/js/desktop/refine.js` | Routes validate requests; services/repositories own candidate pools and rating writes. |
+| People review, labels, merges, scan status | `web/features/people/`, `web/data/repositories/people.py`, `web/face_worker.py`, `web/static/js/desktop/people.js` | Source photos are never modified; face crops come from cached previews. |
 | Search and AI embedding status | `web/features/search/`, `web/features/ai/`, `web/embed_cache.py`, `web/embedding_worker.py` | Metadata fallback must keep working when AI is cold or deferred. |
 | Thumbnail/cache status and pregen | `web/thumbnails/`, `web/features/cache/` | Keep facade exports stable while moving implementation into owning modules. |
-| Settings and composed status payloads | `web/features/settings/`, `web/settings.py` | Settings responses are cached defensively and invalidated by named events. |
-| Bottom bar, background work panel, shared browser shell | `web/templates/_bottom_bar_*.html`, `web/static/js/work/`, `web/static/js/ui.js`, `web/static/style.css` | The measured bottom bar height is the shared layout contract. |
+| Settings and composed status payloads | `web/features/settings/`, `web/settings.py`, `web/static/js/desktop/drawer.js` | Settings responses are cached defensively and invalidated by named events. |
 | Mobile app (timeline, viewer, refine, PWA) | `web/static/js/mobile/`, `web/templates/mobile.html`, `web/static/mobile.css`, `web/static/sw.js` | Check `ui-architecture.md` first; bump the SW cache version when shell assets change. |
-| Legacy browser globals | `web/static/js/legacy/` | Compatibility exports only; put new page behavior in the owning module. |
 | Tests and fixtures | `web/test_support.py`, feature-owned `web/test_*.py` files | Keep shared setup in test support and put behavior tests near their product owner. |
 
 ## Checks
@@ -120,7 +116,7 @@ Agent verification ladder:
 | Change | Check |
 | --- | --- |
 | One JavaScript file | `./scripts/photoarchive-check --quick` plus `node --check web/static/js/path/to/file.js` |
-| Background Work UI | `./scripts/photoarchive-check --area background-work` |
+| Desktop/mobile shell UI | `./scripts/photoarchive-check --area background-work` |
 | Search or AI embedding behavior | `./scripts/photoarchive-check --area ai-search` |
 | Previews or cache behavior | `./scripts/photoarchive-check --area previews` |
 | People background work | `./scripts/photoarchive-check --area people-work` |

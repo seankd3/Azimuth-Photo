@@ -12,27 +12,19 @@ const CHROME_BIN = process.env.CHROME_BIN || "google-chrome-stable";
 const CHROME_DEVTOOLS_TIMEOUT_MS = 45000;
 const PAGE_LOAD_TIMEOUT_MS = 15000;
 const PAGE_READY_TIMEOUT_MS = 10000;
-const PAGE_PATHS = ["/", "/settings", "/catalog", "/people", "/library", "/rankings", "/compare"];
+const PAGE_PATHS = ["/", "/d", "/m"];
 const FAILING_RESOURCE_TYPES = new Set(["Document", "Script", "Stylesheet", "Fetch", "XHR"]);
 
 const PAGE_SENTINELS = {
-    "/": [".settings-page", "#settings-form", "#settings-status"],
-    "/settings": [".settings-page", "#settings-form", "#settings-status"],
-    "/catalog": [".settings-page", "#settings-form", "#catalog-source-list"],
-    "/people": [".people-page", "#people-status-line", "#people-most-seen"],
-    "/library": [".library-container", "#rankings-grid", "#library-bar"],
-    "/rankings": [".library-container", "#rankings-grid", "#library-bar"],
-    "/compare": [".compare-container", "#mosaic-grid", "#compare-bar"],
+    "/": ["#topbar", "#grid-flow", "#ctxbar", "#panel-left", "#panel-right"],
+    "/d": ["#topbar", "#grid-flow", "#ctxbar", "#panel-left", "#panel-right"],
+    "/m": ["#m-tabs", "#m-timeline", "#m-tabbar", "#m-scopebar"],
 };
 
 const PAGE_WORKFLOW_SELECTORS = {
-    "/": ["#choose-folder-btn", "#scan-btn", "#ai-model-section", "#cache-tier-guide", "#people-recognition-section", "#bar-work"],
-    "/settings": ["#choose-folder-btn", "#scan-btn", "#ai-model-section", "#cache-tier-guide", "#people-recognition-section", "#bar-work"],
-    "/catalog": ["#choose-folder-btn", "#scan-btn", "#catalog-source-list", "#bar-work"],
-    "/people": ["#people-status-line", "#people-most-seen", "#people-named", "#people-needs-review", "#bar-work"],
-    "/library": ["#search-input", "#search-clear", "#filter-folder", "#metadata-filter-btn", "#thumb-size", "#bar-work"],
-    "/rankings": ["#search-input", "#search-clear", "#filter-folder", "#metadata-filter-btn", "#thumb-size", "#bar-work"],
-    "/compare": ["#search-input", "#search-clear", "#filter-folder", "#metadata-filter-btn", "#thumb-size", "#bar-work", "#strategy-explore", "#strategy-random"],
+    "/": ["#scope-input", "#view-switch", "#btn-refine", "#system-btn", "#loupe", "#refine"],
+    "/d": ["#scope-input", "#view-switch", "#btn-refine", "#system-btn", "#loupe", "#refine"],
+    "/m": ["#m-zoomctl", "#m-scrub", "#m-selbar", "#m-viewer", "#m-toast"],
 };
 
 const VISIBLE_PAGE_STATE_SCRIPT = `(() => {
@@ -381,252 +373,6 @@ async function verifyWorkflow(cdp, sessionId, pagePath) {
     return result;
 }
 
-function commandBarExpression(pagePath) {
-    return `(() => {
-        const bar = document.querySelector(".command-bar");
-        if (!bar) return { ok: true, skipped: "no command bar" };
-        const main = bar.querySelector(".bar-row-main");
-        const children = Array.from(main?.children || []);
-        const zones = children.map((el) => {
-            if (el.matches(".bar-nav")) return "mode";
-            if (el.matches(".bar-search")) return "search";
-            if (el.matches('[data-command-zone="status"]')) return "status";
-            if (el.id === "bar-work" || el.matches(".bar-work-wrap")) return "work";
-            if (el.matches('[data-command-zone="mode-tools"]')) return "tools";
-            return "";
-        }).filter(Boolean);
-        const required = ["search", "status", "tools", "mode", "work"];
-        const first = Object.fromEntries(required.map((zone) => [zone, zones.indexOf(zone)]));
-        const last = Object.fromEntries(required.map((zone) => [zone, zones.lastIndexOf(zone)]));
-        const ordered = required.every((zone) => first[zone] >= 0)
-            && first.search < first.status
-            && first.status < first.mode
-            && last.tools < first.mode
-            && first.mode < first.work;
-        return { ok: ordered, pagePath: ${JSON.stringify(pagePath)}, zones, first, last };
-    })()`;
-}
-
-async function verifyCommandBar(cdp, sessionId, pagePath) {
-    const result = await evaluate(cdp, sessionId, commandBarExpression(pagePath), `${pagePath} command bar`);
-    if (!result?.ok) {
-        throw new Error(`${pagePath} command bar order failed: ${JSON.stringify(result)}`);
-    }
-    if (!result.skipped) {
-        console.log(`command bar ok: ${pagePath} (${result.zones.join(" > ")})`);
-    }
-}
-
-async function verifyBackgroundWork(cdp, sessionId, pagePath) {
-    const hasWork = await evaluate(cdp, sessionId, `Boolean(document.querySelector("#bar-work"))`, `${pagePath} has Background Work`);
-    if (!hasWork) return;
-    await evaluate(cdp, sessionId, `(async () => {
-        const panel = document.querySelector("#background-work-panel");
-        if (panel?.classList.contains("hidden")) {
-            if (window.PhotoArchiveReady) {
-                const api = await window.PhotoArchiveReady;
-                api.toggleBackgroundWorkPanel?.();
-            } else {
-                document.querySelector("#bar-work")?.click();
-            }
-        }
-        return { ok: true, hidden: panel?.classList.contains("hidden") };
-    })()`, `${pagePath} open Background Work`);
-    const closed = await waitForExpression(cdp, sessionId, `(() => {
-        const panel = document.querySelector("#background-work-panel");
-        const close = document.querySelector('#background-work-panel [data-action="toggle-background-work-panel"]');
-        close?.click();
-        return {
-            ok: Boolean(panel?.classList.contains("hidden")),
-            hidden: panel?.classList.contains("hidden"),
-        };
-    })()`, `${pagePath} close Background Work`, 2000);
-    if (!closed?.ok) {
-        throw new Error(`${pagePath} Background Work close failed: ${JSON.stringify(closed)}`);
-    }
-    await evaluate(cdp, sessionId, `(() => {
-        document.querySelector("#bar-work")?.click();
-        const panel = document.querySelector("#background-work-panel");
-        return { ok: Boolean(panel && !panel.classList.contains("hidden")), hidden: panel?.classList.contains("hidden") };
-    })()`, `${pagePath} reopen Background Work`);
-    const result = await waitForExpression(cdp, sessionId, `(() => {
-        const panel = document.querySelector("#background-work-panel");
-        const rows = Array.from(document.querySelectorAll("#background-work-panel-rows .background-work-row"));
-        const labels = rows.map((row) => row.querySelector(".background-work-label")?.textContent?.trim()).filter(Boolean);
-        const required = ["Search", "Previews", "People"];
-        const missing = required.filter((label) => !labels.includes(label));
-        const controls = Array.from(document.querySelectorAll("#background-work-panel [data-work-kind][data-work-command]"));
-        const peopleRow = rows.find((row) => row.querySelector(".background-work-label")?.textContent?.trim() === "People");
-        const peopleText = peopleRow?.textContent || "";
-        const peopleThrottled = /throttl/i.test(peopleText);
-        return {
-            ok: panel && !panel.classList.contains("hidden") && rows.length === required.length && missing.length === 0 && controls.length <= 3 && !peopleThrottled,
-            hidden: panel?.classList.contains("hidden"),
-            labels,
-            missing,
-            controls: controls.length,
-            peopleText,
-            peopleThrottled,
-        };
-    })()`, `${pagePath} Background Work panel`, 6000);
-    await evaluate(cdp, sessionId, `(async () => {
-        const mod = await import("/static/js/work/status_panel.js");
-        mod.renderBackgroundWorkPanel({
-            worker_state: "idle",
-            model_installed: true,
-            embedded: 0,
-            total_images: 0,
-            progress_pct: 0,
-        }, {
-            cacheStatus: { pregen: {}, disk: { tiers: {} }, memory: { tiers: {} } },
-            peopleStatus: { active: true, worker: { state: "waiting" }, counts: { scan: {} } },
-        });
-        const panel = document.querySelector("#background-work-panel");
-        return { ok: Boolean(panel && !panel.classList.contains("hidden")) };
-    })()`, `${pagePath} Background Work forced status refresh`);
-    const staleFallback = await evaluate(cdp, sessionId, `(async () => {
-        const mod = await import("/static/js/work/status_panel.js");
-        const aiStatus = {
-            status_stale: true,
-            counts_stale: true,
-            worker_state: "stale",
-            latency_ms: 6123,
-        };
-        const cacheStatus = {
-            status_stale: true,
-            counts_stale: true,
-            latency_ms: 6123,
-            pregen: {},
-            disk: { tiers: {} },
-            memory: { tiers: {} },
-        };
-        const peopleStatus = {
-            status_stale: true,
-            counts_stale: true,
-            latency_ms: 6123,
-            active: false,
-            worker: { state: "stale" },
-            counts: { scan: {} },
-        };
-        mod.renderBackgroundWorkPanel(aiStatus, { cacheStatus, peopleStatus });
-        mod.renderBackgroundWorkSummary(aiStatus, { cacheStatus, peopleStatus });
-        const rows = Array.from(document.querySelectorAll("#background-work-panel-rows .background-work-row"));
-        const labels = rows.map((row) => row.querySelector(".background-work-label")?.textContent?.trim()).filter(Boolean);
-        const progressTexts = rows.map((row) => row.querySelector(".background-work-progress-text")?.textContent?.trim()).filter(Boolean);
-        const controls = Array.from(document.querySelectorAll("#background-work-panel [data-work-kind][data-work-command]"));
-        const bottomState = document.querySelector("#ai-model-state")?.textContent?.trim() || "";
-        const required = ["Search", "Previews", "People"];
-        return {
-            ok: JSON.stringify(labels) === JSON.stringify(required)
-                && !progressTexts.some((text) => text.includes("0 / 0"))
-                && controls.length === 0
-                && !bottomState.includes("Search: Stopped"),
-            labels,
-            progressTexts,
-            controls: controls.length,
-            bottomState,
-        };
-    })()`, `${pagePath} Background Work stale fallback status`);
-    if (!staleFallback?.ok) {
-        throw new Error(`${pagePath} Background Work stale fallback failed: ${JSON.stringify(staleFallback)}`);
-    }
-    const stable = await evaluate(cdp, sessionId, `(() => {
-        const panel = document.querySelector("#background-work-panel");
-        const labels = Array.from(document.querySelectorAll("#background-work-panel-rows .background-work-row .background-work-label"))
-            .map((label) => label.textContent?.trim())
-            .filter(Boolean);
-        return {
-            ok: panel && !panel.classList.contains("hidden") && labels.length === 3,
-            hidden: panel?.classList.contains("hidden"),
-            labels,
-        };
-    })()`, `${pagePath} Background Work panel stays open`);
-    if (!stable?.ok) {
-        throw new Error(`${pagePath} Background Work panel did not stay open: ${JSON.stringify(stable)}`);
-    }
-    console.log(`background work ok: ${pagePath} (${result.labels.join(", ")})`);
-}
-
-async function verifyLibraryLoupeWorkflow(cdp, sessionId) {
-    const loaded = await waitForExpression(cdp, sessionId, `(() => {
-        const cards = Array.from(document.querySelectorAll(".rank-card"));
-        const empty = document.querySelector("#library-empty:not(.hidden)");
-        return { ok: cards.length > 0 || Boolean(empty), cards: cards.length, empty: Boolean(empty) };
-    })()`, "/library cards", 10000);
-    if (!loaded.cards) {
-        console.log("loupe workflow skipped: Library has no visible photos");
-        return;
-    }
-
-    const opened = await waitForExpression(cdp, sessionId, `(() => {
-        const before = {
-            search: document.querySelector("#search-input")?.value || "",
-            path: location.pathname,
-            query: location.search,
-            cards: document.querySelectorAll(".rank-card").length,
-        };
-        window.__photoArchiveSmokeLoupe = before;
-        document.querySelector(".rank-card")?.click();
-        const visible = document.body.classList.contains("loupe-open") && document.querySelector("#filmstrip-scroll .filmstrip-thumb");
-        return { ok: Boolean(visible), before, counter: document.querySelector("#filmstrip-counter")?.textContent || "" };
-    })()`, "open Library loupe", 5000);
-
-    const thumbChanged = await waitForExpression(cdp, sessionId, `(() => {
-        const thumbs = Array.from(document.querySelectorAll("#filmstrip-scroll .filmstrip-thumb"));
-        if (thumbs.length < 2) return { ok: true, skipped: "not enough filmstrip thumbs", thumbs: thumbs.length };
-        const before = document.querySelector(".filmstrip-thumb.active")?.dataset.imageId || "";
-        const target = thumbs.find((thumb) => thumb.dataset.imageId !== before) || thumbs[1];
-        target.click();
-        const after = document.querySelector(".filmstrip-thumb.active")?.dataset.imageId || "";
-        return { ok: Boolean(before && after && before !== after), before, after, thumbs: thumbs.length };
-    })()`, "filmstrip thumb navigation", 5000);
-
-    const boundary = await waitForExpression(cdp, sessionId, `(() => {
-        const beforeState = window.__photoArchiveSmokeLoupe || {};
-        const loadedCount = document.querySelectorAll(".rank-card").length;
-        const counter = document.querySelector("#filmstrip-counter")?.textContent || "";
-        const totalMatch = counter.match(/\\/\\s*([0-9,]+)/);
-        const poolTotal = totalMatch ? Number(totalMatch[1].replace(/,/g, "")) : loadedCount;
-        if (poolTotal <= loadedCount || loadedCount < 2) {
-            return { ok: true, skipped: "no lazy boundary", loadedCount, poolTotal };
-        }
-        const cards = Array.from(document.querySelectorAll(".rank-card"));
-        cards[cards.length - 1]?.click();
-        const beforeLoaded = cards.length;
-        window.PhotoArchiveReady.then((api) => api.lightboxNext());
-        window.__photoArchiveSmokeLoupe = { ...beforeState, beforeLoaded, poolTotal };
-        return { ok: true, beforeLoaded, poolTotal };
-    })()`, "start lazy boundary navigation", 5000);
-
-    if (!boundary.skipped) {
-        await waitForExpression(cdp, sessionId, `(() => {
-            const state = window.__photoArchiveSmokeLoupe || {};
-            const loadedNow = document.querySelectorAll(".rank-card").length;
-            const activeIndex = Number(document.querySelector(".filmstrip-thumb.active")?.dataset.idx || -1);
-            return {
-                ok: loadedNow > Number(state.beforeLoaded || 0) || activeIndex >= Number(state.beforeLoaded || 0),
-                beforeLoaded: state.beforeLoaded,
-                loadedNow,
-                activeIndex,
-            };
-        })()`, "lazy boundary loaded more Library photos", 8000);
-    }
-
-    const returned = await waitForExpression(cdp, sessionId, `(() => {
-        const before = window.__photoArchiveSmokeLoupe || {};
-        window.PhotoArchiveReady.then((api) => api.closeLightbox());
-        return {
-            ok: !document.body.classList.contains("loupe-open") && location.pathname === before.path && location.search === before.query && (document.querySelector("#search-input")?.value || "") === before.search,
-            path: location.pathname,
-            query: location.search,
-            search: document.querySelector("#search-input")?.value || "",
-            before,
-        };
-    })()`, "return from Library loupe", 5000);
-    console.log(`loupe workflow ok: filmstrip ${thumbChanged.skipped || "thumb click"}; boundary ${boundary.skipped || "lazy load"}; returned ${returned.path}${returned.query}`);
-    console.log(`loupe opened ok: counter ${opened.counter || "available"}`);
-}
-
 function pageUrl(baseUrl, pagePath) {
     return new URL(pagePath, `${baseUrl}/`).href;
 }
@@ -696,13 +442,6 @@ async function smokePage(cdp, baseUrl, pagePath) {
         }
         const ready = await waitForReady(cdp, sessionId, pagePath);
         await verifyWorkflow(cdp, sessionId, pagePath);
-        if (["/library", "/rankings", "/compare"].includes(pagePath)) {
-            await verifyCommandBar(cdp, sessionId, pagePath);
-        }
-        await verifyBackgroundWork(cdp, sessionId, pagePath);
-        if (pagePath === "/library") {
-            await verifyLibraryLoupeWorkflow(cdp, sessionId);
-        }
         await wait(250);
         if (failures.length > 0) {
             throw new Error(`${pagePath} browser failures:\n- ${failures.join("\n- ")}`);

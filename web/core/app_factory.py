@@ -28,7 +28,7 @@ from features.share import routes as share_routes
 from features.settings import routes as settings_routes
 
 
-DEFAULT_TEMPLATE_WARMUP = ("settings.html", "library.html", "compare.html", "people.html")
+DEFAULT_TEMPLATE_WARMUP = ("desktop.html", "mobile.html", "share_gallery.html")
 INTERACTION_CACHE_WARMUP_DELAY_SECONDS = 0.05
 
 

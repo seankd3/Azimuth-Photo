@@ -43,8 +43,7 @@ export async function getCounts(params) {
     return fetchJson(`/api/counts?${params.toString()}`, { defaultValue: null });
 }
 
-// Flags: same payloads as static/js/library/flags.js and
-// features/settings/routes.py (api_set_image_flag / api_batch_set_flag).
+// Flags: same typed payloads as the shared image flag API.
 export async function writeFlag(imageId, flag) {
     return postJson(`/api/image/${imageId}/flag`, { flag });
 }
@@ -53,8 +52,7 @@ export async function writeFlags(imageIds, flag) {
     return postJson('/api/images/flag', { image_ids: imageIds, flag });
 }
 
-// Refine: same payloads as static/js/compare mosaic flow and
-// features/compare/routes.py (mosaic_pick / compare_undo).
+// Refine: same typed payloads as the compare mosaic and undo API.
 export async function mosaicNext(n, params, exclude = '') {
     const query = new URLSearchParams(params);
     query.set('n', String(n));

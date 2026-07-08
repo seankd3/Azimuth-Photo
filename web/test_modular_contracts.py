@@ -1,7 +1,6 @@
 import asyncio
 import importlib
 import os
-import re
 from types import SimpleNamespace
 import unittest
 
@@ -15,12 +14,6 @@ from core import app_factory
 
 PUBLIC_ROUTE_CONTRACT = {
     ("GET", "/"),
-    ("GET", "/compare"),
-    ("GET", "/rankings"),
-    ("GET", "/library"),
-    ("GET", "/people"),
-    ("GET", "/settings"),
-    ("GET", "/catalog"),
     ("GET", "/m"),
     ("GET", "/d"),
     ("GET", "/sw.js"),
@@ -111,25 +104,6 @@ PUBLIC_ROUTE_CONTRACT = {
     ("GET", "/api/folders"),
 }
 
-CORE_FRONTEND_API = {
-    "initCompare",
-    "initLibrary",
-    "initPeople",
-    "initSettings",
-    "setFilter",
-    "toggleMetadataFilters",
-    "toggleBackgroundWorkPanel",
-    "startScan",
-    "addCatalogSource",
-    "installAIModel",
-    "setCompareMode",
-    "setMosaicStrategy",
-    "openLightboxById",
-    "closeLightbox",
-    "exportRankings",
-}
-
-
 class ModularContractTests(unittest.TestCase):
     def test_compatibility_imports_still_resolve(self):
         for module_name in ("app", "db", "thumbnails"):
@@ -217,36 +191,24 @@ class ModularContractTests(unittest.TestCase):
 
         self.assertEqual(calls, ["warm"])
 
-    def test_frontend_bootstrap_preserves_global_entrypoint(self):
+    def test_frontend_shells_use_living_entrypoints(self):
         base_dir = os.path.dirname(__file__)
-        with open(os.path.join(base_dir, "templates", "base.html"), encoding="utf-8") as fh:
-            base_template = fh.read()
-        with open(os.path.join(base_dir, "static", "app.js"), encoding="utf-8") as fh:
-            app_entry = fh.read()
-        with open(os.path.join(base_dir, "static", "js", "bootstrap.js"), encoding="utf-8") as fh:
-            bootstrap = fh.read()
-        with open(os.path.join(base_dir, "static", "js", "legacy", "public_api.js"), encoding="utf-8") as fh:
-            public_api = fh.read()
+        with open(os.path.join(base_dir, "templates", "desktop.html"), encoding="utf-8") as fh:
+            desktop_template = fh.read()
+        with open(os.path.join(base_dir, "templates", "mobile.html"), encoding="utf-8") as fh:
+            mobile_template = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "desktop", "api.js"), encoding="utf-8") as fh:
+            desktop_api = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "mobile", "api.js"), encoding="utf-8") as fh:
+            mobile_api = fh.read()
 
-        self.assertIn("window.__photoArchiveWhenReady", base_template)
-        self.assertIn('type="module" src="/static/app.js', base_template)
-        self.assertIn("window.PhotoArchiveReady", app_entry)
-        self.assertIn("./js/bootstrap.js", app_entry)
-        self.assertIn("./legacy/app.js", bootstrap)
-        self.assertIn("installAppShellControls", bootstrap)
-        self.assertIn("./work/status_panel.js", bootstrap)
-
-        returned_api = set(
-            re.findall(
-                r"^\s*([A-Za-z_$][A-Za-z0-9_$]*),\s*$",
-                public_api[public_api.rfind("    return {"):],
-                re.MULTILINE,
-            )
-        )
-        self.assertFalse(
-            CORE_FRONTEND_API - returned_api,
-            f"Core frontend API missing from public bridge: {sorted(CORE_FRONTEND_API - returned_api)}",
-        )
+        self.assertIn('href="/static/desktop.css', desktop_template)
+        self.assertIn('src="/static/js/desktop/bootstrap.js', desktop_template)
+        self.assertIn('href="/static/mobile.css', mobile_template)
+        self.assertIn('src="/static/js/mobile/bootstrap.js', mobile_template)
+        self.assertIn("navigator.serviceWorker.register('/sw.js')", mobile_template)
+        self.assertIn("from '../api.js'", desktop_api)
+        self.assertIn("from '../api.js'", mobile_api)
 
 
 if __name__ == "__main__":

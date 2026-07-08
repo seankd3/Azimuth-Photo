@@ -27,37 +27,7 @@ def _render(request: Request, template_name: str):
 
 @router.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    return _render(request, "settings.html")
-
-
-@router.get("/compare", response_class=HTMLResponse)
-async def compare_page(request: Request):
-    return _render(request, "compare.html")
-
-
-@router.get("/rankings", response_class=HTMLResponse)
-async def rankings_page(request: Request):
-    return _render(request, "library.html")
-
-
-@router.get("/library", response_class=HTMLResponse)
-async def library_page(request: Request):
-    return _render(request, "library.html")
-
-
-@router.get("/people", response_class=HTMLResponse)
-async def people_page(request: Request):
-    return _render(request, "people.html")
-
-
-@router.get("/settings", response_class=HTMLResponse)
-async def settings_page(request: Request):
-    return _render(request, "settings.html")
-
-
-@router.get("/catalog", response_class=HTMLResponse)
-async def catalog_page(request: Request):
-    return _render(request, "settings.html")
+    return _render(request, "desktop.html")
 
 
 @router.get("/m", response_class=HTMLResponse)

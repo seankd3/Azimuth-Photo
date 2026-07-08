@@ -995,28 +995,6 @@ class CompareTests(BackendTestCase):
         self.assertTrue(mosaic["ai_unavailable"])
         self.assertTrue(compare["ai_unavailable"])
 
-    async def test_library_cross_view_warmup_does_not_request_diverse_mosaic(self):
-        base_dir = os.path.dirname(__file__)
-        with open(
-            os.path.join(base_dir, "static", "js", "legacy", "app.js"),
-            encoding="utf-8",
-        ) as fh:
-            script = fh.read()
-        with open(
-            os.path.join(base_dir, "static", "js", "warmup_neighbors.js"),
-            encoding="utf-8",
-        ) as fh:
-            warmup_neighbors = fh.read()
-        warmup = script.split("function scheduleCrossViewWarmup(fromView)", 1)[1].split(
-            "function scheduleLibraryNeighborWarmup",
-            1,
-        )[0]
-
-        self.assertIn("neighborWarmups.scheduleCrossViewWarmup(fromView)", warmup)
-        self.assertIn("const warmStrategy = strategy === 'diverse' ? 'explore' : strategy;", warmup_neighbors)
-        self.assertIn("strategy: warmStrategy", warmup_neighbors)
-        self.assertNotIn("strategy: getMosaicStrategy()", warmup_neighbors)
-
     async def test_filtered_compare_window_is_smaller_than_default_window(self):
         self.assertLess(compare_service._FILTERED_SWISS_PAIR_WINDOW, compare_service._SWISS_PAIR_WINDOW)
         self.assertGreaterEqual(compare_service._FILTERED_SWISS_PAIR_WINDOW, 256)

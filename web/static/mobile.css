@@ -1,6 +1,6 @@
 /* ============================================================
    photoArchive mobile (/m) — Google-Photos-grade phone shell
-   Standalone stylesheet: does not touch style.css.
+   Standalone stylesheet for the installable mobile shell.
    ============================================================ */
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }

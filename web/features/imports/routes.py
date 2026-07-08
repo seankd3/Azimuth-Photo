@@ -12,6 +12,10 @@ from features.imports import service as import_service
 router = APIRouter()
 
 
+def _import_library_url(batch_id: int) -> str:
+    return f"/#import_batch={int(batch_id)}"
+
+
 def _preset_options(import_root: str, catalog: dict | None = None) -> list[dict]:
     presets = [
         {"label": "Import Inbox", "path": import_root},
@@ -47,7 +51,7 @@ async def api_import_batch(batch_id: int):
     batch = await import_repository.import_batch(db.DB_PATH, batch_id)
     if not batch:
         return JSONResponse({"error": "Import batch not found"}, status_code=404)
-    return {"ok": True, "batch": batch, "library_url": f"/library?import_batch={int(batch_id)}"}
+    return {"ok": True, "batch": batch, "library_url": _import_library_url(batch_id)}
 
 
 @router.post("/api/imports")
@@ -149,5 +153,5 @@ async def api_create_import(
         "skipped_files": len(copy_result["skipped"]),
         "collision_count": copy_result["collision_count"],
         "destination_path": plan["destination"],
-        "library_url": f"/library?import_batch={int(batch_id)}",
+        "library_url": _import_library_url(batch_id),
     }
