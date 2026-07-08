@@ -9,6 +9,7 @@ import {
     renameCollection, revokeCollectionShare, setBackgroundWork, thumbUrl,
 } from './api.js';
 import { nav, on, rememberImages, setScope, clearScope } from './state.js';
+import { canInstall, promptInstall } from './bootstrap.js';
 import { openSheet, closeSheet } from './selection.js';
 import { showToast } from './toast.js';
 import { openViewer } from './viewer.js';
@@ -56,6 +57,12 @@ function render() {
     });
     html += '<button class="m-lib-card m-lib-new" id="ml-new"><span class="g">+</span>New collection</button></div>';
 
+    if (canInstall()) {
+        html += '<div class="ms-sec" style="padding-left:0;padding-right:0">'
+            + '<button class="m-lib-row ml-install" id="ml-install"><span class="g">⭳</span>'
+            + '<span class="body">Install photoArchive<span class="sub">Add it to your home screen as an app</span></span></button></div>';
+    }
+
     html += '<div class="ms-sec" style="padding-left:0;padding-right:0"><h3>Quick access</h3>'
         + `<button class="m-lib-row" data-q="picked"><span class="g">★</span><span class="body">Picked</span><span class="n num">${fmtInt(counts && counts.picked)}</span></button>`
         + `<button class="m-lib-row" data-q="rejected"><span class="g">✕</span><span class="body">Rejected</span><span class="n num">${fmtInt(counts && counts.rejected)}</span></button>`
@@ -85,6 +92,11 @@ function render() {
     root.innerHTML = html;
 
     bindSuggestions();
+    root.querySelector('#ml-install')?.addEventListener('click', async () => {
+        const accepted = await promptInstall();
+        showToast(accepted ? 'Installed — check your home screen' : "Install dismissed");
+        render();
+    });
     bindWorkRows();
     for (const el of root.querySelectorAll('.m-lib-card[data-ci]')) {
         el.addEventListener('click', () => {
@@ -756,6 +768,9 @@ function bindSheetConfirm(sheet, buttonSelector, confirmSelector, action) {
 }
 
 export function initLibrary() {
+    on('installable', () => {
+        if (!showingCollection && built) render();
+    });
     root = document.getElementById('m-library');
     on('flags', () => {
         counts = null;   // flag writes change picked/rejected counts

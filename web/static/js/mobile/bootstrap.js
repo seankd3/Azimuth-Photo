@@ -11,6 +11,26 @@ import { initRefine, showRefine } from './refine.js';
 import { initSearch, showSearch } from './search.js';
 import { initLibrary, showLibrary } from './library.js';
 
+let installPrompt = null;
+window.addEventListener('beforeinstallprompt', (event) => {
+    event.preventDefault();
+    installPrompt = event;
+    emit('installable', true);
+});
+export function canInstall() {
+    return Boolean(installPrompt) && !window.matchMedia('(display-mode: standalone)').matches;
+}
+export async function promptInstall() {
+    if (!installPrompt) return false;
+    const prompt = installPrompt;
+    installPrompt = null;
+    prompt.prompt();
+    const choice = await prompt.userChoice;
+    emit('installable', false);
+    return choice && choice.outcome === 'accepted';
+}
+
+
 const TABS = ['photos', 'search', 'refine', 'library'];
 
 function setTab(tab) {

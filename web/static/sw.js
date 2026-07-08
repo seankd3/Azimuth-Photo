@@ -8,7 +8,7 @@
  * - Navigations fall back to the cached /m shell when offline.
  */
 
-const CACHE_VERSION = 'pa-mobile-v3';
+const CACHE_VERSION = 'pa-mobile-v4';
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const THUMB_CACHE = `${CACHE_VERSION}-thumbs`;
 const THUMB_CACHE_MAX_ENTRIES = 1500;
