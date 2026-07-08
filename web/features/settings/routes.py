@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Awaitable, Callable
 
 from fastapi import APIRouter, Request
@@ -9,11 +10,12 @@ import settings
 import thumbnails
 from core.requests import json_object
 from data.repositories import catalog as catalog_repository
-from data.repositories import embeddings as embedding_repository
 from data.repositories import images as image_repository
 from features.catalog import metadata as catalog_metadata
 from features.settings import status as settings_status
 
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 BuildResponse = Callable[[], Awaitable[dict]]
@@ -267,7 +269,10 @@ async def api_save_settings(request: Request):
             import db
             await db.purge_retired_embedding_data()
         except Exception:
-            pass
+            logger.warning(
+                "Failed to purge retired embedding data after model change",
+                exc_info=True,
+            )
         _invalidate_vector_derived_caches()
     if search_runtime_changed:
         _invalidate_rankings_cache()
@@ -309,7 +314,10 @@ async def api_reset_settings():
             import db
             await db.purge_retired_embedding_data()
         except Exception:
-            pass
+            logger.warning(
+                "Failed to purge retired embedding data after settings reset",
+                exc_info=True,
+            )
     _invalidate_rankings_cache()
     _invalidate_cache_status_cache()
     _invalidate_ai_status_response_cache()

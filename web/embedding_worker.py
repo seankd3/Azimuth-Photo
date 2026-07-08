@@ -9,7 +9,6 @@ detection, and auto-collections.
 import asyncio
 import importlib.util
 import logging
-import os
 import time
 from collections import deque
 from collections.abc import Awaitable, Callable
@@ -934,7 +933,6 @@ async def run_embedding_worker():
                 _loaded_model_dir = None
                 _loaded_model_id = None
                 _loaded_model_revision = None
-                has_model = False
                 _set_worker_status(
                     "waiting_for_model",
                     f"Install {model_id} from Settings to enable AI features.",

@@ -6,7 +6,7 @@ this module as a stable delegate for older callers during the migration.
 
 import aiosqlite
 import os
-import time as _time
+import time as _time  # noqa: F401  (tests set cache expiries via db._time.time())
 
 from core import cache_events
 from data import connection as data_connection
@@ -14,7 +14,6 @@ from data import schema as data_schema
 from data.repositories import cache_entries as cache_entry_repository
 from data.repositories import catalog as catalog_repository
 from data.repositories import collections as collection_repository
-from data.repositories.common import chunked as _chunked
 from data.repositories import embeddings as embedding_repository
 from data.repositories import filter_options as filter_options_repository
 from data.repositories import images as image_repository
@@ -27,7 +26,6 @@ from data.repositories import stats as stats_repository
 import settings
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "photoarchive.db")
-_embedding_batch_listeners = cache_events.embedding_batch_listeners
 
 
 def register_embedding_batch_listener(listener):
@@ -103,16 +101,8 @@ def _invalidate_ai_status_counts_cache():
     cache_events.invalidate_ai_status_counts_cache()
 
 
-def _invalidate_catalog_summary_cache():
-    cache_events.invalidate_catalog_summary_cache()
-
-
 def _invalidate_rating_stats_cache():
     cache_events.invalidate_rating_stats_cache()
-
-
-def _increment_cached_int(mapping: dict, key: str, delta: int, *, cap: int | None = None):
-    cache_events.increment_cached_int(mapping, key, delta, cap=cap)
 
 
 def _patch_direct_rating_stats_cache(pair_delta: int, rated_image_delta: int):
@@ -134,31 +124,8 @@ def _invalidate_catalog_cache():
     cache_events.invalidate_catalog_cache()
 
 
-def _invalidate_facet_caches():
-    cache_events.invalidate_facet_caches()
-
-
-def _invalidate_visible_facet_caches(cache_root: str | None = None, size: str | None = None):
-    cache_events.invalidate_visible_facet_caches(cache_root, size)
-
-
-def _invalidate_rating_facet_caches():
-    cache_events.invalidate_rating_facet_caches()
-
-
 def _invalidate_ranking_count_cache():
     cache_events.invalidate_ranking_count_cache()
-
-
-_cache_scope_matches = cache_events.cache_scope_matches
-
-
-def _invalidate_visible_cache_dependent_counts(cache_root: str | None = None, size: str | None = None):
-    cache_events.invalidate_visible_cache_dependent_counts(cache_root, size)
-
-
-def _invalidate_rating_ranking_count_cache():
-    cache_events.invalidate_rating_ranking_count_cache()
 
 
 def invalidate_cached_image_ids_cache(cache_root: str | None = None, size: str | None = None):
@@ -208,7 +175,6 @@ async def get_db() -> aiosqlite.Connection:
     return await data_connection.open_async(DB_PATH)
 
 
-_ensure_catalog_source = catalog_repository.ensure_catalog_source_on_conn
 _update_source_counts = catalog_repository.update_source_counts_on_conn
 _refresh_source_online_states_on_conn = catalog_repository.refresh_source_online_states_on_conn
 
@@ -223,7 +189,6 @@ async def _migrate_catalog_sources(conn):
         _invalidate_filter_options_cache()
 
 
-_table_columns = data_schema.table_columns
 _schema_is_current = data_schema.schema_is_current
 
 
@@ -265,9 +230,6 @@ def _retain_active_embedding_cache() -> None:
         pass
 
 
-_ensure_embedding_model_row = embedding_repository.ensure_embedding_model_row
-
-
 async def purge_retired_embedding_data() -> dict:
     conn = await get_db()
     try:
@@ -282,23 +244,6 @@ async def purge_retired_embedding_data() -> dict:
     _invalidate_ai_status_counts_cache()
     _retain_active_embedding_cache()
     return result
-
-
-async def get_cached_semantic_search_results(query: str, model_key: str, threshold) -> dict | None:
-    del query, model_key, threshold
-    return None
-
-
-async def store_cached_semantic_search_results(
-    query: str,
-    model_key: str,
-    threshold,
-    scores: dict[int, float],
-    *,
-    source: str = "fast",
-) -> dict | None:
-    del query, model_key, threshold, scores, source
-    return None
 
 
 async def get_search_query_embedding(config: dict, query: str) -> bytes | None:
@@ -380,15 +325,11 @@ async def get_images_needing_metadata(limit: int = 100, metadata_version: int = 
 
 
 async def batch_update_metadata(updates: list[tuple]):
-    """Persist extracted metadata. Tuples are built in app._metadata_update_tuple."""
+    """Persist extracted metadata. Tuples are built in features.catalog.metadata.metadata_update_tuple."""
     if not updates:
         return
     await image_repository.batch_update_metadata(DB_PATH, updates)
     _invalidate_filter_options_cache()
-
-
-def _insert_row_with_file_metadata(row):
-    return catalog_repository.insert_row_with_file_metadata(row)
 
 
 async def insert_images_batch(rows: list[tuple], source_id: int | None = None):
@@ -398,15 +339,6 @@ async def insert_images_batch(rows: list[tuple], source_id: int | None = None):
     await catalog_repository.insert_images_batch(DB_PATH, rows, source_id)
     _invalidate_stats_cache()
     _invalidate_filter_options_cache()
-
-
-async def _mark_source_missing_files(conn, source_id: int, seen_filepaths: list[str], missing_at: float):
-    await catalog_repository.mark_source_missing_files_on_conn(
-        conn,
-        source_id,
-        seen_filepaths,
-        missing_at,
-    )
 
 
 async def refresh_source_online_states():
@@ -451,14 +383,6 @@ async def get_source(source_id: int):
 
 async def get_source_by_path(path: str):
     return await catalog_repository.get_source_by_path(DB_PATH, path)
-
-
-async def get_catalog_sources():
-    return await catalog_repository.catalog_sources_cached(
-        DB_PATH,
-        refresh_source_online_states=refresh_source_online_states,
-        ttl_seconds=CATALOG_CACHE_TTL_SECONDS,
-    )
 
 
 async def get_catalog_summary():
@@ -715,18 +639,6 @@ _face_embedding_blob = people_repository._face_embedding_blob
 _face_embedding_vector = people_repository._face_embedding_vector
 
 
-async def _canonical_person_ids_on_conn(conn, person_ids: tuple[int, ...]) -> tuple[int, ...]:
-    return await people_repository.canonical_person_ids_on_conn(conn, person_ids)
-
-
-async def _create_person_on_conn(conn, *, status: str = "unknown", name: str = "") -> int:
-    return await people_repository.create_person_on_conn(conn, status=status, name=name)
-
-
-async def _refresh_people_membership_on_conn(conn, person_ids: tuple[int, ...] | None = None) -> None:
-    await people_repository.refresh_people_membership_on_conn(conn, person_ids)
-
-
 async def refresh_people_membership(person_ids: tuple[int, ...] | None = None) -> None:
     await people_repository.refresh_people_membership(DB_PATH, person_ids)
     _invalidate_people_dependent_caches()
@@ -881,9 +793,7 @@ IMAGE_EXTENSION_SEARCH_TERMS = ranking_repository.IMAGE_EXTENSION_SEARCH_TERMS
 
 
 _ranking_filter_parts = ranking_repository.ranking_filter_parts
-_ranking_index_for_query = ranking_repository.ranking_index_for_query
 _ranking_image_source = ranking_repository.ranking_image_source
-_ranking_count_image_source = ranking_repository.ranking_count_image_source
 
 
 async def get_cached_image_ids(
@@ -920,9 +830,6 @@ async def get_active_source_id_set() -> frozenset[int]:
     )
 
 
-_metadata_fts_query = metadata_search_repository.metadata_fts_query
-
-
 async def metadata_search_image_ids(text_query: str, *, max_results: int = 5000) -> set[int] | None:
     """Return a bounded metadata-search ID set using the trigram FTS index.
 
@@ -955,34 +862,6 @@ async def get_rankable_image_id_set() -> frozenset[int]:
         DB_PATH,
         active_source_ids=await get_active_source_id_set(),
         ttl_seconds=RANKABLE_IMAGE_IDS_TTL_SECONDS,
-    )
-
-
-def _has_ranking_count_filters(
-    orientation: str,
-    compared: str,
-    min_stars: int,
-    folder: str,
-    flag: str,
-    date_taken: str,
-    file_type: str,
-    camera: str,
-    lens: str,
-    id_filter: set | None,
-    text_query: str,
-) -> bool:
-    return ranking_repository.has_ranking_count_filters(
-        orientation,
-        compared,
-        min_stars,
-        folder,
-        flag,
-        date_taken,
-        file_type,
-        camera,
-        lens,
-        id_filter,
-        text_query,
     )
 
 
@@ -1033,32 +912,6 @@ async def get_rankings(limit: int = 100, offset: int = 0, sort: str = "elo",
 
 _ranking_count_cache_key = ranking_repository.ranking_count_cache_key
 _facet_cache_key = ranking_repository.facet_cache_key
-
-
-async def _count_rankings_uncached(orientation: str = "", compared: str = "", min_stars: int = 0,
-                                  folder: str = "", flag: str = "", date_taken: str = "",
-                                  file_type: str = "", camera: str = "", lens: str = "",
-                                  id_filter: set = None,
-                                  visible_thumb_size: str = "", cache_root: str = "",
-                                  text_query: str = "") -> int:
-    return await ranking_repository.count_rankings_uncached_with_visible_cache(
-        DB_PATH,
-        get_catalog_image_counts=get_catalog_image_counts,
-        get_cached_image_id_set=get_cached_image_id_set,
-        orientation=orientation,
-        compared=compared,
-        min_stars=min_stars,
-        folder=folder,
-        flag=flag,
-        date_taken=date_taken,
-        file_type=file_type,
-        camera=camera,
-        lens=lens,
-        id_filter=id_filter,
-        visible_thumb_size=visible_thumb_size,
-        cache_root=cache_root,
-        text_query=text_query,
-    )
 
 
 async def rank_quality(orientation: str = "", compared: str = "", min_stars: int = 0,
@@ -1165,18 +1018,6 @@ async def get_map_markers(orientation: str = "", compared: str = "", min_stars: 
 async def get_filter_options():
     try:
         return await filter_options_repository.filter_options_cached(
-            DB_PATH,
-            get_catalog_image_counts=get_catalog_image_counts,
-            get_active_source_id_set=get_active_source_id_set,
-            ttl_seconds=FILTER_OPTIONS_CACHE_TTL_SECONDS,
-        )
-    finally:
-        _sync_filter_options_refreshing_facade()
-
-
-async def _load_filter_options_uncached():
-    try:
-        return await filter_options_repository.load_filter_options_uncached(
             DB_PATH,
             get_catalog_image_counts=get_catalog_image_counts,
             get_active_source_id_set=get_active_source_id_set,

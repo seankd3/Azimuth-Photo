@@ -6,7 +6,6 @@ from features.catalog import routes as catalog_routes
 from features.collections import routes as collection_routes
 from features.compare import routes as compare_routes
 from features.export import routes as export_routes
-from features.imports import routes as imports_routes
 from features.library import routes as library_routes
 from features.media import routes as media_routes
 from features.people import routes as people_routes
@@ -426,22 +425,13 @@ def configure_compare_routes(
 def configure_query_constraints(
     *,
     text_search_resolution_cache_ttl_seconds,
-    invalidate_ai_status_response_cache=None,
-    invalidate_settings_response_cache=None,
 ) -> None:
     import db
     import settings
     from core import query_constraints
-    from features.settings import status as settings_status
 
     query_constraints.configure(
         extension_search_terms=db.IMAGE_EXTENSION_SEARCH_TERMS,
-        invalidate_ai_status_response_cache=(
-            invalidate_ai_status_response_cache or ai_routes.invalidate_ai_status_response_cache
-        ),
-        invalidate_settings_response_cache=(
-            invalidate_settings_response_cache or settings_status.invalidate_settings_response_cache
-        ),
         metadata_search_image_ids=lambda query: db.metadata_search_image_ids(query),
         active_embedding_config=settings.active_embedding_config,
         fast_search_embedding_config=settings.fast_search_embedding_config,

@@ -947,19 +947,6 @@ async def mosaic_next_impl(
     if exclude:
         exclude_ids = {int(x) for x in exclude.split(",") if x.strip().isdigit()}
     search = await _configured_resolve_library_constraints(q, people=people, deep=deep)
-    has_filters = has_candidate_filters(
-        exclude_ids=exclude_ids,
-        orientation=orientation,
-        compared=compared,
-        min_stars=min_stars,
-        folder=folder,
-        flag=flag,
-        date_taken=date_taken,
-        file_type=file_type,
-        camera=camera,
-        lens=lens,
-        search=search,
-    )
     default_pool_only = not has_candidate_filters(
         orientation=orientation,
         compared=compared,

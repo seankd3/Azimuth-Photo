@@ -1,4 +1,3 @@
-import asyncio
 import os
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -249,184 +248,10 @@ def register_app_lifecycle(shell: AppShell, dependencies: AppLifecycleDependenci
     return AppLifecycleHandlers(startup=startup, shutdown=shutdown)
 
 
-def configure_library_service(
-    *,
-    resolve_library_constraints: Callable[..., Awaitable[dict]],
-    cache_root: Callable[[], str],
-    clamp_int: Callable[[object, int, int, int], int],
-    normalize_search_query: Callable[[str], str],
-    schedule_thumbnail_prefetch: Callable[..., None],
-    schedule_result_thumbnail_memory_warm: Callable[[list], None],
-    rankings_response_cache_ttl_seconds: Callable[[], float],
-) -> None:
-    from core import wiring
-
-    wiring.configure_library_service(
-        resolve_library_constraints=resolve_library_constraints,
-        cache_root=cache_root,
-        clamp_int=clamp_int,
-        normalize_search_query=normalize_search_query,
-        schedule_thumbnail_prefetch=schedule_thumbnail_prefetch,
-        schedule_result_thumbnail_memory_warm=schedule_result_thumbnail_memory_warm,
-        rankings_response_cache_ttl_seconds=rankings_response_cache_ttl_seconds,
-    )
-
-
-def configure_settings_routes(
-    *,
-    settings_response_cache: dict,
-    settings_response_cache_ttl_seconds: Callable[[], float],
-    build_settings_response: settings_routes.BuildResponse,
-    copy_settings_response: settings_routes.CopyResponse,
-    track_background_task: settings_routes.TrackTask,
-    get_refreshing: settings_routes.GetRefreshing,
-    set_refreshing: settings_routes.SetRefreshing,
-    build_cache_status: settings_routes.AsyncDictBuilder,
-    build_ai_status: settings_routes.AsyncDictBuilder,
-    people_status_payload: settings_routes.BuildResponse,
-    invalidate_image_flag_caches: settings_routes.Invalidator,
-    invalidate_pairing_cache: settings_routes.InvalidatePairing,
-    invalidate_cache_status_cache: settings_routes.Invalidator,
-    invalidate_ai_status_response_cache: settings_routes.Invalidator,
-    invalidate_settings_response_cache: settings_routes.Invalidator,
-    invalidate_rankings_cache: settings_routes.Invalidator,
-    invalidate_vector_derived_caches: settings_routes.Invalidator,
-    db_path: settings_routes.DbPathProvider | None = None,
-    get_stats: settings_routes.BuildResponse | None = None,
-    refresh_source_online_states: settings_routes.AsyncBoolBuilder | None = None,
-) -> None:
-    from core import wiring
-
-    wiring.configure_settings_routes(
-        settings_response_cache=settings_response_cache,
-        settings_response_cache_ttl_seconds=settings_response_cache_ttl_seconds,
-        build_settings_response=build_settings_response,
-        copy_settings_response=copy_settings_response,
-        track_background_task=track_background_task,
-        get_refreshing=get_refreshing,
-        set_refreshing=set_refreshing,
-        db_path=db_path,
-        get_stats=get_stats,
-        refresh_source_online_states=refresh_source_online_states,
-        build_cache_status=build_cache_status,
-        build_ai_status=build_ai_status,
-        people_status_payload=people_status_payload,
-        invalidate_image_flag_caches=invalidate_image_flag_caches,
-        invalidate_pairing_cache=invalidate_pairing_cache,
-        invalidate_cache_status_cache=invalidate_cache_status_cache,
-        invalidate_ai_status_response_cache=invalidate_ai_status_response_cache,
-        invalidate_settings_response_cache=invalidate_settings_response_cache,
-        invalidate_rankings_cache=invalidate_rankings_cache,
-        invalidate_vector_derived_caches=invalidate_vector_derived_caches,
-    )
-
-
-def configure_compare_service(
-    *,
-    invalidate_rankings_cache: Callable[[], None],
-    invalidate_interaction_response_cache: Callable[[], None],
-    cache_root: Callable[[], str],
-    resolve_library_constraints: Callable[..., Awaitable[dict]],
-    schedule_thumbnail_prefetch: Callable[..., None],
-    schedule_cached_thumbnail_memory_warm: Callable[..., None],
-    db_signature: Callable[[], str] | None = None,
-    get_active_images_for_pairing: Callable[[], Awaitable[list]] | None = None,
-    get_past_matchups: Callable[[], Awaitable[set]] | None = None,
-    get_visible_past_matchups: Callable[..., Awaitable[set]] | None = None,
-    get_past_matchups_for_image_ids: Callable[[list[int]], Awaitable[set]] | None = None,
-    get_active_images_by_ids: Callable[[list[int]], Awaitable[dict[int, dict]]] | None = None,
-    get_visible_images_for_pairing: Callable[..., Awaitable[list]] | None = None,
-    get_visible_orientation_pairing_pool_counts: Callable[..., Awaitable[dict]] | None = None,
-    count_rankings: Callable[..., Awaitable[int]] | None = None,
-    get_rankings: Callable[..., Awaitable[list]] | None = None,
-    get_visible_pairing_pool_counts: Callable[..., Awaitable[dict]] | None = None,
-    get_top_images: Callable[..., Awaitable[list]] | None = None,
-) -> None:
-    from core import wiring
-
-    wiring.configure_compare_service(
-        invalidate_rankings_cache=invalidate_rankings_cache,
-        invalidate_interaction_response_cache=invalidate_interaction_response_cache,
-        cache_root=cache_root,
-        resolve_library_constraints=resolve_library_constraints,
-        schedule_thumbnail_prefetch=schedule_thumbnail_prefetch,
-        schedule_cached_thumbnail_memory_warm=schedule_cached_thumbnail_memory_warm,
-        db_signature=db_signature,
-        get_active_images_for_pairing=get_active_images_for_pairing,
-        get_past_matchups=get_past_matchups,
-        get_visible_past_matchups=get_visible_past_matchups,
-        get_past_matchups_for_image_ids=get_past_matchups_for_image_ids,
-        get_active_images_by_ids=get_active_images_by_ids,
-        get_visible_images_for_pairing=get_visible_images_for_pairing,
-        get_visible_orientation_pairing_pool_counts=get_visible_orientation_pairing_pool_counts,
-        count_rankings=count_rankings,
-        get_rankings=get_rankings,
-        get_visible_pairing_pool_counts=get_visible_pairing_pool_counts,
-        get_top_images=get_top_images,
-    )
-
-
-def configure_compare_routes(
-    *,
-    schedule_pairing_propagation: compare_routes.SchedulePropagation,
-    invalidate_pairing_cache: compare_routes.InvalidatePairing,
-    patch_pairing_cache: compare_routes.PatchPairingCache | None = None,
-    add_past_matchups: compare_routes.AddPastMatchups | None = None,
-    record_active_mosaic_pick: compare_routes.RecordMosaicPick | None = None,
-    record_active_comparison: compare_routes.RecordComparison | None = None,
-    undo_last_comparison: compare_routes.UndoComparison | None = None,
-    mosaic_next_handler: compare_routes.NextHandler | None = None,
-    compare_next_handler: compare_routes.NextHandler | None = None,
-) -> None:
-    from core import wiring
-
-    wiring.configure_compare_routes(
-        patch_pairing_cache=patch_pairing_cache,
-        add_past_matchups=add_past_matchups,
-        schedule_pairing_propagation=schedule_pairing_propagation,
-        invalidate_pairing_cache=invalidate_pairing_cache,
-        record_active_mosaic_pick=record_active_mosaic_pick,
-        record_active_comparison=record_active_comparison,
-        undo_last_comparison=undo_last_comparison,
-        mosaic_next_handler=mosaic_next_handler,
-        compare_next_handler=compare_next_handler,
-    )
-
-
-def configure_query_constraints(
-    *,
-    text_search_resolution_cache_ttl_seconds: Callable[[], float],
-    invalidate_ai_status_response_cache: Callable[[], None] | None = None,
-    invalidate_settings_response_cache: Callable[[], None] | None = None,
-) -> None:
-    from core import wiring
-
-    wiring.configure_query_constraints(
-        text_search_resolution_cache_ttl_seconds=text_search_resolution_cache_ttl_seconds,
-        invalidate_ai_status_response_cache=invalidate_ai_status_response_cache,
-        invalidate_settings_response_cache=invalidate_settings_response_cache,
-    )
-
-
-def configure_export_routes(
-    *,
-    resolve_library_constraints: export_routes.ResolveLibraryConstraints,
-    db_path: export_routes.DbPathProvider,
-    get_import_batch_image_ids: export_routes.GetImportBatchImageIds | None = None,
-) -> None:
-    from core import wiring
-
-    wiring.configure_export_routes(
-        resolve_library_constraints=resolve_library_constraints,
-        db_path=db_path,
-        get_import_batch_image_ids=get_import_batch_image_ids,
-    )
-
-
 def configure_app_runtime_services(shell: AppShell) -> AppRuntimeServices:
     import db
     import thumbnails
-    from core import cache_events, query_constraints
+    from core import cache_events, query_constraints, wiring
     from core import requests as request_helpers
     from features.cache import status as cache_status_service
     from features.compare import service as compare_service
@@ -475,7 +300,7 @@ def configure_app_runtime_services(shell: AppShell) -> AppRuntimeServices:
             resolve_text_search=resolve_text_search,
         )
 
-    configure_compare_service(
+    wiring.configure_compare_service(
         invalidate_rankings_cache=invalidate_rankings_cache,
         invalidate_interaction_response_cache=invalidate_interaction_response_cache,
         cache_root=cache_root,
@@ -483,18 +308,16 @@ def configure_app_runtime_services(shell: AppShell) -> AppRuntimeServices:
         schedule_thumbnail_prefetch=media_warm.schedule_thumbnail_prefetch,
         schedule_cached_thumbnail_memory_warm=media_warm.schedule_cached_thumbnail_memory_warm,
     )
-    configure_query_constraints(
+    wiring.configure_query_constraints(
         text_search_resolution_cache_ttl_seconds=lambda: query_constraints._text_search_resolution_cache_ttl_seconds,
-        invalidate_ai_status_response_cache=ai_routes.invalidate_ai_status_response_cache,
-        invalidate_settings_response_cache=settings_status.invalidate_settings_response_cache,
     )
-    configure_compare_routes(
+    wiring.configure_compare_routes(
         schedule_pairing_propagation=schedule_pairing_propagation,
         invalidate_pairing_cache=invalidate_pairing_cache,
         mosaic_next_handler=lambda **kwargs: compare_service.mosaic_next_impl(**kwargs),
         compare_next_handler=lambda **kwargs: compare_service.compare_next_impl(**kwargs),
     )
-    configure_library_service(
+    wiring.configure_library_service(
         resolve_library_constraints=resolve_library_constraints,
         cache_root=cache_root,
         clamp_int=request_helpers.clamp_int,
@@ -503,12 +326,12 @@ def configure_app_runtime_services(shell: AppShell) -> AppRuntimeServices:
         schedule_result_thumbnail_memory_warm=media_warm.schedule_result_thumbnail_memory_warm,
         rankings_response_cache_ttl_seconds=lambda: library_service._rankings_response_cache_ttl_seconds,
     )
-    configure_export_routes(
+    wiring.configure_export_routes(
         resolve_library_constraints=resolve_library_constraints,
         db_path=lambda: db.DB_PATH,
         get_import_batch_image_ids=lambda batch_id: db.get_import_batch_image_ids(batch_id),
     )
-    configure_settings_routes(
+    wiring.configure_settings_routes(
         settings_response_cache=settings_status._settings_response_cache,
         settings_response_cache_ttl_seconds=lambda: settings_status._settings_response_cache_ttl_seconds,
         build_settings_response=lambda: settings_status.build_settings_response(),

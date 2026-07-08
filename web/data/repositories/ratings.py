@@ -277,7 +277,6 @@ async def visible_orientation_pairing_pool_counts(
     cache_root: str,
     orientation: str,
 ) -> dict:
-    active_images = int(catalog_counts.get("active_images") or 0)
     all_catalog_images_active = _all_catalog_images_active(catalog_counts)
     all_sources_available = int(catalog_counts.get("removed_images") or 0) == 0
     conn = await connection.open_async(db_path)

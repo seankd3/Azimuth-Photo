@@ -18,7 +18,6 @@ from typing import Any
 import numpy as np
 
 import embed_cache
-import settings
 
 log = logging.getLogger("elo_propagation")
 

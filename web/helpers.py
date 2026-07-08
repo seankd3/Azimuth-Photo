@@ -73,16 +73,6 @@ def has_ranking_signal(image: dict) -> bool:
     )
 
 
-def visibility_counts(total_images: int, visible_images: int) -> dict:
-    total = max(0, _as_int(total_images))
-    visible = max(0, _as_int(visible_images))
-    return {
-        "visible_images": visible,
-        "total_images": total,
-        "hidden_pending_thumbnails": max(total - visible, 0),
-    }
-
-
 def date_group_for_image(image: dict) -> str:
     date_taken = str(_get(image, "date_taken") or "")
     return date_taken[:7] if len(date_taken) >= 7 else ""

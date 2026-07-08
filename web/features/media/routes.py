@@ -6,6 +6,7 @@ from collections.abc import Awaitable, Callable
 from fastapi import APIRouter, BackgroundTasks, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 
+from core import requests as request_helpers
 from data.repositories import images as image_repository
 import thumbnails
 
@@ -194,12 +195,9 @@ async def image_media_status(image_id: int):
 
 @router.post("/api/images/media-status")
 async def images_media_status(request: Request):
-    try:
-        body = await request.json()
-    except Exception:
-        return JSONResponse({"error": "Malformed JSON body"}, status_code=400)
-    if not isinstance(body, dict):
-        return JSONResponse({"error": "JSON body must be an object"}, status_code=400)
+    body, error = await request_helpers.json_object(request)
+    if error is not None:
+        return error
     raw_ids = body.get("ids", [])
     if not isinstance(raw_ids, list):
         raw_ids = [raw_ids]

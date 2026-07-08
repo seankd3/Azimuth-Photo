@@ -4,7 +4,6 @@ import importlib.util
 import logging
 import time
 
-import settings
 
 
 logger = logging.getLogger(__name__)

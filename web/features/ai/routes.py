@@ -11,7 +11,6 @@ from core import responses as response_helpers
 
 
 router = APIRouter()
-BuildAiStatus = Callable[..., Awaitable[dict]]
 AsyncDictBuilder = Callable[..., Awaitable[dict]]
 AsyncListBuilder = Callable[..., Awaitable[list]]
 AsyncIntBuilder = Callable[..., Awaitable[int]]
@@ -29,10 +28,7 @@ def configure(
     invalidate_settings_response_cache: InvalidateStatus,
     get_ai_status_counts: AsyncDictBuilder,
     count_embeddings_for_model: AsyncIntBuilder,
-    build_ai_status: BuildAiStatus | None = None,
-    invalidate_ai_status_response_cache: InvalidateStatus | None = None,
 ) -> None:
-    del build_ai_status, invalidate_ai_status_response_cache
     global _invalidate_settings_response_cache, _get_ai_status_counts
     global _count_embeddings_for_model
     _invalidate_settings_response_cache = invalidate_settings_response_cache

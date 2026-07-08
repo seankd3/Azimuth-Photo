@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Callable
 import time as _time
 
@@ -10,19 +11,7 @@ from data.repositories import rankings as ranking_repository
 from data.repositories import stats as stats_repository
 
 
-class CacheInvalidationBus:
-    """Small fanout helper for cross-feature cache invalidation callbacks."""
-
-    def __init__(self):
-        self._listeners: list = []
-
-    def register(self, listener) -> None:
-        if listener not in self._listeners:
-            self._listeners.append(listener)
-
-    def invalidate(self, *args, **kwargs) -> None:
-        for listener in list(self._listeners):
-            listener(*args, **kwargs)
+logger = logging.getLogger(__name__)
 
 
 _compare_service = None
@@ -45,7 +34,11 @@ def notify_embedding_batch_stored(model_key: str, image_ids: list[int]) -> None:
         try:
             listener(model_key, image_ids)
         except Exception:
-            pass
+            logger.warning(
+                "Embedding batch listener failed for model %r",
+                model_key,
+                exc_info=True,
+            )
 
 
 def configure(

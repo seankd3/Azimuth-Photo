@@ -3,12 +3,12 @@
 import asyncio
 from collections.abc import Callable
 import os
-import sqlite3
 
 import numpy as np
 
 import embed_cache
 import settings
+from data import connection
 
 
 MIN_COMPARISON_ROWS = 5
@@ -59,8 +59,7 @@ def _db_file_signature(db_path: str) -> tuple:
 
 
 def _comparison_summary_sync(db_path: str) -> dict:
-    conn = sqlite3.connect(db_path, timeout=30)
-    conn.row_factory = sqlite3.Row
+    conn = connection.open_sync(db_path)
     try:
         summary = conn.execute(
             "SELECT COUNT(*) AS count, COALESCE(MAX(id), 0) AS max_id FROM comparisons"
@@ -74,7 +73,7 @@ def _comparison_summary_sync(db_path: str) -> dict:
             "rows": [(int(row["winner_id"]), int(row["loser_id"])) for row in rows],
         }
     finally:
-        conn.close()
+        connection.close_sync(conn, db_path=db_path)
 
 
 def _unavailable(reason: str, *, comparison_count: int = 0, winner_count: int = 0,
