@@ -1,9 +1,11 @@
 import asyncio
+import io
 import os
 import sqlite3
 import sys
 import tempfile
 import unittest
+import zipfile
 
 import numpy as np
 from fastapi.testclient import TestClient
@@ -543,6 +545,40 @@ class ApiShapeTests(unittest.TestCase):
 
         self.assertEqual(lines[0], ",".join(EXPORT_FIELD_NAMES))
         self.assertIn("sunset-alpha.jpg", lines[1])
+
+    def test_export_zip_streams_original_files_for_requested_ids(self):
+        first_path = os.path.join(self.tempdir.name, "catalog", "sunset-alpha.jpg")
+        second_path = os.path.join(self.tempdir.name, "catalog", "portrait-beta.jpg")
+        with open(first_path, "wb") as fh:
+            fh.write(b"first image")
+        with open(second_path, "wb") as fh:
+            fh.write(b"second image")
+
+        response = self.client.get(f"/api/export?format=zip&ids={self.ids[0]},{self.ids[1]}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.headers["content-disposition"],
+            'attachment; filename="photoarchive-export-2.zip"',
+        )
+        with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+            names = sorted(archive.namelist())
+            self.assertEqual(
+                names,
+                [
+                    f"{self.ids[0]}-sunset-alpha.jpg",
+                    f"{self.ids[1]}-portrait-beta.jpg",
+                ],
+            )
+            self.assertEqual(archive.read(f"{self.ids[0]}-sunset-alpha.jpg"), b"first image")
+
+    def test_export_zip_rejects_requests_over_cap(self):
+        ids = ",".join(str(image_id) for image_id in range(1, 2002))
+
+        response = self.client.get(f"/api/export?format=zip&ids={ids}")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("2000", response.json()["detail"])
 
 
 if __name__ == "__main__":

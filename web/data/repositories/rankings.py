@@ -280,11 +280,11 @@ def ranking_filter_parts(
         conditions.append("i.flag = ?")
         params.append(flag)
 
+    date_range = date_taken_filter_range(date_taken)
     if date_taken == "undated":
         conditions.append("i.date_taken IS NULL")
-    elif date_taken.isdigit() and len(date_taken) == 4:
-        start = f"{date_taken}-01-01 00:00:00"
-        end = f"{int(date_taken) + 1}-01-01 00:00:00"
+    elif date_range is not None:
+        start, end = date_range
         conditions.append("i.date_taken >= ? AND i.date_taken < ?")
         params.extend([start, end])
 
@@ -354,6 +354,27 @@ def ranking_filter_parts(
         params.extend([cache_root, visible_thumb_size])
 
     return conditions, params
+
+
+def date_taken_filter_range(date_taken: str) -> tuple[str, str] | None:
+    value = (date_taken or "").strip()
+    if value.isdigit() and len(value) == 4:
+        year = int(value)
+        return f"{year:04d}-01-01 00:00:00", f"{year + 1:04d}-01-01 00:00:00"
+    try:
+        parsed = datetime.strptime(value, "%Y-%m")
+    except ValueError:
+        return None
+    if parsed.month == 12:
+        next_year = parsed.year + 1
+        next_month = 1
+    else:
+        next_year = parsed.year
+        next_month = parsed.month + 1
+    return (
+        f"{parsed.year:04d}-{parsed.month:02d}-01 00:00:00",
+        f"{next_year:04d}-{next_month:02d}-01 00:00:00",
+    )
 
 
 def ranking_index_for_query(

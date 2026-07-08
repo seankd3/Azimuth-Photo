@@ -67,6 +67,36 @@ async def create_collection(
     return await get_collection(db_path, collection_id) or {"id": collection_id}
 
 
+async def rename_collection(db_path: str, collection_id: int, *, name: str) -> dict | None:
+    now = time.time()
+    clean_name = _clean_text(name)
+    conn = await data_connection.open_async(db_path)
+    try:
+        if not await _collection_exists(conn, collection_id):
+            return None
+        await conn.execute(
+            "UPDATE collections SET name = ?, updated_at = ? WHERE id = ?",
+            (clean_name, now, int(collection_id)),
+        )
+        await conn.commit()
+    finally:
+        await data_connection.close_async(conn, db_path=db_path)
+    return await get_collection(db_path, collection_id)
+
+
+async def delete_collection(db_path: str, collection_id: int) -> bool:
+    conn = await data_connection.open_async(db_path)
+    try:
+        if not await _collection_exists(conn, collection_id):
+            return False
+        await conn.execute("DELETE FROM collection_images WHERE collection_id = ?", (int(collection_id),))
+        await conn.execute("DELETE FROM collections WHERE id = ?", (int(collection_id),))
+        await conn.commit()
+        return True
+    finally:
+        await data_connection.close_async(conn, db_path=db_path)
+
+
 async def list_collections(db_path: str) -> list[dict]:
     conn = await data_connection.open_async(db_path)
     try:
@@ -125,6 +155,26 @@ async def get_collection(db_path: str, collection_id: int, *, limit: int = 200, 
     finally:
         await data_connection.close_async(conn, db_path=db_path)
     return collection
+
+
+async def collection_image_ids(db_path: str, collection_id: int, *, limit: int = 2000) -> list[int] | None:
+    conn = await data_connection.open_async(db_path)
+    try:
+        if not await _collection_exists(conn, collection_id):
+            return None
+        cursor = await conn.execute(
+            """
+            SELECT image_id
+            FROM collection_images
+            WHERE collection_id = ?
+            ORDER BY position ASC, added_at ASC, image_id ASC
+            LIMIT ?
+            """,
+            (int(collection_id), max(1, int(limit))),
+        )
+        return [int(row["image_id"]) for row in await cursor.fetchall()]
+    finally:
+        await data_connection.close_async(conn, db_path=db_path)
 
 
 async def add_images(db_path: str, collection_id: int, image_ids: list[int]) -> dict | None:

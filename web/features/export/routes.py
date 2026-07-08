@@ -1,14 +1,20 @@
+import asyncio
 import csv
 import io
+import os
+import tempfile
+import zipfile
 from collections.abc import Awaitable, Callable
 
 from fastapi import APIRouter
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from starlette.background import BackgroundTask
 
 from core.requests import clamp_int
 from data.repositories import images as image_repository
 from data.repositories import rankings as ranking_repository
 from data.repositories import stats as stats_repository
+import thumbnails
 
 
 router = APIRouter()
@@ -40,6 +46,8 @@ EXPORT_FIELD_NAMES = (
     "latitude",
     "longitude",
 )
+ZIP_EXPORT_MAX_IMAGES = 2000
+ZIP_EXPORT_SIZES = {"original", "lg", "md"}
 
 
 def configure(
@@ -145,14 +153,92 @@ def _export_row(rank: int, image: dict) -> dict:
     }
 
 
+def _parse_ids(ids: str, *, max_ids: int | None = None) -> list[int]:
+    parsed = []
+    seen = set()
+    for value in ids.split(","):
+        value = value.strip()
+        if not value.isdigit():
+            continue
+        image_id = int(value)
+        if image_id <= 0 or image_id in seen:
+            continue
+        seen.add(image_id)
+        parsed.append(image_id)
+        if max_ids is not None and len(parsed) > max_ids:
+            break
+    return parsed
+
+
+def _safe_zip_name(image_id: int, filename: str) -> str:
+    basename = os.path.basename(filename or f"image-{image_id}") or f"image-{image_id}"
+    safe = "".join(char if char.isalnum() or char in "._- " else "_" for char in basename).strip()
+    return f"{image_id}-{safe or f'image-{image_id}'}"
+
+
+def _zip_source_for_image(image: dict, size: str) -> tuple[str | None, str]:
+    image_id = int(image["id"])
+    if size == "original":
+        path = image.get("filepath") or ""
+        if not path:
+            return None, "source path missing"
+        if not os.path.exists(path):
+            return None, "source file unavailable"
+        return path, ""
+    entry = thumbnails.fast_disk_path_entry(size, image_id)
+    if entry is None:
+        return None, f"{size} cache entry missing"
+    _signature, path = entry
+    return path, ""
+
+
+def _build_zip_file(images: list[dict], size: str) -> tuple[str, int]:
+    temp = tempfile.NamedTemporaryFile(prefix="photoarchive-export-", suffix=".zip", delete=False)
+    temp_path = temp.name
+    temp.close()
+    written = 0
+    skipped = []
+    try:
+        with zipfile.ZipFile(temp_path, "w", compression=zipfile.ZIP_STORED) as archive:
+            for image in images:
+                image_id = int(image["id"])
+                path, reason = _zip_source_for_image(image, size)
+                if path is None:
+                    skipped.append(f"{image_id}: {reason}")
+                    continue
+                archive.write(path, arcname=_safe_zip_name(image_id, image.get("filename") or path))
+                written += 1
+            if skipped:
+                archive.writestr(
+                    "manifest.txt",
+                    "Skipped images:\n" + "\n".join(skipped) + "\n",
+                )
+        return temp_path, written
+    except Exception:
+        try:
+            os.remove(temp_path)
+        except OSError:
+            pass
+        raise
+
+
 @router.get("/api/export")
 async def export_rankings(
     format: str = "json", ids: str = "", limit: int = 10000, sort: str = "elo",
     orientation: str = "", compared: str = "", min_stars: int = 0,
     folder: str = "", flag: str = "", date_taken: str = "", file_type: str = "",
     camera: str = "", lens: str = "", q: str = "", deep: bool = False, people: str = "",
-    import_batch: int = 0,
+    import_batch: int = 0, size: str = "original",
 ):
+    normalized_format = (format or "json").lower()
+    if normalized_format == "zip":
+        if size not in ZIP_EXPORT_SIZES:
+            return JSONResponse({"detail": "size must be original, lg, or md"}, status_code=400)
+        if ids and len(_parse_ids(ids, max_ids=ZIP_EXPORT_MAX_IMAGES)) > ZIP_EXPORT_MAX_IMAGES:
+            return JSONResponse(
+                {"detail": f"Zip export is limited to {ZIP_EXPORT_MAX_IMAGES} images"},
+                status_code=400,
+            )
     images = await _get_export_images(
         ids=ids,
         limit=limit,
@@ -171,9 +257,23 @@ async def export_rankings(
         people=people,
         import_batch=import_batch,
     )
+    if normalized_format == "zip":
+        if len(images) > ZIP_EXPORT_MAX_IMAGES:
+            return JSONResponse(
+                {"detail": f"Zip export is limited to {ZIP_EXPORT_MAX_IMAGES} images"},
+                status_code=400,
+            )
+        zip_path, written_count = await asyncio.to_thread(_build_zip_file, [dict(image) for image in images], size)
+        return FileResponse(
+            zip_path,
+            media_type="application/zip",
+            filename=f"photoarchive-export-{written_count}.zip",
+            background=BackgroundTask(os.remove, zip_path),
+        )
+
     data = [_export_row(index + 1, dict(image)) for index, image in enumerate(images)]
 
-    if format == "csv":
+    if normalized_format == "csv":
         output = io.StringIO()
         if data:
             writer = csv.DictWriter(output, fieldnames=EXPORT_FIELD_NAMES)

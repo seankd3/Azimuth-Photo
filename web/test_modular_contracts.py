@@ -92,6 +92,8 @@ PUBLIC_ROUTE_CONTRACT = {
     ("GET", "/api/user-collections"),
     ("POST", "/api/user-collections"),
     ("GET", "/api/user-collections/{collection_id}"),
+    ("POST", "/api/user-collections/{collection_id}/rename"),
+    ("POST", "/api/user-collections/{collection_id}/delete"),
     ("POST", "/api/user-collections/{collection_id}/images"),
     ("POST", "/api/user-collections/{collection_id}/images/remove"),
     ("DELETE", "/api/user-collections/{collection_id}/images"),

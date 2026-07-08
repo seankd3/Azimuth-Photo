@@ -10,6 +10,8 @@ class CollectionTests(BackendTestCase):
             create_collection=lambda **kwargs: db.create_collection(**kwargs),
             list_collections=lambda: db.list_collections(),
             get_collection=lambda collection_id, **kwargs: db.get_collection(collection_id, **kwargs),
+            rename_collection=lambda collection_id, **kwargs: db.rename_collection(collection_id, **kwargs),
+            delete_collection=lambda collection_id: db.delete_collection(collection_id),
             add_collection_images=lambda collection_id, image_ids: db.add_collection_images(collection_id, image_ids),
             remove_collection_images=lambda collection_id, image_ids: db.remove_collection_images(
                 collection_id,
@@ -56,6 +58,57 @@ class CollectionTests(BackendTestCase):
         self.assertTrue(updated["ok"])
         self.assertEqual(updated["collection"]["image_count"], 1)
         self.assertEqual(updated["collection"]["cover_image_id"], second)
+
+    async def test_collection_api_renames_collection(self):
+        created = await collection_routes.api_create_collection(
+            collection_routes.CreateCollectionBody(name="Original")
+        )
+
+        renamed = await collection_routes.api_rename_collection(
+            created["collection"]["id"],
+            collection_routes.RenameCollectionBody(name="  Final selects  "),
+        )
+
+        self.assertTrue(renamed["ok"])
+        self.assertEqual(renamed["collection"]["name"], "Final selects")
+
+    async def test_collection_api_rename_rejects_unknown_and_bad_names(self):
+        missing = await collection_routes.api_rename_collection(
+            999999,
+            collection_routes.RenameCollectionBody(name="Missing"),
+        )
+        blank = await collection_routes.api_rename_collection(
+            999999,
+            collection_routes.RenameCollectionBody(name="   "),
+        )
+        too_long = await collection_routes.api_rename_collection(
+            999999,
+            collection_routes.RenameCollectionBody(name="x" * 161),
+        )
+
+        self.assertEqual(missing.status_code, 404)
+        self.assertEqual(blank.status_code, 400)
+        self.assertEqual(too_long.status_code, 400)
+
+    async def test_collection_api_deletes_collection_without_deleting_photos(self):
+        source = await self._source()
+        image_id = await self._image(source["id"], "kept.jpg")
+        created = await collection_routes.api_create_collection(
+            collection_routes.CreateCollectionBody(name="Delete me", image_ids=[image_id])
+        )
+
+        deleted = await collection_routes.api_delete_collection(created["collection"]["id"])
+        detail = await collection_routes.api_collection(created["collection"]["id"])
+        row = await self._image_row(image_id)
+
+        self.assertEqual(deleted, {"ok": True})
+        self.assertEqual(detail.status_code, 404)
+        self.assertEqual(row["id"], image_id)
+
+    async def test_collection_api_delete_returns_not_found_for_missing_collection(self):
+        response = await collection_routes.api_delete_collection(999999)
+
+        self.assertEqual(response.status_code, 404)
 
     async def test_collection_api_returns_not_found_for_missing_collection(self):
         response = await collection_routes.api_collection(999999)

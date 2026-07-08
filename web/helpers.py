@@ -96,9 +96,14 @@ def filter_by_metadata(
     if date_taken:
         if date_taken == "undated":
             images = [img for img in images if not img.get("date_taken")]
-        elif date_taken.isdigit() and len(date_taken) == 4:
-            prefix = f"{date_taken}-"
-            images = [img for img in images if str(img.get("date_taken") or "").startswith(prefix)]
+        else:
+            date_range = ranking_repository.date_taken_filter_range(date_taken)
+            if date_range is not None:
+                start, end = date_range
+                images = [
+                    img for img in images
+                    if start <= str(img.get("date_taken") or "") < end
+                ]
 
     if file_type:
         normalized_type = file_type.lower().lstrip(".")

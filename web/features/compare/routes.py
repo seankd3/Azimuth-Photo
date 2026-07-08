@@ -12,6 +12,7 @@ from data import connection as data_connection
 
 
 router = APIRouter()
+MAX_SCOPED_IMAGE_IDS = 2000
 PatchPairingCache = Callable[[list[tuple[int, float, int]]], None]
 AddPastMatchups = Callable[[list[tuple[int, int]]], None]
 SchedulePropagation = Callable[[object], None]
@@ -83,15 +84,38 @@ def _configured() -> None:
         raise RuntimeError("Compare routes are not configured")
 
 
+def _parse_scoped_ids(ids: str) -> tuple[list[int], JSONResponse | None]:
+    scoped_ids = []
+    seen = set()
+    for value in (ids or "").split(","):
+        value = value.strip()
+        if not value.isdigit():
+            continue
+        image_id = int(value)
+        if image_id <= 0 or image_id in seen:
+            continue
+        seen.add(image_id)
+        scoped_ids.append(image_id)
+        if len(scoped_ids) > MAX_SCOPED_IMAGE_IDS:
+            return [], JSONResponse(
+                {"error": f"ids is limited to {MAX_SCOPED_IMAGE_IDS} images"},
+                status_code=400,
+            )
+    return scoped_ids, None
+
+
 @router.get("/api/mosaic/next")
 async def mosaic_next(
     n: int = 12, exclude: str = "", strategy: str = "explore", grid_elo: float = 0,
     orientation: str = "", compared: str = "", min_stars: int = 0, folder: str = "",
     flag: str = "", date_taken: str = "", file_type: str = "", camera: str = "", lens: str = "",
-    q: str = "", deep: bool = False, people: str = "",
+    q: str = "", deep: bool = False, people: str = "", ids: str = "", collection_id: int = 0,
 ):
     if _mosaic_next_handler is None:
         raise RuntimeError("Compare routes are not configured")
+    scoped_ids, id_error = _parse_scoped_ids(ids)
+    if id_error is not None:
+        return id_error
     started = time.perf_counter()
     try:
         with data_connection.sqlite_timeout(0.25):
@@ -112,6 +136,8 @@ async def mosaic_next(
                 q=q,
                 deep=deep,
                 people=people,
+                ids=scoped_ids,
+                collection_id=collection_id,
             )
     except Exception as exc:
         if not data_connection.is_sqlite_locked_error(exc):
@@ -240,10 +266,13 @@ async def compare_next(
     n: int = 5, mode: str = "swiss",
     orientation: str = "", compared: str = "", min_stars: int = 0, folder: str = "",
     flag: str = "", date_taken: str = "", file_type: str = "", camera: str = "", lens: str = "",
-    q: str = "", deep: bool = False, people: str = "",
+    q: str = "", deep: bool = False, people: str = "", ids: str = "", collection_id: int = 0,
 ):
     if _compare_next_handler is None:
         raise RuntimeError("Compare routes are not configured")
+    scoped_ids, id_error = _parse_scoped_ids(ids)
+    if id_error is not None:
+        return id_error
     started = time.perf_counter()
     try:
         with data_connection.sqlite_timeout(0.25):
@@ -262,6 +291,8 @@ async def compare_next(
                 q=q,
                 deep=deep,
                 people=people,
+                ids=scoped_ids,
+                collection_id=collection_id,
             )
     except Exception as exc:
         if not data_connection.is_sqlite_locked_error(exc):

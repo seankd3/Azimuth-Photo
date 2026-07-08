@@ -441,12 +441,24 @@ async def get_collection(collection_id: int, **kwargs):
     return await collection_repository.get_collection(DB_PATH, collection_id, **kwargs)
 
 
+async def rename_collection(collection_id: int, *, name: str):
+    return await collection_repository.rename_collection(DB_PATH, collection_id, name=name)
+
+
+async def delete_collection(collection_id: int) -> bool:
+    return await collection_repository.delete_collection(DB_PATH, collection_id)
+
+
 async def add_collection_images(collection_id: int, image_ids: list[int]):
     return await collection_repository.add_images(DB_PATH, collection_id, image_ids)
 
 
 async def remove_collection_images(collection_id: int, image_ids: list[int]):
     return await collection_repository.remove_images(DB_PATH, collection_id, image_ids)
+
+
+async def collection_image_ids(collection_id: int, *, limit: int = 2000) -> list[int] | None:
+    return await collection_repository.collection_image_ids(DB_PATH, collection_id, limit=limit)
 
 
 async def set_image_status(image_id: int, status: str):

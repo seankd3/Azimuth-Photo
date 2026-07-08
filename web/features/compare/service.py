@@ -47,6 +47,7 @@ _count_rankings: Callable[..., Awaitable[int]] | None = None
 _get_rankings: Callable[..., Awaitable[list]] | None = None
 _get_visible_pairing_pool_counts: Callable[..., Awaitable[dict]] | None = None
 _get_top_images: Callable[..., Awaitable[list]] | None = None
+_get_collection_image_ids: Callable[..., Awaitable[list[int] | None]] | None = None
 
 
 def configure(
@@ -69,6 +70,7 @@ def configure(
     get_rankings: Callable[..., Awaitable[list]] | None = None,
     get_visible_pairing_pool_counts: Callable[..., Awaitable[dict]] | None = None,
     get_top_images: Callable[..., Awaitable[list]] | None = None,
+    get_collection_image_ids: Callable[..., Awaitable[list[int] | None]] | None = None,
 ) -> None:
     global _invalidate_rankings_cache, _invalidate_interaction_response_cache, _cache_root
     global _resolve_library_constraints, _schedule_thumbnail_prefetch
@@ -78,6 +80,7 @@ def configure(
     global _get_active_images_by_ids, _get_visible_images_for_pairing
     global _get_visible_orientation_pairing_pool_counts, _count_rankings
     global _get_rankings, _get_visible_pairing_pool_counts, _get_top_images
+    global _get_collection_image_ids
     _invalidate_rankings_cache = invalidate_rankings_cache
     _invalidate_interaction_response_cache = invalidate_interaction_response_cache
     _cache_root = cache_root
@@ -111,6 +114,8 @@ def configure(
         _get_visible_pairing_pool_counts = get_visible_pairing_pool_counts
     if get_top_images is not None:
         _get_top_images = get_top_images
+    if get_collection_image_ids is not None:
+        _get_collection_image_ids = get_collection_image_ids
 
 
 def _configured(provider):
@@ -133,6 +138,27 @@ async def _configured_resolve_library_constraints(q: str, *, people: str = "", d
     if _resolve_library_constraints is None:
         raise RuntimeError("Compare service is not configured")
     return await _resolve_library_constraints(q, people=people, deep=deep)
+
+
+async def _scoped_search(search: dict, ids: list[int] | None, collection_id: int = 0) -> dict:
+    scoped_ids = set(int(image_id) for image_id in ids or [] if int(image_id) > 0)
+    if collection_id and collection_id > 0:
+        collection_ids = await _configured(_get_collection_image_ids)(int(collection_id))
+        if collection_ids is None:
+            scoped_ids = set()
+        elif scoped_ids:
+            scoped_ids.intersection_update(int(image_id) for image_id in collection_ids)
+        else:
+            scoped_ids = {int(image_id) for image_id in collection_ids}
+    if not scoped_ids and not ids and not collection_id:
+        return search
+    scoped = dict(search)
+    current_filter = scoped.get("id_filter")
+    if current_filter is None:
+        scoped["id_filter"] = scoped_ids
+    else:
+        scoped["id_filter"] = {int(image_id) for image_id in current_filter}.intersection(scoped_ids)
+    return scoped
 
 
 def _configured_schedule_thumbnail_prefetch(rows, size: str, *, limit: int) -> None:
@@ -937,7 +963,7 @@ async def mosaic_next_impl(
     n: int = 12, exclude: str = "", strategy: str = "explore", grid_elo: float = 0,
     orientation: str = "", compared: str = "", min_stars: int = 0, folder: str = "",
     flag: str = "", date_taken: str = "", file_type: str = "", camera: str = "", lens: str = "",
-    q: str = "", deep: bool = False, people: str = "",
+    q: str = "", deep: bool = False, people: str = "", ids: list[int] | None = None, collection_id: int = 0,
 ):
     """Get active images for mosaic ranking with configurable sampling strategy."""
     candidate_source = "mosaic_window"
@@ -947,6 +973,7 @@ async def mosaic_next_impl(
     if exclude:
         exclude_ids = {int(x) for x in exclude.split(",") if x.strip().isdigit()}
     search = await _configured_resolve_library_constraints(q, people=people, deep=deep)
+    search = await _scoped_search(search, ids, collection_id)
     default_pool_only = not has_candidate_filters(
         orientation=orientation,
         compared=compared,
@@ -1044,8 +1071,8 @@ async def mosaic_next_impl(
             candidates = [row for row in candidates if int(row["id"]) not in exclude_ids]
             filtered_total = max(0, int(filtered_total) - len(exclude_ids))
             visible_count = max(0, int(visible_count) - len(exclude_ids))
-    elif strategy != "top" and query_constraints.search_constraint_active(search):
-        candidate_source = "search_reservoir"
+    elif query_constraints.search_constraint_active(search):
+        candidate_source = "search_reservoir" if search.get("active") else "scoped_reservoir"
         stats = None
         candidates, filtered_total, visible_count = await search_visible_ranked_candidates(
             "sm",
@@ -1065,7 +1092,7 @@ async def mosaic_next_impl(
             lens=lens,
         )
         if strategy == "diverse" and visible_count > len(candidates):
-            candidate_source = "search_diverse_universe"
+            candidate_source = "search_diverse_universe" if search.get("active") else "scoped_diverse_universe"
             candidates, filtered_total, visible_count = await search_visible_ranked_candidates(
                 "sm",
                 limit=visible_count,
@@ -1251,12 +1278,13 @@ async def compare_next_impl(
     n: int = 5, mode: str = "swiss",
     orientation: str = "", compared: str = "", min_stars: int = 0, folder: str = "",
     flag: str = "", date_taken: str = "", file_type: str = "", camera: str = "", lens: str = "",
-    q: str = "", deep: bool = False, people: str = "",
+    q: str = "", deep: bool = False, people: str = "", ids: list[int] | None = None, collection_id: int = 0,
 ):
     candidate_source = "compare_window"
     cache_hit = False
     counts_stale = False
     search = await _configured_resolve_library_constraints(q, people=people, deep=deep)
+    search = await _scoped_search(search, ids, collection_id)
     default_limited_candidates = False
     ranked_candidate_order = False
     has_filters = has_candidate_filters(
@@ -1327,8 +1355,8 @@ async def compare_next_impl(
             get_past_matchups_for_candidate_ids("md", [row["id"] for row in image_dicts])
         )
         ranked_candidate_order = True
-    elif mode != "topn" and query_constraints.search_constraint_active(search):
-        candidate_source = "search_reservoir"
+    elif query_constraints.search_constraint_active(search):
+        candidate_source = "search_reservoir" if search.get("active") else "scoped_reservoir"
         stats = None
         image_dicts, filtered_total, visible_count = await search_visible_ranked_candidates(
             "md",

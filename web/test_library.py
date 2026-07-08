@@ -941,6 +941,37 @@ class LibraryTests(BackendTestCase):
 
         self.assertEqual(response, {"total": 4, "picked": 1, "rejected": 2})
 
+    async def test_date_taken_filter_accepts_year_month_and_undated(self):
+        source = await self._source()
+        november = await self._image(source["id"], "november.jpg")
+        november_late = await self._image(source["id"], "november-late.jpg")
+        december = await self._image(source["id"], "december.jpg")
+        undated = await self._image(source["id"], "undated.jpg")
+        conn = await db.get_db()
+        try:
+            await conn.executemany(
+                "UPDATE images SET date_taken = ? WHERE id = ?",
+                [
+                    ("2024-11-01 00:00:00", november),
+                    ("2024-11-30 23:59:59", november_late),
+                    ("2024-12-01 00:00:00", december),
+                    (None, undated),
+                ],
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+        db.invalidate_stats_cache()
+
+        year_rows = await db.get_rankings(limit=10, sort="date_taken", date_taken="2024")
+        month_rows = await db.get_rankings(limit=10, sort="date_taken", date_taken="2024-11")
+        undated_rows = await db.get_rankings(limit=10, sort="date_taken", date_taken="undated")
+
+        self.assertEqual({row["id"] for row in year_rows}, {november, november_late, december})
+        self.assertEqual({row["id"] for row in month_rows}, {november, november_late})
+        self.assertEqual([row["id"] for row in undated_rows], [undated])
+        self.assertEqual(await db.count_rankings(date_taken="2024-11"), 2)
+
     async def test_expired_stats_cache_returns_stale_while_refreshing(self):
         stale_stats = {"total_images": 1, "active_images": 1}
         fresh_stats = {"total_images": 2, "active_images": 2}

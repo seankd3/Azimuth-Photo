@@ -584,6 +584,67 @@ class CompareTests(BackendTestCase):
         self.assertEqual(result["stats"]["filtered_pool_visible"], 2)
         self.assertEqual(result["stats"]["filtered_pool_total"], 3)
 
+    async def test_mosaic_next_restricts_pool_by_ids(self):
+        source = await self._source()
+        first = await self._image(source["id"], "first.jpg", elo=1500)
+        second = await self._image(source["id"], "second.jpg", elo=1400)
+        third = await self._image(source["id"], "third.jpg", elo=1300)
+        for image_id in (first, second, third):
+            await self._cache_entry(image_id, "sm")
+
+        result = await compare_routes.mosaic_next(n=2, ids=f"{first},{third}")
+
+        self.assertEqual({image["id"] for image in result["images"]}, {first, third})
+        self.assertEqual(result["total_images"], 2)
+        self.assertEqual(result["visible_images"], 2)
+
+    async def test_mosaic_next_restricts_pool_by_collection_id(self):
+        source = await self._source()
+        first = await self._image(source["id"], "first.jpg", elo=1500)
+        second = await self._image(source["id"], "second.jpg", elo=1400)
+        outside = await self._image(source["id"], "outside.jpg", elo=1300)
+        for image_id in (first, second, outside):
+            await self._cache_entry(image_id, "sm")
+        collection = await db.create_collection(name="Refine", image_ids=[first, second])
+
+        result = await compare_routes.mosaic_next(n=2, collection_id=collection["id"])
+
+        self.assertEqual({image["id"] for image in result["images"]}, {first, second})
+        self.assertNotIn(outside, {image["id"] for image in result["images"]})
+        self.assertEqual(result["total_images"], 2)
+
+    async def test_mosaic_next_scoped_tiny_pool_returns_not_enough_shape(self):
+        source = await self._source()
+        first = await self._image(source["id"], "first.jpg", elo=1500)
+        second = await self._image(source["id"], "second.jpg", elo=1400)
+        for image_id in (first, second):
+            await self._cache_entry(image_id, "sm")
+
+        result = await compare_routes.mosaic_next(n=2, ids=str(first))
+
+        self.assertEqual(result["images"], [])
+        self.assertEqual(result["total_images"], 1)
+        self.assertEqual(result["visible_images"], 1)
+        self.assertEqual(result["stats"]["filtered_pool_total"], 1)
+
+    async def test_compare_next_restricts_pool_by_ids(self):
+        source = await self._source()
+        first = await self._image(source["id"], "first.jpg", elo=1500)
+        second = await self._image(source["id"], "second.jpg", elo=1400)
+        outside = await self._image(source["id"], "outside.jpg", elo=1300)
+        for image_id in (first, second, outside):
+            await self._cache_entry(image_id, "md")
+
+        result = await compare_routes.compare_next(n=1, ids=f"{first},{second}")
+        pair_ids = {
+            result["pairs"][0]["left"]["id"],
+            result["pairs"][0]["right"]["id"],
+        }
+
+        self.assertEqual(pair_ids, {first, second})
+        self.assertNotIn(outside, pair_ids)
+        self.assertEqual(result["total_images"], 2)
+
     async def test_default_interaction_response_cache_reuses_and_invalidates_on_rating(self):
         source = await self._source()
         first = await self._image(source["id"], "first.jpg", elo=1500)

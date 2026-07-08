@@ -228,6 +228,8 @@ def configure_collection_routes() -> None:
         create_collection=lambda **kwargs: db.create_collection(**kwargs),
         list_collections=lambda: db.list_collections(),
         get_collection=lambda collection_id, **kwargs: db.get_collection(collection_id, **kwargs),
+        rename_collection=lambda collection_id, **kwargs: db.rename_collection(collection_id, **kwargs),
+        delete_collection=lambda collection_id: db.delete_collection(collection_id),
         add_collection_images=lambda collection_id, image_ids: db.add_collection_images(collection_id, image_ids),
         remove_collection_images=lambda collection_id, image_ids: db.remove_collection_images(collection_id, image_ids),
         get_suggestions=lambda: collection_suggestions.collection_suggestions(
@@ -353,6 +355,7 @@ def configure_compare_service(
     get_rankings=None,
     get_visible_pairing_pool_counts=None,
     get_top_images=None,
+    get_collection_image_ids=None,
 ) -> None:
     import db
     from features.compare import service as compare_service
@@ -387,6 +390,8 @@ def configure_compare_service(
         get_visible_pairing_pool_counts=get_visible_pairing_pool_counts
         or (lambda size, cache_root: db.get_visible_pairing_pool_counts(size, cache_root)),
         get_top_images=get_top_images or (lambda **kwargs: db.get_top_images(**kwargs)),
+        get_collection_image_ids=get_collection_image_ids
+        or (lambda collection_id: db.collection_image_ids(collection_id)),
     )
 
 
