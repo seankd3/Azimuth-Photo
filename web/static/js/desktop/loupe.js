@@ -1,4 +1,4 @@
-import { byId, emit, on, viewState } from './state.js';
+import { byId, emit, on, rememberImages, viewState } from './state.js';
 import { thumbUrl, writeFlag } from './api.js';
 import { applyFlags } from './selection.js';
 import { openCollectionPicker } from './panel.js';
@@ -9,13 +9,14 @@ let index = 0;
 let open = false;
 let zoomed = false;
 let returnCell = null;
+let sessionImages = null;
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&#34;', "'": '&#39;',
 }[c]));
 
 function images() {
-    return viewState.images;
+    return sessionImages || viewState.images;
 }
 
 function current() {
@@ -62,6 +63,8 @@ function render() {
 }
 
 export function openLoupe(target = 0) {
+    sessionImages = Array.isArray(target.images) && target.images.length ? target.images : null;
+    if (sessionImages) rememberImages(sessionImages);
     const list = images();
     const startIndex = typeof target === 'object' ? Number(target.index || 0) : Number(target);
     const id = typeof target === 'object' ? Number(target.id) : null;
@@ -80,6 +83,7 @@ export function openLoupe(target = 0) {
 export function closeLoupe() {
     if (!open) return;
     open = false;
+    sessionImages = null;
     const root = document.getElementById('loupe');
     root.hidden = true;
     releaseFocus(root);

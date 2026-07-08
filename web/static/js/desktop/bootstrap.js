@@ -9,6 +9,7 @@ import { initOmnibox } from './omnibox.js';
 import { initLenses } from './lenses.js';
 import { initLoupe } from './loupe.js';
 import { initRefine } from './refine.js';
+import { initDuplicates } from './duplicates.js';
 import { initKeyboard } from './keyboard.js';
 import { initFilters } from './filters.js';
 import { initImporter } from './importer.js';
@@ -29,6 +30,7 @@ async function boot() {
     initOmnibox();
     initLoupe();
     initRefine();
+    initDuplicates();
     initRightPanel();
     initDrawer();
     initKeyboard();

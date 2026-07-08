@@ -19,6 +19,7 @@ const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c
 
 const COMMANDS = [
     { glyph: '▸', label: 'Open Refine', kbd: 'R', run: () => emit('refine:open') },
+    { glyph: '◇', label: 'Find duplicates', run: () => emit('duplicates:open') },
     { glyph: '⌯', label: 'Filter…', run: () => emit('filters:open') },
     { glyph: '＋', label: 'Import', run: () => emit('import:open') },
     { glyph: '★', label: 'Toggle Best-of', kbd: 'B', run: toggleBestOf },

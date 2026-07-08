@@ -17,6 +17,7 @@ import { switchLens } from './lenses.js';
 import { closeFilters, filtersOpen } from './filters.js';
 import { closeImport, importOpen } from './importer.js';
 import { closeGridContextMenu, gridContextMenuOpen } from './context_menu.js';
+import { closeDuplicates, duplicatesOpen } from './duplicates.js';
 
 function inputFocused() {
     const el = document.activeElement;
@@ -88,6 +89,10 @@ function escapeOneLayer() {
         closeLoupe();
         return true;
     }
+    if (duplicatesOpen()) {
+        closeDuplicates();
+        return true;
+    }
     if (refineOpen()) {
         closeRefine();
         return true;
@@ -124,6 +129,7 @@ export function initKeyboard() {
                 openCommandPalette();
                 return;
             }
+            if (duplicatesOpen()) return;
             if (refineOpen() && event.key.toLowerCase() === 'z') {
                 event.preventDefault();
                 undoRefine();
@@ -143,6 +149,7 @@ export function initKeyboard() {
             else if (event.key.toLowerCase() === 'u') flagLoupeOrFocused('unflagged');
             return;
         }
+        if (duplicatesOpen()) return;
         const key = event.key.toLowerCase();
         if (key === '/') {
             event.preventDefault();
