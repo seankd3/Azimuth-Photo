@@ -897,6 +897,8 @@ body[data-tab="photos"] #m-scrub { display: block; }
     margin: 4px 0 10px;
 }
 .sheet-input:focus { border-color: var(--accent-lin); }
+.share-expiry { display: grid; gap: 6px; margin: 8px 0; color: var(--text-3); font-size: 12px; }
+.share-expiry select.sheet-input { width: 100%; }
 .sheet-btn {
     width: 100%;
     min-height: 48px;

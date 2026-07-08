@@ -1,6 +1,7 @@
 import {
     addToCollection, createCollection, getCatalog, getCollectionSuggestions,
-    deleteCollection, listCollections, removeFromCollection, renameCollection, thumbUrl,
+    createCollectionShare, deleteCollection, getCollectionShare, listCollections,
+    removeFromCollection, renameCollection, revokeCollectionShare, thumbUrl,
 } from './api.js';
 import { loadCollectionImageIds } from './scope_data.js';
 import {
@@ -19,6 +20,7 @@ let suggestionsLoading = false;
 let drawerOpen = false;
 let collectionMenu = null;
 let collectionMenuReturn = null;
+let shareOverlay = null;
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -143,7 +145,7 @@ function openCollectionMenu(row, anchor) {
     collectionMenuReturn = anchor;
     const id = Number(row.dataset.collId);
     const name = row.dataset.collName || 'Collection';
-    collectionMenu.innerHTML = '<div class="pm-group"><button data-act="rename">Rename</button><button data-act="delete">Delete</button></div>';
+    collectionMenu.innerHTML = '<div class="pm-group"><button data-act="share">Share…</button><button data-act="rename">Rename</button><button data-act="delete">Delete</button></div>';
     collectionMenu.hidden = false;
     positionCollectionMenu(anchor);
     trapFocus(collectionMenu, collectionMenu.querySelector('button'));
@@ -151,10 +153,144 @@ function openCollectionMenu(row, anchor) {
         button.addEventListener('click', () => {
             const action = button.dataset.act;
             closeCollectionMenu();
+            if (action === 'share') openShareOverlay(id, name);
             if (action === 'rename') startCollectionRename(id);
             if (action === 'delete') startCollectionDelete(id, name);
         });
     }
+}
+
+function formatShareDate(value) {
+    if (value == null) return 'Never';
+    const date = new Date(Number(value) * 1000);
+    if (Number.isNaN(date.getTime())) return '—';
+    return date.toLocaleString([], {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+    });
+}
+
+function shareExpiryOptions() {
+    return '<label class="share-expiry">Expires <select id="share-expiry">'
+        + '<option value="">Never</option>'
+        + '<option value="7">7 days</option>'
+        + '<option value="30">30 days</option>'
+        + '</select></label>';
+}
+
+function ensureShareOverlay() {
+    if (shareOverlay) return shareOverlay;
+    shareOverlay = document.createElement('div');
+    shareOverlay.id = 'share-overlay';
+    shareOverlay.className = 'modal-scrim';
+    shareOverlay.hidden = true;
+    document.body.appendChild(shareOverlay);
+    shareOverlay.addEventListener('click', (event) => {
+        if (event.target === shareOverlay) closeShareOverlay();
+    });
+    shareOverlay.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            closeShareOverlay();
+        }
+    });
+    return shareOverlay;
+}
+
+function closeShareOverlay() {
+    if (!shareOverlay || shareOverlay.hidden) return;
+    releaseFocus(shareOverlay);
+    shareOverlay.hidden = true;
+}
+
+async function copyShareUrl(url) {
+    try {
+        await navigator.clipboard.writeText(url);
+        showToast('Link copied');
+    } catch {
+        showToast("Couldn't copy link");
+    }
+}
+
+async function renderShareOverlay(collectionId, name, share = null) {
+    ensureShareOverlay();
+    const body = share
+        ? '<div class="share-link-row"><input id="share-url" readonly value="' + esc(share.url || '') + '"><button id="share-copy" type="button">Copy</button></div>'
+            + '<div class="share-meta">'
+            + `<div><span>Created</span><b>${esc(formatShareDate(share.created_at))}</b></div>`
+            + `<div><span>Expires</span><b>${esc(formatShareDate(share.expires_at))}</b></div></div>`
+            + '<div class="share-actions"><button id="share-rotate" type="button">Rotate link</button><button id="share-revoke" type="button">Revoke</button></div>'
+        : '<p class="share-empty">Create a private gallery link for this collection.</p>'
+            + shareExpiryOptions()
+            + '<div class="share-actions"><button id="share-create" type="button">Create share link</button></div>';
+    shareOverlay.innerHTML = '<div class="modal-card share-card" role="dialog" aria-modal="true" aria-labelledby="share-title">'
+        + '<div class="mo-head"><h2 id="share-title">Share ' + esc(name) + '</h2><button type="button" id="share-close" aria-label="Close">×</button></div>'
+        + '<div class="mo-body">' + body + '</div></div>';
+    shareOverlay.hidden = false;
+    shareOverlay.querySelector('#share-close')?.addEventListener('click', closeShareOverlay);
+    shareOverlay.querySelector('#share-copy')?.addEventListener('click', () => copyShareUrl(share.url));
+    shareOverlay.querySelector('#share-create')?.addEventListener('click', async () => {
+        const value = shareOverlay.querySelector('#share-expiry')?.value || '';
+        const result = await createCollectionShare(collectionId, {
+            expiresInDays: value ? Number(value) : null,
+        });
+        if (result && result.ok) {
+            showToast('Share link created');
+            await renderShareOverlay(collectionId, name, result.share);
+        } else {
+            showToast("Couldn't create share link");
+        }
+    });
+    bindShareConfirmButton('#share-rotate', 'Confirm rotate', async () => {
+        const result = await createCollectionShare(collectionId, { rotate: true });
+        if (result && result.ok) {
+            showToast('Share link rotated');
+            await renderShareOverlay(collectionId, name, result.share);
+        } else {
+            showToast("Couldn't rotate link");
+        }
+    });
+    bindShareConfirmButton('#share-revoke', 'Confirm revoke', async () => {
+        const result = await revokeCollectionShare(collectionId);
+        if (result && result.ok) {
+            showToast('Share link revoked');
+            await renderShareOverlay(collectionId, name, null);
+        } else {
+            showToast("Couldn't revoke link");
+        }
+    });
+    trapFocus(shareOverlay, shareOverlay.querySelector('input, select, button'));
+}
+
+function bindShareConfirmButton(selector, label, action) {
+    const button = shareOverlay?.querySelector(selector);
+    if (!button) return;
+    let armed = false;
+    const original = button.textContent;
+    button.addEventListener('click', async () => {
+        if (!armed) {
+            armed = true;
+            button.textContent = label;
+            return;
+        }
+        button.disabled = true;
+        await action();
+        button.disabled = false;
+        button.textContent = original;
+    });
+}
+
+async function openShareOverlay(collectionId, name = 'Collection') {
+    ensureShareOverlay();
+    shareOverlay.innerHTML = '<div class="modal-card share-card" role="dialog" aria-modal="true"><div class="mo-head"><h2>Share ' + esc(name) + '</h2><button type="button" id="share-close" aria-label="Close">×</button></div><div class="mo-body"><div class="muted">Loading…</div></div></div>';
+    shareOverlay.hidden = false;
+    shareOverlay.querySelector('#share-close')?.addEventListener('click', closeShareOverlay);
+    trapFocus(shareOverlay, shareOverlay.querySelector('button'));
+    const data = await getCollectionShare(collectionId);
+    await renderShareOverlay(collectionId, name, data && data.share);
 }
 
 function startCollectionRename(collectionId) {
@@ -489,6 +625,14 @@ export function requestDeleteCurrentCollection() {
     }
     if (narrowPanel()) openLeftDrawer();
     startCollectionDelete(scope.collectionId, scope.collectionName || 'Collection');
+}
+
+export function requestShareCurrentCollection() {
+    if (!scope.collectionId) {
+        showToast('Open a collection first');
+        return;
+    }
+    openShareOverlay(scope.collectionId, scope.collectionName || 'Collection');
 }
 
 export async function initPanel() {

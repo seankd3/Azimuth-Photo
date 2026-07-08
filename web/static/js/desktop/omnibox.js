@@ -4,7 +4,8 @@ import {
 } from './state.js';
 import { scopeTokenHtml } from './contextbar.js';
 import {
-    exportCurrentScope, requestDeleteCurrentCollection, requestNewCollection, requestRenameCurrentCollection, toggleLeftPanel,
+    exportCurrentScope, requestDeleteCurrentCollection, requestNewCollection,
+    requestRenameCurrentCollection, requestShareCurrentCollection, toggleLeftPanel,
 } from './panel.js';
 import { switchLens } from './lenses.js';
 
@@ -27,6 +28,7 @@ const COMMANDS = [
     { glyph: '⇩', label: 'Export JSON', run: () => exportCurrentScope('json') },
     { glyph: '⇩', label: 'Download files (zip)', run: () => exportCurrentScope('zip', 'original') },
     { glyph: '⊞', label: 'New collection', run: requestNewCollection },
+    { glyph: '↗', label: 'Share this collection', when: () => Boolean(scope.collectionId), run: requestShareCurrentCollection },
     { glyph: '⊞', label: 'Rename this collection', when: () => Boolean(scope.collectionId), run: requestRenameCurrentCollection },
     { glyph: '⊞', label: 'Delete this collection', when: () => Boolean(scope.collectionId), run: requestDeleteCurrentCollection },
     { glyph: '▦', label: 'Switch lens: Grid', kbd: 'G', run: () => switchLens('grid') },

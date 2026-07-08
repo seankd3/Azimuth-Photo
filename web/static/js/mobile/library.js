@@ -5,7 +5,8 @@
 
 import {
     createCollection, fetchJson, getAiStatus, getCacheStatus, getCatalog, getCollection, getCounts,
-    deleteCollection, getPeopleStatus, listCollections, renameCollection, setBackgroundWork, thumbUrl,
+    createCollectionShare, deleteCollection, getCollectionShare, getPeopleStatus, listCollections,
+    renameCollection, revokeCollectionShare, setBackgroundWork, thumbUrl,
 } from './api.js';
 import { nav, on, rememberImages, setScope, clearScope } from './state.js';
 import { openSheet, closeSheet } from './selection.js';
@@ -493,6 +494,7 @@ function openCollectionActionsSheet(coll) {
         `<h3>${esc(coll.name)}</h3>`
         + '<input class="sheet-input" id="ml-rename-name" type="text" autocomplete="off">'
         + '<button class="sheet-btn" id="ml-rename-save">Save name</button>'
+        + '<button class="sheet-row" id="ml-share"><span class="g">↗</span>Share link</button>'
         + '<button class="sheet-row" id="ml-delete"><span class="g">✕</span>Delete collection</button>'
         + '<div class="sheet-confirm" id="ml-delete-confirm" hidden>Delete? <button data-yes="1">Yes</button><button data-no="1">No</button></div>'
     );
@@ -513,6 +515,7 @@ function openCollectionActionsSheet(coll) {
             showToast("Couldn't rename collection");
         }
     });
+    sheet.querySelector('#ml-share')?.addEventListener('click', () => openCollectionShareSheet(coll));
     const deleteButton = sheet.querySelector('#ml-delete');
     const confirm = sheet.querySelector('#ml-delete-confirm');
     deleteButton.addEventListener('click', () => {
@@ -539,6 +542,118 @@ function openCollectionActionsSheet(coll) {
     });
     input.focus();
     input.select();
+}
+
+function formatShareDate(value) {
+    if (value == null) return 'Never';
+    const date = new Date(Number(value) * 1000);
+    if (Number.isNaN(date.getTime())) return '—';
+    return date.toLocaleString([], {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+    });
+}
+
+function shareExpiryControl() {
+    return '<label class="share-expiry">Expires <select class="sheet-input" id="ml-share-expiry">'
+        + '<option value="">Never</option>'
+        + '<option value="7">7 days</option>'
+        + '<option value="30">30 days</option>'
+        + '</select></label>';
+}
+
+async function copyOrShareLink(url, title) {
+    if (navigator.share) {
+        try {
+            await navigator.share({ title, url });
+            return;
+        } catch (error) {
+            if (error && error.name === 'AbortError') return;
+        }
+    }
+    try {
+        await navigator.clipboard.writeText(url);
+        showToast('Link copied');
+    } catch {
+        showToast("Couldn't copy link");
+    }
+}
+
+async function openCollectionShareSheet(coll) {
+    let sheet = openSheet(`<h3>Share ${esc(coll.name)}</h3><div class="ms-empty">Loading…</div>`);
+    const data = await getCollectionShare(coll.id);
+    renderCollectionShareSheet(coll, data && data.share);
+    sheet = document.getElementById('m-sheet');
+    return sheet;
+}
+
+function renderCollectionShareSheet(coll, share) {
+    const sheet = openSheet(
+        `<h3>Share ${esc(coll.name)}</h3>`
+        + (share
+            ? '<div class="sheet-meta">'
+                + `<div><span>Link</span><b>${esc(share.url)}</b></div>`
+                + `<div><span>Created</span><b>${esc(formatShareDate(share.created_at))}</b></div>`
+                + `<div><span>Expires</span><b>${esc(formatShareDate(share.expires_at))}</b></div></div>`
+                + '<button class="sheet-btn" id="ml-share-copy">Share…</button>'
+                + '<button class="sheet-row" id="ml-share-rotate"><span class="g">↻</span>Rotate link</button>'
+                + '<div class="sheet-confirm" id="ml-share-rotate-confirm" hidden>Invalidate old link? <button data-yes="1">Yes</button><button data-no="1">No</button></div>'
+                + '<button class="sheet-row" id="ml-share-revoke"><span class="g">✕</span>Revoke</button>'
+                + '<div class="sheet-confirm" id="ml-share-revoke-confirm" hidden>Revoke link? <button data-yes="1">Yes</button><button data-no="1">No</button></div>'
+            : '<div class="ms-empty">Create a private gallery link for this collection.</div>'
+                + shareExpiryControl()
+                + '<button class="sheet-btn" id="ml-share-create">Create share link</button>')
+    );
+    sheet.querySelector('#ml-share-copy')?.addEventListener('click', () => copyOrShareLink(share.url, coll.name));
+    sheet.querySelector('#ml-share-create')?.addEventListener('click', async () => {
+        const value = sheet.querySelector('#ml-share-expiry')?.value || '';
+        const result = await createCollectionShare(coll.id, {
+            expiresInDays: value ? Number(value) : null,
+        });
+        if (result && result.ok) {
+            showToast('Share link created');
+            renderCollectionShareSheet(coll, result.share);
+        } else {
+            showToast("Couldn't create share link");
+        }
+    });
+    bindSheetConfirm(sheet, '#ml-share-rotate', '#ml-share-rotate-confirm', async () => {
+        const result = await createCollectionShare(coll.id, { rotate: true });
+        if (result && result.ok) {
+            showToast('Share link rotated');
+            renderCollectionShareSheet(coll, result.share);
+        } else {
+            showToast("Couldn't rotate link");
+        }
+    });
+    bindSheetConfirm(sheet, '#ml-share-revoke', '#ml-share-revoke-confirm', async () => {
+        const result = await revokeCollectionShare(coll.id);
+        if (result && result.ok) {
+            showToast('Share link revoked');
+            renderCollectionShareSheet(coll, null);
+        } else {
+            showToast("Couldn't revoke link");
+        }
+    });
+}
+
+function bindSheetConfirm(sheet, buttonSelector, confirmSelector, action) {
+    const button = sheet.querySelector(buttonSelector);
+    const confirm = sheet.querySelector(confirmSelector);
+    if (!button || !confirm) return;
+    button.addEventListener('click', () => {
+        button.hidden = true;
+        confirm.hidden = false;
+        confirm.querySelector('[data-yes]')?.focus();
+    });
+    confirm.querySelector('[data-no]')?.addEventListener('click', () => {
+        confirm.hidden = true;
+        button.hidden = false;
+    });
+    confirm.querySelector('[data-yes]')?.addEventListener('click', action);
 }
 
 export function initLibrary() {

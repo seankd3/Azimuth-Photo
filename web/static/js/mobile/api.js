@@ -111,6 +111,21 @@ export async function removeFromCollection(collectionId, imageIds) {
     return postJson(`/api/user-collections/${collectionId}/images/remove`, { image_ids: imageIds });
 }
 
+export async function getCollectionShare(collectionId) {
+    return fetchJson(`/api/user-collections/${collectionId}/share`, { defaultValue: null });
+}
+
+export async function createCollectionShare(collectionId, { rotate = false, expiresInDays = null } = {}) {
+    return postJson(`/api/user-collections/${collectionId}/share`, {
+        rotate,
+        expires_in_days: expiresInDays,
+    });
+}
+
+export async function revokeCollectionShare(collectionId) {
+    return postJson(`/api/user-collections/${collectionId}/share/revoke`, {});
+}
+
 export async function getPeople(limit = 24) {
     return fetchJson(`/api/people?limit=${limit}`, { defaultValue: null });
 }
