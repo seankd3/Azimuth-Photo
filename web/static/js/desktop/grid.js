@@ -7,6 +7,9 @@ import {
     enterSelection, isSelectionMode, toggleSelection,
 } from './selection.js';
 import { openGridContextMenu } from './context_menu.js';
+import {
+    appendChunk, configureGridWindow, ensureChunkLive, firstLiveChunk, invalidateHeights, reset as resetGridWindow,
+} from './grid_window.js';
 
 let offset = 0;
 let loading = false;
@@ -17,6 +20,9 @@ let sentinelObserver = null;
 let mounted = false;
 let initialized = false;
 let resizeHandler = null;
+let resizeTimer = null;
+let lastThumbSize = viewState.thumbSize;
+let previousFocusedCell = null;
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -33,7 +39,7 @@ function flagGlyph(flag) {
     return '';
 }
 
-function cellHtml(img, index) {
+export function cellHtml(img, index) {
     const flag = img.flag || 'unflagged';
     return `<figure class="cell ${selection.has(Number(img.id)) ? 'sel' : ''}" data-id="${img.id}" data-idx="${index}" draggable="true" tabindex="-1" style="--ar:${aspect(img)}">`
         + `<img data-src="${esc(img.thumb_url || thumbUrl('sm', img.id))}" loading="lazy" decoding="async" alt="${esc(img.filename || '')}">`
@@ -44,8 +50,8 @@ function cellHtml(img, index) {
         + '<button class="c-menu" aria-label="Photo actions">⋯</button></figure>';
 }
 
-function observeImages() {
-    if (imageObserver) imageObserver.disconnect();
+function ensureImageObserver() {
+    if (imageObserver) return imageObserver;
     imageObserver = new IntersectionObserver((entries) => {
         for (const entry of entries) {
             const img = entry.target;
@@ -57,30 +63,48 @@ function observeImages() {
             }
         }
     }, { root: document.getElementById('canvas'), rootMargin: '900px 0px' });
-    for (const img of document.querySelectorAll('#grid-flow img[data-src]')) {
+    return imageObserver;
+}
+
+function observeImages(rootEl) {
+    const observer = ensureImageObserver();
+    for (const img of (rootEl || document).querySelectorAll('img[data-src]')) {
         img.addEventListener('load', () => img.classList.add('ld'), { once: true });
-        imageObserver.observe(img);
+        observer.observe(img);
     }
 }
 
-function render({ append = false } = {}) {
-    const flow = document.getElementById('grid-flow');
-    const html = viewState.images.map((img, index) => cellHtml(img, index)).join('');
-    if (append) {
-        const start = flow.children.length;
-        flow.insertAdjacentHTML('beforeend', viewState.images.slice(start).map((img, i) => cellHtml(img, start + i)).join(''));
-    } else {
-        flow.innerHTML = html;
+function unobserveImages(rootEl) {
+    if (!imageObserver || !rootEl) return;
+    for (const img of rootEl.querySelectorAll('img[data-src]')) {
+        imageObserver.unobserve(img);
     }
+}
+
+function resetImageObserver() {
+    if (imageObserver) imageObserver.disconnect();
+    imageObserver = null;
+}
+
+function render({ append = false, start = 0, images = [] } = {}) {
+    const flow = document.getElementById('grid-flow');
+    if (!append) {
+        resetImageObserver();
+        resetGridWindow();
+    }
+    appendChunk(start, images);
     flow.classList.toggle('selmode', isSelectionMode());
-    observeImages();
-    setFocus(viewState.focusIndex);
+    if (!append) setFocus(viewState.focusIndex);
 }
 
 function renderSkeletons() {
-    document.getElementById('grid-flow').innerHTML = Array.from({ length: 18 }, (_, i) => (
-        `<div class="cell skel-cell" style="--ar:${[1.5, .75, 1.2, 1.8][i % 4]}"></div>`
-    )).join('');
+    resetImageObserver();
+    resetGridWindow();
+    document.getElementById('grid-flow').innerHTML = '<div class="grid-chunk">'
+        + Array.from({ length: 18 }, (_, i) => (
+            `<div class="cell skel-cell" style="--ar:${[1.5, .75, 1.2, 1.8][i % 4]}"></div>`
+        )).join('')
+        + '</div>';
 }
 
 function renderError(message) {
@@ -94,6 +118,7 @@ async function loadPage() {
     loading = true;
     const seq = generation;
     const pageSize = 100;
+    const requestStart = offset;
     let limit = pageSize;
     if (viewState.bestOf && viewState.bestOfLimit != null) {
         const remaining = viewState.bestOfLimit - offset;
@@ -119,16 +144,21 @@ async function loadPage() {
     const remaining = cap == null ? rawIncoming.length : Math.max(0, cap - offset);
     const incoming = cap == null ? rawIncoming : rawIncoming.slice(0, remaining);
     const wasEmpty = viewState.images.length === 0;
-    const next = wasEmpty ? incoming : [...viewState.images, ...incoming];
+    const next = viewState.images.slice();
+    next.length = Math.max(next.length, requestStart);
+    incoming.forEach((img, i) => {
+        next[requestStart + i] = img;
+    });
     offset += incoming.length;
     done = data.source === 'similar' || rawIncoming.length < limit || (cap != null && offset >= cap);
     setImages(next);
+    if (wasEmpty) viewState.focusIndex = requestStart;
     if (wasEmpty) {
         setRankingsMeta({ visibleImages: data.visible_images, sortQuality: data.sort_quality });
     }
     document.getElementById('grid-error').innerHTML = '';
     document.getElementById('grid-end').hidden = !done || next.length === 0;
-    render({ append: !wasEmpty });
+    render({ append: !wasEmpty, start: requestStart, images: incoming });
 }
 
 export function loadFirstPage() {
@@ -140,6 +170,7 @@ export function loadFirstPage() {
     loading = false;
     setImages([]);
     setRankingsMeta({ visibleImages: 0, sortQuality: null });
+    viewState.focusIndex = 0;
     document.getElementById('grid-error').innerHTML = '';
     document.getElementById('grid-end').hidden = true;
     renderSkeletons();
@@ -154,6 +185,7 @@ export function jumpToOffset(nextOffset = 0) {
     done = false;
     loading = false;
     setImages([]);
+    viewState.focusIndex = offset;
     document.getElementById('grid-error').innerHTML = '';
     document.getElementById('grid-end').hidden = true;
     renderSkeletons();
@@ -162,17 +194,27 @@ export function jumpToOffset(nextOffset = 0) {
 }
 
 export function setFocus(index) {
-    const cells = [...document.querySelectorAll('.cell[data-id]')];
-    if (!cells.length) return;
-    viewState.focusIndex = Math.max(0, Math.min(cells.length - 1, index));
-    for (const cell of cells) {
-        cell.classList.remove('kb-focus');
-        cell.tabIndex = -1;
+    if (!viewState.images.length) return;
+    const maxIndex = viewState.images.length - 1;
+    let nextIndex = Math.max(0, Math.min(maxIndex, Number(index) || 0));
+    while (nextIndex <= maxIndex && !viewState.images[nextIndex]) nextIndex += 1;
+    if (nextIndex > maxIndex) {
+        nextIndex = Math.max(0, Math.min(maxIndex, Number(index) || 0));
+        while (nextIndex >= 0 && !viewState.images[nextIndex]) nextIndex -= 1;
     }
-    const current = cells[viewState.focusIndex];
+    if (nextIndex < 0 || !viewState.images[nextIndex]) return;
+    viewState.focusIndex = nextIndex;
+    if (previousFocusedCell?.isConnected) {
+        previousFocusedCell.classList.remove('kb-focus');
+        previousFocusedCell.tabIndex = -1;
+    }
+    ensureChunkLive(viewState.focusIndex);
+    const current = document.querySelector(`.cell[data-idx="${viewState.focusIndex}"]`);
+    if (!current) return;
     current.classList.add('kb-focus');
     current.tabIndex = 0;
     current.focus({ preventScroll: true });
+    previousFocusedCell = current;
     emit('focus', { image: viewState.images[viewState.focusIndex] || null, index: viewState.focusIndex });
 }
 
@@ -185,7 +227,8 @@ export function currentFocusedImage() {
 }
 
 function columns() {
-    const cells = [...document.querySelectorAll('.cell[data-id]')].slice(0, 20);
+    const liveChunk = firstLiveChunk();
+    const cells = liveChunk ? [...liveChunk.querySelectorAll('.cell[data-id]')].slice(0, 20) : [];
     if (cells.length < 2) return 1;
     const top = cells[0].offsetTop;
     return Math.max(1, cells.filter((cell) => Math.abs(cell.offsetTop - top) < 4).length);
@@ -237,6 +280,7 @@ function patchCells(imageIds = null) {
 export function initGrid() {
     if (initialized) return;
     initialized = true;
+    configureGridWindow({ renderCell: cellHtml, observeImages, unobserveImages });
     const flow = document.getElementById('grid-flow');
     flow.addEventListener('click', handleClick);
     flow.addEventListener('contextmenu', (event) => {
@@ -264,9 +308,19 @@ export function initGrid() {
     on('flags', ({ imageIds } = {}) => patchCells(imageIds));
     on('selection', ({ imageIds } = {}) => patchCells(imageIds));
     resizeHandler = () => {
-        if (mounted) setFocus(viewState.focusIndex);
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+            if (!mounted) return;
+            invalidateHeights(1);
+            setFocus(viewState.focusIndex);
+        }, 120);
     };
     window.addEventListener('resize', resizeHandler);
+    on('thumbsize', (size) => {
+        const next = Number(size) || lastThumbSize;
+        invalidateHeights(next / lastThumbSize);
+        lastThumbSize = next;
+    });
 }
 
 export function focusColumns() {
@@ -287,9 +341,8 @@ export function unmountGrid() {
     mounted = false;
     generation += 1;
     loading = false;
-    if (imageObserver) imageObserver.disconnect();
+    resetImageObserver();
     if (sentinelObserver) sentinelObserver.disconnect();
-    imageObserver = null;
     sentinelObserver = null;
     document.getElementById('view-grid').classList.remove('active');
 }
