@@ -10,6 +10,7 @@ import { initViewer } from './viewer.js';
 import { initRefine, showRefine } from './refine.js';
 import { initSearch, showSearch } from './search.js';
 import { initLibrary, showLibrary } from './library.js';
+import './install.js';
 
 function secureContextBanner() {
     if (window.isSecureContext) return;
@@ -21,26 +22,6 @@ function secureContextBanner() {
     bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99;display:block;padding:10px 14px calc(10px);background:#d4a04f;color:#141517;font:600 13px system-ui;text-align:center;text-decoration:none;padding-top:max(10px, env(safe-area-inset-top));';
     document.body.appendChild(bar);
 }
-
-let installPrompt = null;
-window.addEventListener('beforeinstallprompt', (event) => {
-    event.preventDefault();
-    installPrompt = event;
-    emit('installable', true);
-});
-export function canInstall() {
-    return Boolean(installPrompt) && !window.matchMedia('(display-mode: standalone)').matches;
-}
-export async function promptInstall() {
-    if (!installPrompt) return false;
-    const prompt = installPrompt;
-    installPrompt = null;
-    prompt.prompt();
-    const choice = await prompt.userChoice;
-    emit('installable', false);
-    return choice && choice.outcome === 'accepted';
-}
-
 
 const TABS = ['photos', 'search', 'refine', 'library'];
 

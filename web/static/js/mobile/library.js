@@ -9,7 +9,7 @@ import {
     renameCollection, revokeCollectionShare, setBackgroundWork, thumbUrl,
 } from './api.js';
 import { nav, on, rememberImages, setScope, clearScope } from './state.js';
-import { canInstall, promptInstall } from './bootstrap.js';
+import { canInstall, promptInstall } from './install.js';
 import { openSheet, closeSheet } from './selection.js';
 import { showToast } from './toast.js';
 import { openViewer } from './viewer.js';
