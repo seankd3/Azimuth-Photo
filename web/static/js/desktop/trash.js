@@ -17,6 +17,22 @@ let totalBytes = 0;
 let loading = false;
 let loadGeneration = 0;
 let loadError = false;
+const busyActions = new Set();
+
+async function withBusyAction(key, button, action) {
+    if (busyActions.has(key) || button?.disabled) return;
+    busyActions.add(key);
+    if (button) button.disabled = true;
+    try {
+        await action();
+    } finally {
+        busyActions.delete(key);
+        if (!button || !document.contains(button)) return;
+        if (key === 'trash-restore') button.disabled = !selection.size || loading;
+        else if (key === 'trash-empty') button.disabled = !total || loading;
+        else button.disabled = false;
+    }
+}
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -133,8 +149,12 @@ function ensureView() {
     document.getElementById('view-trash').appendChild(root);
     root.querySelector('#trash-close').addEventListener('click', closeTrash);
     root.querySelector('#trash-select-all').addEventListener('click', selectAllTrash);
-    root.querySelector('#trash-restore').addEventListener('click', restoreSelectedTrash);
-    root.querySelector('#trash-empty').addEventListener('click', emptyTrashWithConfirm);
+    root.querySelector('#trash-restore').addEventListener('click', (event) => {
+        withBusyAction('trash-restore', event.currentTarget, restoreSelectedTrash);
+    });
+    root.querySelector('#trash-empty').addEventListener('click', (event) => {
+        withBusyAction('trash-empty', event.currentTarget, emptyTrashWithConfirm);
+    });
     root.querySelector('#trash-body').addEventListener('click', (event) => {
         const cell = event.target.closest('.cell[data-id]');
         if (!cell) return;

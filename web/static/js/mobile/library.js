@@ -900,18 +900,25 @@ async function renderCollectionShareSheet(coll, share) {
     const pickIds = clientPickIds(pickData);
     sheet.querySelector('#ml-share-copy')?.addEventListener('click', () => copyOrShareLink(share.url, coll.name));
     sheet.querySelector('#ml-share-apply-picks')?.addEventListener('click', () => applyShareFavoritesAsPicks(coll, pickIds));
-    sheet.querySelector('#ml-share-create')?.addEventListener('click', async () => {
-        const value = sheet.querySelector('#ml-share-expiry')?.value || '';
-        const password = sheet.querySelector('#ml-share-password')?.value || '';
-        const result = await createCollectionShare(coll.id, {
-            expiresInDays: value ? Number(value) : null,
-            ...(password ? { password } : {}),
-        });
-        if (result && result.ok) {
-            showToast('Share link created');
-            renderCollectionShareSheet(coll, result.share);
-        } else {
-            showToast(writeFailureMessage());
+    sheet.querySelector('#ml-share-create')?.addEventListener('click', async (event) => {
+        const button = event.currentTarget;
+        if (!button || button.disabled) return;
+        button.disabled = true;
+        try {
+            const value = sheet.querySelector('#ml-share-expiry')?.value || '';
+            const password = sheet.querySelector('#ml-share-password')?.value || '';
+            const result = await createCollectionShare(coll.id, {
+                expiresInDays: value ? Number(value) : null,
+                ...(password ? { password } : {}),
+            });
+            if (result && result.ok) {
+                showToast('Share link created');
+                renderCollectionShareSheet(coll, result.share);
+            } else {
+                showToast(writeFailureMessage());
+            }
+        } finally {
+            if (document.contains(button)) button.disabled = false;
         }
     });
     sheet.querySelector('#ml-share-password-save')?.addEventListener('click', async () => {
@@ -970,7 +977,16 @@ function bindSheetConfirm(sheet, buttonSelector, confirmSelector, action) {
         confirm.hidden = true;
         button.hidden = false;
     });
-    confirm.querySelector('[data-yes]')?.addEventListener('click', action);
+    const yes = confirm.querySelector('[data-yes]');
+    yes?.addEventListener('click', async () => {
+        if (!yes || yes.disabled) return;
+        yes.disabled = true;
+        try {
+            await action();
+        } finally {
+            if (document.contains(yes)) yes.disabled = false;
+        }
+    });
 }
 
 export function initLibrary() {

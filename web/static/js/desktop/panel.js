@@ -79,7 +79,8 @@ function renderCollections() {
         + `<button class="coll-main" type="button" title="${esc(title)}">`
         + `<span class="coll-cover">${c.cover_image_id ? `<img src="${esc(thumbUrl('sm', c.cover_image_id))}" loading="lazy" decoding="async" alt="">` : icon(smart ? 'sparkles' : 'folder')}${smart && c.cover_image_id ? `<span class="coll-smart-badge">${icon('sparkles')}</span>` : ''}</span>`
         + `<span class="nr-label" title="${esc(c.name)}">${esc(c.name)}</span><span class="nr-count">${fmt(c.image_count)}</span>`
-        + `${c.published ? `<span class="coll-published" data-tip="Published to website">${icon('globe')}</span>` : ''}</button>`
+        + `${smart ? `<span class="coll-live" data-tip="Live collection — grows automatically" aria-label="Live">${icon('sparkles')} Live</span>` : ''}`
+        + `${c.published ? `<span class="coll-published" data-tip="Published to website" aria-label="Published">${icon('globe')} Published</span>` : ''}</button>`
         + `<button class="coll-menu-btn" type="button" data-tip="Collection actions" aria-label="Collection actions">${icon('ellipsis')}</button></div>`
     }).join('');
     for (const row of host.querySelectorAll('.coll-row')) {
@@ -293,7 +294,7 @@ function sharePasswordControls(share) {
     const isProtected = Boolean(share?.protected);
     return '<div class="share-password-row">'
         + '<div class="share-password-head"><span>Password</span>'
-        + (isProtected ? '<b class="share-badge">Protected</b>' : '')
+        + (isProtected ? `<span class="share-badge">${icon('lock')} Protected</span>` : '')
         + '</div>'
         + '<div class="share-link-row">'
         + `<input id="share-password" type="password" autocomplete="new-password" placeholder="${isProtected ? 'Protected' : 'No password'}">`
@@ -1022,20 +1023,28 @@ export async function openCollectionPicker(imageIds, { onDone = null } = {}) {
             close();
         }
     });
+    let creating = false;
     picker.querySelector('form').addEventListener('submit', async (event) => {
         event.preventDefault();
         const name = picker.querySelector('input').value.trim();
-        if (!name) return;
+        if (!name || creating) return;
+        creating = true;
+        const submit = event.currentTarget.querySelector('button');
+        if (submit) submit.disabled = true;
         close();
         if (onDone) onDone();
-        const result = await createCollection(name, ids);
-        if (result && result.ok) {
-            const coll = result.collection || {};
-            await loadCollections();
-            showToast(`Created “${name}”`, {
-                undo: async () => coll.id && removeFromCollection(coll.id, ids),
-            });
-        } else showToast("Couldn't create collection");
+        try {
+            const result = await createCollection(name, ids);
+            if (result && result.ok) {
+                const coll = result.collection || {};
+                await loadCollections();
+                showToast(`Created “${name}”`, {
+                    undo: async () => coll.id && removeFromCollection(coll.id, ids),
+                });
+            } else showToast("Couldn't create collection");
+        } finally {
+            creating = false;
+        }
     });
     const list = picker.querySelector('.picker-list');
     const regularCollections = collections.filter((c) => !c.smart);

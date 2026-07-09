@@ -92,7 +92,7 @@ let hot = -1;
 let liveTimer = null;
 let liveAbort = null;
 let liveSeq = 0;
-let live = { q: '', loading: false, data: null };
+let live = { q: '', loading: false, data: null, error: false };
 let tokenSelected = false;
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
@@ -221,12 +221,15 @@ function invalidateSuggestionData() {
 
 function open() {
     document.getElementById('scopebox').classList.add('open');
+    document.getElementById('scope-input')?.setAttribute('aria-expanded', 'true');
 }
 
 function close() {
     document.getElementById('scopebox').classList.remove('open');
     hot = -1;
-    document.getElementById('scope-input')?.removeAttribute('aria-activedescendant');
+    const input = document.getElementById('scope-input');
+    input?.removeAttribute('aria-activedescendant');
+    input?.setAttribute('aria-expanded', 'false');
 }
 
 function sectionHead(label, action = '') {
@@ -317,6 +320,10 @@ function buildPhotoRows(term) {
     if (term.length < LIVE_MIN_CHARS) return section;
     if (live.q === term && live.loading) {
         section.push({ photoSkeleton: true });
+        return section;
+    }
+    if (live.q === term && live.error) {
+        section.push({ loadError: true });
         return section;
     }
     if (live.q !== term || !live.data) return section;
@@ -681,6 +688,10 @@ function render() {
                 + '</div>';
         } else if (row.photoSkeleton) {
             html += skeletonPhotosHtml();
+        } else if (row.loadError) {
+            html += '<div class="sd-note"><span class="sd-glyph">' + icon('info') + '</span>'
+                + '<span>Couldn\'t load photo search.</span>'
+                + '<button type="button" class="btn" data-live-retry>Try again</button></div>';
         } else if (row.photo) {
             const photoRows = [];
             while (rows[i]?.photo) {
@@ -720,6 +731,11 @@ function bindDropdown(drop) {
         event.preventDefault();
         event.stopPropagation();
         toggleDeepSearch();
+    });
+    drop.querySelector('[data-live-retry]')?.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        scheduleLiveSearch();
     });
     drop.querySelector('[data-clear-recents]')?.addEventListener('click', (event) => {
         event.preventDefault();
@@ -864,30 +880,42 @@ function clearScopeTokenSelection() {
     if (tokenSelected) setTokenSelected(false);
 }
 
+function isAbortError(error) {
+    if (!error) return false;
+    if (error.name === 'AbortError') return true;
+    return Boolean(error.cause && error.cause.name === 'AbortError');
+}
+
 function scheduleLiveSearch() {
     const term = document.getElementById('scope-input').value.trim();
     if (term.startsWith('>') || term.length < LIVE_MIN_CHARS || facetOnlyIntent(term)) {
         if (liveAbort) liveAbort.abort();
         window.clearTimeout(liveTimer);
-        live = { q: term, loading: false, data: null };
+        live = { q: term, loading: false, data: null, error: false };
         render();
         return;
     }
     window.clearTimeout(liveTimer);
     if (liveAbort) liveAbort.abort();
-    live = { q: term, loading: false, data: null };
+    live = { q: term, loading: false, data: null, error: false };
     const seq = ++liveSeq;
     liveTimer = window.setTimeout(async () => {
-        live = { q: term, loading: true, data: null };
+        live = { q: term, loading: true, data: null, error: false };
         render();
         const controller = new AbortController();
         liveAbort = controller;
         const params = new URLSearchParams({ q: term, limit: String(LIVE_LIMIT), offset: '0', sort: 'similarity' });
         if (scope.deep) params.set('deep', '1');
-        const data = await getRankings(params, { fetchOptions: { signal: controller.signal } });
-        if (seq !== liveSeq || controller.signal.aborted) return;
-        live = { q: term, loading: false, data };
-        render();
+        try {
+            const data = await getRankings(params, { fetchOptions: { signal: controller.signal } });
+            if (seq !== liveSeq || controller.signal.aborted) return;
+            live = { q: term, loading: false, data, error: false };
+            render();
+        } catch (error) {
+            if (seq !== liveSeq || controller.signal.aborted || isAbortError(error)) return;
+            live = { q: term, loading: false, data: null, error: true };
+            render();
+        }
     }, LIVE_DELAY_MS);
 }
 

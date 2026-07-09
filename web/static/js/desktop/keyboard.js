@@ -328,8 +328,11 @@ export function initKeyboard() {
             if (key === '/') { event.preventDefault(); focusOmnibox(); }
             else if (key === '?') { event.preventDefault(); openHelp(); }
             else if (key === 'g') { event.preventDefault(); switchLens('grid'); }
-            else if (activeLens() === 'people' && (key === 'y' || key === 'n')) {
-                if (reviewPeopleMergeByKey(key === 'y' ? 'merge' : 'reject')) event.preventDefault();
+            else if (activeLens() === 'people' && key === 'n') {
+                if (reviewPeopleMergeByKey('reject')) event.preventDefault();
+            }
+            else if (activeLens() === 'people' && key === 'y' && reviewPeopleMergeByKey('merge')) {
+                event.preventDefault();
             }
             else if (key === 'o') { event.preventDefault(); switchLens('people'); }
             else if (key === 'm') { event.preventDefault(); switchLens('map'); }

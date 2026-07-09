@@ -201,21 +201,28 @@ export async function openCollectionSheet(rawIds, { onDone = null } = {}) {
         dismissSheetThen(onDone);
     };
 
-    sheet.querySelector('#sheet-new-btn').addEventListener('click', async () => {
+    sheet.querySelector('#sheet-new-btn').addEventListener('click', async (event) => {
+        const button = event.currentTarget;
+        if (!button || button.disabled) return;
         const name = sheet.querySelector('#sheet-new-name').value.trim();
         if (!name) return;
-        finish();
-        const result = await createCollection(name, ids);
-        if (result && result.ok) {
-            const coll = result.collection || {};
-            showToast(`Created “${name}” · ${ids.length} photos`, {
-                undo: async () => {
-                    if (coll.id) await removeFromCollection(coll.id, ids);
-                    showToast('Removed from collection');
-                },
-            });
-        } else {
-            showToast(writeFailureMessage());
+        button.disabled = true;
+        try {
+            finish();
+            const result = await createCollection(name, ids);
+            if (result && result.ok) {
+                const coll = result.collection || {};
+                showToast(`Created “${name}” · ${ids.length} photos`, {
+                    undo: async () => {
+                        if (coll.id) await removeFromCollection(coll.id, ids);
+                        showToast('Removed from collection');
+                    },
+                });
+            } else {
+                showToast(writeFailureMessage());
+            }
+        } finally {
+            if (document.contains(button)) button.disabled = false;
         }
     });
 

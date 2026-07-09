@@ -11,6 +11,7 @@ import { icon } from '../icons.js';
 import {
     appendChunk, configureGridWindow, ensureChunkLive, firstLiveChunk, invalidateHeights, reset as resetGridWindow,
 } from './grid_window.js';
+import { afterMotion } from './motion.js';
 import { showToast } from './toast.js';
 
 let offset = 0;
@@ -28,6 +29,7 @@ let previousFocusedCell = null;
 let savedScrollTop = 0;
 let expandedStack = null;
 let stackExpansionRequest = 0;
+let creatingStack = false;
 const stackCache = new Map();
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
@@ -52,7 +54,8 @@ export function cellHtml(img, index) {
     const stackBadge = stackId && stackCount > 1
         ? `<button class="c-stack" data-stack-id="${stackId}" data-tip="Expand stack · S" aria-label="Expand stack with ${stackCount} photos" aria-expanded="false" tabindex="-1">${icon('layers')}<span>${stackCount}</span></button>`
         : '';
-    return `<figure class="cell ${selection.has(Number(img.id)) ? 'sel' : ''}" data-id="${img.id}" data-idx="${index}" draggable="true" tabindex="-1" style="--ar:${aspect(img)}">`
+    const selected = selection.has(Number(img.id));
+    return `<figure class="cell ${selected ? 'sel' : ''}" data-id="${img.id}" data-idx="${index}" draggable="true" tabindex="-1" aria-selected="${selected ? 'true' : 'false'}" style="--ar:${aspect(img)}">`
         + `<img data-src="${esc(img.thumb_url || thumbUrl('sm', img.id))}" loading="lazy" decoding="async" alt="${esc(img.filename || '')}">`
         + stackBadge
         + `<button class="c-check" aria-label="Select photo" tabindex="-1">${icon('check')}</button>`
@@ -110,10 +113,10 @@ function closeExpandedStack() {
     if (trayEl?.isConnected) {
         unobserveImages(trayEl);
         trayEl.classList.add('closing');
-        window.setTimeout(() => {
+        afterMotion('base', () => {
             if (trayEl.isConnected) trayEl.remove();
             invalidateHeights(1);
-        }, 140);
+        });
     }
     const badge = document.querySelector(`.c-stack[data-stack-id="${stackId}"]`);
     if (badge) {
@@ -506,25 +509,30 @@ export async function toggleFocusedStack() {
 
 export async function createStackFromSelection() {
     const imageIds = [...selection].map(Number).filter((id) => id > 0);
-    if (imageIds.length < 2) return false;
-    const focused = currentFocusedImage();
-    const representativeId = focused && imageIds.includes(Number(focused.id)) ? Number(focused.id) : imageIds[0];
-    const result = await createStack(imageIds, representativeId);
-    const stackId = Number(result?.stack?.id || result?.id || result?.stack_id);
-    if (!result || !(result.ok || result.stack || stackId)) {
-        showToast("Stack couldn't be created");
+    if (imageIds.length < 2 || creatingStack) return false;
+    creatingStack = true;
+    try {
+        const focused = currentFocusedImage();
+        const representativeId = focused && imageIds.includes(Number(focused.id)) ? Number(focused.id) : imageIds[0];
+        const result = await createStack(imageIds, representativeId);
+        const stackId = Number(result?.stack?.id || result?.id || result?.stack_id);
+        if (!result || !(result.ok || result.stack || stackId)) {
+            showToast("Stack couldn't be created");
+            return true;
+        }
+        clearSelection();
+        showToast(`Stacked ${imageIds.length.toLocaleString('en-US')} photos`, {
+            undo: stackId ? async () => {
+                const undone = await unstack(stackId);
+                showToast(undone ? 'Stack undone' : "Undo didn't save");
+                loadFirstPage();
+            } : null,
+        });
+        loadFirstPage();
         return true;
+    } finally {
+        creatingStack = false;
     }
-    clearSelection();
-    showToast(`Stacked ${imageIds.length.toLocaleString('en-US')} photos`, {
-        undo: stackId ? async () => {
-            const undone = await unstack(stackId);
-            showToast(undone ? 'Stack undone' : "Undo didn't save");
-            loadFirstPage();
-        } : null,
-    });
-    loadFirstPage();
-    return true;
 }
 
 export function focusColumns() {

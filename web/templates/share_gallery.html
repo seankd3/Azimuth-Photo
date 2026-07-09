@@ -363,7 +363,7 @@
         if (pickStatus) pickStatus.textContent = favoritesDone && picked > 0 ? `Done. ${favoriteStatusText(picked)}` : favoriteStatusText(picked);
         if (picksDone) {
           picksDone.disabled = picked === 0;
-          picksDone.textContent = favoritesDone && picked > 0 ? 'Done' : 'Done';
+          picksDone.textContent = 'Done';
         }
         if (hint) hint.hidden = picked > 0 || hintDismissed();
         document.querySelectorAll('[data-fav-id]').forEach((button) => {

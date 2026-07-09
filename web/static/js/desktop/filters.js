@@ -12,6 +12,7 @@ let lastOptionsLoadedAt = 0;
 let expandedYear = '';
 let monthsLoadingKey = '';
 let monthsLoadSeq = 0;
+let monthsErrorKey = '';
 let activeMonthScopeSignature = '';
 const monthsByScopeYear = new Map();
 let options = {
@@ -134,13 +135,18 @@ function renderDate() {
         const cacheKey = monthCacheKey(year);
         const months = monthsByScopeYear.get(cacheKey) || [];
         const loadingMonths = monthsLoadingKey === cacheKey;
+        const monthsFailed = monthsErrorKey === cacheKey;
         const monthRows = expanded
             ? '<div class="filter-months">'
-                + (loadingMonths && !months.length ? '<div class="filter-empty">Loading months…</div>' : months.map((month) => {
-                    const activeMonth = scope.date_taken === month.value;
-                    return `<button class="filter-row filter-month ${activeMonth ? 'active' : ''}" data-key="date_taken" data-value="${month.value}" title="${esc(month.label)}">`
-                        + `<span title="${esc(month.label)}">${esc(month.label)}</span><span class="num">${fmt(month.count)}</span></button>`;
-                }).join('') || emptyOption('No months in this year.', 'calendar'))
+                + (loadingMonths && !months.length
+                    ? '<div class="filter-empty">Loading months…</div>'
+                    : monthsFailed && !months.length
+                        ? '<div class="filter-empty">Couldn\'t load months. <button type="button" class="btn" data-months-retry="' + esc(year) + '">Try again</button></div>'
+                        : months.map((month) => {
+                            const activeMonth = scope.date_taken === month.value;
+                            return `<button class="filter-row filter-month ${activeMonth ? 'active' : ''}" data-key="date_taken" data-value="${month.value}" title="${esc(month.label)}">`
+                                + `<span title="${esc(month.label)}">${esc(month.label)}</span><span class="num">${fmt(month.count)}</span></button>`;
+                        }).join('') || emptyOption('No months in this year.', 'calendar'))
                 + '</div>'
             : '';
         return `<button class="filter-row ${active ? 'active' : ''}" data-key="date_taken" data-value="${esc(year)}" data-year="${esc(year)}" title="${esc(year)}">`
@@ -185,12 +191,18 @@ function resetMonthCacheIfScopeChanged() {
     activeMonthScopeSignature = signature;
     monthsByScopeYear.clear();
     monthsLoadingKey = '';
+    monthsErrorKey = '';
     monthsLoadSeq += 1;
 }
 
 async function scopedMonthCounts(year) {
     if (scope.collectionId) {
-        const images = await loadCollectionImages(scope.collectionId);
+        let images = [];
+        try {
+            images = await loadCollectionImages(scope.collectionId);
+        } catch {
+            throw new Error('collection-months');
+        }
         return images.reduce((acc, img) => {
             const month = monthFromDate(img.date_taken);
             if (month.startsWith(`${year}-`)) acc.set(month, (acc.get(month) || 0) + 1);
@@ -221,23 +233,36 @@ async function scopedMonthCounts(year) {
     }, new Map());
 }
 
-async function expandYear(year) {
+async function expandYear(year, { force = false } = {}) {
     resetMonthCacheIfScopeChanged();
-    expandedYear = expandedYear === year ? '' : year;
+    if (!force) expandedYear = expandedYear === year ? '' : year;
+    else expandedYear = year;
     const cacheKey = monthCacheKey(year);
-    if (!expandedYear || monthsByScopeYear.has(cacheKey)) {
+    if (!expandedYear || (monthsByScopeYear.has(cacheKey) && !force)) {
         render();
         return;
     }
+    if (force) monthsByScopeYear.delete(cacheKey);
     const token = ++monthsLoadSeq;
     monthsLoadingKey = cacheKey;
+    monthsErrorKey = '';
     render();
-    const counts = await scopedMonthCounts(year);
+    let counts;
+    try {
+        counts = await scopedMonthCounts(year);
+    } catch {
+        if (token !== monthsLoadSeq || cacheKey !== monthCacheKey(year) || expandedYear !== year) return;
+        if (monthsLoadingKey === cacheKey) monthsLoadingKey = '';
+        monthsErrorKey = cacheKey;
+        render();
+        return;
+    }
     if (token !== monthsLoadSeq || cacheKey !== monthCacheKey(year) || expandedYear !== year) return;
     monthsByScopeYear.set(cacheKey, [...counts.entries()]
         .sort((a, b) => b[0].localeCompare(a[0]))
         .map(([value, count]) => ({ value, count, label: monthLabel(value) })));
     if (monthsLoadingKey === cacheKey) monthsLoadingKey = '';
+    if (monthsErrorKey === cacheKey) monthsErrorKey = '';
     render();
 }
 
@@ -297,6 +322,13 @@ function render() {
 
 function bindRows() {
     popover.querySelector('#filter-close')?.addEventListener('click', closeFilters);
+    for (const retry of popover.querySelectorAll('[data-months-retry]')) {
+        retry.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            expandYear(retry.dataset.monthsRetry, { force: true });
+        });
+    }
     for (const row of popover.querySelectorAll('[data-key][data-value]')) {
         row.addEventListener('click', () => {
             const key = row.dataset.key;
