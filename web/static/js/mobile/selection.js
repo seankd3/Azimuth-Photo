@@ -107,9 +107,25 @@ function installSheetSwipe() {
     const sheet = document.getElementById('m-sheet');
     let drag = null;
 
+    const releaseDrag = (e) => {
+        if (!drag) return;
+        try {
+            if (sheet.hasPointerCapture && sheet.hasPointerCapture(drag.id)) {
+                sheet.releasePointerCapture(drag.id);
+            } else if (e && sheet.releasePointerCapture) {
+                sheet.releasePointerCapture(e.pointerId);
+            }
+        } catch {
+            // Pointer capture can already be gone after cancel/resize.
+        }
+        sheet.classList.remove('dragging');
+        drag = null;
+    };
+
     sheet.addEventListener('pointerdown', (e) => {
         if (!sheetOpen || !e.isPrimary) return;
         const fromHandle = Boolean(e.target.closest('.sheet-grab, h3'));
+        if (!fromHandle && e.target.closest('button, a, input, textarea, select, label')) return;
         if (!fromHandle && sheet.scrollTop > 0) return;
         const now = performance.now();
         drag = {
@@ -135,7 +151,7 @@ function installSheetSwipe() {
         let dy = e.clientY - drag.y;
         if (!drag.started) {
             if (dy < -2 || sheet.scrollTop > 0) {
-                drag = null;
+                releaseDrag(e);
                 return;
             }
             if (dy < 6) return;
@@ -150,12 +166,12 @@ function installSheetSwipe() {
     const end = (e) => {
         if (!drag || e.pointerId !== drag.id) return;
         if (!drag.started) {
-            drag = null;
+            releaseDrag(e);
             return;
         }
         const dy = e.clientY - drag.y;
         const close = dy > sheet.getBoundingClientRect().height * 0.3 || (dy > 28 && drag.v > 0.55);
-        drag = null;
+        releaseDrag(e);
         sheet.classList.remove('dragging');
         if (close) {
             dismissSheet();
@@ -260,6 +276,7 @@ export function initSelection() {
     bottomBar.innerHTML =
         `<button type="button" data-action="pick">${icon('star')}<span>Pick</span></button>`
         + `<button type="button" data-action="reject">${icon('x')}<span>Reject</span></button>`
+        + `<button type="button" data-action="collection" aria-label="Add to collection">${icon('plus')}</button>`
         + `<button type="button" data-action="more" aria-label="More selection actions">${icon('ellipsis')}</button>`;
     document.body.appendChild(bottomBar);
     document.dispatchEvent(new CustomEvent('selection-actions-mutated'));
@@ -323,6 +340,11 @@ export function initSelection() {
         if (!btn) return;
         if (btn.dataset.action === 'pick') pickSelection();
         else if (btn.dataset.action === 'reject') rejectSelection();
+        else if (btn.dataset.action === 'collection') {
+            openCollectionSheet([...selection], {
+                onDone: () => dismissLayer('selection', clearSelection),
+            });
+        }
         else if (btn.dataset.action === 'more') openMoreActions();
     });
 

@@ -9,6 +9,8 @@ let tab = 'photos';
 let applyingHistory = false;
 let afterPopCallbacks = [];
 let tabHandler = null;
+let dismissInFlight = false;
+const closedLayers = new Set();
 
 function appState() {
     return {
@@ -19,7 +21,7 @@ function appState() {
 }
 
 function validLayers(raw) {
-    return Array.isArray(raw) ? raw.filter((name) => handlers.has(name)) : [];
+    return Array.isArray(raw) ? raw.filter((name) => handlers.has(name) && !closedLayers.has(name)) : [];
 }
 
 function replaceCurrent() {
@@ -37,6 +39,23 @@ function closeLayerNow(name, options = {}) {
     if (handler && typeof handler.close === 'function') {
         handler.close(options);
     }
+}
+
+function markClosed(name) {
+    closedLayers.add(name);
+}
+
+function closeLayersForTabSwitch() {
+    if (!layers.length) return;
+    const current = [...layers];
+    applyingHistory = true;
+    for (let i = current.length - 1; i >= 0; i -= 1) {
+        const name = current[i];
+        markClosed(name);
+        closeLayerNow(name, { fromHistory: true, reason: 'tab-switch' });
+    }
+    applyingHistory = false;
+    layers = [];
 }
 
 export function initHistory(initialTab = 'photos') {
@@ -63,6 +82,7 @@ export function initHistory(initialTab = 'photos') {
         tab = targetTab;
         if (tabChanged && typeof tabHandler === 'function') tabHandler(targetTab);
         applyingHistory = false;
+        dismissInFlight = false;
         const callbacks = afterPopCallbacks;
         afterPopCallbacks = [];
         for (const callback of callbacks) callback();
@@ -79,6 +99,7 @@ export function layerActive(name) {
 
 export function pushLayer(name) {
     if (applyingHistory) return;
+    closedLayers.delete(name);
     if (layers[layers.length - 1] === name) {
         replaceCurrent();
         return;
@@ -91,6 +112,7 @@ export function pushLayer(name) {
 
 export function syncLayerClosed(name) {
     if (applyingHistory || !layers.includes(name)) return;
+    markClosed(name);
     layers = layers.filter((layer) => layer !== name);
     replaceCurrent();
 }
@@ -100,13 +122,19 @@ export function dismissLayer(name, fallback = null) {
 }
 
 export function dismissLayerThen(name, fallback = null, afterClose = null) {
+    if (dismissInFlight) {
+        afterPopCallbacks.push(() => dismissLayerThen(name, fallback, afterClose));
+        return;
+    }
     const close = fallback || ((options) => closeLayerNow(name, options));
     if (layers[layers.length - 1] === name) {
         applyingHistory = true;
+        markClosed(name);
         close({ fromHistory: false });
         applyingHistory = false;
         layers = layers.filter((layer) => layer !== name);
         if (typeof afterClose === 'function') afterPopCallbacks.push(afterClose);
+        dismissInFlight = true;
         history.back();
         return;
     }
@@ -116,6 +144,7 @@ export function dismissLayerThen(name, fallback = null, afterClose = null) {
 }
 
 export function replaceTab(nextTab) {
+    if (!applyingHistory) closeLayersForTabSwitch();
     tab = nextTab;
     if (!applyingHistory) replaceCurrent();
 }

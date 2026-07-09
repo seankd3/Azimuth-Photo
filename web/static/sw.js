@@ -8,7 +8,7 @@
  * - Navigations fall back to the cached /m shell when offline.
  */
 
-const CACHE_VERSION = 'pa-mobile-v10';
+const CACHE_VERSION = 'pa-mobile-v11';
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const THUMB_CACHE = `${CACHE_VERSION}-thumbs`;
 const THUMB_CACHE_MAX_ENTRIES = 1500;
@@ -103,18 +103,23 @@ async function shellFirstNavigation(request) {
     }
 }
 
-async function staticStaleWhileRevalidate(request) {
+async function staticNetworkFirst(request) {
     const cache = await caches.open(SHELL_CACHE);
-    const cached = await cache.match(request, { ignoreSearch: true });
-    const refresh = fetch(request).then((response) => {
+    try {
+        const response = await fetch(request);
         if (response && response.ok) {
             cache.put(request, response.clone());
         }
         return response;
-    }).catch(() => null);
+    } catch {
+        // Fall back only after the network fails, and prefer exact versioned
+        // keys so CSS/JS deploys do not mix old and new app-shell contracts.
+    }
+    const cached = await cache.match(request);
     if (cached) return cached;
-    const fresh = await refresh;
-    if (fresh) return fresh;
+    const url = new URL(request.url);
+    const unversioned = await cache.match(url.pathname);
+    if (unversioned) return unversioned;
     return new Response('', { status: 504, statusText: 'Offline' });
 }
 
@@ -133,12 +138,12 @@ self.addEventListener('fetch', (event) => {
         return; // network-only: live data and writes are never cached
     }
     if (request.mode === 'navigate') {
-        if (url.pathname === '/m') {
+        if (url.pathname === '/m' || url.pathname === '/m/') {
             event.respondWith(shellFirstNavigation(request));
         }
         return;
     }
-    if (url.pathname.startsWith('/static/') || url.pathname === '/sw.js') {
-        event.respondWith(staticStaleWhileRevalidate(request));
+    if (url.pathname.startsWith('/static/')) {
+        event.respondWith(staticNetworkFirst(request));
     }
 });

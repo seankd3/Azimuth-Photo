@@ -53,11 +53,17 @@ function render() {
     html += '<div class="ml-head"><h3>Collections</h3></div><div class="m-lib-grid">';
     colls.forEach((c, i) => {
         const pct = sortedPctCache.get(c.id);
-        const pctLabel = pct == null ? '' : ` · ${pct}% sorted`;
-        html += `<button class="m-lib-card" data-ci="${i}">`
-            + `<div class="m-lib-cover">${c.cover_image_id ? `<img src="${esc(thumbUrl('sm', c.cover_image_id))}" alt="">` : icon('folder')}</div>`
-            + `<div class="m-lib-cap"><b>${esc(c.name)}</b>`
-            + `<span class="num">${fmtInt(c.image_count)} photos${pctLabel}</span></div></button>`;
+        const smart = Boolean(c.smart);
+        const pctLabel = !smart && pct != null ? ` · ${pct}% sorted` : '';
+        const countLabel = `${fmtInt(c.image_count)} photos`;
+        const typeLabel = smart ? `Smart · ${countLabel}` : countLabel;
+        const cover = c.cover_image_id
+            ? `<img src="${esc(thumbUrl('sm', c.cover_image_id))}" alt="">`
+            : icon(smart ? 'sparkles' : 'folder');
+        html += `<button class="m-lib-card${smart ? ' smart' : ''}" data-ci="${i}">`
+            + `<div class="m-lib-cover">${cover}${smart ? `<span class="smart-mark">${icon('sparkles')}</span>` : ''}</div>`
+            + `<div class="m-lib-cap"><b>${smart ? icon('sparkles') : ''}${esc(c.name)}</b>`
+            + `<span class="num">${typeLabel}${pctLabel}</span></div></button>`;
     });
     html += `<button class="m-lib-card m-lib-new" id="ml-new">${icon('plus', 'icon icon-lg')}New collection</button></div>`;
 

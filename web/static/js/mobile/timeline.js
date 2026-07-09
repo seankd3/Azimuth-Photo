@@ -40,6 +40,8 @@ let endReached = false;
 let flatIds = [];
 let suppressClickUntil = 0;
 let currentSortQuality = null;
+let longPressPending = false;
+let cancelLongPressGesture = () => {};
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -87,16 +89,28 @@ function flagBadge(flag) {
     return `<span class="c-flag ${flag}">${flag === 'picked' ? '★' : '✕'}</span>`;
 }
 
+function stackBadge(img) {
+    const stackId = Number(img.stack_id) || 0;
+    const stackCount = Number(img.stack_count) || 0;
+    if (!stackId || stackCount <= 1) return '';
+    return `<span class="c-stack" aria-label="Stack of ${stackCount} photos">${icon('layers')}<b>${stackCount}</b></span>`;
+}
+
 function cellFor(img, mi) {
     const fig = document.createElement('figure');
+    const stackCount = Number(img.stack_count) || 0;
     fig.className = 'mcell';
     fig.dataset.id = String(img.id);
     fig.dataset.mi = String(mi);
     fig.setAttribute('role', 'button');
-    fig.setAttribute('aria-label', img.filename || `Photo ${img.id}`);
+    fig.setAttribute(
+        'aria-label',
+        `${img.filename || `Photo ${img.id}`}${stackCount > 1 ? `, stack of ${stackCount} photos` : ''}`,
+    );
     fig.innerHTML =
         `<div class="c-check">${icon('check')}</div>`
         + `<img alt="" loading="lazy" decoding="async" data-src="${esc(img.thumb_url || thumbUrl('sm', img.id))}">`
+        + stackBadge(img)
         + flagBadge(img.flag);
     const image = fig.querySelector('img');
     image.addEventListener('load', () => image.classList.add('ld'));
@@ -619,16 +633,25 @@ function installSelectionGestures() {
         if (dragFrame == null) dragFrame = requestAnimationFrame(dragLoop);
     }
 
+    cancelLongPressGesture = () => {
+        if (!lp) return;
+        clearTimeout(lp.timer);
+        lp = null;
+        longPressPending = false;
+    };
+
     timeline.addEventListener('pointerdown', (e) => {
         if (e.pointerType === 'mouse') return;
         const cell = e.target.closest('.mcell[data-id]');
         if (!cell) return;
         const mi = Number(cell.dataset.mi);
+        longPressPending = true;
         lp = {
             x: e.clientX,
             y: e.clientY,
             fired: false,
             timer: setTimeout(() => {
+                longPressPending = false;
                 lp.fired = true;
                 if (navigator.vibrate) navigator.vibrate(12);
                 selState.mode = true;
@@ -647,6 +670,7 @@ function installSelectionGestures() {
             if (Math.hypot(e.clientX - lp.x, e.clientY - lp.y) > 10) {
                 clearTimeout(lp.timer);
                 lp = null;
+                longPressPending = false;
             }
             return;
         }
@@ -659,6 +683,7 @@ function installSelectionGestures() {
             if (lp.fired) suppressClickUntil = Date.now() + 420;
         }
         lp = null;
+        longPressPending = false;
         dragActive = false;
         dragBase = null;
         dragPoint = null;
@@ -703,6 +728,7 @@ function installPullToRefresh() {
 
     timeline.addEventListener('touchstart', (e) => {
         if (refreshing || selection.size || isOffline() || e.touches.length !== 1 || pane.scrollTop > 0) return;
+        if (longPressPending || e.target.closest?.('.mcell[data-id]')) return;
         const t = e.touches[0];
         pull = { y: t.clientY, dy: 0, active: false };
     }, { passive: true });
@@ -721,6 +747,7 @@ function installPullToRefresh() {
         pull.dy = dy;
         if (dy > 6) pull.active = true;
         if (!pull.active) return;
+        cancelLongPressGesture();
         e.preventDefault();
         const visual = Math.min(96, dy * 0.72);
         const progress = clamp(dy / 70, 0, 1);
