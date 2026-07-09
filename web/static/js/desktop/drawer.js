@@ -496,7 +496,8 @@ function renderPrefs() {
     return '<section class="dr-sec"><h3>Preferences</h3>'
         + '<div class="pref-row"><label for="drawer-thumb-size">Thumbnail size</label><input class="ctl-range" id="drawer-thumb-size" type="range" min="120" max="320" step="10" value="' + viewState.thumbSize + '"></div>'
         + '<div class="pref-row"><label for="pref-density">Density</label><select id="pref-density" data-pref-sel="density">'
-        + `<option value="comfortable"${viewState.prefs.density !== 'compact' ? ' selected' : ''}>Comfortable</option>`
+        + `<option value="comfortable"${viewState.prefs.density === 'comfortable' ? ' selected' : ''}>Comfortable</option>`
+        + `<option value="cozy"${viewState.prefs.density === 'cozy' ? ' selected' : ''}>Cozy</option>`
         + `<option value="compact"${viewState.prefs.density === 'compact' ? ' selected' : ''}>Compact</option></select></div>`
         + checkbox('badgeCheck', 'Cell badge · check')
         + checkbox('badgeFlag', 'Cell badge · flag')

@@ -15,6 +15,7 @@ const DEFAULT_PREFS = {
     reduceMotion: false,
     panelSections: {},
 };
+const DENSITIES = ['comfortable', 'cozy', 'compact'];
 
 export const scope = {
     q: '',
@@ -74,7 +75,7 @@ function normalizePrefs(value) {
     }
     return {
         ...DEFAULT_PREFS,
-        density: saved.density === 'compact' ? 'compact' : DEFAULT_PREFS.density,
+        density: DENSITIES.includes(saved.density) ? saved.density : DEFAULT_PREFS.density,
         badgeCheck: saved.badgeCheck == null ? DEFAULT_PREFS.badgeCheck : Boolean(saved.badgeCheck),
         badgeFlag: saved.badgeFlag == null ? DEFAULT_PREFS.badgeFlag : Boolean(saved.badgeFlag),
         badgeElo: saved.badgeElo == null ? DEFAULT_PREFS.badgeElo : Boolean(saved.badgeElo),
@@ -101,7 +102,7 @@ function readLens() {
 function applyPrefs() {
     const html = document.documentElement;
     const prefs = viewState.prefs;
-    html.dataset.density = prefs.density === 'compact' ? 'compact' : 'comfortable';
+    html.dataset.density = DENSITIES.includes(prefs.density) ? prefs.density : DEFAULT_PREFS.density;
     html.dataset.badgesCheck = prefs.badgeCheck ? '1' : '0';
     html.dataset.badgesFlag = prefs.badgeFlag ? '1' : '0';
     html.dataset.badgesElo = prefs.badgeElo ? '1' : '0';
@@ -136,6 +137,14 @@ export function scopeActive() {
         || scope.camera || scope.lens || scope.orientation || scope.compared || scope.min_stars
         || scope.import_batch || scope.similarIds.length || scope.collectionId,
     );
+}
+
+export function nonSearchFacetCount() {
+    return [
+        scope.people, scope.flag, scope.folder, scope.date_taken, scope.file_type, scope.camera,
+        scope.lens, scope.orientation, scope.compared, scope.min_stars, scope.import_batch,
+        scope.collectionId, scope.similarIds.length,
+    ].filter(Boolean).length;
 }
 
 export function scopeParams(extra = {}) {
@@ -307,6 +316,13 @@ export function patchPrefs(patch = {}) {
     emit('prefs', viewState.prefs);
 }
 
+export function cycleDensity() {
+    const current = DENSITIES.includes(viewState.prefs.density) ? viewState.prefs.density : DEFAULT_PREFS.density;
+    const next = DENSITIES[(DENSITIES.indexOf(current) + 1) % DENSITIES.length];
+    patchPrefs({ density: next });
+    return next;
+}
+
 export function selectionChanged(imageIds = null) {
     if (!selection.size) {
         selState.mode = false;
@@ -384,7 +400,7 @@ export function describeScope() {
     if (scope.camera) return `camera:${scope.camera}`;
     if (scope.lens) return `lens:${scope.lens}`;
     if (scope.orientation) return scope.orientation;
-    if (scope.compared) return scope.compared;
-    if (scope.min_stars) return `${scope.min_stars}+ stars`;
+    if (scope.compared) return { compared: 'Ranked', uncompared: 'Unranked', confident: 'High confidence' }[scope.compared] || scope.compared;
+    if (scope.min_stars) return `${scope.min_stars}+ rating`;
     return 'All Photos';
 }

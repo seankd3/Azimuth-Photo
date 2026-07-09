@@ -1,5 +1,5 @@
 import {
-    byId, emit, on, scopeParams, selection, setBestOfTotal, setImages, setRankingsMeta, viewState,
+    byId, emit, nonSearchFacetCount, on, scope, scopeActive, scopeParams, selection, setBestOfTotal, setImages, setRankingsMeta, setScope, viewState,
 } from './state.js';
 import { thumbUrl } from './api.js';
 import { loadScopePage } from './scope_data.js';
@@ -109,6 +109,25 @@ function renderSkeletons() {
         + '</div>';
 }
 
+function renderEmptyState() {
+    resetImageObserver();
+    resetGridWindow();
+    const flow = document.getElementById('grid-flow');
+    const showClearFilters = nonSearchFacetCount() > 0;
+    const showClearScope = scopeActive() || viewState.bestOf;
+    flow.innerHTML = '<div class="grid-empty">'
+        + '<h3>No photos in this view</h3>'
+        + '<p>Try widening the current scope or clearing active filters.</p>'
+        + '<div class="grid-empty-actions">'
+        + (showClearFilters ? '<button class="btn" id="grid-clear-filters">Clear filters</button>' : '')
+        + (showClearScope ? '<button class="btn primary" id="grid-clear-scope">Clear scope</button>' : '')
+        + '</div></div>';
+    document.getElementById('grid-clear-filters')?.addEventListener('click', () => {
+        setScope({ q: scope.q, sort: scope.sort || 'elo' });
+    });
+    document.getElementById('grid-clear-scope')?.addEventListener('click', () => setScope({}));
+}
+
 function renderError(message) {
     document.getElementById('grid-error').innerHTML = '<div class="load-error"><h4>Couldn\'t load this scope</h4>'
         + `<p>${esc(message || 'The archive did not respond.')}</p><button class="btn" id="grid-retry">Retry</button></div>`;
@@ -163,7 +182,8 @@ async function loadPage() {
     }
     document.getElementById('grid-error').innerHTML = '';
     document.getElementById('grid-end').hidden = !done || next.length === 0;
-    render({ append: !wasEmpty, start: requestStart, images: incoming });
+    if (next.length === 0 && done) renderEmptyState();
+    else render({ append: !wasEmpty, start: requestStart, images: incoming });
     return incoming.length > 0;
 }
 

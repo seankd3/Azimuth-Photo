@@ -225,6 +225,10 @@ export async function getDateHistogram(params) {
     return fetchJson(`/api/date-histogram?${params.toString()}`, { defaultValue: null });
 }
 
+export async function getCounts(params = new URLSearchParams()) {
+    return fetchJson(`/api/counts?${params.toString()}`, { defaultValue: null });
+}
+
 export async function getMapMarkers(params) {
     return fetchJson(`/api/map/markers?${params.toString()}`, { defaultValue: null });
 }

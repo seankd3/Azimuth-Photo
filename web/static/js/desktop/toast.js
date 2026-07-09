@@ -10,6 +10,14 @@ function dismiss(item) {
     setTimeout(() => item.el.remove(), 240);
 }
 
+function runUndo(item) {
+    const fn = item?.undo;
+    if (!fn) return false;
+    dismiss(item);
+    fn();
+    return true;
+}
+
 export function showToast(message, { undo = null, duration = 8000 } = {}) {
     const root = document.getElementById('toast');
     if (!root) return;
@@ -20,21 +28,26 @@ export function showToast(message, { undo = null, duration = 8000 } = {}) {
         el: document.createElement('div'),
     };
     item.el.className = 'toast-item';
-    item.el.innerHTML = '<span class="t-msg"></span><button class="t-undo">Undo</button><span class="t-timer"><i></i></span>';
+    item.el.innerHTML = '<span class="t-msg"></span><button class="t-undo"><span>Undo</span><kbd>Ctrl</kbd><kbd>Z</kbd></button><span class="t-timer"><i></i></span>';
     item.el.querySelector('.t-msg').textContent = message;
     item.el.querySelector('.t-timer i').style.animationDuration = `${duration}ms`;
     const undoButton = item.el.querySelector('.t-undo');
     undoButton.hidden = !undo;
     undoButton.addEventListener('click', () => {
-        const fn = item.undo;
-        dismiss(item);
-        if (fn) fn();
+        runUndo(item);
     });
     root.appendChild(item.el);
     toasts.push(item);
     requestAnimationFrame(() => item.el.classList.add('on'));
     item.timer = setTimeout(() => dismiss(item), duration);
     while (toasts.length > 3) dismiss(toasts[0]);
+}
+
+export function undoLatestToast() {
+    for (let i = toasts.length - 1; i >= 0; i -= 1) {
+        if (runUndo(toasts[i])) return true;
+    }
+    return false;
 }
 
 export function hideToast() {

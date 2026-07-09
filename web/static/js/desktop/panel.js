@@ -1,11 +1,12 @@
 import {
     addToCollection, createCollection, getCatalog, getCollection,
+    getCounts,
     createCollectionShare, deleteCollection, getCollectionShare, getCollectionShareFavorites, listCollections,
     removeFromCollection, renameCollection, revokeCollectionShare, thumbUrl,
 } from './api.js';
 import { loadCollectionImageIds } from './scope_data.js';
 import {
-    byId, on, scope, scopeParams, selection, selectionChanged, setLeftCollapsed, setScope, viewState,
+    byId, on, scope, scopeActive, scopeParams, selection, selectionChanged, setLeftCollapsed, setScope, viewState,
 } from './state.js';
 import { applyFlags, selectedIds, setCollectionPicker } from './selection.js';
 import { showToast } from './toast.js';
@@ -19,6 +20,7 @@ import {
 
 let collections = [];
 let catalog = null;
+let libraryCounts = null;
 let drawerOpen = false;
 let collectionMenu = null;
 let collectionMenuReturn = null;
@@ -508,14 +510,18 @@ function renderSuggestions() {
 
 function renderLibrary() {
     const rows = [
-        ['all', 'house', 'All Photos', ''],
-        ['picked', 'star', 'Picked', 'picked'],
-        ['rejected', 'x', 'Rejected', 'rejected'],
-        ['recent', 'clock-3', 'Recent', ''],
+        ['all', 'house', 'All Photos', '', libraryCounts?.total, ''],
+        ['picked', 'star', 'Picked', 'picked', libraryCounts?.picked, ''],
+        ['rejected', 'x', 'Rejected', 'rejected', libraryCounts?.rejected, ''],
+        ['recent', 'clock-3', 'Recent', '', null, 'Newest first'],
     ];
-    document.getElementById('library-list').innerHTML = rows.map(([id, glyph, label]) => (
-        `<button class="nav-row" data-lib="${id}"><span class="nr-glyph">${icon(glyph)}</span><span class="nr-label">${label}</span></button>`
-    )).join('');
+    document.getElementById('library-list').innerHTML = rows.map(([id, glyph, label, , count, tip]) => {
+        const hasCount = count != null || id !== 'recent';
+        return `<button class="nav-row" data-lib="${id}"${tip ? ` data-tip="${esc(tip)}"` : ''}>`
+            + `<span class="nr-glyph">${icon(glyph)}</span><span class="nr-label">${label}</span>`
+            + (hasCount ? `<span class="nr-count">${count == null ? '…' : fmt(count)}</span>` : '')
+            + '</button>';
+    }).join('');
     for (const row of document.querySelectorAll('[data-lib]')) {
         row.addEventListener('click', () => {
             const key = row.dataset.lib;
@@ -526,6 +532,12 @@ function renderLibrary() {
             closeLeftDrawer();
         });
     }
+}
+
+async function loadLibraryCounts() {
+    const data = await getCounts(new URLSearchParams());
+    libraryCounts = data || {};
+    renderLibrary();
 }
 
 function renderSources() {
@@ -771,13 +783,16 @@ export async function initPanel() {
         for (const row of document.querySelectorAll('[data-coll-id]')) row.classList.toggle('active', row.dataset.collId === String(scope.collectionId || ''));
         for (const row of document.querySelectorAll('[data-lib]')) {
             const key = row.dataset.lib;
-            const active = (!scope.collectionId && !scope.import_batch && !scope.similarIds.length && key === 'all' && !scope.flag && !scope.q && !scope.people && !scope.folder && !scope.date_taken && !scope.file_type && !scope.camera && !scope.lens && !scope.orientation && !scope.compared && !scope.min_stars)
+            const recentActive = key === 'recent' && scope.sort === 'date_taken' && !scopeActive();
+            const active = (key === 'all' && !scopeActive() && scope.sort !== 'date_taken')
                 || (key === 'picked' && scope.flag === 'picked')
-                || (key === 'rejected' && scope.flag === 'rejected');
+                || (key === 'rejected' && scope.flag === 'rejected')
+                || recentActive;
             row.classList.toggle('active', active);
         }
     });
     renderLibrary();
+    loadLibraryCounts();
     await loadCollections();
     catalog = await getCatalog();
     await initFoldersPanel({ closeDrawer: closeLeftDrawer });

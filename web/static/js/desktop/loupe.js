@@ -28,6 +28,8 @@ let renderToken = 0;
 let fullImageLoadingId = null;
 let imageWaiters = [];
 let lightMode = 'normal';
+let infoMode = 'off';
+const INFO_MODES = ['off', 'basic', 'full'];
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&#34;', "'": '&#39;',
@@ -64,6 +66,53 @@ function caption(img) {
         .filter(Boolean)
         .map(esc)
         .join(' · ');
+}
+
+function bytes(value) {
+    const n = Number(value) || 0;
+    if (!n) return '';
+    if (n >= 1024 * 1024 * 1024) return `${(n / 1024 / 1024 / 1024).toFixed(1)} GB`;
+    if (n >= 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+    if (n >= 1024) return `${Math.round(n / 1024)} KB`;
+    return `${n} B`;
+}
+
+function shortDate(value) {
+    if (!value) return '';
+    const date = new Date(String(value).replace(' ', 'T'));
+    if (Number.isNaN(date.getTime())) return String(value);
+    return date.toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+function cameraLabel(img) {
+    return [img.camera_make, img.camera_model].filter(Boolean).join(' ');
+}
+
+function dimLabel(img) {
+    const w = Number(img.width) || naturalWidth;
+    const h = Number(img.height) || naturalHeight;
+    return w && h ? `${Math.round(w)} × ${Math.round(h)}` : '';
+}
+
+function updateInfoOverlay() {
+    const host = document.getElementById('loupe-info');
+    const img = current();
+    if (!host || !img || infoMode === 'off') {
+        if (host) host.hidden = true;
+        return;
+    }
+    const name = img.filename || `Photo ${img.id}`;
+    const date = shortDate(img.date_taken);
+    const basic = [date].filter(Boolean).join(' · ');
+    const full = [
+        cameraLabel(img),
+        img.lens,
+        [dimLabel(img), bytes(img.file_size)].filter(Boolean).join(' · '),
+    ].filter(Boolean);
+    host.innerHTML = `<b>${esc(name)}</b>`
+        + (basic ? `<span>${esc(basic)}</span>` : '')
+        + (infoMode === 'full' ? full.map((line) => `<span>${esc(line)}</span>`).join('') : '');
+    host.hidden = false;
 }
 
 function imageSizeFromMetadata(img, imageEl) {
@@ -251,6 +300,7 @@ function updateChrome() {
     document.getElementById('loupe-cap').textContent = caption(img);
     updateFlagControls();
     updateZoomChip();
+    updateInfoOverlay();
 }
 
 function render() {
@@ -393,6 +443,11 @@ function setLightMode(next) {
     document.body.classList.toggle('loupe-lights-out', lightMode === 'lights-out');
     const root = document.getElementById('loupe');
     if (root) root.dataset.lights = lightMode;
+    const button = document.getElementById('lp-lights');
+    if (button) {
+        button.classList.toggle('active', lightMode !== 'normal');
+        button.setAttribute('aria-label', lightMode === 'normal' ? 'Lights' : `Lights: ${lightMode}`);
+    }
 }
 
 export function toggleLoupeLights() {
@@ -400,6 +455,12 @@ export function toggleLoupeLights() {
     if (lightMode === 'normal') setLightMode('dim');
     else if (lightMode === 'dim') setLightMode('lights-out');
     else setLightMode('normal');
+}
+
+export function toggleLoupeInfo() {
+    const indexOfMode = INFO_MODES.indexOf(infoMode);
+    infoMode = INFO_MODES[(indexOfMode + 1) % INFO_MODES.length];
+    updateInfoOverlay();
 }
 
 function toggleFitOneToOne(event) {
@@ -467,8 +528,11 @@ function ensureLoupeChrome() {
         const zoom = document.createElement('div');
         zoom.id = 'loupe-zoom';
         zoom.className = 'num';
+        zoom.dataset.tip = 'Fit / 100% · Space';
         zoom.textContent = 'Fit';
         bar.insertBefore(zoom, actions);
+    } else {
+        document.getElementById('loupe-zoom').dataset.tip = 'Fit / 100% · Space';
     }
     if (close.parentElement !== actions) actions.append(close);
     if (strip.parentElement !== root) root.append(strip);
@@ -563,6 +627,7 @@ export function initLoupe() {
     document.getElementById('lp-pick').addEventListener('click', () => flagCurrent('picked'));
     document.getElementById('lp-reject').addEventListener('click', () => flagCurrent('rejected'));
     document.getElementById('lp-unflag').addEventListener('click', () => flagCurrent('unflagged'));
+    document.getElementById('lp-lights')?.addEventListener('click', () => toggleLoupeLights());
     document.getElementById('lp-coll').addEventListener('click', () => {
         const img = current();
         if (img) openCollectionPicker([img.id]);

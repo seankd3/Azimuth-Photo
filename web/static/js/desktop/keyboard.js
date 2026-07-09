@@ -1,14 +1,14 @@
 import { clearSelection, selection } from './state.js';
 import { focusOmnibox, openCommandPalette } from './omnibox.js';
 import { moveFocus, focusColumns, currentFocusedImage } from './grid.js';
-import { applyFlags } from './selection.js';
+import { applyFlags, selectLoadedImages, toggleFocusedSelection } from './selection.js';
 import {
-    closeLoupe, flagLoupeOrFocused, loupeOpen, navLoupe, openLoupe, toggleLoupeLights,
+    closeLoupe, flagLoupeOrFocused, loupeOpen, navLoupe, openLoupe, toggleLoupeInfo, toggleLoupeLights,
 } from './loupe.js';
 import {
     closeRefine, refineOpen, openRefine, pickByKey, undoRefine,
 } from './refine.js';
-import { on, toggleBestOf, viewState } from './state.js';
+import { cycleDensity, emit, on, toggleBestOf, viewState } from './state.js';
 import { closeLeftDrawer, leftDrawerOpen, toggleLeftPanel } from './panel.js';
 import { closeSystemDrawer, systemDrawerOpen } from './drawer.js';
 import { toggleRightPanel } from './panel_right.js';
@@ -18,6 +18,7 @@ import { closeFilters, filtersOpen } from './filters.js';
 import { closeImport, importOpen } from './importer.js';
 import { closeGridContextMenu, gridContextMenuOpen } from './context_menu.js';
 import { closeDuplicates, duplicatesOpen } from './duplicates.js';
+import { showToast, undoLatestToast } from './toast.js';
 
 function inputFocused() {
     const el = document.activeElement;
@@ -133,10 +134,30 @@ export function initKeyboard() {
             if (refineOpen() && event.key.toLowerCase() === 'z') {
                 event.preventDefault();
                 undoRefine();
+                return;
+            }
+            if (event.key.toLowerCase() === 'z') {
+                if (undoLatestToast()) event.preventDefault();
+                return;
+            }
+            if (event.key.toLowerCase() === 'a' && !inputFocused() && viewState.activeLens === 'grid') {
+                const count = selectLoadedImages();
+                if (count) {
+                    event.preventDefault();
+                    showToast(`${count.toLocaleString('en-US')} loaded photos selected`);
+                }
             }
             return;
         }
         if (event.altKey || inputFocused()) return;
+        if (helpOpen()) return;
+        if (filtersOpen()) {
+            if (event.key.toLowerCase() === 'f') {
+                event.preventDefault();
+                closeFilters();
+            }
+            return;
+        }
         if (refineOpen() && pickByKey(event.key)) {
             event.preventDefault();
             return;
@@ -147,6 +168,7 @@ export function initKeyboard() {
             else if (event.key === 'ArrowRight') navLoupe(1);
             else if (lk === 'g') closeLoupe({ force: true });
             else if (lk === 'l') toggleLoupeLights();
+            else if (lk === 'i') toggleLoupeInfo();
             else if (lk === 'p') flagLoupeOrFocused('picked');
             else if (lk === 'x') flagLoupeOrFocused('rejected');
             else if (lk === 'u') flagLoupeOrFocused('unflagged');
@@ -174,6 +196,9 @@ export function initKeyboard() {
         } else if (key === 'b') {
             event.preventDefault();
             toggleBestOf();
+        } else if (key === 'f') {
+            event.preventDefault();
+            emit('filters:toggle');
         } else if (key === 'g') {
             event.preventDefault();
             switchLens('grid');
@@ -184,9 +209,16 @@ export function initKeyboard() {
         } else if (key === 'o') {
             event.preventDefault();
             switchLens('people');
+        } else if (key === 'y') {
+            event.preventDefault();
+            switchLens('events');
         } else if (key === 'm') {
             event.preventDefault();
             switchLens('map');
+        } else if (key === 'j') {
+            event.preventDefault();
+            const next = cycleDensity();
+            showToast(`Density · ${next[0].toUpperCase()}${next.slice(1)}`);
         } else if (key === '[') {
             event.preventDefault();
             toggleLeftPanel();
@@ -199,6 +231,9 @@ export function initKeyboard() {
             flagTarget('rejected');
         } else if (key === 'u') {
             flagTarget('unflagged');
+        } else if (event.key === ' ') {
+            if (viewState.activeLens !== 'grid') return;
+            if (toggleFocusedSelection()) event.preventDefault();
         } else if (event.key === 'Enter') {
             const img = currentFocusedImage();
             if (img) openLoupe({ id: img.id, index: viewState.focusIndex });

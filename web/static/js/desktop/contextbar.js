@@ -1,5 +1,5 @@
 import {
-    clearFacet, describeScope, emit, on, scope, setBestOf, setScope, setSort, setThumbSize, toggleBestOf, viewState,
+    clearFacet, describeScope, emit, nonSearchFacetCount, on, scope, setBestOf, setScope, setSort, setThumbSize, toggleBestOf, viewState,
 } from './state.js';
 import { toggleLeftPanel } from './panel.js';
 import { showToast } from './toast.js';
@@ -41,7 +41,7 @@ function renderChips() {
         const labels = { compared: 'Ranked', uncompared: 'Unranked', confident: 'High confidence' };
         chips.push(chipHtml('compared', labels[scope.compared] || scope.compared));
     }
-    if (scope.min_stars) chips.push(chipHtml('min_stars', `${scope.min_stars}+ stars`));
+    if (scope.min_stars) chips.push(chipHtml('min_stars', `${scope.min_stars}+ rating`));
     if (viewState.bestOf) chips.push(chipHtml('bestOf', 'Best of'));
     if (chips.length > 1) chips.push(`<button class="chip ghost" data-clear-all="1">${icon('x')}<span>Clear all</span></button>`);
     document.getElementById('ctx-crumbs').innerHTML = chips.join('');
@@ -80,6 +80,15 @@ function render() {
         document.getElementById('ctx-count').innerHTML = `<b>${fmt(viewState.visibleImages)}</b> photos`;
     }
     document.getElementById('btn-bestof').classList.toggle('active', viewState.bestOf);
+    const filterCount = nonSearchFacetCount();
+    const filterButton = document.getElementById('btn-filter');
+    const filterBadge = document.getElementById('filter-count');
+    filterButton.classList.toggle('active', filterCount > 0);
+    filterButton.setAttribute('aria-pressed', filterCount > 0 ? 'true' : 'false');
+    if (filterBadge) {
+        filterBadge.hidden = filterCount === 0;
+        filterBadge.textContent = filterCount > 9 ? '9+' : String(filterCount);
+    }
     document.getElementById('sort-select').value = scope.sort || 'elo';
     document.getElementById('thumb-size').value = String(viewState.thumbSize);
 }

@@ -63,6 +63,25 @@ export function toggleSelection(id, index, { range = false } = {}) {
     selectionChanged(changed);
 }
 
+export function toggleFocusedSelection() {
+    const img = viewState.images[viewState.focusIndex];
+    if (!img) return false;
+    toggleSelection(img.id, viewState.focusIndex);
+    return true;
+}
+
+export function selectLoadedImages() {
+    const imageIds = viewState.images.map((img) => Number(img?.id)).filter((id) => id > 0);
+    if (!imageIds.length) return 0;
+    const before = new Set(selection);
+    imageIds.forEach((id) => selection.add(id));
+    selState.mode = true;
+    selState.lastIndex = viewState.focusIndex;
+    const changed = imageIds.filter((id) => !before.has(id));
+    selectionChanged(changed.length ? changed : imageIds);
+    return selection.size;
+}
+
 export async function applyFlags(rawIds, flag) {
     const imageIds = [...new Set(rawIds.map(Number))].filter((id) => id > 0);
     if (!imageIds.length) return;

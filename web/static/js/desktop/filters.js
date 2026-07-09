@@ -202,18 +202,18 @@ async function expandYear(year) {
 
 function renderRanked() {
     return selectBlock('Ranked status', [
-        ['compared', 'Compared'],
-        ['uncompared', 'Uncompared'],
-        ['confident', 'Confident'],
+        ['compared', 'Ranked'],
+        ['uncompared', 'Unranked'],
+        ['confident', 'High confidence'],
     ].map(([value, label]) => (
         `<button class="filter-pill ${scope.compared === value ? 'active' : ''}" data-toggle-key="compared" data-value="${value}">${label}</button>`
     )).join(''), 'data-filter-section="ranked"');
 }
 
 function renderStars() {
-    return selectBlock('Star rating', [1, 2, 3, 4, 5].map((level) => {
+    return selectBlock('Rating floor', [1, 2, 3, 4, 5].map((level) => {
         const active = Number(scope.min_stars || 0) >= level;
-        return `<button class="filter-star ${active ? 'active' : ''}" data-star="${level}" aria-label="${level}+ stars">${icon('star')}</button>`;
+        return `<button class="filter-star ${active ? 'active' : ''}" data-star="${level}" aria-label="${level}+ rating">${icon('star')}</button>`;
     }).join(''), 'data-filter-section="stars"');
 }
 
