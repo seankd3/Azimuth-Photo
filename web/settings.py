@@ -81,6 +81,14 @@ EMBED_MODEL_PRESETS = {
 }
 
 CAPTION_MODEL_PRESETS = {
+    "qwen2.5-vl-3b-instruct-bnb-4bit": {
+        "label": "Qwen2.5-VL 3B Captioner",
+        "model_id": "Qwen/Qwen2.5-VL-3B-Instruct",
+        "revision": "main",
+        "quantization": "bnb-4bit",
+        "prompt_version": "caption-json-v1",
+        "description": "Compact local VLM captioner that fits an 8GB GPU shared with a resident voice daemon.",
+    },
     "qwen2.5-vl-7b-instruct-bnb-4bit": {
         "label": "Qwen2.5-VL 7B Captioner",
         "model_id": "Qwen/Qwen2.5-VL-7B-Instruct",
