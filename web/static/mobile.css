@@ -70,7 +70,7 @@ body {
 .num { font-variant-numeric: tabular-nums; }
 button { transition: transform .12s var(--ease), background .12s var(--ease), color .12s var(--ease), border-color .12s var(--ease); }
 button:active { transform: scale(.97); }
-.icon { width: 16px; height: 16px; display: block; flex: none; stroke-width: 1.75; }
+.icon { width: 16px; height: 16px; display: block; flex: none; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
 .icon-lg { width: 20px; height: 20px; }
 button:focus-visible, input:focus-visible, select:focus-visible {
     outline: 2px solid var(--accent-lin);
@@ -584,6 +584,45 @@ body[data-tab="photos"] #m-scrub { display: block; }
 .ml-head .ml-more { width: 44px; height: 44px; border-radius: 50%; color: var(--text-2); font-size: 20px; }
 .ml-head .ml-more { display: inline-flex; align-items: center; justify-content: center; }
 .ml-head .ml-more:active { background: rgba(255, 255, 255, .06); }
+.ml-suggest-compact {
+    margin: 2px 0 10px;
+    min-height: 52px;
+    border: 1px solid var(--line);
+    background: rgba(255, 255, 255, .025);
+}
+.ml-suggest-compact.skel {
+    border: 0;
+    border-radius: var(--r-card);
+}
+.ml-suggest-sheet-reason {
+    display: grid;
+    gap: 2px;
+    padding: 0 2px 10px;
+    color: var(--text-2);
+    font-size: 13px;
+}
+.ml-suggest-sheet-reason span {
+    color: var(--text-3);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+}
+.ml-suggest-strip {
+    display: flex;
+    gap: 4px;
+    overflow-x: auto;
+    padding: 2px 0 12px;
+    margin-right: -14px;
+    scrollbar-width: none;
+}
+.ml-suggest-strip::-webkit-scrollbar { display: none; }
+.ml-suggest-strip img {
+    flex: 0 0 82px;
+    width: 82px;
+    height: 66px;
+    object-fit: cover;
+    background: #000;
+}
+.ml-suggest-strip.empty { min-height: 66px; background: var(--card); border-radius: var(--r-card); }
 .ml-suggest-head { padding-top: 2px; }
 .ml-suggest-row {
     display: flex;
