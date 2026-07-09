@@ -10,6 +10,7 @@ import { initViewer } from './viewer.js';
 import { initRefine, showRefine } from './refine.js';
 import { initSearch, showSearch } from './search.js';
 import { initLibrary, showLibrary } from './library.js';
+import { initHistory, replaceTab } from './history.js';
 import { mountIconSprite } from '../icons.js';
 import './install.js';
 
@@ -25,11 +26,24 @@ function secureContextBanner() {
 }
 
 const TABS = ['photos', 'search', 'refine', 'library'];
+const scrollMemory = new Map();
+let activeTab = '';
 
 secureContextBanner();
 
 function setTab(tab) {
     if (!TABS.includes(tab)) return;
+    if (tab === activeTab) {
+        if (tab === 'photos') {
+            const pane = document.getElementById('tab-photos');
+            pane?.scrollTo({ top: 0, behavior: 'smooth' });
+            scrollMemory.set('photos', 0);
+        }
+        return;
+    }
+    const currentPane = document.getElementById(`tab-${activeTab}`);
+    if (currentPane) scrollMemory.set(activeTab, currentPane.scrollTop);
+    activeTab = tab;
     document.body.dataset.tab = tab;
     for (const pane of document.querySelectorAll('.m-tab')) {
         pane.classList.toggle('active', pane.id === `tab-${tab}`);
@@ -41,6 +55,11 @@ function setTab(tab) {
     if (tab === 'search') showSearch();
     else if (tab === 'refine') showRefine();
     else if (tab === 'library') showLibrary();
+    replaceTab(tab);
+    requestAnimationFrame(() => {
+        const pane = document.getElementById(`tab-${tab}`);
+        if (pane) pane.scrollTop = scrollMemory.get(tab) || 0;
+    });
 }
 
 function installTabbar() {
@@ -95,6 +114,7 @@ function installTimelinePinch() {
 
 async function boot() {
     await mountIconSprite();
+    initHistory('photos');
     initToast();
     installTabbar();
     installOfflineBanner();

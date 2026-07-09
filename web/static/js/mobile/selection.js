@@ -9,6 +9,9 @@ import {
 import { applyFlags } from './flags.js';
 import { clearSelection, on, selection } from './state.js';
 import { showToast } from './toast.js';
+import {
+    dismissLayer, layerActive, pushLayer, registerLayer, syncLayerClosed,
+} from './history.js';
 import { icon } from '../icons.js';
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
@@ -23,17 +26,78 @@ export function openSheet(html) {
     const sheet = document.getElementById('m-sheet');
     const scrim = document.getElementById('m-sheet-scrim');
     sheet.innerHTML = `<div class="sheet-grab"></div>${html}`;
+    sheet.style.transform = '';
+    sheet.classList.remove('dragging');
     sheet.hidden = false;
     scrim.hidden = false;
     sheetOpen = true;
+    pushLayer('sheet');
     return sheet;
 }
 
-export function closeSheet() {
+export function closeSheet({ fromHistory = false } = {}) {
     if (!sheetOpen) return;
-    document.getElementById('m-sheet').hidden = true;
+    const sheet = document.getElementById('m-sheet');
+    sheet.hidden = true;
+    sheet.style.transform = '';
+    sheet.classList.remove('dragging', 'settling');
     document.getElementById('m-sheet-scrim').hidden = true;
     sheetOpen = false;
+    if (!fromHistory) syncLayerClosed('sheet');
+}
+
+function dismissSheet() {
+    dismissLayer('sheet', closeSheet);
+}
+
+function installSheetSwipe() {
+    const sheet = document.getElementById('m-sheet');
+    let drag = null;
+
+    sheet.addEventListener('pointerdown', (e) => {
+        if (!sheetOpen || !e.isPrimary) return;
+        if (!e.target.closest('.sheet-grab, h3')) return;
+        const now = performance.now();
+        drag = {
+            id: e.pointerId,
+            y: e.clientY,
+            prevY: e.clientY,
+            prevT: now,
+            v: 0,
+        };
+        sheet.classList.add('dragging');
+        sheet.setPointerCapture(e.pointerId);
+    });
+
+    sheet.addEventListener('pointermove', (e) => {
+        if (!drag || e.pointerId !== drag.id) return;
+        const now = performance.now();
+        const dt = Math.max(1, now - drag.prevT);
+        drag.v = (e.clientY - drag.prevY) / dt;
+        drag.prevY = e.clientY;
+        drag.prevT = now;
+        let dy = e.clientY - drag.y;
+        if (dy < 0) dy *= 0.18;
+        sheet.style.transform = `translateY(${Math.max(-18, dy)}px)`;
+        e.preventDefault();
+    });
+
+    const end = (e) => {
+        if (!drag || e.pointerId !== drag.id) return;
+        const dy = e.clientY - drag.y;
+        const close = dy > sheet.getBoundingClientRect().height * 0.3 || (dy > 28 && drag.v > 0.55);
+        drag = null;
+        sheet.classList.remove('dragging');
+        if (close) {
+            dismissSheet();
+            return;
+        }
+        sheet.classList.add('settling');
+        sheet.style.transform = '';
+        window.setTimeout(() => sheet.classList.remove('settling'), 220);
+    };
+    sheet.addEventListener('pointerup', end);
+    sheet.addEventListener('pointercancel', end);
 }
 
 /* ---------- collection picker ---------- */
@@ -127,17 +191,23 @@ export function initSelection() {
         const n = selection.size;
         bar.classList.toggle('on', n > 0);
         count.textContent = `${n} selected`;
+        if (n > 0 && !layerActive('selection')) pushLayer('selection');
+        else if (n === 0) syncLayerClosed('selection');
     });
 
-    document.getElementById('msb-clear').addEventListener('click', clearSelection);
+    registerLayer('sheet', { close: closeSheet });
+    registerLayer('selection', { close: clearSelection });
+    installSheetSwipe();
+
+    document.getElementById('msb-clear').addEventListener('click', () => dismissLayer('selection', clearSelection));
     document.getElementById('msb-pick').addEventListener('click', () => {
         const ids = [...selection];
-        clearSelection();
+        dismissLayer('selection', clearSelection);
         applyFlags(ids, 'picked');
     });
     document.getElementById('msb-reject').addEventListener('click', () => {
         const ids = [...selection];
-        clearSelection();
+        dismissLayer('selection', clearSelection);
         applyFlags(ids, 'rejected');
     });
     document.getElementById('msb-coll').addEventListener('click', () => {
@@ -163,10 +233,10 @@ export function initSelection() {
         }
     });
 
-    document.getElementById('m-sheet-scrim').addEventListener('click', closeSheet);
+    document.getElementById('m-sheet-scrim').addEventListener('click', dismissSheet);
     window.addEventListener('keydown', (e) => {
         if (e.key !== 'Escape') return;
-        if (sheetOpen) closeSheet();
-        else if (selection.size) clearSelection();
+        if (sheetOpen) dismissSheet();
+        else if (selection.size) dismissLayer('selection', clearSelection);
     });
 }

@@ -8,7 +8,7 @@
  * - Navigations fall back to the cached /m shell when offline.
  */
 
-const CACHE_VERSION = 'pa-mobile-v7';
+const CACHE_VERSION = 'pa-mobile-v8';
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const THUMB_CACHE = `${CACHE_VERSION}-thumbs`;
 const THUMB_CACHE_MAX_ENTRIES = 1500;
@@ -25,6 +25,8 @@ const SHELL_URLS = [
     '/static/js/mobile/api.js',
     '/static/js/mobile/bootstrap.js',
     '/static/js/mobile/flags.js',
+    '/static/js/mobile/haptics.js',
+    '/static/js/mobile/history.js',
     '/static/js/mobile/install.js',
     '/static/js/mobile/library.js',
     '/static/js/mobile/refine.js',

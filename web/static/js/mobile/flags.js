@@ -5,6 +5,7 @@
 import { writeFlag, writeFlags } from './api.js';
 import { byId, emit } from './state.js';
 import { showToast } from './toast.js';
+import { tick } from './haptics.js';
 
 const FLAG_LABELS = {
     picked: 'Picked',
@@ -62,6 +63,7 @@ export async function applyFlags(rawIds, flag, { toast = true } = {}) {
         const label = ids.length === 1
             ? FLAG_LABELS[flag]
             : `${FLAG_LABELS[flag]} · ${ids.length} photos`;
+        if (flag === 'picked' || flag === 'rejected') tick(10);
         showToast(label, {
             undo: async () => {
                 setLocal(ids, prev);

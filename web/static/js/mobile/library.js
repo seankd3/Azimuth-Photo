@@ -14,6 +14,7 @@ import { openSheet, closeSheet } from './selection.js';
 import { showToast } from './toast.js';
 import { openViewer } from './viewer.js';
 import { applyFlags } from './flags.js';
+import { dismissLayer, pushLayer, registerLayer, syncLayerClosed } from './history.js';
 import { icon } from '../icons.js';
 
 // Matches RANK_QUALITY_MIN_SIGNALS in data/repositories/rankings.py.
@@ -30,17 +31,19 @@ let suggestions = null;
 let suggestionsLoading = false;
 let suggestionsLoaded = false;
 let showingCollection = false;
+let collectionListScroll = 0;
+let collectionToken = 0;
 let workStatus = null;
 let workPollTimer = null;
 let workLoading = false;
+let activeSuggestionIndex = 0;
 const sortedPctCache = new Map();
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 }[c]));
 const fmtInt = (n) => (n == null ? '…' : Number(n).toLocaleString('en-US'));
-const suggestionFingerprint = (s) => `${s.kind || ''}|${s.cover_image_id || ''}|${s.count || 0}`;
-const suggestionGlyph = (kind) => icon(kind === 'event' ? 'calendar' : 'sparkles');
+const suggestionFingerprint = (s) => s.fingerprint || `${s.kind || ''}|${s.cover_image_id || ''}|${s.count || 0}`;
 
 /* ---------- main render ---------- */
 function render() {
@@ -306,29 +309,16 @@ function visibleSuggestions() {
 
 function renderSuggestions() {
     if (suggestionsLoading && suggestions == null) {
-        return '<div class="ml-suggest-row ml-suggest-loading">'
-            + '<div class="ml-suggest-card skel"></div>'
-            + '<div class="ml-suggest-card skel"></div></div>';
+        return '<div class="ml-suggest-compact skel"></div>';
     }
 
     const visible = visibleSuggestions();
     if (!visible.length) return '';
 
-    let html = '<div class="ml-head ml-suggest-head"><h3>Suggested</h3></div><div class="ml-suggest-row">';
-    visible.forEach((s, i) => {
-        const count = Number(s.count) || 0;
-        html += `<article class="ml-suggest-card" data-si="${i}">`
-            + `<div class="ml-suggest-cover">${s.cover_image_id ? `<img loading="lazy" decoding="async" src="${esc(thumbUrl('md', s.cover_image_id))}" alt="">` : suggestionGlyph(s.kind)}</div>`
-            + '<div class="ml-suggest-body">'
-            + `<b><span class="g">${suggestionGlyph(s.kind)}</span>${esc(s.title)}</b>`
-            + `<span>${esc(s.subtitle || `${fmtInt(count)} photos`)}</span></div>`
-            + '<div class="ml-suggest-actions">'
-            + '<button class="ml-suggest-create" type="button">Create</button>'
-            + `<button class="ml-suggest-dismiss" type="button" aria-label="Dismiss suggestion">${icon('x')}</button></div>`
-            + '</article>';
-    });
-    html += '</div>';
-    return html;
+    return `<button class="m-lib-row ml-suggest-compact" id="ml-suggest-review" type="button">`
+        + `<span class="g">${icon('sparkles')}</span>`
+        + `<span class="body">${fmtInt(visible.length)} suggested<span class="sub">Review</span></span>`
+        + `<span class="n num">${fmtInt(visible.length)}</span></button>`;
 }
 
 async function loadSuggestionsOnce() {
@@ -366,13 +356,48 @@ function showActionToast(message, label, action) {
 }
 
 function bindSuggestions() {
+    root.querySelector('#ml-suggest-review')?.addEventListener('click', () => openSuggestionReviewSheet(0));
+}
+
+function suggestionPreviewStrip(suggestion) {
+    const ids = (suggestion.image_ids || []).slice(0, 30);
+    if (!ids.length) return '<div class="ml-suggest-strip empty"></div>';
+    return '<div class="ml-suggest-strip">' + ids.map((id) => (
+        `<img loading="lazy" decoding="async" src="${esc(thumbUrl('sm', id))}" alt="">`
+    )).join('') + '</div>';
+}
+
+function openSuggestionReviewSheet(index = activeSuggestionIndex) {
     const visible = visibleSuggestions();
-    for (const card of root.querySelectorAll('.ml-suggest-card[data-si]')) {
-        const suggestion = visible[Number(card.dataset.si)];
-        if (!suggestion) continue;
-        card.querySelector('.ml-suggest-create').addEventListener('click', () => createSuggestion(suggestion));
-        card.querySelector('.ml-suggest-dismiss').addEventListener('click', () => dismissSuggestion(suggestion));
+    if (!visible.length) {
+        closeSheet();
+        render();
+        return;
     }
+    activeSuggestionIndex = Math.max(0, Math.min(visible.length - 1, Number(index) || 0));
+    const suggestion = visible[activeSuggestionIndex];
+    const count = Number(suggestion.count) || 0;
+    const sheet = openSheet(
+        `<h3>${esc(suggestion.title)}</h3>`
+        + `<div class="ml-suggest-sheet-reason">${esc(suggestion.reason || 'Suggested')}<span>${esc(suggestion.subtitle || `${fmtInt(count)} photos`)}</span></div>`
+        + suggestionPreviewStrip(suggestion)
+        + '<button class="sheet-btn" id="ml-suggest-create">Create collection</button>'
+        + `<button class="sheet-row" id="ml-suggest-dismiss"><span class="g">${icon('x')}</span>Dismiss</button>`
+        + `<button class="sheet-row" id="ml-suggest-next"><span class="g">${icon('arrow-right')}</span>Next</button>`
+    );
+    sheet.querySelector('#ml-suggest-create').addEventListener('click', async () => {
+        await createSuggestion(suggestion);
+        openSuggestionReviewSheet(activeSuggestionIndex);
+    });
+    sheet.querySelector('#ml-suggest-dismiss').addEventListener('click', () => {
+        dismissSuggestion(suggestion);
+        openSuggestionReviewSheet(activeSuggestionIndex);
+    });
+    sheet.querySelector('#ml-suggest-next').addEventListener('click', () => {
+        const nextVisible = visibleSuggestions();
+        if (!nextVisible.length) return;
+        openSuggestionReviewSheet((activeSuggestionIndex + 1) % nextVisible.length);
+    });
 }
 
 async function createSuggestion(suggestion) {
@@ -472,14 +497,20 @@ function newCollectionSheet() {
 
 /* ---------- collection drill-in ---------- */
 async function openCollectionView(coll) {
+    const pane = document.getElementById('tab-library');
+    if (!showingCollection && pane) collectionListScroll = pane.scrollTop;
+    const token = ++collectionToken;
     showingCollection = true;
     root.innerHTML =
         `<div class="ml-head"><button class="ml-back" id="ml-back">${icon('chevron-left')} Library</button><h3>${esc(coll.name)}</h3><button class="ml-more" id="ml-more" aria-label="Collection actions">${icon('ellipsis')}</button></div>`
         + `<div class="ml-coll-grid">${'<div class="skel-cell"></div>'.repeat(9)}</div>`;
-    root.querySelector('#ml-back').addEventListener('click', render);
+    if (pane) pane.scrollTop = 0;
+    pushLayer('collection');
+    root.querySelector('#ml-back').addEventListener('click', () => dismissLayer('collection', closeCollectionView));
     root.querySelector('#ml-more').addEventListener('click', () => openCollectionActionsSheet(coll));
 
     const data = await getCollection(coll.id, 1000);
+    if (token !== collectionToken || !showingCollection) return;
     const images = (data && data.collection && data.collection.images) || [];
     rememberImages(images);
     const pct = sortedPctCache.get(coll.id);
@@ -492,15 +523,25 @@ async function openCollectionView(coll) {
         `<div class="ml-head"><button class="ml-back" id="ml-back">${icon('chevron-left')} Library</button><h3>${esc(coll.name)}</h3><button class="ml-more" id="ml-more" aria-label="Collection actions">${icon('ellipsis')}</button></div>`
         + `<div class="ms-empty">${fmtInt(images.length)} photos${pct == null ? '' : ` · ${pct}% sorted`}</div>`
         + `<div class="ml-coll-grid">${grid || '<div class="ms-empty" style="grid-column:span 3">Empty collection.</div>'}</div>`;
-    root.querySelector('#ml-back').addEventListener('click', () => {
-        render();
-        loadAll();
-    });
+    root.querySelector('#ml-back').addEventListener('click', () => dismissLayer('collection', closeCollectionView));
     root.querySelector('#ml-more').addEventListener('click', () => openCollectionActionsSheet(coll));
     root.querySelector('.ml-coll-grid').addEventListener('click', (e) => {
         const cell = e.target.closest('.mcell[data-i]');
         if (cell) openViewer(images, Number(cell.dataset.i));
     });
+}
+
+function closeCollectionView({ fromHistory = false } = {}) {
+    if (!showingCollection) return;
+    collectionToken += 1;
+    showingCollection = false;
+    render();
+    requestAnimationFrame(() => {
+        const pane = document.getElementById('tab-library');
+        if (pane) pane.scrollTop = collectionListScroll;
+    });
+    loadAll();
+    if (!fromHistory) syncLayerClosed('collection');
 }
 
 function openCollectionActionsSheet(coll) {
@@ -769,6 +810,7 @@ function bindSheetConfirm(sheet, buttonSelector, confirmSelector, action) {
 }
 
 export function initLibrary() {
+    registerLayer('collection', { close: closeCollectionView });
     on('installable', () => {
         if (!showingCollection && built) render();
     });

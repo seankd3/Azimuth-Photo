@@ -10,6 +10,7 @@ import {
     scope, scopeActive, scopeParams, selState, selection, selectionChanged,
 } from './state.js';
 import { openViewer } from './viewer.js';
+import { tick } from './haptics.js';
 import { icon } from '../icons.js';
 import { personLabel } from '../people_labels.js';
 
@@ -132,7 +133,7 @@ function toggleDay(sec) {
         selState.mode = true;
         ids.forEach((id) => selection.add(id));
     }
-    if (navigator.vibrate) navigator.vibrate(8);
+    tick(8);
     selectionChanged();
 }
 
@@ -630,6 +631,69 @@ function installSelectionGestures() {
     });
 }
 
+function installPullToRefresh() {
+    const pullEl = document.createElement('div');
+    pullEl.id = 'm-pull';
+    pullEl.innerHTML = '<span></span>';
+    pane.appendChild(pullEl);
+
+    let pull = null;
+    let refreshing = false;
+
+    const resetPull = () => {
+        pull = null;
+        pullEl.classList.remove('on', 'ready', 'refreshing');
+        pullEl.style.setProperty('--pull-p', '0');
+    };
+
+    timeline.addEventListener('touchstart', (e) => {
+        if (refreshing || e.touches.length !== 1 || pane.scrollTop > 0) return;
+        const t = e.touches[0];
+        pull = { y: t.clientY, dy: 0, active: false };
+    }, { passive: true });
+
+    timeline.addEventListener('touchmove', (e) => {
+        if (!pull || e.touches.length !== 1) return;
+        const dy = e.touches[0].clientY - pull.y;
+        if (dy <= 0 || pane.scrollTop > 0) {
+            resetPull();
+            return;
+        }
+        pull.dy = dy;
+        if (dy > 6) pull.active = true;
+        if (!pull.active) return;
+        e.preventDefault();
+        const visual = Math.min(96, dy * 0.72);
+        const progress = clamp(dy / 70, 0, 1);
+        pullEl.classList.add('on');
+        pullEl.classList.toggle('ready', dy >= 70);
+        pullEl.style.setProperty('--pull-p', progress.toFixed(3));
+    }, { passive: false });
+
+    const finish = async () => {
+        if (!pull) return;
+        const shouldRefresh = pull.active && pull.dy >= 70;
+        pull = null;
+        if (!shouldRefresh) {
+            resetPull();
+            return;
+        }
+        refreshing = true;
+        pullEl.classList.add('on', 'refreshing');
+        pullEl.classList.remove('ready');
+        pullEl.style.setProperty('--pull-p', '1');
+        try {
+            await reload();
+        } finally {
+            refreshing = false;
+            resetPull();
+        }
+    };
+
+    timeline.addEventListener('touchend', finish, { passive: true });
+    timeline.addEventListener('touchcancel', resetPull, { passive: true });
+}
+
 /* ---------- event wiring ---------- */
 function syncSelectionCells() {
     timeline.classList.toggle('selmode', selState.mode);
@@ -678,6 +742,7 @@ export function initTimeline() {
     });
 
     installSelectionGestures();
+    installPullToRefresh();
     on('selection', syncSelectionCells);
     on('flags', syncFlagCells);
     on('scope', () => {

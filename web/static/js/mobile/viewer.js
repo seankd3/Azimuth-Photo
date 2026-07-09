@@ -10,6 +10,7 @@ import { applyFlags } from './flags.js';
 import { byId, nav as appNav, on, rememberImages, setScope } from './state.js';
 import { closeSheet, openCollectionSheet, openSheet } from './selection.js';
 import { showToast } from './toast.js';
+import { dismissLayer, pushLayer, registerLayer, syncLayerClosed } from './history.js';
 import { icon } from '../icons.js';
 
 let root = null;
@@ -127,17 +128,25 @@ export function openViewer(imageList, startIndex, { loadMore = null } = {}) {
     needMore = loadMore;
     openState = true;
     root.hidden = false;
+    document.body.classList.add('viewer-open');
     document.body.style.overflow = 'hidden';
     showCurrent();
+    pushLayer('viewer');
 }
 
-export function closeViewer() {
+export function closeViewer({ fromHistory = false } = {}) {
     if (!openState) return;
     openState = false;
     root.hidden = true;
     root.style.background = '';
     img.style.transform = '';
+    document.body.classList.remove('viewer-open');
     document.body.style.overflow = '';
+    if (!fromHistory) syncLayerClosed('viewer');
+}
+
+function dismissViewer() {
+    dismissLayer('viewer', closeViewer);
 }
 
 function infoSheet() {
@@ -368,7 +377,7 @@ function installGestures() {
                 return;
             }
             if (sw.mode === 'down' && dy > 90) {
-                closeViewer();
+                dismissViewer();
             } else if (sw.mode === 'up' && dy < -60) {
                 img.style.transform = '';
                 infoSheet();
@@ -405,7 +414,9 @@ export function initViewer() {
     img = document.getElementById('mv-img');
     cap = document.getElementById('mv-cap');
 
-    document.getElementById('mv-close').addEventListener('click', closeViewer);
+    registerLayer('viewer', { close: closeViewer });
+
+    document.getElementById('mv-close').addEventListener('click', dismissViewer);
     document.getElementById('mv-pick').addEventListener('click', () => {
         const image = current();
         if (image) applyFlags([image.id], 'picked');
@@ -426,7 +437,7 @@ export function initViewer() {
 
     window.addEventListener('keydown', (e) => {
         if (!openState) return;
-        if (e.key === 'Escape') closeViewer();
+        if (e.key === 'Escape') dismissViewer();
         else if (e.key === 'ArrowRight') nav(1);
         else if (e.key === 'ArrowLeft') nav(-1);
     });

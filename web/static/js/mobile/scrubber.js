@@ -2,6 +2,7 @@
 // histogram, so a drag can jump anywhere in 47k photos instantly.
 
 import { on } from './state.js';
+import { tick } from './haptics.js';
 import { jumpToMonth, monthForFraction, monthLabel, scrollInfo, zoomLevel } from './timeline.js';
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -45,6 +46,7 @@ export function initScrubber() {
         if (!month) return;
         if (month.key !== lastKey) {
             lastKey = month.key;
+            tick(8);
             // Debounce the actual jump so a fast drag doesn't fetch every
             // month it passes — only where the finger settles.
             clearTimeout(jumpTimer);

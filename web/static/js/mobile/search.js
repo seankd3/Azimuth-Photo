@@ -118,7 +118,8 @@ function render() {
         + ' autocomplete="off" spellcheck="false" aria-label="Search photos">'
         + `<button id="ms-clear" aria-label="Clear search" style="display:none">${icon('x')}</button></div>`
         + '<div class="ms-hints">'
-        + '<span>camera:Sony</span><span>lens:35mm</span>'
+        + '<button type="button" data-hint="camera:Sony">camera:Sony</button>'
+        + '<button type="button" data-hint="lens:35mm">lens:35mm</button>'
         + '</div>';
 
     html += '<div class="ms-sec"><h3>People</h3><div id="ms-people">';
@@ -177,6 +178,16 @@ function render() {
         input.focus();
         clear.style.display = 'none';
     });
+    for (const hint of root.querySelectorAll('.ms-hints [data-hint]')) {
+        hint.addEventListener('click', () => {
+            const value = hint.dataset.hint || '';
+            const prefix = input.value.trim();
+            input.value = prefix ? `${prefix} ${value}` : value;
+            clear.style.display = '';
+            input.focus();
+            input.setSelectionRange(input.value.length, input.value.length);
+        });
+    }
 
     for (const el of root.querySelectorAll('.m-person[data-pi]')) {
         let pressTimer = null;

@@ -1,6 +1,8 @@
 // Undo-first toast (interaction canon: no confirmations,
 // every action is a toast with Undo).
 
+import { tick } from './haptics.js';
+
 let hideTimer = null;
 let currentUndo = null;
 
@@ -18,6 +20,7 @@ export function showToast(message, { undo = null, duration = 6000 } = {}) {
     msg.textContent = message;
     currentUndo = undo;
     undoBtn.hidden = !undo;
+    if (undo) tick(10);
     root.style.setProperty('--toast-duration', `${duration}ms`);
     root.classList.remove('on');
     void root.offsetWidth;
