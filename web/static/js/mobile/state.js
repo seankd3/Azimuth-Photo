@@ -95,6 +95,19 @@ export function clearSelection() {
     emit('selection', selection);
 }
 
+export const network = { online: navigator.onLine !== false };
+
+export function isOffline() {
+    return network.online === false || navigator.onLine === false;
+}
+
+export function setNetworkOnline(online) {
+    const next = Boolean(online);
+    if (network.online === next) return;
+    network.online = next;
+    emit('network', network);
+}
+
 // Registry of every image object the app has seen, by id.
 // Timeline pages, collection drill-ins, and refine sets all feed it,
 // so flag writes can consult previous values for undo.

@@ -2,7 +2,7 @@
 // /api/people + people= scope param), category chips backed by the
 // raw|jpg|tif file_type group aliases and flag scopes.
 
-import { getFilterOptions, getPeople, ignorePerson, labelPerson } from './api.js';
+import { getFilterOptions, getPeople, ignorePerson, labelPerson, writeFailureMessage } from './api.js';
 import { nav, setScope } from './state.js';
 import { closeSheet, openSheet } from './selection.js';
 import { showToast } from './toast.js';
@@ -63,8 +63,8 @@ function openPersonSheet(person) {
     const sheet = openSheet(
         `<h3>${esc(name)}</h3>`
         + '<input class="sheet-input" id="mp-name" type="text" autocomplete="off" placeholder="Name">'
-        + '<button class="sheet-btn" id="mp-save">Rename</button>'
-        + `<button class="sheet-row" id="mp-ignore"><span class="g">${icon('x')}</span>Ignore this person</button>`
+        + '<button class="sheet-btn" id="mp-save" data-mutating>Rename</button>'
+        + `<button class="sheet-row" id="mp-ignore" data-mutating><span class="g">${icon('x')}</span>Ignore this person</button>`
     );
     const input = sheet.querySelector('#mp-name');
     input.value = name === 'Unnamed' ? '' : name;
@@ -79,7 +79,7 @@ function openPersonSheet(person) {
             built = false;
             showSearch();
         } else {
-            showToast("Couldn't rename person");
+            showToast(writeFailureMessage());
         }
     });
     sheet.querySelector('#mp-ignore').addEventListener('click', async () => {
@@ -91,7 +91,7 @@ function openPersonSheet(person) {
             built = false;
             showSearch();
         } else {
-            showToast("Couldn't ignore person");
+            showToast(writeFailureMessage());
         }
     });
     input.focus();
@@ -192,12 +192,16 @@ function render() {
     for (const el of root.querySelectorAll('.m-person[data-pi]')) {
         let pressTimer = null;
         let longPressed = false;
+        let startX = 0;
+        let startY = 0;
         const clearPress = () => {
             clearTimeout(pressTimer);
             pressTimer = null;
         };
-        el.addEventListener('pointerdown', () => {
+        el.addEventListener('pointerdown', (e) => {
             longPressed = false;
+            startX = e.clientX;
+            startY = e.clientY;
             clearPress();
             pressTimer = setTimeout(() => {
                 const p = ppl && ppl[Number(el.dataset.pi)];
@@ -205,9 +209,11 @@ function render() {
                 longPressed = true;
                 if (navigator.vibrate) navigator.vibrate(10);
                 openPersonSheet(p);
-            }, 520);
+            }, 400);
         });
-        el.addEventListener('pointermove', clearPress);
+        el.addEventListener('pointermove', (e) => {
+            if (Math.hypot(e.clientX - startX, e.clientY - startY) > 12) clearPress();
+        });
         el.addEventListener('pointerup', clearPress);
         el.addEventListener('pointercancel', clearPress);
         el.addEventListener('contextmenu', (e) => e.preventDefault());

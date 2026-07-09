@@ -413,10 +413,16 @@ export function initViewer() {
     stage = document.getElementById('mv-stage');
     img = document.getElementById('mv-img');
     cap = document.getElementById('mv-cap');
+    const done = document.createElement('button');
+    done.id = 'mv-done';
+    done.type = 'button';
+    done.textContent = 'Done';
+    root.appendChild(done);
 
     registerLayer('viewer', { close: closeViewer });
 
     document.getElementById('mv-close').addEventListener('click', dismissViewer);
+    done.addEventListener('click', dismissViewer);
     document.getElementById('mv-pick').addEventListener('click', () => {
         const image = current();
         if (image) applyFlags([image.id], 'picked');

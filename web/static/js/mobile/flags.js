@@ -2,7 +2,7 @@
 // the write happens in the background, and Undo writes the
 // previous flag values back — real writes both ways.
 
-import { writeFlag, writeFlags } from './api.js';
+import { writeFailureMessage, writeFlag, writeFlags } from './api.js';
 import { byId, emit } from './state.js';
 import { showToast } from './toast.js';
 import { tick } from './haptics.js';
@@ -55,7 +55,7 @@ export async function applyFlags(rawIds, flag, { toast = true } = {}) {
     const ok = await write(ids, flag);
     if (!ok) {
         setLocal(ids, prev);
-        showToast("Couldn't save — check connection");
+        showToast(writeFailureMessage());
         return false;
     }
 
@@ -69,7 +69,7 @@ export async function applyFlags(rawIds, flag, { toast = true } = {}) {
                 setLocal(ids, prev);
                 if (!(await writeBack(prev))) {
                     setLocal(ids, flag);
-                    showToast("Couldn't undo — check connection");
+                    showToast(writeFailureMessage());
                 }
             },
         });

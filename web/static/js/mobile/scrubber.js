@@ -3,7 +3,9 @@
 
 import { on } from './state.js';
 import { tick } from './haptics.js';
-import { jumpToMonth, monthForFraction, monthLabel, scrollInfo, zoomLevel } from './timeline.js';
+import {
+    jumpToMonth, monthCenterFraction, monthForFraction, monthLabel, scrollInfo, zoomLevel,
+} from './timeline.js';
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
@@ -17,13 +19,19 @@ export function initScrubber() {
     let pending = null;
     let lastKey = null;
     let jumpTimer = null;
+    const handleHeight = 48;
+
+    function setHandleFraction(frac) {
+        const y = clamp((frac * scrub.clientHeight) - (handleHeight / 2), 0, Math.max(0, scrub.clientHeight - handleHeight));
+        handle.style.top = `${y.toFixed(1)}px`;
+    }
 
     function positionHandle() {
         const { pane } = scrollInfo();
         if (!pane) return;
         const denom = pane.scrollHeight - pane.clientHeight;
         const frac = denom > 0 ? pane.scrollTop / denom : 0;
-        handle.style.top = `${(frac * Math.max(0, scrub.clientHeight - 48)).toFixed(1)}px`;
+        handle.style.top = `${(frac * Math.max(0, scrub.clientHeight - handleHeight)).toFixed(1)}px`;
     }
 
     function show() {
@@ -52,13 +60,16 @@ export function initScrubber() {
             clearTimeout(jumpTimer);
             jumpTimer = setTimeout(() => jumpToMonth(month.key), 140);
         }
+        const center = monthCenterFraction(month.key);
+        if (center != null) setHandleFraction(center);
         bubble.textContent = monthLabel(month.key);
         bubble.style.top = `${clientY}px`;
         bubble.classList.add('on');
-        positionHandle();
     }
 
     scrub.addEventListener('pointerdown', (e) => {
+        const rect = scrub.getBoundingClientRect();
+        if (e.clientX < rect.right - 28) return;
         dragging = true;
         lastKey = null;
         scrub.classList.add('dragging');

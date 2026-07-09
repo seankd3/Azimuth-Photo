@@ -6,7 +6,7 @@
 import {
     createCollection, fetchJson, getAiStatus, getCacheStatus, getCatalog, getCollection, getCounts,
     createCollectionShare, deleteCollection, getCollectionShare, getCollectionShareFavorites, getPeopleStatus, listCollections,
-    renameCollection, revokeCollectionShare, setBackgroundWork, thumbUrl,
+    renameCollection, revokeCollectionShare, setBackgroundWork, thumbUrl, writeFailureMessage,
 } from './api.js';
 import { nav, on, rememberImages, setScope, clearScope } from './state.js';
 import { canInstall, promptInstall } from './install.js';
@@ -244,12 +244,12 @@ function openWorkSheet(kind) {
         + '<div class="sheet-meta">'
         + details.rows.map(([k, v]) => `<div><span>${esc(k)}</span><b>${esc(v == null || v === '' ? '—' : v)}</b></div>`).join('')
         + '</div>'
-        + `<button class="sheet-btn" id="ml-work-action">${action === 'resume' ? 'Resume' : 'Pause'}</button>`
+        + `<button class="sheet-btn" id="ml-work-action" data-mutating>${action === 'resume' ? 'Resume' : 'Pause'}</button>`
     );
     sheet.querySelector('#ml-work-action').addEventListener('click', async () => {
         closeSheet();
         const result = await setBackgroundWork(kind, action);
-        showToast(result && result.ok ? `${details.title} ${action === 'resume' ? 'resumed' : 'paused'}` : "Couldn't update background work");
+        showToast(result && result.ok ? `${details.title} ${action === 'resume' ? 'resumed' : 'paused'}` : writeFailureMessage());
         await loadWorkStatus();
     });
 }
@@ -381,7 +381,7 @@ function openSuggestionReviewSheet(index = activeSuggestionIndex) {
         `<h3>${esc(suggestion.title)}</h3>`
         + `<div class="ml-suggest-sheet-reason">${esc(suggestion.reason || 'Suggested')}<span>${esc(suggestion.subtitle || `${fmtInt(count)} photos`)}</span></div>`
         + suggestionPreviewStrip(suggestion)
-        + '<button class="sheet-btn" id="ml-suggest-create">Create collection</button>'
+        + '<button class="sheet-btn" id="ml-suggest-create" data-mutating>Create collection</button>'
         + `<button class="sheet-row" id="ml-suggest-dismiss"><span class="g">${icon('x')}</span>Dismiss</button>`
         + `<button class="sheet-row" id="ml-suggest-next"><span class="g">${icon('arrow-right')}</span>Next</button>`
     );
@@ -413,7 +413,7 @@ async function createSuggestion(suggestion) {
     if (!(result && result.ok)) {
         restoreSuggestionFingerprint(fingerprint);
         render();
-        showToast("Couldn't create collection");
+        showToast(writeFailureMessage());
         return;
     }
 
@@ -477,7 +477,7 @@ function newCollectionSheet() {
     const sheet = openSheet(
         '<h3>New collection</h3>'
         + '<input class="sheet-input" id="ml-new-name" type="text" placeholder="Collection name" autocomplete="off">'
-        + '<button class="sheet-btn" id="ml-new-create">Create</button>'
+        + '<button class="sheet-btn" id="ml-new-create" data-mutating>Create</button>'
     );
     sheet.querySelector('#ml-new-create').addEventListener('click', async () => {
         const name = sheet.querySelector('#ml-new-name').value.trim();
@@ -489,7 +489,7 @@ function newCollectionSheet() {
             collections = null;
             loadAll();
         } else {
-            showToast("Couldn't create collection");
+            showToast(writeFailureMessage());
         }
     });
     sheet.querySelector('#ml-new-name').focus();
@@ -548,9 +548,9 @@ function openCollectionActionsSheet(coll) {
     const sheet = openSheet(
         `<h3>${esc(coll.name)}</h3>`
         + '<input class="sheet-input" id="ml-rename-name" type="text" autocomplete="off">'
-        + '<button class="sheet-btn" id="ml-rename-save">Save name</button>'
+        + '<button class="sheet-btn" id="ml-rename-save" data-mutating>Save name</button>'
         + `<button class="sheet-row" id="ml-share"><span class="g">${icon('share-2')}</span>Share link</button>`
-        + `<button class="sheet-row" id="ml-delete"><span class="g">${icon('trash-2')}</span>Delete collection</button>`
+        + `<button class="sheet-row" id="ml-delete" data-mutating><span class="g">${icon('trash-2')}</span>Delete collection</button>`
         + '<div class="sheet-confirm" id="ml-delete-confirm" hidden>Delete? <button data-yes="1">Yes</button><button data-no="1">No</button></div>'
     );
     const input = sheet.querySelector('#ml-rename-name');
@@ -567,7 +567,7 @@ function openCollectionActionsSheet(coll) {
             await loadAll();
             openCollectionView(coll);
         } else {
-            showToast("Couldn't rename collection");
+            showToast(writeFailureMessage());
         }
     });
     sheet.querySelector('#ml-share')?.addEventListener('click', () => openCollectionShareSheet(coll));
@@ -592,7 +592,7 @@ function openCollectionActionsSheet(coll) {
             showingCollection = false;
             await loadAll();
         } else {
-            showToast("Couldn't delete collection");
+            showToast(writeFailureMessage());
         }
     });
     input.focus();
@@ -649,7 +649,7 @@ function clientPickIds(pickData) {
 function sharePicksRow(pickData) {
     const ids = clientPickIds(pickData);
     const count = Number(pickData?.count ?? ids.length);
-    return `<button class="sheet-row" id="ml-share-apply-picks" ${ids.length ? '' : 'disabled'}>`
+    return `<button class="sheet-row" id="ml-share-apply-picks" data-mutating ${ids.length ? '' : 'disabled'}>`
         + `<span class="g">${icon('heart')}</span>`
         + '<span class="body">Client picks</span>'
         + `<span class="n num">${fmtInt(count)}</span></button>`;
@@ -681,8 +681,8 @@ function sharePasswordControl(share) {
         + (isProtected ? '<b>Protected</b>' : '')
         + '</div>'
         + `<input class="sheet-input" id="ml-share-password" type="password" autocomplete="new-password" placeholder="${isProtected ? 'Protected' : 'No password'}">`
-        + (share ? `<button class="sheet-row" id="ml-share-password-save"><span class="g">${icon('lock')}</span>${isProtected ? 'Change password' : 'Set password'}</button>` : '')
-        + (isProtected ? `<button class="sheet-row" id="ml-share-password-clear"><span class="g">${icon('x')}</span>Remove password</button>` : '')
+        + (share ? `<button class="sheet-row" id="ml-share-password-save" data-mutating><span class="g">${icon('lock')}</span>${isProtected ? 'Change password' : 'Set password'}</button>` : '')
+        + (isProtected ? `<button class="sheet-row" id="ml-share-password-clear" data-mutating><span class="g">${icon('x')}</span>Remove password</button>` : '')
         + '</div>';
 }
 
@@ -724,14 +724,14 @@ async function renderCollectionShareSheet(coll, share) {
                 + sharePicksRow(pickData)
                 + sharePasswordControl(share)
                 + '<button class="sheet-btn" id="ml-share-copy">Share…</button>'
-                + `<button class="sheet-row" id="ml-share-rotate"><span class="g">${icon('refresh-cw')}</span>Rotate link</button>`
+                + `<button class="sheet-row" id="ml-share-rotate" data-mutating><span class="g">${icon('refresh-cw')}</span>Rotate link</button>`
                 + '<div class="sheet-confirm" id="ml-share-rotate-confirm" hidden>Invalidate old link? <button data-yes="1">Yes</button><button data-no="1">No</button></div>'
-                + `<button class="sheet-row" id="ml-share-revoke"><span class="g">${icon('x')}</span>Revoke</button>`
+                + `<button class="sheet-row" id="ml-share-revoke" data-mutating><span class="g">${icon('x')}</span>Revoke</button>`
                 + '<div class="sheet-confirm" id="ml-share-revoke-confirm" hidden>Revoke link? <button data-yes="1">Yes</button><button data-no="1">No</button></div>'
             : '<div class="ms-empty">Create a private gallery link for this collection.</div>'
                 + shareExpiryControl()
                 + sharePasswordControl(null)
-                + '<button class="sheet-btn" id="ml-share-create">Create share link</button>')
+                + '<button class="sheet-btn" id="ml-share-create" data-mutating>Create share link</button>')
     );
     const pickIds = clientPickIds(pickData);
     sheet.querySelector('#ml-share-copy')?.addEventListener('click', () => copyOrShareLink(share.url, coll.name));
@@ -747,7 +747,7 @@ async function renderCollectionShareSheet(coll, share) {
             showToast('Share link created');
             renderCollectionShareSheet(coll, result.share);
         } else {
-            showToast("Couldn't create share link");
+            showToast(writeFailureMessage());
         }
     });
     sheet.querySelector('#ml-share-password-save')?.addEventListener('click', async () => {
@@ -761,7 +761,7 @@ async function renderCollectionShareSheet(coll, share) {
             showToast(share.protected ? 'Password changed' : 'Password set');
             renderCollectionShareSheet(coll, result.share);
         } else {
-            showToast("Couldn't save password");
+            showToast(writeFailureMessage());
         }
     });
     sheet.querySelector('#ml-share-password-clear')?.addEventListener('click', async () => {
@@ -770,7 +770,7 @@ async function renderCollectionShareSheet(coll, share) {
             showToast('Password removed');
             renderCollectionShareSheet(coll, result.share);
         } else {
-            showToast("Couldn't remove password");
+            showToast(writeFailureMessage());
         }
     });
     bindSheetConfirm(sheet, '#ml-share-rotate', '#ml-share-rotate-confirm', async () => {
@@ -779,7 +779,7 @@ async function renderCollectionShareSheet(coll, share) {
             showToast('Share link rotated');
             renderCollectionShareSheet(coll, result.share);
         } else {
-            showToast("Couldn't rotate link");
+            showToast(writeFailureMessage());
         }
     });
     bindSheetConfirm(sheet, '#ml-share-revoke', '#ml-share-revoke-confirm', async () => {
@@ -788,7 +788,7 @@ async function renderCollectionShareSheet(coll, share) {
             showToast('Share link revoked');
             renderCollectionShareSheet(coll, null);
         } else {
-            showToast("Couldn't revoke link");
+            showToast(writeFailureMessage());
         }
     });
 }

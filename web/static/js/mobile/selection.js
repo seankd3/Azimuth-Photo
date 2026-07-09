@@ -4,7 +4,7 @@
 
 import {
     addToCollection, createCollection, exportUrl,
-    listCollections, removeFromCollection, thumbUrl,
+    listCollections, removeFromCollection, thumbUrl, writeFailureMessage,
 } from './api.js';
 import { applyFlags } from './flags.js';
 import { clearSelection, on, selection } from './state.js';
@@ -32,6 +32,7 @@ export function openSheet(html) {
     scrim.hidden = false;
     sheetOpen = true;
     pushLayer('sheet');
+    queueMicrotask(() => document.dispatchEvent(new CustomEvent('sheet-mutated')));
     return sheet;
 }
 
@@ -43,11 +44,57 @@ export function closeSheet({ fromHistory = false } = {}) {
     sheet.classList.remove('dragging', 'settling');
     document.getElementById('m-sheet-scrim').hidden = true;
     sheetOpen = false;
+    document.body.classList.remove('sheet-keyboard');
+    document.documentElement.style.setProperty('--keyboard-offset', '0px');
     if (!fromHistory) syncLayerClosed('sheet');
 }
 
 function dismissSheet() {
     dismissLayer('sheet', closeSheet);
+}
+
+function installSheetKeyboardLift() {
+    const sheet = document.getElementById('m-sheet');
+    if (!sheet || !window.visualViewport) return;
+    let focused = null;
+
+    const isField = (el) => el && el.matches && el.matches('input, textarea, select');
+
+    const adjust = () => {
+        if (!sheetOpen || !focused || !sheet.contains(focused)) return;
+        const vv = window.visualViewport;
+        const keyboard = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+        document.body.classList.toggle('sheet-keyboard', keyboard > 24);
+        document.documentElement.style.setProperty('--keyboard-offset', `${Math.ceil(keyboard)}px`);
+
+        requestAnimationFrame(() => {
+            const primary = sheet.querySelector('.sheet-btn:not([hidden]):not(:disabled)');
+            const targets = [focused, primary].filter(Boolean);
+            if (!targets.length) return;
+            let bottom = 0;
+            for (const el of targets) {
+                bottom = Math.max(bottom, el.offsetTop + el.offsetHeight);
+            }
+            const viewBottom = sheet.scrollTop + sheet.clientHeight - 14;
+            if (bottom > viewBottom) {
+                sheet.scrollTo({ top: bottom - sheet.clientHeight + 14, behavior: 'smooth' });
+            }
+        });
+    };
+
+    sheet.addEventListener('focusin', (e) => {
+        if (!isField(e.target)) return;
+        focused = e.target;
+        adjust();
+    });
+    sheet.addEventListener('focusout', (e) => {
+        if (sheet.contains(e.relatedTarget) && isField(e.relatedTarget)) return;
+        focused = null;
+        document.body.classList.remove('sheet-keyboard');
+        document.documentElement.style.setProperty('--keyboard-offset', '0px');
+    });
+    window.visualViewport.addEventListener('resize', adjust);
+    window.visualViewport.addEventListener('scroll', adjust);
 }
 
 function installSheetSwipe() {
@@ -108,7 +155,7 @@ export async function openCollectionSheet(rawIds, { onDone = null } = {}) {
     const sheet = openSheet(
         '<h3>Add to collection</h3>'
         + '<input class="sheet-input" id="sheet-new-name" type="text" placeholder="New collection name" autocomplete="off">'
-        + '<button class="sheet-btn" id="sheet-new-btn">Create &amp; add</button>'
+        + '<button class="sheet-btn" id="sheet-new-btn" data-mutating>Create &amp; add</button>'
         + '<div id="sheet-coll-list"><div class="skel-row"></div><div class="skel-row"></div></div>'
     );
 
@@ -131,7 +178,7 @@ export async function openCollectionSheet(rawIds, { onDone = null } = {}) {
                 },
             });
         } else {
-            showToast("Couldn't create collection");
+            showToast(writeFailureMessage());
         }
     });
 
@@ -144,10 +191,11 @@ export async function openCollectionSheet(rawIds, { onDone = null } = {}) {
         return;
     }
     listEl.innerHTML = collections.map((c, i) =>
-        `<button class="sheet-row" data-ci="${i}">`
+        `<button class="sheet-row" data-ci="${i}" data-mutating>`
         + `<span class="g">${c.cover_image_id ? `<img src="${esc(thumbUrl('sm', c.cover_image_id))}" alt="" style="width:24px;height:24px;border-radius:6px;object-fit:cover">` : icon('folder')}</span>`
         + `<span>${esc(c.name)}</span><span class="n num">${c.image_count || 0}</span></button>`
     ).join('');
+    document.dispatchEvent(new CustomEvent('sheet-mutated'));
     for (const row of listEl.querySelectorAll('.sheet-row')) {
         row.addEventListener('click', async () => {
             const coll = collections[Number(row.dataset.ci)];
@@ -162,7 +210,7 @@ export async function openCollectionSheet(rawIds, { onDone = null } = {}) {
                     },
                 });
             } else {
-                showToast("Couldn't add to collection");
+                showToast(writeFailureMessage());
             }
         });
     }
@@ -186,38 +234,30 @@ export function exportImages(ids, format = 'csv', size = '') {
 export function initSelection() {
     const bar = document.getElementById('m-selbar');
     const count = document.getElementById('msb-count');
+    const bottomBar = document.createElement('div');
+    bottomBar.id = 'm-sel-actions';
+    bottomBar.innerHTML =
+        `<button type="button" data-action="pick">${icon('star')}<span>Pick</span></button>`
+        + `<button type="button" data-action="reject">${icon('x')}<span>Reject</span></button>`
+        + `<button type="button" data-action="more" aria-label="More selection actions">${icon('ellipsis')}</button>`;
+    document.body.appendChild(bottomBar);
+    document.dispatchEvent(new CustomEvent('selection-actions-mutated'));
 
-    on('selection', () => {
-        const n = selection.size;
-        bar.classList.toggle('on', n > 0);
-        count.textContent = `${n} selected`;
-        if (n > 0 && !layerActive('selection')) pushLayer('selection');
-        else if (n === 0) syncLayerClosed('selection');
-    });
-
-    registerLayer('sheet', { close: closeSheet });
-    registerLayer('selection', { close: clearSelection });
-    installSheetSwipe();
-
-    document.getElementById('msb-clear').addEventListener('click', () => dismissLayer('selection', clearSelection));
-    document.getElementById('msb-pick').addEventListener('click', () => {
+    const pickSelection = () => {
         const ids = [...selection];
         dismissLayer('selection', clearSelection);
         applyFlags(ids, 'picked');
-    });
-    document.getElementById('msb-reject').addEventListener('click', () => {
+    };
+    const rejectSelection = () => {
         const ids = [...selection];
         dismissLayer('selection', clearSelection);
         applyFlags(ids, 'rejected');
-    });
-    document.getElementById('msb-coll').addEventListener('click', () => {
-        openCollectionSheet([...selection], { onDone: clearSelection });
-    });
-    document.getElementById('msb-more').addEventListener('click', () => {
+    };
+    const openMoreActions = () => {
         const ids = [...selection];
         const sheet = openSheet(
             `<h3>${ids.length} selected</h3>`
-            + `<button class="sheet-row" data-act="unflag"><span class="g">${icon('circle')}</span>Unflag</button>`
+            + `<button class="sheet-row" data-act="unflag" data-mutating><span class="g">${icon('circle')}</span>Unflag</button>`
             + `<button class="sheet-row" data-act="csv"><span class="g">${icon('download')}</span>Export CSV</button>`
             + `<button class="sheet-row" data-act="json"><span class="g">${icon('download')}</span>Export JSON</button>`
             + `<button class="sheet-row" data-act="zip"><span class="g">${icon('download')}</span>Download files (zip)</button>`
@@ -231,6 +271,35 @@ export function initSelection() {
                 else exportImages(ids, row.dataset.act);
             });
         }
+    };
+
+    on('selection', () => {
+        const n = selection.size;
+        bar.classList.toggle('on', n > 0);
+        bottomBar.classList.toggle('on', n > 0);
+        count.textContent = `${n} selected`;
+        if (n > 0 && !layerActive('selection')) pushLayer('selection');
+        else if (n === 0) syncLayerClosed('selection');
+    });
+
+    registerLayer('sheet', { close: closeSheet });
+    registerLayer('selection', { close: clearSelection });
+    installSheetSwipe();
+    installSheetKeyboardLift();
+
+    document.getElementById('msb-clear').addEventListener('click', () => dismissLayer('selection', clearSelection));
+    document.getElementById('msb-pick').addEventListener('click', pickSelection);
+    document.getElementById('msb-reject').addEventListener('click', rejectSelection);
+    document.getElementById('msb-coll').addEventListener('click', () => {
+        openCollectionSheet([...selection], { onDone: clearSelection });
+    });
+    document.getElementById('msb-more').addEventListener('click', openMoreActions);
+    bottomBar.addEventListener('click', (e) => {
+        const btn = e.target.closest('button[data-action]');
+        if (!btn) return;
+        if (btn.dataset.action === 'pick') pickSelection();
+        else if (btn.dataset.action === 'reject') rejectSelection();
+        else if (btn.dataset.action === 'more') openMoreActions();
     });
 
     document.getElementById('m-sheet-scrim').addEventListener('click', dismissSheet);

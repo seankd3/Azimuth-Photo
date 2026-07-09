@@ -1,9 +1,9 @@
 // Mobile app entry: four tabs (Photos / Search / Refine / Library),
 // offline awareness, and the timeline pinch-zoom fallback.
 
-import { emit, nav } from './state.js';
+import { emit, nav, setNetworkOnline } from './state.js';
 import { initToast } from './toast.js';
-import { initTimeline, stepZoom } from './timeline.js';
+import { initTimeline, reload, stepZoom } from './timeline.js';
 import { initScrubber } from './scrubber.js';
 import { initSelection } from './selection.js';
 import { initViewer } from './viewer.js';
@@ -72,11 +72,63 @@ function installTabbar() {
 
 function installOfflineBanner() {
     const banner = document.getElementById('m-offline');
-    const sync = () => {
-        banner.hidden = navigator.onLine;
+    const secure = document.getElementById('m-secure-banner');
+
+    const refreshBannerOffset = () => {
+        const offlineH = banner && !banner.hidden ? banner.getBoundingClientRect().height : 0;
+        if (secure) secure.style.top = offlineH ? `${offlineH}px` : '0';
+        const secureH = secure ? secure.getBoundingClientRect().height : 0;
+        const offset = offlineH + secureH;
+        document.body.classList.toggle('m-bannered', offset > 0);
+        document.documentElement.style.setProperty('--top-banner-offset', `${Math.ceil(offset)}px`);
     };
+
+    const syncMutationControls = () => {
+        const offline = !navigator.onLine;
+        document.body.classList.toggle('offline', offline);
+        const selectors = [
+            '[data-mutating]',
+            '#msb-pick',
+            '#msb-reject',
+            '#msb-coll',
+            '#m-sel-actions [data-action="pick"]',
+            '#m-sel-actions [data-action="reject"]',
+            '#mv-pick',
+            '#mv-reject',
+            '#mv-unflag',
+            '#mv-coll',
+            '#mr-stage .mr-card',
+        ];
+        for (const el of document.querySelectorAll(selectors.join(','))) {
+            if ('disabled' in el) el.disabled = offline;
+            el.setAttribute('aria-disabled', String(offline));
+        }
+    };
+
+    const sync = () => {
+        const online = navigator.onLine;
+        banner.hidden = online;
+        setNetworkOnline(online);
+        syncMutationControls();
+        refreshBannerOffset();
+    };
+    banner.setAttribute('role', 'button');
+    banner.tabIndex = 0;
+    banner.addEventListener('click', () => reload());
+    banner.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            reload();
+        }
+    });
     window.addEventListener('online', sync);
     window.addEventListener('offline', sync);
+    window.addEventListener('resize', refreshBannerOffset);
+    if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', refreshBannerOffset);
+    }
+    document.addEventListener('sheet-mutated', syncMutationControls);
+    document.addEventListener('selection-actions-mutated', syncMutationControls);
     sync();
 }
 

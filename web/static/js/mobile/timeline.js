@@ -7,7 +7,7 @@
 import { getDateHistogram, getRankings, thumbUrl } from './api.js';
 import {
     byId, clearScope, clearSelection, emit, on, rememberImages,
-    scope, scopeActive, scopeParams, selState, selection, selectionChanged,
+    isOffline, scope, scopeActive, scopeParams, selState, selection, selectionChanged,
 } from './state.js';
 import { openViewer } from './viewer.js';
 import { tick } from './haptics.js';
@@ -162,6 +162,16 @@ function renderSkeleton() {
     timeline.innerHTML =
         '<section class="m-day"><div class="m-day-head"><h3 class="skel" style="width:140px;height:16px;border-radius:4px"></h3></div>'
         + `<div class="m-day-grid">${'<div class="skel-cell"></div>'.repeat(12)}</div></section>`;
+}
+
+function renderOfflineEmpty() {
+    timeline.innerHTML =
+        '<button class="ms-empty m-offline-empty" type="button">'
+        + '<b>Reconnect to load</b>'
+        + '<span>Cached thumbs may still appear</span>'
+        + '<small>Tap to retry</small>'
+        + '</button>';
+    timeline.querySelector('.m-offline-empty')?.addEventListener('click', reload);
 }
 
 function appendImages(batch) {
@@ -392,6 +402,8 @@ export async function reload() {
         if (zoomIdx === 2) renderMonths();
         else appendImages(images);
         endReached = page.images.length < PAGE;
+    } else if (isOffline()) {
+        renderOfflineEmpty();
     } else {
         timeline.innerHTML = '<div class="ms-empty" style="padding:40px 16px;text-align:center">Couldn\'t load photos.</div>';
     }
@@ -442,6 +454,12 @@ export function monthForFraction(frac) {
     if (!monthOffsets.length) return null;
     const idx = clamp(Math.floor(frac * monthOffsets.length), 0, monthOffsets.length - 1);
     return monthOffsets[idx];
+}
+
+export function monthCenterFraction(key) {
+    const idx = monthOffsets.findIndex((m) => m.key === key);
+    if (idx < 0 || !monthOffsets.length) return null;
+    return (idx + 0.5) / monthOffsets.length;
 }
 
 export async function jumpToMonth(key) {
@@ -544,7 +562,8 @@ function installSelectionGestures() {
     let dragActive = false;
     let dragBase = null;
     let anchorMi = -1;
-    let dragPend = null;
+    let dragPoint = null;
+    let dragFrame = null;
 
     function applyDragRange(mi) {
         const a = Math.min(anchorMi, mi);
@@ -555,6 +574,48 @@ function installSelectionGestures() {
             if (flatIds[i] != null) selection.add(flatIds[i]);
         }
         selectionChanged();
+    }
+
+    function edgeScrollSpeed(y) {
+        const selbar = document.getElementById('m-selbar');
+        const bottomActions = document.getElementById('m-sel-actions');
+        const tabbar = document.getElementById('m-tabbar');
+        const topLimit = (selbar && selbar.classList.contains('on'))
+            ? selbar.getBoundingClientRect().bottom + 16
+            : 84;
+        const tabbarH = tabbar ? tabbar.getBoundingClientRect().height : 0;
+        const actionsH = bottomActions && bottomActions.classList.contains('on')
+            ? bottomActions.getBoundingClientRect().height + 8
+            : 0;
+        const bottomLimit = window.innerHeight - tabbarH - actionsH - 16;
+        const zone = 112;
+        if (y < topLimit + zone) {
+            const p = clamp((topLimit + zone - y) / zone, 0, 1);
+            return -(4 + p * p * 30);
+        }
+        if (y > bottomLimit - zone) {
+            const p = clamp((y - (bottomLimit - zone)) / zone, 0, 1);
+            return 4 + p * p * 30;
+        }
+        return 0;
+    }
+
+    function dragLoop() {
+        dragFrame = null;
+        if (!dragActive || !dragPoint) return;
+        const p = dragPoint;
+        const el = document.elementFromPoint(p.x, p.y);
+        const cell = el && el.closest ? el.closest('.mcell[data-id]') : null;
+        if (cell) applyDragRange(Number(cell.dataset.mi));
+        const speed = edgeScrollSpeed(p.y);
+        if (speed) {
+            pane.scrollTop += speed;
+            dragFrame = requestAnimationFrame(dragLoop);
+        }
+    }
+
+    function scheduleDragLoop() {
+        if (dragFrame == null) dragFrame = requestAnimationFrame(dragLoop);
     }
 
     timeline.addEventListener('pointerdown', (e) => {
@@ -574,6 +635,8 @@ function installSelectionGestures() {
                 anchorMi = mi;
                 dragActive = true;
                 applyDragRange(mi);
+                dragPoint = { x: lp.x, y: lp.y };
+                scheduleDragLoop();
             }, 340),
         };
     });
@@ -586,19 +649,8 @@ function installSelectionGestures() {
             }
             return;
         }
-        if (dragPend == null) {
-            requestAnimationFrame(() => {
-                const p = dragPend;
-                dragPend = null;
-                if (!p || !dragActive) return;
-                const el = document.elementFromPoint(p.x, p.y);
-                const cell = el && el.closest ? el.closest('.mcell[data-id]') : null;
-                if (cell) applyDragRange(Number(cell.dataset.mi));
-                if (p.y > window.innerHeight - 120) pane.scrollTop += 9;
-                else if (p.y < 100) pane.scrollTop -= 9;
-            });
-        }
-        dragPend = { x: e.clientX, y: e.clientY };
+        dragPoint = { x: e.clientX, y: e.clientY };
+        scheduleDragLoop();
     });
     const endLP = () => {
         if (lp) {
@@ -608,7 +660,9 @@ function installSelectionGestures() {
         lp = null;
         dragActive = false;
         dragBase = null;
-        dragPend = null;
+        dragPoint = null;
+        if (dragFrame != null) cancelAnimationFrame(dragFrame);
+        dragFrame = null;
     };
     timeline.addEventListener('pointerup', endLP);
     timeline.addEventListener('pointercancel', endLP);

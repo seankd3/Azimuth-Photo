@@ -4,7 +4,7 @@
 // POST /api/compare/undo. The sorted % is the real sort_quality
 // from /api/rankings offset=0 — no fake ticking.
 
-import { getRankings, mosaicNext, mosaicPick, compareUndo, thumbUrl } from './api.js';
+import { getRankings, mosaicNext, mosaicPick, compareUndo, thumbUrl, writeFailureMessage } from './api.js';
 import { on, rememberImages, scope, scopeActive, scopeParams } from './state.js';
 import { showToast } from './toast.js';
 
@@ -112,9 +112,10 @@ function renderSet() {
         return;
     }
     stage.innerHTML = currentSet.map((img) =>
-        `<button class="mr-card" data-id="${img.id}" aria-label="Pick ${esc(img.filename || img.id)}">`
+        `<button class="mr-card" data-id="${img.id}" data-mutating aria-label="Pick ${esc(img.filename || img.id)}">`
         + `<img src="${esc(thumbUrl('md', img.id))}" decoding="async" alt=""></button>`
     ).join('');
+    document.dispatchEvent(new CustomEvent('sheet-mutated'));
 }
 
 function fetchSet(excludeIds = []) {
@@ -190,7 +191,7 @@ async function pick(winnerId) {
         streak = 0;
         root.querySelector('#mr-picks').textContent = String(picks);
         root.querySelector('#mr-streak').textContent = String(streak);
-        showToast("Pick didn't save — check connection");
+        showToast(writeFailureMessage());
         return;
     }
     scheduleQualityRefresh();
@@ -204,7 +205,7 @@ async function undo() {
     busy = false;
     if (!result || !result.ok) {
         history.push(last);
-        showToast('Nothing to undo');
+        showToast(writeFailureMessage());
         return;
     }
     picks = Math.max(0, picks - 1);

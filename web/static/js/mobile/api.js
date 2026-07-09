@@ -2,19 +2,37 @@
 // payload shapes mirror the desktop modules exactly.
 
 import { fetchJson } from '../api.js';
+import { isOffline } from './state.js';
 
 export { fetchJson };
 
+let lastWriteFailure = null;
+
+export function writeFailureMessage() {
+    return lastWriteFailure === 'offline' || isOffline()
+        ? 'Offline — change not saved'
+        : 'Server error — change not saved';
+}
+
 export async function postJson(url, body) {
+    if (isOffline()) {
+        lastWriteFailure = 'offline';
+        return null;
+    }
     try {
         const response = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body),
         });
-        if (!response.ok) return null;
+        if (!response.ok) {
+            lastWriteFailure = 'server';
+            return null;
+        }
+        lastWriteFailure = null;
         return await response.json();
     } catch {
+        lastWriteFailure = isOffline() ? 'offline' : 'server';
         return null;
     }
 }
@@ -66,11 +84,20 @@ export async function mosaicPick(winnerId, loserIds) {
 }
 
 export async function compareUndo() {
+    if (isOffline()) {
+        lastWriteFailure = 'offline';
+        return null;
+    }
     try {
         const response = await fetch('/api/compare/undo', { method: 'POST' });
-        if (!response.ok) return null;
+        if (!response.ok) {
+            lastWriteFailure = 'server';
+            return null;
+        }
+        lastWriteFailure = null;
         return await response.json();
     } catch {
+        lastWriteFailure = isOffline() ? 'offline' : 'server';
         return null;
     }
 }
