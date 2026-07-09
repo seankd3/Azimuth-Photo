@@ -355,6 +355,13 @@ def rebuild_stacks(db_path: str, kinds=None) -> dict:
             variant_stats = _build_variant_groups_with_stats(db_path, rows)
             groups = variant_stats["groups"]
         else:
+            if embedding_groups.get("skipped"):
+                results[kind] = {
+                    "created": 0, "inserted": 0, "candidate_groups": 0, "stack_count": 0,
+                    "skipped": embedding_groups["skipped"],
+                }
+                timings[f"{kind}_ms"] = round((time.perf_counter() - kind_started) * 1000, 1)
+                continue
             groups = embedding_groups.get(kind) or []
         upserted = stack_repository.upsert_auto_stacks_sync(db_path, kind, groups)
         results[kind] = {

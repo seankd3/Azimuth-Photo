@@ -1,13 +1,39 @@
 let nextId = 1;
 const toasts = [];
 
-function dismiss(item) {
+function removeFromHistory(item) {
     const index = toasts.indexOf(item);
     if (index >= 0) toasts.splice(index, 1);
-    clearTimeout(item.timer);
-    item.el.classList.remove('on');
-    item.el.addEventListener('transitionend', () => item.el.remove(), { once: true });
-    setTimeout(() => item.el.remove(), 240);
+}
+
+function removeElement(item) {
+    if (!item.el) return;
+    const el = item.el;
+    item.el = null;
+    item.visible = false;
+    el.classList.remove('on');
+    el.addEventListener('transitionend', () => el.remove(), { once: true });
+    setTimeout(() => el.remove(), 240);
+}
+
+function dismiss(item, { keepUndo = false } = {}) {
+    if (!keepUndo) {
+        removeFromHistory(item);
+        clearTimeout(item.timer);
+    }
+    removeElement(item);
+}
+
+function replaceVisibleToasts() {
+    for (const item of toasts) {
+        if (!item.visible) continue;
+        dismiss(item, { keepUndo: Boolean(item.undo) });
+    }
+}
+
+function expire(item) {
+    removeFromHistory(item);
+    removeElement(item);
 }
 
 function runUndo(item) {
@@ -25,6 +51,7 @@ export function showToast(message, { undo = null, duration = 8000 } = {}) {
         id: nextId++,
         undo,
         timer: null,
+        visible: true,
         el: document.createElement('div'),
     };
     item.el.className = 'toast-item';
@@ -36,11 +63,12 @@ export function showToast(message, { undo = null, duration = 8000 } = {}) {
     undoButton.addEventListener('click', () => {
         runUndo(item);
     });
+    replaceVisibleToasts();
     root.appendChild(item.el);
     toasts.push(item);
-    requestAnimationFrame(() => item.el.classList.add('on'));
-    item.timer = setTimeout(() => dismiss(item), duration);
-    while (toasts.length > 3) dismiss(toasts[0]);
+    requestAnimationFrame(() => item.el?.classList.add('on'));
+    item.timer = setTimeout(() => expire(item), duration);
+    while (toasts.length > 8) dismiss(toasts[0]);
 }
 
 export function undoLatestToast() {
@@ -51,7 +79,7 @@ export function undoLatestToast() {
 }
 
 export function hideToast() {
-    const item = toasts[toasts.length - 1];
+    const item = [...toasts].reverse().find((toast) => toast.visible);
     if (item) dismiss(item);
 }
 

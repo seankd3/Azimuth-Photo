@@ -2,7 +2,7 @@ import {
     getFilterOptions, getFolders, getPeople, getRankings, listCollections, thumbUrl,
 } from './api.js';
 import {
-    emit, on, scope, setScope, setSort, toggleBestOf,
+    emit, on, scope, scopeActive, setScope, setSort, toggleBestOf,
 } from './state.js';
 import { currentFocusedImage } from './grid.js';
 import { openLoupe, toggleLoupeLights } from './loupe.js';
@@ -89,6 +89,7 @@ let liveTimer = null;
 let liveAbort = null;
 let liveSeq = 0;
 let live = { q: '', loading: false, data: null };
+let tokenSelected = false;
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -719,7 +720,24 @@ function completeOperator(name, tokenInfo) {
 }
 
 function renderToken() {
-    document.getElementById('scope-token-slot').innerHTML = scopeTokenHtml();
+    const slot = document.getElementById('scope-token-slot');
+    slot.innerHTML = scopeTokenHtml();
+    slot.querySelector('.scope-token:last-child')?.classList.toggle('selected', tokenSelected && scopeActive());
+}
+
+function setTokenSelected(selected) {
+    tokenSelected = Boolean(selected) && scopeActive();
+    renderToken();
+}
+
+function inputAtTokenBoundary(input) {
+    const start = Number(input.selectionStart ?? 0);
+    const end = Number(input.selectionEnd ?? start);
+    return input.value.length === 0 || (start === 0 && end === 0);
+}
+
+function clearScopeTokenSelection() {
+    if (tokenSelected) setTokenSelected(false);
 }
 
 function scheduleLiveSearch() {
@@ -781,6 +799,7 @@ function movePhotoHot(delta) {
 
 export function focusOmnibox(seed = null) {
     const input = document.getElementById('scope-input');
+    clearScopeTokenSelection();
     if (seed != null) input.value = seed;
     input.focus();
     if (seed == null) input.select();
@@ -809,6 +828,7 @@ export function initOmnibox() {
     });
     input.addEventListener('input', () => {
         hot = -1;
+        clearScopeTokenSelection();
         ensureSuggestionData();
         scheduleLiveSearch();
     });
@@ -827,10 +847,28 @@ export function initOmnibox() {
         } else if (event.key === 'Enter') {
             event.preventDefault();
             run(hot >= 0 ? hot : 0);
+        } else if (event.key === 'Backspace' && scopeActive() && inputAtTokenBoundary(input)) {
+            event.preventDefault();
+            if (tokenSelected) {
+                setScope({});
+                setTokenSelected(false);
+                input.focus();
+                hot = -1;
+                render();
+            } else {
+                setTokenSelected(true);
+            }
         } else if (event.key === 'Escape') {
+            if (tokenSelected) {
+                event.preventDefault();
+                setTokenSelected(false);
+                return;
+            }
             input.value = '';
             input.blur();
             close();
+        } else if (event.key.length === 1 || event.key === 'Delete') {
+            clearScopeTokenSelection();
         } else if (!count && event.key.length === 1) {
             render();
         }
@@ -838,7 +876,10 @@ export function initOmnibox() {
     document.addEventListener('pointerdown', (event) => {
         if (!box.contains(event.target)) close();
     });
-    on('scope', renderToken);
+    on('scope', () => {
+        tokenSelected = false;
+        renderToken();
+    });
     on('meta', renderToken);
     renderToken();
     ensureSuggestionData();
