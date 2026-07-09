@@ -29,3 +29,7 @@ android/app/build/
 # Local audits and build outputs
 cleanup/
 outputs/
+
+# internal agent docs
+AGENTS.md
+CLAUDE.md
