@@ -1,5 +1,6 @@
 import {
-    clearFacet, describeScope, emit, nonSearchFacetCount, on, scope, setBestOf, setScope, setSort, setThumbSize, toggleBestOf, viewState,
+    clearFacet, describeScope, emit, folderChip, nonSearchFacetCount, on, scope, setBestOf, setScope, setSortBase,
+    setThumbSize, sortAscending, sortBase, toggleBestOf, toggleSortDirection, viewState,
 } from './state.js';
 import { toggleLeftPanel } from './panel.js';
 import { showToast } from './toast.js';
@@ -20,15 +21,22 @@ function dateLabel(value) {
     return `${MONTHS[Number(match[2]) - 1] || match[2]} ${match[1]}`;
 }
 
-function chipHtml(key, label, extra = '', className = '') {
+function chipHtml(key, label, extra = '', className = '', title = label) {
     const cls = ['chip', className].filter(Boolean).join(' ');
-    return `<span class="${cls}" data-facet="${key}" title="${esc(label)}">${extra}<span title="${esc(label)}">${esc(label)}</span><button class="chip-x" aria-label="Remove ${esc(label)}">${icon('x')}</button></span>`;
+    return `<span class="${cls}" data-facet="${key}" title="${esc(title)}">${extra}<span title="${esc(title)}">${esc(label)}</span><button class="chip-x" aria-label="Remove ${esc(label)}">${icon('x')}</button></span>`;
 }
 
 function renderChips() {
     const chips = [];
     if (scope.similarIds.length) chips.push(chipHtml('similarIds', scope.similarLabel || 'Similar photos'));
+    if (scope.similarIds.length && scope.similarSourceId) {
+        chips.push('<label class="similar-depth" data-tip="Re-run Similar from the source photo with this many results.">'
+            + '<span>Depth</span><select id="similar-depth-select" aria-label="Similar depth">'
+            + [100, 250, 500].map((value) => `<option value="${value}"${Number(scope.similarLimit || 100) === value ? ' selected' : ''}>${value}</option>`).join('')
+            + '</select></label>');
+    }
     if (scope.q) chips.push(chipHtml('q', `“${scope.q}”`, `<span class="tk-glyph tk-spark">${icon('sparkles')}</span>`));
+    if (scope.q && scope.deep) chips.push(chipHtml('deep', 'Deep search', `<span class="tk-glyph tk-spark">${icon('sparkles')}</span>`, 'smart-chip', 'Uses the active embedding model instead of the fast search model when those model indexes differ.'));
     if (scope.collectionId) {
         const glyph = scope.collectionSmart ? `<span class="tk-glyph tk-spark">${icon('sparkles')}</span>` : '';
         chips.push(chipHtml('collectionId', `Collection · ${scope.collectionName || 'Untitled'}`, glyph, scope.collectionSmart ? 'smart-chip' : ''));
@@ -36,12 +44,13 @@ function renderChips() {
     if (scope.import_batch) chips.push(chipHtml('import_batch', scope.importBatchLabel || `Import ${scope.import_batch}`));
     if (scope.people) {
         const label = cleanPersonLabel({ label: scope.personLabel });
-        const display = label === 'Unnamed' ? 'Add name' : label;
+        const display = label === 'Unnamed' ? 'Unnamed person' : label;
         const face = scope.personThumb ? `<img src="${esc(scope.personThumb)}" alt="">` : `<span class="tk-glyph">${icon('users')}</span>`;
         chips.push(chipHtml('people', display, face, 'person-chip'));
     }
     if (scope.flag) chips.push(chipHtml('flag', scope.flag === 'picked' ? 'Picked' : scope.flag === 'rejected' ? 'Rejected' : 'Unflagged'));
-    if (scope.folder) chips.push(chipHtml('folder', scope.folder.split('/').filter(Boolean).pop() || scope.folder));
+    const folderScope = folderChip();
+    if (folderScope) chips.push(chipHtml('folder', folderScope.label, '', '', folderScope.title));
     if (scope.date_taken) chips.push(chipHtml('date_taken', dateLabel(scope.date_taken)));
     if (scope.file_type) chips.push(chipHtml('file_type', String(scope.file_type).toUpperCase()));
     if (scope.camera) chips.push(chipHtml('camera', `Camera · ${scope.camera}`));
@@ -49,7 +58,7 @@ function renderChips() {
     if (scope.tag) chips.push(chipHtml('tag', `Tag · ${scope.tag}`));
     if (scope.orientation) chips.push(chipHtml('orientation', scope.orientation === 'landscape' ? 'Landscape' : scope.orientation === 'portrait' ? 'Portrait' : scope.orientation));
     if (scope.compared) {
-        const labels = { compared: 'Ranked', uncompared: 'Unranked', confident: 'High confidence' };
+        const labels = { compared: 'Ranked', uncompared: 'Unranked', direct_uncompared: 'Never dueled', confident: 'High confidence' };
         chips.push(chipHtml('compared', labels[scope.compared] || scope.compared));
     }
     if (scope.min_stars) chips.push(chipHtml('min_stars', `${scope.min_stars}+ rating`));
@@ -66,6 +75,9 @@ function renderChips() {
         });
     }
     document.querySelector('.chip[data-clear-all="1"]')?.addEventListener('click', () => setScope({}));
+    document.getElementById('similar-depth-select')?.addEventListener('change', (event) => {
+        emit('similar:find', { imageId: Number(scope.similarSourceId || 0), limit: Number(event.target.value || 100) });
+    });
 }
 
 function renderQuality() {
@@ -100,7 +112,13 @@ function render() {
         filterBadge.hidden = filterCount === 0;
         filterBadge.textContent = filterCount > 9 ? '9+' : String(filterCount);
     }
-    document.getElementById('sort-select').value = scope.sort || 'elo';
+    document.getElementById('sort-select').value = sortBase();
+    const sortDir = document.getElementById('sort-dir');
+    const ascending = sortAscending();
+    sortDir.innerHTML = icon(ascending ? 'sort-asc' : 'arrow-down-wide-narrow');
+    sortDir.classList.toggle('active', ascending);
+    sortDir.setAttribute('aria-pressed', ascending ? 'true' : 'false');
+    sortDir.setAttribute('aria-label', ascending ? 'Sort ascending' : 'Sort descending');
     document.getElementById('thumb-size').value = String(viewState.thumbSize);
 }
 
@@ -125,8 +143,9 @@ export function initContextbar() {
     document.getElementById('btn-filter').addEventListener('click', () => emit('filters:toggle'));
     document.getElementById('btn-bestof').addEventListener('click', toggleBestOf);
     document.getElementById('sort-select').addEventListener('change', (event) => {
-        setSort(event.target.value || 'elo');
+        setSortBase(event.target.value || 'elo');
     });
+    document.getElementById('sort-dir').addEventListener('click', toggleSortDirection);
     document.getElementById('thumb-size').addEventListener('input', (event) => {
         window.clearTimeout(thumbInputTimer);
         const value = event.target.value;
@@ -145,7 +164,7 @@ export function scopeTokenHtml() {
     const count = viewState.visibleImages ? `<span class="tk-count">- ${fmt(viewState.visibleImages)}</span>` : '';
     if (scope.people) {
         const label = cleanPersonLabel({ label: scope.personLabel });
-        const display = label === 'Unnamed' ? 'Add name' : label;
+        const display = label === 'Unnamed' ? 'Unnamed person' : label;
         const img = scope.personThumb ? `<img src="${esc(scope.personThumb)}" alt="">` : `<span class="tk-glyph">${icon('users')}</span>`;
         return `<span class="scope-token person-token" title="${esc(display)}">${img}<b title="${esc(display)}">${esc(display)}</b>${count}</span>`;
     }
@@ -164,7 +183,7 @@ export function scopeTokenHtml() {
         return `<span class="scope-token" title="${esc(label)}"><span class="tk-glyph">${icon('scan-search')}</span><b title="${esc(label)}">${esc(label)}</b>${count}</span>`;
     }
     if (scope.q) {
-        const label = `“${scope.q}”`;
+        const label = scope.deep ? `Deep · “${scope.q}”` : `“${scope.q}”`;
         return `<span class="scope-token semantic" title="${esc(label)}"><span class="tk-glyph tk-spark">${icon('sparkles')}</span><b title="${esc(label)}">${esc(label)}</b>${count}</span>`;
     }
     if (scope.tag) {

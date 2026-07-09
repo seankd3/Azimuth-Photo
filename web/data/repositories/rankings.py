@@ -13,6 +13,7 @@ RANKING_SORTS = {
     "comparisons": "i.comparisons DESC",
     "least_compared": "i.comparisons ASC",
     "filename": "i.filename ASC",
+    "filename_asc": "i.filename ASC",
     "filename_desc": "i.filename DESC",
     "newest": "i.id DESC",
     "oldest": "i.id ASC",
@@ -23,6 +24,7 @@ RANKING_SORTS = {
     "date_modified": "i.file_modified_at IS NULL ASC, i.file_modified_at DESC, i.id DESC",
     "date_modified_asc": "i.file_modified_at IS NULL ASC, i.file_modified_at ASC, i.id ASC",
     "camera": "i.camera_make IS NULL ASC, i.camera_make ASC, i.camera_model ASC, i.id ASC",
+    "camera_asc": "i.camera_make IS NULL ASC, i.camera_make ASC, i.camera_model ASC, i.id ASC",
     "camera_desc": "i.camera_make IS NULL ASC, i.camera_make DESC, i.camera_model DESC, i.id DESC",
     "resolution": "(i.width * i.height) IS NULL ASC, (i.width * i.height) DESC, i.id DESC",
     "resolution_asc": "(i.width * i.height) IS NULL ASC, (i.width * i.height) ASC, i.id ASC",
@@ -33,6 +35,7 @@ RANKING_INDEXES = {
     "comparisons": "idx_images_active_comparisons",
     "least_compared": "idx_images_active_comparisons_asc",
     "filename": "idx_images_active_filename",
+    "filename_asc": "idx_images_active_filename",
     "filename_desc": "idx_images_active_filename",
     "newest": "idx_images_active_id",
     "oldest": "idx_images_active_id",
@@ -43,6 +46,7 @@ RANKING_INDEXES = {
     "date_modified": "idx_images_active_modified_sort_desc",
     "date_modified_asc": "idx_images_active_modified_sort_asc",
     "camera": "idx_images_active_camera_sort_asc",
+    "camera_asc": "idx_images_active_camera_sort_asc",
     "camera_desc": "idx_images_active_camera_sort_desc",
     "resolution": "idx_images_active_resolution_sort_desc",
     "resolution_asc": "idx_images_active_resolution_sort_asc",
@@ -53,12 +57,14 @@ SPARSE_VISIBLE_ID_FILTER_SORTS = {
     "comparisons",
     "least_compared",
     "filename",
+    "filename_asc",
     "filename_desc",
     "date_taken",
     "date_taken_asc",
     "date_modified",
     "date_modified_asc",
     "camera",
+    "camera_asc",
     "camera_desc",
     "resolution",
     "resolution_asc",
@@ -67,6 +73,7 @@ VISIBLE_CACHE_FIRST_SORTS = {
     "comparisons",
     "least_compared",
     "filename",
+    "filename_asc",
     "filename_desc",
     "date_taken",
     "date_taken_asc",
@@ -75,6 +82,7 @@ VISIBLE_CACHE_FIRST_SORTS = {
     "file_size",
     "file_size_asc",
     "camera",
+    "camera_asc",
     "camera_desc",
     "resolution",
     "resolution_asc",
@@ -122,6 +130,50 @@ def escape_like(value: str) -> str:
     )
 
 
+def normalized_folder_values(folder) -> list[str]:
+    if not folder:
+        return []
+    if isinstance(folder, (list, tuple)):
+        values = folder
+    else:
+        values = [folder]
+    normalized = []
+    seen = set()
+    for value in values:
+        clean = str(value or "").strip().rstrip("/")
+        if not clean or clean in seen:
+            continue
+        seen.add(clean)
+        normalized.append(clean)
+    return normalized
+
+
+def folder_cache_value(folder):
+    values = normalized_folder_values(folder)
+    if not values:
+        return ""
+    if len(values) == 1:
+        return values[0]
+    return tuple(values)
+
+
+def folder_filter_sql(folder) -> tuple[str, list] | None:
+    values = normalized_folder_values(folder)
+    if not values:
+        return None
+    parts = []
+    params = []
+    for value in values:
+        parts.append("i.filepath LIKE ? ESCAPE '\\'")
+        if value.startswith("/"):
+            params.append(f"{escape_like(value)}/%")
+        else:
+            params.append(f"%/{escape_like(value)}/%")
+    if len(parts) == 1:
+        return parts[0], params
+    return f"({' OR '.join(parts)})", params
+
+
 def ranking_count_cache_key(
     orientation: str = "",
     compared: str = "",
@@ -145,7 +197,7 @@ def ranking_count_cache_key(
         orientation or "",
         compared or "",
         int(min_stars or 0),
-        folder or "",
+        folder_cache_value(folder),
         flag or "",
         date_taken or "",
         file_type or "",
@@ -182,7 +234,7 @@ def facet_cache_key(
         orientation or "",
         compared or "",
         int(min_stars or 0),
-        folder or "",
+        folder_cache_value(folder),
         flag or "",
         date_taken or "",
         file_type or "",
@@ -300,14 +352,11 @@ def ranking_filter_parts(
         conditions.append("i.elo >= ?")
         params.append(STAR_THRESHOLDS[min_stars])
 
-    if folder:
-        normalized_folder = folder.strip().rstrip("/")
-        if normalized_folder.startswith("/"):
-            conditions.append("i.filepath LIKE ? ESCAPE '\\'")
-            params.append(f"{escape_like(normalized_folder)}/%")
-        else:
-            conditions.append("i.filepath LIKE ? ESCAPE '\\'")
-            params.append(f"%/{escape_like(normalized_folder)}/%")
+    folder_filter = folder_filter_sql(folder)
+    if folder_filter is not None:
+        condition, folder_params = folder_filter
+        conditions.append(condition)
+        params.extend(folder_params)
 
     if flag in ("picked", "unflagged", "rejected"):
         conditions.append("i.flag = ?")

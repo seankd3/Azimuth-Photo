@@ -32,8 +32,10 @@ function syncChrome(lens) {
     }
     document.getElementById('shell').classList.toggle('right-hidden', lens === 'events' || lens === 'map' || lens === 'suggestions');
     document.getElementById('event-gap-wrap').hidden = lens !== 'events';
-    document.getElementById('sort-select').disabled = lens === 'people' || lens === 'map' || lens === 'refine' || lens === 'suggestions' || lens === 'loupe' || lens === 'duplicates' || lens === 'trash';
-    document.getElementById('thumb-size').disabled = lens === 'people' || lens === 'map' || lens === 'refine' || lens === 'suggestions' || lens === 'loupe' || lens === 'duplicates' || lens === 'trash';
+    const sortDisabled = lens === 'people' || lens === 'map' || lens === 'refine' || lens === 'suggestions' || lens === 'loupe' || lens === 'duplicates' || lens === 'trash';
+    document.getElementById('sort-select').disabled = sortDisabled;
+    document.getElementById('sort-dir').disabled = sortDisabled;
+    document.getElementById('thumb-size').disabled = lens === 'people' || lens === 'map' || lens === 'refine' || lens === 'suggestions' || lens === 'loupe' || lens === 'trash';
     document.getElementById('btn-refine').classList.toggle('active', lens === 'refine');
     document.getElementById('find-duplicates')?.classList.toggle('active', lens === 'duplicates');
     document.querySelector('[data-lib="trash"]')?.classList.toggle('active', lens === 'trash');

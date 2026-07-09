@@ -275,6 +275,10 @@ export async function getImportOptions() {
     return fetchJson('/api/imports/options', { defaultValue: null });
 }
 
+export async function listImports(limit = 20) {
+    return fetchJson(`/api/imports?limit=${encodeURIComponent(limit)}`, { defaultValue: { imports: [] } });
+}
+
 export async function getDateHistogram(params) {
     return fetchJson(`/api/date-histogram?${params.toString()}`, { defaultValue: null });
 }

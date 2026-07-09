@@ -122,6 +122,20 @@ async def import_batch(db_path: str, batch_id: int) -> dict | None:
         await connection.close_async(conn, db_path=db_path)
 
 
+async def recent_import_batches(db_path: str, *, limit: int = 20) -> list[dict]:
+    conn = await connection.open_async(db_path)
+    try:
+        cursor = await conn.execute(
+            "SELECT id, name, status, destination_path, total_files, imported_files, "
+            "skipped_files, collision_count, created_at AS started_at, created_at, completed_at "
+            "FROM import_batches ORDER BY created_at DESC, id DESC LIMIT ?",
+            (max(1, min(int(limit or 20), 100)),),
+        )
+        return [dict(row) for row in await cursor.fetchall()]
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+
+
 async def import_batch_image_ids(db_path: str, batch_id: int) -> set[int] | None:
     conn = await connection.open_async(db_path)
     try:

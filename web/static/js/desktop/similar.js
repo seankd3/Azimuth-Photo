@@ -7,11 +7,12 @@ function labelFor(img) {
     return `Similar to ${img.filename || `photo ${img.id}`}`;
 }
 
-export async function findSimilar(imageId) {
+export async function findSimilar(imageId, limit = 100) {
     const id = Number(imageId);
     if (!id) return;
+    const depth = [100, 250, 500].includes(Number(limit)) ? Number(limit) : 100;
     const source = byId.get(id) || { id };
-    const data = await getSimilar(id, 100);
+    const data = await getSimilar(id, depth);
     if (!data || data.error || data.ok === false) {
         showToast('Similar search failed');
         return;
@@ -22,6 +23,8 @@ export async function findSimilar(imageId) {
     clearSelection();
     setScope({
         similarIds: images.map((img) => Number(img.id)).filter((value) => value > 0),
+        similarSourceId: String(id),
+        similarLimit: depth,
         similarLabel: labelFor(source),
         sort: 'elo',
     }, { pushHash: false });
@@ -30,5 +33,5 @@ export async function findSimilar(imageId) {
 }
 
 export function initSimilar() {
-    on('similar:find', ({ imageId } = {}) => findSimilar(imageId));
+    on('similar:find', ({ imageId, limit } = {}) => findSimilar(imageId, limit));
 }

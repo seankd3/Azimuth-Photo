@@ -288,6 +288,8 @@ function bindCaptionPanel(host, img, caption) {
             collectionName: '',
             collectionSmart: false,
             similarIds: [],
+            similarSourceId: '',
+            similarLimit: 100,
             similarLabel: '',
         }, { merge: true }));
     }

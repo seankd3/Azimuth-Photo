@@ -96,6 +96,7 @@ PUBLIC_ROUTE_CONTRACT = {
     ("GET", "/api/trash"),
     ("POST", "/api/trash/empty"),
     ("GET", "/api/export"),
+    ("GET", "/api/imports"),
     ("GET", "/api/imports/options"),
     ("POST", "/api/imports"),
     ("GET", "/api/imports/{batch_id}"),
@@ -126,7 +127,6 @@ PUBLIC_ROUTE_CONTRACT = {
     ("GET", "/api/similar/{image_id}"),
     ("GET", "/api/duplicates"),
     ("GET", "/api/image/{image_id}/exif"),
-    ("GET", "/api/collections"),
     ("GET", "/api/folders"),
     ("GET", "/api/folders/tree"),
 }

@@ -23,14 +23,55 @@ const SMART_QUERY_KEYS = [
 ];
 const SMART_ACTIVE_KEYS = SMART_QUERY_KEYS.filter((key) => key !== 'sort');
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const SORT_VARIANTS = {
+    elo: { desc: 'elo', asc: 'elo_asc' },
+    date_taken: { desc: 'date_taken', asc: 'date_taken_asc' },
+    camera: { desc: 'camera_desc', asc: 'camera' },
+    filename: { desc: 'filename_desc', asc: 'filename' },
+    file_size: { desc: 'file_size', asc: 'file_size_asc' },
+    date_modified: { desc: 'date_modified', asc: 'date_modified_asc' },
+    resolution: { desc: 'resolution', asc: 'resolution_asc' },
+    newest: { desc: 'newest', asc: 'oldest' },
+    comparisons: { desc: 'comparisons', asc: 'least_compared' },
+};
+const SORT_ALIASES = {
+    camera_desc: 'camera',
+    filename_desc: 'filename',
+};
+
+function sortVariant(sort) {
+    const clean = normalizeSort(sort);
+    for (const [base, variants] of Object.entries(SORT_VARIANTS)) {
+        if (clean === variants.desc || clean === variants.asc) return { base, ...variants };
+    }
+    return { base: clean || 'elo', desc: clean || 'elo', asc: `${clean || 'elo'}_asc` };
+}
+
+function normalizeSort(sort) {
+    return SORT_ALIASES[String(sort || '')] || String(sort || 'elo');
+}
+
+export function sortBase(sort = scope.sort) {
+    return sortVariant(sort).base;
+}
+
+export function sortAscending(sort = scope.sort) {
+    return sortVariant(sort).asc === String(sort || '');
+}
+
+export function sortWithDirection(sort = scope.sort, ascending = false) {
+    const variant = sortVariant(sort);
+    return ascending ? variant.asc : variant.desc;
+}
 
 export const scope = {
     q: '',
+    deep: false,
     people: '',
     personLabel: '',
     personThumb: '',
     flag: '',
-    folder: '',
+    folder: [],
     date_taken: '',
     file_type: '',
     camera: '',
@@ -42,6 +83,8 @@ export const scope = {
     import_batch: '',
     importBatchLabel: '',
     similarIds: [],
+    similarSourceId: '',
+    similarLimit: 100,
     similarLabel: '',
     collectionId: '',
     collectionName: '',
@@ -69,6 +112,34 @@ export const viewState = {
 export const byId = new Map();
 export const selection = new Set();
 export const selState = { mode: false, lastIndex: null };
+
+export function folderValues(value = scope.folder) {
+    if (Array.isArray(value)) return value.map((item) => String(item || '')).filter(Boolean);
+    const clean = String(value || '');
+    return clean ? [clean] : [];
+}
+
+function normalizeFolderValue(value) {
+    return [...new Set(folderValues(value))];
+}
+
+export function folderActive(path) {
+    return folderValues().includes(path);
+}
+
+export function folderLabel(path) {
+    return String(path || '').split('/').filter(Boolean).pop() || path || '';
+}
+
+export function folderChip() {
+    const folders = folderValues();
+    if (!folders.length) return null;
+    const labels = folders.map(folderLabel);
+    return {
+        label: labels.length === 1 ? labels[0] : `${labels[0]} + ${labels.length - 1} more`,
+        title: labels.join('\n'),
+    };
+}
 
 function isPlainObject(value) {
     return Boolean(value && Object.prototype.toString.call(value) === '[object Object]');
@@ -143,7 +214,7 @@ export function rememberImages(images) {
 
 export function scopeActive() {
     return Boolean(
-        scope.q || scope.people || scope.flag || scope.folder || scope.date_taken || scope.file_type
+        scope.q || scope.deep || scope.people || scope.flag || folderValues().length || scope.date_taken || scope.file_type
         || scope.camera || scope.lens || scope.tag || scope.orientation || scope.compared || scope.min_stars
         || scope.import_batch || scope.similarIds.length || scope.collectionId,
     );
@@ -151,7 +222,7 @@ export function scopeActive() {
 
 export function nonSearchFacetCount() {
     return [
-        scope.people, scope.flag, scope.folder, scope.date_taken, scope.file_type, scope.camera,
+        scope.people, scope.flag, folderValues().length, scope.date_taken, scope.file_type, scope.camera,
         scope.lens, scope.tag, scope.orientation, scope.compared, scope.min_stars, scope.import_batch,
         scope.collectionId, scope.similarIds.length,
     ].filter(Boolean).length;
@@ -160,9 +231,10 @@ export function nonSearchFacetCount() {
 export function scopeParams(extra = {}) {
     const params = new URLSearchParams();
     if (scope.q) params.set('q', scope.q);
+    if (scope.q && scope.deep) params.set('deep', '1');
     if (scope.people) params.set('people', scope.people);
     if (scope.flag) params.set('flag', scope.flag);
-    if (scope.folder) params.set('folder', scope.folder);
+    for (const folder of folderValues()) params.append('folder', folder);
     if (scope.date_taken) params.set('date_taken', scope.date_taken);
     if (scope.file_type) params.set('file_type', scope.file_type);
     if (scope.camera) params.set('camera', scope.camera);
@@ -189,13 +261,16 @@ export function refineParams(extra = {}) {
 
 export function setScope(patch = {}, { merge = false, pushHash = true } = {}) {
     const next = merge ? { ...scope, ...patch } : {
-        q: '', people: '', personLabel: '', personThumb: '', flag: '',
-        folder: '', date_taken: '', file_type: '', camera: '', lens: '',
+        q: '', deep: false, people: '', personLabel: '', personThumb: '', flag: '',
+        folder: [], date_taken: '', file_type: '', camera: '', lens: '',
         tag: '', orientation: '', compared: '', min_stars: '', import_batch: '', importBatchLabel: '',
-        similarIds: [], similarLabel: '', collectionId: '', collectionName: '', collectionSmart: false,
+        similarIds: [], similarSourceId: '', similarLimit: 100, similarLabel: '', collectionId: '', collectionName: '', collectionSmart: false,
         sort: scope.sort || 'elo', ...patch,
     };
     if (!Array.isArray(next.similarIds)) next.similarIds = [];
+    next.similarLimit = [100, 250, 500].includes(Number(next.similarLimit)) ? Number(next.similarLimit) : 100;
+    next.deep = Boolean(next.deep && next.q);
+    next.folder = normalizeFolderValue(next.folder);
     Object.assign(scope, next);
     clearBestOfState();
     viewState.focusIndex = 0;
@@ -205,6 +280,12 @@ export function setScope(patch = {}, { merge = false, pushHash = true } = {}) {
 
 export function patchScope(patch, { pushHash = true } = {}) {
     if (patch.similarIds && !Array.isArray(patch.similarIds)) patch.similarIds = [];
+    if (Object.prototype.hasOwnProperty.call(patch, 'similarLimit')) {
+        patch.similarLimit = [100, 250, 500].includes(Number(patch.similarLimit)) ? Number(patch.similarLimit) : 100;
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, 'folder')) patch.folder = normalizeFolderValue(patch.folder);
+    if (Object.prototype.hasOwnProperty.call(patch, 'deep')) patch.deep = Boolean(patch.deep);
+    if (Object.prototype.hasOwnProperty.call(patch, 'q') && !patch.q) patch.deep = false;
     Object.assign(scope, patch);
     emit('scope', scope);
     if (pushHash) writeHash();
@@ -254,12 +335,24 @@ export function toggleBestOf() {
 }
 
 export function setSort(sort) {
-    const nextSort = sort || 'elo';
+    const nextSort = normalizeSort(sort);
     if (viewState.bestOf) {
         clearBestOfState();
         emit('bestof', false);
     }
     patchScope({ sort: nextSort });
+}
+
+export function setSortBase(sort) {
+    setSort(sortWithDirection(sort || 'elo', sortAscending()));
+}
+
+export function setSortDirection(ascending) {
+    setSort(sortWithDirection(scope.sort || 'elo', Boolean(ascending)));
+}
+
+export function toggleSortDirection() {
+    setSortDirection(!sortAscending());
 }
 
 export function setActiveLens(lens) {
@@ -288,6 +381,8 @@ export function clearFacet(key) {
     if (key === 'similarIds') {
         patch.similarLabel = '';
         patch.similarIds = [];
+        patch.similarSourceId = '';
+        patch.similarLimit = 100;
     }
     patchScope(patch);
 }
@@ -358,12 +453,14 @@ export function clearSelection() {
 function writeHash() {
     const params = new URLSearchParams();
     for (const key of [
-        'q', 'people', 'personLabel', 'personThumb', 'flag', 'folder', 'date_taken', 'file_type',
+        'q', 'people', 'personLabel', 'personThumb', 'flag', 'date_taken', 'file_type',
         'camera', 'lens', 'tag', 'orientation', 'compared', 'min_stars', 'import_batch', 'importBatchLabel',
         'collectionId', 'collectionName', 'collectionSmart', 'sort',
     ]) {
         if (scope[key]) params.set(key, scope[key]);
     }
+    if (scope.q && scope.deep) params.set('deep', '1');
+    for (const folder of folderValues()) params.append('folder', folder);
     const next = params.toString();
     if (location.hash.slice(1) !== next) {
         history.pushState(null, '', next ? `#${next}` : location.pathname);
@@ -374,16 +471,19 @@ function loadHash() {
     const params = new URLSearchParams(location.hash.slice(1));
     const patch = {};
     for (const key of [
-        'q', 'people', 'personLabel', 'personThumb', 'flag', 'folder', 'date_taken', 'file_type',
+        'q', 'people', 'personLabel', 'personThumb', 'flag', 'date_taken', 'file_type',
         'camera', 'lens', 'tag', 'orientation', 'compared', 'min_stars', 'import_batch', 'importBatchLabel',
         'collectionId', 'collectionName', 'collectionSmart', 'sort',
     ]) {
         patch[key] = params.get(key) || '';
     }
+    patch.folder = params.getAll('folder').filter(Boolean);
+    patch.deep = ['1', 'true', 'yes', 'on'].includes(String(params.get('deep') || '').toLowerCase()) && Boolean(patch.q);
     patch.collectionSmart = patch.collectionSmart === '1' || patch.collectionSmart === 'true';
     patch.similarIds = [];
     patch.similarLabel = '';
     if (!patch.sort) patch.sort = 'elo';
+    else patch.sort = normalizeSort(patch.sort);
     setScope(patch, { pushHash: false });
 }
 
@@ -398,12 +498,13 @@ export function describeScope() {
     if (scope.similarIds.length) return scope.similarLabel || 'Similar photos';
     if (scope.collectionId) return scope.collectionName || 'Collection';
     if (scope.import_batch) return scope.importBatchLabel || `Import ${scope.import_batch}`;
-    if (scope.people) return scope.personLabel || 'Add name';
+    if (scope.people) return scope.personLabel || 'Unnamed person';
     if (scope.q) return `“${scope.q}”`;
     if (scope.flag === 'picked') return 'Picked';
     if (scope.flag === 'unflagged') return 'Unflagged';
     if (scope.flag === 'rejected') return 'Rejected';
-    if (scope.folder) return scope.folder.split('/').filter(Boolean).pop() || scope.folder;
+    const chip = folderChip();
+    if (chip) return chip.label;
     if (scope.date_taken) {
         const match = String(scope.date_taken).match(/^(\d{4})-(\d{2})$/);
         if (match) {
@@ -417,7 +518,7 @@ export function describeScope() {
     if (scope.lens) return `Lens · ${scope.lens}`;
     if (scope.tag) return `Tag · ${scope.tag}`;
     if (scope.orientation) return scope.orientation === 'landscape' ? 'Landscape' : scope.orientation === 'portrait' ? 'Portrait' : scope.orientation;
-    if (scope.compared) return { compared: 'Ranked', uncompared: 'Unranked', confident: 'High confidence' }[scope.compared] || scope.compared;
+    if (scope.compared) return { compared: 'Ranked', uncompared: 'Unranked', direct_uncompared: 'Never dueled', confident: 'High confidence' }[scope.compared] || scope.compared;
     if (scope.min_stars) return `${scope.min_stars}+ rating`;
     return 'All photos';
 }
@@ -429,13 +530,14 @@ function smartDateLabel(value) {
     return `${MONTHS[Number(match[2]) - 1] || match[2]} ${match[1]}`;
 }
 
-function folderLabel(path) {
-    return String(path || '').split('/').filter(Boolean).pop() || path || '';
-}
-
 export function smartQueryFromScope() {
     const query = {};
     for (const key of SMART_QUERY_KEYS) {
+        if (key === 'folder') {
+            const folders = folderValues();
+            if (folders.length === 1) query.folder = folders[0];
+            continue;
+        }
         if (scope[key] !== undefined && scope[key] !== null && scope[key] !== '') query[key] = scope[key];
     }
     if (!query.sort) query.sort = scope.sort || 'elo';
@@ -462,7 +564,7 @@ export function smartQuerySummary(query = {}, { valuesOnly = false, fallback = '
     add('lens', query.lens);
     add('tag', query.tag);
     add('orientation', query.orientation);
-    add('rank', { compared: 'ranked', uncompared: 'unranked', confident: 'high confidence' }[query.compared] || query.compared);
+    add('rank', { compared: 'ranked', uncompared: 'unranked', direct_uncompared: 'never dueled', confident: 'high confidence' }[query.compared] || query.compared);
     add('rating', query.min_stars ? `${query.min_stars}+` : '');
     if (!parts.length && query.sort) add('sort', query.sort === 'date_taken' ? 'date' : query.sort);
     return parts.length ? parts.join(' · ') : fallback;
@@ -474,14 +576,14 @@ export function smartQueryName(query = smartQueryFromScope()) {
 
 export function scopePatchFromSmartQuery(query = {}) {
     const patch = {
-        q: '', people: '', personLabel: '', personThumb: '', flag: '',
-        folder: '', date_taken: '', file_type: '', camera: '', lens: '',
+        q: '', deep: false, people: '', personLabel: '', personThumb: '', flag: '',
+        folder: [], date_taken: '', file_type: '', camera: '', lens: '',
         tag: '', orientation: '', compared: '', min_stars: '', import_batch: '', importBatchLabel: '',
-        similarIds: [], similarLabel: '', collectionId: '', collectionName: '', collectionSmart: false,
+        similarIds: [], similarSourceId: '', similarLimit: 100, similarLabel: '', collectionId: '', collectionName: '', collectionSmart: false,
         sort: query.sort || 'elo',
     };
     for (const key of SMART_ACTIVE_KEYS) {
-        if (query[key] !== undefined && query[key] !== null) patch[key] = String(query[key]);
+        if (query[key] !== undefined && query[key] !== null) patch[key] = key === 'folder' ? [String(query[key])] : String(query[key]);
     }
     return patch;
 }

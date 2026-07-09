@@ -154,7 +154,6 @@ async def resolve_text_search(
     fast_search_embedding_config=None,
 ) -> dict:
     """Resolve a text query into either embedding IDs or metadata fallback text."""
-    del deep
     normalized_query = normalize_query(q)
     result = {
         "active": bool(normalized_query),
@@ -170,7 +169,7 @@ async def resolve_text_search(
         return result
 
     extension_query = normalized_query.lower().lstrip(".")
-    config_provider = active_embedding_config or fast_search_embedding_config
+    config_provider = active_embedding_config if deep else (fast_search_embedding_config or active_embedding_config)
     if config_provider is None:
         raise RuntimeError("resolve_text_search requires active_embedding_config")
     active_config = config_provider()
@@ -183,6 +182,7 @@ async def resolve_text_search(
             caption_signature = None
     cache_key = (
         normalized_query.casefold(),
+        bool(deep),
         active_config["model_key"],
         caption_signature,
         f"{float(threshold or 0.0):.6f}",

@@ -54,7 +54,7 @@ export function confirmTypedCount({
             + `<input type="text" autocomplete="off" spellcheck="false" aria-label="Type ${required} to confirm">`
             + '<div class="typed-confirm-actions">'
             + '<button class="btn" data-cancel>Cancel</button>'
-            + `<button class="btn ${danger ? 'danger' : 'primary'}" data-confirm disabled>${esc(confirmLabel)}</button>`
+            + `<button class="btn ${danger ? 'btn-danger' : 'primary'}" data-confirm disabled>${esc(confirmLabel)}</button>`
             + '</div></div>';
         const finish = (ok) => {
             if (done) return;
@@ -117,8 +117,8 @@ function viewHtml() {
         + '<header id="trash-head">'
         + '<div><b>Trash</b><span id="trash-count" class="num"></span></div>'
         + '<button class="btn" id="trash-select-all" disabled>Select all</button>'
-        + '<button class="btn primary" id="trash-restore" disabled>Restore selected</button>'
-        + '<button class="btn danger" id="trash-empty" disabled>Empty trash</button>'
+        + '<button class="btn" id="trash-restore" disabled>Restore selected</button>'
+        + '<button class="btn btn-danger" id="trash-empty" disabled>Empty trash</button>'
         + `<button class="icon-btn" id="trash-close" data-tip="Grid (G / Esc)" aria-label="Return to Grid">${icon('x')}</button>`
         + '</header>'
         + '<div id="trash-body"></div>'

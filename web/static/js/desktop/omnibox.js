@@ -2,7 +2,7 @@ import {
     getFilterOptions, getFolders, getPeople, getRankings, getTags, listCollections, thumbUrl,
 } from './api.js';
 import {
-    emit, on, scope, scopeActive, setScope, setSort, smartQueryActive, smartQuerySummary, toggleBestOf,
+    emit, folderLabel, folderValues, on, patchScope, scope, scopeActive, setScope, setSort, smartQueryActive, smartQuerySummary, toggleBestOf,
 } from './state.js';
 import { currentFocusedImage } from './grid.js';
 import { openLoupe, toggleLoupeLights } from './loupe.js';
@@ -21,6 +21,7 @@ const LIVE_DELAY_MS = 250;
 const LIVE_MIN_CHARS = 2;
 const LIVE_LIMIT = 6;
 const MAX_SECTION_ROWS = 6;
+const DEEP_SEARCH_TIP = 'Uses the active embedding model instead of the fast search model when those model indexes differ.';
 const FLAG_VALUES = [
     { value: 'picked', label: 'Picked', icon: 'star' },
     { value: 'rejected', label: 'Rejected', icon: 'x' },
@@ -161,7 +162,8 @@ function scopeLabel(value) {
     if (value.collectionName) return value.collectionName;
     if (value.personLabel) return personLabel({ label: value.personLabel });
     if (value.people) return 'Add name';
-    if (value.folder) return value.folder.split('/').filter(Boolean).pop() || value.folder;
+    const folders = folderValues(value.folder);
+    if (folders.length) return folders.length === 1 ? folderLabel(folders[0]) : `${folderLabel(folders[0])} + ${folders.length - 1} more`;
     if (value.date_taken) return dateLabel(value.date_taken);
     if (value.camera) return `Camera · ${value.camera}`;
     if (value.lens) return `Lens · ${value.lens}`;
@@ -174,7 +176,7 @@ function scopeLabel(value) {
 function scopeIcon(value) {
     if (value.personLabel || value.people) return 'users';
     if (value.collectionSmart) return 'sparkles';
-    if (value.collectionName || value.collectionId || value.folder) return 'folder';
+    if (value.collectionName || value.collectionId || folderValues(value.folder).length) return 'folder';
     if (value.date_taken) return 'calendar';
     if (value.camera) return 'camera';
     if (value.lens) return 'aperture';
@@ -309,7 +311,7 @@ function searchRow(term) {
 
 function buildPhotoRows(term) {
     if (!term) return [];
-    const section = [{ head: 'Photos' }, searchRow(term)];
+    const section = [{ head: 'Photos' }, { deepToggle: true, term }, searchRow(term)];
     if (term.length < LIVE_MIN_CHARS) return section;
     if (live.q === term && live.loading) {
         section.push({ photoSkeleton: true });
@@ -651,6 +653,10 @@ function render() {
             html += '<div class="sd-hint">'
                 + OPERATORS.map((op) => `<button data-op="${op.name}"><span>${icon(op.icon)}</span>${op.name}:</button>`).join('')
                 + '</div>';
+        } else if (row.deepToggle) {
+            html += '<div class="sd-tools">'
+                + `<button class="sd-chip ${scope.deep ? 'active' : ''}" data-deep-toggle="1" data-tip="${esc(DEEP_SEARCH_TIP)}" aria-pressed="${scope.deep ? 'true' : 'false'}">${icon('sparkles')} Deep</button>`
+                + '</div>';
         } else if (row.photoSkeleton) {
             html += skeletonPhotosHtml();
         } else if (row.photo) {
@@ -688,6 +694,11 @@ function bindDropdown(drop) {
             render();
         });
     }
+    drop.querySelector('[data-deep-toggle]')?.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        toggleDeepSearch();
+    });
     drop.querySelector('[data-clear-recents]')?.addEventListener('click', (event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -742,8 +753,18 @@ function applyScope(patch, { keepFocus = false } = {}) {
 }
 
 function applySearch(term) {
-    applyScope({ q: term });
+    applyScope({ q: term, deep: scope.deep });
     switchLens('grid');
+}
+
+function toggleDeepSearch() {
+    const input = document.getElementById('scope-input');
+    const term = input.value.trim() || scope.q || '';
+    const next = !scope.deep;
+    if (term) patchScope({ q: term, deep: next });
+    else patchScope({ deep: false });
+    scheduleLiveSearch();
+    open();
 }
 
 function openPhotoResult(term, photo, images) {
@@ -771,6 +792,8 @@ function applyFacet({ key, value, remove, closeAfter = false }) {
         collectionName: '',
         collectionSmart: false,
         similarIds: [],
+        similarSourceId: '',
+        similarLimit: 100,
         similarLabel: '',
     };
     if (key === 'people') {
@@ -838,6 +861,7 @@ function scheduleLiveSearch() {
         const controller = new AbortController();
         liveAbort = controller;
         const params = new URLSearchParams({ q: term, limit: String(LIVE_LIMIT), offset: '0', sort: 'similarity' });
+        if (scope.deep) params.set('deep', '1');
         const data = await getRankings(params, { fetchOptions: { signal: controller.signal } });
         if (seq !== liveSeq || controller.signal.aborted) return;
         live = { q: term, loading: false, data };

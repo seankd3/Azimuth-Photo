@@ -1,6 +1,6 @@
 import { getFolderTree } from './api.js';
 import { downloadExport, openExportMenu } from './export_menu.js';
-import { emit, on, scope, scopeParams, setScope } from './state.js';
+import { emit, folderActive, folderValues, on, scopeParams, setScope } from './state.js';
 import { showToast } from './toast.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
 import { icon } from '../icons.js';
@@ -16,6 +16,7 @@ let loading = true;
 let refreshTimer = 0;
 let refreshGeneration = 0;
 let filterTimer = 0;
+let lastSelectedFolderPath = '';
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -65,14 +66,67 @@ function nodeMatches(node, query) {
     return haystack.includes(query) || (node.children || []).some((child) => nodeMatches(child, query));
 }
 
-function applyFolderScope(path) {
+function applyFolderScope(path, options = {}) {
     if (!path) return;
-    setScope({ folder: path });
-    closeDrawer();
+    setScope({ folder: [path] }, options);
+    if (!options.keepOpen) closeDrawer();
+}
+
+function toggleFolderScope(path) {
+    const current = folderValues();
+    const next = current.includes(path)
+        ? current.filter((item) => item !== path)
+        : [...current, path];
+    setScope({ folder: next }, { merge: true });
+}
+
+function rowScopePath(row) {
+    return row?.dataset?.folderPath || row?.dataset?.folderSourcePath || '';
+}
+
+function rowParentContainer(row) {
+    if (!row) return null;
+    if (row.matches('.folder-source-row')) return row.closest('.folder-source')?.parentElement || null;
+    return row.parentElement;
+}
+
+function siblingScopeRows(row) {
+    const parent = rowParentContainer(row);
+    if (!parent) return [];
+    return [...parent.querySelectorAll(':scope > .folder-row, :scope > .folder-source > .folder-source-row')];
+}
+
+function rangeWithinParent(anchorPath, targetRow) {
+    const anchorRow = document.querySelector(`[data-folder-path="${CSS.escape(anchorPath)}"], [data-folder-source-path="${CSS.escape(anchorPath)}"]`);
+    if (!anchorRow || !targetRow || rowParentContainer(anchorRow) !== rowParentContainer(targetRow)) return [];
+    const rows = siblingScopeRows(targetRow);
+    const anchorIndex = rows.indexOf(anchorRow);
+    const targetIndex = rows.indexOf(targetRow);
+    if (anchorIndex < 0 || targetIndex < 0) return [];
+    const [start, end] = anchorIndex < targetIndex ? [anchorIndex, targetIndex] : [targetIndex, anchorIndex];
+    return rows.slice(start, end + 1).map(rowScopePath).filter(Boolean);
+}
+
+function selectFolderPath(path, row, event) {
+    if (!path) return;
+    if (event?.shiftKey && lastSelectedFolderPath) {
+        const range = rangeWithinParent(lastSelectedFolderPath, row);
+        if (range.length) {
+            const next = event.ctrlKey || event.metaKey ? [...new Set([...folderValues(), ...range])] : range;
+            setScope({ folder: next }, { merge: true });
+            return;
+        }
+    }
+    lastSelectedFolderPath = path;
+    if (event?.ctrlKey || event?.metaKey) {
+        toggleFolderScope(path);
+        return;
+    }
+    applyFolderScope(path);
 }
 
 function exportFolderScope(node, anchor) {
-    applyFolderScope(node.path);
+    applyFolderScope(node.path, { keepOpen: true });
     openExportMenu(anchor, ({ format, size }) => {
         const params = scopeParams({ format });
         if (size) params.set('size', size);
@@ -151,7 +205,7 @@ function renderFolderNode(node, level, query = '') {
     const children = Array.isArray(node.children) ? node.children : [];
     const hasChildren = children.some((child) => nodeMatches(child, query));
     const isOpen = Boolean(query) || expanded.has(node.path);
-    const active = scope.folder === node.path ? ' active' : '';
+    const active = folderActive(node.path) ? ' active' : '';
     const label = node.name || leafName(node.path);
     const chevron = hasChildren
         ? `<button class="folder-expander" type="button" data-folder-expand="${esc(node.path)}" aria-label="Toggle ${esc(label)}" aria-expanded="${isOpen ? 'true' : 'false'}">${icon('chevron-right')}</button>`
@@ -178,13 +232,14 @@ function renderSource(source, query = '') {
     const sourceMatches = !query || `${source.display_name} ${source.path}`.toLowerCase().includes(query);
     if (query && !sourceMatches && !folders.length) return '';
     const isOpen = Boolean(query) || expandedByDefault(source.path, true);
-    const active = scope.folder === source.path ? ' active' : '';
+    const active = folderActive(source.path) ? ' active' : '';
     return `<div class="folder-source" data-folder-source="${esc(source.path)}">`
-        + `<button class="folder-source-row${active}${isOpen ? ' open' : ''}" type="button" data-folder-source-toggle="${esc(source.path)}" title="${esc(source.display_name)}">`
-        + `<span class="folder-expander">${icon('chevron-right')}</span>`
+        + `<div class="folder-source-row${active}${isOpen ? ' open' : ''}" role="treeitem" aria-selected="${active ? 'true' : 'false'}" aria-expanded="${isOpen ? 'true' : 'false'}" data-folder-source-path="${esc(source.path)}" title="${esc(source.display_name)}">`
+        + `<button class="folder-expander" type="button" data-folder-source-toggle="${esc(source.path)}" aria-label="Toggle ${esc(source.display_name)}" aria-expanded="${isOpen ? 'true' : 'false'}">${icon('chevron-right')}</button>`
+        + `<button class="folder-main" type="button" data-folder-select="${esc(source.path)}" title="${esc(source.display_name)}">`
         + `<span class="nr-dot ${source.online ? 'on' : 'off'}"></span>`
         + `<span class="folder-label" title="${esc(source.display_name)}">${esc(source.display_name)}</span>`
-        + `<span class="folder-count">${fmt(source.total_count)}</span></button>`
+        + `<span class="folder-count">${fmt(source.total_count)}</span></button></div>`
         + `<div class="folder-children source-children" data-folder-source-children="${esc(source.path)}"${isOpen ? '' : ' hidden'}>`
         + (isOpen ? folders.map((folder) => renderFolderNode(folder, 0, query)).join('') : '')
         + '</div></div>';
@@ -232,6 +287,12 @@ function findNode(path) {
     return null;
 }
 
+function findScopeNode(path) {
+    const source = sources.find((item) => item.path === path);
+    if (source) return { path: source.path, name: source.display_name, total_count: source.total_count };
+    return findNode(path);
+}
+
 function bindTreeEvents(root, query = '') {
     for (const button of root.querySelectorAll('[data-folder-expand]')) {
         button.addEventListener('click', (event) => {
@@ -253,27 +314,31 @@ function bindTreeEvents(root, query = '') {
     }
     for (const button of root.querySelectorAll('[data-folder-select]')) {
         button.addEventListener('click', (event) => {
-            const row = button.closest('.folder-row');
+            const row = button.closest('.folder-row, .folder-source-row');
             if (event.altKey) {
                 event.preventDefault();
-                openFolderMenu(findNode(row.dataset.folderPath), button);
+                openFolderMenu(findScopeNode(rowScopePath(row)), button);
                 return;
             }
-            applyFolderScope(row.dataset.folderPath);
+            selectFolderPath(rowScopePath(row), row, event);
         });
     }
-    for (const row of root.querySelectorAll('[data-folder-path]')) {
+    for (const row of root.querySelectorAll('[data-folder-path], [data-folder-source-path]')) {
         row.addEventListener('contextmenu', (event) => {
             event.preventDefault();
-            openFolderMenu(findNode(row.dataset.folderPath), row.querySelector('.folder-main') || row);
+            openFolderMenu(findScopeNode(rowScopePath(row)), row.querySelector('.folder-main') || row);
         });
     }
     for (const row of root.querySelectorAll('[data-folder-source-toggle]')) {
-        row.addEventListener('click', () => {
+        row.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
             const path = row.dataset.folderSourceToggle;
-            const nextOpen = !row.classList.contains('open');
+            const sourceRow = row.closest('.folder-source-row');
+            const nextOpen = !sourceRow.classList.contains('open');
             setExpanded(path, nextOpen);
-            row.classList.toggle('open', nextOpen);
+            sourceRow.classList.toggle('open', nextOpen);
+            sourceRow.setAttribute('aria-expanded', nextOpen ? 'true' : 'false');
             row.setAttribute('aria-expanded', nextOpen ? 'true' : 'false');
             const container = document.querySelector(`[data-folder-source-children="${CSS.escape(path)}"]`);
             if (!container) return;
@@ -288,10 +353,11 @@ function bindTreeEvents(root, query = '') {
 }
 
 function syncActiveRows() {
-    for (const row of document.querySelectorAll('[data-folder-path], [data-folder-source-toggle]')) {
-        const path = row.dataset.folderPath || row.dataset.folderSourceToggle;
-        row.classList.toggle('active', path === scope.folder);
-        if (row.matches('[data-folder-path]')) row.setAttribute('aria-selected', path === scope.folder ? 'true' : 'false');
+    for (const row of document.querySelectorAll('[data-folder-path], [data-folder-source-path]')) {
+        const path = rowScopePath(row);
+        const active = folderActive(path);
+        row.classList.toggle('active', active);
+        row.setAttribute('aria-selected', active ? 'true' : 'false');
     }
 }
 

@@ -77,6 +77,10 @@ export function openSuggestionsReview() {
     setActiveLens('suggestions');
 }
 
+function closeSuggestionsReview() {
+    setActiveLens('grid');
+}
+
 export async function createSuggestion(suggestion) {
     const fp = suggestionFingerprint(suggestion);
     if (creatingFingerprints.has(fp)) return false;
@@ -152,23 +156,44 @@ function previewHtml(suggestion) {
     )).join('');
 }
 
+function headerHtml(visibleCount = 0) {
+    const copy = suggestionsLoading && suggestions == null
+        ? 'Loading'
+        : `${fmt(visibleCount)} ${visibleCount === 1 ? 'idea' : 'ideas'}`;
+    return '<header id="suggestions-head">'
+        + '<div><b>Suggested Collections</b>'
+        + `<span id="suggestions-count" class="num">${esc(copy)}</span></div>`
+        + `<button class="icon-btn" id="suggestions-close" data-tip="Grid (G / Esc)" aria-label="Return to Grid" type="button">${icon('x')}</button>`
+        + '</header>';
+}
+
+function bindChrome(root) {
+    root.querySelector('#suggestions-close')?.addEventListener('click', closeSuggestionsReview);
+}
+
 function render() {
     if (!mounted) return;
     const root = document.getElementById('suggestions-flow');
+    const visible = currentSuggestions();
     if (suggestionsLoading && suggestions == null) {
-        root.innerHTML = '<div class="suggest-review"><aside class="suggest-review-rail">'
+        root.innerHTML = '<div class="suggest-review">'
+            + headerHtml(visible.length)
+            + '<aside class="suggest-review-rail">'
             + '<div class="skel suggest-review-skel"></div><div class="skel suggest-review-skel"></div>'
             + '</aside><section class="suggest-review-main"><div class="skel suggest-preview-skel"></div></section></div>';
+        bindChrome(root);
         return;
     }
 
-    const visible = currentSuggestions();
     if (!visible.length) {
-        root.innerHTML = '<div class="suggest-review empty"><div>'
+        root.innerHTML = '<div class="suggest-review empty">'
+            + headerHtml(visible.length)
+            + '<div class="suggest-review-empty-body"><div>'
             + `<span class="suggest-empty-glyph">${icon('sparkles')}</span>`
             + '<h2>Nothing to review</h2>'
             + '<p>New collection ideas will appear here after the archive has more patterns to suggest.</p>'
-            + '</div></div>';
+            + '</div></div></div>';
+        bindChrome(root);
         return;
     }
 
@@ -176,6 +201,7 @@ function render() {
     const creating = creatingFingerprints.has(suggestionFingerprint(suggestion));
     const liveCopy = suggestion.query ? 'Live collection — grows automatically' : '';
     root.innerHTML = '<div class="suggest-review">'
+        + headerHtml(visible.length)
         + `<aside class="suggest-review-rail">${visible.map(rowHtml).join('')}</aside>`
         + '<section class="suggest-review-main">'
         + '<header class="suggest-review-head">'
@@ -191,6 +217,7 @@ function render() {
         + `<div class="suggest-preview-grid">${previewHtml(suggestion)}</div>`
         + '</section></div>';
 
+    bindChrome(root);
     for (const row of root.querySelectorAll('.suggest-review-row')) {
         row.addEventListener('click', () => {
             activeIndex = Number(row.dataset.suggestIndex || 0);
@@ -215,7 +242,7 @@ function handleKeydown(event) {
     if (key === 'escape') {
         event.preventDefault();
         event.stopImmediatePropagation();
-        setActiveLens('grid');
+        closeSuggestionsReview();
     } else if (event.key === 'ArrowDown') {
         event.preventDefault();
         event.stopImmediatePropagation();

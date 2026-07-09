@@ -1,5 +1,5 @@
 import { getDateHistogram, getFilterOptions, getFolders, getPeople, getTags } from './api.js';
-import { byId, on, scope, scopeParams, setScope } from './state.js';
+import { byId, folderValues, on, scope, scopeParams, setScope } from './state.js';
 import { loadCollectionImages } from './scope_data.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
 import { icon } from '../icons.js';
@@ -37,13 +37,37 @@ function countLabel(item, fallback = '') {
     return count == null ? fallback : fmt(count);
 }
 
+function personThumb(person) {
+    return person?.face_thumb_url || person?.thumb_url || person?.image_thumb_url || '';
+}
+
+function flattenPeople(peopleData) {
+    const sections = (peopleData && peopleData.sections) || {};
+    const seen = new Map();
+    for (const list of [
+        peopleData?.people,
+        peopleData?.persons,
+        peopleData?.results,
+        sections.most_seen,
+        sections.named_people,
+        sections.other_faces,
+    ]) {
+        for (const person of list || []) {
+            if (person?.id != null && !seen.has(String(person.id))) seen.set(String(person.id), person);
+        }
+    }
+    return [...seen.values()];
+}
+
 function selectValue(key, value, extra = {}) {
     setScope({
-        [key]: String(value || ''),
+        [key]: key === 'folder' ? folderValues(value) : String(value || ''),
         collectionId: '',
         collectionName: '',
         collectionSmart: false,
         similarIds: [],
+        similarSourceId: '',
+        similarLimit: 100,
         similarLabel: '',
         ...extra,
     }, { merge: true });
@@ -51,14 +75,15 @@ function selectValue(key, value, extra = {}) {
 }
 
 function toggleValue(key, value) {
-    selectValue(key, scope[key] === value ? '' : value);
+    const active = key === 'folder' ? folderValues().includes(value) : scope[key] === value;
+    selectValue(key, active ? '' : value);
 }
 
 function optionRows(items, key, valueOf, labelOf) {
     return (items || []).map((item) => {
         const value = String(valueOf(item) || '');
         if (!value) return '';
-        const active = String(scope[key] || '') === value;
+        const active = key === 'folder' ? folderValues().includes(value) : String(scope[key] || '') === value;
         const label = labelOf(item);
         return `<button class="filter-row ${active ? 'active' : ''}" data-key="${key}" data-value="${esc(value)}" title="${esc(label)}">`
             + `<span title="${esc(label)}">${esc(label)}</span><span class="num">${esc(countLabel(item))}</span></button>`;
@@ -215,10 +240,12 @@ function renderRanked() {
     return selectBlock('Ranked status', [
         ['compared', 'Ranked'],
         ['uncompared', 'Unranked'],
+        ['direct_uncompared', 'Never dueled'],
         ['confident', 'High confidence'],
-    ].map(([value, label]) => (
-        `<button class="filter-pill ${scope.compared === value ? 'active' : ''}" data-toggle-key="compared" data-value="${value}">${label}</button>`
-    )).join(''), 'data-filter-section="ranked"');
+    ].map(([value, label]) => {
+        const tip = value === 'direct_uncompared' ? ' data-tip="Photos with zero direct duel comparisons, even if they have propagated rank signal."' : '';
+        return `<button class="filter-pill ${scope.compared === value ? 'active' : ''}" data-toggle-key="compared" data-value="${value}"${tip}>${label}</button>`;
+    }).join(''), 'data-filter-section="ranked"');
 }
 
 function renderStars() {
@@ -268,13 +295,14 @@ function bindRows() {
     for (const row of popover.querySelectorAll('[data-key][data-value]')) {
         row.addEventListener('click', () => {
             const key = row.dataset.key;
-            const value = scope[key] === row.dataset.value ? '' : row.dataset.value;
+            const active = key === 'folder' ? folderValues().includes(row.dataset.value) : scope[key] === row.dataset.value;
+            const value = active ? '' : row.dataset.value;
             if (row.dataset.year) expandYear(row.dataset.year);
             if (key === 'people') {
                 const person = options.people.find((item) => String(item.id) === String(value));
                 selectValue(key, value, {
                     personLabel: person ? personLabel(person) : '',
-                    personThumb: person?.thumb_url || '',
+                    personThumb: personThumb(person),
                 });
             } else {
                 selectValue(key, value);
@@ -307,7 +335,7 @@ async function loadOptions({ force = false } = {}) {
         getTags({ limit: 12 }),
     ]);
     options = {
-        people: (peopleData && (peopleData.people || peopleData.persons || peopleData.results)) || [],
+        people: flattenPeople(peopleData),
         folders: (folderData && folderData.folders) || [],
         years: (filterData && filterData.years) || [],
         fileTypes: (filterData && filterData.file_types) || [],

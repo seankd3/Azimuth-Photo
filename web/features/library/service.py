@@ -166,6 +166,25 @@ def _normalized_import_batch_id(value) -> int:
         return 0
 
 
+def _folder_cache_value(folder):
+    if not folder:
+        return ""
+    if isinstance(folder, (list, tuple)):
+        values = []
+        seen = set()
+        for value in folder:
+            clean = str(value or "").strip().rstrip("/")
+            if clean and clean not in seen:
+                seen.add(clean)
+                values.append(clean)
+        if not values:
+            return ""
+        if len(values) == 1:
+            return values[0]
+        return tuple(values)
+    return str(folder or "")
+
+
 async def _combined_import_batch_filter(current_ids, import_batch: int = 0):
     batch_id = _normalized_import_batch_id(import_batch)
     if batch_id <= 0:
@@ -436,7 +455,7 @@ async def api_rankings_impl(
             orientation,
             compared,
             int(min_stars or 0),
-            folder,
+            _folder_cache_value(folder),
             flag,
             date_taken,
             file_type,

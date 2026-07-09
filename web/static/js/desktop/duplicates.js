@@ -7,7 +7,6 @@ import {
     byId, emit, on, rememberImages, setActiveLens,
 } from './state.js';
 import { showToast } from './toast.js';
-import { confirmTypedCount } from './trash.js';
 import { icon } from '../icons.js';
 
 const DEFAULT_THRESHOLD = 0.95;
@@ -40,6 +39,8 @@ let stackSentinel = null;
 let stackObserver = null;
 let loading = false;
 let stackRescanning = false;
+let bulkNonCoverIds = null;
+let bulkCountGeneration = 0;
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -127,6 +128,11 @@ function dateLabel(value) {
 }
 
 function folderLabel(image) {
+    const folder = String(image?.folder || '').trim();
+    if (folder) {
+        const folderParts = folder.replace(/\\/g, '/').split('/').filter(Boolean);
+        return folderParts.length ? folderParts[folderParts.length - 1] : folder;
+    }
     const path = String(image?.filepath || '').replace(/\\/g, '/');
     const parts = path.split('/').filter(Boolean);
     return parts.length > 1 ? parts[parts.length - 2] : '—';
@@ -330,7 +336,7 @@ function metaClass(field, image, diff) {
 }
 
 function metaRow(field, label, value, image, diff) {
-    return `<div class="dupe-meta-row ${metaClass(field, image, diff)}"><span>${esc(label)}</span><b>${esc(value)}</b></div>`;
+    return `<div class="dupe-meta-row ${metaClass(field, image, diff)}"><span>${esc(label)}</span><b title="${esc(value)}">${esc(value)}</b></div>`;
 }
 
 function photoHtml(image, diff) {
@@ -565,7 +571,7 @@ function stackRowHtml(stack) {
         + '<div class="dupe-row-head">'
         + `<div><b>${fmt(members.length)} photos</b><span>${esc(metaNote(stack))}</span></div>`
         + '<div class="dupe-row-actions">'
-        + `<button class="btn" data-stack-keep="${stack.id}"${actionDisabled}>Keep cover, trash rest</button>`
+        + `<button class="btn btn-danger" data-stack-keep="${stack.id}"${actionDisabled}>Keep cover, trash rest</button>`
         + `<button class="btn" data-stack-unstack="${stack.id}"${actionDisabled}>Unstack</button>`
         + '</div></div>'
         + `<div class="dupe-photos">${members.map((image) => stackPhotoHtml(stack, image, diff)).join('')}</div>`
@@ -593,6 +599,29 @@ function renderStacks({ append = false } = {}) {
         if (sentinel) sentinel.textContent = stackLoading && stacks.length ? 'Loading more stacks...' : '';
     }
     bindStackSentinel();
+}
+
+function invalidateBulkNonCoverCount() {
+    bulkNonCoverIds = null;
+    bulkCountGeneration += 1;
+    const button = root?.querySelector('#stacks-keep-covers');
+    if (button) button.textContent = 'Trash non-covers';
+}
+
+async function refreshBulkNonCoverCount() {
+    if (!root || mode !== 'stacks' || stackLoading || stackRescanning || !stackTotal) return;
+    const generation = bulkCountGeneration + 1;
+    bulkCountGeneration = generation;
+    bulkNonCoverIds = null;
+    const button = root.querySelector('#stacks-keep-covers');
+    if (!button) return;
+    button.textContent = 'Counting...';
+    button.disabled = true;
+    const imageIds = await collectNonCoverIdsForCurrentFilter();
+    if (generation !== bulkCountGeneration || !root?.isConnected || mode !== 'stacks') return;
+    bulkNonCoverIds = imageIds;
+    button.textContent = imageIds.length ? `Trash ${fmt(imageIds.length)} photos` : 'No non-covers';
+    button.disabled = !imageIds.length || stackLoading || stackRescanning;
 }
 
 async function loadStackCounts() {
@@ -660,11 +689,13 @@ function resetStackObserver() {
 async function reloadStacks() {
     stackGeneration += 1;
     stackLoading = false;
+    invalidateBulkNonCoverCount();
     const seq = stackGeneration;
     resetStackObserver();
     await loadStackCounts();
     if (seq !== stackGeneration || mode !== 'stacks') return;
     await loadStackPage({ reset: true });
+    if (seq === stackGeneration && mode === 'stacks') refreshBulkNonCoverCount();
 }
 
 function findStack(stackId) {
@@ -689,14 +720,6 @@ async function setCover(stackId, imageId) {
 async function unstackOne(stackId) {
     const stack = findStack(stackId);
     const members = stackMembers(stack);
-    const ok = await confirmTypedCount({
-        title: 'Unstack photos',
-        message: `Remove this ${esc(stackKindLabel(stack?.kind).toLowerCase())} stack for ${fmt(members.length)} photos? Photos stay in the archive. Type ${fmt(members.length).replace(/,/g, '')} to confirm.`,
-        count: members.length,
-        confirmLabel: 'Unstack',
-        danger: false,
-    });
-    if (!ok) return;
     const result = await unstack(stackId);
     if (!result) {
         showToast("Unstack didn't save");
@@ -713,13 +736,6 @@ async function keepCoverForStack(stackId) {
     const repId = representativeId(stack);
     const imageIds = stackMembers(stack).map((image) => Number(image.id)).filter((id) => id && id !== repId);
     if (!imageIds.length) return;
-    const ok = await confirmTypedCount({
-        title: 'Keep cover',
-        message: `Trash ${fmt(imageIds.length)} non-cover photo${imageIds.length === 1 ? '' : 's'} from this stack? They can be restored. Type ${fmt(imageIds.length).replace(/,/g, '')} to confirm.`,
-        count: imageIds.length,
-        confirmLabel: 'Trash members',
-    });
-    if (!ok) return;
     const result = await trashImages(imageIds);
     if (!result) {
         showToast("Trash didn't save");
@@ -732,7 +748,9 @@ async function keepCoverForStack(stackId) {
         stack.members_preview = [keep];
         stack.member_count = 1;
     }
+    invalidateBulkNonCoverCount();
     renderStacks();
+    refreshBulkNonCoverCount();
     showToast(`Trashed ${fmt(imageIds.length)} stack member${imageIds.length === 1 ? '' : 's'}`, {
         undo: async () => {
             const restored = await restoreImages(imageIds);
@@ -762,27 +780,24 @@ async function collectNonCoverIdsForCurrentFilter() {
 async function keepCoversEverywhere() {
     const button = root.querySelector('#stacks-keep-covers');
     button.disabled = true;
-    button.textContent = 'Counting...';
-    const imageIds = await collectNonCoverIdsForCurrentFilter();
-    button.textContent = 'Keep covers everywhere';
-    button.disabled = !stackTotal;
+    if (!bulkNonCoverIds) {
+        button.textContent = 'Counting...';
+        bulkNonCoverIds = await collectNonCoverIdsForCurrentFilter();
+    }
+    const imageIds = bulkNonCoverIds || [];
+    button.textContent = imageIds.length ? `Trash ${fmt(imageIds.length)} photos` : 'No non-covers';
+    button.disabled = !imageIds.length;
     if (!imageIds.length) {
         showToast('No non-cover members in this filter');
         return;
     }
-    const ok = await confirmTypedCount({
-        title: 'Keep covers everywhere',
-        message: `Trash ${fmt(imageIds.length)} photos to .trash? They can be restored. Type ${fmt(imageIds.length).replace(/,/g, '')} to confirm.`,
-        count: imageIds.length,
-        confirmLabel: 'Trash members',
-    });
-    if (!ok) return;
     const result = await trashImages(imageIds);
     if (!result) {
         showToast("Trash didn't save");
         return;
     }
     emit('trash:changed', { imageIds });
+    invalidateBulkNonCoverCount();
     await reloadStacks();
     showToast(`Trashed ${fmt(imageIds.length)} non-cover photos`, {
         undo: async () => {
@@ -846,7 +861,7 @@ function viewHtml() {
         + '<header id="duplicates-head">'
         + '<div><b>Stacks</b><span id="duplicates-count" class="num"></span></div>'
         + '<div class="seg-compact" role="group" aria-label="Stacks mode"><button class="active" data-stack-mode="stacks">Review</button><button data-stack-mode="adhoc">Ad-hoc scan</button></div>'
-        + '<div id="stacks-review-tools"><button class="btn primary" id="stacks-keep-covers" disabled>Keep covers everywhere</button><button class="btn" id="stacks-rescan">Rescan stacks</button></div>'
+        + '<div id="stacks-review-tools"><button class="btn btn-danger" id="stacks-keep-covers" disabled>Trash non-covers</button><button class="btn" id="stacks-rescan">Rescan stacks</button></div>'
         + '<div id="duplicates-adhoc-tools" hidden>'
         + '<label class="dupe-threshold"><span>Similarity</span><output id="duplicates-threshold-value">95%</output><input id="duplicates-threshold" class="ctl-range" type="range" min="0.90" max="0.99" step="0.01" value="0.95"></label>'
         + '<button class="btn primary" id="duplicates-keep-all" disabled>Keep highest rated everywhere</button>'

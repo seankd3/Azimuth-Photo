@@ -7,12 +7,13 @@ import {
 } from './api.js';
 import { loadCollectionImageIds } from './scope_data.js';
 import {
-    byId, emit, on, scope, scopeActive, scopeParams, scopePatchFromSmartQuery, selection, selectionChanged, setActiveLens,
-    setLeftCollapsed, setScope, smartQueryActive, smartQueryFromScope, smartQueryName, smartQuerySummary, viewState,
+    byId, emit, folderActive, on, scope, scopeActive, scopeParams, scopePatchFromSmartQuery, selection, selectionChanged, setActiveLens,
+    setLeftCollapsed, setScope, smartQueryActive, smartQueryFromScope, smartQueryName, smartQuerySummary, sortBase, viewState,
 } from './state.js';
 import { applyFlags, selectedIds, setCollectionPicker } from './selection.js';
 import { showToast } from './toast.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
+import { confirmTypedCount } from './trash.js';
 import { downloadExport, openExportMenu } from './export_menu.js';
 import { initFoldersPanel } from './folders.js';
 import { icon } from '../icons.js';
@@ -565,7 +566,7 @@ async function renderPublishOverlay(collectionId, name, data = null, token = pub
         + '</div>'
         + publishStatusBlock(data)
         + '<div class="publish-actions">'
-        + (publish ? '<button id="publish-revoke" type="button" class="danger" ' + (busy ? 'disabled' : '') + '>Unpublish</button>' : '')
+        + (publish ? '<button id="publish-revoke" type="button" class="btn-danger" ' + (busy ? 'disabled' : '') + '>Unpublish</button>' : '')
         + `<button id="publish-submit" type="button" ${busy ? 'disabled' : ''}>${esc(actionLabel)}</button>`
         + '</div>'
         + '</div></div>';
@@ -602,7 +603,14 @@ async function renderPublishOverlay(collectionId, name, data = null, token = pub
     } else {
         publishOverlay.querySelector('#publish-submit')?.addEventListener('click', startPublish);
     }
-    bindPublishConfirmButton('#publish-revoke', 'Confirm unpublish', async () => {
+    publishOverlay.querySelector('#publish-revoke')?.addEventListener('click', async () => {
+        const ok = await confirmTypedCount({
+            title: 'Unpublish gallery',
+            message: `Remove this public gallery from the website? Type ${fmt(count).replace(/,/g, '')} to confirm.`,
+            count,
+            confirmLabel: 'Unpublish',
+        });
+        if (!ok) return;
         const result = await revokeCollectionPublish(collectionId);
         if (!publishOverlayIsCurrent(token)) return;
         if (result.ok) {
@@ -717,12 +725,14 @@ function startCollectionRename(collectionId) {
 function startCollectionDelete(collectionId, name = 'Collection') {
     const row = document.querySelector(`.coll-row[data-coll-id="${collectionId}"]`);
     if (!row) return;
-    row.outerHTML = `<div class="coll-confirm" data-delete-coll="${collectionId}">`
-        + `<b>Delete “${esc(name)}”?</b><span>Photos stay in the archive. This removes the collection from the sidebar.</span>`
-        + '<div><button class="btn danger" data-yes="1">Delete</button><button class="btn" data-no="1">Cancel</button></div></div>';
-    const confirm = document.querySelector(`.coll-confirm[data-delete-coll="${collectionId}"]`);
-    confirm.querySelector('[data-no]')?.addEventListener('click', renderCollections);
-    confirm.querySelector('[data-yes]')?.addEventListener('click', async () => {
+    const coll = collectionById(collectionId) || {};
+    confirmTypedCount({
+        title: 'Delete collection',
+        message: `Delete “${name}”? Photos stay in the archive, but this collection is removed. Type ${fmt(coll.image_count || 0).replace(/,/g, '')} to confirm.`,
+        count: coll.image_count || 0,
+        confirmLabel: 'Delete',
+    }).then(async (ok) => {
+        if (!ok) return;
         const result = await deleteCollection(collectionId);
         if (result && result.ok) {
             showToast(`Deleted “${name}”`);
@@ -733,7 +743,6 @@ function startCollectionDelete(collectionId, name = 'Collection') {
             renderCollections();
         }
     });
-    confirm.querySelector('[data-yes]')?.focus();
 }
 
 function startSmartQueryEdit(collectionId) {
@@ -844,7 +853,7 @@ function renderSources() {
     }).join('') : emptyState('hard-drive', 'No sources yet.');
     for (const row of host.querySelectorAll('[data-source]')) {
         row.addEventListener('click', () => {
-            setScope({ folder: row.dataset.source });
+            setScope({ folder: [row.dataset.source] });
             closeLeftDrawer();
         });
     }
@@ -1197,12 +1206,12 @@ export async function initPanel() {
     on('import:changed', scheduleChromeRefresh);
     on('scope', () => {
         renderNewCollectionForm();
-        for (const row of document.querySelectorAll('[data-source]')) row.classList.toggle('active', row.dataset.source === scope.folder);
+        for (const row of document.querySelectorAll('[data-source]')) row.classList.toggle('active', folderActive(row.dataset.source));
         for (const row of document.querySelectorAll('[data-coll-id]')) row.classList.toggle('active', row.dataset.collId === String(scope.collectionId || ''));
         for (const row of document.querySelectorAll('[data-lib]')) {
             const key = row.dataset.lib;
-            const recentActive = key === 'recent' && scope.sort === 'date_taken' && !scopeActive();
-            const active = (key === 'all' && !scopeActive() && scope.sort !== 'date_taken')
+            const recentActive = key === 'recent' && sortBase() === 'date_taken' && !scopeActive();
+            const active = (key === 'all' && !scopeActive() && sortBase() !== 'date_taken')
                 || (key === 'picked' && scope.flag === 'picked')
                 || (key === 'rejected' && scope.flag === 'rejected')
                 || recentActive;

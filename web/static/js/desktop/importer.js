@@ -1,4 +1,4 @@
-import { getImportOptions } from './api.js';
+import { getImportOptions, listImports } from './api.js';
 import { emit, on, setScope } from './state.js';
 import { showToast } from './toast.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
@@ -8,6 +8,7 @@ let modal = null;
 let selectedFiles = [];
 let optionsLoaded = false;
 let importOptions = null;
+let recentImports = null;
 
 const fmt = (n) => Number(n || 0).toLocaleString('en-US');
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
@@ -103,6 +104,59 @@ function renderOptions() {
         )).join('');
     }
     destinationPanels();
+}
+
+function timeLabel(value) {
+    const raw = Number(value || 0);
+    if (!raw) return 'Unknown time';
+    const date = new Date(raw * 1000);
+    if (Number.isNaN(date.getTime())) return 'Unknown time';
+    return date.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+function renderImportHistory() {
+    const host = modal?.querySelector('#import-history-list');
+    if (!host) return;
+    if (recentImports == null) {
+        host.innerHTML = '<div class="import-history-empty">Loading past imports...</div>';
+        return;
+    }
+    if (!recentImports.length) {
+        host.innerHTML = '<div class="import-history-empty">No past imports yet.</div>';
+        return;
+    }
+    host.innerHTML = recentImports.map((batch) => {
+        const id = Number(batch.id || 0);
+        const imported = Number(batch.imported_files || 0);
+        const total = Number(batch.total_files || 0);
+        const skipped = Number(batch.skipped_files || 0);
+        const collisions = Number(batch.collision_count || 0);
+        const counts = `${fmt(imported)} imported${total ? ` / ${fmt(total)} files` : ''}${skipped ? ` · ${fmt(skipped)} skipped` : ''}${collisions ? ` · ${fmt(collisions)} renamed` : ''}`;
+        const label = batch.name || `Import ${id}`;
+        return `<button class="import-history-row" data-import-batch="${id}" data-tip="Scope the grid to this import batch">`
+            + `<span><b>${esc(label)}</b><small>${esc(timeLabel(batch.started_at || batch.created_at))} · ${esc(batch.status || 'complete')}</small></span>`
+            + `<em>${esc(counts)}</em></button>`;
+    }).join('');
+    for (const row of host.querySelectorAll('[data-import-batch]')) {
+        row.addEventListener('click', () => {
+            const id = row.dataset.importBatch;
+            const label = row.querySelector('b')?.textContent || `Import ${id}`;
+            setScope({
+                import_batch: String(id),
+                importBatchLabel: label,
+                sort: 'date_taken',
+            });
+            closeImport();
+        });
+    }
+}
+
+async function loadImportHistory() {
+    recentImports = null;
+    renderImportHistory();
+    const data = await listImports(12);
+    recentImports = (data && data.imports) || [];
+    renderImportHistory();
 }
 
 async function loadOptions() {
@@ -208,6 +262,7 @@ function modalHtml() {
         + '</div>'
         + '<div id="import-progress"><i></i></div><div id="import-status" data-tone="muted">Choose photos to import.</div>'
         + '<div class="mo-actions"><button class="btn primary" id="import-start" disabled>Import</button></div>'
+        + '<section class="import-history"><div class="import-history-head"><b>Past imports</b><span data-tip="Click a batch to show only those imported photos in the grid.">Scope grid</span></div><div id="import-history-list"></div></section>'
         + '</div></div>';
 }
 
@@ -265,6 +320,7 @@ export function openImport() {
     setSelectedFiles([]);
     renderOptions();
     loadOptions();
+    loadImportHistory();
     trapFocus(modal, modal.querySelector('#import-drop-zone'));
 }
 

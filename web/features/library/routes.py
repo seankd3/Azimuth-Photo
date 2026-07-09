@@ -3,6 +3,7 @@ import time
 
 from fastapi import APIRouter, Request
 
+from core.requests import repeated_query_values
 from data import connection as data_connection
 from features.library import service as library_service
 
@@ -30,6 +31,7 @@ async def api_rankings(
 ):
     if _rankings_handler is None:
         raise RuntimeError("Library routes are not configured")
+    folder_scope = repeated_query_values(request, "folder", folder)
     started = time.perf_counter()
     try:
         with data_connection.sqlite_timeout(0.25):
@@ -40,7 +42,7 @@ async def api_rankings(
                 orientation=orientation,
                 compared=compared,
                 min_stars=min_stars,
-                folder=folder,
+                folder=folder_scope,
                 flag=flag,
                 date_taken=date_taken,
                 file_type=file_type,
@@ -79,14 +81,14 @@ async def api_date_groups(
     orientation: str = "", compared: str = "", min_stars: int = 0,
     folder: str = "", flag: str = "", date_taken: str = "", file_type: str = "",
     camera: str = "", lens: str = "", tag: str = "", people: str = "", q: str = "", deep: bool = False,
-    import_batch: int = 0, stacks: str = "expanded",
+    import_batch: int = 0, stacks: str = "expanded", request: Request = None,
 ):
     """Return date groups with counts for the scrubber, respecting active filters."""
     return await library_service.date_groups_payload(
         orientation=orientation,
         compared=compared,
         min_stars=min_stars,
-        folder=folder,
+        folder=repeated_query_values(request, "folder", folder),
         flag=flag,
         date_taken=date_taken,
         file_type=file_type,
@@ -106,14 +108,14 @@ async def api_date_histogram(
     orientation: str = "", compared: str = "", min_stars: int = 0,
     folder: str = "", flag: str = "", date_taken: str = "", file_type: str = "",
     camera: str = "", lens: str = "", tag: str = "", people: str = "", q: str = "", deep: bool = False,
-    import_batch: int = 0, stacks: str = "expanded",
+    import_batch: int = 0, stacks: str = "expanded", request: Request = None,
 ):
     """Return whole-scope month counts for the timeline scrubber and month view."""
     return await library_service.date_histogram_payload(
         orientation=orientation,
         compared=compared,
         min_stars=min_stars,
-        folder=folder,
+        folder=repeated_query_values(request, "folder", folder),
         flag=flag,
         date_taken=date_taken,
         file_type=file_type,
@@ -133,14 +135,14 @@ async def api_counts(
     orientation: str = "", compared: str = "", min_stars: int = 0,
     folder: str = "", date_taken: str = "", file_type: str = "",
     camera: str = "", lens: str = "", tag: str = "", people: str = "", q: str = "", deep: bool = False,
-    import_batch: int = 0, stacks: str = "expanded",
+    import_batch: int = 0, stacks: str = "expanded", request: Request = None,
 ):
     """Return cheap total/picked/rejected counts for the scope in one call."""
     return await library_service.scope_counts_payload(
         orientation=orientation,
         compared=compared,
         min_stars=min_stars,
-        folder=folder,
+        folder=repeated_query_values(request, "folder", folder),
         date_taken=date_taken,
         file_type=file_type,
         camera=camera,
@@ -159,14 +161,14 @@ async def api_map_markers(
     orientation: str = "", compared: str = "", min_stars: int = 0,
     folder: str = "", flag: str = "", date_taken: str = "", file_type: str = "",
     camera: str = "", lens: str = "", people: str = "", q: str = "", deep: bool = False,
-    import_batch: int = 0,
+    import_batch: int = 0, request: Request = None,
 ):
     """Return images with GPS data for map display."""
     return await library_service.map_markers_payload(
         orientation=orientation,
         compared=compared,
         min_stars=min_stars,
-        folder=folder,
+        folder=repeated_query_values(request, "folder", folder),
         flag=flag,
         date_taken=date_taken,
         file_type=file_type,

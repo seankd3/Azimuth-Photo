@@ -550,6 +550,8 @@ export function unmountRefine() {
     generation += 1;
     selectedIndex = -1;
     document.getElementById('view-refine').classList.remove('active');
+    document.getElementById('refine-head')?.classList.remove('controls-open');
+    document.getElementById('refine-controls-toggle')?.setAttribute('aria-expanded', 'false');
     renderUndoState();
 }
 
@@ -641,6 +643,23 @@ export function pickByKey(key) {
 }
 
 export function initRefine() {
+    const refineHead = document.getElementById('refine-head');
+    const controlsToggle = document.getElementById('refine-controls-toggle');
+    const controls = document.getElementById('refine-controls');
+    const setControlsOpen = (nextOpen) => {
+        refineHead?.classList.toggle('controls-open', nextOpen);
+        controlsToggle?.setAttribute('aria-expanded', nextOpen ? 'true' : 'false');
+    };
+    controlsToggle?.addEventListener('click', (event) => {
+        event.stopPropagation();
+        setControlsOpen(!refineHead?.classList.contains('controls-open'));
+    });
+    controls?.addEventListener('click', (event) => event.stopPropagation());
+    document.addEventListener('click', (event) => {
+        if (!refineHead?.classList.contains('controls-open')) return;
+        if (refineHead.contains(event.target)) return;
+        setControlsOpen(false);
+    });
     document.getElementById('refine-stage').addEventListener('click', (event) => {
         const card = event.target.closest('.ref-card[data-id]');
         if (!card) return;

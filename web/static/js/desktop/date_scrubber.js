@@ -1,7 +1,7 @@
 import { getDateHistogram } from './api.js';
 import { jumpToOffset } from './grid.js';
 import { collectionScopeActive } from './scope_data.js';
-import { on, scope, scopeParams, viewState } from './state.js';
+import { on, scope, scopeParams, sortAscending, sortBase, viewState } from './state.js';
 
 let months = [];
 let generation = 0;
@@ -27,7 +27,7 @@ function label(key) {
 }
 
 function active() {
-    return viewState.activeLens === 'grid' && scope.sort === 'date_taken' && !collectionScopeActive();
+    return viewState.activeLens === 'grid' && sortBase() === 'date_taken' && !collectionScopeActive();
 }
 
 function setGutter(on) {
@@ -171,7 +171,8 @@ async function load() {
     const data = await getDateHistogram(params);
     if (seq !== generation || !data) return;
     let offset = 0;
-    months = (data.months || []).map((month) => {
+    const datedMonths = sortAscending() ? [...(data.months || [])].reverse() : (data.months || []);
+    months = datedMonths.map((month) => {
         const item = { key: month.month, count: Number(month.count) || 0, offset };
         offset += item.count;
         return item;

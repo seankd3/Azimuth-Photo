@@ -1,5 +1,6 @@
 from test_support import *  # noqa: F401,F403
 import embed_cache
+from fastapi.testclient import TestClient
 from features.library import taste as taste_service
 
 
@@ -1325,8 +1326,6 @@ class LibraryTests(BackendTestCase):
         folders = await catalog_routes.api_folders()
         self.assertTrue(folders["folders"])
 
-        collections = await search_routes.api_collections()
-        self.assertEqual(collections["collections"], [])
         duplicates = await search_routes.api_duplicates()
         self.assertEqual(duplicates["pairs"], [])
         self.assertEqual(duplicates["total_pairs"], 0)
@@ -1440,6 +1439,79 @@ class LibraryTests(BackendTestCase):
         self.assertEqual(nested_count, 2)
         self.assertLess(nested_count, parent_count)
         self.assertEqual([row["filename"] for row in nested_rows], ["detail.jpg", "wide.jpg"])
+
+    async def test_single_folder_filter_shape_regression(self):
+        folder = "/archive/Family"
+
+        string_conditions, string_params = rankings.ranking_filter_parts(folder=folder)
+        list_conditions, list_params = rankings.ranking_filter_parts(folder=[folder])
+
+        self.assertEqual(list_conditions, string_conditions)
+        self.assertEqual(list_params, string_params)
+
+    async def test_multi_folder_scope_ors_rankings_counts_groups_histogram_and_export(self):
+        source = await self._source("multi-folder-source")
+        files = [
+            ("Alpha", "one.jpg"),
+            ("Alpha", "two.jpg"),
+            ("Beta", "three.jpg"),
+            ("Gamma", "four.jpg"),
+        ]
+        for folder_name, filename in files:
+            path = os.path.join(source["path"], folder_name, filename)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "wb") as f:
+                f.write(b"image")
+
+        await scanner.scan_folder(source["path"], source_id=source["id"])
+        alpha = os.path.join(source["path"], "Alpha")
+        beta = os.path.join(source["path"], "Beta")
+
+        alpha_count = await db.count_rankings(folder=alpha)
+        beta_count = await db.count_rankings(folder=beta)
+        multi_count = await db.count_rankings(folder=[alpha, beta])
+        rows = await db.get_rankings(limit=10, sort="filename", folder=[alpha, beta])
+        for row in rows:
+            await self._cache_entry(row["id"], "sm")
+        cache_events.invalidate_rankings_cache()
+        db.invalidate_cached_image_ids_cache()
+        counts = await db.scope_counts(folder=[alpha, beta])
+        histogram = await db.date_histogram(folder=[alpha, beta])
+        groups = await db.get_date_groups(folder=[alpha, beta])
+
+        self.assertEqual(alpha_count, 2)
+        self.assertEqual(beta_count, 1)
+        self.assertEqual(multi_count, alpha_count + beta_count)
+        self.assertEqual(counts["total"], multi_count)
+        self.assertEqual(histogram["total"], multi_count)
+        self.assertEqual(sum(group["count"] for group in groups), multi_count)
+        self.assertEqual([row["filename"] for row in rows], ["one.jpg", "three.jpg", "two.jpg"])
+
+        def probe():
+            client = TestClient(app_module.app)
+            try:
+                params = [("folder", alpha), ("folder", beta), ("sort", "filename"), ("limit", "10")]
+                rankings_response = client.get("/api/rankings", params=params)
+                counts_response = client.get("/api/counts", params=[("folder", alpha), ("folder", beta)])
+                histogram_response = client.get("/api/date-histogram", params=[("folder", alpha), ("folder", beta)])
+                groups_response = client.get("/api/date-groups", params=[("folder", alpha), ("folder", beta)])
+                export_response = client.get("/api/export", params=params + [("format", "json")])
+                return rankings_response, counts_response, histogram_response, groups_response, export_response
+            finally:
+                client.close()
+
+        rankings_response, counts_response, histogram_response, groups_response, export_response = await asyncio.to_thread(probe)
+
+        self.assertEqual(rankings_response.status_code, 200)
+        self.assertEqual(rankings_response.json()["total_images"], multi_count)
+        self.assertEqual(counts_response.status_code, 200)
+        self.assertEqual(counts_response.json()["total"], multi_count)
+        self.assertEqual(histogram_response.status_code, 200)
+        self.assertEqual(histogram_response.json()["total"], multi_count)
+        self.assertEqual(groups_response.status_code, 200)
+        self.assertEqual(sum(group["count"] for group in groups_response.json()["groups"]), multi_count)
+        self.assertEqual(export_response.status_code, 200)
+        self.assertEqual([row["filename"] for row in export_response.json()], ["one.jpg", "three.jpg", "two.jpg"])
 
     async def test_folder_tree_counts_flat_source_without_nested_fetch(self):
         source = await self._source("flat-source")

@@ -24,6 +24,7 @@ let panX = 0;
 let panY = 0;
 let zoomMode = 'fit';
 let dragState = null;
+let suppressNextClick = false;
 let renderToken = 0;
 let fullImageLoadingId = null;
 let imageWaiters = [];
@@ -487,6 +488,14 @@ function toggleFitOneToOne(event) {
     else centerFit();
 }
 
+function eventHitsImage(event) {
+    if (event?.target?.closest?.('#loupe-img')) return true;
+    if (event && Number.isFinite(event.clientX) && Number.isFinite(event.clientY)) {
+        return document.elementFromPoint(event.clientX, event.clientY)?.closest?.('#loupe-img');
+    }
+    return false;
+}
+
 async function flagCurrent(flag) {
     const img = current();
     if (!img) return;
@@ -558,16 +567,20 @@ function ensureLoupeChrome() {
 function bindPointer() {
     const stage = document.getElementById('loupe-stage');
     stage.addEventListener('click', (event) => {
+        if (suppressNextClick) {
+            suppressNextClick = false;
+            return;
+        }
         if (dragState?.moved) {
             dragState = null;
             updateCursor();
             return;
         }
-        if (!event.target.closest('#loupe-img')) return;
+        if (!eventHitsImage(event)) return;
         toggleFitOneToOne(event);
     });
     stage.addEventListener('dblclick', (event) => {
-        if (!event.target.closest('#loupe-img')) return;
+        if (!eventHitsImage(event)) return;
         event.preventDefault();
         centerFit();
     });
@@ -591,7 +604,6 @@ function bindPointer() {
         };
         stage.setPointerCapture(event.pointerId);
         updateCursor();
-        event.preventDefault();
     });
     stage.addEventListener('pointermove', (event) => {
         if (!dragState?.dragging || dragState.pointerId !== event.pointerId) return;
@@ -605,7 +617,14 @@ function bindPointer() {
     });
     stage.addEventListener('pointerup', (event) => {
         if (!dragState || dragState.pointerId !== event.pointerId) return;
+        const wasClick = !dragState.moved;
         dragState.dragging = false;
+        if (wasClick && eventHitsImage(event)) {
+            suppressNextClick = true;
+            centerFit();
+            dragState = null;
+            return;
+        }
         updateCursor();
     });
     stage.addEventListener('pointercancel', () => {

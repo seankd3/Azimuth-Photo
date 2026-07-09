@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import os
 import asyncio
+import posixpath
 import time
 from collections.abc import Iterable
 
@@ -80,14 +80,31 @@ def _member_score(rows: list[dict], image_id: int):
     return None
 
 
-def _folder(filepath: str | None) -> str:
-    return os.path.dirname(filepath or "")
+def _path_for_label(value: str | None) -> str:
+    return str(value or "").replace("\\", "/").rstrip("/")
+
+
+def _folder(filepath: str | None, source_path: str | None = None) -> str:
+    path = _path_for_label(filepath)
+    if not path:
+        return ""
+    source = _path_for_label(source_path)
+    label_path = path
+    if source:
+        source_cmp = source.lower()
+        path_cmp = path.lower()
+        if path_cmp.startswith(source_cmp + "/"):
+            label_path = path[len(source) + 1:]
+    directory = posixpath.dirname(label_path)
+    if not directory or directory == ".":
+        return ""
+    return posixpath.basename(directory)
 
 
 def _member_card(row) -> dict:
     data = dict(row)
     card = app_helpers.image_card(data, "sm")
-    card["folder"] = _folder(data.get("filepath"))
+    card["folder"] = _folder(data.get("filepath"), data.get("source_path"))
     if "score" in data:
         card["score"] = data.get("score")
     return card
@@ -237,8 +254,9 @@ async def get_stack(db_path: str, stack_id: int) -> dict | None:
             return None
         stack_row = dict(stack)
         member_cursor = await conn.execute(
-            "SELECT i.*, sm.score "
+            "SELECT i.*, sm.score, cs.path AS source_path "
             "FROM stack_members sm JOIN images i ON i.id = sm.image_id "
+            "LEFT JOIN catalog_sources cs ON cs.id = i.source_id "
             "WHERE sm.stack_id = ? "
             "ORDER BY CASE WHEN i.id = ? THEN 0 ELSE 1 END, sm.score DESC, i.id ASC",
             (int(stack_id), int(stack_row["representative_image_id"])),
@@ -298,8 +316,9 @@ async def list_stacks(
         if stack_ids:
             placeholders = ",".join("?" for _ in stack_ids)
             member_cursor = await conn.execute(
-                "SELECT sm.stack_id, i.*, sm.score "
+                "SELECT sm.stack_id, i.*, sm.score, cs.path AS source_path "
                 "FROM stack_members sm JOIN images i ON i.id = sm.image_id "
+                "LEFT JOIN catalog_sources cs ON cs.id = i.source_id "
                 f"WHERE sm.stack_id IN ({placeholders}) "
                 "ORDER BY sm.stack_id ASC, sm.score DESC, i.id ASC",
                 stack_ids,

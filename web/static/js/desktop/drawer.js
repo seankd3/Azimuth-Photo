@@ -1,14 +1,15 @@
 import {
     addCatalogSource, clearCache, getAiStatus, getCacheStatus, getCatalog, getPeopleStatus,
-    getRemoteAccess, getScanStatus, getSettings, installAiModel, pauseAiEmbeddings,
+    getRemoteAccess, getScanStatus, getSettings, installAiModel, listPublishes, pauseAiEmbeddings,
     pausePeopleScan, removeCatalogSource, rescanCatalogSource, resetSettings, resumeAiEmbeddings,
-    resumePeopleScan, saveSettings, startCachePregen, stopCachePregen,
+    resumePeopleScan, revokeCollectionPublish, saveSettings, startCachePregen, stopCachePregen,
 } from './api.js';
 import {
     on, patchPrefs, setThumbSize, viewState,
 } from './state.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
 import { showToast } from './toast.js';
+import { confirmTypedCount } from './trash.js';
 
 let open = false;
 let drawerTimer = null;
@@ -21,6 +22,7 @@ let aiStatus = null;
 let cacheStatus = null;
 let peopleStatus = null;
 let remoteAccess = null;
+let publishes = null;
 let settingsPageData = null;
 let savedSettings = {};
 let draftSettings = {};
@@ -293,6 +295,14 @@ function lastScan(source) {
     return `scanned ${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
 }
 
+function dateTime(value) {
+    const raw = Number(value || 0);
+    if (!raw) return 'not published';
+    const date = new Date(raw * 1000);
+    if (Number.isNaN(date.getTime())) return 'not published';
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
 function renderSources() {
     const sources = (catalog && catalog.sources) || [];
     const rows = sources.length ? sources.map((source) => {
@@ -305,8 +315,8 @@ function renderSources() {
             + `<div class="sc-sub">${fmt(sourceCount(source))} photos · ${esc(lastScan(source))}${online ? '' : ' · offline'}</div>`
             + '<div class="src-actions">'
             + `<button class="mini-btn" data-act="rescan" ${online ? '' : 'aria-disabled="true"'}>Rescan</button>`
-            + '<button class="mini-btn danger" data-act="remove">Remove</button></div>'
-            + `<div class="remove-choice" hidden><button class="mini-btn" data-mode="keep">Keep photos</button><button class="mini-btn danger" data-mode="delete">Delete catalog data</button></div>`
+            + '<button class="mini-btn btn-danger" data-act="remove">Remove</button></div>'
+            + `<div class="remove-choice" hidden><button class="mini-btn" data-mode="keep">Keep photos</button><button class="mini-btn btn-danger" data-mode="delete">Delete catalog data</button></div>`
             + `<div class="scan-progress" ${scanning ? '' : 'hidden'}>Scanning…</div>`
             + '</div></article>';
     }).join('') : '<div class="muted">No sources yet.</div>';
@@ -360,6 +370,27 @@ function renderRemote() {
         + `<span class="remote-url" title="${esc(url)}">${esc(url || 'Unavailable')}</span>`
         + `<button class="mini-btn" id="copy-remote" ${url ? '' : 'aria-disabled="true"'}>Copy</button>`
         + '</div></section>';
+}
+
+function renderPublished() {
+    const rows = (publishes && publishes.publishes) || [];
+    const body = rows.length ? rows.map((item) => {
+        const url = item.url || '';
+        const collectionId = Number(item.collection_id || item.id || 0);
+        return '<article class="publish-row" data-publish-collection="' + collectionId + '">'
+            + '<div class="publish-row-main">'
+            + `<b title="${esc(item.title || item.slug || 'Published gallery')}">${esc(item.title || item.slug || 'Published gallery')}</b>`
+            + `<small>${esc(item.slug || '')} · ${fmt(item.image_count || 0)} photos · ${esc(dateTime(item.published_at))}</small>`
+            + `<code title="${esc(url)}">${esc(url || 'No live URL')}</code>`
+            + '</div>'
+            + '<div class="publish-row-actions">'
+            + `<button class="mini-btn" data-publish-copy="${esc(url)}" data-tip="Copy live gallery URL" ${url ? '' : 'aria-disabled="true"'}>Copy</button>`
+            + `<button class="mini-btn" data-publish-open="${esc(url)}" data-tip="Open live gallery" ${url ? '' : 'aria-disabled="true"'}>Open</button>`
+            + `<button class="mini-btn btn-danger" data-publish-unpublish="${collectionId}" data-publish-count="${Number(item.image_count) || 0}" data-tip="Unpublish this gallery">Unpublish</button>`
+            + '</div></article>';
+    }).join('') : '<div class="muted">No published galleries yet.</div>';
+    return '<section class="dr-sec"><h3>Published galleries</h3>'
+        + '<div id="drawer-publishes">' + body + '</div></section>';
 }
 
 function detailsSection(title, body) {
@@ -484,7 +515,7 @@ function renderSettingsSaveBar() {
     return '<div class="drawer-savebar" role="group" aria-label="Settings actions">'
         + `<span id="drawer-save-state">${count ? `${fmt(count)} dirty field${count === 1 ? '' : 's'}` : 'No unsaved settings'}</span>`
         + `<button class="btn primary" id="drawer-save-settings" type="button" ${count && !invalid ? '' : 'disabled'}>Save settings</button>`
-        + `<button class="mini-btn danger" id="drawer-reset-settings" type="button">${resetConfirmArmed ? 'Confirm reset' : 'Reset defaults'}</button>`
+        + `<button class="mini-btn btn-danger" id="drawer-reset-settings" type="button">${resetConfirmArmed ? 'Confirm reset' : 'Reset defaults'}</button>`
         + '</div>';
 }
 
@@ -513,20 +544,21 @@ function renderDrawer() {
     if (!body) return;
     openSettingSections = new Set(Array.from(body.querySelectorAll('.dr-details[open] summary span'))
         .map((el) => el.textContent || ''));
-    body.innerHTML = renderSources() + renderWork() + renderSettingsSections() + renderStorage() + renderRemote() + renderPrefs() + renderSettingsSaveBar();
+    body.innerHTML = renderSources() + renderWork() + renderPublished() + renderSettingsSections() + renderStorage() + renderRemote() + renderPrefs() + renderSettingsSaveBar();
     bindDrawerActions();
 }
 
 async function refreshDrawer() {
-    const requests = [getCatalog(), getAiStatus(), getCacheStatus(), getPeopleStatus(), getRemoteAccess()];
+    const requests = [getCatalog(), getAiStatus(), getCacheStatus(), getPeopleStatus(), getRemoteAccess(), listPublishes()];
     if (!settingsPageData) requests.push(getSettings());
-    const [nextCatalog, ai, cache, people, remote, settingsData] = await Promise.all(requests);
+    const [nextCatalog, ai, cache, people, remote, nextPublishes, settingsData] = await Promise.all(requests);
     if (settingsData) applySettingsData(settingsData);
     catalog = nextCatalog || catalog;
     aiStatus = ai || aiStatus;
     cacheStatus = cache || cacheStatus;
     peopleStatus = people || peopleStatus;
     remoteAccess = remote || remoteAccess;
+    publishes = nextPublishes || publishes;
     renderActivity();
     if (!drawerEditing()) renderDrawer();
 }
@@ -785,6 +817,45 @@ function bindDrawerActions() {
             showToast('Copy failed');
         }
     });
+    for (const btn of body.querySelectorAll('[data-publish-copy]')) {
+        btn.addEventListener('click', async () => {
+            if (btn.getAttribute('aria-disabled') === 'true') return;
+            try {
+                await navigator.clipboard.writeText(btn.dataset.publishCopy || '');
+                showToast('Published URL copied');
+            } catch {
+                showToast('Copy failed');
+            }
+        });
+    }
+    for (const btn of body.querySelectorAll('[data-publish-open]')) {
+        btn.addEventListener('click', () => {
+            if (btn.getAttribute('aria-disabled') === 'true') return;
+            window.open(btn.dataset.publishOpen || '', '_blank', 'noopener');
+        });
+    }
+    for (const btn of body.querySelectorAll('[data-publish-unpublish]')) {
+        btn.addEventListener('click', async () => {
+            const count = Number(btn.dataset.publishCount || 0);
+            const ok = await confirmTypedCount({
+                title: 'Unpublish gallery',
+                message: `Remove this public gallery from the website? Type ${fmt(count).replace(/,/g, '')} to confirm.`,
+                count,
+                confirmLabel: 'Unpublish',
+            });
+            if (!ok) return;
+            btn.disabled = true;
+            const result = await revokeCollectionPublish(Number(btn.dataset.publishUnpublish || 0));
+            if (result.ok) {
+                showToast('Unpublishing gallery');
+                publishes = await listPublishes();
+                renderDrawer();
+            } else {
+                btn.disabled = false;
+                showToast("Couldn't start unpublishing");
+            }
+        });
+    }
     body.querySelector('#drawer-thumb-size')?.addEventListener('input', (event) => setThumbSize(event.target.value));
     body.querySelector('[data-pref-sel="density"]')?.addEventListener('change', (event) => patchPrefs({ density: event.target.value }));
     for (const input of body.querySelectorAll('[data-pref]')) {
