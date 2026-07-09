@@ -43,6 +43,7 @@ async def open_async(db_path: str, *, timeout: float | None = None) -> aiosqlite
     conn = await aiosqlite.connect(db_path, timeout=effective_timeout)
     conn.row_factory = aiosqlite.Row
     await conn.execute(f"PRAGMA busy_timeout={int(effective_timeout * 1000)}")
+    await conn.execute("PRAGMA foreign_keys=ON")
     await conn.execute("PRAGMA synchronous=NORMAL")
     await conn.execute("PRAGMA temp_store=MEMORY")
     try:
@@ -67,6 +68,7 @@ def open_sync(
     if row_factory is not None:
         conn.row_factory = row_factory
     conn.execute(f"PRAGMA busy_timeout={int(effective_timeout * 1000)}")
+    conn.execute("PRAGMA foreign_keys=ON")
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA temp_store=MEMORY")
     try:

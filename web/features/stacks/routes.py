@@ -161,6 +161,11 @@ async def api_create_stack(body: CreateStackBody):
             {"error": "Images already belong to a manual stack", "image_ids": exc.image_ids},
             status_code=409,
         )
+    except stack_repository.UnknownStackImages as exc:
+        return JSONResponse(
+            {"error": "Stack image ids were not found", "image_ids": exc.image_ids},
+            status_code=400,
+        )
     _invalidate()
     return stack
 

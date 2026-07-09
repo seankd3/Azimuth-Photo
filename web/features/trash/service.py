@@ -77,29 +77,64 @@ def _same_device_or_reason(source_stat, source_root: str) -> str:
     return ""
 
 
-def _move_to_trash(filepath: str, source_root: str) -> tuple[str | None, int, str]:
+def _stat_token(value) -> tuple[int, int, int, int]:
+    return (
+        int(value.st_dev),
+        int(value.st_ino),
+        int(value.st_size or 0),
+        int(getattr(value, "st_mtime_ns", 0) or 0),
+    )
+
+
+def _same_stat_token(value, expected: tuple[int, int, int, int] | None) -> bool:
+    return expected is not None and _stat_token(value) == expected
+
+
+def _prepare_trash_move(filepath: str, source_root: str) -> tuple[str | None, int, tuple[int, int, int, int] | None, str]:
     source_stat, reason = _regular_file_lstat(filepath)
     if reason == "missing":
-        return None, 0, ""
+        return None, 0, None, ""
     if source_stat is None:
-        return None, 0, reason
+        return None, 0, None, reason
 
     dest = _trash_destination(filepath, source_root)
     if dest is None:
-        return None, 0, "source path is outside its catalog source"
+        return None, 0, None, "source path is outside its catalog source"
     if os.path.lexists(dest):
-        return None, 0, "trash destination already exists"
+        return None, 0, None, "trash destination already exists"
 
     device_reason = _same_device_or_reason(source_stat, source_root)
     if device_reason:
-        return None, 0, device_reason
+        return None, 0, None, device_reason
 
+    return dest, int(source_stat.st_size or 0), _stat_token(source_stat), ""
+
+
+def _move_to_trash(filepath: str, dest: str | None, expected_token: tuple[int, int, int, int] | None) -> tuple[int, str]:
+    if not dest:
+        return 0, ""
     try:
         os.makedirs(os.path.dirname(dest), exist_ok=True)
+        final_stat, reason = _regular_file_lstat(filepath)
+        if reason == "missing":
+            return 0, "missing"
+        if final_stat is None:
+            return 0, reason
+        if not _same_stat_token(final_stat, expected_token):
+            return 0, "source path changed before move"
+        if os.path.lexists(dest):
+            return 0, "trash destination already exists"
+        # Re-lstat immediately before rename narrows the local TOCTOU window on
+        # platforms where Python cannot express a no-follow rename.
+        final_stat, reason = _regular_file_lstat(filepath)
+        if final_stat is None:
+            return 0, reason or "source path changed before move"
+        if not _same_stat_token(final_stat, expected_token):
+            return 0, "source path changed before move"
         os.rename(filepath, dest)
     except OSError as exc:
-        return None, 0, str(exc)
-    return dest, int(source_stat.st_size or 0), ""
+        return 0, str(exc)
+    return int(final_stat.st_size or 0), ""
 
 
 def _restore_from_trash(trash_path: str | None, filepath: str) -> tuple[str | None, str]:
@@ -114,6 +149,22 @@ def _restore_from_trash(trash_path: str | None, filepath: str) -> tuple[str | No
         return None, "original path already exists"
     try:
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        final_stat, reason = _regular_file_lstat(trash_path)
+        if reason == "missing":
+            return "Trash file is missing; restored catalog row only", ""
+        if final_stat is None:
+            return None, reason
+        if not _same_stat_token(final_stat, _stat_token(trash_stat)):
+            return None, "trash path changed before restore"
+        if os.path.lexists(filepath):
+            return None, "original path already exists"
+        # Re-lstat immediately before rename narrows the local TOCTOU window on
+        # platforms where Python cannot express a no-follow rename.
+        final_stat, reason = _regular_file_lstat(trash_path)
+        if final_stat is None:
+            return (("Trash file is missing; restored catalog row only", "") if reason == "missing" else (None, reason))
+        if not _same_stat_token(final_stat, _stat_token(trash_stat)):
+            return None, "trash path changed before restore"
         os.rename(trash_path, filepath)
     except OSError as exc:
         return None, str(exc)
@@ -181,7 +232,7 @@ async def trash_images(db_path: str, image_ids: list[int]) -> dict:
     trashed: list[int] = []
     errors: list[Error] = []
     freed_estimate_bytes = 0
-    moved: list[tuple[int, str | None, float]] = []
+    plans: list[dict] = []
     now = time.time()
 
     conn = await data_connection.open_async(db_path)
@@ -200,29 +251,57 @@ async def trash_images(db_path: str, image_ids: list[int]) -> dict:
             if not source_root or not filepath:
                 errors.append(_error(image_id, "source path missing"))
                 continue
-            dest, moved_bytes, reason = await __to_thread_move_to_trash(filepath, source_root)
+            dest, moved_bytes, expected_token, reason = await __to_thread_prepare_trash_move(filepath, source_root)
             if reason:
                 errors.append(_error(image_id, reason))
                 continue
-            moved.append((image_id, dest, now))
-            freed_estimate_bytes += moved_bytes
+            plans.append({
+                "id": image_id,
+                "filepath": filepath,
+                "trash_path": dest,
+                "size": moved_bytes,
+                "token": expected_token,
+                "previous_status": row.get("status") or "kept",
+                "previous_trashed_at": row.get("trashed_at"),
+                "previous_trash_path": row.get("trash_path"),
+            })
 
-        if moved:
+        if plans:
             await conn.execute("BEGIN")
             await conn.executemany(
                 "UPDATE images SET status = 'trashed', trashed_at = ?, trash_path = ? WHERE id = ?",
-                [(trashed_at, trash_path, image_id) for image_id, trash_path, trashed_at in moved],
+                [(now, plan["trash_path"], plan["id"]) for plan in plans],
             )
-            await _repair_stacks_after_trash(conn, [image_id for image_id, _trash_path, _when in moved])
             source_ids = sorted({
-                int(rows[image_id]["source_id"])
-                for image_id, _trash_path, _when in moved
-                if rows[image_id].get("source_id") is not None
+                int(rows[plan["id"]]["source_id"])
+                for plan in plans
+                if rows[plan["id"]].get("source_id") is not None
             })
             for source_id in source_ids:
                 await catalog_repository.update_source_counts_on_conn(conn, source_id)
             await conn.commit()
-            trashed.extend(image_id for image_id, _trash_path, _when in moved)
+
+            successful: list[dict] = []
+            failed: list[dict] = []
+            for plan in plans:
+                moved_bytes, reason = await __to_thread_move_to_trash(
+                    plan["filepath"],
+                    plan["trash_path"],
+                    plan["token"],
+                )
+                if reason:
+                    errors.append(_error(plan["id"], reason))
+                    failed.append(plan)
+                    continue
+                successful.append(plan)
+                trashed.append(plan["id"])
+                freed_estimate_bytes += moved_bytes
+            if failed:
+                await _revert_failed_trash_moves(conn, failed, rows)
+            if successful:
+                await conn.execute("BEGIN")
+                await _repair_stacks_after_trash(conn, [plan["id"] for plan in successful])
+                await conn.commit()
     except Exception:
         await conn.rollback()
         raise
@@ -235,10 +314,47 @@ async def trash_images(db_path: str, image_ids: list[int]) -> dict:
     }
 
 
-async def __to_thread_move_to_trash(filepath: str, source_root: str) -> tuple[str | None, int, str]:
+async def __to_thread_prepare_trash_move(
+    filepath: str,
+    source_root: str,
+) -> tuple[str | None, int, tuple[int, int, int, int] | None, str]:
     import asyncio
 
-    return await asyncio.to_thread(_move_to_trash, filepath, source_root)
+    return await asyncio.to_thread(_prepare_trash_move, filepath, source_root)
+
+
+async def __to_thread_move_to_trash(
+    filepath: str,
+    dest: str | None,
+    expected_token: tuple[int, int, int, int] | None,
+) -> tuple[int, str]:
+    import asyncio
+
+    return await asyncio.to_thread(_move_to_trash, filepath, dest, expected_token)
+
+
+async def _revert_failed_trash_moves(conn, failed: list[dict], rows: dict[int, dict]) -> None:
+    await conn.execute("BEGIN")
+    await conn.executemany(
+        "UPDATE images SET status = ?, trashed_at = ?, trash_path = ? WHERE id = ?",
+        [
+            (
+                plan["previous_status"],
+                plan["previous_trashed_at"],
+                plan["previous_trash_path"],
+                plan["id"],
+            )
+            for plan in failed
+        ],
+    )
+    source_ids = sorted({
+        int(rows[plan["id"]]["source_id"])
+        for plan in failed
+        if rows[plan["id"]].get("source_id") is not None
+    })
+    for source_id in source_ids:
+        await catalog_repository.update_source_counts_on_conn(conn, source_id)
+    await conn.commit()
 
 
 async def restore_images(db_path: str, image_ids: list[int]) -> dict:
@@ -249,7 +365,7 @@ async def restore_images(db_path: str, image_ids: list[int]) -> dict:
     conn = await data_connection.open_async(db_path)
     try:
         rows = await _image_rows_by_id(conn, ids)
-        updates: list[int] = []
+        updates: list[dict] = []
         for image_id in ids:
             row = rows.get(image_id)
             if row is None:
@@ -258,17 +374,19 @@ async def restore_images(db_path: str, image_ids: list[int]) -> dict:
             if row.get("status") != "trashed":
                 restored.append(image_id)
                 continue
-            warning, reason = await __to_thread_restore_from_trash(row.get("trash_path"), row.get("filepath") or "")
-            if reason:
-                errors.append(_error(image_id, reason))
-                continue
-            if warning:
-                warnings.append(_error(image_id, warning))
-            updates.append(image_id)
+            updates.append({
+                "id": image_id,
+                "filepath": row.get("filepath") or "",
+                "trash_path": row.get("trash_path"),
+                "previous_status": row.get("status") or "trashed",
+                "previous_trashed_at": row.get("trashed_at"),
+                "previous_trash_path": row.get("trash_path"),
+            })
 
         if updates:
             await conn.execute("BEGIN")
-            for chunk in catalog_repository._chunked(updates):
+            update_ids = [plan["id"] for plan in updates]
+            for chunk in catalog_repository._chunked(update_ids):
                 placeholders = ",".join("?" for _ in chunk)
                 await conn.execute(
                     f"UPDATE images SET status = 'kept', trashed_at = NULL, trash_path = NULL "
@@ -276,14 +394,26 @@ async def restore_images(db_path: str, image_ids: list[int]) -> dict:
                     chunk,
                 )
             source_ids = sorted({
-                int(rows[image_id]["source_id"])
-                for image_id in updates
-                if rows[image_id].get("source_id") is not None
+                int(rows[plan["id"]]["source_id"])
+                for plan in updates
+                if rows[plan["id"]].get("source_id") is not None
             })
             for source_id in source_ids:
                 await catalog_repository.update_source_counts_on_conn(conn, source_id)
             await conn.commit()
-            restored.extend(updates)
+
+            failed: list[dict] = []
+            for plan in updates:
+                warning, reason = await __to_thread_restore_from_trash(plan["trash_path"], plan["filepath"])
+                if reason:
+                    errors.append(_error(plan["id"], reason))
+                    failed.append(plan)
+                    continue
+                if warning:
+                    warnings.append(_error(plan["id"], warning))
+                restored.append(plan["id"])
+            if failed:
+                await _revert_failed_restores(conn, failed, rows)
     except Exception:
         await conn.rollback()
         raise
@@ -296,6 +426,30 @@ async def __to_thread_restore_from_trash(trash_path: str | None, filepath: str) 
     import asyncio
 
     return await asyncio.to_thread(_restore_from_trash, trash_path, filepath)
+
+
+async def _revert_failed_restores(conn, failed: list[dict], rows: dict[int, dict]) -> None:
+    await conn.execute("BEGIN")
+    await conn.executemany(
+        "UPDATE images SET status = ?, trashed_at = ?, trash_path = ? WHERE id = ?",
+        [
+            (
+                plan["previous_status"],
+                plan["previous_trashed_at"],
+                plan["previous_trash_path"],
+                plan["id"],
+            )
+            for plan in failed
+        ],
+    )
+    source_ids = sorted({
+        int(rows[plan["id"]]["source_id"])
+        for plan in failed
+        if rows[plan["id"]].get("source_id") is not None
+    })
+    for source_id in source_ids:
+        await catalog_repository.update_source_counts_on_conn(conn, source_id)
+    await conn.commit()
 
 
 async def list_trash(db_path: str, *, limit: int = 100, offset: int = 0) -> dict:
@@ -341,8 +495,18 @@ def _remove_trash_file(path: str | None) -> tuple[int, str]:
         return 0, "trash path is a symlink"
     if not stat.S_ISREG(lstat_result.st_mode):
         return 0, "trash path is not a regular file"
+    expected_token = _stat_token(lstat_result)
     size = int(lstat_result.st_size or 0)
     try:
+        # Re-lstat immediately before remove narrows the local TOCTOU window on
+        # platforms where Python cannot express a no-follow unlink.
+        final_stat, reason = _regular_file_lstat(path)
+        if reason == "missing":
+            return 0, ""
+        if final_stat is None:
+            return 0, reason
+        if not _same_stat_token(final_stat, expected_token):
+            return 0, "trash path changed before delete"
         os.remove(path)
     except OSError as exc:
         return 0, str(exc)
@@ -391,14 +555,44 @@ async def empty_trash(db_path: str) -> dict:
         if trash_path:
             paths_to_prune.append(trash_path)
 
+    deleted_ids: list[int] = []
     if deletable_ids:
-        await catalog_repository.delete_image_catalog_rows(db_path, deletable_ids)
+        deleted_ids, delete_errors = await _delete_emptied_catalog_rows(db_path, deletable_ids)
+        errors.extend(delete_errors)
     await __to_thread_prune_empty_trash_dirs(paths_to_prune)
     return {
-        "deleted_count": len(deletable_ids),
+        "deleted_count": len(deleted_ids),
         "freed_bytes": int(freed_bytes),
         "errors": errors,
     }
+
+
+async def _delete_emptied_catalog_rows(db_path: str, image_ids: list[int]) -> tuple[list[int], list[Error]]:
+    deleted: list[int] = []
+    errors: list[Error] = []
+    conn = await data_connection.open_async(db_path)
+    try:
+        try:
+            await conn.execute("BEGIN")
+            await catalog_repository.delete_image_catalog_rows_on_conn(conn, image_ids)
+            await catalog_repository.update_source_counts_on_conn(conn)
+            await conn.commit()
+            return list(image_ids), []
+        except Exception:
+            await conn.rollback()
+        for image_id in image_ids:
+            try:
+                await conn.execute("BEGIN")
+                await catalog_repository.delete_image_catalog_rows_on_conn(conn, [image_id])
+                await catalog_repository.update_source_counts_on_conn(conn)
+                await conn.commit()
+                deleted.append(image_id)
+            except Exception as exc:
+                await conn.rollback()
+                errors.append(_error(image_id, f"catalog row deletion failed: {exc}"))
+    finally:
+        await data_connection.close_async(conn, db_path=db_path)
+    return deleted, errors
 
 
 async def __to_thread_remove_trash_file(path: str | None) -> tuple[int, str]:

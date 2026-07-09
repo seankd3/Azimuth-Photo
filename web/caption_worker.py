@@ -23,6 +23,7 @@ if not log.handlers:
 
 WORKER_SLEEP_SECONDS = 20
 MODEL_LOAD_FAILURE_RETRY_SECONDS = 300
+MODEL_LOAD_FAILURE_PAUSE_THRESHOLD = 3
 CAPTION_PROMPT = (
     "Describe this photo for private photo-library search. Return only JSON with "
     "keys caption and tags. caption must be 2-3 rich sentences mentioning "
@@ -37,6 +38,7 @@ _processor = None
 _loaded_key: tuple[str, str, str, str] | None = None
 _caption_manual_pause = True
 _caption_manual_pause_message = "Captions are stopped until you start them from Background Work."
+_model_load_failure_count = 0
 _status = {
     "state": "idle",
     "message": "Captions have not scanned cached previews yet.",
@@ -56,6 +58,7 @@ _status = {
     "session_captioned": 0,
     "session_started_at": None,
     "oom_backoffs": 0,
+    "model_load_failures": 0,
     "source_files_preserved": True,
     "source_media_read": "app_owned_cached_previews_only",
 }
@@ -115,12 +118,33 @@ def pause_caption_worker(message: str = "Captions are stopped.") -> dict[str, An
 
 
 def resume_caption_worker() -> dict[str, Any]:
-    global _caption_manual_pause, _caption_manual_pause_message
+    global _caption_manual_pause, _caption_manual_pause_message, _model_load_failure_count
     _caption_manual_pause = False
     _caption_manual_pause_message = ""
+    _model_load_failure_count = 0
     work_coordination.claim_manual_owner("captions")
-    _set_status(state="idle", message="Captions will scan cached previews.")
+    _set_status(state="idle", message="Captions will scan cached previews.", model_load_failures=0)
     return get_worker_status()
+
+
+def _reset_model_load_failures() -> None:
+    global _model_load_failure_count
+    if _model_load_failure_count:
+        _model_load_failure_count = 0
+        _set_status(model_load_failures=0)
+
+
+def _record_model_load_failure(error: Exception) -> bool:
+    global _model_load_failure_count
+    _model_load_failure_count += 1
+    _set_status(model_load_failures=_model_load_failure_count, last_error=str(error))
+    if _model_load_failure_count < MODEL_LOAD_FAILURE_PAUSE_THRESHOLD:
+        return False
+    pause_caption_worker(
+        "Captions paused after 3 consecutive model load failures. Check the local caption model and start again."
+    )
+    _set_status(model_load_failures=_model_load_failure_count, last_error=str(error))
+    return True
 
 
 def _is_cuda_oom_error(error) -> bool:
@@ -349,7 +373,31 @@ async def run_caption_worker() -> None:
                 message=f"Captioning {len(rows)} cached previews.",
             )
             with work_coordination.manual_bulk("captions"):
-                await loop.run_in_executor(_caption_executor, _load_model, caption_config)
+                try:
+                    await loop.run_in_executor(_caption_executor, _load_model, caption_config)
+                    _reset_model_load_failures()
+                except Exception as exc:
+                    if _is_cuda_oom_error(exc):
+                        batch_size = max(1, batch_size // 2)
+                        _set_status(oom_backoffs=int(_status.get("oom_backoffs") or 0) + 1)
+                    _unload_model()
+                    paused = _record_model_load_failure(exc)
+                    if paused:
+                        log.error("Caption worker paused after repeated model load failures: %s", exc, exc_info=True)
+                        await asyncio.sleep(WORKER_SLEEP_SECONDS)
+                    else:
+                        _set_status(
+                            state="error",
+                            ready=False,
+                            message=(
+                                "Caption model load failed "
+                                f"({_model_load_failure_count}/{MODEL_LOAD_FAILURE_PAUSE_THRESHOLD})."
+                            ),
+                            last_batch_seconds=round(time.perf_counter() - started, 3),
+                        )
+                        log.error("Caption model load failed: %s", exc, exc_info=True)
+                        await asyncio.sleep(MODEL_LOAD_FAILURE_RETRY_SECONDS)
+                    continue
                 for row in rows:
                     image_id = int(row["id"])
                     cache_path = str(row.get("cache_path") or "")

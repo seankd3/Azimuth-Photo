@@ -22,6 +22,12 @@ class ManualStackConflict(ValueError):
         super().__init__("Images already belong to a manual stack")
 
 
+class UnknownStackImages(ValueError):
+    def __init__(self, image_ids: Iterable[int]):
+        self.image_ids = sorted({int(image_id) for image_id in image_ids})
+        super().__init__("Stack images do not exist")
+
+
 def _normalize_kind(kind: str) -> str:
     value = (kind or "").strip().lower()
     if value not in VALID_KINDS:
@@ -101,6 +107,17 @@ async def _manual_conflicts(conn, image_ids: list[int]) -> set[int]:
         )
         conflicts.update(int(row["image_id"]) for row in await cursor.fetchall())
     return conflicts
+
+
+async def _missing_image_ids(conn, image_ids: list[int]) -> set[int]:
+    if not image_ids:
+        return set()
+    found: set[int] = set()
+    for ids in chunked(image_ids, 900):
+        placeholders = ",".join("?" for _ in ids)
+        cursor = await conn.execute(f"SELECT id FROM images WHERE id IN ({placeholders})", ids)
+        found.update(int(row["id"]) for row in await cursor.fetchall())
+    return set(image_ids) - found
 
 
 async def _delete_auto_memberships(conn, image_ids: list[int]) -> None:
@@ -183,6 +200,9 @@ async def create_stack(
     try:
         await conn.execute("BEGIN")
         if not auto:
+            missing = await _missing_image_ids(conn, image_ids)
+            if missing:
+                raise UnknownStackImages(missing)
             conflicts = await _manual_conflicts(conn, image_ids)
             if conflicts:
                 raise ManualStackConflict(conflicts)

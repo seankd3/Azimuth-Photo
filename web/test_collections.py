@@ -256,6 +256,108 @@ class CollectionTests(BackendTestCase):
         self.assertEqual(response.status_code, 422)
         self.assertIn("Unknown smart collection query key", response.json()["detail"])
 
+    async def test_smart_collection_rejects_oversize_string_fields(self):
+        def probe():
+            client = TestClient(app_module.app)
+            try:
+                q_response = client.post(
+                    "/api/user-collections",
+                    json={"name": "Bad smart", "query": {"q": "x" * 1001}},
+                )
+                folder_response = client.post(
+                    "/api/user-collections",
+                    json={"name": "Bad smart", "query": {"folder": "x" * 501}},
+                )
+                return q_response, folder_response
+            finally:
+                client.close()
+
+        q_response, folder_response = await asyncio.to_thread(probe)
+
+        self.assertEqual(q_response.status_code, 422)
+        self.assertIn("query.q must be 1000 characters or less", q_response.json()["detail"])
+        self.assertEqual(folder_response.status_code, 422)
+        self.assertIn("query.folder must be 500 characters or less", folder_response.json()["detail"])
+
+    async def test_smart_collection_materialize_cap_returns_conflict(self):
+        created = await collection_routes.api_create_collection(
+            collection_routes.CreateCollectionBody(name="Too broad", query={"flag": "picked"})
+        )
+        old_resolver = collection_routes._resolve_smart_image_ids
+
+        async def too_many(_query):
+            raise smart_collections.SmartCollectionMaterializeTooLarge(
+                smart_collections.MAX_MATERIALIZE_IMAGE_IDS + 1
+            )
+
+        collection_routes._resolve_smart_image_ids = too_many
+        try:
+            response = await collection_routes.api_update_collection(
+                created["collection"]["id"],
+                collection_routes.UpdateCollectionBody(materialize=True),
+            )
+        finally:
+            collection_routes._resolve_smart_image_ids = old_resolver
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.body.decode().count("10001"), 1)
+
+    async def test_resolve_image_ids_caps_materialization_before_loading_rows(self):
+        async def resolve_library_constraints(_q, *, people="", deep=False):
+            return {"id_filter": None, "text_query": ""}
+
+        async def count_rankings(**_kwargs):
+            return smart_collections.MAX_MATERIALIZE_IMAGE_IDS + 1
+
+        async def get_rankings(**_kwargs):
+            raise AssertionError("materialize cap should stop before loading rows")
+
+        with self.assertRaises(smart_collections.SmartCollectionMaterializeTooLarge):
+            await smart_collections.resolve_image_ids(
+                {"flag": "picked"},
+                resolve_library_constraints=resolve_library_constraints,
+                count_rankings=count_rankings,
+                get_rankings=get_rankings,
+            )
+
+    async def test_collection_mutations_invalidate_suggestions_cache(self):
+        source = await self._source()
+        image_id = await self._image(source["id"], "member.jpg")
+
+        def prime_cache():
+            collection_suggestions._cache.update({
+                "key": "test",
+                "data": {"suggestions": [{"id": "stale"}]},
+                "expires": time.monotonic() + 600,
+            })
+
+        def cache_empty():
+            return collection_suggestions._cache["data"] is None
+
+        prime_cache()
+        created = await collection_routes.api_create_collection(
+            collection_routes.CreateCollectionBody(name="Cache invalidation")
+        )
+        self.assertTrue(cache_empty())
+
+        prime_cache()
+        await collection_routes.api_add_collection_images(
+            created["collection"]["id"],
+            collection_routes.CollectionImagesBody(image_ids=[image_id]),
+        )
+        self.assertTrue(cache_empty())
+
+        prime_cache()
+        await collection_routes.api_remove_collection_images_post(
+            created["collection"]["id"],
+            collection_routes.CollectionImagesBody(image_ids=[image_id]),
+        )
+        self.assertTrue(cache_empty())
+
+        prime_cache()
+        await collection_routes.api_delete_collection(created["collection"]["id"])
+        self.assertTrue(cache_empty())
+
     async def test_smart_collection_share_snapshots_membership(self):
         source = await self._source()
         first = await self._image(source["id"], "share-picked-a.jpg", elo=1400)

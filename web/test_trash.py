@@ -1,4 +1,5 @@
 import os
+import sqlite3
 from fastapi.testclient import TestClient
 
 from test_support import *  # noqa: F401,F403
@@ -77,6 +78,38 @@ class TrashTests(BackendTestCase):
         self.assertIsNotNone(row["trashed_at"])
         self.assertTrue(row["trash_path"].endswith(os.path.join(".trash", "shoot", "one.jpg")))
         self.assertEqual(open(row["trash_path"], "rb").read(), b"one")
+
+    async def test_trash_move_failure_reverts_committed_row(self):
+        source, _root = await self._source_root()
+        image_id, filepath = await self._file_image(source, "move-fails.jpg", data=b"keep me")
+        original_move = trash_service._move_to_trash
+        observed_states = []
+
+        def fail_after_db_commit(_filepath, _dest, _token):
+            conn = sqlite3.connect(db.DB_PATH)
+            try:
+                observed_states.append(
+                    conn.execute("SELECT status, trash_path FROM images WHERE id = ?", (image_id,)).fetchone()
+                )
+            finally:
+                conn.close()
+            return 0, "injected move failure"
+
+        trash_service._move_to_trash = fail_after_db_commit
+        try:
+            result = await trash_service.trash_images(db.DB_PATH, [image_id])
+        finally:
+            trash_service._move_to_trash = original_move
+        row = await self._image_row(image_id)
+
+        self.assertEqual(result["trashed"], [])
+        self.assertEqual(result["errors"], [{"id": image_id, "reason": "injected move failure"}])
+        self.assertEqual(observed_states[0][0], "trashed")
+        self.assertIsNotNone(observed_states[0][1])
+        self.assertTrue(os.path.exists(filepath))
+        self.assertEqual(row["status"], "kept")
+        self.assertIsNone(row["trashed_at"])
+        self.assertIsNone(row["trash_path"])
 
     async def test_trashed_rows_vanish_from_rankings_and_counts(self):
         source, _root = await self._source_root()

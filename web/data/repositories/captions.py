@@ -10,6 +10,9 @@ from data.repositories.common import chunked as _chunked
 from data.repositories.metadata_search import metadata_fts_query
 
 
+ERROR_RETRY_AFTER_SECONDS = 24 * 60 * 60
+
+
 def normalize_tags(tags) -> list[str]:
     if not isinstance(tags, list):
         return []
@@ -111,6 +114,7 @@ async def get_images_needing_captions(
     cache_size: str = "md",
     limit: int = 8,
 ) -> list[dict]:
+    retry_before = time.time() - ERROR_RETRY_AFTER_SECONDS
     conn = await connection.open_async(db_path)
     try:
         cursor = await conn.execute(
@@ -123,11 +127,12 @@ async def get_images_needing_captions(
             "ON csi.image_id = i.id AND csi.model_key = ? "
             "WHERE s.included = 1 AND i.status IN ('kept', 'maybe') "
             "AND i.missing_at IS NULL "
-            "AND (csi.status IS NULL OR csi.status = 'pending') "
+            "AND (csi.status IS NULL OR csi.status = 'pending' "
+            "OR (csi.status = 'error' AND csi.scanned_at <= ?)) "
             "ORDER BY CASE WHEN i.flag = 'picked' THEN 0 ELSE 1 END, "
             "(i.date_taken IS NULL), i.date_taken DESC, i.id DESC "
             "LIMIT ?",
-            (cache_root, cache_size, model_key, max(1, int(limit))),
+            (cache_root, cache_size, model_key, retry_before, max(1, int(limit))),
         )
         return [dict(row) for row in await cursor.fetchall()]
     finally:
@@ -141,6 +146,7 @@ async def count_images_needing_captions(
     cache_root: str,
     cache_size: str = "md",
 ) -> int:
+    retry_before = time.time() - ERROR_RETRY_AFTER_SECONDS
     conn = await connection.open_async(db_path)
     try:
         cursor = await conn.execute(
@@ -153,8 +159,9 @@ async def count_images_needing_captions(
             "ON csi.image_id = i.id AND csi.model_key = ? "
             "WHERE s.included = 1 AND i.status IN ('kept', 'maybe') "
             "AND i.missing_at IS NULL "
-            "AND (csi.status IS NULL OR csi.status = 'pending')",
-            (cache_root, cache_size, model_key),
+            "AND (csi.status IS NULL OR csi.status = 'pending' "
+            "OR (csi.status = 'error' AND csi.scanned_at <= ?))",
+            (cache_root, cache_size, model_key, retry_before),
         )
         row = await cursor.fetchone()
         return int(row["c"] if row else 0)

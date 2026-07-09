@@ -1,6 +1,7 @@
 from test_support import *  # noqa: F401,F403
 
 import caption_worker
+from data.repositories import captions
 from features.search.fusion import reciprocal_rank_fusion
 
 
@@ -44,7 +45,7 @@ class CaptionTests(BackendTestCase):
         deleted_matches = await db.caption_search_ranked_image_ids("night stars", caption_config=config)
         self.assertEqual(deleted_matches, [])
 
-    async def test_caption_ledger_transitions_exclude_done_and_error(self):
+    async def test_caption_ledger_retries_error_rows_after_backoff(self):
         source = await self._source()
         first = await self._image(source["id"], "picked.jpg")
         second = await self._image(source["id"], "newest.jpg")
@@ -52,7 +53,11 @@ class CaptionTests(BackendTestCase):
         await self._cache_entry(second, "md")
         config = settings.active_caption_config()
 
-        pending = await db.get_images_needing_captions(limit=10, caption_config=config)
+        pending = await db.get_images_needing_captions(
+            limit=10,
+            caption_config=config,
+            cache_root=thumbnails.SSD_CACHE_DIR,
+        )
         self.assertEqual({row["id"] for row in pending}, {first, second})
 
         await db.store_caption_result(
@@ -72,12 +77,39 @@ class CaptionTests(BackendTestCase):
         )
 
         self.assertEqual(
-            await db.count_images_needing_captions(caption_config=config),
+            await db.count_images_needing_captions(
+                caption_config=config,
+                cache_root=thumbnails.SSD_CACHE_DIR,
+            ),
             0,
         )
         counts = await db.get_caption_status_counts(caption_config=config)
         self.assertEqual(counts["done"], 1)
         self.assertEqual(counts["error"], 1)
+
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "UPDATE caption_scan_images SET scanned_at = ? WHERE image_id = ? AND model_key = ?",
+                (time.time() - captions.ERROR_RETRY_AFTER_SECONDS - 1, first, config["model_key"]),
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        retry_ready = await db.get_images_needing_captions(
+            limit=10,
+            caption_config=config,
+            cache_root=thumbnails.SSD_CACHE_DIR,
+        )
+        self.assertEqual([row["id"] for row in retry_ready], [first])
+        self.assertEqual(
+            await db.count_images_needing_captions(
+                caption_config=config,
+                cache_root=thumbnails.SSD_CACHE_DIR,
+            ),
+            1,
+        )
 
     def test_caption_parse_fallback_uses_raw_text(self):
         parsed = caption_worker.parse_caption_response("not json but still useful")

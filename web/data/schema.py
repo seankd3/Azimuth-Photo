@@ -697,6 +697,17 @@ COLLECTION_SHARE_COMPAT_COLUMNS = (
     ("last_viewed_at", "REAL DEFAULT NULL"),
 )
 
+COLLECTION_PUBLISH_COMPAT_COLUMNS = (
+    ("collection_id", "INTEGER REFERENCES collections(id)"),
+    ("slug", "TEXT DEFAULT ''"),
+    ("title", "TEXT DEFAULT ''"),
+    ("published_at", "REAL DEFAULT 0"),
+    ("updated_at", "REAL DEFAULT 0"),
+    ("image_count", "INTEGER NOT NULL DEFAULT 0"),
+    ("bundle_bytes", "INTEGER NOT NULL DEFAULT 0"),
+    ("last_commit", "TEXT DEFAULT NULL"),
+)
+
 COMPAT_INDEX_SQL = (
     "CREATE INDEX IF NOT EXISTS idx_images_flag ON images(flag)",
     "CREATE INDEX IF NOT EXISTS idx_comparisons_action_id ON comparisons(action_id)",
@@ -1014,6 +1025,7 @@ async def prepare_existing_database_for_schema(conn) -> None:
     await _add_columns_if_missing(conn, "images", IMAGE_COMPAT_COLUMNS)
     await _add_columns_if_missing(conn, "comparisons", (("action_id", "TEXT DEFAULT NULL"),))
     await _add_columns_if_missing(conn, "collections", COLLECTION_COMPAT_COLUMNS)
+    await _add_columns_if_missing(conn, "collection_publishes", COLLECTION_PUBLISH_COMPAT_COLUMNS)
 
 
 async def ensure_compatibility_columns(conn) -> None:
@@ -1027,6 +1039,7 @@ async def ensure_compatibility_columns(conn) -> None:
     await _add_columns_if_missing(conn, "catalog_sources", CATALOG_SOURCE_COMPAT_COLUMNS)
     await _add_columns_if_missing(conn, "collections", COLLECTION_COMPAT_COLUMNS)
     await _add_columns_if_missing(conn, "collection_shares", COLLECTION_SHARE_COMPAT_COLUMNS)
+    await _add_columns_if_missing(conn, "collection_publishes", COLLECTION_PUBLISH_COMPAT_COLUMNS)
 
 
 async def ensure_compatibility_indexes(conn) -> None:

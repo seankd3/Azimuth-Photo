@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from features.collections import smart
+from features.collections import suggestions as collection_suggestions
 
 
 router = APIRouter()
@@ -128,6 +129,10 @@ def _invalid_query_response(exc: smart.SmartCollectionQueryError) -> JSONRespons
     return JSONResponse({"detail": str(exc)}, status_code=422)
 
 
+def _invalidate_suggestions_cache() -> None:
+    collection_suggestions.invalidate_cache()
+
+
 async def _smart_collection_conflict(collection_id: int) -> JSONResponse | None:
     if _collection_is_smart is None:
         return None
@@ -179,7 +184,17 @@ async def _collection_update(
         if current is None:
             return JSONResponse({"error": "Collection not found"}, status_code=404)
         if current.get("smart"):
-            materialize_ids = await _resolve_smart_image_ids(current["query"] or {})
+            try:
+                materialize_ids = await _resolve_smart_image_ids(current["query"] or {})
+            except smart.SmartCollectionMaterializeTooLarge as exc:
+                return JSONResponse(
+                    {
+                        "error": "Smart collection is too large to materialize",
+                        "image_count": exc.count,
+                        "limit": exc.limit,
+                    },
+                    status_code=409,
+                )
 
     collection = await _rename_collection(
         collection_id,
@@ -190,6 +205,8 @@ async def _collection_update(
     )
     if collection is None:
         return JSONResponse({"error": "Collection not found"}, status_code=404)
+    if materialize_ids is not None:
+        _invalidate_suggestions_cache()
     return {"ok": True, "collection": await _with_smart_summary(collection)}
 
 
@@ -217,6 +234,7 @@ async def api_create_collection(payload: CreateCollectionBody):
         status=payload.status,
         query=query_json,
     )
+    _invalidate_suggestions_cache()
     return {"ok": True, "collection": await _with_smart_summary(collection)}
 
 
@@ -258,6 +276,7 @@ async def api_delete_collection(collection_id: int):
     deleted = await _delete_collection(collection_id)
     if not deleted:
         return JSONResponse({"error": "Collection not found"}, status_code=404)
+    _invalidate_suggestions_cache()
     return {"ok": True}
 
 
@@ -272,6 +291,7 @@ async def api_add_collection_images(collection_id: int, payload: CollectionImage
     collection = await _add_collection_images(collection_id, payload.image_ids)
     if collection is None:
         return JSONResponse({"error": "Collection not found"}, status_code=404)
+    _invalidate_suggestions_cache()
     return {"ok": True, "collection": collection}
 
 
@@ -286,6 +306,7 @@ async def api_remove_collection_images_post(collection_id: int, payload: Collect
     collection = await _remove_collection_images(collection_id, payload.image_ids)
     if collection is None:
         return JSONResponse({"error": "Collection not found"}, status_code=404)
+    _invalidate_suggestions_cache()
     return {"ok": True, "collection": collection}
 
 
@@ -302,4 +323,5 @@ async def api_remove_collection_images(collection_id: int, payload: CollectionIm
     collection = await _remove_collection_images(collection_id, payload.image_ids)
     if collection is None:
         return JSONResponse({"error": "Collection not found"}, status_code=404)
+    _invalidate_suggestions_cache()
     return {"ok": True, "collection": collection}

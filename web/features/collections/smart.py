@@ -23,12 +23,22 @@ STRING_QUERY_KEYS = {
 INT_QUERY_KEYS = {"min_stars"}
 ALLOWED_QUERY_KEYS = STRING_QUERY_KEYS | INT_QUERY_KEYS
 SMART_SUMMARY_CACHE_TTL_SECONDS = 2.0
+MAX_QUERY_STRING_LENGTH = 500
+MAX_TEXT_QUERY_LENGTH = 1000
+MAX_MATERIALIZE_IMAGE_IDS = 10000
 
 _smart_summary_cache: dict[tuple, dict] = {}
 
 
 class SmartCollectionQueryError(ValueError):
     pass
+
+
+class SmartCollectionMaterializeTooLarge(ValueError):
+    def __init__(self, count: int, limit: int = MAX_MATERIALIZE_IMAGE_IDS):
+        self.count = int(count)
+        self.limit = int(limit)
+        super().__init__(f"Smart collection has {self.count} images; materialization is capped at {self.limit}.")
 
 
 def invalidate_smart_collection_cache() -> None:
@@ -51,6 +61,9 @@ def normalize_query(query: object) -> dict | None:
             if not isinstance(value, str):
                 raise SmartCollectionQueryError(f"query.{key} must be a string")
             clean = value.strip()
+            limit = MAX_TEXT_QUERY_LENGTH if key == "q" else MAX_QUERY_STRING_LENGTH
+            if len(clean) > limit:
+                raise SmartCollectionQueryError(f"query.{key} must be {limit} characters or less")
             if clean:
                 normalized[key] = clean
             continue
@@ -201,6 +214,8 @@ async def resolve_image_ids(
         resolve_library_constraints=resolve_library_constraints,
     )
     total = await count_rankings(**filters)
+    if int(total) > MAX_MATERIALIZE_IMAGE_IDS:
+        raise SmartCollectionMaterializeTooLarge(int(total))
     image_ids: list[int] = []
     offset = 0
     while offset < total:

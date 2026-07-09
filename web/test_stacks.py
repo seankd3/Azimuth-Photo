@@ -489,3 +489,35 @@ class StackRouteTests(unittest.TestCase):
             finally:
                 db.DB_PATH = old_db_path
                 cache_events.invalidate_stats_cache()
+
+    def test_manual_stack_route_rejects_unknown_image_ids(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            old_db_path = db.DB_PATH
+            db.DB_PATH = os.path.join(tempdir, "route-stacks-test.db")
+            try:
+                asyncio.run(db.init_db())
+                source = asyncio.run(db.add_or_restore_source(os.path.join(tempdir, "catalog")))
+
+                async def insert(filename):
+                    conn = await db.get_db()
+                    try:
+                        cursor = await conn.execute(
+                            "INSERT INTO images (source_id, filename, filepath, status) VALUES (?, ?, ?, 'kept')",
+                            (source["id"], filename, os.path.join(source["path"], filename)),
+                        )
+                        await conn.commit()
+                        return int(cursor.lastrowid)
+                    finally:
+                        await conn.close()
+
+                first = asyncio.run(insert("a.jpg"))
+                with TestClient(app_module.app) as client:
+                    response = client.post(
+                        "/api/stacks",
+                        json={"image_ids": [first, 999999], "representative_id": first},
+                    )
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.json()["image_ids"], [999999])
+            finally:
+                db.DB_PATH = old_db_path
+                cache_events.invalidate_stats_cache()
