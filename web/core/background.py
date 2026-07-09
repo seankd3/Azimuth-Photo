@@ -7,6 +7,7 @@ IDLE_ACTIVITY_EXCLUDED_PATHS = frozenset(
         "/api/ai/status",
         "/api/cache/status",
         "/api/cache/pregen/status",
+        "/api/captions/status",
         "/api/dev/status",
         "/api/people/status",
         "/api/scan/status",
@@ -75,6 +76,7 @@ async def run_startup(
     thumbnails,
     settings,
     face_worker,
+    caption_worker,
     track_background_task,
     init_db,
     get_filter_options,
@@ -242,6 +244,13 @@ async def run_startup(
         pass  # AI features disabled - missing dependencies
 
     track_background_task(_start_background_daemon(face_worker.run_face_worker, delay=25.0))
+    try:
+        caption_worker.pause_caption_worker(
+            "Captions are stopped until you start them from Background Work."
+        )
+        track_background_task(_start_background_daemon(caption_worker.run_caption_worker, delay=30.0))
+    except Exception:
+        pass
 
     async def _warm_interaction_caches():
         await asyncio.sleep(interaction_cache_warmup_delay_seconds)

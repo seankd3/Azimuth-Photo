@@ -4,6 +4,8 @@ import importlib.util
 import logging
 import time
 
+from features.search.fusion import FUSED_CANDIDATE_LIMIT, fused_candidate_scores
+
 
 
 logger = logging.getLogger(__name__)
@@ -92,6 +94,30 @@ def _similarity_scores(matrix, text_vec, image_ids, threshold) -> dict[int, floa
     }
 
 
+def _embedding_ranked_scores(matrix, text_vec, image_ids, threshold, max_results: int) -> dict[int, float]:
+    import numpy as np
+
+    similarities = matrix @ text_vec
+    if similarities.size == 0:
+        return {}
+    matching_indices = np.flatnonzero(similarities >= threshold)
+    if matching_indices.size == 0:
+        return {}
+    if matching_indices.size > max_results:
+        local_scores = similarities[matching_indices]
+        top_local = np.argpartition(local_scores, -max_results)[-max_results:]
+        matching_indices = matching_indices[top_local]
+    ordered = sorted(
+        (
+            (int(image_ids[int(i)]), float(similarities[int(i)]))
+            for i in matching_indices
+        ),
+        key=lambda item: item[1],
+        reverse=True,
+    )
+    return dict(ordered)
+
+
 async def apply_metadata_search_ids(result: dict, normalized_query: str, *, metadata_search_image_ids) -> None:
     metadata_ids = await metadata_search_image_ids(normalized_query)
     if metadata_ids is not None:
@@ -118,6 +144,10 @@ async def resolve_text_search(
     apply_metadata_ids=None,
     get_search_query_embedding=None,
     store_search_query_embedding=None,
+    metadata_ranked_image_ids=None,
+    caption_ranked_image_ids=None,
+    get_active_images_by_ids=None,
+    caption_count_for_signature=None,
     extension_search_terms: set[str],
     get_settings,
     active_embedding_config=None,
@@ -132,6 +162,7 @@ async def resolve_text_search(
         "scores": {},
         "text_query": "",
         "search_mode": "",
+        "search_sources": [],
         "ai_unavailable": False,
         "fallback_reason": "",
     }
@@ -144,9 +175,16 @@ async def resolve_text_search(
         raise RuntimeError("resolve_text_search requires active_embedding_config")
     active_config = config_provider()
     threshold = get_settings().get("search_similarity_threshold", 0.35)
+    caption_signature = None
+    if caption_count_for_signature is not None:
+        try:
+            caption_signature = await caption_count_for_signature()
+        except Exception:
+            caption_signature = None
     cache_key = (
         normalized_query.casefold(),
         active_config["model_key"],
+        caption_signature,
         f"{float(threshold or 0.0):.6f}",
     )
     cached = _text_search_resolution_cache.get(cache_key)
@@ -157,6 +195,7 @@ async def resolve_text_search(
         result.update({
             "text_query": normalized_query,
             "search_mode": "metadata",
+            "search_sources": ["metadata"],
         })
         _text_search_resolution_cache[cache_key] = {
             "data": dict(result),
@@ -205,6 +244,7 @@ async def resolve_text_search(
             result.update({
                 "text_query": normalized_query,
                 "search_mode": "metadata",
+                "search_sources": ["metadata"],
                 "ai_unavailable": True,
                 "fallback_reason": "model_loading",
             })
@@ -218,33 +258,54 @@ async def resolve_text_search(
                 # can take a while on a large archive; keep it off the loop.
                 scores = await asyncio.get_event_loop().run_in_executor(
                     None,
-                    _similarity_scores,
+                    _embedding_ranked_scores,
                     matrix,
                     text_vec,
                     image_ids,
                     threshold,
+                    5000,
                 )
-                # Hybrid search: exact metadata matches (filename, camera,
-                # lens, date, folder) always count and rank ahead of
-                # semantic-only matches, so specific multi-word queries keep
-                # working even when the embedding match is weak.
-                metadata_ids = None
-                if apply_metadata_ids is not None:
-                    metadata_probe = {"id_filter": None, "text_query": ""}
+                metadata_ranked = []
+                caption_ranked = []
+                if metadata_ranked_image_ids is not None:
                     try:
-                        await apply_metadata_ids(metadata_probe, normalized_query)
-                        metadata_ids = metadata_probe.get("id_filter")
+                        metadata_ranked = await metadata_ranked_image_ids(normalized_query)
                     except Exception:
-                        metadata_ids = None
-                if metadata_ids:
-                    top_score = max(scores.values(), default=0.0)
-                    for image_id in metadata_ids:
-                        image_id = int(image_id)
-                        scores[image_id] = max(scores.get(image_id, 0.0), top_score + 1.0)
+                        metadata_ranked = []
+                if caption_ranked_image_ids is not None:
+                    try:
+                        caption_ranked = await caption_ranked_image_ids(normalized_query)
+                    except Exception:
+                        caption_ranked = []
+                ranked_sources = {}
+                if scores:
+                    ranked_sources["embedding"] = list(scores.keys())
+                if metadata_ranked:
+                    ranked_sources["metadata"] = [image_id for image_id, _score in metadata_ranked]
+                if caption_ranked:
+                    ranked_sources["captions"] = [image_id for image_id, _score in caption_ranked]
+                rows_by_id = {}
+                source_union = {
+                    int(image_id)
+                    for image_ids in ranked_sources.values()
+                    for image_id in image_ids[:FUSED_CANDIDATE_LIMIT]
+                }
+                if source_union and get_active_images_by_ids is not None:
+                    rows_by_id = await get_active_images_by_ids(list(source_union))
+                fused_scores, sources = fused_candidate_scores(
+                    ranked_sources=ranked_sources,
+                    embedding_scores=scores,
+                    rows_by_id=rows_by_id,
+                    limit=FUSED_CANDIDATE_LIMIT,
+                )
+                if not fused_scores and scores:
+                    fused_scores = scores
+                    sources = ["embedding"]
                 result.update({
-                    "id_filter": set(scores.keys()),
-                    "scores": scores,
-                    "search_mode": "hybrid" if metadata_ids else "embedding",
+                    "id_filter": set(fused_scores.keys()),
+                    "scores": fused_scores,
+                    "search_mode": "fused" if len(sources) > 1 else (sources[0] if sources else "embedding"),
+                    "search_sources": sources,
                 })
                 _text_search_resolution_cache[cache_key] = {
                     "data": dict(result),
@@ -261,6 +322,7 @@ async def resolve_text_search(
     result.update({
         "text_query": normalized_query,
         "search_mode": "metadata",
+        "search_sources": ["metadata"],
         "ai_unavailable": True,
     })
     if extension_query not in extension_search_terms and apply_metadata_ids is not None:
@@ -294,6 +356,10 @@ async def resolve_configured_text_search(
         store_search_query_embedding=(
             _optional_dependency("store_search_query_embedding")
         ),
+        metadata_ranked_image_ids=_optional_dependency("metadata_search_ranked_image_ids"),
+        caption_ranked_image_ids=_optional_dependency("caption_search_ranked_image_ids"),
+        get_active_images_by_ids=_optional_dependency("get_active_images_by_ids"),
+        caption_count_for_signature=_optional_dependency("caption_count_for_signature"),
         extension_search_terms=_dependency("extension_search_terms"),
         active_embedding_config=(
             _optional_dependency("active_embedding_config")

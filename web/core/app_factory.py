@@ -13,6 +13,7 @@ from core.static_assets import StaticAssetContext, warm_templates
 from features.access import routes as access_routes
 from features.ai import routes as ai_routes
 from features.cache import routes as cache_routes
+from features.captions import routes as caption_routes
 from features.catalog import routes as catalog_routes
 from features.collections import routes as collection_routes
 from features.compare import routes as compare_routes
@@ -104,6 +105,7 @@ class AppLifecycleDependencies:
     thumbnails: Any
     settings: Any
     face_worker: Any
+    caption_worker: Any
     init_db: Callable[[], Awaitable[Any]]
     get_filter_options: Callable[[], Awaitable[dict]]
     get_date_groups: Callable[..., Awaitable[Any]]
@@ -208,6 +210,7 @@ def register_app_lifecycle(shell: AppShell, dependencies: AppLifecycleDependenci
             thumbnails=dependencies.thumbnails,
             settings=dependencies.settings,
             face_worker=dependencies.face_worker,
+            caption_worker=dependencies.caption_worker,
             track_background_task=shell.track_background_task,
             init_db=dependencies.init_db,
             get_filter_options=dependencies.get_filter_options,
@@ -368,6 +371,7 @@ def configure_app_runtime_services(shell: AppShell) -> AppRuntimeServices:
 
 
 def configure_app_lifecycle(shell: AppShell) -> AppLifecycleHandlers:
+    import caption_worker
     import db
     import face_worker
     import settings
@@ -388,6 +392,7 @@ def configure_app_lifecycle(shell: AppShell) -> AppLifecycleHandlers:
             thumbnails=thumbnails,
             settings=settings,
             face_worker=face_worker,
+            caption_worker=caption_worker,
             init_db=lambda: db.init_db(),
             get_filter_options=lambda: db.get_filter_options(),
             get_date_groups=lambda **kwargs: db.get_date_groups(**kwargs),
@@ -489,6 +494,7 @@ def create_app_shell(
     app.include_router(search_routes.router)
     app.include_router(settings_routes.router)
     app.include_router(cache_routes.router)
+    app.include_router(caption_routes.router)
     app.include_router(ai_routes.router)
     configure_idle_activity_middleware(shell)
     configure_app_lifecycle(shell)

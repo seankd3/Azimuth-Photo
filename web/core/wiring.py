@@ -2,6 +2,7 @@
 
 from features.ai import routes as ai_routes
 from features.cache import routes as cache_routes
+from features.captions import routes as caption_routes
 from features.catalog import routes as catalog_routes
 from features.collections import routes as collection_routes
 from features.compare import routes as compare_routes
@@ -20,6 +21,7 @@ def configure_database_backed_providers() -> None:
     import db
     import embed_cache
     import embedding_worker
+    import caption_worker
     import elo_propagation
     import face_worker
     import helpers as app_helpers
@@ -38,6 +40,11 @@ def configure_database_backed_providers() -> None:
         get_unembedded_images=lambda **kwargs: db.get_unembedded_images(**kwargs),
         store_embeddings_batch=lambda rows, **kwargs: db.store_embeddings_batch(rows, **kwargs),
         get_embedding_count=lambda: db.get_embedding_count(),
+    )
+    caption_worker.configure(
+        count_images_needing_captions=lambda **kwargs: db.count_images_needing_captions(**kwargs),
+        get_images_needing_captions=lambda **kwargs: db.get_images_needing_captions(**kwargs),
+        store_caption_result=lambda **kwargs: db.store_caption_result(**kwargs),
     )
     elo_propagation.configure(
         active_embedding_model_key=lambda: db.active_embedding_model_key(),
@@ -140,6 +147,10 @@ def configure_status_media_search_providers() -> None:
         invalidate_settings_response_cache=settings_status.invalidate_settings_response_cache,
         get_ai_status_counts=lambda: db.get_ai_status_counts(),
         count_embeddings_for_model=lambda config, **kwargs: db.count_embeddings_for_model(config, **kwargs),
+    )
+    caption_routes.configure(
+        get_caption_status_counts=lambda **kwargs: db.get_caption_status_counts(**kwargs),
+        invalidate_settings_response_cache=settings_status.invalidate_settings_response_cache,
     )
 
 
@@ -518,6 +529,10 @@ def configure_query_constraints(
     query_constraints.configure(
         extension_search_terms=db.IMAGE_EXTENSION_SEARCH_TERMS,
         metadata_search_image_ids=lambda query: db.metadata_search_image_ids(query),
+        metadata_search_ranked_image_ids=lambda query: db.metadata_search_ranked_image_ids(query),
+        caption_search_ranked_image_ids=lambda query: db.caption_search_ranked_image_ids(query),
+        get_active_images_by_ids=lambda image_ids: db.get_active_images_by_ids(image_ids),
+        caption_count_for_signature=lambda: db.caption_count_for_signature(),
         active_embedding_config=settings.active_embedding_config,
         fast_search_embedding_config=settings.fast_search_embedding_config,
         get_settings=settings.get_settings,

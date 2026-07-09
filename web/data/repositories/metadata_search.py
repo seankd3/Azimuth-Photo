@@ -69,3 +69,37 @@ async def metadata_search_image_ids(
         return None
     finally:
         await connection.close_async(conn, db_path=db_path)
+
+
+async def metadata_search_ranked_image_ids(
+    db_path: str,
+    text_query: str,
+    *,
+    active_source_ids,
+    max_results: int = 5000,
+) -> list[tuple[int, float]]:
+    query = (text_query or "").strip()
+    if len(query) < 3:
+        return []
+    active_source_ids = sorted(int(source_id) for source_id in active_source_ids)
+    if not active_source_ids:
+        return []
+
+    conn = await connection.open_async(db_path)
+    try:
+        source_placeholders = ",".join("?" for _ in active_source_ids)
+        cursor = await conn.execute(
+            "SELECT f.rowid AS id, bm25(images_metadata_fts) AS score "
+            "FROM images_metadata_fts f "
+            "JOIN images i ON i.id = f.rowid "
+            f"WHERE i.source_id IN ({source_placeholders}) "
+            "AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL "
+            "AND images_metadata_fts MATCH ? "
+            "ORDER BY score ASC LIMIT ?",
+            (*active_source_ids, metadata_fts_query(query), int(max_results)),
+        )
+        return [(int(row["id"]), -float(row["score"] or 0.0)) for row in await cursor.fetchall()]
+    except Exception:
+        return []
+    finally:
+        await connection.close_async(conn, db_path=db_path)

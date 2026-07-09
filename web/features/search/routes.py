@@ -126,6 +126,7 @@ async def api_search(
             "images": [],
             "query": query,
             "search_mode": "",
+            "search_sources": [],
             "ai_unavailable": False,
             "fallback_reason": "",
             **_visibility_counts(0, 0),

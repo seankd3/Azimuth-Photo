@@ -571,6 +571,8 @@ async def delete_image_catalog_rows_on_conn(conn, image_ids: list[int]) -> dict:
         placeholders = ",".join("?" for _ in chunk)
         await conn.execute(f"DELETE FROM embeddings WHERE image_id IN ({placeholders})", chunk)
         await conn.execute(f"DELETE FROM embeddings_by_model WHERE image_id IN ({placeholders})", chunk)
+        await conn.execute(f"DELETE FROM image_captions WHERE image_id IN ({placeholders})", chunk)
+        await conn.execute(f"DELETE FROM caption_scan_images WHERE image_id IN ({placeholders})", chunk)
         cursor = await conn.execute(
             f"SELECT winner_id, loser_id FROM comparisons "
             f"WHERE winner_id IN ({placeholders}) OR loser_id IN ({placeholders})",

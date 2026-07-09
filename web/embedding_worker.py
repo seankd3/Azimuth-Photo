@@ -230,6 +230,16 @@ def _clear_cuda_cache():
         pass
 
 
+def _unload_model() -> None:
+    global _model, _loaded_model_dir, _loaded_model_id, _loaded_model_revision
+    _model = None
+    _loaded_model_dir = None
+    _loaded_model_id = None
+    _loaded_model_revision = None
+    _clear_cuda_cache()
+    work_coordination.release_gpu_owner("embeddings")
+
+
 def _set_worker_status(
     state: str,
     message: str = "",
@@ -371,7 +381,8 @@ def pause_embedding_worker(message: str = "Search is stopped.") -> dict:
     _embedding_manual_pause_message = message
     _embedding_pause_reason = _pause_reason_for_message(message)
     work_coordination.release_manual_owner("embeddings")
-    _set_worker_status("paused", message, ready=_model is not None)
+    _unload_model()
+    _set_worker_status("paused", message, ready=False)
     return get_worker_status()
 
 
@@ -952,15 +963,13 @@ async def run_embedding_worker():
             model_installed = ai_models.model_files_present(model_dir)
 
             if _embedding_manual_pause:
+                _unload_model()
                 _set_worker_status("paused", _manual_pause_message(), ready=_model is not None)
                 await asyncio.sleep(1)
                 continue
 
             if not model_installed:
-                _model = None
-                _loaded_model_dir = None
-                _loaded_model_id = None
-                _loaded_model_revision = None
+                _unload_model()
                 _set_worker_status(
                     "waiting_for_model",
                     f"Install {model_id} from Settings to enable AI features.",
@@ -973,10 +982,7 @@ async def run_embedding_worker():
                 not _model_is_current(model_dir, model_id, model_revision)
             )
             if needs_model_load and _block_model_load_for_missing_dependency(model_dir, model_id, model_revision):
-                _model = None
-                _loaded_model_dir = None
-                _loaded_model_id = None
-                _loaded_model_revision = None
+                _unload_model()
                 await asyncio.sleep(min(MODEL_LOAD_FAILURE_RETRY_SECONDS, 30))
                 continue
             if needs_model_load and _model_load_blocked(model_dir, model_id, model_revision):
@@ -996,6 +1002,7 @@ async def run_embedding_worker():
                             continue
                         _set_worker_status("loading_model", f"Loading {model_id} from disk…", ready=False)
                         try:
+                            await work_coordination.wait_for_gpu_turn("embeddings")
                             await work_coordination.wait_for_manual_turn("embeddings")
                             with work_coordination.manual_bulk("embeddings"):
                                 _model = await loop.run_in_executor(_embed_executor, _load_model, model_dir, model_id)
@@ -1005,10 +1012,7 @@ async def run_embedding_worker():
                             _clear_model_load_failure()
                             _set_worker_status("ready", f"{model_id} loaded locally.", ready=True)
                         except Exception as exc:
-                            _model = None
-                            _loaded_model_dir = None
-                            _loaded_model_id = None
-                            _loaded_model_revision = None
+                            _unload_model()
                             _note_model_load_failure(model_dir, model_id, model_revision, exc)
                             await asyncio.sleep(min(MODEL_LOAD_FAILURE_RETRY_SECONDS, 30))
                             continue
@@ -1042,6 +1046,7 @@ async def run_embedding_worker():
                 "next_retry_at": next_retry_at,
             })
             if unembedded:
+                await work_coordination.wait_for_gpu_turn("embeddings")
                 await work_coordination.wait_for_manual_turn("embeddings")
                 _set_worker_status(
                     "embedding",
@@ -1078,6 +1083,7 @@ async def run_embedding_worker():
                 continue
 
             work_coordination.release_manual_owner("embeddings")
+            _unload_model()
             _set_worker_status("idle", "Waiting for new images…", ready=True)
             await asyncio.sleep(2)
 

@@ -1,0 +1,15 @@
+// Placeholder proxy eval set for Sean to refine against the real archive.
+[
+  {"query": "portraits", "relevant_hints": {"filename_patterns": ["*portrait*"], "note": "People and portrait sessions."}},
+  {"query": "wedding", "relevant_hints": {"filename_patterns": ["*wedding*"], "folders": ["*wedding*"], "note": "Wedding ceremony and reception."}},
+  {"query": "starbase rocket", "relevant_hints": {"filename_patterns": ["*starbase*", "*rocket*"], "folders": ["*starbase*", "*rocket*"], "note": "SpaceX Starbase or rocket photos."}},
+  {"query": "airshow jets", "relevant_hints": {"filename_patterns": ["*airshow*", "*jet*"], "folders": ["*airshow*"], "note": "Jets at airshows."}},
+  {"query": "night sky stars", "relevant_hints": {"filename_patterns": ["*stars*", "*night*"], "folders": ["*astro*", "*stars*"], "note": "Stars and night-sky images."}},
+  {"query": "film scan", "relevant_hints": {"filename_patterns": ["*scan*", "*film*"], "folders": ["*film*", "*scan*"], "note": "Scanned film frames."}},
+  {"query": "cat", "relevant_hints": {"filename_patterns": ["*cat*"], "folders": ["*cat*"], "note": "Cat photos."}},
+  {"query": "sunset water", "relevant_hints": {"filename_patterns": ["*sunset*", "*water*"], "folders": ["*lake*", "*beach*", "*water*"], "note": "Sunset over water."}},
+  {"query": "snow", "relevant_hints": {"filename_patterns": ["*snow*"], "folders": ["*snow*", "*winter*"], "note": "Snow and winter scenes."}},
+  {"query": "concert stage", "relevant_hints": {"filename_patterns": ["*concert*", "*stage*"], "folders": ["*concert*", "*music*"], "note": "Concert or stage lighting."}},
+  {"query": "macro flower", "relevant_hints": {"filename_patterns": ["*flower*", "*macro*"], "folders": ["*flower*", "*garden*"], "note": "Close-up flowers."}},
+  {"query": "group photo", "relevant_hints": {"filename_patterns": ["*group*"], "folders": ["*family*", "*friends*"], "note": "Group photos with multiple people."}}
+]

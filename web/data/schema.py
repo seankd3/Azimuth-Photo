@@ -6,7 +6,7 @@ from date_inference import infer_image_date
 from data.repositories import catalog as catalog_repository
 
 EXPECTED_EMBEDDING_DIM = 2048  # Qwen3-VL-Embedding-2B native dimension
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS catalog_sources (
@@ -317,6 +317,72 @@ CREATE TABLE IF NOT EXISTS search_query_embeddings (
 
 CREATE INDEX IF NOT EXISTS idx_search_query_embeddings_used
 ON search_query_embeddings(last_used_at DESC);
+
+CREATE TABLE IF NOT EXISTS caption_fts_model (
+    id INTEGER PRIMARY KEY CHECK(id = 1),
+    model_key TEXT NOT NULL DEFAULT ''
+);
+
+INSERT OR IGNORE INTO caption_fts_model (id, model_key) VALUES (1, '');
+
+CREATE TABLE IF NOT EXISTS image_captions (
+    image_id INTEGER NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+    model_key TEXT NOT NULL,
+    caption TEXT NOT NULL,
+    tags TEXT NOT NULL DEFAULT '[]',
+    quality TEXT DEFAULT NULL,
+    created_at REAL NOT NULL DEFAULT (strftime('%s', 'now')),
+    PRIMARY KEY (model_key, image_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_image_captions_image
+ON image_captions(image_id);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS image_captions_fts
+USING fts5(caption, tags, tokenize='unicode61');
+
+CREATE TRIGGER IF NOT EXISTS image_captions_fts_ai
+AFTER INSERT ON image_captions
+WHEN new.model_key = (SELECT model_key FROM caption_fts_model WHERE id = 1)
+BEGIN
+    DELETE FROM image_captions_fts WHERE rowid = new.image_id;
+    INSERT INTO image_captions_fts(rowid, caption, tags)
+    VALUES (new.image_id, new.caption, new.tags);
+END;
+
+CREATE TRIGGER IF NOT EXISTS image_captions_fts_ad
+AFTER DELETE ON image_captions
+WHEN old.model_key = (SELECT model_key FROM caption_fts_model WHERE id = 1)
+BEGIN
+    DELETE FROM image_captions_fts WHERE rowid = old.image_id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS image_captions_fts_au
+AFTER UPDATE OF caption, tags, model_key ON image_captions
+BEGIN
+    DELETE FROM image_captions_fts
+    WHERE rowid IN (old.image_id, new.image_id)
+    AND (
+        old.model_key = (SELECT model_key FROM caption_fts_model WHERE id = 1)
+        OR new.model_key = (SELECT model_key FROM caption_fts_model WHERE id = 1)
+    );
+    INSERT INTO image_captions_fts(rowid, caption, tags)
+    SELECT new.image_id, new.caption, new.tags
+    WHERE new.model_key = (SELECT model_key FROM caption_fts_model WHERE id = 1);
+END;
+
+CREATE TABLE IF NOT EXISTS caption_scan_images (
+    image_id INTEGER NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+    model_key TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK(status IN ('pending', 'done', 'error')),
+    last_error TEXT NOT NULL DEFAULT '',
+    scanned_at REAL NOT NULL DEFAULT 0,
+    PRIMARY KEY (image_id, model_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_caption_scan_images_status
+ON caption_scan_images(model_key, status, scanned_at);
 
 CREATE TABLE IF NOT EXISTS cache_entries (
     cache_root TEXT NOT NULL,
@@ -763,6 +829,10 @@ REQUIRED_TABLES = {
     "embedding_models",
     "embeddings_by_model",
     "search_query_embeddings",
+    "caption_fts_model",
+    "image_captions",
+    "image_captions_fts",
+    "caption_scan_images",
     "cache_entries",
     "cache_metadata",
     "import_batches",
@@ -838,6 +908,8 @@ REQUIRED_INDEXES = {
     "idx_images_rating_signal_cover",
     "idx_embeddings_by_model_image_id",
     "idx_search_query_embeddings_used",
+    "idx_image_captions_image",
+    "idx_caption_scan_images_status",
     "idx_cache_entries_root_size_bytes",
     "idx_cache_entries_root_size_accessed_id",
     "idx_import_batches_created",

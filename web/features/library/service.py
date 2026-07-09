@@ -427,7 +427,7 @@ async def api_rankings_impl(
         and not search_scores
         and search.get("fallback_reason") != "model_loading"
     )
-    cacheable_embedding_search = search_mode == "embedding"
+    cacheable_embedding_search = search_mode in ("embedding", "fused", "captions")
     cacheable_search = cacheable_metadata_search or cacheable_embedding_search
     normalized_search_query = _configured_normalize_search_query(q) if search["active"] else ""
     if not search["active"] or cacheable_search:
@@ -475,6 +475,7 @@ async def api_rankings_impl(
                 **response_helpers.visibility_counts(0, 0),
                 "total_kept": 0,
                 "search_mode": search_mode,
+                "search_sources": search.get("search_sources") or [],
                 "ai_unavailable": search["ai_unavailable"],
                 **taste_fields,
             }
@@ -504,6 +505,7 @@ async def api_rankings_impl(
                 **response_helpers.visibility_counts(total_images, visible_images),
                 "total_kept": total_images,
                 "search_mode": search_mode,
+                "search_sources": search.get("search_sources") or [],
                 "ai_unavailable": search["ai_unavailable"],
                 **taste_fields,
             }
@@ -558,6 +560,7 @@ async def api_rankings_impl(
             **response_helpers.visibility_counts(total_images, visible_images),
             "total_kept": total_images,
             "search_mode": search_mode,
+            "search_sources": search.get("search_sources") or [],
             "ai_unavailable": search["ai_unavailable"],
             **taste_fields,
         }
@@ -612,6 +615,7 @@ async def api_rankings_impl(
             **response_helpers.visibility_counts(total_images, visible_images),
             "total_kept": total_images,
             "search_mode": search_mode,
+            "search_sources": search.get("search_sources") or [],
             "ai_unavailable": search["ai_unavailable"],
             "fallback_reason": search.get("fallback_reason", ""),
         }
@@ -625,6 +629,7 @@ async def api_rankings_impl(
             **response_helpers.visibility_counts(0, 0),
             "total_kept": 0,
             "search_mode": search_mode,
+            "search_sources": search.get("search_sources") or [],
             "ai_unavailable": search["ai_unavailable"],
             "fallback_reason": search.get("fallback_reason", ""),
         }
@@ -751,6 +756,7 @@ async def api_rankings_impl(
         **response_helpers.visibility_counts(total_images, visible_images),
         "total_kept": total_images,
         "search_mode": search_mode,
+        "search_sources": search.get("search_sources") or [],
         "ai_unavailable": search["ai_unavailable"],
         "fallback_reason": search.get("fallback_reason", ""),
     }

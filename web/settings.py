@@ -8,6 +8,7 @@ SETTINGS_PATH = os.path.join(WEB_DIR, "settings.local.json")
 SETTINGS_VERSION = 2
 DEFAULT_EMBED_MODEL_PRESET_KEY = "qwen3-vl-embedding-8b"
 LEGACY_2B_PRESET_KEY = "qwen3-vl-embedding-2b"
+DEFAULT_CAPTION_MODEL_PRESET_KEY = "qwen2.5-vl-7b-instruct-bnb-4bit"
 
 
 def _default_import_root() -> str:
@@ -42,6 +43,14 @@ DEFAULT_SETTINGS = {
     "search_similarity_threshold": 0.35,
     "show_loupe_cache_status": True,
     "people_scan_enabled": True,
+    "caption_scan_enabled": False,
+    "caption_model_preset": DEFAULT_CAPTION_MODEL_PRESET_KEY,
+    "caption_model_id": "Qwen/Qwen2.5-VL-7B-Instruct",
+    "caption_model_revision": "main",
+    "caption_model_dir": _default_model_dir("Qwen/Qwen2.5-VL-7B-Instruct"),
+    "caption_model_quantization": "bnb-4bit",
+    "caption_prompt_version": "caption-json-v1",
+    "caption_batch_size": 1,
     "people_auto_install": True,
     "face_model_id": "buffalo_l",
     "face_model_dir": _default_model_dir("insightface"),
@@ -71,6 +80,17 @@ EMBED_MODEL_PRESETS = {
     },
 }
 
+CAPTION_MODEL_PRESETS = {
+    "qwen2.5-vl-7b-instruct-bnb-4bit": {
+        "label": "Qwen2.5-VL 7B Captioner",
+        "model_id": "Qwen/Qwen2.5-VL-7B-Instruct",
+        "revision": "main",
+        "quantization": "bnb-4bit",
+        "prompt_version": "caption-json-v1",
+        "description": "Default local VLM captioner, loaded sequentially with embeddings on 8GB GPUs.",
+    },
+}
+
 # Compatibility name for callers that still pass the old fast role.
 FAST_SEARCH_PRESET_KEY = LEGACY_2B_PRESET_KEY
 
@@ -87,6 +107,7 @@ INT_RANGES = {
     "embed_batch_size": (1, 32),
     "embed_model_dim": (64, 4096),
     "face_detection_size": (160, 1280),
+    "caption_batch_size": (1, 4),
 }
 
 FLOAT_RANGES = {
@@ -142,6 +163,18 @@ def embedding_model_key(config: dict | None = None) -> str:
     return f"{_safe_model_key_part(model_id)}@{_safe_model_key_part(revision)}:{dimension}"
 
 
+def caption_model_key(config: dict | None = None) -> str:
+    config = config or get_settings()
+    model_id = config.get("caption_model_id") or DEFAULT_SETTINGS["caption_model_id"]
+    revision = config.get("caption_model_revision") or "main"
+    quantization = config.get("caption_model_quantization") or "none"
+    prompt_version = config.get("caption_prompt_version") or "caption-json-v1"
+    return (
+        f"{_safe_model_key_part(model_id)}@{_safe_model_key_part(revision)}:"
+        f"{_safe_model_key_part(quantization)}:{_safe_model_key_part(prompt_version)}"
+    )
+
+
 def embedding_model_config_for_preset(preset_key: str) -> dict:
     preset = EMBED_MODEL_PRESETS[preset_key]
     config = {
@@ -177,6 +210,38 @@ def active_embedding_config(config: dict | None = None) -> dict:
         "embed_model_dim": int(config["embed_model_dim"]),
         "embed_model_dir": config["embed_model_dir"],
         "embed_batch_size": int(config.get("embed_batch_size") or DEFAULT_SETTINGS["embed_batch_size"]),
+    }
+
+
+def caption_model_config_for_preset(preset_key: str) -> dict:
+    preset = CAPTION_MODEL_PRESETS[preset_key]
+    config = {
+        "caption_model_id": preset["model_id"],
+        "caption_model_revision": preset["revision"],
+        "caption_model_dir": _default_model_dir(preset["model_id"]),
+        "caption_model_quantization": preset["quantization"],
+        "caption_prompt_version": preset["prompt_version"],
+    }
+    return {
+        "model_key": caption_model_key(config),
+        "model_id": config["caption_model_id"],
+        "revision": config["caption_model_revision"],
+        "model_dir": config["caption_model_dir"],
+        "quantization": config["caption_model_quantization"],
+        "prompt_version": config["caption_prompt_version"],
+    }
+
+
+def active_caption_config(config: dict | None = None) -> dict:
+    config = config or get_settings()
+    return {
+        "model_key": caption_model_key(config),
+        "model_id": config["caption_model_id"],
+        "revision": config["caption_model_revision"],
+        "model_dir": config["caption_model_dir"],
+        "quantization": config.get("caption_model_quantization") or "bnb-4bit",
+        "prompt_version": config.get("caption_prompt_version") or "caption-json-v1",
+        "batch_size": int(config.get("caption_batch_size") or DEFAULT_SETTINGS["caption_batch_size"]),
     }
 
 
@@ -325,6 +390,22 @@ def normalize_settings(raw: dict | None) -> dict:
         "embed_model_dir": _default_model_dir(preset_config["model_id"]),
     }
 
+    caption_preset = str(
+        raw.get("caption_model_preset", normalized.get("caption_model_preset", ""))
+    ).strip()
+    if caption_preset not in CAPTION_MODEL_PRESETS:
+        caption_preset = DEFAULT_CAPTION_MODEL_PRESET_KEY
+    normalized["caption_model_preset"] = caption_preset
+    caption_preset_config = CAPTION_MODEL_PRESETS[caption_preset]
+    raw = {
+        **raw,
+        "caption_model_id": caption_preset_config["model_id"],
+        "caption_model_revision": caption_preset_config["revision"],
+        "caption_model_dir": _default_model_dir(caption_preset_config["model_id"]),
+        "caption_model_quantization": caption_preset_config["quantization"],
+        "caption_prompt_version": caption_preset_config["prompt_version"],
+    }
+
     model_id = (raw.get("embed_model_id") or normalized["embed_model_id"]).strip()
     if not model_id:
         model_id = normalized["embed_model_id"]
@@ -341,6 +422,21 @@ def normalize_settings(raw: dict | None) -> dict:
         raw.get("embed_model_dir", _default_model_dir(model_id)),
         _default_model_dir(model_id),
     )
+    caption_model_id = str(raw.get("caption_model_id") or normalized["caption_model_id"]).strip()
+    normalized["caption_model_id"] = caption_model_id or DEFAULT_SETTINGS["caption_model_id"]
+    normalized["caption_model_revision"] = str(
+        raw.get("caption_model_revision") or normalized["caption_model_revision"]
+    ).strip() or "main"
+    normalized["caption_model_dir"] = _resolve_cache_dir(
+        raw.get("caption_model_dir", _default_model_dir(caption_model_id)),
+        _default_model_dir(caption_model_id),
+    )
+    normalized["caption_model_quantization"] = str(
+        raw.get("caption_model_quantization") or normalized["caption_model_quantization"]
+    ).strip() or "bnb-4bit"
+    normalized["caption_prompt_version"] = str(
+        raw.get("caption_prompt_version") or normalized["caption_prompt_version"]
+    ).strip() or "caption-json-v1"
     face_model_id = str(raw.get("face_model_id") or normalized["face_model_id"]).strip()
     normalized["face_model_id"] = face_model_id or DEFAULT_SETTINGS["face_model_id"]
     normalized["face_model_dir"] = _resolve_cache_dir(
@@ -378,6 +474,10 @@ def normalize_settings(raw: dict | None) -> dict:
     normalized["people_scan_enabled"] = _normalize_bool(
         raw.get("people_scan_enabled", normalized["people_scan_enabled"]),
         DEFAULT_SETTINGS["people_scan_enabled"],
+    )
+    normalized["caption_scan_enabled"] = _normalize_bool(
+        raw.get("caption_scan_enabled", normalized["caption_scan_enabled"]),
+        DEFAULT_SETTINGS["caption_scan_enabled"],
     )
     normalized["people_auto_install"] = _normalize_bool(
         raw.get("people_auto_install", normalized["people_auto_install"]),

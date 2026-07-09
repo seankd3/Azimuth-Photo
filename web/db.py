@@ -13,6 +13,7 @@ from data import connection as data_connection
 from data import schema as data_schema
 from data.repositories import cache_entries as cache_entry_repository
 from data.repositories import catalog as catalog_repository
+from data.repositories import captions as caption_repository
 from data.repositories import collections as collection_repository
 from data.repositories import shares as share_repository
 from data.repositories import stacks as stack_repository
@@ -86,6 +87,14 @@ def active_embedding_config() -> dict:
 
 def active_embedding_model_key() -> str:
     return active_embedding_config()["model_key"]
+
+
+def active_caption_config() -> dict:
+    return settings.active_caption_config()
+
+
+def active_caption_model_key() -> str:
+    return active_caption_config()["model_key"]
 
 
 normalize_source_path = catalog_repository.normalize_source_path
@@ -1280,6 +1289,115 @@ async def get_embedding_count() -> int:
         active_embedding_config=active_embedding_config,
         count_embeddings_for_model=count_embeddings_for_model,
         ttl_seconds=EMBEDDING_COUNT_CACHE_TTL_SECONDS,
+    )
+
+
+async def ensure_active_caption_fts_model(caption_config: dict | None = None) -> None:
+    caption_config = caption_config or active_caption_config()
+    await caption_repository.ensure_active_caption_fts_model(
+        DB_PATH,
+        caption_config["model_key"],
+    )
+
+
+async def get_images_needing_captions(
+    limit: int = 8,
+    caption_config: dict | None = None,
+    cache_root: str = "",
+    cache_size: str = "md",
+) -> list[dict]:
+    caption_config = caption_config or active_caption_config()
+    return await caption_repository.get_images_needing_captions(
+        DB_PATH,
+        model_key=caption_config["model_key"],
+        cache_root=cache_root or settings.get_settings()["ssd_cache_dir"],
+        cache_size=cache_size,
+        limit=limit,
+    )
+
+
+async def count_images_needing_captions(
+    caption_config: dict | None = None,
+    cache_root: str = "",
+    cache_size: str = "md",
+) -> int:
+    caption_config = caption_config or active_caption_config()
+    return await caption_repository.count_images_needing_captions(
+        DB_PATH,
+        model_key=caption_config["model_key"],
+        cache_root=cache_root or settings.get_settings()["ssd_cache_dir"],
+        cache_size=cache_size,
+    )
+
+
+async def store_caption_result(
+    *,
+    image_id: int,
+    caption_config: dict | None = None,
+    caption: str = "",
+    tags=None,
+    quality: str | None = None,
+    status: str = "done",
+    error: str = "",
+) -> None:
+    caption_config = caption_config or active_caption_config()
+    await ensure_active_caption_fts_model(caption_config)
+    await caption_repository.store_caption_result(
+        DB_PATH,
+        image_id=image_id,
+        model_key=caption_config["model_key"],
+        caption=caption,
+        tags=tags or [],
+        quality=quality,
+        status=status,
+        error=error,
+    )
+    cache_events.invalidate_rankings_cache()
+
+
+async def get_caption_status_counts(caption_config: dict | None = None) -> dict:
+    caption_config = caption_config or active_caption_config()
+    return await caption_repository.caption_status_counts(
+        DB_PATH,
+        model_key=caption_config["model_key"],
+        cache_root=settings.get_settings()["ssd_cache_dir"],
+    )
+
+
+async def caption_search_ranked_image_ids(
+    text_query: str,
+    *,
+    max_results: int = 5000,
+    caption_config: dict | None = None,
+) -> list[tuple[int, float]]:
+    caption_config = caption_config or active_caption_config()
+    return await caption_repository.caption_search_ranked_image_ids(
+        DB_PATH,
+        text_query,
+        active_source_ids=await get_active_source_id_set(),
+        model_key=caption_config["model_key"],
+        max_results=max_results,
+    )
+
+
+async def metadata_search_ranked_image_ids(
+    text_query: str,
+    *,
+    max_results: int = 5000,
+) -> list[tuple[int, float]]:
+    return await metadata_search_repository.metadata_search_ranked_image_ids(
+        DB_PATH,
+        text_query,
+        active_source_ids=await get_active_source_id_set(),
+        max_results=max_results,
+    )
+
+
+async def caption_count_for_signature(caption_config: dict | None = None) -> int:
+    caption_config = caption_config or active_caption_config()
+    return await caption_repository.caption_count_for_signature(
+        DB_PATH,
+        model_key=caption_config["model_key"],
     )
 
 
