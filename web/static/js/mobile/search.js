@@ -6,6 +6,8 @@ import { getFilterOptions, getPeople, ignorePerson, labelPerson } from './api.js
 import { nav, setScope } from './state.js';
 import { closeSheet, openSheet } from './selection.js';
 import { showToast } from './toast.js';
+import { icon } from '../icons.js';
+import { personLabel } from '../people_labels.js';
 
 const RECENT_KEY = 'pa-m-recent-searches';
 
@@ -57,15 +59,15 @@ function commitSearch(raw) {
 }
 
 function openPersonSheet(person) {
-    const name = person.label || person.name || 'Person';
+    const name = personLabel(person);
     const sheet = openSheet(
         `<h3>${esc(name)}</h3>`
         + '<input class="sheet-input" id="mp-name" type="text" autocomplete="off" placeholder="Name">'
         + '<button class="sheet-btn" id="mp-save">Rename</button>'
-        + '<button class="sheet-row" id="mp-ignore"><span class="g">✕</span>Ignore this person</button>'
+        + `<button class="sheet-row" id="mp-ignore"><span class="g">${icon('x')}</span>Ignore this person</button>`
     );
     const input = sheet.querySelector('#mp-name');
-    input.value = name === 'Person' ? '' : name;
+    input.value = name === 'Unnamed' ? '' : name;
     sheet.querySelector('#mp-save').addEventListener('click', async () => {
         const next = input.value.trim();
         if (!next) return;
@@ -111,10 +113,10 @@ function render() {
     };
 
     let html =
-        '<div id="ms-field"><span class="g">⌕</span>'
+        `<div id="ms-field"><span class="g">${icon('search')}</span>`
         + '<input id="ms-input" type="search" enterkeyhint="search" placeholder="Search your photos"'
         + ' autocomplete="off" spellcheck="false" aria-label="Search photos">'
-        + '<button id="ms-clear" aria-label="Clear search" style="display:none">✕</button></div>'
+        + `<button id="ms-clear" aria-label="Clear search" style="display:none">${icon('x')}</button></div>`
         + '<div class="ms-hints">'
         + '<span>camera:Sony</span><span>lens:35mm</span>'
         + '</div>';
@@ -126,13 +128,13 @@ function render() {
         html += '<div class="ms-empty">No faces surfaced yet.</div>';
     } else {
         ppl.forEach((p, i) => {
-            const name = p.label || p.name || 'Person';
+            const name = personLabel(p);
             const faceUrl = p.face_thumb_url || p.thumb_url || '';
             const face = faceUrl
                 ? `<img loading="lazy" decoding="async" src="${esc(faceUrl)}" alt="">`
                 : `<div class="pf-init">${esc(name.trim().charAt(0).toUpperCase() || '?')}</div>`;
             html += `<button class="m-person" data-pi="${i}" aria-label="${esc(name)}">`
-                + `<div class="m-face">${face}</div><span>${esc(name)}</span></button>`;
+                + `<div class="m-face">${face}</div><span class="${name === 'Unnamed' ? 'unnamed' : ''}">${esc(name)}</span></button>`;
         });
     }
     html += '</div></div>';
@@ -141,19 +143,19 @@ function render() {
         `<button class="ms-chip" ${attrs}><span class="g">${glyph}</span><b>${esc(label)}</b>`
         + `${count ? `<span class="n num">${fmtInt(count)}</span>` : ''}</button>`;
     html += '<div class="ms-sec"><h3>Categories</h3><div id="ms-cats">'
-        + chip('data-type="raw"', '▦', 'RAW files', countFor('raw'))
-        + chip('data-type="jpg"', '▢', 'JPGs', countFor('jpg'))
-        + chip('data-type="tif"', '▣', 'TIFFs', countFor('tif'))
-        + chip('data-flag="picked"', '★', 'Picked', null)
-        + chip('data-flag="rejected"', '✕', 'Rejected', null)
-        + chip('data-stars="4"', '★', '4+ stars', null)
-        + cams.map((c, i) => chip(`data-cam="${i}"`, '▧', c.camera, c.count)).join('')
+        + chip('data-type="raw"', icon('image'), 'RAW files', countFor('raw'))
+        + chip('data-type="jpg"', icon('image'), 'JPGs', countFor('jpg'))
+        + chip('data-type="tif"', icon('image'), 'TIFFs', countFor('tif'))
+        + chip('data-flag="picked"', icon('star'), 'Picked', null)
+        + chip('data-flag="rejected"', icon('x'), 'Rejected', null)
+        + chip('data-stars="4"', icon('star'), '4+ stars', null)
+        + cams.map((c, i) => chip(`data-cam="${i}"`, icon('camera'), c.camera, c.count)).join('')
         + '</div></div>';
 
     const recents = recentSearches();
     html += '<div class="ms-sec"><h3>Recent searches</h3>'
         + (recents.length
-            ? recents.map((s, i) => `<button class="ms-row" data-rs="${i}"><span class="g">◷</span>${esc(s)}</button>`).join('')
+            ? recents.map((s, i) => `<button class="ms-row" data-rs="${i}"><span class="g">${icon('clock-3')}</span>${esc(s)}</button>`).join('')
             : '<div class="ms-empty">Searches you run will show up here.</div>')
         + '</div>';
 
@@ -204,7 +206,7 @@ function render() {
             if (!p) return;
             setScope({
                 people: String(p.id),
-                label: p.label || p.name || 'Person',
+                label: personLabel(p),
                 thumb: p.face_thumb_url || p.thumb_url || '',
             });
             nav.setTab('photos');

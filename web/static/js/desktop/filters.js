@@ -2,6 +2,8 @@ import { getDateHistogram, getFilterOptions, getFolders, getPeople } from './api
 import { byId, on, scope, scopeParams, setScope } from './state.js';
 import { loadCollectionImages } from './scope_data.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
+import { icon } from '../icons.js';
+import { personLabel } from '../people_labels.js';
 
 let popover = null;
 let loaded = false;
@@ -24,10 +26,6 @@ const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c
 }[c]));
 const fmt = (n) => Number(n || 0).toLocaleString('en-US');
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-function personLabel(person) {
-    return person.label || person.name || person.display_name || `Person ${person.id}`;
-}
 
 function countLabel(item, fallback = '') {
     const count = item.count ?? item.image_count ?? item.face_count;
@@ -183,7 +181,7 @@ function renderRanked() {
 function renderStars() {
     return selectBlock('Star rating', [1, 2, 3, 4, 5].map((level) => {
         const active = Number(scope.min_stars || 0) >= level;
-        return `<button class="filter-star ${active ? 'active' : ''}" data-star="${level}" aria-label="${level}+ stars">${active ? '★' : '☆'}</button>`;
+        return `<button class="filter-star ${active ? 'active' : ''}" data-star="${level}" aria-label="${level}+ stars">${icon('star')}</button>`;
     }).join(''), 'data-filter-section="stars"');
 }
 
@@ -191,7 +189,7 @@ function render() {
     if (!popover) return;
     const keepPeopleFocus = document.activeElement?.id === 'filter-people-search';
     const peopleSearch = popover.querySelector('#filter-people-search')?.value || '';
-    popover.innerHTML = '<div class="filter-pop-head"><b>Filter</b><button class="icon-btn" id="filter-close" aria-label="Close">×</button></div>'
+    popover.innerHTML = `<div class="filter-pop-head"><b>Filter</b><button class="icon-btn" id="filter-close" data-tip="Close (Esc)" aria-label="Close">${icon('x')}</button></div>`
         + (loading ? '<div class="filter-loading skel"></div>' : [
             renderFlag(),
             renderPeople(),

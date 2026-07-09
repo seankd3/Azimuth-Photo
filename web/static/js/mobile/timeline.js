@@ -6,10 +6,12 @@
 
 import { getDateHistogram, getRankings, thumbUrl } from './api.js';
 import {
-    byId, clearSelection, emit, on, rememberImages,
+    byId, clearScope, clearSelection, emit, on, rememberImages,
     scope, scopeActive, scopeParams, selState, selection, selectionChanged,
 } from './state.js';
 import { openViewer } from './viewer.js';
+import { icon } from '../icons.js';
+import { personLabel } from '../people_labels.js';
 
 const PAGE = 120;
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -91,7 +93,7 @@ function cellFor(img, mi) {
     fig.setAttribute('role', 'button');
     fig.setAttribute('aria-label', img.filename || `Photo ${img.id}`);
     fig.innerHTML =
-        '<div class="c-check">✓</div>'
+        `<div class="c-check">${icon('check')}</div>`
         + `<img alt="" loading="lazy" decoding="async" data-src="${esc(img.thumb_url || thumbUrl('sm', img.id))}">`
         + flagBadge(img.flag);
     const image = fig.querySelector('img');
@@ -108,7 +110,7 @@ function mkDaySection(dk, d) {
     sec.dataset.month = d ? monthKeyOf(d) : 'undated';
     sec.innerHTML =
         '<div class="m-day-head">'
-        + '<span class="m-day-check" role="checkbox" aria-checked="false" aria-label="Select day">✓</span>'
+        + `<span class="m-day-check" role="checkbox" aria-checked="false" aria-label="Select day">${icon('check')}</span>`
         + `<h3>${d ? esc(fmtDayHead(d)) : 'Undated'}</h3></div>`
         + '<div class="m-day-grid"></div>';
     sec.querySelector('.m-day-check').addEventListener('click', (e) => {
@@ -282,7 +284,7 @@ export function setZoom(i) {
         if (was === 2) rebuildLoaded();
     }
     const ctl = document.getElementById('m-zoomctl');
-    if (ctl) ctl.textContent = zoomIdx === 2 ? '▣' : zoomIdx === 1 ? '▤' : '▦';
+    if (ctl) ctl.innerHTML = icon(zoomIdx === 2 ? 'rows-3' : zoomIdx === 1 ? 'grid-3x3' : 'layout-grid', 'icon icon-lg');
     updateMonthPill(false);
     endEl.hidden = zoomIdx === 2 || !endReached;
 }
@@ -487,21 +489,23 @@ function renderScopeBar() {
         bar.innerHTML = '';
         return;
     }
-    let html = '';
+    const chips = [];
     const chip = (kind, label, clear, img = '') =>
         `<span class="chip">${img}<span class="chip-kind">${esc(kind)}</span><b>${esc(label)}</b>`
-        + `<span class="chip-x" role="button" aria-label="Clear ${esc(kind)}" data-clear="${clear}">✕</span></span>`;
+        + `<span class="chip-x" role="button" aria-label="Clear ${esc(kind)}" data-clear="${clear}">${icon('x')}</span></span>`;
     if (scope.people) {
         const face = scope.thumb ? `<img src="${esc(scope.thumb)}" alt="">` : '';
-        html += chip('person', scope.label || 'Person', 'people', face);
+        chips.push(chip('person', personLabel({ label: scope.label }), 'people', face));
     }
-    if (scope.q) html += chip('search', scope.q, 'q');
-    if (scope.flag) html += chip('flag', scope.flag === 'picked' ? 'Picked' : 'Rejected', 'flag');
-    if (scope.fileType) html += chip('type', scope.fileType.toUpperCase(), 'fileType');
-    if (scope.camera) html += chip('camera', scope.camera, 'camera');
-    if (scope.lens) html += chip('lens', scope.lens, 'lens');
-    if (scope.minStars) html += chip('rating', `${scope.minStars}+ stars`, 'minStars');
-    if (scope.similarId) html += chip('similar', scope.label || 'Similar', 'similarId');
+    if (scope.q) chips.push(chip('search', scope.q, 'q'));
+    if (scope.flag) chips.push(chip('flag', scope.flag === 'picked' ? 'Picked' : 'Rejected', 'flag'));
+    if (scope.fileType) chips.push(chip('type', scope.fileType.toUpperCase(), 'fileType'));
+    if (scope.camera) chips.push(chip('camera', scope.camera, 'camera'));
+    if (scope.lens) chips.push(chip('lens', scope.lens, 'lens'));
+    if (scope.minStars) chips.push(chip('rating', `${scope.minStars}+ stars`, 'minStars'));
+    if (scope.similarId) chips.push(chip('similar', scope.label || 'Similar', 'similarId'));
+    if (chips.length > 1) chips.push(`<button class="chip ghost" data-clear-all="1">${icon('x')}<span>Clear all</span></button>`);
+    let html = chips.join('');
     html += `<span class="m-scope-count num">${fmtInt(histogram.total)} photos</span>`;
     if (currentSortQuality && Number(currentSortQuality.total) > 0) {
         html += `<span class="m-scope-quality num">${fmtInt(currentSortQuality.percent)}% sorted</span>`;
@@ -522,6 +526,9 @@ function renderScopeBar() {
             emit('scope', scope);
         });
     }
+    bar.querySelector('[data-clear-all]')?.addEventListener('click', () => {
+        clearScope();
+    });
 }
 
 /* ---------- selection gestures (long-press + drag range) ---------- */

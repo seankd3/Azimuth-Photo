@@ -2,6 +2,7 @@ import { getImportOptions } from './api.js';
 import { emit, on, setScope } from './state.js';
 import { showToast } from './toast.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
+import { icon } from '../icons.js';
 
 let modal = null;
 let selectedFiles = [];
@@ -190,7 +191,7 @@ async function startImport() {
 
 function modalHtml() {
     return '<div id="import-modal" class="modal-card" role="dialog" aria-modal="true" aria-label="Import photos" tabindex="-1">'
-        + '<div class="mo-head"><h2>Import</h2><button class="icon-btn" id="import-close" aria-label="Close">×</button></div>'
+        + `<div class="mo-head"><h2>Import</h2><button class="icon-btn" id="import-close" data-tip="Close (Esc)" aria-label="Close">${icon('x')}</button></div>`
         + '<div class="mo-body">'
         + '<div id="import-drop-zone" class="import-drop" tabindex="0"><b>Drop photos or folders</b><span id="import-selection-summary">No photos selected</span></div>'
         + '<div class="import-actions"><button class="btn" id="import-files">Choose files</button><button class="btn" id="import-folder">Choose folder</button></div>'

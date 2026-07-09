@@ -1,5 +1,6 @@
 import { getCollection, getMapMarkers, thumbUrl } from './api.js';
 import { emit, on, scope, scopeParams, setImages, setRankingsMeta } from './state.js';
+import { icon } from '../icons.js';
 
 let mounted = false;
 let initialized = false;
@@ -66,7 +67,7 @@ function renderMap(data = {}) {
     const stage = document.getElementById('map-stage');
     const clusters = cluster(markers);
     if (!markers.length) {
-        stage.innerHTML = '<div id="map-empty"><div class="me-glyph">◈</div><h3>No GPS data in this scope</h3><p>Photos with coordinates will appear here as map points.</p></div>';
+        stage.innerHTML = `<div id="map-empty"><div class="me-glyph">${icon('map-pin')}</div><h3>No GPS data in this scope — photos with location info will appear here automatically</h3></div>`;
         return;
     }
     stage.innerHTML = '<svg id="map-svg" viewBox="0 0 1000 500" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Photo map">'

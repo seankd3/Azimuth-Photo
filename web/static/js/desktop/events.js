@@ -2,6 +2,7 @@ import { createCollection, removeFromCollection, thumbUrl } from './api.js';
 import { emit, on, selection, selectionChanged, setImages, setRankingsMeta, viewState } from './state.js';
 import { loadScopePage } from './scope_data.js';
 import { showToast } from './toast.js';
+import { icon } from '../icons.js';
 
 const GAP_KEY = 'pa_d_event_gap';
 const PAGE_SIZE = 100;
@@ -78,7 +79,7 @@ function buildGroups() {
 function cellHtml(img, index) {
     return `<figure class="cell ${selection.has(Number(img.id)) ? 'sel' : ''}" data-id="${img.id}" data-idx="${index}" tabindex="-1" style="--ar:${aspect(img)}">`
         + `<img data-src="${esc(img.thumb_url || thumbUrl('sm', img.id))}" loading="lazy" decoding="async" alt="${esc(img.filename || '')}">`
-        + '<button class="c-check" aria-label="Select photo">✓</button>'
+        + `<button class="c-check" aria-label="Select photo">${icon('check')}</button>`
         + `<span class="c-idx">${index + 1}</span><span class="c-elo"><span class="elo-chip">${Math.round(Number(img.elo) || 0)}</span></span></figure>`;
 }
 
@@ -114,7 +115,7 @@ function render() {
         return `<article class="event-block" data-group="${groupIndex}">`
             + `<header class="event-head"><h2>${esc(title)}</h2><span class="ev-count">${fmt(group.images.length)} photos</span>`
             + `<span class="ev-dots" data-tip="Ranking coverage">${coverageDots(group)}</span><span class="ev-spacer"></span>`
-            + `<button class="ev-menu-btn" data-menu="${groupIndex}" aria-label="Event actions">...</button></header>`
+            + `<button class="ev-menu-btn" data-menu="${groupIndex}" data-tip="Event actions" aria-label="Event actions">${icon('ellipsis')}</button></header>`
             + '<div class="event-body">'
             + `<figure class="event-hero" data-id="${hero.id}"><img data-src="${esc(thumbUrl('md', hero.id))}" alt="${esc(hero.filename || '')}"><figcaption class="hero-cap"><span>${esc(hero.filename || '')}</span><span>${Math.round(Number(hero.elo) || 0)}</span></figcaption></figure>`
             + `<div class="event-tiles">${visibleTiles.map((img) => cellHtml(img, images.findIndex((item) => Number(item.id) === Number(img.id)))).join('')}`

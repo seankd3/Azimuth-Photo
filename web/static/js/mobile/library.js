@@ -14,6 +14,7 @@ import { openSheet, closeSheet } from './selection.js';
 import { showToast } from './toast.js';
 import { openViewer } from './viewer.js';
 import { applyFlags } from './flags.js';
+import { icon } from '../icons.js';
 
 // Matches RANK_QUALITY_MIN_SIGNALS in data/repositories/rankings.py.
 const SORT_QUALITY_MIN_SIGNALS = 3;
@@ -39,7 +40,7 @@ const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c
 }[c]));
 const fmtInt = (n) => (n == null ? '…' : Number(n).toLocaleString('en-US'));
 const suggestionFingerprint = (s) => `${s.kind || ''}|${s.cover_image_id || ''}|${s.count || 0}`;
-const suggestionGlyph = (kind) => (kind === 'event' ? '◷' : '◇');
+const suggestionGlyph = (kind) => icon(kind === 'event' ? 'calendar' : 'sparkles');
 
 /* ---------- main render ---------- */
 function render() {
@@ -51,22 +52,22 @@ function render() {
         const pct = sortedPctCache.get(c.id);
         const pctLabel = pct == null ? '' : ` · ${pct}% sorted`;
         html += `<button class="m-lib-card" data-ci="${i}">`
-            + `<div class="m-lib-cover">${c.cover_image_id ? `<img src="${esc(thumbUrl('sm', c.cover_image_id))}" alt="">` : '⊞'}</div>`
+            + `<div class="m-lib-cover">${c.cover_image_id ? `<img src="${esc(thumbUrl('sm', c.cover_image_id))}" alt="">` : icon('folder')}</div>`
             + `<div class="m-lib-cap"><b>${esc(c.name)}</b>`
             + `<span class="num">${fmtInt(c.image_count)} photos${pctLabel}</span></div></button>`;
     });
-    html += '<button class="m-lib-card m-lib-new" id="ml-new"><span class="g">+</span>New collection</button></div>';
+    html += `<button class="m-lib-card m-lib-new" id="ml-new">${icon('plus', 'icon icon-lg')}New collection</button></div>`;
 
     if (canInstall()) {
         html += '<div class="ms-sec" style="padding-left:0;padding-right:0">'
-            + '<button class="m-lib-row ml-install" id="ml-install"><span class="g">⭳</span>'
+            + `<button class="m-lib-row ml-install" id="ml-install"><span class="g">${icon('download')}</span>`
             + '<span class="body">Install photoArchive<span class="sub">Add it to your home screen as an app</span></span></button></div>';
     }
 
     html += '<div class="ms-sec" style="padding-left:0;padding-right:0"><h3>Quick access</h3>'
-        + `<button class="m-lib-row" data-q="picked"><span class="g">★</span><span class="body">Picked</span><span class="n num">${fmtInt(counts && counts.picked)}</span></button>`
-        + `<button class="m-lib-row" data-q="rejected"><span class="g">✕</span><span class="body">Rejected</span><span class="n num">${fmtInt(counts && counts.rejected)}</span></button>`
-        + `<button class="m-lib-row" data-q="all"><span class="g">◷</span><span class="body">All photos</span><span class="n num">${fmtInt(counts && counts.total)}</span></button></div>`;
+        + `<button class="m-lib-row" data-q="picked"><span class="g">${icon('star')}</span><span class="body">Picked</span><span class="n num">${fmtInt(counts && counts.picked)}</span></button>`
+        + `<button class="m-lib-row" data-q="rejected"><span class="g">${icon('x')}</span><span class="body">Rejected</span><span class="n num">${fmtInt(counts && counts.rejected)}</span></button>`
+        + `<button class="m-lib-row" data-q="all"><span class="g">${icon('clock-3')}</span><span class="body">All photos</span><span class="n num">${fmtInt(counts && counts.total)}</span></button></div>`;
 
     html += '<div class="ms-sec" style="padding-left:0;padding-right:0"><h3>Sources</h3>';
     const sources = (catalog && catalog.sources) || null;
@@ -75,7 +76,7 @@ function render() {
             const online = Number(s.online) === 1;
             const photoCount = s.active_image_count != null ? s.active_image_count : s.image_count;
             html += '<div class="m-lib-row">'
-                + '<span class="g">▤</span>'
+                + `<span class="g">${icon('hard-drive')}</span>`
                 + `<span class="body">${esc(s.display_name || s.path)}`
                 + `<span class="sub num">${fmtInt(photoCount)} photos${online ? '' : ' · offline'}</span></span>`
                 + `<span class="nr-dot ${online ? 'on' : 'off'}"></span></div>`;
@@ -128,7 +129,7 @@ function workRows() {
     return [
         {
             key: 'ai',
-            glyph: '⌕',
+            glyph: icon('search'),
             title: 'AI embeddings',
             progress: pct(ai && ai.progress_pct),
             detail: ai
@@ -139,7 +140,7 @@ function workRows() {
         },
         {
             key: 'cache',
-            glyph: '▧',
+            glyph: icon('image'),
             title: 'Cache pregen',
             progress: pct(preview.progress_pct),
             detail: cache
@@ -150,7 +151,7 @@ function workRows() {
         },
         {
             key: 'people',
-            glyph: '◉',
+            glyph: icon('users'),
             title: 'People scan',
             progress: null,
             detail: peopleStatus
@@ -323,7 +324,7 @@ function renderSuggestions() {
             + `<span>${esc(s.subtitle || `${fmtInt(count)} photos`)}</span></div>`
             + '<div class="ml-suggest-actions">'
             + '<button class="ml-suggest-create" type="button">Create</button>'
-            + '<button class="ml-suggest-dismiss" type="button" aria-label="Dismiss suggestion">×</button></div>'
+            + `<button class="ml-suggest-dismiss" type="button" aria-label="Dismiss suggestion">${icon('x')}</button></div>`
             + '</article>';
     });
     html += '</div>';
@@ -473,7 +474,7 @@ function newCollectionSheet() {
 async function openCollectionView(coll) {
     showingCollection = true;
     root.innerHTML =
-        `<div class="ml-head"><button class="ml-back" id="ml-back">‹ Library</button><h3>${esc(coll.name)}</h3><button class="ml-more" id="ml-more" aria-label="Collection actions">⋯</button></div>`
+        `<div class="ml-head"><button class="ml-back" id="ml-back">${icon('chevron-left')} Library</button><h3>${esc(coll.name)}</h3><button class="ml-more" id="ml-more" aria-label="Collection actions">${icon('ellipsis')}</button></div>`
         + `<div class="ml-coll-grid">${'<div class="skel-cell"></div>'.repeat(9)}</div>`;
     root.querySelector('#ml-back').addEventListener('click', render);
     root.querySelector('#ml-more').addEventListener('click', () => openCollectionActionsSheet(coll));
@@ -488,7 +489,7 @@ async function openCollectionView(coll) {
         + '</figure>'
     ).join('');
     root.innerHTML =
-        `<div class="ml-head"><button class="ml-back" id="ml-back">‹ Library</button><h3>${esc(coll.name)}</h3><button class="ml-more" id="ml-more" aria-label="Collection actions">⋯</button></div>`
+        `<div class="ml-head"><button class="ml-back" id="ml-back">${icon('chevron-left')} Library</button><h3>${esc(coll.name)}</h3><button class="ml-more" id="ml-more" aria-label="Collection actions">${icon('ellipsis')}</button></div>`
         + `<div class="ms-empty">${fmtInt(images.length)} photos${pct == null ? '' : ` · ${pct}% sorted`}</div>`
         + `<div class="ml-coll-grid">${grid || '<div class="ms-empty" style="grid-column:span 3">Empty collection.</div>'}</div>`;
     root.querySelector('#ml-back').addEventListener('click', () => {
@@ -507,8 +508,8 @@ function openCollectionActionsSheet(coll) {
         `<h3>${esc(coll.name)}</h3>`
         + '<input class="sheet-input" id="ml-rename-name" type="text" autocomplete="off">'
         + '<button class="sheet-btn" id="ml-rename-save">Save name</button>'
-        + '<button class="sheet-row" id="ml-share"><span class="g">↗</span>Share link</button>'
-        + '<button class="sheet-row" id="ml-delete"><span class="g">✕</span>Delete collection</button>'
+        + `<button class="sheet-row" id="ml-share"><span class="g">${icon('share-2')}</span>Share link</button>`
+        + `<button class="sheet-row" id="ml-delete"><span class="g">${icon('trash-2')}</span>Delete collection</button>`
         + '<div class="sheet-confirm" id="ml-delete-confirm" hidden>Delete? <button data-yes="1">Yes</button><button data-no="1">No</button></div>'
     );
     const input = sheet.querySelector('#ml-rename-name');
@@ -608,7 +609,7 @@ function sharePicksRow(pickData) {
     const ids = clientPickIds(pickData);
     const count = Number(pickData?.count ?? ids.length);
     return `<button class="sheet-row" id="ml-share-apply-picks" ${ids.length ? '' : 'disabled'}>`
-        + '<span class="g">♡</span>'
+        + `<span class="g">${icon('heart')}</span>`
         + '<span class="body">Client picks</span>'
         + `<span class="n num">${fmtInt(count)}</span></button>`;
 }
@@ -639,8 +640,8 @@ function sharePasswordControl(share) {
         + (isProtected ? '<b>Protected</b>' : '')
         + '</div>'
         + `<input class="sheet-input" id="ml-share-password" type="password" autocomplete="new-password" placeholder="${isProtected ? 'Protected' : 'No password'}">`
-        + (share ? `<button class="sheet-row" id="ml-share-password-save"><span class="g">⌁</span>${isProtected ? 'Change password' : 'Set password'}</button>` : '')
-        + (isProtected ? '<button class="sheet-row" id="ml-share-password-clear"><span class="g">✕</span>Remove password</button>' : '')
+        + (share ? `<button class="sheet-row" id="ml-share-password-save"><span class="g">${icon('lock')}</span>${isProtected ? 'Change password' : 'Set password'}</button>` : '')
+        + (isProtected ? `<button class="sheet-row" id="ml-share-password-clear"><span class="g">${icon('x')}</span>Remove password</button>` : '')
         + '</div>';
 }
 
@@ -682,9 +683,9 @@ async function renderCollectionShareSheet(coll, share) {
                 + sharePicksRow(pickData)
                 + sharePasswordControl(share)
                 + '<button class="sheet-btn" id="ml-share-copy">Share…</button>'
-                + '<button class="sheet-row" id="ml-share-rotate"><span class="g">↻</span>Rotate link</button>'
+                + `<button class="sheet-row" id="ml-share-rotate"><span class="g">${icon('refresh-cw')}</span>Rotate link</button>`
                 + '<div class="sheet-confirm" id="ml-share-rotate-confirm" hidden>Invalidate old link? <button data-yes="1">Yes</button><button data-no="1">No</button></div>'
-                + '<button class="sheet-row" id="ml-share-revoke"><span class="g">✕</span>Revoke</button>'
+                + `<button class="sheet-row" id="ml-share-revoke"><span class="g">${icon('x')}</span>Revoke</button>`
                 + '<div class="sheet-confirm" id="ml-share-revoke-confirm" hidden>Revoke link? <button data-yes="1">Yes</button><button data-no="1">No</button></div>'
             : '<div class="ms-empty">Create a private gallery link for this collection.</div>'
                 + shareExpiryControl()

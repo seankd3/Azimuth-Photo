@@ -12,6 +12,7 @@ const DEFAULT_PREFS = {
     badgeElo: true,
     badgeIndex: true,
     reduceMotion: false,
+    panelSections: {},
 };
 
 export const scope = {

@@ -7,6 +7,7 @@ import {
     enterSelection, isSelectionMode, toggleSelection,
 } from './selection.js';
 import { openGridContextMenu } from './context_menu.js';
+import { icon } from '../icons.js';
 import {
     appendChunk, configureGridWindow, ensureChunkLive, firstLiveChunk, invalidateHeights, reset as resetGridWindow,
 } from './grid_window.js';
@@ -43,11 +44,11 @@ export function cellHtml(img, index) {
     const flag = img.flag || 'unflagged';
     return `<figure class="cell ${selection.has(Number(img.id)) ? 'sel' : ''}" data-id="${img.id}" data-idx="${index}" draggable="true" tabindex="-1" style="--ar:${aspect(img)}">`
         + `<img data-src="${esc(img.thumb_url || thumbUrl('sm', img.id))}" loading="lazy" decoding="async" alt="${esc(img.filename || '')}">`
-        + '<button class="c-check" aria-label="Select photo">✓</button>'
+        + `<button class="c-check" aria-label="Select photo">${icon('check')}</button>`
         + `<span class="c-idx">${index + 1}</span>`
         + `<span class="c-flag ${flag}">${flagGlyph(flag)}</span>`
         + `<span class="c-elo"><span class="elo-chip">${Math.round(Number(img.elo) || 0)}</span></span>`
-        + '<button class="c-menu" aria-label="Photo actions">⋯</button></figure>';
+        + `<button class="c-menu" data-tip="Photo actions" aria-label="Photo actions">${icon('ellipsis')}</button></figure>`;
 }
 
 function ensureImageObserver() {
@@ -114,7 +115,7 @@ function renderError(message) {
 }
 
 async function loadPage() {
-    if (!mounted || loading || done) return;
+    if (!mounted || loading || done) return false;
     loading = true;
     const seq = generation;
     const pageSize = 100;
@@ -126,17 +127,20 @@ async function loadPage() {
             done = true;
             loading = false;
             document.getElementById('grid-end').hidden = viewState.images.length === 0;
-            return;
+            return false;
         }
         limit = Math.min(pageSize, remaining);
     }
     const params = scopeParams({ limit, offset });
     const data = await loadScopePage({ limit, offset });
-    if (seq !== generation) return;
+    if (seq !== generation) {
+        loading = false;
+        return false;
+    }
     loading = false;
     if (!data) {
         renderError('Retry when the local service is ready.');
-        return;
+        return false;
     }
     const rawIncoming = data.images || [];
     if (offset === 0 && viewState.bestOf) setBestOfTotal(data.visible_images);
@@ -159,6 +163,12 @@ async function loadPage() {
     document.getElementById('grid-error').innerHTML = '';
     document.getElementById('grid-end').hidden = !done || next.length === 0;
     render({ append: !wasEmpty, start: requestStart, images: incoming });
+    return incoming.length > 0;
+}
+
+export async function requestMorePhotos() {
+    if (!mounted || loading || done) return false;
+    return loadPage();
 }
 
 export function loadFirstPage() {

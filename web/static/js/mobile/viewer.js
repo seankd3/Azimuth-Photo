@@ -10,6 +10,7 @@ import { applyFlags } from './flags.js';
 import { byId, nav as appNav, on, rememberImages, setScope } from './state.js';
 import { closeSheet, openCollectionSheet, openSheet } from './selection.js';
 import { showToast } from './toast.js';
+import { icon } from '../icons.js';
 
 let root = null;
 let stage = null;
@@ -163,7 +164,7 @@ function infoSheet() {
     ];
     const sheet = openSheet(
         '<h3>Info</h3>'
-        + '<button class="sheet-row" id="mv-similar"><span class="g">⌕</span>Find similar</button>'
+        + `<button class="sheet-row" id="mv-similar"><span class="g">${icon('scan-search')}</span>Find similar</button>`
         + '<div class="sheet-meta">'
         + rows.map(([k, v]) => `<div><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('')
         + '</div>'

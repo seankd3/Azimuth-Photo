@@ -1,5 +1,6 @@
 import { releaseFocus, trapFocus } from './focusTrap.js';
 import { showToast } from './toast.js';
+import { icon } from '../icons.js';
 
 export const ZIP_EXPORT_MAX = 2000;
 
@@ -35,12 +36,12 @@ function clampPosition(anchor) {
 
 function render({ allowSizes = true } = {}) {
     menu.innerHTML = '<div class="pm-group">'
-        + '<button data-format="csv">⇩ CSV</button>'
-        + '<button data-format="json">⇩ JSON</button>'
+        + `<button data-format="csv">${icon('download')} CSV</button>`
+        + `<button data-format="json">${icon('download')} JSON</button>`
         + '</div><div class="pm-group">'
         + '<div class="pm-label">Download files (zip)</div>'
-        + `<button data-format="zip" data-size="original">Original${allowSizes ? '' : ''}</button>`
-        + (allowSizes ? '<button data-format="zip" data-size="lg">Large</button><button data-format="zip" data-size="md">Medium</button>' : '')
+        + `<button data-format="zip" data-size="original">${icon('download')} Original${allowSizes ? '' : ''}</button>`
+        + (allowSizes ? `<button data-format="zip" data-size="lg">${icon('download')} Large</button><button data-format="zip" data-size="md">${icon('download')} Medium</button>` : '')
         + '</div>';
     for (const button of menu.querySelectorAll('button[data-format]')) {
         button.addEventListener('click', () => {

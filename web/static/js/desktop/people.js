@@ -3,6 +3,8 @@ import {
 } from './api.js';
 import { on, setActiveLens, setRankingsMeta, setScope } from './state.js';
 import { showToast } from './toast.js';
+import { icon } from '../icons.js';
+import { personLabel as cleanPersonLabel, isUnnamedPersonLabel } from '../people_labels.js';
 
 let mounted = false;
 let initialized = false;
@@ -15,15 +17,12 @@ const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c
 }[c]));
 const fmt = (n) => Number(n || 0).toLocaleString('en-US');
 
-function personLabel(person) {
-    return person.label || person.name || `Person ${person.id}`;
-}
-
 function personCard(person, section) {
-    const named = Boolean(person.name);
+    const label = cleanPersonLabel(person);
+    const named = !isUnnamedPersonLabel(label);
     return `<article class="person-card" data-person-id="${person.id}" data-section="${section}" tabindex="0">`
-        + `<div class="person-face">${person.face_thumb_url || person.thumb_url ? `<img src="${esc(person.face_thumb_url || person.thumb_url)}" loading="lazy" decoding="async" alt="">` : '<div class="person-empty">◉</div>'}</div>`
-        + `<div class="person-name ${named ? '' : 'unnamed'}">${esc(personLabel(person))}</div>`
+        + `<div class="person-face">${person.face_thumb_url || person.thumb_url ? `<img src="${esc(person.face_thumb_url || person.thumb_url)}" loading="lazy" decoding="async" alt="">` : `<div class="person-empty">${icon('users')}</div>`}</div>`
+        + `<div class="person-name ${named ? '' : 'unnamed'}">${esc(label)}</div>`
         + `<div class="person-count">${fmt(person.photo_count || person.image_count || person.face_count)} photos</div>`
         + '<div class="person-actions"><button data-act="rename">Rename</button><button data-act="ignore">Ignore</button></div></article>';
 }
@@ -34,14 +33,14 @@ function reviewCard(suggestion) {
     return `<article class="review-card" data-suggestion-id="${suggestion.id}" data-source-id="${suggestion.source_person_id}" data-target-id="${suggestion.target_person_id}">`
         + '<div class="review-faces">'
         + `${personMini(source, suggestion.source_label)}${personMini(target, suggestion.target_label)}</div>`
-        + `<div class="review-copy"><b>${esc(suggestion.source_label)} + ${esc(suggestion.target_label)}</b><span>${Math.round(Number(suggestion.confidence || 0) * 100)}% match</span></div>`
+        + `<div class="review-copy"><b>${esc(cleanPersonLabel(source, suggestion.source_label))} + ${esc(cleanPersonLabel(target, suggestion.target_label))}</b><span>${Math.round(Number(suggestion.confidence || 0) * 100)}% match</span></div>`
         + '<div class="review-actions"><button data-act="merge">Merge</button><button data-act="reject">Reject</button></div></article>';
 }
 
 function personMini(person, fallback) {
     const src = person.face_thumb_url || person.thumb_url || '';
-    return `<button class="person-mini" data-person-id="${person.id || ''}" aria-label="${esc(fallback || personLabel(person))}">`
-        + `${src ? `<img src="${esc(src)}" alt="">` : '<span>◉</span>'}</button>`;
+    return `<button class="person-mini" data-person-id="${person.id || ''}" aria-label="${esc(cleanPersonLabel(person, fallback))}">`
+        + `${src ? `<img src="${esc(src)}" alt="">` : `<span>${icon('users')}</span>`}</button>`;
 }
 
 function sectionHtml(title, key, items) {
@@ -101,7 +100,7 @@ function openPerson(person) {
     if (!person || !person.id) return;
     setScope({
         people: person.id,
-        personLabel: personLabel(person),
+        personLabel: cleanPersonLabel(person),
         personThumb: person.face_thumb_url || person.thumb_url || '',
     });
     setActiveLens('grid');
@@ -109,7 +108,7 @@ function openPerson(person) {
 
 function beginRename(card, person) {
     const label = card.querySelector('.person-name');
-    label.innerHTML = `<input value="${esc(person.name || '')}" placeholder="${esc(personLabel(person))}" aria-label="Person name">`;
+    label.innerHTML = `<input value="${esc(person.name || '')}" placeholder="${esc(cleanPersonLabel(person))}" aria-label="Person name">`;
     const input = label.querySelector('input');
     input.focus();
     input.select();

@@ -11,6 +11,7 @@ import { applyFlags, selectedIds, setCollectionPicker } from './selection.js';
 import { showToast } from './toast.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
 import { downloadExport, openExportMenu } from './export_menu.js';
+import { icon } from '../icons.js';
 
 const DISMISSED_KEY = 'pa_d_dismissed_suggestions';
 let collections = [];
@@ -58,9 +59,9 @@ function renderCollections() {
     }
     host.innerHTML = collections.map((c) => (
         `<div class="nav-row coll-row ${String(scope.collectionId || '') === String(c.id) ? 'active' : ''}" data-coll-id="${c.id}" data-coll-name="${esc(c.name)}" role="button" tabindex="0">`
-        + `<span class="coll-cover">${c.cover_image_id ? `<img src="${esc(thumbUrl('sm', c.cover_image_id))}" alt="">` : '⊞'}</span>`
+        + `<span class="coll-cover">${c.cover_image_id ? `<img src="${esc(thumbUrl('sm', c.cover_image_id))}" alt="">` : icon('folder')}</span>`
         + `<span class="nr-label">${esc(c.name)}</span><span class="nr-count">${fmt(c.image_count)}</span>`
-        + '<button class="coll-menu-btn" type="button" aria-label="Collection actions">⋯</button></div>'
+        + `<button class="coll-menu-btn" type="button" data-tip="Collection actions" aria-label="Collection actions">${icon('ellipsis')}</button></div>`
     )).join('');
     for (const row of host.querySelectorAll('.coll-row')) {
         row.addEventListener('click', () => {
@@ -145,7 +146,10 @@ function openCollectionMenu(row, anchor) {
     collectionMenuReturn = anchor;
     const id = Number(row.dataset.collId);
     const name = row.dataset.collName || 'Collection';
-    collectionMenu.innerHTML = '<div class="pm-group"><button data-act="share">Share…</button><button data-act="rename">Rename</button><button data-act="delete">Delete</button></div>';
+    collectionMenu.innerHTML = '<div class="pm-group">'
+        + `<button data-act="share">${icon('share-2')} Share…</button>`
+        + `<button data-act="rename">${icon('pencil')} Rename</button>`
+        + `<button data-act="delete">${icon('trash-2')} Delete</button></div>`;
     collectionMenu.hidden = false;
     positionCollectionMenu(anchor);
     trapFocus(collectionMenu, collectionMenu.querySelector('button'));
@@ -323,7 +327,7 @@ async function renderShareOverlay(collectionId, name, share = null) {
             + sharePasswordControls(null)
             + '<div class="share-actions"><button id="share-create" type="button">Create share link</button></div>';
     shareOverlay.innerHTML = '<div class="modal-card share-card" role="dialog" aria-modal="true" aria-labelledby="share-title">'
-        + '<div class="mo-head"><h2 id="share-title">Share ' + esc(name) + '</h2><button type="button" id="share-close" aria-label="Close">×</button></div>'
+        + `<div class="mo-head"><h2 id="share-title">Share ${esc(name)}</h2><button type="button" id="share-close" data-tip="Close (Esc)" aria-label="Close">${icon('x')}</button></div>`
         + '<div class="mo-body">' + body + '</div></div>';
     shareOverlay.hidden = false;
     const pickIds = clientPickIds(pickData);
@@ -410,7 +414,7 @@ function bindShareConfirmButton(selector, label, action) {
 
 async function openShareOverlay(collectionId, name = 'Collection') {
     ensureShareOverlay();
-    shareOverlay.innerHTML = '<div class="modal-card share-card" role="dialog" aria-modal="true"><div class="mo-head"><h2>Share ' + esc(name) + '</h2><button type="button" id="share-close" aria-label="Close">×</button></div><div class="mo-body"><div class="muted">Loading…</div></div></div>';
+    shareOverlay.innerHTML = `<div class="modal-card share-card" role="dialog" aria-modal="true"><div class="mo-head"><h2>Share ${esc(name)}</h2><button type="button" id="share-close" data-tip="Close (Esc)" aria-label="Close">${icon('x')}</button></div><div class="mo-body"><div class="muted">Loading…</div></div></div>`;
     shareOverlay.hidden = false;
     shareOverlay.querySelector('#share-close')?.addEventListener('click', closeShareOverlay);
     trapFocus(shareOverlay, shareOverlay.querySelector('button'));
@@ -491,9 +495,9 @@ function renderSuggestions() {
     const visible = (suggestions || []).filter((s) => !gone.has(fingerprint(s)));
     host.innerHTML = visible.map((s, index) => (
         `<article class="suggest-card" data-index="${index}">`
-        + `<div class="cover">${s.cover_image_id ? `<img src="${esc(thumbUrl('md', s.cover_image_id))}" alt="">` : '◇'}</div>`
+        + `<div class="cover">${s.cover_image_id ? `<img src="${esc(thumbUrl('md', s.cover_image_id))}" alt="">` : icon('sparkles')}</div>`
         + `<div class="body"><b>${esc(s.title)}</b><span>${esc(s.subtitle || `${fmt(s.count)} photos`)}</span></div>`
-        + '<div class="actions"><button data-act="create">Create</button><button data-act="dismiss">×</button></div></article>'
+        + `<div class="actions"><button data-act="create">Create</button><button data-act="dismiss" aria-label="Dismiss">${icon('x')}</button></div></article>`
     )).join('');
     for (const card of host.querySelectorAll('.suggest-card[data-index]')) {
         const suggestion = visible[Number(card.dataset.index)];
@@ -541,13 +545,13 @@ async function loadSuggestionsOnce() {
 
 function renderLibrary() {
     const rows = [
-        ['all', '⌂', 'All Photos', ''],
-        ['picked', '★', 'Picked', 'picked'],
-        ['rejected', '×', 'Rejected', 'rejected'],
-        ['recent', '◷', 'Recent', ''],
+        ['all', 'house', 'All Photos', ''],
+        ['picked', 'star', 'Picked', 'picked'],
+        ['rejected', 'x', 'Rejected', 'rejected'],
+        ['recent', 'clock-3', 'Recent', ''],
     ];
     document.getElementById('library-list').innerHTML = rows.map(([id, glyph, label]) => (
-        `<button class="nav-row" data-lib="${id}"><span class="nr-glyph">${glyph}</span><span class="nr-label">${label}</span></button>`
+        `<button class="nav-row" data-lib="${id}"><span class="nr-glyph">${icon(glyph)}</span><span class="nr-label">${label}</span></button>`
     )).join('');
     for (const row of document.querySelectorAll('[data-lib]')) {
         row.addEventListener('click', () => {
@@ -613,7 +617,7 @@ export async function openCollectionPicker(imageIds, { onDone = null } = {}) {
     } else {
         releaseFocus(picker);
     }
-    picker.innerHTML = '<div class="picker-card"><div class="picker-head"><b>Add to collection</b><button aria-label="Close">×</button></div>'
+    picker.innerHTML = `<div class="picker-card"><div class="picker-head"><b>Add to collection</b><button data-tip="Close (Esc)" aria-label="Close">${icon('x')}</button></div>`
         + '<form><input type="text" placeholder="New collection name" autocomplete="off"><button>Create & add</button></form>'
         + '<div class="picker-list"></div></div>';
     const close = () => {

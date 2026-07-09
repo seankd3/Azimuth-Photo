@@ -16,8 +16,11 @@ import { initImporter } from './importer.js';
 import { initSimilar } from './similar.js';
 import { initGridContextMenu } from './context_menu.js';
 import { initExportMenu } from './export_menu.js';
+import { mountIconSprite } from '../icons.js';
+import { initPanelSections } from './panel_sections.js';
 
 async function boot() {
+    await mountIconSprite();
     initState();
     initToast();
     initSelection();
@@ -32,6 +35,7 @@ async function boot() {
     initRefine();
     initDuplicates();
     initRightPanel();
+    initPanelSections();
     initDrawer();
     initKeyboard();
     await initPanel();

@@ -8,6 +8,8 @@ import {
     requestRenameCurrentCollection, requestShareCurrentCollection, toggleLeftPanel,
 } from './panel.js';
 import { switchLens } from './lenses.js';
+import { icon } from '../icons.js';
+import { personLabel } from '../people_labels.js';
 
 const RECENT_KEY = 'pa_d_recent_scopes';
 let people = null;
@@ -19,28 +21,28 @@ const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c
 }[c]));
 
 const COMMANDS = [
-    { glyph: '▸', label: 'Open Refine', kbd: 'R', run: () => emit('refine:open') },
-    { glyph: '◇', label: 'Find duplicates', run: () => emit('duplicates:open') },
-    { glyph: '⌯', label: 'Filter…', run: () => emit('filters:open') },
-    { glyph: '＋', label: 'Import', run: () => emit('import:open') },
-    { glyph: '★', label: 'Toggle Best-of', kbd: 'B', run: toggleBestOf },
-    { glyph: '⇩', label: 'Export CSV', run: () => exportCurrentScope('csv') },
-    { glyph: '⇩', label: 'Export JSON', run: () => exportCurrentScope('json') },
-    { glyph: '⇩', label: 'Download files (zip)', run: () => exportCurrentScope('zip', 'original') },
-    { glyph: '⊞', label: 'New collection', run: requestNewCollection },
-    { glyph: '↗', label: 'Share this collection', when: () => Boolean(scope.collectionId), run: requestShareCurrentCollection },
-    { glyph: '⊞', label: 'Rename this collection', when: () => Boolean(scope.collectionId), run: requestRenameCurrentCollection },
-    { glyph: '⊞', label: 'Delete this collection', when: () => Boolean(scope.collectionId), run: requestDeleteCurrentCollection },
-    { glyph: '▦', label: 'Switch lens: Grid', kbd: 'G', run: () => switchLens('grid') },
-    { glyph: '☰', label: 'Switch lens: Events', kbd: 'E', run: () => switchLens('events') },
-    { glyph: '◉', label: 'Switch lens: People', kbd: 'O', run: () => switchLens('people') },
-    { glyph: '◈', label: 'Switch lens: Map', kbd: 'M', run: () => switchLens('map') },
-    { glyph: '☰', label: 'Toggle left panel', kbd: '[', run: toggleLeftPanel },
-    { glyph: '?', label: 'Keyboard shortcuts', kbd: '?', run: () => emit('help:open') },
-    { glyph: '⌂', label: 'Clear scope / All Photos', run: () => setScope({}) },
-    { glyph: '↓', label: 'Sort by Elo', run: () => setSort('elo') },
-    { glyph: '◷', label: 'Sort by Date', run: () => setSort('date_taken') },
-    { glyph: 'A', label: 'Sort by Filename', run: () => setSort('filename') },
+    { icon: 'zap', label: 'Open Refine', kbd: 'R', run: () => emit('refine:open') },
+    { icon: 'layers', label: 'Find duplicates', run: () => emit('duplicates:open') },
+    { icon: 'funnel', label: 'Filter…', run: () => emit('filters:open') },
+    { icon: 'upload', label: 'Import', run: () => emit('import:open') },
+    { icon: 'star', label: 'Toggle Best-of', kbd: 'B', run: toggleBestOf },
+    { icon: 'download', label: 'Export CSV', run: () => exportCurrentScope('csv') },
+    { icon: 'download', label: 'Export JSON', run: () => exportCurrentScope('json') },
+    { icon: 'download', label: 'Download files (zip)', run: () => exportCurrentScope('zip', 'original') },
+    { icon: 'plus', label: 'New collection', run: requestNewCollection },
+    { icon: 'share-2', label: 'Share this collection', when: () => Boolean(scope.collectionId), run: requestShareCurrentCollection },
+    { icon: 'pencil', label: 'Rename this collection', when: () => Boolean(scope.collectionId), run: requestRenameCurrentCollection },
+    { icon: 'trash-2', label: 'Delete this collection', when: () => Boolean(scope.collectionId), run: requestDeleteCurrentCollection },
+    { icon: 'layout-grid', label: 'Switch lens: Grid', kbd: 'G', run: () => switchLens('grid') },
+    { icon: 'rows-3', label: 'Switch lens: Events', kbd: 'E', run: () => switchLens('events') },
+    { icon: 'users', label: 'Switch lens: People', kbd: 'O', run: () => switchLens('people') },
+    { icon: 'map-pin', label: 'Switch lens: Map', kbd: 'M', run: () => switchLens('map') },
+    { icon: 'panel-left', label: 'Toggle left panel', kbd: '[', run: toggleLeftPanel },
+    { icon: 'keyboard', label: 'Keyboard shortcuts', kbd: '?', run: () => emit('help:open') },
+    { icon: 'house', label: 'Clear scope / All Photos', run: () => setScope({}) },
+    { icon: 'arrow-down-wide-narrow', label: 'Sort by Elo', run: () => setSort('elo') },
+    { icon: 'calendar', label: 'Sort by Date', run: () => setSort('date_taken') },
+    { icon: 'file-type', label: 'Sort by Filename', run: () => setSort('filename') },
 ];
 
 function fuzzy(haystack, needle) {
@@ -88,7 +90,7 @@ function close() {
 }
 
 function rowHtml(row, index) {
-    const face = row.thumb ? `<img class="sd-face" src="${esc(row.thumb)}" alt="">` : `<span class="sd-glyph">${row.glyph}</span>`;
+    const face = row.thumb ? `<img class="sd-face" src="${esc(row.thumb)}" alt="">` : `<span class="sd-glyph">${row.icon ? icon(row.icon) : esc(row.glyph || '')}</span>`;
     const meta = row.kbd ? `<kbd>${esc(row.kbd)}</kbd>` : esc(row.meta || '');
     return `<div class="sd-item ${index === hot ? 'hot' : ''}" role="option" data-index="${index}">${face}<span class="sd-label">${esc(row.label)}</span><span class="sd-meta">${meta}</span></div>`;
 }
@@ -106,19 +108,19 @@ async function build() {
         if (rows.length === 1) rows.push({ empty: 'No matching command.' });
     } else if (term) {
         if (term.startsWith('camera:')) {
-            rows.push({ glyph: '⌘', label: `Use ${term}`, run: () => apply({ camera: term.slice(7).trim() }) });
+            rows.push({ icon: 'camera', label: `Use ${term}`, run: () => apply({ camera: term.slice(7).trim() }) });
         } else if (term.startsWith('lens:')) {
-            rows.push({ glyph: '⌘', label: `Use ${term}`, run: () => apply({ lens: term.slice(5).trim() }) });
+            rows.push({ icon: 'aperture', label: `Use ${term}`, run: () => apply({ lens: term.slice(5).trim() }) });
         } else {
-            rows.push({ glyph: '⌕', label: `Search for “${term}”`, run: () => apply({ q: term }) });
+            rows.push({ icon: 'search', label: `Search for “${term}”`, run: () => apply({ q: term }) });
         }
         const allPeople = await loadPeople();
         const lower = term.toLowerCase();
         for (const person of allPeople) {
-            const label = person.label || person.name || person.display_name || `Person ${person.id}`;
+            const label = personLabel(person);
             if (!label.toLowerCase().includes(lower)) continue;
             rows.push({
-                glyph: '◉',
+                icon: 'users',
                 thumb: person.thumb_url,
                 label,
                 meta: person.image_count || person.face_count || '',
@@ -130,7 +132,7 @@ async function build() {
     const recents = recentScopes();
     if (recents.length) rows.push({ head: 'Recent scopes' });
     for (const item of recents) {
-        rows.push({ glyph: '◷', label: item.label, run: () => apply(item.scope) });
+        rows.push({ icon: 'clock-3', label: item.label, run: () => apply(item.scope) });
     }
     render();
 }

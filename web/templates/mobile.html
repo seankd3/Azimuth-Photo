@@ -30,19 +30,19 @@
 
     <!-- Photos-tab chrome -->
     <div id="m-monthpill" aria-hidden="true"></div>
-    <button id="m-zoomctl" aria-label="Change grid zoom level">&#9638;</button>
+    <button id="m-zoomctl" aria-label="Change grid zoom level"><svg class="icon icon-lg" aria-hidden="true"><use href="#i-layout-grid"></use></svg></button>
     <div id="m-scopebar"></div>
-    <div id="m-scrub"><div class="ms-handle">&#8801;</div></div>
+    <div id="m-scrub"><div class="ms-handle"><svg class="icon" aria-hidden="true"><use href="#i-grip"></use></svg></div></div>
     <div id="scrub-bubble"></div>
 
     <!-- selection bar -->
     <div id="m-selbar">
-        <button class="msb-x" id="msb-clear" aria-label="Clear selection">&#10005;</button>
+        <button class="msb-x" id="msb-clear" aria-label="Clear selection"><svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg></button>
         <span class="msb-count" id="msb-count">0 selected</span>
-        <button class="msb-act" id="msb-pick"><span class="g">&#9733;</span>Pick</button>
-        <button class="msb-act" id="msb-reject"><span class="g">&#10005;</span>Reject</button>
-        <button class="msb-act" id="msb-coll" aria-label="Add to collection"><span class="g">&#8862;</span></button>
-        <button class="msb-act" id="msb-more" aria-label="More actions"><span class="g">&#8943;</span></button>
+        <button class="msb-act" id="msb-pick"><svg class="icon" aria-hidden="true"><use href="#i-star"></use></svg>Pick</button>
+        <button class="msb-act" id="msb-reject"><svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg>Reject</button>
+        <button class="msb-act" id="msb-coll" aria-label="Add to collection"><svg class="icon" aria-hidden="true"><use href="#i-plus"></use></svg></button>
+        <button class="msb-act" id="msb-more" aria-label="More actions"><svg class="icon" aria-hidden="true"><use href="#i-ellipsis"></use></svg></button>
     </div>
 
     <!-- bottom sheet (collections picker, info, menus) -->
@@ -54,14 +54,14 @@
         <div id="mv-stage">
             <img id="mv-img" alt="" fetchpriority="high" decoding="async">
             <div id="mv-cap"></div>
-            <button id="mv-close" aria-label="Close viewer">&#10005;</button>
+            <button id="mv-close" aria-label="Close viewer"><svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg></button>
         </div>
         <div id="mv-bar">
-            <button id="mv-pick" aria-label="Pick">&#9733;</button>
-            <button id="mv-reject" aria-label="Reject">&#10005;</button>
-            <button id="mv-unflag" aria-label="Unflag">&#9675;</button>
-            <button id="mv-coll" aria-label="Add to collection">&#8862;</button>
-            <button id="mv-info" aria-label="Photo info">&#9432;</button>
+            <button id="mv-pick" aria-label="Pick"><svg class="icon icon-lg" aria-hidden="true"><use href="#i-star"></use></svg></button>
+            <button id="mv-reject" aria-label="Reject"><svg class="icon icon-lg" aria-hidden="true"><use href="#i-x"></use></svg></button>
+            <button id="mv-unflag" aria-label="Unflag"><svg class="icon icon-lg" aria-hidden="true"><use href="#i-circle"></use></svg></button>
+            <button id="mv-coll" aria-label="Add to collection"><svg class="icon icon-lg" aria-hidden="true"><use href="#i-plus"></use></svg></button>
+            <button id="mv-info" aria-label="Photo info"><svg class="icon icon-lg" aria-hidden="true"><use href="#i-info"></use></svg></button>
         </div>
     </div>
 
@@ -72,10 +72,10 @@
     </div>
 
     <nav id="m-tabbar">
-        <button data-tab="photos" class="active"><span class="tb-glyph">&#9638;</span>Photos</button>
-        <button data-tab="search"><span class="tb-glyph">&#8981;</span>Search</button>
-        <button data-tab="refine"><span class="tb-glyph">&#9670;</span>Refine</button>
-        <button data-tab="library"><span class="tb-glyph">&#9636;</span>Library</button>
+        <button data-tab="photos" class="active"><svg class="icon icon-lg" aria-hidden="true"><use href="#i-layout-grid"></use></svg>Photos</button>
+        <button data-tab="search"><svg class="icon icon-lg" aria-hidden="true"><use href="#i-search"></use></svg>Search</button>
+        <button data-tab="refine"><svg class="icon icon-lg" aria-hidden="true"><use href="#i-zap"></use></svg>Refine</button>
+        <button data-tab="library"><svg class="icon icon-lg" aria-hidden="true"><use href="#i-folder"></use></svg>Library</button>
     </nav>
 
     <a id="m-dl" download hidden></a>

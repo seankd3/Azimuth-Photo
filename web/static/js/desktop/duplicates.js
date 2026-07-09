@@ -3,6 +3,7 @@ import { applyFlags } from './selection.js';
 import { byId, emit, on, rememberImages } from './state.js';
 import { showToast } from './toast.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
+import { icon } from '../icons.js';
 
 const DEFAULT_THRESHOLD = 0.95;
 const LIMIT = 100;
@@ -21,9 +22,9 @@ const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c
 const fmt = (n) => Number(n || 0).toLocaleString('en-US');
 
 function flagGlyph(flag) {
-    if (flag === 'picked') return '★';
-    if (flag === 'rejected') return '×';
-    return '○';
+    if (flag === 'picked') return icon('star');
+    if (flag === 'rejected') return icon('x');
+    return icon('circle');
 }
 
 function normalizeFlag(flag) {
@@ -207,9 +208,9 @@ function photoHtml(image) {
         + '</button>'
         + `<div class="dupe-name" title="${esc(image.filename || '')}">${esc(image.filename || image.id)}</div>`
         + '<div class="dupe-actions" aria-label="Flag photo">'
-        + `<button data-flag="picked" data-id="${image.id}" aria-label="Pick ${esc(image.filename || image.id)}">P</button>`
-        + `<button data-flag="rejected" data-id="${image.id}" aria-label="Reject ${esc(image.filename || image.id)}">X</button>`
-        + `<button data-flag="unflagged" data-id="${image.id}" aria-label="Clear flag for ${esc(image.filename || image.id)}">U</button>`
+        + `<button data-flag="picked" data-id="${image.id}" aria-label="Pick ${esc(image.filename || image.id)}">${icon('star')}</button>`
+        + `<button data-flag="rejected" data-id="${image.id}" aria-label="Reject ${esc(image.filename || image.id)}">${icon('x')}</button>`
+        + `<button data-flag="unflagged" data-id="${image.id}" aria-label="Clear flag for ${esc(image.filename || image.id)}">${icon('circle')}</button>`
         + '</div></article>';
 }
 
@@ -324,7 +325,7 @@ function overlayHtml() {
         + '<div><b>Find duplicates</b><span id="duplicates-count" class="num"></span></div>'
         + '<label class="dupe-threshold"><span>Similarity</span><output id="duplicates-threshold-value">95%</output><input id="duplicates-threshold" class="ctl-range" type="range" min="0.90" max="0.99" step="0.01" value="0.95"></label>'
         + '<button class="btn primary" id="duplicates-keep-all" disabled>Keep best everywhere</button>'
-        + '<button class="icon-btn" id="duplicates-close" data-tip="Close (Esc)" aria-label="Close">×</button>'
+        + `<button class="icon-btn" id="duplicates-close" data-tip="Close (Esc)" aria-label="Close">${icon('x')}</button>`
         + '</header>'
         + '<div id="duplicates-body"></div>'
         + '</div></div>';

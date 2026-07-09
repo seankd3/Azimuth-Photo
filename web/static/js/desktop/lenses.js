@@ -21,7 +21,7 @@ function syncChrome(lens) {
         button.setAttribute('aria-selected', active ? 'true' : 'false');
     }
     document.getElementById('shell').classList.toggle('right-hidden', lens === 'events' || lens === 'map');
-    document.getElementById('event-gap').hidden = lens !== 'events';
+    document.getElementById('event-gap-wrap').hidden = lens !== 'events';
     document.getElementById('sort-select').disabled = lens === 'people' || lens === 'map';
     document.getElementById('thumb-size').disabled = lens === 'people' || lens === 'map';
 }

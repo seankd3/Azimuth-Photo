@@ -9,6 +9,7 @@ import {
 import { applyFlags } from './flags.js';
 import { clearSelection, on, selection } from './state.js';
 import { showToast } from './toast.js';
+import { icon } from '../icons.js';
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -80,7 +81,7 @@ export async function openCollectionSheet(rawIds, { onDone = null } = {}) {
     }
     listEl.innerHTML = collections.map((c, i) =>
         `<button class="sheet-row" data-ci="${i}">`
-        + `<span class="g">${c.cover_image_id ? `<img src="${esc(thumbUrl('sm', c.cover_image_id))}" alt="" style="width:24px;height:24px;border-radius:6px;object-fit:cover">` : '⊞'}</span>`
+        + `<span class="g">${c.cover_image_id ? `<img src="${esc(thumbUrl('sm', c.cover_image_id))}" alt="" style="width:24px;height:24px;border-radius:6px;object-fit:cover">` : icon('folder')}</span>`
         + `<span>${esc(c.name)}</span><span class="n num">${c.image_count || 0}</span></button>`
     ).join('');
     for (const row of listEl.querySelectorAll('.sheet-row')) {
@@ -146,10 +147,10 @@ export function initSelection() {
         const ids = [...selection];
         const sheet = openSheet(
             `<h3>${ids.length} selected</h3>`
-            + '<button class="sheet-row" data-act="unflag"><span class="g">○</span>Unflag</button>'
-            + '<button class="sheet-row" data-act="csv"><span class="g">⤓</span>Export CSV</button>'
-            + '<button class="sheet-row" data-act="json"><span class="g">⤓</span>Export JSON</button>'
-            + '<button class="sheet-row" data-act="zip"><span class="g">⤓</span>Download files (zip)</button>'
+            + `<button class="sheet-row" data-act="unflag"><span class="g">${icon('circle')}</span>Unflag</button>`
+            + `<button class="sheet-row" data-act="csv"><span class="g">${icon('download')}</span>Export CSV</button>`
+            + `<button class="sheet-row" data-act="json"><span class="g">${icon('download')}</span>Export JSON</button>`
+            + `<button class="sheet-row" data-act="zip"><span class="g">${icon('download')}</span>Download files (zip)</button>`
         );
         for (const row of sheet.querySelectorAll('.sheet-row[data-act]')) {
             row.addEventListener('click', () => {

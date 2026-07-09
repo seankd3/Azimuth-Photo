@@ -10,6 +10,7 @@ import { initViewer } from './viewer.js';
 import { initRefine, showRefine } from './refine.js';
 import { initSearch, showSearch } from './search.js';
 import { initLibrary, showLibrary } from './library.js';
+import { mountIconSprite } from '../icons.js';
 import './install.js';
 
 function secureContextBanner() {
@@ -92,7 +93,8 @@ function installTimelinePinch() {
     }, { passive: true });
 }
 
-function boot() {
+async function boot() {
+    await mountIconSprite();
     initToast();
     installTabbar();
     installOfflineBanner();

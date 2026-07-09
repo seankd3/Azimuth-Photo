@@ -70,6 +70,12 @@ body {
 .num { font-variant-numeric: tabular-nums; }
 button { transition: transform .12s var(--ease), background .12s var(--ease), color .12s var(--ease), border-color .12s var(--ease); }
 button:active { transform: scale(.97); }
+.icon { width: 16px; height: 16px; display: block; flex: none; stroke-width: 1.75; }
+.icon-lg { width: 20px; height: 20px; }
+button:focus-visible, input:focus-visible, select:focus-visible {
+    outline: 2px solid var(--accent-lin);
+    outline-offset: 2px;
+}
 
 /* ---------- offline banner ---------- */
 #m-offline {
@@ -122,8 +128,8 @@ button:active { transform: scale(.97); }
     font-size: 10px;
     transition: color .12s;
 }
-#m-tabbar button .tb-glyph { font-size: 17px; transition: transform .12s var(--ease); }
-#m-tabbar button:active .tb-glyph { transform: scale(.92); }
+#m-tabbar button .icon { transition: transform .12s var(--ease); }
+#m-tabbar button:active .icon { transform: scale(.92); }
 #m-tabbar button.active { color: var(--accent); }
 
 /* ---------- skeletons (never spinners) ---------- */
@@ -207,6 +213,7 @@ body.m-scoped #m-timeline { padding-top: calc(52px + var(--sat)); }
     opacity: 0;
     transition: opacity .12s;
 }
+.mcell .c-check .icon { width: 12px; height: 12px; }
 #m-timeline.selmode .mcell .c-check { opacity: 1; }
 .mcell.sel { background: var(--accent-dim); }
 .mcell.sel img { transform: scale(.82); border-radius: var(--r-card); }
@@ -335,6 +342,7 @@ body[data-tab="photos"] #m-scopebar.on { display: flex; }
     font-size: 12.5px;
     white-space: nowrap;
 }
+#m-scopebar .chip.ghost { background: transparent; color: var(--text-3); }
 #m-scopebar .chip img { width: 20px; height: 20px; border-radius: 50%; object-fit: cover; }
 #m-scopebar .chip .chip-kind { color: var(--text-3); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
 #m-scopebar .chip b { font-weight: 600; max-width: 40vw; overflow: hidden; text-overflow: ellipsis; }
@@ -443,6 +451,7 @@ body[data-tab="photos"] #m-scrub { display: block; }
 }
 #m-selbar .msb-act:active, #m-selbar .msb-x:active { transform: scale(.94); }
 #m-selbar .msb-act .g { font-size: 15px; color: var(--text-2); }
+#m-selbar .msb-act .icon { color: var(--text-2); }
 
 /* ============================================================
    SEARCH tab
@@ -461,6 +470,7 @@ body[data-tab="photos"] #m-scrub { display: block; }
 }
 #ms-field:focus-within { border-color: var(--accent-lin); background: #101113; }
 #ms-field .g { color: var(--text-3); font-size: 15px; flex: none; }
+#ms-field .g .icon { width: 17px; height: 17px; }
 #ms-input { flex: 1; min-width: 0; font-size: 16px; color: var(--text); outline: none; }
 #ms-input::placeholder { color: var(--text-3); }
 #ms-clear { width: 34px; height: 34px; border-radius: 50%; color: var(--text-3); font-size: 14px; flex: none; }
@@ -522,6 +532,7 @@ body[data-tab="photos"] #m-scrub { display: block; }
     white-space: nowrap;
     color: var(--text-2);
 }
+.m-person span.unnamed { color: var(--text-3); font-style: italic; }
 #ms-cats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 10px 0 0; }
 .ms-chip {
     display: flex;
@@ -538,6 +549,7 @@ body[data-tab="photos"] #m-scrub { display: block; }
 .ms-chip:active { transform: scale(.97); }
 .ms-chip.on { border: 1px solid var(--accent-lin); background: var(--accent-dim); }
 .ms-chip .g { font-size: 16px; color: var(--text-2); flex: none; width: 20px; text-align: center; }
+.ms-chip .g { display: inline-flex; align-items: center; justify-content: center; }
 .ms-chip b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ms-chip .n { margin-left: auto; font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; flex: none; }
 .ms-row {
@@ -553,6 +565,7 @@ body[data-tab="photos"] #m-scrub { display: block; }
     border-radius: 8px;
 }
 .ms-row .g { color: var(--text-3); width: 20px; text-align: center; flex: none; }
+.ms-row .g { display: inline-flex; align-items: center; justify-content: center; }
 .ms-empty { padding: 12px 4px; font-size: 12.5px; color: var(--text-3); }
 
 /* ============================================================
@@ -569,6 +582,7 @@ body[data-tab="photos"] #m-scrub { display: block; }
 }
 .ml-head .ml-back { color: var(--accent); font-size: 13px; min-height: 44px; padding: 0 6px; }
 .ml-head .ml-more { width: 44px; height: 44px; border-radius: 50%; color: var(--text-2); font-size: 20px; }
+.ml-head .ml-more { display: inline-flex; align-items: center; justify-content: center; }
 .ml-head .ml-more:active { background: rgba(255, 255, 255, .06); }
 .ml-suggest-head { padding-top: 2px; }
 .ml-suggest-row {
@@ -599,6 +613,7 @@ body[data-tab="photos"] #m-scrub { display: block; }
     justify-content: center;
     font-size: 20px;
 }
+.ml-suggest-cover .icon, .m-lib-cover .icon, .m-lib-new .icon { width: 20px; height: 20px; }
 .ml-suggest-cover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .ml-suggest-body { padding: 8px 10px 6px; min-width: 0; }
 .ml-suggest-body b {
@@ -690,6 +705,7 @@ body[data-tab="photos"] #m-scrub { display: block; }
 }
 .m-lib-row:active { background: rgba(255, 255, 255, .04); }
 .m-lib-row .g { width: 24px; text-align: center; color: var(--text-2); font-size: 15px; flex: none; }
+.m-lib-row .g { display: inline-flex; align-items: center; justify-content: center; }
 .m-lib-row .n { margin-left: auto; font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; flex: none; }
 .m-lib-row .sub { display: block; font-size: 11px; color: var(--text-3); }
 .m-lib-row .body { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -885,6 +901,7 @@ body[data-tab="photos"] #m-scrub { display: block; }
 .sheet-row:disabled { color: var(--text-3); opacity: .55; }
 .sheet-row:disabled:active { background: transparent; }
 .sheet-row .g { width: 24px; text-align: center; color: var(--text-2); flex: none; }
+.sheet-row .g { display: inline-flex; align-items: center; justify-content: center; }
 .sheet-row .n { margin-left: auto; font-size: 12px; color: var(--text-3); flex: none; }
 .sheet-input {
     width: 100%;

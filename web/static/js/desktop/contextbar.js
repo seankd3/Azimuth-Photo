@@ -1,8 +1,10 @@
 import {
-    clearFacet, describeScope, emit, on, scope, setBestOf, setSort, setThumbSize, toggleBestOf, viewState,
+    clearFacet, describeScope, emit, on, scope, setBestOf, setScope, setSort, setThumbSize, toggleBestOf, viewState,
 } from './state.js';
 import { toggleLeftPanel } from './panel.js';
 import { showToast } from './toast.js';
+import { icon } from '../icons.js';
+import { personLabel as cleanPersonLabel } from '../people_labels.js';
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -18,7 +20,7 @@ function dateLabel(value) {
 }
 
 function chipHtml(key, label, extra = '') {
-    return `<span class="chip" data-facet="${key}">${extra}<span>${esc(label)}</span><button class="chip-x" aria-label="Remove ${esc(label)}">×</button></span>`;
+    return `<span class="chip" data-facet="${key}">${extra}<span>${esc(label)}</span><button class="chip-x" aria-label="Remove ${esc(label)}">${icon('x')}</button></span>`;
 }
 
 function renderChips() {
@@ -41,6 +43,7 @@ function renderChips() {
     }
     if (scope.min_stars) chips.push(chipHtml('min_stars', `${scope.min_stars}+ stars`));
     if (viewState.bestOf) chips.push(chipHtml('bestOf', 'Best of'));
+    if (chips.length > 1) chips.push(`<button class="chip ghost" data-clear-all="1">${icon('x')}<span>Clear all</span></button>`);
     document.getElementById('ctx-crumbs').innerHTML = chips.join('');
     for (const chip of document.querySelectorAll('.chip[data-facet]')) {
         chip.querySelector('.chip-x').addEventListener('click', () => {
@@ -51,6 +54,7 @@ function renderChips() {
             }
         });
     }
+    document.querySelector('.chip[data-clear-all="1"]')?.addEventListener('click', () => setScope({}));
 }
 
 function renderQuality() {
@@ -117,12 +121,12 @@ export function initContextbar() {
 export function scopeTokenHtml() {
     const count = viewState.visibleImages ? `<span class="tk-count">- ${fmt(viewState.visibleImages)}</span>` : '';
     if (scope.people) {
-        const img = scope.personThumb ? `<img src="${esc(scope.personThumb)}" alt="">` : '<span class="tk-glyph">◉</span>';
-        return `<span class="scope-token">${img}<b>${esc(scope.personLabel || 'Person')}</b>${count}</span>`;
+        const img = scope.personThumb ? `<img src="${esc(scope.personThumb)}" alt="">` : `<span class="tk-glyph">${icon('users')}</span>`;
+        return `<span class="scope-token">${img}<b>${esc(cleanPersonLabel({ label: scope.personLabel }))}</b>${count}</span>`;
     }
-    if (scope.collectionId) return `<span class="scope-token"><span class="tk-glyph">⊞</span><b>${esc(scope.collectionName || 'Collection')}</b>${count}</span>`;
-    if (scope.import_batch) return `<span class="scope-token"><span class="tk-glyph">＋</span><b>${esc(scope.importBatchLabel || `Import ${scope.import_batch}`)}</b>${count}</span>`;
-    if (scope.similarIds.length) return `<span class="scope-token"><span class="tk-glyph">≈</span><b>${esc(scope.similarLabel || 'Similar photos')}</b>${count}</span>`;
-    if (scope.q) return `<span class="scope-token"><span class="tk-glyph">⌕</span><b>“${esc(scope.q)}”</b>${count}</span>`;
-    return `<span class="scope-token"><span class="tk-glyph">⌂</span><b>${esc(describeScope())}</b>${count}</span>`;
+    if (scope.collectionId) return `<span class="scope-token"><span class="tk-glyph">${icon('folder')}</span><b>${esc(scope.collectionName || 'Collection')}</b>${count}</span>`;
+    if (scope.import_batch) return `<span class="scope-token"><span class="tk-glyph">${icon('upload')}</span><b>${esc(scope.importBatchLabel || `Import ${scope.import_batch}`)}</b>${count}</span>`;
+    if (scope.similarIds.length) return `<span class="scope-token"><span class="tk-glyph">${icon('scan-search')}</span><b>${esc(scope.similarLabel || 'Similar photos')}</b>${count}</span>`;
+    if (scope.q) return `<span class="scope-token"><span class="tk-glyph">${icon('search')}</span><b>“${esc(scope.q)}”</b>${count}</span>`;
+    return `<span class="scope-token"><span class="tk-glyph">${icon('house')}</span><b>${esc(describeScope())}</b>${count}</span>`;
 }
