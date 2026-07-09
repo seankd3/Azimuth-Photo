@@ -4,9 +4,9 @@ from datetime import datetime
 from fractions import Fraction
 
 from PIL import Image as PILImage
-from PIL.ExifTags import IFD, TAGS
+from PIL.ExifTags import GPSTAGS, IFD, TAGS
 
-METADATA_EXTRACTOR_VERSION = 2
+METADATA_EXTRACTOR_VERSION = 3
 PILLOW_METADATA_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp", ".bmp", ".gif"}
 
 
@@ -142,8 +142,11 @@ def _merge_exif_tags(exif_raw) -> dict:
             ifd_tags = exif_raw.get_ifd(ifd)
         except Exception:
             ifd_tags = {}
+        # GPS IFD tag ids live in their own namespace (GPSTAGS); mapping them
+        # through TAGS silently drops every GPS field.
+        names = GPSTAGS if ifd == IFD.GPSInfo else TAGS
         for tag_id, value in ifd_tags.items():
-            tag_name = TAGS.get(tag_id, "")
+            tag_name = names.get(tag_id, "")
             if tag_name:
                 all_tags[tag_name] = value
 
