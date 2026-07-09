@@ -1,14 +1,18 @@
 import {
-    byId, on, selection, setRightCollapsed, viewState,
+    byId, on, selection, setRightCollapsed, setScope, viewState,
 } from './state.js';
-import { getImageExif } from './api.js';
+import { getCaptionStatus, getImageCaption, getImageExif, saveImageCaption } from './api.js';
 
 const exifCache = new Map();
+const captionCache = new Map();
 let currentImageId = null;
 let focusedImage = null;
 let histogramCache = { signature: '', bins: [], min: 0, max: 0, empty: true };
 let rankCache = { signature: '', byId: new Map(), total: 0 };
 let imageVersion = 0;
+let captionStatus = null;
+let captionEditId = null;
+let captionToken = 0;
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -198,6 +202,118 @@ function renderMetadata(img) {
     });
 }
 
+function captionProgressHint() {
+    const counts = (captionStatus && captionStatus.counts) || {};
+    const captioned = Number(counts.captioned || 0);
+    const pending = Number(counts.pending_cached_images || 0);
+    const total = captioned + pending;
+    return total > 0 ? `${fmt(captioned)} of ${fmt(total)} captioned` : '';
+}
+
+function tagChips(tags) {
+    return (tags || []).map((tag) => (
+        `<button class="cap-tag" data-caption-tag="${esc(tag)}" title="tag:${esc(tag)}">#${esc(tag)}</button>`
+    )).join('');
+}
+
+function renderCaptionView(img, caption) {
+    const host = document.getElementById('caption-panel');
+    if (!img) {
+        host.innerHTML = '<div class="panel-empty">Focus one photo to see its caption.</div>';
+        return;
+    }
+    if (!caption || !caption.has_caption) {
+        const hint = captionProgressHint();
+        host.innerHTML = '<div class="panel-empty">Not yet captioned'
+            + (hint ? `<span class="cap-progress">${esc(hint)}</span>` : '')
+            + '</div>';
+        return;
+    }
+    const edited = caption.user_edited ? '<span class="cap-edited">edited</span>' : '';
+    host.innerHTML = '<div class="cap-text"></div>'
+        + `<div class="cap-tags">${tagChips(caption.tags)}</div>`
+        + `<div class="cap-actions">${edited}<button class="mini-btn" id="caption-edit">Edit</button></div>`;
+    host.querySelector('.cap-text').textContent = caption.caption || '';
+    bindCaptionPanel(host, img, caption);
+}
+
+function renderCaptionEditor(img, caption) {
+    const host = document.getElementById('caption-panel');
+    const tags = (caption && caption.tags) || [];
+    host.innerHTML = '<div class="cap-editor">'
+        + '<textarea id="caption-text" rows="5"></textarea>'
+        + '<input id="caption-tags" class="drawer-input" autocomplete="off" placeholder="Tags">'
+        + '<div class="cap-actions"><button class="mini-btn" id="caption-cancel">Cancel</button><button class="mini-btn" id="caption-save">Save</button></div>'
+        + '</div>';
+    host.querySelector('#caption-text').value = (caption && caption.caption) || '';
+    host.querySelector('#caption-tags').value = tags.join(', ');
+    bindCaptionPanel(host, img, caption);
+    host.querySelector('#caption-text').focus({ preventScroll: true });
+}
+
+function bindCaptionPanel(host, img, caption) {
+    host.querySelector('#caption-edit')?.addEventListener('click', () => {
+        captionEditId = Number(img.id);
+        renderCaptionEditor(img, caption || {});
+    });
+    host.querySelector('#caption-cancel')?.addEventListener('click', () => {
+        captionEditId = null;
+        renderCaptionView(img, caption || null);
+    });
+    host.querySelector('#caption-save')?.addEventListener('click', async () => {
+        const text = host.querySelector('#caption-text')?.value || '';
+        const tags = (host.querySelector('#caption-tags')?.value || '')
+            .split(',')
+            .map((tag) => tag.trim())
+            .filter(Boolean);
+        host.querySelector('#caption-save').disabled = true;
+        const saved = await saveImageCaption(img.id, { caption: text, tags });
+        if (!saved || !saved.caption) {
+            host.querySelector('#caption-save').disabled = false;
+            return;
+        }
+        captionEditId = null;
+        captionCache.set(Number(img.id), saved.caption);
+        const card = byId.get(Number(img.id));
+        if (card) {
+            card.has_caption = true;
+            card.caption_tags = saved.caption.tags || [];
+        }
+        renderCaptionView(img, saved.caption);
+    });
+    for (const chip of host.querySelectorAll('[data-caption-tag]')) {
+        chip.addEventListener('click', () => setScope({
+            tag: chip.dataset.captionTag || '',
+            collectionId: '',
+            collectionName: '',
+            collectionSmart: false,
+            similarIds: [],
+            similarLabel: '',
+        }, { merge: true }));
+    }
+}
+
+async function renderCaption(img) {
+    const host = document.getElementById('caption-panel');
+    if (!host) return;
+    if (!img) {
+        renderCaptionView(null, null);
+        return;
+    }
+    const imageId = Number(img.id);
+    if (captionEditId === imageId) return;
+    const token = ++captionToken;
+    if (!captionStatus) captionStatus = await getCaptionStatus();
+    let caption = captionCache.get(imageId);
+    if (!caption) {
+        host.innerHTML = '<div class="panel-empty">Loading caption…</div>';
+        caption = await getImageCaption(imageId);
+        if (token !== captionToken || Number(currentImageId) !== imageId) return;
+        captionCache.set(imageId, caption || { has_caption: false, tags: [] });
+    }
+    renderCaptionView(img, caption);
+}
+
 function renderSelection() {
     const host = document.getElementById('selection-panel');
     const images = selectedImages();
@@ -224,6 +340,7 @@ function render() {
     renderHistogram();
     renderRanking(img);
     renderMetadata(img);
+    renderCaption(img);
     renderSelection();
 }
 

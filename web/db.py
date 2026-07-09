@@ -1008,11 +1008,12 @@ async def get_rankings(limit: int = 100, offset: int = 0, sort: str = "elo",
                        orientation: str = "", compared: str = "", min_stars: int = 0,
                        folder: str = "", flag: str = "", date_taken: str = "",
                        file_type: str = "", camera: str = "", lens: str = "",
+                       tag: str = "",
                        id_filter: set = None,
                        visible_thumb_size: str = "", cache_root: str = "",
                        text_query: str = "",
                        exclude_collapsed_stack_members: bool = False):
-    return await ranking_repository.rankings_cached(
+    rows = await ranking_repository.rankings_cached(
         DB_PATH,
         get_catalog_image_counts=get_catalog_image_counts,
         cache_entry_count=_cache_entry_count,
@@ -1029,12 +1030,15 @@ async def get_rankings(limit: int = 100, offset: int = 0, sort: str = "elo",
         file_type=file_type,
         camera=camera,
         lens=lens,
+        tag=tag,
         id_filter=id_filter,
         visible_thumb_size=visible_thumb_size,
         cache_root=cache_root,
         text_query=text_query,
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
+        caption_model_key=active_caption_model_key(),
     )
+    return await _annotate_caption_presence(rows)
 
 
 _ranking_count_cache_key = ranking_repository.ranking_count_cache_key
@@ -1044,6 +1048,7 @@ _facet_cache_key = ranking_repository.facet_cache_key
 async def rank_quality(orientation: str = "", compared: str = "", min_stars: int = 0,
                        folder: str = "", flag: str = "", date_taken: str = "",
                        file_type: str = "", camera: str = "", lens: str = "",
+                       tag: str = "",
                        id_filter: set = None, text_query: str = "",
                        exclude_collapsed_stack_members: bool = False) -> dict:
     return await ranking_repository.rank_quality(
@@ -1057,17 +1062,21 @@ async def rank_quality(orientation: str = "", compared: str = "", min_stars: int
         file_type=file_type,
         camera=camera,
         lens=lens,
+        tag=tag,
         id_filter=id_filter,
         text_query=text_query,
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
+        caption_model_key=active_caption_model_key(),
     )
 
 
 async def date_histogram(**kwargs) -> dict:
+    kwargs.setdefault("caption_model_key", active_caption_model_key())
     return await ranking_repository.date_histogram(DB_PATH, **kwargs)
 
 
 async def scope_counts(**kwargs) -> dict:
+    kwargs.setdefault("caption_model_key", active_caption_model_key())
     return await ranking_repository.scope_counts(DB_PATH, **kwargs)
 
 
@@ -1106,6 +1115,7 @@ async def upsert_auto_stacks(kind: str, groups) -> dict:
 async def count_rankings(orientation: str = "", compared: str = "", min_stars: int = 0,
                          folder: str = "", flag: str = "", date_taken: str = "",
                          file_type: str = "", camera: str = "", lens: str = "",
+                         tag: str = "",
                          id_filter: set = None,
                          visible_thumb_size: str = "", cache_root: str = "",
                          text_query: str = "",
@@ -1123,11 +1133,13 @@ async def count_rankings(orientation: str = "", compared: str = "", min_stars: i
         file_type=file_type,
         camera=camera,
         lens=lens,
+        tag=tag,
         id_filter=id_filter,
         visible_thumb_size=visible_thumb_size,
         cache_root=cache_root,
         text_query=text_query,
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
+        caption_model_key=active_caption_model_key(),
         ttl_seconds=RANKING_COUNT_CACHE_TTL_SECONDS,
     )
 
@@ -1135,6 +1147,7 @@ async def count_rankings(orientation: str = "", compared: str = "", min_stars: i
 async def get_date_groups(orientation: str = "", compared: str = "", min_stars: int = 0,
                           folder: str = "", flag: str = "", date_taken: str = "",
                           file_type: str = "", camera: str = "", lens: str = "",
+                          tag: str = "",
                           visible_thumb_size: str = "", cache_root: str = "",
                           id_filter: set | None = None, text_query: str = "",
                           _force_refresh: bool = False,
@@ -1144,12 +1157,13 @@ async def get_date_groups(orientation: str = "", compared: str = "", min_stars: 
         get_catalog_image_counts=get_catalog_image_counts,
         orientation=orientation, compared=compared, min_stars=min_stars,
         folder=folder, flag=flag, date_taken=date_taken,
-        file_type=file_type, camera=camera, lens=lens,
+        file_type=file_type, camera=camera, lens=lens, tag=tag,
         visible_thumb_size=visible_thumb_size, cache_root=cache_root,
         id_filter=id_filter, text_query=text_query,
         force_refresh=_force_refresh,
         ttl_seconds=FACET_CACHE_TTL_SECONDS,
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
+        caption_model_key=active_caption_model_key(),
     )
 
 
@@ -1389,6 +1403,7 @@ async def store_caption_result(
         status=status,
         error=error,
     )
+    caption_repository.invalidate_tags_cache()
     cache_events.invalidate_rankings_cache()
 
 
@@ -1399,6 +1414,66 @@ async def get_caption_status_counts(caption_config: dict | None = None) -> dict:
         model_key=caption_config["model_key"],
         cache_root=settings.get_settings()["ssd_cache_dir"],
     )
+
+
+async def get_image_caption(image_id: int, caption_config: dict | None = None) -> dict | None:
+    caption_config = caption_config or active_caption_config()
+    return await caption_repository.get_image_caption(
+        DB_PATH,
+        image_id=image_id,
+        model_key=caption_config["model_key"],
+    )
+
+
+async def owner_update_caption(
+    *,
+    image_id: int,
+    caption_config: dict | None = None,
+    caption: str | None = None,
+    tags=None,
+) -> dict | None:
+    caption_config = caption_config or active_caption_config()
+    await ensure_active_caption_fts_model(caption_config)
+    result = await caption_repository.owner_update_caption(
+        DB_PATH,
+        image_id=image_id,
+        model_key=caption_config["model_key"],
+        caption=caption,
+        tags=tags,
+    )
+    cache_events.invalidate_rankings_cache()
+    db_invalidate = getattr(cache_events, "invalidate_ranking_count_cache", None)
+    if callable(db_invalidate):
+        db_invalidate()
+    return result
+
+
+async def get_tags(q: str = "", limit: int = 100, caption_config: dict | None = None) -> list[dict]:
+    caption_config = caption_config or active_caption_config()
+    return await caption_repository.list_tags(
+        DB_PATH,
+        model_key=caption_config["model_key"],
+        q=q,
+        limit=limit,
+        signature=await caption_repository.tag_signature(DB_PATH, model_key=caption_config["model_key"]),
+    )
+
+
+async def _annotate_caption_presence(rows, caption_config: dict | None = None) -> list[dict]:
+    data = [dict(row) for row in rows or []]
+    if not data:
+        return data
+    caption_config = caption_config or active_caption_config()
+    summaries = await caption_repository.image_caption_summaries(
+        DB_PATH,
+        model_key=caption_config["model_key"],
+        image_ids=[row.get("id") for row in data],
+    )
+    for row in data:
+        summary = summaries.get(int(row.get("id") or 0), {})
+        row["has_caption"] = bool(summary.get("has_caption"))
+        row["caption_tags"] = summary.get("caption_tags") or []
+    return data
 
 
 async def caption_search_ranked_image_ids(

@@ -151,6 +151,9 @@ def configure_status_media_search_providers() -> None:
     )
     caption_routes.configure(
         get_caption_status_counts=lambda **kwargs: db.get_caption_status_counts(**kwargs),
+        get_image_caption=lambda **kwargs: db.get_image_caption(**kwargs),
+        owner_update_caption=lambda **kwargs: db.owner_update_caption(**kwargs),
+        get_tags=lambda **kwargs: db.get_tags(**kwargs),
         invalidate_settings_response_cache=settings_status.invalidate_settings_response_cache,
     )
 

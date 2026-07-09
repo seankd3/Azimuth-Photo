@@ -2,6 +2,7 @@ from collections.abc import Awaitable, Callable
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 import caption_worker
 import settings
@@ -9,24 +10,47 @@ import settings
 
 router = APIRouter()
 AsyncDictBuilder = Callable[..., Awaitable[dict]]
+AsyncMaybeDictBuilder = Callable[..., Awaitable[dict | None]]
+AsyncListBuilder = Callable[..., Awaitable[list]]
 InvalidateStatus = Callable[[], None]
 
 _get_caption_status_counts: AsyncDictBuilder | None = None
+_get_image_caption: AsyncMaybeDictBuilder | None = None
+_owner_update_caption: AsyncMaybeDictBuilder | None = None
+_get_tags: AsyncListBuilder | None = None
 _invalidate_settings_response_cache: InvalidateStatus | None = None
+
+
+class CaptionBody(BaseModel):
+    caption: str | None = None
+    tags: list[str] | None = None
 
 
 def configure(
     *,
     get_caption_status_counts: AsyncDictBuilder,
+    get_image_caption: AsyncMaybeDictBuilder | None = None,
+    owner_update_caption: AsyncMaybeDictBuilder | None = None,
+    get_tags: AsyncListBuilder | None = None,
     invalidate_settings_response_cache: InvalidateStatus,
 ) -> None:
-    global _get_caption_status_counts, _invalidate_settings_response_cache
+    global _get_caption_status_counts, _get_image_caption, _owner_update_caption, _get_tags
+    global _invalidate_settings_response_cache
     _get_caption_status_counts = get_caption_status_counts
+    _get_image_caption = get_image_caption
+    _owner_update_caption = owner_update_caption
+    _get_tags = get_tags
     _invalidate_settings_response_cache = invalidate_settings_response_cache
 
 
 def _configured() -> None:
     if _get_caption_status_counts is None or _invalidate_settings_response_cache is None:
+        raise RuntimeError("Caption routes are not configured")
+
+
+def _caption_routes_configured() -> None:
+    _configured()
+    if _get_image_caption is None or _owner_update_caption is None or _get_tags is None:
         raise RuntimeError("Caption routes are not configured")
 
 
@@ -56,6 +80,41 @@ async def caption_status_payload() -> dict:
 @router.get("/api/captions/status")
 async def api_captions_status():
     return await caption_status_payload()
+
+
+@router.get("/api/tags")
+async def api_tags(limit: int = 100, q: str = ""):
+    _caption_routes_configured()
+    return {"tags": await _get_tags(q=q, limit=limit)}
+
+
+@router.get("/api/image/{image_id}/caption")
+async def api_image_caption(image_id: int):
+    _caption_routes_configured()
+    caption = await _get_image_caption(image_id=image_id)
+    if caption is None:
+        return {
+            "image_id": int(image_id),
+            "caption": "",
+            "tags": [],
+            "quality": "",
+            "user_edited": False,
+            "has_caption": False,
+        }
+    return {**caption, "has_caption": True}
+
+
+@router.post("/api/image/{image_id}/caption")
+async def api_update_image_caption(image_id: int, body: CaptionBody):
+    _caption_routes_configured()
+    caption = await _owner_update_caption(
+        image_id=image_id,
+        caption=body.caption,
+        tags=body.tags,
+    )
+    if caption is None:
+        return JSONResponse({"error": "Image not found"}, status_code=404)
+    return {"ok": True, "caption": {**caption, "has_caption": True}}
 
 
 @router.post("/api/captions/scan/pause")

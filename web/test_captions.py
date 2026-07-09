@@ -1,6 +1,7 @@
 from test_support import *  # noqa: F401,F403
 
 import caption_worker
+from fastapi.testclient import TestClient
 from data.repositories import captions
 from features.search.fusion import reciprocal_rank_fusion
 
@@ -150,3 +151,86 @@ class CaptionTests(BackendTestCase):
         self.assertEqual(set(result["search_sources"]), {"captions", "embedding", "metadata"})
         result_ids = {image["id"] for image in result["images"]}
         self.assertTrue({caption_only, metadata_hit, embedding_hit}.issubset(result_ids))
+
+    async def test_tags_route_and_tag_scope_filters(self):
+        source = await self._source()
+        wedding = await self._image(source["id"], "wedding.jpg")
+        travel = await self._image(source["id"], "travel.jpg")
+        await self._cache_entry(wedding, "sm")
+        await self._cache_entry(travel, "sm")
+        config = settings.active_caption_config()
+        await db.store_caption_result(
+            image_id=wedding,
+            caption_config=config,
+            caption="A small ceremony beside a garden path.",
+            tags=["wedding", "garden"],
+            status="done",
+        )
+        await db.store_caption_result(
+            image_id=travel,
+            caption_config=config,
+            caption="A street scene with market umbrellas.",
+            tags=["travel", "market"],
+            status="done",
+        )
+
+        def probe():
+            client = TestClient(app_module.app)
+            tags = client.get("/api/tags", params={"q": "wed", "limit": 10})
+            rankings = client.get("/api/rankings", params={"tag": "wedding", "limit": 10})
+            counts = client.get("/api/counts", params={"tag": "wedding"})
+            groups = client.get("/api/date-groups", params={"tag": "wedding"})
+            return tags, rankings, counts, groups
+
+        tags, rankings, counts, groups = await asyncio.to_thread(probe)
+        self.assertEqual(tags.status_code, 200)
+        self.assertEqual(tags.json()["tags"], [{"tag": "wedding", "count": 1}])
+        self.assertEqual([image["id"] for image in rankings.json()["images"]], [wedding])
+        self.assertTrue(rankings.json()["images"][0]["has_caption"])
+        self.assertEqual(counts.json()["total"], 1)
+        self.assertEqual(groups.json()["groups"][0]["count"], 1)
+
+    async def test_owner_caption_edit_persists_fts_and_blocks_worker_overwrite(self):
+        source = await self._source()
+        image_id = await self._image(source["id"], "portrait.jpg")
+        config = settings.active_caption_config()
+        await db.store_caption_result(
+            image_id=image_id,
+            caption_config=config,
+            caption="A neutral generated caption.",
+            tags=["portrait"],
+            status="done",
+        )
+
+        def edit():
+            client = TestClient(app_module.app)
+            return client.post(
+                f"/api/image/{image_id}/caption",
+                json={"caption": "Sean edited this into a moonlit harbor frame.", "tags": ["harbor", "moonlit"]},
+            )
+
+        response = await asyncio.to_thread(edit)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["caption"]["user_edited"])
+        self.assertEqual(response.json()["caption"]["tags"], ["harbor", "moonlit"])
+        matches = await db.caption_search_ranked_image_ids("moonlit harbor", caption_config=config)
+        self.assertEqual([image_id for image_id, _score in matches], [image_id])
+
+        await db.store_caption_result(
+            image_id=image_id,
+            caption_config=config,
+            caption="Worker tried to replace the owner edit.",
+            tags=["worker"],
+            status="done",
+        )
+        saved = await db.get_image_caption(image_id, caption_config=config)
+        self.assertEqual(saved["caption"], "Sean edited this into a moonlit harbor frame.")
+        self.assertEqual(saved["tags"], ["harbor", "moonlit"])
+
+        def read():
+            client = TestClient(app_module.app)
+            return client.get(f"/api/image/{image_id}/caption")
+
+        readback = await asyncio.to_thread(read)
+        self.assertEqual(readback.status_code, 200)
+        self.assertEqual(readback.json()["caption"], "Sean edited this into a moonlit harbor frame.")

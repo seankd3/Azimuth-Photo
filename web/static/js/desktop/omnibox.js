@@ -1,5 +1,5 @@
 import {
-    getFilterOptions, getFolders, getPeople, getRankings, listCollections, thumbUrl,
+    getFilterOptions, getFolders, getPeople, getRankings, getTags, listCollections, thumbUrl,
 } from './api.js';
 import {
     emit, on, scope, scopeActive, setScope, setSort, smartQueryActive, smartQuerySummary, toggleBestOf,
@@ -43,6 +43,7 @@ const MONTHS = [
 const OPERATORS = [
     { name: 'camera', key: 'camera', icon: 'camera', label: 'Camera' },
     { name: 'lens', key: 'lens', icon: 'aperture', label: 'Lens' },
+    { name: 'tag', key: 'tag', icon: 'tag', label: 'Caption tag' },
     { name: 'type', key: 'file_type', icon: 'file-type', label: 'File type' },
     { name: 'flag', key: 'flag', icon: 'flag', label: 'Flag' },
     { name: 'folder', key: 'folder', icon: 'folder', label: 'Folder' },
@@ -82,6 +83,7 @@ const COMMANDS = [
 let people = [];
 let collections = [];
 let folders = [];
+let tags = [];
 let filterOptions = null;
 let dataPromise = null;
 let rows = [];
@@ -196,11 +198,13 @@ async function ensureSuggestionData() {
         listCollections(),
         getFolders(null),
         getFilterOptions(),
-    ]).then(([peopleData, collectionData, folderData, optionsData]) => {
+        getTags({ limit: 100 }),
+    ]).then(([peopleData, collectionData, folderData, optionsData, tagData]) => {
         people = flattenPeople(peopleData);
         collections = (collectionData && collectionData.collections) || [];
         folders = (folderData && folderData.folders) || [];
         filterOptions = optionsData || {};
+        tags = (tagData && tagData.tags) || [];
         render();
     }).catch(() => {});
     return dataPromise;
@@ -322,6 +326,13 @@ function buildPhotoRows(term) {
             navRow: 2,
             run: () => openPhotoResult(term, photo, images),
         })));
+        const contextTags = [...new Set(images.flatMap((img) => img.caption_tags || []))].slice(0, 5);
+        if (contextTags.length) {
+            section.push({
+                note: contextTags.map((tag) => `#${tag}`).join('  '),
+                icon: 'tag',
+            });
+        }
     }
     return section;
 }
@@ -465,6 +476,12 @@ function valuesForOperator(operator, query) {
             .filter((item) => includesText(item.lens || item.value, q))
             .slice(0, MAX_SECTION_ROWS)
             .map((item) => ({ value: item.lens || item.value, label: item.lens || item.value, count: item.count }));
+    }
+    if (operator.name === 'tag') {
+        return (tags || [])
+            .filter((item) => includesText(item.tag || item.value, q))
+            .slice(0, MAX_SECTION_ROWS)
+            .map((item) => ({ value: item.tag || item.value, label: item.tag || item.value, count: item.count }));
     }
     if (operator.name === 'type') {
         return (filterOptions?.file_types || [])

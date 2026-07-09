@@ -6,7 +6,7 @@ from date_inference import infer_image_date
 from data.repositories import catalog as catalog_repository
 
 EXPECTED_EMBEDDING_DIM = 2048  # Qwen3-VL-Embedding-2B native dimension
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 18
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS catalog_sources (
@@ -331,12 +331,51 @@ CREATE TABLE IF NOT EXISTS image_captions (
     caption TEXT NOT NULL,
     tags TEXT NOT NULL DEFAULT '[]',
     quality TEXT DEFAULT NULL,
+    user_edited INTEGER NOT NULL DEFAULT 0,
     created_at REAL NOT NULL DEFAULT (strftime('%s', 'now')),
     PRIMARY KEY (model_key, image_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_image_captions_image
 ON image_captions(image_id);
+
+CREATE TABLE IF NOT EXISTS image_tags (
+    model_key TEXT NOT NULL,
+    image_id INTEGER NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+    tag TEXT NOT NULL,
+    PRIMARY KEY (model_key, image_id, tag)
+);
+
+CREATE INDEX IF NOT EXISTS idx_image_tags_model_tag_image
+ON image_tags(model_key, tag, image_id);
+
+CREATE INDEX IF NOT EXISTS idx_image_tags_image_model
+ON image_tags(image_id, model_key);
+
+CREATE TRIGGER IF NOT EXISTS image_tags_ai
+AFTER INSERT ON image_captions
+BEGIN
+    INSERT OR IGNORE INTO image_tags(model_key, image_id, tag)
+    SELECT new.model_key, new.image_id, lower(trim(value))
+    FROM json_each(new.tags)
+    WHERE type = 'text' AND trim(value) != '';
+END;
+
+CREATE TRIGGER IF NOT EXISTS image_tags_ad
+AFTER DELETE ON image_captions
+BEGIN
+    DELETE FROM image_tags WHERE model_key = old.model_key AND image_id = old.image_id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS image_tags_au
+AFTER UPDATE OF tags, model_key ON image_captions
+BEGIN
+    DELETE FROM image_tags WHERE model_key = old.model_key AND image_id = old.image_id;
+    INSERT OR IGNORE INTO image_tags(model_key, image_id, tag)
+    SELECT new.model_key, new.image_id, lower(trim(value))
+    FROM json_each(new.tags)
+    WHERE type = 'text' AND trim(value) != '';
+END;
 
 CREATE VIRTUAL TABLE IF NOT EXISTS image_captions_fts
 USING fts5(caption, tags, tokenize='unicode61');
@@ -708,6 +747,10 @@ COLLECTION_PUBLISH_COMPAT_COLUMNS = (
     ("last_commit", "TEXT DEFAULT NULL"),
 )
 
+IMAGE_CAPTION_COMPAT_COLUMNS = (
+    ("user_edited", "INTEGER NOT NULL DEFAULT 0"),
+)
+
 COMPAT_INDEX_SQL = (
     "CREATE INDEX IF NOT EXISTS idx_images_flag ON images(flag)",
     "CREATE INDEX IF NOT EXISTS idx_comparisons_action_id ON comparisons(action_id)",
@@ -782,6 +825,8 @@ COMPAT_INDEX_SQL = (
         "AND latitude IS NOT NULL AND longitude IS NOT NULL"
     ),
     "CREATE INDEX IF NOT EXISTS idx_images_rating_signal_cover ON images(comparisons, propagated_updates, elo)",
+    "CREATE INDEX IF NOT EXISTS idx_image_tags_model_tag_image ON image_tags(model_key, tag, image_id)",
+    "CREATE INDEX IF NOT EXISTS idx_image_tags_image_model ON image_tags(image_id, model_key)",
     (
         "CREATE INDEX IF NOT EXISTS idx_images_source_missing_rating_signal "
         "ON images(source_id, missing_at, comparisons, propagated_updates, elo)"
@@ -873,6 +918,7 @@ REQUIRED_TABLES = {
     "search_query_embeddings",
     "caption_fts_model",
     "image_captions",
+    "image_tags",
     "image_captions_fts",
     "caption_scan_images",
     "cache_entries",
@@ -949,6 +995,7 @@ REQUIRED_COLUMNS = {
         "bundle_bytes",
         "last_commit",
     },
+    "image_captions": {"user_edited"},
 }
 
 REQUIRED_INDEXES = {
@@ -964,6 +1011,8 @@ REQUIRED_INDEXES = {
     "idx_embeddings_by_model_image_id",
     "idx_search_query_embeddings_used",
     "idx_image_captions_image",
+    "idx_image_tags_model_tag_image",
+    "idx_image_tags_image_model",
     "idx_caption_scan_images_status",
     "idx_cache_entries_root_size_bytes",
     "idx_cache_entries_root_size_accessed_id",
@@ -1026,6 +1075,7 @@ async def prepare_existing_database_for_schema(conn) -> None:
     await _add_columns_if_missing(conn, "comparisons", (("action_id", "TEXT DEFAULT NULL"),))
     await _add_columns_if_missing(conn, "collections", COLLECTION_COMPAT_COLUMNS)
     await _add_columns_if_missing(conn, "collection_publishes", COLLECTION_PUBLISH_COMPAT_COLUMNS)
+    await _add_columns_if_missing(conn, "image_captions", IMAGE_CAPTION_COMPAT_COLUMNS)
 
 
 async def ensure_compatibility_columns(conn) -> None:
@@ -1040,6 +1090,7 @@ async def ensure_compatibility_columns(conn) -> None:
     await _add_columns_if_missing(conn, "collections", COLLECTION_COMPAT_COLUMNS)
     await _add_columns_if_missing(conn, "collection_shares", COLLECTION_SHARE_COMPAT_COLUMNS)
     await _add_columns_if_missing(conn, "collection_publishes", COLLECTION_PUBLISH_COMPAT_COLUMNS)
+    await _add_columns_if_missing(conn, "image_captions", IMAGE_CAPTION_COMPAT_COLUMNS)
 
 
 async def ensure_compatibility_indexes(conn) -> None:
@@ -1113,6 +1164,18 @@ async def backfill_share_images(conn) -> None:
     )
 
 
+async def backfill_image_tags(conn) -> None:
+    await conn.execute(
+        """
+        INSERT OR IGNORE INTO image_tags(model_key, image_id, tag)
+        SELECT c.model_key, c.image_id, lower(trim(j.value))
+        FROM image_captions c
+        JOIN json_each(c.tags) j
+        WHERE j.type = 'text' AND trim(j.value) != ''
+        """
+    )
+
+
 async def _executescript_in_transaction(conn, script: str) -> None:
     try:
         await conn.executescript(f"BEGIN;\n{script}\nCOMMIT;")
@@ -1139,6 +1202,7 @@ async def apply_schema_and_migrations(conn, *, db_exists: bool) -> None:
         await ensure_compatibility_columns(conn)
         await ensure_compatibility_indexes(conn)
         await backfill_share_images(conn)
+        await backfill_image_tags(conn)
         await backfill_legacy_aspect_ratios(conn)
         await conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         await conn.commit()

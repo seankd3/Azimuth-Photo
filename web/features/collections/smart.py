@@ -13,6 +13,7 @@ STRING_QUERY_KEYS = {
     "folder",
     "camera",
     "lens",
+    "tag",
     "flag",
     "date_taken",
     "file_type",
@@ -111,6 +112,7 @@ def ranking_params(query: dict | None) -> dict:
         "file_type": query.get("file_type", ""),
         "camera": query.get("camera", ""),
         "lens": query.get("lens", ""),
+        "tag": query.get("tag", ""),
     }
 
 

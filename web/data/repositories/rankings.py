@@ -132,6 +132,7 @@ def ranking_count_cache_key(
     file_type: str = "",
     camera: str = "",
     lens: str = "",
+    tag: str = "",
     id_filter: set | None = None,
     visible_thumb_size: str = "",
     cache_root: str = "",
@@ -150,6 +151,7 @@ def ranking_count_cache_key(
         file_type or "",
         camera or "",
         lens or "",
+        tag or "",
         visible_thumb_size or "",
         cache_root or "",
         text_query or "",
@@ -167,6 +169,7 @@ def facet_cache_key(
     file_type: str = "",
     camera: str = "",
     lens: str = "",
+    tag: str = "",
     visible_thumb_size: str = "",
     cache_root: str = "",
     id_filter: set | None = None,
@@ -185,6 +188,7 @@ def facet_cache_key(
         file_type or "",
         camera or "",
         lens or "",
+        tag or "",
         visible_thumb_size or "",
         cache_root or "",
         bool(exclude_collapsed_stack_members),
@@ -216,8 +220,8 @@ def invalidate_visible_facet_caches(cache_root: str | None = None, size: str | N
 
     for cache in (_date_groups_cache, _map_markers_cache):
         for key in list(cache.keys()):
-            key_size = key[9]
-            key_root = key[10]
+            key_size = key[10]
+            key_root = key[11]
             if key_size and key_root and cache_scope_matches(key_root, key_size, cache_root, size):
                 cache.pop(key, None)
                 _date_groups_refreshing.discard(key)
@@ -234,8 +238,8 @@ def invalidate_rating_facet_caches() -> None:
 
 def invalidate_visible_cache_dependent_counts(cache_root: str | None = None, size: str | None = None) -> None:
     for key in list(_ranking_count_cache.keys()):
-        key_size = key[9]
-        key_root = key[10]
+        key_size = key[10]
+        key_root = key[11]
         if key_size and key_root and cache_scope_matches(key_root, key_size, cache_root, size):
             _ranking_count_cache.pop(key, None)
 
@@ -251,6 +255,7 @@ def ranking_filter_parts(
     orientation: str = "", compared: str = "", min_stars: int = 0,
     folder: str = "", flag: str = "", date_taken: str = "",
     file_type: str = "", camera: str = "", lens: str = "",
+    tag: str = "", caption_model_key: str = "",
     visible_thumb_size: str = "", cache_root: str = "",
     text_query: str = "",
     include_source: bool = True,
@@ -334,6 +339,15 @@ def ranking_filter_parts(
     if lens:
         conditions.append("i.lens = ?")
         params.append(lens)
+
+    if tag:
+        conditions.append(
+            "EXISTS ("
+            "SELECT 1 FROM image_tags it "
+            "WHERE it.image_id = i.id AND it.model_key = ? AND it.tag = ?"
+            ")"
+        )
+        params.extend([caption_model_key, tag.strip().lower()])
 
     if text_query:
         # Each whitespace token must match at least one metadata field, so
@@ -459,6 +473,8 @@ async def rankings(
     file_type: str = "",
     camera: str = "",
     lens: str = "",
+    tag: str = "",
+    caption_model_key: str = "",
     id_filter: set | None = None,
     visible_thumb_size: str = "",
     cache_root: str = "",
@@ -487,6 +503,8 @@ async def rankings(
         file_type=file_type,
         camera=camera,
         lens=lens,
+        tag=tag,
+        caption_model_key=caption_model_key,
         visible_thumb_size=visible_thumb_size,
         cache_root=cache_root,
         text_query=text_query,
@@ -520,6 +538,8 @@ async def rankings(
                 file_type=file_type,
                 camera=camera,
                 lens=lens,
+                tag=tag,
+                caption_model_key=caption_model_key,
                 text_query=text_query,
                 include_source=False,
                 exclude_collapsed_stack_members=exclude_collapsed_stack_members,
@@ -575,6 +595,8 @@ async def rankings_cached(
     file_type: str = "",
     camera: str = "",
     lens: str = "",
+    tag: str = "",
+    caption_model_key: str = "",
     id_filter: set | None = None,
     visible_thumb_size: str = "",
     cache_root: str = "",
@@ -629,6 +651,8 @@ async def rankings_cached(
         file_type=file_type,
         camera=camera,
         lens=lens,
+        tag=tag,
+        caption_model_key=caption_model_key,
         id_filter=id_filter,
         visible_thumb_size=visible_thumb_size,
         cache_root=cache_root,
@@ -648,13 +672,14 @@ def has_ranking_count_filters(
     file_type: str,
     camera: str,
     lens: str,
-    id_filter: set | None,
-    text_query: str,
+    tag: str = "",
+    id_filter: set | None = None,
+    text_query: str = "",
     exclude_collapsed_stack_members: bool = False,
 ) -> bool:
     return bool(
         orientation or compared or min_stars > 0 or folder or flag or date_taken
-        or file_type or camera or lens or id_filter is not None or text_query
+        or file_type or camera or lens or tag or id_filter is not None or text_query
         or exclude_collapsed_stack_members
     )
 
@@ -672,6 +697,8 @@ async def count_rankings_uncached(
     file_type: str = "",
     camera: str = "",
     lens: str = "",
+    tag: str = "",
+    caption_model_key: str = "",
     id_filter: set | None = None,
     visible_thumb_size: str = "",
     cache_root: str = "",
@@ -690,6 +717,7 @@ async def count_rankings_uncached(
         file_type,
         camera,
         lens,
+        tag,
         id_filter,
         text_query,
         exclude_collapsed_stack_members,
@@ -739,6 +767,8 @@ async def count_rankings_uncached(
                 file_type=file_type,
                 camera=camera,
                 lens=lens,
+                tag=tag,
+                caption_model_key=caption_model_key,
                 text_query=text_query,
                 include_source=not all_sources_available,
                 exclude_collapsed_stack_members=exclude_collapsed_stack_members,
@@ -776,6 +806,8 @@ async def count_rankings_uncached(
             file_type=file_type,
             camera=camera,
             lens=lens,
+            tag=tag,
+            caption_model_key=caption_model_key,
             visible_thumb_size=visible_thumb_size,
             cache_root=cache_root,
             text_query=text_query,
@@ -833,6 +865,8 @@ async def count_rankings_uncached_with_visible_cache(
     file_type: str = "",
     camera: str = "",
     lens: str = "",
+    tag: str = "",
+    caption_model_key: str = "",
     id_filter: set | None = None,
     visible_thumb_size: str = "",
     cache_root: str = "",
@@ -854,6 +888,8 @@ async def count_rankings_uncached_with_visible_cache(
         file_type=file_type,
         camera=camera,
         lens=lens,
+        tag=tag,
+        caption_model_key=caption_model_key,
         id_filter=id_filter,
         visible_thumb_size=visible_thumb_size,
         cache_root=cache_root,
@@ -877,6 +913,8 @@ async def count_rankings_cached(
     file_type: str = "",
     camera: str = "",
     lens: str = "",
+    tag: str = "",
+    caption_model_key: str = "",
     id_filter: set | None = None,
     visible_thumb_size: str = "",
     cache_root: str = "",
@@ -894,6 +932,7 @@ async def count_rankings_cached(
         file_type=file_type,
         camera=camera,
         lens=lens,
+        tag=tag,
         id_filter=id_filter,
         visible_thumb_size=visible_thumb_size,
         cache_root=cache_root,
@@ -919,6 +958,8 @@ async def count_rankings_cached(
         file_type=file_type,
         camera=camera,
         lens=lens,
+        tag=tag,
+        caption_model_key=caption_model_key,
         id_filter=id_filter,
         visible_thumb_size=visible_thumb_size,
         cache_root=cache_root,
@@ -1010,6 +1051,8 @@ async def rank_quality(
     file_type: str = "",
     camera: str = "",
     lens: str = "",
+    tag: str = "",
+    caption_model_key: str = "",
     id_filter: set | None = None,
     text_query: str = "",
     exclude_collapsed_stack_members: bool = False,
@@ -1029,6 +1072,8 @@ async def rank_quality(
         file_type=file_type,
         camera=camera,
         lens=lens,
+        tag=tag,
+        caption_model_key=caption_model_key,
         text_query=text_query,
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
     )
@@ -1089,6 +1134,8 @@ async def date_histogram(
     file_type: str = "",
     camera: str = "",
     lens: str = "",
+    tag: str = "",
+    caption_model_key: str = "",
     id_filter: set | None = None,
     text_query: str = "",
     exclude_collapsed_stack_members: bool = False,
@@ -1108,6 +1155,8 @@ async def date_histogram(
         file_type=file_type,
         camera=camera,
         lens=lens,
+        tag=tag,
+        caption_model_key=caption_model_key,
         text_query=text_query,
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
     )
@@ -1166,6 +1215,8 @@ async def scope_counts(
     file_type: str = "",
     camera: str = "",
     lens: str = "",
+    tag: str = "",
+    caption_model_key: str = "",
     id_filter: set | None = None,
     text_query: str = "",
     exclude_collapsed_stack_members: bool = False,
@@ -1180,6 +1231,8 @@ async def scope_counts(
         file_type=file_type,
         camera=camera,
         lens=lens,
+        tag=tag,
+        caption_model_key=caption_model_key,
         text_query=text_query,
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
     )
@@ -1241,6 +1294,8 @@ async def date_groups(
     file_type: str = "",
     camera: str = "",
     lens: str = "",
+    tag: str = "",
+    caption_model_key: str = "",
     visible_thumb_size: str = "",
     cache_root: str = "",
     id_filter: set | None = None,
@@ -1257,7 +1312,8 @@ async def date_groups(
     conditions, params = ranking_filter_parts(
         orientation=orientation, compared=compared, min_stars=min_stars,
         folder=folder, flag=flag, date_taken=date_taken,
-        file_type=file_type, camera=camera, lens=lens,
+        file_type=file_type, camera=camera, lens=lens, tag=tag,
+        caption_model_key=caption_model_key,
         text_query=text_query,
         include_source=not all_sources_available,
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
@@ -1341,6 +1397,8 @@ async def date_groups_cached(
     file_type: str = "",
     camera: str = "",
     lens: str = "",
+    tag: str = "",
+    caption_model_key: str = "",
     visible_thumb_size: str = "",
     cache_root: str = "",
     id_filter: set | None = None,
@@ -1359,6 +1417,7 @@ async def date_groups_cached(
         file_type=file_type,
         camera=camera,
         lens=lens,
+        tag=tag,
         visible_thumb_size=visible_thumb_size,
         cache_root=cache_root,
         id_filter=id_filter,
@@ -1387,6 +1446,8 @@ async def date_groups_cached(
                         file_type=file_type,
                         camera=camera,
                         lens=lens,
+                        tag=tag,
+                        caption_model_key=caption_model_key,
                         visible_thumb_size=visible_thumb_size,
                         cache_root=cache_root,
                         id_filter=id_filter,
@@ -1414,6 +1475,8 @@ async def date_groups_cached(
         file_type=file_type,
         camera=camera,
         lens=lens,
+        tag=tag,
+        caption_model_key=caption_model_key,
         visible_thumb_size=visible_thumb_size,
         cache_root=cache_root,
         id_filter=id_filter,
@@ -1612,17 +1675,17 @@ async def map_markers_cached(
         return empty_map_markers()
 
     has_filters = has_ranking_count_filters(
-        orientation,
-        compared,
-        min_stars,
-        folder,
-        flag,
-        date_taken,
-        file_type,
-        camera,
-        lens,
-        id_filter,
-        text_query,
+        orientation=orientation,
+        compared=compared,
+        min_stars=min_stars,
+        folder=folder,
+        flag=flag,
+        date_taken=date_taken,
+        file_type=file_type,
+        camera=camera,
+        lens=lens,
+        id_filter=id_filter,
+        text_query=text_query,
     )
     if not has_filters:
         total_count = active_images

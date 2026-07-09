@@ -18,6 +18,7 @@ from data.repositories import images as image_repository
 from data.repositories import rankings as ranking_repository
 from data.repositories import stats as stats_repository
 import thumbnails
+import settings
 
 
 router = APIRouter()
@@ -91,6 +92,7 @@ async def _get_export_images(
     file_type: str,
     camera: str,
     lens: str,
+    tag: str,
     q: str,
     deep: bool,
     people: str,
@@ -133,6 +135,8 @@ async def _get_export_images(
         file_type=file_type,
         camera=camera,
         lens=lens,
+        tag=tag,
+        caption_model_key=settings.active_caption_config()["model_key"],
         id_filter=id_filter,
         text_query=search.get("text_query") or "",
     )
@@ -317,7 +321,7 @@ async def export_rankings(
     format: str = "json", ids: str = "", limit: int = 10000, sort: str = "elo",
     orientation: str = "", compared: str = "", min_stars: int = 0,
     folder: str = "", flag: str = "", date_taken: str = "", file_type: str = "",
-    camera: str = "", lens: str = "", q: str = "", deep: bool = False, people: str = "",
+    camera: str = "", lens: str = "", tag: str = "", q: str = "", deep: bool = False, people: str = "",
     import_batch: int = 0, size: str = "original",
 ):
     normalized_format = (format or "json").lower()
@@ -342,6 +346,7 @@ async def export_rankings(
         file_type=file_type,
         camera=camera,
         lens=lens,
+        tag=tag,
         q=q,
         deep=deep,
         people=people,

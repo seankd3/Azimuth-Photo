@@ -11,6 +11,8 @@ from data.repositories.metadata_search import metadata_fts_query
 
 
 ERROR_RETRY_AFTER_SECONDS = 24 * 60 * 60
+TAGS_CACHE_TTL_SECONDS = 2.0
+_tags_cache: dict[tuple, dict] = {}
 
 
 def normalize_tags(tags) -> list[str]:
@@ -26,6 +28,18 @@ def normalize_tags(tags) -> list[str]:
 
 def tags_json(tags) -> str:
     return json.dumps(normalize_tags(tags), ensure_ascii=True)
+
+
+def _tags_signature_key(db_path: str, model_key: str, q: str, limit: int, signature: int) -> tuple:
+    return (db_path, model_key, q.casefold(), int(limit), int(signature))
+
+
+def escape_like(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def invalidate_tags_cache() -> None:
+    _tags_cache.clear()
 
 
 async def ensure_active_caption_fts_model(db_path: str, model_key: str) -> None:
@@ -82,11 +96,12 @@ async def store_caption_result(
         if status == "done":
             await conn.execute(
                 "INSERT INTO image_captions "
-                "(image_id, model_key, caption, tags, quality, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?) "
+                "(image_id, model_key, caption, tags, quality, user_edited, created_at) "
+                "VALUES (?, ?, ?, ?, ?, 0, ?) "
                 "ON CONFLICT(model_key, image_id) DO UPDATE SET "
                 "caption = excluded.caption, tags = excluded.tags, "
-                "quality = excluded.quality, created_at = excluded.created_at",
+                "quality = excluded.quality, created_at = excluded.created_at "
+                "WHERE COALESCE(image_captions.user_edited, 0) = 0",
                 (int(image_id), model_key, str(caption or ""), tags_text, quality, now),
             )
         await conn.execute(
@@ -104,6 +119,207 @@ async def store_caption_result(
         raise
     finally:
         await connection.close_async(conn, db_path=db_path)
+
+
+async def owner_update_caption(
+    db_path: str,
+    *,
+    image_id: int,
+    model_key: str,
+    caption: str | None = None,
+    tags=None,
+) -> dict | None:
+    now = time.time()
+    clean_caption = str(caption or "") if caption is not None else None
+    clean_tags = normalize_tags(tags) if tags is not None else None
+    conn = await connection.open_async(db_path)
+    try:
+        await conn.execute("BEGIN")
+        cursor = await conn.execute("SELECT id FROM images WHERE id = ?", (int(image_id),))
+        if await cursor.fetchone() is None:
+            await conn.rollback()
+            return None
+        cursor = await conn.execute(
+            "SELECT caption, tags, quality FROM image_captions WHERE image_id = ? AND model_key = ?",
+            (int(image_id), model_key),
+        )
+        existing = await cursor.fetchone()
+        next_caption = clean_caption if clean_caption is not None else str(existing["caption"] if existing else "")
+        existing_tags = []
+        if existing:
+            try:
+                existing_tags = json.loads(existing["tags"] or "[]")
+            except (TypeError, ValueError):
+                existing_tags = []
+        next_tags = clean_tags if clean_tags is not None else normalize_tags(existing_tags)
+        next_quality = str(existing["quality"] or "") if existing else "user"
+        await conn.execute(
+            "INSERT INTO image_captions "
+            "(image_id, model_key, caption, tags, quality, user_edited, created_at) "
+            "VALUES (?, ?, ?, ?, ?, 1, ?) "
+            "ON CONFLICT(model_key, image_id) DO UPDATE SET "
+            "caption = excluded.caption, tags = excluded.tags, quality = excluded.quality, "
+            "user_edited = 1, created_at = excluded.created_at",
+            (int(image_id), model_key, next_caption, tags_json(next_tags), next_quality, now),
+        )
+        await conn.execute(
+            "INSERT INTO caption_scan_images "
+            "(image_id, model_key, status, last_error, scanned_at) "
+            "VALUES (?, ?, 'done', '', ?) "
+            "ON CONFLICT(image_id, model_key) DO UPDATE SET "
+            "status = 'done', last_error = '', scanned_at = excluded.scanned_at",
+            (int(image_id), model_key, now),
+        )
+        await conn.commit()
+    except Exception:
+        await conn.rollback()
+        raise
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+    invalidate_tags_cache()
+    return await get_image_caption(db_path, image_id=image_id, model_key=model_key)
+
+
+async def get_image_caption(db_path: str, *, image_id: int, model_key: str) -> dict | None:
+    conn = await connection.open_async(db_path)
+    try:
+        cursor = await conn.execute(
+            "SELECT image_id, model_key, caption, tags, quality, user_edited, created_at "
+            "FROM image_captions WHERE image_id = ? AND model_key = ?",
+            (int(image_id), model_key),
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        try:
+            parsed_tags = json.loads(row["tags"] or "[]")
+        except (TypeError, ValueError):
+            parsed_tags = []
+        return {
+            "image_id": int(row["image_id"]),
+            "model_key": row["model_key"],
+            "caption": row["caption"] or "",
+            "tags": normalize_tags(parsed_tags),
+            "quality": row["quality"] or "",
+            "user_edited": bool(row["user_edited"]),
+            "created_at": row["created_at"],
+        }
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+
+
+async def image_caption_presence(db_path: str, *, model_key: str, image_ids) -> dict[int, bool]:
+    ids = []
+    for image_id in dict.fromkeys(image_ids or []):
+        try:
+            normalized = int(image_id)
+        except (TypeError, ValueError):
+            continue
+        if normalized > 0:
+            ids.append(normalized)
+    if not ids:
+        return {}
+    result: dict[int, bool] = {}
+    conn = await connection.open_async(db_path)
+    try:
+        for chunk in _chunked(ids, 900):
+            placeholders = ",".join("?" for _ in chunk)
+            cursor = await conn.execute(
+                "SELECT image_id FROM image_captions "
+                f"WHERE model_key = ? AND image_id IN ({placeholders})",
+                (model_key, *chunk),
+            )
+            for row in await cursor.fetchall():
+                result[int(row["image_id"])] = True
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+    return result
+
+
+async def image_caption_summaries(db_path: str, *, model_key: str, image_ids) -> dict[int, dict]:
+    ids = []
+    for image_id in dict.fromkeys(image_ids or []):
+        try:
+            normalized = int(image_id)
+        except (TypeError, ValueError):
+            continue
+        if normalized > 0:
+            ids.append(normalized)
+    if not ids:
+        return {}
+    result: dict[int, dict] = {}
+    conn = await connection.open_async(db_path)
+    try:
+        for chunk in _chunked(ids, 900):
+            placeholders = ",".join("?" for _ in chunk)
+            cursor = await conn.execute(
+                "SELECT image_id, tags FROM image_captions "
+                f"WHERE model_key = ? AND image_id IN ({placeholders})",
+                (model_key, *chunk),
+            )
+            for row in await cursor.fetchall():
+                try:
+                    parsed_tags = json.loads(row["tags"] or "[]")
+                except (TypeError, ValueError):
+                    parsed_tags = []
+                result[int(row["image_id"])] = {"has_caption": True, "caption_tags": normalize_tags(parsed_tags)}
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+    return result
+
+
+async def tag_signature(db_path: str, *, model_key: str) -> int:
+    conn = await connection.open_async(db_path)
+    try:
+        cursor = await conn.execute(
+            "SELECT COUNT(*) AS c FROM image_tags WHERE model_key = ?",
+            (model_key,),
+        )
+        row = await cursor.fetchone()
+        return int(row["c"] if row else 0)
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+
+
+async def list_tags(
+    db_path: str,
+    *,
+    model_key: str,
+    q: str = "",
+    limit: int = 100,
+    signature: int | None = None,
+    ttl_seconds: float = TAGS_CACHE_TTL_SECONDS,
+) -> list[dict]:
+    query = str(q or "").strip().lower()
+    capped_limit = max(1, min(int(limit or 100), 500))
+    sig = await tag_signature(db_path, model_key=model_key) if signature is None else int(signature)
+    cache_key = _tags_signature_key(db_path, model_key, query, capped_limit, sig)
+    now = time.time()
+    cached = _tags_cache.get(cache_key)
+    if cached and cached["expires"] > now:
+        return [dict(item) for item in cached["data"]]
+    where = ["it.model_key = ?", "i.status IN ('kept', 'maybe')", "i.missing_at IS NULL", "s.included = 1"]
+    params: list = [model_key]
+    if query:
+        where.append("it.tag LIKE ? ESCAPE '\\'")
+        params.append(f"{escape_like(query)}%")
+    params.append(capped_limit)
+    conn = await connection.open_async(db_path)
+    try:
+        cursor = await conn.execute(
+            "SELECT it.tag, COUNT(DISTINCT it.image_id) AS count "
+            "FROM image_tags it "
+            "JOIN images i ON i.id = it.image_id "
+            "JOIN catalog_sources s ON s.id = i.source_id "
+            f"WHERE {' AND '.join(where)} "
+            "GROUP BY it.tag ORDER BY count DESC, it.tag ASC LIMIT ?",
+            params,
+        )
+        rows = [{"tag": row["tag"], "count": int(row["count"] or 0)} for row in await cursor.fetchall()]
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+    _tags_cache[cache_key] = {"data": [dict(item) for item in rows], "expires": now + ttl_seconds}
+    return rows
 
 
 async def get_images_needing_captions(

@@ -61,6 +61,12 @@ export async function getFilterOptions() {
     return fetchJson('/api/filter-options', { defaultValue: null });
 }
 
+export async function getTags({ q = '', limit = 100 } = {}) {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (q) params.set('q', q);
+    return fetchJson(`/api/tags?${params.toString()}`, { defaultValue: { tags: [] } });
+}
+
 export async function labelPerson(personId, name) {
     return postJson(`/api/people/${personId}/label`, { name });
 }
@@ -102,6 +108,18 @@ export async function getScanStatus() {
 
 export async function getImageExif(imageId) {
     return fetchJson(`/api/image/${imageId}/exif`, { defaultValue: null });
+}
+
+export async function getImageCaption(imageId) {
+    return fetchJson(`/api/image/${imageId}/caption`, { defaultValue: null });
+}
+
+export async function saveImageCaption(imageId, { caption, tags } = {}) {
+    return postJson(`/api/image/${imageId}/caption`, { caption, tags });
+}
+
+export async function getCaptionStatus() {
+    return fetchJson('/api/captions/status', { defaultValue: null });
 }
 
 export async function getAiStatus() {

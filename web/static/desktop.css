@@ -878,6 +878,16 @@ body:has(#view-loupe.active) #toast { bottom: 92px; }
 .rk-tier.settling i { background: var(--accent); }
 .rk-tier.confident i { background: var(--ok); }
 .panel-empty { color: var(--text-3); font-size: 12px; line-height: 1.5; padding: 2px 0 6px; }
+.panel-empty .cap-progress { display: block; margin-top: 3px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.cap-text { color: var(--text-2); font-size: 12.5px; line-height: 1.5; overflow-wrap: anywhere; }
+.cap-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: var(--s2); }
+.cap-tag { max-width: 100%; min-height: 22px; padding: 2px 7px; border: 1px solid var(--line); border-radius: var(--r-ctl); color: var(--accent); background: rgba(122,168,212,.08); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cap-tag:hover, .cap-tag:focus-visible { background: rgba(122,168,212,.16); color: var(--text); }
+.cap-actions { display: flex; align-items: center; justify-content: flex-end; gap: var(--s2); margin-top: var(--s2); }
+.cap-edited { margin-right: auto; color: var(--text-3); font-size: 11px; }
+.cap-editor { display: grid; gap: var(--s2); }
+.cap-editor textarea { width: 100%; min-width: 0; resize: vertical; padding: 7px 8px; border: 1px solid var(--line); border-radius: var(--r-ctl); background: var(--bg); color: var(--text); outline: 0; font: inherit; font-size: 12.5px; line-height: 1.45; }
+.cap-editor textarea:focus-visible, .cap-editor input:focus-visible { border-color: var(--accent-lin); }
 .more-exif { margin-top: var(--s3); }
 .more-exif summary { cursor: pointer; color: var(--accent); font-size: 12px; }
 .exif-rows { margin-top: var(--s2); max-height: 220px; overflow: auto; padding-right: 2px; }

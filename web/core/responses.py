@@ -70,6 +70,8 @@ def image_card(
         "status": _get(image, "status") or "kept",
         "flag": _get(image, "flag") or "unflagged",
         "aspect_ratio": _as_float(_get(image, "aspect_ratio"), 1.5) or 1.5,
+        "has_caption": bool(_get(image, "has_caption", False)),
+        "caption_tags": list(_get(image, "caption_tags", []) or []),
         **metadata_payload(image),
         "thumb_url": f"/api/thumb/{thumb_size}/{image_id}",
     }

@@ -366,7 +366,15 @@ class LibraryTests(BackendTestCase):
         )
         facade_rows = await db.get_rankings(limit=10, offset=0, **filters)
 
-        self.assertEqual([dict(row) for row in facade_rows], [dict(row) for row in repository_rows])
+        def repository_shape(row):
+            data = dict(row)
+            data.pop("has_caption", None)
+            data.pop("caption_tags", None)
+            return data
+
+        self.assertEqual([repository_shape(row) for row in facade_rows], [dict(row) for row in repository_rows])
+        self.assertEqual([row["has_caption"] for row in facade_rows], [False, False])
+        self.assertEqual([row["caption_tags"] for row in facade_rows], [[], []])
         self.assertEqual([row["id"] for row in facade_rows], [alpha, beta])
 
         id_filtered_facade_rows = await db.get_rankings(
@@ -384,9 +392,11 @@ class LibraryTests(BackendTestCase):
             id_filter={beta},
         )
         self.assertEqual(
-            [dict(row) for row in id_filtered_facade_rows],
+            [repository_shape(row) for row in id_filtered_facade_rows],
             [dict(row) for row in id_filtered_repository_rows],
         )
+        self.assertEqual([row["has_caption"] for row in id_filtered_facade_rows], [False])
+        self.assertEqual([row["caption_tags"] for row in id_filtered_facade_rows], [[]])
         self.assertEqual([row["id"] for row in id_filtered_facade_rows], [beta])
 
     async def test_file_type_filters_match_dotted_and_plain_extensions(self):

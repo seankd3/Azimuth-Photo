@@ -1,4 +1,4 @@
-import { getDateHistogram, getFilterOptions, getFolders, getPeople } from './api.js';
+import { getDateHistogram, getFilterOptions, getFolders, getPeople, getTags } from './api.js';
 import { byId, on, scope, scopeParams, setScope } from './state.js';
 import { loadCollectionImages } from './scope_data.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
@@ -21,6 +21,7 @@ let options = {
     fileTypes: [],
     cameras: [],
     lenses: [],
+    tags: [],
     undated: 0,
 };
 
@@ -240,6 +241,7 @@ function render() {
             selectBlock('File type', optionRows(options.fileTypes, 'file_type', (item) => item.ext || item.value, (item) => String(item.ext || item.value).replace('.', '').toUpperCase()) || emptyOption('No file types found.', 'file-type'), 'data-filter-section="filetype"'),
             selectBlock('Camera', optionRows(options.cameras, 'camera', (item) => item.camera || item.value, (item) => item.camera || item.value) || emptyOption('No cameras found.', 'camera'), 'data-filter-section="camera"'),
             selectBlock('Lens', optionRows(options.lenses, 'lens', (item) => item.lens || item.value, (item) => item.lens || item.value) || emptyOption('No lenses found.', 'aperture'), 'data-filter-section="lens"'),
+            selectBlock('Tags', optionRows(options.tags, 'tag', (item) => item.tag || item.value, (item) => item.tag || item.value) || emptyOption('No caption tags yet.', 'tag'), 'data-filter-section="tags"'),
             selectBlock('Orientation', [
                 ['landscape', 'Landscape'],
                 ['portrait', 'Portrait'],
@@ -298,10 +300,11 @@ async function loadOptions({ force = false } = {}) {
     if ((optionsAreFresh() && !force) || loading) return;
     loading = true;
     render();
-    const [peopleData, folderData, filterData] = await Promise.all([
+    const [peopleData, folderData, filterData, tagData] = await Promise.all([
         getPeople(500),
         getFolders(),
         getFilterOptions(),
+        getTags({ limit: 12 }),
     ]);
     options = {
         people: (peopleData && (peopleData.people || peopleData.persons || peopleData.results)) || [],
@@ -310,6 +313,7 @@ async function loadOptions({ force = false } = {}) {
         fileTypes: (filterData && filterData.file_types) || [],
         cameras: (filterData && filterData.cameras) || [],
         lenses: (filterData && filterData.lenses) || [],
+        tags: (tagData && tagData.tags) || [],
         undated: Number(filterData && filterData.undated) || 0,
     };
     loaded = true;

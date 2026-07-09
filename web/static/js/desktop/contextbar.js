@@ -46,6 +46,7 @@ function renderChips() {
     if (scope.file_type) chips.push(chipHtml('file_type', String(scope.file_type).toUpperCase()));
     if (scope.camera) chips.push(chipHtml('camera', `Camera · ${scope.camera}`));
     if (scope.lens) chips.push(chipHtml('lens', `Lens · ${scope.lens}`));
+    if (scope.tag) chips.push(chipHtml('tag', `Tag · ${scope.tag}`));
     if (scope.orientation) chips.push(chipHtml('orientation', scope.orientation === 'landscape' ? 'Landscape' : scope.orientation === 'portrait' ? 'Portrait' : scope.orientation));
     if (scope.compared) {
         const labels = { compared: 'Ranked', uncompared: 'Unranked', confident: 'High confidence' };
@@ -165,6 +166,10 @@ export function scopeTokenHtml() {
     if (scope.q) {
         const label = `“${scope.q}”`;
         return `<span class="scope-token semantic" title="${esc(label)}"><span class="tk-glyph tk-spark">${icon('sparkles')}</span><b title="${esc(label)}">${esc(label)}</b>${count}</span>`;
+    }
+    if (scope.tag) {
+        const label = `Tag · ${scope.tag}`;
+        return `<span class="scope-token" title="${esc(label)}"><span class="tk-glyph">${icon('tag')}</span><b title="${esc(label)}">${esc(label)}</b>${count}</span>`;
     }
     const label = describeScope();
     return `<span class="scope-token" title="${esc(label)}"><span class="tk-glyph">${icon('house')}</span><b title="${esc(label)}">${esc(label)}</b>${count}</span>`;

@@ -25,7 +25,7 @@ async def api_rankings(
     limit: int = 100, offset: int = 0, sort: str = "elo",
     orientation: str = "", compared: str = "", min_stars: int = 0,
     folder: str = "", flag: str = "", date_taken: str = "", file_type: str = "",
-    camera: str = "", lens: str = "", q: str = "", deep: bool = False, people: str = "",
+    camera: str = "", lens: str = "", tag: str = "", q: str = "", deep: bool = False, people: str = "",
     import_batch: int = 0, stacks: str = "expanded", request: Request = None,
 ):
     if _rankings_handler is None:
@@ -46,6 +46,7 @@ async def api_rankings(
                 file_type=file_type,
                 camera=camera,
                 lens=lens,
+                tag=tag,
                 q=q,
                 deep=deep,
                 people=people,
@@ -77,7 +78,7 @@ async def api_rankings(
 async def api_date_groups(
     orientation: str = "", compared: str = "", min_stars: int = 0,
     folder: str = "", flag: str = "", date_taken: str = "", file_type: str = "",
-    camera: str = "", lens: str = "", people: str = "", q: str = "", deep: bool = False,
+    camera: str = "", lens: str = "", tag: str = "", people: str = "", q: str = "", deep: bool = False,
     import_batch: int = 0, stacks: str = "expanded",
 ):
     """Return date groups with counts for the scrubber, respecting active filters."""
@@ -91,6 +92,7 @@ async def api_date_groups(
         file_type=file_type,
         camera=camera,
         lens=lens,
+        tag=tag,
         people=people,
         q=q,
         import_batch=import_batch,
@@ -103,7 +105,7 @@ async def api_date_groups(
 async def api_date_histogram(
     orientation: str = "", compared: str = "", min_stars: int = 0,
     folder: str = "", flag: str = "", date_taken: str = "", file_type: str = "",
-    camera: str = "", lens: str = "", people: str = "", q: str = "", deep: bool = False,
+    camera: str = "", lens: str = "", tag: str = "", people: str = "", q: str = "", deep: bool = False,
     import_batch: int = 0, stacks: str = "expanded",
 ):
     """Return whole-scope month counts for the timeline scrubber and month view."""
@@ -117,6 +119,7 @@ async def api_date_histogram(
         file_type=file_type,
         camera=camera,
         lens=lens,
+        tag=tag,
         people=people,
         q=q,
         import_batch=import_batch,
@@ -129,7 +132,7 @@ async def api_date_histogram(
 async def api_counts(
     orientation: str = "", compared: str = "", min_stars: int = 0,
     folder: str = "", date_taken: str = "", file_type: str = "",
-    camera: str = "", lens: str = "", people: str = "", q: str = "", deep: bool = False,
+    camera: str = "", lens: str = "", tag: str = "", people: str = "", q: str = "", deep: bool = False,
     import_batch: int = 0, stacks: str = "expanded",
 ):
     """Return cheap total/picked/rejected counts for the scope in one call."""
@@ -142,6 +145,7 @@ async def api_counts(
         file_type=file_type,
         camera=camera,
         lens=lens,
+        tag=tag,
         people=people,
         q=q,
         import_batch=import_batch,
