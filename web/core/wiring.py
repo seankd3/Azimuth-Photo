@@ -172,7 +172,6 @@ def configure_cache_events() -> None:
         query_constraints=query_constraints,
         invalidate_ai_status_response_cache=ai_routes.invalidate_ai_status_response_cache,
         duplicates_cache=search_service._duplicates_cache,
-        collections_cache=search_service._collections_cache,
         elo_propagation=elo_propagation,
     )
     db.register_embedding_batch_listener(cache_events.embedding_batch_stored)
@@ -239,7 +238,6 @@ def configure_search_routes() -> None:
         get_image_by_id=lambda image_id: db.get_image_by_id(image_id),
         batch_update_metadata=lambda updates: db.batch_update_metadata(updates),
         duplicates_cache=search_service._duplicates_cache,
-        collections_cache=search_service._collections_cache,
     )
 
 

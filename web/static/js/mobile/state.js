@@ -26,6 +26,10 @@ export const scope = {
     fileType: '',
     camera: '',
     lens: '',
+    tag: '',
+    orientation: '',
+    folder: '',
+    compared: '',
     minStars: '',
     similarId: '',
     similarImages: null,
@@ -33,10 +37,16 @@ export const scope = {
     thumb: '',
 };
 
+export const viewPrefs = {
+    sort: 'date_taken',
+    collapseStacks: false,
+};
+
 export function scopeActive() {
     return Boolean(
         scope.q || scope.people || scope.flag || scope.fileType || scope.camera
-        || scope.lens || scope.minStars || scope.similarId
+        || scope.lens || scope.tag || scope.orientation || scope.folder || scope.compared
+        || scope.minStars || scope.similarId
     );
 }
 
@@ -48,7 +58,12 @@ export function scopeParams(extra = {}) {
     if (scope.fileType) params.set('file_type', scope.fileType);
     if (scope.camera) params.set('camera', scope.camera);
     if (scope.lens) params.set('lens', scope.lens);
+    if (scope.tag) params.set('tag', scope.tag);
+    if (scope.orientation) params.set('orientation', scope.orientation);
+    if (scope.folder) params.set('folder', scope.folder);
+    if (scope.compared) params.set('compared', scope.compared);
     if (scope.minStars) params.set('min_stars', scope.minStars);
+    params.set('stacks', viewPrefs.collapseStacks ? 'collapsed' : 'expanded');
     for (const [key, value] of Object.entries(extra)) {
         if (value !== undefined && value !== null && value !== '') params.set(key, String(value));
     }
@@ -62,6 +77,10 @@ export function setScope(patch) {
     scope.fileType = '';
     scope.camera = '';
     scope.lens = '';
+    scope.tag = '';
+    scope.orientation = '';
+    scope.folder = '';
+    scope.compared = '';
     scope.minStars = '';
     scope.similarId = '';
     scope.similarImages = null;
@@ -74,6 +93,11 @@ export function setScope(patch) {
 export function patchScope(patch) {
     Object.assign(scope, patch);
     emit('scope', scope);
+}
+
+export function setViewPrefs(patch) {
+    Object.assign(viewPrefs, patch);
+    emit('view-prefs', viewPrefs);
 }
 
 export function clearScope() {

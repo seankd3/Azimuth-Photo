@@ -279,6 +279,22 @@ class CollectionTests(BackendTestCase):
         self.assertEqual(folder_response.status_code, 422)
         self.assertIn("query.folder must be 500 characters or less", folder_response.json()["detail"])
 
+    async def test_smart_collection_rejects_folder_arrays(self):
+        def probe():
+            client = TestClient(app_module.app)
+            try:
+                return client.post(
+                    "/api/user-collections",
+                    json={"name": "Bad smart", "query": {"folder": ["/archive/a", "/archive/b"]}},
+                )
+            finally:
+                client.close()
+
+        response = await asyncio.to_thread(probe)
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("query.folder must be a string", response.json()["detail"])
+
     async def test_smart_collection_materialize_cap_returns_conflict(self):
         created = await collection_routes.api_create_collection(
             collection_routes.CreateCollectionBody(name="Too broad", query={"flag": "picked"})

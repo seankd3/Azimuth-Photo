@@ -8,7 +8,6 @@ from data.repositories import images as image_repository
 
 
 _duplicates_cache = {"key": None, "data": None}
-_collections_cache = {"key": None, "data": None}
 
 _cache_root: Callable[[], str] | None = None
 _db_path: Callable[[], str] | None = None

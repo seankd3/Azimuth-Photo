@@ -41,7 +41,6 @@ _get_active_images_by_ids: GetActiveImagesByIds | None = None
 _get_image_by_id: GetImageById | None = None
 _batch_update_metadata: BatchUpdateMetadata | None = None
 _duplicates_cache: dict | None = None
-_collections_cache: dict | None = None
 _exif_cache: dict[int, dict] = {}
 _EXIF_CACHE_MAX = 2000
 
@@ -63,13 +62,12 @@ def configure(
     get_image_by_id: GetImageById,
     batch_update_metadata: BatchUpdateMetadata,
     duplicates_cache: dict,
-    collections_cache: dict,
 ) -> None:
     global _api_rankings, _visible_embedding_page, _cached_image_ids, _metadata_update_tuple
     global _invalidate_pairing_cache, _normalize_search_query, _clamp_int, _visibility_counts
     global _active_embedding_model_key, _db_signature, _get_active_source_id_set
     global _get_active_images_by_ids, _get_image_by_id, _batch_update_metadata
-    global _duplicates_cache, _collections_cache
+    global _duplicates_cache
     _api_rankings = api_rankings
     _visible_embedding_page = visible_embedding_page
     _cached_image_ids = cached_image_ids
@@ -85,7 +83,6 @@ def configure(
     _get_image_by_id = get_image_by_id
     _batch_update_metadata = batch_update_metadata
     _duplicates_cache = duplicates_cache
-    _collections_cache = collections_cache
 
 
 def _configured() -> None:
@@ -105,7 +102,6 @@ def _configured() -> None:
         _get_image_by_id,
         _batch_update_metadata,
         _duplicates_cache,
-        _collections_cache,
     )
     if any(value is None for value in values):
         raise RuntimeError("Search routes are not configured")
@@ -311,99 +307,4 @@ async def api_exif(image_id: int):
         to_remove = list(_exif_cache.keys())[:_EXIF_CACHE_MAX // 2]
         for key in to_remove:
             del _exif_cache[key]
-    return result
-
-
-@router.get("/api/collections")
-async def api_collections(n_clusters: int = 20):
-    """Auto-group images into collections using embedding clustering."""
-    _configured()
-    n_clusters = max(2, min(int(n_clusters), 100))
-    if not await _get_active_source_id_set():
-        return {"collections": []}
-
-    try:
-        import numpy as np
-        import embed_cache
-    except ImportError:
-        return JSONResponse({"error": "Dependencies not available"}, status_code=503)
-
-    image_ids, matrix = await embed_cache.get_matrix()
-    if image_ids is None or len(image_ids) < n_clusters:
-        return {"collections": []}
-
-    cached_sm_ids = await _cached_image_ids([int(image_id) for image_id in image_ids], "sm")
-    if not cached_sm_ids:
-        return {"collections": []}
-
-    cache_key = (int(n_clusters), len(image_ids), len(cached_sm_ids))
-    if _collections_cache["key"] == cache_key and _collections_cache["data"] is not None:
-        return _collections_cache["data"]
-
-    try:
-        from sklearn.cluster import KMeans, MiniBatchKMeans
-    except ImportError:
-        return JSONResponse({"error": "Dependencies not available"}, status_code=503)
-
-    loop = asyncio.get_running_loop()
-    if len(image_ids) > 5000:
-        kmeans = MiniBatchKMeans(
-            n_clusters=n_clusters,
-            batch_size=4096,
-            n_init=3,
-            random_state=42,
-        )
-    else:
-        kmeans = KMeans(n_clusters=n_clusters, n_init=3, random_state=42)
-    labels = await loop.run_in_executor(None, kmeans.fit_predict, matrix)
-
-    collection_drafts = []
-    representative_ids = []
-    for cluster_id in range(n_clusters):
-        cluster_indices = np.flatnonzero(labels == cluster_id)
-        if cluster_indices.size == 0:
-            continue
-
-        centroid = kmeans.cluster_centers_[cluster_id]
-        cluster_vecs = matrix[cluster_indices]
-        dists = np.linalg.norm(cluster_vecs - centroid, axis=1)
-        rep_idx = None
-        for local_idx in np.argsort(dists):
-            candidate_idx = int(cluster_indices[int(local_idx)])
-            candidate_id = int(image_ids[candidate_idx])
-            if candidate_id in cached_sm_ids:
-                rep_idx = candidate_idx
-                break
-        if rep_idx is None:
-            continue
-        rep_id = int(image_ids[rep_idx])
-        representative_ids.append(rep_id)
-        member_ids = [
-            int(image_ids[int(i)])
-            for i in cluster_indices[:50]
-            if int(image_ids[int(i)]) in cached_sm_ids
-        ]
-        if rep_id not in member_ids:
-            member_ids.insert(0, rep_id)
-        collection_drafts.append((cluster_id, int(cluster_indices.size), rep_id, member_ids))
-
-    images_data = await _get_active_images_by_ids(representative_ids)
-    collections = []
-    for cluster_id, count, rep_id, member_ids in collection_drafts:
-        rep_img = images_data.get(rep_id, {})
-        collections.append({
-            "id": cluster_id,
-            "count": count,
-            "representative": {
-                "id": rep_id,
-                "filename": rep_img.get("filename", ""),
-                "thumb_url": f"/api/thumb/sm/{rep_id}",
-            },
-            "image_ids": member_ids,
-        })
-
-    collections.sort(key=lambda collection: collection["count"], reverse=True)
-    result = {"collections": collections}
-    _collections_cache["key"] = cache_key
-    _collections_cache["data"] = result
     return result

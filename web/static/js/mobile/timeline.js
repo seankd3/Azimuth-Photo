@@ -8,8 +8,10 @@ import { getDateHistogram, getRankings, thumbUrl } from './api.js';
 import {
     byId, clearScope, clearSelection, emit, on, rememberImages,
     isOffline, scope, scopeActive, scopeParams, selState, selection, selectionChanged,
+    setViewPrefs, viewPrefs,
 } from './state.js';
 import { dismissLayer } from './history.js';
+import { dismissSheetThen, openSheet } from './selection.js';
 import { openViewer } from './viewer.js';
 import { tick } from './haptics.js';
 import { icon } from '../icons.js';
@@ -22,6 +24,18 @@ const FULL_MONTHS = [
     'July', 'August', 'September', 'October', 'November', 'December',
 ];
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const SORT_OPTIONS = [
+    { value: 'date_taken', label: 'Date ↓', detail: 'Newest first', glyph: 'calendar-days' },
+    { value: 'date_taken_asc', label: 'Date ↑', detail: 'Oldest first', glyph: 'calendar-days' },
+    { value: 'elo', label: 'Rating ↓', detail: 'Highest first', glyph: 'star' },
+    { value: 'elo_asc', label: 'Rating ↑', detail: 'Lowest first', glyph: 'star' },
+];
+const COMPARED_LABELS = {
+    compared: 'Ranked',
+    uncompared: 'Unranked',
+    direct_uncompared: 'Never dueled',
+    confident: 'High confidence',
+};
 
 let pane = null;
 let timeline = null;
@@ -360,7 +374,7 @@ export function updateMonthPill(show) {
 
 /* ---------- data loading ---------- */
 function rankingParams(offset) {
-    return scopeParams({ limit: PAGE, offset, sort: 'date_taken' });
+    return scopeParams({ limit: PAGE, offset, sort: viewPrefs.sort || 'date_taken' });
 }
 
 async function loadHistogram() {
@@ -454,7 +468,7 @@ async function loadPrev() {
     loadingPrev = true;
     const gen = generation;
     const newStart = Math.max(0, startOffset - PAGE);
-    const params = scopeParams({ limit: startOffset - newStart, offset: newStart, sort: 'date_taken' });
+    const params = scopeParams({ limit: startOffset - newStart, offset: newStart, sort: viewPrefs.sort || 'date_taken' });
     const page = await getRankings(params);
     loadingPrev = false;
     if (gen !== generation || !page || !Array.isArray(page.images) || !page.images.length) return;
@@ -536,6 +550,10 @@ function renderScopeBar() {
     if (scope.fileType) chips.push(chip('type', scope.fileType.toUpperCase(), 'fileType'));
     if (scope.camera) chips.push(chip('camera', scope.camera, 'camera'));
     if (scope.lens) chips.push(chip('lens', scope.lens, 'lens'));
+    if (scope.tag) chips.push(chip('tag', scope.tag, 'tag'));
+    if (scope.orientation) chips.push(chip('orientation', scope.orientation === 'landscape' ? 'Landscape' : 'Portrait', 'orientation'));
+    if (scope.folder) chips.push(chip('folder', scope.label || scope.folder.split('/').filter(Boolean).pop() || scope.folder, 'folder'));
+    if (scope.compared) chips.push(chip('ranking', COMPARED_LABELS[scope.compared] || scope.compared, 'compared'));
     if (scope.minStars) chips.push(chip('rating', `${scope.minStars}+ stars`, 'minStars'));
     if (scope.similarId) chips.push(chip('similar', scope.label || 'Similar', 'similarId'));
     if (chips.length > 1) chips.push(`<button class="chip ghost" data-clear-all="1">${icon('x')}<span>Clear all</span></button>`);
@@ -557,11 +575,42 @@ function renderScopeBar() {
                 scope.thumb = '';
                 scope.label = '';
             }
+            if (field === 'folder' && scope.label) scope.label = '';
             emit('scope', scope);
         });
     }
     bar.querySelector('[data-clear-all]')?.addEventListener('click', () => {
         clearScope();
+    });
+}
+
+function openPhotoOptionsSheet() {
+    const sortRows = SORT_OPTIONS.map((option) => {
+        const active = option.value === viewPrefs.sort;
+        return `<button class="sheet-row m-sort-row${active ? ' active' : ''}" data-sort="${esc(option.value)}">`
+            + `<span class="g">${icon(option.glyph)}</span>`
+            + `<span class="body">${esc(option.label)}<span class="sub">${esc(option.detail)}</span></span>`
+            + `<span class="n">${active ? icon('check') : ''}</span></button>`;
+    }).join('');
+    const sheet = openSheet(
+        '<h3>Photos</h3>'
+        + '<div class="sheet-label">Sort</div>'
+        + sortRows
+        + '<div class="sheet-label">Options</div>'
+        + `<button class="sheet-row m-toggle-row${viewPrefs.collapseStacks ? ' active' : ''}" id="m-stack-toggle">`
+        + `<span class="g">${icon('layers')}</span>`
+        + '<span class="body">Group stacks<span class="sub">Show only each stack representative</span></span>'
+        + `<span class="m-switch" aria-hidden="true"><span></span></span></button>`
+    );
+    for (const row of sheet.querySelectorAll('[data-sort]')) {
+        row.addEventListener('click', () => {
+            const sort = row.dataset.sort || 'date_taken';
+            if (sort === viewPrefs.sort) return;
+            dismissSheetThen(() => setViewPrefs({ sort }));
+        });
+    }
+    sheet.querySelector('#m-stack-toggle')?.addEventListener('click', () => {
+        dismissSheetThen(() => setViewPrefs({ collapseStacks: !viewPrefs.collapseStacks }));
     });
 }
 
@@ -826,6 +875,7 @@ export function initTimeline() {
     document.getElementById('m-zoomctl').addEventListener('click', () => {
         setZoom((zoomIdx + 1) % 3);
     });
+    document.getElementById('m-photo-options').addEventListener('click', openPhotoOptionsSheet);
 
     installSelectionGestures();
     installPullToRefresh();
@@ -836,6 +886,7 @@ export function initTimeline() {
         else clearSelection();
         reload();
     });
+    on('view-prefs', reload);
 
     reload();
 }

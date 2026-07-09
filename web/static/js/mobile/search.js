@@ -2,7 +2,7 @@
 // /api/people + people= scope param), category chips backed by the
 // raw|jpg|tif file_type group aliases and flag scopes.
 
-import { getFilterOptions, getPeople, ignorePerson, labelPerson, writeFailureMessage } from './api.js';
+import { getFilterOptions, getPeople, getTags, ignorePerson, labelPerson, writeFailureMessage } from './api.js';
 import { nav, setScope } from './state.js';
 import { dismissSheetThen, openSheet } from './selection.js';
 import { showToast } from './toast.js';
@@ -15,6 +15,7 @@ let root = null;
 let built = false;
 let people = null;
 let filterOptions = null;
+let tagOptions = null;
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -42,7 +43,7 @@ function commitSearch(raw) {
     const q = String(raw || '').trim();
     if (!q) return;
     rememberSearch(q);
-    const operator = q.match(/^(camera|lens):(.+)$/i);
+    const operator = q.match(/^(camera|lens|tag):(.+)$/i);
     if (operator) {
         const kind = operator[1].toLowerCase();
         const value = operator[2].trim();
@@ -122,6 +123,7 @@ function render() {
         + '<div class="ms-hints">'
         + '<button type="button" data-hint="camera:Sony">camera:Sony</button>'
         + '<button type="button" data-hint="lens:35mm">lens:35mm</button>'
+        + '<button type="button" data-hint="tag:wedding">tag:wedding</button>'
         + '</div>';
 
     html += '<div class="ms-sec"><h3>People</h3><div id="ms-people">';
@@ -145,6 +147,18 @@ function render() {
     const chip = (attrs, glyph, label, count) =>
         `<button class="ms-chip" ${attrs}><span class="g">${glyph}</span><b>${esc(label)}</b>`
         + `${count ? `<span class="n num">${fmtInt(count)}</span>` : ''}</button>`;
+    html += '<div class="ms-sec"><h3>Orientation</h3><div class="ms-pills">'
+        + '<button class="ms-pill" data-orientation="landscape">Landscape</button>'
+        + '<button class="ms-pill" data-orientation="portrait">Portrait</button>'
+        + '</div></div>';
+
+    html += '<div class="ms-sec"><h3>Ranking state</h3><div class="ms-pills">'
+        + '<button class="ms-pill" data-compared="compared">Ranked</button>'
+        + '<button class="ms-pill" data-compared="uncompared">Unranked</button>'
+        + '<button class="ms-pill" data-compared="direct_uncompared">Never dueled</button>'
+        + '<button class="ms-pill" data-compared="confident">High confidence</button>'
+        + '</div></div>';
+
     html += '<div class="ms-sec"><h3>Categories</h3><div id="ms-cats">'
         + chip('data-type="raw"', icon('image'), 'RAW files', countFor('raw'))
         + chip('data-type="jpg"', icon('image'), 'JPGs', countFor('jpg'))
@@ -154,6 +168,20 @@ function render() {
         + chip('data-stars="4"', icon('star'), '4+ stars', null)
         + cams.map((c, i) => chip(`data-cam="${i}"`, icon('camera'), c.camera, c.count)).join('')
         + '</div></div>';
+
+    const tags = ((tagOptions && tagOptions.tags) || []).slice(0, 16);
+    html += '<div class="ms-sec"><h3>Tags</h3><div id="ms-tags" class="ms-pills">';
+    if (!tagOptions) {
+        for (let i = 0; i < 6; i++) html += '<span class="ms-pill skel"></span>';
+    } else if (!tags.length) {
+        html += '<div class="ms-empty">No caption tags yet.</div>';
+    } else {
+        tags.forEach((tag, i) => {
+            html += `<button class="ms-pill" data-tag="${i}">#${esc(tag.tag || tag.value)}`
+                + `${tag.count ? `<span class="num">${fmtInt(tag.count)}</span>` : ''}</button>`;
+        });
+    }
+    html += '</div></div>';
 
     const recents = recentSearches();
     html += '<div class="ms-sec"><h3>Recent searches</h3>'
@@ -259,6 +287,38 @@ function render() {
             nav.setTab('photos');
         });
     }
+    for (const el of root.querySelectorAll('.ms-pill[data-orientation]')) {
+        el.addEventListener('click', () => {
+            const orientation = el.dataset.orientation;
+            setScope({
+                orientation,
+                label: orientation === 'landscape' ? 'Landscape' : 'Portrait',
+            });
+            nav.setTab('photos');
+        });
+    }
+    for (const el of root.querySelectorAll('.ms-pill[data-compared]')) {
+        el.addEventListener('click', () => {
+            const compared = el.dataset.compared;
+            const labels = {
+                compared: 'Ranked',
+                uncompared: 'Unranked',
+                direct_uncompared: 'Never dueled',
+                confident: 'High confidence',
+            };
+            setScope({ compared, label: labels[compared] || compared });
+            nav.setTab('photos');
+        });
+    }
+    for (const el of root.querySelectorAll('.ms-pill[data-tag]')) {
+        el.addEventListener('click', () => {
+            const tag = tags[Number(el.dataset.tag)];
+            const value = tag && (tag.tag || tag.value);
+            if (!value) return;
+            setScope({ tag: value, label: `#${value}` });
+            nav.setTab('photos');
+        });
+    }
     for (const el of root.querySelectorAll('.ms-row[data-rs]')) {
         el.addEventListener('click', () => commitSearch(recents[Number(el.dataset.rs)]));
     }
@@ -275,6 +335,7 @@ export function showSearch() {
         Promise.all([
             getPeople(24).then((data) => { people = data || { people: [] }; }),
             getFilterOptions().then((data) => { filterOptions = data; }),
+            getTags(24).then((data) => { tagOptions = data || { tags: [] }; }),
         ]).then(render);
     } else {
         render();

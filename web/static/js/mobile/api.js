@@ -180,6 +180,16 @@ export async function getFilterOptions() {
     return fetchJson('/api/filter-options', { defaultValue: null });
 }
 
+export async function getTags(limit = 24, q = '') {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (q) params.set('q', q);
+    return fetchJson(`/api/tags?${params.toString()}`, { defaultValue: { tags: [] } });
+}
+
+export async function getFoldersTree() {
+    return fetchJson('/api/folders/tree', { defaultValue: { sources: [] } });
+}
+
 export async function labelPerson(personId, name) {
     return postJson(`/api/people/${personId}/label`, { name });
 }

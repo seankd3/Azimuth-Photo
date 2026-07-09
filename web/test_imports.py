@@ -44,6 +44,14 @@ class ImportTests(BackendTestCase):
             self.assertEqual(len(batch.json()["batch"]["images"]), 1)
             self.assertEqual(batch.json()["library_url"], f"/#import_batch={batch_id}")
 
+            listed = client.get("/api/imports")
+            self.assertEqual(listed.status_code, 200, listed.text)
+            self.assertEqual(listed.json()["imports"][0]["id"], batch_id)
+            self.assertIn("started_at", listed.json()["imports"][0])
+            self.assertEqual(listed.json()["imports"][0]["total_files"], 2)
+            self.assertEqual(listed.json()["imports"][0]["imported_files"], 1)
+            self.assertEqual(listed.json()["imports"][0]["skipped_files"], 1)
+
             rankings = client.get(f"/api/rankings?import_batch={batch_id}&limit=10")
             self.assertEqual(rankings.status_code, 200, rankings.text)
             images = rankings.json()["images"]
@@ -65,4 +73,6 @@ class ImportTests(BackendTestCase):
         self.assertIn("document.getElementById('import-view')?.addEventListener('click', openImport)", importer)
         self.assertIn("formData.set('import_root'", importer)
         self.assertIn("xhr.open('POST', '/api/imports')", importer)
+        self.assertIn("Past imports", importer)
+        self.assertIn("listImports(12)", importer)
         self.assertIn("import_root: { type: 'text' }", drawer)

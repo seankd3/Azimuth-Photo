@@ -46,6 +46,12 @@ async def api_import_options():
     }
 
 
+@router.get("/api/imports")
+async def api_import_batches(limit: int = 20):
+    batches = await import_repository.recent_import_batches(db.DB_PATH, limit=limit)
+    return {"imports": batches}
+
+
 @router.get("/api/imports/{batch_id}")
 async def api_import_batch(batch_id: int):
     batch = await import_repository.import_batch(db.DB_PATH, batch_id)

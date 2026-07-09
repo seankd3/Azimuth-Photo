@@ -8,11 +8,11 @@ import tempfile
 import zipfile
 from collections.abc import Awaitable, Callable
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
-from core.requests import clamp_int
+from core.requests import clamp_int, repeated_query_values
 from data.repositories import catalog as catalog_repository
 from data.repositories import images as image_repository
 from data.repositories import rankings as ranking_repository
@@ -322,7 +322,7 @@ async def export_rankings(
     orientation: str = "", compared: str = "", min_stars: int = 0,
     folder: str = "", flag: str = "", date_taken: str = "", file_type: str = "",
     camera: str = "", lens: str = "", tag: str = "", q: str = "", deep: bool = False, people: str = "",
-    import_batch: int = 0, size: str = "original",
+    import_batch: int = 0, size: str = "original", request: Request = None,
 ):
     normalized_format = (format or "json").lower()
     if normalized_format == "zip":
@@ -340,7 +340,7 @@ async def export_rankings(
         orientation=orientation,
         compared=compared,
         min_stars=min_stars,
-        folder=folder,
+        folder=repeated_query_values(request, "folder", folder),
         flag=flag,
         date_taken=date_taken,
         file_type=file_type,

@@ -19,7 +19,6 @@ _library_service = None
 _query_constraints = None
 _invalidate_ai_status_response_cache: Callable[[], None] | None = None
 _duplicates_cache: dict | None = None
-_collections_cache: dict | None = None
 _elo_propagation = None
 embedding_batch_listeners = []
 
@@ -48,18 +47,16 @@ def configure(
     query_constraints,
     invalidate_ai_status_response_cache: Callable[[], None],
     duplicates_cache: dict,
-    collections_cache: dict,
     elo_propagation,
 ) -> None:
     global _compare_service, _library_service, _query_constraints
     global _invalidate_ai_status_response_cache, _duplicates_cache
-    global _collections_cache, _elo_propagation
+    global _elo_propagation
     _compare_service = compare_service
     _library_service = library_service
     _query_constraints = query_constraints
     _invalidate_ai_status_response_cache = invalidate_ai_status_response_cache
     _duplicates_cache = duplicates_cache
-    _collections_cache = collections_cache
     _elo_propagation = elo_propagation
 
 
@@ -70,7 +67,6 @@ def _configured():
         or _query_constraints is None
         or _invalidate_ai_status_response_cache is None
         or _duplicates_cache is None
-        or _collections_cache is None
         or _elo_propagation is None
     ):
         raise RuntimeError("Cache event coordinator is not configured")
@@ -80,7 +76,6 @@ def _configured():
         _query_constraints,
         _invalidate_ai_status_response_cache,
         _duplicates_cache,
-        _collections_cache,
         _elo_propagation,
     )
 
@@ -99,9 +94,8 @@ def invalidate_rankings_cache() -> None:
 
 
 def invalidate_vector_derived_caches(*, invalidate_embedding_matrix: bool = True) -> None:
-    *_, duplicates_cache, collections_cache, elo_propagation = _configured()
+    *_, duplicates_cache, elo_propagation = _configured()
     duplicates_cache.update({"key": None, "data": None})
-    collections_cache.update({"key": None, "data": None})
     elo_propagation.invalidate_prediction_cache()
     if not invalidate_embedding_matrix:
         return
@@ -113,7 +107,7 @@ def invalidate_vector_derived_caches(*, invalidate_embedding_matrix: bool = True
 
 
 def embedding_batch_stored(_model_key: str, _image_ids: list[int]) -> None:
-    _, _, _, invalidate_ai_status_response_cache, _, _, _ = _configured()
+    _, _, _, invalidate_ai_status_response_cache, _, _ = _configured()
     invalidate_rankings_cache()
     invalidate_ai_status_response_cache()
     invalidate_vector_derived_caches(invalidate_embedding_matrix=False)

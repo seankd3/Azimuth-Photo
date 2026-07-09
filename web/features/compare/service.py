@@ -678,6 +678,10 @@ def candidate_value(candidate, key: str, default=None):
         return default
 
 
+def _candidate_id(candidate) -> int:
+    return int(candidate_value(candidate, "id", 0) or 0)
+
+
 def metadata_text_match(image: dict, query: str) -> bool:
     tokens = (query or "").strip().lower().split()
     if not tokens:
@@ -845,7 +849,7 @@ async def diverse_sample(candidates: list[dict], count: int) -> list[dict]:
         cand_items = []
         without_emb = []
         for candidate in search_candidates:
-            idx = id_to_idx.get(candidate["id"])
+            idx = id_to_idx.get(_candidate_id(candidate))
             if idx is not None:
                 cand_indices.append(idx)
                 cand_items.append(candidate)
@@ -853,11 +857,11 @@ async def diverse_sample(candidates: list[dict], count: int) -> list[dict]:
                 without_emb.append(candidate)
 
         if len(cand_items) < count and search_candidates is not candidates:
-            seen = {candidate["id"] for candidate in search_candidates}
+            seen = {_candidate_id(candidate) for candidate in search_candidates}
             for candidate in candidates:
-                if candidate["id"] in seen:
+                if _candidate_id(candidate) in seen:
                     continue
-                idx = id_to_idx.get(candidate["id"])
+                idx = id_to_idx.get(_candidate_id(candidate))
                 if idx is not None:
                     cand_indices.append(idx)
                     cand_items.append(candidate)
@@ -875,7 +879,7 @@ async def diverse_sample(candidates: list[dict], count: int) -> list[dict]:
 
         pool = min(max(count * 16, 96), 192, len(cand_items))
         comp_counts = np.fromiter(
-            (candidate["comparisons"] for candidate in cand_items),
+            (candidate_value(candidate, "comparisons", 0) or 0 for candidate in cand_items),
             dtype=np.float32,
             count=len(cand_items),
         )
@@ -941,6 +945,32 @@ async def diverse_sample(candidates: list[dict], count: int) -> list[dict]:
         pool_items = [cand_items[int(i)] for i in pool_idx]
         pool_bias = 1.0 / (comp_counts[pool_idx] + 1.0)
 
+        neighbor_cell_limit = min(
+            semantic_pairing.MOSAIC_DIVERSE_NEIGHBOR_CELL_LIMIT,
+            max(0, count - 1),
+        )
+
+        def neighbor_cell_count(selected_indices: list[int]) -> int:
+            if len(selected_indices) < 2:
+                return 0
+            selected_matrix = pool_matrix[selected_indices]
+            similarities = selected_matrix @ selected_matrix.T
+            seen = set()
+            for left in range(len(selected_indices)):
+                for right in range(left + 1, len(selected_indices)):
+                    if similarities[left, right] > semantic_pairing.MOSAIC_NEIGHBOR_THRESHOLD:
+                        seen.add(left)
+                        seen.add(right)
+            return len(seen)
+
+        def acceptable_pick(selected_indices: list[int], pick: int) -> bool:
+            if not selected_indices:
+                return True
+            similarities = pool_matrix[selected_indices] @ pool_matrix[pick]
+            if float(similarities.max()) >= semantic_pairing.MOSAIC_DIVERSE_SPREAD_THRESHOLD:
+                return False
+            return neighbor_cell_count([*selected_indices, pick]) <= neighbor_cell_limit
+
         first = random.randrange(len(pool_items))
         selected = [first]
         max_sim = pool_matrix @ pool_matrix[first]
@@ -948,7 +978,23 @@ async def diverse_sample(candidates: list[dict], count: int) -> list[dict]:
         for _ in range(count - 1):
             max_sim[selected[-1]] = 999.0
             score = max_sim - pool_bias * 0.15
-            next_pick = int(np.argmin(score))
+            ordered = np.argsort(score)
+            next_pick = None
+            for candidate_idx in ordered:
+                candidate_pick = int(candidate_idx)
+                if candidate_pick in selected:
+                    continue
+                if acceptable_pick(selected, candidate_pick):
+                    next_pick = candidate_pick
+                    break
+            if next_pick is None:
+                for candidate_idx in ordered:
+                    candidate_pick = int(candidate_idx)
+                    if candidate_pick not in selected:
+                        next_pick = candidate_pick
+                        break
+            if next_pick is None:
+                break
             selected.append(next_pick)
             new_sims = pool_matrix @ pool_matrix[next_pick]
             np.maximum(max_sim, new_sims, out=max_sim)
@@ -988,7 +1034,7 @@ def _strategy_pool_and_weights(
 
 def _strategy_scores(candidates: list[dict], weights: list[float]) -> dict[int, float]:
     return {
-        int(candidate["id"]): max(0.0, float(weight))
+        _candidate_id(candidate): max(0.0, float(weight))
         for candidate, weight in zip(candidates, weights)
     }
 
@@ -1000,7 +1046,7 @@ def _weighted_unique_sample(candidates: list[dict], weights: list[float], count:
     sample = []
     seen_ids = set()
     for img in random.choices(candidates, weights=weights, k=draw_count):
-        image_id = img["id"]
+        image_id = _candidate_id(img)
         if image_id in seen_ids:
             continue
         sample.append(img)
@@ -1008,7 +1054,7 @@ def _weighted_unique_sample(candidates: list[dict], weights: list[float], count:
         if len(sample) >= count:
             break
     if len(sample) < count:
-        remaining = [img for img in candidates if img["id"] not in seen_ids]
+        remaining = [img for img in candidates if _candidate_id(img) not in seen_ids]
         sample.extend(random.sample(remaining, min(count - len(sample), len(remaining))))
     return sample
 
@@ -1024,6 +1070,63 @@ async def _strategy_sample(
         return await diverse_sample(candidates, count)
     pool, weights = _strategy_pool_and_weights(candidates, count, strategy=strategy, grid_elo=grid_elo)
     return _weighted_unique_sample(pool, weights, count)
+
+
+def _compete_semantic_tiebreak(
+    sample: list[dict],
+    candidates: list[dict],
+    *,
+    count: int,
+    grid_elo: float,
+    context,
+) -> list[dict]:
+    if not sample or context is None or grid_elo <= 0:
+        return sample
+    selected_by_id = {_candidate_id(candidate): candidate for candidate in sample}
+    selected_ids = set(selected_by_id)
+    target_elo = grid_elo
+    best_score = {
+        image_id: abs(_effective_elo(candidate) - target_elo)
+        for image_id, candidate in selected_by_id.items()
+    }
+    ordered_pool = sorted(
+        candidates,
+        key=lambda img: (
+            abs(_effective_elo(img) - target_elo),
+            -sum(
+                max(0.0, context.cosine(_candidate_id(img), sample_id) or 0.0)
+                for sample_id in selected_ids
+                if context.has(_candidate_id(img)) and context.has(sample_id)
+            ),
+            _candidate_id(img),
+        ),
+    )
+    if len(ordered_pool) <= count:
+        return ordered_pool
+
+    for candidate in ordered_pool:
+        candidate_id = _candidate_id(candidate)
+        if candidate_id in selected_ids:
+            continue
+        candidate_score = abs(_effective_elo(candidate) - target_elo)
+        replace_id = None
+        for selected_id in selected_ids:
+            if candidate_score == best_score[selected_id]:
+                replace_id = selected_id
+                break
+        if replace_id is None:
+            continue
+        selected_ids.remove(replace_id)
+        selected_ids.add(candidate_id)
+        selected_by_id.pop(replace_id, None)
+        selected_by_id[candidate_id] = candidate
+        best_score.pop(replace_id, None)
+        best_score[candidate_id] = candidate_score
+
+    return sorted(
+        (selected_by_id[image_id] for image_id in selected_ids),
+        key=lambda img: (abs(_effective_elo(img) - target_elo), _candidate_id(img)),
+    )[:count]
 
 
 async def _semantic_context_for(candidates: list[dict]):
@@ -1074,59 +1177,6 @@ async def _semantic_duel_sample(
     return [seed, partner], "semantic"
 
 
-async def _semantic_mosaic_sample(
-    candidates: list[dict],
-    count: int,
-    *,
-    strategy: str,
-    grid_elo: float,
-    context,
-) -> tuple[list[dict], str]:
-    if count < 3 or len(candidates) < count:
-        return [], "strategy"
-
-    if strategy == "diverse":
-        seed_sample = await diverse_sample(candidates, 1)
-        score_pool, score_weights = _strategy_pool_and_weights(candidates, count, strategy="random")
-    else:
-        score_pool, score_weights = _strategy_pool_and_weights(
-            candidates,
-            count,
-            strategy=strategy,
-            grid_elo=grid_elo,
-        )
-        seed_sample = _weighted_unique_sample(score_pool, score_weights, 1)
-    if not seed_sample:
-        return [], "strategy"
-
-    seed = seed_sample[0]
-    selected = [seed]
-    selected_ids = {int(seed["id"])}
-    strategy_scores = _strategy_scores(score_pool, score_weights)
-    while len(selected) < count:
-        neighbor = semantic_pairing.best_partner(
-            seed,
-            candidates,
-            strategy_scores,
-            context,
-            minimum_cosine=semantic_pairing.MOSAIC_NEIGHBOR_THRESHOLD,
-            used_ids=selected_ids,
-        )
-        if neighbor is None:
-            break
-        selected.append(neighbor)
-        selected_ids.add(int(neighbor["id"]))
-
-    if len(selected) < 2:
-        return [], "strategy"
-    if len(selected) < count:
-        remaining = [img for img in candidates if int(img["id"]) not in selected_ids]
-        remaining_weights = [strategy_scores.get(int(img["id"]), 1.0) for img in remaining]
-        selected.extend(_weighted_unique_sample(remaining, remaining_weights, count - len(selected)))
-
-    return selected[:count], "semantic"
-
-
 async def _refine_sample(
     candidates: list[dict],
     count: int,
@@ -1134,9 +1184,9 @@ async def _refine_sample(
     strategy: str,
     grid_elo: float = 0,
 ) -> tuple[list[dict], str]:
-    context = await _semantic_context_for(candidates)
-    if context is not None:
-        if count == 2:
+    if count == 2:
+        context = await _semantic_context_for(candidates)
+        if context is not None:
             sample, pairing_mode = await _semantic_duel_sample(
                 candidates,
                 count,
@@ -1146,17 +1196,17 @@ async def _refine_sample(
             )
             if len(sample) >= count:
                 return sample, pairing_mode
-        else:
-            sample, pairing_mode = await _semantic_mosaic_sample(
-                candidates,
-                count,
-                strategy=strategy,
-                grid_elo=grid_elo,
-                context=context,
-            )
-            if len(sample) >= count:
-                return sample, pairing_mode
-    return await _strategy_sample(candidates, count, strategy=strategy, grid_elo=grid_elo), "strategy"
+    sample = await _strategy_sample(candidates, count, strategy=strategy, grid_elo=grid_elo)
+    if strategy == "compete":
+        context = await _semantic_context_for(candidates)
+        sample = _compete_semantic_tiebreak(
+            sample,
+            candidates,
+            count=count,
+            grid_elo=grid_elo,
+            context=context,
+        )
+    return sample, "strategy"
 
 
 async def mosaic_next_impl(

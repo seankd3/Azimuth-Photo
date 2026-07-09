@@ -472,6 +472,54 @@ class SearchTests(BackendTestCase):
         self.assertNotIn("deep_requested", result)
         self.assertNotIn("deep_search_cached", result)
 
+    async def test_deep_search_uses_active_embedding_config_instead_of_fast_config(self):
+        import embed_cache as embed_cache_module
+
+        old_get_matrix = embed_cache_module.get_matrix
+        matrix_calls = []
+        fast_config = {
+            "model_key": "fast-model",
+            "dimension": 2,
+        }
+        active_config = {
+            "model_key": "active-model",
+            "dimension": 2,
+        }
+
+        async def fake_get_matrix(model_key=None):
+            matrix_calls.append(model_key)
+            return [1], np.array([[0.95, 0.0]], dtype=np.float32)
+
+        try:
+            embed_cache_module.get_matrix = fake_get_matrix
+            query_constraints._text_search_resolution_cache.clear()
+            fast = await query_constraints.resolve_text_search(
+                "garden",
+                deep=False,
+                encode_text=lambda _encoder, _query, _config: np.array([1.0, 0.0], dtype=np.float32),
+                start_model_load=lambda _worker: False,
+                extension_search_terms=set(),
+                get_settings=lambda: {"search_similarity_threshold": 0.35},
+                active_embedding_config=lambda: active_config,
+                fast_search_embedding_config=lambda: fast_config,
+            )
+            deep = await query_constraints.resolve_text_search(
+                "garden",
+                deep=True,
+                encode_text=lambda _encoder, _query, _config: np.array([1.0, 0.0], dtype=np.float32),
+                start_model_load=lambda _worker: False,
+                extension_search_terms=set(),
+                get_settings=lambda: {"search_similarity_threshold": 0.35},
+                active_embedding_config=lambda: active_config,
+                fast_search_embedding_config=lambda: fast_config,
+            )
+        finally:
+            embed_cache_module.get_matrix = old_get_matrix
+
+        self.assertEqual(matrix_calls, ["fast-model", "active-model"])
+        self.assertEqual(fast["id_filter"], {1})
+        self.assertEqual(deep["id_filter"], {1})
+
     async def test_stale_busy_responses_report_deep_disabled(self):
         old_rankings_handler = library_routes._rankings_handler
         old_mosaic_handler = compare_routes._mosaic_next_handler
@@ -694,7 +742,6 @@ class SearchTests(BackendTestCase):
 
     async def test_embedding_batch_listener_invalidates_vector_derived_caches(self):
         search_service._duplicates_cache.update({"key": ("stale",), "data": {"pairs": []}})
-        search_service._collections_cache.update({"key": ("stale",), "data": {"collections": []}})
         elo_propagation._prediction_cache_key = ("stale",)
         elo_propagation._prediction_cache_counts = {1: 10}
 
@@ -702,14 +749,11 @@ class SearchTests(BackendTestCase):
 
         self.assertIsNone(search_service._duplicates_cache["key"])
         self.assertIsNone(search_service._duplicates_cache["data"])
-        self.assertIsNone(search_service._collections_cache["key"])
-        self.assertIsNone(search_service._collections_cache["data"])
         self.assertIsNone(elo_propagation._prediction_cache_key)
         self.assertIsNone(elo_propagation._prediction_cache_counts)
 
     async def test_embedding_model_change_invalidates_vector_derived_caches(self):
         search_service._duplicates_cache.update({"key": ("stale",), "data": {"pairs": []}})
-        search_service._collections_cache.update({"key": ("stale",), "data": {"collections": []}})
         elo_propagation._prediction_cache_key = ("stale",)
         elo_propagation._prediction_cache_counts = {1: 10}
 
@@ -720,8 +764,6 @@ class SearchTests(BackendTestCase):
 
         self.assertIsNone(search_service._duplicates_cache["key"])
         self.assertIsNone(search_service._duplicates_cache["data"])
-        self.assertIsNone(search_service._collections_cache["key"])
-        self.assertIsNone(search_service._collections_cache["data"])
         self.assertIsNone(elo_propagation._prediction_cache_key)
         self.assertIsNone(elo_propagation._prediction_cache_counts)
 

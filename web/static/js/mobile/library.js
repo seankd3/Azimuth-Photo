@@ -5,7 +5,7 @@
 
 import {
     createCollection, fetchJson, getAiStatus, getCacheStatus, getCatalog, getCollection, getCounts,
-    createCollectionShare, deleteCollection, getCollectionShare, getCollectionShareFavorites, getPeopleStatus, listCollections,
+    createCollectionShare, deleteCollection, getCollectionShare, getCollectionShareFavorites, getFoldersTree, getPeopleStatus, listCollections,
     renameCollection, revokeCollectionShare, setBackgroundWork, thumbUrl, writeFailureMessage,
 } from './api.js';
 import { nav, on, rememberImages, setScope, clearScope } from './state.js';
@@ -27,6 +27,8 @@ let built = false;
 let counts = null;
 let collections = null;
 let catalog = null;
+let folderTree = null;
+let folderBrowser = null;
 let suggestions = null;
 let suggestionsLoading = false;
 let suggestionsLoaded = false;
@@ -44,9 +46,111 @@ const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c
 }[c]));
 const fmtInt = (n) => (n == null ? '…' : Number(n).toLocaleString('en-US'));
 const suggestionFingerprint = (s) => s.fingerprint || `${s.kind || ''}|${s.cover_image_id || ''}|${s.count || 0}`;
+const folderName = (path) => String(path || '').split('/').filter(Boolean).pop() || path || 'Folder';
+
+function folderLabel(node, source) {
+    if (!node) return (source && (source.display_name || folderName(source.path))) || 'Source';
+    return node.name || folderName(node.path);
+}
+
+function folderChildren(node, source) {
+    return node ? (node.children || []) : (source && source.folders) || [];
+}
+
+function findFolderSource(source) {
+    const sources = (folderTree && folderTree.sources) || [];
+    return sources.find((item) => String(item.id) === String(source.id))
+        || sources.find((item) => item.path === source.path)
+        || null;
+}
+
+function openFolderBrowser(source) {
+    const treeSource = findFolderSource(source);
+    if (!treeSource) {
+        showToast('Folder tree is still loading');
+        return;
+    }
+    folderBrowser = { source: treeSource, trail: [] };
+    renderFolderBrowser();
+}
+
+function scopeFolder(node, source) {
+    const path = (node && node.path) || (source && source.path) || '';
+    setScope({ folder: path, label: folderLabel(node, source) });
+    nav.setTab('photos');
+}
+
+function renderFolderBrowser() {
+    if (!folderBrowser) {
+        render();
+        return;
+    }
+    showingCollection = false;
+    const { source, trail } = folderBrowser;
+    const current = trail[trail.length - 1] || null;
+    const children = folderChildren(current, source);
+    const title = folderLabel(current, source);
+    const count = (current || source).total_count;
+    let html = '<div class="ml-head">'
+        + '<button class="ml-back" id="ml-folder-back">Back</button>'
+        + `<h3>${esc(title)}</h3><button class="ml-more" id="ml-folder-close" aria-label="Close">${icon('x')}</button></div>`
+        + `<button class="m-lib-row" id="ml-folder-scope-current"><span class="g">${icon('folder-open')}</span>`
+        + `<span class="body">Use ${esc(title)}<span class="sub num">${fmtInt(count)} photos</span></span></button>`
+        + '<div class="ms-sec ml-folder-list" style="padding-left:0;padding-right:0"><h3>Folders</h3>';
+    if (children.length) {
+        children.forEach((child, i) => {
+            const hasChildren = (child.children || []).length > 0;
+            const childCount = child.total_count != null ? child.total_count : child.count;
+            html += '<div class="ml-folder-row">'
+                + `<button class="m-lib-row ml-folder-scope" data-folder-i="${i}"><span class="g">${icon(hasChildren ? 'folder-tree' : 'folder')}</span>`
+                + `<span class="body">${esc(folderLabel(child, source))}<span class="sub num">${fmtInt(childCount)} photos</span></span></button>`
+                + (hasChildren
+                    ? `<button class="ml-folder-drill" data-folder-i="${i}" aria-label="Open ${esc(folderLabel(child, source))}">${icon('chevron-right')}</button>`
+                    : '')
+                + '</div>';
+        });
+    } else {
+        html += '<div class="ms-empty">No child folders here.</div>';
+    }
+    html += '</div>';
+    root.innerHTML = html;
+
+    root.querySelector('#ml-folder-close')?.addEventListener('click', () => {
+        folderBrowser = null;
+        render();
+    });
+    root.querySelector('#ml-folder-back')?.addEventListener('click', () => {
+        if (folderBrowser.trail.length) {
+            folderBrowser.trail.pop();
+            renderFolderBrowser();
+        } else {
+            folderBrowser = null;
+            render();
+        }
+    });
+    root.querySelector('#ml-folder-scope-current')?.addEventListener('click', () => scopeFolder(current, source));
+    for (const row of root.querySelectorAll('.ml-folder-scope[data-folder-i]')) {
+        row.addEventListener('click', () => {
+            const child = children[Number(row.dataset.folderI)];
+            if (child) scopeFolder(child, source);
+        });
+    }
+    for (const row of root.querySelectorAll('.ml-folder-drill[data-folder-i]')) {
+        row.addEventListener('click', () => {
+            const child = children[Number(row.dataset.folderI)];
+            if (!child) return;
+            folderBrowser.trail.push(child);
+            renderFolderBrowser();
+        });
+    }
+}
 
 /* ---------- main render ---------- */
 function render() {
+    if (folderBrowser) {
+        renderFolderBrowser();
+        return;
+    }
     showingCollection = false;
     const colls = collections || [];
     let html = renderSuggestions();
@@ -81,15 +185,15 @@ function render() {
     html += '<div class="ms-sec" style="padding-left:0;padding-right:0"><h3>Sources</h3>';
     const sources = (catalog && catalog.sources) || null;
     if (sources && sources.length) {
-        for (const s of sources) {
+        sources.forEach((s, i) => {
             const online = Number(s.online) === 1;
             const photoCount = s.active_image_count != null ? s.active_image_count : s.image_count;
-            html += '<div class="m-lib-row">'
+            html += `<button class="m-lib-row" data-source-i="${i}">`
                 + `<span class="g">${icon('hard-drive')}</span>`
                 + `<span class="body">${esc(s.display_name || s.path)}`
                 + `<span class="sub num">${fmtInt(photoCount)} photos${online ? '' : ' · offline'}</span></span>`
-                + `<span class="nr-dot ${online ? 'on' : 'off'}"></span></div>`;
-        }
+                + `<span class="nr-dot ${online ? 'on' : 'off'}"></span></button>`;
+        });
     } else if (sources) {
         html += '<div class="ms-empty">No sources yet — add one on the desktop app.</div>';
     } else {
@@ -121,6 +225,12 @@ function render() {
             if (q === 'all') clearScope();
             else setScope({ flag: q, label: q === 'picked' ? 'Picked' : 'Rejected' });
             nav.setTab('photos');
+        });
+    }
+    for (const el of root.querySelectorAll('.m-lib-row[data-source-i]')) {
+        el.addEventListener('click', () => {
+            const source = sources[Number(el.dataset.sourceI)];
+            if (source) openFolderBrowser(source);
         });
     }
 }
@@ -448,14 +558,16 @@ function dismissSuggestion(suggestion) {
 
 /* ---------- data ---------- */
 async function loadAll() {
-    const [countsData, collData, catalogData] = await Promise.all([
+    const [countsData, collData, catalogData, folderData] = await Promise.all([
         getCounts(new URLSearchParams()),   // archive-wide quick-access counts
         listCollections(),
         getCatalog(),
+        getFoldersTree(),
     ]);
     counts = countsData;
     collections = (collData && collData.collections) || [];
     catalog = catalogData;
+    folderTree = folderData || { sources: [] };
     render();
     computeSortedPcts();
 }

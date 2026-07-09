@@ -835,7 +835,7 @@ class CompareTests(BackendTestCase):
         self.assertGreaterEqual(strategy_draws, 10)
         self.assertLessEqual(strategy_draws, 35)
 
-    async def test_refine_semantic_mosaic_seeds_and_fills_with_neighbors(self):
+    async def test_refine_mosaic_keeps_strategy_pairing_with_embeddings(self):
         source = await self._source()
         warm_ids = [
             await self._image(source["id"], f"warm-{idx}.jpg")
@@ -873,13 +873,78 @@ class CompareTests(BackendTestCase):
         random.seed(12)
         result = await compare_routes.mosaic_next(n=3, strategy="random")
         selected = [image["id"] for image in result["images"]]
-        selected_indices = [image_ids.index(image_id) for image_id in selected]
-        seed = matrix[selected_indices[0]]
-        similarities = [float(np.dot(seed, matrix[idx])) for idx in selected_indices[1:]]
 
-        self.assertEqual(result["pairing"], "semantic")
+        self.assertEqual(result["pairing"], "strategy")
         self.assertEqual(len(selected), 3)
-        self.assertTrue(all(similarity > semantic_pairing.MOSAIC_NEIGHBOR_THRESHOLD for similarity in similarities))
+
+    async def test_refine_mosaic_strategies_remain_distinct_on_synthetic_embeddings(self):
+        image_ids = list(range(1, 19))
+        candidates = [
+            {
+                "id": image_id,
+                "elo": 1300.0 if image_id >= 10 else 100.0,
+                "comparisons": 0 if image_id <= 9 else 20,
+                "propagated_updates": 0,
+            }
+            for image_id in image_ids
+        ]
+        cluster = np.tile(np.array([[1.0] + [0.0] * 9], dtype=np.float32), (9, 1))
+        spread = np.eye(10, dtype=np.float32)[1:]
+        matrix = np.vstack([cluster, spread])
+
+        async def fake_get_matrix(_model_key=None):
+            return image_ids, matrix
+
+        def fake_get_index(_model_key=None):
+            return {image_id: idx for idx, image_id in enumerate(image_ids)}
+
+        elo_propagation.embed_cache.get_matrix = fake_get_matrix
+        elo_propagation.embed_cache.get_index = fake_get_index
+
+        random.seed(22)
+        diverse, diverse_pairing = await compare_service._refine_sample(
+            candidates,
+            9,
+            strategy="diverse",
+        )
+        random.seed(22)
+        explore, explore_pairing = await compare_service._refine_sample(
+            candidates,
+            9,
+            strategy="explore",
+        )
+        random.seed(22)
+        compete, compete_pairing = await compare_service._refine_sample(
+            candidates,
+            9,
+            strategy="compete",
+            grid_elo=1300.0,
+        )
+
+        diverse_ids = {image["id"] for image in diverse}
+        explore_ids = {image["id"] for image in explore}
+        compete_ids = {image["id"] for image in compete}
+        diverse_indices = [image_ids.index(image_id) for image_id in diverse_ids]
+        similarities = matrix[diverse_indices] @ matrix[diverse_indices].T
+        high_similarity_pairs = [
+            similarities[left, right]
+            for left in range(len(diverse_indices))
+            for right in range(left + 1, len(diverse_indices))
+        ]
+        semantic_neighbor_cells = {
+            index
+            for left in range(len(diverse_indices))
+            for right in range(left + 1, len(diverse_indices))
+            if similarities[left, right] > semantic_pairing.MOSAIC_NEIGHBOR_THRESHOLD
+            for index in (left, right)
+        }
+
+        self.assertEqual((diverse_pairing, explore_pairing, compete_pairing), ("strategy", "strategy", "strategy"))
+        self.assertNotEqual(diverse_ids, explore_ids)
+        self.assertNotEqual(diverse_ids, compete_ids)
+        self.assertNotEqual(explore_ids, compete_ids)
+        self.assertTrue(all(sim < semantic_pairing.MOSAIC_DIVERSE_SPREAD_THRESHOLD for sim in high_similarity_pairs))
+        self.assertLessEqual(len(semantic_neighbor_cells), semantic_pairing.MOSAIC_DIVERSE_NEIGHBOR_CELL_LIMIT)
 
     async def test_refine_semantic_unavailable_embeddings_fallback_is_identical(self):
         source = await self._source()

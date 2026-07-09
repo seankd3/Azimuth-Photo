@@ -374,6 +374,22 @@ class StackTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(counts["total"], 2)
         self.assertEqual(histogram["total"], 2)
 
+    async def test_stack_member_folder_uses_parent_under_source_root(self):
+        source = await self._source("catalog")
+        cover = await self._image(source, "IMG_1000.jpg", folder="Facebook Photos")
+        member = await self._image(source, "IMG_1000 copy.jpg", folder="Facebook Photos")
+
+        stack = await stack_repository.create_stack(
+            db.DB_PATH,
+            kind="manual",
+            representative_image_id=cover,
+            member_rows=[{"image_id": cover}, {"image_id": member}],
+            auto=False,
+        )
+
+        detail = await stack_repository.get_stack(db.DB_PATH, stack["id"])
+        self.assertEqual({image["folder"] for image in detail["members"]}, {"Facebook Photos"})
+
     async def test_full_library_collapsed_rankings_do_not_materialize_id_filter(self):
         source = await self._source("catalog")
         image_ids = await self._bulk_cached_images(source, 1200)
