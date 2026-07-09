@@ -36,9 +36,21 @@ _caption_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="captio
 _model = None
 _processor = None
 _loaded_key: tuple[str, str, str, str] | None = None
-_caption_manual_pause = True
+# Auto-resume: when captioning is enabled in settings, the worker starts
+# running after a service restart instead of waiting for a manual click —
+# a 47k backfill must survive routine deploy restarts unattended.
+def _initial_manual_pause() -> bool:
+    try:
+        import settings as _settings
+        return not bool(_settings.get_settings().get("caption_scan_enabled"))
+    except Exception:
+        return True
+
+
+_caption_manual_pause = _initial_manual_pause()
 _caption_manual_pause_message = "Captions are stopped until you start them from Background Work."
 _model_load_failure_count = 0
+_load_failure_cooldown_until = 0.0
 _status = {
     "state": "idle",
     "message": "Captions have not scanned cached previews yet.",
@@ -104,6 +116,8 @@ def get_worker_status() -> dict[str, Any]:
 
 
 def manual_pause_active() -> bool:
+    if _load_failure_cooldown_until and time.time() < _load_failure_cooldown_until:
+        return True
     return _caption_manual_pause
 
 
@@ -140,8 +154,14 @@ def _record_model_load_failure(error: Exception) -> bool:
     _set_status(model_load_failures=_model_load_failure_count, last_error=str(error))
     if _model_load_failure_count < MODEL_LOAD_FAILURE_PAUSE_THRESHOLD:
         return False
-    pause_caption_worker(
-        "Captions paused after 3 consecutive model load failures. Check the local caption model and start again."
+    # Cool down instead of a permanent pause: transient GPU contention (the
+    # dev server or another worker holding VRAM) must not end the backfill.
+    global _load_failure_cooldown_until
+    _load_failure_cooldown_until = time.time() + 900
+    _model_load_failure_count = 0
+    _set_status(
+        state="cooldown",
+        message="Caption model failed to load 3 times - retrying in 15 minutes.",
     )
     _set_status(model_load_failures=_model_load_failure_count, last_error=str(error))
     return True
