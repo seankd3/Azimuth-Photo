@@ -681,6 +681,8 @@ function render() {
         } else if (row.hint) {
             html += '<div class="sd-hint">'
                 + OPERATORS.map((op) => `<button data-op="${op.name}"><span>${icon(op.icon)}</span>${op.name}:</button>`).join('')
+                + `<button data-orient="landscape" class="${scope.orientation === 'landscape' ? 'active' : ''}"><span>${icon('image')}</span>Horizontal</button>`
+                + `<button data-orient="portrait" class="${scope.orientation === 'portrait' ? 'active' : ''}"><span class="rot90">${icon('image')}</span>Vertical</button>`
                 + '</div>';
         } else if (row.deepToggle) {
             html += '<div class="sd-tools">'
@@ -717,6 +719,15 @@ function render() {
 function bindDropdown(drop) {
     for (const item of drop.querySelectorAll('[data-index]')) {
         item.addEventListener('click', () => run(Number(item.dataset.index)));
+    }
+    for (const button of drop.querySelectorAll('[data-orient]')) {
+        button.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const value = scope.orientation === button.dataset.orient ? '' : button.dataset.orient;
+            patchScope({ orientation: value });
+            render();
+        });
     }
     for (const button of drop.querySelectorAll('[data-op]')) {
         button.addEventListener('click', () => {

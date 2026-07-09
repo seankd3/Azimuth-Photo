@@ -174,6 +174,9 @@ body.loupe-lights-out #ctxbar { display: none; }
 .sd-hint button { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 7px; border: 1px solid var(--line); border-radius: var(--r-ctl); color: var(--text-2); font-size: var(--fs-caption); }
 .sd-hint button:hover { background: var(--card); color: var(--text); }
 .sd-hint .icon { width: 16px; height: 16px; }
+.sd-hint button.active { color: var(--accent); border-color: var(--accent-lin); background: var(--accent-dim); }
+.sd-hint .rot90 { display: inline-flex; }
+.sd-hint .rot90 .icon { transform: rotate(90deg); }
 .sd-tools { display: flex; gap: 6px; padding: 2px 14px 6px; }
 .sd-chip { position: relative; height: 24px; display: inline-flex; align-items: center; gap: 5px; padding: 0 8px; border: 1px solid var(--line); border-radius: var(--r-ctl); color: var(--text-2); font-size: var(--fs-caption); }
 .sd-chip:hover, .sd-chip.active { background: var(--card); color: var(--text); }
@@ -292,15 +295,16 @@ body.loupe-lights-out #ctxbar { display: none; }
 .suggest-row { color: var(--text-2); }
 .suggest-row .nr-glyph { color: var(--text-3); }
 .suggest-row:hover .nr-glyph { color: var(--accent); }
-.edge-btn { position: absolute; right: 0; top: 50%; width: 24px; height: 42px; display: inline-flex; align-items: center; justify-content: center; padding-left: 1px; border: 1px solid var(--line); border-left: 0; border-radius: 0 12px 12px 0; background: var(--panel); color: var(--text-3); z-index: 30; transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease); }
-.edge-btn:hover { background: var(--card); color: var(--text); }
-.edge-btn.right-edge { padding-left: 0; padding-right: 1px; }
-.edge-btn.ctx-edge { padding-left: 0; }
-.right-edge { left: 0; right: auto; border-left: 1px solid var(--line); border-right: 0; border-radius: 12px 0 0 12px; }
-#shell.right-collapsed .right-edge { transform: rotate(180deg); }
+.edge-btn { position: absolute; right: 0; top: 50%; transform: translateY(-50%); width: 14px; height: 76px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 0; background: transparent; color: var(--text-3); z-index: 30; transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease); }
+.edge-btn:not(.ctx-edge) .icon { display: none; }
+.edge-btn:not(.ctx-edge)::before { content: ""; width: 4px; height: 30px; border-radius: 2px; background: rgba(255,255,255,.12); transition: background var(--dur-fast) var(--ease), height var(--dur-fast) var(--ease); }
+.edge-btn:not(.ctx-edge):hover::before, .edge-btn:not(.ctx-edge):focus-visible::before { background: var(--accent-lin); height: 46px; }
+.edge-btn.ctx-edge { padding-left: 0; transform: none; }
+.right-edge { left: 0; right: auto; }
+#shell.right-collapsed .right-edge { transform: translateY(-50%); }
 .ctx-edge { display: none; position: static; width: 28px; height: 28px; border: 1px solid var(--line); border-radius: var(--r-ctl); background: transparent; }
 #center { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg); position: relative; }
-#ctxbar { height: var(--ctxbar-h); flex: none; display: flex; align-items: center; gap: var(--s3); min-width: 0; padding: 0 var(--s4); border-bottom: 1px solid var(--line); background: var(--surface-chrome); z-index: 20; overflow: hidden; }
+#ctxbar { height: var(--ctxbar-h); flex: none; display: flex; align-items: center; gap: var(--s3); min-width: 0; padding: 0 var(--s4); border-bottom: 1px solid var(--line); background: var(--surface-chrome); z-index: 20; overflow: visible; }
 #btn-left-drawer { display: none; flex: none; }
 #ctx-crumbs {
     display: flex; align-items: center; gap: 6px; min-width: 0; flex: 0 1 auto; overflow-x: auto; overflow-y: hidden;
@@ -379,6 +383,7 @@ body.loupe-lights-out #ctxbar { display: none; }
 .stack-tray-rail { border-radius: 2px; background: var(--accent-lin); opacity: .54; }
 .stack-tray-main { min-width: 0; display: grid; gap: var(--s2); }
 .stack-tray-head { min-height: 28px; display: flex; align-items: center; justify-content: space-between; gap: var(--s2); color: var(--text-3); font-size: var(--fs-caption); font-weight: var(--fw-semibold); }
+.stack-tray-actions { display: flex; align-items: center; gap: var(--s2); }
 .stack-tray-collapse { width: 26px; height: 24px; }
 .stack-tray-cells { display: flex; flex-wrap: wrap; gap: var(--cell-gap); min-width: 0; }
 .stack-tray-cells::after { content: ""; flex-grow: 10000; min-width: 10%; }

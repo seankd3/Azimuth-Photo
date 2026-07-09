@@ -115,13 +115,14 @@
                         </label>
                         <select class="ctl" id="sort-select" aria-label="Sort">
                             <option value="elo">Rating</option>
+                            <option value="taste" title="Refine a few duels to teach it" disabled>Taste — Refine a few duels to teach it</option>
                             <option value="date_taken">Date</option>
                             <option value="camera">Camera</option>
                             <option value="filename">Filename</option>
                             <option value="file_size">Size</option>
                         </select>
                         <button class="icon-btn sort-dir-btn" id="sort-dir" data-tip="Sort direction" aria-label="Sort descending" aria-pressed="false"><svg class="icon" aria-hidden="true"><use href="#i-arrow-down-wide-narrow"></use></svg></button>
-                        <label class="auto-advance-toggle" data-tip="Auto-advance after P / X / U" aria-label="Auto-advance after flag">
+                        <label class="auto-advance-toggle" data-tip="Auto-advance: flagging (P / X / U) jumps to the next photo" aria-label="Auto-advance after flag">
                             <input id="auto-advance-flags" type="checkbox" checked>
                             <span>Auto</span>
                         </label>
@@ -277,7 +278,7 @@
                 <div><h3>Curate</h3><p><kbd>B</kbd> Best of</p><p><kbd>P</kbd> Pick</p><p><kbd>X</kbd> Reject</p><p><kbd>U</kbd> Clear flag</p><p><kbd>Ctrl</kbd><kbd>Z</kbd> Undo latest toast</p></div>
                 <div><h3>Views</h3><p><kbd>G</kbd> Grid</p><p><kbd>Y</kbd> Events</p><p><kbd>O</kbd> People</p><p><kbd>M</kbd> Map</p></div>
                 <div><h3>Loupe</h3><p><kbd>P</kbd><kbd>X</kbd><kbd>U</kbd> Flag + next when Auto is on</p><p><kbd>←</kbd><kbd>→</kbd> Previous / next</p><p><kbd>Space</kbd> or <kbd>Z</kbd> Fit / 100%</p><p><kbd>L</kbd> Loupe lights</p><p><kbd>I</kbd> Info overlay</p><p><kbd>G</kbd> Grid</p></div>
-                <div><h3>Stacks / People</h3><p><kbd>↑↓</kbd> Stack row</p><p><kbd>←→</kbd> Stack photo</p><p><kbd>C</kbd> Cover</p><p><kbd>K</kbd> or <kbd>Enter</kbd> Keep cover</p><p><kbd>U</kbd> Unstack</p><p><kbd>Y</kbd><kbd>N</kbd> Merge review</p></div>
+                <div><h3>Stacks / People</h3><p><kbd>↑↓</kbd> Stack row</p><p><kbd>←→</kbd> Stack photo</p><p><kbd>C</kbd> Cover</p><p><kbd>X</kbd> Keep cover, reject rest</p><p><kbd>K</kbd> or <kbd>Enter</kbd> Keep cover, trash rest</p><p><kbd>U</kbd> Unstack</p><p><kbd>Y</kbd><kbd>N</kbd> Merge review</p></div>
                 <div><h3>Panels</h3><p><kbd>[</kbd> Toggle left panel</p><p><kbd>]</kbd> Toggle info panel</p><p><kbd>?</kbd> This overlay</p></div>
             </div>
         </div>
