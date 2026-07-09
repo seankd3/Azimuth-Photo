@@ -9,6 +9,13 @@ let menu = null;
 let returnEl = null;
 let target = { id: 0, index: 0, ids: [] };
 
+function moveMenuFocus(delta) {
+    const items = [...menu.querySelectorAll('button:not([disabled])')];
+    if (!items.length) return;
+    const index = Math.max(0, items.indexOf(document.activeElement));
+    items[(index + delta + items.length) % items.length].focus();
+}
+
 function idsFor(id) {
     const imageId = Number(id);
     return selection.has(imageId) ? [...selection].map(Number).filter((value) => value > 0) : [imageId];
@@ -27,6 +34,9 @@ function ensureMenu() {
             event.preventDefault();
             event.stopPropagation();
             closeGridContextMenu();
+        } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            event.preventDefault();
+            moveMenuFocus(event.key === 'ArrowDown' ? 1 : -1);
         }
     });
     return menu;
@@ -64,6 +74,7 @@ function render() {
         + `<button data-act="export-zip-md">${icon('download')} Download files · medium</button>`
         + '</div>';
     for (const button of menu.querySelectorAll('[data-act]')) {
+        button.setAttribute('role', 'menuitem');
         button.addEventListener('click', () => run(button.dataset.act));
     }
 }

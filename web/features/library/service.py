@@ -313,6 +313,7 @@ async def map_markers_payload(
         file_type=file_type,
         camera=camera,
         lens=lens,
+        tag=tag,
         visible_thumb_size=visible_thumb_size,
         cache_root=_configured_cache_root(),
         id_filter=search_ids,

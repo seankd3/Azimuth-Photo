@@ -27,7 +27,7 @@ function dismiss(item, { keepUndo = false } = {}) {
 function replaceVisibleToasts() {
     for (const item of toasts) {
         if (!item.visible) continue;
-        dismiss(item, { keepUndo: Boolean(item.undo) });
+        dismiss(item);
     }
 }
 
@@ -40,7 +40,11 @@ function runUndo(item) {
     const fn = item?.undo;
     if (!fn) return false;
     dismiss(item);
-    fn();
+    try {
+        Promise.resolve(fn()).catch(() => showToast("Undo didn't finish"));
+    } catch {
+        showToast("Undo didn't finish");
+    }
     return true;
 }
 

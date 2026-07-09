@@ -8,6 +8,13 @@ let menu = null;
 let returnEl = null;
 let onChoose = null;
 
+function moveMenuFocus(delta) {
+    const items = [...menu.querySelectorAll('button:not([disabled])')];
+    if (!items.length) return;
+    const index = Math.max(0, items.indexOf(document.activeElement));
+    items[(index + delta + items.length) % items.length].focus();
+}
+
 function ensureMenu() {
     if (menu) return menu;
     menu = document.createElement('div');
@@ -21,6 +28,9 @@ function ensureMenu() {
             event.preventDefault();
             event.stopPropagation();
             closeExportMenu();
+        } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            event.preventDefault();
+            moveMenuFocus(event.key === 'ArrowDown' ? 1 : -1);
         }
     });
     return menu;
@@ -45,6 +55,7 @@ function render({ allowSizes = true } = {}) {
         + (allowSizes ? `<button data-format="zip" data-size="lg">${icon('download')} Large</button><button data-format="zip" data-size="md">${icon('download')} Medium</button>` : '')
         + '</div>';
     for (const button of menu.querySelectorAll('button[data-format]')) {
+        button.setAttribute('role', 'menuitem');
         button.addEventListener('click', () => {
             const format = button.dataset.format;
             const size = button.dataset.size || '';

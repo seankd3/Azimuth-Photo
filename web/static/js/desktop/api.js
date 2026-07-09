@@ -263,6 +263,10 @@ export async function listPublishes() {
     return fetchJson('/api/publishes', { defaultValue: { publishes: [] } });
 }
 
+export async function listSharedSurfaces() {
+    return fetchJson('/api/shares', { defaultValue: { items: [] } });
+}
+
 export async function getCollectionSuggestions() {
     return fetchJson('/api/collections/suggestions', { defaultValue: null });
 }

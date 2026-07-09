@@ -221,6 +221,45 @@ class ShareTests(BackendTestCase):
         self.assertEqual(owner.json()["count"], 2)
         self.assertEqual([row["image_id"] for row in owner.json()["favorites"]], [first, second])
 
+    async def test_shared_surfaces_aggregate_private_and_website_state(self):
+        settings.save_settings({"publish_site_base_url": "https://example.test"})
+        collection, first, _second, _third = await self._collection_with_images()
+        share = await db.create_or_rotate_share(
+            collection["id"],
+            password_hash=share_auth.hash_password("gallery"),
+        )
+        await db.set_share_favorite(share["id"], first, True, client_name="Client")
+        await db.upsert_collection_publish(
+            collection_id=collection["id"],
+            slug="shared-set",
+            title="Shared Set",
+            image_count=2,
+            bundle_bytes=123,
+            last_commit=None,
+            hook_exit_code=7,
+            hook_output="deploy failed",
+            hook_ran_at=123.0,
+        )
+
+        def probe():
+            client = TestClient(app_module.app)
+            try:
+                return client.get("/api/shares")
+            finally:
+                client.close()
+
+        response = await asyncio.to_thread(probe)
+        item = response.json()["items"][0]
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(item["collection_id"], collection["id"])
+        self.assertEqual(item["private_link"]["token"], share["token"])
+        self.assertTrue(item["private_link"]["protected"])
+        self.assertEqual(item["private_link"]["pick_count"], 1)
+        self.assertEqual(item["website"]["url"], "https://example.test/g/shared-set/")
+        self.assertFalse(item["website"]["hook_status"]["ok"])
+        self.assertEqual(item["website"]["hook_status"]["output"], "deploy failed")
+
     async def test_public_favorite_route_rejects_locked_share_without_cookie(self):
         collection, first, *_ = await self._collection_with_images()
         share = await db.create_or_rotate_share(

@@ -401,12 +401,13 @@ async def filtered_visible_ranked_candidates(
     file_type: str = "",
     camera: str = "",
     lens: str = "",
+    tag: str = "",
 ) -> tuple[list[dict], int, int]:
     cache_root = _configured_cache_root()
     cache_key = (
         f"filtered:{_configured_db_signature()}:{cache_root}:{size}:{max(1, int(limit))}:"
         f"{sort}:{orientation}:{compared}:{int(min_stars or 0)}:{folder}:{flag}:"
-        f"{date_taken}:{file_type}:{camera}:{lens}"
+        f"{date_taken}:{file_type}:{camera}:{lens}:{tag}"
     )
     now = time.monotonic()
     cached = _visible_pairing_candidates_cache.get(cache_key)
@@ -437,6 +438,7 @@ async def filtered_visible_ranked_candidates(
                             file_type=file_type,
                             camera=camera,
                             lens=lens,
+                            tag=tag,
                         )
                     )
                     if refresh_generation != _visible_pairing_candidates_generation:
@@ -473,6 +475,7 @@ async def filtered_visible_ranked_candidates(
         file_type=file_type,
         camera=camera,
         lens=lens,
+        tag=tag,
     )
     _visible_pairing_candidates_cache[cache_key] = {
         "data": result_rows,
@@ -498,6 +501,7 @@ async def load_filtered_visible_ranked_candidates(
     file_type: str = "",
     camera: str = "",
     lens: str = "",
+    tag: str = "",
 ) -> tuple[list[dict], int, int]:
     cache_root = _configured_cache_root()
     normalized_limit = max(1, int(limit))
@@ -511,6 +515,7 @@ async def load_filtered_visible_ranked_candidates(
             file_type,
             camera,
             lens,
+            tag,
         )
     )
     if orientation_only:
@@ -529,6 +534,7 @@ async def load_filtered_visible_ranked_candidates(
                 file_type=file_type,
                 camera=camera,
                 lens=lens,
+                tag=tag,
             )
         )
         visible_count_task = asyncio.create_task(
@@ -542,6 +548,7 @@ async def load_filtered_visible_ranked_candidates(
                 file_type=file_type,
                 camera=camera,
                 lens=lens,
+                tag=tag,
                 visible_thumb_size=size,
                 cache_root=cache_root,
             )
@@ -559,6 +566,7 @@ async def load_filtered_visible_ranked_candidates(
         file_type=file_type,
         camera=camera,
         lens=lens,
+        tag=tag,
         visible_thumb_size=size,
         cache_root=cache_root,
     )
@@ -590,6 +598,7 @@ async def search_visible_ranked_candidates(
     file_type: str = "",
     camera: str = "",
     lens: str = "",
+    tag: str = "",
 ) -> tuple[list[dict], int, int]:
     cache_root = _configured_cache_root()
     exclude_ids = exclude_ids or set()
@@ -603,6 +612,7 @@ async def search_visible_ranked_candidates(
                 orientation=orientation, compared=compared, min_stars=min_stars,
                 folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
                 camera=camera, lens=lens,
+                tag=tag,
                 id_filter=id_filter,
                 text_query=text_query,
             )
@@ -612,6 +622,7 @@ async def search_visible_ranked_candidates(
                 orientation=orientation, compared=compared, min_stars=min_stars,
                 folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
                 camera=camera, lens=lens,
+                tag=tag,
                 id_filter=id_filter,
                 visible_thumb_size=size,
                 cache_root=cache_root,
@@ -634,6 +645,7 @@ async def search_visible_ranked_candidates(
         file_type=file_type,
         camera=camera,
         lens=lens,
+        tag=tag,
         id_filter=id_filter,
         visible_thumb_size=size,
         cache_root=cache_root,
@@ -713,6 +725,19 @@ def apply_text_search_constraint(candidates: list[dict], search: dict) -> list[d
     return [c for c in candidates if metadata_text_match(c, text_query)]
 
 
+def apply_tag_constraint(candidates: list[dict], tag: str = "") -> list[dict]:
+    normalized = (tag or "").strip().lower()
+    if not normalized:
+        return candidates
+    return [
+        c for c in candidates
+        if normalized in {
+            str(value or "").strip().lower()
+            for value in (candidate_value(c, "caption_tags", []) or [])
+        }
+    ]
+
+
 async def add_explore_uncompared_stats(
     stats: dict,
     *,
@@ -730,6 +755,7 @@ async def add_explore_uncompared_stats(
     file_type: str = "",
     camera: str = "",
     lens: str = "",
+    tag: str = "",
 ) -> dict:
     """Attach direct user-uncompared pool counts for Explore mode."""
     if strategy != "explore" or compared:
@@ -745,6 +771,7 @@ async def add_explore_uncompared_stats(
         "file_type": file_type,
         "camera": camera,
         "lens": lens,
+        "tag": tag,
         "id_filter": search.get("id_filter"),
         "text_query": search.get("text_query") or "",
     }
@@ -801,6 +828,7 @@ def has_candidate_filters(
     file_type: str = "",
     camera: str = "",
     lens: str = "",
+    tag: str = "",
     search: dict | None = None,
 ) -> bool:
     return bool(
@@ -814,6 +842,7 @@ def has_candidate_filters(
         or file_type
         or camera
         or lens
+        or tag
         or query_constraints.search_constraint_active(search)
     )
 
@@ -1213,7 +1242,7 @@ async def mosaic_next_impl(
     n: int = 12, exclude: str = "", strategy: str = "explore", grid_elo: float = 0,
     orientation: str = "", compared: str = "", min_stars: int = 0, folder: str = "",
     flag: str = "", date_taken: str = "", file_type: str = "", camera: str = "", lens: str = "",
-    q: str = "", deep: bool = False, people: str = "", ids: list[int] | None = None, collection_id: int = 0,
+    tag: str = "", q: str = "", deep: bool = False, people: str = "", ids: list[int] | None = None, collection_id: int = 0,
 ):
     """Get active images for mosaic ranking with configurable sampling strategy."""
     candidate_source = "mosaic_window"
@@ -1234,10 +1263,11 @@ async def mosaic_next_impl(
         file_type=file_type,
         camera=camera,
         lens=lens,
+        tag=tag,
         search=search,
     )
     response_cache_key = None
-    if default_pool_only and not exclude_ids and strategy == "explore":
+    if default_pool_only and not exclude_ids and strategy == "explore" and int(n) != 2:
         response_cache_key = (
             "mosaic_next",
             _configured_db_signature(),
@@ -1301,6 +1331,7 @@ async def mosaic_next_impl(
             file_type=file_type,
             camera=camera,
             lens=lens,
+            tag=tag,
         )
         if strategy == "diverse" and visible_count > len(candidates):
             candidate_source = "filtered_diverse_universe"
@@ -1316,6 +1347,7 @@ async def mosaic_next_impl(
                 file_type=file_type,
                 camera=camera,
                 lens=lens,
+                tag=tag,
             )
         if exclude_ids:
             candidates = [row for row in candidates if int(row["id"]) not in exclude_ids]
@@ -1340,6 +1372,7 @@ async def mosaic_next_impl(
             file_type=file_type,
             camera=camera,
             lens=lens,
+            tag=tag,
         )
         if strategy == "diverse" and visible_count > len(candidates):
             candidate_source = "search_diverse_universe" if search.get("active") else "scoped_diverse_universe"
@@ -1358,6 +1391,7 @@ async def mosaic_next_impl(
                 file_type=file_type,
                 camera=camera,
                 lens=lens,
+                tag=tag,
             )
     else:
         candidate_source = "full_candidate_scan"
@@ -1379,6 +1413,7 @@ async def mosaic_next_impl(
             camera=camera,
             lens=lens,
         )
+        candidates = apply_tag_constraint(candidates, tag)
         candidates = apply_text_search_constraint(candidates, search)
         filtered_total = len(candidates)
         candidates = await filter_visible_candidates(candidates, "sm")
@@ -1411,6 +1446,7 @@ async def mosaic_next_impl(
             file_type=file_type,
             camera=camera,
             lens=lens,
+            tag=tag,
         )
         response = {
             "images": [],
@@ -1472,6 +1508,7 @@ async def mosaic_next_impl(
         file_type=file_type,
         camera=camera,
         lens=lens,
+        tag=tag,
     )
     response = {
         "images": result,
@@ -1499,7 +1536,7 @@ async def compare_next_impl(
     n: int = 5, mode: str = "swiss",
     orientation: str = "", compared: str = "", min_stars: int = 0, folder: str = "",
     flag: str = "", date_taken: str = "", file_type: str = "", camera: str = "", lens: str = "",
-    q: str = "", deep: bool = False, people: str = "", ids: list[int] | None = None, collection_id: int = 0,
+    tag: str = "", q: str = "", deep: bool = False, people: str = "", ids: list[int] | None = None, collection_id: int = 0,
 ):
     candidate_source = "compare_window"
     cache_hit = False
@@ -1518,6 +1555,7 @@ async def compare_next_impl(
         file_type=file_type,
         camera=camera,
         lens=lens,
+        tag=tag,
         search=search,
     )
     response_cache_key = None
@@ -1571,6 +1609,7 @@ async def compare_next_impl(
             file_type=file_type,
             camera=camera,
             lens=lens,
+            tag=tag,
         )
         past_task = asyncio.create_task(
             get_past_matchups_for_candidate_ids("md", [row["id"] for row in image_dicts])
@@ -1592,6 +1631,7 @@ async def compare_next_impl(
             file_type=file_type,
             camera=camera,
             lens=lens,
+            tag=tag,
         )
         past_task = asyncio.create_task(
             get_past_matchups_for_candidate_ids("md", [row["id"] for row in image_dicts])
@@ -1617,6 +1657,7 @@ async def compare_next_impl(
             camera=camera,
             lens=lens,
         )
+        image_dicts = apply_tag_constraint(image_dicts, tag)
         image_dicts = apply_text_search_constraint(image_dicts, search)
         filtered_total = len(image_dicts)
         image_dicts = await filter_visible_candidates(image_dicts, "md")
@@ -1677,6 +1718,7 @@ async def compare_next_impl(
             file_type=file_type,
             camera=camera,
             lens=lens,
+            tag=tag,
         )
         past = await get_visible_past_matchups("md")
         pairs = pairing.swiss_pair(image_dicts, past, max_pairs=n, presorted=True)

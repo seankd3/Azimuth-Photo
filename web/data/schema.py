@@ -6,7 +6,7 @@ from date_inference import infer_image_date
 from data.repositories import catalog as catalog_repository
 
 EXPECTED_EMBEDDING_DIM = 2048  # Qwen3-VL-Embedding-2B native dimension
-SCHEMA_VERSION = 18
+SCHEMA_VERSION = 19
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS catalog_sources (
@@ -567,7 +567,10 @@ CREATE TABLE IF NOT EXISTS collection_publishes (
     updated_at REAL NOT NULL,
     image_count INTEGER NOT NULL DEFAULT 0,
     bundle_bytes INTEGER NOT NULL DEFAULT 0,
-    last_commit TEXT DEFAULT NULL
+    last_commit TEXT DEFAULT NULL,
+    hook_exit_code INTEGER DEFAULT NULL,
+    hook_output TEXT NOT NULL DEFAULT '',
+    hook_ran_at REAL DEFAULT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_collections_updated
@@ -745,6 +748,9 @@ COLLECTION_PUBLISH_COMPAT_COLUMNS = (
     ("image_count", "INTEGER NOT NULL DEFAULT 0"),
     ("bundle_bytes", "INTEGER NOT NULL DEFAULT 0"),
     ("last_commit", "TEXT DEFAULT NULL"),
+    ("hook_exit_code", "INTEGER DEFAULT NULL"),
+    ("hook_output", "TEXT NOT NULL DEFAULT ''"),
+    ("hook_ran_at", "REAL DEFAULT NULL"),
 )
 
 IMAGE_CAPTION_COMPAT_COLUMNS = (
@@ -994,6 +1000,9 @@ REQUIRED_COLUMNS = {
         "image_count",
         "bundle_bytes",
         "last_commit",
+        "hook_exit_code",
+        "hook_output",
+        "hook_ran_at",
     },
     "image_captions": {"user_edited"},
 }

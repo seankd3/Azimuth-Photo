@@ -12,12 +12,12 @@ from fastapi.responses import JSONResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
+import settings
 from features.publish.builder import build_public_gallery_bundle
-from features.publish.deployer import GalleryDeployer, PublishConflict, PublishDeployError
+from features.publish.deployer import GalleryDeployer, HookStatus, PublishConflict, PublishDeployError, PublishSetupError
 
 
 router = APIRouter()
-PUBLIC_GALLERY_BASE = "https://www.seankennethdoherty.com/g"
 
 GetCollection = Callable[..., Awaitable[dict | None]]
 GetImagesByIds = Callable[[list[int]], Awaitable[dict[int, dict]]]
@@ -107,6 +107,8 @@ def _configured() -> None:
 @router.post("/api/user-collections/{collection_id}/publish")
 async def api_publish_collection(collection_id: int, payload: PublishBody):
     _configured()
+    if not _publish_enabled():
+        return JSONResponse({"error": "Choose a publishing folder before publishing this gallery."}, status_code=409)
     collection = await _get_collection(collection_id, limit=1, offset=0)
     if collection is None:
         return JSONResponse({"error": "Collection not found"}, status_code=404)
@@ -136,6 +138,7 @@ async def api_get_collection_publish(collection_id: int):
         "url": _public_url(publish["slug"]) if publish else None,
         "job": job,
         "in_progress": bool(job and job.get("state") in {"publishing", "revoking"}),
+        "publishing": _publishing_config_payload(),
     }
 
 
@@ -154,16 +157,17 @@ async def api_revoke_collection_publish(collection_id: int):
 async def api_list_publishes():
     _configured()
     publishes = await _list_publishes()
-    return {"publishes": [_publish_payload(row) for row in publishes]}
+    return {"publishes": [_publish_payload(row) for row in publishes], "publishing": _publishing_config_payload()}
 
 
 async def _run_publish_job(collection_id: int, slug: str, title: str) -> None:
     assert _deployer is not None
     try:
-        rows = await _list_publishes()
-
         def progress(phase: str) -> None:
             _update_job(collection_id, phase=phase)
+
+        def published_rows():
+            return asyncio.run(_list_publishes())
 
         def write_bundle(target):
             return asyncio.run(
@@ -185,7 +189,7 @@ async def _run_publish_job(collection_id: int, slug: str, title: str) -> None:
             slug=slug,
             title=title,
             collection_id=collection_id,
-            published_rows=rows,
+            published_rows=published_rows,
             write_bundle=write_bundle,
             progress=progress,
         )
@@ -197,9 +201,19 @@ async def _run_publish_job(collection_id: int, slug: str, title: str) -> None:
             image_count=summary.photo_count if summary else 0,
             bundle_bytes=summary.bundle_bytes if summary else 0,
             last_commit=result.last_commit,
+            hook_exit_code=result.hook.returncode if result.hook and result.hook.configured else None,
+            hook_output=result.hook.output if result.hook and result.hook.configured else "",
+            hook_ran_at=result.hook.ran_at if result.hook and result.hook.configured else None,
         )
-        _finish_job(collection_id, "live", publish=_publish_payload(row), push_error=result.push_error)
-    except (PublishConflict, PublishDeployError) as exc:
+        state = "hook_failed" if result.hook and not result.hook.ok else "live"
+        _finish_job(
+            collection_id,
+            state,
+            publish=_publish_payload(row),
+            push_error=result.push_error,
+            hook=result.hook,
+        )
+    except (PublishConflict, PublishDeployError, PublishSetupError) as exc:
         _fail_job(collection_id, exc)
     except Exception as exc:
         _fail_job(collection_id, exc)
@@ -208,20 +222,22 @@ async def _run_publish_job(collection_id: int, slug: str, title: str) -> None:
 async def _run_revoke_job(collection_id: int, slug: str) -> None:
     assert _deployer is not None
     try:
-        rows = await _list_publishes()
-
         def progress(phase: str) -> None:
             _update_job(collection_id, phase=phase)
+
+        def published_rows():
+            return asyncio.run(_list_publishes())
 
         result = await _deployer.revoke(
             slug=slug,
             collection_id=collection_id,
-            published_rows=rows,
+            published_rows=published_rows,
             progress=progress,
         )
         await _delete_publish(collection_id)
-        _finish_job(collection_id, "revoked", publish=None, push_error=result.push_error)
-    except (PublishConflict, PublishDeployError) as exc:
+        state = "revoked_hook_failed" if result.hook and not result.hook.ok else "revoked"
+        _finish_job(collection_id, state, publish=None, push_error=result.push_error, hook=result.hook)
+    except (PublishConflict, PublishDeployError, PublishSetupError) as exc:
         _fail_job(collection_id, exc)
     except Exception as exc:
         _fail_job(collection_id, exc)
@@ -244,6 +260,7 @@ def _start_job(collection_id: int, state: str, *, slug: str, title: str) -> None
         "completed_at": None,
         "error": None,
         "status_code": None,
+        "hook": None,
     }
 
 
@@ -253,15 +270,23 @@ def _update_job(collection_id: int, **fields) -> None:
         job.update(fields)
 
 
-def _finish_job(collection_id: int, state: str, *, publish: dict | None, push_error: str | None) -> None:
+def _finish_job(
+    collection_id: int,
+    state: str,
+    *,
+    publish: dict | None,
+    push_error: str | None,
+    hook: HookStatus | None,
+) -> None:
     _update_job(
         collection_id,
         state=state,
-        phase=state,
+        phase="published locally, hook failed" if state == "hook_failed" else state,
         publish=publish,
         url=_public_url(publish["slug"]) if publish else None,
         completed_at=time.time(),
         push_error=push_error,
+        hook=_hook_payload(hook),
     )
 
 
@@ -288,11 +313,55 @@ def _publish_payload(row: dict | None) -> dict | None:
         return None
     payload = dict(row)
     payload["url"] = _public_url(row["slug"])
+    payload["hook_status"] = _hook_payload(row)
     return payload
 
 
-def _public_url(slug: str) -> str:
-    return f"{PUBLIC_GALLERY_BASE}/{slug}/"
+def _public_url(slug: str) -> str | None:
+    base = str(settings.get_settings().get("publish_site_base_url") or "").strip().rstrip("/")
+    if not base:
+        return None
+    return f"{base}/g/{slug}/"
+
+
+def _publish_enabled() -> bool:
+    return bool(str(settings.get_settings().get("publish_dir") or "").strip())
+
+
+def _publishing_config_payload() -> dict:
+    config = settings.get_settings()
+    publish_dir = str(config.get("publish_dir") or "").strip()
+    return {
+        "enabled": bool(publish_dir),
+        "publish_dir": publish_dir,
+        "hook_configured": bool(str(config.get("publish_hook") or "").strip()),
+        "site_base_url": str(config.get("publish_site_base_url") or "").strip(),
+        "setup_prompt": "" if publish_dir else "Choose a folder for published galleries before publishing.",
+    }
+
+
+def _hook_payload(value) -> dict:
+    if value is None:
+        return {
+            "configured": False,
+            "returncode": None,
+            "output": "",
+            "ran_at": None,
+            "timed_out": False,
+            "ok": True,
+        }
+    if isinstance(value, HookStatus):
+        return value.payload()
+    exit_code = value.get("hook_exit_code")
+    configured = exit_code is not None or bool(value.get("hook_output") or value.get("hook_ran_at"))
+    return {
+        "configured": configured,
+        "returncode": int(exit_code) if exit_code is not None else None,
+        "output": value.get("hook_output") or "",
+        "ran_at": value.get("hook_ran_at"),
+        "timed_out": False,
+        "ok": not configured or exit_code == 0,
+    }
 
 
 def _clean_slug(value: str) -> str:

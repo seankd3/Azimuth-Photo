@@ -103,7 +103,7 @@ export async function createSuggestion(suggestion) {
             return false;
         }
         await refreshCollections();
-        showToast('Collection created', { undo: null });
+        showToast('Collection created');
         notifyChange();
         render();
         return true;
@@ -186,12 +186,13 @@ function render() {
     }
 
     if (!visible.length) {
+        const cleared = Boolean((suggestions || []).length && dismissed().length);
         root.innerHTML = '<div class="suggest-review empty">'
             + headerHtml(visible.length)
             + '<div class="suggest-review-empty-body"><div>'
             + `<span class="suggest-empty-glyph">${icon('sparkles')}</span>`
             + '<h2>Nothing to review</h2>'
-            + '<p>New collection ideas will appear here after the archive has more patterns to suggest.</p>'
+            + `<p>${esc(cleared ? "You've cleared the suggestion queue." : 'New collection ideas will appear here after the archive has more patterns to suggest.')}</p>`
             + '</div></div></div>';
         bindChrome(root);
         return;

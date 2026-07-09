@@ -53,6 +53,10 @@ export async function getExif(imageId) {
     return fetchJson(`/api/image/${imageId}/exif`, { defaultValue: null });
 }
 
+export async function getImageCaption(imageId) {
+    return fetchJson(`/api/image/${imageId}/caption`, { defaultValue: null });
+}
+
 export async function getDateHistogram(params) {
     return fetchJson(`/api/date-histogram?${params.toString()}`, { defaultValue: null });
 }

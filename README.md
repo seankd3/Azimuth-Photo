@@ -70,6 +70,8 @@ Share any collection as a private gallery link:
 - **Client proofing** — recipients favorite photos in the gallery; their picks flow back into your archive as flags, ready for export.
 - Public links serve resized previews only — originals never leave the archive.
 
+Website publishing writes static gallery bundles and a `manifest.json` into your own site folder, then can run one optional hook command. See [Publishing Static Galleries](docs/publishing.md).
+
 Zip export of any filtered view (originals or previews) with symlink-safe path hardening, size budgets, and manifest reporting.
 
 ## The phone app

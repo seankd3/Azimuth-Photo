@@ -114,14 +114,21 @@ async function load() {
     const seq = ++generation;
     const stage = document.getElementById('map-stage');
     stage.innerHTML = '<div class="map-loading skel"></div>';
-    const data = scope.collectionId
-        ? await loadCollectionMarkers()
-        : await getMapMarkers(scopeParams());
-    if (seq !== generation) return;
-    markers = (data && data.markers) || [];
-    setImages(markers);
-    setRankingsMeta({ visibleImages: Number((data && (data.total_count || data.gps_total_count || data.gps_count)) || markers.length), sortQuality: null });
-    renderMap(data || {});
+    try {
+        const data = scope.collectionId
+            ? await loadCollectionMarkers()
+            : await getMapMarkers(scopeParams());
+        if (seq !== generation) return;
+        markers = (data && data.markers) || [];
+        setImages(markers);
+        setRankingsMeta({ visibleImages: Number((data && (data.total_count || data.gps_total_count || data.gps_count)) || markers.length), sortQuality: null });
+        renderMap(data || {});
+    } catch {
+        if (seq !== generation) return;
+        markers = [];
+        stage.innerHTML = `<div class="load-error"><h4>Couldn't load map</h4><p>The archive did not respond.</p><button class="btn" id="map-retry">Try again</button></div>`;
+        document.getElementById('map-retry')?.addEventListener('click', load);
+    }
 }
 
 function openCluster(index, pin) {
@@ -141,6 +148,7 @@ function openCluster(index, pin) {
     pop.style.left = `${Math.min(window.innerWidth - 220, rect.left)}px`;
     pop.style.top = `${Math.min(window.innerHeight - 260, rect.bottom + 8)}px`;
     pop.classList.add('on');
+    pop.querySelector('button')?.focus({ preventScroll: true });
 }
 
 export function initMap() {
@@ -156,6 +164,13 @@ export function initMap() {
         const pin = event.target.closest('.map-pin[data-cluster]');
         if (pin) openCluster(Number(pin.dataset.cluster), pin);
         else document.getElementById('map-popover')?.classList.remove('on');
+    });
+    document.getElementById('map-stage').addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') return;
+        const pop = document.getElementById('map-popover');
+        if (!pop?.classList.contains('on')) return;
+        event.preventDefault();
+        pop.classList.remove('on');
     });
     on('scope', load);
 }

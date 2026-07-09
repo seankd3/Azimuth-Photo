@@ -2,6 +2,7 @@ import {
     byId, on, selection, setRightCollapsed, setScope, viewState,
 } from './state.js';
 import { getCaptionStatus, getImageCaption, getImageExif, saveImageCaption } from './api.js';
+import { showToast } from './toast.js';
 
 const exifCache = new Map();
 const captionCache = new Map();
@@ -206,8 +207,12 @@ function captionProgressHint() {
     const counts = (captionStatus && captionStatus.counts) || {};
     const captioned = Number(counts.captioned || 0);
     const pending = Number(counts.pending_cached_images || 0);
-    const total = captioned + pending;
-    return total > 0 ? `${fmt(captioned)} of ${fmt(total)} captioned` : '';
+    const active = Boolean(captionStatus && captionStatus.active);
+    const worker = (captionStatus && captionStatus.worker) || {};
+    if (active && pending > 0) return `Captions running · ${fmt(captioned)} done, ${fmt(pending)} queued`;
+    if (active) return `Captions running · ${fmt(captioned)} done`;
+    if (worker.last_error) return `Captions paused · ${fmt(captioned)} done`;
+    return captioned > 0 ? `Captions idle · ${fmt(captioned)} done` : '';
 }
 
 function tagChips(tags) {
@@ -226,7 +231,8 @@ function renderCaptionView(img, caption) {
         const hint = captionProgressHint();
         host.innerHTML = '<div class="panel-empty">Not yet captioned'
             + (hint ? `<span class="cap-progress">${esc(hint)}</span>` : '')
-            + '</div>';
+            + '<button class="mini-btn" id="caption-edit">Write caption</button></div>';
+        bindCaptionPanel(host, img, { has_caption: false, caption: '', tags: [] });
         return;
     }
     const edited = caption.user_edited ? '<span class="cap-edited">edited</span>' : '';
@@ -242,7 +248,7 @@ function renderCaptionEditor(img, caption) {
     const tags = (caption && caption.tags) || [];
     host.innerHTML = '<div class="cap-editor">'
         + '<textarea id="caption-text" rows="5"></textarea>'
-        + '<input id="caption-tags" class="drawer-input" autocomplete="off" placeholder="Tags">'
+        + '<input id="caption-tags" class="drawer-input" autocomplete="off" placeholder="Tags, comma-separated">'
         + '<div class="cap-actions"><button class="mini-btn" id="caption-cancel">Cancel</button><button class="mini-btn" id="caption-save">Save</button></div>'
         + '</div>';
     host.querySelector('#caption-text').value = (caption && caption.caption) || '';
@@ -270,6 +276,7 @@ function bindCaptionPanel(host, img, caption) {
         const saved = await saveImageCaption(img.id, { caption: text, tags });
         if (!saved || !saved.caption) {
             host.querySelector('#caption-save').disabled = false;
+            showToast("Couldn't save caption");
             return;
         }
         captionEditId = null;
@@ -282,8 +289,10 @@ function bindCaptionPanel(host, img, caption) {
         renderCaptionView(img, saved.caption);
     });
     for (const chip of host.querySelectorAll('[data-caption-tag]')) {
-        chip.addEventListener('click', () => setScope({
-            tag: chip.dataset.captionTag || '',
+        chip.addEventListener('click', () => {
+            const tag = chip.dataset.captionTag || '';
+            setScope({
+            tag,
             collectionId: '',
             collectionName: '',
             collectionSmart: false,
@@ -291,7 +300,9 @@ function bindCaptionPanel(host, img, caption) {
             similarSourceId: '',
             similarLimit: 100,
             similarLabel: '',
-        }, { merge: true }));
+            }, { merge: true });
+            showToast(`Scoped to Tag · ${tag}`);
+        });
     }
 }
 
@@ -305,7 +316,7 @@ async function renderCaption(img) {
     const imageId = Number(img.id);
     if (captionEditId === imageId) return;
     const token = ++captionToken;
-    if (!captionStatus) captionStatus = await getCaptionStatus();
+    captionStatus = await getCaptionStatus();
     let caption = captionCache.get(imageId);
     if (!caption) {
         host.innerHTML = '<div class="panel-empty">Loading caption…</div>';

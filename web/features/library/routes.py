@@ -160,7 +160,7 @@ async def api_counts(
 async def api_map_markers(
     orientation: str = "", compared: str = "", min_stars: int = 0,
     folder: str = "", flag: str = "", date_taken: str = "", file_type: str = "",
-    camera: str = "", lens: str = "", people: str = "", q: str = "", deep: bool = False,
+    camera: str = "", lens: str = "", tag: str = "", people: str = "", q: str = "", deep: bool = False,
     import_batch: int = 0, request: Request = None,
 ):
     """Return images with GPS data for map display."""
@@ -174,6 +174,7 @@ async def api_map_markers(
         file_type=file_type,
         camera=camera,
         lens=lens,
+        tag=tag,
         people=people,
         q=q,
         import_batch=import_batch,

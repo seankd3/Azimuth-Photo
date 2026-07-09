@@ -167,6 +167,7 @@ function scopeLabel(value) {
     if (value.date_taken) return dateLabel(value.date_taken);
     if (value.camera) return `Camera · ${value.camera}`;
     if (value.lens) return `Lens · ${value.lens}`;
+    if (value.tag) return `Tag · ${value.tag}`;
     if (value.file_type) return String(value.file_type).toUpperCase();
     if (value.flag) return value.flag === 'picked' ? 'Picked' : value.flag === 'rejected' ? 'Rejected' : 'Unflagged';
     if (value.q) return `“${value.q}”`;
@@ -180,6 +181,7 @@ function scopeIcon(value) {
     if (value.date_taken) return 'calendar';
     if (value.camera) return 'camera';
     if (value.lens) return 'aperture';
+    if (value.tag) return 'tag';
     if (value.file_type) return 'file-type';
     if (value.flag) return 'flag';
     if (value.q) return 'search';
@@ -330,8 +332,25 @@ function buildPhotoRows(term) {
         })));
         const contextTags = [...new Set(images.flatMap((img) => img.caption_tags || []))].slice(0, 5);
         if (contextTags.length) {
+            section.push(...contextTags.map((tag) => ({
+                icon: 'tag',
+                label: `#${tag}`,
+                meta: 'Tag',
+                navRow: 3,
+                run: () => applyScope({
+                    tag,
+                    q: '',
+                    collectionId: '',
+                    collectionName: '',
+                    collectionSmart: false,
+                    similarIds: [],
+                    similarSourceId: '',
+                    similarLimit: 100,
+                    similarLabel: '',
+                }),
+            })));
             section.push({
-                note: contextTags.map((tag) => `#${tag}`).join('  '),
+                note: 'Related caption tags',
                 icon: 'tag',
             });
         }
@@ -554,6 +573,9 @@ function buildFacetRows(input) {
                     remove: tokenInfo,
                 }),
             });
+        }
+        if (!rowsOut.length && operator.name === 'tag') {
+            rowsOut.push({ empty: 'No caption tags match.' });
         }
     }
     return rowsOut.length ? [{ head: 'Facet completions' }, ...rowsOut.slice(0, MAX_SECTION_ROWS + 1)] : [];

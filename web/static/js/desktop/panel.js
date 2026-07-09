@@ -260,6 +260,13 @@ function selectClientPicks(ids) {
     showToast(`${fmt(ids.length)} client picks selected`);
 }
 
+export async function viewClientPicks(collectionId) {
+    const pickData = await getCollectionShareFavorites(collectionId);
+    const ids = clientPickIds(pickData);
+    await rememberCollectionImages(collectionId);
+    selectClientPicks(ids);
+}
+
 async function applyClientPicks(collectionId, ids) {
     if (!ids.length) {
         showToast('No client picks yet');
@@ -332,6 +339,16 @@ async function copyShareUrl(url) {
     }
 }
 
+async function withBusyButton(button, action) {
+    if (!button || button.disabled) return;
+    button.disabled = true;
+    try {
+        await action();
+    } finally {
+        if (document.contains(button)) button.disabled = false;
+    }
+}
+
 async function renderShareOverlay(collectionId, name, share = null, token = shareOverlayToken) {
     ensureShareOverlay();
     if (!shareOverlayIsCurrent(token)) return;
@@ -359,7 +376,7 @@ async function renderShareOverlay(collectionId, name, share = null, token = shar
     shareOverlay.querySelector('#share-copy')?.addEventListener('click', () => copyShareUrl(share.url));
     shareOverlay.querySelector('#share-view-picks')?.addEventListener('click', () => selectClientPicks(pickIds));
     shareOverlay.querySelector('#share-apply-picks')?.addEventListener('click', () => applyClientPicks(collectionId, pickIds));
-    shareOverlay.querySelector('#share-create')?.addEventListener('click', async () => {
+    shareOverlay.querySelector('#share-create')?.addEventListener('click', async (event) => withBusyButton(event.currentTarget, async () => {
         const actionToken = shareOverlayToken;
         const value = shareOverlay.querySelector('#share-expiry')?.value || '';
         const password = shareOverlay.querySelector('#share-password')?.value || '';
@@ -374,8 +391,8 @@ async function renderShareOverlay(collectionId, name, share = null, token = shar
         } else {
             showToast("Couldn't create share link");
         }
-    });
-    shareOverlay.querySelector('#share-password-save')?.addEventListener('click', async () => {
+    }));
+    shareOverlay.querySelector('#share-password-save')?.addEventListener('click', async (event) => withBusyButton(event.currentTarget, async () => {
         if (!share) return;
         const actionToken = shareOverlayToken;
         const password = shareOverlay.querySelector('#share-password')?.value || '';
@@ -391,8 +408,8 @@ async function renderShareOverlay(collectionId, name, share = null, token = shar
         } else {
             showToast("Couldn't save password");
         }
-    });
-    shareOverlay.querySelector('#share-password-clear')?.addEventListener('click', async () => {
+    }));
+    shareOverlay.querySelector('#share-password-clear')?.addEventListener('click', async (event) => withBusyButton(event.currentTarget, async () => {
         const actionToken = shareOverlayToken;
         const result = await createCollectionShare(collectionId, { clearPassword: true });
         if (!shareOverlayIsCurrent(actionToken)) return;
@@ -402,7 +419,7 @@ async function renderShareOverlay(collectionId, name, share = null, token = shar
         } else {
             showToast("Couldn't remove password");
         }
-    });
+    }));
     bindShareConfirmButton('#share-rotate', 'Confirm rotate', async () => {
         const actionToken = shareOverlayToken;
         const result = await createCollectionShare(collectionId, { rotate: true });
@@ -446,7 +463,7 @@ function bindShareConfirmButton(selector, label, action) {
     });
 }
 
-async function openShareOverlay(collectionId, name = 'Collection') {
+export async function openShareOverlay(collectionId, name = 'Collection') {
     ensureShareOverlay();
     const token = ++shareOverlayToken;
     shareOverlay.innerHTML = `<div class="modal-card share-card" role="dialog" aria-modal="true"><div class="mo-head"><h2>Share ${esc(name)}</h2><button type="button" id="share-close" data-tip="Close (Esc)" aria-label="Close">${icon('x')}</button></div><div class="mo-body"><div class="muted">Loading…</div></div></div>`;
@@ -495,14 +512,30 @@ function slugifyName(value) {
     return String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 96) || 'gallery';
 }
 
-function publishCopyText(count, slug) {
-    return `Publish ${fmt(count)} photos publicly at seankennethdoherty.com/g/${slug}/.`;
+function configuredGalleryUrl(slug, publishing = {}) {
+    const base = String(publishing.site_base_url || '').replace(/\/+$/, '');
+    return base && slug ? `${base}/g/${slug}/` : '';
+}
+
+function publishCopyText(count, slug, publishing = {}) {
+    const url = configuredGalleryUrl(slug, publishing);
+    if (url) return `Publish ${fmt(count)} photos publicly at ${url}.`;
+    return `Publish ${fmt(count)} photos into the configured gallery folder.`;
+}
+
+function publishLeadText(count, slug, publish, publishing = {}) {
+    const url = configuredGalleryUrl(slug, publishing);
+    if (publish) return url ? `Update the live gallery at ${url}.` : 'Update the published gallery bundle.';
+    return publishCopyText(count, slug, publishing);
 }
 
 function publishPhaseCopy(job) {
     if (!job) return '';
     if (job.state === 'error') return 'Publishing needs attention.';
-    if (job.phase === 'deploying') return 'Deploying to the website…';
+    if (job.state === 'hook_failed') return 'Published locally, hook failed.';
+    if (job.state === 'revoked_hook_failed') return 'Gallery removed locally, hook failed.';
+    if (job.phase === 'hook') return 'Running publish hook…';
+    if (job.phase === 'deploying') return 'Running publish hook…';
     if (job.phase === 'building') return 'Building static gallery…';
     if (job.state === 'live') return 'Gallery is live.';
     if (job.state === 'revoked') return 'Gallery is unpublished.';
@@ -515,11 +548,12 @@ function publishErrorBlock(job) {
         ? `<div class="publish-error-list">${job.paths.map((path) => `<code>${esc(path)}</code>`).join('')}</div>`
         : '';
     const tail = job.tail ? `<pre>${esc(job.tail)}</pre>` : '';
+    const details = paths || tail ? `<details><summary>Details</summary>${paths}${tail}</details>` : '';
     return '<div class="publish-error">'
-        + `<b>${esc(job.status_code ? `${job.status_code} error` : 'Publish error')}</b>`
-        + `<p>${esc(job.error || "Couldn't publish this gallery.")}</p>`
-        + paths
-        + tail
+        + '<b>Couldn\'t publish this gallery.</b>'
+        + `<p>${esc(job.error || 'The website did not finish the publish. Try again when ready.')}</p>`
+        + '<button class="btn primary" id="publish-retry" type="button">Try again</button>'
+        + details
         + '</div>';
 }
 
@@ -527,10 +561,14 @@ function publishStatusBlock(data) {
     const job = data?.job || null;
     const publish = data?.publish || job?.publish || null;
     const url = data?.url || job?.url || publish?.url || '';
-    const status = publishPhaseCopy(job);
+    const setupNeeded = data?.publishing?.enabled === false;
+    const status = setupNeeded ? 'Publishing is disabled until a folder is set.' : publishPhaseCopy(job);
+    const hook = publish?.hook_status || job?.hook || null;
+    const hookFailed = hook && hook.configured && !hook.ok;
     return '<div class="publish-status">'
         + (status ? `<span>${esc(status)}</span>` : '<span>Ready to publish.</span>')
         + (url ? `<div class="share-link-row"><input id="publish-url" readonly value="${esc(url)}"><button id="publish-copy" type="button">${icon('copy')} Copy</button></div>` : '')
+        + (hookFailed ? `<div class="publish-error"><b>Published locally, hook failed.</b><p>${esc(hook.output || 'The hook did not finish successfully.')}</p></div>` : '')
         + publishErrorBlock(job)
         + '</div>';
 }
@@ -550,6 +588,8 @@ async function renderPublishOverlay(collectionId, name, data = null, token = pub
     const coll = collectionById(collectionId) || {};
     const publish = data?.publish || null;
     const job = data?.job || null;
+    const publishing = data?.publishing || {};
+    const setupNeeded = publishing.enabled === false;
     const busy = Boolean(data?.in_progress || (job && ['publishing', 'revoking'].includes(job.state)));
     const count = Number(coll.image_count || publish?.image_count || 0);
     const slug = (job?.slug || publish?.slug || slugifyName(name));
@@ -559,15 +599,16 @@ async function renderPublishOverlay(collectionId, name, data = null, token = pub
     publishOverlay.innerHTML = '<div class="modal-card publish-card" role="dialog" aria-modal="true" aria-labelledby="publish-title">'
         + `<div class="mo-head"><h2 id="publish-title">Publish ${esc(name)}</h2><button type="button" id="publish-close" data-tip="Close (Esc)" aria-label="Close">${icon('x')}</button></div>`
         + '<div class="mo-body">'
-        + `<p class="publish-confirm-copy">${esc(publishCopyText(count, slug))}</p>`
+        + (setupNeeded ? '<div class="publish-setup"><b>Choose a publishing folder first.</b><p>photoArchive writes static gallery bundles and manifest.json into that folder. Add it in System, then come back here to publish.</p><button class="btn primary" id="publish-open-settings" type="button">Open Publishing settings</button></div>' : '')
+        + `<p class="publish-confirm-copy"${setupNeeded ? ' hidden' : ''}>${esc(publishLeadText(count, slug, publish, publishing))}</p>`
         + '<div class="publish-fields">'
-        + `<label>Title <input id="publish-title-input" value="${esc(title)}" maxlength="160" ${busy ? 'disabled' : ''}></label>`
-        + `<label>Slug <input id="publish-slug-input" value="${esc(slug)}" maxlength="96" ${busy || publish ? 'disabled' : ''}></label>`
+        + `<label>Title <input id="publish-title-input" value="${esc(title)}" maxlength="160" ${busy || setupNeeded ? 'disabled' : ''}></label>`
+        + `<label>Slug <input id="publish-slug-input" value="${esc(slug)}" maxlength="96" ${busy || publish || setupNeeded ? 'disabled' : ''}>${publish ? '<small>URL is fixed after first publish.</small>' : ''}</label>`
         + '</div>'
         + publishStatusBlock(data)
         + '<div class="publish-actions">'
         + (publish ? '<button id="publish-revoke" type="button" class="btn-danger" ' + (busy ? 'disabled' : '') + '>Unpublish</button>' : '')
-        + `<button id="publish-submit" type="button" ${busy ? 'disabled' : ''}>${esc(actionLabel)}</button>`
+        + `<button id="publish-submit" type="button" ${busy || setupNeeded ? 'disabled' : ''}>${esc(actionLabel)}</button>`
         + '</div>'
         + '</div></div>';
     publishOverlay.hidden = false;
@@ -577,7 +618,11 @@ async function renderPublishOverlay(collectionId, name, data = null, token = pub
     const copy = publishOverlay.querySelector('.publish-confirm-copy');
     slugInput?.addEventListener('input', () => {
         const nextSlug = slugifyName(slugInput.value);
-        copy.textContent = publishCopyText(count, nextSlug);
+        copy.textContent = publishLeadText(count, nextSlug, publish, publishing);
+    });
+    publishOverlay.querySelector('#publish-open-settings')?.addEventListener('click', () => {
+        closePublishOverlay();
+        document.getElementById('system-btn')?.click();
     });
     const startPublish = async () => {
         const nextSlug = slugifyName(slugInput?.value || slug);
@@ -603,6 +648,7 @@ async function renderPublishOverlay(collectionId, name, data = null, token = pub
     } else {
         publishOverlay.querySelector('#publish-submit')?.addEventListener('click', startPublish);
     }
+    publishOverlay.querySelector('#publish-retry')?.addEventListener('click', startPublish);
     publishOverlay.querySelector('#publish-revoke')?.addEventListener('click', async () => {
         const ok = await confirmTypedCount({
             title: 'Unpublish gallery',
@@ -663,11 +709,12 @@ async function pollPublishStatus(collectionId, name, token, immediate = false) {
     if (data?.in_progress) {
         schedulePublishPoll(collectionId, name, token);
     } else if (!immediate) {
+        if (data?.job?.state === 'revoked') showToast('Gallery unpublished');
         await loadCollections();
     }
 }
 
-async function openPublishOverlay(collectionId, name = 'Collection') {
+export async function openPublishOverlay(collectionId, name = 'Collection') {
     ensurePublishOverlay();
     const token = ++publishOverlayToken;
     publishOverlay.innerHTML = `<div class="modal-card publish-card" role="dialog" aria-modal="true"><div class="mo-head"><h2>Publish ${esc(name)}</h2><button type="button" id="publish-close" data-tip="Close (Esc)" aria-label="Close">${icon('x')}</button></div><div class="mo-body"><div class="muted">Loading…</div></div></div>`;
@@ -1175,6 +1222,7 @@ export async function initPanel() {
     });
     window.addEventListener('resize', closeCollectionMenu);
     document.getElementById('export-view').addEventListener('click', (event) => openScopeExportMenu(event.currentTarget));
+    document.getElementById('shared-view')?.addEventListener('click', () => setActiveLens('shared'));
     document.getElementById('new-coll-btn').addEventListener('click', requestNewCollection);
     document.getElementById('new-coll-smart')?.addEventListener('click', saveSmartCollectionFromForm);
     document.getElementById('new-coll-cancel-edit')?.addEventListener('click', cancelSmartCollectionEdit);

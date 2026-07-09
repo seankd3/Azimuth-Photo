@@ -20,6 +20,11 @@ def _summary(row) -> dict:
         "image_count": int(row["image_count"] or 0),
         "bundle_bytes": int(row["bundle_bytes"] or 0),
         "last_commit": row["last_commit"],
+        "hook_exit_code": int(row["hook_exit_code"]) if row["hook_exit_code"] is not None else None,
+        "hook_output": row["hook_output"] or "",
+        "hook_ran_at": float(row["hook_ran_at"]) if row["hook_ran_at"] is not None else None,
+        "collection_name": row["collection_name"] if "collection_name" in row.keys() else None,
+        "cover_image_id": int(row["cover_image_id"]) if "cover_image_id" in row.keys() and row["cover_image_id"] is not None else None,
     }
 
 
@@ -54,7 +59,7 @@ async def list_publishes(db_path: str) -> list[dict]:
     try:
         cursor = await conn.execute(
             """
-            SELECT p.*
+            SELECT p.*, c.name AS collection_name, c.cover_image_id
             FROM collection_publishes p
             JOIN collections c ON c.id = p.collection_id
             ORDER BY p.updated_at DESC, p.id DESC
@@ -74,6 +79,9 @@ async def upsert_publish(
     image_count: int,
     bundle_bytes: int,
     last_commit: str | None,
+    hook_exit_code: int | None = None,
+    hook_output: str = "",
+    hook_ran_at: float | None = None,
     now: float | None = None,
 ) -> dict:
     clean_slug = (slug or "").strip()
@@ -89,15 +97,19 @@ async def upsert_publish(
             await conn.execute(
                 """
                 INSERT INTO collection_publishes
-                    (collection_id, slug, title, published_at, updated_at, image_count, bundle_bytes, last_commit)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    (collection_id, slug, title, published_at, updated_at, image_count, bundle_bytes,
+                     last_commit, hook_exit_code, hook_output, hook_ran_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(collection_id) DO UPDATE SET
                     slug = excluded.slug,
                     title = excluded.title,
                     updated_at = excluded.updated_at,
                     image_count = excluded.image_count,
                     bundle_bytes = excluded.bundle_bytes,
-                    last_commit = excluded.last_commit
+                    last_commit = excluded.last_commit,
+                    hook_exit_code = excluded.hook_exit_code,
+                    hook_output = excluded.hook_output,
+                    hook_ran_at = excluded.hook_ran_at
                 """,
                 (
                     int(collection_id),
@@ -108,6 +120,9 @@ async def upsert_publish(
                     max(0, int(image_count)),
                     max(0, int(bundle_bytes)),
                     last_commit,
+                    hook_exit_code,
+                    str(hook_output or ""),
+                    hook_ran_at,
                 ),
             )
             await conn.commit()

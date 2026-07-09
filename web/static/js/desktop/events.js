@@ -103,7 +103,9 @@ function render() {
     buildGroups();
     const flow = document.getElementById('events-flow');
     if (!groups.length && !loading) {
-        flow.innerHTML = '<div class="load-error"><h4>No dated photos loaded yet</h4><p>Events group this view by gaps in capture time. Try a broader view or keep scrolling as photos load.</p></div>';
+        flow.innerHTML = '<div class="load-error"><h4>No dated photos loaded yet</h4><p>Events group this view by gaps in capture time. Try a broader view or keep scrolling as photos load.</p></div>'
+            + '<div id="events-sentinel"></div><div class="grid-end" id="events-end" hidden>End of scope</div>';
+        document.getElementById('events-end').hidden = !done || images.length === 0;
         return;
     }
     const imageIndexes = new Map(images.map((img, idx) => [Number(img.id), idx]));
@@ -144,21 +146,29 @@ async function loadPage() {
     if (!mounted || loading || done) return;
     loading = true;
     const seq = generation;
-    const data = await loadScopePage({ limit: PAGE_SIZE, offset, sort: 'date_taken' });
-    if (seq !== generation) return;
-    loading = false;
-    if (!data) {
-        document.getElementById('events-flow').innerHTML = '<div class="load-error"><h4>Couldn\'t load events</h4><p>The archive did not respond.</p></div>';
-        return;
+    try {
+        const data = await loadScopePage({ limit: PAGE_SIZE, offset, sort: 'date_taken' });
+        if (seq !== generation) return;
+        if (!data) {
+            document.getElementById('events-flow').innerHTML = '<div class="load-error"><h4>Couldn\'t load events</h4><p>The archive did not respond.</p><button class="btn" id="events-retry">Try again</button></div>';
+            document.getElementById('events-retry')?.addEventListener('click', loadPage);
+            return;
+        }
+        const incoming = data.images || [];
+        offset += incoming.length;
+        done = incoming.length < PAGE_SIZE;
+        images = images.concat(incoming);
+        setImages(images);
+        if (offset === incoming.length) setRankingsMeta({ visibleImages: data.visible_images, sortQuality: data.sort_quality });
+        render();
+        setupSentinel();
+    } catch {
+        if (seq !== generation) return;
+        document.getElementById('events-flow').innerHTML = '<div class="load-error"><h4>Couldn\'t load events</h4><p>The archive did not respond.</p><button class="btn" id="events-retry">Try again</button></div>';
+        document.getElementById('events-retry')?.addEventListener('click', loadPage);
+    } finally {
+        if (seq === generation) loading = false;
     }
-    const incoming = data.images || [];
-    offset += incoming.length;
-    done = incoming.length < PAGE_SIZE;
-    images = images.concat(incoming);
-    setImages(images);
-    if (offset === incoming.length) setRankingsMeta({ visibleImages: data.visible_images, sortQuality: data.sort_quality });
-    render();
-    setupSentinel();
 }
 
 function setupSentinel() {
@@ -183,13 +193,28 @@ function openMenu(button, groupIndex) {
     const ids = group.images.map((img) => Number(img.id)).filter((id) => id > 0);
     menu = document.createElement('div');
     menu.className = 'pop-menu on event-menu';
-    menu.innerHTML = '<button data-act="collection">Make collection from event</button>'
-        + '<button data-act="refine">Open in Refine</button>'
-        + '<button data-act="select">Select all in event</button>';
+    menu.setAttribute('role', 'menu');
+    menu.innerHTML = '<button data-act="collection" role="menuitem">Make collection from event</button>'
+        + '<button data-act="refine" role="menuitem">Open in Refine</button>'
+        + '<button data-act="select" role="menuitem">Select all in event</button>';
     document.body.appendChild(menu);
     const rect = button.getBoundingClientRect();
     menu.style.left = `${Math.min(window.innerWidth - 230, rect.right - 210)}px`;
     menu.style.top = `${rect.bottom + 6}px`;
+    menu.querySelector('button')?.focus({ preventScroll: true });
+    menu.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            closeMenu();
+            button.focus({ preventScroll: true });
+            return;
+        }
+        if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+        event.preventDefault();
+        const buttons = [...menu.querySelectorAll('button')];
+        const index = Math.max(0, buttons.indexOf(document.activeElement));
+        buttons[(index + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length].focus();
+    });
     menu.addEventListener('click', async (event) => {
         const action = event.target.closest('button')?.dataset.act;
         if (!action) return;

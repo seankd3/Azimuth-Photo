@@ -9,6 +9,7 @@ let selectedFiles = [];
 let optionsLoaded = false;
 let importOptions = null;
 let recentImports = null;
+let currentUpload = null;
 
 const fmt = (n) => Number(n || 0).toLocaleString('en-US');
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
@@ -184,6 +185,7 @@ function appendFields(formData) {
 function upload(formData) {
     return new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
+        currentUpload = xhr;
         xhr.open('POST', '/api/imports');
         xhr.upload.onprogress = (event) => {
             if (!event.lengthComputable) {
@@ -195,6 +197,7 @@ function upload(formData) {
             setStatus(`Uploading… ${percent}%`);
         };
         xhr.onload = () => {
+            if (currentUpload === xhr) currentUpload = null;
             let data = {};
             try {
                 data = JSON.parse(xhr.responseText || '{}');
@@ -205,7 +208,14 @@ function upload(formData) {
             }
             resolve(data);
         };
-        xhr.onerror = () => reject(new Error('Import failed'));
+        xhr.onerror = () => {
+            if (currentUpload === xhr) currentUpload = null;
+            reject(new Error('Import failed'));
+        };
+        xhr.onabort = () => {
+            if (currentUpload === xhr) currentUpload = null;
+            reject(new DOMException('Import cancelled', 'AbortError'));
+        };
         xhr.send(formData);
     });
 }
@@ -238,6 +248,10 @@ async function startImport() {
             });
         }
     } catch (error) {
+        if (error && error.name === 'AbortError') {
+            showToast('Import cancelled');
+            return;
+        }
         setStatus(`Import failed: ${error.message}`, 'error');
         showToast('Import failed');
         if (start) start.disabled = false;
@@ -309,6 +323,11 @@ function bindModal() {
         setSelectedFiles(await droppedFiles(event.dataTransfer));
     });
     zone.addEventListener('click', () => modal.querySelector('#import-file-input').click());
+    zone.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        modal.querySelector('#import-file-input').click();
+    });
 }
 
 export function openImport() {
@@ -326,6 +345,7 @@ export function openImport() {
 
 export function closeImport() {
     if (!modal || modal.hidden) return;
+    if (currentUpload) currentUpload.abort();
     modal.hidden = true;
     releaseFocus(modal);
 }

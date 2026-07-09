@@ -93,6 +93,15 @@ async def store_caption_result(
     conn = await connection.open_async(db_path)
     try:
         await conn.execute("BEGIN")
+        if status != "done":
+            cursor = await conn.execute(
+                "SELECT user_edited FROM image_captions WHERE image_id = ? AND model_key = ?",
+                (int(image_id), model_key),
+            )
+            existing = await cursor.fetchone()
+            if existing and int(existing["user_edited"] or 0):
+                status = "done"
+                error = ""
         if status == "done":
             await conn.execute(
                 "INSERT INTO image_captions "

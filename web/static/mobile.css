@@ -1309,6 +1309,31 @@ body.sheet-keyboard #m-sheet {
 .sheet-meta b { color: var(--text); font-weight: 600; text-align: right; overflow-wrap: anywhere; }
 .sheet-meta div { padding: 5px 0; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; gap: 12px; }
 .sheet-meta div:last-child { border-bottom: none; }
+.sheet-caption {
+    padding: 8px 4px 10px;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 4px;
+}
+.sheet-caption-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--text-3);
+    margin-bottom: 6px;
+}
+.sheet-caption-text {
+    font-size: 13px;
+    line-height: 1.45;
+    color: var(--text);
+    overflow-wrap: anywhere;
+}
+.sheet-caption-muted { color: var(--text-3); }
+.sheet-caption-tags {
+    padding: 10px 0 0;
+    flex-wrap: wrap;
+    overflow-x: visible;
+}
 .sheet-details { margin-top: var(--s2); }
 .sheet-details summary {
     min-height: 44px;

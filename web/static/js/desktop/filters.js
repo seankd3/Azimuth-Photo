@@ -332,7 +332,7 @@ async function loadOptions({ force = false } = {}) {
         getPeople(500),
         getFolders(),
         getFilterOptions(),
-        getTags({ limit: 12 }),
+        getTags({ limit: 100 }),
     ]);
     options = {
         people: flattenPeople(peopleData),

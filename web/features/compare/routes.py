@@ -125,7 +125,7 @@ async def mosaic_next(
     n: int = 12, exclude: str = "", strategy: str = "explore", grid_elo: float = 0,
     orientation: str = "", compared: str = "", min_stars: int = 0, folder: str = "",
     flag: str = "", date_taken: str = "", file_type: str = "", camera: str = "", lens: str = "",
-    q: str = "", deep: bool = False, people: str = "", ids: str | None = None, collection_id: int = 0,
+    tag: str = "", q: str = "", deep: bool = False, people: str = "", ids: str | None = None, collection_id: int = 0,
 ):
     if _mosaic_next_handler is None:
         raise RuntimeError("Compare routes are not configured")
@@ -149,6 +149,7 @@ async def mosaic_next(
                 file_type=file_type,
                 camera=camera,
                 lens=lens,
+                tag=tag,
                 q=q,
                 deep=deep,
                 people=people,
@@ -283,7 +284,7 @@ async def compare_next(
     n: int = 5, mode: str = "swiss",
     orientation: str = "", compared: str = "", min_stars: int = 0, folder: str = "",
     flag: str = "", date_taken: str = "", file_type: str = "", camera: str = "", lens: str = "",
-    q: str = "", deep: bool = False, people: str = "", ids: str | None = None, collection_id: int = 0,
+    tag: str = "", q: str = "", deep: bool = False, people: str = "", ids: str | None = None, collection_id: int = 0,
 ):
     if _compare_next_handler is None:
         raise RuntimeError("Compare routes are not configured")
@@ -305,6 +306,7 @@ async def compare_next(
                 file_type=file_type,
                 camera=camera,
                 lens=lens,
+                tag=tag,
                 q=q,
                 deep=deep,
                 people=people,

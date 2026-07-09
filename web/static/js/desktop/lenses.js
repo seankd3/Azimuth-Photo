@@ -8,6 +8,7 @@ import { mountSuggestions, unmountSuggestions } from './suggestions.js';
 import { mountLoupe, unmountLoupe } from './loupe.js';
 import { mountDuplicates, unmountDuplicates } from './duplicates.js';
 import { mountTrash, unmountTrash } from './trash.js';
+import { mountShared, unmountShared } from './shared.js';
 import { on, setActiveLens, viewState } from './state.js';
 
 const LENSES = {
@@ -20,6 +21,7 @@ const LENSES = {
     loupe: { mount: mountLoupe, unmount: unmountLoupe },
     duplicates: { mount: mountDuplicates, unmount: unmountDuplicates },
     trash: { mount: mountTrash, unmount: unmountTrash },
+    shared: { mount: mountShared, unmount: unmountShared },
 };
 
 let current = null;
@@ -30,15 +32,16 @@ function syncChrome(lens) {
         button.classList.toggle('active', active);
         button.setAttribute('aria-selected', active ? 'true' : 'false');
     }
-    document.getElementById('shell').classList.toggle('right-hidden', lens === 'events' || lens === 'map' || lens === 'suggestions');
+    document.getElementById('shell').classList.toggle('right-hidden', lens === 'events' || lens === 'map' || lens === 'suggestions' || lens === 'shared');
     document.getElementById('event-gap-wrap').hidden = lens !== 'events';
-    const sortDisabled = lens === 'people' || lens === 'map' || lens === 'refine' || lens === 'suggestions' || lens === 'loupe' || lens === 'duplicates' || lens === 'trash';
+    const sortDisabled = lens === 'people' || lens === 'map' || lens === 'refine' || lens === 'suggestions' || lens === 'loupe' || lens === 'duplicates' || lens === 'trash' || lens === 'shared';
     document.getElementById('sort-select').disabled = sortDisabled;
     document.getElementById('sort-dir').disabled = sortDisabled;
-    document.getElementById('thumb-size').disabled = lens === 'people' || lens === 'map' || lens === 'refine' || lens === 'suggestions' || lens === 'loupe' || lens === 'trash';
+    document.getElementById('thumb-size').disabled = lens === 'people' || lens === 'map' || lens === 'refine' || lens === 'suggestions' || lens === 'loupe' || lens === 'trash' || lens === 'shared';
     document.getElementById('btn-refine').classList.toggle('active', lens === 'refine');
     document.getElementById('find-duplicates')?.classList.toggle('active', lens === 'duplicates');
     document.querySelector('[data-lib="trash"]')?.classList.toggle('active', lens === 'trash');
+    document.getElementById('shared-view')?.classList.toggle('active', lens === 'shared');
 }
 
 function activate(lens) {

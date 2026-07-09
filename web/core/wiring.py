@@ -13,6 +13,7 @@ from features.people import routes as people_routes
 from features.publish import routes as publish_routes
 from features.search import routes as search_routes
 from features.share import routes as share_routes
+from features.shared import routes as shared_routes
 from features.stacks import routes as stack_routes
 from features.settings import routes as settings_routes
 from features.trash import routes as trash_routes
@@ -404,6 +405,15 @@ def configure_publish_routes(*, templates, resolve_library_constraints=None, tra
         slug_available=lambda slug, **kwargs: db.collection_publish_slug_available(slug, **kwargs),
         thumbnails=thumbnails,
         track_background_task=track_background_task,
+    )
+
+
+def configure_shared_routes() -> None:
+    import db
+
+    shared_routes.configure(
+        list_shares=lambda: db.list_active_collection_shares(),
+        list_publishes=lambda: db.list_collection_publishes(),
     )
 
 

@@ -8,6 +8,7 @@ structure first, then ranked with size, recency, people, and embedding coherence
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from functools import lru_cache
 import math
 import re
@@ -965,14 +966,21 @@ def invalidate_cache() -> None:
     _cache.update({"key": None, "data": None, "expires": 0.0})
 
 
-async def _caption_tag_signature(db_path: str, model_key: str) -> int:
+async def _caption_tag_signature(db_path: str, model_key: str) -> str:
     conn = await connection.open_async(db_path)
     try:
         cursor = await conn.execute(
-            "SELECT COUNT(*) AS c FROM image_tags WHERE model_key = ?",
+            "SELECT image_id, tag FROM image_tags WHERE model_key = ? ORDER BY tag, image_id",
             (model_key,),
         )
-        row = await cursor.fetchone()
-        return int(row["c"] if row else 0)
+        digest = hashlib.blake2b(digest_size=16)
+        count = 0
+        for row in await cursor.fetchall():
+            count += 1
+            digest.update(str(row["tag"]).encode("utf-8"))
+            digest.update(b"\0")
+            digest.update(str(int(row["image_id"])).encode("ascii"))
+            digest.update(b"\0")
+        return f"{count}:{digest.hexdigest()}"
     finally:
         await connection.close_async(conn, db_path=db_path)

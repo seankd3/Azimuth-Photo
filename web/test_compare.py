@@ -975,6 +975,51 @@ class CompareTests(BackendTestCase):
         self.assertEqual(actual, expected)
         self.assertEqual(actual["pairing"], "strategy")
 
+    async def test_refine_two_card_mosaic_does_not_reuse_semantic_response_cache(self):
+        source = await self._source()
+        image_ids = [
+            await self._image(source["id"], f"semantic-cache-{idx}.jpg", elo=1200 + idx)
+            for idx in range(4)
+        ]
+        for image_id in image_ids:
+            await self._cache_entry(image_id, "sm")
+
+        matrix = np.array(
+            [
+                [1.0, 0.0],
+                [0.96, 0.08],
+                [0.0, 1.0],
+                [0.08, 0.96],
+            ],
+            dtype=np.float32,
+        )
+
+        async def fake_get_matrix(_model_key=None):
+            return image_ids, matrix
+
+        def fake_get_index(_model_key=None):
+            return {image_id: idx for idx, image_id in enumerate(image_ids)}
+
+        old_rate = semantic_pairing.SEMANTIC_DUEL_EXPLORATION_RATE
+        elo_propagation.embed_cache.get_matrix = fake_get_matrix
+        elo_propagation.embed_cache.get_index = fake_get_index
+        semantic_pairing.SEMANTIC_DUEL_EXPLORATION_RATE = 0.0
+        compare_service._interaction_response_cache.clear()
+        try:
+            random.seed(8)
+            semantic = await compare_service.mosaic_next_impl(n=2, strategy="explore")
+            self.assertEqual(semantic["pairing"], "semantic")
+            self.assertFalse(compare_service._interaction_response_cache)
+
+            settings.save_settings({"refine_semantic_pairing": False})
+            random.seed(8)
+            fallback = await compare_service.mosaic_next_impl(n=2, strategy="explore")
+        finally:
+            semantic_pairing.SEMANTIC_DUEL_EXPLORATION_RATE = old_rate
+            compare_service._interaction_response_cache.clear()
+
+        self.assertEqual(fallback["pairing"], "strategy")
+
     async def test_mosaic_explore_reports_direct_uncompared_pool_stats(self):
         source = await self._source()
         first = await self._image(source["id"], "first.jpg")

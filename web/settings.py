@@ -59,6 +59,9 @@ DEFAULT_SETTINGS = {
     "face_similarity_threshold": 0.52,
     "face_merge_suggestion_threshold": 0.62,
     "import_root": _default_import_root(),
+    "publish_dir": "",
+    "publish_hook": "",
+    "publish_site_base_url": "",
     "share_cookie_secret": "",
 }
 
@@ -456,6 +459,11 @@ def normalize_settings(raw: dict | None) -> dict:
         raw.get("import_root", normalized["import_root"]),
         DEFAULT_SETTINGS["import_root"],
     )
+    normalized["publish_dir"] = str(raw.get("publish_dir") or "").strip()
+    if normalized["publish_dir"]:
+        normalized["publish_dir"] = os.path.abspath(os.path.expanduser(normalized["publish_dir"]))
+    normalized["publish_hook"] = str(raw.get("publish_hook") or "").strip()
+    normalized["publish_site_base_url"] = str(raw.get("publish_site_base_url") or "").strip().rstrip("/")
 
     profile = str(raw.get("cache_profile", normalized["cache_profile"])).strip().lower()
     normalized["cache_profile"] = profile if profile in CACHE_PROFILES else DEFAULT_SETTINGS["cache_profile"]

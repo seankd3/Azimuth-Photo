@@ -112,6 +112,7 @@ PUBLIC_ROUTE_CONTRACT = {
     ("POST", "/api/user-collections/{collection_id}/publish"),
     ("POST", "/api/user-collections/{collection_id}/publish/revoke"),
     ("GET", "/api/publishes"),
+    ("GET", "/api/shares"),
     ("POST", "/api/user-collections/{collection_id}/rename"),
     ("POST", "/api/user-collections/{collection_id}/delete"),
     ("POST", "/api/user-collections/{collection_id}/images"),

@@ -13,7 +13,6 @@ from features.publish.deployer import (
     CommandResult,
     GalleryDeployer,
     PublishConfig,
-    PublishConflict,
     gallery_meta_from_index,
     write_manifest,
 )
@@ -110,23 +109,96 @@ class PublishBuilderTests(BackendTestCase):
 
 
 class PublishDeployerTests(unittest.TestCase):
-    def test_preflight_dirty_gallery_paths_raises_409(self):
+    def test_publish_writes_bundle_manifest_and_successful_hook(self):
         with tempfile.TemporaryDirectory() as temp_name:
-            repo = Path(temp_name)
-            (repo / "app" / "public" / "g").mkdir(parents=True)
+            public_g = Path(temp_name) / "g"
+            calls = []
 
-            def runner(command, _cwd, _env=None):
-                if command[:3] == ["git", "status", "--porcelain"]:
-                    return CommandResult(0, " M app/public/g/manifest.json\n?? app/public/g/draft/\n", "")
-                return CommandResult(0, "", "")
+            def runner(command, cwd, timeout):
+                calls.append((command, cwd, timeout))
+                return CommandResult(0, "deployed\n", "")
 
-            deployer = GalleryDeployer(PublishConfig(site_repo=str(repo)), command_runner=runner)
+            def write_bundle(target):
+                target.mkdir(parents=True)
+                (target / "index.html").write_text(
+                    '<script type="application/json" id="gallery-data">'
+                    '{"photo_count":1,"images":[{"id":101}]}'
+                    "</script>",
+                    encoding="utf-8",
+                )
+                return BundleSummary(
+                    slug="selected",
+                    title="Selected",
+                    photo_count=1,
+                    date_range="",
+                    cover="/g/selected/thumb/sm/101.jpg",
+                    bundle_bytes=10,
+                    file_count=1,
+                )
 
-            with self.assertRaises(PublishConflict) as raised:
-                deployer._preflight()
+            deployer = GalleryDeployer(
+                PublishConfig(publish_dir=str(public_g), publish_hook="scripts/deploy.sh"),
+                command_runner=runner,
+            )
+            result = deployer._publish_sync(
+                "selected",
+                "Selected",
+                7,
+                [],
+                write_bundle,
+                None,
+            )
 
-            self.assertEqual(raised.exception.status_code, 409)
-            self.assertEqual(raised.exception.paths, ["app/public/g/manifest.json", "app/public/g/draft/"])
+            self.assertTrue((public_g / "selected" / "index.html").exists())
+            self.assertEqual(calls, [("scripts/deploy.sh", public_g, 900)])
+            self.assertTrue(result.hook.ok)
+            manifest = json.loads((public_g / "manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["galleries"][0]["slug"], "selected")
+
+    def test_publish_succeeds_when_hook_fails(self):
+        with tempfile.TemporaryDirectory() as temp_name:
+            public_g = Path(temp_name) / "g"
+
+            def runner(_command, _cwd, _timeout):
+                return CommandResult(7, "first\n", "last\n")
+
+            def write_bundle(target):
+                target.mkdir(parents=True)
+                (target / "index.html").write_text("{}", encoding="utf-8")
+                return BundleSummary("broken-hook", "Broken Hook", 0, "", "", 2, 1)
+
+            deployer = GalleryDeployer(
+                PublishConfig(publish_dir=str(public_g), publish_hook="deploy"),
+                command_runner=runner,
+            )
+            result = deployer._publish_sync("broken-hook", "Broken Hook", 1, [], write_bundle, None)
+
+            self.assertTrue((public_g / "broken-hook").exists())
+            self.assertFalse(result.hook.ok)
+            self.assertEqual(result.hook.returncode, 7)
+            self.assertIn("last", result.hook.output)
+
+    def test_hook_timeout_is_recorded_without_raising(self):
+        with tempfile.TemporaryDirectory() as temp_name:
+            public_g = Path(temp_name) / "g"
+
+            def runner(_command, _cwd, _timeout):
+                return CommandResult(124, "still running", "", timed_out=True)
+
+            def write_bundle(target):
+                target.mkdir(parents=True)
+                (target / "index.html").write_text("{}", encoding="utf-8")
+                return BundleSummary("slow-hook", "Slow Hook", 0, "", "", 2, 1)
+
+            deployer = GalleryDeployer(
+                PublishConfig(publish_dir=str(public_g), publish_hook="deploy", hook_timeout_seconds=1),
+                command_runner=runner,
+            )
+            result = deployer._publish_sync("slow-hook", "Slow Hook", 1, [], write_bundle, None)
+
+            self.assertFalse(result.hook.ok)
+            self.assertTrue(result.hook.timed_out)
+            self.assertEqual(result.hook.returncode, 124)
 
     def test_manifest_regenerates_from_gallery_index_contract(self):
         with tempfile.TemporaryDirectory() as temp_name:
@@ -183,12 +255,12 @@ class FakeDeployer:
         summary = await asyncio.to_thread(write_bundle, Path(tempfile.mkdtemp()) / slug)
         if progress:
             progress("deploying")
-        return SimpleNamespace(summary=summary, last_commit="abc123", push_error=None)
+        return SimpleNamespace(summary=summary, last_commit=None, push_error=None, hook=None)
 
     async def revoke(self, *, slug, collection_id, published_rows, progress=None):
         if progress:
             progress("deploying")
-        return SimpleNamespace(summary=None, last_commit="def456", push_error=None)
+        return SimpleNamespace(summary=None, last_commit=None, push_error=None, hook=None)
 
 
 class PublishRouteTests(BackendTestCase):
@@ -198,6 +270,10 @@ class PublishRouteTests(BackendTestCase):
         templates = app_module.app.state.photoarchive_shell.templates
         self.cache = Path(self.tempdir.name) / "cache"
         self.cache.mkdir()
+        settings.save_settings({
+            "publish_dir": str(Path(self.tempdir.name) / "published"),
+            "publish_site_base_url": "https://www.seankennethdoherty.com",
+        })
         self.thumbs = FakeThumbnails(self.cache)
         publish_routes.configure(
             templates=templates,

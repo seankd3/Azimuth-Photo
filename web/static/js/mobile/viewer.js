@@ -5,7 +5,7 @@
 //   double-tap → 1x ↔ 2.5x at the tap point
 // Flags are real writes with undo.
 
-import { getExif, getSimilar, thumbUrl } from './api.js';
+import { getExif, getImageCaption, getSimilar, thumbUrl } from './api.js';
 import { applyFlags } from './flags.js';
 import { byId, nav as appNav, on, rememberImages, setScope } from './state.js';
 import { dismissSheetThen, openCollectionSheet, openSheet } from './selection.js';
@@ -178,6 +178,10 @@ function infoSheet() {
     const sheet = openSheet(
         '<h3>Info</h3>'
         + `<button class="sheet-row" id="mv-similar"><span class="g">${icon('scan-search')}</span>Find similar</button>`
+        + '<div class="sheet-caption" id="mv-caption">'
+        + '<div class="sheet-caption-label">Caption</div>'
+        + '<div class="sheet-caption-text sheet-caption-muted">Loading…</div>'
+        + '</div>'
         + '<div class="sheet-meta">'
         + rows.map(([k, v]) => `<div><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('')
         + '</div>'
@@ -204,7 +208,47 @@ function infoSheet() {
             });
         });
     });
+    loadCaptionBlock(sheet, image.id);
     loadExifDetails(sheet, image.id);
+}
+
+function scopeToTag(tag) {
+    if (!tag) return;
+    setScope({ tag, label: `#${tag}` });
+    dismissSheetThen(() => {
+        dismissViewerThen(() => {
+            appNav.setTab('photos');
+        });
+    });
+}
+
+async function loadCaptionBlock(sheet, imageId) {
+    const host = sheet.querySelector('#mv-caption');
+    if (!host) return;
+    const data = await getImageCaption(imageId);
+    if (!host.isConnected) return;
+    const hasCaption = Boolean(data && data.has_caption);
+    const text = hasCaption ? String(data.caption || '').trim() : '';
+    const tags = (hasCaption && Array.isArray(data.tags)) ? data.tags.filter(Boolean) : [];
+    let html = '<div class="sheet-caption-label">Caption</div>';
+    if (!hasCaption || !text) {
+        html += '<div class="sheet-caption-text sheet-caption-muted">Not yet captioned</div>';
+    } else {
+        html += `<div class="sheet-caption-text">${esc(text)}</div>`;
+    }
+    if (tags.length) {
+        html += '<div class="ms-pills sheet-caption-tags">'
+            + tags.map((tag) =>
+                `<button type="button" class="ms-pill" data-caption-tag="${esc(tag)}">#${esc(tag)}</button>`
+            ).join('')
+            + '</div>';
+    }
+    host.innerHTML = html;
+    for (const chip of host.querySelectorAll('[data-caption-tag]')) {
+        chip.addEventListener('click', () => {
+            scopeToTag(chip.dataset.captionTag || '');
+        });
+    }
 }
 
 function detailValue(value) {

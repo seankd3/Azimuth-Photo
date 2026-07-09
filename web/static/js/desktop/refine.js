@@ -196,7 +196,7 @@ function uniqueIds(values = []) {
     return [...new Set(values.map(Number).filter((id) => id > 0))];
 }
 
-async function fetchImages(count, excludeIds = [], { updatePairingBadge = true } = {}) {
+async function fetchImages(count, excludeIds = []) {
     const data = await mosaicNext(
         count,
         refineQueryParams(),
@@ -204,7 +204,7 @@ async function fetchImages(count, excludeIds = [], { updatePairingBadge = true }
         strategy,
         gridElo(),
     );
-    if (updatePairingBadge) renderSemanticPairing(data && data.pairing === 'semantic');
+    renderSemanticPairing(data && data.pairing === 'semantic');
     return ((data && data.images) || []).map(normalizeImage).filter(Boolean);
 }
 
@@ -270,13 +270,11 @@ async function fillReplacements() {
         let candidates = await fetchImages(
             needed,
             currentExcludeIds({ includeRecent: true }),
-            { updatePairingBadge: false },
         );
         if (!candidates.length && recentIds.length) {
             candidates = await fetchImages(
                 needed,
                 currentExcludeIds({ includeRecent: false }),
-                { updatePairingBadge: false },
             );
         }
         if (token !== generation) return false;

@@ -529,6 +529,10 @@ async def get_collection_share(collection_id: int):
     return await share_repository.get_share(DB_PATH, collection_id)
 
 
+async def list_active_collection_shares():
+    return await share_repository.list_active_shares(DB_PATH)
+
+
 async def revoke_collection_share(collection_id: int) -> bool:
     return await share_repository.revoke_share(DB_PATH, collection_id)
 
@@ -1170,6 +1174,7 @@ async def get_date_groups(orientation: str = "", compared: str = "", min_stars: 
 async def get_map_markers(orientation: str = "", compared: str = "", min_stars: int = 0,
                           folder: str = "", flag: str = "", date_taken: str = "",
                           file_type: str = "", camera: str = "", lens: str = "",
+                          tag: str = "",
                           visible_thumb_size: str = "", cache_root: str = "",
                           id_filter: set | None = None, text_query: str = ""):
     return await ranking_repository.map_markers_cached(
@@ -1186,11 +1191,13 @@ async def get_map_markers(orientation: str = "", compared: str = "", min_stars: 
         file_type=file_type,
         camera=camera,
         lens=lens,
+        tag=tag,
         visible_thumb_size=visible_thumb_size,
         cache_root=cache_root,
         id_filter=id_filter,
         text_query=text_query,
         ttl_seconds=FACET_CACHE_TTL_SECONDS,
+        caption_model_key=active_caption_model_key(),
     )
 
 
@@ -1405,6 +1412,8 @@ async def store_caption_result(
     )
     caption_repository.invalidate_tags_cache()
     cache_events.invalidate_rankings_cache()
+    cache_events.invalidate_ranking_count_cache()
+    cache_events.invalidate_facet_caches()
 
 
 async def get_caption_status_counts(caption_config: dict | None = None) -> dict:
@@ -1445,6 +1454,9 @@ async def owner_update_caption(
     db_invalidate = getattr(cache_events, "invalidate_ranking_count_cache", None)
     if callable(db_invalidate):
         db_invalidate()
+    facet_invalidate = getattr(cache_events, "invalidate_facet_caches", None)
+    if callable(facet_invalidate):
+        facet_invalidate()
     return result
 
 

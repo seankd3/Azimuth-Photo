@@ -1,4 +1,4 @@
-"""Deploy static gallery bundles into the portfolio site repo."""
+"""Publish static gallery bundles to a configured directory."""
 
 from __future__ import annotations
 
@@ -7,40 +7,45 @@ import html
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
-import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+import settings
 from features.publish.builder import BundleSummary
 
 
-MAX_PAGES_FILE_BYTES = 25 * 1024 * 1024
-DEFAULT_SITE_REPO = "/home/sean/Projects/sean-kenneth-doherty"
+HOOK_TIMEOUT_SECONDS = 15 * 60
+HOOK_OUTPUT_LINES = 40
 
 _deploy_lock = asyncio.Lock()
 
 
 @dataclass(frozen=True)
 class PublishConfig:
-    site_repo: str = DEFAULT_SITE_REPO
-    project_name: str = "seankennethdoherty"
-    branch: str = "master"
+    publish_dir: str = ""
+    publish_hook: str = ""
+    hook_timeout_seconds: int = HOOK_TIMEOUT_SECONDS
 
-    @property
-    def app_dir(self) -> Path:
-        return Path(self.site_repo) / "app"
+    @classmethod
+    def from_settings(cls) -> "PublishConfig":
+        config = settings.get_settings()
+        return cls(
+            publish_dir=str(config.get("publish_dir") or "").strip(),
+            publish_hook=str(config.get("publish_hook") or "").strip(),
+        )
 
     @property
     def public_g_dir(self) -> Path:
-        return self.app_dir / "public" / "g"
+        return Path(self.publish_dir).expanduser()
 
     @property
-    def build_out_dir(self) -> Path:
-        return self.app_dir / "out"
+    def enabled(self) -> bool:
+        return bool(str(self.publish_dir or "").strip())
 
 
 @dataclass(frozen=True)
@@ -48,6 +53,7 @@ class CommandResult:
     returncode: int
     stdout: str = ""
     stderr: str = ""
+    timed_out: bool = False
 
     @property
     def text(self) -> str:
@@ -55,10 +61,36 @@ class CommandResult:
 
 
 @dataclass(frozen=True)
+class HookStatus:
+    configured: bool
+    command: str = ""
+    returncode: int | None = None
+    output: str = ""
+    ran_at: float | None = None
+    timed_out: bool = False
+
+    @property
+    def ok(self) -> bool:
+        return (not self.configured) or self.returncode == 0
+
+    def payload(self) -> dict:
+        return {
+            "configured": self.configured,
+            "command": self.command,
+            "returncode": self.returncode,
+            "output": self.output,
+            "ran_at": self.ran_at,
+            "timed_out": self.timed_out,
+            "ok": self.ok,
+        }
+
+
+@dataclass(frozen=True)
 class DeployResult:
     summary: BundleSummary | None
-    last_commit: str | None
+    last_commit: str | None = None
     push_error: str | None = None
+    hook: HookStatus | None = None
 
 
 class PublishConflict(Exception):
@@ -77,20 +109,33 @@ class PublishDeployError(Exception):
         self.tail = tail
 
 
-CommandRunner = Callable[[list[str], Path, dict[str, str] | None], CommandResult]
+class PublishSetupError(Exception):
+    status_code = 409
+
+
+CommandRunner = Callable[[str, Path, int], CommandResult]
 BundleWriter = Callable[[Path], BundleSummary]
+PublishedRows = list[dict] | Callable[[], list[dict]]
+ConfigFactory = Callable[[], PublishConfig]
 
 
-def default_command_runner(command: list[str], cwd: Path, env: dict[str, str] | None = None) -> CommandResult:
-    completed = subprocess.run(
-        command,
-        cwd=str(cwd),
-        env=env,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    return CommandResult(completed.returncode, completed.stdout, completed.stderr)
+def default_command_runner(command: str, cwd: Path, timeout_seconds: int) -> CommandResult:
+    try:
+        completed = subprocess.run(
+            _resolve_relative_command(command, cwd),
+            cwd=str(cwd),
+            env=os.environ.copy(),
+            text=True,
+            capture_output=True,
+            check=False,
+            shell=True,
+            timeout=timeout_seconds,
+        )
+        return CommandResult(completed.returncode, completed.stdout, completed.stderr)
+    except subprocess.TimeoutExpired as exc:
+        stdout = exc.stdout.decode("utf-8", errors="replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
+        stderr = exc.stderr.decode("utf-8", errors="replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")
+        return CommandResult(124, stdout, stderr, timed_out=True)
 
 
 class GalleryDeployer:
@@ -99,11 +144,11 @@ class GalleryDeployer:
         config: PublishConfig | None = None,
         *,
         command_runner: CommandRunner = default_command_runner,
+        config_factory: ConfigFactory | None = None,
     ):
-        self.config = config or PublishConfig(
-            site_repo=os.environ.get("PHOTOARCHIVE_PORTFOLIO_REPO", DEFAULT_SITE_REPO)
-        )
+        self.config = config
         self.command_runner = command_runner
+        self.config_factory = config_factory or PublishConfig.from_settings
 
     async def publish(
         self,
@@ -111,7 +156,7 @@ class GalleryDeployer:
         slug: str,
         title: str,
         collection_id: int,
-        published_rows: list[dict],
+        published_rows: PublishedRows,
         write_bundle: BundleWriter,
         progress: Callable[[str], None] | None = None,
     ) -> DeployResult:
@@ -131,7 +176,7 @@ class GalleryDeployer:
         *,
         slug: str,
         collection_id: int,
-        published_rows: list[dict],
+        published_rows: PublishedRows,
         progress: Callable[[str], None] | None = None,
     ) -> DeployResult:
         async with _deploy_lock:
@@ -148,124 +193,76 @@ class GalleryDeployer:
         slug: str,
         title: str,
         collection_id: int,
-        published_rows: list[dict],
+        published_rows: PublishedRows,
         write_bundle: BundleWriter,
         progress: Callable[[str], None] | None,
     ) -> DeployResult:
-        self._preflight()
-        self.config.public_g_dir.mkdir(parents=True, exist_ok=True)
-        target = self.config.public_g_dir / slug
+        config = self._active_config()
+        public_g_dir = _publish_root(config)
+        target = public_g_dir / slug
+        now = time.time()
         if progress:
             progress("building")
         summary = write_bundle(target)
         manifest_rows = _rows_with_pending(
-            published_rows,
+            _published_rows(published_rows),
             {
                 "collection_id": collection_id,
                 "slug": slug,
                 "title": title,
-                "published_at": time.time(),
-                "updated_at": time.time(),
+                "published_at": now,
+                "updated_at": now,
                 "image_count": summary.photo_count,
             },
         )
-        write_manifest(self.config.public_g_dir, manifest_rows)
-        commit, did_commit = self._commit(f"Publish gallery {slug} ({summary.photo_count} photos)")
+        write_manifest(public_g_dir, manifest_rows)
         if progress:
-            progress("deploying")
-        self._build_or_rollback(did_commit)
-        push_error = self._deploy_and_push()
-        return DeployResult(summary=summary, last_commit=commit, push_error=push_error)
+            progress("hook")
+        hook = self._run_hook(config)
+        return DeployResult(summary=summary, hook=hook)
 
     def _revoke_sync(
         self,
         slug: str,
         collection_id: int,
-        published_rows: list[dict],
+        published_rows: PublishedRows,
         progress: Callable[[str], None] | None,
     ) -> DeployResult:
-        self._preflight()
+        config = self._active_config()
+        public_g_dir = _publish_root(config)
         if progress:
             progress("building")
-        shutil.rmtree(self.config.public_g_dir / slug, ignore_errors=True)
+        shutil.rmtree(public_g_dir / slug, ignore_errors=True)
         manifest_rows = [
             row
-            for row in published_rows
+            for row in _published_rows(published_rows)
             if int(row.get("collection_id") or 0) != collection_id and row.get("slug") != slug
         ]
-        write_manifest(self.config.public_g_dir, manifest_rows)
-        commit, did_commit = self._commit(f"Revoke gallery {slug}")
+        write_manifest(public_g_dir, manifest_rows)
         if progress:
-            progress("deploying")
-        self._build_or_rollback(did_commit)
-        push_error = self._deploy_and_push()
-        return DeployResult(summary=None, last_commit=commit, push_error=push_error)
+            progress("hook")
+        hook = self._run_hook(config)
+        return DeployResult(summary=None, hook=hook)
 
-    def _preflight(self) -> None:
-        self.config.public_g_dir.mkdir(parents=True, exist_ok=True)
-        dirty = self.command_runner(
-            ["git", "status", "--porcelain", "--", "app/public/g"],
-            Path(self.config.site_repo),
-            None,
+    def _active_config(self) -> PublishConfig:
+        config = self.config or self.config_factory()
+        if not config.enabled:
+            raise PublishSetupError("Choose a publishing folder before publishing this gallery.")
+        return config
+
+    def _run_hook(self, config: PublishConfig) -> HookStatus:
+        command = str(config.publish_hook or "").strip()
+        if not command:
+            return HookStatus(configured=False)
+        result = self.command_runner(command, config.public_g_dir, int(config.hook_timeout_seconds or HOOK_TIMEOUT_SECONDS))
+        return HookStatus(
+            configured=True,
+            command=command,
+            returncode=int(result.returncode),
+            output=_tail(result.text),
+            ran_at=time.time(),
+            timed_out=bool(result.timed_out),
         )
-        dirty_paths = [line[3:] if len(line) > 3 else line for line in dirty.stdout.splitlines() if line.strip()]
-        if dirty_paths:
-            raise PublishConflict("Portfolio gallery files have uncommitted changes.", paths=dirty_paths)
-        pulled = self.command_runner(["git", "pull", "--ff-only"], Path(self.config.site_repo), None)
-        if pulled.returncode != 0:
-            raise PublishConflict("Portfolio repo diverged; git pull --ff-only failed.")
-
-    def _commit(self, message: str) -> tuple[str | None, bool]:
-        self.command_runner(["git", "add", "app/public/g"], Path(self.config.site_repo), None)
-        diff = self.command_runner(
-            ["git", "diff", "--cached", "--quiet", "--", "app/public/g"],
-            Path(self.config.site_repo),
-            None,
-        )
-        if diff.returncode == 0:
-            head = self.command_runner(["git", "rev-parse", "HEAD"], Path(self.config.site_repo), None)
-            return (head.stdout.strip() if head.returncode == 0 else None), False
-        committed = self.command_runner(["git", "commit", "-m", message], Path(self.config.site_repo), None)
-        if committed.returncode != 0:
-            raise PublishDeployError("Portfolio gallery commit failed.", tail=_tail(committed.text))
-        head = self.command_runner(["git", "rev-parse", "HEAD"], Path(self.config.site_repo), None)
-        return (head.stdout.strip() if head.returncode == 0 else None), True
-
-    def _build_or_rollback(self, did_commit: bool) -> None:
-        env = {**os.environ, "NEXT_PUBLIC_SITE_BASE_PATH": ""}
-        built = self.command_runner(["npm", "run", "build"], self.config.app_dir, env)
-        if built.returncode == 0:
-            return
-        if did_commit:
-            self.command_runner(["git", "reset", "--hard", "HEAD~1"], Path(self.config.site_repo), None)
-        raise PublishDeployError("Portfolio build failed.", tail=_tail(built.text))
-
-    def _deploy_and_push(self) -> str | None:
-        with tempfile.TemporaryDirectory(prefix="pa-gallery-pages-") as temp_name:
-            temp_path = Path(temp_name)
-            shutil.copytree(self.config.build_out_dir, temp_path, dirs_exist_ok=True)
-            _delete_large_files(temp_path)
-            deployed = self.command_runner(
-                [
-                    "npx",
-                    "wrangler",
-                    "pages",
-                    "deploy",
-                    str(temp_path),
-                    "--project-name",
-                    self.config.project_name,
-                    "--branch",
-                    self.config.branch,
-                ],
-                self.config.app_dir,
-                None,
-            )
-            if deployed.returncode != 0:
-                raise PublishDeployError("Portfolio deploy failed.", tail=_tail(deployed.text))
-        pushed = self.command_runner(["git", "push", "origin", self.config.branch], Path(self.config.site_repo), None)
-        if pushed.returncode != 0:
-            return _tail(pushed.text)
-        return None
 
 
 def write_manifest(public_g_dir: Path, rows: list[dict]) -> None:
@@ -276,7 +273,7 @@ def write_manifest(public_g_dir: Path, rows: list[dict]) -> None:
         if not slug:
             continue
         meta = gallery_meta_from_index(public_g_dir / slug / "index.html")
-        cover = meta.get("cover") or f"/g/{slug}/thumb/sm/{meta['first_id']}.jpg" if meta.get("first_id") else ""
+        cover = meta.get("cover") or (f"/g/{slug}/thumb/sm/{meta['first_id']}.jpg" if meta.get("first_id") else "")
         galleries.append(
             {
                 "slug": slug,
@@ -288,10 +285,17 @@ def write_manifest(public_g_dir: Path, rows: list[dict]) -> None:
             }
         )
     galleries.sort(key=lambda item: item["published_at"], reverse=True)
-    (public_g_dir / "manifest.json").write_text(
-        json.dumps({"galleries": galleries}, separators=(",", ":")),
-        encoding="utf-8",
-    )
+    manifest_path = public_g_dir / "manifest.json"
+    temp_path = public_g_dir / f".manifest.tmp-{os.getpid()}-{time.time_ns()}.json"
+    try:
+        temp_path.write_text(
+            json.dumps({"galleries": galleries}, separators=(",", ":")),
+            encoding="utf-8",
+        )
+        os.replace(temp_path, manifest_path)
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
 
 
 def gallery_meta_from_index(index_path: Path) -> dict:
@@ -323,6 +327,14 @@ def gallery_meta_from_index(index_path: Path) -> dict:
     }
 
 
+def _publish_root(config: PublishConfig) -> Path:
+    root = config.public_g_dir
+    root.mkdir(parents=True, exist_ok=True)
+    if not root.is_dir():
+        raise PublishDeployError("Publishing folder is not a directory.")
+    return root
+
+
 def _rows_with_pending(rows: list[dict], pending: dict) -> list[dict]:
     collection_id = int(pending.get("collection_id") or 0)
     slug = pending.get("slug")
@@ -334,11 +346,29 @@ def _rows_with_pending(rows: list[dict], pending: dict) -> list[dict]:
     return [pending, *kept]
 
 
-def _delete_large_files(root: Path) -> None:
-    for path in root.rglob("*"):
-        if path.is_file() and path.stat().st_size > MAX_PAGES_FILE_BYTES:
-            path.unlink()
+def _published_rows(rows: PublishedRows) -> list[dict]:
+    if callable(rows):
+        return list(rows())
+    return list(rows)
 
 
-def _tail(text: str, *, lines: int = 40) -> str:
+def _resolve_relative_command(command: str, cwd: Path) -> str:
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        return command
+    if not parts:
+        return command
+    first = parts[0]
+    if first.startswith("/") or "/" not in first or (cwd / first).exists():
+        return command
+    for parent in (cwd, *cwd.parents):
+        candidate = parent / first
+        if candidate.exists():
+            parts[0] = str(candidate)
+            return " ".join(shlex.quote(part) for part in parts)
+    return command
+
+
+def _tail(text: str, *, lines: int = HOOK_OUTPUT_LINES) -> str:
     return "\n".join((text or "").splitlines()[-lines:])

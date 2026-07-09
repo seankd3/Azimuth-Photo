@@ -37,6 +37,28 @@ def _favorite_summary(row) -> dict:
     }
 
 
+def _shared_collection_summary(row) -> dict:
+    return {
+        "collection_id": int(row["collection_id"]),
+        "collection_name": row["collection_name"],
+        "photo_count": int(row["photo_count"] or 0),
+        "cover_image_id": int(row["cover_image_id"]) if row["cover_image_id"] is not None else None,
+        "id": int(row["share_id"]),
+        "token": row["token"],
+        "created_at": float(row["created_at"]),
+        "expires_at": float(row["expires_at"]) if row["expires_at"] is not None else None,
+        "password_hash": row["password_hash"],
+        "view_count": int(row["view_count"] or 0),
+        "first_viewed_at": (
+            float(row["first_viewed_at"]) if row["first_viewed_at"] is not None else None
+        ),
+        "last_viewed_at": (
+            float(row["last_viewed_at"]) if row["last_viewed_at"] is not None else None
+        ),
+        "pick_count": int(row["pick_count"] or 0),
+    }
+
+
 def _active_unexpired_clause(alias: str = "s") -> str:
     return f"{alias}.revoked_at IS NULL AND ({alias}.expires_at IS NULL OR {alias}.expires_at > ?)"
 
@@ -121,6 +143,50 @@ async def get_share(db_path: str, collection_id: int) -> dict | None:
     conn = await data_connection.open_async(db_path)
     try:
         return await _active_share_on_conn(conn, int(collection_id))
+    finally:
+        await data_connection.close_async(conn, db_path=db_path)
+
+
+async def list_active_shares(db_path: str) -> list[dict]:
+    now = time.time()
+    conn = await data_connection.open_async(db_path)
+    try:
+        cursor = await conn.execute(
+            f"""
+            SELECT
+                c.id AS collection_id,
+                c.name AS collection_name,
+                COALESCE(COUNT(DISTINCT si.image_id), 0) AS photo_count,
+                COALESCE(
+                    c.cover_image_id,
+                    (
+                        SELECT si2.image_id
+                        FROM share_images si2
+                        WHERE si2.share_id = s.id
+                        ORDER BY si2.position ASC, si2.added_at ASC, si2.image_id ASC
+                        LIMIT 1
+                    )
+                ) AS cover_image_id,
+                s.id AS share_id,
+                s.token,
+                s.created_at,
+                s.expires_at,
+                s.password_hash,
+                s.view_count,
+                s.first_viewed_at,
+                s.last_viewed_at,
+                COUNT(DISTINCT sf.image_id) AS pick_count
+            FROM collection_shares s
+            JOIN collections c ON c.id = s.collection_id
+            LEFT JOIN share_images si ON si.share_id = s.id
+            LEFT JOIN share_favorites sf ON sf.share_id = s.id
+            WHERE {_active_unexpired_clause("s")}
+            GROUP BY s.id, c.id
+            ORDER BY s.created_at DESC, s.id DESC
+            """,
+            (now,),
+        )
+        return [_shared_collection_summary(row) for row in await cursor.fetchall()]
     finally:
         await data_connection.close_async(conn, db_path=db_path)
 

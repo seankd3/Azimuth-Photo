@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import os
 import shutil
+import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -65,66 +67,74 @@ async def build_public_gallery_bundle(
     images = [rows_by_id[image_id] for image_id in image_ids if image_id in rows_by_id]
 
     target = Path(destination)
-    await asyncio.to_thread(_reset_bundle_dir, target)
-    await asyncio.to_thread((target / "thumb" / "sm").mkdir, parents=True, exist_ok=True)
-    await asyncio.to_thread((target / "img").mkdir, parents=True, exist_ok=True)
+    await asyncio.to_thread(target.parent.mkdir, parents=True, exist_ok=True)
+    work_target = Path(tempfile.mkdtemp(prefix=f".{target.name}.tmp-", dir=str(target.parent)))
 
-    gallery_images = []
-    for image in images:
-        image_id = int(image["id"])
-        await _write_cached_jpeg(
-            thumbnails=thumbnails,
-            image=image,
-            size="sm",
-            output_path=target / "thumb" / "sm" / f"{image_id}.jpg",
-        )
-        await _write_cached_jpeg(
-            thumbnails=thumbnails,
-            image=image,
-            size="md",
-            output_path=target / "img" / f"{image_id}.jpg",
-        )
-        gallery_images.append(
-            {
-                "id": image_id,
-                "filename": image.get("filename") or f"Photo {image_id}",
-                "aspect_ratio": float(image.get("aspect_ratio") or 1.5),
-                "date_taken": image.get("date_taken"),
-                "thumb": f"./thumb/sm/{image_id}.jpg",
-                "preview": f"./img/{image_id}.jpg",
-                "full": f"./img/{image_id}.jpg",
-            }
-        )
+    try:
+        await asyncio.to_thread((work_target / "thumb" / "sm").mkdir, parents=True, exist_ok=True)
+        await asyncio.to_thread((work_target / "img").mkdir, parents=True, exist_ok=True)
 
-    date_range = date_range_for_images(gallery_images)
-    cover = f"/g/{slug}/thumb/sm/{gallery_images[0]['id']}.jpg" if gallery_images else ""
-    html = templates.env.get_template("share_gallery.html").render(
-        not_found=False,
-        locked=False,
-        public_static=True,
-        token=f"public-{slug}",
-        collection_name=title or collection.get("name") or "Gallery",
-        photo_count=len(gallery_images),
-        date_range=date_range,
-        gallery_json={
-            "token": f"public-{slug}",
-            "name": title or collection.get("name") or "Gallery",
-            "photo_count": len(gallery_images),
-            "date_range": date_range,
-            "images": gallery_images,
-        },
-    )
-    await asyncio.to_thread((target / "index.html").write_text, html, "utf-8")
-    bundle_bytes, file_count = await asyncio.to_thread(_bundle_size, target)
-    return BundleSummary(
-        slug=slug,
-        title=title or collection.get("name") or "Gallery",
-        photo_count=len(gallery_images),
-        date_range=date_range,
-        cover=cover,
-        bundle_bytes=bundle_bytes,
-        file_count=file_count,
-    )
+        gallery_images = []
+        for image in images:
+            image_id = int(image["id"])
+            await _write_cached_jpeg(
+                thumbnails=thumbnails,
+                image=image,
+                size="sm",
+                output_path=work_target / "thumb" / "sm" / f"{image_id}.jpg",
+            )
+            await _write_cached_jpeg(
+                thumbnails=thumbnails,
+                image=image,
+                size="md",
+                output_path=work_target / "img" / f"{image_id}.jpg",
+            )
+            gallery_images.append(
+                {
+                    "id": image_id,
+                    "filename": image.get("filename") or f"Photo {image_id}",
+                    "aspect_ratio": float(image.get("aspect_ratio") or 1.5),
+                    "date_taken": image.get("date_taken"),
+                    "thumb": f"./thumb/sm/{image_id}.jpg",
+                    "preview": f"./img/{image_id}.jpg",
+                    "full": f"./img/{image_id}.jpg",
+                }
+            )
+
+        date_range = date_range_for_images(gallery_images)
+        cover = f"/g/{slug}/thumb/sm/{gallery_images[0]['id']}.jpg" if gallery_images else ""
+        html = templates.env.get_template("share_gallery.html").render(
+            not_found=False,
+            locked=False,
+            public_static=True,
+            token=f"public-{slug}",
+            collection_name=title or collection.get("name") or "Gallery",
+            photo_count=len(gallery_images),
+            date_range=date_range,
+            gallery_json={
+                "token": f"public-{slug}",
+                "name": title or collection.get("name") or "Gallery",
+                "photo_count": len(gallery_images),
+                "date_range": date_range,
+                "images": gallery_images,
+            },
+        )
+        await asyncio.to_thread((work_target / "index.html").write_text, html, "utf-8")
+        bundle_bytes, file_count = await asyncio.to_thread(_bundle_size, work_target)
+        summary = BundleSummary(
+            slug=slug,
+            title=title or collection.get("name") or "Gallery",
+            photo_count=len(gallery_images),
+            date_range=date_range,
+            cover=cover,
+            bundle_bytes=bundle_bytes,
+            file_count=file_count,
+        )
+        await asyncio.to_thread(_replace_bundle_dir, work_target, target)
+        return summary
+    except Exception:
+        await asyncio.to_thread(shutil.rmtree, work_target, True)
+        raise
 
 
 async def _snapshot_image_ids(
@@ -163,10 +173,20 @@ async def _write_cached_jpeg(*, thumbnails, image: dict, size: str, output_path:
     await asyncio.to_thread(output_path.write_bytes, data)
 
 
-def _reset_bundle_dir(target: Path) -> None:
-    if target.exists():
-        shutil.rmtree(target)
-    target.mkdir(parents=True, exist_ok=True)
+def _replace_bundle_dir(work_target: Path, target: Path) -> None:
+    backup = target.parent / f".{target.name}.bak-{os.getpid()}-{time.time_ns()}"
+    had_target = target.exists()
+    if had_target:
+        os.replace(target, backup)
+    try:
+        os.replace(work_target, target)
+    except Exception:
+        if had_target and backup.exists() and not target.exists():
+            os.replace(backup, target)
+        raise
+    finally:
+        if backup.exists():
+            shutil.rmtree(backup, ignore_errors=True)
 
 
 def _bundle_size(target: Path) -> tuple[int, int]:
