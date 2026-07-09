@@ -1,6 +1,6 @@
 import { clearSelection, selection } from './state.js';
 import { focusOmnibox, openCommandPalette } from './omnibox.js';
-import { moveFocus, focusColumns, currentFocusedImage } from './grid.js';
+import { createStackFromSelection, moveFocus, focusColumns, currentFocusedImage, toggleFocusedStack } from './grid.js';
 import { applyFlags, selectLoadedImages, toggleFocusedSelection } from './selection.js';
 import {
     closeLoupe, flagLoupeOrFocused, loupeOpen, navLoupe, openLoupe, toggleLoupeInfo, toggleLoupeLights,
@@ -18,6 +18,7 @@ import { closeFilters, filtersOpen } from './filters.js';
 import { closeImport, importOpen } from './importer.js';
 import { closeGridContextMenu, gridContextMenuOpen } from './context_menu.js';
 import { closeDuplicates, duplicatesOpen } from './duplicates.js';
+import { closeTrash, trashOpen, trashSelectedImages } from './trash.js';
 import { showToast, undoLatestToast } from './toast.js';
 
 function inputFocused() {
@@ -92,6 +93,10 @@ function escapeOneLayer() {
     }
     if (duplicatesOpen()) {
         closeDuplicates();
+        return true;
+    }
+    if (trashOpen()) {
+        closeTrash();
         return true;
     }
     if (refineOpen()) {
@@ -183,6 +188,13 @@ export function initKeyboard() {
             }
             return;
         }
+        if (trashOpen()) {
+            if (event.key.toLowerCase() === 'g') {
+                event.preventDefault();
+                closeTrash();
+            }
+            return;
+        }
         const key = event.key.toLowerCase();
         if (key === '/') {
             event.preventDefault();
@@ -215,10 +227,19 @@ export function initKeyboard() {
         } else if (key === 'm') {
             event.preventDefault();
             switchLens('map');
+        } else if (key === 's') {
+            event.preventDefault();
+            if (selection.size > 1) createStackFromSelection();
+            else toggleFocusedStack();
         } else if (key === 'j') {
             event.preventDefault();
             const next = cycleDensity();
             showToast(`Density · ${next[0].toUpperCase()}${next.slice(1)}`);
+        } else if (event.key === 'Delete' || event.key === 'Backspace') {
+            if (selection.size) {
+                event.preventDefault();
+                trashSelectedImages();
+            }
         } else if (key === '[') {
             event.preventDefault();
             toggleLeftPanel();

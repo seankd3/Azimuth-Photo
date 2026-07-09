@@ -10,6 +10,7 @@ import { initLenses } from './lenses.js';
 import { initLoupe } from './loupe.js';
 import { initRefine } from './refine.js';
 import { initDuplicates } from './duplicates.js';
+import { initTrash } from './trash.js';
 import { initKeyboard } from './keyboard.js';
 import { initFilters } from './filters.js';
 import { initImporter } from './importer.js';
@@ -34,6 +35,7 @@ async function boot() {
     initLoupe();
     initRefine();
     initDuplicates();
+    initTrash();
     initRightPanel();
     initPanelSections();
     initDrawer();

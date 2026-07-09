@@ -54,7 +54,7 @@ const COMMANDS = [
         if (img) openLoupe({ id: img.id });
     } },
     { icon: 'eye', label: 'Cycle Loupe lights', kbd: 'L', run: toggleLoupeLights },
-    { icon: 'layers', label: 'Find duplicates', run: () => emit('duplicates:open') },
+    { icon: 'layers', label: 'Stacks', run: () => emit('duplicates:open') },
     { icon: 'sparkles', label: 'Review suggested collections', run: openSuggestionsReview },
     { icon: 'funnel', label: 'Filter…', run: () => emit('filters:open') },
     { icon: 'upload', label: 'Import', run: () => emit('import:open') },

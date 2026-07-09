@@ -229,6 +229,56 @@ export async function getCounts(params = new URLSearchParams()) {
     return fetchJson(`/api/counts?${params.toString()}`, { defaultValue: null });
 }
 
+export async function listStacks({ kind = '', limit = 50, offset = 0 } = {}) {
+    const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+    if (kind) params.set('kind', kind);
+    return fetchJson(`/api/stacks?${params.toString()}`, { defaultValue: null });
+}
+
+export async function getStack(stackId) {
+    return fetchJson(`/api/stacks/${encodeURIComponent(stackId)}`, { defaultValue: null });
+}
+
+export async function createStack(imageIds, representativeId = null) {
+    const body = { image_ids: imageIds };
+    if (representativeId) body.representative_id = representativeId;
+    return postJson('/api/stacks', body);
+}
+
+export async function setStackRepresentative(stackId, imageId) {
+    return postJson(`/api/stacks/${encodeURIComponent(stackId)}/representative`, { image_id: imageId });
+}
+
+export async function unstack(stackId) {
+    return postJson(`/api/stacks/${encodeURIComponent(stackId)}/unstack`);
+}
+
+export async function rebuildStacks(kinds = null) {
+    const body = Array.isArray(kinds) && kinds.length ? { kinds } : {};
+    return postJson('/api/stacks/rebuild', body);
+}
+
+export async function getStackRebuildStatus() {
+    return fetchJson('/api/stacks/rebuild/status', { defaultValue: null });
+}
+
+export async function getTrash({ limit = 200, offset = 0 } = {}) {
+    const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+    return fetchJson(`/api/trash?${params.toString()}`, { defaultValue: null });
+}
+
+export async function trashImages(imageIds) {
+    return postJson('/api/images/trash', { ids: imageIds });
+}
+
+export async function restoreImages(imageIds) {
+    return postJson('/api/images/restore', { ids: imageIds });
+}
+
+export async function emptyTrash() {
+    return postJson('/api/trash/empty');
+}
+
 export async function getMapMarkers(params) {
     return fetchJson(`/api/map/markers?${params.toString()}`, { defaultValue: null });
 }

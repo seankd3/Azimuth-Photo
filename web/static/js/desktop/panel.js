@@ -1,12 +1,12 @@
 import {
     addToCollection, createCollection, getCatalog, getCollection,
-    getCounts,
+    getCounts, getTrash,
     createCollectionShare, deleteCollection, getCollectionShare, getCollectionShareFavorites, listCollections,
     removeFromCollection, renameCollection, revokeCollectionShare, thumbUrl,
 } from './api.js';
 import { loadCollectionImageIds } from './scope_data.js';
 import {
-    byId, on, scope, scopeActive, scopeParams, selection, selectionChanged, setLeftCollapsed, setScope, viewState,
+    byId, on, scope, scopeActive, scopeParams, selection, selectionChanged, setActiveLens, setLeftCollapsed, setScope, viewState,
 } from './state.js';
 import { applyFlags, selectedIds, setCollectionPicker } from './selection.js';
 import { showToast } from './toast.js';
@@ -21,6 +21,7 @@ import {
 let collections = [];
 let catalog = null;
 let libraryCounts = null;
+let trashTotal = null;
 let drawerOpen = false;
 let collectionMenu = null;
 let collectionMenuReturn = null;
@@ -513,6 +514,7 @@ function renderLibrary() {
         ['all', 'house', 'All Photos', '', libraryCounts?.total, ''],
         ['picked', 'star', 'Picked', 'picked', libraryCounts?.picked, ''],
         ['rejected', 'x', 'Rejected', 'rejected', libraryCounts?.rejected, ''],
+        ['trash', 'trash-2', 'Trash', '', trashTotal, 'Deleted photos'],
         ['recent', 'clock-3', 'Recent', '', null, 'Newest first'],
     ];
     document.getElementById('library-list').innerHTML = rows.map(([id, glyph, label, , count, tip]) => {
@@ -528,6 +530,7 @@ function renderLibrary() {
             if (key === 'all') setScope({});
             if (key === 'picked') setScope({ flag: 'picked' });
             if (key === 'rejected') setScope({ flag: 'rejected' });
+            if (key === 'trash') setActiveLens('trash');
             if (key === 'recent') setScope({ sort: 'date_taken' });
             closeLeftDrawer();
         });
@@ -535,8 +538,9 @@ function renderLibrary() {
 }
 
 async function loadLibraryCounts() {
-    const data = await getCounts(new URLSearchParams());
+    const [data, trash] = await Promise.all([getCounts(new URLSearchParams()), getTrash({ limit: 1, offset: 0 })]);
     libraryCounts = data || {};
+    trashTotal = trash && trash.total != null ? Number(trash.total) || 0 : null;
     renderLibrary();
 }
 
@@ -791,6 +795,10 @@ export async function initPanel() {
             row.classList.toggle('active', active);
         }
     });
+    on('lens', (lens) => {
+        document.querySelector('[data-lib="trash"]')?.classList.toggle('active', lens === 'trash');
+    });
+    on('trash:changed', loadLibraryCounts);
     renderLibrary();
     loadLibraryCounts();
     await loadCollections();

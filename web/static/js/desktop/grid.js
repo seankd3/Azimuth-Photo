@@ -1,7 +1,7 @@
 import {
-    byId, emit, nonSearchFacetCount, on, scope, scopeActive, scopeParams, selection, setBestOfTotal, setImages, setRankingsMeta, setScope, viewState,
+    byId, clearSelection, emit, nonSearchFacetCount, on, scope, scopeActive, scopeParams, selection, setBestOfTotal, setImages, setRankingsMeta, setScope, viewState,
 } from './state.js';
-import { thumbUrl } from './api.js';
+import { createStack, getStack, thumbUrl, unstack } from './api.js';
 import { loadScopePage } from './scope_data.js';
 import {
     enterSelection, isSelectionMode, toggleSelection,
@@ -11,6 +11,7 @@ import { icon } from '../icons.js';
 import {
     appendChunk, configureGridWindow, ensureChunkLive, firstLiveChunk, invalidateHeights, reset as resetGridWindow,
 } from './grid_window.js';
+import { showToast } from './toast.js';
 
 let offset = 0;
 let loading = false;
@@ -25,6 +26,8 @@ let resizeTimer = null;
 let lastThumbSize = viewState.thumbSize;
 let previousFocusedCell = null;
 let savedScrollTop = 0;
+let expandedStack = null;
+const stackCache = new Map();
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -43,13 +46,25 @@ function flagGlyph(flag) {
 
 export function cellHtml(img, index) {
     const flag = img.flag || 'unflagged';
+    const stackId = Number(img.stack_id) || 0;
+    const stackCount = Number(img.stack_count) || 0;
+    const stackBadge = stackId && stackCount > 1
+        ? `<button class="c-stack" data-stack-id="${stackId}" data-tip="Expand stack · S" aria-label="Expand stack with ${stackCount} photos" aria-expanded="false">${icon('layers')}<span>${stackCount}</span></button>`
+        : '';
     return `<figure class="cell ${selection.has(Number(img.id)) ? 'sel' : ''}" data-id="${img.id}" data-idx="${index}" draggable="true" tabindex="-1" style="--ar:${aspect(img)}">`
         + `<img data-src="${esc(img.thumb_url || thumbUrl('sm', img.id))}" loading="lazy" decoding="async" alt="${esc(img.filename || '')}">`
+        + stackBadge
         + `<button class="c-check" aria-label="Select photo">${icon('check')}</button>`
         + `<span class="c-idx">${index + 1}</span>`
         + `<span class="c-flag ${flag}">${flagGlyph(flag)}</span>`
         + `<span class="c-elo"><span class="elo-chip">${Math.round(Number(img.elo) || 0)}</span></span>`
         + `<button class="c-menu" data-tip="Photo actions" aria-label="Photo actions">${icon('ellipsis')}</button></figure>`;
+}
+
+function memberCellHtml(img, index) {
+    return cellHtml({ ...img, stack_id: null, stack_count: null }, index)
+        .replace('class="cell ', 'class="cell stack-member ')
+        .replace('<figure ', '<figure data-stack-member="1" ');
 }
 
 function ensureImageObserver() {
@@ -88,9 +103,76 @@ function resetImageObserver() {
     imageObserver = null;
 }
 
+function closeExpandedStack() {
+    if (!expandedStack) return false;
+    const { stackId, trayEl } = expandedStack;
+    if (trayEl?.isConnected) {
+        unobserveImages(trayEl);
+        trayEl.remove();
+    }
+    const badge = document.querySelector(`.c-stack[data-stack-id="${stackId}"]`);
+    if (badge) {
+        badge.classList.remove('expanded');
+        badge.setAttribute('aria-expanded', 'false');
+        badge.setAttribute('aria-label', badge.getAttribute('aria-label')?.replace(/^Collapse/, 'Expand') || 'Expand stack');
+    }
+    expandedStack = null;
+    invalidateHeights(1);
+    return true;
+}
+
+async function expandStack(stackId, cell) {
+    const id = Number(stackId) || 0;
+    if (!id || !cell) return false;
+    if (expandedStack?.stackId === id) {
+        closeExpandedStack();
+        return true;
+    }
+    closeExpandedStack();
+    const badge = cell.querySelector(`.c-stack[data-stack-id="${id}"]`);
+    if (badge) {
+        badge.classList.add('loading');
+        badge.disabled = true;
+    }
+    const data = stackCache.get(id) || await getStack(id);
+    if (data) stackCache.set(id, data);
+    if (badge) {
+        badge.classList.remove('loading');
+        badge.disabled = false;
+    }
+    const members = (data && data.members || []).filter((img) => Number(img?.id) !== Number(cell.dataset.id));
+    if (!members.length) {
+        showToast("Stack didn't return expandable members");
+        return false;
+    }
+    for (const member of members) {
+        const image = { ...member, stack_id: id };
+        byId.set(Number(image.id), image);
+    }
+    const index = Number(cell.dataset.idx) || 0;
+    const tray = document.createElement('div');
+    tray.className = 'stack-tray';
+    tray.dataset.stackId = String(id);
+    tray.innerHTML = '<div class="stack-tray-rail"></div><div class="stack-tray-cells">'
+        + members.map((member) => memberCellHtml(member, index)).join('')
+        + '</div>';
+    cell.insertAdjacentElement('afterend', tray);
+    observeImages(tray);
+    if (badge) {
+        badge.classList.add('expanded');
+        badge.setAttribute('aria-expanded', 'true');
+        badge.setAttribute('aria-label', `Collapse stack with ${Number(data.member_count || members.length + 1)} photos`);
+        badge.setAttribute('data-tip', 'Collapse stack · S');
+    }
+    expandedStack = { stackId: id, trayEl: tray };
+    invalidateHeights(1);
+    return true;
+}
+
 function render({ append = false, start = 0, images = [] } = {}) {
     const flow = document.getElementById('grid-flow');
     if (!append) {
+        closeExpandedStack();
         resetImageObserver();
         resetGridWindow();
     }
@@ -100,6 +182,7 @@ function render({ append = false, start = 0, images = [] } = {}) {
 }
 
 function renderSkeletons() {
+    closeExpandedStack();
     resetImageObserver();
     resetGridWindow();
     document.getElementById('grid-flow').innerHTML = '<div class="grid-chunk">'
@@ -110,6 +193,7 @@ function renderSkeletons() {
 }
 
 function renderEmptyState() {
+    closeExpandedStack();
     resetImageObserver();
     resetGridWindow();
     const flow = document.getElementById('grid-flow');
@@ -270,6 +354,13 @@ function handleClick(event) {
     if (!cell) return;
     const id = Number(cell.dataset.id);
     const index = Number(cell.dataset.idx);
+    const stackButton = event.target.closest('.c-stack[data-stack-id]');
+    if (stackButton) {
+        event.preventDefault();
+        event.stopPropagation();
+        expandStack(stackButton.dataset.stackId, cell);
+        return;
+    }
     if (event.target.closest('.c-check')) {
         enterSelection(id, index);
         return;
@@ -281,6 +372,14 @@ function handleClick(event) {
     }
     if (isSelectionMode()) {
         toggleSelection(id, index, { range: event.shiftKey });
+        return;
+    }
+    const tray = cell.closest('.stack-tray');
+    if (tray) {
+        const stack = stackCache.get(Number(tray.dataset.stackId));
+        const images = stack && stack.members ? stack.members : [...tray.querySelectorAll('.cell[data-id]')]
+            .map((item) => byId.get(Number(item.dataset.id))).filter(Boolean);
+        emit('loupe:open', { id, index: images.findIndex((img) => Number(img.id) === id), images });
         return;
     }
     emit('loupe:open', { id, index });
@@ -338,6 +437,9 @@ export function initGrid() {
     });
     on('flags', ({ imageIds } = {}) => patchCells(imageIds));
     on('selection', ({ imageIds } = {}) => patchCells(imageIds));
+    on('trash:changed', () => {
+        if (mounted) loadFirstPage();
+    });
     resizeHandler = () => {
         clearTimeout(resizeTimer);
         resizeTimer = setTimeout(() => {
@@ -352,6 +454,39 @@ export function initGrid() {
         invalidateHeights(next / lastThumbSize);
         lastThumbSize = next;
     });
+}
+
+export async function toggleFocusedStack() {
+    const img = currentFocusedImage();
+    const stackId = Number(img?.stack_id) || 0;
+    if (!stackId) return false;
+    ensureChunkLive(viewState.focusIndex);
+    const cell = document.querySelector(`.cell[data-id="${Number(img.id)}"]`);
+    if (!cell) return false;
+    return expandStack(stackId, cell);
+}
+
+export async function createStackFromSelection() {
+    const imageIds = [...selection].map(Number).filter((id) => id > 0);
+    if (imageIds.length < 2) return false;
+    const focused = currentFocusedImage();
+    const representativeId = focused && imageIds.includes(Number(focused.id)) ? Number(focused.id) : imageIds[0];
+    const result = await createStack(imageIds, representativeId);
+    const stackId = Number(result?.stack?.id || result?.id || result?.stack_id);
+    if (!result || !(result.ok || result.stack || stackId)) {
+        showToast("Stack couldn't be created");
+        return true;
+    }
+    clearSelection();
+    showToast(`Stacked ${imageIds.length.toLocaleString('en-US')} photos`, {
+        undo: stackId ? async () => {
+            const undone = await unstack(stackId);
+            showToast(undone ? 'Stack undone' : "Undo didn't save");
+            loadFirstPage();
+        } : null,
+    });
+    loadFirstPage();
+    return true;
 }
 
 export function focusColumns() {
@@ -381,6 +516,7 @@ export function unmountGrid() {
     savedScrollTop = document.getElementById('canvas').scrollTop;
     generation += 1;
     loading = false;
+    closeExpandedStack();
     resetImageObserver();
     if (sentinelObserver) sentinelObserver.disconnect();
     sentinelObserver = null;

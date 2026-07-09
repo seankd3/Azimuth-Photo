@@ -5,13 +5,14 @@ const THUMB_KEY = 'pa_d_thumb_size';
 const PREFS_KEY = 'pa_d_prefs';
 const LENS_KEY = 'pa_d_lens';
 const PERSISTENT_LENSES = new Set(['grid', 'events', 'people', 'map']);
-const VALID_LENSES = new Set([...PERSISTENT_LENSES, 'refine', 'suggestions', 'loupe', 'duplicates']);
+const VALID_LENSES = new Set([...PERSISTENT_LENSES, 'refine', 'suggestions', 'loupe', 'duplicates', 'trash']);
 const DEFAULT_PREFS = {
     density: 'comfortable',
     badgeCheck: true,
     badgeFlag: true,
     badgeElo: true,
     badgeIndex: true,
+    collapseStacks: true,
     reduceMotion: false,
     panelSections: {},
 };
@@ -80,6 +81,7 @@ function normalizePrefs(value) {
         badgeFlag: saved.badgeFlag == null ? DEFAULT_PREFS.badgeFlag : Boolean(saved.badgeFlag),
         badgeElo: saved.badgeElo == null ? DEFAULT_PREFS.badgeElo : Boolean(saved.badgeElo),
         badgeIndex: saved.badgeIndex == null ? DEFAULT_PREFS.badgeIndex : Boolean(saved.badgeIndex),
+        collapseStacks: saved.collapseStacks == null ? DEFAULT_PREFS.collapseStacks : Boolean(saved.collapseStacks),
         reduceMotion: saved.reduceMotion == null ? DEFAULT_PREFS.reduceMotion : Boolean(saved.reduceMotion),
         panelSections,
     };
@@ -162,6 +164,7 @@ export function scopeParams(extra = {}) {
     if (scope.min_stars) params.set('min_stars', scope.min_stars);
     if (scope.import_batch) params.set('import_batch', scope.import_batch);
     if (scope.sort) params.set('sort', scope.sort);
+    params.set('stacks', viewState.prefs.collapseStacks ? 'collapsed' : 'expanded');
     for (const [key, value] of Object.entries(extra)) {
         if (value !== undefined && value !== null && value !== '') params.set(key, String(value));
     }
@@ -171,6 +174,7 @@ export function scopeParams(extra = {}) {
 export function refineParams(extra = {}) {
     const params = scopeParams(extra);
     params.delete('sort');
+    params.delete('stacks');
     return params;
 }
 
@@ -310,10 +314,12 @@ export function setRightCollapsed(collapsed) {
 }
 
 export function patchPrefs(patch = {}) {
+    const beforeCollapseStacks = viewState.prefs.collapseStacks;
     viewState.prefs = normalizePrefs({ ...viewState.prefs, ...(isPlainObject(patch) ? patch : {}) });
     localStorage.setItem(PREFS_KEY, JSON.stringify(viewState.prefs));
     applyPrefs();
     emit('prefs', viewState.prefs);
+    if (beforeCollapseStacks !== viewState.prefs.collapseStacks) emit('scope', scope);
 }
 
 export function cycleDensity() {

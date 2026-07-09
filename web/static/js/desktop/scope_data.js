@@ -1,5 +1,5 @@
 import { getCollection, getRankings } from './api.js';
-import { byId, rememberImages, scope, scopeParams } from './state.js';
+import { byId, rememberImages, scope, scopeParams, viewState } from './state.js';
 
 export function collectionScopeActive() {
     return Boolean(scope.collectionId);
@@ -40,6 +40,9 @@ export async function loadScopePage({ limit = 100, offset = 0, sort = null } = {
     }
     const params = scopeParams({ limit, offset });
     if (sort) params.set('sort', sort);
+    const data = await getRankings(params);
+    if (data || !viewState.prefs.collapseStacks) return data;
+    params.set('stacks', 'expanded');
     return getRankings(params);
 }
 

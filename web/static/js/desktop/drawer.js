@@ -503,6 +503,7 @@ function renderPrefs() {
         + checkbox('badgeFlag', 'Cell badge · flag')
         + checkbox('badgeElo', 'Cell badge · Elo')
         + checkbox('badgeIndex', 'Cell badge · index')
+        + checkbox('collapseStacks', 'Collapse stacks')
         + checkbox('reduceMotion', 'Reduce motion')
         + '</section>';
 }

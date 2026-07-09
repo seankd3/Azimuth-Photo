@@ -7,6 +7,7 @@ import { mountRefine, unmountRefine } from './refine.js';
 import { mountSuggestions, unmountSuggestions } from './suggestions.js';
 import { mountLoupe, unmountLoupe } from './loupe.js';
 import { mountDuplicates, unmountDuplicates } from './duplicates.js';
+import { mountTrash, unmountTrash } from './trash.js';
 import { on, setActiveLens, viewState } from './state.js';
 
 const LENSES = {
@@ -18,6 +19,7 @@ const LENSES = {
     suggestions: { mount: mountSuggestions, unmount: unmountSuggestions },
     loupe: { mount: mountLoupe, unmount: unmountLoupe },
     duplicates: { mount: mountDuplicates, unmount: unmountDuplicates },
+    trash: { mount: mountTrash, unmount: unmountTrash },
 };
 
 let current = null;
@@ -30,10 +32,11 @@ function syncChrome(lens) {
     }
     document.getElementById('shell').classList.toggle('right-hidden', lens === 'events' || lens === 'map' || lens === 'suggestions');
     document.getElementById('event-gap-wrap').hidden = lens !== 'events';
-    document.getElementById('sort-select').disabled = lens === 'people' || lens === 'map' || lens === 'refine' || lens === 'suggestions' || lens === 'loupe' || lens === 'duplicates';
-    document.getElementById('thumb-size').disabled = lens === 'people' || lens === 'map' || lens === 'refine' || lens === 'suggestions' || lens === 'loupe' || lens === 'duplicates';
+    document.getElementById('sort-select').disabled = lens === 'people' || lens === 'map' || lens === 'refine' || lens === 'suggestions' || lens === 'loupe' || lens === 'duplicates' || lens === 'trash';
+    document.getElementById('thumb-size').disabled = lens === 'people' || lens === 'map' || lens === 'refine' || lens === 'suggestions' || lens === 'loupe' || lens === 'duplicates' || lens === 'trash';
     document.getElementById('btn-refine').classList.toggle('active', lens === 'refine');
     document.getElementById('find-duplicates')?.classList.toggle('active', lens === 'duplicates');
+    document.querySelector('[data-lib="trash"]')?.classList.toggle('active', lens === 'trash');
 }
 
 function activate(lens) {
