@@ -218,8 +218,18 @@ export function initKeyboard() {
             }
             return;
         }
-        if (activeLens() !== 'grid') return;
         const key = event.key.toLowerCase();
+        // Global keys: navigation between lenses, omnibox, and help work from
+        // every persistent lens — only grid-specific keys are gated below.
+        if (activeLens() !== 'grid') {
+            if (key === '/') { event.preventDefault(); focusOmnibox(); }
+            else if (key === '?') { event.preventDefault(); openHelp(); }
+            else if (key === 'g') { event.preventDefault(); switchLens('grid'); }
+            else if (key === 'o') { event.preventDefault(); switchLens('people'); }
+            else if (key === 'm') { event.preventDefault(); switchLens('map'); }
+            else if (key === 'y') { event.preventDefault(); switchLens('events'); }
+            return;
+        }
         if (key === '/') {
             event.preventDefault();
             focusOmnibox();
