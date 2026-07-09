@@ -28,7 +28,7 @@ Library is for daily browsing, culling, filtering, and export.
 - Search with text. Metadata search works without AI; semantic search improves
   as local embeddings are built.
 - Filter by orientation, ranked/unranked/confident status, flag, minimum stars,
-  person, folder, date, file type, camera, and lens.
+  person, one or more folders, date, file type, camera, and lens.
 - Switch between **Grid** and **Map** when photos have GPS metadata.
 - Use the thumbnail-size slider to choose dense browsing or larger inspection.
 - Open the loupe for progressive image loading, zoom, pan, filmstrip
@@ -36,6 +36,8 @@ Library is for daily browsing, culling, filtering, and export.
 - Flag photos as picked, unflagged, or rejected.
 - Use **Select** for batch flagging and selected-image JSON/CSV export.
 - Export the current ranked and filtered result set as JSON or CSV.
+- Smart collections currently save a single folder scope; multi-folder live
+  scopes are intentionally rejected until the smart-query vocabulary expands.
 
 ## Compare
 
