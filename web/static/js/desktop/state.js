@@ -60,10 +60,34 @@ export const byId = new Map();
 export const selection = new Set();
 export const selState = { mode: false, lastIndex: null };
 
+function isPlainObject(value) {
+    return Boolean(value && Object.prototype.toString.call(value) === '[object Object]');
+}
+
+function normalizePrefs(value) {
+    const saved = isPlainObject(value) ? value : {};
+    const panelSections = {};
+    if (isPlainObject(saved.panelSections)) {
+        for (const [key, collapsed] of Object.entries(saved.panelSections)) {
+            panelSections[key] = Boolean(collapsed);
+        }
+    }
+    return {
+        ...DEFAULT_PREFS,
+        density: saved.density === 'compact' ? 'compact' : DEFAULT_PREFS.density,
+        badgeCheck: saved.badgeCheck == null ? DEFAULT_PREFS.badgeCheck : Boolean(saved.badgeCheck),
+        badgeFlag: saved.badgeFlag == null ? DEFAULT_PREFS.badgeFlag : Boolean(saved.badgeFlag),
+        badgeElo: saved.badgeElo == null ? DEFAULT_PREFS.badgeElo : Boolean(saved.badgeElo),
+        badgeIndex: saved.badgeIndex == null ? DEFAULT_PREFS.badgeIndex : Boolean(saved.badgeIndex),
+        reduceMotion: saved.reduceMotion == null ? DEFAULT_PREFS.reduceMotion : Boolean(saved.reduceMotion),
+        panelSections,
+    };
+}
+
 function readPrefs() {
     try {
         const saved = JSON.parse(localStorage.getItem(PREFS_KEY) || '{}');
-        return { ...DEFAULT_PREFS, ...(saved && typeof saved === 'object' ? saved : {}) };
+        return normalizePrefs(saved);
     } catch {
         return { ...DEFAULT_PREFS };
     }
@@ -277,7 +301,7 @@ export function setRightCollapsed(collapsed) {
 }
 
 export function patchPrefs(patch = {}) {
-    viewState.prefs = { ...viewState.prefs, ...patch };
+    viewState.prefs = normalizePrefs({ ...viewState.prefs, ...(isPlainObject(patch) ? patch : {}) });
     localStorage.setItem(PREFS_KEY, JSON.stringify(viewState.prefs));
     applyPrefs();
     emit('prefs', viewState.prefs);

@@ -7,7 +7,13 @@ function focusables(container) {
 
 export function trapFocus(container, initial = null) {
     if (!container) return;
-    stack.push({ container, returnEl: document.activeElement });
+    const existingIndex = stack.findIndex((entry) => entry.container === container);
+    let returnEl = document.activeElement;
+    if (existingIndex >= 0) {
+        const existing = stack.splice(existingIndex, 1)[0];
+        if (existing.returnEl && document.contains(existing.returnEl)) returnEl = existing.returnEl;
+    }
+    stack.push({ container, returnEl });
     let tries = 15;
     const attempt = () => {
         if (!stack.length || stack[stack.length - 1].container !== container) return;

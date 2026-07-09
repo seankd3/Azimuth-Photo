@@ -6,8 +6,20 @@ import { showToast } from './toast.js';
 import { downloadExport, openExportMenu } from './export_menu.js';
 
 let collectionPicker = null;
+const flagMutationVersions = new Map();
 
 const ids = () => [...selection].map(Number).filter((id) => id > 0);
+
+export function beginFlagMutation(imageId) {
+    const id = Number(imageId);
+    const next = (flagMutationVersions.get(id) || 0) + 1;
+    flagMutationVersions.set(id, next);
+    return next;
+}
+
+export function flagMutationIsLatest(imageId, version) {
+    return flagMutationVersions.get(Number(imageId)) === version;
+}
 
 export function setCollectionPicker(fn) {
     collectionPicker = fn;
@@ -54,7 +66,7 @@ export function toggleSelection(id, index, { range = false } = {}) {
 export async function applyFlags(rawIds, flag) {
     const imageIds = [...new Set(rawIds.map(Number))].filter((id) => id > 0);
     if (!imageIds.length) return;
-    const previous = imageIds.map((id) => [id, (byId.get(id) || {}).flag || 'unflagged']);
+    const previous = imageIds.map((id) => [id, (byId.get(id) || {}).flag || 'unflagged', beginFlagMutation(id)]);
     for (const id of imageIds) {
         const img = byId.get(id);
         if (img) img.flag = flag;
@@ -62,23 +74,43 @@ export async function applyFlags(rawIds, flag) {
     emit('flags', { imageIds, flag });
     const result = await writeFlags(imageIds, flag);
     if (!result || !result.ok) {
-        for (const [id, oldFlag] of previous) {
+        const rolledBackIds = [];
+        for (const [id, oldFlag, version] of previous) {
+            if (!flagMutationIsLatest(id, version)) continue;
             const img = byId.get(id);
             if (img) img.flag = oldFlag;
+            rolledBackIds.push(id);
         }
-        emit('flags', { imageIds, failed: true });
-        showToast("Flag change didn't save");
+        if (rolledBackIds.length) {
+            emit('flags', { imageIds: rolledBackIds, failed: true });
+            showToast("Flag change didn't save");
+        }
         return;
     }
     const label = flag === 'picked' ? 'Picked' : flag === 'rejected' ? 'Rejected' : 'Flags cleared';
     showToast(`${label} · ${imageIds.length} photos`, {
         undo: async () => {
+            const undoVersions = previous.map(([id]) => [id, beginFlagMutation(id)]);
             for (const [id, oldFlag] of previous) {
                 const img = byId.get(id);
                 if (img) img.flag = oldFlag;
-                await writeFlags([id], oldFlag);
             }
             emit('flags', { imageIds });
+            const undoResult = await Promise.all(previous.map(([id, oldFlag]) => writeFlags([id], oldFlag)));
+            const failedIds = [];
+            for (let i = 0; i < undoResult.length; i += 1) {
+                const [id, version] = undoVersions[i];
+                if (undoResult[i] && undoResult[i].ok) continue;
+                if (!flagMutationIsLatest(id, version)) continue;
+                const img = byId.get(id);
+                if (img) img.flag = flag;
+                failedIds.push(id);
+            }
+            if (failedIds.length) {
+                emit('flags', { imageIds: failedIds, failed: true });
+                showToast("Undo didn't save");
+                return;
+            }
             showToast('Undone');
         },
     });

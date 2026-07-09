@@ -44,6 +44,7 @@ let startedAt = 0;
 let saveQueue = Promise.resolve();
 let saveQueueActive = false;
 let saveQueueToken = 0;
+let pickActionQueue = Promise.resolve();
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -375,6 +376,7 @@ function enqueuePickSave(winnerId, loserIds) {
 }
 
 function restoreSnapshot(snapshot) {
+    generation += 1;
     currentSet = snapshot.images.slice();
     age = snapshot.age.slice();
     replacements = snapshot.replacements.slice();
@@ -421,7 +423,7 @@ async function shuffleSet() {
     fillReplacements();
 }
 
-export async function pickRefine(winnerId) {
+async function applyRefinePick(winnerId) {
     if (!open || currentSet.length < need()) return;
     const winner = Number(winnerId);
     const idx = currentSet.findIndex((img) => Number(img.id) === winner);
@@ -473,6 +475,18 @@ export async function pickRefine(winnerId) {
     }
     refreshPropagation();
     if (picks % 10 === 0) refreshQuality();
+}
+
+export function pickRefine(winnerId) {
+    const queuedWinner = Number(winnerId);
+    const queuedGeneration = generation;
+    pickActionQueue = pickActionQueue
+        .catch(() => {})
+        .then(() => {
+            if (queuedGeneration !== generation) return null;
+            return applyRefinePick(queuedWinner);
+        });
+    return pickActionQueue;
 }
 
 export async function undoRefine() {

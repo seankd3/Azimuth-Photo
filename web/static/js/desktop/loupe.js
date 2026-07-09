@@ -2,7 +2,7 @@ import {
     byId, emit, on, rememberImages, setActiveLens, viewState,
 } from './state.js';
 import { thumbUrl, writeFlag } from './api.js';
-import { applyFlags } from './selection.js';
+import { applyFlags, beginFlagMutation, flagMutationIsLatest } from './selection.js';
 import { openCollectionPicker } from './panel.js';
 import { requestMorePhotos } from './grid.js';
 import { showToast } from './toast.js';
@@ -413,24 +413,34 @@ function toggleFitOneToOne(event) {
 async function flagCurrent(flag) {
     const img = current();
     if (!img) return;
+    const imageId = Number(img.id);
     const old = img.flag || 'unflagged';
+    const version = beginFlagMutation(imageId);
     img.flag = flag;
     updateChrome();
-    emit('flags', { imageIds: [img.id], flag });
-    const result = await writeFlag(img.id, flag);
+    emit('flags', { imageIds: [imageId], flag });
+    const result = await writeFlag(imageId, flag);
     if (!result || !result.ok) {
+        if (!flagMutationIsLatest(imageId, version)) return;
         img.flag = old;
         updateChrome();
-        emit('flags', { imageIds: [img.id] });
+        emit('flags', { imageIds: [imageId] });
         showToast("Flag change didn't save");
         return;
     }
     showToast(flag === 'picked' ? 'Picked' : flag === 'rejected' ? 'Rejected' : 'Flag cleared', {
         undo: async () => {
+            const undoVersion = beginFlagMutation(imageId);
             img.flag = old;
-            await writeFlag(img.id, old);
             updateChrome();
-            emit('flags', { imageIds: [img.id] });
+            emit('flags', { imageIds: [imageId] });
+            const undoResult = await writeFlag(imageId, old);
+            if (!(undoResult && undoResult.ok) && flagMutationIsLatest(imageId, undoVersion)) {
+                img.flag = flag;
+                updateChrome();
+                emit('flags', { imageIds: [imageId] });
+                showToast("Undo didn't save");
+            }
         },
     });
 }

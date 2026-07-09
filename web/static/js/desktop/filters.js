@@ -9,8 +9,10 @@ let popover = null;
 let loaded = false;
 let loading = false;
 let expandedYear = '';
-let monthsLoading = false;
-const monthsByYear = new Map();
+let monthsLoadingKey = '';
+let monthsLoadSeq = 0;
+let activeMonthScopeSignature = '';
+const monthsByScopeYear = new Map();
 let options = {
     people: [],
     folders: [],
@@ -93,10 +95,12 @@ function renderDate() {
         if (!year) return '';
         const active = String(scope.date_taken || '') === year;
         const expanded = expandedYear === year;
-        const months = monthsByYear.get(year) || [];
+        const cacheKey = monthCacheKey(year);
+        const months = monthsByScopeYear.get(cacheKey) || [];
+        const loadingMonths = monthsLoadingKey === cacheKey;
         const monthRows = expanded
             ? '<div class="filter-months">'
-                + (monthsLoading && !months.length ? '<div class="filter-empty">Loading months…</div>' : months.map((month) => {
+                + (loadingMonths && !months.length ? '<div class="filter-empty">Loading months…</div>' : months.map((month) => {
                     const activeMonth = scope.date_taken === month.value;
                     return `<button class="filter-row filter-month ${activeMonth ? 'active' : ''}" data-key="date_taken" data-value="${month.value}">`
                         + `<span>${esc(month.label)}</span><span class="num">${fmt(month.count)}</span></button>`;
@@ -122,6 +126,30 @@ function monthFromDate(value) {
     if (!value) return '';
     const match = String(value).match(/^(\d{4})-(\d{2})/);
     return match ? `${match[1]}-${match[2]}` : '';
+}
+
+function monthScopeSignature() {
+    const params = scopeParams();
+    params.delete('sort');
+    params.delete('date_taken');
+    if (scope.collectionId) params.set('collection_id', String(scope.collectionId));
+    if (scope.similarIds.length) {
+        params.set('similar_ids', scope.similarIds.map(Number).filter((id) => id > 0).join(','));
+    }
+    return params.toString();
+}
+
+function monthCacheKey(year) {
+    return `${activeMonthScopeSignature}|${year}`;
+}
+
+function resetMonthCacheIfScopeChanged() {
+    const signature = monthScopeSignature();
+    if (signature === activeMonthScopeSignature) return;
+    activeMonthScopeSignature = signature;
+    monthsByScopeYear.clear();
+    monthsLoadingKey = '';
+    monthsLoadSeq += 1;
 }
 
 async function scopedMonthCounts(year) {
@@ -153,18 +181,22 @@ async function scopedMonthCounts(year) {
 }
 
 async function expandYear(year) {
+    resetMonthCacheIfScopeChanged();
     expandedYear = expandedYear === year ? '' : year;
-    if (!expandedYear || monthsByYear.has(year)) {
+    const cacheKey = monthCacheKey(year);
+    if (!expandedYear || monthsByScopeYear.has(cacheKey)) {
         render();
         return;
     }
-    monthsLoading = true;
+    const token = ++monthsLoadSeq;
+    monthsLoadingKey = cacheKey;
     render();
     const counts = await scopedMonthCounts(year);
-    monthsByYear.set(year, [...counts.entries()]
+    if (token !== monthsLoadSeq || cacheKey !== monthCacheKey(year) || expandedYear !== year) return;
+    monthsByScopeYear.set(cacheKey, [...counts.entries()]
         .sort((a, b) => b[0].localeCompare(a[0]))
         .map(([value, count]) => ({ value, count, label: monthLabel(value) })));
-    monthsLoading = false;
+    if (monthsLoadingKey === cacheKey) monthsLoadingKey = '';
     render();
 }
 
@@ -303,6 +335,7 @@ function positionPopover() {
 export function openFilters() {
     ensurePopover();
     if (!popover.hidden) return;
+    resetMonthCacheIfScopeChanged();
     popover.hidden = false;
     positionPopover();
     render();
@@ -331,6 +364,7 @@ export function initFilters() {
     on('filters:open', openFilters);
     on('filters:toggle', () => (filtersOpen() ? closeFilters() : openFilters()));
     on('scope', () => {
+        resetMonthCacheIfScopeChanged();
         if (!popover.hidden) render();
     });
     document.addEventListener('pointerdown', outsideClose);

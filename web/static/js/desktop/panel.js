@@ -23,6 +23,7 @@ let drawerOpen = false;
 let collectionMenu = null;
 let collectionMenuReturn = null;
 let shareOverlay = null;
+let shareOverlayToken = 0;
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -274,8 +275,13 @@ function ensureShareOverlay() {
     return shareOverlay;
 }
 
+function shareOverlayIsCurrent(token) {
+    return Boolean(shareOverlay && !shareOverlay.hidden && token === shareOverlayToken);
+}
+
 function closeShareOverlay() {
     if (!shareOverlay || shareOverlay.hidden) return;
+    shareOverlayToken += 1;
     releaseFocus(shareOverlay);
     shareOverlay.hidden = true;
 }
@@ -289,9 +295,11 @@ async function copyShareUrl(url) {
     }
 }
 
-async function renderShareOverlay(collectionId, name, share = null) {
+async function renderShareOverlay(collectionId, name, share = null, token = shareOverlayToken) {
     ensureShareOverlay();
+    if (!shareOverlayIsCurrent(token)) return;
     const pickData = share ? await getCollectionShareFavorites(collectionId) : null;
+    if (!shareOverlayIsCurrent(token)) return;
     const body = share
         ? '<div class="share-link-row"><input id="share-url" readonly value="' + esc(share.url || '') + '"><button id="share-copy" type="button">Copy</button></div>'
             + '<div class="share-meta">'
@@ -315,57 +323,67 @@ async function renderShareOverlay(collectionId, name, share = null) {
     shareOverlay.querySelector('#share-view-picks')?.addEventListener('click', () => selectClientPicks(pickIds));
     shareOverlay.querySelector('#share-apply-picks')?.addEventListener('click', () => applyClientPicks(collectionId, pickIds));
     shareOverlay.querySelector('#share-create')?.addEventListener('click', async () => {
+        const actionToken = shareOverlayToken;
         const value = shareOverlay.querySelector('#share-expiry')?.value || '';
         const password = shareOverlay.querySelector('#share-password')?.value || '';
         const result = await createCollectionShare(collectionId, {
             expiresInDays: value ? Number(value) : null,
             ...(password ? { password } : {}),
         });
+        if (!shareOverlayIsCurrent(actionToken)) return;
         if (result && result.ok) {
             showToast('Share link created');
-            await renderShareOverlay(collectionId, name, result.share);
+            await renderShareOverlay(collectionId, name, result.share, actionToken);
         } else {
             showToast("Couldn't create share link");
         }
     });
     shareOverlay.querySelector('#share-password-save')?.addEventListener('click', async () => {
         if (!share) return;
+        const actionToken = shareOverlayToken;
         const password = shareOverlay.querySelector('#share-password')?.value || '';
         if (!password) {
             showToast('Enter a password');
             return;
         }
         const result = await createCollectionShare(collectionId, { password });
+        if (!shareOverlayIsCurrent(actionToken)) return;
         if (result && result.ok) {
             showToast(share.protected ? 'Password changed' : 'Password set');
-            await renderShareOverlay(collectionId, name, result.share);
+            await renderShareOverlay(collectionId, name, result.share, actionToken);
         } else {
             showToast("Couldn't save password");
         }
     });
     shareOverlay.querySelector('#share-password-clear')?.addEventListener('click', async () => {
+        const actionToken = shareOverlayToken;
         const result = await createCollectionShare(collectionId, { clearPassword: true });
+        if (!shareOverlayIsCurrent(actionToken)) return;
         if (result && result.ok) {
             showToast('Password removed');
-            await renderShareOverlay(collectionId, name, result.share);
+            await renderShareOverlay(collectionId, name, result.share, actionToken);
         } else {
             showToast("Couldn't remove password");
         }
     });
     bindShareConfirmButton('#share-rotate', 'Confirm rotate', async () => {
+        const actionToken = shareOverlayToken;
         const result = await createCollectionShare(collectionId, { rotate: true });
+        if (!shareOverlayIsCurrent(actionToken)) return;
         if (result && result.ok) {
             showToast('Share link rotated');
-            await renderShareOverlay(collectionId, name, result.share);
+            await renderShareOverlay(collectionId, name, result.share, actionToken);
         } else {
             showToast("Couldn't rotate link");
         }
     });
     bindShareConfirmButton('#share-revoke', 'Confirm revoke', async () => {
+        const actionToken = shareOverlayToken;
         const result = await revokeCollectionShare(collectionId);
+        if (!shareOverlayIsCurrent(actionToken)) return;
         if (result && result.ok) {
             showToast('Share link revoked');
-            await renderShareOverlay(collectionId, name, null);
+            await renderShareOverlay(collectionId, name, null, actionToken);
         } else {
             showToast("Couldn't revoke link");
         }
@@ -393,12 +411,14 @@ function bindShareConfirmButton(selector, label, action) {
 
 async function openShareOverlay(collectionId, name = 'Collection') {
     ensureShareOverlay();
+    const token = ++shareOverlayToken;
     shareOverlay.innerHTML = `<div class="modal-card share-card" role="dialog" aria-modal="true"><div class="mo-head"><h2>Share ${esc(name)}</h2><button type="button" id="share-close" data-tip="Close (Esc)" aria-label="Close">${icon('x')}</button></div><div class="mo-body"><div class="muted">Loading…</div></div></div>`;
     shareOverlay.hidden = false;
     shareOverlay.querySelector('#share-close')?.addEventListener('click', closeShareOverlay);
     trapFocus(shareOverlay, shareOverlay.querySelector('button'));
     const data = await getCollectionShare(collectionId);
-    await renderShareOverlay(collectionId, name, data && data.share);
+    if (!shareOverlayIsCurrent(token)) return;
+    await renderShareOverlay(collectionId, name, data && data.share, token);
 }
 
 function startCollectionRename(collectionId) {

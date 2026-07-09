@@ -11,6 +11,7 @@ let activeIndex = 0;
 let mounted = false;
 let refreshCollections = async () => {};
 let notifyChange = () => {};
+const creatingFingerprints = new Set();
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -75,22 +76,29 @@ export function openSuggestionsReview() {
 
 export async function createSuggestion(suggestion) {
     const fp = suggestionFingerprint(suggestion);
-    dismissFingerprint(fp);
-    notifyChange();
-    render();
-    const result = await createCollection(suggestion.title, suggestion.image_ids || [], suggestion.subtitle || '');
-    if (!(result && result.ok)) {
-        restoreFingerprint(fp);
+    if (creatingFingerprints.has(fp)) return false;
+    creatingFingerprints.add(fp);
+    try {
+        dismissFingerprint(fp);
         notifyChange();
         render();
-        showToast("Couldn't create collection");
-        return false;
+        const result = await createCollection(suggestion.title, suggestion.image_ids || [], suggestion.subtitle || '');
+        if (!(result && result.ok)) {
+            restoreFingerprint(fp);
+            notifyChange();
+            render();
+            showToast("Couldn't create collection");
+            return false;
+        }
+        await refreshCollections();
+        showToast('Collection created', { undo: null });
+        notifyChange();
+        render();
+        return true;
+    } finally {
+        creatingFingerprints.delete(fp);
+        render();
     }
-    await refreshCollections();
-    showToast('Collection created', { undo: null });
-    notifyChange();
-    render();
-    return true;
 }
 
 export function dismissSuggestion(suggestion) {
@@ -145,6 +153,7 @@ function render() {
     }
 
     const suggestion = visible[activeIndex];
+    const creating = creatingFingerprints.has(suggestionFingerprint(suggestion));
     root.innerHTML = '<div class="suggest-review">'
         + `<aside class="suggest-review-rail">${visible.map(rowHtml).join('')}</aside>`
         + '<section class="suggest-review-main">'
@@ -154,7 +163,7 @@ function render() {
         + `<p>${esc(suggestion.reason || 'Suggested')} · ${esc(suggestion.subtitle || `${fmt(suggestion.count)} photos`)}</p>`
         + '</div>'
         + '<div class="suggest-review-actions">'
-        + '<button class="btn primary" id="suggest-create" type="button">Create collection</button>'
+        + `<button class="btn primary" id="suggest-create" type="button" ${creating ? 'disabled' : ''}>Create collection</button>`
         + '<button class="btn" id="suggest-dismiss" type="button">Dismiss</button>'
         + '</div></header>'
         + `<div class="suggest-preview-grid">${previewHtml(suggestion)}</div>`

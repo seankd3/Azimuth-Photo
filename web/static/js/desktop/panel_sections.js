@@ -8,12 +8,15 @@ function sectionId(section, index) {
 }
 
 function readCollapsed(id) {
-    const saved = viewState.prefs.panelSections || {};
+    const saved = viewState.prefs.panelSections;
+    if (!saved || Object.prototype.toString.call(saved) !== '[object Object]') return false;
     return Boolean(saved[id]);
 }
 
 function saveCollapsed(id, collapsed) {
-    const panelSections = { ...(viewState.prefs.panelSections || {}), [id]: collapsed };
+    const saved = viewState.prefs.panelSections;
+    const current = saved && Object.prototype.toString.call(saved) === '[object Object]' ? saved : {};
+    const panelSections = { ...current, [id]: Boolean(collapsed) };
     patchPrefs({ panelSections });
 }
 
