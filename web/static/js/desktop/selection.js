@@ -162,7 +162,9 @@ function render({ imageIds = null } = {}) {
         ? ids.map((id) => document.querySelector(`.cell[data-id="${id}"]`)).filter(Boolean)
         : [...document.querySelectorAll('.cell[data-id]')];
     for (const cell of cells) {
-        cell.classList.toggle('sel', selection.has(Number(cell.dataset.id)));
+        const selected = selection.has(Number(cell.dataset.id));
+        cell.classList.toggle('sel', selected);
+        cell.setAttribute('aria-selected', selected ? 'true' : 'false');
     }
 }
 

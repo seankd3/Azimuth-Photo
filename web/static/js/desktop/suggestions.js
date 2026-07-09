@@ -140,7 +140,7 @@ function kindLabel(kind) {
 
 function liveMark(suggestion) {
     if (!suggestion.query) return '';
-    return `<span class="suggest-live-mark" title="Live collection">${icon('sparkles')}</span>`;
+    return `<span class="suggest-live-mark" title="Live collection">${icon('sparkles')} Live</span>`;
 }
 
 function rowHtml(suggestion, index) {
@@ -223,14 +223,14 @@ function render() {
 
     const suggestion = visible[activeIndex];
     const creating = creatingFingerprints.has(suggestionFingerprint(suggestion));
-    const liveCopy = suggestion.query ? 'Live collection — grows automatically' : '';
+    const liveCopy = suggestion.query ? 'Live' : '';
     root.innerHTML = '<div class="suggest-review">'
         + headerHtml(visible.length)
         + `<aside class="suggest-review-rail">${visible.map(rowHtml).join('')}</aside>`
         + '<section class="suggest-review-main">'
         + '<header class="suggest-review-head">'
         + '<div>'
-        + `<div class="suggest-head-meta"><span class="suggest-kind-badge">${esc(kindLabel(suggestion.kind))}</span>${liveCopy ? `<span class="suggest-live-copy">${icon('sparkles')}${esc(liveCopy)}</span>` : ''}</div>`
+        + `<div class="suggest-head-meta"><span class="suggest-kind-badge">${esc(kindLabel(suggestion.kind))}</span>${liveCopy ? `<span class="suggest-live-copy" title="Live collection — grows automatically">${icon('sparkles')}${esc(liveCopy)}</span>` : ''}</div>`
         + `<h2 title="${esc(suggestion.title)}">${esc(suggestion.title)}</h2>`
         + `<p>${esc(suggestion.reason || 'Suggested')} · ${esc(suggestion.subtitle || `${fmt(suggestion.count)} photos`)}</p>`
         + '</div>'

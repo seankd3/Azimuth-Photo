@@ -1,4 +1,5 @@
 import { initState } from './state.js';
+import { initMotion } from './motion.js';
 import { initToast } from './toast.js';
 import { initSelection } from './selection.js';
 import { initPanel } from './panel.js';
@@ -22,6 +23,7 @@ import { initPanelSections } from './panel_sections.js';
 
 async function boot() {
     await mountIconSprite();
+    initMotion();
     initState();
     initToast();
     initSelection();

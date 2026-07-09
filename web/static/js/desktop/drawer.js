@@ -9,6 +9,7 @@ import {
     on, patchPrefs, scope, setActiveLens, setThumbSize, viewState,
 } from './state.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
+import { afterMotion } from './motion.js';
 import { showToast } from './toast.js';
 import { confirmTypedCount } from './trash.js';
 
@@ -1150,9 +1151,9 @@ export function closeSystemDrawer() {
     scrim.classList.remove('on');
     drawer.classList.remove('on');
     drawer.setAttribute('aria-hidden', 'true');
-    setTimeout(() => {
+    afterMotion('slow', () => {
         if (!open) scrim.hidden = true;
-    }, 240);
+    });
     releaseFocus(drawer);
     stopDrawerPolling();
 }

@@ -1,3 +1,5 @@
+import { afterMotion, prefersReducedMotion } from './motion.js';
+
 let nextId = 1;
 const toasts = [];
 
@@ -12,8 +14,12 @@ function removeElement(item) {
     item.el = null;
     item.visible = false;
     el.classList.remove('on');
+    if (prefersReducedMotion()) {
+        el.remove();
+        return;
+    }
     el.addEventListener('transitionend', () => el.remove(), { once: true });
-    setTimeout(() => el.remove(), 240);
+    afterMotion('slow', () => el.remove());
 }
 
 function dismiss(item, { keepUndo = false } = {}) {

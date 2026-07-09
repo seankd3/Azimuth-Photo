@@ -165,7 +165,7 @@ function render() {
         reviewStripHtml(review),
         sectionHtml('Named people', named),
         sectionHtml('Unnamed', unnamed),
-    ].join('') || `<div class="load-error"><h4>No people yet</h4><p>${esc(emptyCopy)}</p></div>`;
+    ].join('') || `<div class="grid-empty"><h3>No people yet</h3><p>${esc(emptyCopy)}</p></div>`;
     if (mergeSourceId) {
         flow.querySelector(`.person-card[data-person-id="${CSS.escape(String(mergeSourceId))}"]`)?.classList.add('merge-source');
     }

@@ -1,6 +1,7 @@
 import { createCollection, removeFromCollection, thumbUrl } from './api.js';
 import { emit, on, selection, selectionChanged, setImages, setRankingsMeta, viewState } from './state.js';
 import { loadScopePage } from './scope_data.js';
+import { releaseFocus, trapFocus } from './focusTrap.js';
 import { showToast } from './toast.js';
 import { icon } from '../icons.js';
 
@@ -77,9 +78,9 @@ function buildGroups() {
 }
 
 function cellHtml(img, index) {
-    return `<figure class="cell ${selection.has(Number(img.id)) ? 'sel' : ''}" data-id="${img.id}" data-idx="${index}" tabindex="-1" style="--ar:${aspect(img)}">`
+    const selected = selection.has(Number(img.id));
+    return `<figure class="cell ${selected ? 'sel' : ''}" data-id="${img.id}" data-idx="${index}" tabindex="-1" aria-selected="${selected ? 'true' : 'false'}" style="--ar:${aspect(img)}">`
         + `<img data-src="${esc(img.thumb_url || thumbUrl('sm', img.id))}" loading="lazy" decoding="async" alt="${esc(img.filename || '')}">`
-        + `<button class="c-check" aria-label="Select photo">${icon('check')}</button>`
         + `<span class="c-idx">${index + 1}</span><span class="c-elo"><span class="elo-chip">${Math.round(Number(img.elo) || 0)}</span></span></figure>`;
 }
 
@@ -103,7 +104,7 @@ function render() {
     buildGroups();
     const flow = document.getElementById('events-flow');
     if (!groups.length && !loading) {
-        flow.innerHTML = '<div class="load-error"><h4>No dated photos loaded yet</h4><p>Events group this view by gaps in capture time. Try a broader view or keep scrolling as photos load.</p></div>'
+        flow.innerHTML = '<div class="grid-empty"><h3>No dated photos loaded yet</h3><p>Events group this view by gaps in capture time. Try a broader view or keep scrolling as photos load.</p></div>'
             + '<div id="events-sentinel"></div><div class="grid-end" id="events-end" hidden>End of scope</div>';
         document.getElementById('events-end').hidden = !done || images.length === 0;
         return;
@@ -182,7 +183,10 @@ function setupSentinel() {
 }
 
 function closeMenu() {
-    if (menu) menu.remove();
+    if (menu) {
+        releaseFocus(menu);
+        menu.remove();
+    }
     menu = null;
 }
 
@@ -192,16 +196,16 @@ function openMenu(button, groupIndex) {
     if (!group) return;
     const ids = group.images.map((img) => Number(img.id)).filter((id) => id > 0);
     menu = document.createElement('div');
-    menu.className = 'pop-menu on event-menu';
+    menu.className = 'pop-menu on event-menu grid-pop-menu';
     menu.setAttribute('role', 'menu');
-    menu.innerHTML = '<button data-act="collection" role="menuitem">Make collection from event</button>'
-        + '<button data-act="refine" role="menuitem">Open in Refine</button>'
-        + '<button data-act="select" role="menuitem">Select all in event</button>';
+    menu.innerHTML = `<button data-act="collection" role="menuitem">${icon('folder-plus')} Make collection from event</button>`
+        + `<button data-act="refine" role="menuitem">${icon('zap')} Open in Refine</button>`
+        + `<button data-act="select" role="menuitem">${icon('check')} Select all in event</button>`;
     document.body.appendChild(menu);
     const rect = button.getBoundingClientRect();
     menu.style.left = `${Math.min(window.innerWidth - 230, rect.right - 210)}px`;
     menu.style.top = `${rect.bottom + 6}px`;
-    menu.querySelector('button')?.focus({ preventScroll: true });
+    trapFocus(menu, menu.querySelector('button'));
     menu.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') {
             event.preventDefault();

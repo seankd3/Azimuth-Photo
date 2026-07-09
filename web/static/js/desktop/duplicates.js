@@ -375,8 +375,8 @@ function renderError({ title, copy, retry = true } = {}) {
 }
 
 function renderEmpty() {
-    root.querySelector('#duplicates-body').innerHTML = '<div class="load-error dupe-empty">'
-        + `<h4>No duplicates at ≥ ${thresholdLabel()} similarity.</h4>`
+    root.querySelector('#duplicates-body').innerHTML = '<div class="grid-empty dupe-empty">'
+        + `<h3>No duplicates at ≥ ${thresholdLabel()} similarity.</h3>`
         + '<p>Lower the threshold to widen the scan.</p></div>';
 }
 
@@ -589,7 +589,7 @@ function renderStacks({ append = false } = {}) {
     const banner = stackRescanning ? '<div class="stack-status-banner">Rescanning stacks. Review actions are paused until fresh results are ready.</div>' : '';
     if (!append) {
         if (!stacks.length && !stackLoading) {
-            body.innerHTML = banner + '<div class="load-error dupe-empty"><h4>No stacks in this filter.</h4><p>Try another kind or rescan stacks.</p></div><div id="stacks-sentinel"></div>';
+            body.innerHTML = banner + '<div class="grid-empty dupe-empty"><h3>No stacks in this filter.</h3><p>Try another kind or rescan stacks.</p></div><div id="stacks-sentinel"></div>';
         } else {
             body.innerHTML = banner + stacks.map(stackRowHtml).join('') + `<div id="stacks-sentinel">${stackLoading && stacks.length ? 'Loading more stacks...' : ''}</div>`;
         }
