@@ -598,6 +598,19 @@ class CompareTests(BackendTestCase):
         self.assertEqual(result["total_images"], 2)
         self.assertEqual(result["visible_images"], 2)
 
+    async def test_mosaic_next_rejects_malformed_ids(self):
+        response = await compare_routes.mosaic_next(ids="abc")
+        self.assertEqual(response.status_code, 400)
+
+        response = await compare_routes.mosaic_next(ids="")
+        self.assertEqual(response.status_code, 400)
+
+        response = await compare_routes.mosaic_next(ids="1,0")
+        self.assertEqual(response.status_code, 400)
+
+        response = await compare_routes.mosaic_next(ids="1" * (compare_routes.MAX_SCOPED_IDS_LENGTH + 1))
+        self.assertEqual(response.status_code, 400)
+
     async def test_mosaic_next_restricts_pool_by_collection_id(self):
         source = await self._source()
         first = await self._image(source["id"], "first.jpg", elo=1500)
@@ -644,6 +657,18 @@ class CompareTests(BackendTestCase):
         self.assertEqual(pair_ids, {first, second})
         self.assertNotIn(outside, pair_ids)
         self.assertEqual(result["total_images"], 2)
+
+    async def test_compare_next_rejects_malformed_ids(self):
+        response = await compare_routes.compare_next(ids="1,bad")
+        self.assertEqual(response.status_code, 400)
+
+        response = await compare_routes.compare_next(ids=",,,")
+        self.assertEqual(response.status_code, 400)
+
+    async def test_compare_and_mosaic_reject_mixed_malformed_ids(self):
+        for route in (compare_routes.compare_next, compare_routes.mosaic_next):
+            response = await route(ids="abc,-1,0")
+            self.assertEqual(response.status_code, 400)
 
     async def test_default_interaction_response_cache_reuses_and_invalidates_on_rating(self):
         source = await self._source()

@@ -1,3 +1,5 @@
+from fastapi.testclient import TestClient
+
 from test_support import *  # noqa: F401,F403
 from features.collections import suggestions as collection_suggestions
 from features.collections import routes as collection_routes
@@ -110,6 +112,40 @@ class CollectionTests(BackendTestCase):
 
         self.assertEqual(response.status_code, 404)
 
+    async def test_collection_http_rename_delete_lifecycle(self):
+        source = await self._source()
+        image_id = await self._image(source["id"], "member.jpg")
+        collection = await db.create_collection(name="Original", image_ids=[image_id])
+
+        def probe():
+            client = TestClient(app_module.app)
+            try:
+                renamed = client.post(
+                    f"/api/user-collections/{collection['id']}/rename",
+                    json={"name": "  Trimmed name  "},
+                )
+                after_rename = client.get(f"/api/user-collections/{collection['id']}")
+                invalid = client.post(
+                    f"/api/user-collections/{collection['id']}/rename",
+                    json={"name": "   "},
+                )
+                deleted = client.post(f"/api/user-collections/{collection['id']}/delete")
+                missing = client.get(f"/api/user-collections/{collection['id']}")
+                return renamed, after_rename, invalid, deleted, missing
+            finally:
+                client.close()
+
+        renamed, after_rename, invalid, deleted, missing = await asyncio.to_thread(probe)
+
+        self.assertEqual(renamed.status_code, 200)
+        self.assertEqual(renamed.json()["collection"]["name"], "Trimmed name")
+        self.assertEqual(after_rename.status_code, 200)
+        self.assertEqual(after_rename.json()["collection"]["name"], "Trimmed name")
+        self.assertEqual(invalid.status_code, 400)
+        self.assertEqual(deleted.status_code, 200)
+        self.assertEqual(deleted.json(), {"ok": True})
+        self.assertEqual(missing.status_code, 404)
+
     async def test_collection_api_returns_not_found_for_missing_collection(self):
         response = await collection_routes.api_collection(999999)
 
@@ -173,3 +209,69 @@ class SuggestionGroupingTests(unittest.TestCase):
 
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0]["camera"], "EOS R5")
+
+    def test_shoot_hint_uses_starbase_filename_date(self):
+        from features.collections.suggestions import shoot_hint_from_path
+
+        hint = shoot_hint_from_path(
+            "/run/media/sean/Expansion/Photos/Exported Edits/2024/All Selected/"
+            "SKD-Starbase-2024-04-24-N01758.jpg"
+        )
+
+        self.assertEqual(hint["title"], "Starbase")
+        self.assertEqual(hint["key"], "starbase-2024-04-24")
+        self.assertEqual(hint["source"], "filename")
+        self.assertIsNotNone(hint["date"])
+
+    def test_shoot_hint_uses_human_folder_when_filename_is_counter(self):
+        from features.collections.suggestions import shoot_hint_from_path
+
+        hint = shoot_hint_from_path(
+            "/run/media/sean/Expansion/Photos/Exported Edits/2022/Events/"
+            "New York Air Show/quick edits/NYS Airshow-16.jpg"
+        )
+
+        self.assertEqual(hint["title"], "New York Air Show")
+        self.assertEqual(hint["key"], "new-york-air-show")
+        self.assertEqual(hint["source"], "folder")
+
+    def test_shoot_hint_cleans_people_and_wedding_prefixes(self):
+        from features.collections.suggestions import shoot_hint_from_path
+
+        lauren = shoot_hint_from_path(
+            "/run/media/sean/Expansion/Photos/Exported Edits/2022/Portraits/"
+            "Lauren Elphin/Lauren_Elphin-0025.jpg"
+        )
+        wedding = shoot_hint_from_path(
+            "/run/media/sean/Expansion/Photos/Exported Edits/2020/2020-07-18/"
+            "Kathryn&JoesephWedding205of684.jpg"
+        )
+
+        self.assertEqual(lauren["title"], "Lauren Elphin")
+        self.assertEqual(wedding["title"], "Kathryn & Joeseph Wedding")
+
+    def test_build_shoot_candidates_titles_date_pattern(self):
+        from features.collections.suggestions import _build_shoot_candidates
+
+        rows = [
+            {
+                "id": i,
+                "filename": f"SKD-Starbase-2024-04-24-N{i:05d}.jpg",
+                "filepath": (
+                    "/run/media/sean/Expansion/Photos/Exported Edits/2024/All Selected/"
+                    f"SKD-Starbase-2024-04-24-N{i:05d}.jpg"
+                ),
+                "date_taken": f"2024-04-24 12:{i:02d}:00",
+                "elo": 1200 + i,
+                "camera_model": "EOS R5",
+            }
+            for i in range(1, 10)
+        ]
+
+        shoots, fallback = _build_shoot_candidates(rows)
+
+        self.assertEqual(fallback, [])
+        self.assertEqual(len(shoots), 1)
+        self.assertEqual(shoots[0]["title"], "Starbase - Apr 24, 2024")
+        self.assertEqual(shoots[0]["reason"], "Same filename pattern")
+        self.assertEqual(shoots[0]["count"], 9)

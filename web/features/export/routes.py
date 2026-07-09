@@ -2,6 +2,8 @@ import asyncio
 import csv
 import io
 import os
+import shutil
+import stat
 import tempfile
 import zipfile
 from collections.abc import Awaitable, Callable
@@ -11,6 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
 from core.requests import clamp_int
+from data.repositories import catalog as catalog_repository
 from data.repositories import images as image_repository
 from data.repositories import rankings as ranking_repository
 from data.repositories import stats as stats_repository
@@ -48,6 +51,12 @@ EXPORT_FIELD_NAMES = (
 )
 ZIP_EXPORT_MAX_IMAGES = 2000
 ZIP_EXPORT_SIZES = {"original", "lg", "md"}
+ZIP_EXPORT_ORIGINAL_MAX_BYTES = 8 * 1024 * 1024 * 1024
+_zip_export_semaphore = asyncio.Semaphore(2)
+
+
+class InsufficientExportStorage(Exception):
+    pass
 
 
 def configure(
@@ -192,12 +201,76 @@ def _zip_source_for_image(image: dict, size: str) -> tuple[str | None, str]:
     return path, ""
 
 
+def _active_source_roots() -> list[str]:
+    rows = catalog_repository.folder_source_rows(_configured_db_path())
+    roots = []
+    for _source_id, source_path, _active_count in rows:
+        if source_path:
+            roots.append(catalog_repository.normalize_source_path(source_path))
+    return roots
+
+
+def _path_is_under_root(path: str, roots: list[str]) -> bool:
+    for root in roots:
+        try:
+            if os.path.commonpath([root, path]) == root:
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+def _regular_file_size(path: str, *, source_roots: list[str] | None = None) -> tuple[int | None, str]:
+    try:
+        lstat_result = os.lstat(path)
+    except OSError:
+        return None, "source file unavailable"
+    if stat.S_ISLNK(lstat_result.st_mode):
+        return None, "source path is a symlink"
+    if not stat.S_ISREG(lstat_result.st_mode):
+        return None, "source path is not a regular file"
+    real_path = os.path.realpath(path)
+    if source_roots is not None and not _path_is_under_root(real_path, source_roots):
+        return None, "outside library"
+    return int(lstat_result.st_size), ""
+
+
+def _estimate_zip_size(images: list[dict], size: str) -> int:
+    if size == "original":
+        source_roots = _active_source_roots()
+    else:
+        source_roots = None
+    total = 0
+    for image in images:
+        path, reason = _zip_source_for_image(image, size)
+        if path is None:
+            continue
+        file_size, reason = _regular_file_size(path, source_roots=source_roots)
+        if file_size is None:
+            continue
+        total += file_size
+        if size == "original" and total >= ZIP_EXPORT_ORIGINAL_MAX_BYTES:
+            return ZIP_EXPORT_ORIGINAL_MAX_BYTES
+    return total
+
+
+def _ensure_export_storage(estimated_size: int) -> None:
+    free_bytes = shutil.disk_usage(tempfile.gettempdir()).free
+    if free_bytes < max(1, estimated_size) * 2:
+        raise InsufficientExportStorage()
+
+
 def _build_zip_file(images: list[dict], size: str) -> tuple[str, int]:
+    estimated_size = _estimate_zip_size(images, size)
+    _ensure_export_storage(estimated_size)
     temp = tempfile.NamedTemporaryFile(prefix="photoarchive-export-", suffix=".zip", delete=False)
     temp_path = temp.name
     temp.close()
     written = 0
     skipped = []
+    cutoff = False
+    total_original_bytes = 0
+    source_roots = _active_source_roots() if size == "original" else None
     try:
         with zipfile.ZipFile(temp_path, "w", compression=zipfile.ZIP_STORED) as archive:
             for image in images:
@@ -206,8 +279,25 @@ def _build_zip_file(images: list[dict], size: str) -> tuple[str, int]:
                 if path is None:
                     skipped.append(f"{image_id}: {reason}")
                     continue
+                file_size, reason = _regular_file_size(path, source_roots=source_roots)
+                if file_size is None:
+                    skipped.append(f"{image_id}: {reason}")
+                    continue
+                if (
+                    size == "original"
+                    and total_original_bytes + file_size > ZIP_EXPORT_ORIGINAL_MAX_BYTES
+                ):
+                    cutoff = True
+                    skipped.append(f"{image_id}: original export size limit reached")
+                    break
                 archive.write(path, arcname=_safe_zip_name(image_id, image.get("filename") or path))
+                if size == "original":
+                    total_original_bytes += file_size
                 written += 1
+            if cutoff:
+                skipped.append(
+                    f"cutoff: original export limited to {ZIP_EXPORT_ORIGINAL_MAX_BYTES} bytes"
+                )
             if skipped:
                 archive.writestr(
                     "manifest.txt",
@@ -263,7 +353,18 @@ async def export_rankings(
                 {"detail": f"Zip export is limited to {ZIP_EXPORT_MAX_IMAGES} images"},
                 status_code=400,
             )
-        zip_path, written_count = await asyncio.to_thread(_build_zip_file, [dict(image) for image in images], size)
+        try:
+            async with _zip_export_semaphore:
+                zip_path, written_count = await asyncio.to_thread(
+                    _build_zip_file,
+                    [dict(image) for image in images],
+                    size,
+                )
+        except InsufficientExportStorage:
+            return JSONResponse(
+                {"detail": "Not enough temporary disk space for export"},
+                status_code=507,
+            )
         return FileResponse(
             zip_path,
             media_type="application/zip",

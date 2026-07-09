@@ -5,6 +5,7 @@ from fastapi.responses import Response
 from fastapi.testclient import TestClient
 
 from test_support import *  # noqa: F401,F403
+from features.collections import routes as collection_routes
 from features.share import auth as share_auth
 from features.share import routes as share_routes
 
@@ -38,6 +39,20 @@ class ShareTests(BackendTestCase):
             favorites_for_collection=lambda collection_id: db.favorites_for_collection(collection_id),
             thumbnail_response=self._thumbnail_response,
         )
+        collection_routes.configure(
+            create_collection=lambda **kwargs: db.create_collection(**kwargs),
+            list_collections=lambda: db.list_collections(),
+            get_collection=lambda collection_id, **kwargs: db.get_collection(collection_id, **kwargs),
+            rename_collection=lambda collection_id, **kwargs: db.rename_collection(collection_id, **kwargs),
+            delete_collection=lambda collection_id: db.delete_collection(collection_id),
+            add_collection_images=lambda collection_id, image_ids: db.add_collection_images(collection_id, image_ids),
+            remove_collection_images=lambda collection_id, image_ids: db.remove_collection_images(
+                collection_id,
+                image_ids,
+            ),
+            get_suggestions=lambda: [],
+        )
+        share_routes._unlock_failures.clear()
 
     async def _thumbnail_response(self, _request, _size, image_id, cached=False):
         return Response(content=f"thumb-{image_id}".encode("ascii"), media_type="image/jpeg")
@@ -229,6 +244,77 @@ class ShareTests(BackendTestCase):
         self.assertEqual(response.headers.get("referrer-policy"), "no-referrer")
         self.assertEqual(await db.list_share_favorites(share["id"]), [])
 
+    async def test_share_rotate_preserves_password_over_http(self):
+        collection, *_ = await self._collection_with_images()
+
+        def probe():
+            client = TestClient(app_module.app)
+            try:
+                created = client.post(
+                    f"/api/user-collections/{collection['id']}/share",
+                    json={"password": "gallery"},
+                )
+                old_token = created.json()["share"]["token"]
+                rotated = client.post(
+                    f"/api/user-collections/{collection['id']}/share",
+                    json={"rotate": True},
+                )
+                new_token = rotated.json()["share"]["token"]
+                old_gallery = client.get(f"/s/{old_token}")
+                new_gallery = client.get(f"/s/{new_token}")
+                return created, rotated, old_token, new_token, old_gallery, new_gallery
+            finally:
+                client.close()
+
+        created, rotated, old_token, new_token, old_gallery, new_gallery = await asyncio.to_thread(probe)
+        active = await db.get_collection_share(collection["id"])
+
+        self.assertEqual(created.status_code, 200)
+        self.assertTrue(created.json()["share"]["protected"])
+        self.assertEqual(rotated.status_code, 200)
+        self.assertTrue(rotated.json()["share"]["protected"])
+        self.assertNotEqual(old_token, new_token)
+        self.assertEqual(active["token"], new_token)
+        self.assertIsNotNone(active["password_hash"])
+        self.assertEqual(old_gallery.status_code, 404)
+        self.assertEqual(new_gallery.status_code, 200)
+        self.assertIn("Unlock", new_gallery.text)
+        self.assertNotIn("gallery-data", new_gallery.text)
+
+    async def test_share_clear_password_without_rotation_over_http(self):
+        collection, *_ = await self._collection_with_images()
+
+        def probe():
+            client = TestClient(app_module.app)
+            try:
+                created = client.post(
+                    f"/api/user-collections/{collection['id']}/share",
+                    json={"password": "gallery"},
+                )
+                token = created.json()["share"]["token"]
+                cleared = client.post(
+                    f"/api/user-collections/{collection['id']}/share",
+                    json={"clear_password": True},
+                )
+                gallery = client.get(f"/s/{token}")
+                return created, cleared, gallery
+            finally:
+                client.close()
+
+        created, cleared, gallery = await asyncio.to_thread(probe)
+        active = await db.get_collection_share(collection["id"])
+
+        self.assertEqual(created.status_code, 200)
+        self.assertTrue(created.json()["share"]["protected"])
+        self.assertEqual(cleared.status_code, 200)
+        self.assertFalse(cleared.json()["share"]["protected"])
+        self.assertEqual(cleared.json()["share"]["token"], created.json()["share"]["token"])
+        self.assertEqual(active["token"], created.json()["share"]["token"])
+        self.assertIsNone(active["password_hash"])
+        self.assertEqual(gallery.status_code, 200)
+        self.assertIn("gallery-data", gallery.text)
+        self.assertIn("Shared set", gallery.text)
+
     async def test_protected_share_unlocks_media_and_counts_one_view_per_cookie(self):
         collection, first, *_ = await self._collection_with_images()
         password_hash = share_auth.hash_password("open-sesame")
@@ -278,6 +364,176 @@ class ShareTests(BackendTestCase):
         self.assertIsNotNone(active["first_viewed_at"])
         self.assertIsNotNone(active["last_viewed_at"])
 
+    async def test_share_favorites_require_current_unlock_cookie(self):
+        collection, first, second, *_ = await self._collection_with_images()
+        share = await db.create_or_rotate_share(
+            collection["id"],
+            password_hash=share_auth.hash_password("old-password"),
+        )
+
+        def probe():
+            client = TestClient(app_module.app)
+            try:
+                unlock_old = client.post(
+                    f"/s/{share['token']}/unlock",
+                    data={"password": "old-password"},
+                    follow_redirects=False,
+                )
+                first_favorite = client.post(
+                    f"/s/{share['token']}/favorite",
+                    json={"image_id": first, "on": True},
+                )
+                changed = client.post(
+                    f"/api/user-collections/{collection['id']}/share",
+                    json={"password": "new-password"},
+                )
+                old_cookie_read = client.get(f"/s/{share['token']}/favorites")
+                old_cookie_write = client.post(
+                    f"/s/{share['token']}/favorite",
+                    json={"image_id": second, "on": True},
+                )
+                unlock_new = client.post(
+                    f"/s/{share['token']}/unlock",
+                    data={"password": "new-password"},
+                    follow_redirects=False,
+                )
+                new_cookie_read = client.get(f"/s/{share['token']}/favorites")
+                new_cookie_write = client.post(
+                    f"/s/{share['token']}/favorite",
+                    json={"image_id": second, "on": True},
+                )
+                return (
+                    unlock_old,
+                    first_favorite,
+                    changed,
+                    old_cookie_read,
+                    old_cookie_write,
+                    unlock_new,
+                    new_cookie_read,
+                    new_cookie_write,
+                )
+            finally:
+                client.close()
+
+        (
+            unlock_old,
+            first_favorite,
+            changed,
+            old_cookie_read,
+            old_cookie_write,
+            unlock_new,
+            new_cookie_read,
+            new_cookie_write,
+        ) = await asyncio.to_thread(probe)
+
+        self.assertEqual(unlock_old.status_code, 303)
+        self.assertEqual(first_favorite.status_code, 200)
+        self.assertEqual(first_favorite.json()["favorites"], [first])
+        self.assertEqual(changed.status_code, 200)
+        self.assertTrue(changed.json()["share"]["protected"])
+        self.assertEqual(old_cookie_read.status_code, 404)
+        self.assertEqual(old_cookie_write.status_code, 404)
+        self.assertEqual(unlock_new.status_code, 303)
+        self.assertEqual(new_cookie_read.status_code, 200)
+        self.assertEqual(new_cookie_read.json()["favorites"], [first])
+        self.assertEqual(new_cookie_write.status_code, 200)
+        self.assertEqual(new_cookie_write.json()["favorites"], [first, second])
+
+    async def test_share_view_count_is_per_distinct_session(self):
+        collection, *_ = await self._collection_with_images()
+        share = await db.create_or_rotate_share(collection["id"])
+
+        def probe():
+            first_client = TestClient(app_module.app)
+            second_client = TestClient(app_module.app)
+            try:
+                first_load = first_client.get(f"/s/{share['token']}")
+                first_again = first_client.get(f"/s/{share['token']}")
+                second_load = second_client.get(f"/s/{share['token']}")
+                return first_load, first_again, second_load
+            finally:
+                first_client.close()
+                second_client.close()
+
+        first_load, first_again, second_load = await asyncio.to_thread(probe)
+        active = await db.get_collection_share(collection["id"])
+
+        self.assertEqual(first_load.status_code, 200)
+        self.assertEqual(first_again.status_code, 200)
+        self.assertEqual(second_load.status_code, 200)
+        self.assertEqual(active["view_count"], 2)
+        self.assertIsNotNone(active["first_viewed_at"])
+        self.assertIsNotNone(active["last_viewed_at"])
+
+    async def test_share_unlock_rejects_oversized_password_before_hashing(self):
+        collection, *_ = await self._collection_with_images()
+        password_hash = share_auth.hash_password("open-sesame")
+        share = await db.create_or_rotate_share(collection["id"], password_hash=password_hash)
+
+        def probe():
+            client = TestClient(app_module.app)
+            try:
+                return client.post(
+                    f"/s/{share['token']}/unlock",
+                    data={"password": "x" * (share_routes.MAX_UNLOCK_PASSWORD_LENGTH + 1)},
+                    follow_redirects=False,
+                )
+            finally:
+                client.close()
+
+        response = await asyncio.to_thread(probe)
+
+        self.assertEqual(response.status_code, 413)
+
+    async def test_share_unlock_throttles_repeated_failures_by_token(self):
+        collection, *_ = await self._collection_with_images()
+        password_hash = share_auth.hash_password("open-sesame")
+        share = await db.create_or_rotate_share(collection["id"], password_hash=password_hash)
+
+        async def no_sleep(_seconds):
+            return None
+
+        old_sleep = share_routes.asyncio.sleep
+        share_routes.asyncio.sleep = no_sleep
+        try:
+            def probe():
+                client = TestClient(app_module.app)
+                try:
+                    failures = [
+                        client.post(
+                            f"/s/{share['token']}/unlock",
+                            data={"password": "nope"},
+                            follow_redirects=False,
+                        )
+                        for _ in range(share_routes.UNLOCK_FAILURE_LIMIT)
+                    ]
+                    throttled = client.post(
+                        f"/s/{share['token']}/unlock",
+                        data={"password": "nope"},
+                        follow_redirects=False,
+                    )
+                    share_routes._unlock_failures[share["token"]]["first_at"] -= (
+                        share_routes.UNLOCK_FAILURE_WINDOW_SECONDS + 1
+                    )
+                    recovered = client.post(
+                        f"/s/{share['token']}/unlock",
+                        data={"password": "open-sesame"},
+                        follow_redirects=False,
+                    )
+                    return failures, throttled, recovered
+                finally:
+                    client.close()
+
+            failures, throttled, recovered = await asyncio.to_thread(probe)
+        finally:
+            share_routes.asyncio.sleep = old_sleep
+
+        self.assertEqual([response.status_code for response in failures], [303] * share_routes.UNLOCK_FAILURE_LIMIT)
+        self.assertEqual(throttled.status_code, 429)
+        self.assertGreater(int(throttled.headers.get("retry-after", "0")), 0)
+        self.assertEqual(recovered.status_code, 303)
+        self.assertNotIn(share["token"], share_routes._unlock_failures)
+
     async def test_public_thumb_rejects_non_member_image(self):
         collection, _first, _second, third = await self._collection_with_images()
         share = await db.create_or_rotate_share(collection["id"])
@@ -293,6 +549,60 @@ class ShareTests(BackendTestCase):
 
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.headers.get("referrer-policy"), "no-referrer")
+
+    async def test_public_image_rejects_non_member_without_calling_provider(self):
+        collection, _first, _second, third = await self._collection_with_images()
+        share = await db.create_or_rotate_share(collection["id"])
+        calls = []
+        old_thumbnail_response = share_routes._thumbnail_response
+
+        async def fail_if_called(*args, **kwargs):
+            calls.append((args, kwargs))
+            return Response(content=b"unexpected", media_type="image/jpeg")
+
+        share_routes._thumbnail_response = fail_if_called
+        try:
+            def probe():
+                client = TestClient(app_module.app)
+                try:
+                    return client.get(f"/s/{share['token']}/img/{third}")
+                finally:
+                    client.close()
+
+            response = await asyncio.to_thread(probe)
+        finally:
+            share_routes._thumbnail_response = old_thumbnail_response
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.headers.get("referrer-policy"), "no-referrer")
+        self.assertEqual(calls, [])
+
+    async def test_http_collection_delete_removes_public_share_and_favorites(self):
+        collection, first, *_ = await self._collection_with_images()
+        share = await db.create_or_rotate_share(collection["id"])
+
+        def probe():
+            client = TestClient(app_module.app)
+            try:
+                favorite = client.post(
+                    f"/s/{share['token']}/favorite",
+                    json={"image_id": first, "on": True},
+                )
+                deleted = client.post(f"/api/user-collections/{collection['id']}/delete")
+                gallery = client.get(f"/s/{share['token']}")
+                return favorite, deleted, gallery
+            finally:
+                client.close()
+
+        favorite, deleted, gallery = await asyncio.to_thread(probe)
+        resolved = await db.resolve_share_token(share["token"])
+
+        self.assertEqual(favorite.status_code, 200)
+        self.assertEqual(favorite.json()["favorites"], [first])
+        self.assertEqual(deleted.status_code, 200)
+        self.assertEqual(deleted.json(), {"ok": True})
+        self.assertEqual(gallery.status_code, 404)
+        self.assertIsNone(resolved)
 
     async def test_delete_collection_removes_shares(self):
         collection, *_ = await self._collection_with_images()

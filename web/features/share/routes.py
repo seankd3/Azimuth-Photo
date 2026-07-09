@@ -13,6 +13,9 @@ from features.share import auth
 
 
 router = APIRouter()
+UNLOCK_FAILURE_LIMIT = 5
+UNLOCK_FAILURE_WINDOW_SECONDS = 15 * 60
+MAX_UNLOCK_PASSWORD_LENGTH = 256
 
 CreateOrRotateShare = Callable[..., Awaitable[dict | None]]
 GetShare = Callable[[int], Awaitable[dict | None]]
@@ -38,6 +41,7 @@ _set_favorite: SetFavorite | None = None
 _list_favorites: ListFavorites | None = None
 _favorites_for_collection: FavoritesForCollection | None = None
 _thumbnail_response: ThumbnailResponse | None = None
+_unlock_failures: dict[str, dict[str, float | int]] = {}
 
 
 class ShareBody(BaseModel):
@@ -197,6 +201,35 @@ async def _form_password(request: Request) -> str:
         return str((parse_qs(body).get("password") or [""])[0])
 
 
+def _unlock_retry_after(token: str, now: float | None = None) -> int | None:
+    now = time.time() if now is None else now
+    failure = _unlock_failures.get(token)
+    if not failure:
+        return None
+    first_at = float(failure.get("first_at") or now)
+    count = int(failure.get("count") or 0)
+    expires_at = first_at + UNLOCK_FAILURE_WINDOW_SECONDS
+    if now >= expires_at:
+        _unlock_failures.pop(token, None)
+        return None
+    if count >= UNLOCK_FAILURE_LIMIT:
+        return max(1, int(expires_at - now))
+    return None
+
+
+def _record_unlock_failure(token: str, now: float | None = None) -> None:
+    now = time.time() if now is None else now
+    failure = _unlock_failures.get(token)
+    if not failure or now >= float(failure.get("first_at") or now) + UNLOCK_FAILURE_WINDOW_SECONDS:
+        _unlock_failures[token] = {"count": 1, "first_at": now}
+        return
+    failure["count"] = int(failure.get("count") or 0) + 1
+
+
+def _clear_unlock_failures(token: str) -> None:
+    _unlock_failures.pop(token, None)
+
+
 @router.post("/api/user-collections/{collection_id}/share")
 async def api_create_share(collection_id: int, payload: ShareBody, request: Request):
     _configured()
@@ -326,12 +359,21 @@ async def public_share_favorite(token: str, payload: FavoriteBody, request: Requ
 @router.post("/s/{token}/unlock")
 async def public_share_unlock(token: str, request: Request):
     _configured()
+    retry_after = _unlock_retry_after(token)
+    if retry_after is not None:
+        response = JSONResponse({"error": "Too many unlock attempts"}, status_code=429)
+        response.headers["Retry-After"] = str(retry_after)
+        return _public_response(response)
     collection = await _resolve_token(token)
     password = await _form_password(request)
+    if len(password) > MAX_UNLOCK_PASSWORD_LENGTH:
+        return _public_response(JSONResponse({"error": "Password is too long"}, status_code=413))
     if collection is None or not auth.verify_password(password, collection.get("password_hash")):
+        _record_unlock_failure(token)
         await asyncio.sleep(0.4)
         return _public_response(RedirectResponse(f"/s/{token}?e=1", status_code=303))
 
+    _clear_unlock_failures(token)
     response = RedirectResponse(f"/s/{token}", status_code=303)
     auth.set_unlock_cookie(
         response,

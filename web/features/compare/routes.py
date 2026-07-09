@@ -13,6 +13,7 @@ from data import connection as data_connection
 
 router = APIRouter()
 MAX_SCOPED_IMAGE_IDS = 2000
+MAX_SCOPED_IDS_LENGTH = 20000
 PatchPairingCache = Callable[[list[tuple[int, float, int]]], None]
 AddPastMatchups = Callable[[list[tuple[int, int]]], None]
 SchedulePropagation = Callable[[object], None]
@@ -84,15 +85,28 @@ def _configured() -> None:
         raise RuntimeError("Compare routes are not configured")
 
 
-def _parse_scoped_ids(ids: str) -> tuple[list[int], JSONResponse | None]:
+def _parse_scoped_ids(ids: str | None) -> tuple[list[int], JSONResponse | None]:
+    if ids is None:
+        return [], None
+    if len(ids) > MAX_SCOPED_IDS_LENGTH:
+        return [], JSONResponse(
+            {"error": f"ids is limited to {MAX_SCOPED_IDS_LENGTH} characters"},
+            status_code=400,
+        )
     scoped_ids = []
     seen = set()
-    for value in (ids or "").split(","):
+    saw_token = False
+    for value in ids.split(","):
         value = value.strip()
-        if not value.isdigit():
+        if not value:
             continue
+        saw_token = True
+        if not value.isdigit():
+            return [], JSONResponse({"error": "ids must contain positive integers"}, status_code=400)
         image_id = int(value)
-        if image_id <= 0 or image_id in seen:
+        if image_id <= 0:
+            return [], JSONResponse({"error": "ids must contain positive integers"}, status_code=400)
+        if image_id in seen:
             continue
         seen.add(image_id)
         scoped_ids.append(image_id)
@@ -101,6 +115,8 @@ def _parse_scoped_ids(ids: str) -> tuple[list[int], JSONResponse | None]:
                 {"error": f"ids is limited to {MAX_SCOPED_IMAGE_IDS} images"},
                 status_code=400,
             )
+    if not saw_token or not scoped_ids:
+        return [], JSONResponse({"error": "ids must contain at least one image id"}, status_code=400)
     return scoped_ids, None
 
 
@@ -109,7 +125,7 @@ async def mosaic_next(
     n: int = 12, exclude: str = "", strategy: str = "explore", grid_elo: float = 0,
     orientation: str = "", compared: str = "", min_stars: int = 0, folder: str = "",
     flag: str = "", date_taken: str = "", file_type: str = "", camera: str = "", lens: str = "",
-    q: str = "", deep: bool = False, people: str = "", ids: str = "", collection_id: int = 0,
+    q: str = "", deep: bool = False, people: str = "", ids: str | None = None, collection_id: int = 0,
 ):
     if _mosaic_next_handler is None:
         raise RuntimeError("Compare routes are not configured")
@@ -266,7 +282,7 @@ async def compare_next(
     n: int = 5, mode: str = "swiss",
     orientation: str = "", compared: str = "", min_stars: int = 0, folder: str = "",
     flag: str = "", date_taken: str = "", file_type: str = "", camera: str = "", lens: str = "",
-    q: str = "", deep: bool = False, people: str = "", ids: str = "", collection_id: int = 0,
+    q: str = "", deep: bool = False, people: str = "", ids: str | None = None, collection_id: int = 0,
 ):
     if _compare_next_handler is None:
         raise RuntimeError("Compare routes are not configured")

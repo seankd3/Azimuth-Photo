@@ -17,6 +17,7 @@ import embed_cache  # noqa: E402
 import embedding_worker  # noqa: E402
 import settings  # noqa: E402
 import thumbnails  # noqa: E402
+from features.export import routes as export_routes  # noqa: E402
 from features.compare import service as compare_service  # noqa: E402
 from thumbnails import cache_entries as thumbnail_cache_entries  # noqa: E402
 
@@ -89,6 +90,7 @@ class ApiShapeTests(unittest.TestCase):
         settings.SETTINGS_PATH = os.path.join(self.tempdir.name, "settings.local.json")
         settings._settings = None
         thumbnails.SSD_CACHE_DIR = os.path.join(self.tempdir.name, "cache")
+        thumbnails._clear_disk_index()
         db.invalidate_stats_cache()
         db.invalidate_cached_image_ids_cache()
         db.clear_filter_options_cache()
@@ -127,6 +129,7 @@ class ApiShapeTests(unittest.TestCase):
             os.environ.pop("PHOTOARCHIVE_SMOKE_MODE", None)
         else:
             os.environ["PHOTOARCHIVE_SMOKE_MODE"] = self.old_smoke_mode
+        thumbnails._clear_disk_index()
         db.DB_PATH = self.old_db_path
         db.invalidate_stats_cache()
         db.invalidate_cached_image_ids_cache()
@@ -482,6 +485,9 @@ class ApiShapeTests(unittest.TestCase):
         folders_response = self.client.get("/api/folders?max_depth=1")
         self.assertEqual(folders_response.status_code, 200)
         self.assertIsInstance(folders_response.json()["folders"], list)
+        folder_tree_response = self.client.get("/api/folders/tree")
+        self.assertEqual(folder_tree_response.status_code, 200)
+        self.assertIsInstance(folder_tree_response.json()["sources"], list)
 
     def test_cache_and_ai_status_endpoint_shapes(self):
         cache_response = self.client.get("/api/cache/status?ahead=0")
@@ -571,6 +577,106 @@ class ApiShapeTests(unittest.TestCase):
                 ],
             )
             self.assertEqual(archive.read(f"{self.ids[0]}-sunset-alpha.jpg"), b"first image")
+
+    def test_export_zip_streams_cached_md_tier_and_rejects_sm_size(self):
+        md_path = os.path.join(self.tempdir.name, f"md-{self.ids[0]}.jpg")
+        with open(md_path, "wb") as fh:
+            fh.write(b"cached md image")
+        thumbnails._clear_disk_index()
+
+        response = self.client.get(f"/api/export?format=zip&size=md&ids={self.ids[0]}")
+        sm_response = self.client.get(f"/api/export?format=zip&size=sm&ids={self.ids[0]}")
+
+        self.assertEqual(response.status_code, 200)
+        with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+            names = archive.namelist()
+            self.assertEqual(names, [f"{self.ids[0]}-sunset-alpha.jpg"])
+            self.assertEqual(archive.read(f"{self.ids[0]}-sunset-alpha.jpg"), b"cached md image")
+        self.assertEqual(sm_response.status_code, 400)
+        self.assertIn("size must be original, lg, or md", sm_response.json()["detail"])
+
+    def test_export_zip_manifest_names_missing_original_id(self):
+        first_path = os.path.join(self.tempdir.name, "catalog", "sunset-alpha.jpg")
+        with open(first_path, "wb") as fh:
+            fh.write(b"first image")
+
+        response = self.client.get(f"/api/export?format=zip&ids={self.ids[0]},{self.ids[1]}")
+
+        self.assertEqual(response.status_code, 200)
+        with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+            names = sorted(archive.namelist())
+            self.assertEqual(names, [f"{self.ids[0]}-sunset-alpha.jpg", "manifest.txt"])
+            self.assertEqual(archive.read(f"{self.ids[0]}-sunset-alpha.jpg"), b"first image")
+            manifest = archive.read("manifest.txt").decode("utf-8")
+            self.assertIn(f"{self.ids[1]}: source file unavailable", manifest)
+
+    def test_export_zip_skips_symlinks_and_paths_outside_library(self):
+        first_path = os.path.join(self.tempdir.name, "catalog", "sunset-alpha.jpg")
+        symlink_path = os.path.join(self.tempdir.name, "catalog", "portrait-beta.jpg")
+        outside_path = os.path.join(self.tempdir.name, "outside.jpg")
+        with open(first_path, "wb") as fh:
+            fh.write(b"first image")
+        with open(outside_path, "wb") as fh:
+            fh.write(b"outside image")
+        os.symlink(outside_path, symlink_path)
+        conn = sqlite3.connect(db.DB_PATH)
+        try:
+            conn.execute("UPDATE images SET filepath = ? WHERE id = ?", (outside_path, self.ids[2]))
+            conn.commit()
+        finally:
+            conn.close()
+
+        response = self.client.get(
+            f"/api/export?format=zip&ids={self.ids[0]},{self.ids[1]},{self.ids[2]}"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+            names = sorted(archive.namelist())
+            self.assertEqual(names, [f"{self.ids[0]}-sunset-alpha.jpg", "manifest.txt"])
+            manifest = archive.read("manifest.txt").decode("utf-8")
+            self.assertIn(f"{self.ids[1]}: source path is a symlink", manifest)
+            self.assertIn(f"{self.ids[2]}: outside library", manifest)
+
+    def test_export_zip_stops_when_original_byte_cap_is_reached(self):
+        first_path = os.path.join(self.tempdir.name, "catalog", "sunset-alpha.jpg")
+        second_path = os.path.join(self.tempdir.name, "catalog", "portrait-beta.jpg")
+        with open(first_path, "wb") as fh:
+            fh.write(b"1234")
+        with open(second_path, "wb") as fh:
+            fh.write(b"5678")
+        old_cap = export_routes.ZIP_EXPORT_ORIGINAL_MAX_BYTES
+        export_routes.ZIP_EXPORT_ORIGINAL_MAX_BYTES = 5
+        try:
+            response = self.client.get(f"/api/export?format=zip&ids={self.ids[0]},{self.ids[1]}")
+        finally:
+            export_routes.ZIP_EXPORT_ORIGINAL_MAX_BYTES = old_cap
+
+        self.assertEqual(response.status_code, 200)
+        with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+            names = sorted(archive.namelist())
+            self.assertEqual(names, [f"{self.ids[0]}-sunset-alpha.jpg", "manifest.txt"])
+            manifest = archive.read("manifest.txt").decode("utf-8")
+            self.assertIn(f"{self.ids[1]}: original export size limit reached", manifest)
+            self.assertIn("cutoff: original export limited to 5 bytes", manifest)
+
+    def test_export_zip_returns_507_when_temp_disk_space_is_too_low(self):
+        first_path = os.path.join(self.tempdir.name, "catalog", "sunset-alpha.jpg")
+        with open(first_path, "wb") as fh:
+            fh.write(b"first image")
+
+        class LowDisk:
+            free = 1
+
+        old_disk_usage = export_routes.shutil.disk_usage
+        export_routes.shutil.disk_usage = lambda _path: LowDisk()
+        try:
+            response = self.client.get(f"/api/export?format=zip&ids={self.ids[0]}")
+        finally:
+            export_routes.shutil.disk_usage = old_disk_usage
+
+        self.assertEqual(response.status_code, 507)
+        self.assertIn("temporary disk space", response.json()["detail"])
 
     def test_export_zip_rejects_requests_over_cap(self):
         ids = ",".join(str(image_id) for image_id in range(1, 2002))
