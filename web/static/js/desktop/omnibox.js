@@ -2,19 +2,19 @@ import {
     getFilterOptions, getFolders, getPeople, getRankings, listCollections, thumbUrl,
 } from './api.js';
 import {
-    emit, on, scope, scopeActive, setScope, setSort, toggleBestOf,
+    emit, on, scope, scopeActive, setScope, setSort, smartQueryActive, toggleBestOf,
 } from './state.js';
 import { currentFocusedImage } from './grid.js';
 import { openLoupe, toggleLoupeLights } from './loupe.js';
 import { scopeTokenHtml } from './contextbar.js';
 import {
     exportCurrentScope, requestDeleteCurrentCollection, requestNewCollection,
-    requestRenameCurrentCollection, requestShareCurrentCollection, toggleLeftPanel,
+    requestRenameCurrentCollection, requestSaveSmartCollection, requestShareCurrentCollection, toggleLeftPanel,
 } from './panel.js';
 import { switchLens } from './lenses.js';
 import { openSuggestionsReview } from './suggestions.js';
 import { icon } from '../icons.js';
-import { personLabel } from '../people_labels.js';
+import { isUnnamedPersonLabel, personLabel } from '../people_labels.js';
 
 const RECENT_KEY = 'pa_d_recent_scopes';
 const LIVE_DELAY_MS = 250;
@@ -63,6 +63,7 @@ const COMMANDS = [
     { icon: 'download', label: 'Export JSON', run: () => exportCurrentScope('json') },
     { icon: 'download', label: 'Download files (zip)', run: () => exportCurrentScope('zip', 'original') },
     { icon: 'plus', label: 'New collection', run: requestNewCollection },
+    { icon: 'sparkles', label: 'Save as Smart Collection', when: smartQueryActive, run: requestSaveSmartCollection },
     { icon: 'share-2', label: 'Share this collection', when: () => Boolean(scope.collectionId), run: requestShareCurrentCollection },
     { icon: 'pencil', label: 'Rename this collection', when: () => Boolean(scope.collectionId), run: requestRenameCurrentCollection },
     { icon: 'trash-2', label: 'Delete this collection', when: () => Boolean(scope.collectionId), run: requestDeleteCurrentCollection },
@@ -157,6 +158,7 @@ function storeRecents(values) {
 function scopeLabel(value) {
     if (value.collectionName) return value.collectionName;
     if (value.personLabel) return personLabel({ label: value.personLabel });
+    if (value.people) return 'Add name';
     if (value.folder) return value.folder.split('/').filter(Boolean).pop() || value.folder;
     if (value.date_taken) return dateLabel(value.date_taken);
     if (value.camera) return `Camera · ${value.camera}`;
@@ -169,6 +171,7 @@ function scopeLabel(value) {
 
 function scopeIcon(value) {
     if (value.personLabel || value.people) return 'users';
+    if (value.collectionSmart) return 'sparkles';
     if (value.collectionName || value.collectionId || value.folder) return 'folder';
     if (value.date_taken) return 'calendar';
     if (value.camera) return 'camera';
@@ -194,7 +197,7 @@ async function ensureSuggestionData() {
         getFolders(null),
         getFilterOptions(),
     ]).then(([peopleData, collectionData, folderData, optionsData]) => {
-        people = (peopleData && (peopleData.people || peopleData.persons || peopleData.results)) || [];
+        people = flattenPeople(peopleData);
         collections = (collectionData && collectionData.collections) || [];
         folders = (folderData && folderData.folders) || [];
         filterOptions = optionsData || {};
@@ -249,6 +252,37 @@ function photoStripHtml(items) {
         + '</div>';
 }
 
+function personThumb(person) {
+    return person?.face_thumb_url || person?.thumb_url || person?.image_thumb_url || '';
+}
+
+function personCount(person) {
+    return Number(person?.image_count || person?.photo_count || person?.face_count || 0);
+}
+
+function flattenPeople(peopleData) {
+    const sections = (peopleData && peopleData.sections) || {};
+    const seen = new Map();
+    for (const list of [
+        peopleData?.people,
+        peopleData?.persons,
+        peopleData?.results,
+        sections.named_people,
+        sections.most_seen,
+        sections.other_faces,
+    ]) {
+        for (const person of list || []) {
+            if (person?.id != null && !seen.has(String(person.id))) seen.set(String(person.id), person);
+        }
+    }
+    return [...seen.values()];
+}
+
+function idQuery(term) {
+    const text = String(term || '').trim().toLowerCase();
+    return text.match(/^(?:#|id:?)?\d+$/) ? text.replace(/\D/g, '') : '';
+}
+
 function skeletonPhotosHtml() {
     return '<div class="sd-photo-strip" aria-label="Loading photo search results">'
         + Array.from({ length: LIVE_LIMIT }, (_, i) => `<span class="sd-photo sd-photo-skel skel" style="--ar:${[1.45, .8, 1.2, 1.7, 1, 1.55][i]}"></span>`).join('')
@@ -292,24 +326,31 @@ function buildPhotoRows(term) {
 }
 
 function buildPeopleRows(term) {
+    const idTerm = idQuery(term);
     const matches = people
-        .map((person) => ({ person, label: personLabel(person) }))
-        .filter((item) => includesText(item.label, term))
+        .map((person) => {
+            const label = personLabel(person);
+            const named = !isUnnamedPersonLabel(label);
+            const idMatch = idTerm && String(person.id).includes(idTerm);
+            return { person, label: named ? label : 'Add name', named, idMatch };
+        })
+        .filter((item) => (item.named && includesText(item.label, term)) || (!item.named && item.idMatch))
+        .sort((a, b) => Number(b.named) - Number(a.named) || personCount(b.person) - personCount(a.person))
         .slice(0, MAX_SECTION_ROWS);
     if (!matches.length) return [];
     return [
         { head: 'People' },
-        ...matches.map(({ person, label }, i) => ({
+        ...matches.map(({ person, label, named }, i) => ({
             icon: 'users',
-            thumb: person.thumb_url,
+            thumb: personThumb(person),
             label,
-            labelHtml: highlight(label, term),
-            meta: fmt(person.image_count || person.face_count || 0),
+            labelHtml: named ? highlight(label, term) : esc(label),
+            meta: named ? fmt(personCount(person)) : `ID ${person.id}`,
             navRow: 10 + i,
             run: () => applyScope({
                 people: person.id,
-                personLabel: label,
-                personThumb: person.thumb_url || '',
+                personLabel: named ? label : '',
+                personThumb: personThumb(person),
             }),
         })),
     ];
@@ -323,13 +364,17 @@ function buildCollectionRows(term) {
     return [
         { head: 'Collections' },
         ...matches.map((collection, i) => ({
-            icon: 'folder',
+            icon: collection.smart ? 'sparkles' : 'folder',
             thumb: collection.cover_image_id ? thumbUrl('sm', collection.cover_image_id) : '',
             label: collection.name,
             labelHtml: highlight(collection.name, term),
             meta: fmt(collection.image_count || 0),
             navRow: 30 + i,
-            run: () => applyScope({ collectionId: collection.id, collectionName: collection.name || 'Collection' }),
+            run: () => applyScope({
+                collectionId: collection.id,
+                collectionName: collection.name || 'Collection',
+                collectionSmart: Boolean(collection.smart),
+            }),
         })),
     ];
 }
@@ -704,6 +749,7 @@ function applyFacet({ key, value, remove, closeAfter = false }) {
         q: nextQ || scope.q || '',
         collectionId: '',
         collectionName: '',
+        collectionSmart: false,
         similarIds: [],
         similarLabel: '',
     };

@@ -17,6 +17,12 @@ const DEFAULT_PREFS = {
     panelSections: {},
 };
 const DENSITIES = ['comfortable', 'cozy', 'compact'];
+const SMART_QUERY_KEYS = [
+    'q', 'people', 'folder', 'camera', 'lens', 'flag', 'date_taken', 'file_type',
+    'orientation', 'compared', 'min_stars', 'sort',
+];
+const SMART_ACTIVE_KEYS = SMART_QUERY_KEYS.filter((key) => key !== 'sort');
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 export const scope = {
     q: '',
@@ -38,6 +44,7 @@ export const scope = {
     similarLabel: '',
     collectionId: '',
     collectionName: '',
+    collectionSmart: false,
     sort: 'elo',
 };
 
@@ -183,7 +190,7 @@ export function setScope(patch = {}, { merge = false, pushHash = true } = {}) {
         q: '', people: '', personLabel: '', personThumb: '', flag: '',
         folder: '', date_taken: '', file_type: '', camera: '', lens: '',
         orientation: '', compared: '', min_stars: '', import_batch: '', importBatchLabel: '',
-        similarIds: [], similarLabel: '', collectionId: '', collectionName: '',
+        similarIds: [], similarLabel: '', collectionId: '', collectionName: '', collectionSmart: false,
         sort: scope.sort || 'elo', ...patch,
     };
     if (!Array.isArray(next.similarIds)) next.similarIds = [];
@@ -271,6 +278,7 @@ export function clearFacet(key) {
     }
     if (key === 'collectionId') {
         patch.collectionName = '';
+        patch.collectionSmart = false;
     }
     if (key === 'import_batch') {
         patch.importBatchLabel = '';
@@ -350,7 +358,7 @@ function writeHash() {
     for (const key of [
         'q', 'people', 'personLabel', 'personThumb', 'flag', 'folder', 'date_taken', 'file_type',
         'camera', 'lens', 'orientation', 'compared', 'min_stars', 'import_batch', 'importBatchLabel',
-        'collectionId', 'collectionName', 'sort',
+        'collectionId', 'collectionName', 'collectionSmart', 'sort',
     ]) {
         if (scope[key]) params.set(key, scope[key]);
     }
@@ -366,10 +374,11 @@ function loadHash() {
     for (const key of [
         'q', 'people', 'personLabel', 'personThumb', 'flag', 'folder', 'date_taken', 'file_type',
         'camera', 'lens', 'orientation', 'compared', 'min_stars', 'import_batch', 'importBatchLabel',
-        'collectionId', 'collectionName', 'sort',
+        'collectionId', 'collectionName', 'collectionSmart', 'sort',
     ]) {
         patch[key] = params.get(key) || '';
     }
+    patch.collectionSmart = patch.collectionSmart === '1' || patch.collectionSmart === 'true';
     patch.similarIds = [];
     patch.similarLabel = '';
     if (!patch.sort) patch.sort = 'elo';
@@ -388,7 +397,7 @@ export function describeScope() {
     if (scope.similarIds.length) return scope.similarLabel || 'Similar photos';
     if (scope.collectionId) return scope.collectionName || 'Collection';
     if (scope.import_batch) return scope.importBatchLabel || `Import ${scope.import_batch}`;
-    if (scope.people) return scope.personLabel || 'Person';
+    if (scope.people) return scope.personLabel || 'Add name';
     if (scope.q) return `“${scope.q}”`;
     if (scope.flag === 'picked') return 'Picked';
     if (scope.flag === 'unflagged') return 'Unflagged';
@@ -409,4 +418,67 @@ export function describeScope() {
     if (scope.compared) return { compared: 'Ranked', uncompared: 'Unranked', confident: 'High confidence' }[scope.compared] || scope.compared;
     if (scope.min_stars) return `${scope.min_stars}+ rating`;
     return 'All photos';
+}
+
+function smartDateLabel(value) {
+    if (value === 'undated') return 'Undated';
+    const match = String(value || '').match(/^(\d{4})-(\d{2})$/);
+    if (!match) return value;
+    return `${MONTHS[Number(match[2]) - 1] || match[2]} ${match[1]}`;
+}
+
+function folderLabel(path) {
+    return String(path || '').split('/').filter(Boolean).pop() || path || '';
+}
+
+export function smartQueryFromScope() {
+    const query = {};
+    for (const key of SMART_QUERY_KEYS) {
+        if (scope[key] !== undefined && scope[key] !== null && scope[key] !== '') query[key] = scope[key];
+    }
+    if (!query.sort) query.sort = scope.sort || 'elo';
+    return query;
+}
+
+export function smartQueryActive(query = smartQueryFromScope()) {
+    return SMART_ACTIVE_KEYS.some((key) => Boolean(query && query[key] !== undefined && query[key] !== null && query[key] !== ''));
+}
+
+export function smartQuerySummary(query = {}, { valuesOnly = false, fallback = 'All photos' } = {}) {
+    const parts = [];
+    const add = (key, value) => {
+        if (value === undefined || value === null || value === '') return;
+        parts.push(valuesOnly ? String(value) : `${key} ${value}`);
+    };
+    add('search', query.q ? `“${query.q}”` : '');
+    add('person', query.people);
+    add('folder', folderLabel(query.folder));
+    add('flag', query.flag);
+    add('date', smartDateLabel(query.date_taken));
+    add('type', query.file_type ? String(query.file_type).toUpperCase() : '');
+    add('camera', query.camera);
+    add('lens', query.lens);
+    add('orientation', query.orientation);
+    add('rank', { compared: 'ranked', uncompared: 'unranked', confident: 'high confidence' }[query.compared] || query.compared);
+    add('rating', query.min_stars ? `${query.min_stars}+` : '');
+    if (!parts.length && query.sort) add('sort', query.sort === 'date_taken' ? 'date' : query.sort);
+    return parts.length ? parts.join(' · ') : fallback;
+}
+
+export function smartQueryName(query = smartQueryFromScope()) {
+    return smartQuerySummary(query, { valuesOnly: true, fallback: 'Smart collection' });
+}
+
+export function scopePatchFromSmartQuery(query = {}) {
+    const patch = {
+        q: '', people: '', personLabel: '', personThumb: '', flag: '',
+        folder: '', date_taken: '', file_type: '', camera: '', lens: '',
+        orientation: '', compared: '', min_stars: '', import_batch: '', importBatchLabel: '',
+        similarIds: [], similarLabel: '', collectionId: '', collectionName: '', collectionSmart: false,
+        sort: query.sort || 'elo',
+    };
+    for (const key of SMART_ACTIVE_KEYS) {
+        if (query[key] !== undefined && query[key] !== null) patch[key] = String(query[key]);
+    }
+    return patch;
 }

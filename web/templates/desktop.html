@@ -50,6 +50,10 @@
                         <div class="psec-head"><h3>Collections</h3><button class="psec-act" id="new-coll-btn">New</button></div>
                         <form id="new-coll-form" hidden>
                             <input id="new-coll-name" type="text" autocomplete="off" placeholder="Collection name">
+                            <div class="new-coll-actions">
+                                <button id="new-coll-create" type="submit">Create</button>
+                                <button id="new-coll-smart" type="button" hidden>Save as Smart Collection</button>
+                            </div>
                         </form>
                         <div id="collection-list"></div>
                         <div id="suggestions-wrap"></div>
@@ -245,7 +249,7 @@
             <button id="help-close" class="icon-btn" data-tip="Close (Esc)" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg></button>
             <h2>Keyboard</h2>
             <div class="help-cols">
-                <div><h3>Navigate</h3><p><kbd>/</kbd> Omnibox</p><p><kbd>Ctrl</kbd><kbd>K</kbd> Commands</p><p><kbd>&gt;</kbd> in Omnibox · command mode</p><p><kbd>↑↓←→</kbd> Move grid focus</p><p><kbd>Enter</kbd> or <kbd>E</kbd> Loupe</p><p><kbd>Esc</kbd> Back out one layer</p></div>
+                <div><h3>Navigate</h3><p><kbd>/</kbd> Omnibox</p><p><kbd>Ctrl</kbd><kbd>K</kbd> Commands</p><p><kbd>&gt;</kbd> in Omnibox · command mode</p><p>Save filtered view as smart collection from New or Commands</p><p><kbd>↑↓←→</kbd> Move grid focus</p><p><kbd>Enter</kbd> or <kbd>E</kbd> Loupe</p><p><kbd>Esc</kbd> Back out one layer</p></div>
                 <div><h3>Grid</h3><p><kbd>Space</kbd> Toggle focused selection</p><p><kbd>S</kbd> Stack / expand stack</p><p><kbd>Delete</kbd> Trash selection</p><p><kbd>Ctrl/Cmd</kbd><kbd>A</kbd> Select loaded photos</p><p><kbd>F</kbd> Filter</p><p><kbd>J</kbd> Cycle density</p></div>
                 <div><h3>Refine</h3><p><kbd>R</kbd> Refine this scope</p><p><kbd>1-4</kbd> Pick in Mosaic</p><p><kbd>←</kbd><kbd>→</kbd> Pick in Duel</p><p><kbd>Ctrl</kbd><kbd>Z</kbd> Undo pick</p></div>
                 <div><h3>Curate</h3><p><kbd>B</kbd> Best of</p><p><kbd>P</kbd> Pick</p><p><kbd>X</kbd> Reject</p><p><kbd>U</kbd> Clear flag</p><p><kbd>Ctrl</kbd><kbd>Z</kbd> Undo latest toast</p></div>

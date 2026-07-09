@@ -41,6 +41,7 @@ function selectValue(key, value, extra = {}) {
         [key]: String(value || ''),
         collectionId: '',
         collectionName: '',
+        collectionSmart: false,
         similarIds: [],
         similarLabel: '',
         ...extra,

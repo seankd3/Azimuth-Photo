@@ -19,17 +19,26 @@ function dateLabel(value) {
     return `${MONTHS[Number(match[2]) - 1] || match[2]} ${match[1]}`;
 }
 
-function chipHtml(key, label, extra = '') {
-    return `<span class="chip" data-facet="${key}" title="${esc(label)}">${extra}<span title="${esc(label)}">${esc(label)}</span><button class="chip-x" aria-label="Remove ${esc(label)}">${icon('x')}</button></span>`;
+function chipHtml(key, label, extra = '', className = '') {
+    const cls = ['chip', className].filter(Boolean).join(' ');
+    return `<span class="${cls}" data-facet="${key}" title="${esc(label)}">${extra}<span title="${esc(label)}">${esc(label)}</span><button class="chip-x" aria-label="Remove ${esc(label)}">${icon('x')}</button></span>`;
 }
 
 function renderChips() {
     const chips = [];
     if (scope.similarIds.length) chips.push(chipHtml('similarIds', scope.similarLabel || 'Similar photos'));
     if (scope.q) chips.push(chipHtml('q', `“${scope.q}”`, `<span class="tk-glyph tk-spark">${icon('sparkles')}</span>`));
-    if (scope.collectionId) chips.push(chipHtml('collectionId', `Collection · ${scope.collectionName || 'Untitled'}`));
+    if (scope.collectionId) {
+        const glyph = scope.collectionSmart ? `<span class="tk-glyph tk-spark">${icon('sparkles')}</span>` : '';
+        chips.push(chipHtml('collectionId', `Collection · ${scope.collectionName || 'Untitled'}`, glyph, scope.collectionSmart ? 'smart-chip' : ''));
+    }
     if (scope.import_batch) chips.push(chipHtml('import_batch', scope.importBatchLabel || `Import ${scope.import_batch}`));
-    if (scope.people) chips.push(chipHtml('people', scope.personLabel || 'Person', scope.personThumb ? `<img src="${esc(scope.personThumb)}" alt="">` : ''));
+    if (scope.people) {
+        const label = cleanPersonLabel({ label: scope.personLabel });
+        const display = label === 'Unnamed' ? 'Add name' : label;
+        const face = scope.personThumb ? `<img src="${esc(scope.personThumb)}" alt="">` : `<span class="tk-glyph">${icon('users')}</span>`;
+        chips.push(chipHtml('people', display, face, 'person-chip'));
+    }
     if (scope.flag) chips.push(chipHtml('flag', scope.flag === 'picked' ? 'Picked' : scope.flag === 'rejected' ? 'Rejected' : 'Unflagged'));
     if (scope.folder) chips.push(chipHtml('folder', scope.folder.split('/').filter(Boolean).pop() || scope.folder));
     if (scope.date_taken) chips.push(chipHtml('date_taken', dateLabel(scope.date_taken)));
@@ -131,12 +140,15 @@ export function scopeTokenHtml() {
     const count = viewState.visibleImages ? `<span class="tk-count">- ${fmt(viewState.visibleImages)}</span>` : '';
     if (scope.people) {
         const label = cleanPersonLabel({ label: scope.personLabel });
+        const display = label === 'Unnamed' ? 'Add name' : label;
         const img = scope.personThumb ? `<img src="${esc(scope.personThumb)}" alt="">` : `<span class="tk-glyph">${icon('users')}</span>`;
-        return `<span class="scope-token" title="${esc(label)}">${img}<b title="${esc(label)}">${esc(label)}</b>${count}</span>`;
+        return `<span class="scope-token person-token" title="${esc(display)}">${img}<b title="${esc(display)}">${esc(display)}</b>${count}</span>`;
     }
     if (scope.collectionId) {
         const label = scope.collectionName || 'Collection';
-        return `<span class="scope-token" title="${esc(label)}"><span class="tk-glyph">${icon('folder')}</span><b title="${esc(label)}">${esc(label)}</b>${count}</span>`;
+        const glyph = scope.collectionSmart ? 'sparkles' : 'folder';
+        const cls = scope.collectionSmart ? ' smart-token' : '';
+        return `<span class="scope-token${cls}" title="${esc(label)}"><span class="tk-glyph ${scope.collectionSmart ? 'tk-spark' : ''}">${icon(glyph)}</span><b title="${esc(label)}">${esc(label)}</b>${count}</span>`;
     }
     if (scope.import_batch) {
         const label = scope.importBatchLabel || `Import ${scope.import_batch}`;

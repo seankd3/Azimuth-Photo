@@ -157,8 +157,9 @@ export async function getCollection(collectionId, { limit = 500, offset = 0 } = 
     return fetchJson(`/api/user-collections/${collectionId}?limit=${limit}&offset=${offset}`, { defaultValue: null });
 }
 
-export async function createCollection(name, imageIds = [], description = '') {
-    return postJson('/api/user-collections', { name, description, image_ids: imageIds });
+export async function createCollection(name, imageIds = [], description = '', query = null) {
+    const payload = query ? { name, query } : { name, description, image_ids: imageIds };
+    return postJson('/api/user-collections', payload);
 }
 
 export async function renameCollection(collectionId, name) {
@@ -167,6 +168,10 @@ export async function renameCollection(collectionId, name) {
 
 export async function deleteCollection(collectionId) {
     return postJson(`/api/user-collections/${collectionId}/delete`);
+}
+
+export async function updateCollection(collectionId, fields = {}) {
+    return postJson(`/api/user-collections/${collectionId}`, fields);
 }
 
 export async function addToCollection(collectionId, imageIds) {
