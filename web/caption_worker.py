@@ -254,7 +254,7 @@ def _caption_cached_preview(cache_path: str, config: dict[str, Any]) -> dict[str
         image = ImageOps.exif_transpose(opened).convert("RGB")
         # Cap visual tokens: Qwen-VL attention memory scales with input pixels,
         # and an uncapped md preview can demand >9 GiB on an 8GB card.
-        image.thumbnail((1024, 1024))
+        image.thumbnail((1280, 1280))
         messages = [
             {
                 "role": "user",
