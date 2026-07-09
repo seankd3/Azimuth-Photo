@@ -245,9 +245,13 @@ async def run_startup(
 
     track_background_task(_start_background_daemon(face_worker.run_face_worker, delay=25.0))
     try:
-        caption_worker.pause_caption_worker(
-            "Captions are stopped until you start them from Background Work."
-        )
+        import settings as _settings
+        if not _settings.get_settings().get("caption_scan_enabled"):
+            caption_worker.pause_caption_worker(
+                "Captions are stopped until you start them from Background Work."
+            )
+        else:
+            caption_worker.resume_caption_worker()
         track_background_task(_start_background_daemon(caption_worker.run_caption_worker, delay=30.0))
     except Exception:
         pass
