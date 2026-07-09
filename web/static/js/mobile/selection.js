@@ -10,7 +10,7 @@ import { applyFlags } from './flags.js';
 import { clearSelection, on, selection } from './state.js';
 import { showToast } from './toast.js';
 import {
-    dismissLayer, layerActive, pushLayer, registerLayer, syncLayerClosed,
+    dismissLayer, dismissLayerThen, layerActive, pushLayer, registerLayer, syncLayerClosed,
 } from './history.js';
 import { icon } from '../icons.js';
 
@@ -53,6 +53,10 @@ function dismissSheet() {
     dismissLayer('sheet', closeSheet);
 }
 
+export function dismissSheetThen(afterClose = null) {
+    dismissLayerThen('sheet', closeSheet, afterClose);
+}
+
 function installSheetKeyboardLift() {
     const sheet = document.getElementById('m-sheet');
     if (!sheet || !window.visualViewport) return;
@@ -66,6 +70,7 @@ function installSheetKeyboardLift() {
         const keyboard = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
         document.body.classList.toggle('sheet-keyboard', keyboard > 24);
         document.documentElement.style.setProperty('--keyboard-offset', `${Math.ceil(keyboard)}px`);
+        document.documentElement.style.setProperty('--visual-vh', `${Math.ceil(vv.height)}px`);
 
         requestAnimationFrame(() => {
             const primary = sheet.querySelector('.sheet-btn:not([hidden]):not(:disabled)');
@@ -92,6 +97,7 @@ function installSheetKeyboardLift() {
         focused = null;
         document.body.classList.remove('sheet-keyboard');
         document.documentElement.style.setProperty('--keyboard-offset', '0px');
+        document.documentElement.style.setProperty('--visual-vh', '100dvh');
     });
     window.visualViewport.addEventListener('resize', adjust);
     window.visualViewport.addEventListener('scroll', adjust);
@@ -103,7 +109,8 @@ function installSheetSwipe() {
 
     sheet.addEventListener('pointerdown', (e) => {
         if (!sheetOpen || !e.isPrimary) return;
-        if (!e.target.closest('.sheet-grab, h3')) return;
+        const fromHandle = Boolean(e.target.closest('.sheet-grab, h3'));
+        if (!fromHandle && sheet.scrollTop > 0) return;
         const now = performance.now();
         drag = {
             id: e.pointerId,
@@ -111,9 +118,11 @@ function installSheetSwipe() {
             prevY: e.clientY,
             prevT: now,
             v: 0,
+            fromHandle,
+            started: fromHandle,
         };
-        sheet.classList.add('dragging');
         sheet.setPointerCapture(e.pointerId);
+        if (fromHandle) sheet.classList.add('dragging');
     });
 
     sheet.addEventListener('pointermove', (e) => {
@@ -124,6 +133,15 @@ function installSheetSwipe() {
         drag.prevY = e.clientY;
         drag.prevT = now;
         let dy = e.clientY - drag.y;
+        if (!drag.started) {
+            if (dy < -2 || sheet.scrollTop > 0) {
+                drag = null;
+                return;
+            }
+            if (dy < 6) return;
+            drag.started = true;
+            sheet.classList.add('dragging');
+        }
         if (dy < 0) dy *= 0.18;
         sheet.style.transform = `translateY(${Math.max(-18, dy)}px)`;
         e.preventDefault();
@@ -131,6 +149,10 @@ function installSheetSwipe() {
 
     const end = (e) => {
         if (!drag || e.pointerId !== drag.id) return;
+        if (!drag.started) {
+            drag = null;
+            return;
+        }
         const dy = e.clientY - drag.y;
         const close = dy > sheet.getBoundingClientRect().height * 0.3 || (dy > 28 && drag.v > 0.55);
         drag = null;
@@ -160,8 +182,7 @@ export async function openCollectionSheet(rawIds, { onDone = null } = {}) {
     );
 
     const finish = () => {
-        closeSheet();
-        if (onDone) onDone();
+        dismissSheetThen(onDone);
     };
 
     sheet.querySelector('#sheet-new-btn').addEventListener('click', async () => {
@@ -245,13 +266,11 @@ export function initSelection() {
 
     const pickSelection = () => {
         const ids = [...selection];
-        dismissLayer('selection', clearSelection);
-        applyFlags(ids, 'picked');
+        dismissLayerThen('selection', clearSelection, () => applyFlags(ids, 'picked'));
     };
     const rejectSelection = () => {
         const ids = [...selection];
-        dismissLayer('selection', clearSelection);
-        applyFlags(ids, 'rejected');
+        dismissLayerThen('selection', clearSelection, () => applyFlags(ids, 'rejected'));
     };
     const openMoreActions = () => {
         const ids = [...selection];
@@ -264,11 +283,13 @@ export function initSelection() {
         );
         for (const row of sheet.querySelectorAll('.sheet-row[data-act]')) {
             row.addEventListener('click', () => {
-                closeSheet();
-                clearSelection();
-                if (row.dataset.act === 'unflag') applyFlags(ids, 'unflagged');
-                else if (row.dataset.act === 'zip') exportImages(ids, 'zip', 'original');
-                else exportImages(ids, row.dataset.act);
+                dismissSheetThen(() => {
+                    dismissLayerThen('selection', clearSelection, () => {
+                        if (row.dataset.act === 'unflag') applyFlags(ids, 'unflagged');
+                        else if (row.dataset.act === 'zip') exportImages(ids, 'zip', 'original');
+                        else exportImages(ids, row.dataset.act);
+                    });
+                });
             });
         }
     };
@@ -277,6 +298,7 @@ export function initSelection() {
         const n = selection.size;
         bar.classList.toggle('on', n > 0);
         bottomBar.classList.toggle('on', n > 0);
+        document.body.classList.toggle('m-selecting', n > 0);
         count.textContent = `${n} selected`;
         if (n > 0 && !layerActive('selection')) pushLayer('selection');
         else if (n === 0) syncLayerClosed('selection');
@@ -291,7 +313,9 @@ export function initSelection() {
     document.getElementById('msb-pick').addEventListener('click', pickSelection);
     document.getElementById('msb-reject').addEventListener('click', rejectSelection);
     document.getElementById('msb-coll').addEventListener('click', () => {
-        openCollectionSheet([...selection], { onDone: clearSelection });
+        openCollectionSheet([...selection], {
+            onDone: () => dismissLayer('selection', clearSelection),
+        });
     });
     document.getElementById('msb-more').addEventListener('click', openMoreActions);
     bottomBar.addEventListener('click', (e) => {

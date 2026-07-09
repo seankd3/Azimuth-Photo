@@ -99,4 +99,8 @@ export function initScrubber() {
 
     on('timeline-scroll', show);
     on('histogram', show);
+    window.addEventListener('resize', show);
+    if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', show);
+    }
 }

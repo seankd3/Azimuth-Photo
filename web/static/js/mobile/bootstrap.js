@@ -10,7 +10,7 @@ import { initViewer } from './viewer.js';
 import { initRefine, showRefine } from './refine.js';
 import { initSearch, showSearch } from './search.js';
 import { initLibrary, showLibrary } from './library.js';
-import { initHistory, replaceTab } from './history.js';
+import { initHistory, onHistoryTab, replaceTab } from './history.js';
 import { mountIconSprite } from '../icons.js';
 import './install.js';
 
@@ -21,7 +21,7 @@ function secureContextBanner() {
     bar.href = target;
     bar.id = 'm-secure-banner';
     bar.textContent = 'Insecure address — tap to open the installable app';
-    bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99;display:block;padding:10px 14px calc(10px);background:#d4a04f;color:#141517;font:600 13px system-ui;text-align:center;text-decoration:none;padding-top:max(10px, env(safe-area-inset-top));';
+    bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:890;display:block;padding:10px 14px calc(10px);background:#d4a04f;color:#141517;font:600 13px system-ui;text-align:center;text-decoration:none;padding-top:max(10px, env(safe-area-inset-top));';
     document.body.appendChild(bar);
 }
 
@@ -76,7 +76,10 @@ function installOfflineBanner() {
 
     const refreshBannerOffset = () => {
         const offlineH = banner && !banner.hidden ? banner.getBoundingClientRect().height : 0;
-        if (secure) secure.style.top = offlineH ? `${offlineH}px` : '0';
+        if (secure) {
+            secure.style.top = offlineH ? `${offlineH}px` : '0';
+            secure.style.paddingTop = offlineH ? '10px' : 'max(10px, env(safe-area-inset-top))';
+        }
         const secureH = secure ? secure.getBoundingClientRect().height : 0;
         const offset = offlineH + secureH;
         document.body.classList.toggle('m-bannered', offset > 0);
@@ -91,8 +94,10 @@ function installOfflineBanner() {
             '#msb-pick',
             '#msb-reject',
             '#msb-coll',
+            '#msb-more',
             '#m-sel-actions [data-action="pick"]',
             '#m-sel-actions [data-action="reject"]',
+            '#m-sel-actions [data-action="more"]',
             '#mv-pick',
             '#mv-reject',
             '#mv-unflag',
@@ -167,6 +172,7 @@ function installTimelinePinch() {
 async function boot() {
     await mountIconSprite();
     initHistory('photos');
+    onHistoryTab(setTab);
     initToast();
     installTabbar();
     installOfflineBanner();

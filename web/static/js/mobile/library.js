@@ -10,7 +10,7 @@ import {
 } from './api.js';
 import { nav, on, rememberImages, setScope, clearScope } from './state.js';
 import { canInstall, promptInstall } from './install.js';
-import { openSheet, closeSheet } from './selection.js';
+import { dismissSheetThen, openSheet } from './selection.js';
 import { showToast } from './toast.js';
 import { openViewer } from './viewer.js';
 import { applyFlags } from './flags.js';
@@ -247,10 +247,11 @@ function openWorkSheet(kind) {
         + `<button class="sheet-btn" id="ml-work-action" data-mutating>${action === 'resume' ? 'Resume' : 'Pause'}</button>`
     );
     sheet.querySelector('#ml-work-action').addEventListener('click', async () => {
-        closeSheet();
-        const result = await setBackgroundWork(kind, action);
-        showToast(result && result.ok ? `${details.title} ${action === 'resume' ? 'resumed' : 'paused'}` : writeFailureMessage());
-        await loadWorkStatus();
+        dismissSheetThen(async () => {
+            const result = await setBackgroundWork(kind, action);
+            showToast(result && result.ok ? `${details.title} ${action === 'resume' ? 'resumed' : 'paused'}` : writeFailureMessage());
+            await loadWorkStatus();
+        });
     });
 }
 
@@ -370,8 +371,7 @@ function suggestionPreviewStrip(suggestion) {
 function openSuggestionReviewSheet(index = activeSuggestionIndex) {
     const visible = visibleSuggestions();
     if (!visible.length) {
-        closeSheet();
-        render();
+        dismissSheetThen(render);
         return;
     }
     activeSuggestionIndex = Math.max(0, Math.min(visible.length - 1, Number(index) || 0));
@@ -482,15 +482,16 @@ function newCollectionSheet() {
     sheet.querySelector('#ml-new-create').addEventListener('click', async () => {
         const name = sheet.querySelector('#ml-new-name').value.trim();
         if (!name) return;
-        closeSheet();
-        const result = await createCollection(name, []);
-        if (result && result.ok) {
-            showToast(`Created “${name}”`);
-            collections = null;
-            loadAll();
-        } else {
-            showToast(writeFailureMessage());
-        }
+        dismissSheetThen(async () => {
+            const result = await createCollection(name, []);
+            if (result && result.ok) {
+                showToast(`Created “${name}”`);
+                collections = null;
+                loadAll();
+            } else {
+                showToast(writeFailureMessage());
+            }
+        });
     });
     sheet.querySelector('#ml-new-name').focus();
 }
@@ -558,17 +559,18 @@ function openCollectionActionsSheet(coll) {
     sheet.querySelector('#ml-rename-save').addEventListener('click', async () => {
         const next = input.value.trim();
         if (!next || next === coll.name) return;
-        closeSheet();
-        const result = await renameCollection(coll.id, next);
-        if (result && result.ok) {
-            showToast(`Renamed to “${next}”`);
-            collections = null;
-            coll.name = next;
-            await loadAll();
-            openCollectionView(coll);
-        } else {
-            showToast(writeFailureMessage());
-        }
+        dismissSheetThen(async () => {
+            const result = await renameCollection(coll.id, next);
+            if (result && result.ok) {
+                showToast(`Renamed to “${next}”`);
+                collections = null;
+                coll.name = next;
+                await loadAll();
+                openCollectionView(coll);
+            } else {
+                showToast(writeFailureMessage());
+            }
+        });
     });
     sheet.querySelector('#ml-share')?.addEventListener('click', () => openCollectionShareSheet(coll));
     const deleteButton = sheet.querySelector('#ml-delete');
@@ -583,17 +585,18 @@ function openCollectionActionsSheet(coll) {
         deleteButton.hidden = false;
     });
     confirm.querySelector('[data-yes]')?.addEventListener('click', async () => {
-        closeSheet();
-        const result = await deleteCollection(coll.id);
-        if (result && result.ok) {
-            showToast(`Deleted “${coll.name}”`);
-            collections = null;
-            counts = null;
-            showingCollection = false;
-            await loadAll();
-        } else {
-            showToast(writeFailureMessage());
-        }
+        dismissSheetThen(async () => {
+            const result = await deleteCollection(coll.id);
+            if (result && result.ok) {
+                showToast(`Deleted “${coll.name}”`);
+                collections = null;
+                counts = null;
+                dismissLayer('collection', closeCollectionView);
+                await loadAll();
+            } else {
+                showToast(writeFailureMessage());
+            }
+        });
     });
     input.focus();
     input.select();
@@ -662,8 +665,7 @@ async function applyShareFavoritesAsPicks(coll, ids) {
     }
     const data = await getCollection(coll.id, 1000);
     rememberImages((data && data.collection && data.collection.images) || []);
-    closeSheet();
-    await applyFlags(ids, 'picked');
+    dismissSheetThen(() => applyFlags(ids, 'picked'));
 }
 
 function shareExpiryControl() {

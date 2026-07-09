@@ -8,9 +8,9 @@
 import { getExif, getSimilar, thumbUrl } from './api.js';
 import { applyFlags } from './flags.js';
 import { byId, nav as appNav, on, rememberImages, setScope } from './state.js';
-import { closeSheet, openCollectionSheet, openSheet } from './selection.js';
+import { dismissSheetThen, openCollectionSheet, openSheet } from './selection.js';
 import { showToast } from './toast.js';
-import { dismissLayer, pushLayer, registerLayer, syncLayerClosed } from './history.js';
+import { dismissLayer, dismissLayerThen, pushLayer, registerLayer, syncLayerClosed } from './history.js';
 import { icon } from '../icons.js';
 
 let root = null;
@@ -149,6 +149,10 @@ function dismissViewer() {
     dismissLayer('viewer', closeViewer);
 }
 
+function dismissViewerThen(afterClose = null) {
+    dismissLayerThen('viewer', closeViewer, afterClose);
+}
+
 function infoSheet() {
     const image = current();
     if (!image) return;
@@ -193,10 +197,12 @@ function infoSheet() {
             similarImages: results,
             label: `Similar to ${image.filename || `photo ${image.id}`}`,
         });
-        closeSheet();
-        closeViewer();
-        appNav.setTab('photos');
-        showToast(`${results.length} similar photos`);
+        dismissSheetThen(() => {
+            dismissViewerThen(() => {
+                appNav.setTab('photos');
+                showToast(`${results.length} similar photos`);
+            });
+        });
     });
     loadExifDetails(sheet, image.id);
 }
@@ -447,6 +453,16 @@ export function initViewer() {
         else if (e.key === 'ArrowRight') nav(1);
         else if (e.key === 'ArrowLeft') nav(-1);
     });
+    const reflow = () => {
+        if (!openState || !zoomed) return;
+        clampPan();
+        applyT();
+    };
+    window.addEventListener('resize', reflow);
+    if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', reflow);
+        window.visualViewport.addEventListener('scroll', reflow);
+    }
 
     on('flags', syncFlagButtons);
     installGestures();

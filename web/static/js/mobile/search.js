@@ -4,7 +4,7 @@
 
 import { getFilterOptions, getPeople, ignorePerson, labelPerson, writeFailureMessage } from './api.js';
 import { nav, setScope } from './state.js';
-import { closeSheet, openSheet } from './selection.js';
+import { dismissSheetThen, openSheet } from './selection.js';
 import { showToast } from './toast.js';
 import { icon } from '../icons.js';
 import { personLabel } from '../people_labels.js';
@@ -71,28 +71,30 @@ function openPersonSheet(person) {
     sheet.querySelector('#mp-save').addEventListener('click', async () => {
         const next = input.value.trim();
         if (!next) return;
-        closeSheet();
-        const result = await labelPerson(person.id, next);
-        if (result && result.ok) {
-            showToast(`Renamed to “${next}”`);
-            people = null;
-            built = false;
-            showSearch();
-        } else {
-            showToast(writeFailureMessage());
-        }
+        dismissSheetThen(async () => {
+            const result = await labelPerson(person.id, next);
+            if (result && result.ok) {
+                showToast(`Renamed to “${next}”`);
+                people = null;
+                built = false;
+                showSearch();
+            } else {
+                showToast(writeFailureMessage());
+            }
+        });
     });
     sheet.querySelector('#mp-ignore').addEventListener('click', async () => {
-        closeSheet();
-        const result = await ignorePerson(person.id);
-        if (result && result.ok) {
-            showToast('Ignored person');
-            people = null;
-            built = false;
-            showSearch();
-        } else {
-            showToast(writeFailureMessage());
-        }
+        dismissSheetThen(async () => {
+            const result = await ignorePerson(person.id);
+            if (result && result.ok) {
+                showToast('Ignored person');
+                people = null;
+                built = false;
+                showSearch();
+            } else {
+                showToast(writeFailureMessage());
+            }
+        });
     });
     input.focus();
 }

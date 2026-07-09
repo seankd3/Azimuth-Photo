@@ -7,6 +7,8 @@ const handlers = new Map();
 let layers = [];
 let tab = 'photos';
 let applyingHistory = false;
+let afterPopCallbacks = [];
+let tabHandler = null;
 
 function appState() {
     return {
@@ -24,6 +26,12 @@ function replaceCurrent() {
     history.replaceState(appState(), '', location.href);
 }
 
+function pushRootGuards(count = 2) {
+    for (let i = 0; i < count; i += 1) {
+        history.pushState(appState(), '', location.href);
+    }
+}
+
 function closeLayerNow(name, options = {}) {
     const handler = handlers.get(name);
     if (handler && typeof handler.close === 'function') {
@@ -36,6 +44,9 @@ export function initHistory(initialTab = 'photos') {
     layers = [];
     if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
     replaceCurrent();
+    // Root guard: rapid Android Back after layer cleanup should land on the
+    // shell, not fall through to the browser's blank/pre-app entry.
+    pushRootGuards();
 
     window.addEventListener('popstate', (event) => {
         const state = event.state && event.state.app === APP_STATE ? event.state : {};
@@ -48,8 +59,13 @@ export function initHistory(initialTab = 'photos') {
             if (!targetLayers.includes(name)) closeLayerNow(name, { fromHistory: true });
         }
         layers = targetLayers;
+        const tabChanged = targetTab !== tab;
         tab = targetTab;
+        if (tabChanged && typeof tabHandler === 'function') tabHandler(targetTab);
         applyingHistory = false;
+        const callbacks = afterPopCallbacks;
+        afterPopCallbacks = [];
+        for (const callback of callbacks) callback();
     });
 }
 
@@ -67,6 +83,7 @@ export function pushLayer(name) {
         replaceCurrent();
         return;
     }
+    if (!layers.length) pushRootGuards();
     layers = layers.filter((layer) => layer !== name);
     layers.push(name);
     history.pushState(appState(), '', location.href);
@@ -79,20 +96,30 @@ export function syncLayerClosed(name) {
 }
 
 export function dismissLayer(name, fallback = null) {
+    dismissLayerThen(name, fallback);
+}
+
+export function dismissLayerThen(name, fallback = null, afterClose = null) {
     const close = fallback || ((options) => closeLayerNow(name, options));
     if (layers[layers.length - 1] === name) {
         applyingHistory = true;
         close({ fromHistory: false });
         applyingHistory = false;
         layers = layers.filter((layer) => layer !== name);
+        if (typeof afterClose === 'function') afterPopCallbacks.push(afterClose);
         history.back();
         return;
     }
     close({ fromHistory: false });
     syncLayerClosed(name);
+    if (typeof afterClose === 'function') afterClose();
 }
 
 export function replaceTab(nextTab) {
     tab = nextTab;
     if (!applyingHistory) replaceCurrent();
+}
+
+export function onHistoryTab(handler) {
+    tabHandler = typeof handler === 'function' ? handler : null;
 }

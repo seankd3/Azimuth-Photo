@@ -9,6 +9,7 @@ import {
     byId, clearScope, clearSelection, emit, on, rememberImages,
     isOffline, scope, scopeActive, scopeParams, selState, selection, selectionChanged,
 } from './state.js';
+import { dismissLayer } from './history.js';
 import { openViewer } from './viewer.js';
 import { tick } from './haptics.js';
 import { icon } from '../icons.js';
@@ -701,12 +702,16 @@ function installPullToRefresh() {
     };
 
     timeline.addEventListener('touchstart', (e) => {
-        if (refreshing || e.touches.length !== 1 || pane.scrollTop > 0) return;
+        if (refreshing || selection.size || isOffline() || e.touches.length !== 1 || pane.scrollTop > 0) return;
         const t = e.touches[0];
         pull = { y: t.clientY, dy: 0, active: false };
     }, { passive: true });
 
     timeline.addEventListener('touchmove', (e) => {
+        if (selection.size || isOffline()) {
+            resetPull();
+            return;
+        }
         if (!pull || e.touches.length !== 1) return;
         const dy = e.touches[0].clientY - pull.y;
         if (dy <= 0 || pane.scrollTop > 0) {
@@ -800,7 +805,8 @@ export function initTimeline() {
     on('selection', syncSelectionCells);
     on('flags', syncFlagCells);
     on('scope', () => {
-        clearSelection();
+        if (selection.size) dismissLayer('selection', clearSelection);
+        else clearSelection();
         reload();
     });
 
