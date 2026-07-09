@@ -74,7 +74,7 @@ async def get_top_images(db_path: str, *, limit: int, catalog_counts: dict):
     try:
         cursor = await conn.execute(
             "SELECT i.id, i.filename, i.filepath, i.elo, i.comparisons, "
-            "i.propagated_updates, i.status, i.flag, i.orientation, i.aspect_ratio, i.date_taken, "
+            "i.propagated_updates, i.status, i.flag, i.orientation, i.aspect_ratio, i.date_taken, i.date_source, "
             "i.camera_make, i.camera_model, i.lens, i.file_ext, i.file_size, "
             "i.width, i.height, i.file_modified_at, i.latitude, i.longitude, i.created_at "
             "FROM images i INDEXED BY idx_images_active_elo "
@@ -105,7 +105,7 @@ async def get_unclassified_images(db_path: str, limit: int = 200):
     conn = await connection.open_async(db_path)
     try:
         cursor = await conn.execute(
-            "SELECT i.id, i.filepath FROM images i "
+            "SELECT i.id, i.filepath, s.path AS source_root FROM images i "
             "JOIN catalog_sources s ON s.id = i.source_id "
             "WHERE i.orientation IS NULL AND s.included = 1 "
             "AND i.status IN ('kept', 'maybe') "
@@ -161,7 +161,15 @@ async def batch_update_metadata(db_path: str, updates: list[tuple]):
     try:
         await conn.executemany(
             "UPDATE images SET "
-            "date_taken = COALESCE(?, date_taken), "
+            "date_taken = CASE "
+            "WHEN ? = 'exif' AND ? IS NOT NULL THEN ? "
+            "WHEN date_taken IS NULL OR date_taken = '' THEN ? "
+            "ELSE date_taken END, "
+            "date_source = CASE "
+            "WHEN ? = 'exif' AND ? IS NOT NULL THEN 'exif' "
+            "WHEN (date_taken IS NULL OR date_taken = '') AND ? IS NOT NULL THEN ? "
+            "WHEN (date_source IS NULL OR date_source = '') AND date_taken IS NOT NULL AND date_taken != '' THEN 'exif' "
+            "ELSE date_source END, "
             "camera_make = COALESCE(?, camera_make), "
             "camera_model = COALESCE(?, camera_model), "
             "lens = COALESCE(?, lens), "

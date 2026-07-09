@@ -32,6 +32,7 @@ CARD_KEYS = {
     "flag",
     "aspect_ratio",
     "date_taken",
+    "date_source",
     "camera_make",
     "camera_model",
     "lens",

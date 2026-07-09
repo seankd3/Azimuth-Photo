@@ -102,7 +102,7 @@ IMAGE_ROW_SELECT = (
     "i.id, i.source_id, i.filename, i.filepath, i.elo, i.comparisons, "
     "i.propagated_updates, "
     "i.status, i.flag, i.aspect_ratio, "
-    "i.date_taken, i.camera_make, i.camera_model, i.lens, i.file_ext, i.file_size, "
+    "i.date_taken, i.date_source, i.camera_make, i.camera_model, i.lens, i.file_ext, i.file_size, "
     "i.file_modified_at, i.width, i.height, i.latitude, i.longitude, i.created_at"
 )
 

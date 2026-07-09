@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 from datetime import datetime
 from pathlib import PurePath
 
 from data import connection as data_connection
 from data.repositories import stacks as stack_repository
-from features.collections.suggestions import _TRAILING_TOKEN_RE, _strip_trailing_noise
 from features.search.similarity import scan_duplicate_pairs
 
 
@@ -21,6 +21,20 @@ TIFF_EXTS = {"tif", "tiff"}
 JPG_EXTS = {"jpg", "jpeg"}
 SOCIAL_HINTS = ("facebook photos", "google photos")
 EXPORTED_EDITS_HINT = "exported edits"
+VARIANT_MARKER_TOKENS = (
+    "-Edit",
+    "-Edit-N",
+    "-FullJPG",
+    "-Discord",
+    "-Edited PNG",
+    "-Web",
+    "-Instagram",
+    "-Print",
+)
+VARIANT_EXTENSION_SIBLING_EXTS = JPG_EXTS | TIFF_EXTS | {"png"}
+VARIANT_GROUP_MEMBER_CAP = 12
+_TRAILING_VARIANT_COUNTER_RE = re.compile(r"-\d+$")
+_VARIANT_MARKER_SUFFIXES = tuple(sorted(VARIANT_MARKER_TOKENS, key=len, reverse=True))
 
 
 def _active_rows(db_path: str) -> dict[int, dict]:
@@ -48,18 +62,44 @@ def _capture_ts(value) -> float | None:
     return None
 
 
-def _variant_stem(filename: str) -> str:
+def _variant_key(filename: str) -> tuple[str, bool]:
     stem = os.path.splitext(filename or "")[0]
-    cleaned = _strip_trailing_noise(stem)
-    if cleaned:
-        return cleaned.lower()
     text = (stem or "").strip(" -_.,")
-    for _ in range(8):
-        next_text = _TRAILING_TOKEN_RE.sub("", text).strip(" -_.,")
-        if not next_text or next_text == text:
+    stripped_marker = False
+    for _ in range(16):
+        counter = _TRAILING_VARIANT_COUNTER_RE.search(text)
+        if counter and _ends_with_variant_marker(text[: counter.start()]):
+            text = text[: counter.start()].strip(" -_.,")
+            continue
+
+        next_text = _strip_variant_marker(text)
+        if next_text is None:
             break
+        stripped_marker = True
         text = next_text
-    return text.lower()
+    return text.lower(), stripped_marker
+
+
+def _variant_stem(filename: str) -> str:
+    return _variant_key(filename)[0]
+
+
+def _ends_with_variant_marker(text: str) -> bool:
+    lower = (text or "").lower()
+    return any(lower.endswith(token.lower()) for token in _VARIANT_MARKER_SUFFIXES)
+
+
+def _strip_variant_marker(text: str) -> str | None:
+    lower = (text or "").lower()
+    for token in _VARIANT_MARKER_SUFFIXES:
+        if lower.endswith(token.lower()):
+            return text[: -len(token)].strip(" -_.,")
+    return None
+
+
+def _image_ext(row: dict) -> str:
+    value = row.get("file_ext") or os.path.splitext(row.get("filename") or "")[1]
+    return str(value or "").lower().lstrip(".")
 
 
 def _top_folder(row: dict) -> str:
@@ -160,22 +200,48 @@ def _groups_from_union(uf: _UnionFind, rows: dict[int, dict], kind: str, scores:
     return groups
 
 
-def build_variant_groups(db_path: str, rows: dict[int, dict] | None = None):
+def _build_variant_groups_with_stats(db_path: str, rows: dict[int, dict] | None = None) -> dict:
     rows = rows or _active_rows(db_path)
-    grouped: dict[tuple[str, str], list[int]] = {}
+    grouped: dict[tuple[str, str], list[dict]] = {}
     for image_id, row in rows.items():
-        stem = _variant_stem(row.get("filename") or "")
+        stem, stripped_marker = _variant_key(row.get("filename") or "")
         if not stem:
             continue
         folder = os.path.dirname(row.get("filepath") or "")
-        grouped.setdefault((folder, stem), []).append(image_id)
+        grouped.setdefault((folder, stem), []).append({
+            "image_id": image_id,
+            "stripped_marker": stripped_marker,
+            "ext": _image_ext(row),
+        })
     groups = []
-    for member_ids in grouped.values():
-        if len(member_ids) < 2:
+    oversize_candidate_groups = 0
+    for members in grouped.values():
+        if len(members) < 2:
+            continue
+        has_marker = any(member["stripped_marker"] for member in members)
+        sibling_exts = {
+            member["ext"]
+            for member in members
+            if member["ext"] in VARIANT_EXTENSION_SIBLING_EXTS
+        }
+        if not has_marker and len(sibling_exts) < 2:
+            continue
+        member_ids = [int(member["image_id"]) for member in members]
+        if len(member_ids) > VARIANT_GROUP_MEMBER_CAP:
+            oversize_candidate_groups += 1
             continue
         rep_id = representative_id(member_ids, rows, kind="variant")
         groups.append((member_ids, rep_id, {}))
-    return groups
+    if oversize_candidate_groups:
+        logger.warning("Skipped %s oversize variant candidate groups", oversize_candidate_groups)
+    return {
+        "groups": groups,
+        "oversize_candidate_groups": oversize_candidate_groups,
+    }
+
+
+def build_variant_groups(db_path: str, rows: dict[int, dict] | None = None):
+    return _build_variant_groups_with_stats(db_path, rows)["groups"]
 
 
 def _embedding_pairs():
@@ -249,6 +315,25 @@ def build_embedding_groups(db_path: str, rows: dict[int, dict] | None = None):
     }
 
 
+def _auto_stack_counts(db_path: str, kinds) -> dict[str, int]:
+    requested = [kind for kind in kinds if kind in STACK_KINDS]
+    if not requested:
+        return {}
+    placeholders = ",".join("?" for _ in requested)
+    conn = data_connection.open_sync(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT kind, COUNT(*) AS count FROM stacks "
+            f"WHERE auto = 1 AND kind IN ({placeholders}) "
+            "GROUP BY kind",
+            requested,
+        ).fetchall()
+        counts = {str(row["kind"]): int(row["count"]) for row in rows}
+        return {kind: counts.get(kind, 0) for kind in requested}
+    finally:
+        data_connection.close_sync(conn, db_path=db_path)
+
+
 def rebuild_stacks(db_path: str, kinds=None) -> dict:
     requested = tuple(kind for kind in (kinds or STACK_KINDS) if kind in STACK_KINDS)
     timings = {}
@@ -265,13 +350,27 @@ def rebuild_stacks(db_path: str, kinds=None) -> dict:
     build_order = [kind for kind in ("burst", "variant", "crosssource") if kind in requested]
     for kind in build_order:
         kind_started = time.perf_counter()
+        variant_stats = {}
         if kind == "variant":
-            groups = build_variant_groups(db_path, rows)
+            variant_stats = _build_variant_groups_with_stats(db_path, rows)
+            groups = variant_stats["groups"]
         else:
             groups = embedding_groups.get(kind) or []
         upserted = stack_repository.upsert_auto_stacks_sync(db_path, kind, groups)
-        results[kind] = {**upserted, "candidate_groups": len(groups)}
+        results[kind] = {
+            **upserted,
+            "inserted": upserted.get("created", 0),
+            "candidate_groups": len(groups),
+        }
+        if variant_stats.get("oversize_candidate_groups"):
+            results[kind]["skipped_oversize_candidate_groups"] = variant_stats["oversize_candidate_groups"]
         timings[f"{kind}_ms"] = round((time.perf_counter() - kind_started) * 1000, 1)
+
+    final_counts = _auto_stack_counts(db_path, build_order)
+    for kind, count in final_counts.items():
+        if kind in results:
+            results[kind]["created"] = count
+            results[kind]["stack_count"] = count
 
     if embedding_groups.get("skipped"):
         results["embedding_skipped"] = embedding_groups["skipped"]

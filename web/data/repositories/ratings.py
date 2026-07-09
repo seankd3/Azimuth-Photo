@@ -75,7 +75,7 @@ async def active_images_for_pairing(db_path: str, *, catalog_counts: dict):
         cursor = await conn.execute(
             "SELECT i.id, i.filename, i.filepath, i.elo, i.comparisons, "
             "i.propagated_updates, i.status, i.flag, i.orientation, "
-            "i.aspect_ratio, i.date_taken, i.camera_make, i.camera_model, "
+            "i.aspect_ratio, i.date_taken, i.date_source, i.camera_make, i.camera_model, "
             "i.lens, i.file_ext FROM images i "
             "WHERE i.status IN ('kept', 'maybe') "
             f"{source_filter}"
@@ -155,7 +155,7 @@ async def visible_images_for_pairing(
         cursor = await conn.execute(
             "SELECT i.id, i.filename, i.filepath, i.elo, i.comparisons, "
             "i.propagated_updates, i.status, i.flag, i.orientation, "
-            "i.aspect_ratio, i.date_taken, i.camera_make, i.camera_model, "
+            "i.aspect_ratio, i.date_taken, i.date_source, i.camera_make, i.camera_model, "
             f"i.lens, i.file_ext{', ' if metadata_columns else ' '}{metadata_columns}"
             f"{from_sql}"
             f"{where_sql}"

@@ -3,6 +3,7 @@ import copy
 
 METADATA_FIELDS = (
     "date_taken",
+    "date_source",
     "camera_make",
     "camera_model",
     "lens",

@@ -2,10 +2,11 @@
 
 import os
 
+from date_inference import infer_image_date
 from data.repositories import catalog as catalog_repository
 
 EXPECTED_EMBEDDING_DIM = 2048  # Qwen3-VL-Embedding-2B native dimension
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS catalog_sources (
@@ -34,6 +35,7 @@ CREATE TABLE IF NOT EXISTS images (
     flag TEXT DEFAULT 'unflagged',
     orientation TEXT DEFAULT NULL,
     date_taken TEXT DEFAULT NULL,
+    date_source TEXT DEFAULT NULL,
     camera_make TEXT DEFAULT NULL,
     camera_model TEXT DEFAULT NULL,
     lens TEXT DEFAULT NULL,
@@ -561,6 +563,7 @@ IMAGE_COMPAT_COLUMNS = (
     ("uncertainty", "REAL DEFAULT NULL"),
     ("aspect_ratio", "REAL DEFAULT NULL"),
     ("date_taken", "TEXT DEFAULT NULL"),
+    ("date_source", "TEXT DEFAULT NULL"),
     ("camera_make", "TEXT DEFAULT NULL"),
     ("camera_model", "TEXT DEFAULT NULL"),
     ("lens", "TEXT DEFAULT NULL"),
@@ -788,6 +791,7 @@ REQUIRED_COLUMNS = {
         "uncertainty",
         "aspect_ratio",
         "date_taken",
+        "date_source",
         "camera_make",
         "camera_model",
         "lens",
@@ -916,6 +920,44 @@ async def backfill_legacy_aspect_ratios(conn) -> None:
     await conn.execute(
         "UPDATE images SET aspect_ratio = 0.6667 WHERE orientation = 'portrait' AND aspect_ratio IS NULL"
     )
+
+
+async def backfill_image_date_sources(conn) -> int:
+    """Populate date_source and infer missing dates for legacy rows."""
+
+    changed = 0
+    cursor = await conn.execute(
+        "UPDATE images SET date_source = 'exif' "
+        "WHERE date_taken IS NOT NULL AND date_taken != '' "
+        "AND (date_source IS NULL OR date_source = '')"
+    )
+    changed += max(int(cursor.rowcount or 0), 0)
+
+    cursor = await conn.execute(
+        "SELECT i.id, i.filename, i.filepath, i.file_modified_at, s.path AS source_root "
+        "FROM images i "
+        "LEFT JOIN catalog_sources s ON s.id = i.source_id "
+        "WHERE i.date_taken IS NULL OR i.date_taken = ''"
+    )
+    updates = []
+    for row in await cursor.fetchall():
+        inferred = infer_image_date(
+            filename=row["filename"] or "",
+            filepath=row["filepath"] or "",
+            file_modified_at=row["file_modified_at"],
+            source_root=row["source_root"],
+        )
+        if inferred is None:
+            continue
+        updates.append((inferred.date_taken, inferred.date_source, row["id"]))
+    if updates:
+        await conn.executemany(
+            "UPDATE images SET date_taken = ?, date_source = ? "
+            "WHERE id = ? AND (date_taken IS NULL OR date_taken = '')",
+            updates,
+        )
+        changed += len(updates)
+    return changed
 
 
 async def _executescript_in_transaction(conn, script: str) -> None:

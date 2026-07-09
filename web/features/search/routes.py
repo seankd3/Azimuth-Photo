@@ -288,7 +288,7 @@ async def api_exif(image_id: int):
 
     row = dict(image)
     for key in (
-        "date_taken", "camera_make", "camera_model", "lens", "file_ext",
+        "date_taken", "date_source", "camera_make", "camera_model", "lens", "file_ext",
         "file_size", "file_modified_at", "latitude", "longitude",
     ):
         if not exif.get(key) and row.get(key) is not None:

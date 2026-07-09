@@ -267,6 +267,7 @@ async def store_search_query_embedding(config: dict, query: str, blob: bytes):
 
 _ensure_metadata_fts = data_schema.ensure_metadata_fts
 _apply_schema_and_migrations = data_schema.apply_schema_and_migrations
+_backfill_image_date_sources = data_schema.backfill_image_date_sources
 
 
 async def init_db():
@@ -290,6 +291,9 @@ async def init_db():
             return
         await _apply_schema_and_migrations(db, db_exists=db_exists)
         await _migrate_catalog_sources(db)
+        if await _backfill_image_date_sources(db):
+            cache_events.invalidate_rankings_cache()
+            _invalidate_filter_options_cache()
         await _refresh_source_online_states_on_conn(db)
         await _ensure_embedding_model_tables(db)
         _ensured_embedding_model_keys.clear()
@@ -332,6 +336,7 @@ async def batch_update_metadata(updates: list[tuple]):
         return
     await image_repository.batch_update_metadata(DB_PATH, updates)
     _invalidate_filter_options_cache()
+    cache_events.invalidate_rankings_cache()
 
 
 async def insert_images_batch(rows: list[tuple], source_id: int | None = None):
@@ -341,6 +346,7 @@ async def insert_images_batch(rows: list[tuple], source_id: int | None = None):
     await catalog_repository.insert_images_batch(DB_PATH, rows, source_id)
     _invalidate_stats_cache()
     _invalidate_filter_options_cache()
+    cache_events.invalidate_rankings_cache()
 
 
 async def refresh_source_online_states():

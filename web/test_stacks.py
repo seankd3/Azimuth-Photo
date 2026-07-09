@@ -98,7 +98,37 @@ class StackTestCase(unittest.IsolatedAsyncioTestCase):
 
         embed_cache.get_matrix = fake_get_matrix
 
-    async def test_variant_builder_strips_export_noise_family(self):
+    async def test_variant_builder_keeps_sequential_export_numbers(self):
+        source = await self._source("catalog")
+        image_ids = [
+            await self._image(source, f"SKD-Starbase-2024-12-03-{index}.jpg", folder="shoot")
+            for index in range(1, 6)
+        ]
+
+        groups = builders.build_variant_groups(db.DB_PATH)
+
+        sequential_ids = set(image_ids)
+        self.assertFalse(any(sequential_ids.issubset(set(group[0])) for group in groups))
+
+    async def test_variant_builder_groups_edit_family(self):
+        source = await self._source("catalog")
+        first = await self._image(
+            source,
+            "20201119-IMG_4860-Edit.jpg",
+            folder="shoot",
+            file_ext="jpg",
+        )
+        second = await self._image(
+            source,
+            "20201119-IMG_4860.jpg",
+            folder="shoot",
+            file_ext="jpg",
+        )
+        groups = builders.build_variant_groups(db.DB_PATH)
+        member_sets = [set(group[0]) for group in groups]
+        self.assertIn({first, second}, member_sets)
+
+    async def test_variant_builder_strips_marker_counter_chain(self):
         source = await self._source("catalog")
         first = await self._image(
             source,
@@ -115,6 +145,29 @@ class StackTestCase(unittest.IsolatedAsyncioTestCase):
         groups = builders.build_variant_groups(db.DB_PATH)
         member_sets = [set(group[0]) for group in groups]
         self.assertIn({first, second}, member_sets)
+
+    async def test_variant_builder_groups_same_stem_extension_siblings(self):
+        source = await self._source("catalog")
+        jpg = await self._image(source, "IMG_4860.jpg", folder="shoot", file_ext="jpg")
+        png = await self._image(source, "IMG_4860.png", folder="shoot", file_ext="png")
+
+        groups = builders.build_variant_groups(db.DB_PATH)
+
+        member_sets = [set(group[0]) for group in groups]
+        self.assertIn({jpg, png}, member_sets)
+
+    async def test_variant_rebuild_skips_and_reports_oversize_candidates(self):
+        source = await self._source("catalog")
+        for index in range(13):
+            await self._image(source, f"IMG_1000-Edit-{index + 1}.jpg", folder="shoot")
+
+        result = builders.rebuild_stacks(db.DB_PATH, kinds=["variant"])
+
+        variant_result = result["results"]["variant"]
+        self.assertEqual(variant_result["candidate_groups"], 0)
+        self.assertEqual(variant_result["created"], 0)
+        self.assertEqual(variant_result["stack_count"], 0)
+        self.assertEqual(variant_result["skipped_oversize_candidate_groups"], 1)
 
     async def test_burst_builder_respects_sixty_second_capture_gap(self):
         source = await self._source("catalog")
@@ -201,6 +254,46 @@ class StackTestCase(unittest.IsolatedAsyncioTestCase):
         third_stack = await stack_repository.stack_for_image(db.DB_PATH, third)
         self.assertEqual(third_stack["kind"], "variant")
         self.assertEqual({member["id"] for member in third_stack["members"]}, {third, fourth})
+
+    async def test_rebuild_reports_final_counts_after_priority_steals(self):
+        primary = await self._source("catalog")
+        exported = await self._source("Exported Edits")
+        first = await self._image(
+            primary,
+            "first.jpg",
+            date_taken="2024-01-01 10:00:00",
+            camera_model="X100",
+        )
+        second = await self._image(
+            primary,
+            "second.jpg",
+            date_taken="2024-01-01 10:00:30",
+            camera_model="X100",
+        )
+        third = await self._image(
+            exported,
+            "first.jpg",
+            date_taken="2024-01-02 10:00:00",
+            camera_model="GFX",
+        )
+        angle = math.acos(0.93)
+        matrix = np.array(
+            [
+                [1.0, 0.0],
+                [math.cos(angle), math.sin(angle)],
+                [1.0, 0.0],
+            ],
+            dtype=np.float32,
+        )
+        self._stub_embeddings([first, second, third], matrix)
+
+        result = await asyncio.to_thread(builders.rebuild_stacks, db.DB_PATH, ["burst", "crosssource"])
+
+        self.assertEqual(result["results"]["burst"]["created"], 0)
+        self.assertEqual(result["results"]["burst"]["inserted"], 1)
+        self.assertEqual(result["results"]["burst"]["stack_count"], 0)
+        self.assertEqual(result["results"]["crosssource"]["created"], 1)
+        self.assertEqual(result["results"]["crosssource"]["stack_count"], 1)
 
     async def test_collapsed_rankings_exclude_non_reps_and_annotate_representatives(self):
         source = await self._source("catalog")

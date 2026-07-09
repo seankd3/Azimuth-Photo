@@ -25,6 +25,7 @@ def configure_database_backed_providers() -> None:
     import helpers as app_helpers
     import scanner
     import thumbnails
+    from core import cache_events
     from features.catalog import metadata as catalog_metadata
 
     embed_cache.configure(
@@ -73,6 +74,7 @@ def configure_database_backed_providers() -> None:
     catalog_metadata.configure(
         db_path=lambda: db.DB_PATH,
         invalidate_filter_options_cache=db._invalidate_filter_options_cache,
+        invalidate_rankings_cache=cache_events.invalidate_rankings_cache,
     )
     scanner.configure(
         mark_source_scan_started=lambda source_id: db.mark_source_scan_started(source_id),

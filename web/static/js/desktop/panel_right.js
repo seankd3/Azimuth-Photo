@@ -121,6 +121,12 @@ function metaRow(label, value) {
     return `<div class="meta-row"><span class="k">${esc(label)}</span><span class="v" title="${esc(value || '')}">${esc(value || '—')}</span></div>`;
 }
 
+function takenLabel(img) {
+    const date = img.date_taken || '';
+    if (!date) return '';
+    return img.date_source && img.date_source !== 'exif' ? `${date} · approx` : date;
+}
+
 function renderExifRows(host, exif) {
     const entries = Object.entries(exif || {})
         .filter(([, value]) => value != null && value !== '')
@@ -152,7 +158,7 @@ function renderMetadata(img) {
     const size = img.width && img.height ? `${fmt(img.width)} × ${fmt(img.height)}` : '—';
     host.innerHTML = '<div class="meta-rows">'
         + metaRow('File', img.filename)
-        + metaRow('Taken', img.date_taken)
+        + metaRow('Taken', takenLabel(img))
         + metaRow('Camera', camera(img))
         + metaRow('Lens', img.lens)
         + metaRow('Size', `${size}${img.file_size ? ` · ${bytes(img.file_size)}` : ''}`)

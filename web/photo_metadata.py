@@ -106,6 +106,7 @@ def _apply_sidecar_metadata(metadata: dict, filepath: str) -> None:
         parsed_taken = _parse_unix_timestamp(taken)
         if parsed_taken:
             metadata.setdefault("date_taken", parsed_taken)
+            metadata.setdefault("date_source", "exif")
 
         make = _clean_text(sidecar.get("cameraMake") or sidecar.get("camera_make"))
         model = _clean_text(sidecar.get("cameraModel") or sidecar.get("camera_model"))
@@ -301,6 +302,7 @@ def extract_image_metadata(filepath: str) -> dict:
         metadata["date"] = _clean_text(raw_date)
         if parsed:
             metadata["date_taken"] = parsed
+            metadata["date_source"] = "exif"
 
     width = all_tags.get("ExifImageWidth") or all_tags.get("ImageWidth")
     height = all_tags.get("ExifImageHeight") or all_tags.get("ImageLength")

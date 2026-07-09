@@ -4,6 +4,7 @@ import asyncio
 import time
 from collections.abc import Callable
 
+from date_inference import infer_image_date
 import photo_metadata
 from core import work_coordination
 from data.repositories import images as image_repository
@@ -14,6 +15,7 @@ Invalidator = Callable[[], None]
 
 _db_path: DbPathProvider | None = None
 _invalidate_filter_options_cache: Invalidator | None = None
+_invalidate_rankings_cache: Invalidator | None = None
 _metadata_manual_pause = True
 _status = {
     "state": "paused",
@@ -31,10 +33,12 @@ def configure(
     *,
     db_path: DbPathProvider,
     invalidate_filter_options_cache: Invalidator,
+    invalidate_rankings_cache: Invalidator,
 ) -> None:
-    global _db_path, _invalidate_filter_options_cache
+    global _db_path, _invalidate_filter_options_cache, _invalidate_rankings_cache
     _db_path = db_path
     _invalidate_filter_options_cache = invalidate_filter_options_cache
+    _invalidate_rankings_cache = invalidate_rankings_cache
 
 
 def _configured_db_path() -> str:
@@ -44,9 +48,10 @@ def _configured_db_path() -> str:
 
 
 def _invalidate_filter_options() -> None:
-    if _invalidate_filter_options_cache is None:
+    if _invalidate_filter_options_cache is None or _invalidate_rankings_cache is None:
         raise RuntimeError("Catalog metadata workers are not configured")
     _invalidate_filter_options_cache()
+    _invalidate_rankings_cache()
 
 
 def pause_catalog_metadata() -> dict:
@@ -167,8 +172,28 @@ def metadata_update_tuple(image_id: int, metadata: dict):
         except Exception:
             pass
 
+    date_taken = metadata.get("date_taken") or None
+    date_source = metadata.get("date_source") or ("exif" if date_taken else None)
+    if not date_taken:
+        inferred = infer_image_date(
+            filename=metadata.get("filename") or "",
+            filepath=metadata.get("filepath") or "",
+            file_modified_at=metadata.get("file_modified_at"),
+            source_root=metadata.get("source_root"),
+        )
+        if inferred:
+            date_taken = inferred.date_taken
+            date_source = inferred.date_source
+
     return (
-        metadata.get("date_taken") or None,
+        date_source,
+        date_taken,
+        date_taken,
+        date_taken,
+        date_source,
+        date_taken,
+        date_taken,
+        date_source,
         metadata.get("camera_make") or None,
         metadata.get("camera_model") or None,
         metadata.get("lens") or None,
@@ -195,6 +220,7 @@ async def scan_metadata_background():
         updates = []
         for row in rows:
             metadata = photo_metadata.extract_image_metadata(row["filepath"])
+            metadata["source_root"] = row["source_root"]
             updates.append(metadata_update_tuple(row["id"], metadata))
         return updates
 

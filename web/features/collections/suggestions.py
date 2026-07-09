@@ -15,6 +15,7 @@ import time
 from datetime import datetime
 from pathlib import PurePosixPath
 
+from date_inference import DATE_RE
 from data import connection
 
 EVENT_GAP_SECONDS = 6 * 3600
@@ -29,7 +30,7 @@ MEMBER_ID_LIMIT = 500
 EXISTING_OVERLAP_LIMIT = 0.7
 _CACHE_TTL_SECONDS = 600.0
 _DEFAULT_COHERENCE = 0.72
-_DATE_RE = re.compile(r"(?<!\d)(?P<year>20\d{2}|19\d{2})[-_ ]?(?P<month>\d{2})[-_ ]?(?P<day>\d{2})(?!\d)")
+_DATE_RE = DATE_RE
 _CAMERA_STEM_RE = re.compile(
     r"^(?:IMG|DSC|PXL|DJI|LRT|R5|R5_|7N4A|_MG|MG|PHOTO|VID)[-_]?\d+",
     re.IGNORECASE,

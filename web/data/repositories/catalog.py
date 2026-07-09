@@ -4,6 +4,7 @@ import asyncio
 import os
 import time as _time
 
+from date_inference import infer_image_date
 from data import connection
 from data.repositories.common import chunked as _chunked
 
@@ -102,6 +103,25 @@ def insert_row_with_file_metadata(row):
     return filename, filepath, file_ext, file_size, file_modified_at
 
 
+def _insert_row_with_inferred_date(row, source_root: str | None = None):
+    filename, filepath, file_ext, file_size, file_modified_at = insert_row_with_file_metadata(row)
+    inferred = infer_image_date(
+        filename=filename,
+        filepath=filepath,
+        file_modified_at=file_modified_at,
+        source_root=source_root,
+    )
+    return (
+        filename,
+        filepath,
+        file_ext,
+        file_size,
+        file_modified_at,
+        inferred.date_taken if inferred else None,
+        inferred.date_source if inferred else None,
+    )
+
+
 async def ensure_catalog_source_on_conn(conn, path: str, *, included: bool = True, last_scan_at=None):
     normalized = normalize_source_path(path)
     display_name = source_display_name(normalized)
@@ -184,12 +204,18 @@ async def insert_images_batch(db_path: str, rows: list[tuple], source_id: int | 
         return
     conn = await connection.open_async(db_path)
     try:
-        normalized_rows = [insert_row_with_file_metadata(row) for row in rows]
+        source_root = None
+        if source_id is not None:
+            cursor = await conn.execute("SELECT path FROM catalog_sources WHERE id = ?", (source_id,))
+            source = await cursor.fetchone()
+            if source:
+                source_root = source["path"]
+        normalized_rows = [_insert_row_with_inferred_date(row, source_root) for row in rows]
         if source_id is not None:
             await conn.executemany(
                 "INSERT OR IGNORE INTO images "
-                "(source_id, filename, filepath, status, file_ext, file_size, file_modified_at) "
-                "VALUES (?, ?, ?, 'kept', ?, ?, ?)",
+                "(source_id, filename, filepath, status, file_ext, file_size, file_modified_at, date_taken, date_source) "
+                "VALUES (?, ?, ?, 'kept', ?, ?, ?, ?, ?)",
                 [(source_id, *row) for row in normalized_rows],
             )
             await conn.executemany(
@@ -199,10 +225,12 @@ async def insert_images_batch(db_path: str, rows: list[tuple], source_id: int | 
                 "file_ext = COALESCE(?, file_ext), "
                 "file_size = COALESCE(?, file_size), "
                 "file_modified_at = COALESCE(?, file_modified_at), "
+                "date_taken = CASE WHEN date_taken IS NULL OR date_taken = '' THEN ? ELSE date_taken END, "
+                "date_source = CASE WHEN date_taken IS NULL OR date_taken = '' THEN ? ELSE date_source END, "
                 "missing_at = NULL "
                 "WHERE filepath = ? AND (source_id = ? OR source_id IS NULL)",
                 [
-                    (source_id, row[0], row[2], row[3], row[4], row[1], source_id)
+                    (source_id, row[0], row[2], row[3], row[4], row[5], row[6], row[1], source_id)
                     for row in normalized_rows
                 ],
             )
@@ -210,8 +238,8 @@ async def insert_images_batch(db_path: str, rows: list[tuple], source_id: int | 
         else:
             await conn.executemany(
                 "INSERT OR IGNORE INTO images "
-                "(filename, filepath, status, file_ext, file_size, file_modified_at) "
-                "VALUES (?, ?, 'kept', ?, ?, ?)",
+                "(filename, filepath, status, file_ext, file_size, file_modified_at, date_taken, date_source) "
+                "VALUES (?, ?, 'kept', ?, ?, ?, ?, ?)",
                 normalized_rows,
             )
         await conn.commit()
