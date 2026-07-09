@@ -25,16 +25,21 @@ export function exportUrl(params) {
     return `/api/export?${params.toString()}`;
 }
 
-export async function getRankings(params) {
-    return fetchJson(`/api/rankings?${params.toString()}`, { defaultValue: null });
+export async function getRankings(params, options = {}) {
+    return fetchJson(`/api/rankings?${params.toString()}`, { defaultValue: null, ...options });
 }
 
 export async function getPeople(limit = 48) {
     return fetchJson(`/api/people?limit=${limit}`, { defaultValue: null });
 }
 
-export async function getFolders() {
-    return fetchJson('/api/folders?max_depth=0', { defaultValue: null });
+export async function getFolders(maxDepth = 0) {
+    const suffix = maxDepth == null ? '' : `?max_depth=${encodeURIComponent(maxDepth)}`;
+    return fetchJson(`/api/folders${suffix}`, { defaultValue: null });
+}
+
+export async function getFolderTree() {
+    return fetchJson('/api/folders/tree', { defaultValue: null });
 }
 
 export async function getFilterOptions() {

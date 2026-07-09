@@ -24,6 +24,7 @@ let resizeHandler = null;
 let resizeTimer = null;
 let lastThumbSize = viewState.thumbSize;
 let previousFocusedCell = null;
+let savedScrollTop = 0;
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -115,7 +116,7 @@ function renderError(message) {
 }
 
 async function loadPage() {
-    if (!mounted || loading || done) return false;
+    if (loading || done) return false;
     loading = true;
     const seq = generation;
     const pageSize = 100;
@@ -167,7 +168,7 @@ async function loadPage() {
 }
 
 export async function requestMorePhotos() {
-    if (!mounted || loading || done) return false;
+    if (loading || done) return false;
     return loadPage();
 }
 
@@ -344,11 +345,20 @@ export function mountGrid() {
         if (entries.some((entry) => entry.isIntersecting)) loadPage();
     }, { root: document.getElementById('canvas'), rootMargin: '900px 0px' });
     sentinelObserver.observe(document.getElementById('grid-sentinel'));
-    loadFirstPage();
+    if (viewState.images.length || offset > 0) {
+        observeImages(document.getElementById('grid-flow'));
+        requestAnimationFrame(() => {
+            document.getElementById('canvas').scrollTo({ top: savedScrollTop, behavior: 'auto' });
+            setFocus(viewState.focusIndex);
+        });
+    } else {
+        loadFirstPage();
+    }
 }
 
 export function unmountGrid() {
     mounted = false;
+    savedScrollTop = document.getElementById('canvas').scrollTop;
     generation += 1;
     loading = false;
     resetImageObserver();

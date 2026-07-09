@@ -1,10 +1,11 @@
-import { byId, emit, on, rememberImages, viewState } from './state.js';
+import {
+    byId, emit, on, rememberImages, setActiveLens, viewState,
+} from './state.js';
 import { thumbUrl, writeFlag } from './api.js';
 import { applyFlags } from './selection.js';
 import { openCollectionPicker } from './panel.js';
 import { requestMorePhotos } from './grid.js';
 import { showToast } from './toast.js';
-import { releaseFocus, trapFocus } from './focusTrap.js';
 
 const ZOOM_STEP = 1.15;
 const MAX_SCALE = 4;
@@ -26,6 +27,7 @@ let dragState = null;
 let renderToken = 0;
 let fullImageLoadingId = null;
 let imageWaiters = [];
+let lightMode = 'normal';
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&#34;', "'": '&#39;',
@@ -244,6 +246,8 @@ function preloadNeighbors() {
 function updateChrome() {
     const img = current();
     if (!img) return;
+    if (isGridScope()) viewState.focusIndex = index;
+    emit('focus', { image: img, index });
     document.getElementById('loupe-cap').textContent = caption(img);
     updateFlagControls();
     updateZoomChip();
@@ -325,25 +329,47 @@ export function openLoupe(target = 0) {
         : document.querySelector(`.cell[data-idx="${startIndex}"]`);
     index = Math.max(0, Math.min(list.length - 1, resolvedIndex >= 0 ? resolvedIndex : startIndex));
     open = true;
+    setLightMode('normal');
+    setActiveLens('loupe');
     const root = document.getElementById('loupe');
-    root.hidden = false;
-    trapFocus(root, root);
-    render();
+    if (!root.hidden) render();
 }
 
 export function closeLoupe(options = {}) {
     if (!open) return;
+    if (!options.force && lightMode !== 'normal') {
+        setLightMode(lightMode === 'lights-out' ? 'dim' : 'normal');
+        return;
+    }
     if (!options.force && zoomMode !== 'fit') {
         centerFit();
         return;
     }
+    setLightMode('normal');
+    setActiveLens('grid');
+}
+
+export function mountLoupe() {
+    if (!open) open = true;
+    document.getElementById('view-loupe').classList.add('active');
+    const root = document.getElementById('loupe');
+    root.hidden = false;
+    setLightMode(lightMode);
+    render();
+}
+
+export function unmountLoupe() {
     open = false;
     sessionImages = null;
     imageWaiters = [];
     const root = document.getElementById('loupe');
     root.hidden = true;
-    releaseFocus(root);
-    if (returnCell) returnCell.focus({ preventScroll: true });
+    document.getElementById('view-loupe').classList.remove('active');
+    setLightMode('normal');
+    if (returnCell) {
+        const target = returnCell;
+        requestAnimationFrame(() => target.focus({ preventScroll: true }));
+    }
 }
 
 export function loupeOpen() {
@@ -359,6 +385,21 @@ export async function navLoupe(delta) {
     if (!available) return;
     index = targetIndex;
     render();
+}
+
+function setLightMode(next) {
+    lightMode = next === 'dim' || next === 'lights-out' ? next : 'normal';
+    document.body.classList.toggle('loupe-lights-dim', lightMode === 'dim');
+    document.body.classList.toggle('loupe-lights-out', lightMode === 'lights-out');
+    const root = document.getElementById('loupe');
+    if (root) root.dataset.lights = lightMode;
+}
+
+export function toggleLoupeLights() {
+    if (!open) return;
+    if (lightMode === 'normal') setLightMode('dim');
+    else if (lightMode === 'dim') setLightMode('lights-out');
+    else setLightMode('normal');
 }
 
 function toggleFitOneToOne(event) {

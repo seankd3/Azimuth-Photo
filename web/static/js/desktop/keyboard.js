@@ -3,7 +3,7 @@ import { focusOmnibox, openCommandPalette } from './omnibox.js';
 import { moveFocus, focusColumns, currentFocusedImage } from './grid.js';
 import { applyFlags } from './selection.js';
 import {
-    closeLoupe, flagLoupeOrFocused, loupeOpen, navLoupe, openLoupe,
+    closeLoupe, flagLoupeOrFocused, loupeOpen, navLoupe, openLoupe, toggleLoupeLights,
 } from './loupe.js';
 import {
     closeRefine, refineOpen, openRefine, pickByKey, undoRefine,
@@ -142,14 +142,25 @@ export function initKeyboard() {
             return;
         }
         if (loupeOpen()) {
+            const lk = event.key.toLowerCase();
             if (event.key === 'ArrowLeft') navLoupe(-1);
             else if (event.key === 'ArrowRight') navLoupe(1);
-            else if (event.key.toLowerCase() === 'p') flagLoupeOrFocused('picked');
-            else if (event.key.toLowerCase() === 'x') flagLoupeOrFocused('rejected');
-            else if (event.key.toLowerCase() === 'u') flagLoupeOrFocused('unflagged');
+            else if (lk === 'g') closeLoupe({ force: true });
+            else if (lk === 'l') toggleLoupeLights();
+            else if (lk === 'p') flagLoupeOrFocused('picked');
+            else if (lk === 'x') flagLoupeOrFocused('rejected');
+            else if (lk === 'u') flagLoupeOrFocused('unflagged');
+            else return;
+            event.preventDefault();
             return;
         }
-        if (duplicatesOpen()) return;
+        if (duplicatesOpen()) {
+            if (event.key.toLowerCase() === 'g') {
+                event.preventDefault();
+                closeDuplicates();
+            }
+            return;
+        }
         const key = event.key.toLowerCase();
         if (key === '/') {
             event.preventDefault();
@@ -168,7 +179,8 @@ export function initKeyboard() {
             switchLens('grid');
         } else if (key === 'e') {
             event.preventDefault();
-            switchLens('events');
+            const img = currentFocusedImage();
+            if (img) openLoupe({ id: img.id, index: viewState.focusIndex });
         } else if (key === 'o') {
             event.preventDefault();
             switchLens('people');

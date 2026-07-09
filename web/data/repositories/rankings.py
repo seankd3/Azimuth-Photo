@@ -113,6 +113,15 @@ _ranking_count_cache: dict[tuple, dict] = {}
 _rankable_image_ids_cache = {"ids": frozenset(), "expires": 0}
 
 
+def escape_like(value: str) -> str:
+    return (
+        value
+        .replace("\\", "\\\\")
+        .replace("%", "\\%")
+        .replace("_", "\\_")
+    )
+
+
 def ranking_count_cache_key(
     orientation: str = "",
     compared: str = "",
@@ -273,8 +282,13 @@ def ranking_filter_parts(
         params.append(STAR_THRESHOLDS[min_stars])
 
     if folder:
-        conditions.append("i.filepath LIKE ?")
-        params.append(f"%/{folder}/%")
+        normalized_folder = folder.strip().rstrip("/")
+        if normalized_folder.startswith("/"):
+            conditions.append("i.filepath LIKE ? ESCAPE '\\'")
+            params.append(f"{escape_like(normalized_folder)}/%")
+        else:
+            conditions.append("i.filepath LIKE ? ESCAPE '\\'")
+            params.append(f"%/{escape_like(normalized_folder)}/%")
 
     if flag in ("picked", "unflagged", "rejected"):
         conditions.append("i.flag = ?")
@@ -312,12 +326,7 @@ def ranking_filter_parts(
         # multi-word queries narrow results instead of requiring one field to
         # contain the entire phrase.
         for token in text_query.strip().split():
-            escaped = (
-                token
-                .replace("\\", "\\\\")
-                .replace("%", "\\%")
-                .replace("_", "\\_")
-            )
+            escaped = escape_like(token)
             if not escaped:
                 continue
             extension_query = escaped.lower().lstrip(".")

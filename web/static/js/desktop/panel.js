@@ -1,5 +1,5 @@
 import {
-    addToCollection, createCollection, getCatalog, getCollection, getCollectionSuggestions,
+    addToCollection, createCollection, getCatalog, getCollection,
     createCollectionShare, deleteCollection, getCollectionShare, getCollectionShareFavorites, listCollections,
     removeFromCollection, renameCollection, revokeCollectionShare, thumbUrl,
 } from './api.js';
@@ -11,13 +11,14 @@ import { applyFlags, selectedIds, setCollectionPicker } from './selection.js';
 import { showToast } from './toast.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
 import { downloadExport, openExportMenu } from './export_menu.js';
+import { initFoldersPanel } from './folders.js';
 import { icon } from '../icons.js';
+import {
+    initSuggestions, loadSuggestionsOnce, openSuggestionsReview, suggestionsAreLoading, visibleSuggestions,
+} from './suggestions.js';
 
-const DISMISSED_KEY = 'pa_d_dismissed_suggestions';
 let collections = [];
 let catalog = null;
-let suggestions = null;
-let suggestionsLoading = false;
 let drawerOpen = false;
 let collectionMenu = null;
 let collectionMenuReturn = null;
@@ -27,29 +28,7 @@ const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 }[c]));
 const fmt = (n) => Number(n || 0).toLocaleString('en-US');
-const fingerprint = (s) => `${s.kind || ''}|${s.cover_image_id || ''}|${s.count || 0}`;
 const narrowPanel = () => window.matchMedia('(max-width: 880px)').matches;
-
-function dismissed() {
-    try {
-        const values = JSON.parse(localStorage.getItem(DISMISSED_KEY) || '[]');
-        return Array.isArray(values) ? values.filter((v) => typeof v === 'string') : [];
-    } catch {
-        return [];
-    }
-}
-
-function setDismissed(values) {
-    localStorage.setItem(DISMISSED_KEY, JSON.stringify(values.slice(-100)));
-}
-
-function dismiss(fp) {
-    setDismissed([...dismissed().filter((v) => v !== fp), fp]);
-}
-
-function restore(fp) {
-    setDismissed(dismissed().filter((v) => v !== fp));
-}
 
 function renderCollections() {
     const host = document.getElementById('collection-list');
@@ -486,61 +465,25 @@ function startCollectionDelete(collectionId, name = 'Collection') {
 }
 
 function renderSuggestions() {
-    const host = document.getElementById('suggestion-list');
-    if (suggestionsLoading && suggestions == null) {
-        host.innerHTML = '<div class="suggest-card skel" style="height:132px"></div><div class="suggest-card skel" style="height:132px"></div>';
+    const host = document.getElementById('suggestions-wrap');
+    if (!host) return;
+    if (suggestionsAreLoading()) {
+        host.innerHTML = '<div class="suggest-row skel" style="height:30px"></div>';
         return;
     }
-    const gone = new Set(dismissed());
-    const visible = (suggestions || []).filter((s) => !gone.has(fingerprint(s)));
-    host.innerHTML = visible.map((s, index) => (
-        `<article class="suggest-card" data-index="${index}">`
-        + `<div class="cover">${s.cover_image_id ? `<img src="${esc(thumbUrl('md', s.cover_image_id))}" alt="">` : icon('sparkles')}</div>`
-        + `<div class="body"><b>${esc(s.title)}</b><span>${esc(s.subtitle || `${fmt(s.count)} photos`)}</span></div>`
-        + `<div class="actions"><button data-act="create">Create</button><button data-act="dismiss" aria-label="Dismiss">${icon('x')}</button></div></article>`
-    )).join('');
-    for (const card of host.querySelectorAll('.suggest-card[data-index]')) {
-        const suggestion = visible[Number(card.dataset.index)];
-        card.querySelector('[data-act="create"]').addEventListener('click', () => createSuggestion(suggestion));
-        card.querySelector('[data-act="dismiss"]').addEventListener('click', () => dismissSuggestion(suggestion));
-    }
-}
-
-async function createSuggestion(suggestion) {
-    const fp = fingerprint(suggestion);
-    dismiss(fp);
-    renderSuggestions();
-    const result = await createCollection(suggestion.title, suggestion.image_ids || [], suggestion.subtitle || '');
-    if (!(result && result.ok)) {
-        restore(fp);
-        renderSuggestions();
-        showToast("Couldn't create collection");
+    const count = visibleSuggestions().length;
+    if (!count) {
+        host.innerHTML = '';
         return;
     }
-    await loadCollections();
-    showToast('Collection created', { undo: null });
-}
-
-function dismissSuggestion(suggestion) {
-    const fp = fingerprint(suggestion);
-    dismiss(fp);
-    renderSuggestions();
-    showToast('Dismissed', {
-        undo: () => {
-            restore(fp);
-            renderSuggestions();
-        },
+    host.innerHTML = '<button class="nav-row suggest-row" id="review-suggestions" type="button">'
+        + `<span class="nr-glyph">${icon('sparkles')}</span>`
+        + '<span class="nr-label">Suggested collections</span>'
+        + `<span class="nr-count">${fmt(count)}</span></button>`;
+    host.querySelector('#review-suggestions')?.addEventListener('click', () => {
+        openSuggestionsReview();
+        closeLeftDrawer();
     });
-}
-
-async function loadSuggestionsOnce() {
-    if (suggestions || suggestionsLoading) return;
-    suggestionsLoading = true;
-    renderSuggestions();
-    const data = await getCollectionSuggestions();
-    suggestions = (data && data.suggestions) || [];
-    suggestionsLoading = false;
-    renderSuggestions();
 }
 
 function renderLibrary() {
@@ -765,6 +708,10 @@ export function requestShareCurrentCollection() {
 }
 
 export async function initPanel() {
+    initSuggestions({
+        refreshCollections: loadCollections,
+        notifyChange: renderSuggestions,
+    });
     setCollectionPicker(openCollectionPicker);
     document.getElementById('shell').classList.toggle('left-collapsed', viewState.leftCollapsed);
     document.getElementById('collapse-left').addEventListener('click', toggleLeftPanel);
@@ -813,6 +760,7 @@ export async function initPanel() {
     renderLibrary();
     await loadCollections();
     catalog = await getCatalog();
+    await initFoldersPanel({ closeDrawer: closeLeftDrawer });
     renderSources();
     setTimeout(loadSuggestionsOnce, 0);
 }

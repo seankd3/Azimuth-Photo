@@ -1355,6 +1355,82 @@ class LibraryTests(BackendTestCase):
         self.assertEqual(shallow_counts["Family/Trip"], 2)
         self.assertNotIn("Family/Trip/Day", shallow_counts)
 
+    async def test_folder_tree_payload_assembles_source_hierarchy(self):
+        sources = [
+            {
+                "id": 1,
+                "path": "/archive/main",
+                "display_name": "Main Archive",
+                "online": 1,
+                "active_image_count": 6,
+            },
+            {
+                "id": 2,
+                "path": "/archive/offline",
+                "display_name": "Offline Archive",
+                "online": 0,
+                "active_image_count": 1,
+            },
+        ]
+        counts = {
+            1: {
+                "/archive/main": 1,
+                "/archive/main/Family": 2,
+                "/archive/main/Family/Trip": 2,
+                "/archive/main/Family/Trip/Day": 1,
+            },
+            2: {
+                "/archive/offline/Scans": 1,
+            },
+        }
+
+        result = catalog_routes.build_folder_tree_payload_from_rows(sources, counts, max_depth=2)
+
+        main = result["sources"][0]
+        self.assertEqual(main["display_name"], "Main Archive")
+        self.assertTrue(main["online"])
+        self.assertEqual(main["count"], 1)
+        self.assertEqual(main["total_count"], 6)
+        family = main["folders"][0]
+        self.assertEqual(family["path"], "/archive/main/Family")
+        self.assertEqual(family["count"], 2)
+        self.assertEqual(family["total_count"], 5)
+        trip = family["children"][0]
+        self.assertEqual(trip["path"], "/archive/main/Family/Trip")
+        self.assertEqual(trip["count"], 2)
+        self.assertEqual(trip["total_count"], 3)
+        self.assertEqual(trip["children"], [])
+
+        offline = result["sources"][1]
+        self.assertFalse(offline["online"])
+        self.assertEqual(offline["folders"][0]["name"], "Scans")
+
+    async def test_absolute_nested_folder_scope_matches_subtree(self):
+        source = await self._source("scope-source")
+        paths = [
+            os.path.join(source["path"], "Family", "root.jpg"),
+            os.path.join(source["path"], "Family", "Trip", "wide.jpg"),
+            os.path.join(source["path"], "Family", "Trip", "Day", "detail.jpg"),
+            os.path.join(source["path"], "Family", "Other", "aside.jpg"),
+        ]
+        for path in paths:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "wb") as f:
+                f.write(b"image")
+
+        await scanner.scan_folder(source["path"], source_id=source["id"])
+        parent = os.path.join(source["path"], "Family")
+        nested = os.path.join(source["path"], "Family", "Trip")
+
+        parent_count = await db.count_rankings(folder=parent)
+        nested_count = await db.count_rankings(folder=nested)
+        nested_rows = await db.get_rankings(limit=10, sort="filename", folder=nested)
+
+        self.assertEqual(parent_count, 4)
+        self.assertEqual(nested_count, 2)
+        self.assertLess(nested_count, parent_count)
+        self.assertEqual([row["filename"] for row in nested_rows], ["detail.jpg", "wide.jpg"])
+
     async def test_folder_tree_counts_flat_source_without_nested_fetch(self):
         source = await self._source("flat-source")
         files = [

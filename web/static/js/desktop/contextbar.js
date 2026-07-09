@@ -26,7 +26,7 @@ function chipHtml(key, label, extra = '') {
 function renderChips() {
     const chips = [];
     if (scope.similarIds.length) chips.push(chipHtml('similarIds', scope.similarLabel || 'Similar photos'));
-    if (scope.q) chips.push(chipHtml('q', `“${scope.q}”`));
+    if (scope.q) chips.push(chipHtml('q', `“${scope.q}”`, `<span class="tk-glyph tk-spark">${icon('sparkles')}</span>`));
     if (scope.collectionId) chips.push(chipHtml('collectionId', `Collection · ${scope.collectionName || 'Untitled'}`));
     if (scope.import_batch) chips.push(chipHtml('import_batch', scope.importBatchLabel || `Import ${scope.import_batch}`));
     if (scope.people) chips.push(chipHtml('people', scope.personLabel || 'Person', scope.personThumb ? `<img src="${esc(scope.personThumb)}" alt="">` : ''));
@@ -127,6 +127,6 @@ export function scopeTokenHtml() {
     if (scope.collectionId) return `<span class="scope-token"><span class="tk-glyph">${icon('folder')}</span><b>${esc(scope.collectionName || 'Collection')}</b>${count}</span>`;
     if (scope.import_batch) return `<span class="scope-token"><span class="tk-glyph">${icon('upload')}</span><b>${esc(scope.importBatchLabel || `Import ${scope.import_batch}`)}</b>${count}</span>`;
     if (scope.similarIds.length) return `<span class="scope-token"><span class="tk-glyph">${icon('scan-search')}</span><b>${esc(scope.similarLabel || 'Similar photos')}</b>${count}</span>`;
-    if (scope.q) return `<span class="scope-token"><span class="tk-glyph">${icon('search')}</span><b>“${esc(scope.q)}”</b>${count}</span>`;
+    if (scope.q) return `<span class="scope-token semantic"><span class="tk-glyph tk-spark">${icon('sparkles')}</span><b>“${esc(scope.q)}”</b>${count}</span>`;
     return `<span class="scope-token"><span class="tk-glyph">${icon('house')}</span><b>${esc(describeScope())}</b>${count}</span>`;
 }

@@ -106,6 +106,7 @@ PUBLIC_ROUTE_CONTRACT = {
     ("GET", "/api/image/{image_id}/exif"),
     ("GET", "/api/collections"),
     ("GET", "/api/folders"),
+    ("GET", "/api/folders/tree"),
 }
 
 class ModularContractTests(unittest.TestCase):

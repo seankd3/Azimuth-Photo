@@ -3,6 +3,10 @@ import { initDateScrubber } from './date_scrubber.js';
 import { initGrid, mountGrid, unmountGrid } from './grid.js';
 import { initMap, mountMap, unmountMap } from './map.js';
 import { initPeople, mountPeople, unmountPeople } from './people.js';
+import { mountRefine, unmountRefine } from './refine.js';
+import { mountSuggestions, unmountSuggestions } from './suggestions.js';
+import { mountLoupe, unmountLoupe } from './loupe.js';
+import { mountDuplicates, unmountDuplicates } from './duplicates.js';
 import { on, setActiveLens, viewState } from './state.js';
 
 const LENSES = {
@@ -10,6 +14,10 @@ const LENSES = {
     events: { mount: mountEvents, unmount: unmountEvents },
     people: { mount: mountPeople, unmount: unmountPeople },
     map: { mount: mountMap, unmount: unmountMap },
+    refine: { mount: mountRefine, unmount: unmountRefine },
+    suggestions: { mount: mountSuggestions, unmount: unmountSuggestions },
+    loupe: { mount: mountLoupe, unmount: unmountLoupe },
+    duplicates: { mount: mountDuplicates, unmount: unmountDuplicates },
 };
 
 let current = null;
@@ -20,10 +28,12 @@ function syncChrome(lens) {
         button.classList.toggle('active', active);
         button.setAttribute('aria-selected', active ? 'true' : 'false');
     }
-    document.getElementById('shell').classList.toggle('right-hidden', lens === 'events' || lens === 'map');
+    document.getElementById('shell').classList.toggle('right-hidden', lens === 'events' || lens === 'map' || lens === 'suggestions');
     document.getElementById('event-gap-wrap').hidden = lens !== 'events';
-    document.getElementById('sort-select').disabled = lens === 'people' || lens === 'map';
-    document.getElementById('thumb-size').disabled = lens === 'people' || lens === 'map';
+    document.getElementById('sort-select').disabled = lens === 'people' || lens === 'map' || lens === 'refine' || lens === 'suggestions' || lens === 'loupe' || lens === 'duplicates';
+    document.getElementById('thumb-size').disabled = lens === 'people' || lens === 'map' || lens === 'refine' || lens === 'suggestions' || lens === 'loupe' || lens === 'duplicates';
+    document.getElementById('btn-refine').classList.toggle('active', lens === 'refine');
+    document.getElementById('find-duplicates')?.classList.toggle('active', lens === 'duplicates');
 }
 
 function activate(lens) {

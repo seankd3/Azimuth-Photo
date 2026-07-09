@@ -4,7 +4,8 @@ const RIGHT_PANEL_KEY = 'pa_d_right_collapsed';
 const THUMB_KEY = 'pa_d_thumb_size';
 const PREFS_KEY = 'pa_d_prefs';
 const LENS_KEY = 'pa_d_lens';
-const VALID_LENSES = new Set(['grid', 'events', 'people', 'map']);
+const PERSISTENT_LENSES = new Set(['grid', 'events', 'people', 'map']);
+const VALID_LENSES = new Set([...PERSISTENT_LENSES, 'refine', 'suggestions', 'loupe', 'duplicates']);
 const DEFAULT_PREFS = {
     density: 'comfortable',
     badgeCheck: true,
@@ -70,7 +71,7 @@ function readPrefs() {
 
 function readLens() {
     const saved = localStorage.getItem(LENS_KEY) || 'grid';
-    return VALID_LENSES.has(saved) ? saved : 'grid';
+    return PERSISTENT_LENSES.has(saved) ? saved : 'grid';
 }
 
 function applyPrefs() {
@@ -219,7 +220,9 @@ export function setActiveLens(lens) {
     const next = VALID_LENSES.has(lens) ? lens : 'grid';
     if (viewState.activeLens === next) return;
     viewState.activeLens = next;
-    localStorage.setItem(LENS_KEY, next);
+    if (PERSISTENT_LENSES.has(next)) {
+        localStorage.setItem(LENS_KEY, next);
+    }
     emit('lens', next);
 }
 

@@ -45,6 +45,9 @@ _get_catalog_image_counts: GetCatalogImageCountsProvider | None = None
 _folders_cache: dict[int | None, dict] = {}
 _folders_refreshing: set[int | None] = set()
 _folders_cache_ttl_seconds = 300.0
+_folder_tree_cache: dict = {"data": None, "expires": 0}
+_folder_tree_cache_ttl_seconds = 60.0
+_folder_tree_max_depth = 6
 
 
 def configure(
@@ -102,11 +105,14 @@ def _invalidate_embedding_cache() -> None:
 def invalidate_folders_cache() -> None:
     for cached in _folders_cache.values():
         cached["expires"] = 0
+    _folder_tree_cache["expires"] = 0
 
 
 def clear_folders_cache() -> None:
     _folders_cache.clear()
     _folders_refreshing.clear()
+    _folder_tree_cache["data"] = None
+    _folder_tree_cache["expires"] = 0
 
 
 def _catalog_changed(*, matchups: bool = True, cache_status: bool = False) -> None:
@@ -599,6 +605,127 @@ def build_folders_payload(max_depth: int | None = None) -> dict:
     return {"folders": folders, "root": root}
 
 
+def parts_under_source(source_path: str, directory: str) -> list[str]:
+    source_root = catalog_repository.normalize_source_path(source_path).rstrip(os.sep)
+    current = catalog_repository.normalize_source_path(directory or source_path).rstrip(os.sep)
+    if not source_root:
+        return []
+    if current == source_root:
+        return []
+    root_prefix = source_root + os.sep
+    if current.startswith(root_prefix):
+        rel = current[len(root_prefix):]
+    else:
+        rel = os.path.relpath(current, source_root)
+    return [part for part in rel.split(os.sep) if part and part != "."]
+
+
+def folder_path_for_parts(source_path: str, parts: list[str]) -> str:
+    if not parts:
+        return catalog_repository.normalize_source_path(source_path)
+    return os.path.join(catalog_repository.normalize_source_path(source_path), *parts)
+
+
+def make_folder_node(source_path: str, parts: list[str]) -> dict:
+    path = folder_path_for_parts(source_path, parts)
+    return {
+        "path": path,
+        "name": os.path.basename(path.rstrip(os.sep)) or path,
+        "count": 0,
+        "total_count": 0,
+        "children": [],
+        "_children_by_name": {},
+    }
+
+
+def serialize_folder_node(node: dict) -> dict | None:
+    if int(node.get("total_count") or 0) <= 0:
+        return None
+    children = []
+    for child in sorted(
+        node.get("_children_by_name", {}).values(),
+        key=lambda item: (str(item.get("name") or "").lower(), str(item.get("path") or "")),
+    ):
+        serialized = serialize_folder_node(child)
+        if serialized is not None:
+            children.append(serialized)
+    return {
+        "path": node["path"],
+        "name": node["name"],
+        "count": int(node.get("count") or 0),
+        "total_count": int(node.get("total_count") or 0),
+        "children": children,
+    }
+
+
+def build_folder_tree_payload_from_rows(
+    sources: list[dict],
+    directory_counts_by_source: dict[int, dict[str, int]],
+    *,
+    max_depth: int = _folder_tree_max_depth,
+) -> dict:
+    payload_sources = []
+    capped_depth = max(0, min(int(max_depth), _folder_tree_max_depth))
+    for source in sources:
+        source_id = int(source.get("id") or 0)
+        source_path = source.get("path") or ""
+        root = make_folder_node(source_path, [])
+        for directory, raw_count in directory_counts_by_source.get(source_id, {}).items():
+            count = int(raw_count or 0)
+            if count <= 0:
+                continue
+            parts = parts_under_source(source_path, directory)
+            capped_parts = parts[:capped_depth]
+            root["total_count"] += count
+            if not parts:
+                root["count"] += count
+                continue
+
+            node = root
+            for depth in range(len(capped_parts)):
+                name = capped_parts[depth]
+                child = node["_children_by_name"].get(name)
+                if child is None:
+                    child = make_folder_node(source_path, capped_parts[:depth + 1])
+                    node["_children_by_name"][name] = child
+                child["total_count"] += count
+                node = child
+            if len(parts) <= capped_depth:
+                node["count"] += count
+
+        payload_sources.append({
+            "id": source_id,
+            "path": catalog_repository.normalize_source_path(source_path),
+            "display_name": source.get("display_name") or catalog_repository.source_display_name(source_path),
+            "online": bool(source.get("online")),
+            "count": int(root["count"] or 0),
+            "total_count": int(root["total_count"] or 0),
+            "folders": [
+                child
+                for child in (
+                    serialize_folder_node(node)
+                    for node in sorted(
+                        root["_children_by_name"].values(),
+                        key=lambda item: (str(item.get("name") or "").lower(), str(item.get("path") or "")),
+                    )
+                )
+                if child is not None
+            ],
+        })
+    return {"sources": payload_sources}
+
+
+def build_folder_tree_payload() -> dict:
+    sources = catalog_repository.folder_tree_source_rows(_configured_db_path())
+    active_source_ids = [
+        int(source["id"])
+        for source in sources
+        if int(source.get("active_image_count") or 0) > 0
+    ]
+    directory_counts = catalog_repository.folder_directory_counts_by_source(_configured_db_path(), active_source_ids)
+    return build_folder_tree_payload_from_rows(sources, directory_counts)
+
+
 @router.get("/api/folders")
 async def api_folders(max_depth: int | None = None):
     """Get folder tree with image counts."""
@@ -638,4 +765,20 @@ async def api_folders(max_depth: int | None = None):
         "data": result,
         "expires": _time.time() + _folders_cache_ttl_seconds,
     }
+    return result
+
+
+@router.get("/api/folders/tree")
+async def api_folders_tree():
+    cached = _folder_tree_cache.get("data")
+    if cached and _time.time() < _folder_tree_cache["expires"]:
+        return cached
+
+    counts = await _configured(_get_catalog_image_counts)()
+    if int(counts.get("active_images") or 0) <= 0:
+        result = {"sources": []}
+    else:
+        result = await asyncio.to_thread(build_folder_tree_payload)
+    _folder_tree_cache["data"] = result
+    _folder_tree_cache["expires"] = _time.time() + _folder_tree_cache_ttl_seconds
     return result

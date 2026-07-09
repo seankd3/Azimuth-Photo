@@ -1,0 +1,288 @@
+import { getFolderTree } from './api.js';
+import { downloadExport, openExportMenu } from './export_menu.js';
+import { emit, on, scope, scopeParams, setScope } from './state.js';
+import { showToast } from './toast.js';
+import { icon } from '../icons.js';
+
+const EXPANDED_KEY = 'pa_d_folder_expanded';
+
+let sources = [];
+let expanded = readExpanded();
+let closeDrawer = () => {};
+let menu = null;
+let menuReturn = null;
+
+const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+}[c]));
+const fmt = (n) => Number(n || 0).toLocaleString('en-US');
+const leafName = (path) => String(path || '').split('/').filter(Boolean).pop() || path || 'Folder';
+
+function readExpanded() {
+    try {
+        const values = JSON.parse(localStorage.getItem(EXPANDED_KEY) || '[]');
+        return new Set(Array.isArray(values) ? values.filter(Boolean) : []);
+    } catch {
+        return new Set();
+    }
+}
+
+function saveExpanded() {
+    localStorage.setItem(EXPANDED_KEY, JSON.stringify([...expanded].slice(-1000)));
+}
+
+function expandedByDefault(path, openByDefault = false) {
+    return expanded.has(path) || (openByDefault && !localStorage.getItem(EXPANDED_KEY));
+}
+
+function setExpanded(path, value) {
+    if (!path) return;
+    if (value) expanded.add(path);
+    else expanded.delete(path);
+    saveExpanded();
+}
+
+function normalizeSource(source) {
+    return {
+        ...source,
+        id: Number(source?.id || 0),
+        path: source?.path || '',
+        display_name: source?.display_name || leafName(source?.path),
+        online: Boolean(source?.online),
+        total_count: Number(source?.total_count || 0),
+        folders: Array.isArray(source?.folders) ? source.folders : [],
+    };
+}
+
+function nodeMatches(node, query) {
+    if (!query) return true;
+    const haystack = `${node.name || ''} ${node.path || ''}`.toLowerCase();
+    return haystack.includes(query) || (node.children || []).some((child) => nodeMatches(child, query));
+}
+
+function applyFolderScope(path) {
+    if (!path) return;
+    setScope({ folder: path });
+    closeDrawer();
+}
+
+function exportFolderScope(node, anchor) {
+    applyFolderScope(node.path);
+    openExportMenu(anchor, ({ format, size }) => {
+        const params = scopeParams({ format });
+        if (size) params.set('size', size);
+        downloadExport(params, {
+            count: Number(node.total_count || 0),
+            message: format === 'zip' ? 'Preparing folder zip' : `Exporting folder as ${format.toUpperCase()}`,
+        });
+    });
+}
+
+function ensureMenu() {
+    if (menu) return menu;
+    menu = document.createElement('div');
+    menu.id = 'folder-pop-menu';
+    menu.className = 'pop-menu grid-pop-menu folder-pop-menu';
+    menu.setAttribute('role', 'menu');
+    menu.hidden = true;
+    document.body.appendChild(menu);
+    menu.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            closeFolderMenu();
+        }
+    });
+    return menu;
+}
+
+function positionMenu(anchor) {
+    const rect = anchor.getBoundingClientRect();
+    const menuRect = menu.getBoundingClientRect();
+    const left = Math.max(8, Math.min(window.innerWidth - menuRect.width - 8, rect.left + 18));
+    const top = Math.max(8, Math.min(window.innerHeight - menuRect.height - 8, rect.top + 18));
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+}
+
+function openFolderMenu(node, anchor) {
+    if (!node || !node.path) return;
+    ensureMenu();
+    menuReturn = anchor;
+    menu.innerHTML = '<div class="pm-group">'
+        + `<button data-act="scope">${icon('folder-tree')} Show in scope with subfolders</button>`
+        + `<button data-act="refine">${icon('zap')} Open in Refine</button>`
+        + `<button data-act="export">${icon('download')} Export view...</button>`
+        + '</div>';
+    menu.hidden = false;
+    positionMenu(anchor);
+    for (const button of menu.querySelectorAll('[data-act]')) {
+        button.addEventListener('click', () => {
+            const action = button.dataset.act;
+            closeFolderMenu();
+            if (action === 'scope') applyFolderScope(node.path);
+            if (action === 'refine') {
+                applyFolderScope(node.path);
+                emit('refine:open');
+            }
+            if (action === 'export') exportFolderScope(node, anchor);
+        });
+    }
+    menu.querySelector('button')?.focus({ preventScroll: true });
+}
+
+function closeFolderMenu() {
+    if (!menu || menu.hidden) return;
+    menu.hidden = true;
+    if (menuReturn && document.contains(menuReturn) && menuReturn.focus) {
+        menuReturn.focus({ preventScroll: true });
+    }
+}
+
+function renderFolderNode(node, level, query = '') {
+    if (query && !nodeMatches(node, query)) return '';
+    const children = Array.isArray(node.children) ? node.children : [];
+    const hasChildren = children.some((child) => nodeMatches(child, query));
+    const isOpen = Boolean(query) || expanded.has(node.path);
+    const active = scope.folder === node.path ? ' active' : '';
+    const chevron = hasChildren
+        ? `<span class="folder-expander" role="button" data-folder-expand="${esc(node.path)}" aria-label="Toggle ${esc(node.name)}">${icon('chevron-right')}</span>`
+        : '<span class="folder-expander empty"></span>';
+    const row = `<button class="folder-row${active}${isOpen ? ' open' : ''}" type="button" data-folder-path="${esc(node.path)}" style="--folder-level:${level}">`
+        + chevron
+        + `<span class="folder-label">${esc(node.name || leafName(node.path))}</span>`
+        + `<span class="folder-count">${fmt(node.total_count)}</span></button>`
+        + `<div class="folder-children" data-folder-children="${esc(node.path)}"${isOpen ? '' : ' hidden'}>`
+        + ((isOpen || query) ? renderFolderChildren(node, level + 1, query) : '')
+        + '</div>';
+    return row;
+}
+
+function renderFolderChildren(node, level, query = '') {
+    const children = Array.isArray(node.children) ? node.children : [];
+    return children.map((child) => renderFolderNode(child, level, query)).join('');
+}
+
+function renderSource(source, query = '') {
+    const folders = source.folders.filter((folder) => nodeMatches(folder, query));
+    const sourceMatches = !query || `${source.display_name} ${source.path}`.toLowerCase().includes(query);
+    if (query && !sourceMatches && !folders.length) return '';
+    const isOpen = Boolean(query) || expandedByDefault(source.path, true);
+    const active = scope.folder === source.path ? ' active' : '';
+    return `<div class="folder-source" data-folder-source="${esc(source.path)}">`
+        + `<button class="folder-source-row${active}${isOpen ? ' open' : ''}" type="button" data-folder-source-toggle="${esc(source.path)}">`
+        + `<span class="folder-expander">${icon('chevron-right')}</span>`
+        + `<span class="nr-dot ${source.online ? 'on' : 'off'}"></span>`
+        + `<span class="folder-label">${esc(source.display_name)}</span>`
+        + `<span class="folder-count">${fmt(source.total_count)}</span></button>`
+        + `<div class="folder-children source-children" data-folder-source-children="${esc(source.path)}"${isOpen ? '' : ' hidden'}>`
+        + (isOpen ? folders.map((folder) => renderFolderNode(folder, 0, query)).join('') : '')
+        + '</div></div>';
+}
+
+function renderTree() {
+    const host = document.getElementById('folder-tree');
+    if (!host) return;
+    const query = (document.getElementById('folder-filter')?.value || '').trim().toLowerCase();
+    if (!sources.length) {
+        host.innerHTML = '<div class="muted">No folders yet.</div>';
+        return;
+    }
+    const html = sources.map((source) => renderSource(source, query)).filter(Boolean).join('');
+    host.innerHTML = html || '<div class="muted">No matching folders.</div>';
+    bindTreeEvents(host, query);
+}
+
+function ensureRenderedChildren(row, query = '') {
+    const path = row.dataset.folderPath;
+    const container = document.querySelector(`[data-folder-children="${CSS.escape(path)}"]`);
+    if (!container || container.dataset.rendered === '1') return;
+    const node = findNode(path);
+    if (!node) return;
+    container.innerHTML = renderFolderChildren(node, Number(row.style.getPropertyValue('--folder-level') || 0) + 1, query);
+    container.dataset.rendered = '1';
+    bindTreeEvents(container, query);
+}
+
+function findNode(path) {
+    const stack = sources.flatMap((source) => source.folders);
+    while (stack.length) {
+        const node = stack.shift();
+        if (node.path === path) return node;
+        stack.push(...(node.children || []));
+    }
+    return null;
+}
+
+function bindTreeEvents(root, query = '') {
+    for (const button of root.querySelectorAll('[data-folder-expand]')) {
+        button.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const row = button.closest('.folder-row');
+            const path = button.dataset.folderExpand;
+            const nextOpen = !row.classList.contains('open');
+            setExpanded(path, nextOpen);
+            row.classList.toggle('open', nextOpen);
+            const container = document.querySelector(`[data-folder-children="${CSS.escape(path)}"]`);
+            if (container) {
+                if (nextOpen) ensureRenderedChildren(row, query);
+                container.hidden = !nextOpen;
+            }
+        });
+    }
+    for (const row of root.querySelectorAll('[data-folder-path]')) {
+        row.addEventListener('click', (event) => {
+            if (event.altKey) {
+                event.preventDefault();
+                openFolderMenu(findNode(row.dataset.folderPath), row);
+                return;
+            }
+            applyFolderScope(row.dataset.folderPath);
+        });
+        row.addEventListener('contextmenu', (event) => {
+            event.preventDefault();
+            openFolderMenu(findNode(row.dataset.folderPath), row);
+        });
+    }
+    for (const row of root.querySelectorAll('[data-folder-source-toggle]')) {
+        row.addEventListener('click', () => {
+            const path = row.dataset.folderSourceToggle;
+            const nextOpen = !row.classList.contains('open');
+            setExpanded(path, nextOpen);
+            row.classList.toggle('open', nextOpen);
+            const container = document.querySelector(`[data-folder-source-children="${CSS.escape(path)}"]`);
+            if (!container) return;
+            if (nextOpen && !container.innerHTML.trim()) {
+                const source = sources.find((item) => item.path === path);
+                container.innerHTML = (source?.folders || []).map((folder) => renderFolderNode(folder, 0)).join('');
+                bindTreeEvents(container);
+            }
+            container.hidden = !nextOpen;
+        });
+    }
+}
+
+function syncActiveRows() {
+    for (const row of document.querySelectorAll('[data-folder-path], [data-folder-source-toggle]')) {
+        const path = row.dataset.folderPath || row.dataset.folderSourceToggle;
+        row.classList.toggle('active', path === scope.folder);
+    }
+}
+
+export async function initFoldersPanel(options = {}) {
+    closeDrawer = options.closeDrawer || closeDrawer;
+    ensureMenu();
+    const filter = document.getElementById('folder-filter');
+    filter?.addEventListener('input', renderTree);
+    document.addEventListener('pointerdown', (event) => {
+        if (!menu || menu.hidden || menu.contains(event.target)) return;
+        closeFolderMenu();
+    });
+    window.addEventListener('resize', closeFolderMenu);
+    on('scope', syncActiveRows);
+
+    const data = await getFolderTree();
+    sources = ((data && data.sources) || []).map(normalizeSource);
+    renderTree();
+    if (!sources.length) showToast('No folder tree yet');
+}

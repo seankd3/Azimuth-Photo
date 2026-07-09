@@ -5,6 +5,7 @@ import { getImageExif } from './api.js';
 
 const exifCache = new Map();
 let currentImageId = null;
+let focusedImage = null;
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -40,7 +41,7 @@ function selectedImages() {
 function currentImage() {
     if (selection.size === 1) return byId.get(Number([...selection][0])) || null;
     if (selection.size > 1) return null;
-    return viewState.images[viewState.focusIndex] || null;
+    return focusedImage || viewState.images[viewState.focusIndex] || null;
 }
 
 function highlightedIds() {
@@ -206,6 +207,9 @@ export function initRightPanel() {
     on('images', render);
     on('selection', render);
     on('flags', render);
-    on('focus', render);
+    on('focus', ({ image } = {}) => {
+        focusedImage = image || null;
+        render();
+    });
     render();
 }

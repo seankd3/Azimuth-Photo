@@ -1,28 +1,61 @@
-import { getPeople } from './api.js';
+import {
+    getFilterOptions, getFolders, getPeople, getRankings, listCollections, thumbUrl,
+} from './api.js';
 import {
     emit, on, scope, setScope, setSort, toggleBestOf,
 } from './state.js';
+import { currentFocusedImage } from './grid.js';
+import { openLoupe, toggleLoupeLights } from './loupe.js';
 import { scopeTokenHtml } from './contextbar.js';
 import {
     exportCurrentScope, requestDeleteCurrentCollection, requestNewCollection,
     requestRenameCurrentCollection, requestShareCurrentCollection, toggleLeftPanel,
 } from './panel.js';
 import { switchLens } from './lenses.js';
+import { openSuggestionsReview } from './suggestions.js';
 import { icon } from '../icons.js';
 import { personLabel } from '../people_labels.js';
 
 const RECENT_KEY = 'pa_d_recent_scopes';
-let people = null;
-let rows = [];
-let hot = -1;
-
-const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[c]));
-
+const LIVE_DELAY_MS = 250;
+const LIVE_MIN_CHARS = 2;
+const LIVE_LIMIT = 6;
+const MAX_SECTION_ROWS = 6;
+const FLAG_VALUES = [
+    { value: 'picked', label: 'Picked', icon: 'star' },
+    { value: 'rejected', label: 'Rejected', icon: 'x' },
+    { value: 'unflagged', label: 'Unflagged', icon: 'circle' },
+];
+const MONTHS = [
+    ['january', 'jan', 1],
+    ['february', 'feb', 2],
+    ['march', 'mar', 3],
+    ['april', 'apr', 4],
+    ['may', 'may', 5],
+    ['june', 'jun', 6],
+    ['july', 'jul', 7],
+    ['august', 'aug', 8],
+    ['september', 'sep', 9],
+    ['october', 'oct', 10],
+    ['november', 'nov', 11],
+    ['december', 'dec', 12],
+];
+const OPERATORS = [
+    { name: 'camera', key: 'camera', icon: 'camera', label: 'Camera' },
+    { name: 'lens', key: 'lens', icon: 'aperture', label: 'Lens' },
+    { name: 'type', key: 'file_type', icon: 'file-type', label: 'File type' },
+    { name: 'flag', key: 'flag', icon: 'flag', label: 'Flag' },
+    { name: 'folder', key: 'folder', icon: 'folder', label: 'Folder' },
+];
 const COMMANDS = [
     { icon: 'zap', label: 'Open Refine', kbd: 'R', run: () => emit('refine:open') },
+    { icon: 'image', label: 'Open Loupe', kbd: 'E', run: () => {
+        const img = currentFocusedImage();
+        if (img) openLoupe({ id: img.id });
+    } },
+    { icon: 'eye', label: 'Cycle Loupe lights', kbd: 'L', run: toggleLoupeLights },
     { icon: 'layers', label: 'Find duplicates', run: () => emit('duplicates:open') },
+    { icon: 'sparkles', label: 'Review suggested collections', run: openSuggestionsReview },
     { icon: 'funnel', label: 'Filter…', run: () => emit('filters:open') },
     { icon: 'upload', label: 'Import', run: () => emit('import:open') },
     { icon: 'star', label: 'Toggle Best-of', kbd: 'B', run: toggleBestOf },
@@ -34,7 +67,7 @@ const COMMANDS = [
     { icon: 'pencil', label: 'Rename this collection', when: () => Boolean(scope.collectionId), run: requestRenameCurrentCollection },
     { icon: 'trash-2', label: 'Delete this collection', when: () => Boolean(scope.collectionId), run: requestDeleteCurrentCollection },
     { icon: 'layout-grid', label: 'Switch lens: Grid', kbd: 'G', run: () => switchLens('grid') },
-    { icon: 'rows-3', label: 'Switch lens: Events', kbd: 'E', run: () => switchLens('events') },
+    { icon: 'rows-3', label: 'Switch lens: Events', run: () => switchLens('events') },
     { icon: 'users', label: 'Switch lens: People', kbd: 'O', run: () => switchLens('people') },
     { icon: 'map-pin', label: 'Switch lens: Map', kbd: 'M', run: () => switchLens('map') },
     { icon: 'panel-left', label: 'Toggle left panel', kbd: '[', run: toggleLeftPanel },
@@ -45,9 +78,26 @@ const COMMANDS = [
     { icon: 'file-type', label: 'Sort by Filename', run: () => setSort('filename') },
 ];
 
+let people = [];
+let collections = [];
+let folders = [];
+let filterOptions = null;
+let dataPromise = null;
+let rows = [];
+let hot = -1;
+let liveTimer = null;
+let liveAbort = null;
+let liveSeq = 0;
+let live = { q: '', loading: false, data: null };
+
+const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+}[c]));
+const fmt = (n) => Number(n || 0).toLocaleString('en-US');
+
 function fuzzy(haystack, needle) {
-    const hay = haystack.toLowerCase();
-    const term = needle.toLowerCase().trim();
+    const hay = String(haystack || '').toLowerCase();
+    const term = String(needle || '').toLowerCase().trim();
     if (!term) return true;
     let i = 0;
     for (const ch of hay) {
@@ -55,6 +105,39 @@ function fuzzy(haystack, needle) {
         if (i === term.length) return true;
     }
     return false;
+}
+
+function includesText(haystack, needle) {
+    return String(haystack || '').toLowerCase().includes(String(needle || '').toLowerCase());
+}
+
+function highlight(value, term) {
+    const text = String(value == null ? '' : value);
+    const cleanTerm = String(term || '').trim();
+    if (!cleanTerm) return esc(text);
+    const index = text.toLowerCase().indexOf(cleanTerm.toLowerCase());
+    if (index < 0) return esc(text);
+    return `${esc(text.slice(0, index))}<mark>${esc(text.slice(index, index + cleanTerm.length))}</mark>${esc(text.slice(index + cleanTerm.length))}`;
+}
+
+function aspect(img) {
+    const ar = Number(img?.aspect_ratio) || (Number(img?.width) && Number(img?.height) ? Number(img.width) / Number(img.height) : 1.5);
+    return Math.max(.65, Math.min(2.1, ar));
+}
+
+function activeToken(input) {
+    const raw = String(input || '');
+    const match = raw.match(/(?:^|\s)(\S*)$/);
+    const token = match ? match[1] : raw;
+    return {
+        token,
+        start: raw.length - token.length,
+        end: raw.length,
+    };
+}
+
+function remainingQuery(input, start, end) {
+    return `${input.slice(0, start)} ${input.slice(end)}`.replace(/\s+/g, ' ').trim();
 }
 
 function recentScopes() {
@@ -66,18 +149,57 @@ function recentScopes() {
     }
 }
 
-function remember(scope) {
-    const label = scope.collectionName || scope.personLabel || scope.q || scope.camera || scope.lens || 'All Photos';
-    const values = recentScopes().filter((item) => JSON.stringify(item.scope) !== JSON.stringify(scope));
-    values.unshift({ label, scope });
+function storeRecents(values) {
     localStorage.setItem(RECENT_KEY, JSON.stringify(values.slice(0, 6)));
 }
 
-async function loadPeople() {
-    if (people) return people;
-    const data = await getPeople(48);
-    people = (data && (data.people || data.persons || data.results)) || [];
-    return people;
+function scopeLabel(value) {
+    if (value.collectionName) return value.collectionName;
+    if (value.personLabel) return personLabel({ label: value.personLabel });
+    if (value.folder) return value.folder.split('/').filter(Boolean).pop() || value.folder;
+    if (value.date_taken) return dateLabel(value.date_taken);
+    if (value.camera) return `camera:${value.camera}`;
+    if (value.lens) return `lens:${value.lens}`;
+    if (value.file_type) return String(value.file_type).toUpperCase();
+    if (value.flag) return value.flag === 'picked' ? 'Picked' : value.flag === 'rejected' ? 'Rejected' : 'Unflagged';
+    if (value.q) return `“${value.q}”`;
+    return 'All Photos';
+}
+
+function scopeIcon(value) {
+    if (value.personLabel || value.people) return 'users';
+    if (value.collectionName || value.collectionId || value.folder) return 'folder';
+    if (value.date_taken) return 'calendar';
+    if (value.camera) return 'camera';
+    if (value.lens) return 'aperture';
+    if (value.file_type) return 'file-type';
+    if (value.flag) return 'flag';
+    if (value.q) return 'search';
+    return 'house';
+}
+
+function remember(value) {
+    const storedScope = { ...value };
+    const values = recentScopes().filter((item) => JSON.stringify(item.scope) !== JSON.stringify(storedScope));
+    values.unshift({ label: scopeLabel(storedScope), scope: storedScope });
+    storeRecents(values);
+}
+
+async function ensureSuggestionData() {
+    if (dataPromise) return dataPromise;
+    dataPromise = Promise.all([
+        getPeople(500),
+        listCollections(),
+        getFolders(null),
+        getFilterOptions(),
+    ]).then(([peopleData, collectionData, folderData, optionsData]) => {
+        people = (peopleData && (peopleData.people || peopleData.persons || peopleData.results)) || [];
+        collections = (collectionData && collectionData.collections) || [];
+        folders = (folderData && folderData.folders) || [];
+        filterOptions = optionsData || {};
+        render();
+    }).catch(() => {});
+    return dataPromise;
 }
 
 function open() {
@@ -89,67 +211,423 @@ function close() {
     hot = -1;
 }
 
-function rowHtml(row, index) {
-    const face = row.thumb ? `<img class="sd-face" src="${esc(row.thumb)}" alt="">` : `<span class="sd-glyph">${row.icon ? icon(row.icon) : esc(row.glyph || '')}</span>`;
-    const meta = row.kbd ? `<kbd>${esc(row.kbd)}</kbd>` : esc(row.meta || '');
-    return `<div class="sd-item ${index === hot ? 'hot' : ''}" role="option" data-index="${index}">${face}<span class="sd-label">${esc(row.label)}</span><span class="sd-meta">${meta}</span></div>`;
+function sectionHead(label, action = '') {
+    return `<div class="sd-head"><span>${esc(label)}</span>${action}</div>`;
 }
 
-async function build() {
-    const input = document.getElementById('scope-input');
-    const term = input.value.trim();
-    rows = [];
-    if (input.value.startsWith('>')) {
-        rows.push({ head: 'Commands' });
-        const query = input.value.slice(1);
-        for (const command of COMMANDS.filter((item) => (!item.when || item.when()) && fuzzy(item.label, query))) {
-            rows.push(command);
-        }
-        if (rows.length === 1) rows.push({ empty: 'No matching command.' });
-    } else if (term) {
-        if (term.startsWith('camera:')) {
-            rows.push({ icon: 'camera', label: `Use ${term}`, run: () => apply({ camera: term.slice(7).trim() }) });
-        } else if (term.startsWith('lens:')) {
-            rows.push({ icon: 'aperture', label: `Use ${term}`, run: () => apply({ lens: term.slice(5).trim() }) });
-        } else {
-            rows.push({ icon: 'search', label: `Search for “${term}”`, run: () => apply({ q: term }) });
-        }
-        const allPeople = await loadPeople();
-        const lower = term.toLowerCase();
-        for (const person of allPeople) {
-            const label = personLabel(person);
-            if (!label.toLowerCase().includes(lower)) continue;
-            rows.push({
-                icon: 'users',
-                thumb: person.thumb_url,
-                label,
-                meta: person.image_count || person.face_count || '',
-                run: () => apply({ people: person.id, personLabel: label, personThumb: person.thumb_url || '' }),
+function rowHtml(row, index) {
+    const face = row.thumb
+        ? `<img class="sd-face" src="${esc(row.thumb)}" alt="">`
+        : `<span class="sd-glyph">${row.icon ? icon(row.icon) : esc(row.glyph || '')}</span>`;
+    const meta = row.kbd ? `<kbd>${esc(row.kbd)}</kbd>` : esc(row.meta || '');
+    const label = row.labelHtml || esc(row.label);
+    const recentRemove = row.recentIndex == null
+        ? ''
+        : `<button class="sd-recent-x" data-recent-index="${row.recentIndex}" aria-label="Remove recent">${icon('x')}</button>`;
+    const cls = ['sd-item', index === hot ? 'hot' : '', row.muted ? 'muted' : ''].filter(Boolean).join(' ');
+    return `<div class="${cls}" role="option" data-index="${index}">${face}<span class="sd-label">${label}</span><span class="sd-meta">${meta}</span>${recentRemove}</div>`;
+}
+
+function photoStripHtml(items) {
+    return '<div class="sd-photo-strip" role="group" aria-label="Photo search results">'
+        + items.map((row) => {
+            const index = row.runIndex;
+            const img = row.photo;
+            const cls = `sd-photo ${index === hot ? 'hot' : ''}`;
+            return `<button class="${cls}" data-index="${index}" aria-label="${esc(img.filename || `Photo ${img.id}`)}" style="--ar:${aspect(img)}">`
+                + `<img src="${esc(img.thumb_url || thumbUrl('sm', img.id))}" alt="">`
+                + '</button>';
+        }).join('')
+        + '</div>';
+}
+
+function skeletonPhotosHtml() {
+    return '<div class="sd-photo-strip" aria-label="Loading photo search results">'
+        + Array.from({ length: LIVE_LIMIT }, (_, i) => `<span class="sd-photo sd-photo-skel skel" style="--ar:${[1.45, .8, 1.2, 1.7, 1, 1.55][i]}"></span>`).join('')
+        + '</div>';
+}
+
+function searchRow(term) {
+    const count = live.q === term && live.data ? Number(live.data.visible_images) : null;
+    const meta = count == null ? 'Enter' : `${fmt(count)} results ⏎`;
+    return {
+        icon: live.q === term && live.data && !live.data.ai_unavailable ? 'sparkles' : 'search',
+        label: `Search “${term}”`,
+        labelHtml: `Search “${highlight(term, term)}”`,
+        meta,
+        navRow: 1,
+        run: () => applySearch(term),
+    };
+}
+
+function buildPhotoRows(term) {
+    if (!term) return [];
+    const section = [{ head: 'Photos' }, searchRow(term)];
+    if (term.length < LIVE_MIN_CHARS) return section;
+    if (live.q === term && live.loading) {
+        section.push({ photoSkeleton: true });
+        return section;
+    }
+    if (live.q !== term || !live.data) return section;
+    if (live.data.ai_unavailable) {
+        section.push({ note: 'filename search only — AI model not ready', icon: 'info' });
+    }
+    const images = (live.data.images || []).slice(0, LIVE_LIMIT);
+    if (images.length) {
+        section.push(...images.map((photo) => ({
+            photo,
+            navRow: 2,
+            run: () => openPhotoResult(term, photo, images),
+        })));
+    }
+    return section;
+}
+
+function buildPeopleRows(term) {
+    const matches = people
+        .map((person) => ({ person, label: personLabel(person) }))
+        .filter((item) => includesText(item.label, term))
+        .slice(0, MAX_SECTION_ROWS);
+    if (!matches.length) return [];
+    return [
+        { head: 'People' },
+        ...matches.map(({ person, label }, i) => ({
+            icon: 'users',
+            thumb: person.thumb_url,
+            label,
+            labelHtml: highlight(label, term),
+            meta: fmt(person.image_count || person.face_count || 0),
+            navRow: 10 + i,
+            run: () => applyScope({
+                people: person.id,
+                personLabel: label,
+                personThumb: person.thumb_url || '',
+            }),
+        })),
+    ];
+}
+
+function buildCollectionRows(term) {
+    const matches = collections
+        .filter((collection) => includesText(collection.name, term))
+        .slice(0, MAX_SECTION_ROWS);
+    if (!matches.length) return [];
+    return [
+        { head: 'Collections' },
+        ...matches.map((collection, i) => ({
+            icon: 'folder',
+            thumb: collection.cover_image_id ? thumbUrl('sm', collection.cover_image_id) : '',
+            label: collection.name,
+            labelHtml: highlight(collection.name, term),
+            meta: fmt(collection.image_count || 0),
+            navRow: 30 + i,
+            run: () => applyScope({ collectionId: collection.id, collectionName: collection.name || 'Collection' }),
+        })),
+    ];
+}
+
+function folderName(path) {
+    return String(path || '').split('/').filter(Boolean).pop() || path || '';
+}
+
+function buildFolderRows(term) {
+    const matches = folders
+        .filter((folder) => includesText(folder.path, term))
+        .slice(0, MAX_SECTION_ROWS);
+    if (!matches.length) return [];
+    return [
+        { head: 'Folders' },
+        ...matches.map((folder, i) => ({
+            icon: 'folder',
+            label: folderName(folder.path),
+            labelHtml: highlight(folderName(folder.path), term),
+            meta: `${fmt(folder.count || 0)} · ${folder.path}`,
+            navRow: 50 + i,
+            run: () => applyFacet({ key: 'folder', value: folder.path, remove: { start: 0, end: term.length }, closeAfter: true }),
+        })),
+    ];
+}
+
+function latestYear() {
+    const years = (filterOptions?.years || []).map((item) => Number(item.year || item.value)).filter(Boolean).sort((a, b) => b - a);
+    return years[0] || new Date().getFullYear();
+}
+
+function monthShort(month) {
+    const found = MONTHS.find((item) => item[2] === Number(month));
+    return found ? found[1][0].toUpperCase() + found[1].slice(1) : String(month).padStart(2, '0');
+}
+
+function dateLabel(value) {
+    if (value === 'undated') return 'Undated';
+    const month = String(value || '').match(/^(\d{4})-(\d{2})$/);
+    if (month) return `${monthShort(Number(month[2]))} ${month[1]}`;
+    return value;
+}
+
+function findDateSuggestion(input) {
+    const text = String(input || '');
+    const lower = text.toLowerCase();
+    const yearOnly = lower.match(/(?:^|\s)(\d{4})(?=\s|$)/);
+    let best = null;
+    for (const [full, short, month] of MONTHS) {
+        const monthPattern = `(?:${full}|${short})`;
+        const monthYear = new RegExp(`(?:^|\\s)(${monthPattern})\\s+(\\d{4})(?=\\s|$)`, 'i').exec(text);
+        const yearMonth = new RegExp(`(?:^|\\s)(\\d{4})\\s+(${monthPattern})(?=\\s|$)`, 'i').exec(text);
+        const monthOnly = new RegExp(`(?:^|\\s)(${monthPattern})(?=\\s|$)`, 'i').exec(text);
+        const match = monthYear || yearMonth || monthOnly;
+        if (!match) continue;
+        const year = monthYear ? Number(monthYear[2]) : yearMonth ? Number(yearMonth[1]) : latestYear();
+        const value = `${year}-${String(month).padStart(2, '0')}`;
+        const start = match.index + (match[0].startsWith(' ') ? 1 : 0);
+        best = {
+            value,
+            label: dateLabel(value),
+            remove: { start, end: match.index + match[0].length },
+        };
+        break;
+    }
+    if (!best && yearOnly) {
+        const start = yearOnly.index + (yearOnly[0].startsWith(' ') ? 1 : 0);
+        best = {
+            value: yearOnly[1],
+            label: yearOnly[1],
+            remove: { start, end: yearOnly.index + yearOnly[0].length },
+        };
+    }
+    return best;
+}
+
+function valuesForOperator(operator, query) {
+    const q = String(query || '').toLowerCase();
+    if (operator.name === 'camera') {
+        return (filterOptions?.cameras || [])
+            .filter((item) => includesText(item.camera || item.value, q))
+            .slice(0, MAX_SECTION_ROWS)
+            .map((item) => ({ value: item.camera || item.value, label: item.camera || item.value, count: item.count }));
+    }
+    if (operator.name === 'lens') {
+        return (filterOptions?.lenses || [])
+            .filter((item) => includesText(item.lens || item.value, q))
+            .slice(0, MAX_SECTION_ROWS)
+            .map((item) => ({ value: item.lens || item.value, label: item.lens || item.value, count: item.count }));
+    }
+    if (operator.name === 'type') {
+        return (filterOptions?.file_types || [])
+            .filter((item) => includesText(item.ext || item.value, q))
+            .slice(0, MAX_SECTION_ROWS)
+            .map((item) => {
+                const ext = String(item.ext || item.value || '').replace('.', '').toLowerCase();
+                return { value: ext, label: ext.toUpperCase(), count: item.count };
             });
-            if (rows.length >= 8) break;
+    }
+    if (operator.name === 'flag') {
+        return FLAG_VALUES.filter((item) => includesText(item.label, q) || includesText(item.value, q));
+    }
+    if (operator.name === 'folder') {
+        return folders
+            .filter((item) => includesText(item.path, q))
+            .slice(0, MAX_SECTION_ROWS)
+            .map((item) => ({ value: item.path, label: folderName(item.path), count: item.count, meta: item.path }));
+    }
+    return [];
+}
+
+function buildFacetRows(input) {
+    const tokenInfo = activeToken(input);
+    const token = tokenInfo.token;
+    const lower = token.toLowerCase();
+    const rowsOut = [];
+    const date = findDateSuggestion(input);
+    if (date) {
+        rowsOut.push({
+            icon: 'calendar',
+            label: `Date · ${date.label}`,
+            labelHtml: `Date · ${highlight(date.label, token)}`,
+            meta: 'facet',
+            navRow: 70,
+            run: () => applyFacet({ key: 'date_taken', value: date.value, remove: date.remove }),
+        });
+    }
+    const operatorMatch = lower.match(/^([a-z]*):?(.*)$/);
+    if (!operatorMatch) return rowsOut.length ? [{ head: 'Facet completions' }, ...rowsOut] : [];
+    const typedName = operatorMatch[1] || '';
+    const hasColon = token.includes(':');
+    const typedValue = hasColon ? token.slice(token.indexOf(':') + 1) : '';
+    if (!typedName) return rowsOut.length ? [{ head: 'Facet completions' }, ...rowsOut] : [];
+    const operators = OPERATORS.filter((op) => op.name.startsWith(typedName) || typedName.startsWith(op.name));
+    for (const operator of operators) {
+        if (!hasColon || operator.name !== typedName) {
+            rowsOut.push({
+                icon: operator.icon,
+                label: `${operator.name}:`,
+                labelHtml: `${highlight(operator.name, typedName)}:`,
+                meta: operator.label,
+                navRow: 80 + rowsOut.length,
+                run: () => completeOperator(operator.name, tokenInfo),
+            });
+            continue;
+        }
+        for (const value of valuesForOperator(operator, typedValue)) {
+            rowsOut.push({
+                icon: value.icon || operator.icon,
+                label: `${operator.name}:${value.label}`,
+                labelHtml: `${operator.name}:${highlight(value.label, typedValue)}`,
+                meta: value.count == null ? (value.meta || 'facet') : fmt(value.count),
+                navRow: 80 + rowsOut.length,
+                run: () => applyFacet({
+                    key: operator.key,
+                    value: value.value,
+                    remove: tokenInfo,
+                }),
+            });
         }
     }
+    return rowsOut.length ? [{ head: 'Facet completions' }, ...rowsOut.slice(0, MAX_SECTION_ROWS + 1)] : [];
+}
+
+function operatorIntent(input) {
+    const token = activeToken(input).token.toLowerCase();
+    if (!token) return false;
+    const name = token.includes(':') ? token.slice(0, token.indexOf(':')) : token;
+    return OPERATORS.some((op) => op.name.startsWith(name) || name.startsWith(op.name));
+}
+
+function dateOnlyIntent(input) {
+    const suggestion = findDateSuggestion(input);
+    if (!suggestion) return false;
+    return !remainingQuery(input, suggestion.remove.start, suggestion.remove.end);
+}
+
+function facetOnlyIntent(input) {
+    return operatorIntent(input) || dateOnlyIntent(input);
+}
+
+function buildEmptyRows() {
     const recents = recentScopes();
-    if (recents.length) rows.push({ head: 'Recent scopes' });
-    for (const item of recents) {
-        rows.push({ icon: 'clock-3', label: item.label, run: () => apply(item.scope) });
+    const result = [
+        { hint: true },
+    ];
+    if (recents.length) {
+        result.push({
+            head: 'Recents',
+            action: '<button class="sd-head-action" data-clear-recents="1">Clear</button>',
+        });
+        result.push(...recents.map((item, i) => ({
+            icon: scopeIcon(item.scope || {}),
+            label: item.label || scopeLabel(item.scope || {}),
+            meta: '',
+            recentIndex: i,
+            navRow: 100 + i,
+            run: () => applyScope(item.scope || {}),
+        })));
     }
-    render();
+    return result;
+}
+
+function buildCommandRows(input) {
+    const query = input.slice(1);
+    const matches = COMMANDS.filter((item) => (!item.when || item.when()) && fuzzy(item.label, query));
+    return [
+        { head: 'Commands' },
+        ...(matches.length ? matches.map((command, i) => ({ ...command, navRow: i })) : [{ empty: 'No matching command.' }]),
+    ];
+}
+
+function buildRows() {
+    const input = document.getElementById('scope-input');
+    const raw = input.value;
+    const term = raw.trim();
+    if (raw.startsWith('>')) return buildCommandRows(raw);
+    if (!term) return buildEmptyRows();
+    if (facetOnlyIntent(raw)) return buildFacetRows(raw);
+    return [
+        ...buildPhotoRows(term),
+        ...buildPeopleRows(term),
+        ...buildCollectionRows(term),
+        ...buildFolderRows(term),
+        ...buildFacetRows(raw),
+    ];
+}
+
+function assignRunIndexes() {
+    let index = 0;
+    for (const row of rows) {
+        if (row.run) {
+            row.runIndex = index;
+            index += 1;
+        }
+    }
 }
 
 function render() {
     const drop = document.getElementById('scope-drop');
-    let index = 0;
-    const footer = '<div class="sd-foot">Use Filter for flags, people, folders, metadata, and rating.</div>';
-    drop.innerHTML = rows.map((row) => {
-        if (row.head) return `<div class="sd-head">${row.head}</div>`;
-        if (row.empty) return `<div class="sd-item"><span class="sd-label">${esc(row.empty)}</span></div>`;
-        return rowHtml(row, index++);
-    }).join('') || '<div class="sd-item"><span class="sd-label">Type to search this archive</span></div>';
-    drop.insertAdjacentHTML('beforeend', footer);
-    hot = Math.min(hot, runnableRows().length - 1);
-    for (const item of drop.querySelectorAll('.sd-item[data-index]')) {
+    if (!drop) return;
+    rows = buildRows();
+    assignRunIndexes();
+    const runnableCount = runnableRows().length;
+    hot = runnableCount ? Math.min(Math.max(hot, -1), runnableCount - 1) : -1;
+    let html = '';
+    for (let i = 0; i < rows.length; i += 1) {
+        const row = rows[i];
+        if (row.head) {
+            html += sectionHead(row.head, row.action || '');
+        } else if (row.empty) {
+            html += `<div class="sd-empty">${esc(row.empty)}</div>`;
+        } else if (row.note) {
+            html += `<div class="sd-note"><span class="sd-glyph">${icon(row.icon || 'info')}</span><span>${esc(row.note)}</span></div>`;
+        } else if (row.hint) {
+            html += '<div class="sd-hint">'
+                + OPERATORS.map((op) => `<button data-op="${op.name}"><span>${icon(op.icon)}</span>${op.name}:</button>`).join('')
+                + '</div>';
+        } else if (row.photoSkeleton) {
+            html += skeletonPhotosHtml();
+        } else if (row.photo) {
+            const photoRows = [];
+            while (rows[i]?.photo) {
+                photoRows.push(rows[i]);
+                i += 1;
+            }
+            i -= 1;
+            html += photoStripHtml(photoRows);
+        } else {
+            html += rowHtml(row, row.runIndex);
+        }
+    }
+    drop.innerHTML = html || '<div class="sd-empty">Type to search this archive</div>';
+    bindDropdown(drop);
+}
+
+function bindDropdown(drop) {
+    for (const item of drop.querySelectorAll('[data-index]')) {
         item.addEventListener('click', () => run(Number(item.dataset.index)));
+    }
+    for (const button of drop.querySelectorAll('[data-op]')) {
+        button.addEventListener('click', () => {
+            const input = document.getElementById('scope-input');
+            input.value = `${button.dataset.op}:`;
+            input.focus();
+            input.setSelectionRange(input.value.length, input.value.length);
+            render();
+        });
+    }
+    drop.querySelector('[data-clear-recents]')?.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        storeRecents([]);
+        hot = -1;
+        render();
+    });
+    for (const button of drop.querySelectorAll('.sd-recent-x')) {
+        button.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const index = Number(button.dataset.recentIndex);
+            const next = recentScopes().filter((_, i) => i !== index);
+            storeRecents(next);
+            hot = -1;
+            render();
+        });
     }
 }
 
@@ -170,15 +648,135 @@ function run(index) {
     row.run();
 }
 
-function apply(patch) {
-    remember(patch);
-    setScope(patch);
+function applyScope(patch, { keepFocus = false } = {}) {
+    const clean = { ...patch };
+    remember(clean);
+    setScope(clean);
+    document.getElementById('scope-input').value = '';
+    if (keepFocus) {
+        open();
+        render();
+        document.getElementById('scope-input').focus();
+    } else {
+        close();
+    }
+}
+
+function applySearch(term) {
+    applyScope({ q: term });
+    switchLens('grid');
+}
+
+function openPhotoResult(term, photo, images) {
+    remember({ q: term });
+    setScope({ q: term });
+    switchLens('grid');
     document.getElementById('scope-input').value = '';
     close();
+    requestAnimationFrame(() => {
+        emit('loupe:open', {
+            id: Number(photo.id),
+            index: images.findIndex((img) => Number(img.id) === Number(photo.id)),
+            images,
+        });
+    });
+}
+
+function applyFacet({ key, value, remove, closeAfter = false }) {
+    const input = document.getElementById('scope-input');
+    const nextQ = remainingQuery(input.value, remove.start, remove.end);
+    const patch = {
+        [key]: String(value || ''),
+        q: nextQ || scope.q || '',
+        collectionId: '',
+        collectionName: '',
+        similarIds: [],
+        similarLabel: '',
+    };
+    if (key === 'people') {
+        patch.personLabel = '';
+        patch.personThumb = '';
+    }
+    remember({ ...scope, ...patch });
+    setScope(patch, { merge: true });
+    input.value = '';
+    input.focus();
+    if (closeAfter) close();
+    else {
+        hot = -1;
+        open();
+        render();
+    }
+}
+
+function completeOperator(name, tokenInfo) {
+    const input = document.getElementById('scope-input');
+    input.value = `${input.value.slice(0, tokenInfo.start)}${name}:${input.value.slice(tokenInfo.end)}`;
+    input.focus();
+    input.setSelectionRange(tokenInfo.start + name.length + 1, tokenInfo.start + name.length + 1);
+    hot = -1;
+    render();
 }
 
 function renderToken() {
     document.getElementById('scope-token-slot').innerHTML = scopeTokenHtml();
+}
+
+function scheduleLiveSearch() {
+    const term = document.getElementById('scope-input').value.trim();
+    if (term.startsWith('>') || term.length < LIVE_MIN_CHARS || facetOnlyIntent(term)) {
+        if (liveAbort) liveAbort.abort();
+        window.clearTimeout(liveTimer);
+        live = { q: term, loading: false, data: null };
+        render();
+        return;
+    }
+    window.clearTimeout(liveTimer);
+    if (liveAbort) liveAbort.abort();
+    live = { q: term, loading: true, data: null };
+    render();
+    const seq = ++liveSeq;
+    liveTimer = window.setTimeout(async () => {
+        const controller = new AbortController();
+        liveAbort = controller;
+        const params = new URLSearchParams({ q: term, limit: String(LIVE_LIMIT), offset: '0', sort: 'similarity' });
+        const data = await getRankings(params, { fetchOptions: { signal: controller.signal } });
+        if (seq !== liveSeq || controller.signal.aborted) return;
+        live = { q: term, loading: false, data };
+        render();
+    }, LIVE_DELAY_MS);
+}
+
+function moveHot(delta) {
+    const runnables = runnableRows();
+    if (!runnables.length) return;
+    if (hot < 0) {
+        hot = delta > 0 ? 0 : runnables.length - 1;
+        render();
+        return;
+    }
+    const current = runnables[hot];
+    const currentRow = current.navRow ?? hot;
+    const candidates = runnables
+        .map((row, index) => ({ row, index }))
+        .filter((item) => delta > 0 ? (item.row.navRow ?? item.index) > currentRow : (item.row.navRow ?? item.index) < currentRow);
+    hot = candidates.length ? candidates[delta > 0 ? 0 : candidates.length - 1].index : hot;
+    render();
+}
+
+function movePhotoHot(delta) {
+    const runnables = runnableRows();
+    const current = runnables[hot];
+    if (!current?.photo) return false;
+    const photoIndexes = runnables
+        .map((row, index) => ({ row, index }))
+        .filter((item) => item.row.photo && item.row.navRow === current.navRow);
+    const pos = photoIndexes.findIndex((item) => item.index === hot);
+    const next = photoIndexes[Math.max(0, Math.min(photoIndexes.length - 1, pos + delta))];
+    if (!next || next.index === hot) return true;
+    hot = next.index;
+    render();
+    return true;
 }
 
 export function focusOmnibox(seed = null) {
@@ -187,7 +785,8 @@ export function focusOmnibox(seed = null) {
     input.focus();
     if (seed == null) input.select();
     else input.setSelectionRange(input.value.length, input.value.length);
-    build();
+    ensureSuggestionData();
+    scheduleLiveSearch();
     open();
 }
 
@@ -197,22 +796,34 @@ export function openCommandPalette() {
 
 export function initOmnibox() {
     const box = document.getElementById('scopebox');
+    const field = document.getElementById('scope-field');
     const input = document.getElementById('scope-input');
+    field.addEventListener('click', (event) => {
+        if (event.target.closest('button, [data-clear-all], .chip-x')) return;
+        if (document.activeElement !== input) input.focus();
+    });
     input.addEventListener('focus', () => {
-        build();
+        ensureSuggestionData();
+        scheduleLiveSearch();
         open();
     });
-    input.addEventListener('input', build);
+    input.addEventListener('input', () => {
+        hot = -1;
+        ensureSuggestionData();
+        scheduleLiveSearch();
+    });
     input.addEventListener('keydown', (event) => {
         const count = runnableRows().length;
         if (event.key === 'ArrowDown') {
             event.preventDefault();
-            hot = Math.min(count - 1, hot + 1);
-            render();
+            moveHot(1);
         } else if (event.key === 'ArrowUp') {
             event.preventDefault();
-            hot = Math.max(0, hot - 1);
-            render();
+            moveHot(-1);
+        } else if (event.key === 'ArrowRight' && movePhotoHot(1)) {
+            event.preventDefault();
+        } else if (event.key === 'ArrowLeft' && movePhotoHot(-1)) {
+            event.preventDefault();
         } else if (event.key === 'Enter') {
             event.preventDefault();
             run(hot >= 0 ? hot : 0);
@@ -220,6 +831,8 @@ export function initOmnibox() {
             input.value = '';
             input.blur();
             close();
+        } else if (!count && event.key.length === 1) {
+            render();
         }
     });
     document.addEventListener('pointerdown', (event) => {
@@ -228,5 +841,5 @@ export function initOmnibox() {
     on('scope', renderToken);
     on('meta', renderToken);
     renderToken();
-    loadPeople();
+    ensureSuggestionData();
 }

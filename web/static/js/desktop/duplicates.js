@@ -1,8 +1,9 @@
 import { thumbUrl, writeFlags } from './api.js';
 import { applyFlags } from './selection.js';
-import { byId, emit, on, rememberImages } from './state.js';
+import {
+    byId, emit, on, rememberImages, setActiveLens,
+} from './state.js';
 import { showToast } from './toast.js';
-import { releaseFocus, trapFocus } from './focusTrap.js';
 import { icon } from '../icons.js';
 
 const DEFAULT_THRESHOLD = 0.95;
@@ -20,6 +21,7 @@ const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 }[c]));
 const fmt = (n) => Number(n || 0).toLocaleString('en-US');
+const RAW_EXTS = new Set(['arw', 'cr2', 'cr3', 'dng', 'nef', 'orf', 'raf', 'rw2']);
 
 function flagGlyph(flag) {
     if (flag === 'picked') return icon('star');
@@ -46,6 +48,102 @@ function mergeImage(image) {
         flag: normalizeFlag(image?.flag || cached.flag),
         thumb_url: image?.thumb_url || cached.thumb_url || thumbUrl('sm', id),
     };
+}
+
+function normalizedExt(image) {
+    const filename = String(image?.filename || '');
+    const fallback = filename.includes('.') ? filename.split('.').pop() : '';
+    return String(image?.file_ext || fallback || '')
+        .replace(/^\./, '')
+        .toLowerCase();
+}
+
+function fileType(image) {
+    const ext = normalizedExt(image);
+    if (RAW_EXTS.has(ext)) return 'RAW';
+    if (ext === 'jpg' || ext === 'jpeg') return 'JPG';
+    if (ext === 'tif' || ext === 'tiff') return 'TIFF';
+    return ext ? ext.toUpperCase() : '—';
+}
+
+function typeRank(image) {
+    const type = fileType(image);
+    if (type === 'RAW') return 4;
+    if (type === 'TIFF') return 3;
+    if (type === 'JPG') return 2;
+    return type === '—' ? 0 : 1;
+}
+
+function pixels(image) {
+    return (Number(image?.width) || 0) * (Number(image?.height) || 0);
+}
+
+function bytesLabel(value) {
+    const n = Number(value) || 0;
+    if (!n) return '—';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let size = n;
+    let unit = 0;
+    while (size >= 1024 && unit < units.length - 1) {
+        size /= 1024;
+        unit += 1;
+    }
+    return `${size >= 10 || unit === 0 ? Math.round(size) : size.toFixed(1)} ${units[unit]}`;
+}
+
+function dimensionsLabel(image) {
+    const width = Number(image?.width) || 0;
+    const height = Number(image?.height) || 0;
+    return width && height ? `${fmt(width)} × ${fmt(height)}` : '—';
+}
+
+function dateLabel(value) {
+    const text = String(value || '').trim();
+    return text ? text.slice(0, 10) : '—';
+}
+
+function folderLabel(image) {
+    const path = String(image?.filepath || '').replace(/\\/g, '/');
+    const parts = path.split('/').filter(Boolean);
+    return parts.length > 1 ? parts[parts.length - 2] : '—';
+}
+
+function fieldValues(image) {
+    return {
+        filename: image?.filename || String(image?.id || ''),
+        type: fileType(image),
+        dimensions: dimensionsLabel(image),
+        size: bytesLabel(image?.file_size),
+        date: dateLabel(image?.date_taken),
+        folder: folderLabel(image),
+    };
+}
+
+function bestBy(group, score) {
+    return group.images.reduce((winner, image) => (score(image) > score(winner) ? image : winner), group.images[0]);
+}
+
+function largestFileKeeper(group) {
+    return group.images.slice().sort((a, b) => (
+        pixels(b) - pixels(a)
+        || (Number(b.file_size) || 0) - (Number(a.file_size) || 0)
+        || (Number(b.elo) || 0) - (Number(a.elo) || 0)
+    ))[0];
+}
+
+function groupDiffs(group) {
+    const values = group.images.map(fieldValues);
+    const differs = {};
+    for (const field of ['filename', 'type', 'dimensions', 'size', 'date', 'folder']) {
+        differs[field] = new Set(values.map((value) => value[field])).size > 1;
+    }
+    const winners = {
+        type: bestBy(group, typeRank)?.id,
+        dimensions: bestBy(group, pixels)?.id,
+        size: bestBy(group, (image) => Number(image.file_size) || 0)?.id,
+        date: bestBy(group, (image) => Date.parse(image.date_taken || '') || 0)?.id,
+    };
+    return { differs, winners };
 }
 
 function groupPairs(pairs = []) {
@@ -112,13 +210,20 @@ function uniqueImages(images) {
     });
 }
 
-function groupChanges(group) {
-    const keeper = group.images[0];
+function changesForKeeper(group, keeper) {
     if (!keeper) return [];
     return group.images.map((image) => ({
         id: Number(image.id),
         flag: Number(image.id) === Number(keeper.id) ? 'picked' : 'rejected',
     }));
+}
+
+function groupChanges(group) {
+    return changesForKeeper(group, group.images[0]);
+}
+
+function largestFileChanges(group) {
+    return changesForKeeper(group, largestFileKeeper(group));
 }
 
 function dedupeChanges(changes) {
@@ -195,18 +300,35 @@ function renderSkeleton() {
         + '</div>';
 }
 
-function photoHtml(image) {
+function metaClass(field, image, diff) {
+    if (!diff.differs[field]) return 'muted';
+    return Number(diff.winners[field]) === Number(image.id) ? 'win' : 'diff';
+}
+
+function metaRow(field, label, value, image, diff) {
+    return `<div class="dupe-meta-row ${metaClass(field, image, diff)}"><span>${esc(label)}</span><b>${esc(value)}</b></div>`;
+}
+
+function photoHtml(image, diff) {
     const flag = currentFlag(image);
     const aspect = Number(image.width) && Number(image.height)
         ? Math.max(.65, Math.min(2.2, Number(image.width) / Number(image.height)))
         : 1.5;
+    const values = fieldValues(image);
     return `<article class="dupe-photo" style="--dupe-ar:${aspect}">`
         + `<button class="dupe-thumb" data-open-id="${image.id}" aria-label="Open ${esc(image.filename || image.id)} in Loupe">`
         + `<img src="${esc(thumbUrl('md', image.id))}" loading="lazy" decoding="async" alt="${esc(image.filename || '')}">`
         + `<span class="dupe-elo elo-chip">${Math.round(Number(image.elo) || 0)}</span>`
         + `<span class="dupe-flag ${flag}" title="${esc(flag)}">${flagGlyph(flag)}</span>`
         + '</button>'
-        + `<div class="dupe-name" title="${esc(image.filename || '')}">${esc(image.filename || image.id)}</div>`
+        + '<div class="dupe-facts">'
+        + `<div class="dupe-name ${diff.differs.filename ? 'diff' : 'muted'}" title="${esc(values.filename)}">${esc(values.filename)}</div>`
+        + `<div class="dupe-type ${metaClass('type', image, diff)}">${esc(values.type)}</div>`
+        + metaRow('dimensions', 'Dimensions', values.dimensions, image, diff)
+        + metaRow('size', 'File size', values.size, image, diff)
+        + metaRow('date', 'Taken', values.date, image, diff)
+        + metaRow('folder', 'Folder', values.folder, image, diff)
+        + '</div>'
         + '<div class="dupe-actions" aria-label="Flag photo">'
         + `<button data-flag="picked" data-id="${image.id}" aria-label="Pick ${esc(image.filename || image.id)}">${icon('star')}</button>`
         + `<button data-flag="rejected" data-id="${image.id}" aria-label="Reject ${esc(image.filename || image.id)}">${icon('x')}</button>`
@@ -240,9 +362,14 @@ function renderGroups() {
         `<section class="dupe-row" data-group="${index}">`
         + '<div class="dupe-row-head">'
         + `<div><b>${fmt(group.images.length)} photos</b><span>similarity ≥ ${thresholdLabel()}</span></div>`
-        + `<button class="btn" data-keep-group="${index}">Keep best</button>`
+        + '<div class="dupe-row-actions">'
+        + `<button class="btn" data-keep-group="${index}">Keep highest rated</button>`
+        + '<details class="dupe-more">'
+        + `<summary class="icon-btn" data-tip="More keeper choices" aria-label="More keeper choices">${icon('ellipsis')}</summary>`
+        + `<div class="dupe-menu"><button data-keep-largest-group="${index}">Keep largest file</button></div>`
+        + '</details></div>'
         + '</div>'
-        + `<div class="dupe-photos">${group.images.map(photoHtml).join('')}</div>`
+        + `<div class="dupe-photos">${group.images.map((image) => photoHtml(image, groupDiffs(group))).join('')}</div>`
         + '</section>'
     )).join('');
 }
@@ -267,9 +394,23 @@ async function hydrateFlags() {
                 target.flag = normalizeFlag(row.flag);
                 target.width = row.width || target.width;
                 target.height = row.height || target.height;
+                target.file_ext = row.file_ext || target.file_ext;
+                target.file_size = row.file_size || target.file_size;
+                target.date_taken = row.date_taken || target.date_taken;
+                target.filepath = row.filepath || target.filepath;
             }
             const cached = byId.get(Number(id));
-            if (cached) cached.flag = normalizeFlag(row.flag);
+            if (cached) {
+                Object.assign(cached, {
+                    flag: normalizeFlag(row.flag),
+                    width: row.width || cached.width,
+                    height: row.height || cached.height,
+                    file_ext: row.file_ext || cached.file_ext,
+                    file_size: row.file_size || cached.file_size,
+                    date_taken: row.date_taken || cached.date_taken,
+                    filepath: row.filepath || cached.filepath,
+                });
+            }
         }
         rememberImages(uniqueImages(allImages()));
     } catch {}
@@ -318,28 +459,28 @@ async function loadDuplicates() {
     }
 }
 
-function overlayHtml() {
-    return '<div id="duplicates" role="dialog" aria-modal="true" aria-label="Find duplicates" hidden tabindex="-1">'
+function viewHtml() {
+    return '<div id="duplicates" hidden>'
         + '<div id="duplicates-panel">'
         + '<header id="duplicates-head">'
         + '<div><b>Find duplicates</b><span id="duplicates-count" class="num"></span></div>'
         + '<label class="dupe-threshold"><span>Similarity</span><output id="duplicates-threshold-value">95%</output><input id="duplicates-threshold" class="ctl-range" type="range" min="0.90" max="0.99" step="0.01" value="0.95"></label>'
-        + '<button class="btn primary" id="duplicates-keep-all" disabled>Keep best everywhere</button>'
-        + `<button class="icon-btn" id="duplicates-close" data-tip="Close (Esc)" aria-label="Close">${icon('x')}</button>`
+        + '<button class="btn primary" id="duplicates-keep-all" disabled>Keep highest rated everywhere</button>'
+        + `<button class="icon-btn" id="duplicates-close" data-tip="Grid (G / Esc)" aria-label="Return to Grid">${icon('x')}</button>`
         + '</header>'
         + '<div id="duplicates-body"></div>'
         + '</div></div>';
 }
 
-function ensureOverlay() {
+function ensureView() {
     if (root) return root;
     const wrap = document.createElement('div');
-    wrap.innerHTML = overlayHtml();
+    wrap.innerHTML = viewHtml();
     root = wrap.firstElementChild;
-    document.body.appendChild(root);
+    document.getElementById('view-duplicates').appendChild(root);
     root.querySelector('#duplicates-close').addEventListener('click', closeDuplicates);
     root.querySelector('#duplicates-keep-all').addEventListener('click', () => {
-        applyKeepBest(groups.flatMap(groupChanges), 'Kept best everywhere');
+        applyKeepBest(groups.flatMap(groupChanges), 'Kept highest rated everywhere');
     });
     root.querySelector('#duplicates-threshold').addEventListener('input', (event) => {
         const value = Number(event.target.value) || DEFAULT_THRESHOLD;
@@ -366,7 +507,14 @@ function ensureOverlay() {
         const keepButton = event.target.closest('[data-keep-group]');
         if (keepButton) {
             const group = groups[Number(keepButton.dataset.keepGroup)];
-            if (group) applyKeepBest(groupChanges(group), 'Kept best');
+            if (group) applyKeepBest(groupChanges(group), 'Kept highest rated');
+            return;
+        }
+        const largestButton = event.target.closest('[data-keep-largest-group]');
+        if (largestButton) {
+            const group = groups[Number(largestButton.dataset.keepLargestGroup)];
+            largestButton.closest('details')?.removeAttribute('open');
+            if (group) applyKeepBest(largestFileChanges(group), 'Kept largest file');
         }
     });
     on('flags', () => {
@@ -376,21 +524,32 @@ function ensureOverlay() {
 }
 
 export function openDuplicates() {
-    ensureOverlay();
+    ensureView();
     if (open) return;
     open = true;
-    root.hidden = false;
-    trapFocus(root, root);
-    loadDuplicates();
+    setActiveLens('duplicates');
 }
 
 export function closeDuplicates() {
     if (!open || !root) return;
+    setActiveLens('grid');
+}
+
+export function mountDuplicates() {
+    ensureView();
+    if (!open) open = true;
+    document.getElementById('view-duplicates').classList.add('active');
+    root.hidden = false;
+    loadDuplicates();
+}
+
+export function unmountDuplicates() {
+    if (!root) return;
     open = false;
     if (abortController) abortController.abort();
     abortController = null;
     root.hidden = true;
-    releaseFocus(root);
+    document.getElementById('view-duplicates').classList.remove('active');
 }
 
 export function duplicatesOpen() {
@@ -398,7 +557,7 @@ export function duplicatesOpen() {
 }
 
 export function initDuplicates() {
-    ensureOverlay();
+    ensureView();
     document.getElementById('find-duplicates')?.addEventListener('click', openDuplicates);
     on('duplicates:open', openDuplicates);
 }

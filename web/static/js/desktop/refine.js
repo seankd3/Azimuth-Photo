@@ -1,34 +1,90 @@
-import { describeScope, on, refineParams, scope, setRankingsMeta } from './state.js';
-import { compareUndo, getPropagationLast, getRankings, mosaicNext, mosaicPick, thumbUrl } from './api.js';
+import {
+    describeScope, on, refineParams, scope, setActiveLens, setRankingsMeta,
+} from './state.js';
+import {
+    compareUndo, getPropagationLast, getRankings, mosaicNext, mosaicPick, thumbUrl,
+} from './api.js';
 import { showToast } from './toast.js';
-import { releaseFocus, trapFocus } from './focusTrap.js';
 
 const MODE_KEY = 'pa_d_refine_mode';
+const SIZE_KEY = 'pa_d_refine_size';
 const STRATEGY_KEY = 'pa_d_refine_strategy';
+const MAX_SCOPED_IDS = 2000;
+const STALE_ROUNDS = 10;
+const REPLACEMENT_TARGET = 24;
+const REPLACEMENT_FETCH_MIN = 12;
+const REPLACEMENT_LOW_WATER = 8;
+const REPLACEMENT_PROBE_CONCURRENCY = 4;
+const REPLACEMENT_PRELOAD_TIMEOUT_MS = 120;
+const RECENT_EXCLUDE_LIMIT = 48;
+const HISTORY_LIMIT = 20;
+
+const GRID_SIZES = {
+    '2x2': { columns: 2, rows: 2, count: 4 },
+    '3x2': { columns: 3, rows: 2, count: 6 },
+    '3x3': { columns: 3, rows: 3, count: 9 },
+    '4x3': { columns: 4, rows: 3, count: 12 },
+};
+
 let open = false;
-let mode = localStorage.getItem(MODE_KEY) || 'survey';
-let strategy = localStorage.getItem(STRATEGY_KEY) || 'diverse';
+let mode = readChoice(MODE_KEY, ['mosaic', 'duel'], 'mosaic');
+let gridSize = readChoice(SIZE_KEY, Object.keys(GRID_SIZES), '3x3');
+let strategy = readChoice(STRATEGY_KEY, ['diverse', 'explore', 'compete', 'random'], 'diverse');
 let currentSet = [];
-let nextPromise = null;
+let age = [];
+let replacements = [];
+let recentIds = [];
 let history = [];
 let generation = 0;
-let busy = false;
+let actionSeq = 0;
+let filling = false;
+let selectedIndex = -1;
 let picks = 0;
 let startedAt = 0;
+let saveQueue = Promise.resolve();
+let saveQueueActive = false;
+let saveQueueToken = 0;
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 }[c]));
-const MAX_SCOPED_IDS = 2000;
+
+function readChoice(key, choices, fallback) {
+    const saved = localStorage.getItem(key);
+    return choices.includes(saved) ? saved : fallback;
+}
 
 function need() {
-    return mode === 'duel' ? 2 : 4;
+    return mode === 'duel' ? 2 : GRID_SIZES[gridSize].count;
+}
+
+function stageClassName() {
+    return mode === 'duel' ? 'duel' : `mosaic grid-${gridSize}`;
+}
+
+function thumbTier() {
+    return 'md';
+}
+
+function imageUrl(img) {
+    return thumbUrl(thumbTier(), img.id);
+}
+
+function normalizeImage(img) {
+    if (!img || img.id == null) return null;
+    return {
+        ...img,
+        id: Number(img.id),
+        thumb_url: imageUrl(img),
+    };
 }
 
 function renderModes() {
     for (const button of document.querySelectorAll('#refine-modes button')) {
         button.classList.toggle('active', button.dataset.mode === mode);
     }
+    document.getElementById('refine-size').value = gridSize;
+    document.getElementById('refine-size').disabled = mode === 'duel';
     document.getElementById('refine-strategy').value = strategy;
 }
 
@@ -54,24 +110,42 @@ async function refreshPropagation() {
     pulsePropagation(count);
 }
 
+function setImagesLoadedHandlers() {
+    for (const img of document.querySelectorAll('#refine-stage .ref-card img')) {
+        const markLoaded = () => img.classList.add('loaded');
+        img.addEventListener('load', markLoaded, { once: true });
+        if (img.complete && img.naturalWidth > 0) markLoaded();
+    }
+}
+
 function renderSkeleton() {
     const stage = document.getElementById('refine-stage');
-    stage.className = mode;
-    stage.innerHTML = '<div class="ref-card skel"></div>'.repeat(need());
+    stage.className = stageClassName();
+    stage.innerHTML = '<button class="ref-card skel" aria-hidden="true" tabindex="-1"></button>'.repeat(need());
 }
 
 function renderSet() {
     const stage = document.getElementById('refine-stage');
-    stage.className = mode;
+    stage.className = stageClassName();
     if (currentSet.length < need()) {
         stage.innerHTML = '<div class="load-error"><h4>Not enough photos to refine</h4><p>Try widening the current view.</p></div>';
+        selectedIndex = -1;
         return;
     }
+    if (selectedIndex >= currentSet.length) selectedIndex = currentSet.length - 1;
     stage.innerHTML = currentSet.map((img, index) => {
         const key = mode === 'duel' ? (index === 0 ? '←' : '→') : String(index + 1);
-        return `<button class="ref-card" data-id="${img.id}" aria-label="Pick ${esc(img.filename || img.id)}">`
-            + `<img src="${esc(thumbUrl('md', img.id))}" decoding="async" alt=""><span class="ref-key">${key}</span></button>`;
+        const selected = index === selectedIndex ? ' selected' : '';
+        return `<button class="ref-card${selected}" data-id="${img.id}" data-index="${index}" aria-label="Pick ${esc(img.filename || img.id)}">`
+            + `<img src="${esc(imageUrl(img))}" decoding="async" alt="${esc(img.filename || '')}"><span class="ref-key">${key}</span></button>`;
     }).join('');
+    setImagesLoadedHandlers();
+}
+
+function updateSelectedCell() {
+    for (const card of document.querySelectorAll('#refine-stage .ref-card[data-index]')) {
+        card.classList.toggle('selected', Number(card.dataset.index) === selectedIndex);
+    }
 }
 
 async function refreshQuality() {
@@ -88,89 +162,313 @@ async function refreshQuality() {
         : '';
 }
 
-function fetchSet(excludeIds = []) {
-    const avgElo = currentSet.length
-        ? currentSet.reduce((sum, img) => sum + (Number(img.elo) || 1200), 0) / currentSet.length
-        : 0;
+function refineQueryParams() {
     const params = refineParams();
     if (scope.collectionId) params.set('collection_id', String(scope.collectionId));
-    if (scope.similarIds.length) params.set('ids', scope.similarIds.map(Number).filter((id) => id > 0).slice(0, MAX_SCOPED_IDS).join(','));
-    return mosaicNext(need(), params, excludeIds.join(','), strategy, avgElo);
+    if (scope.similarIds.length) {
+        params.set('ids', scope.similarIds.map(Number).filter((id) => id > 0).slice(0, MAX_SCOPED_IDS).join(','));
+    }
+    return params;
 }
 
-function prefetch() {
-    nextPromise = fetchSet(currentSet.map((img) => img.id));
+function gridElo() {
+    if (!currentSet.length) return 0;
+    return currentSet.reduce((sum, img) => sum + (Number(img.elo) || 1200), 0) / currentSet.length;
+}
+
+function uniqueIds(values = []) {
+    return [...new Set(values.map(Number).filter((id) => id > 0))];
+}
+
+async function fetchImages(count, excludeIds = []) {
+    const data = await mosaicNext(
+        count,
+        refineQueryParams(),
+        uniqueIds(excludeIds).join(','),
+        strategy,
+        gridElo(),
+    );
+    return ((data && data.images) || []).map(normalizeImage).filter(Boolean);
+}
+
+function currentExcludeIds({ includeRecent = true } = {}) {
+    const ids = [
+        ...currentSet.map((img) => img.id),
+        ...replacements.map((img) => img.id),
+    ];
+    if (includeRecent) ids.push(...recentIds);
+    return uniqueIds(ids);
+}
+
+function rememberRecent(ids = []) {
+    for (const id of ids) {
+        const n = Number(id);
+        if (!n) continue;
+        recentIds = recentIds.filter((entry) => entry !== n);
+        recentIds.push(n);
+    }
+    if (recentIds.length > RECENT_EXCLUDE_LIMIT) {
+        recentIds = recentIds.slice(recentIds.length - RECENT_EXCLUDE_LIMIT);
+    }
+}
+
+function probeImage(url, timeoutMs = REPLACEMENT_PRELOAD_TIMEOUT_MS) {
+    return new Promise((resolve) => {
+        const ImageCtor = globalThis.Image;
+        if (!ImageCtor || !url) {
+            resolve({ ok: false, timedOut: false });
+            return;
+        }
+        let settled = false;
+        const done = (ok, timedOut = false) => {
+            if (settled) return;
+            settled = true;
+            resolve({ ok, timedOut });
+        };
+        const img = new ImageCtor();
+        img.onload = () => done(true);
+        img.onerror = () => done(false);
+        img.src = url;
+        setTimeout(() => done(false, true), timeoutMs);
+    });
+}
+
+async function addReadyReplacement(img, token) {
+    const probe = await probeImage(imageUrl(img));
+    if (token !== generation) return false;
+    if (!probe.ok && !probe.timedOut) return false;
+    const currentIds = new Set(currentSet.map((entry) => entry.id));
+    if (currentIds.has(img.id) || replacements.some((entry) => entry.id === img.id)) return false;
+    if (replacements.length >= REPLACEMENT_TARGET) return false;
+    replacements.push({ ...img, cache_probe_deferred: Boolean(probe.timedOut) });
+    return true;
+}
+
+async function fillReplacements() {
+    if (!open || filling || replacements.length >= REPLACEMENT_TARGET) return false;
+    filling = true;
+    const token = generation;
+    try {
+        const needed = Math.max(REPLACEMENT_FETCH_MIN, REPLACEMENT_TARGET - replacements.length);
+        let candidates = await fetchImages(needed, currentExcludeIds({ includeRecent: true }));
+        if (!candidates.length && recentIds.length) {
+            candidates = await fetchImages(needed, currentExcludeIds({ includeRecent: false }));
+        }
+        if (token !== generation) return false;
+        const seen = new Set(replacements.map((img) => img.id));
+        candidates = candidates.filter((img) => {
+            const duplicate = seen.has(img.id) || currentSet.some((entry) => entry.id === img.id);
+            seen.add(img.id);
+            return !duplicate;
+        });
+        for (let start = 0; start < candidates.length; start += REPLACEMENT_PROBE_CONCURRENCY) {
+            if (token !== generation || replacements.length >= REPLACEMENT_TARGET) break;
+            const chunk = candidates.slice(start, start + REPLACEMENT_PROBE_CONCURRENCY);
+            await Promise.all(chunk.map((img) => addReadyReplacement(img, token)));
+        }
+    } finally {
+        if (token === generation) filling = false;
+    }
+    return true;
+}
+
+function maybeFillReplacements() {
+    if (replacements.length < REPLACEMENT_LOW_WATER) fillReplacements();
+}
+
+function takeReplacement() {
+    const existingIds = new Set(currentSet.map((img) => img.id));
+    while (replacements.length) {
+        const next = replacements.shift();
+        if (next && !existingIds.has(next.id)) return next;
+    }
+    return null;
+}
+
+function waitForReplacement() {
+    fillReplacements();
+    return new Promise((resolve) => {
+        let attempts = 0;
+        const poll = () => {
+            const next = takeReplacement();
+            if (next || attempts >= 30 || !open) {
+                resolve(next);
+                return;
+            }
+            attempts += 1;
+            setTimeout(poll, 160);
+        };
+        poll();
+    });
+}
+
+function replacementIndices(pickedIndex) {
+    let oldestIndex = -1;
+    let oldestAge = -1;
+    for (let i = 0; i < age.length; i++) {
+        if (i !== pickedIndex && age[i] > oldestAge) {
+            oldestAge = age[i];
+            oldestIndex = i;
+        }
+    }
+    const indices = [pickedIndex];
+    if (oldestIndex >= 0 && oldestAge >= STALE_ROUNDS) indices.push(oldestIndex);
+    return indices;
+}
+
+function swapCell(index, img) {
+    const old = currentSet[index];
+    if (!old || !img) return false;
+    rememberRecent([old.id]);
+    currentSet[index] = img;
+    age[index] = 0;
+    const card = document.querySelector(`#refine-stage .ref-card[data-index="${index}"]`);
+    if (!card) {
+        renderSet();
+        return true;
+    }
+    card.classList.add('replacing');
+    card.dataset.id = String(img.id);
+    card.setAttribute('aria-label', `Pick ${img.filename || img.id}`);
+    const image = card.querySelector('img');
+    const finish = () => {
+        card.classList.remove('replacing');
+        if (image) image.classList.add('loaded');
+    };
+    if (image) {
+        image.classList.remove('loaded');
+        image.alt = img.filename || '';
+        image.addEventListener('load', finish, { once: true });
+        image.addEventListener('error', finish, { once: true });
+        image.src = imageUrl(img);
+        if (image.complete) finish();
+    } else {
+        finish();
+    }
+    maybeFillReplacements();
+    return true;
+}
+
+async function replaceAt(index, token) {
+    const card = document.querySelector(`#refine-stage .ref-card[data-index="${index}"]`);
+    card?.classList.add('replacing');
+    const next = takeReplacement() || await waitForReplacement();
+    if (token !== generation || !next) {
+        card?.classList.remove('replacing');
+        return false;
+    }
+    return swapCell(index, next);
+}
+
+function enqueuePickSave(winnerId, loserIds) {
+    const run = () => mosaicPick(winnerId, loserIds)
+        .then((result) => ({ ok: Boolean(result && result.ok), result }))
+        .catch((error) => ({ ok: false, error }));
+    const queued = saveQueueActive ? saveQueue.then(run, run) : run();
+    const token = ++saveQueueToken;
+    saveQueueActive = true;
+    saveQueue = queued.catch(() => {});
+    saveQueue.finally(() => {
+        if (token === saveQueueToken) saveQueueActive = false;
+    });
+    return queued;
+}
+
+function restoreSnapshot(snapshot) {
+    currentSet = snapshot.images.slice();
+    age = snapshot.age.slice();
+    replacements = snapshot.replacements.slice();
+    recentIds = snapshot.recentIds.slice();
+    selectedIndex = snapshot.selectedIndex;
+    renderSet();
+    renderStats();
+    fillReplacements();
 }
 
 async function resetSet() {
     const seq = ++generation;
     history = [];
     currentSet = [];
-    nextPromise = null;
+    age = [];
+    replacements = [];
+    recentIds = [];
+    selectedIndex = -1;
     document.getElementById('refine-title').textContent = `Refining · ${describeScope()}`;
     renderModes();
     renderSkeleton();
-    const data = await fetchSet();
+    const images = await fetchImages(need());
     if (seq !== generation) return;
-    currentSet = (data && data.images) || [];
+    currentSet = images.slice(0, need());
+    age = currentSet.map(() => 0);
     renderSet();
-    if (currentSet.length >= need()) prefetch();
+    fillReplacements();
     refreshQuality();
 }
 
 async function shuffleSet() {
-    if (!open || busy) return;
+    if (!open) return;
     const seq = ++generation;
     const exclude = currentSet.map((img) => img.id);
-    nextPromise = null;
+    replacements = [];
+    selectedIndex = -1;
     renderSkeleton();
-    const data = await fetchSet(exclude);
+    const images = await fetchImages(need(), exclude);
     if (seq !== generation) return;
-    currentSet = (data && data.images) || [];
+    rememberRecent(exclude);
+    currentSet = images.slice(0, need());
+    age = currentSet.map(() => 0);
     renderSet();
-    if (currentSet.length >= need()) prefetch();
-}
-
-async function advance() {
-    const seq = ++generation;
-    const promise = nextPromise || fetchSet(currentSet.map((img) => img.id));
-    nextPromise = null;
-    renderSkeleton();
-    const data = await promise;
-    if (seq !== generation) return null;
-    currentSet = (data && data.images) || [];
-    renderSet();
-    if (currentSet.length >= need()) prefetch();
-    return { seq, set: currentSet };
+    fillReplacements();
 }
 
 export async function pickRefine(winnerId) {
-    if (!open || busy || currentSet.length < need()) return;
-    const winner = currentSet.find((img) => Number(img.id) === Number(winnerId));
-    if (!winner) return;
-    const loserIds = currentSet.filter((img) => Number(img.id) !== Number(winnerId)).map((img) => Number(img.id));
-    busy = true;
-    const entry = { set: currentSet, seq: generation };
+    if (!open || currentSet.length < need()) return;
+    const winner = Number(winnerId);
+    const idx = currentSet.findIndex((img) => Number(img.id) === winner);
+    if (idx < 0) return;
+    const pickedCard = document.querySelector(`#refine-stage .ref-card[data-index="${idx}"]`);
+    if (pickedCard?.classList.contains('replacing')) return;
+    const loserIds = currentSet.filter((img) => Number(img.id) !== winner).map((img) => Number(img.id));
+    if (!loserIds.length) return;
+    const seq = ++actionSeq;
+    const snapshot = {
+        images: currentSet.slice(),
+        age: age.slice(),
+        replacements: replacements.slice(),
+        recentIds: recentIds.slice(),
+        selectedIndex,
+    };
+    const entry = { snapshot, actionSeq: seq, savePromise: null };
     history.push(entry);
-    if (history.length > 20) history.shift();
+    if (history.length > HISTORY_LIMIT) history.shift();
     picks += 1;
     renderStats();
-    const write = mosaicPick(winnerId, loserIds);
-    const advanced = await advance();
-    busy = false;
-    const result = await write;
-    if (!result || !result.ok) {
+
+    const savePromise = enqueuePickSave(winner, loserIds);
+    entry.savePromise = savePromise;
+
+    for (let i = 0; i < age.length; i++) {
+        if (i !== idx) age[i] += 1;
+    }
+    const indices = replacementIndices(idx);
+    const token = generation;
+    for (const index of indices) replaceAt(index, token);
+    selectedIndex = Math.min(idx, currentSet.length - 1);
+    updateSelectedCell();
+    fillReplacements();
+
+    const saveResult = await savePromise;
+    if (!saveResult.ok) {
+        const historyIndex = history.indexOf(entry);
+        if (historyIndex >= 0) history.splice(historyIndex, 1);
         picks = Math.max(0, picks - 1);
-        const index = history.indexOf(entry);
-        if (index >= 0) history.splice(index, 1);
-        if (advanced && advanced.seq === generation && currentSet === advanced.set) {
-            currentSet = entry.set;
-            nextPromise = null;
-            renderSet();
-            if (currentSet.length >= need()) prefetch();
+        if (open && seq === actionSeq) {
+            restoreSnapshot(snapshot);
+            showToast('Pick did not save; restored the mosaic');
+        } else {
+            renderStats();
+            showToast('Pick did not save');
         }
-        renderStats();
-        showToast("Pick didn't save");
         return;
     }
     refreshPropagation();
@@ -178,27 +476,43 @@ export async function pickRefine(winnerId) {
 }
 
 export async function undoRefine() {
-    if (!open || busy || !history.length) return;
-    busy = true;
-    const previous = history.pop();
+    if (!open || !history.length) return;
+    const entry = history.pop();
+    if (entry.savePromise) await entry.savePromise;
     const result = await compareUndo();
-    busy = false;
     if (!result || !result.ok) {
-        history.push(previous);
+        history.push(entry);
         showToast('Nothing to undo');
         return;
     }
     picks = Math.max(0, picks - 1);
-    currentSet = previous.set;
-    renderSet();
-    renderStats();
-    prefetch();
+    restoreSnapshot(entry.snapshot);
     refreshQuality();
     showToast('Pick undone');
 }
 
-export function openRefine() {
+export function mountRefine() {
     if (open) return;
+    open = true;
+    document.getElementById('view-refine').classList.add('active');
+    startedAt = Date.now();
+    renderStats();
+    resetSet();
+}
+
+export function unmountRefine() {
+    if (!open) return;
+    open = false;
+    generation += 1;
+    selectedIndex = -1;
+    document.getElementById('view-refine').classList.remove('active');
+}
+
+export function openRefine() {
+    if (open) {
+        closeRefine();
+        return;
+    }
     if (scope.import_batch) {
         showToast('Refine is not available for import batches yet.');
         return;
@@ -207,38 +521,71 @@ export function openRefine() {
         showToast(`Refine is limited to ${MAX_SCOPED_IDS.toLocaleString('en-US')} similar photos`);
         return;
     }
-    open = true;
-    startedAt = Date.now();
-    const root = document.getElementById('refine');
-    root.hidden = false;
-    trapFocus(root, root);
-    renderStats();
-    resetSet();
+    setActiveLens('refine');
 }
 
 export function closeRefine() {
     if (!open) return;
-    open = false;
-    const root = document.getElementById('refine');
-    root.hidden = true;
-    releaseFocus(root);
+    setActiveLens('grid');
 }
 
 export function refineOpen() {
     return open;
 }
 
+function selectIndex(index) {
+    if (!open || currentSet.length < need()) return false;
+    selectedIndex = Math.max(0, Math.min(index, currentSet.length - 1));
+    updateSelectedCell();
+    return true;
+}
+
+function selectInVerticalDirection(direction) {
+    const card = document.querySelector(`#refine-stage .ref-card[data-index="${selectedIndex}"]`);
+    const cards = [...document.querySelectorAll('#refine-stage .ref-card[data-index]')];
+    if (!card || !cards.length) return selectIndex(0);
+    const currentRect = card.getBoundingClientRect();
+    const currentCenter = currentRect.left + currentRect.width / 2;
+    let bestIndex = selectedIndex;
+    let bestScore = Number.POSITIVE_INFINITY;
+    for (const candidate of cards) {
+        const index = Number(candidate.dataset.index);
+        if (index === selectedIndex) continue;
+        const rect = candidate.getBoundingClientRect();
+        const above = direction < 0 && rect.bottom <= currentRect.top + 1;
+        const below = direction > 0 && rect.top >= currentRect.bottom - 1;
+        if (!above && !below) continue;
+        const center = rect.left + rect.width / 2;
+        const vertical = direction < 0 ? currentRect.top - rect.bottom : rect.top - currentRect.bottom;
+        const score = vertical * 1000 + Math.abs(center - currentCenter);
+        if (score < bestScore) {
+            bestScore = score;
+            bestIndex = index;
+        }
+    }
+    return selectIndex(bestIndex);
+}
+
 export function pickByKey(key) {
     if (!open) return false;
-    if (mode === 'survey' && /^[1-4]$/.test(key)) {
-        const img = currentSet[Number(key) - 1];
-        if (img) pickRefine(img.id);
-        return true;
-    }
     if (mode === 'duel' && (key === 'ArrowLeft' || key === 'ArrowRight')) {
         const img = currentSet[key === 'ArrowLeft' ? 0 : 1];
         if (img) pickRefine(img.id);
         return true;
+    }
+    if (mode === 'mosaic') {
+        if (key === 'ArrowRight') return selectIndex(selectedIndex < 0 ? 0 : selectedIndex + 1);
+        if (key === 'ArrowLeft') return selectIndex(selectedIndex < 0 ? 0 : selectedIndex - 1);
+        if (key === 'ArrowDown') return selectInVerticalDirection(1);
+        if (key === 'ArrowUp') return selectInVerticalDirection(-1);
+        if (key === 'Enter' && selectedIndex >= 0) {
+            const keepIndex = selectedIndex;
+            const img = currentSet[selectedIndex];
+            if (img) pickRefine(img.id);
+            selectedIndex = keepIndex;
+            updateSelectedCell();
+            return true;
+        }
     }
     return false;
 }
@@ -246,21 +593,31 @@ export function pickByKey(key) {
 export function initRefine() {
     document.getElementById('refine-stage').addEventListener('click', (event) => {
         const card = event.target.closest('.ref-card[data-id]');
-        if (card) pickRefine(Number(card.dataset.id));
+        if (!card) return;
+        selectedIndex = Number(card.dataset.index);
+        updateSelectedCell();
+        pickRefine(Number(card.dataset.id));
     });
     document.getElementById('refine-close').addEventListener('click', closeRefine);
     document.getElementById('refine-undo').addEventListener('click', undoRefine);
     document.getElementById('refine-shuffle').addEventListener('click', shuffleSet);
+    document.getElementById('refine-size').addEventListener('change', (event) => {
+        gridSize = GRID_SIZES[event.target.value] ? event.target.value : '3x3';
+        localStorage.setItem(SIZE_KEY, gridSize);
+        if (open && mode === 'mosaic') resetSet();
+        renderModes();
+    });
     document.getElementById('refine-strategy').addEventListener('change', (event) => {
         strategy = event.target.value || 'diverse';
         localStorage.setItem(STRATEGY_KEY, strategy);
-        resetSet();
+        if (open) resetSet();
     });
     for (const button of document.querySelectorAll('#refine-modes button')) {
         button.addEventListener('click', () => {
-            mode = button.dataset.mode;
+            mode = button.dataset.mode === 'duel' ? 'duel' : 'mosaic';
             localStorage.setItem(MODE_KEY, mode);
-            resetSet();
+            if (open) resetSet();
+            renderModes();
         });
     }
     on('scope', () => {

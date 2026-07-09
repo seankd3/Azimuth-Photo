@@ -429,6 +429,58 @@ def folder_source_rows(db_path: str) -> list[tuple[int, str, int]]:
         connection.close_sync(conn, db_path=db_path)
 
 
+def folder_tree_source_rows(db_path: str) -> list[dict]:
+    conn = connection.open_sync(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT id, path, display_name, online, active_image_count "
+            "FROM catalog_sources WHERE included = 1 "
+            "ORDER BY display_name COLLATE NOCASE ASC, path ASC"
+        ).fetchall()
+        return [
+            {
+                "id": int(row[0]),
+                "path": row[1] or "",
+                "display_name": row[2] or source_display_name(row[1] or ""),
+                "online": int(row[3] or 0),
+                "active_image_count": int(row[4] or 0),
+            }
+            for row in rows
+        ]
+    finally:
+        connection.close_sync(conn, db_path=db_path)
+
+
+def folder_directory_counts_by_source(db_path: str, source_ids: list[int]) -> dict[int, dict[str, int]]:
+    ids = list(dict.fromkeys(int(source_id) for source_id in source_ids if int(source_id) > 0))
+    if not ids:
+        return {}
+    conn = connection.open_sync(db_path)
+    try:
+        counts_by_source: dict[int, dict[str, int]] = {source_id: {} for source_id in ids}
+        for chunk in _chunked(ids, 900):
+            placeholders = ",".join("?" for _ in chunk)
+            rows = conn.execute(
+                "SELECT source_id, "
+                "RTRIM(SUBSTR(filepath, 1, LENGTH(filepath) - LENGTH(filename)), ?) AS directory, "
+                "COUNT(*) AS count "
+                "FROM images "
+                f"WHERE source_id IN ({placeholders}) "
+                "AND missing_at IS NULL "
+                "AND filepath IS NOT NULL "
+                "AND filename IS NOT NULL "
+                "AND filename != '' "
+                "GROUP BY source_id, directory",
+                (os.sep, *chunk),
+            ).fetchall()
+            for source_id, directory, count in rows:
+                directory_counts = counts_by_source.setdefault(int(source_id), {})
+                directory_counts[directory or os.sep] = int(count or 0)
+        return counts_by_source
+    finally:
+        connection.close_sync(conn, db_path=db_path)
+
+
 def folder_image_filepaths_by_source(db_path: str, source_ids: list[int]) -> dict[int, list[str]]:
     ids = list(dict.fromkeys(int(source_id) for source_id in source_ids if int(source_id) > 0))
     if not ids:
