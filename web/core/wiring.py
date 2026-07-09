@@ -11,6 +11,7 @@ from features.media import routes as media_routes
 from features.people import routes as people_routes
 from features.search import routes as search_routes
 from features.share import routes as share_routes
+from features.stacks import routes as stack_routes
 from features.settings import routes as settings_routes
 
 
@@ -190,6 +191,11 @@ def configure_library_routes() -> None:
     library_service.configure_import_batches(
         get_import_batch_image_ids=lambda batch_id: db.get_import_batch_image_ids(batch_id),
     )
+    library_service.configure_stacks(
+        get_rankable_image_ids=lambda: db.get_rankable_image_id_set(),
+        get_stack_collapsed_image_ids=lambda: db.stack_member_image_ids_excluding_representatives(),
+        get_stack_representative_counts=lambda image_ids: db.stack_representative_counts(image_ids),
+    )
 
 
 def configure_search_routes() -> None:
@@ -237,6 +243,21 @@ def configure_collection_routes() -> None:
             db.DB_PATH,
             db_signature=db.DB_PATH,
         ),
+    )
+
+
+def configure_stack_routes() -> None:
+    import db
+    from core import cache_events
+
+    def invalidate_stack_dependent_caches() -> None:
+        cache_events.invalidate_rankings_cache()
+        cache_events.invalidate_ranking_count_cache()
+        cache_events.invalidate_facet_caches()
+
+    stack_routes.configure(
+        db_path=lambda: db.DB_PATH,
+        invalidate_rankings_cache=invalidate_stack_dependent_caches,
     )
 
 

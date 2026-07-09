@@ -25,6 +25,7 @@ from features.pages import routes as page_routes
 from features.people import routes as people_routes
 from features.search import routes as search_routes
 from features.share import routes as share_routes
+from features.stacks import routes as stack_routes
 from features.settings import routes as settings_routes
 
 
@@ -464,6 +465,7 @@ def create_app_shell(
     wiring.configure_library_routes()
     wiring.configure_search_routes()
     wiring.configure_collection_routes()
+    wiring.configure_stack_routes()
     wiring.configure_share_routes(templates=templates)
     object.__setattr__(shell, "runtime_services", configure_app_runtime_services(shell))
     page_routes.configure(templates=templates, template_context=shell.template_context)
@@ -477,6 +479,7 @@ def create_app_shell(
     app.include_router(media_routes.router)
     app.include_router(library_routes.router)
     app.include_router(collection_routes.router)
+    app.include_router(stack_routes.router)
     app.include_router(share_routes.router)
     app.include_router(export_routes.router)
     app.include_router(imports_routes.router)

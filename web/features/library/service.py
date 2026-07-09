@@ -39,6 +39,9 @@ _get_date_histogram: Callable[..., Awaitable[dict]] | None = None
 _get_scope_counts: Callable[..., Awaitable[dict]] | None = None
 _get_visible_pairing_pool_counts: Callable[..., Awaitable[dict]] | None = None
 _get_import_batch_image_ids: Callable[[int], Awaitable[set[int] | None]] | None = None
+_get_rankable_image_ids: Callable[[], Awaitable[frozenset[int]]] | None = None
+_get_stack_collapsed_image_ids: Callable[[], Awaitable[set[int]]] | None = None
+_get_stack_representative_counts: Callable[[list[int]], Awaitable[dict[int, dict]]] | None = None
 
 
 def configure(
@@ -94,6 +97,18 @@ def configure(
 def configure_import_batches(*, get_import_batch_image_ids: Callable[[int], Awaitable[set[int] | None]]) -> None:
     global _get_import_batch_image_ids
     _get_import_batch_image_ids = get_import_batch_image_ids
+
+
+def configure_stacks(
+    *,
+    get_rankable_image_ids: Callable[[], Awaitable[frozenset[int]]],
+    get_stack_collapsed_image_ids: Callable[[], Awaitable[set[int]]],
+    get_stack_representative_counts: Callable[[list[int]], Awaitable[dict[int, dict]]],
+) -> None:
+    global _get_rankable_image_ids, _get_stack_collapsed_image_ids, _get_stack_representative_counts
+    _get_rankable_image_ids = get_rankable_image_ids
+    _get_stack_collapsed_image_ids = get_stack_collapsed_image_ids
+    _get_stack_representative_counts = get_stack_representative_counts
 
 
 def invalidate_rankings_response_cache() -> None:
@@ -171,6 +186,39 @@ async def _combined_import_batch_filter(current_ids, import_batch: int = 0):
     return set(int(image_id) for image_id in current_ids).intersection(batch_ids)
 
 
+def _normalize_stacks_mode(value: str = "") -> str:
+    return "collapsed" if (value or "").strip().lower() == "collapsed" else "expanded"
+
+
+async def _combined_stack_filter(current_ids, stacks: str = "expanded"):
+    if _normalize_stacks_mode(stacks) != "collapsed":
+        return current_ids
+    if _get_stack_collapsed_image_ids is None or _get_rankable_image_ids is None:
+        raise RuntimeError("Library service is not configured")
+    collapsed_ids = await _get_stack_collapsed_image_ids()
+    if not collapsed_ids:
+        return current_ids
+    if current_ids is None:
+        current_ids = await _get_rankable_image_ids()
+    return set(int(image_id) for image_id in current_ids).difference(collapsed_ids)
+
+
+async def _attach_stack_counts(cards: list[dict], stacks: str = "expanded") -> list[dict]:
+    if _normalize_stacks_mode(stacks) != "collapsed" or not cards:
+        return cards
+    if _get_stack_representative_counts is None:
+        raise RuntimeError("Library service is not configured")
+    mapping = await _get_stack_representative_counts([int(card["id"]) for card in cards])
+    if not mapping:
+        return cards
+    for card in cards:
+        stack_data = mapping.get(int(card["id"]))
+        if stack_data:
+            card["stack_id"] = stack_data["stack_id"]
+            card["stack_count"] = stack_data["stack_count"]
+    return cards
+
+
 def _visible_thumb_size_for_scope(import_batch: int = 0) -> str:
     return "" if _normalized_import_batch_id(import_batch) else "sm"
 
@@ -204,9 +252,11 @@ async def date_groups_payload(
     q: str = "",
     deep: bool = False,
     import_batch: int = 0,
+    stacks: str = "expanded",
 ) -> dict:
     search = await _configured_resolve_library_constraints(q, people=people, deep=deep)
     search_ids = await _combined_import_batch_filter(search.get("id_filter"), import_batch)
+    search_ids = await _combined_stack_filter(search_ids, stacks)
     visible_thumb_size = _visible_thumb_size_for_scope(import_batch)
     groups = await _configured(_get_date_groups)(
         orientation=orientation,
@@ -277,9 +327,11 @@ async def date_histogram_payload(
     q: str = "",
     deep: bool = False,
     import_batch: int = 0,
+    stacks: str = "expanded",
 ) -> dict:
     search = await _configured_resolve_library_constraints(q, people=people, deep=deep)
     search_ids = await _combined_import_batch_filter(search.get("id_filter"), import_batch)
+    search_ids = await _combined_stack_filter(search_ids, stacks)
     return await _configured(_get_date_histogram)(
         orientation=orientation,
         compared=compared,
@@ -309,9 +361,11 @@ async def scope_counts_payload(
     q: str = "",
     deep: bool = False,
     import_batch: int = 0,
+    stacks: str = "expanded",
 ) -> dict:
     search = await _configured_resolve_library_constraints(q, people=people, deep=deep)
     search_ids = await _combined_import_batch_filter(search.get("id_filter"), import_batch)
+    search_ids = await _combined_stack_filter(search_ids, stacks)
     return await _configured(_get_scope_counts)(
         orientation=orientation,
         compared=compared,
@@ -339,12 +393,14 @@ async def api_rankings_impl(
     orientation: str = "", compared: str = "", min_stars: int = 0,
     folder: str = "", flag: str = "", date_taken: str = "", file_type: str = "",
     camera: str = "", lens: str = "", q: str = "", deep: bool = False, people: str = "",
-    import_batch: int = 0, request=None,
+    import_batch: int = 0, stacks: str = "expanded", request=None,
 ):
     limit = _configured_clamp_int(limit, 100, 1, MAX_RANKINGS_LIMIT)
     offset = _configured_clamp_int(offset, 0, 0, 1_000_000)
     search = await _configured_resolve_library_constraints(q, people=people, deep=deep)
     search_ids = await _combined_import_batch_filter(search["id_filter"], import_batch)
+    stacks_mode = _normalize_stacks_mode(stacks)
+    search_ids = await _combined_stack_filter(search_ids, stacks_mode)
     search_scores = search["scores"]
     search_mode = search["search_mode"]
     text_query = search["text_query"]
@@ -397,6 +453,7 @@ async def api_rankings_impl(
             bool(search["ai_unavailable"]) if cacheable_search else False,
             str(search.get("fallback_reason") or ""),
             _normalized_import_batch_id(import_batch),
+            stacks_mode,
         )
         cached = _rankings_response_cache.get(rankings_cache_key)
         if cached and cached["expires"] > time.monotonic():
@@ -488,6 +545,7 @@ async def api_rankings_impl(
             reverse=True,
         )
         page = all_results[offset:offset + limit]
+        page = await _attach_stack_counts(page, stacks_mode)
         if page:
             _configured_schedule_thumbnail_prefetch(
                 [{"id": row["id"], "filepath": ""} for row in page],
@@ -541,6 +599,7 @@ async def api_rankings_impl(
             )
         all_results.sort(key=lambda x: x["similarity"], reverse=(sort == "similarity"))
         page = all_results[offset:offset + limit]
+        page = await _attach_stack_counts(page, stacks_mode)
         if page:
             _configured_schedule_thumbnail_prefetch(
                 [{"id": row["id"], "filepath": ""} for row in page],
@@ -686,6 +745,7 @@ async def api_rankings_impl(
         if sort in ("date_taken", "date_taken_asc"):
             kwargs["date_group"] = app_helpers.date_group_for_image(data)
         result.append(app_helpers.image_card(data, "sm", **kwargs))
+    result = await _attach_stack_counts(result, stacks_mode)
     response = {
         "images": result,
         **response_helpers.visibility_counts(total_images, visible_images),

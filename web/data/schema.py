@@ -5,7 +5,7 @@ import os
 from data.repositories import catalog as catalog_repository
 
 EXPECTED_EMBEDDING_DIM = 2048  # Qwen3-VL-Embedding-2B native dimension
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS catalog_sources (
@@ -377,6 +377,28 @@ ON import_batches(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_import_batch_images_image
 ON import_batch_images(image_id, batch_id);
 
+CREATE TABLE IF NOT EXISTS stacks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL CHECK(kind IN ('burst','variant','crosssource','manual')),
+    representative_image_id INTEGER NOT NULL REFERENCES images(id),
+    auto INTEGER NOT NULL DEFAULT 1,
+    created_at REAL,
+    updated_at REAL
+);
+
+CREATE TABLE IF NOT EXISTS stack_members (
+    stack_id INTEGER NOT NULL REFERENCES stacks(id) ON DELETE CASCADE,
+    image_id INTEGER NOT NULL UNIQUE REFERENCES images(id),
+    score REAL,
+    added_at REAL,
+    PRIMARY KEY(stack_id, image_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_stacks_kind
+ON stacks(kind);
+CREATE INDEX IF NOT EXISTS idx_stack_members_stack_id
+ON stack_members(stack_id);
+
 CREATE TABLE IF NOT EXISTS collections (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
@@ -738,6 +760,8 @@ REQUIRED_TABLES = {
     "cache_metadata",
     "import_batches",
     "import_batch_images",
+    "stacks",
+    "stack_members",
     "collections",
     "collection_images",
     "collection_shares",
@@ -787,6 +811,8 @@ REQUIRED_COLUMNS = {
     },
     "comparisons": {"action_id"},
     "cache_metadata": {"replace_stale_thumbnails"},
+    "stacks": {"kind", "representative_image_id", "auto", "created_at", "updated_at"},
+    "stack_members": {"stack_id", "image_id", "score", "added_at"},
     "collection_shares": {"password_hash", "view_count", "first_viewed_at", "last_viewed_at"},
 }
 
@@ -806,6 +832,8 @@ REQUIRED_INDEXES = {
     "idx_cache_entries_root_size_accessed_id",
     "idx_import_batches_created",
     "idx_import_batch_images_image",
+    "idx_stacks_kind",
+    "idx_stack_members_stack_id",
     "idx_collections_updated",
     "idx_collection_images_image",
     "idx_collection_images_position",

@@ -15,6 +15,7 @@ from data.repositories import cache_entries as cache_entry_repository
 from data.repositories import catalog as catalog_repository
 from data.repositories import collections as collection_repository
 from data.repositories import shares as share_repository
+from data.repositories import stacks as stack_repository
 from data.repositories import embeddings as embedding_repository
 from data.repositories import filter_options as filter_options_repository
 from data.repositories import images as image_repository
@@ -1016,6 +1017,42 @@ async def date_histogram(**kwargs) -> dict:
 
 async def scope_counts(**kwargs) -> dict:
     return await ranking_repository.scope_counts(DB_PATH, **kwargs)
+
+
+async def create_stack(**kwargs) -> dict:
+    return await stack_repository.create_stack(DB_PATH, **kwargs)
+
+
+async def get_stack(stack_id: int) -> dict | None:
+    return await stack_repository.get_stack(DB_PATH, stack_id)
+
+
+async def list_stacks(**kwargs) -> dict:
+    return await stack_repository.list_stacks(DB_PATH, **kwargs)
+
+
+async def unstack(stack_id: int) -> bool:
+    return await stack_repository.unstack(DB_PATH, stack_id)
+
+
+async def set_stack_representative(stack_id: int, image_id: int) -> dict | None:
+    return await stack_repository.set_representative(DB_PATH, stack_id, image_id)
+
+
+async def stack_member_image_ids_excluding_representatives() -> set[int]:
+    return await stack_repository.member_image_ids_excluding_representatives(DB_PATH)
+
+
+async def stack_representative_counts(image_ids) -> dict[int, dict]:
+    return await stack_repository.representative_stack_counts(DB_PATH, image_ids)
+
+
+async def stack_for_image(image_id: int) -> dict | None:
+    return await stack_repository.stack_for_image(DB_PATH, image_id)
+
+
+async def upsert_auto_stacks(kind: str, groups) -> dict:
+    return await stack_repository.upsert_auto_stacks(DB_PATH, kind, groups)
 
 
 async def count_rankings(orientation: str = "", compared: str = "", min_stars: int = 0,

@@ -26,7 +26,7 @@ async def api_rankings(
     orientation: str = "", compared: str = "", min_stars: int = 0,
     folder: str = "", flag: str = "", date_taken: str = "", file_type: str = "",
     camera: str = "", lens: str = "", q: str = "", deep: bool = False, people: str = "",
-    import_batch: int = 0, request: Request = None,
+    import_batch: int = 0, stacks: str = "expanded", request: Request = None,
 ):
     if _rankings_handler is None:
         raise RuntimeError("Library routes are not configured")
@@ -50,6 +50,7 @@ async def api_rankings(
                 deep=deep,
                 people=people,
                 import_batch=import_batch,
+                stacks=stacks,
                 request=request,
             )
     except Exception as exc:
@@ -77,7 +78,7 @@ async def api_date_groups(
     orientation: str = "", compared: str = "", min_stars: int = 0,
     folder: str = "", flag: str = "", date_taken: str = "", file_type: str = "",
     camera: str = "", lens: str = "", people: str = "", q: str = "", deep: bool = False,
-    import_batch: int = 0,
+    import_batch: int = 0, stacks: str = "expanded",
 ):
     """Return date groups with counts for the scrubber, respecting active filters."""
     return await library_service.date_groups_payload(
@@ -94,6 +95,7 @@ async def api_date_groups(
         q=q,
         import_batch=import_batch,
         deep=deep,
+        stacks=stacks,
     )
 
 
@@ -102,7 +104,7 @@ async def api_date_histogram(
     orientation: str = "", compared: str = "", min_stars: int = 0,
     folder: str = "", flag: str = "", date_taken: str = "", file_type: str = "",
     camera: str = "", lens: str = "", people: str = "", q: str = "", deep: bool = False,
-    import_batch: int = 0,
+    import_batch: int = 0, stacks: str = "expanded",
 ):
     """Return whole-scope month counts for the timeline scrubber and month view."""
     return await library_service.date_histogram_payload(
@@ -119,6 +121,7 @@ async def api_date_histogram(
         q=q,
         import_batch=import_batch,
         deep=deep,
+        stacks=stacks,
     )
 
 
@@ -127,7 +130,7 @@ async def api_counts(
     orientation: str = "", compared: str = "", min_stars: int = 0,
     folder: str = "", date_taken: str = "", file_type: str = "",
     camera: str = "", lens: str = "", people: str = "", q: str = "", deep: bool = False,
-    import_batch: int = 0,
+    import_batch: int = 0, stacks: str = "expanded",
 ):
     """Return cheap total/picked/rejected counts for the scope in one call."""
     return await library_service.scope_counts_payload(
@@ -143,6 +146,7 @@ async def api_counts(
         q=q,
         import_batch=import_batch,
         deep=deep,
+        stacks=stacks,
     )
 
 
