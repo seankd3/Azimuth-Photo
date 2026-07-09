@@ -21,7 +21,7 @@ const LIVE_DELAY_MS = 250;
 const LIVE_MIN_CHARS = 2;
 const LIVE_LIMIT = 6;
 const MAX_SECTION_ROWS = 6;
-const DEEP_SEARCH_TIP = 'Uses the active embedding model instead of the fast search model when those model indexes differ.';
+const DEEP_SEARCH_TIP = 'Slower, more thorough visual search';
 const FLAG_VALUES = [
     { value: 'picked', label: 'Picked', icon: 'star' },
     { value: 'rejected', label: 'Rejected', icon: 'x' },
@@ -75,8 +75,8 @@ const COMMANDS = [
     { icon: 'map-pin', label: 'Switch lens: map', kbd: 'M', run: () => switchLens('map') },
     { icon: 'panel-left', label: 'Toggle left panel', kbd: '[', run: toggleLeftPanel },
     { icon: 'keyboard', label: 'Keyboard shortcuts', kbd: '?', run: () => emit('help:open') },
-    { icon: 'house', label: 'Clear scope / All photos', run: () => setScope({}) },
-    { icon: 'arrow-down-wide-narrow', label: 'Sort by Elo', run: () => setSort('elo') },
+    { icon: 'house', label: 'Clear view / All photos', run: () => setScope({}) },
+    { icon: 'arrow-down-wide-narrow', label: 'Sort by rating', run: () => setSort('elo') },
     { icon: 'calendar', label: 'Sort by date', run: () => setSort('date_taken') },
     { icon: 'file-type', label: 'Sort by filename', run: () => setSort('filename') },
 ];
@@ -385,7 +385,7 @@ function buildPeopleRows(term) {
             thumb: personThumb(person),
             label,
             labelHtml: named ? highlight(label, term) : esc(label),
-            meta: named ? fmt(personCount(person)) : `ID ${person.id}`,
+            meta: named ? fmt(personCount(person)) : `Unnamed · ${fmt(personCount(person))} photos`,
             navRow: 10 + i,
             run: () => applyScope({
                 people: person.id,

@@ -91,7 +91,7 @@ export function exportMenuOpen() {
 export function downloadExport(params, { count = 0, message = '' } = {}) {
     const format = params.get('format') || 'csv';
     if (format === 'zip' && count > ZIP_EXPORT_MAX) {
-        showToast(`Zip export is limited to ${ZIP_EXPORT_MAX.toLocaleString('en-US')} photos`);
+        showToast(`Zip export tops out at ${ZIP_EXPORT_MAX.toLocaleString('en-US')} photos`);
         return false;
     }
     const link = document.getElementById('download-link');

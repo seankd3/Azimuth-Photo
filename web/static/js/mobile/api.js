@@ -10,8 +10,8 @@ let lastWriteFailure = null;
 
 export function writeFailureMessage() {
     return lastWriteFailure === 'offline' || isOffline()
-        ? 'Offline — change not saved'
-        : 'Server error — change not saved';
+        ? 'Offline — couldn’t save'
+        : 'Couldn’t save — try again';
 }
 
 export async function postJson(url, body) {

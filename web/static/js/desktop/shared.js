@@ -190,7 +190,7 @@ function privateBlock(item) {
 function websiteBadge(website) {
     const hook = website.hook_status || {};
     if (hook.configured && !hook.ok) {
-        return '<span class="shared-badge bad">Hook failed</span>';
+        return '<span class="shared-badge bad">Website update failed</span>';
     }
     if (!website.url) {
         return '<span class="shared-badge neutral">Published locally</span>';
@@ -214,8 +214,8 @@ function websiteBlock(item) {
         + websiteBadge(website)
         + '</div>'
         + `<p>Published ${esc(dateLine(website.published_at, 'Unknown'))} · updated ${esc(relLine(website.updated_at, 'never'))}</p>`
-        + (hook.configured && !hook.ok ? `<p class="shared-error">Published locally, hook failed${hook.output ? ` · ${esc(hook.output.split('\n').slice(-1)[0])}` : ''}</p>` : '')
-        + (!website.url && !(hook.configured && !hook.ok) ? '<p class="shared-meta">Local bundle ready · set Site base URL for a live link</p>' : '')
+        + (hook.configured && !hook.ok ? `<p class="shared-error">Gallery files are ready, but the website update didn’t finish${hook.output ? ` · ${esc(hook.output.split('\n').slice(-1)[0])}` : ''}</p>` : '')
+        + (!website.url && !(hook.configured && !hook.ok) ? '<p class="shared-meta">Gallery files are ready · set Site base URL for a live link</p>' : '')
         + `<code title="${esc(website.url || '')}">${esc(website.url || 'Base URL not set')}</code>`
         + '<div class="shared-actions">'
         + actionButton('publish-open', 'Open', 'external-link', !website.url)
@@ -269,7 +269,7 @@ function shellHead(subhead) {
 function emptyBoardHtml() {
     return '<div class="shared-empty">'
         + '<h3>No shared collections yet</h3>'
-        + '<p>Private links make a gallery for a client or friend. Website publishing writes a static gallery to your site folder.</p>'
+        + '<p>Share a private gallery link, or publish a collection to your website.</p>'
         + '<div class="shared-empty-actions">'
         + '<button class="btn primary" id="shared-open-library" type="button">Open a collection</button>'
         + '</div></div>';
@@ -311,7 +311,7 @@ async function copyText(value, label) {
         await navigator.clipboard.writeText(value || '');
         showToast(`${label} copied`);
     } catch {
-        showToast('Copy failed');
+        showToast('Couldn’t copy');
     }
 }
 

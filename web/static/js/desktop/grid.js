@@ -1,7 +1,7 @@
 import {
     byId, clearSelection, emit, nonSearchFacetCount, on, scope, scopeActive, scopeParams, selection, setBestOfTotal, setImages, setRankingsMeta, setScope, viewState,
 } from './state.js';
-import { createStack, getStack, thumbUrl, unstack } from './api.js';
+import { createStack, getCatalog, getScanStatus, getStack, thumbUrl, unstack } from './api.js';
 import { loadScopePage } from './scope_data.js';
 import {
     enterSelection, isSelectionMode, toggleSelection,
@@ -30,6 +30,8 @@ let savedScrollTop = 0;
 let expandedStack = null;
 let stackExpansionRequest = 0;
 let creatingStack = false;
+let emptyStateRequest = 0;
+let emptyScanTimer = 0;
 const stackCache = new Map();
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
@@ -167,7 +169,7 @@ async function expandStack(stackId, cell) {
     if (!current) return false;
     const members = (data && data.members || []).filter((img) => Number(img?.id) !== Number(cell.dataset.id));
     if (!members.length) {
-        showToast("Stack didn't return expandable members");
+        showToast('Couldn’t expand this stack');
         return false;
     }
     for (const member of members) {
@@ -221,6 +223,51 @@ function renderSkeletons() {
         + '</div>';
 }
 
+function bindEmptyActions() {
+    document.getElementById('grid-add-source')?.addEventListener('click', () => document.getElementById('system-btn')?.click());
+    document.getElementById('grid-import')?.addEventListener('click', () => emit('import:open'));
+}
+
+async function hydrateFirstRunEmpty(request) {
+    if (scopeActive() || viewState.bestOf) return;
+    const [catalog, scan] = await Promise.all([
+        getCatalog().catch(() => null),
+        getScanStatus().catch(() => null),
+    ]);
+    if (request !== emptyStateRequest || !mounted || viewState.images.length) return;
+    const flow = document.getElementById('grid-flow');
+    const sources = (catalog && catalog.sources) || [];
+    const scanning = Boolean(scan && scan.scanning);
+    const found = Number(scan && (scan.total_found || scan.total_inserted)) || 0;
+    window.clearTimeout(emptyScanTimer);
+    if (!sources.length) {
+        flow.innerHTML = '<div class="grid-empty">'
+            + '<h3>Welcome to photoArchive</h3>'
+            + '<p>Add a folder of photos to start your private, local library.</p>'
+            + '<div class="grid-empty-actions"><button class="btn primary" id="grid-add-source">Add a source</button>'
+            + '<button class="btn" id="grid-import">Import photos</button></div></div>';
+    } else if (scanning) {
+        flow.innerHTML = '<div class="grid-empty">'
+            + '<h3>Source added</h3>'
+            + `<p>Scanning${found ? ` · ${found.toLocaleString('en-US')} photos found` : ' for photos'}.</p>`
+            + '<p>Your first thumbnails will appear here when they’re ready.</p>'
+            + '<div class="grid-empty-actions"><button class="btn primary" id="grid-add-source">View scan progress</button></div></div>';
+        emptyScanTimer = window.setTimeout(async () => {
+            if (request !== emptyStateRequest || !mounted || viewState.images.length) return;
+            const page = await loadScopePage({ limit: 1, offset: 0 });
+            if (page && (page.images || []).length) loadFirstPage();
+            else hydrateFirstRunEmpty(request);
+        }, 1500);
+    } else {
+        flow.innerHTML = '<div class="grid-empty">'
+            + '<h3>No photos yet</h3>'
+            + '<p>Your source is ready, but no photos have appeared. Check the source or start a rescan in System.</p>'
+            + '<div class="grid-empty-actions"><button class="btn primary" id="grid-add-source">Open Sources</button>'
+            + '<button class="btn" id="grid-import">Import photos</button></div></div>';
+    }
+    bindEmptyActions();
+}
+
 function renderEmptyState() {
     stackExpansionRequest += 1;
     closeExpandedStack();
@@ -229,21 +276,23 @@ function renderEmptyState() {
     const flow = document.getElementById('grid-flow');
     const showClearFilters = nonSearchFacetCount() > 0;
     const showClearScope = scopeActive() || viewState.bestOf;
+    const request = ++emptyStateRequest;
     flow.innerHTML = '<div class="grid-empty">'
-        + '<h3>No photos in this view</h3>'
-        + '<p>Try widening the current scope or clearing active filters.</p>'
+        + '<h3>No photos in this view.</h3>'
+        + '<p>Try widening this view or clearing filters.</p>'
         + '<div class="grid-empty-actions">'
         + (showClearFilters ? '<button class="btn" id="grid-clear-filters">Clear filters</button>' : '')
-        + (showClearScope ? '<button class="btn primary" id="grid-clear-scope">Clear scope</button>' : '')
+        + (showClearScope ? '<button class="btn primary" id="grid-clear-scope">Clear view</button>' : '')
         + '</div></div>';
     document.getElementById('grid-clear-filters')?.addEventListener('click', () => {
         setScope({ q: scope.q, sort: scope.sort || 'elo' });
     });
     document.getElementById('grid-clear-scope')?.addEventListener('click', () => setScope({}));
+    hydrateFirstRunEmpty(request);
 }
 
 function renderError(message) {
-    document.getElementById('grid-error').innerHTML = '<div class="load-error"><h4>Couldn\'t load this scope</h4>'
+    document.getElementById('grid-error').innerHTML = '<div class="load-error"><h4>Couldn\'t load this view</h4>'
         + `<p>${esc(message || 'The archive did not respond.')}</p><button class="btn" id="grid-retry">Retry</button></div>`;
     document.getElementById('grid-retry').addEventListener('click', () => loadFirstPage());
 }
@@ -308,6 +357,7 @@ export async function requestMorePhotos() {
 
 export function loadFirstPage() {
     if (!mounted) return;
+    window.clearTimeout(emptyScanTimer);
     generation += 1;
     viewState.generation = generation;
     offset = 0;
@@ -481,6 +531,11 @@ export function initGrid() {
     on('trash:changed', () => {
         if (mounted) loadFirstPage();
     });
+    on('scan', ({ scanning } = {}) => {
+        if (!mounted || viewState.images.length) return;
+        if (scanning) renderEmptyState();
+        else loadFirstPage();
+    });
     resizeHandler = () => {
         clearTimeout(resizeTimer);
         resizeTimer = setTimeout(() => {
@@ -524,7 +579,7 @@ export async function createStackFromSelection() {
         showToast(`Stacked ${imageIds.length.toLocaleString('en-US')} photos`, {
             undo: stackId ? async () => {
                 const undone = await unstack(stackId);
-                showToast(undone ? 'Stack undone' : "Undo didn't save");
+                showToast(undone ? 'Stack undone' : 'Couldn’t undo');
                 loadFirstPage();
             } : null,
         });

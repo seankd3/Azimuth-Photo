@@ -68,7 +68,7 @@ function findFolderSource(source) {
 function openFolderBrowser(source) {
     const treeSource = findFolderSource(source);
     if (!treeSource) {
-        showToast('Folder tree is still loading');
+        showToast('Folders are still loading');
         return;
     }
     folderBrowser = { source: treeSource, trail: [] };
@@ -219,7 +219,7 @@ function render() {
     bindSuggestions();
     root.querySelector('#ml-install')?.addEventListener('click', async () => {
         const accepted = await promptInstall();
-        showToast(accepted ? 'Installed — check your home screen' : "Install dismissed");
+        showToast(accepted ? 'Installed — check your home screen' : 'Install cancelled');
         render();
     });
     bindWorkRows();
@@ -260,7 +260,7 @@ function workRows() {
         {
             key: 'ai',
             glyph: icon('search'),
-            title: 'AI embeddings',
+            title: 'Visual search index',
             progress: pct(ai && ai.progress_pct),
             detail: ai
                 ? `${fmtInt(ai.embedded)} / ${fmtInt(ai.total_images)} indexed`
@@ -271,7 +271,7 @@ function workRows() {
         {
             key: 'cache',
             glyph: icon('image'),
-            title: 'Cache pregen',
+            title: 'Preview cache',
             progress: pct(preview.progress_pct),
             detail: cache
                 ? `${fmtInt(preview.count)} / ${fmtInt(preview.total)} previews`
@@ -324,7 +324,7 @@ function detailsForWork(kind) {
     if (kind === 'ai') {
         const ai = workStatus && workStatus.ai;
         return {
-            title: 'AI embeddings',
+            title: 'Visual search index',
             rows: [
                 ['State', ai && ai.worker_state],
                 ['Progress', ai ? `${fmtInt(ai.embedded)} / ${fmtInt(ai.total_images)} (${ai.progress_pct || 0}%)` : '—'],
@@ -338,7 +338,7 @@ function detailsForWork(kind) {
         const pregen = (workStatus && workStatus.cache && workStatus.cache.pregen) || {};
         const preview = pregen.preview || {};
         return {
-            title: 'Cache pregen',
+            title: 'Preview cache',
             rows: [
                 ['State', pregen.state],
                 ['Progress', `${fmtInt(preview.count)} / ${fmtInt(preview.total)} (${preview.progress_pct || 0}%)`],
@@ -685,7 +685,7 @@ async function openCollectionView(coll) {
     root.innerHTML =
         `<div class="ml-head"><button class="ml-back" id="ml-back">${icon('chevron-left')} Library</button><h3>${esc(coll.name)}</h3><button class="ml-more" id="ml-more" aria-label="Collection actions">${icon('ellipsis')}</button></div>`
         + `<div class="ms-empty">${fmtInt(images.length)} photos${pct == null ? '' : ` · ${pct}% sorted`}</div>`
-        + `<div class="ml-coll-grid">${grid || '<div class="ms-empty" style="grid-column:span 3">Empty collection.</div>'}</div>`;
+        + `<div class="ml-coll-grid">${grid || '<div class="ms-empty" style="grid-column:span 3">No photos in this collection.</div>'}</div>`;
     root.querySelector('#ml-back').addEventListener('click', () => dismissLayer('collection', closeCollectionView));
     root.querySelector('#ml-more').addEventListener('click', () => openCollectionActionsSheet(coll));
     root.querySelector('.ml-coll-grid').addEventListener('click', (e) => {
@@ -947,7 +947,7 @@ async function renderCollectionShareSheet(coll, share) {
     bindSheetConfirm(sheet, '#ml-share-rotate', '#ml-share-rotate-confirm', async () => {
         const result = await createCollectionShare(coll.id, { rotate: true });
         if (result && result.ok) {
-            showToast('Share link rotated');
+            showToast('New share link created');
             renderCollectionShareSheet(coll, result.share);
         } else {
             showToast(writeFailureMessage());

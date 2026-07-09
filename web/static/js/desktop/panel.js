@@ -79,7 +79,7 @@ function renderCollections() {
         + `<button class="coll-main" type="button" title="${esc(title)}">`
         + `<span class="coll-cover">${c.cover_image_id ? `<img src="${esc(thumbUrl('sm', c.cover_image_id))}" loading="lazy" decoding="async" alt="">` : icon(smart ? 'sparkles' : 'folder')}${smart && c.cover_image_id ? `<span class="coll-smart-badge">${icon('sparkles')}</span>` : ''}</span>`
         + `<span class="nr-label" title="${esc(c.name)}">${esc(c.name)}</span><span class="nr-count">${fmt(c.image_count)}</span>`
-        + `${smart ? `<span class="coll-live" data-tip="Live collection — grows automatically" aria-label="Live">${icon('sparkles')} Live</span>` : ''}`
+        + `${smart ? `<span class="coll-live" data-tip="Updates automatically" aria-label="Live">${icon('sparkles')} Live</span>` : ''}`
         + `${c.published ? `<span class="coll-published" data-tip="Published to website" aria-label="Published">${icon('globe')} Published</span>` : ''}</button>`
         + `<button class="coll-menu-btn" type="button" data-tip="Collection actions" aria-label="Collection actions">${icon('ellipsis')}</button></div>`
     }).join('');
@@ -441,7 +441,7 @@ async function renderShareOverlay(collectionId, name, share = null, token = shar
         const result = await createCollectionShare(collectionId, { rotate: true });
         if (!shareOverlayIsCurrent(actionToken)) return;
         if (result && result.ok) {
-            showToast('Share link rotated');
+            showToast('New share link created');
             await renderShareOverlay(collectionId, name, result.share, actionToken);
             emitSharedSurfacesChanged(collectionId);
         } else {
@@ -543,18 +543,18 @@ function publishCopyText(count, slug, publishing = {}) {
 
 function publishLeadText(count, slug, publish, publishing = {}) {
     const url = configuredGalleryUrl(slug, publishing);
-    if (publish) return url ? `Update the live gallery at ${url}.` : 'Update the published gallery bundle.';
+    if (publish) return url ? `Update the live gallery at ${url}.` : 'Update the published gallery.';
     return publishCopyText(count, slug, publishing);
 }
 
 function publishPhaseCopy(job) {
     if (!job) return '';
-    if (job.state === 'error') return 'Publishing needs attention.';
-    if (job.state === 'hook_failed') return 'Published locally, hook failed.';
-    if (job.state === 'revoked_hook_failed') return 'Gallery removed locally, hook failed.';
-    if (job.phase === 'hook') return 'Running publish hook…';
-    if (job.phase === 'deploying') return 'Running publish hook…';
-    if (job.phase === 'building') return 'Building static gallery…';
+    if (job.state === 'error') return 'Publishing didn’t finish.';
+    if (job.state === 'hook_failed') return 'Gallery files are ready, but the website update didn’t finish.';
+    if (job.state === 'revoked_hook_failed') return 'Gallery files were removed, but the website update didn’t finish.';
+    if (job.phase === 'hook') return 'Updating website…';
+    if (job.phase === 'deploying') return 'Updating website…';
+    if (job.phase === 'building') return 'Building gallery…';
     if (job.state === 'live') return 'Gallery is live.';
     if (job.state === 'revoked') return 'Gallery is unpublished.';
     return job.state === 'revoking' ? 'Unpublishing gallery…' : 'Publishing queued…';
@@ -586,7 +586,7 @@ function publishStatusBlock(data) {
     return '<div class="publish-status">'
         + (status ? `<span>${esc(status)}</span>` : '<span>Ready to publish.</span>')
         + (url ? `<div class="share-link-row"><input id="publish-url" readonly value="${esc(url)}"><button id="publish-copy" type="button">${icon('copy')} Copy</button></div>` : '')
-        + (hookFailed ? `<div class="publish-error"><b>Published locally, hook failed.</b><p>${esc(hook.output || 'The hook did not finish successfully.')}</p></div>` : '')
+        + (hookFailed ? `<div class="publish-error"><b>Gallery files are ready, but the website update didn’t finish.</b><p>${esc(hook.output || 'The website update did not finish successfully.')}</p></div>` : '')
         + publishErrorBlock(job)
         + '</div>';
 }
@@ -594,7 +594,7 @@ function publishStatusBlock(data) {
 async function copyPublishUrl(url) {
     try {
         await navigator.clipboard.writeText(url);
-        showToast('Public URL copied');
+        showToast('Link copied');
     } catch {
         showToast("Couldn't copy URL");
     }
@@ -617,11 +617,11 @@ async function renderPublishOverlay(collectionId, name, data = null, token = pub
     publishOverlay.innerHTML = '<div class="modal-card publish-card" role="dialog" aria-modal="true" aria-labelledby="publish-title">'
         + `<div class="mo-head"><h2 id="publish-title">Publish ${esc(name)}</h2><button type="button" id="publish-close" data-tip="Close (Esc)" aria-label="Close">${icon('x')}</button></div>`
         + '<div class="mo-body">'
-        + (setupNeeded ? '<div class="publish-setup"><b>Choose a publishing folder first.</b><p>photoArchive writes static gallery bundles and manifest.json into that folder. Add it in System, then come back here to publish.</p><button class="btn primary" id="publish-open-settings" type="button">Open Publishing settings</button></div>' : '')
+        + (setupNeeded ? '<div class="publish-setup"><b>Choose a publishing folder first.</b><p>Choose a folder for public galleries in System, then come back here to publish.</p><button class="btn primary" id="publish-open-settings" type="button">Open Publishing settings</button></div>' : '')
         + `<p class="publish-confirm-copy"${setupNeeded ? ' hidden' : ''}>${esc(publishLeadText(count, slug, publish, publishing))}</p>`
         + '<div class="publish-fields">'
         + `<label>Title <input id="publish-title-input" value="${esc(title)}" maxlength="160" ${busy || setupNeeded ? 'disabled' : ''}></label>`
-        + `<label>Slug <input id="publish-slug-input" value="${esc(slug)}" maxlength="96" ${busy || publish || setupNeeded ? 'disabled' : ''}>${publish ? '<small>URL is fixed after first publish.</small>' : ''}</label>`
+        + `<label>URL name <input id="publish-slug-input" value="${esc(slug)}" maxlength="96" ${busy || publish || setupNeeded ? 'disabled' : ''}>${publish ? '<small>URL is fixed after first publish.</small>' : ''}</label>`
         + '</div>'
         + publishStatusBlock(data)
         + '<div class="publish-actions">'
@@ -820,7 +820,7 @@ function startSmartQueryEdit(collectionId) {
     setScope(scopePatchFromSmartQuery(coll.query || {}));
     requestNewCollection({ preferSmart: true });
     closeLeftDrawer();
-    showToast('Smart query loaded. Tweak filters, then update it.');
+    showToast('Smart collection loaded. Adjust filters, then update.');
 }
 
 function startSmartMaterialize(collectionId, name = 'Collection') {
@@ -834,7 +834,7 @@ function startSmartMaterialize(collectionId, name = 'Collection') {
     confirm.querySelector('[data-yes]')?.addEventListener('click', async () => {
         const result = await updateCollection(collectionId, { materialize: true });
         if (result && result.ok) {
-            showToast(`Converted “${name}” to static`);
+            showToast(`Converted “${name}” to a regular collection`);
             if (String(scope.collectionId || '') === String(collectionId)) {
                 setScope({ collectionId, collectionName: name, collectionSmart: false }, { merge: true });
             }
@@ -923,7 +923,8 @@ function renderSources() {
         return `<button class="nav-row" data-source="${esc(s.path)}" title="${esc(label)}">`
             + `<span class="nr-dot ${online ? 'on' : 'off'}"></span><span class="nr-label" title="${esc(label)}">${esc(label)}</span>`
             + `<span class="nr-count">${fmt(count)}</span>${online ? '' : '<span class="nr-tag">offline</span>'}</button>`;
-    }).join('') : emptyState('hard-drive', 'No sources yet.');
+    }).join('') : emptyState('hard-drive', 'No sources yet.', '<button type="button" data-add-source>Add a source</button>');
+    host.querySelector('[data-add-source]')?.addEventListener('click', () => document.getElementById('system-btn')?.click());
     for (const row of host.querySelectorAll('[data-source]')) {
         row.addEventListener('click', () => {
             setScope({ folder: [row.dataset.source] });
@@ -976,7 +977,7 @@ function scheduleChromeRefresh() {
 async function addImagesToCollection(collectionId, imageIds) {
     const coll = collections.find((c) => Number(c.id) === Number(collectionId));
     if (coll?.smart) {
-        showToast('Smart collections update from their query');
+        showToast('Smart collections update from their filters');
         return;
     }
     const result = await addToCollection(collectionId, imageIds);
@@ -1050,7 +1051,7 @@ export async function openCollectionPicker(imageIds, { onDone = null } = {}) {
     const regularCollections = collections.filter((c) => !c.smart);
     list.innerHTML = regularCollections.length ? regularCollections.map((c) => (
         `<button data-coll-id="${c.id}" title="${esc(c.name)}"><span title="${esc(c.name)}">${esc(c.name)}</span><span class="num">${fmt(c.image_count)}</span></button>`
-    )).join('') : '<div class="muted">No static collections yet.</div>';
+    )).join('') : '<div class="muted">No regular collections yet.</div>';
     for (const row of list.querySelectorAll('[data-coll-id]')) {
         row.addEventListener('click', async () => {
             close();
@@ -1073,7 +1074,7 @@ export async function exportCurrentScope(format = 'csv', size = '') {
     if (scope.collectionId) {
         const ids = await loadCollectionImageIds(scope.collectionId);
         if (!ids.length) {
-            showToast('Collection is empty');
+            showToast('This collection has no photos');
             return;
         }
         count = ids.length;
@@ -1154,7 +1155,7 @@ function cancelSmartCollectionEdit() {
 
 export function requestSaveSmartCollection() {
     if (!smartQueryActive()) {
-        showToast('Add a filter or search first');
+        showToast('Add a search or filter first');
         return;
     }
     requestNewCollection({ preferSmart: true });
@@ -1180,12 +1181,12 @@ function renderNewCollectionForm({ resetName = false, preferSmart = false } = {}
     if (smartButton) {
         smartButton.hidden = !canSaveSmart && !editingSmartCollection;
         smartButton.disabled = !canSaveSmart;
-        smartButton.textContent = editingSmartCollection ? 'Update Smart Collection' : 'Save as Smart Collection';
+        smartButton.textContent = editingSmartCollection ? 'Update smart collection' : 'Save as smart collection';
         smartButton.title = canSaveSmart ? smartQuerySummary(query) : '';
     }
     if (createButton) {
         createButton.hidden = Boolean(editingSmartCollection);
-        createButton.textContent = canSaveSmart ? 'Create Static' : 'Create';
+        createButton.textContent = canSaveSmart ? 'Create collection' : 'Create';
     }
     if (resetName && canSaveSmart && (preferSmart || !input.value.trim())) {
         input.value = editingSmartCollection?.name || smartQueryName(query);
@@ -1199,7 +1200,7 @@ async function saveSmartCollectionFromForm() {
     const button = document.getElementById('new-coll-smart');
     const query = smartQueryFromScope();
     if (!smartQueryActive(query)) {
-        showToast('Add a filter or search first');
+        showToast('Add a search or filter first');
         return;
     }
     const name = input.value.trim() || smartQueryName(query);

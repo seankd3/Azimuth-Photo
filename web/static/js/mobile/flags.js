@@ -10,7 +10,7 @@ import { tick } from './haptics.js';
 const FLAG_LABELS = {
     picked: 'Picked',
     rejected: 'Rejected',
-    unflagged: 'Unflagged',
+    unflagged: 'Flag cleared',
 };
 
 function setLocal(ids, flagById) {

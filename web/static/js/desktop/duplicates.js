@@ -307,14 +307,14 @@ async function applyKeepBest(changes, label) {
     if (!ok) {
         setFlagsLocally(previous);
         await writeGrouped(previous);
-        showToast("Keep-best didn't save");
+        showToast('Couldn’t keep best');
         return;
     }
     showToast(`${label} · ${fmt(normalized.length)} photos`, {
         undo: async () => {
             setFlagsLocally(previous);
             const undone = await writeGrouped(previous);
-            showToast(undone ? 'Undone' : "Undo didn't save");
+            showToast(undone ? 'Undone' : 'Couldn’t undo');
         },
     });
 }
@@ -376,7 +376,7 @@ function renderError({ title, copy, retry = true } = {}) {
 
 function renderEmpty() {
     root.querySelector('#duplicates-body').innerHTML = '<div class="grid-empty dupe-empty">'
-        + `<h3>No duplicates at ≥ ${thresholdLabel()} similarity.</h3>`
+        + `<h3>No duplicates at ${thresholdLabel()} similarity or higher.</h3>`
         + '<p>Lower the threshold to widen the scan.</p></div>';
 }
 
@@ -466,7 +466,7 @@ async function loadDuplicates() {
             loading = false;
             renderError({
                 title: 'Duplicates unavailable',
-                copy: 'Duplicate matching needs embeddings to be installed and indexed first.',
+                copy: 'Duplicate matching needs the visual search index to be installed and ready first.',
             });
             return;
         }
@@ -589,7 +589,7 @@ function renderStacks({ append = false } = {}) {
     const banner = stackRescanning ? '<div class="stack-status-banner">Rescanning stacks. Review actions are paused until fresh results are ready.</div>' : '';
     if (!append) {
         if (!stacks.length && !stackLoading) {
-            body.innerHTML = banner + '<div class="grid-empty dupe-empty"><h3>No stacks in this filter.</h3><p>Try another kind or rescan stacks.</p></div><div id="stacks-sentinel"></div>';
+            body.innerHTML = banner + '<div class="grid-empty dupe-empty"><h3>No stacks in this view.</h3><p>Add photos first, or try another kind after the library is scanned.</p></div><div id="stacks-sentinel"></div>';
         } else {
             body.innerHTML = banner + stacks.map(stackRowHtml).join('') + `<div id="stacks-sentinel">${stackLoading && stacks.length ? 'Loading more stacks...' : ''}</div>`;
         }
@@ -708,7 +708,7 @@ async function setCover(stackId, imageId) {
     if (!stack) return;
     const result = await setStackRepresentative(stackId, imageId);
     if (!result) {
-        showToast("Cover didn't save");
+        showToast('Couldn’t save cover');
         return;
     }
     const member = stackMembers(stack).find((image) => Number(image.id) === Number(imageId));
@@ -722,7 +722,7 @@ async function unstackOne(stackId) {
     const members = stackMembers(stack);
     const result = await unstack(stackId);
     if (!result) {
-        showToast("Unstack didn't save");
+        showToast('Couldn’t unstack photos');
         return;
     }
     stacks = stacks.filter((stack) => Number(stack.id) !== Number(stackId));
@@ -738,7 +738,7 @@ async function keepCoverForStack(stackId) {
     if (!imageIds.length) return;
     const result = await trashImages(imageIds);
     if (!result) {
-        showToast("Trash didn't save");
+        showToast('Couldn’t move photos to Trash');
         return;
     }
     emit('trash:changed', { imageIds });
@@ -756,7 +756,7 @@ async function keepCoverForStack(stackId) {
             const restored = await restoreImages(imageIds);
             emit('trash:changed', { imageIds });
             if (open && mode === 'stacks') await reloadStacks();
-            showToast(restored ? 'Restored' : "Restore didn't save");
+            showToast(restored ? 'Restored' : 'Couldn’t restore');
         },
     });
 }
@@ -788,12 +788,12 @@ async function keepCoversEverywhere() {
     button.textContent = imageIds.length ? `Trash ${fmt(imageIds.length)} photos` : 'No non-covers';
     button.disabled = !imageIds.length;
     if (!imageIds.length) {
-        showToast('No non-cover members in this filter');
+        showToast('No other photos in this filter');
         return;
     }
     const result = await trashImages(imageIds);
     if (!result) {
-        showToast("Trash didn't save");
+        showToast('Couldn’t move photos to Trash');
         return;
     }
     emit('trash:changed', { imageIds });
@@ -804,7 +804,7 @@ async function keepCoversEverywhere() {
             const restored = await restoreImages(imageIds);
             emit('trash:changed', { imageIds });
             if (open && mode === 'stacks') await reloadStacks();
-            showToast(restored ? 'Restored' : "Restore didn't save");
+            showToast(restored ? 'Restored' : 'Couldn’t restore');
         },
     });
 }
@@ -821,7 +821,7 @@ async function rescanStacks() {
         button.disabled = false;
         button.textContent = 'Rescan stacks';
         renderStacks();
-        showToast('Rescan could not start');
+        showToast('Couldn’t start rescan');
         return;
     }
     const poll = async () => {

@@ -20,7 +20,7 @@ function secureContextBanner() {
     const bar = document.createElement('a');
     bar.href = target;
     bar.id = 'm-secure-banner';
-    bar.textContent = 'Insecure address — tap to open the installable app';
+    bar.textContent = 'Open the secure app address to install';
     bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:890;display:block;padding:10px 14px calc(10px);background:#d4a04f;color:#141517;font:600 13px system-ui;text-align:center;text-decoration:none;padding-top:max(10px, env(safe-area-inset-top));';
     document.body.appendChild(bar);
 }

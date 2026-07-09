@@ -377,7 +377,7 @@ export function initKeyboard() {
         } else if (key === 'j') {
             event.preventDefault();
             const next = cycleDensity();
-            showToast(`Density · ${next[0].toUpperCase()}${next.slice(1)}`);
+            showToast(`Density: ${next[0].toUpperCase()}${next.slice(1)}`);
         } else if (event.key === 'Delete' || event.key === 'Backspace') {
             if (selection.size) {
                 event.preventDefault();

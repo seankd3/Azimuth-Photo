@@ -264,7 +264,8 @@ function renderTree() {
     if (!sources.length) {
         host.innerHTML = '<div class="chrome-empty"><span class="chrome-empty-glyph">'
             + icon('folder')
-            + '</span><span>No folders yet.</span></div>';
+            + '</span><span>No folders yet.</span><button type="button" id="folders-add-source">Add a source</button></div>';
+        host.querySelector('#folders-add-source')?.addEventListener('click', () => document.getElementById('system-btn')?.click());
         return;
     }
     const html = sources.map((source) => renderSource(source, query)).filter(Boolean).join('');

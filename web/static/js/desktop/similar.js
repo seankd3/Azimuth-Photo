@@ -14,7 +14,7 @@ export async function findSimilar(imageId, limit = 100) {
     const source = byId.get(id) || { id };
     const data = await getSimilar(id, depth);
     if (!data || data.error || data.ok === false) {
-        showToast('Similar search failed');
+        showToast('Couldn’t find similar photos');
         return;
     }
     const images = Array.isArray(data.images) ? data.images : [];

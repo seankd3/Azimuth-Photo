@@ -34,7 +34,7 @@ const SORT_OPTIONS = [
 const COMPARED_LABELS = {
     compared: 'Ranked',
     uncompared: 'Unranked',
-    direct_uncompared: 'Never dueled',
+    direct_uncompared: 'Not compared yet',
     confident: 'High confidence',
 };
 
@@ -197,11 +197,16 @@ function renderSkeleton() {
 function renderOfflineEmpty() {
     timeline.innerHTML =
         '<button class="ms-empty m-offline-empty" type="button">'
-        + '<b>Reconnect to load</b>'
-        + '<span>Cached thumbs may still appear</span>'
+        + '<b>You’re offline</b>'
+        + '<span>Some thumbnails may still show</span>'
         + '<small>Tap to retry</small>'
         + '</button>';
     timeline.querySelector('.m-offline-empty')?.addEventListener('click', reload);
+}
+
+function renderEmpty() {
+    timeline.innerHTML = '<div class="ms-empty" style="padding:48px 24px;text-align:center">'
+        + '<b>No photos yet</b><br><span>Add a source in the desktop app. Photos will appear here as they’re scanned.</span></div>';
 }
 
 function appendImages(batch) {
@@ -304,7 +309,7 @@ function renderMonths() {
         wrap.appendChild(card);
     }
     if (!monthOffsets.length) {
-        wrap.innerHTML = '<div class="ms-empty" style="grid-column:span 2">Nothing here yet.</div>';
+        wrap.innerHTML = '<div class="ms-empty" style="grid-column:span 2">No photos yet. Add a source in the desktop app.</div>';
     }
     timeline.appendChild(wrap);
 }
@@ -440,14 +445,15 @@ export async function reload() {
         currentSortQuality = page.sort_quality || null;
         rememberImages(images);
         if (zoomIdx === 2) renderMonths();
-        else appendImages(images);
+        else if (images.length) appendImages(images);
+        else renderEmpty();
         endReached = page.images.length < PAGE;
     } else if (isOffline()) {
         renderOfflineEmpty();
     } else {
         timeline.innerHTML = '<div class="ms-empty" style="padding:40px 16px;text-align:center">Couldn\'t load photos.</div>';
     }
-    endEl.hidden = zoomIdx === 2 || !endReached;
+    endEl.hidden = zoomIdx === 2 || !endReached || images.length === 0;
     renderScopeBar();
     updateMonthPill(false);
     pane.scrollTop = 0;
@@ -462,7 +468,7 @@ export async function loadMore() {
         page = await getRankings(rankingParams(startOffset + images.length));
     } catch {
         loadingNext = false;
-        showToast('More photos could not load');
+        showToast('Couldn’t load more photos');
         return;
     }
     loadingNext = false;
@@ -492,7 +498,7 @@ async function loadPrev() {
         page = await getRankings(params);
     } catch {
         loadingPrev = false;
-        showToast('Earlier photos could not load');
+        showToast('Couldn’t load earlier photos');
         return;
     }
     loadingPrev = false;

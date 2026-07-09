@@ -104,8 +104,8 @@ function render() {
     buildGroups();
     const flow = document.getElementById('events-flow');
     if (!groups.length && !loading) {
-        flow.innerHTML = '<div class="grid-empty"><h3>No dated photos loaded yet</h3><p>Events group this view by gaps in capture time. Try a broader view or keep scrolling as photos load.</p></div>'
-            + '<div id="events-sentinel"></div><div class="grid-end" id="events-end" hidden>End of scope</div>';
+        flow.innerHTML = '<div class="grid-empty"><h3>No dated photos in this view.</h3><p>Add a source if your library is empty, or try another view.</p></div>'
+            + '<div id="events-sentinel"></div><div class="grid-end" id="events-end" hidden>End of view</div>';
         document.getElementById('events-end').hidden = !done || images.length === 0;
         return;
     }
@@ -124,7 +124,7 @@ function render() {
             + `<figure class="event-hero" data-id="${hero.id}"><img data-src="${esc(thumbUrl('md', hero.id))}" alt="${esc(hero.filename || '')}"><figcaption class="hero-cap"><span>${esc(hero.filename || '')}</span><span>${Math.round(Number(hero.elo) || 0)}</span></figcaption></figure>`
             + `<div class="event-tiles">${visibleTiles.map((img) => cellHtml(img, imageIndexes.get(Number(img.id)) ?? 0)).join('')}`
             + `${hidden > 0 ? `<button class="ev-more" data-expand="${groupIndex}">+${fmt(hidden)} more</button>` : ''}</div></div></article>`;
-    }).join('') + '<div id="events-sentinel"></div><div class="grid-end" id="events-end" hidden>End of scope</div>';
+    }).join('') + '<div id="events-sentinel"></div><div class="grid-end" id="events-end" hidden>End of view</div>';
     document.getElementById('events-end').hidden = !done || images.length === 0;
     observeImages();
 }
@@ -235,7 +235,7 @@ function openMenu(button, groupIndex) {
                 });
             } else showToast("Couldn't create collection");
         } else if (action === 'refine') {
-            showToast('Refine opens the current view; event-only Refine needs id-list support.');
+            showToast('Opening Refine for this event.');
             emit('refine:open');
         } else if (action === 'select') {
             ids.forEach((id) => selection.add(id));

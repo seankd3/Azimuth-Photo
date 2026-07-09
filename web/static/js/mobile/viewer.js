@@ -197,7 +197,7 @@ function infoSheet() {
         try {
             data = await getSimilar(image.id, 100);
         } catch {
-            showToast('Similar search failed');
+            showToast('Couldn’t find similar photos');
             return;
         }
         const results = (data && data.images) || [];

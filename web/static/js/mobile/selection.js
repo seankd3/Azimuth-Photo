@@ -259,7 +259,7 @@ export async function openCollectionSheet(rawIds, { onDone = null } = {}) {
                 showToast(`Added ${ids.length} to “${coll.name}”`, {
                     undo: async () => {
                         await removeFromCollection(coll.id, ids);
-                        showToast('Removed again');
+                        showToast('Removed from collection');
                     },
                 });
             } else {
@@ -273,7 +273,7 @@ export async function openCollectionSheet(rawIds, { onDone = null } = {}) {
 export function exportImages(ids, format = 'csv', size = '') {
     if (!ids.length) return;
     if (format === 'zip' && ids.length > ZIP_EXPORT_MAX) {
-        showToast(`Zip export is limited to ${ZIP_EXPORT_MAX.toLocaleString('en-US')} photos`);
+        showToast(`Zip export tops out at ${ZIP_EXPORT_MAX.toLocaleString('en-US')} photos`);
         return;
     }
     const anchor = document.getElementById('m-dl');

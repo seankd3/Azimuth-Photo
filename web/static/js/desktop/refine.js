@@ -148,7 +148,7 @@ function renderSet() {
     const stage = document.getElementById('refine-stage');
     stage.className = stageClassName();
     if (currentSet.length < need()) {
-        stage.innerHTML = '<div class="load-error"><h4>Not enough photos to refine</h4><p>Try widening the current view.</p></div>';
+        stage.innerHTML = '<div class="load-error"><h4>Not enough photos to refine</h4><p>Add a source if your library is empty, or try widening this view.</p></div>';
         selectedIndex = -1;
         return;
     }
@@ -306,7 +306,7 @@ async function fillReplacements() {
             await Promise.all(chunk.map((img) => addReadyReplacement(img, token)));
         }
     } catch {
-        if (token === generation) showToast('Refine replacements could not load');
+        if (token === generation) showToast('Couldn’t load Refine replacements');
     } finally {
         if (token === generation) filling = false;
     }
@@ -523,10 +523,10 @@ async function applyRefinePick(winnerId) {
         picks = Math.max(0, picks - 1);
         if (open && seq === actionSeq) {
             restoreSnapshot(snapshot);
-            showToast('Pick did not save; restored the mosaic');
+            showToast('Couldn’t save pick · mosaic restored');
         } else {
             renderStats();
-            showToast('Pick did not save');
+            showToast('Couldn’t save pick');
         }
         return;
     }
@@ -591,11 +591,11 @@ export function openRefine() {
         return;
     }
     if (scope.import_batch) {
-        showToast('Refine is not available for import batches yet.');
+        showToast('Refine isn’t available for imports yet.');
         return;
     }
     if (scope.similarIds.length > MAX_SCOPED_IDS) {
-        showToast(`Refine is limited to ${MAX_SCOPED_IDS.toLocaleString('en-US')} similar photos`);
+        showToast(`Refine can use up to ${MAX_SCOPED_IDS.toLocaleString('en-US')} similar photos`);
         return;
     }
     setActiveLens('refine');

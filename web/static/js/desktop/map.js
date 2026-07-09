@@ -67,7 +67,7 @@ function renderMap(data = {}) {
     const stage = document.getElementById('map-stage');
     const clusters = cluster(markers);
     if (!markers.length) {
-        stage.innerHTML = `<div id="map-empty"><div class="me-glyph">${icon('map-pin')}</div><h3>No GPS data in this scope — photos with location info will appear here automatically</h3></div>`;
+        stage.innerHTML = `<div id="map-empty"><div class="me-glyph">${icon('map-pin')}</div><h3>No location data in this view.</h3><p>Add a source if your library is empty. Photos with GPS will show up here.</p></div>`;
         return;
     }
     stage.innerHTML = '<svg id="map-svg" viewBox="0 0 1000 500" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Photo map">'

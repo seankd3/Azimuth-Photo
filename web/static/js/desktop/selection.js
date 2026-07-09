@@ -102,7 +102,7 @@ export async function applyFlags(rawIds, flag) {
         }
         if (rolledBackIds.length) {
             emit('flags', { imageIds: rolledBackIds, failed: true });
-            showToast("Flag change didn't save");
+            showToast('Couldn’t save flag');
         }
         return;
     }
@@ -128,7 +128,7 @@ export async function applyFlags(rawIds, flag) {
             }
             if (failedIds.length) {
                 emit('flags', { imageIds: failedIds, failed: true });
-                showToast("Undo didn't save");
+                showToast('Couldn’t undo');
                 return;
             }
             emit('flags', { imageIds, committed: true });

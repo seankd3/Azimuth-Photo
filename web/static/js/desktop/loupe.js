@@ -64,7 +64,7 @@ function caption(img) {
     const name = img.filename || img.id;
     const elo = Math.round(Number(img.elo) || 0);
     const flag = flagGlyph(img.flag || 'unflagged');
-    return [name, `${index + 1} / ${scopeTotal() || images().length}`, `Elo ${elo}`, flag]
+    return [name, `${index + 1} / ${scopeTotal() || images().length}`, `Rating ${elo}`, flag]
         .filter(Boolean)
         .map(esc)
         .join(' · ');
@@ -516,7 +516,7 @@ async function flagCurrent(flag) {
         img.flag = old;
         if (currentIs(imageId)) updateChrome();
         emit('flags', { imageIds: [imageId] });
-        showToast("Flag change didn't save");
+        showToast('Couldn’t save flag');
         return;
     }
     showToast(flag === 'picked' ? 'Picked' : flag === 'rejected' ? 'Rejected' : 'Flag cleared', {
@@ -530,7 +530,7 @@ async function flagCurrent(flag) {
                 img.flag = flag;
                 if (currentIs(imageId)) updateChrome();
                 emit('flags', { imageIds: [imageId] });
-                showToast("Undo didn't save");
+                showToast('Couldn’t undo');
             }
         },
     });

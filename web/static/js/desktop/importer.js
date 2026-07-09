@@ -119,7 +119,7 @@ function renderImportHistory() {
     const host = modal?.querySelector('#import-history-list');
     if (!host) return;
     if (recentImports == null) {
-        host.innerHTML = '<div class="import-history-empty">Loading past imports...</div>';
+        host.innerHTML = '<div class="import-history-empty">Loading past imports…</div>';
         return;
     }
     if (!recentImports.length) {
@@ -252,8 +252,8 @@ async function startImport() {
             showToast('Import cancelled');
             return;
         }
-        setStatus(`Import failed: ${error.message}`, 'error');
-        showToast('Import failed');
+        setStatus(`Couldn’t import: ${error.message}`, 'error');
+        showToast('Couldn’t import');
         if (start) start.disabled = false;
     }
 }

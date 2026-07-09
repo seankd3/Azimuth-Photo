@@ -6,7 +6,7 @@ import {
     stopMetadataScan,
 } from './api.js';
 import {
-    on, patchPrefs, scope, setActiveLens, setThumbSize, viewState,
+    emit, on, patchPrefs, scope, setActiveLens, setThumbSize, viewState,
 } from './state.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
 import { afterMotion } from './motion.js';
@@ -286,7 +286,7 @@ function captionLine() {
 }
 
 function metadataLine() {
-    if (!metadataStatus) return 'unavailable';
+    if (!metadataStatus) return 'Status unknown';
     const state = metadataStatus.manual_pause ? 'paused' : metadataStatus.active ? 'running' : 'idle';
     const count = Number(metadataStatus.pending || metadataStatus.remaining || 0);
     return `${state}${count ? ` · ${fmt(count)} pending` : ''}`;
@@ -397,7 +397,7 @@ function renderSources() {
             + '<div class="src-actions">'
             + `<button class="mini-btn" data-act="rescan" ${online ? '' : 'aria-disabled="true" disabled'}>Rescan</button>`
             + '<button class="mini-btn btn-danger" data-act="remove">Remove</button></div>'
-            + `<div class="remove-choice" hidden><button class="mini-btn" data-mode="keep">Keep photos</button><button class="mini-btn btn-danger" data-mode="delete">Delete catalog data</button><button class="mini-btn" data-remove-cancel>Cancel</button></div>`
+            + `<div class="remove-choice" hidden><button class="mini-btn" data-mode="keep">Keep photos</button><button class="mini-btn btn-danger" data-mode="delete">Remove from library index</button><button class="mini-btn" data-remove-cancel>Cancel</button></div>`
             + `<div class="scan-progress" ${scanning ? '' : 'hidden'}>Scanning…</div>`
             + '</div></article>';
     }).join('') : '<div class="muted">No sources yet.</div>';
@@ -432,10 +432,10 @@ function renderWork() {
         : progress(captionCounts.captioned || 0, (captionCounts.captioned || 0) + (captionCounts.pending_cached_images || 0));
     const metadataPaused = metadataStatus && metadataStatus.manual_pause;
     return '<section class="dr-sec"><h3>Background work</h3>'
-        + workerRow('ai', 'AI embeddings', aiStatus ? aiStatus.progress_pct : 0, aiStatus ? statusText('AI', aiStatus) : 'unavailable', aiStatus && aiStatus.embedding_manual_pause, null, 'Resume also wakes cache pregeneration.')
-        + workerRow('cache', 'Cache pregeneration', (preview.progress_pct || pregen.progress_pct || 0), cacheStatus ? statusText('Cache', cacheStatus) : 'unavailable', pregen.manual_pause || pregen.state === 'paused', pregen.manual_pause || pregen.state === 'paused' ? 'Resume' : 'Pause', 'Pause also pauses AI embeddings and People scan.')
-        + workerRow('people', 'People scan', peoplePct, peopleStatus ? statusText('People', peopleStatus) : 'unavailable', worker.manual_pause || !settingValue('people_scan_enabled'), null, 'Resume also wakes cache pregeneration.')
-        + workerRow('captions', 'Captions', captionPct, captionStatus ? statusText('Captions', captionStatus) : 'unavailable', captionStatus && !captionStatus.active)
+        + workerRow('ai', 'Visual search index', aiStatus ? aiStatus.progress_pct : 0, aiStatus ? statusText('AI', aiStatus) : 'Status unknown', aiStatus && aiStatus.embedding_manual_pause, null, 'Resume also wakes the preview cache.')
+        + workerRow('cache', 'Preview cache', (preview.progress_pct || pregen.progress_pct || 0), cacheStatus ? statusText('Cache', cacheStatus) : 'Status unknown', pregen.manual_pause || pregen.state === 'paused', pregen.manual_pause || pregen.state === 'paused' ? 'Resume' : 'Pause', 'Pause also pauses the visual search index and People scan.')
+        + workerRow('people', 'People scan', peoplePct, peopleStatus ? statusText('People', peopleStatus) : 'Status unknown', worker.manual_pause || !settingValue('people_scan_enabled'), null, 'Resume also wakes the preview cache.')
+        + workerRow('captions', 'Captions', captionPct, captionStatus ? statusText('Captions', captionStatus) : 'Status unknown', captionStatus && !captionStatus.active)
         + workerRow('metadata', 'Metadata', metadataPaused ? 0 : 50, metadataLine(), metadataPaused)
         + '</section>';
 }
@@ -585,7 +585,7 @@ function renderPeopleSettings() {
         `<div class="setting-status">${esc(peopleLine())}</div>`
         + settingToggle('people_scan_enabled', 'Scan for people automatically')
         + settingToggle('people_auto_install', 'Install people model automatically')
-        + settingInput('face_model_id', 'Face model ID')
+        + settingInput('face_model_id', 'Face model')
         + settingInput('face_model_dir', 'Model directory')
         + '<div class="settings-two">'
         + settingInput('face_detection_size', 'Detection size')
@@ -648,10 +648,10 @@ function renderPublishingSettings() {
         publishReturnBar()
         + publishingStatusNote()
         + settingInput('publish_dir', 'Gallery folder', {
-            hint: 'Required. Static bundles and manifest.json are written here. Leave empty to disable publishing.',
+            hint: 'Required. Public gallery files are written here. Leave empty to disable publishing.',
         })
-        + settingInput('publish_hook', 'Hook command', {
-            hint: 'Optional. Runs with Gallery folder as cwd (15 min timeout). Publish still succeeds if the hook fails.',
+        + settingInput('publish_hook', 'After-publish script', {
+            hint: 'Optional. Runs after publish or unpublish. Gallery files are still saved if the script does not finish.',
         })
         + settingInput('publish_site_base_url', 'Site base URL', {
             hint: 'Display-only for in-app links (e.g. https://photos.example.com). Does not serve files.',
@@ -679,7 +679,7 @@ function renderSettingsSaveBar() {
     const count = dirtySettings.size;
     const invalid = hasInvalidSetting();
     return '<div class="drawer-savebar" role="group" aria-label="Settings actions">'
-        + `<span id="drawer-save-state">${count ? `${fmt(count)} dirty field${count === 1 ? '' : 's'}` : 'No unsaved settings'}</span>`
+        + `<span id="drawer-save-state">${count ? `${fmt(count)} unsaved change${count === 1 ? '' : 's'}` : 'No unsaved settings'}</span>`
         + `<button class="btn primary" id="drawer-save-settings" type="button" ${count && !invalid ? '' : 'disabled'}>Save settings</button>`
         + `<button class="mini-btn btn-danger" id="drawer-reset-settings" type="button">${resetConfirmArmed ? 'Confirm reset' : 'Reset defaults'}</button>`
         + '</div>';
@@ -698,7 +698,7 @@ function renderPrefs() {
         + `<option value="compact"${viewState.prefs.density === 'compact' ? ' selected' : ''}>Compact</option></select></div>`
         + checkbox('badgeCheck', 'Cell badge · check')
         + checkbox('badgeFlag', 'Cell badge · flag')
-        + checkbox('badgeElo', 'Cell badge · Elo')
+        + checkbox('badgeElo', 'Cell badge · rating')
         + checkbox('badgeIndex', 'Cell badge · index')
         + checkbox('collapseStacks', 'Collapse stacks')
         + checkbox('reduceMotion', 'Reduce motion')
@@ -769,11 +769,13 @@ async function pollScanUntilDone(sourceId) {
             scanSourceId = null;
             catalog = await getCatalog().catch(() => catalog);
             renderDrawer();
+            emit('scan', { scanning: false, done: true });
             showToast('Source scan finished');
             return;
         }
+        emit('scan', status);
         const progressEl = document.querySelector(`.src-card[data-source-id="${scanSourceId}"] .scan-progress`);
-        if (progressEl) progressEl.textContent = `Scanning ${fmt(status.processed || status.count || 0)} photos`;
+        if (progressEl) progressEl.textContent = `Scanning · ${fmt(status.total_found || status.total_inserted || 0)} photos found · thumbnails appear as they’re ready`;
     };
     await tick();
     scanTimer = setInterval(tick, 1000);
@@ -788,7 +790,7 @@ async function handleSourceAction(card, action) {
         if (result && result.ok) {
             showToast('Rescan started');
             pollScanUntilDone(sourceId);
-        } else showToast('Rescan could not start');
+        } else showToast('Couldn’t start rescan');
     } else if (action === 'remove') {
         card.querySelector('.remove-choice').hidden = false;
     }
@@ -800,8 +802,8 @@ async function handleRemove(card, mode) {
     if (result && result.ok) {
         catalog = result.catalog || await getCatalog().catch(() => catalog);
         renderDrawer();
-        showToast(mode === 'keep' ? 'Source removed; photos kept in catalog' : 'Source and catalog data removed. Undo is unavailable.');
-    } else showToast('Source could not be removed');
+        showToast(mode === 'keep' ? 'Source removed; photos stay in the library' : 'Source and library records removed. This can’t be undone.');
+    } else showToast('Couldn’t remove source');
 }
 
 function updateSaveBar() {
@@ -814,7 +816,7 @@ function updateSaveBar() {
     if (state) {
         if (invalid) state.textContent = 'Check highlighted values';
         else state.textContent = dirtySettings.size
-            ? `${fmt(dirtySettings.size)} dirty field${dirtySettings.size === 1 ? '' : 's'}`
+            ? `${fmt(dirtySettings.size)} unsaved change${dirtySettings.size === 1 ? '' : 's'}`
             : 'No unsaved settings';
     }
     for (const input of document.querySelectorAll('[data-setting-field]')) {
@@ -913,7 +915,7 @@ async function saveDrawerSettings() {
         }
         showToast('Settings saved');
     } else {
-        showToast('Settings could not be saved');
+        showToast('Couldn’t save settings');
     }
 }
 
@@ -932,7 +934,7 @@ async function resetDrawerSettings() {
     } else {
         resetConfirmArmed = false;
         updateSaveBar();
-        showToast('Settings could not be reset');
+        showToast('Couldn’t reset settings');
     }
 }
 
@@ -964,7 +966,7 @@ async function saveAndInstallModel() {
     const modelFields = new Set(MODEL_SAVE_FIELDS);
     const saveData = await saveSettings(collectModelSettings());
     if (!saveData || !saveData.ok) {
-        showToast('Model settings could not be saved');
+        showToast('Couldn’t save model settings');
         if (button) button.disabled = false;
         return;
     }
@@ -975,7 +977,7 @@ async function saveAndInstallModel() {
         showToast(installData.already_installed ? 'Model already installed' : 'Model install started');
         pollModelInstall();
     } else {
-        showToast('Model install could not start');
+        showToast('Couldn’t start model install');
     }
     renderActivity();
     renderDrawer();
@@ -1000,9 +1002,9 @@ function bindDrawerActions() {
             catalog = result.catalog || catalog;
             event.currentTarget.reset();
             renderDrawer();
-            showToast('Source added; scan started');
+            showToast('Source added · scanning for photos');
             pollScanUntilDone(result.source && result.source.id);
-        } else showToast('Source could not be added');
+        } else showToast('Couldn’t add source');
         });
     });
     for (const btn of body.querySelectorAll('[data-act]')) {
@@ -1035,7 +1037,7 @@ function bindDrawerActions() {
             }
             if (key === 'captions') result = captionStatus && captionStatus.active ? await pauseCaptionScan() : await resumeCaptionScan();
             if (key === 'metadata') result = metadataStatus && metadataStatus.manual_pause ? await startMetadataScan() : await stopMetadataScan();
-            if (!result) showToast('Worker command did not save');
+            if (!result) showToast('Couldn’t update background work');
             await refreshDrawer();
         }));
     }
@@ -1053,16 +1055,16 @@ function bindDrawerActions() {
             cacheStatus = result.cache_stats || await getCacheStatus().catch(() => cacheStatus);
             renderDrawer();
             showToast('Cache cleared. Undo is unavailable.');
-        } else showToast('Cache could not be cleared');
+        } else showToast('Couldn’t clear cache');
     }));
     body.querySelector('#copy-remote')?.addEventListener('click', async (event) => {
         if (event.currentTarget.getAttribute('aria-disabled') === 'true') return;
         const url = (remoteAccess && remoteAccess.tailscale && remoteAccess.tailscale.url) || remoteAccess.current_url || '';
         try {
             await navigator.clipboard.writeText(url);
-            showToast('Remote URL copied');
+            showToast('Link copied');
         } catch {
-            showToast('Copy failed');
+            showToast('Couldn’t copy');
         }
     });
     body.querySelector('#drawer-open-shared')?.addEventListener('click', () => {

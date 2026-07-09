@@ -88,7 +88,7 @@ function renderHistogram() {
     const host = document.getElementById('info-histogram');
     const data = histogramData();
     if (data.empty) {
-        host.innerHTML = '<div class="panel-empty">Load a scope to see its Elo shape.</div>';
+        host.innerHTML = '<div class="panel-empty">Load photos to see the rating spread.</div>';
         return;
     }
     const ids = highlightedIds();
@@ -103,8 +103,8 @@ function renderHistogram() {
         const selected = bin.ids.some((id) => ids.has(id));
         return `<rect class="${selected ? 'sel-bin' : ''}" x="${x}" y="${y}" width="${barW}" height="${h}" rx="2"></rect>`;
     }).join('');
-    host.innerHTML = `<svg viewBox="0 0 ${width} 68" preserveAspectRatio="none" aria-label="Elo histogram">${rects}</svg>`
-        + `<div class="histo-cap"><span>${Math.round(data.min)}</span><span>Elo across loaded scope</span><span>${Math.round(data.max)}</span></div>`;
+    host.innerHTML = `<svg viewBox="0 0 ${width} 68" preserveAspectRatio="none" aria-label="Rating histogram">${rects}</svg>`
+        + `<div class="histo-cap"><span>${Math.round(data.min)}</span><span>Rating across this view</span><span>${Math.round(data.max)}</span></div>`;
 }
 
 function confidence(comparisons) {
@@ -129,7 +129,7 @@ function topPercent(img) {
     }
     const index = rankCache.byId.get(Number(img.id));
     if (index == null || !rankCache.total) return '—';
-    return `top ${Math.max(1, Math.ceil(((index + 1) / rankCache.total) * 100))}% of scope`;
+    return `top ${Math.max(1, Math.ceil(((index + 1) / rankCache.total) * 100))}% of this view`;
 }
 
 function renderRanking(img) {
@@ -322,7 +322,7 @@ function bindCaptionPanel(host, img, caption) {
             similarLimit: 100,
             similarLabel: '',
             }, { merge: true });
-            showToast(`Scoped to Tag · ${tag}`);
+            showToast(`Showing tag · ${tag}`);
         });
     }
 }

@@ -68,7 +68,7 @@ function shell() {
 
 function renderTitle() {
     const title = root.querySelector('#mr-title');
-    if (title) title.textContent = scopeActive() ? (scope.label || scope.q || 'This scope') : 'All Photos';
+    if (title) title.textContent = scopeActive() ? (scope.label || scope.q || 'This view') : 'All Photos';
 }
 
 function renderQuality(quality) {
@@ -113,7 +113,7 @@ function renderSet() {
     stage.className = `mr-stage ${mode}`;
     if (currentSet.length < need()) {
         stage.className = 'mr-stage';
-        stage.innerHTML = '<div class="mr-empty">Not enough photos to refine in this scope.<br>Try widening the scope.</div>';
+        stage.innerHTML = '<div class="mr-empty">Not enough photos to refine here.<br>Add a source on desktop, or try another view.</div>';
         return;
     }
     stage.innerHTML = currentSet.map((img) =>

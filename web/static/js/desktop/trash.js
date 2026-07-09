@@ -266,7 +266,7 @@ export async function trashSelectedImages() {
         undo: async () => {
             const restored = await restoreImages(imageIds);
             emit('trash:changed', { imageIds });
-            showToast(restored ? 'Restored' : "Restore didn't save");
+            showToast(restored ? 'Restored' : 'Couldn’t restore');
         },
     });
     return true;
@@ -277,7 +277,7 @@ async function restoreSelectedTrash() {
     if (!imageIds.length) return;
     const result = await restoreImages(imageIds);
     if (!result) {
-        showToast("Restore didn't save");
+        showToast('Couldn’t restore');
         return;
     }
     clearSelection();
@@ -286,7 +286,7 @@ async function restoreSelectedTrash() {
         undo: async () => {
             const trashed = await trashImages(imageIds);
             emit('trash:changed', { imageIds });
-            showToast(trashed ? 'Moved back to Trash' : "Undo didn't save");
+            showToast(trashed ? 'Moved back to Trash' : 'Couldn’t undo');
         },
     });
 }

@@ -36,7 +36,7 @@ function renderChips() {
             + '</select></label>');
     }
     if (scope.q) chips.push(chipHtml('q', `“${scope.q}”`, `<span class="tk-glyph tk-spark">${icon('sparkles')}</span>`));
-    if (scope.q && scope.deep) chips.push(chipHtml('deep', 'Deep search', `<span class="tk-glyph tk-spark">${icon('sparkles')}</span>`, 'smart-chip', 'Uses the active embedding model instead of the fast search model when those model indexes differ.'));
+    if (scope.q && scope.deep) chips.push(chipHtml('deep', 'Deep search', `<span class="tk-glyph tk-spark">${icon('sparkles')}</span>`, 'smart-chip', 'Slower, more thorough visual search'));
     if (scope.collectionId) {
         const glyph = scope.collectionSmart ? `<span class="tk-glyph tk-spark">${icon('sparkles')}</span>` : '';
         chips.push(chipHtml('collectionId', `Collection · ${scope.collectionName || 'Untitled'}`, glyph, scope.collectionSmart ? 'smart-chip' : ''));
@@ -58,7 +58,7 @@ function renderChips() {
     if (scope.tag) chips.push(chipHtml('tag', `Tag · ${scope.tag}`));
     if (scope.orientation) chips.push(chipHtml('orientation', scope.orientation === 'landscape' ? 'Landscape' : scope.orientation === 'portrait' ? 'Portrait' : scope.orientation));
     if (scope.compared) {
-        const labels = { compared: 'Ranked', uncompared: 'Unranked', direct_uncompared: 'Never dueled', confident: 'High confidence' };
+        const labels = { compared: 'Ranked', uncompared: 'Unranked', direct_uncompared: 'Not compared yet', confident: 'High confidence' };
         chips.push(chipHtml('compared', labels[scope.compared] || scope.compared));
     }
     if (scope.min_stars) chips.push(chipHtml('min_stars', `${scope.min_stars}+ rating`));
@@ -155,7 +155,7 @@ export function initContextbar() {
     on('scope', render);
     on('meta', render);
     on('bestof', render);
-    on('bestof:unsupported', () => showToast('Collection Best of needs backend collection filtering first.'));
+    on('bestof:unsupported', () => showToast('Best of isn’t available in collections yet.'));
     on('thumbsize', render);
     render();
 }

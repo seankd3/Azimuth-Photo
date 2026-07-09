@@ -522,7 +522,7 @@ export function describeScope() {
     if (scope.lens) return `Lens · ${scope.lens}`;
     if (scope.tag) return `Tag · ${scope.tag}`;
     if (scope.orientation) return scope.orientation === 'landscape' ? 'Landscape' : scope.orientation === 'portrait' ? 'Portrait' : scope.orientation;
-    if (scope.compared) return { compared: 'Ranked', uncompared: 'Unranked', direct_uncompared: 'Never dueled', confident: 'High confidence' }[scope.compared] || scope.compared;
+    if (scope.compared) return { compared: 'Ranked', uncompared: 'Unranked', direct_uncompared: 'Not compared yet', confident: 'High confidence' }[scope.compared] || scope.compared;
     if (scope.min_stars) return `${scope.min_stars}+ rating`;
     return 'All photos';
 }

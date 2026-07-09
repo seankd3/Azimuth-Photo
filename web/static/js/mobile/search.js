@@ -88,7 +88,7 @@ function openPersonSheet(person) {
         dismissSheetThen(async () => {
             const result = await ignorePerson(person.id);
             if (result && result.ok) {
-                showToast('Ignored person');
+                showToast('Person hidden');
                 people = null;
                 built = false;
                 showSearch();
@@ -130,7 +130,7 @@ function render() {
     if (!ppl) {
         for (let i = 0; i < 6; i++) html += '<div class="m-person"><div class="m-face skel"></div></div>';
     } else if (!ppl.length) {
-        html += '<div class="ms-empty">No faces surfaced yet.</div>';
+        html += '<div class="ms-empty">No people found yet.</div>';
     } else {
         ppl.forEach((p, i) => {
             const name = personLabel(p);
@@ -155,7 +155,7 @@ function render() {
     html += '<div class="ms-sec"><h3>Ranking state</h3><div class="ms-pills">'
         + '<button class="ms-pill" data-compared="compared">Ranked</button>'
         + '<button class="ms-pill" data-compared="uncompared">Unranked</button>'
-        + '<button class="ms-pill" data-compared="direct_uncompared">Never dueled</button>'
+        + '<button class="ms-pill" data-compared="direct_uncompared">Not compared yet</button>'
         + '<button class="ms-pill" data-compared="confident">High confidence</button>'
         + '</div></div>';
 
@@ -303,7 +303,7 @@ function render() {
             const labels = {
                 compared: 'Ranked',
                 uncompared: 'Unranked',
-                direct_uncompared: 'Never dueled',
+                direct_uncompared: 'Not compared yet',
                 confident: 'High confidence',
             };
             setScope({ compared, label: labels[compared] || compared });

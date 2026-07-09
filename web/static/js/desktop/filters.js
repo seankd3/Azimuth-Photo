@@ -270,10 +270,10 @@ function renderRanked() {
     return selectBlock('Ranked status', [
         ['compared', 'Ranked'],
         ['uncompared', 'Unranked'],
-        ['direct_uncompared', 'Never dueled'],
+        ['direct_uncompared', 'Not compared yet'],
         ['confident', 'High confidence'],
     ].map(([value, label]) => {
-        const tip = value === 'direct_uncompared' ? ' data-tip="Photos with zero direct duel comparisons, even if they have propagated rank signal."' : '';
+        const tip = value === 'direct_uncompared' ? ' data-tip="Photos you haven’t compared yet in Refine."' : '';
         return `<button class="filter-pill ${scope.compared === value ? 'active' : ''}" data-toggle-key="compared" data-value="${value}"${tip}>${label}</button>`;
     }).join(''), 'data-filter-section="ranked"');
 }

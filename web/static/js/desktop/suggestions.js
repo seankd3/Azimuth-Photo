@@ -214,8 +214,8 @@ function render() {
             + headerHtml(visible.length)
             + '<div class="suggest-review-empty-body"><div>'
             + `<span class="suggest-empty-glyph">${icon('sparkles')}</span>`
-            + '<h2>Nothing to review</h2>'
-            + `<p>${esc(cleared ? "You've cleared the suggestion queue." : 'New collection ideas will appear here after the archive has more patterns to suggest.')}</p>`
+            + '<h2>Nothing to review.</h2>'
+            + `<p>${esc(cleared ? 'You’ve cleared all suggestions.' : 'Add photos first. New collection ideas will appear as the library finds patterns.')}</p>`
             + '</div></div></div>';
         bindChrome(root);
         return;
@@ -230,7 +230,7 @@ function render() {
         + '<section class="suggest-review-main">'
         + '<header class="suggest-review-head">'
         + '<div>'
-        + `<div class="suggest-head-meta"><span class="suggest-kind-badge">${esc(kindLabel(suggestion.kind))}</span>${liveCopy ? `<span class="suggest-live-copy" title="Live collection — grows automatically">${icon('sparkles')}${esc(liveCopy)}</span>` : ''}</div>`
+        + `<div class="suggest-head-meta"><span class="suggest-kind-badge">${esc(kindLabel(suggestion.kind))}</span>${liveCopy ? `<span class="suggest-live-copy" title="Updates automatically">${icon('sparkles')}${esc(liveCopy)}</span>` : ''}</div>`
         + `<h2 title="${esc(suggestion.title)}">${esc(suggestion.title)}</h2>`
         + `<p>${esc(suggestion.reason || 'Suggested')} · ${esc(suggestion.subtitle || `${fmt(suggestion.count)} photos`)}</p>`
         + '</div>'

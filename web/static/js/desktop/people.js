@@ -159,8 +159,8 @@ function render() {
     }
     const { named, unnamed, review } = arrangedSections();
     const emptyCopy = peopleStatus && String(peopleStatus.state || peopleStatus.status || '').toLowerCase().includes('paused')
-        ? 'Face scanning is paused. Resume scanning to find reusable identities.'
-        : 'People will appear here after face scanning finds reusable identities.';
+        ? 'Add photos first, then resume face scanning to find people.'
+        : 'Add a source if your library is empty. People will appear after face scanning.';
     flow.innerHTML = [
         reviewStripHtml(review),
         sectionHtml('Named people', named),
@@ -381,7 +381,7 @@ async function handleReview(button, card) {
     const result = await rejectMergeSuggestion(suggestionId);
     if (result && result.ok) {
         removeSuggestion(suggestionId);
-        showToast('Suggestion rejected');
+        showToast('Merge suggestion dismissed');
         render();
         focusReviewCard(reviewFocusIndex);
         load();
@@ -473,7 +473,7 @@ export function initPeople() {
             mergeSourceId = card.dataset.personId;
             render();
             focusPersonCard(mergeSourceId);
-            showToast('Choose another person to merge with');
+            showToast('Choose a different person to merge with');
         } else if (action === 'ignore') {
             event.stopPropagation();
             requestIgnore(card, person);

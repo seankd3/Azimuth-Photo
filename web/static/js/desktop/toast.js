@@ -47,9 +47,9 @@ function runUndo(item) {
     if (!fn) return false;
     dismiss(item);
     try {
-        Promise.resolve(fn()).catch(() => showToast("Undo didn't finish"));
+        Promise.resolve(fn()).catch(() => showToast('Couldn’t undo'));
     } catch {
-        showToast("Undo didn't finish");
+        showToast('Couldn’t undo');
     }
     return true;
 }

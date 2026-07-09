@@ -24,7 +24,7 @@
                     <div id="scope-field">
                         <span class="sf-icon"><svg class="icon" aria-hidden="true"><use href="#i-search"></use></svg></span>
                         <span id="scope-token-slot"></span>
-                        <input id="scope-input" placeholder="Search photos, people, cameras…" autocomplete="off" spellcheck="false" aria-label="Scope and search" aria-controls="scope-drop" aria-autocomplete="list" aria-expanded="false" role="combobox">
+                        <input id="scope-input" placeholder="Search photos, people, cameras…" autocomplete="off" spellcheck="false" aria-label="Search photos" aria-controls="scope-drop" aria-autocomplete="list" aria-expanded="false" role="combobox">
                         <span id="scope-kbd"><kbd>/</kbd></span>
                     </div>
                     <div id="scope-drop" role="listbox"></div>
@@ -96,7 +96,7 @@
                 <div id="ctx-crumbs"></div>
                     <div id="ctx-mid">
                         <span id="ctx-count" class="num" aria-live="polite" aria-atomic="true">0 photos</span>
-                        <div id="quality-wrap" data-tip="Sorted % for this scope">
+                        <div id="quality-wrap" data-tip="Sorted % for this view">
                             <span id="quality-bar"><i></i></span>
                             <span id="quality-label" class="num"></span>
                         </div>
@@ -133,7 +133,7 @@
                         <div id="grid-flow"></div>
                         <div id="grid-error"></div>
                         <div id="grid-sentinel"></div>
-                        <div class="grid-end" id="grid-end" hidden>End of scope</div>
+                        <div class="grid-end" id="grid-end" hidden>End of view</div>
                     </section>
                     <section id="view-events" class="view" role="tabpanel" aria-label="Events">
                         <div id="events-flow"></div>
@@ -195,7 +195,7 @@
                                         <option value="3x3">3×3</option>
                                         <option value="4x3">4×3</option>
                                     </select>
-                                    <select class="ctl" id="refine-strategy" aria-label="Refine strategy" data-tip="Explore = uncertain pairs · Compete = close Elo">
+                                    <select class="ctl" id="refine-strategy" aria-label="Refine strategy" data-tip="Explore = unsure rankings · Compete = close ratings">
                                         <option value="diverse">Diverse</option>
                                         <option value="explore">Explore</option>
                                         <option value="compete">Compete</option>
@@ -271,15 +271,14 @@
             <button id="help-close" class="icon-btn" data-tip="Close (Esc)" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg></button>
             <h2>Keyboard</h2>
             <div class="help-cols">
-                <div><h3>Navigate</h3><p><kbd>/</kbd> Omnibox</p><p><kbd>Ctrl</kbd><kbd>K</kbd> Commands</p><p><kbd>&gt;</kbd> in Omnibox · command mode</p><p>Save filtered view as smart collection from New or Commands</p><p><kbd>↑↓←→</kbd> Move grid focus</p><p><kbd>Enter</kbd> or <kbd>E</kbd> Loupe</p><p><kbd>Esc</kbd> Back out one layer</p></div>
-                <div><h3>Grid</h3><p><kbd>Space</kbd> Toggle focused selection</p><p><kbd>S</kbd> Stack / expand stack</p><p><kbd>P</kbd><kbd>X</kbd><kbd>U</kbd> Flag + advance when Auto is on</p><p><kbd>Delete</kbd> Trash selection</p><p><kbd>Ctrl/Cmd</kbd><kbd>A</kbd> Select loaded photos</p><p><kbd>F</kbd> Filter</p><p><kbd>J</kbd> Cycle density</p></div>
-                <div><h3>Refine</h3><p><kbd>R</kbd> Refine this scope</p><p><kbd>1-4</kbd> Pick in Mosaic</p><p><kbd>←</kbd><kbd>→</kbd> Pick in Duel</p><p><kbd>Ctrl</kbd><kbd>Z</kbd> Undo pick</p></div>
+                <div><h3>Navigate</h3><p><kbd>/</kbd> Search</p><p><kbd>Ctrl</kbd><kbd>K</kbd> Commands</p><p><kbd>&gt;</kbd> in search · commands</p><p>Save a filtered view as a smart collection from New or Commands</p><p><kbd>↑↓←→</kbd> Move grid focus</p><p><kbd>Enter</kbd> or <kbd>E</kbd> Loupe</p><p><kbd>Esc</kbd> Back out one layer</p></div>
+                <div><h3>Grid</h3><p><kbd>Space</kbd> Toggle focused selection</p><p><kbd>S</kbd> Stack / expand stack</p><p><kbd>P</kbd><kbd>X</kbd><kbd>U</kbd> Flag + advance when Auto is on</p><p><kbd>Delete</kbd> Trash selection</p><p><kbd>Ctrl/Cmd</kbd><kbd>A</kbd> Select loaded photos</p><p><kbd>F</kbd> Filter, including Not compared yet</p><p><kbd>J</kbd> Cycle density</p><p>Import history can reopen an import</p></div>
+                <div><h3>Refine</h3><p><kbd>R</kbd> Refine this view</p><p><kbd>1-4</kbd> Pick in Mosaic</p><p><kbd>←</kbd><kbd>→</kbd> Pick in Duel</p><p><kbd>Ctrl</kbd><kbd>Z</kbd> Undo pick</p></div>
                 <div><h3>Curate</h3><p><kbd>B</kbd> Best of</p><p><kbd>P</kbd> Pick</p><p><kbd>X</kbd> Reject</p><p><kbd>U</kbd> Clear flag</p><p><kbd>Ctrl</kbd><kbd>Z</kbd> Undo latest toast</p></div>
                 <div><h3>Views</h3><p><kbd>G</kbd> Grid</p><p><kbd>Y</kbd> Events</p><p><kbd>O</kbd> People</p><p><kbd>M</kbd> Map</p></div>
                 <div><h3>Loupe</h3><p><kbd>P</kbd><kbd>X</kbd><kbd>U</kbd> Flag + next when Auto is on</p><p><kbd>←</kbd><kbd>→</kbd> Previous / next</p><p><kbd>Space</kbd> or <kbd>Z</kbd> Fit / 100%</p><p><kbd>L</kbd> Loupe lights</p><p><kbd>I</kbd> Info overlay</p><p><kbd>G</kbd> Grid</p></div>
                 <div><h3>Stacks / People</h3><p><kbd>↑↓</kbd> Stack row</p><p><kbd>←→</kbd> Stack photo</p><p><kbd>C</kbd> Cover</p><p><kbd>K</kbd> or <kbd>Enter</kbd> Keep cover</p><p><kbd>U</kbd> Unstack</p><p><kbd>Y</kbd><kbd>N</kbd> Merge review</p></div>
                 <div><h3>Panels</h3><p><kbd>[</kbd> Toggle left panel</p><p><kbd>]</kbd> Toggle info panel</p><p><kbd>?</kbd> This overlay</p></div>
-                <div><h3>New controls</h3><p>Deep in search switches to the active embedding model when available</p><p>Import shows Past imports for batch scopes</p><p>System shows Published galleries</p><p>Filter includes Never dueled</p><p>Similar depth chooses 100 / 250 / 500</p></div>
             </div>
         </div>
     </div>
