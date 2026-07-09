@@ -41,6 +41,7 @@ DEFAULT_SETTINGS = {
     "embed_model_dir": _default_model_dir("Qwen/Qwen3-VL-Embedding-8B"),
     "embed_model_dim": 4096,
     "search_similarity_threshold": 0.35,
+    "refine_semantic_pairing": True,
     "show_loupe_cache_status": True,
     "people_scan_enabled": True,
     "caption_scan_enabled": False,
@@ -493,6 +494,10 @@ def normalize_settings(raw: dict | None) -> dict:
     )
     normalized["show_loupe_cache_status"] = bool(
         raw.get("show_loupe_cache_status", normalized["show_loupe_cache_status"])
+    )
+    normalized["refine_semantic_pairing"] = _normalize_bool(
+        raw.get("refine_semantic_pairing", normalized["refine_semantic_pairing"]),
+        DEFAULT_SETTINGS["refine_semantic_pairing"],
     )
     normalized["share_cookie_secret"] = str(raw.get("share_cookie_secret") or "").strip()
     normalized.update(_derive_runtime_tuning(normalized["memory_cache_gb"]))

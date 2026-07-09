@@ -104,6 +104,12 @@ function renderStats() {
     document.getElementById('refine-pace').textContent = String(Math.round(picks / elapsed));
 }
 
+function renderSemanticPairing(active) {
+    const badge = document.getElementById('refine-semantic-badge');
+    if (!badge) return;
+    badge.hidden = !active;
+}
+
 function pulsePropagation(count) {
     const badge = document.getElementById('propagation-badge');
     const n = Number(count || 0);
@@ -190,7 +196,7 @@ function uniqueIds(values = []) {
     return [...new Set(values.map(Number).filter((id) => id > 0))];
 }
 
-async function fetchImages(count, excludeIds = []) {
+async function fetchImages(count, excludeIds = [], { updatePairingBadge = true } = {}) {
     const data = await mosaicNext(
         count,
         refineQueryParams(),
@@ -198,6 +204,7 @@ async function fetchImages(count, excludeIds = []) {
         strategy,
         gridElo(),
     );
+    if (updatePairingBadge) renderSemanticPairing(data && data.pairing === 'semantic');
     return ((data && data.images) || []).map(normalizeImage).filter(Boolean);
 }
 
@@ -260,9 +267,17 @@ async function fillReplacements() {
     const token = generation;
     try {
         const needed = Math.max(REPLACEMENT_FETCH_MIN, REPLACEMENT_TARGET - replacements.length);
-        let candidates = await fetchImages(needed, currentExcludeIds({ includeRecent: true }));
+        let candidates = await fetchImages(
+            needed,
+            currentExcludeIds({ includeRecent: true }),
+            { updatePairingBadge: false },
+        );
         if (!candidates.length && recentIds.length) {
-            candidates = await fetchImages(needed, currentExcludeIds({ includeRecent: false }));
+            candidates = await fetchImages(
+                needed,
+                currentExcludeIds({ includeRecent: false }),
+                { updatePairingBadge: false },
+            );
         }
         if (token !== generation) return false;
         const seen = new Set(replacements.map((img) => img.id));
@@ -405,6 +420,7 @@ async function resetSet() {
     recentIds = [];
     selectedIndex = -1;
     document.getElementById('refine-title').textContent = `Refining · ${describeScope()}`;
+    renderSemanticPairing(false);
     renderModes();
     renderSkeleton();
     const images = await fetchImages(need());

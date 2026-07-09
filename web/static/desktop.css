@@ -638,6 +638,9 @@ html[data-badges-index="0"] .cell .c-idx { display: none; }
 .refine-title-wrap { flex: 1 1 auto; min-width: 150px; display: flex; align-items: baseline; gap: var(--s2); overflow: hidden; }
 #refine-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #refine-quality { color: var(--text-2); white-space: nowrap; }
+.ref-semantic-badge { width: 24px; height: 24px; flex: none; display: inline-grid; place-items: center; border: 1px solid var(--accent-lin); border-radius: 999px; background: var(--accent-dim); color: var(--accent); }
+.ref-semantic-badge[hidden] { display: none; }
+.ref-semantic-badge .icon { width: 14px; height: 14px; }
 #refine-modes { display: flex; gap: 2px; padding: 2px; background: var(--bg); border: 1px solid var(--line); border-radius: var(--r-ctl); }
 #refine-modes button { height: 26px; padding: 0 10px; border-radius: 4px; color: var(--text-2); }
 #refine-modes button.active { background: var(--card-hi); color: var(--accent); }

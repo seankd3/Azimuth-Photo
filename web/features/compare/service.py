@@ -10,6 +10,7 @@ import pairing
 import settings
 from core import query_constraints
 from core import responses as response_helpers
+from features.compare import semantic_pairing
 
 
 _pairing_cache = {"data": None, "valid": False}
@@ -959,6 +960,205 @@ async def diverse_sample(candidates: list[dict], count: int) -> list[dict]:
         return random.sample(candidates, min(count, len(candidates)))
 
 
+def _effective_elo(img) -> float:
+    return candidate_value(img, "elo", 1200.0) or 1200.0
+
+
+def _strategy_pool_and_weights(
+    candidates: list[dict],
+    count: int,
+    *,
+    strategy: str,
+    grid_elo: float = 0,
+) -> tuple[list[dict], list[float]]:
+    if strategy == "explore":
+        pool = lowest_comparison_candidate_pool(candidates, count)
+        weights = [1.0 / (int(candidate_value(img, "comparisons", 0) or 0) + 1) for img in pool]
+    elif strategy == "compete" and grid_elo > 0:
+        pool = candidates
+        weights = [1.0 / (abs(_effective_elo(img) - grid_elo) + 50) for img in pool]
+    elif strategy == "top":
+        pool = candidates
+        weights = [_effective_elo(img) for img in pool]
+    else:
+        pool = candidates
+        weights = [1.0 for _ in pool]
+    return pool, weights
+
+
+def _strategy_scores(candidates: list[dict], weights: list[float]) -> dict[int, float]:
+    return {
+        int(candidate["id"]): max(0.0, float(weight))
+        for candidate, weight in zip(candidates, weights)
+    }
+
+
+def _weighted_unique_sample(candidates: list[dict], weights: list[float], count: int) -> list[dict]:
+    import random
+
+    draw_count = min(len(candidates), max(count * 4, count))
+    sample = []
+    seen_ids = set()
+    for img in random.choices(candidates, weights=weights, k=draw_count):
+        image_id = img["id"]
+        if image_id in seen_ids:
+            continue
+        sample.append(img)
+        seen_ids.add(image_id)
+        if len(sample) >= count:
+            break
+    if len(sample) < count:
+        remaining = [img for img in candidates if img["id"] not in seen_ids]
+        sample.extend(random.sample(remaining, min(count - len(sample), len(remaining))))
+    return sample
+
+
+async def _strategy_sample(
+    candidates: list[dict],
+    count: int,
+    *,
+    strategy: str,
+    grid_elo: float = 0,
+) -> list[dict]:
+    if strategy == "diverse":
+        return await diverse_sample(candidates, count)
+    pool, weights = _strategy_pool_and_weights(candidates, count, strategy=strategy, grid_elo=grid_elo)
+    return _weighted_unique_sample(pool, weights, count)
+
+
+async def _semantic_context_for(candidates: list[dict]):
+    if not settings.get_settings().get("refine_semantic_pairing", True):
+        return None
+    model_key = elo_propagation.compare_embedding_model_key()
+    return await semantic_pairing.load_context(candidates, model_key)
+
+
+async def _semantic_duel_sample(
+    candidates: list[dict],
+    count: int,
+    *,
+    strategy: str,
+    grid_elo: float,
+    context,
+) -> tuple[list[dict], str]:
+    import random
+
+    if count != 2 or len(candidates) < 2:
+        return [], "strategy"
+    if random.random() < semantic_pairing.SEMANTIC_DUEL_EXPLORATION_RATE:
+        return await _strategy_sample(candidates, count, strategy=strategy, grid_elo=grid_elo), "strategy"
+
+    if strategy == "diverse":
+        seed_sample = await diverse_sample(candidates, 1)
+        score_pool, score_weights = _strategy_pool_and_weights(candidates, count, strategy="random")
+    else:
+        score_pool, score_weights = _strategy_pool_and_weights(
+            candidates,
+            count,
+            strategy=strategy,
+            grid_elo=grid_elo,
+        )
+        seed_sample = _weighted_unique_sample(score_pool, score_weights, 1)
+    if not seed_sample:
+        return [], "strategy"
+    seed = seed_sample[0]
+    strategy_scores = _strategy_scores(score_pool, score_weights)
+    partner = semantic_pairing.best_partner(seed, candidates, strategy_scores, context)
+    if partner is None:
+        remaining = [img for img in candidates if int(img["id"]) != int(seed["id"])]
+        remaining_weights = [strategy_scores.get(int(img["id"]), 1.0) for img in remaining]
+        fallback = _weighted_unique_sample(remaining, remaining_weights, 1)
+        if not fallback:
+            return [seed], "strategy"
+        return [seed, fallback[0]], "strategy"
+    return [seed, partner], "semantic"
+
+
+async def _semantic_mosaic_sample(
+    candidates: list[dict],
+    count: int,
+    *,
+    strategy: str,
+    grid_elo: float,
+    context,
+) -> tuple[list[dict], str]:
+    if count < 3 or len(candidates) < count:
+        return [], "strategy"
+
+    if strategy == "diverse":
+        seed_sample = await diverse_sample(candidates, 1)
+        score_pool, score_weights = _strategy_pool_and_weights(candidates, count, strategy="random")
+    else:
+        score_pool, score_weights = _strategy_pool_and_weights(
+            candidates,
+            count,
+            strategy=strategy,
+            grid_elo=grid_elo,
+        )
+        seed_sample = _weighted_unique_sample(score_pool, score_weights, 1)
+    if not seed_sample:
+        return [], "strategy"
+
+    seed = seed_sample[0]
+    selected = [seed]
+    selected_ids = {int(seed["id"])}
+    strategy_scores = _strategy_scores(score_pool, score_weights)
+    while len(selected) < count:
+        neighbor = semantic_pairing.best_partner(
+            seed,
+            candidates,
+            strategy_scores,
+            context,
+            minimum_cosine=semantic_pairing.MOSAIC_NEIGHBOR_THRESHOLD,
+            used_ids=selected_ids,
+        )
+        if neighbor is None:
+            break
+        selected.append(neighbor)
+        selected_ids.add(int(neighbor["id"]))
+
+    if len(selected) < 2:
+        return [], "strategy"
+    if len(selected) < count:
+        remaining = [img for img in candidates if int(img["id"]) not in selected_ids]
+        remaining_weights = [strategy_scores.get(int(img["id"]), 1.0) for img in remaining]
+        selected.extend(_weighted_unique_sample(remaining, remaining_weights, count - len(selected)))
+
+    return selected[:count], "semantic"
+
+
+async def _refine_sample(
+    candidates: list[dict],
+    count: int,
+    *,
+    strategy: str,
+    grid_elo: float = 0,
+) -> tuple[list[dict], str]:
+    context = await _semantic_context_for(candidates)
+    if context is not None:
+        if count == 2:
+            sample, pairing_mode = await _semantic_duel_sample(
+                candidates,
+                count,
+                strategy=strategy,
+                grid_elo=grid_elo,
+                context=context,
+            )
+            if len(sample) >= count:
+                return sample, pairing_mode
+        else:
+            sample, pairing_mode = await _semantic_mosaic_sample(
+                candidates,
+                count,
+                strategy=strategy,
+                grid_elo=grid_elo,
+                context=context,
+            )
+            if len(sample) >= count:
+                return sample, pairing_mode
+    return await _strategy_sample(candidates, count, strategy=strategy, grid_elo=grid_elo), "strategy"
+
+
 async def mosaic_next_impl(
     n: int = 12, exclude: str = "", strategy: str = "explore", grid_elo: float = 0,
     orientation: str = "", compared: str = "", min_stars: int = 0, folder: str = "",
@@ -1171,6 +1371,7 @@ async def mosaic_next_impl(
             "ai_unavailable": search["ai_unavailable"],
             "fallback_reason": search.get("fallback_reason", ""),
             "candidate_source": candidate_source,
+            "pairing": "strategy",
             "counts_stale": counts_stale,
             "cache_hit": cache_hit,
             "reservoir_remaining": 0,
@@ -1182,41 +1383,10 @@ async def mosaic_next_impl(
             }
         return response
 
-    import random
     count = min(n, len(candidates))
+    sample, pairing_mode = await _refine_sample(candidates, count, strategy=strategy, grid_elo=grid_elo)
 
-    def effective_elo(img):
-        return candidate_value(img, "elo", 1200.0) or 1200.0
-
-    if strategy == "diverse":
-        sample = await diverse_sample(candidates, count)
-    else:
-        if strategy == "explore":
-            candidates = lowest_comparison_candidate_pool(candidates, count)
-            weights = [1.0 / (int(candidate_value(img, "comparisons", 0) or 0) + 1) for img in candidates]
-        elif strategy == "compete" and grid_elo > 0:
-            weights = [1.0 / (abs(effective_elo(img) - grid_elo) + 50) for img in candidates]
-        elif strategy == "top":
-            weights = [effective_elo(img) for img in candidates]
-        else:
-            weights = [1.0 for _ in candidates]
-
-        draw_count = min(len(candidates), max(count * 4, count))
-        sample = []
-        seen_ids = set()
-        for img in random.choices(candidates, weights=weights, k=draw_count):
-            image_id = img["id"]
-            if image_id in seen_ids:
-                continue
-            sample.append(img)
-            seen_ids.add(image_id)
-            if len(sample) >= count:
-                break
-        if len(sample) < count:
-            remaining = [img for img in candidates if img["id"] not in seen_ids]
-            sample.extend(random.sample(remaining, min(count - len(sample), len(remaining))))
-
-    sample_elo_by_id = {img["id"]: effective_elo(img) for img in sample}
+    sample_elo_by_id = {img["id"]: _effective_elo(img) for img in sample}
     hydrated_sample = await hydrate_active_rows(sample)
     result = [
         app_helpers.image_card(img, "sm", elo_value=sample_elo_by_id.get(img["id"], img["elo"]))
@@ -1262,6 +1432,7 @@ async def mosaic_next_impl(
         "ai_unavailable": search["ai_unavailable"],
         "fallback_reason": search.get("fallback_reason", ""),
         "candidate_source": candidate_source,
+        "pairing": pairing_mode,
         "counts_stale": counts_stale,
         "cache_hit": cache_hit,
         "reservoir_remaining": max(0, len(candidates) - len(result)),
@@ -1415,6 +1586,7 @@ async def compare_next_impl(
             "ai_unavailable": search["ai_unavailable"],
             "fallback_reason": search.get("fallback_reason", ""),
             "candidate_source": candidate_source,
+            "pairing": "strategy",
             "counts_stale": counts_stale,
             "cache_hit": cache_hit,
             "reservoir_remaining": 0,
@@ -1500,6 +1672,7 @@ async def compare_next_impl(
         "ai_unavailable": search["ai_unavailable"],
         "fallback_reason": search.get("fallback_reason", ""),
         "candidate_source": candidate_source,
+        "pairing": "strategy",
         "counts_stale": counts_stale,
         "cache_hit": cache_hit,
         "reservoir_remaining": max(0, len(image_dicts) - len(pair_rows)),

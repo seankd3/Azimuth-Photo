@@ -168,6 +168,7 @@ async def mosaic_next(
             "status_stale": True,
             "counts_stale": True,
             "candidate_source": "sqlite_busy",
+            "pairing": "strategy",
             "latency_ms": round((time.perf_counter() - started) * 1000, 1),
         }
     if isinstance(response, dict):
@@ -323,6 +324,7 @@ async def compare_next(
             "status_stale": True,
             "counts_stale": True,
             "candidate_source": "sqlite_busy",
+            "pairing": "strategy",
             "latency_ms": round((time.perf_counter() - started) * 1000, 1),
         }
     if isinstance(response, dict):

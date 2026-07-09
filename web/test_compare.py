@@ -1,4 +1,7 @@
 from test_support import *  # noqa: F401,F403
+import random
+
+from features.compare import semantic_pairing
 
 
 class CompareTests(BackendTestCase):
@@ -755,6 +758,157 @@ class CompareTests(BackendTestCase):
         self.assertEqual(calls[0][1].get("order"), "least_compared")
         self.assertEqual(result["candidate_source"], "default_explore_least_compared")
         self.assertEqual({image["id"] for image in result["images"]}, {1, 2})
+
+    async def test_refine_semantic_duel_prefers_within_cluster_partner(self):
+        source = await self._source()
+        sunset_a = await self._image(source["id"], "sunset-a.jpg")
+        sunset_b = await self._image(source["id"], "sunset-b.jpg")
+        screen_a = await self._image(source["id"], "screen-a.jpg")
+        screen_b = await self._image(source["id"], "screen-b.jpg")
+        image_ids = [sunset_a, sunset_b, screen_a, screen_b]
+        for image_id in image_ids:
+            await self._cache_entry(image_id, "sm")
+
+        matrix = np.array(
+            [
+                [1.0, 0.0],
+                [0.96, 0.08],
+                [0.0, 1.0],
+                [0.08, 0.96],
+            ],
+            dtype=np.float32,
+        )
+
+        async def fake_get_matrix(_model_key=None):
+            return image_ids, matrix
+
+        def fake_get_index(_model_key=None):
+            return {image_id: idx for idx, image_id in enumerate(image_ids)}
+
+        old_rate = semantic_pairing.SEMANTIC_DUEL_EXPLORATION_RATE
+        elo_propagation.embed_cache.get_matrix = fake_get_matrix
+        elo_propagation.embed_cache.get_index = fake_get_index
+        semantic_pairing.SEMANTIC_DUEL_EXPLORATION_RATE = 0.0
+        try:
+            random.seed(8)
+            result = await compare_routes.mosaic_next(n=2, strategy="random")
+        finally:
+            semantic_pairing.SEMANTIC_DUEL_EXPLORATION_RATE = old_rate
+
+        selected_ids = {image["id"] for image in result["images"]}
+        self.assertEqual(result["pairing"], "semantic")
+        self.assertIn(selected_ids, ({sunset_a, sunset_b}, {screen_a, screen_b}))
+
+    async def test_refine_semantic_duel_keeps_exploration_floor(self):
+        image_ids = [1, 2, 3, 4]
+        candidates = [
+            {"id": image_id, "elo": 1200.0, "comparisons": 0, "propagated_updates": 0}
+            for image_id in image_ids
+        ]
+        matrix = np.array(
+            [
+                [1.0, 0.0],
+                [0.98, 0.02],
+                [0.0, 1.0],
+                [0.02, 0.98],
+            ],
+            dtype=np.float32,
+        )
+        context = semantic_pairing.SemanticContext(
+            matrix=matrix,
+            index_by_id={image_id: idx for idx, image_id in enumerate(image_ids)},
+        )
+
+        random.seed(41)
+        strategy_draws = 0
+        for _ in range(100):
+            _sample, pairing_mode = await compare_service._semantic_duel_sample(
+                candidates,
+                2,
+                strategy="random",
+                grid_elo=0,
+                context=context,
+            )
+            if pairing_mode == "strategy":
+                strategy_draws += 1
+
+        self.assertGreaterEqual(strategy_draws, 10)
+        self.assertLessEqual(strategy_draws, 35)
+
+    async def test_refine_semantic_mosaic_seeds_and_fills_with_neighbors(self):
+        source = await self._source()
+        warm_ids = [
+            await self._image(source["id"], f"warm-{idx}.jpg")
+            for idx in range(3)
+        ]
+        cool_ids = [
+            await self._image(source["id"], f"cool-{idx}.jpg")
+            for idx in range(3)
+        ]
+        image_ids = warm_ids + cool_ids
+        for image_id in image_ids:
+            await self._cache_entry(image_id, "sm")
+
+        matrix = np.array(
+            [
+                [1.0, 0.0],
+                [0.92, 0.08],
+                [0.88, 0.12],
+                [0.0, 1.0],
+                [0.08, 0.92],
+                [0.12, 0.88],
+            ],
+            dtype=np.float32,
+        )
+
+        async def fake_get_matrix(_model_key=None):
+            return image_ids, matrix
+
+        def fake_get_index(_model_key=None):
+            return {image_id: idx for idx, image_id in enumerate(image_ids)}
+
+        elo_propagation.embed_cache.get_matrix = fake_get_matrix
+        elo_propagation.embed_cache.get_index = fake_get_index
+
+        random.seed(12)
+        result = await compare_routes.mosaic_next(n=3, strategy="random")
+        selected = [image["id"] for image in result["images"]]
+        selected_indices = [image_ids.index(image_id) for image_id in selected]
+        seed = matrix[selected_indices[0]]
+        similarities = [float(np.dot(seed, matrix[idx])) for idx in selected_indices[1:]]
+
+        self.assertEqual(result["pairing"], "semantic")
+        self.assertEqual(len(selected), 3)
+        self.assertTrue(all(similarity > semantic_pairing.MOSAIC_NEIGHBOR_THRESHOLD for similarity in similarities))
+
+    async def test_refine_semantic_unavailable_embeddings_fallback_is_identical(self):
+        source = await self._source()
+        image_ids = [
+            await self._image(source["id"], f"image-{idx}.jpg", elo=1200 + idx)
+            for idx in range(6)
+        ]
+        for image_id in image_ids:
+            await self._cache_entry(image_id, "sm")
+
+        settings.save_settings({"refine_semantic_pairing": False})
+        random.seed(91)
+        expected = await compare_service.mosaic_next_impl(n=4, strategy="random")
+
+        async def missing_matrix(_model_key=None):
+            return None, None
+
+        def missing_index(_model_key=None):
+            return {}
+
+        settings.save_settings({"refine_semantic_pairing": True})
+        compare_service._interaction_response_cache.clear()
+        elo_propagation.embed_cache.get_matrix = missing_matrix
+        elo_propagation.embed_cache.get_index = missing_index
+        random.seed(91)
+        actual = await compare_service.mosaic_next_impl(n=4, strategy="random")
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual["pairing"], "strategy")
 
     async def test_mosaic_explore_reports_direct_uncompared_pool_stats(self):
         source = await self._source()
