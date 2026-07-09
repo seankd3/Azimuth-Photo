@@ -10,6 +10,7 @@ from features.export import routes as export_routes
 from features.library import routes as library_routes
 from features.media import routes as media_routes
 from features.people import routes as people_routes
+from features.publish import routes as publish_routes
 from features.search import routes as search_routes
 from features.share import routes as share_routes
 from features.stacks import routes as stack_routes
@@ -371,6 +372,37 @@ def configure_share_routes(*, templates, resolve_library_constraints=None) -> No
         thumbnail_response=media_routes.thumbnail_response,
         get_collection=lambda collection_id, **kwargs: db.get_collection(collection_id, **kwargs),
         resolve_smart_image_ids=resolve_smart_image_ids,
+    )
+
+
+def configure_publish_routes(*, templates, resolve_library_constraints=None, track_background_task=None) -> None:
+    import db
+    import thumbnails
+    from features.collections import smart as smart_collections
+
+    async def resolve_smart_image_ids(query):
+        if resolve_library_constraints is None:
+            raise RuntimeError("Smart publish routes are not configured")
+        return await smart_collections.resolve_image_ids(
+            query,
+            resolve_library_constraints=resolve_library_constraints,
+            count_rankings=lambda **kwargs: db.count_rankings(**kwargs),
+            get_rankings=lambda **kwargs: db.get_rankings(**kwargs),
+        )
+
+    publish_routes.configure(
+        templates=templates,
+        get_collection=lambda collection_id, **kwargs: db.get_collection(collection_id, **kwargs),
+        get_images_by_ids=lambda image_ids: db.get_images_by_ids(image_ids),
+        collection_image_ids=lambda collection_id: db.collection_image_ids(collection_id),
+        resolve_smart_image_ids=resolve_smart_image_ids,
+        get_publish=lambda collection_id: db.get_collection_publish(collection_id),
+        list_publishes=lambda: db.list_collection_publishes(),
+        upsert_publish=lambda **kwargs: db.upsert_collection_publish(**kwargs),
+        delete_publish=lambda collection_id: db.delete_collection_publish(collection_id),
+        slug_available=lambda slug, **kwargs: db.collection_publish_slug_available(slug, **kwargs),
+        thumbnails=thumbnails,
+        track_background_task=track_background_task,
     )
 
 

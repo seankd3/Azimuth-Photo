@@ -23,6 +23,7 @@ from data.repositories import images as image_repository
 from data.repositories import imports as import_repository
 from data.repositories import metadata_search as metadata_search_repository
 from data.repositories import people as people_repository
+from data.repositories import publishes as publish_repository
 from data.repositories import ratings as rating_repository
 from data.repositories import rankings as ranking_repository
 from data.repositories import stats as stats_repository
@@ -480,6 +481,30 @@ async def collection_image_ids(collection_id: int, *, limit: int = 2000) -> list
 
 async def collection_is_smart(collection_id: int) -> bool | None:
     return await collection_repository.collection_is_smart(DB_PATH, collection_id)
+
+
+async def get_collection_publish(collection_id: int):
+    return await publish_repository.get_publish(DB_PATH, collection_id)
+
+
+async def get_collection_publish_by_slug(slug: str):
+    return await publish_repository.get_publish_by_slug(DB_PATH, slug)
+
+
+async def list_collection_publishes():
+    return await publish_repository.list_publishes(DB_PATH)
+
+
+async def upsert_collection_publish(**kwargs):
+    return await publish_repository.upsert_publish(DB_PATH, **kwargs)
+
+
+async def delete_collection_publish(collection_id: int) -> bool:
+    return await publish_repository.delete_publish(DB_PATH, collection_id)
+
+
+async def collection_publish_slug_available(slug: str, *, collection_id: int | None = None) -> bool:
+    return await publish_repository.slug_available(DB_PATH, slug, collection_id=collection_id)
 
 
 async def create_or_rotate_share(

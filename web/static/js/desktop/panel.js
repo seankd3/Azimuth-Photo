@@ -2,7 +2,8 @@ import {
     addToCollection, createCollection, getCatalog, getCollection,
     getCounts, getTrash,
     createCollectionShare, deleteCollection, getCollectionShare, getCollectionShareFavorites, listCollections,
-    removeFromCollection, renameCollection, revokeCollectionShare, thumbUrl, updateCollection,
+    getCollectionPublish, publishCollection, removeFromCollection, renameCollection,
+    revokeCollectionPublish, revokeCollectionShare, thumbUrl, updateCollection,
 } from './api.js';
 import { loadCollectionImageIds } from './scope_data.js';
 import {
@@ -30,6 +31,9 @@ let collectionMenu = null;
 let collectionMenuReturn = null;
 let shareOverlay = null;
 let shareOverlayToken = 0;
+let publishOverlay = null;
+let publishOverlayToken = 0;
+let publishPollTimer = 0;
 let chromeRefreshTimer = 0;
 let editingSmartCollection = null;
 
@@ -61,7 +65,8 @@ function renderCollections() {
         return `<div class="nav-row coll-row ${smart ? 'smart' : ''} ${String(scope.collectionId || '') === String(c.id) ? 'active' : ''}" data-coll-id="${c.id}" data-coll-name="${esc(c.name)}" data-coll-smart="${smart ? '1' : ''}">`
         + `<button class="coll-main" type="button" title="${esc(title)}">`
         + `<span class="coll-cover">${c.cover_image_id ? `<img src="${esc(thumbUrl('sm', c.cover_image_id))}" alt="">` : icon(smart ? 'sparkles' : 'folder')}${smart && c.cover_image_id ? `<span class="coll-smart-badge">${icon('sparkles')}</span>` : ''}</span>`
-        + `<span class="nr-label" title="${esc(c.name)}">${esc(c.name)}</span><span class="nr-count">${fmt(c.image_count)}</span></button>`
+        + `<span class="nr-label" title="${esc(c.name)}">${esc(c.name)}</span><span class="nr-count">${fmt(c.image_count)}</span>`
+        + `${c.published ? `<span class="coll-published" data-tip="Published to website">${icon('globe')}</span>` : ''}</button>`
         + `<button class="coll-menu-btn" type="button" data-tip="Collection actions" aria-label="Collection actions">${icon('ellipsis')}</button></div>`
     }).join('');
     for (const row of host.querySelectorAll('.coll-row')) {
@@ -153,6 +158,7 @@ function openCollectionMenu(row, anchor) {
         + (smart ? `<button data-act="edit-query">${icon('sparkles')} Edit query</button>`
             + `<button data-act="materialize">${icon('archive')} Convert to static</button>` : '')
         + `<button data-act="share">${icon('share-2')} Share…</button>`
+        + `<button data-act="publish">${icon('globe')} Publish to website…</button>`
         + `<button data-act="rename">${icon('pencil')} Rename</button>`
         + `<button data-act="delete">${icon('trash-2')} Delete</button></div>`;
     collectionMenu.hidden = false;
@@ -165,6 +171,7 @@ function openCollectionMenu(row, anchor) {
             if (action === 'edit-query') startSmartQueryEdit(id);
             if (action === 'materialize') startSmartMaterialize(id, name);
             if (action === 'share') openShareOverlay(id, name);
+            if (action === 'publish') openPublishOverlay(id, name);
             if (action === 'rename') startCollectionRename(id);
             if (action === 'delete') startCollectionDelete(id, name);
         });
@@ -446,6 +453,219 @@ async function openShareOverlay(collectionId, name = 'Collection') {
     const data = await getCollectionShare(collectionId);
     if (!shareOverlayIsCurrent(token)) return;
     await renderShareOverlay(collectionId, name, data && data.share, token);
+}
+
+function ensurePublishOverlay() {
+    if (publishOverlay) return publishOverlay;
+    publishOverlay = document.createElement('div');
+    publishOverlay.id = 'publish-overlay';
+    publishOverlay.className = 'modal-scrim';
+    publishOverlay.hidden = true;
+    document.body.appendChild(publishOverlay);
+    publishOverlay.addEventListener('click', (event) => {
+        if (event.target === publishOverlay) closePublishOverlay();
+    });
+    publishOverlay.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            closePublishOverlay();
+        }
+    });
+    return publishOverlay;
+}
+
+function publishOverlayIsCurrent(token) {
+    return Boolean(publishOverlay && !publishOverlay.hidden && token === publishOverlayToken);
+}
+
+function closePublishOverlay() {
+    window.clearTimeout(publishPollTimer);
+    publishPollTimer = 0;
+    if (!publishOverlay || publishOverlay.hidden) return;
+    publishOverlayToken += 1;
+    releaseFocus(publishOverlay);
+    publishOverlay.hidden = true;
+}
+
+function slugifyName(value) {
+    return String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 96) || 'gallery';
+}
+
+function publishCopyText(count, slug) {
+    return `Publish ${fmt(count)} photos publicly at seankennethdoherty.com/g/${slug}/.`;
+}
+
+function publishPhaseCopy(job) {
+    if (!job) return '';
+    if (job.state === 'error') return 'Publishing needs attention.';
+    if (job.phase === 'deploying') return 'Deploying to the website…';
+    if (job.phase === 'building') return 'Building static gallery…';
+    if (job.state === 'live') return 'Gallery is live.';
+    if (job.state === 'revoked') return 'Gallery is unpublished.';
+    return job.state === 'revoking' ? 'Unpublishing gallery…' : 'Publishing queued…';
+}
+
+function publishErrorBlock(job) {
+    if (!job || job.state !== 'error') return '';
+    const paths = Array.isArray(job.paths) && job.paths.length
+        ? `<div class="publish-error-list">${job.paths.map((path) => `<code>${esc(path)}</code>`).join('')}</div>`
+        : '';
+    const tail = job.tail ? `<pre>${esc(job.tail)}</pre>` : '';
+    return '<div class="publish-error">'
+        + `<b>${esc(job.status_code ? `${job.status_code} error` : 'Publish error')}</b>`
+        + `<p>${esc(job.error || "Couldn't publish this gallery.")}</p>`
+        + paths
+        + tail
+        + '</div>';
+}
+
+function publishStatusBlock(data) {
+    const job = data?.job || null;
+    const publish = data?.publish || job?.publish || null;
+    const url = data?.url || job?.url || publish?.url || '';
+    const status = publishPhaseCopy(job);
+    return '<div class="publish-status">'
+        + (status ? `<span>${esc(status)}</span>` : '<span>Ready to publish.</span>')
+        + (url ? `<div class="share-link-row"><input id="publish-url" readonly value="${esc(url)}"><button id="publish-copy" type="button">${icon('copy')} Copy</button></div>` : '')
+        + publishErrorBlock(job)
+        + '</div>';
+}
+
+async function copyPublishUrl(url) {
+    try {
+        await navigator.clipboard.writeText(url);
+        showToast('Public URL copied');
+    } catch {
+        showToast("Couldn't copy URL");
+    }
+}
+
+async function renderPublishOverlay(collectionId, name, data = null, token = publishOverlayToken) {
+    ensurePublishOverlay();
+    if (!publishOverlayIsCurrent(token)) return;
+    const coll = collectionById(collectionId) || {};
+    const publish = data?.publish || null;
+    const job = data?.job || null;
+    const busy = Boolean(data?.in_progress || (job && ['publishing', 'revoking'].includes(job.state)));
+    const count = Number(coll.image_count || publish?.image_count || 0);
+    const slug = (job?.slug || publish?.slug || slugifyName(name));
+    const title = (job?.title || publish?.title || name || 'Gallery');
+    const liveUrl = data?.url || publish?.url || job?.url || '';
+    const actionLabel = publish ? 'Republish to website' : 'Publish to website';
+    publishOverlay.innerHTML = '<div class="modal-card publish-card" role="dialog" aria-modal="true" aria-labelledby="publish-title">'
+        + `<div class="mo-head"><h2 id="publish-title">Publish ${esc(name)}</h2><button type="button" id="publish-close" data-tip="Close (Esc)" aria-label="Close">${icon('x')}</button></div>`
+        + '<div class="mo-body">'
+        + `<p class="publish-confirm-copy">${esc(publishCopyText(count, slug))}</p>`
+        + '<div class="publish-fields">'
+        + `<label>Title <input id="publish-title-input" value="${esc(title)}" maxlength="160" ${busy ? 'disabled' : ''}></label>`
+        + `<label>Slug <input id="publish-slug-input" value="${esc(slug)}" maxlength="96" ${busy || publish ? 'disabled' : ''}></label>`
+        + '</div>'
+        + publishStatusBlock(data)
+        + '<div class="publish-actions">'
+        + (publish ? '<button id="publish-revoke" type="button" class="danger" ' + (busy ? 'disabled' : '') + '>Unpublish</button>' : '')
+        + `<button id="publish-submit" type="button" ${busy ? 'disabled' : ''}>${esc(actionLabel)}</button>`
+        + '</div>'
+        + '</div></div>';
+    publishOverlay.hidden = false;
+    publishOverlay.querySelector('#publish-close')?.addEventListener('click', closePublishOverlay);
+    publishOverlay.querySelector('#publish-copy')?.addEventListener('click', () => copyPublishUrl(liveUrl));
+    const slugInput = publishOverlay.querySelector('#publish-slug-input');
+    const copy = publishOverlay.querySelector('.publish-confirm-copy');
+    slugInput?.addEventListener('input', () => {
+        const nextSlug = slugifyName(slugInput.value);
+        copy.textContent = publishCopyText(count, nextSlug);
+    });
+    const startPublish = async () => {
+        const nextSlug = slugifyName(slugInput?.value || slug);
+        const nextTitle = publishOverlay.querySelector('#publish-title-input')?.value.trim() || title;
+        const result = await publishCollection(collectionId, { slug: nextSlug, title: nextTitle });
+        if (!publishOverlayIsCurrent(token)) return;
+        if (result.ok) {
+            showToast(publish ? 'Republishing gallery' : 'Publishing gallery');
+            await pollPublishStatus(collectionId, name, token, true);
+        } else {
+            await renderPublishOverlay(collectionId, name, {
+                ...data,
+                job: {
+                    state: 'error',
+                    status_code: result.status,
+                    error: result.data?.error || "Couldn't start publishing.",
+                },
+            }, token);
+        }
+    };
+    if (publish) {
+        bindPublishConfirmButton('#publish-submit', 'Confirm republish', startPublish);
+    } else {
+        publishOverlay.querySelector('#publish-submit')?.addEventListener('click', startPublish);
+    }
+    bindPublishConfirmButton('#publish-revoke', 'Confirm unpublish', async () => {
+        const result = await revokeCollectionPublish(collectionId);
+        if (!publishOverlayIsCurrent(token)) return;
+        if (result.ok) {
+            showToast('Unpublishing gallery');
+            await pollPublishStatus(collectionId, name, token, true);
+        } else {
+            await renderPublishOverlay(collectionId, name, {
+                ...data,
+                job: {
+                    state: 'error',
+                    status_code: result.status,
+                    error: result.data?.error || "Couldn't start unpublishing.",
+                },
+            }, token);
+        }
+    });
+    if (busy) schedulePublishPoll(collectionId, name, token);
+    trapFocus(publishOverlay, publishOverlay.querySelector('input, button'));
+}
+
+function bindPublishConfirmButton(selector, label, action) {
+    const button = publishOverlay?.querySelector(selector);
+    if (!button) return;
+    let armed = false;
+    const original = button.textContent;
+    button.addEventListener('click', async () => {
+        if (!armed) {
+            armed = true;
+            button.textContent = label;
+            return;
+        }
+        button.disabled = true;
+        await action();
+        button.disabled = false;
+        button.textContent = original;
+    });
+}
+
+function schedulePublishPoll(collectionId, name, token) {
+    window.clearTimeout(publishPollTimer);
+    publishPollTimer = window.setTimeout(() => pollPublishStatus(collectionId, name, token), 2500);
+}
+
+async function pollPublishStatus(collectionId, name, token, immediate = false) {
+    window.clearTimeout(publishPollTimer);
+    if (!publishOverlayIsCurrent(token)) return;
+    const data = await getCollectionPublish(collectionId);
+    if (!publishOverlayIsCurrent(token)) return;
+    await renderPublishOverlay(collectionId, name, data, token);
+    if (data?.in_progress) {
+        schedulePublishPoll(collectionId, name, token);
+    } else if (!immediate) {
+        await loadCollections();
+    }
+}
+
+async function openPublishOverlay(collectionId, name = 'Collection') {
+    ensurePublishOverlay();
+    const token = ++publishOverlayToken;
+    publishOverlay.innerHTML = `<div class="modal-card publish-card" role="dialog" aria-modal="true"><div class="mo-head"><h2>Publish ${esc(name)}</h2><button type="button" id="publish-close" data-tip="Close (Esc)" aria-label="Close">${icon('x')}</button></div><div class="mo-body"><div class="muted">Loading…</div></div></div>`;
+    publishOverlay.hidden = false;
+    publishOverlay.querySelector('#publish-close')?.addEventListener('click', closePublishOverlay);
+    trapFocus(publishOverlay, publishOverlay.querySelector('button'));
+    const data = await getCollectionPublish(collectionId);
+    if (!publishOverlayIsCurrent(token)) return;
+    await renderPublishOverlay(collectionId, name, data, token);
 }
 
 function startCollectionRename(collectionId) {

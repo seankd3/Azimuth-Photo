@@ -116,9 +116,13 @@
         </div>
         <div class="header-stats">
           <div class="count">{{ photo_count }} photo{% if photo_count != 1 %}s{% endif %}</div>
+          {% if not public_static|default(false) %}
           <div class="pick-count" id="pick-count">0 picked</div>
+          {% endif %}
         </div>
+        {% if not public_static|default(false) %}
         <div class="hint-chip" id="fav-hint" hidden>Tap ♡ to pick your favorites</div>
+        {% endif %}
       </header>
       <section class="grid" id="grid" aria-label="{{ collection_name }} photos"></section>
     {% endif %}
@@ -128,8 +132,10 @@
     <div class="lb-bar">
       <button id="close" type="button" aria-label="Close">×</button>
       <span id="counter"></span>
+      {% if not public_static|default(false) %}
       <button class="fav-btn" id="lb-fav" type="button" aria-label="Pick favorite" aria-pressed="false">♡</button>
-      <a id="full" href="#" target="_blank" rel="noopener noreferrer">View full size</a>
+      {% endif %}
+      <a id="full" href="#" target="_blank" rel="noopener noreferrer"{% if public_static|default(false) %} download{% endif %}>{% if public_static|default(false) %}Download image{% else %}View full size{% endif %}</a>
     </div>
     <button class="nav prev" id="prev" type="button" aria-label="Previous">‹</button>
     <div class="stage"><img id="stage-img" alt=""></div>
@@ -150,6 +156,7 @@
       const pickCount = document.getElementById('pick-count');
       const hint = document.getElementById('fav-hint');
       const lightboxFav = document.getElementById('lb-fav');
+      const publicStatic = {{ public_static|default(false)|tojson }};
       const token = String(data.token || '');
       const favoriteKey = `pa_fav_${token}`;
       const hintKey = `pa_fav_hint_${token}`;
@@ -162,7 +169,7 @@
         grid.innerHTML = images.map((image, i) => (
           `<div class="tile" role="button" tabindex="0" style="--ar:${Math.max(.45, Math.min(2.4, Number(image.aspect_ratio) || 1.5))}" data-i="${i}" aria-label="${escapeHtml(image.filename)}">`
           + `<img loading="lazy" decoding="async" src="${image.thumb}" alt="">`
-          + `<button class="fav-btn tile-fav${favorites.has(Number(image.id)) ? ' on' : ''}" type="button" data-fav-id="${image.id}" aria-label="Pick favorite" aria-pressed="${favorites.has(Number(image.id)) ? 'true' : 'false'}">${favorites.has(Number(image.id)) ? '♥' : '♡'}</button>`
+          + (publicStatic ? '' : `<button class="fav-btn tile-fav${favorites.has(Number(image.id)) ? ' on' : ''}" type="button" data-fav-id="${image.id}" aria-label="Pick favorite" aria-pressed="${favorites.has(Number(image.id)) ? 'true' : 'false'}">${favorites.has(Number(image.id)) ? '♥' : '♡'}</button>`)
           + '</div>'
         )).join('');
         grid.querySelectorAll('img').forEach((img) => {
@@ -274,6 +281,7 @@
         }
       }
 
+      {% if not public_static|default(false) %}
       async function fetchFavorites() {
         try {
           const response = await fetch(`/s/${encodeURIComponent(token)}/favorites`, { headers: { Accept: 'application/json' } });
@@ -312,14 +320,17 @@
           syncFavoriteButtons();
         }
       }
+      {% endif %}
 
       stageImg.addEventListener('load', () => stageImg.classList.add('loaded'));
       document.getElementById('close').addEventListener('click', close);
       document.getElementById('prev').addEventListener('click', () => move(-1));
       document.getElementById('next').addEventListener('click', () => move(1));
-      lightboxFav.addEventListener('click', () => {
+      {% if not public_static|default(false) %}
+      lightboxFav?.addEventListener('click', () => {
         if (images[index]) toggleFavorite(Number(images[index].id));
       });
+      {% endif %}
       document.addEventListener('keydown', (event) => {
         if (lightbox.hidden) return;
         if (event.key === 'Escape') close();
@@ -342,7 +353,7 @@
 
       renderGrid();
       syncFavoriteButtons();
-      fetchFavorites();
+      if (!publicStatic) fetchFavorites();
     })();
   </script>
   {% endif %}

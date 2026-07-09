@@ -136,6 +136,7 @@ async def delete_collection(db_path: str, collection_id: int) -> bool:
         )
         await conn.execute("DELETE FROM collection_images WHERE collection_id = ?", (int(collection_id),))
         await conn.execute("DELETE FROM collection_shares WHERE collection_id = ?", (int(collection_id),))
+        await conn.execute("DELETE FROM collection_publishes WHERE collection_id = ?", (int(collection_id),))
         await conn.execute("DELETE FROM collections WHERE id = ?", (int(collection_id),))
         await conn.commit()
         return True
@@ -151,10 +152,14 @@ async def list_collections(db_path: str) -> list[dict]:
             SELECT
                 c.*,
                 COUNT(ci.image_id) AS image_count,
-                cover.filename AS cover_filename
+                cover.filename AS cover_filename,
+                p.slug AS publish_slug,
+                p.published_at AS publish_published_at,
+                p.updated_at AS publish_updated_at
             FROM collections c
             LEFT JOIN collection_images ci ON ci.collection_id = c.id
             LEFT JOIN images cover ON cover.id = c.cover_image_id
+            LEFT JOIN collection_publishes p ON p.collection_id = c.id
             GROUP BY c.id
             ORDER BY c.updated_at DESC, c.id DESC
             """
@@ -173,10 +178,14 @@ async def get_collection(db_path: str, collection_id: int, *, limit: int = 200, 
             SELECT
                 c.*,
                 COUNT(ci.image_id) AS image_count,
-                cover.filename AS cover_filename
+                cover.filename AS cover_filename,
+                p.slug AS publish_slug,
+                p.published_at AS publish_published_at,
+                p.updated_at AS publish_updated_at
             FROM collections c
             LEFT JOIN collection_images ci ON ci.collection_id = c.id
             LEFT JOIN images cover ON cover.id = c.cover_image_id
+            LEFT JOIN collection_publishes p ON p.collection_id = c.id
             WHERE c.id = ?
             GROUP BY c.id
             """,
@@ -375,4 +384,8 @@ def _collection_summary(row: dict) -> dict:
         "cover_filename": row.get("cover_filename") or "",
         "created_at": row.get("created_at"),
         "updated_at": row.get("updated_at"),
+        "published": bool(row.get("publish_slug")),
+        "publish_slug": row.get("publish_slug") or "",
+        "published_at": row.get("publish_published_at"),
+        "publish_updated_at": row.get("publish_updated_at"),
     }

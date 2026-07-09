@@ -6,7 +6,7 @@ from date_inference import infer_image_date
 from data.repositories import catalog as catalog_repository
 
 EXPECTED_EMBEDDING_DIM = 2048  # Qwen3-VL-Embedding-2B native dimension
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 17
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS catalog_sources (
@@ -519,6 +519,18 @@ CREATE TABLE IF NOT EXISTS share_favorites (
     UNIQUE(share_id, image_id)
 );
 
+CREATE TABLE IF NOT EXISTS collection_publishes (
+    id INTEGER PRIMARY KEY,
+    collection_id INTEGER NOT NULL UNIQUE REFERENCES collections(id),
+    slug TEXT NOT NULL UNIQUE,
+    title TEXT NOT NULL,
+    published_at REAL NOT NULL,
+    updated_at REAL NOT NULL,
+    image_count INTEGER NOT NULL DEFAULT 0,
+    bundle_bytes INTEGER NOT NULL DEFAULT 0,
+    last_commit TEXT DEFAULT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_collections_updated
 ON collections(updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_collection_images_image
@@ -533,6 +545,8 @@ CREATE INDEX IF NOT EXISTS idx_share_images_position
 ON share_images(share_id, position, added_at);
 CREATE INDEX IF NOT EXISTS idx_share_favorites_share
 ON share_favorites(share_id);
+CREATE INDEX IF NOT EXISTS idx_collection_publishes_updated
+ON collection_publishes(updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS people (
     id INTEGER PRIMARY KEY,
@@ -861,6 +875,7 @@ REQUIRED_TABLES = {
     "collection_shares",
     "share_images",
     "share_favorites",
+    "collection_publishes",
     "people",
     "face_detections",
     "face_assignments",
@@ -913,6 +928,16 @@ REQUIRED_COLUMNS = {
     "stack_members": {"stack_id", "image_id", "score", "added_at"},
     "collections": {"query"},
     "collection_shares": {"password_hash", "view_count", "first_viewed_at", "last_viewed_at"},
+    "collection_publishes": {
+        "collection_id",
+        "slug",
+        "title",
+        "published_at",
+        "updated_at",
+        "image_count",
+        "bundle_bytes",
+        "last_commit",
+    },
 }
 
 REQUIRED_INDEXES = {
@@ -942,6 +967,7 @@ REQUIRED_INDEXES = {
     "idx_share_images_image",
     "idx_share_images_position",
     "idx_share_favorites_share",
+    "idx_collection_publishes_updated",
     "idx_people_status_seen",
     "idx_face_detections_image_model",
     "idx_face_detections_status_model",

@@ -17,6 +17,21 @@ export async function postJson(url, body = null) {
     }
 }
 
+export async function postJsonWithStatus(url, body = null) {
+    try {
+        const options = { method: 'POST', headers: { Accept: 'application/json' } };
+        if (body != null) {
+            options.headers['Content-Type'] = 'application/json';
+            options.body = JSON.stringify(body);
+        }
+        const response = await fetch(url, options);
+        const data = await response.json().catch(() => null);
+        return { ok: response.ok, status: response.status, data };
+    } catch {
+        return { ok: false, status: 0, data: null };
+    }
+}
+
 export function thumbUrl(size, imageId) {
     return `/api/thumb/${size}/${imageId}`;
 }
@@ -212,6 +227,22 @@ export async function createCollectionShare(
 
 export async function revokeCollectionShare(collectionId) {
     return postJson(`/api/user-collections/${collectionId}/share/revoke`);
+}
+
+export async function getCollectionPublish(collectionId) {
+    return fetchJson(`/api/user-collections/${collectionId}/publish`, { defaultValue: null });
+}
+
+export async function publishCollection(collectionId, { slug = '', title = '' } = {}) {
+    return postJsonWithStatus(`/api/user-collections/${collectionId}/publish`, { slug, title });
+}
+
+export async function revokeCollectionPublish(collectionId) {
+    return postJsonWithStatus(`/api/user-collections/${collectionId}/publish/revoke`);
+}
+
+export async function listPublishes() {
+    return fetchJson('/api/publishes', { defaultValue: { publishes: [] } });
 }
 
 export async function getCollectionSuggestions() {
