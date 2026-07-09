@@ -3,87 +3,104 @@
 This roadmap turns the product vision into shippable slices. The bias is toward
 workflows Sean can actually use, not abstract platform work.
 
-## Phase 1: Collections Become The Center
+## Shipped Foundation
 
-Goal: make albums/collections a durable first-class object.
+### Collections
 
-- Add persistent collections with a clear exposure state.
-- Add/remove photos from Library, imports, search results, and eventually the
-  Android app.
-- Show collection counts, cover image, and recent update time.
-- Filter Library by a collection.
-- Make import batches easy to save as collections.
+- Persistent collection APIs and left-panel collection UI.
+- Add/remove photos, rename, delete, and collection detail views.
+- Smart collections saved from validated live scopes.
+- Collection suggestions from dates, people, imports, and visual/library
+  structure.
 
-User outcome: Sean can create an album from a trip, person, event, or import
-batch and keep working on it over time.
+User outcome: Sean can create an album from a trip, person, event, import
+batch, search, or manual selection and keep working on it over time.
 
-## Phase 2: Private Sharing
+### Private Sharing
 
-Goal: replace the Google Photos private-share use case.
+- Private collection links at `/s/{token}`.
+- Friend-facing read-only gallery with favorites/proofing.
+- Password protection, revoke, rotate, expiry, analytics, and owner-side pick
+  review.
+- Shared triage view for private links and website galleries.
 
-- Create private share links for a collection.
-- Build a friend-facing read-only collection page.
-- Support revoke/rotate for links.
-- Label shared collections clearly in the main app.
-- Keep everything private unless explicitly shared.
+User outcome: Sean can send a private album link without uploading the whole
+archive to a cloud photo service.
 
-User outcome: Sean can send a private album link to a friend without uploading
-the whole archive to a cloud photo service.
+### Website Publishing
 
-## Phase 3: Website Publishing
-
-Goal: make public galleries flow from the same collection object.
-
-- Mark a collection as public/published.
-- Preview the website gallery.
-- Generate responsive public images from safe cache derivatives.
-- Publish, update, and unpublish a gallery from photoArchive.
-- Show published status and destination URL.
+- Publish, update, and unpublish collection galleries.
+- Static gallery bundles generated from safe preview derivatives.
+- `publish_dir`, `publish_hook`, and `publish_site_base_url` settings.
+- Manifest generation and Shared status for local/live/hook-failed states.
 
 User outcome: Sean can publish a curated photo story to his website without
 manual export folders.
 
-## Phase 4: Mobile Collection Workflow
+### Library Power Tools
 
-Goal: make the Android app useful for more than browsing.
+- Grid, Events, People, Map, Stacks, Trash, Shared, Import, Loupe, Refine.
+- Tags, captions, smart scopes, multi-folder browsing, sort direction, import
+  history, ZIP export, and semantic Refine pairing.
 
-- View collections on the phone.
-- Add/remove photos from a collection while browsing.
-- Create a new collection from selected phone photos.
-- Share a private collection link from Android.
-- Import phone photos directly into a collection.
+User outcome: the archive is now a working culling, organizing, search,
+sharing, and publishing tool rather than just a browser.
+
+## Current Build Priorities
+
+### Mobile Collection Workflow
+
+Goal: make the phone useful for curation, sharing, and import.
+
+- Improve collection browsing and add/remove flows on mobile.
+- Make private share creation and client-pick review feel native on the phone.
+- Keep mobile Refine, search, and People aligned with desktop scopes.
+- Import phone photos directly into useful collections or import batches.
 
 User outcome: Sean can curate and share from the couch or on the road.
 
-## Phase 5: Platform Sharing
+### Publishing Polish
 
-Goal: prepare photos for Instagram, X, and future destinations without losing
-the archive source of truth.
+Goal: make public galleries feel reliable enough to trust.
 
-- Export platform-ready derivatives from a collection.
-- Draft captions/titles from collection context.
-- Track which photos were posted where.
-- Add direct posting only where APIs make it reliable and safe.
+- Improve preview/open flows before publish.
+- Make hook output and retry states clearer.
+- Tighten manifest/site integration documentation.
+- Add small guardrails around incomplete preview caches.
 
-User outcome: Sean can use photoArchive as the source of truth for public posts.
+User outcome: Sean can publish and update website galleries without babysitting
+the deployment path.
 
-## Phase 6: Taste And AI Assistance
+### Shared And Exposure Clarity
+
+Goal: make privacy state obvious at a glance.
+
+- Surface private-link and published status consistently on collection cards,
+  collection detail, Shared, and mobile.
+- Make expired, revoked, local-only, and hook-failed states visually distinct.
+- Keep client favorites easy to review and apply.
+
+User outcome: Sean always knows what is private, privately shared, public, or
+only staged locally.
+
+### Taste And AI Assistance
 
 Goal: help Sean find and shape better albums faster.
 
-- Suggest collections from imports, dates, people, places, and visual clusters.
+- Improve suggested collections from imports, dates, people, places, and visual
+  clusters.
 - Suggest keepers within a collection from ranking/taste signals.
-- Draft album names, descriptions, and captions.
+- Use captions and tags to improve search, grouping, and story drafts.
 - Surface near-duplicates and weaker alternates inside album curation.
 
 User outcome: the app helps curate without taking control away from Sean.
 
-## Immediate Build Order
+## Later Goals
 
-1. Persistent collection APIs.
-2. Library save-to-collection UI.
-3. Collection detail page.
-4. Private share links.
-5. Friend-facing shared collection page.
-6. Website publishing adapter.
-7. Android collection browsing and add-to-collection.
+- Platform-ready derivatives for Instagram, X, and future destinations.
+- Draft captions/titles from collection context.
+- Track which photos were posted where.
+- Better map/place exploration.
+- Multi-device sync of app state while keeping Omarchy as the source of truth.
+- A polished setup flow for other prosumer photographers with NAS/external-drive
+  presets.

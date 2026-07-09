@@ -88,7 +88,12 @@ async function refreshQuality() {
         renderQuality(null);
         return;
     }
-    const data = await getRankings(scopeParams({ limit: 1, offset: 0, sort: 'elo' }));
+    let data = null;
+    try {
+        data = await getRankings(scopeParams({ limit: 1, offset: 0, sort: 'elo' }));
+    } catch {
+        return;
+    }
     if (data && data.sort_quality) renderQuality(data.sort_quality);
 }
 
@@ -127,6 +132,13 @@ function fetchSet(excludeIds = []) {
     return mosaicNext(need(), params, excludeIds.join(','));
 }
 
+function renderLoadError() {
+    const stage = root.querySelector('#mr-stage');
+    stage.className = 'mr-stage';
+    stage.innerHTML = '<div class="mr-empty">Couldn\'t load Refine.<br><button class="sheet-btn" id="mr-retry" type="button">Try again</button></div>';
+    stage.querySelector('#mr-retry')?.addEventListener('click', resetSet);
+}
+
 function prefetchNext() {
     nextSetPromise = fetchSet(currentSet.map((img) => img.id));
 }
@@ -137,7 +149,14 @@ async function resetSet() {
     nextSetPromise = null;
     renderTitle();
     renderSkeleton();
-    const data = await fetchSet();
+    let data = null;
+    try {
+        data = await fetchSet();
+    } catch {
+        if (gen !== generationCounter) return;
+        renderLoadError();
+        return;
+    }
     if (gen !== generationCounter) return;
     currentSet = (data && data.images) || [];
     rememberImages(currentSet);
@@ -151,7 +170,14 @@ async function advance() {
     const promise = nextSetPromise || fetchSet(currentSet.map((img) => img.id));
     nextSetPromise = null;
     renderSkeleton();
-    const data = await promise;
+    let data = null;
+    try {
+        data = await promise;
+    } catch {
+        if (gen !== generationCounter) return;
+        renderLoadError();
+        return;
+    }
     if (gen !== generationCounter) return;
     currentSet = (data && data.images) || [];
     rememberImages(currentSet);

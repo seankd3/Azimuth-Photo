@@ -183,25 +183,23 @@ private photo has been accidentally published.
 - Keep the no-phone Android release gate as the default quality check.
 - Improve first-run and connection behavior until it feels automatic.
 
-### Collections MVP
+### Collections Polish And Mobile Parity
 
-- Make collection creation and editing a first-class surface.
-- Add collection membership from Library, search results, imports, and mobile
-  browsing.
-- Show collection status and counts clearly.
+Shipped on desktop: collection creation, editing, membership, smart
+collections, suggestions, status icons, and counts. Next work is polish and
+mobile parity.
 
-### Private Sharing MVP
+### Private Sharing Polish And Exposure Clarity
 
-- Create private share links for a collection.
-- Build a friend-facing share page.
-- Add link revoke/rotate.
-- Label shared collections clearly inside the app.
+Shipped on desktop: private share links, friend-facing galleries, password
+protection, revoke/rotate, analytics, favorites/proofing, and Shared triage.
+Next work is clearer exposure state across mobile and collection surfaces.
 
-### Website Publishing MVP
+### Website Publishing Polish
 
-- Connect selected public collections to Sean's website pipeline.
-- Generate and publish responsive gallery assets.
-- Show published/unpublished status in photoArchive.
+Shipped on desktop: collection publishing to a configured folder, responsive
+gallery assets, manifest generation, optional hook command, unpublish, and
+Shared status. Next work is polish around preview, retries, and site feedback.
 
 ## Later Goals
 

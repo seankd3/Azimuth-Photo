@@ -7,6 +7,7 @@ import html
 import json
 import os
 import re
+import signal
 import shlex
 import shutil
 import subprocess
@@ -91,6 +92,7 @@ class DeployResult:
     last_commit: str | None = None
     push_error: str | None = None
     hook: HookStatus | None = None
+    publish_row: dict | None = None
 
 
 class PublishConflict(Exception):
@@ -115,26 +117,33 @@ class PublishSetupError(Exception):
 
 CommandRunner = Callable[[str, Path, int], CommandResult]
 BundleWriter = Callable[[Path], BundleSummary]
+PublishPersister = Callable[[BundleSummary, HookStatus | None], dict]
+RevokePersister = Callable[[HookStatus | None], bool]
 PublishedRows = list[dict] | Callable[[], list[dict]]
 ConfigFactory = Callable[[], PublishConfig]
 
 
 def default_command_runner(command: str, cwd: Path, timeout_seconds: int) -> CommandResult:
+    process: subprocess.Popen | None = None
     try:
-        completed = subprocess.run(
+        process = subprocess.Popen(
             _resolve_relative_command(command, cwd),
             cwd=str(cwd),
             env=os.environ.copy(),
             text=True,
-            capture_output=True,
-            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             shell=True,
-            timeout=timeout_seconds,
+            start_new_session=True,
         )
-        return CommandResult(completed.returncode, completed.stdout, completed.stderr)
-    except subprocess.TimeoutExpired as exc:
-        stdout = exc.stdout.decode("utf-8", errors="replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
-        stderr = exc.stderr.decode("utf-8", errors="replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")
+        stdout, stderr = process.communicate(timeout=timeout_seconds)
+        return CommandResult(process.returncode or 0, stdout, stderr)
+    except subprocess.TimeoutExpired:
+        if process is not None:
+            _kill_process_group(process)
+            stdout, stderr = process.communicate()
+        else:
+            stdout, stderr = "", ""
         return CommandResult(124, stdout, stderr, timed_out=True)
 
 
@@ -158,6 +167,7 @@ class GalleryDeployer:
         collection_id: int,
         published_rows: PublishedRows,
         write_bundle: BundleWriter,
+        persist_publish: PublishPersister | None = None,
         progress: Callable[[str], None] | None = None,
     ) -> DeployResult:
         async with _deploy_lock:
@@ -168,6 +178,7 @@ class GalleryDeployer:
                 int(collection_id),
                 published_rows,
                 write_bundle,
+                persist_publish,
                 progress,
             )
 
@@ -177,6 +188,7 @@ class GalleryDeployer:
         slug: str,
         collection_id: int,
         published_rows: PublishedRows,
+        persist_revoke: RevokePersister | None = None,
         progress: Callable[[str], None] | None = None,
     ) -> DeployResult:
         async with _deploy_lock:
@@ -185,6 +197,7 @@ class GalleryDeployer:
                 slug,
                 int(collection_id),
                 published_rows,
+                persist_revoke,
                 progress,
             )
 
@@ -195,7 +208,8 @@ class GalleryDeployer:
         collection_id: int,
         published_rows: PublishedRows,
         write_bundle: BundleWriter,
-        progress: Callable[[str], None] | None,
+        persist_publish: PublishPersister | None = None,
+        progress: Callable[[str], None] | None = None,
     ) -> DeployResult:
         config = self._active_config()
         public_g_dir = _publish_root(config)
@@ -219,20 +233,25 @@ class GalleryDeployer:
         if progress:
             progress("hook")
         hook = self._run_hook(config)
-        return DeployResult(summary=summary, hook=hook)
+        publish_row = persist_publish(summary, hook) if persist_publish else None
+        return DeployResult(summary=summary, hook=hook, publish_row=publish_row)
 
     def _revoke_sync(
         self,
         slug: str,
         collection_id: int,
         published_rows: PublishedRows,
-        progress: Callable[[str], None] | None,
+        persist_revoke: RevokePersister | None = None,
+        progress: Callable[[str], None] | None = None,
     ) -> DeployResult:
         config = self._active_config()
         public_g_dir = _publish_root(config)
         if progress:
             progress("building")
-        shutil.rmtree(public_g_dir / slug, ignore_errors=True)
+        try:
+            shutil.rmtree(public_g_dir / slug)
+        except OSError as exc:
+            raise PublishDeployError(f"Could not remove live gallery '{slug}'. It is still published.") from exc
         manifest_rows = [
             row
             for row in _published_rows(published_rows)
@@ -242,6 +261,8 @@ class GalleryDeployer:
         if progress:
             progress("hook")
         hook = self._run_hook(config)
+        if persist_revoke:
+            persist_revoke(hook)
         return DeployResult(summary=None, hook=hook)
 
     def _active_config(self) -> PublishConfig:
@@ -350,6 +371,13 @@ def _published_rows(rows: PublishedRows) -> list[dict]:
     if callable(rows):
         return list(rows())
     return list(rows)
+
+
+def _kill_process_group(process: subprocess.Popen) -> None:
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
 
 
 def _resolve_relative_command(command: str, cwd: Path) -> str:

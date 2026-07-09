@@ -219,7 +219,16 @@ export async function openCollectionSheet(rawIds, { onDone = null } = {}) {
         }
     });
 
-    const data = await listCollections();
+    let data = null;
+    try {
+        data = await listCollections();
+    } catch {
+        const listEl = sheet.querySelector('#sheet-coll-list');
+        if (listEl) {
+            listEl.innerHTML = '<div class="ms-empty">Couldn\'t load collections.</div>';
+        }
+        return;
+    }
     const listEl = sheet.querySelector('#sheet-coll-list');
     if (!listEl) return;
     const collections = (data && data.collections) || [];

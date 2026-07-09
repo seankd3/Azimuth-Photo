@@ -1,18 +1,28 @@
 import asyncio
 import json
 import os
+import shlex
+import subprocess
+import sys
 import tempfile
+import threading
+import time
+import unittest
+import unittest.mock
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from test_support import *  # noqa: F401,F403
+from features.publish import builder as publish_builder
 from features.publish import routes as publish_routes
 from features.publish.builder import BundleSummary, build_public_gallery_bundle
 from features.publish.deployer import (
     CommandResult,
     GalleryDeployer,
     PublishConfig,
+    PublishDeployError,
+    default_command_runner,
     gallery_meta_from_index,
     write_manifest,
 )
@@ -41,6 +51,10 @@ class FakeThumbnails:
 
 class PublishBuilderTests(BackendTestCase):
     async def test_bundle_uses_sm_md_stable_names_and_static_relative_urls(self):
+        settings.save_settings({
+            "share_brand_name": "Northstar Studio",
+            "publish_site_base_url": "https://photos.example.test",
+        })
         templates = app_module.app.state.photoarchive_shell.templates
         cache = Path(self.tempdir.name) / "cache"
         cache.mkdir()
@@ -99,6 +113,13 @@ class PublishBuilderTests(BackendTestCase):
         html = (dest / "index.html").read_text(encoding="utf-8")
         self.assertIn("./thumb/sm/101.jpg", html)
         self.assertIn("./img/101.jpg", html)
+        self.assertIn("Northstar Studio", html)
+        self.assertIn("https://photos.example.test", html)
+        self.assertIn("Download all", html)
+        self.assertIn("Download photo", html)
+        self.assertIn("Photo 1 of 2", html)
+        self.assertIn("gallery-size copy", html)
+        self.assertIn('"download_name": "a.jpg"', html)
         self.assertNotIn("/favorite", html)
         self.assertNotIn("/unlock", html)
         self.assertEqual(summary.photo_count, 2)
@@ -200,6 +221,139 @@ class PublishDeployerTests(unittest.TestCase):
             self.assertTrue(result.hook.timed_out)
             self.assertEqual(result.hook.returncode, 124)
 
+    def test_hook_timeout_kills_process_group_children(self):
+        with tempfile.TemporaryDirectory() as temp_name:
+            public_g = Path(temp_name)
+            pid_path = public_g / "child.pid"
+            command = (
+                f"{sys.executable} -c "
+                + shlex.quote(
+                    "import pathlib, subprocess, time; "
+                    "p = subprocess.Popen(['sleep', '30']); "
+                    f"pathlib.Path({str(pid_path)!r}).write_text(str(p.pid)); "
+                    "time.sleep(30)"
+                )
+            )
+
+            result = default_command_runner(command, public_g, 1)
+
+            self.assertTrue(result.timed_out)
+            self.assertEqual(result.returncode, 124)
+            child_pid = int(pid_path.read_text(encoding="utf-8"))
+            self.assertTrue(self._process_exited(child_pid), f"child process {child_pid} was still running")
+
+    def test_publish_lock_covers_persisted_row_mutation(self):
+        with tempfile.TemporaryDirectory() as temp_name:
+            public_g = Path(temp_name) / "g"
+            deployer = GalleryDeployer(PublishConfig(publish_dir=str(public_g)))
+            first_persist_started = threading.Event()
+            release_first_persist = threading.Event()
+            second_bundle_started = threading.Event()
+
+            def write_bundle(slug):
+                def _write(target):
+                    if slug == "second":
+                        second_bundle_started.set()
+                    target.mkdir(parents=True)
+                    (target / "index.html").write_text("{}", encoding="utf-8")
+                    return BundleSummary(slug, slug.title(), 0, "", "", 2, 1)
+
+                return _write
+
+            def persist_publish(summary, _hook):
+                if summary.slug == "first":
+                    first_persist_started.set()
+                    self.assertTrue(release_first_persist.wait(2))
+                return {"collection_id": 1, "slug": summary.slug}
+
+            async def run_race():
+                first = asyncio.create_task(
+                    deployer.publish(
+                        slug="first",
+                        title="First",
+                        collection_id=1,
+                        published_rows=[],
+                        write_bundle=write_bundle("first"),
+                        persist_publish=persist_publish,
+                    )
+                )
+                self.assertTrue(await asyncio.to_thread(first_persist_started.wait, 2))
+                second = asyncio.create_task(
+                    deployer.publish(
+                        slug="second",
+                        title="Second",
+                        collection_id=2,
+                        published_rows=[],
+                        write_bundle=write_bundle("second"),
+                        persist_publish=persist_publish,
+                    )
+                )
+                await asyncio.sleep(0.1)
+                self.assertFalse(second_bundle_started.is_set())
+                release_first_persist.set()
+                await asyncio.gather(first, second)
+
+            asyncio.run(run_race())
+
+    def test_revoke_failure_keeps_manifest_and_skips_db_delete(self):
+        with tempfile.TemporaryDirectory() as temp_name:
+            public_g = Path(temp_name) / "g"
+            live = public_g / "selected"
+            live.mkdir(parents=True)
+            (live / "index.html").write_text("still live", encoding="utf-8")
+            row = {
+                "collection_id": 7,
+                "slug": "selected",
+                "title": "Selected",
+                "image_count": 1,
+                "published_at": 123.4,
+            }
+            write_manifest(public_g, [row])
+            deleted = []
+            deployer = GalleryDeployer(PublishConfig(publish_dir=str(public_g)))
+
+            with unittest.mock.patch(
+                "features.publish.deployer.shutil.rmtree",
+                side_effect=OSError("permission denied"),
+            ):
+                with self.assertRaises(PublishDeployError) as raised:
+                    deployer._revoke_sync(
+                        "selected",
+                        7,
+                        [row],
+                        lambda _hook: deleted.append(True),
+                        None,
+                    )
+
+            self.assertEqual(raised.exception.status_code, 502)
+            self.assertTrue((live / "index.html").exists())
+            self.assertFalse(deleted)
+            manifest = json.loads((public_g / "manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["galleries"][0]["slug"], "selected")
+
+    def test_republish_uses_atomic_directory_exchange(self):
+        with tempfile.TemporaryDirectory() as temp_name:
+            parent = Path(temp_name)
+            target = parent / "selected"
+            work = parent / ".selected.tmp-test"
+            target.mkdir()
+            work.mkdir()
+            (target / "index.html").write_text("old", encoding="utf-8")
+            (work / "index.html").write_text("new", encoding="utf-8")
+            calls = []
+            real_exchange = publish_builder._atomic_exchange_paths
+
+            def wrapped_exchange(source, destination):
+                calls.append((source, destination, destination.exists()))
+                return real_exchange(source, destination)
+
+            with unittest.mock.patch("features.publish.builder._atomic_exchange_paths", wrapped_exchange):
+                publish_builder._replace_bundle_dir(work, target)
+
+            self.assertEqual(calls, [(work, target, True)])
+            self.assertEqual((target / "index.html").read_text(encoding="utf-8"), "new")
+            self.assertFalse(work.exists())
+
     def test_manifest_regenerates_from_gallery_index_contract(self):
         with tempfile.TemporaryDirectory() as temp_name:
             public_g = Path(temp_name) / "g"
@@ -247,19 +401,47 @@ class PublishDeployerTests(unittest.TestCase):
             )
             self.assertEqual(gallery_meta_from_index(gallery / "index.html")["first_id"], 101)
 
+    def _process_exited(self, pid):
+        for _ in range(20):
+            status = subprocess.run(
+                ["ps", "-o", "stat=", "-p", str(pid)],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            if status.returncode != 0 or not status.stdout.strip():
+                return True
+            if status.stdout.strip().startswith("Z"):
+                return True
+            time.sleep(0.1)
+        return False
+
 
 class FakeDeployer:
-    async def publish(self, *, slug, title, collection_id, published_rows, write_bundle, progress=None):
+    async def publish(
+        self,
+        *,
+        slug,
+        title,
+        collection_id,
+        published_rows,
+        write_bundle,
+        persist_publish=None,
+        progress=None,
+    ):
         if progress:
             progress("building")
         summary = await asyncio.to_thread(write_bundle, Path(tempfile.mkdtemp()) / slug)
         if progress:
             progress("deploying")
-        return SimpleNamespace(summary=summary, last_commit=None, push_error=None, hook=None)
+        publish_row = await asyncio.to_thread(persist_publish, summary, None) if persist_publish else None
+        return SimpleNamespace(summary=summary, last_commit=None, push_error=None, hook=None, publish_row=publish_row)
 
-    async def revoke(self, *, slug, collection_id, published_rows, progress=None):
+    async def revoke(self, *, slug, collection_id, published_rows, persist_revoke=None, progress=None):
         if progress:
             progress("deploying")
+        if persist_revoke:
+            await asyncio.to_thread(persist_revoke, None)
         return SimpleNamespace(summary=None, last_commit=None, push_error=None, hook=None)
 
 

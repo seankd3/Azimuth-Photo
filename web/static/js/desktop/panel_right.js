@@ -166,18 +166,39 @@ function renderExifRows(host, exif) {
     host.innerHTML = entries.length ? entries.map(([key, value]) => metaRow(key, value)).join('') : '<div class="panel-empty">No EXIF returned.</div>';
 }
 
+function renderExifError(rows, img, details) {
+    rows.innerHTML = '<div class="panel-empty">Couldn\'t load EXIF.'
+        + '<button class="mini-btn" id="exif-retry" type="button">Try again</button></div>';
+    rows.querySelector('#exif-retry')?.addEventListener('click', () => {
+        details.dataset.loaded = '0';
+        loadExif(img, details);
+    });
+}
+
 async function loadExif(img, details) {
     const rows = details.querySelector('.exif-rows');
     if (!rows || details.dataset.loaded === '1') return;
     rows.innerHTML = '<div class="panel-empty">Reading EXIF…</div>';
     let data = exifCache.get(Number(img.id));
     if (!data) {
-        data = await getImageExif(img.id);
-        exifCache.set(Number(img.id), data || { exif: {} });
+        try {
+            data = await getImageExif(img.id);
+            exifCache.set(Number(img.id), data || { exif: {} });
+        } catch {
+            if (Number(img.id) !== currentImageId) return;
+            renderExifError(rows, img, details);
+            return;
+        }
     }
     if (Number(img.id) !== currentImageId) return;
     details.dataset.loaded = '1';
     renderExifRows(rows, (data && data.exif) || {});
+}
+
+function renderCaptionError(host, img) {
+    host.innerHTML = '<div class="panel-empty">Couldn\'t load caption.'
+        + '<button class="mini-btn" id="caption-retry" type="button">Try again</button></div>';
+    host.querySelector('#caption-retry')?.addEventListener('click', () => renderCaption(img));
 }
 
 function renderMetadata(img) {
@@ -316,11 +337,21 @@ async function renderCaption(img) {
     const imageId = Number(img.id);
     if (captionEditId === imageId) return;
     const token = ++captionToken;
-    captionStatus = await getCaptionStatus();
+    try {
+        captionStatus = await getCaptionStatus();
+    } catch {
+        captionStatus = null;
+    }
     let caption = captionCache.get(imageId);
     if (!caption) {
         host.innerHTML = '<div class="panel-empty">Loading caption…</div>';
-        caption = await getImageCaption(imageId);
+        try {
+            caption = await getImageCaption(imageId);
+        } catch {
+            if (token !== captionToken || Number(currentImageId) !== imageId) return;
+            renderCaptionError(host, img);
+            return;
+        }
         if (token !== captionToken || Number(currentImageId) !== imageId) return;
         captionCache.set(imageId, caption || { has_caption: false, tags: [] });
     }

@@ -8,12 +8,15 @@ import {
 import {
     closeRefine, refineOpen, openRefine, pickByKey, undoRefine,
 } from './refine.js';
-import { cycleDensity, emit, on, toggleBestOf, viewState } from './state.js';
+import {
+    cycleDensity, emit, on, patchPrefs, toggleBestOf, viewState,
+} from './state.js';
 import { closeLeftDrawer, leftDrawerOpen, toggleLeftPanel } from './panel.js';
 import { closeSystemDrawer, systemDrawerOpen } from './drawer.js';
 import { toggleRightPanel } from './panel_right.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
 import { activeLens, switchLens } from './lenses.js';
+import { reviewPeopleMergeByKey } from './people.js';
 import { closeFilters, filtersOpen } from './filters.js';
 import { closeImport, importOpen } from './importer.js';
 import { closeGridContextMenu, gridContextMenuOpen } from './context_menu.js';
@@ -73,7 +76,103 @@ function flagTarget(flag) {
         return;
     }
     const img = currentFocusedImage();
-    if (img) applyFlags([img.id], flag);
+    if (img) {
+        applyFlags([img.id], flag);
+        if (viewState.prefs.autoAdvanceFlags) moveFocus(1);
+    }
+}
+
+function stackRows() {
+    return [...document.querySelectorAll('#duplicates-body .stack-row[data-stack]')]
+        .filter((row) => row.offsetParent !== null);
+}
+
+function activeStackRow() {
+    const focused = document.activeElement?.closest?.('.stack-row[data-stack]');
+    if (focused) return focused;
+    const selected = document.querySelector('#duplicates-body .stack-row.kb-focus[data-stack]');
+    return selected || stackRows()[0] || null;
+}
+
+function focusStackRow(row) {
+    if (!row) return false;
+    for (const item of document.querySelectorAll('#duplicates-body .stack-row.kb-focus')) {
+        item.classList.remove('kb-focus');
+        if (item !== row) item.removeAttribute('tabindex');
+    }
+    row.classList.add('kb-focus');
+    row.tabIndex = 0;
+    row.focus({ preventScroll: true });
+    row.scrollIntoView({ block: 'nearest' });
+    return true;
+}
+
+function moveStackFocus(delta) {
+    const rows = stackRows();
+    if (!rows.length) return false;
+    const current = activeStackRow();
+    const index = Math.max(0, rows.indexOf(current));
+    const next = rows[Math.max(0, Math.min(rows.length - 1, index + delta))];
+    return focusStackRow(next);
+}
+
+function focusStackPhoto(delta) {
+    const row = activeStackRow();
+    if (!row) return false;
+    focusStackRow(row);
+    const thumbs = [...row.querySelectorAll('.stack-photo .dupe-thumb')];
+    if (!thumbs.length) return false;
+    const focused = document.activeElement?.closest?.('.dupe-thumb');
+    const currentIndex = thumbs.indexOf(focused);
+    const start = currentIndex >= 0 ? currentIndex : 0;
+    const next = thumbs[Math.max(0, Math.min(thumbs.length - 1, start + delta))];
+    next.focus({ preventScroll: true });
+    next.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    return true;
+}
+
+function clickAndFocusNextStack(button, row) {
+    if (!button || button.disabled) return false;
+    const rows = stackRows();
+    const index = Math.max(0, rows.indexOf(row));
+    button.click();
+    const refocus = () => {
+        const nextRows = stackRows();
+        focusStackRow(nextRows[Math.min(index, nextRows.length - 1)] || nextRows[nextRows.length - 1]);
+    };
+    window.setTimeout(refocus, 80);
+    window.setTimeout(refocus, 450);
+    return true;
+}
+
+function handleStackKey(event) {
+    const key = event.key.toLowerCase();
+    if (key === 'g') {
+        closeDuplicates();
+    } else if (event.key === 'ArrowDown') {
+        moveStackFocus(1);
+    } else if (event.key === 'ArrowUp') {
+        moveStackFocus(-1);
+    } else if (event.key === 'ArrowRight') {
+        focusStackPhoto(1);
+    } else if (event.key === 'ArrowLeft') {
+        focusStackPhoto(-1);
+    } else if (key === 'k' || event.key === 'Enter') {
+        const row = activeStackRow();
+        if (!clickAndFocusNextStack(row?.querySelector('[data-stack-keep]'), row)) return false;
+    } else if (key === 'u') {
+        const row = activeStackRow();
+        if (!clickAndFocusNextStack(row?.querySelector('[data-stack-unstack]'), row)) return false;
+    } else if (key === 'c') {
+        const photo = document.activeElement?.closest?.('.stack-photo') || activeStackRow()?.querySelector('.stack-photo.is-cover, .stack-photo');
+        const button = photo?.querySelector('[data-set-cover][data-stack-id]');
+        if (!button || button.disabled) return false;
+        button.click();
+    } else {
+        return false;
+    }
+    event.preventDefault();
+    return true;
 }
 
 function escapeOneLayer() {
@@ -141,6 +240,13 @@ export function initKeyboard() {
     document.getElementById('help').addEventListener('click', (event) => {
         if (event.target.id === 'help') closeHelp();
     });
+    document.getElementById('auto-advance-flags')?.addEventListener('change', (event) => {
+        patchPrefs({ autoAdvanceFlags: event.target.checked });
+    });
+    on('prefs', (prefs) => {
+        const input = document.getElementById('auto-advance-flags');
+        if (input) input.checked = Boolean(prefs.autoAdvanceFlags);
+    });
     window.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') {
             if (escapeOneLayer()) {
@@ -205,10 +311,7 @@ export function initKeyboard() {
             return;
         }
         if (duplicatesOpen()) {
-            if (event.key.toLowerCase() === 'g') {
-                event.preventDefault();
-                closeDuplicates();
-            }
+            handleStackKey(event);
             return;
         }
         if (trashOpen()) {
@@ -225,6 +328,9 @@ export function initKeyboard() {
             if (key === '/') { event.preventDefault(); focusOmnibox(); }
             else if (key === '?') { event.preventDefault(); openHelp(); }
             else if (key === 'g') { event.preventDefault(); switchLens('grid'); }
+            else if (activeLens() === 'people' && (key === 'y' || key === 'n')) {
+                if (reviewPeopleMergeByKey(key === 'y' ? 'merge' : 'reject')) event.preventDefault();
+            }
             else if (key === 'o') { event.preventDefault(); switchLens('people'); }
             else if (key === 'm') { event.preventDefault(); switchLens('map'); }
             else if (key === 'y') { event.preventDefault(); switchLens('events'); }

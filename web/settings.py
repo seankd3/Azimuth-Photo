@@ -41,6 +41,8 @@ DEFAULT_SETTINGS = {
     "embed_model_dir": _default_model_dir("Qwen/Qwen3-VL-Embedding-8B"),
     "embed_model_dim": 4096,
     "search_similarity_threshold": 0.35,
+    "ranking_taste_blend": True,
+    "taste_blend_min_signal": 25,
     "refine_semantic_pairing": True,
     "show_loupe_cache_status": True,
     "people_scan_enabled": True,
@@ -62,6 +64,7 @@ DEFAULT_SETTINGS = {
     "publish_dir": "",
     "publish_hook": "",
     "publish_site_base_url": "",
+    "share_brand_name": "",
     "share_cookie_secret": "",
 }
 
@@ -118,6 +121,7 @@ INT_RANGES = {
     "embed_batch_pause_ms": (0, 5000),
     "embed_batch_size": (1, 32),
     "embed_model_dim": (64, 4096),
+    "taste_blend_min_signal": (1, 10000),
     "face_detection_size": (160, 1280),
     "caption_batch_size": (1, 4),
 }
@@ -464,6 +468,7 @@ def normalize_settings(raw: dict | None) -> dict:
         normalized["publish_dir"] = os.path.abspath(os.path.expanduser(normalized["publish_dir"]))
     normalized["publish_hook"] = str(raw.get("publish_hook") or "").strip()
     normalized["publish_site_base_url"] = str(raw.get("publish_site_base_url") or "").strip().rstrip("/")
+    normalized["share_brand_name"] = str(raw.get("share_brand_name") or "").strip()
 
     profile = str(raw.get("cache_profile", normalized["cache_profile"])).strip().lower()
     normalized["cache_profile"] = profile if profile in CACHE_PROFILES else DEFAULT_SETTINGS["cache_profile"]
@@ -506,6 +511,10 @@ def normalize_settings(raw: dict | None) -> dict:
     normalized["refine_semantic_pairing"] = _normalize_bool(
         raw.get("refine_semantic_pairing", normalized["refine_semantic_pairing"]),
         DEFAULT_SETTINGS["refine_semantic_pairing"],
+    )
+    normalized["ranking_taste_blend"] = _normalize_bool(
+        raw.get("ranking_taste_blend", normalized["ranking_taste_blend"]),
+        DEFAULT_SETTINGS["ranking_taste_blend"],
     )
     normalized["share_cookie_secret"] = str(raw.get("share_cookie_secret") or "").strip()
     normalized.update(_derive_runtime_tuning(normalized["memory_cache_gb"]))
@@ -584,5 +593,9 @@ def settings_metadata() -> dict:
         "embedding_model_presets": [
             {"key": key, **value, "model_dir": _default_model_dir(value["model_id"])}
             for key, value in EMBED_MODEL_PRESETS.items()
+        ],
+        "caption_model_presets": [
+            {"key": key, **value, "model_dir": _default_model_dir(value["model_id"])}
+            for key, value in CAPTION_MODEL_PRESETS.items()
         ],
     }

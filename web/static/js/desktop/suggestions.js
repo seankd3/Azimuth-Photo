@@ -7,6 +7,7 @@ const DISMISSED_KEY = 'pa_d_dismissed_suggestions';
 
 let suggestions = null;
 let suggestionsLoading = false;
+let suggestionsError = false;
 let activeIndex = 0;
 let mounted = false;
 let refreshCollections = async () => {};
@@ -57,10 +58,14 @@ function currentSuggestions() {
 export async function loadSuggestionsOnce() {
     if (suggestions || suggestionsLoading) return;
     suggestionsLoading = true;
+    suggestionsError = false;
     notifyChange();
     try {
         const data = await getCollectionSuggestions();
         if (data && Array.isArray(data.suggestions)) suggestions = data.suggestions;
+    } catch {
+        suggestions = [];
+        suggestionsError = true;
     } finally {
         suggestionsLoading = false;
         notifyChange();
@@ -182,6 +187,24 @@ function render() {
             + '<div class="skel suggest-review-skel"></div><div class="skel suggest-review-skel"></div>'
             + '</aside><section class="suggest-review-main"><div class="skel suggest-preview-skel"></div></section></div>';
         bindChrome(root);
+        return;
+    }
+
+    if (suggestionsError) {
+        root.innerHTML = '<div class="suggest-review empty">'
+            + headerHtml(0)
+            + '<div class="suggest-review-empty-body"><div>'
+            + `<span class="suggest-empty-glyph">${icon('sparkles')}</span>`
+            + '<h2>Couldn\'t load suggestions</h2>'
+            + '<p>The archive did not respond.</p>'
+            + '<div class="shared-empty-actions"><button class="btn" id="suggestions-retry" type="button">Try again</button></div>'
+            + '</div></div></div>';
+        bindChrome(root);
+        root.querySelector('#suggestions-retry')?.addEventListener('click', () => {
+            suggestions = null;
+            loadSuggestionsOnce();
+            render();
+        });
         return;
     }
 

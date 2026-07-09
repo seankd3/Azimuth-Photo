@@ -9,7 +9,11 @@ your library.
 Original photo folders remain the source of truth.
 
 - Scanning reads source folders and records catalog metadata.
-- The app does not edit or delete original image files.
+- Normal browsing, scanning, AI work, People, captions, sharing, publishing,
+  and export do not edit original image files.
+- Trash is the explicit exception: deleting moves originals into a `.trash`
+  area on the same source root, and **Empty trash** permanently deletes those
+  moved files.
 - Removing a source from the catalog changes app catalog/cache state, not the
   source folder itself.
 - Generated cache files and database rows can be rebuilt from the original

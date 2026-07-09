@@ -27,6 +27,8 @@ let libraryCounts = null;
 let trashTotal = null;
 let collectionsLoading = true;
 let sourcesLoading = true;
+let collectionsLoadError = false;
+let sourcesLoadError = false;
 let drawerOpen = false;
 let collectionMenu = null;
 let collectionMenuReturn = null;
@@ -38,6 +40,7 @@ let publishPollTimer = 0;
 let chromeRefreshTimer = 0;
 let editingSmartCollection = null;
 
+const SHARED_CHANGED_EVENT = 'shares/publishes-changed';
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 }[c]));
@@ -48,10 +51,19 @@ const emptyState = (glyph, copy, action = '') => (
 );
 const skeletonRows = (count = 3) => Array.from({ length: count }, () => '<div class="chrome-skel nav-row skel"></div>').join('');
 
+function emitSharedSurfacesChanged(collectionId) {
+    window.dispatchEvent(new CustomEvent(SHARED_CHANGED_EVENT, { detail: { collectionId } }));
+}
+
 function renderCollections() {
     const host = document.getElementById('collection-list');
     if (collectionsLoading) {
         host.innerHTML = skeletonRows(3);
+        return;
+    }
+    if (collectionsLoadError) {
+        host.innerHTML = emptyState('folder-plus', "Couldn't load collections.", '<button type="button" data-retry-collections>Retry</button>');
+        host.querySelector('[data-retry-collections]')?.addEventListener('click', loadCollections);
         return;
     }
     if (!collections.length) {
@@ -388,6 +400,7 @@ async function renderShareOverlay(collectionId, name, share = null, token = shar
         if (result && result.ok) {
             showToast('Share link created');
             await renderShareOverlay(collectionId, name, result.share, actionToken);
+            emitSharedSurfacesChanged(collectionId);
         } else {
             showToast("Couldn't create share link");
         }
@@ -405,6 +418,7 @@ async function renderShareOverlay(collectionId, name, share = null, token = shar
         if (result && result.ok) {
             showToast(share.protected ? 'Password changed' : 'Password set');
             await renderShareOverlay(collectionId, name, result.share, actionToken);
+            emitSharedSurfacesChanged(collectionId);
         } else {
             showToast("Couldn't save password");
         }
@@ -416,6 +430,7 @@ async function renderShareOverlay(collectionId, name, share = null, token = shar
         if (result && result.ok) {
             showToast('Password removed');
             await renderShareOverlay(collectionId, name, result.share, actionToken);
+            emitSharedSurfacesChanged(collectionId);
         } else {
             showToast("Couldn't remove password");
         }
@@ -427,6 +442,7 @@ async function renderShareOverlay(collectionId, name, share = null, token = shar
         if (result && result.ok) {
             showToast('Share link rotated');
             await renderShareOverlay(collectionId, name, result.share, actionToken);
+            emitSharedSurfacesChanged(collectionId);
         } else {
             showToast("Couldn't rotate link");
         }
@@ -438,6 +454,7 @@ async function renderShareOverlay(collectionId, name, share = null, token = shar
         if (result && result.ok) {
             showToast('Share link revoked');
             await renderShareOverlay(collectionId, name, null, actionToken);
+            emitSharedSurfacesChanged(collectionId);
         } else {
             showToast("Couldn't revoke link");
         }
@@ -631,6 +648,7 @@ async function renderPublishOverlay(collectionId, name, data = null, token = pub
         if (!publishOverlayIsCurrent(token)) return;
         if (result.ok) {
             showToast(publish ? 'Republishing gallery' : 'Publishing gallery');
+            emitSharedSurfacesChanged(collectionId);
             await pollPublishStatus(collectionId, name, token, true);
         } else {
             await renderPublishOverlay(collectionId, name, {
@@ -661,6 +679,7 @@ async function renderPublishOverlay(collectionId, name, data = null, token = pub
         if (!publishOverlayIsCurrent(token)) return;
         if (result.ok) {
             showToast('Unpublishing gallery');
+            emitSharedSurfacesChanged(collectionId);
             await pollPublishStatus(collectionId, name, token, true);
         } else {
             await renderPublishOverlay(collectionId, name, {
@@ -708,8 +727,9 @@ async function pollPublishStatus(collectionId, name, token, immediate = false) {
     await renderPublishOverlay(collectionId, name, data, token);
     if (data?.in_progress) {
         schedulePublishPoll(collectionId, name, token);
-    } else if (!immediate) {
-        if (data?.job?.state === 'revoked') showToast('Gallery unpublished');
+    } else {
+        if (!immediate && data?.job?.state === 'revoked') showToast('Gallery unpublished');
+        emitSharedSurfacesChanged(collectionId);
         await loadCollections();
     }
 }
@@ -890,6 +910,11 @@ function renderSources() {
         host.innerHTML = skeletonRows(3);
         return;
     }
+    if (sourcesLoadError) {
+        host.innerHTML = emptyState('hard-drive', "Couldn't load sources.", '<button type="button" data-retry-sources>Retry</button>');
+        host.querySelector('[data-retry-sources]')?.addEventListener('click', loadCatalogChrome);
+        return;
+    }
     host.innerHTML = sources.length ? sources.map((s) => {
         const online = Number(s.online) === 1;
         const count = s.active_image_count != null ? s.active_image_count : s.image_count;
@@ -908,20 +933,34 @@ function renderSources() {
 
 async function loadCollections() {
     collectionsLoading = true;
+    collectionsLoadError = false;
     renderCollections();
-    const data = await listCollections();
-    collections = (data && data.collections) || [];
-    collectionsLoading = false;
-    renderCollections();
-    emit('collections:changed', { collections });
+    try {
+        const data = await listCollections();
+        collections = (data && data.collections) || [];
+        emit('collections:changed', { collections });
+    } catch {
+        collections = [];
+        collectionsLoadError = true;
+    } finally {
+        collectionsLoading = false;
+        renderCollections();
+    }
 }
 
 async function loadCatalogChrome() {
     sourcesLoading = true;
+    sourcesLoadError = false;
     renderSources();
-    catalog = await getCatalog();
-    sourcesLoading = false;
-    renderSources();
+    try {
+        catalog = await getCatalog();
+    } catch {
+        catalog = null;
+        sourcesLoadError = true;
+    } finally {
+        sourcesLoading = false;
+        renderSources();
+    }
 }
 
 function scheduleChromeRefresh() {

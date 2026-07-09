@@ -185,26 +185,31 @@ async def _run_publish_job(collection_id: int, slug: str, title: str) -> None:
                 )
             )
 
+        def persist_publish(summary, hook):
+            return asyncio.run(
+                _upsert_publish(
+                    collection_id=collection_id,
+                    slug=slug,
+                    title=title,
+                    image_count=summary.photo_count if summary else 0,
+                    bundle_bytes=summary.bundle_bytes if summary else 0,
+                    last_commit=None,
+                    hook_exit_code=hook.returncode if hook and hook.configured else None,
+                    hook_output=hook.output if hook and hook.configured else "",
+                    hook_ran_at=hook.ran_at if hook and hook.configured else None,
+                )
+            )
+
         result = await _deployer.publish(
             slug=slug,
             title=title,
             collection_id=collection_id,
             published_rows=published_rows,
             write_bundle=write_bundle,
+            persist_publish=persist_publish,
             progress=progress,
         )
-        summary = result.summary
-        row = await _upsert_publish(
-            collection_id=collection_id,
-            slug=slug,
-            title=title,
-            image_count=summary.photo_count if summary else 0,
-            bundle_bytes=summary.bundle_bytes if summary else 0,
-            last_commit=result.last_commit,
-            hook_exit_code=result.hook.returncode if result.hook and result.hook.configured else None,
-            hook_output=result.hook.output if result.hook and result.hook.configured else "",
-            hook_ran_at=result.hook.ran_at if result.hook and result.hook.configured else None,
-        )
+        row = result.publish_row
         state = "hook_failed" if result.hook and not result.hook.ok else "live"
         _finish_job(
             collection_id,
@@ -228,13 +233,16 @@ async def _run_revoke_job(collection_id: int, slug: str) -> None:
         def published_rows():
             return asyncio.run(_list_publishes())
 
+        def persist_revoke(_hook):
+            return asyncio.run(_delete_publish(collection_id))
+
         result = await _deployer.revoke(
             slug=slug,
             collection_id=collection_id,
             published_rows=published_rows,
+            persist_revoke=persist_revoke,
             progress=progress,
         )
-        await _delete_publish(collection_id)
         state = "revoked_hook_failed" if result.hook and not result.hook.ok else "revoked"
         _finish_job(collection_id, state, publish=None, push_error=result.push_error, hook=result.hook)
     except (PublishConflict, PublishDeployError, PublishSetupError) as exc:

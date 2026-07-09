@@ -3,15 +3,20 @@
 from __future__ import annotations
 
 import asyncio
+import ctypes
+import errno
 import os
+import platform
 import shutil
 import tempfile
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from fastapi.templating import Jinja2Templates
+
+import settings
 
 
 @dataclass(frozen=True)
@@ -98,11 +103,25 @@ async def build_public_gallery_bundle(
                     "thumb": f"./thumb/sm/{image_id}.jpg",
                     "preview": f"./img/{image_id}.jpg",
                     "full": f"./img/{image_id}.jpg",
+                    "download": f"./img/{image_id}.jpg",
+                    "download_name": _download_name(image_id, image.get("filename") or ""),
                 }
             )
 
         date_range = date_range_for_images(gallery_images)
+        for index, image in enumerate(gallery_images, start=1):
+            image["display_label"] = f"Photo {index} of {len(gallery_images)}"
         cover = f"/g/{slug}/thumb/sm/{gallery_images[0]['id']}.jpg" if gallery_images else ""
+        brand = _brand_payload()
+        gallery_json = {
+            "token": f"public-{slug}",
+            "name": title or collection.get("name") or "Gallery",
+            "photo_count": len(gallery_images),
+            "date_range": date_range,
+            "brand": brand,
+            "download_size_label": "gallery-size copy",
+            "images": gallery_images,
+        }
         html = templates.env.get_template("share_gallery.html").render(
             not_found=False,
             locked=False,
@@ -111,13 +130,8 @@ async def build_public_gallery_bundle(
             collection_name=title or collection.get("name") or "Gallery",
             photo_count=len(gallery_images),
             date_range=date_range,
-            gallery_json={
-                "token": f"public-{slug}",
-                "name": title or collection.get("name") or "Gallery",
-                "photo_count": len(gallery_images),
-                "date_range": date_range,
-                "images": gallery_images,
-            },
+            brand=brand,
+            gallery_json=gallery_json,
         )
         await asyncio.to_thread((work_target / "index.html").write_text, html, "utf-8")
         bundle_bytes, file_count = await asyncio.to_thread(_bundle_size, work_target)
@@ -174,19 +188,43 @@ async def _write_cached_jpeg(*, thumbnails, image: dict, size: str, output_path:
 
 
 def _replace_bundle_dir(work_target: Path, target: Path) -> None:
-    backup = target.parent / f".{target.name}.bak-{os.getpid()}-{time.time_ns()}"
-    had_target = target.exists()
-    if had_target:
-        os.replace(target, backup)
-    try:
+    if not target.exists():
         os.replace(work_target, target)
-    except Exception:
-        if had_target and backup.exists() and not target.exists():
-            os.replace(backup, target)
-        raise
-    finally:
-        if backup.exists():
-            shutil.rmtree(backup, ignore_errors=True)
+        return
+
+    _atomic_exchange_paths(work_target, target)
+    shutil.rmtree(work_target, ignore_errors=True)
+
+
+def _atomic_exchange_paths(source: Path, target: Path) -> None:
+    if platform.system() != "Linux":
+        raise RuntimeError("Atomic gallery republish requires Linux rename exchange support.")
+    renameat2_syscall = _renameat2_syscall_number()
+    if renameat2_syscall is None:
+        raise RuntimeError("Atomic gallery republish requires renameat2 support.")
+
+    libc = ctypes.CDLL(None, use_errno=True)
+    result = libc.syscall(
+        ctypes.c_long(renameat2_syscall),
+        ctypes.c_int(-100),
+        ctypes.c_char_p(os.fsencode(source)),
+        ctypes.c_int(-100),
+        ctypes.c_char_p(os.fsencode(target)),
+        ctypes.c_uint(2),
+    )
+    if result != 0:
+        err = ctypes.get_errno()
+        message = os.strerror(err) if err else "unknown error"
+        raise OSError(err or errno.EIO, f"Could not atomically replace published gallery: {message}")
+
+
+def _renameat2_syscall_number() -> int | None:
+    machine = platform.machine().lower()
+    if machine in {"x86_64", "amd64"}:
+        return 316
+    if machine in {"aarch64", "arm64"}:
+        return 276
+    return None
 
 
 def _bundle_size(target: Path) -> tuple[int, int]:
@@ -212,3 +250,25 @@ def _unique_ids(image_ids) -> list[int]:
             seen.add(image_id)
             unique.append(image_id)
     return unique
+
+
+def _brand_payload() -> dict:
+    config = settings.get_settings()
+    site_url = str(config.get("publish_site_base_url") or "").strip().rstrip("/")
+    site_label = _site_label(site_url)
+    name = str(config.get("share_brand_name") or "").strip()
+    if not name:
+        name = site_label or "Your photographer"
+    return {"name": name, "site_url": site_url, "site_label": site_label}
+
+
+def _site_label(site_url: str) -> str:
+    if not site_url:
+        return ""
+    parsed = urlparse(site_url if "://" in site_url else f"https://{site_url}")
+    return (parsed.netloc or parsed.path).removeprefix("www.")
+
+
+def _download_name(image_id: int, filename: str) -> str:
+    basename = os.path.basename(filename or "").strip() or f"photo-{image_id}.jpg"
+    return basename.replace('"', "").replace("'", "")

@@ -21,8 +21,10 @@ The app runs at `http://127.0.0.1:8000` by default.
 - `web/app.py` creates the FastAPI app through `core.app_factory`.
 - `web/core/` holds app wiring, background runtime helpers, request/response
   utilities, static asset handling, and query constraints.
-- `web/features/` holds route modules by product surface: AI, cache, catalog,
-  compare, export, library, media, pages, people, search, and settings.
+- `web/features/` holds route modules by product surface: access, AI, cache,
+  captions, catalog, collections, compare/Refine, dev, export, imports,
+  library, media, pages, people, publish, search, settings, share, shared,
+  stacks, and trash.
 - `web/data/` holds SQLite schema and repositories.
 - `web/templates/` contains Jinja templates.
 - `web/static/` contains CSS and browser JavaScript modules.
@@ -67,14 +69,22 @@ replacement; desktop = Lightroom Classic replacement).
 
 Before changing worker controls, scheduling, or status UI, use
 [`background-work-behavior.md`](background-work-behavior.md) as the
-authoritative product anchor for Search, Previews, and People background work.
+authoritative product anchor for AI embeddings, cache pregeneration, People
+scan, captions, and metadata background work.
 
 | Change | Start here | Notes |
 | --- | --- | --- |
-| Desktop app shell, lenses, panels, import, settings drawer | `web/templates/desktop.html`, `web/static/desktop.css`, `web/static/js/desktop/` | `/` and `/d` render this shell; keep page behavior in focused desktop modules. |
+| Desktop app shell, lenses, panels, Shared, Stacks, Trash, import, settings drawer | `web/templates/desktop.html`, `web/static/desktop.css`, `web/static/js/desktop/` | `/` and `/d` render this shell; keep page behavior in focused desktop modules. |
 | Catalog setup, source folders, scans | `web/features/catalog/`, `web/data/repositories/catalog.py`, `web/static/js/desktop/drawer.js` | Keep folder/source SQL in repositories and route parsing in routes. |
 | Library rankings, filters, maps, dates | `web/features/library/`, `web/data/repositories/rankings.py`, `web/data/repositories/filter_options.py`, `web/static/js/desktop/` | Preserve cached/offline browsing behavior and visible-count semantics. |
-| Compare pair and mosaic workflows | `web/features/compare/`, `web/elo_propagation.py`, `web/data/repositories/ratings.py`, `web/static/js/desktop/refine.js` | Routes validate requests; services/repositories own candidate pools and rating writes. |
+| Refine pair, duel, and mosaic workflows | `web/features/compare/`, `web/elo_propagation.py`, `web/data/repositories/ratings.py`, `web/static/js/desktop/refine.js` | Routes validate requests; services/repositories own candidate pools and rating writes. |
+| Collections and smart collections | `web/features/collections/`, `web/data/repositories/collections.py`, `web/static/js/desktop/panel.js`, `web/static/js/desktop/state.js` | Regular collections own image membership; smart collections save a validated query. |
+| Stacks | `web/features/stacks/`, `web/data/repositories/stacks.py`, `web/static/js/desktop/duplicates.js` | Builders cover bursts, variants, and cross-source duplicates; UI label is Stacks. |
+| Trash and restore | `web/features/trash/`, `web/static/js/desktop/trash.js`, stack/grid callers | Trash moves originals into source-local `.trash`; empty trash is permanent. |
+| Private share links | `web/features/share/`, `web/templates/share_gallery.html`, `web/static/js/desktop/panel.js`, `web/static/js/mobile/library.js` | Public gallery routes live at `/s/{token}` and serve resized previews. |
+| Website publishing and Shared triage | `web/features/publish/`, `web/features/shared/`, `web/static/js/desktop/shared.js`, `web/static/js/desktop/panel.js`, `docs/publishing.md` | Publishing writes static bundles to `publish_dir`; Shared aggregates links and publishes. |
+| Captions and tags | `web/features/captions/`, `web/data/repositories/captions.py`, `web/static/js/desktop/panel_right.js` | Captions are local VLM output; tags participate in filters and search. |
+| Imports and import history | `web/features/imports/`, `web/static/js/desktop/importer.js` | Past imports scope the grid through `import_batch`. |
 | People review, labels, merges, scan status | `web/features/people/`, `web/data/repositories/people.py`, `web/face_worker.py`, `web/static/js/desktop/people.js` | Source photos are never modified; face crops come from cached previews. |
 | Search and AI embedding status | `web/features/search/`, `web/features/ai/`, `web/embed_cache.py`, `web/embedding_worker.py` | Metadata fallback must keep working when AI is cold or deferred. |
 | Thumbnail/cache status and pregen | `web/thumbnails/`, `web/features/cache/` | Keep facade exports stable while moving implementation into owning modules. |

@@ -1,14 +1,16 @@
 import {
-    addCatalogSource, clearCache, getAiStatus, getCacheStatus, getCatalog, getPeopleStatus,
-    getRemoteAccess, getScanStatus, getSettings, installAiModel, pauseAiEmbeddings,
-    pausePeopleScan, removeCatalogSource, rescanCatalogSource, resetSettings, resumeAiEmbeddings,
-    resumePeopleScan, saveSettings, startCachePregen, stopCachePregen,
+    addCatalogSource, clearCache, getAiStatus, getCacheStatus, getCaptionStatus, getCatalog,
+    getMetadataStatus, getPeopleStatus, getRemoteAccess, getScanStatus, getSettings, installAiModel, pauseAiEmbeddings,
+    pauseCaptionScan, pausePeopleScan, removeCatalogSource, rescanCatalogSource, resetSettings, resumeAiEmbeddings,
+    resumeCaptionScan, resumePeopleScan, saveSettings, startCachePregen, startMetadataScan, stopCachePregen,
+    stopMetadataScan,
 } from './api.js';
 import {
-    on, patchPrefs, setActiveLens, setThumbSize, viewState,
+    on, patchPrefs, scope, setActiveLens, setThumbSize, viewState,
 } from './state.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
 import { showToast } from './toast.js';
+import { confirmTypedCount } from './trash.js';
 
 let open = false;
 let drawerTimer = null;
@@ -20,6 +22,8 @@ let catalog = null;
 let aiStatus = null;
 let cacheStatus = null;
 let peopleStatus = null;
+let captionStatus = null;
+let metadataStatus = null;
 let remoteAccess = null;
 let settingsPageData = null;
 let savedSettings = {};
@@ -27,8 +31,13 @@ let draftSettings = {};
 let dirtySettings = new Set();
 let openSettingSections = new Set();
 let resetConfirmArmed = false;
+let publishReturn = null;
+let publishingFocusPending = false;
+let thumbnailCachePolicy = 'keep';
+const busyActions = new Set();
 
 const MODEL_SAVE_FIELDS = ['embed_model_preset', 'embed_model_id', 'embed_model_revision', 'embed_model_dir', 'embed_model_dim'];
+const CAPTION_MODEL_FIELDS = ['caption_model_preset', 'caption_model_id', 'caption_model_revision', 'caption_model_dir', 'caption_model_quantization', 'caption_prompt_version'];
 const THUMB_FIELDS = ['thumb_size_sm', 'thumb_size_md', 'thumb_size_lg', 'thumb_quality'];
 const SETTING_DEFS = {
     embed_model_preset: { type: 'select' },
@@ -37,6 +46,7 @@ const SETTING_DEFS = {
     cache_profile: { type: 'select' },
     ssd_cache_dir: { type: 'text' },
     search_similarity_threshold: { type: 'number', min: 0.1, max: 0.8, step: 0.05 },
+    refine_semantic_pairing: { type: 'checkbox' },
     show_loupe_cache_status: { type: 'checkbox' },
     import_root: { type: 'text' },
     thumb_size_sm: { type: 'number', min: 64, max: 4096, step: 1, unit: 'px' },
@@ -48,9 +58,15 @@ const SETTING_DEFS = {
     face_detection_size: { type: 'number', min: 160, max: 1280, step: 32, unit: 'px' },
     face_similarity_threshold: { type: 'number', min: 0.1, max: 0.9, step: 0.01 },
     face_merge_suggestion_threshold: { type: 'number', min: 0.1, max: 0.95, step: 0.01 },
+    people_scan_enabled: { type: 'checkbox' },
+    people_auto_install: { type: 'checkbox' },
+    caption_scan_enabled: { type: 'checkbox' },
+    caption_model_preset: { type: 'select' },
+    caption_batch_size: { type: 'number', min: 1, max: 4, step: 1 },
     publish_dir: { type: 'text' },
     publish_hook: { type: 'text' },
     publish_site_base_url: { type: 'text' },
+    share_brand_name: { type: 'text' },
 };
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
@@ -99,6 +115,7 @@ function applySettingsData(data, { preserveDirtyExcept = null } = {}) {
     aiStatus = data.ai_status || aiStatus;
     cacheStatus = data.cache_stats || cacheStatus;
     peopleStatus = data.people_status || peopleStatus;
+    metadataStatus = data.metadata_status || metadataStatus;
     catalog = data.catalog || catalog;
     resetConfirmArmed = false;
 }
@@ -147,8 +164,26 @@ function embeddingPresetConfig(key = settingValue('embed_model_preset')) {
     };
 }
 
+function captionPresetConfig(key = settingValue('caption_model_preset')) {
+    const preset = (settingsPageData && settingsPageData.caption_model_presets || [])
+        .find((item) => item.key === key);
+    if (!preset) return { caption_model_preset: key || '' };
+    return {
+        caption_model_preset: preset.key,
+        caption_model_id: preset.model_id,
+        caption_model_revision: preset.revision || 'main',
+        caption_model_dir: preset.model_dir,
+        caption_model_quantization: preset.quantization || 'bnb-4bit',
+        caption_prompt_version: preset.prompt_version || 'caption-json-v1',
+    };
+}
+
 function collectModelSettings() {
     return embeddingPresetConfig(settingValue('embed_model_preset'));
+}
+
+function collectCaptionSettings() {
+    return captionPresetConfig(settingValue('caption_model_preset'));
 }
 
 function collectDirtySettings() {
@@ -157,8 +192,9 @@ function collectDirtySettings() {
         payload[field] = draftSettings[field];
     }
     if (dirtySettings.has('embed_model_preset')) Object.assign(payload, collectModelSettings());
+    if (dirtySettings.has('caption_model_preset')) Object.assign(payload, collectCaptionSettings());
     if (THUMB_FIELDS.some((field) => dirtySettings.has(field))) {
-        payload.thumbnail_cache_policy = document.querySelector('input[name="drawer_thumbnail_cache_policy"]:checked')?.value || 'keep';
+        payload.thumbnail_cache_policy = thumbnailCachePolicy;
     }
     return payload;
 }
@@ -187,12 +223,15 @@ function activeProgress() {
     const ai = pct(aiStatus && aiStatus.progress_pct);
     const pregen = cacheStatus && cacheStatus.pregen ? cacheStatus.pregen : {};
     const cache = pct((pregen.preview && pregen.preview.progress_pct) || pregen.progress_pct);
-    const worker = (peopleStatus && peopleStatus.worker) || {};
-    const counts = (peopleStatus && peopleStatus.counts) || {};
-    const people = worker.progress_pct != null
-        ? pct(worker.progress_pct)
-        : progress(counts.detected_faces || counts.people || 0, (counts.detected_faces || 0) + (counts.pending_cached_images || 0));
-    return { ai, cache, people };
+    const peopleWorker = (peopleStatus && peopleStatus.worker) || {};
+    const people = peopleWorker.progress_pct != null ? pct(peopleWorker.progress_pct) : 0;
+    const captionWorker = (captionStatus && captionStatus.worker) || {};
+    const captionCounts = (captionStatus && captionStatus.counts) || {};
+    const caption = captionWorker.progress_pct != null
+        ? pct(captionWorker.progress_pct)
+        : progress(captionCounts.captioned || 0, (captionCounts.captioned || 0) + (captionCounts.pending_cached_images || 0));
+    const metadata = metadataStatus && metadataStatus.manual_pause ? 0 : (metadataStatus && metadataStatus.active ? 50 : 0);
+    return { ai, cache, people, captions: caption, metadata };
 }
 
 function modelStateLine(status = aiStatus || {}) {
@@ -218,6 +257,9 @@ function modelLine() {
 }
 
 function cacheUsageLine() {
+    if (cacheStatus && (cacheStatus.status_stale || cacheStatus.counts_stale)) {
+        return `Cache status is stale${cacheStatus.latency_ms ? ` · last check timed out after ${fmt(cacheStatus.latency_ms)} ms` : ''}`;
+    }
     const memory = (cacheStatus && cacheStatus.memory) || {};
     const disk = (cacheStatus && cacheStatus.disk) || {};
     const pregen = (cacheStatus && cacheStatus.pregen) || {};
@@ -229,7 +271,24 @@ function peopleLine() {
     const counts = (peopleStatus && peopleStatus.counts) || {};
     const pending = Number(counts.pending_cached_images || 0);
     const faces = Number(counts.detected_faces || counts.people || 0);
-    return `${fmt(faces)} faces · ${pending ? `${fmt(pending)} pending · ` : ''}${worker.state || 'idle'}`;
+    const enabled = settingValue('people_scan_enabled');
+    return `${enabled ? 'enabled' : 'disabled'} · ${fmt(faces)} faces · ${pending ? `${fmt(pending)} pending · ` : ''}${worker.state || 'idle'}`;
+}
+
+function captionLine() {
+    const worker = (captionStatus && captionStatus.worker) || {};
+    const counts = (captionStatus && captionStatus.counts) || {};
+    const captioned = Number(counts.captioned || 0);
+    const pending = Number(counts.pending_cached_images || 0);
+    const active = Boolean(captionStatus && captionStatus.active);
+    return `${active ? 'enabled' : 'paused'} · ${fmt(captioned)} captioned${pending ? ` · ${fmt(pending)} pending` : ''} · ${worker.state || 'idle'}`;
+}
+
+function metadataLine() {
+    if (!metadataStatus) return 'unavailable';
+    const state = metadataStatus.manual_pause ? 'paused' : metadataStatus.active ? 'running' : 'idle';
+    const count = Number(metadataStatus.pending || metadataStatus.remaining || 0);
+    return `${state}${count ? ` · ${fmt(count)} pending` : ''}`;
 }
 
 function statusText(name, data) {
@@ -240,6 +299,14 @@ function statusText(name, data) {
         const pregen = (data && data.pregen) || {};
         const preview = pregen.preview || {};
         return `${fmt(preview.count)} / ${fmt(preview.total)} · ${pregen.state || 'idle'}`;
+    }
+    if (name === 'Captions') {
+        const worker = (data && data.worker) || {};
+        const counts = (data && data.counts) || {};
+        return `${fmt(counts.captioned || 0)} captioned · ${fmt(counts.pending_cached_images || 0)} pending · ${worker.state || 'idle'}`;
+    }
+    if (name === 'Metadata') {
+        return metadataLine();
     }
     const worker = (data && data.worker) || {};
     const counts = (data && data.counts) || {};
@@ -258,12 +325,16 @@ function renderActivity() {
     const aiPaused = aiStatus && aiStatus.embedding_manual_pause;
     const cachePaused = cacheStatus && cacheStatus.pregen && cacheStatus.pregen.manual_pause;
     const peoplePaused = peopleStatus && peopleStatus.worker && peopleStatus.worker.manual_pause;
-    widget.classList.toggle('paused', Boolean(aiPaused || cachePaused || peoplePaused));
+    const captionsPaused = captionStatus && !captionStatus.active;
+    const metadataPaused = metadataStatus && metadataStatus.manual_pause;
+    widget.classList.toggle('paused', Boolean(aiPaused || cachePaused || peoplePaused || captionsPaused || metadataPaused));
     widget.classList.toggle('active', Object.values(values).some((value) => value > 0 && value < 100));
     pop.innerHTML = [
         ['AI', values.ai, aiStatus || {}],
         ['Cache', values.cache, cacheStatus || {}],
         ['People', values.people, peopleStatus || {}],
+        ['Captions', values.captions, captionStatus || {}],
+        ['Metadata', values.metadata, metadataStatus || {}],
     ].map(([name, value, data]) => (
         `<div class="ap-row"><span>${name}</span><span class="ap-track"><i style="width:${value}%"></i></span><span class="ap-val">${esc(statusText(name, data))}</span></div>`
     )).join('');
@@ -271,10 +342,18 @@ function renderActivity() {
 
 async function refreshActivity() {
     if (document.hidden) return;
-    const [ai, cache, people] = await Promise.all([getAiStatus(), getCacheStatus(), getPeopleStatus()]);
+    const [ai, cache, people, captions, metadata] = await Promise.all([
+        getAiStatus().catch(() => null),
+        getCacheStatus().catch(() => null),
+        getPeopleStatus().catch(() => null),
+        getCaptionStatus().catch(() => null),
+        getMetadataStatus().catch(() => null),
+    ]);
     aiStatus = ai || aiStatus;
     cacheStatus = cache || cacheStatus;
     peopleStatus = people || peopleStatus;
+    captionStatus = captions || captionStatus;
+    metadataStatus = metadata || metadataStatus;
     renderActivity();
     if (open && !drawerEditing()) renderDrawer();
 }
@@ -327,11 +406,13 @@ function renderSources() {
         + '</section>';
 }
 
-function workerRow(key, label, value, detail, paused, actionLabel) {
+function workerRow(key, label, value, detail, paused, actionLabel, note = '') {
     return '<div class="work-row" data-worker-row="' + key + '">'
         + '<div class="wr-body"><div class="wr-top">'
         + `<span>${esc(label)}</span><span class="v">${esc(detail)}</span></div>`
-        + `<div class="wr-track"><i style="width:${pct(value)}%"></i></div></div>`
+        + `<div class="wr-track"><i style="width:${pct(value)}%"></i></div>`
+        + (note ? `<small class="wr-note">${esc(note)}</small>` : '')
+        + '</div>'
         + `<button class="mini-btn" data-worker-action="${key}">${esc(actionLabel || (paused ? 'Resume' : 'Pause'))}</button></div>`;
 }
 
@@ -342,11 +423,19 @@ function renderWork() {
     const counts = (peopleStatus && peopleStatus.counts) || {};
     const peoplePct = worker.progress_pct != null
         ? pct(worker.progress_pct)
-        : progress(counts.detected_faces || counts.people || 0, (counts.detected_faces || 0) + (counts.pending_cached_images || 0));
+        : 0;
+    const captionWorker = (captionStatus && captionStatus.worker) || {};
+    const captionCounts = (captionStatus && captionStatus.counts) || {};
+    const captionPct = captionWorker.progress_pct != null
+        ? pct(captionWorker.progress_pct)
+        : progress(captionCounts.captioned || 0, (captionCounts.captioned || 0) + (captionCounts.pending_cached_images || 0));
+    const metadataPaused = metadataStatus && metadataStatus.manual_pause;
     return '<section class="dr-sec"><h3>Background work</h3>'
-        + workerRow('ai', 'AI embeddings', aiStatus ? aiStatus.progress_pct : 0, aiStatus ? statusText('AI', aiStatus) : 'unavailable', aiStatus && aiStatus.embedding_manual_pause)
-        + workerRow('cache', 'Cache pregeneration', (preview.progress_pct || pregen.progress_pct || 0), cacheStatus ? statusText('Cache', cacheStatus) : 'unavailable', pregen.manual_pause || pregen.state === 'paused', pregen.manual_pause || pregen.state === 'paused' ? 'Resume' : 'Pause')
-        + workerRow('people', 'People scan', peoplePct, peopleStatus ? statusText('People', peopleStatus) : 'unavailable', worker.manual_pause)
+        + workerRow('ai', 'AI embeddings', aiStatus ? aiStatus.progress_pct : 0, aiStatus ? statusText('AI', aiStatus) : 'unavailable', aiStatus && aiStatus.embedding_manual_pause, null, 'Resume also wakes cache pregeneration.')
+        + workerRow('cache', 'Cache pregeneration', (preview.progress_pct || pregen.progress_pct || 0), cacheStatus ? statusText('Cache', cacheStatus) : 'unavailable', pregen.manual_pause || pregen.state === 'paused', pregen.manual_pause || pregen.state === 'paused' ? 'Resume' : 'Pause', 'Pause also pauses AI embeddings and People scan.')
+        + workerRow('people', 'People scan', peoplePct, peopleStatus ? statusText('People', peopleStatus) : 'unavailable', worker.manual_pause || !settingValue('people_scan_enabled'), null, 'Resume also wakes cache pregeneration.')
+        + workerRow('captions', 'Captions', captionPct, captionStatus ? statusText('Captions', captionStatus) : 'unavailable', captionStatus && !captionStatus.active)
+        + workerRow('metadata', 'Metadata', metadataPaused ? 0 : 50, metadataLine(), metadataPaused)
         + '</section>';
 }
 
@@ -356,9 +445,10 @@ function renderStorage() {
         const tier = tiers[size] || {};
         return `<span class="tier-chip"><b>${size.toUpperCase()}</b><span>${fmt(tier.count)} files</span><span>${bytes(tier.bytes)}</span></span>`;
     }).join('');
+    const totalFiles = Object.values(tiers).reduce((sum, tier) => sum + Number(tier?.count || 0), 0);
     return '<section class="dr-sec"><h3>Storage</h3>'
         + `<div class="tier-chips">${chips}</div>`
-        + '<button class="btn" id="clear-cache-btn">Clear cache</button>'
+        + `<button class="btn btn-danger" id="clear-cache-btn" data-cache-files="${totalFiles}">Clear cache</button>`
         + '</section>';
 }
 
@@ -382,8 +472,7 @@ function renderSharedHome() {
 }
 
 function detailsSection(title, body) {
-    return '<details class="dr-sec dr-details">'
-        .replace('>', `${openSettingSections.has(title) ? ' open' : ''}>`)
+    return `<details class="dr-sec dr-details" data-settings-section="${esc(title)}"${openSettingSections.has(title) ? ' open' : ''}>`
         + `<summary><span>${esc(title)}</span></summary>`
         + `<div class="dr-details-body">${body}</div></details>`;
 }
@@ -426,17 +515,22 @@ function settingToggle(field, label) {
 }
 
 function renderAiSettings() {
-    const presets = (settingsPageData && settingsPageData.embedding_model_presets || []).map((preset) => ({
+    const rawPresets = settingsPageData && settingsPageData.embedding_model_presets || [];
+    const presets = rawPresets.map((preset) => ({
         value: preset.key,
         label: preset.label || preset.key,
     }));
+    const selectedPreset = rawPresets.find((preset) => preset.key === settingValue('embed_model_preset'));
     const presetSelect = settingSelect('embed_model_preset', 'Model preset', presets.length ? presets : [
         { value: settingValue('embed_model_preset'), label: settingValue('embed_model_preset') || 'Current preset' },
     ]);
     return detailsSection('AI model',
         `<div class="setting-status">${esc(modelLine())}</div>`
+        + '<div class="setting-status warn">Changing model preset rebuilds the search index and can take a while.</div>'
         + presetSelect
-        + settingInput('search_similarity_threshold', 'Search threshold')
+        + (selectedPreset?.description ? `<div class="setting-hint">${esc(selectedPreset.description)}</div>` : '')
+        + settingInput('search_similarity_threshold', 'Search threshold', { hint: 'Higher is stricter for visual/text search matches.' })
+        + settingToggle('refine_semantic_pairing', 'Use semantic pairing in Refine')
         + '<div class="setting-actions">'
         + '<button class="btn primary" id="drawer-install-model" type="button">Save & install</button>'
         + '</div>');
@@ -459,9 +553,13 @@ function renderImageCacheSettings() {
         + '</div>'
         + '<details class="setting-subdetails"><summary>Advanced</summary>'
         + settingInput('ssd_cache_dir', 'Cache location')
-        + settingInput('import_root', 'Import inbox')
-        + settingToggle('show_loupe_cache_status', 'Show loupe cache status')
         + '</details>');
+}
+
+function renderImportSettings() {
+    return detailsSection('Imports',
+        settingInput('import_root', 'Import inbox')
+    );
 }
 
 function renderThumbnailSettings() {
@@ -473,35 +571,107 @@ function renderThumbnailSettings() {
         + settingInput('thumb_quality', 'JPEG quality')
         + '</div>'
         + '<div class="thumb-policy" role="radiogroup" aria-label="Existing previews policy">'
-        + '<label><input type="radio" name="drawer_thumbnail_cache_policy" value="keep" checked> Keep existing previews</label>'
-        + '<label><input type="radio" name="drawer_thumbnail_cache_policy" value="replace"> Replace existing previews in the background</label>'
+        + `<label><input type="radio" name="drawer_thumbnail_cache_policy" value="keep" ${thumbnailCachePolicy === 'keep' ? 'checked' : ''}> Keep existing previews</label>`
+        + `<label><input type="radio" name="drawer_thumbnail_cache_policy" value="replace" ${thumbnailCachePolicy === 'replace' ? 'checked' : ''}> Replace existing previews in the background</label>`
+        + '</div>'
+        + '<div class="setting-actions">'
+        + settingToggle('show_loupe_cache_status', 'Show loupe cache status')
         + '</div>');
 }
 
 function renderPeopleSettings() {
     return detailsSection('People recognition',
         `<div class="setting-status">${esc(peopleLine())}</div>`
+        + settingToggle('people_scan_enabled', 'Scan for people automatically')
+        + settingToggle('people_auto_install', 'Install people model automatically')
         + settingInput('face_model_id', 'Face model ID')
         + settingInput('face_model_dir', 'Model directory')
         + '<div class="settings-two">'
         + settingInput('face_detection_size', 'Detection size')
-        + settingInput('face_similarity_threshold', 'Cluster threshold')
-        + settingInput('face_merge_suggestion_threshold', 'Merge threshold')
+        + settingInput('face_similarity_threshold', 'Cluster threshold', { hint: 'Higher is stricter when grouping faces.' })
+        + settingInput('face_merge_suggestion_threshold', 'Merge threshold', { hint: 'Higher is stricter before suggesting merges.' })
         + '</div>');
+}
+
+function renderCaptionSettings() {
+    const rawPresets = settingsPageData && settingsPageData.caption_model_presets || [];
+    const presets = rawPresets.map((preset) => ({ value: preset.key, label: preset.label || preset.key }));
+    const selectedPreset = rawPresets.find((preset) => preset.key === settingValue('caption_model_preset'));
+    return detailsSection('Captions',
+        `<div class="setting-status">${esc(captionLine())}</div>`
+        + settingToggle('caption_scan_enabled', 'Caption cached photos automatically')
+        + settingSelect('caption_model_preset', 'Caption model', presets.length ? presets : [
+            { value: settingValue('caption_model_preset'), label: settingValue('caption_model_preset') || 'Current model' },
+        ])
+        + (selectedPreset?.description ? `<div class="setting-hint">${esc(selectedPreset.description)}</div>` : '')
+        + settingInput('caption_batch_size', 'Batch size'));
+}
+
+function renderMetadataSettings() {
+    return detailsSection('Metadata',
+        `<div class="setting-status">${esc(metadataLine())}</div>`
+        + '<div class="setting-hint">Metadata indexing keeps searchable file details current in the background.</div>');
+}
+
+function publishingStatusNote() {
+    const folder = String(settingValue('publish_dir') || '').trim();
+    if (!folder) {
+        return '<div class="setting-status warn">Publishing is off until a Gallery folder is set. Empty folder disables Publish.</div>';
+    }
+    return `<div class="setting-status">Writing galleries to <code>${esc(folder)}</code></div>`;
+}
+
+function updateDrawerContext() {
+    const context = document.getElementById('drawer-context');
+    if (!context) return;
+    if (!publishReturn) {
+        context.hidden = true;
+        context.textContent = '';
+        return;
+    }
+    context.hidden = false;
+    context.textContent = `Publishing setup · return to ${publishReturn.name || 'Publish'}`;
+}
+
+function publishReturnBar() {
+    if (!publishReturn) return '';
+    const name = publishReturn.name || 'collection';
+    return '<div class="publish-return" role="status">'
+        + `<span>Set the folder, save, then return to publish <b>${esc(name)}</b>.</span>`
+        + '<button class="btn primary" id="drawer-return-publish" type="button">Return to Publish</button>'
+        + '</div>';
 }
 
 function renderPublishingSettings() {
     return detailsSection('Publishing',
-        settingInput('publish_dir', 'Gallery folder', { hint: 'Static bundles and manifest.json are written here.' })
-        + settingInput('publish_hook', 'Hook command', { hint: 'Optional command to run after publish or unpublish.' })
-        + settingInput('publish_site_base_url', 'Site base URL', { hint: 'Used for live gallery links.' }));
+        publishReturnBar()
+        + publishingStatusNote()
+        + settingInput('publish_dir', 'Gallery folder', {
+            hint: 'Required. Static bundles and manifest.json are written here. Leave empty to disable publishing.',
+        })
+        + settingInput('publish_hook', 'Hook command', {
+            hint: 'Optional. Runs with Gallery folder as cwd (15 min timeout). Publish still succeeds if the hook fails.',
+        })
+        + settingInput('publish_site_base_url', 'Site base URL', {
+            hint: 'Display-only for in-app links (e.g. https://photos.example.com). Does not serve files.',
+        })
+        + settingInput('share_brand_name', 'Gallery brand name', {
+            hint: 'Shown on private share links and published galleries as the photographer or studio name.',
+        }));
 }
 
 function renderSettingsSections() {
     if (!settingsPageData) {
         return '<section class="dr-sec"><h3>Settings</h3><div class="muted">Loading settings…</div></section>';
     }
-    return renderPublishingSettings() + renderAiSettings() + renderImageCacheSettings() + renderThumbnailSettings() + renderPeopleSettings();
+    return renderPublishingSettings()
+        + renderAiSettings()
+        + renderImageCacheSettings()
+        + renderThumbnailSettings()
+        + renderImportSettings()
+        + renderPeopleSettings()
+        + renderCaptionSettings()
+        + renderMetadataSettings();
 }
 
 function renderSettingsSaveBar() {
@@ -534,24 +704,54 @@ function renderPrefs() {
         + '</section>';
 }
 
+function focusPublishingSection() {
+    const drawer = document.getElementById('drawer');
+    const section = drawer?.querySelector('.dr-details[data-settings-section="Publishing"]');
+    if (!section) return;
+    section.open = true;
+    openSettingSections.add('Publishing');
+    section.classList.add('focus-target');
+    const field = section.querySelector('#drawer-setting-publish_dir');
+    requestAnimationFrame(() => {
+        section.scrollIntoView({ block: 'start', behavior: 'smooth' });
+        field?.focus();
+        window.setTimeout(() => section.classList.remove('focus-target'), 2400);
+    });
+}
+
 function renderDrawer() {
     const body = document.getElementById('drawer-body');
     if (!body) return;
     openSettingSections = new Set(Array.from(body.querySelectorAll('.dr-details[open] summary span'))
         .map((el) => el.textContent || ''));
+    if (publishingFocusPending || publishReturn) openSettingSections.add('Publishing');
     body.innerHTML = renderSources() + renderWork() + renderSharedHome() + renderSettingsSections() + renderStorage() + renderRemote() + renderPrefs() + renderSettingsSaveBar();
+    updateDrawerContext();
     bindDrawerActions();
+    if (publishingFocusPending && body.querySelector('.dr-details[data-settings-section="Publishing"]')) {
+        publishingFocusPending = false;
+        focusPublishingSection();
+    }
 }
 
 async function refreshDrawer() {
-    const requests = [getCatalog(), getAiStatus(), getCacheStatus(), getPeopleStatus(), getRemoteAccess()];
-    if (!settingsPageData) requests.push(getSettings());
-    const [nextCatalog, ai, cache, people, remote, settingsData] = await Promise.all(requests);
-    if (settingsData) applySettingsData(settingsData);
+    const [nextCatalog, ai, cache, people, captions, metadata, remote, settingsData] = await Promise.all([
+        getCatalog().catch(() => null),
+        getAiStatus().catch(() => null),
+        getCacheStatus().catch(() => null),
+        getPeopleStatus().catch(() => null),
+        getCaptionStatus().catch(() => null),
+        getMetadataStatus().catch(() => null),
+        getRemoteAccess().catch(() => null),
+        getSettings().catch(() => null),
+    ]);
+    if (settingsData) applySettingsData(settingsData, { preserveDirtyExcept: new Set() });
     catalog = nextCatalog || catalog;
     aiStatus = ai || aiStatus;
     cacheStatus = cache || cacheStatus;
     peopleStatus = people || peopleStatus;
+    captionStatus = captions || captionStatus;
+    metadataStatus = metadata || metadataStatus || (settingsData && settingsData.metadata_status);
     remoteAccess = remote || remoteAccess;
     renderActivity();
     if (!drawerEditing()) renderDrawer();
@@ -561,12 +761,12 @@ async function pollScanUntilDone(sourceId) {
     scanSourceId = Number(sourceId) || null;
     clearInterval(scanTimer);
     const tick = async () => {
-        const status = await getScanStatus();
+        const status = await getScanStatus().catch(() => null);
         if (!status || !status.scanning) {
             clearInterval(scanTimer);
             scanTimer = null;
             scanSourceId = null;
-            catalog = await getCatalog();
+            catalog = await getCatalog().catch(() => catalog);
             renderDrawer();
             showToast('Source scan finished');
             return;
@@ -597,7 +797,7 @@ async function handleRemove(card, mode) {
     const sourceId = Number(card.dataset.sourceId);
     const result = await removeCatalogSource(sourceId, mode);
     if (result && result.ok) {
-        catalog = result.catalog || await getCatalog();
+        catalog = result.catalog || await getCatalog().catch(() => catalog);
         renderDrawer();
         showToast(mode === 'keep' ? 'Source removed; photos kept in catalog' : 'Source and catalog data removed. Undo is unavailable.');
     } else showToast('Source could not be removed');
@@ -644,7 +844,22 @@ function bindSettingInputs(body) {
         });
     }
     for (const input of body.querySelectorAll('input[name="drawer_thumbnail_cache_policy"]')) {
-        input.addEventListener('change', updateSaveBar);
+        input.addEventListener('change', () => {
+            thumbnailCachePolicy = input.value || 'keep';
+            updateSaveBar();
+        });
+    }
+}
+
+async function withBusyAction(key, button, action) {
+    if (busyActions.has(key) || button?.disabled) return;
+    busyActions.add(key);
+    if (button) button.disabled = true;
+    try {
+        await action();
+    } finally {
+        busyActions.delete(key);
+        if (button && document.contains(button)) button.disabled = false;
     }
 }
 
@@ -664,6 +879,19 @@ function applyCacheDefaults() {
     showToast('Cache defaults applied; save settings to keep them');
 }
 
+async function returnToPublish() {
+    const target = publishReturn;
+    publishReturn = null;
+    updateDrawerContext();
+    closeSystemDrawer();
+    if (!target?.collectionId) {
+        showToast('Open Publish from the collection when ready');
+        return;
+    }
+    const { openPublishOverlay } = await import('./panel.js');
+    openPublishOverlay(target.collectionId, target.name || 'Collection');
+}
+
 async function saveDrawerSettings() {
     if (!dirtySettings.size) return;
     if (hasInvalidSetting()) {
@@ -676,6 +904,12 @@ async function saveDrawerSettings() {
         applySettingsData(result);
         renderActivity();
         renderDrawer();
+        const folderReady = Boolean(String(settingValue('publish_dir') || '').trim());
+        if (publishReturn && folderReady) {
+            showToast('Publishing folder saved');
+            returnToPublish();
+            return;
+        }
         showToast('Settings saved');
     } else {
         showToast('Settings could not be saved');
@@ -750,14 +984,16 @@ function bindDrawerActions() {
     const body = document.getElementById('drawer-body');
     bindSettingInputs(body);
     body.querySelector('#drawer-cache-defaults')?.addEventListener('click', applyCacheDefaults);
-    body.querySelector('#drawer-save-settings')?.addEventListener('click', saveDrawerSettings);
-    body.querySelector('#drawer-reset-settings')?.addEventListener('click', resetDrawerSettings);
-    body.querySelector('#drawer-install-model')?.addEventListener('click', saveAndInstallModel);
+    body.querySelector('#drawer-save-settings')?.addEventListener('click', (event) => withBusyAction('settings-save', event.currentTarget, saveDrawerSettings));
+    body.querySelector('#drawer-reset-settings')?.addEventListener('click', (event) => withBusyAction('settings-reset', event.currentTarget, resetDrawerSettings));
+    body.querySelector('#drawer-install-model')?.addEventListener('click', (event) => withBusyAction('model-install', event.currentTarget, saveAndInstallModel));
+    body.querySelector('#drawer-return-publish')?.addEventListener('click', returnToPublish);
     body.querySelector('#add-source-form')?.addEventListener('submit', async (event) => {
         event.preventDefault();
         const input = event.currentTarget.querySelector('input[name="path"]');
         const path = input ? input.value.trim() : '';
         if (!path) return;
+        await withBusyAction('source-add', event.currentTarget.querySelector('button'), async () => {
         const result = await addCatalogSource(path, true);
         if (result && result.ok) {
             catalog = result.catalog || catalog;
@@ -766,15 +1002,16 @@ function bindDrawerActions() {
             showToast('Source added; scan started');
             pollScanUntilDone(result.source && result.source.id);
         } else showToast('Source could not be added');
+        });
     });
     for (const btn of body.querySelectorAll('[data-act]')) {
         btn.addEventListener('click', () => {
             if (btn.getAttribute('aria-disabled') === 'true') return;
-            handleSourceAction(btn.closest('.src-card'), btn.dataset.act);
+            withBusyAction(`source-${btn.dataset.act}-${btn.closest('.src-card')?.dataset.sourceId || ''}`, btn, () => handleSourceAction(btn.closest('.src-card'), btn.dataset.act));
         });
     }
     for (const btn of body.querySelectorAll('[data-mode]')) {
-        btn.addEventListener('click', () => handleRemove(btn.closest('.src-card'), btn.dataset.mode));
+        btn.addEventListener('click', () => withBusyAction(`source-remove-${btn.closest('.src-card')?.dataset.sourceId || ''}`, btn, () => handleRemove(btn.closest('.src-card'), btn.dataset.mode)));
     }
     for (const btn of body.querySelectorAll('[data-remove-cancel]')) {
         btn.addEventListener('click', () => {
@@ -783,7 +1020,7 @@ function bindDrawerActions() {
         });
     }
     for (const btn of body.querySelectorAll('[data-worker-action]')) {
-        btn.addEventListener('click', async () => {
+        btn.addEventListener('click', () => withBusyAction(`worker-${btn.dataset.workerAction}`, btn, async () => {
             const key = btn.dataset.workerAction;
             let result = null;
             if (key === 'ai') result = aiStatus && aiStatus.embedding_manual_pause ? await resumeAiEmbeddings() : await pauseAiEmbeddings();
@@ -795,18 +1032,28 @@ function bindDrawerActions() {
                 const worker = (peopleStatus && peopleStatus.worker) || {};
                 result = worker.manual_pause ? await resumePeopleScan() : await pausePeopleScan();
             }
+            if (key === 'captions') result = captionStatus && captionStatus.active ? await pauseCaptionScan() : await resumeCaptionScan();
+            if (key === 'metadata') result = metadataStatus && metadataStatus.manual_pause ? await startMetadataScan() : await stopMetadataScan();
             if (!result) showToast('Worker command did not save');
             await refreshDrawer();
-        });
+        }));
     }
-    body.querySelector('#clear-cache-btn')?.addEventListener('click', async () => {
+    body.querySelector('#clear-cache-btn')?.addEventListener('click', (event) => withBusyAction('clear-cache', event.currentTarget, async () => {
+        const count = Number(event.currentTarget.dataset.cacheFiles || 0);
+        const confirmed = await confirmTypedCount({
+            title: 'Clear image cache?',
+            message: 'This deletes generated previews from disk and cannot be undone. Type the file count to continue.',
+            count,
+            confirmLabel: 'Clear cache',
+        });
+        if (!confirmed) return;
         const result = await clearCache();
         if (result && result.ok) {
-            cacheStatus = result.cache_stats || await getCacheStatus();
+            cacheStatus = result.cache_stats || await getCacheStatus().catch(() => cacheStatus);
             renderDrawer();
             showToast('Cache cleared. Undo is unavailable.');
         } else showToast('Cache could not be cleared');
-    });
+    }));
     body.querySelector('#copy-remote')?.addEventListener('click', async (event) => {
         if (event.currentTarget.getAttribute('aria-disabled') === 'true') return;
         const url = (remoteAccess && remoteAccess.tailscale && remoteAccess.tailscale.url) || remoteAccess.current_url || '';
@@ -841,8 +1088,44 @@ function stopDrawerPolling() {
     installTimer = null;
 }
 
+function resolvePublishReturnTarget() {
+    const title = document.querySelector('#publish-overlay #publish-title')?.textContent || '';
+    const name = title.replace(/^Publish\s+/, '').trim() || 'Collection';
+    const sharedRow = Array.from(document.querySelectorAll('.shared-row'))
+        .find((row) => (row.dataset.name || '') === name);
+    if (sharedRow?.dataset.collectionId) {
+        return { collectionId: Number(sharedRow.dataset.collectionId), name };
+    }
+    const collRow = Array.from(document.querySelectorAll('.coll-row'))
+        .find((row) => (row.dataset.collName || '') === name);
+    if (collRow?.dataset.collId) {
+        return { collectionId: Number(collRow.dataset.collId), name };
+    }
+    if (scope.collectionId && (scope.collectionName || '') === name) {
+        return { collectionId: Number(scope.collectionId), name };
+    }
+    if (scope.collectionId) {
+        return { collectionId: Number(scope.collectionId), name: scope.collectionName || name };
+    }
+    return { collectionId: 0, name };
+}
+
+export function openPublishingSettings({ returnTo = null } = {}) {
+    publishReturn = returnTo;
+    publishingFocusPending = true;
+    openSettingSections.add('Publishing');
+    if (open) {
+        renderDrawer();
+        return;
+    }
+    openSystemDrawer();
+}
+
 export function openSystemDrawer() {
-    if (open) return;
+    if (open) {
+        if (publishingFocusPending || publishReturn) renderDrawer();
+        return;
+    }
     const drawer = document.getElementById('drawer');
     const scrim = document.getElementById('drawer-scrim');
     open = true;
@@ -862,6 +1145,8 @@ export function closeSystemDrawer() {
     const scrim = document.getElementById('drawer-scrim');
     open = false;
     resetConfirmArmed = false;
+    publishingFocusPending = false;
+    updateDrawerContext();
     scrim.classList.remove('on');
     drawer.classList.remove('on');
     drawer.setAttribute('aria-hidden', 'true');
@@ -888,6 +1173,15 @@ export function initDrawer() {
             closeSystemDrawer();
         }
     });
+    document.addEventListener('click', (event) => {
+        const button = event.target.closest('#publish-open-settings');
+        if (!button) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        const returnTo = resolvePublishReturnTarget();
+        document.getElementById('publish-close')?.click();
+        openPublishingSettings({ returnTo });
+    }, true);
     on('thumbsize', () => {
         const input = document.getElementById('drawer-thumb-size');
         if (input) input.value = String(viewState.thumbSize);

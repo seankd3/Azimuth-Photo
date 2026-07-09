@@ -1,99 +1,148 @@
 # Feature Guide
 
-photoArchive is organized around four main screens: Catalog, Library, Compare,
-and People.
+photoArchive opens into one desktop shell at `/` or `/d`. The current scope is
+shared across the grid, lenses, overlays, panels, exports, and background work.
 
-## Catalog
+## Desktop Shell
 
-Catalog is the setup and control room.
+- The top lens switcher shows **Grid**, **Events**, **People**, and **Map**.
+- The left panel holds Collections, Library shortcuts, Folders, Sources, and
+  Tools: **Export view**, **Shared**, **Stacks**, and **Import**.
+- The context bar shows scope breadcrumbs, count, Sorted %, filters, **Refine**,
+  **Best of**, sort, sort direction, auto-advance, and thumbnail size.
+- The right panel shows histogram, ranking, metadata, caption, and selection
+  details for the focused photo.
+- The System drawer owns source setup, background work, publishing, import,
+  cache, AI, People, caption, metadata, remote-access, and preference settings.
 
-- Add source folders with **Choose Folder**, **Tree Browse**, or a typed path.
-- Scan and rescan folders when files change on disk.
-- Remove sources from the active catalog without deleting source photo folders.
-- Keep temporarily offline drives browseable from cached previews, search data,
-  rankings, and People labels while source-file work waits for the drive.
-- Start or stop the three Background Work jobs: Search, Previews, and People.
-- Install the local semantic-search model.
-- Configure People recognition and review local face model status.
-- Tune thumbnail sizes, JPEG quality, RAM cache, SSD cache, cache profile, and
-  idle cache warming.
-- Clear generated cache files when previews should be rebuilt.
+## Browsing And Lenses
 
-## Library
+- **Grid** is the daily browsing and culling surface.
+- **Events** groups the current scope by capture-time gaps.
+- **People** shows **Named people**, **Unnamed**, and **Review merges**.
+- **Map** shows photos with GPS metadata.
+- Filters compose across text, person, folder, date, file type, camera, lens,
+  tag, orientation, flag, minimum rating, and ranked/unranked states.
+- Folder scope can include multiple folders at once; the API receives repeated
+  `folder` query parameters.
+- The sort menu exposes **Rating**, **Date**, **Camera**, **Filename**, and
+  **Size**. The adjacent sort-direction button toggles ascending/descending.
+- **Best of** narrows the current non-collection scope to the top slice by
+  rating.
 
-Library is for daily browsing, culling, filtering, and export.
+## Search, Captions, Tags, And Similarity
 
-- Sort by rating, confidence, date taken, date modified, file size, resolution,
-  camera, or filename.
-- Search with text. Metadata search works without AI; semantic search improves
-  as local embeddings are built.
-- Filter by orientation, ranked/unranked/confident status, flag, minimum stars,
-  person, one or more folders, date, file type, camera, and lens.
-- Switch between **Grid** and **Map** when photos have GPS metadata.
-- Use the thumbnail-size slider to choose dense browsing or larger inspection.
-- Open the loupe for progressive image loading, zoom, pan, filmstrip
-  navigation, metadata overlay, and optional cache status.
-- Flag photos as picked, unflagged, or rejected.
-- Use **Select** for batch flagging and selected-image JSON/CSV export.
-- Export the current ranked and filtered result set as JSON or CSV.
-- Smart collections currently save a single folder scope; multi-folder live
-  scopes are intentionally rejected until the smart-query vocabulary expands.
+- Metadata search works without AI. Semantic search and similar-photo results
+  improve as local embeddings are built.
+- The omnibox supports facet completions such as `camera:`, `lens:`, `folder:`,
+  `tag:`, and natural typed searches.
+- The **Deep** chip appears for a typed search and asks the app to use the
+  active embedding model when that differs from the fast search model. It is a
+  live query mode, not a background queue or separate cache product.
+- Captions and tags are generated locally when the Captions worker is enabled.
+  Captions appear in the right panel, `/api/image/{id}/caption`, and the
+  caption full-text index; tags appear in `/api/tags` and `tag:` scopes.
+- Similar-photo workflows use `/api/similar/{image_id}` and can scope the grid
+  to the top 100, 250, or 500 similar images.
+- Advanced local APIs also include `/api/duplicates` and
+  `/api/image/{image_id}/exif`.
 
-## Compare
+## Collections
 
-Compare builds ranking signal from your choices.
+- Collections live in the left panel and use `/api/user-collections`.
+- Create regular collections manually, add/remove selected photos, rename, or
+  delete collections.
+- Smart collections save a live query from the current scope. Supported smart
+  keys include `q`, `people`, `folder`, `camera`, `lens`, `tag`, `flag`,
+  `date_taken`, `file_type`, `orientation`, `compared`, `min_stars`, and
+  `sort`.
+- Live browsing can scope multiple folders. Smart collection save keeps one
+  folder value when exactly one folder is active; multi-folder live scopes are
+  browsable but not persisted as multi-folder smart rules.
+- Collection suggestions are exposed at `/api/collections/suggestions`.
 
-- **Mosaic** shows a grid. Pick the best image and the app records one winner
+## Refine
+
+Refine is the ranking overlay for the current scope.
+
+- **Mosaic** shows a grid. Pick the best photo and the app records one winner
   against the visible alternatives.
-- **Swiss** shows A/B matchups chosen to improve ranking confidence.
-- **Top 50** focuses comparison work on the current best images.
-- Mosaic strategies control the pool: **Diverse**, **Explore**, **Compete**,
-  **Top Cut**, and **Random**.
-- Search and filters limit the comparison pool just like Library.
-- **Shuffle** refreshes Mosaic candidates.
-- Undo is available from the toolbar or the up-arrow shortcut.
-- The bottom bar shows rank-signal count, pool size, coverage, and background
-  work status.
+- **Duel** shows A/B choices.
+- Strategies are **Diverse**, **Explore**, **Compete**, and **Random**.
+- Search, filters, people, folder, tag, collection, import, and similar scopes
+  limit the Refine pool just like the grid.
+- Semantic pairing can compare like-with-like when enabled.
+- **Shuffle** refreshes candidates. **Undo** is available from the toolbar or
+  `Ctrl+Z`.
+- The overlay shows pick count, pace, Sorted %, and propagation feedback.
 
-## People
+## Stacks
 
-People recognition runs locally from app-generated cached previews.
+Stacks group related photos behind one cover.
 
-- The People page groups results into **Most Seen**, **Named People**,
-  **Needs Review**, and **Other Faces**.
-- Add labels to people you recognize.
-- Merge suggested duplicates when two groups are the same person.
-- Ignore unwanted groups.
-- Use People filters in Library and Compare to narrow browsing and ranking to a
-  person.
+- Builders detect burst sequences, export variants, and cross-source
+  duplicates.
+- The grid can collapse stack members by default or show expanded stacks.
+- The Stacks tool shows review rows, ad-hoc scans, stack metadata differences,
+  cover promotion, unstacking, and "trash non-covers" workflows.
+- Stack APIs live under `/api/stacks`.
 
-## Search, Similarity, And AI
+## Trash
 
-photoArchive uses a local embedding index for interactive semantic search.
-Metadata search works without an AI model, and semantic search becomes
-available as local embeddings are built.
+Trash is the reversible delete surface.
 
-Advanced local API surfaces also exist for similar images, duplicates, EXIF, and
-collections:
+- `Delete` and stack cleanup actions move originals into a `.trash` area under
+  the source root.
+- Trashed images leave normal active views and appear in the Trash tool.
+- Restore uses `/api/images/restore`; listing uses `/api/trash`.
+- Empty trash permanently deletes the moved files via `/api/trash/empty`.
 
-```text
-/api/similar/{image_id}
-/api/duplicates
-/api/image/{image_id}/exif
-/api/collections
-```
+## Shared And Publishing
+
+- **Share** creates private collection galleries at `/s/{token}` through
+  `/api/user-collections/{id}/share`.
+- Share links can be password protected, revoked, rotated, and inspected for
+  client favorites.
+- **Publish to website** writes static gallery bundles into the configured
+  `publish_dir` through `/api/user-collections/{id}/publish`.
+- The **Shared** view aggregates private links and website publishes through
+  `/api/shares`, including expiry, picks, local publish state, live URLs, and
+  hook failures.
+- See [Publishing Static Galleries](publishing.md) for `publish_dir`,
+  `publish_hook`, and `publish_site_base_url`.
+
+## Import And Export
+
+- Import accepts dropped photos, chosen files, or a chosen folder and can
+  preserve folder structure into the configured import inbox.
+- **Past imports** lists recent batches from `/api/imports`; selecting a batch
+  scopes the grid with `import_batch`.
+- Export can write the current view or selected IDs as JSON, CSV, or ZIP.
+- ZIP export supports original or preview sizes, path hardening, size budgets,
+  and manifest reporting.
 
 ## Background Work
 
-The bottom **Work** panel appears in Library and Compare. It summarizes the
-manual jobs: Search, Previews, and People. Previews includes full-size cache
-copies when storage permits.
+The compact activity widget opens the System drawer. Background work rows are:
 
-Start jobs only when you want them to run. Nearby previews, next-image warmups,
-and hot full-size cache fills stay on automatically for responsive browsing.
+- **AI embeddings**
+- **Cache pregeneration**
+- **People scan**
+- **Captions**
+- **Metadata**
+
+Rows use **Pause** and **Resume** language where applicable. Heavy workers stay
+local, and GPU-heavy work is coordinated so model jobs do not fight each other.
 
 ## Keyboard Shortcuts
 
-- Library: arrow keys navigate, Enter opens the loupe, `P` picks, `X` rejects,
-  `U` clears the flag, Tab jumps to Compare, Esc clears selection.
-- Loupe: left/right moves through photos, scroll zooms, Esc closes.
+- Grid: arrow keys navigate, Enter opens Loupe, `P` picks, `X` rejects, `U`
+  clears the flag, `Delete` moves the selection to Trash, `S` expands or acts
+  on a stack, `F` opens filters, `J` cycles density, and Esc clears layers or
+  selection.
+- Refine: `R` opens Refine, `1`-`4` pick in Mosaic, left/right choose in Duel,
+  and `Ctrl+Z` undoes a pick.
+- Loupe: left/right moves through photos, Space toggles zoom, `I` toggles info,
+  `L` toggles lights-out, `P`/`X`/`U` flags, and Esc returns to Grid.
+- Stacks and People: arrows move inside review surfaces; `C`, `K`/Enter, `U`,
+  `Y`, and `N` drive cover, keep, unstack, and merge-review actions.

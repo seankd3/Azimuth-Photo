@@ -12,6 +12,7 @@ import {
 } from './state.js';
 import { dismissLayer } from './history.js';
 import { dismissSheetThen, openSheet } from './selection.js';
+import { showToast } from './toast.js';
 import { openViewer } from './viewer.js';
 import { tick } from './haptics.js';
 import { icon } from '../icons.js';
@@ -378,7 +379,12 @@ function rankingParams(offset) {
 }
 
 async function loadHistogram() {
-    const data = await getDateHistogram(scopeParams());
+    let data = null;
+    try {
+        data = await getDateHistogram(scopeParams());
+    } catch {
+        return;
+    }
     if (!data) return;
     histogram = data;
     monthOffsets = [];
@@ -417,10 +423,15 @@ export async function reload() {
         pane.scrollTop = 0;
         return;
     }
-    const [, page] = await Promise.all([
-        loadHistogram(),
-        getRankings(rankingParams(0)),
-    ]);
+    let page = null;
+    try {
+        [, page] = await Promise.all([
+            loadHistogram(),
+            getRankings(rankingParams(0)),
+        ]);
+    } catch {
+        page = null;
+    }
     if (gen !== generation) return;
     timeline.innerHTML = '';
     timeline.classList.toggle('m-z5', zoomIdx === 1);
@@ -446,7 +457,14 @@ export async function loadMore() {
     if (loadingNext || endReached || zoomIdx === 2) return;
     loadingNext = true;
     const gen = generation;
-    const page = await getRankings(rankingParams(startOffset + images.length));
+    let page = null;
+    try {
+        page = await getRankings(rankingParams(startOffset + images.length));
+    } catch {
+        loadingNext = false;
+        showToast('More photos could not load');
+        return;
+    }
     loadingNext = false;
     if (gen !== generation || !page || !Array.isArray(page.images)) return;
     if (!page.images.length) {
@@ -469,7 +487,14 @@ async function loadPrev() {
     const gen = generation;
     const newStart = Math.max(0, startOffset - PAGE);
     const params = scopeParams({ limit: startOffset - newStart, offset: newStart, sort: viewPrefs.sort || 'date_taken' });
-    const page = await getRankings(params);
+    let page = null;
+    try {
+        page = await getRankings(params);
+    } catch {
+        loadingPrev = false;
+        showToast('Earlier photos could not load');
+        return;
+    }
     loadingPrev = false;
     if (gen !== generation || !page || !Array.isArray(page.images) || !page.images.length) return;
     images = page.images.concat(images);
@@ -513,7 +538,15 @@ export async function jumpToMonth(key) {
     endEl.hidden = true;
     renderSkeleton();
     pane.scrollTop = 0;
-    const page = await getRankings(rankingParams(entry.offset));
+    let page = null;
+    try {
+        page = await getRankings(rankingParams(entry.offset));
+    } catch {
+        if (gen !== generation) return;
+        timeline.innerHTML = '<div class="ms-empty" style="padding:40px 16px;text-align:center">Couldn\'t load photos.</div>';
+        endEl.hidden = true;
+        return;
+    }
     if (gen !== generation) return;
     timeline.innerHTML = '';
     if (page && Array.isArray(page.images)) {

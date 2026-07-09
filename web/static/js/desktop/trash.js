@@ -194,7 +194,19 @@ async function loadTrash() {
     loading = true;
     loadError = false;
     render();
-    const data = await getTrash({ limit: 500, offset: 0 });
+    let data = null;
+    try {
+        data = await getTrash({ limit: 500, offset: 0 });
+    } catch {
+        if (seq !== loadGeneration || !root?.isConnected || !open) return;
+        images = [];
+        total = 0;
+        totalBytes = 0;
+        loading = false;
+        loadError = true;
+        render();
+        return;
+    }
     if (seq !== loadGeneration || !root?.isConnected || !open) return;
     if (!data) {
         images = [];

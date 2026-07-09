@@ -161,6 +161,10 @@ class ShareTests(BackendTestCase):
         self.assertEqual([row["image_id"] for row in favorites], [first, second])
 
     async def test_public_gallery_returns_200_and_404(self):
+        settings.save_settings({
+            "share_brand_name": "Northstar Studio",
+            "publish_site_base_url": "https://photos.example.test",
+        })
         collection, *_ = await self._collection_with_images()
         share = await db.create_or_rotate_share(collection["id"])
 
@@ -177,6 +181,12 @@ class ShareTests(BackendTestCase):
 
         self.assertEqual(ok.status_code, 200)
         self.assertIn("Shared set", ok.text)
+        self.assertIn("Northstar Studio", ok.text)
+        self.assertIn("https://photos.example.test", ok.text)
+        self.assertIn("Download all", ok.text)
+        self.assertIn("Download photo", ok.text)
+        self.assertIn("Photo 1 of 2", ok.text)
+        self.assertIn("your photographer sees these", ok.text)
         self.assertEqual(ok.headers.get("referrer-policy"), "no-referrer")
         self.assertEqual(missing.status_code, 404)
         self.assertIn("Share unavailable", missing.text)
@@ -523,6 +533,9 @@ class ShareTests(BackendTestCase):
         response = await asyncio.to_thread(probe)
 
         self.assertEqual(response.status_code, 413)
+        self.assertIn("text/html", response.headers.get("content-type", ""))
+        self.assertIn("That password is too long.", response.text)
+        self.assertNotIn("gallery-data", response.text)
 
     async def test_share_unlock_throttles_repeated_failures_by_token(self):
         collection, *_ = await self._collection_with_images()
@@ -569,6 +582,9 @@ class ShareTests(BackendTestCase):
 
         self.assertEqual([response.status_code for response in failures], [303] * share_routes.UNLOCK_FAILURE_LIMIT)
         self.assertEqual(throttled.status_code, 429)
+        self.assertIn("text/html", throttled.headers.get("content-type", ""))
+        self.assertIn("Too many tries", throttled.text)
+        self.assertNotIn("gallery-data", throttled.text)
         self.assertGreater(int(throttled.headers.get("retry-after", "0")), 0)
         self.assertEqual(recovered.status_code, 303)
         self.assertNotIn(share["token"], share_routes._unlock_failures)

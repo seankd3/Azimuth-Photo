@@ -12,6 +12,7 @@ const DEFAULT_PREFS = {
     badgeFlag: true,
     badgeElo: true,
     badgeIndex: true,
+    autoAdvanceFlags: true,
     collapseStacks: true,
     reduceMotion: false,
     panelSections: {},
@@ -160,6 +161,7 @@ function normalizePrefs(value) {
         badgeFlag: saved.badgeFlag == null ? DEFAULT_PREFS.badgeFlag : Boolean(saved.badgeFlag),
         badgeElo: saved.badgeElo == null ? DEFAULT_PREFS.badgeElo : Boolean(saved.badgeElo),
         badgeIndex: saved.badgeIndex == null ? DEFAULT_PREFS.badgeIndex : Boolean(saved.badgeIndex),
+        autoAdvanceFlags: saved.autoAdvanceFlags == null ? DEFAULT_PREFS.autoAdvanceFlags : Boolean(saved.autoAdvanceFlags),
         collapseStacks: saved.collapseStacks == null ? DEFAULT_PREFS.collapseStacks : Boolean(saved.collapseStacks),
         reduceMotion: saved.reduceMotion == null ? DEFAULT_PREFS.reduceMotion : Boolean(saved.reduceMotion),
         panelSections,
@@ -189,6 +191,8 @@ function applyPrefs() {
     html.dataset.badgesElo = prefs.badgeElo ? '1' : '0';
     html.dataset.badgesIndex = prefs.badgeIndex ? '1' : '0';
     html.dataset.motion = prefs.reduceMotion ? 'reduced' : 'full';
+    const autoAdvance = document.getElementById('auto-advance-flags');
+    if (autoAdvance) autoAdvance.checked = Boolean(prefs.autoAdvanceFlags);
 }
 
 export function on(event, fn) {

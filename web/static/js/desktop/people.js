@@ -17,6 +17,7 @@ let pendingMerge = null;
 let mergeSourceId = null;
 let loadError = false;
 let peopleStatus = null;
+let reviewFocusIndex = 0;
 
 const hiddenPeople = new Set();
 const ignoreTimers = new Map();
@@ -112,7 +113,7 @@ function reviewCard(suggestion) {
     const source = suggestion.source || { id: suggestion.source_person_id, label: suggestion.source_label };
     const target = suggestion.target || { id: suggestion.target_person_id, label: suggestion.target_label };
     const confidence = Math.round(Number(suggestion.confidence || 0) * 100);
-    return `<article class="review-card" data-suggestion-id="${esc(suggestion.id)}" data-source-id="${esc(suggestion.source_person_id)}" data-target-id="${esc(suggestion.target_person_id)}">`
+    return `<article class="review-card" data-suggestion-id="${esc(suggestion.id)}" data-source-id="${esc(suggestion.source_person_id)}" data-target-id="${esc(suggestion.target_person_id)}" tabindex="0">`
         + '<div class="review-pair">'
         + personMini(source, suggestion.source_label)
         + '<span class="review-link" aria-hidden="true"></span>'
@@ -215,6 +216,23 @@ function removeSuggestion(suggestionId) {
     const review = peopleData?.sections?.needs_review || [];
     const suggestion = review.find((item) => String(item.id) === String(suggestionId));
     if (suggestion) suggestion._done = true;
+}
+
+function reviewCards() {
+    return [...document.querySelectorAll('#people-flow .review-card[data-suggestion-id]')];
+}
+
+function reviewCardIndex(card) {
+    const cards = reviewCards();
+    return Math.max(0, cards.indexOf(card));
+}
+
+function focusReviewCard(index = reviewFocusIndex) {
+    const cards = reviewCards();
+    if (!cards.length) return false;
+    reviewFocusIndex = Math.max(0, Math.min(cards.length - 1, Number(index) || 0));
+    cards[reviewFocusIndex]?.focus({ preventScroll: true });
+    return true;
 }
 
 function openPerson(person) {
@@ -324,18 +342,26 @@ function requestIgnore(card, person) {
     });
 }
 
-async function runMerge(sourceId, targetId, trigger = null) {
-    if (!sourceId || !targetId || String(sourceId) === String(targetId)) return;
+async function runMerge(sourceId, targetId, trigger = null, options = {}) {
+    if (!sourceId || !targetId || String(sourceId) === String(targetId)) return false;
     trigger?.classList.add('is-pending');
     const result = await mergePeople(sourceId, targetId);
     if (result && result.ok) {
         showToast('People merged');
         mergeSourceId = null;
-        peopleData = null;
+        if (options.suggestionId) {
+            removeSuggestion(options.suggestionId);
+            render();
+            focusReviewCard(options.reviewIndex);
+        } else {
+            peopleData = null;
+        }
         load();
+        return true;
     } else {
         trigger?.classList.remove('is-pending');
         showToast("Couldn't merge people");
+        return false;
     }
 }
 
@@ -344,9 +370,11 @@ async function handleReview(button, card) {
     const suggestionId = card.dataset.suggestionId;
     const sourceId = card.dataset.sourceId;
     const targetId = card.dataset.targetId;
+    reviewFocusIndex = reviewCardIndex(card);
     if (action === 'merge') {
-        const rect = button.getBoundingClientRect();
-        showMergePopover(sourceId, targetId, rect, { suggestionId, sourceLabel: 'Suggested match' });
+        card.classList.add('is-pending');
+        const merged = await runMerge(sourceId, targetId, button, { suggestionId, reviewIndex: reviewFocusIndex });
+        if (!merged) card.classList.remove('is-pending');
         return;
     }
     card.classList.add('is-pending');
@@ -355,11 +383,25 @@ async function handleReview(button, card) {
         removeSuggestion(suggestionId);
         showToast('Suggestion rejected');
         render();
+        focusReviewCard(reviewFocusIndex);
         load();
     } else {
         card.classList.remove('is-pending');
         showToast("Couldn't reject suggestion");
     }
+}
+
+export function reviewPeopleMergeByKey(action) {
+    if (!mounted || document.getElementById('people-merge-pop')) return false;
+    const active = document.activeElement?.closest?.('.review-card[data-suggestion-id]');
+    const card = active || reviewCards()[reviewFocusIndex] || reviewCards()[0];
+    if (!card) return false;
+    reviewFocusIndex = reviewCardIndex(card);
+    const selector = action === 'merge' ? '[data-act="merge"]' : '[data-act="reject"]';
+    const button = card.querySelector(selector);
+    if (!button || button.disabled || card.classList.contains('is-pending')) return false;
+    handleReview(button, card);
+    return true;
 }
 
 function mergePopoverHtml(source, target, options = {}) {
@@ -519,7 +561,10 @@ export function initPeople() {
         if (confirm && pendingMerge) {
             const merge = pendingMerge;
             closeMergePopover();
-            runMerge(merge.sourceId, merge.targetId);
+            runMerge(merge.sourceId, merge.targetId, null, {
+                suggestionId: merge.suggestionId,
+                reviewIndex: reviewFocusIndex,
+            });
             if (merge.suggestionId) removeSuggestion(merge.suggestionId);
         } else if (cancel) {
             closeMergePopover();

@@ -121,9 +121,13 @@ function pulsePropagation(count) {
 }
 
 async function refreshPropagation() {
-    const data = await getPropagationLast();
-    const count = Number(data && data.count) || 0;
-    pulsePropagation(count);
+    try {
+        const data = await getPropagationLast();
+        const count = Number(data && data.count) || 0;
+        pulsePropagation(count);
+    } catch {
+        /* Decorative status only. Pick save failures are handled separately. */
+    }
 }
 
 function setImagesLoadedHandlers() {
@@ -158,6 +162,13 @@ function renderSet() {
     setImagesLoadedHandlers();
 }
 
+function renderLoadError() {
+    const stage = document.getElementById('refine-stage');
+    stage.className = stageClassName();
+    stage.innerHTML = '<div class="load-error"><h4>Couldn\'t load Refine</h4><p>The archive did not respond. Try again.</p><button class="btn" id="refine-retry" type="button">Try again</button></div>';
+    stage.querySelector('#refine-retry')?.addEventListener('click', resetSet);
+}
+
 function updateSelectedCell() {
     for (const card of document.querySelectorAll('#refine-stage .ref-card[data-index]')) {
         card.classList.toggle('selected', Number(card.dataset.index) === selectedIndex);
@@ -169,7 +180,12 @@ async function refreshQuality() {
         document.getElementById('refine-quality').textContent = '';
         return;
     }
-    const data = await getRankings(refineParams({ limit: 1, offset: 0, sort: 'elo' }));
+    let data = null;
+    try {
+        data = await getRankings(refineParams({ limit: 1, offset: 0, sort: 'elo' }));
+    } catch {
+        return;
+    }
     if (!data) return;
     setRankingsMeta({ visibleImages: data.visible_images, sortQuality: data.sort_quality });
     const quality = data.sort_quality;
@@ -289,6 +305,8 @@ async function fillReplacements() {
             const chunk = candidates.slice(start, start + REPLACEMENT_PROBE_CONCURRENCY);
             await Promise.all(chunk.map((img) => addReadyReplacement(img, token)));
         }
+    } catch {
+        if (token === generation) showToast('Refine replacements could not load');
     } finally {
         if (token === generation) filling = false;
     }
@@ -421,7 +439,14 @@ async function resetSet() {
     renderSemanticPairing(false);
     renderModes();
     renderSkeleton();
-    const images = await fetchImages(need());
+    let images = [];
+    try {
+        images = await fetchImages(need());
+    } catch {
+        if (seq !== generation) return;
+        renderLoadError();
+        return;
+    }
     if (seq !== generation) return;
     currentSet = images.slice(0, need());
     age = currentSet.map(() => 0);
@@ -437,7 +462,14 @@ async function shuffleSet() {
     replacements = [];
     selectedIndex = -1;
     renderSkeleton();
-    const images = await fetchImages(need(), exclude);
+    let images = [];
+    try {
+        images = await fetchImages(need(), exclude);
+    } catch {
+        if (seq !== generation) return;
+        renderLoadError();
+        return;
+    }
     if (seq !== generation) return;
     rememberRecent(exclude);
     currentSet = images.slice(0, need());

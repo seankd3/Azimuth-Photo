@@ -142,7 +142,19 @@ async function expandStack(stackId, cell) {
         badge.classList.add('loading');
         badge.disabled = true;
     }
-    const data = stackCache.get(id) || await getStack(id);
+    let data = stackCache.get(id) || null;
+    if (!data) {
+        try {
+            data = await getStack(id);
+        } catch {
+            if (badge?.isConnected) {
+                badge.classList.remove('loading');
+                badge.disabled = false;
+            }
+            showToast("Stack couldn't load");
+            return false;
+        }
+    }
     if (data) stackCache.set(id, data);
     const current = mounted && request === stackExpansionRequest && seq === generation && cell.isConnected && Number(cell.dataset.id) === cellId;
     if (badge?.isConnected) {

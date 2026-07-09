@@ -2,13 +2,14 @@ import asyncio
 import os
 import time
 from collections.abc import Awaitable, Callable
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlparse
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
+import settings
 from features.share import auth
 
 
@@ -153,6 +154,23 @@ def _public_response(response: Response) -> Response:
     return response
 
 
+def _brand_payload() -> dict:
+    config = settings.get_settings()
+    site_url = str(config.get("publish_site_base_url") or "").strip().rstrip("/")
+    site_label = _site_label(site_url)
+    name = str(config.get("share_brand_name") or "").strip()
+    if not name:
+        name = site_label or "Your photographer"
+    return {"name": name, "site_url": site_url, "site_label": site_label}
+
+
+def _site_label(site_url: str) -> str:
+    if not site_url:
+        return ""
+    parsed = urlparse(site_url if "://" in site_url else f"https://{site_url}")
+    return (parsed.netloc or parsed.path).removeprefix("www.")
+
+
 def _date_subtitle(collection: dict | None) -> str:
     if not collection:
         return ""
@@ -168,24 +186,36 @@ def _gallery_payload(token: str, collection: dict | None) -> dict:
     if collection:
         for row in collection.get("images") or []:
             image_id = int(row["id"])
+            filename = row.get("filename") or f"photo-{image_id}.jpg"
             images.append(
                 {
                     "id": image_id,
-                    "filename": row.get("filename") or f"Photo {image_id}",
+                    "filename": filename,
                     "aspect_ratio": float(row.get("aspect_ratio") or 1.5),
                     "date_taken": row.get("date_taken"),
                     "thumb": f"/s/{token}/thumb/sm/{image_id}",
                     "preview": f"/s/{token}/thumb/md/{image_id}",
                     "full": f"/s/{token}/img/{image_id}",
+                    "download": f"/s/{token}/img/{image_id}",
+                    "download_name": _download_name(image_id, filename),
                 }
             )
+    for index, image in enumerate(images, start=1):
+        image["display_label"] = f"Photo {index} of {len(images)}"
     return {
         "token": token,
         "name": collection.get("name") if collection else "Share unavailable",
         "photo_count": len(images),
         "date_range": _date_subtitle(collection),
+        "brand": _brand_payload(),
+        "download_size_label": "full-size gallery copy",
         "images": images,
     }
+
+
+def _download_name(image_id: int, filename: str) -> str:
+    basename = os.path.basename(filename or "").strip() or f"photo-{image_id}.jpg"
+    return basename.replace('"', "").replace("'", "")
 
 
 def _favorite_ids(favorites: list[dict]) -> list[int]:
@@ -250,6 +280,39 @@ def _clear_unlock_failures(token: str) -> None:
     _unlock_failures.pop(token, None)
 
 
+def _locked_share_response(
+    request: Request,
+    token: str,
+    collection: dict,
+    *,
+    unlock_error: bool = False,
+    throttle_seconds: int | None = None,
+    password_too_long: bool = False,
+    status_code: int = 200,
+) -> Response:
+    response = _templates.TemplateResponse(
+        request,
+        "share_gallery.html",
+        {
+            "not_found": False,
+            "locked": True,
+            "unlock_error": unlock_error,
+            "throttle_seconds": throttle_seconds,
+            "throttle_minutes": ((throttle_seconds or 0) + 59) // 60 if throttle_seconds else None,
+            "password_too_long": password_too_long,
+            "token": token,
+            "collection_name": collection.get("name") or "Protected share",
+            "photo_count": int(collection.get("image_count") or 0),
+            "date_range": _date_subtitle(collection),
+            "brand": _brand_payload(),
+        },
+        status_code=status_code,
+    )
+    if throttle_seconds is not None:
+        response.headers["Retry-After"] = str(throttle_seconds)
+    return _public_response(response)
+
+
 @router.post("/api/user-collections/{collection_id}/share")
 async def api_create_share(collection_id: int, payload: ShareBody, request: Request):
     _configured()
@@ -312,21 +375,13 @@ async def public_share_gallery(token: str, request: Request):
     status_code = 200 if collection is not None else 404
     locked = bool(collection is not None and not auth.is_unlocked(request, collection))
     if locked:
-        response = _templates.TemplateResponse(
+        return _locked_share_response(
             request,
-            "share_gallery.html",
-            {
-                "not_found": False,
-                "locked": True,
-                "unlock_error": request.query_params.get("e") == "1",
-                "token": token,
-                "collection_name": collection.get("name") or "Protected share",
-                "photo_count": int(collection.get("image_count") or 0),
-                "date_range": _date_subtitle(collection),
-            },
+            token,
+            collection,
+            unlock_error=request.query_params.get("e") == "1",
             status_code=status_code,
         )
-        return _public_response(response)
 
     page = _gallery_payload(token, collection)
     response = _templates.TemplateResponse(
@@ -340,6 +395,7 @@ async def public_share_gallery(token: str, request: Request):
             "photo_count": page["photo_count"],
             "date_range": page["date_range"],
             "gallery_json": page,
+            "brand": page["brand"],
         },
         status_code=status_code,
     )
@@ -380,14 +436,30 @@ async def public_share_favorite(token: str, payload: FavoriteBody, request: Requ
 @router.post("/s/{token}/unlock")
 async def public_share_unlock(token: str, request: Request):
     _configured()
+    collection = await _resolve_token(token)
     retry_after = _unlock_retry_after(token)
     if retry_after is not None:
+        if collection is not None:
+            return _locked_share_response(
+                request,
+                token,
+                collection,
+                throttle_seconds=retry_after,
+                status_code=429,
+            )
         response = JSONResponse({"error": "Too many unlock attempts"}, status_code=429)
         response.headers["Retry-After"] = str(retry_after)
         return _public_response(response)
-    collection = await _resolve_token(token)
     password = await _form_password(request)
     if len(password) > MAX_UNLOCK_PASSWORD_LENGTH:
+        if collection is not None:
+            return _locked_share_response(
+                request,
+                token,
+                collection,
+                password_too_long=True,
+                status_code=413,
+            )
         return _public_response(JSONResponse({"error": "Password is too long"}, status_code=413))
     if collection is None or not auth.verify_password(password, collection.get("password_hash")):
         _record_unlock_failure(token)

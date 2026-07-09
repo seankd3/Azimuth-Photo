@@ -54,7 +54,18 @@ export async function getExif(imageId) {
 }
 
 export async function getImageCaption(imageId) {
-    return fetchJson(`/api/image/${imageId}/caption`, { defaultValue: null });
+    try {
+        const response = await fetch(`/api/image/${imageId}/caption`);
+        if (response.status === 404) {
+            return { has_caption: false, caption: '', tags: [], not_found: true };
+        }
+        if (!response.ok) {
+            return { has_caption: false, caption: '', tags: [], error: true, status: response.status };
+        }
+        return await response.json();
+    } catch {
+        return { has_caption: false, caption: '', tags: [], error: true, status: 0 };
+    }
 }
 
 export async function getDateHistogram(params) {

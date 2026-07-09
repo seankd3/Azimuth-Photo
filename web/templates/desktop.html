@@ -121,6 +121,10 @@
                             <option value="file_size">Size</option>
                         </select>
                         <button class="icon-btn sort-dir-btn" id="sort-dir" data-tip="Sort direction" aria-label="Sort descending" aria-pressed="false"><svg class="icon" aria-hidden="true"><use href="#i-arrow-down-wide-narrow"></use></svg></button>
+                        <label class="auto-advance-toggle" data-tip="Auto-advance after P / X / U" aria-label="Auto-advance after flag">
+                            <input id="auto-advance-flags" type="checkbox" checked>
+                            <span>Auto</span>
+                        </label>
                         <input class="ctl-range" id="thumb-size" type="range" min="120" max="320" step="10" aria-label="Thumbnail size" data-tip="Thumbnail size · Ctrl+scroll">
                     </div>
                 </div>
@@ -243,7 +247,10 @@
     <button id="drawer-scrim" aria-label="Close system drawer" hidden></button>
     <aside id="drawer" role="dialog" aria-modal="true" aria-label="System" aria-hidden="true" tabindex="-1">
         <div class="dr-head">
-            <h2>System</h2>
+            <div class="dr-head-copy">
+                <h2>System</h2>
+                <p id="drawer-context" class="dr-context" hidden></p>
+            </div>
             <button id="drawer-close" class="icon-btn" data-tip="Close (Esc)" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg></button>
         </div>
         <div id="drawer-body"></div>
@@ -265,11 +272,12 @@
             <h2>Keyboard</h2>
             <div class="help-cols">
                 <div><h3>Navigate</h3><p><kbd>/</kbd> Omnibox</p><p><kbd>Ctrl</kbd><kbd>K</kbd> Commands</p><p><kbd>&gt;</kbd> in Omnibox · command mode</p><p>Save filtered view as smart collection from New or Commands</p><p><kbd>↑↓←→</kbd> Move grid focus</p><p><kbd>Enter</kbd> or <kbd>E</kbd> Loupe</p><p><kbd>Esc</kbd> Back out one layer</p></div>
-                <div><h3>Grid</h3><p><kbd>Space</kbd> Toggle focused selection</p><p><kbd>S</kbd> Stack / expand stack</p><p><kbd>Delete</kbd> Trash selection</p><p><kbd>Ctrl/Cmd</kbd><kbd>A</kbd> Select loaded photos</p><p><kbd>F</kbd> Filter</p><p><kbd>J</kbd> Cycle density</p></div>
+                <div><h3>Grid</h3><p><kbd>Space</kbd> Toggle focused selection</p><p><kbd>S</kbd> Stack / expand stack</p><p><kbd>P</kbd><kbd>X</kbd><kbd>U</kbd> Flag + advance when Auto is on</p><p><kbd>Delete</kbd> Trash selection</p><p><kbd>Ctrl/Cmd</kbd><kbd>A</kbd> Select loaded photos</p><p><kbd>F</kbd> Filter</p><p><kbd>J</kbd> Cycle density</p></div>
                 <div><h3>Refine</h3><p><kbd>R</kbd> Refine this scope</p><p><kbd>1-4</kbd> Pick in Mosaic</p><p><kbd>←</kbd><kbd>→</kbd> Pick in Duel</p><p><kbd>Ctrl</kbd><kbd>Z</kbd> Undo pick</p></div>
                 <div><h3>Curate</h3><p><kbd>B</kbd> Best of</p><p><kbd>P</kbd> Pick</p><p><kbd>X</kbd> Reject</p><p><kbd>U</kbd> Clear flag</p><p><kbd>Ctrl</kbd><kbd>Z</kbd> Undo latest toast</p></div>
                 <div><h3>Views</h3><p><kbd>G</kbd> Grid</p><p><kbd>Y</kbd> Events</p><p><kbd>O</kbd> People</p><p><kbd>M</kbd> Map</p></div>
-                <div><h3>Loupe</h3><p><kbd>←</kbd><kbd>→</kbd> Previous / next</p><p><kbd>Space</kbd> or <kbd>Z</kbd> Fit / 100%</p><p><kbd>L</kbd> Loupe lights</p><p><kbd>I</kbd> Info overlay</p><p><kbd>G</kbd> Grid</p></div>
+                <div><h3>Loupe</h3><p><kbd>P</kbd><kbd>X</kbd><kbd>U</kbd> Flag + next when Auto is on</p><p><kbd>←</kbd><kbd>→</kbd> Previous / next</p><p><kbd>Space</kbd> or <kbd>Z</kbd> Fit / 100%</p><p><kbd>L</kbd> Loupe lights</p><p><kbd>I</kbd> Info overlay</p><p><kbd>G</kbd> Grid</p></div>
+                <div><h3>Stacks / People</h3><p><kbd>↑↓</kbd> Stack row</p><p><kbd>←→</kbd> Stack photo</p><p><kbd>C</kbd> Cover</p><p><kbd>K</kbd> or <kbd>Enter</kbd> Keep cover</p><p><kbd>U</kbd> Unstack</p><p><kbd>Y</kbd><kbd>N</kbd> Merge review</p></div>
                 <div><h3>Panels</h3><p><kbd>[</kbd> Toggle left panel</p><p><kbd>]</kbd> Toggle info panel</p><p><kbd>?</kbd> This overlay</p></div>
                 <div><h3>New controls</h3><p>Deep in search switches to the active embedding model when available</p><p>Import shows Past imports for batch scopes</p><p>System shows Published galleries</p><p>Filter includes Never dueled</p><p>Similar depth chooses 100 / 250 / 500</p></div>
             </div>

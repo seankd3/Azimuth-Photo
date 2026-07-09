@@ -5,6 +5,15 @@ from features.library import taste as taste_service
 
 
 class LibraryTests(BackendTestCase):
+    def _set_taste_blend(self, *, enabled=True, min_signal=1):
+        settings.save_settings({
+            **settings.get_settings(),
+            "ranking_taste_blend": enabled,
+            "taste_blend_min_signal": min_signal,
+        })
+        cache_events.invalidate_rankings_cache()
+        taste_service.invalidate_taste_cache()
+
     async def _embedding(self, image_id, values):
         config = settings.active_embedding_config()
         vector = np.asarray(values, dtype=np.float32)
@@ -652,6 +661,108 @@ class LibraryTests(BackendTestCase):
         self.assertNotEqual(taste_service._cache["key"][3], first["comparison_count"])
         self.assertEqual(fourth["comparison_count"], third["comparison_count"])
         self.assertEqual(taste_service._cache["key"][2], 5)
+
+    async def test_taste_blend_uses_confidence_weighted_display_score_for_elo_sort(self):
+        self._set_taste_blend(enabled=True, min_signal=1)
+        source = await self._source()
+        winners = [await self._image(source["id"], f"winner-{idx}.jpg", comparisons=1) for idx in range(3)]
+        losers = [await self._image(source["id"], f"loser-{idx}.jpg", comparisons=1) for idx in range(3)]
+        measured = await self._image(source["id"], "measured.jpg", elo=1500, comparisons=10)
+        predicted = await self._image(source["id"], "predicted.jpg", elo=1000, comparisons=0)
+        for image_id in winners + [predicted]:
+            await self._embedding(image_id, [1.0, 0.0])
+        for image_id in losers + [measured]:
+            await self._embedding(image_id, [-1.0, 0.0])
+        await self._comparison_rows(list(zip(winners, losers)) + [(winners[0], losers[0]), (winners[1], losers[1])])
+        await self._cache_entry(measured, "sm")
+        await self._cache_entry(predicted, "sm")
+
+        result = await library_routes.api_rankings(limit=10, sort="elo")
+        cards = {image["id"]: image for image in result["images"]}
+
+        self.assertEqual([image["id"] for image in result["images"][:2]], [predicted, measured])
+        self.assertAlmostEqual(cards[measured]["display_score"], 1500.0, places=1)
+        self.assertAlmostEqual(cards[predicted]["display_score"], 1600.0, places=1)
+        self.assertEqual(cards[measured]["rank_basis"], "measured")
+        self.assertEqual(cards[predicted]["rank_basis"], "predicted")
+        self.assertEqual(cards[measured]["taste_weight"], 0.0)
+        self.assertEqual(cards[predicted]["taste_weight"], 1.0)
+
+    async def test_taste_blend_signal_floor_disables_global_blend(self):
+        self._set_taste_blend(enabled=True, min_signal=6)
+        source = await self._source()
+        winners = [await self._image(source["id"], f"floor-winner-{idx}.jpg", comparisons=1) for idx in range(3)]
+        losers = [await self._image(source["id"], f"floor-loser-{idx}.jpg", comparisons=1) for idx in range(3)]
+        high_elo = await self._image(source["id"], "high-elo.jpg", elo=1500, comparisons=0)
+        taste_match = await self._image(source["id"], "taste-match.jpg", elo=1000, comparisons=0)
+        for image_id in winners + [taste_match]:
+            await self._embedding(image_id, [1.0, 0.0])
+        for image_id in losers + [high_elo]:
+            await self._embedding(image_id, [-1.0, 0.0])
+        await self._comparison_rows(list(zip(winners, losers)) + [(winners[0], losers[0]), (winners[1], losers[1])])
+        await self._cache_entry(high_elo, "sm")
+        await self._cache_entry(taste_match, "sm")
+
+        result = await library_routes.api_rankings(limit=10, sort="elo")
+
+        self.assertEqual([image["id"] for image in result["images"][:2]], [high_elo, taste_match])
+        self.assertNotIn("display_score", result["images"][0])
+        self.assertNotIn("taste_weight", result["images"][0])
+
+    async def test_taste_blend_unavailable_keeps_pure_elo_response(self):
+        self._set_taste_blend(enabled=True, min_signal=1)
+        source = await self._source()
+        high = await self._image(source["id"], "unavailable-high.jpg", elo=1500)
+        low = await self._image(source["id"], "unavailable-low.jpg", elo=1000)
+        await self._cache_entry(high, "sm")
+        await self._cache_entry(low, "sm")
+
+        result = await library_routes.api_rankings(limit=10, sort="elo")
+
+        self.assertEqual([image["id"] for image in result["images"]], [high, low])
+        self.assertNotIn("display_score", result["images"][0])
+
+    async def test_taste_blend_rank_basis_thresholds(self):
+        self.assertEqual(taste_service.rank_basis(taste_service.elo_confidence(0)), "predicted")
+        self.assertEqual(taste_service.rank_basis(taste_service.elo_confidence(2)), "predicted")
+        self.assertEqual(taste_service.rank_basis(taste_service.elo_confidence(5)), "blended")
+        self.assertEqual(taste_service.rank_basis(taste_service.elo_confidence(8)), "measured")
+        self.assertEqual(taste_service.rank_basis(taste_service.elo_confidence(10)), "measured")
+
+    async def test_taste_blend_off_flag_matches_pure_elo_response(self):
+        self._set_taste_blend(enabled=False, min_signal=1)
+        source = await self._source()
+        winners = [await self._image(source["id"], f"off-winner-{idx}.jpg", comparisons=1) for idx in range(3)]
+        losers = [await self._image(source["id"], f"off-loser-{idx}.jpg", comparisons=1) for idx in range(3)]
+        high_elo = await self._image(source["id"], "off-high.jpg", elo=1500)
+        taste_match = await self._image(source["id"], "off-taste-match.jpg", elo=1000)
+        for image_id in winners + [taste_match]:
+            await self._embedding(image_id, [1.0, 0.0])
+        for image_id in losers + [high_elo]:
+            await self._embedding(image_id, [-1.0, 0.0])
+        await self._comparison_rows(list(zip(winners, losers)) + [(winners[0], losers[0]), (winners[1], losers[1])])
+        await self._cache_entry(high_elo, "sm")
+        await self._cache_entry(taste_match, "sm")
+
+        pure = await library_routes.api_rankings(limit=10, sort="elo")
+        old_taste_vector = taste_service.taste_vector
+
+        async def fail_taste_vector():
+            raise AssertionError("taste vector should not be read when ranking_taste_blend is off")
+
+        taste_service.taste_vector = fail_taste_vector
+        library_service._rankings_response_cache.clear()
+        try:
+            without_taste = await library_routes.api_rankings(limit=10, sort="elo")
+        finally:
+            taste_service.taste_vector = old_taste_vector
+
+        self.assertEqual(
+            {key: value for key, value in without_taste.items() if key != "latency_ms"},
+            {key: value for key, value in pure.items() if key != "latency_ms"},
+        )
+        self.assertEqual([image["id"] for image in pure["images"][:2]], [high_elo, taste_match])
+        self.assertNotIn("display_score", pure["images"][0])
 
     async def test_visible_orientation_rankings_filter_cached_images(self):
         source = await self._source()

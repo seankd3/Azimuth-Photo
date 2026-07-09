@@ -1,8 +1,8 @@
 # UI Architecture
 
 This is the design charter for photoArchive's interface. Every UI change should
-be checkable against it. The reference implementation of this architecture is
-the "photoArchive One" prototype; the production UI is converging toward it.
+be checkable against it. The production desktop shell is the reference
+implementation of this architecture.
 
 ## The two bars
 
@@ -27,7 +27,7 @@ A **Scope** is any answer to "which photos am I working with?" — all photos, a
 search, a person, a collection, a source folder, a flag state, or any
 combination. The app has exactly one current scope at a time.
 
-**Verbs:** Browse, Find, Refine (rank), Curate (flag/collect), Share (future).
+**Verbs:** Browse, Find, Refine (rank), Curate (flag/collect), Share, Publish.
 
 ## The three-layer law
 
@@ -36,10 +36,12 @@ Every piece of UI is exactly one of:
 1. **Shell** — permanent chrome: the scope omnibox, left panel (collections,
    library, sources, tools), right panel (info), context bar. The shell never
    grows when features are added.
-2. **Lens** — a way of seeing the current scope: Grid, Events, People, Map.
-   New ways of seeing photos (Duplicates, Places, …) are new lenses in the
-   view switcher. A lens renders the scope; it does not own navigation.
-3. **Overlay** — a verb performed in place: Refine, Loupe, Export, Share.
+2. **Lens** — a way of seeing the current scope: Grid, Events, People, Map,
+   Suggestions, Stacks, Trash, Shared. Persistent everyday lenses live in the
+   top switcher; tool lenses live in the left panel. A lens renders a scope or
+   review surface; it does not own app navigation.
+3. **Overlay** — a verb performed in place: Refine, Loupe, Export, Share,
+   Publish, Import.
    Overlays dim the app behind them and Esc always returns exactly where the
    user was. Verbs never navigate.
 
@@ -48,8 +50,8 @@ new lens, a new overlay verb, a new scope type, or an annotation inside an
 existing lens. If it can't, redesign the feature — not the app.
 
 Roadmap phases expressed in the grammar:
-- Private sharing → a verb (overlay) on Collection.
-- Website publishing → a second verb on Collection.
+- Private sharing → a verb (overlay) on Collection plus Shared triage.
+- Website publishing → a second verb on Collection plus Shared triage.
 - AI assistance → annotations inside existing lenses (suggested stacks in
   Grid, suggested collections in Events, suggested keepers in Refine).
 - Mobile → the same nouns and verbs in a tab-bar shell.

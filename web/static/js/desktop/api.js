@@ -106,6 +106,18 @@ export async function getScanStatus() {
     return fetchJson('/api/scan/status', { defaultValue: null });
 }
 
+export async function getMetadataStatus() {
+    return fetchJson('/api/catalog/metadata/status', { defaultValue: null });
+}
+
+export async function startMetadataScan() {
+    return postJson('/api/catalog/metadata/start');
+}
+
+export async function stopMetadataScan() {
+    return postJson('/api/catalog/metadata/stop');
+}
+
 export async function getImageExif(imageId) {
     return fetchJson(`/api/image/${imageId}/exif`, { defaultValue: null });
 }
@@ -120,6 +132,14 @@ export async function saveImageCaption(imageId, { caption, tags } = {}) {
 
 export async function getCaptionStatus() {
     return fetchJson('/api/captions/status', { defaultValue: null });
+}
+
+export async function pauseCaptionScan() {
+    return postJson('/api/captions/scan/pause');
+}
+
+export async function resumeCaptionScan() {
+    return postJson('/api/captions/scan/resume');
 }
 
 export async function getAiStatus() {

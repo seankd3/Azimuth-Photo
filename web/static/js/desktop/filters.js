@@ -208,7 +208,12 @@ async function scopedMonthCounts(year) {
     const params = scopeParams();
     params.delete('sort');
     params.delete('date_taken');
-    const data = await getDateHistogram(params);
+    let data = null;
+    try {
+        data = await getDateHistogram(params);
+    } catch {
+        return new Map();
+    }
     return (data && data.months ? data.months : []).reduce((acc, item) => {
         const month = item.month || '';
         if (month.startsWith(`${year}-`)) acc.set(month, Number(item.count) || 0);

@@ -496,6 +496,10 @@ function eventHitsImage(event) {
     return false;
 }
 
+function currentIs(imageId) {
+    return current() && Number(current().id) === Number(imageId);
+}
+
 async function flagCurrent(flag) {
     const img = current();
     if (!img) return;
@@ -503,13 +507,14 @@ async function flagCurrent(flag) {
     const old = img.flag || 'unflagged';
     const version = beginFlagMutation(imageId);
     img.flag = flag;
-    updateChrome();
+    if (currentIs(imageId)) updateChrome();
     emit('flags', { imageIds: [imageId], flag });
+    if (viewState.prefs.autoAdvanceFlags) navLoupe(1);
     const result = await writeFlag(imageId, flag);
     if (!result || !result.ok) {
         if (!flagMutationIsLatest(imageId, version)) return;
         img.flag = old;
-        updateChrome();
+        if (currentIs(imageId)) updateChrome();
         emit('flags', { imageIds: [imageId] });
         showToast("Flag change didn't save");
         return;
@@ -518,12 +523,12 @@ async function flagCurrent(flag) {
         undo: async () => {
             const undoVersion = beginFlagMutation(imageId);
             img.flag = old;
-            updateChrome();
+            if (currentIs(imageId)) updateChrome();
             emit('flags', { imageIds: [imageId] });
             const undoResult = await writeFlag(imageId, old);
             if (!(undoResult && undoResult.ok) && flagMutationIsLatest(imageId, undoVersion)) {
                 img.flag = flag;
-                updateChrome();
+                if (currentIs(imageId)) updateChrome();
                 emit('flags', { imageIds: [imageId] });
                 showToast("Undo didn't save");
             }

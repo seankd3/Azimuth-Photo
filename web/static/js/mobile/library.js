@@ -33,6 +33,7 @@ let suggestions = null;
 let suggestionsLoading = false;
 let suggestionsLoaded = false;
 let showingCollection = false;
+let loadError = false;
 let collectionListScroll = 0;
 let collectionToken = 0;
 let workStatus = null;
@@ -152,6 +153,16 @@ function render() {
         return;
     }
     showingCollection = false;
+    if (loadError) {
+        root.innerHTML = '<div class="ms-empty">Couldn\'t load Library.</div>'
+            + '<button class="sheet-btn" id="ml-retry-load" type="button">Try again</button>';
+        root.querySelector('#ml-retry-load')?.addEventListener('click', () => {
+            loadError = false;
+            render();
+            loadAll().then(loadSuggestionsOnce, loadSuggestionsOnce);
+        });
+        return;
+    }
     const colls = collections || [];
     let html = renderSuggestions();
     html += '<div class="ml-head"><h3>Collections</h3></div><div class="m-lib-grid">';
@@ -374,14 +385,19 @@ function openWorkSheet(kind) {
 async function loadWorkStatus() {
     if (workLoading) return;
     workLoading = true;
-    const [ai, cache, peopleStatus] = await Promise.all([
-        getAiStatus(),
-        getCacheStatus(),
-        getPeopleStatus(),
-    ]);
-    workStatus = { ai, cache, people: peopleStatus };
-    workLoading = false;
-    if (!showingCollection) render();
+    try {
+        const [ai, cache, peopleStatus] = await Promise.all([
+            getAiStatus(),
+            getCacheStatus(),
+            getPeopleStatus(),
+        ]);
+        workStatus = { ai, cache, people: peopleStatus };
+    } catch {
+        workStatus = null;
+    } finally {
+        workLoading = false;
+        if (!showingCollection) render();
+    }
 }
 
 function startWorkPolling() {
@@ -442,12 +458,12 @@ async function loadSuggestionsOnce() {
     if (suggestionsLoaded || suggestionsLoading) return;
     suggestionsLoading = true;
     if (!showingCollection) render();
-    const data = await fetchJson('/api/collections/suggestions', { defaultValue: null });
-    if (data == null) {
-        console.error('collection suggestions failed');
-        suggestions = [];
-    } else {
+    try {
+        const data = await fetchJson('/api/collections/suggestions', { defaultValue: null });
         suggestions = data.suggestions || [];
+    } catch (error) {
+        console.error('collection suggestions failed', error);
+        suggestions = [];
     }
     suggestionsLoaded = true;
     suggestionsLoading = false;
@@ -558,18 +574,28 @@ function dismissSuggestion(suggestion) {
 
 /* ---------- data ---------- */
 async function loadAll() {
-    const [countsData, collData, catalogData, folderData] = await Promise.all([
-        getCounts(new URLSearchParams()),   // archive-wide quick-access counts
-        listCollections(),
-        getCatalog(),
-        getFoldersTree(),
-    ]);
-    counts = countsData;
-    collections = (collData && collData.collections) || [];
-    catalog = catalogData;
-    folderTree = folderData || { sources: [] };
-    render();
-    computeSortedPcts();
+    try {
+        const [countsData, collData, catalogData, folderData] = await Promise.all([
+            getCounts(new URLSearchParams()),   // archive-wide quick-access counts
+            listCollections(),
+            getCatalog(),
+            getFoldersTree(),
+        ]);
+        counts = countsData;
+        collections = (collData && collData.collections) || [];
+        catalog = catalogData;
+        folderTree = folderData || { sources: [] };
+        loadError = false;
+        render();
+        computeSortedPcts();
+    } catch {
+        counts = null;
+        collections = [];
+        catalog = null;
+        folderTree = { sources: [] };
+        loadError = true;
+        render();
+    }
 }
 
 async function computeSortedPcts() {
@@ -577,7 +603,12 @@ async function computeSortedPcts() {
     // how many have enough ranking signal (comparisons + propagated).
     for (const coll of collections || []) {
         if (sortedPctCache.has(coll.id) || !coll.image_count) continue;
-        const data = await getCollection(coll.id, 500);
+        let data = null;
+        try {
+            data = await getCollection(coll.id, 500);
+        } catch {
+            continue;
+        }
         const images = (data && data.collection && data.collection.images) || [];
         if (!images.length) continue;
         let done = 0;
@@ -628,7 +659,20 @@ async function openCollectionView(coll) {
     root.querySelector('#ml-back').addEventListener('click', () => dismissLayer('collection', closeCollectionView));
     root.querySelector('#ml-more').addEventListener('click', () => openCollectionActionsSheet(coll));
 
-    const data = await getCollection(coll.id, 1000);
+    let data = null;
+    try {
+        data = await getCollection(coll.id, 1000);
+    } catch {
+        if (token !== collectionToken || !showingCollection) return;
+        root.innerHTML =
+            `<div class="ml-head"><button class="ml-back" id="ml-back">${icon('chevron-left')} Library</button><h3>${esc(coll.name)}</h3><button class="ml-more" id="ml-more" aria-label="Collection actions">${icon('ellipsis')}</button></div>`
+            + '<div class="ms-empty">Couldn\'t load this collection.</div>'
+            + '<button class="sheet-btn" id="ml-coll-retry" type="button">Try again</button>';
+        root.querySelector('#ml-back')?.addEventListener('click', () => dismissLayer('collection', closeCollectionView));
+        root.querySelector('#ml-more')?.addEventListener('click', () => openCollectionActionsSheet(coll));
+        root.querySelector('#ml-coll-retry')?.addEventListener('click', () => openCollectionView(coll));
+        return;
+    }
     if (token !== collectionToken || !showingCollection) return;
     const images = (data && data.collection && data.collection.images) || [];
     rememberImages(images);

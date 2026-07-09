@@ -10,7 +10,9 @@ from fastapi.responses import Response
 
 import embed_cache
 import helpers as app_helpers
+import settings
 from core import responses as response_helpers
+from data.repositories import rankings as ranking_repository
 from features.library import taste as taste_service
 
 
@@ -18,6 +20,7 @@ _rankings_response_cache: dict[tuple, dict] = {}
 _rankings_response_cache_ttl_seconds = 1800.0
 _rankings_response_cache_max_entries = 256
 MAX_RANKINGS_LIMIT = 5000
+ELO_FAMILY_SORTS = {"elo", "elo_asc"}
 
 _resolve_library_constraints: Callable[..., object] | None = None
 _cache_root: Callable[[], str] | None = None
@@ -157,6 +160,102 @@ def _configured_rankings_response_cache_ttl_seconds() -> float:
     if _rankings_response_cache_ttl_seconds_provider is not None:
         return float(_rankings_response_cache_ttl_seconds_provider())
     return float(_rankings_response_cache_ttl_seconds)
+
+
+def _ranking_taste_blend_settings() -> tuple[bool, int]:
+    values = settings.get_settings()
+    return (
+        bool(values.get("ranking_taste_blend", True)),
+        int(values.get("taste_blend_min_signal") or 25),
+    )
+
+
+async def _ranking_taste_blend_context(db_sort: str) -> dict:
+    enabled, min_signal = _ranking_taste_blend_settings()
+    if db_sort not in ELO_FAMILY_SORTS:
+        return {"active": False, "cache_key": ("taste_blend", "not_elo", bool(enabled), min_signal)}
+    if not enabled:
+        return {"active": False, "cache_key": ("taste_blend", "off", False, min_signal)}
+
+    taste = await taste_service.taste_vector()
+    signature = taste_service.taste_vector_signature(taste)
+    signal_count = int(taste.get("signal_count") or 0)
+    if not taste.get("available") or signal_count < min_signal:
+        return {
+            "active": False,
+            "cache_key": ("taste_blend", "disabled", True, min_signal, signature),
+        }
+    scores = await taste_service.taste_scaled_scores(taste)
+    if not scores:
+        return {
+            "active": False,
+            "cache_key": ("taste_blend", "no_scores", True, min_signal, signature),
+        }
+    return {
+        "active": True,
+        "scores": scores,
+        "cache_key": ("taste_blend", "active", True, min_signal, signature),
+    }
+
+
+def _with_blended_rank_data(rows, blend_context: dict) -> list[dict]:
+    if not blend_context.get("active"):
+        return [dict(row) for row in rows]
+    scores = blend_context.get("scores") or {}
+    ranked = []
+    for row in rows:
+        data = dict(row)
+        stored_elo = float(data.get("elo") or 1200.0)
+        taste_scaled = scores.get(int(data.get("id") or 0))
+        if taste_scaled is None:
+            display_score = stored_elo
+            confidence = 1.0
+            taste_weight = 0.0
+        else:
+            display_score, confidence = taste_service.blend_display_score(
+                stored_elo,
+                taste_scaled,
+                int(data.get("comparisons") or 0),
+            )
+            taste_weight = 1.0 - confidence
+        data["_display_score"] = display_score
+        data["_rank_basis"] = taste_service.rank_basis(confidence)
+        data["_taste_weight"] = taste_weight
+        ranked.append(data)
+    return ranked
+
+
+def _sort_blended_rankings(rows: list[dict], db_sort: str) -> list[dict]:
+    reverse = db_sort != "elo_asc"
+    return sorted(
+        rows,
+        key=lambda row: (
+            float(row.get("_display_score") or row.get("elo") or 1200.0),
+            float(row.get("elo") or 1200.0),
+            int(row.get("id") or 0),
+        ),
+        reverse=reverse,
+    )
+
+
+def _blend_card_kwargs(data: dict, blend_context: dict) -> dict:
+    if not blend_context.get("active"):
+        return {}
+    display_score = data.get("_display_score", data.get("elo"))
+    return {
+        "display_score": display_score,
+        "rank_basis": data.get("_rank_basis") or "measured",
+        "taste_weight": data.get("_taste_weight"),
+    }
+
+
+def _passes_blended_star_filter(data: dict, min_stars: int) -> bool:
+    if min_stars <= 0:
+        return True
+    threshold = ranking_repository.STAR_THRESHOLDS.get(int(min_stars or 0))
+    if threshold is None:
+        return True
+    return float(data.get("_display_score") or data.get("elo") or 1200.0) >= threshold
 
 
 def _normalized_import_batch_id(value) -> int:
@@ -436,6 +535,11 @@ async def api_rankings_impl(
             }
 
     db_sort = "elo" if sort == "similarity" and not search_scores else sort
+    blend_context = (
+        await _ranking_taste_blend_context(db_sort)
+        if sort != "taste" and not (sort == "similarity" and search_scores)
+        else {"active": False, "cache_key": ("taste_blend", "bypassed")}
+    )
     rankings_cache_key = None
     cacheable_metadata_search = (
         search_mode == "metadata"
@@ -470,6 +574,7 @@ async def api_rankings_impl(
             str(search.get("fallback_reason") or ""),
             _normalized_import_batch_id(import_batch),
             stacks_mode,
+            blend_context.get("cache_key"),
         )
         cached = _rankings_response_cache.get(rankings_cache_key)
         if cached and cached["expires"] > time.monotonic():
@@ -659,6 +764,7 @@ async def api_rankings_impl(
             cache_rankings_response(rankings_cache_key, response)
         return response
 
+    ranking_filter_min_stars = 0 if blend_context.get("active") and int(min_stars or 0) > 0 else min_stars
     unfiltered_rankings = not any(
         (
             orientation,
@@ -683,13 +789,13 @@ async def api_rankings_impl(
             _configured(_get_visible_pairing_pool_counts)("sm", _configured_cache_root())
         )
     else:
-        defer_empty_first_page_counts = bool(text_query) and offset == 0
+        defer_empty_first_page_counts = bool(text_query) and offset == 0 and not blend_context.get("active")
         total_task = None
         visible_task = None
         if not defer_empty_first_page_counts:
             total_task = asyncio.create_task(
                 _configured(_count_rankings)(
-                    orientation=orientation, compared=compared, min_stars=min_stars,
+                    orientation=orientation, compared=compared, min_stars=ranking_filter_min_stars,
                     folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
                     camera=camera, lens=lens, tag=tag,
                     id_filter=search_ids,
@@ -699,7 +805,7 @@ async def api_rankings_impl(
             )
             visible_task = asyncio.create_task(
                 _configured(_count_rankings)(
-                    orientation=orientation, compared=compared, min_stars=min_stars,
+                    orientation=orientation, compared=compared, min_stars=ranking_filter_min_stars,
                     folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
                     camera=camera, lens=lens, tag=tag,
                     id_filter=search_ids,
@@ -720,29 +826,16 @@ async def api_rankings_impl(
                 exclude_collapsed_stack_members=exclude_collapsed_stack_members,
             )
         )
-    images = await _configured(_get_rankings)(
-        limit=limit, offset=offset, sort=db_sort,
-        orientation=orientation, compared=compared, min_stars=min_stars,
-        folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
-        camera=camera, lens=lens, tag=tag,
-        id_filter=search_ids,
-        visible_thumb_size=visible_thumb_size, cache_root=_configured_cache_root(),
-        text_query=text_query,
-        exclude_collapsed_stack_members=exclude_collapsed_stack_members,
-    )
-    if unfiltered_rankings:
-        counts = await counts_task
-        total_images = int(counts.get("active_images") or 0)
-        visible_images = int(counts.get("visible_images") or 0)
-    else:
-        if defer_empty_first_page_counts and not images:
-            visible_images = 0
-            total_images = 0
+    if blend_context.get("active"):
+        if unfiltered_rankings:
+            counts = await counts_task
+            total_images = int(counts.get("active_images") or 0)
+            visible_images = int(counts.get("visible_images") or 0)
         else:
             if total_task is None:
                 total_task = asyncio.create_task(
                     _configured(_count_rankings)(
-                        orientation=orientation, compared=compared, min_stars=min_stars,
+                        orientation=orientation, compared=compared, min_stars=ranking_filter_min_stars,
                         folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
                         camera=camera, lens=lens, tag=tag,
                         id_filter=search_ids,
@@ -753,7 +846,7 @@ async def api_rankings_impl(
             if visible_task is None:
                 visible_task = asyncio.create_task(
                     _configured(_count_rankings)(
-                        orientation=orientation, compared=compared, min_stars=min_stars,
+                        orientation=orientation, compared=compared, min_stars=ranking_filter_min_stars,
                         folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
                         camera=camera, lens=lens, tag=tag,
                         id_filter=search_ids,
@@ -764,6 +857,88 @@ async def api_rankings_impl(
                 )
             visible_images = await visible_task
             total_images = await total_task
+
+        visible_rows = []
+        if visible_images > 0:
+            visible_rows = await _configured(_get_rankings)(
+                limit=visible_images, offset=0, sort=db_sort,
+                orientation=orientation, compared=compared, min_stars=ranking_filter_min_stars,
+                folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
+                camera=camera, lens=lens, tag=tag,
+                id_filter=search_ids,
+                visible_thumb_size=visible_thumb_size, cache_root=_configured_cache_root(),
+                text_query=text_query,
+                exclude_collapsed_stack_members=exclude_collapsed_stack_members,
+            )
+        blended_rows = _sort_blended_rankings(_with_blended_rank_data(visible_rows, blend_context), db_sort)
+        if int(min_stars or 0) > 0:
+            blended_rows = [
+                row for row in blended_rows
+                if _passes_blended_star_filter(row, int(min_stars or 0))
+            ]
+            visible_images = len(blended_rows)
+            if total_images > 0:
+                total_rows = await _configured(_get_rankings)(
+                    limit=total_images, offset=0, sort=db_sort,
+                    orientation=orientation, compared=compared, min_stars=ranking_filter_min_stars,
+                    folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
+                    camera=camera, lens=lens, tag=tag,
+                    id_filter=search_ids,
+                    text_query=text_query,
+                    exclude_collapsed_stack_members=exclude_collapsed_stack_members,
+                )
+                total_images = sum(
+                    1 for row in _with_blended_rank_data(total_rows, blend_context)
+                    if _passes_blended_star_filter(row, int(min_stars or 0))
+                )
+            else:
+                total_images = 0
+        images = blended_rows[offset:offset + limit]
+    else:
+        images = await _configured(_get_rankings)(
+            limit=limit, offset=offset, sort=db_sort,
+            orientation=orientation, compared=compared, min_stars=ranking_filter_min_stars,
+            folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
+            camera=camera, lens=lens, tag=tag,
+            id_filter=search_ids,
+            visible_thumb_size=visible_thumb_size, cache_root=_configured_cache_root(),
+            text_query=text_query,
+            exclude_collapsed_stack_members=exclude_collapsed_stack_members,
+        )
+        if unfiltered_rankings:
+            counts = await counts_task
+            total_images = int(counts.get("active_images") or 0)
+            visible_images = int(counts.get("visible_images") or 0)
+        else:
+            if defer_empty_first_page_counts and not images:
+                visible_images = 0
+                total_images = 0
+            else:
+                if total_task is None:
+                    total_task = asyncio.create_task(
+                        _configured(_count_rankings)(
+                            orientation=orientation, compared=compared, min_stars=ranking_filter_min_stars,
+                            folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
+                            camera=camera, lens=lens, tag=tag,
+                            id_filter=search_ids,
+                            text_query=text_query,
+                            exclude_collapsed_stack_members=exclude_collapsed_stack_members,
+                        )
+                    )
+                if visible_task is None:
+                    visible_task = asyncio.create_task(
+                        _configured(_count_rankings)(
+                            orientation=orientation, compared=compared, min_stars=ranking_filter_min_stars,
+                            folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
+                            camera=camera, lens=lens, tag=tag,
+                            id_filter=search_ids,
+                            visible_thumb_size=visible_thumb_size, cache_root=_configured_cache_root(),
+                            text_query=text_query,
+                            exclude_collapsed_stack_members=exclude_collapsed_stack_members,
+                        )
+                    )
+                visible_images = await visible_task
+                total_images = await total_task
     if images:
         _configured_schedule_thumbnail_prefetch(
             [dict(img) for img in images],
@@ -777,6 +952,7 @@ async def api_rankings_impl(
         kwargs = {}
         if search_scores:
             kwargs["similarity"] = search_scores.get(data["id"], 0)
+        kwargs.update(_blend_card_kwargs(data, blend_context))
         if sort in ("date_taken", "date_taken_asc"):
             kwargs["date_group"] = app_helpers.date_group_for_image(data)
         result.append(app_helpers.image_card(data, "sm", **kwargs))

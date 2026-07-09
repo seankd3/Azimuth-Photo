@@ -38,6 +38,10 @@ function current() {
     return list[index] || null;
 }
 
+function viewerRequestCurrent(imageId, generation) {
+    return generation === loadToken && Number(current()?.id || 0) === Number(imageId || 0);
+}
+
 function applyT() {
     img.style.transform = `translate(${tx}px, ${ty}px) scale(${zScale})`;
 }
@@ -189,7 +193,13 @@ function infoSheet() {
         + '<div class="sheet-meta" id="mv-exif"><div><span>Loading</span><b>…</b></div></div></details>'
     );
     sheet.querySelector('#mv-similar').addEventListener('click', async () => {
-        const data = await getSimilar(image.id, 100);
+        let data = null;
+        try {
+            data = await getSimilar(image.id, 100);
+        } catch {
+            showToast('Similar search failed');
+            return;
+        }
         const results = (data && data.images) || [];
         if (!results.length) {
             showToast('No similar photos found');
@@ -208,8 +218,9 @@ function infoSheet() {
             });
         });
     });
-    loadCaptionBlock(sheet, image.id);
-    loadExifDetails(sheet, image.id);
+    const generation = loadToken;
+    loadCaptionBlock(sheet, image.id, generation);
+    loadExifDetails(sheet, image.id, generation);
 }
 
 function scopeToTag(tag) {
@@ -222,11 +233,21 @@ function scopeToTag(tag) {
     });
 }
 
-async function loadCaptionBlock(sheet, imageId) {
+async function loadCaptionBlock(sheet, imageId, generation) {
     const host = sheet.querySelector('#mv-caption');
     if (!host) return;
     const data = await getImageCaption(imageId);
-    if (!host.isConnected) return;
+    if (!host.isConnected || !viewerRequestCurrent(imageId, generation)) return;
+    if (data?.error) {
+        host.innerHTML = '<div class="sheet-caption-label">Caption</div>'
+            + '<button type="button" class="sheet-caption-text sheet-caption-muted" id="mv-caption-retry">Couldn\'t load — tap to retry</button>';
+        host.querySelector('#mv-caption-retry')?.addEventListener('click', () => {
+            host.innerHTML = '<div class="sheet-caption-label">Caption</div>'
+                + '<div class="sheet-caption-text sheet-caption-muted">Loading…</div>';
+            loadCaptionBlock(sheet, imageId, generation);
+        });
+        return;
+    }
     const hasCaption = Boolean(data && data.has_caption);
     const text = hasCaption ? String(data.caption || '').trim() : '';
     const tags = (hasCaption && Array.isArray(data.tags)) ? data.tags.filter(Boolean) : [];
@@ -246,6 +267,7 @@ async function loadCaptionBlock(sheet, imageId) {
     host.innerHTML = html;
     for (const chip of host.querySelectorAll('[data-caption-tag]')) {
         chip.addEventListener('click', () => {
+            if (!viewerRequestCurrent(imageId, generation)) return;
             scopeToTag(chip.dataset.captionTag || '');
         });
     }
@@ -258,10 +280,18 @@ function detailValue(value) {
     return String(value);
 }
 
-async function loadExifDetails(sheet, imageId) {
+async function loadExifDetails(sheet, imageId, generation) {
     const target = sheet.querySelector('#mv-exif');
     if (!target) return;
-    const data = await getExif(imageId);
+    let data = null;
+    try {
+        data = await getExif(imageId);
+    } catch {
+        if (!target.isConnected || !viewerRequestCurrent(imageId, generation)) return;
+        target.innerHTML = '<div><span>Details</span><b>Couldn\'t load EXIF</b></div>';
+        return;
+    }
+    if (!target.isConnected || !viewerRequestCurrent(imageId, generation)) return;
     const exif = (data && data.exif) || {};
     const entries = Object.entries(exif)
         .filter(([, value]) => value != null && value !== '')

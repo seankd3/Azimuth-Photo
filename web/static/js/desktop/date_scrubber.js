@@ -168,7 +168,15 @@ async function load() {
     if (!active()) return;
     const params = scopeParams();
     params.delete('sort');
-    const data = await getDateHistogram(params);
+    let data = null;
+    try {
+        data = await getDateHistogram(params);
+    } catch {
+        if (seq !== generation) return;
+        months = [];
+        render();
+        return;
+    }
     if (seq !== generation || !data) return;
     let offset = 0;
     const datedMonths = sortAscending() ? [...(data.months || [])].reverse() : (data.months || []);

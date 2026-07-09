@@ -58,6 +58,9 @@ def image_card(
     elo_value=_MISSING,
     similarity=_MISSING,
     taste_score=_MISSING,
+    rank_basis=_MISSING,
+    taste_weight=_MISSING,
+    display_score=_MISSING,
     date_group=_MISSING,
 ) -> dict:
     image_id = _as_int(_get(image, "id"))
@@ -79,6 +82,12 @@ def image_card(
         card["similarity"] = None if similarity is None else round(_as_float(similarity), 4)
     if taste_score is not _MISSING:
         card["taste_score"] = None if taste_score is None else round(_as_float(taste_score), 4)
+    if rank_basis is not _MISSING:
+        card["rank_basis"] = rank_basis or ""
+    if taste_weight is not _MISSING:
+        card["taste_weight"] = None if taste_weight is None else round(_as_float(taste_weight), 4)
+    if display_score is not _MISSING:
+        card["display_score"] = None if display_score is None else _rounded_elo(display_score)
     if date_group is not _MISSING:
         card["date_group"] = date_group or ""
     return card

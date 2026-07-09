@@ -4,6 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#141517">
+  <meta property="og:title" content="{{ collection_name }}">
+  <meta property="og:description" content="{% if brand and brand.name %}A photo gallery from {{ brand.name }}{% else %}A private photo gallery{% endif %}">
+  {% if brand and brand.site_url %}<meta property="og:site_name" content="{{ brand.name }}">{% endif %}
   <title>{{ collection_name }}</title>
   <style>
     :root {
@@ -14,6 +18,7 @@
       --muted: #9a9a97;
       --line: rgba(232, 232, 230, .12);
       --accent: #7aa8d4;
+      --accent-soft: rgba(122, 168, 212, .13);
       --danger: #e19393;
       --row: 220px;
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -22,13 +27,25 @@
     html, body { min-height: 100%; margin: 0; background: var(--bg); color: var(--text); }
     body { padding: max(28px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(32px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
     .shell { width: min(1420px, 100%); margin: 0 auto; }
-    header { position: relative; display: flex; align-items: end; justify-content: space-between; gap: 24px; padding: 4px 0 22px; border-bottom: 1px solid var(--line); }
+    header { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 24px; padding: 4px 0 18px; border-bottom: 1px solid var(--line); }
+    .brand-line { margin-bottom: 12px; display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; color: var(--muted); font-size: 13px; }
+    .brand-name { color: var(--text); font-weight: 650; }
+    .brand-line a, footer a { color: var(--accent); text-decoration: none; }
+    .brand-line a:hover, footer a:hover { text-decoration: underline; }
     h1 { margin: 0; font-size: clamp(26px, 4vw, 46px); line-height: 1; font-weight: 680; letter-spacing: 0; }
     .sub, .count, .empty p { color: var(--muted); font-size: 14px; line-height: 1.45; }
     .sub { margin-top: 8px; }
     .count { font-variant-numeric: tabular-nums; white-space: nowrap; }
     .header-stats { display: grid; gap: 5px; justify-items: end; }
     .pick-count { color: var(--accent); font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .header-actions { display: flex; align-items: center; justify-content: end; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+    .action-btn, .done-btn, .download-btn { min-height: 40px; border: 1px solid var(--line); border-radius: 6px; background: rgba(255,255,255,.045); color: var(--text); font: inherit; font-size: 13px; text-decoration: none; display: inline-grid; place-items: center; cursor: pointer; padding: 0 12px; }
+    .action-btn:hover, .done-btn:hover, .download-btn:hover { background: rgba(255,255,255,.08); }
+    .action-btn:focus-visible, .done-btn:focus-visible, .download-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .download-note, .pick-status { color: var(--muted); font-size: 13px; line-height: 1.4; }
+    .client-panel { margin: 14px 0 0; padding: 12px 0 0; border-top: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .done-btn { color: #0d1114; background: var(--accent); border-color: transparent; font-weight: 680; }
+    .done-btn:disabled { cursor: default; opacity: .52; }
     .hint-chip { position: absolute; right: 0; bottom: -15px; z-index: 3; border: 1px solid var(--line); border-radius: 999px; background: #202225; color: var(--text); box-shadow: 0 10px 24px rgba(0,0,0,.22); padding: 6px 10px; font-size: 12px; line-height: 1; transition: opacity .16s ease, transform .16s ease; }
     .hint-chip[hidden] { display: none; }
     .grid { display: flex; flex-wrap: wrap; gap: 5px; padding-top: 18px; }
@@ -42,9 +59,10 @@
     .fav-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     .fav-btn.on { color: var(--accent); opacity: 1; }
     .tile-fav { position: absolute; top: 6px; right: 6px; opacity: .68; }
+    .tile-download { position: absolute; right: 6px; bottom: 6px; width: 40px; min-width: 40px; height: 40px; min-height: 40px; padding: 0; border-radius: 999px; background: rgba(10,11,13,.54); opacity: .72; font-size: 19px; line-height: 1; }
     @media (hover: hover) and (pointer: fine) {
-      .tile-fav { opacity: 0; }
-      .tile:hover .tile-fav, .tile:focus-within .tile-fav, .tile-fav.on { opacity: 1; }
+      .tile-fav, .tile-download { opacity: 0; }
+      .tile:hover .tile-fav, .tile:focus-within .tile-fav, .tile-fav.on, .tile:hover .tile-download, .tile:focus-within .tile-download { opacity: 1; }
     }
     .empty { min-height: 58vh; display: grid; place-items: center; text-align: center; }
     .empty h1 { font-size: clamp(28px, 6vw, 54px); }
@@ -58,6 +76,7 @@
     .unlock-form input:focus { border-color: var(--accent); }
     .unlock-form button { height: 46px; border: 0; border-radius: 6px; background: var(--accent); color: #0d1114; font: inherit; font-weight: 680; cursor: pointer; }
     .unlock-error { min-height: 19px; margin: 0; color: var(--danger); font-size: 13px; }
+    footer { margin-top: 30px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
     .lightbox[hidden] { display: none; }
     .lightbox { position: fixed; inset: 0; z-index: 20; background: #000; display: grid; grid-template-rows: auto 1fr auto; padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); touch-action: none; }
     .lb-bar { height: 48px; display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
@@ -76,8 +95,11 @@
     .next { right: max(12px, env(safe-area-inset-right)); }
     @media (max-width: 720px) {
       body { padding-top: max(18px, env(safe-area-inset-top)); }
-      header { align-items: start; flex-direction: column; gap: 8px; padding-bottom: 16px; }
-      .header-stats { justify-items: start; }
+      header { grid-template-columns: 1fr; align-items: start; gap: 10px; padding-bottom: 16px; }
+      .header-stats { justify-items: start; width: 100%; }
+      .header-actions { justify-content: start; }
+      .client-panel { align-items: stretch; flex-direction: column; }
+      .done-btn { width: 100%; }
       .hint-chip { left: 0; right: auto; bottom: -17px; }
       .grid { gap: 3px; }
       .tile { --row: 118px; flex-basis: calc(var(--ar) * var(--row)); min-width: 31%; }
@@ -99,23 +121,44 @@
       <section class="locked-wrap">
         <div class="lock-card">
           <div class="lock-glyph" aria-hidden="true">&#128274;</div>
+          {% if brand and brand.name %}
+          <div class="brand-line" style="justify-content:center">
+            <span class="brand-name">{{ brand.name }}</span>
+            {% if brand.site_url %}<a href="{{ brand.site_url }}" target="_blank" rel="noopener noreferrer">{{ brand.site_label or brand.site_url }}</a>{% endif %}
+          </div>
+          {% endif %}
           <h1>{{ collection_name }}</h1>
           {% if date_range %}<div class="sub">{{ date_range }}</div>{% endif %}
           <form class="unlock-form" method="post" action="/s/{{ token }}/unlock">
             <input name="password" type="password" placeholder="Password" autocomplete="current-password" autofocus required>
             <button type="submit">Unlock</button>
-            <p class="unlock-error">{% if unlock_error %}That password did not unlock this share.{% endif %}</p>
+            <p class="unlock-error">
+              {% if throttle_seconds %}Too many tries. Please wait about {{ throttle_minutes }} minute{% if throttle_minutes != 1 %}s{% endif %} and try again.
+              {% elif password_too_long %}That password is too long.
+              {% elif unlock_error %}That password did not unlock this share.{% endif %}
+            </p>
           </form>
         </div>
       </section>
     {% else %}
       <header>
         <div>
+          {% if brand and brand.name %}
+          <div class="brand-line">
+            <span>From</span>
+            <span class="brand-name">{{ brand.name }}</span>
+            {% if brand.site_url %}<a href="{{ brand.site_url }}" target="_blank" rel="noopener noreferrer">{{ brand.site_label or brand.site_url }}</a>{% endif %}
+          </div>
+          {% endif %}
           <h1>{{ collection_name }}</h1>
           {% if date_range %}<div class="sub">{{ date_range }}</div>{% endif %}
         </div>
         <div class="header-stats">
           <div class="count">{{ photo_count }} photo{% if photo_count != 1 %}s{% endif %}</div>
+          <div class="download-note" id="download-note">Downloads use the gallery-ready files.</div>
+          <div class="header-actions">
+            <button class="action-btn" id="download-all" type="button">Download all</button>
+          </div>
           {% if not public_static|default(false) %}
           <div class="pick-count" id="pick-count">0 picked</div>
           {% endif %}
@@ -124,7 +167,17 @@
         <div class="hint-chip" id="fav-hint" hidden>Tap ♡ to pick your favorites</div>
         {% endif %}
       </header>
+      {% if not public_static|default(false) %}
+      <section class="client-panel" aria-label="Favorites status">
+        <div class="pick-status" id="pick-status">Pick favorites as you browse.</div>
+        <button class="done-btn" id="picks-done" type="button" disabled>Done</button>
+      </section>
+      {% endif %}
       <section class="grid" id="grid" aria-label="{{ collection_name }} photos"></section>
+      <footer>
+        <span>{% if brand and brand.name %}{{ brand.name }}{% else %}Your photographer{% endif %}</span>
+        {% if brand and brand.site_url %}<a href="{{ brand.site_url }}" target="_blank" rel="noopener noreferrer">{{ brand.site_label or brand.site_url }}</a>{% endif %}
+      </footer>
     {% endif %}
   </main>
   {% if not not_found and not locked %}
@@ -135,7 +188,7 @@
       {% if not public_static|default(false) %}
       <button class="fav-btn" id="lb-fav" type="button" aria-label="Pick favorite" aria-pressed="false">♡</button>
       {% endif %}
-      <a id="full" href="#" target="_blank" rel="noopener noreferrer"{% if public_static|default(false) %} download{% endif %}>{% if public_static|default(false) %}Download image{% else %}View full size{% endif %}</a>
+      <a id="full" href="#" rel="noopener noreferrer" download>Download photo</a>
     </div>
     <button class="nav prev" id="prev" type="button" aria-label="Previous">‹</button>
     <div class="stage"><img id="stage-img" alt=""></div>
@@ -154,22 +207,33 @@
       const caption = document.getElementById('caption');
       const full = document.getElementById('full');
       const pickCount = document.getElementById('pick-count');
+      const pickStatus = document.getElementById('pick-status');
+      const picksDone = document.getElementById('picks-done');
       const hint = document.getElementById('fav-hint');
       const lightboxFav = document.getElementById('lb-fav');
+      const downloadAll = document.getElementById('download-all');
+      const downloadNote = document.getElementById('download-note');
       const publicStatic = {{ public_static|default(false)|tojson }};
       const token = String(data.token || '');
       const favoriteKey = `pa_fav_${token}`;
       const hintKey = `pa_fav_hint_${token}`;
+      const doneKey = `pa_fav_done_${token}`;
       let favorites = readFavorites();
+      let favoritesDone = readFavoritesDone();
       let index = 0;
       let touchStart = null;
 
       function renderGrid() {
         if (!grid) return;
+        if (!images.length) {
+          grid.innerHTML = '<section class="empty"><div><h1>No photos yet</h1><p>This gallery is ready, but it does not include any photos.</p></div></section>';
+          return;
+        }
         grid.innerHTML = images.map((image, i) => (
-          `<div class="tile" role="button" tabindex="0" style="--ar:${Math.max(.45, Math.min(2.4, Number(image.aspect_ratio) || 1.5))}" data-i="${i}" aria-label="${escapeHtml(image.filename)}">`
+          `<div class="tile" role="button" tabindex="0" style="--ar:${Math.max(.45, Math.min(2.4, Number(image.aspect_ratio) || 1.5))}" data-i="${i}" aria-label="${escapeHtml(photoLabel(image, i))}">`
           + `<img loading="lazy" decoding="async" src="${image.thumb}" alt="">`
           + (publicStatic ? '' : `<button class="fav-btn tile-fav${favorites.has(Number(image.id)) ? ' on' : ''}" type="button" data-fav-id="${image.id}" aria-label="Pick favorite" aria-pressed="${favorites.has(Number(image.id)) ? 'true' : 'false'}">${favorites.has(Number(image.id)) ? '♥' : '♡'}</button>`)
+          + `<a class="download-btn tile-download" href="${escapeHtml(image.download || image.full || '#')}" download="${escapeHtml(image.download_name || '')}" aria-label="Download ${escapeHtml(photoLabel(image, i))}" title="Download">↓</a>`
           + '</div>'
         )).join('');
         grid.querySelectorAll('img').forEach((img) => {
@@ -184,6 +248,7 @@
             toggleFavorite(Number(favButton.dataset.favId));
             return;
           }
+          if (event.target.closest('.tile-download')) return;
           const tile = event.target.closest('.tile[data-i]');
           if (tile) openAt(Number(tile.dataset.i));
         });
@@ -203,17 +268,22 @@
         }[c]));
       }
 
+      function photoLabel(image, fallbackIndex) {
+        return image.display_label || `Photo ${fallbackIndex + 1} of ${images.length}`;
+      }
+
       function openAt(nextIndex) {
         if (!images.length) return;
         index = (nextIndex + images.length) % images.length;
         const image = images[index];
         lightbox.hidden = false;
         stageImg.classList.remove('loaded');
-        stageImg.alt = image.filename || '';
+        stageImg.alt = photoLabel(image, index);
         stageImg.src = image.preview;
         counter.textContent = `${index + 1} / ${images.length}`;
-        caption.textContent = image.filename || '';
-        full.href = image.full;
+        caption.textContent = photoLabel(image, index);
+        full.href = image.download || image.full;
+        full.setAttribute('download', image.download_name || '');
         syncFavoriteButtons();
         document.body.style.overflow = 'hidden';
         document.getElementById('close').focus({ preventScroll: true });
@@ -238,12 +308,36 @@
         }
       }
 
+      function readFavoritesDone() {
+        try {
+          return localStorage.getItem(doneKey) === '1';
+        } catch {
+          return false;
+        }
+      }
+
       function writeFavorites() {
         try {
           localStorage.setItem(favoriteKey, JSON.stringify([...favorites]));
         } catch {
           // Local mirror is an instant-paint cache only.
         }
+      }
+
+      function writeFavoritesDone(done) {
+        favoritesDone = Boolean(done);
+        try {
+          if (favoritesDone) localStorage.setItem(doneKey, '1');
+          else localStorage.removeItem(doneKey);
+        } catch {
+          // Done state is only local confirmation chrome.
+        }
+      }
+
+      function favoriteStatusText(picked) {
+        const noun = picked === 1 ? 'favorite' : 'favorites';
+        if (picked > 0) return `${picked} ${noun} saved — your photographer sees these.`;
+        return 'Pick favorites as you browse.';
       }
 
       function hintDismissed() {
@@ -266,6 +360,11 @@
       function syncFavoriteButtons() {
         const picked = favorites.size;
         if (pickCount) pickCount.textContent = `${picked} picked`;
+        if (pickStatus) pickStatus.textContent = favoritesDone && picked > 0 ? `Done. ${favoriteStatusText(picked)}` : favoriteStatusText(picked);
+        if (picksDone) {
+          picksDone.disabled = picked === 0;
+          picksDone.textContent = favoritesDone && picked > 0 ? 'Done' : 'Done';
+        }
         if (hint) hint.hidden = picked > 0 || hintDismissed();
         document.querySelectorAll('[data-fav-id]').forEach((button) => {
           const on = favorites.has(Number(button.dataset.favId));
@@ -299,6 +398,7 @@
         const next = !favorites.has(imageId);
         if (next) favorites.add(imageId);
         else favorites.delete(imageId);
+        writeFavoritesDone(false);
         dismissHint();
         writeFavorites();
         syncFavoriteButtons();
@@ -311,6 +411,7 @@
           if (!response.ok) throw new Error('favorite failed');
           const result = await response.json();
           favorites = new Set((result.favorites || []).map(Number).filter((id) => id > 0));
+          writeFavoritesDone(false);
           writeFavorites();
           syncFavoriteButtons();
         } catch {
@@ -322,13 +423,38 @@
       }
       {% endif %}
 
+      function downloadGallery() {
+        if (!images.length) return;
+        if (downloadNote) {
+          downloadNote.textContent = `Starting ${images.length} photo download${images.length === 1 ? '' : 's'} at ${data.download_size_label || 'gallery size'}.`;
+        }
+        images.forEach((image, i) => {
+          window.setTimeout(() => {
+            const link = document.createElement('a');
+            link.href = image.download || image.full;
+            link.download = image.download_name || '';
+            link.rel = 'noopener noreferrer';
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+          }, i * 120);
+        });
+      }
+
       stageImg.addEventListener('load', () => stageImg.classList.add('loaded'));
       document.getElementById('close').addEventListener('click', close);
       document.getElementById('prev').addEventListener('click', () => move(-1));
       document.getElementById('next').addEventListener('click', () => move(1));
+      downloadAll?.addEventListener('click', downloadGallery);
       {% if not public_static|default(false) %}
       lightboxFav?.addEventListener('click', () => {
         if (images[index]) toggleFavorite(Number(images[index].id));
+      });
+      picksDone?.addEventListener('click', () => {
+        if (!favorites.size) return;
+        writeFavoritesDone(true);
+        syncFavoriteButtons();
+        picksDone.blur();
       });
       {% endif %}
       document.addEventListener('keydown', (event) => {

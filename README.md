@@ -4,14 +4,17 @@
 
 photoArchive is a self-hosted library for serious photo archives — and it is **fast**. Where Lightroom chugs, photoArchive flies: browse terabytes of photos at lightning speed from your own computer, NAS, or server. Cull, rank, search, and share tens of thousands of images without uploading a single byte to anyone else's cloud.
 
-It runs on your own hardware. Your files never move, never get edited, never leave your network unless you explicitly share them.
+It runs on your own hardware. Your originals stay under your control: scanning,
+AI, sharing, and publishing use catalog data and generated derivatives; the one
+explicit file-moving action is Trash, which moves originals into a restorable
+`.trash` area until you empty it.
 
 ## Built for speed
 
 - **A tiered preview cache** (small / medium / large / originals) with configurable size budgets pre-generates in the background, so browsing never waits on a slow external drive.
 - **An in-memory hot cache** serves the thumbnails you're actually looking at from RAM.
 - **A virtualized grid** keeps the DOM tiny no matter how deep you scroll — 50,000 photos feel like 50.
-- **Response caching** on every heavy query means filters, counts, and date histograms come back instantly.
+- **Response caching** on heavy query paths means filters, counts, and date histograms come back quickly.
 
 Point it at terabytes on a sleepy USB drive and it still feels instant — the archive wakes the drive only when it truly needs original pixels.
 
@@ -82,18 +85,20 @@ An installable PWA at `/m`: fast timeline with pinch density, pull-to-refresh, o
 
 ## Architecture
 
-- **Backend**: FastAPI + SQLite (WAL). Feature-sliced modules with dependency-injected routes, additive-only schema migrations, and a contract-tested public API surface (380+ tests).
+- **Backend**: FastAPI + SQLite (WAL). Feature-sliced modules with dependency-injected routes, additive-only schema migrations, and a contract-tested public API surface.
 - **Frontend**: browser-native ES modules. No bundler, no build step, no framework — the desktop app is plain modern JavaScript with a virtualized grid.
-- **Workers**: thumbnail pregeneration, embedding indexer, face scanner, and VLM captioner run as idle-gated background jobs that share a single GPU sequentially and never touch source files — they read the app's own preview cache.
+- **Workers**: cache pregeneration, embedding indexer, face scanner, VLM captioner, and metadata indexing run as background jobs. GPU-heavy work is sequenced, and AI/People/caption paths work from app-generated derivatives rather than editing originals.
 - **Local-first**: the catalog, caches, and models all live beside the app. Offline drives degrade gracefully; cached views keep working and rescans wait for the drive to return.
 
 ## Quickstart
 
 ```bash
 git clone https://github.com/Sean-Kenneth-Doherty/photo-archive.git
-cd photo-archive/web
+cd photo-archive
+cd web
 python -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/uvicorn app:app --host 0.0.0.0 --port 8000
+cd ..
+./scripts/photoarchive-server start
 ```
 
 Open `http://localhost:8000`, add a source folder in the system drawer, and let the scanners run. AI features (semantic search, captions, faces) activate when you install the local models from Background Work — everything works without them, and gets smarter with them.

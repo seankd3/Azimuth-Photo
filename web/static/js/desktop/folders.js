@@ -13,6 +13,7 @@ let closeDrawer = () => {};
 let menu = null;
 let menuReturn = null;
 let loading = true;
+let loadError = false;
 let refreshTimer = 0;
 let refreshGeneration = 0;
 let filterTimer = 0;
@@ -253,6 +254,13 @@ function renderTree() {
         host.innerHTML = Array.from({ length: 4 }, () => '<div class="chrome-skel nav-row skel"></div>').join('');
         return;
     }
+    if (loadError) {
+        host.innerHTML = '<div class="chrome-empty"><span class="chrome-empty-glyph">'
+            + icon('folder')
+            + '</span><span>Couldn\'t load folders.</span><button type="button" id="folder-tree-retry">Retry</button></div>';
+        host.querySelector('#folder-tree-retry')?.addEventListener('click', () => refreshFoldersPanel());
+        return;
+    }
     if (!sources.length) {
         host.innerHTML = '<div class="chrome-empty"><span class="chrome-empty-glyph">'
             + icon('folder')
@@ -364,13 +372,22 @@ function syncActiveRows() {
 export async function refreshFoldersPanel({ toastEmpty = false } = {}) {
     const seq = ++refreshGeneration;
     loading = true;
+    loadError = false;
     renderTree();
-    const data = await getFolderTree();
-    if (seq !== refreshGeneration) return;
-    sources = ((data && data.sources) || []).map(normalizeSource);
-    loading = false;
-    renderTree();
-    if (toastEmpty && !sources.length) showToast('No folder tree yet');
+    try {
+        const data = await getFolderTree();
+        if (seq !== refreshGeneration) return;
+        sources = ((data && data.sources) || []).map(normalizeSource);
+        if (toastEmpty && !sources.length) showToast('No folder tree yet');
+    } catch {
+        if (seq !== refreshGeneration) return;
+        sources = [];
+        loadError = true;
+    } finally {
+        if (seq !== refreshGeneration) return;
+        loading = false;
+        renderTree();
+    }
 }
 
 function scheduleFolderRefresh() {

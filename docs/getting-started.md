@@ -6,10 +6,12 @@ This guide gets photoArchive from a fresh clone to a usable local catalog.
 
 ```bash
 git clone https://github.com/Sean-Kenneth-Doherty/photo-archive.git
-cd photo-archive/web
+cd photo-archive
+cd web
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+cd ..
 ```
 
 ## Run The App
@@ -40,42 +42,47 @@ By default it uses `127.0.0.1:8000`. Override the host or port with
 
 ## First Catalog
 
-1. Open the app. Catalog is the first screen.
-2. In **Catalog Sources**, choose a folder, use tree browse, or type a path.
-3. Select **Add + Scan**.
-4. Leave the scan running until photos begin appearing in Library.
-5. Rescan a source later when files change on disk.
+1. Open the app. It opens on the Grid lens.
+2. Open **System** from the top-right settings button.
+3. In Sources, choose a folder, use tree browse, or type a path.
+4. Select **Add + Scan**.
+5. Leave the scan running until photos begin appearing in the grid.
+6. Rescan a source later when files change on disk.
 
 Removing a source changes catalog/cache state. It does not delete the original
 photo folder.
 
 If a removable drive is slow to wake or temporarily offline, photoArchive keeps
-included catalog rows active for cached Library, Compare, search, and People
-views. Rescan and missing-file checks resume when the source folder is reachable.
+included catalog rows active for cached grid, Refine, search, and People views.
+Rescan and missing-file checks resume when the source folder is reachable.
 
 ## Background Work
 
-Use the **Background Work** panel to start or stop Search, Previews, and People.
-Previews also fills the full-size cache when storage permits.
+Use **System → Background work** to inspect and pause/resume **AI embeddings**,
+**Cache pregeneration**, **People scan**, **Captions**, and **Metadata**.
 
-Heavy whole-catalog work stays paused until you start it. Nearby thumbnails,
-next-image warmups, and recently viewed full-size images still warm
-automatically while you browse.
+Heavy whole-catalog work is controllable from the drawer. Nearby thumbnails,
+next-image warmups, and recently viewed media still warm automatically while you
+browse.
 
 ## First Useful Workflow
 
 1. Scan one photo folder.
-2. Open **Library** and make sure the grid loads.
+2. Make sure the **Grid** lens loads.
 3. Adjust thumbnail size until browsing feels comfortable.
 4. Flag obvious picks and rejects with `P`, `X`, and `U`.
-5. Open **Compare** and use Mosaic to add quick ranking signal.
-6. Return to Library and sort by rating or confidence.
-7. Export a filtered result set as JSON or CSV when you want a portable list.
+5. Open **Refine** and use Mosaic or Duel to add quick ranking signal.
+6. Return to Grid and sort by Rating or Date; use the sort-direction button when
+   ascending order is more useful.
+7. Save a regular or smart collection, share it privately, publish it to a
+   configured website folder, or export a filtered result set as JSON, CSV, or
+   ZIP.
 
 ## Optional AI Setup
 
-photoArchive works without AI models. Install the local model from Catalog when
-you want semantic image search.
+photoArchive works without AI models. Install local models from **System → AI**
+or **System → Background work** when you want semantic image search, local
+captions/tags, People, and AI-assisted Refine pairing.
 
 The first model download needs internet access unless the model is already on
 disk. After installation, indexing runs locally in the background.
@@ -86,11 +93,11 @@ disk. After installation, indexing runs locally in the background.
   in `web/`.
 - If the port is busy, stop the old server or run with
   `PHOTOARCHIVE_PORT=8001`.
-- If Library feels slow while the app is building, pause any manual Background
-  Work job you do not need right now.
-- If semantic search is unavailable, check Catalog's AI model and embedding
+- If the grid feels slow while the app is building, pause any Background work
+  row you do not need right now.
+- If semantic search is unavailable, check System's AI model and embedding
   index status.
 - If People stays empty, make sure preview caching and People scanning are
   enabled and that cached previews have had time to build.
-- If previews look stale after changing thumbnail settings, use Catalog's cache
+- If previews look stale after changing thumbnail settings, use System's cache
   controls to refresh or clear generated cache.
