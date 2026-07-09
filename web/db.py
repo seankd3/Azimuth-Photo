@@ -977,7 +977,8 @@ async def get_rankings(limit: int = 100, offset: int = 0, sort: str = "elo",
                        file_type: str = "", camera: str = "", lens: str = "",
                        id_filter: set = None,
                        visible_thumb_size: str = "", cache_root: str = "",
-                       text_query: str = ""):
+                       text_query: str = "",
+                       exclude_collapsed_stack_members: bool = False):
     return await ranking_repository.rankings_cached(
         DB_PATH,
         get_catalog_image_counts=get_catalog_image_counts,
@@ -999,6 +1000,7 @@ async def get_rankings(limit: int = 100, offset: int = 0, sort: str = "elo",
         visible_thumb_size=visible_thumb_size,
         cache_root=cache_root,
         text_query=text_query,
+        exclude_collapsed_stack_members=exclude_collapsed_stack_members,
     )
 
 
@@ -1009,7 +1011,8 @@ _facet_cache_key = ranking_repository.facet_cache_key
 async def rank_quality(orientation: str = "", compared: str = "", min_stars: int = 0,
                        folder: str = "", flag: str = "", date_taken: str = "",
                        file_type: str = "", camera: str = "", lens: str = "",
-                       id_filter: set = None, text_query: str = "") -> dict:
+                       id_filter: set = None, text_query: str = "",
+                       exclude_collapsed_stack_members: bool = False) -> dict:
     return await ranking_repository.rank_quality(
         DB_PATH,
         orientation=orientation,
@@ -1023,6 +1026,7 @@ async def rank_quality(orientation: str = "", compared: str = "", min_stars: int
         lens=lens,
         id_filter=id_filter,
         text_query=text_query,
+        exclude_collapsed_stack_members=exclude_collapsed_stack_members,
     )
 
 
@@ -1054,10 +1058,6 @@ async def set_stack_representative(stack_id: int, image_id: int) -> dict | None:
     return await stack_repository.set_representative(DB_PATH, stack_id, image_id)
 
 
-async def stack_member_image_ids_excluding_representatives() -> set[int]:
-    return await stack_repository.member_image_ids_excluding_representatives(DB_PATH)
-
-
 async def stack_representative_counts(image_ids) -> dict[int, dict]:
     return await stack_repository.representative_stack_counts(DB_PATH, image_ids)
 
@@ -1075,7 +1075,8 @@ async def count_rankings(orientation: str = "", compared: str = "", min_stars: i
                          file_type: str = "", camera: str = "", lens: str = "",
                          id_filter: set = None,
                          visible_thumb_size: str = "", cache_root: str = "",
-                         text_query: str = "") -> int:
+                         text_query: str = "",
+                         exclude_collapsed_stack_members: bool = False) -> int:
     return await ranking_repository.count_rankings_cached(
         DB_PATH,
         get_catalog_image_counts=get_catalog_image_counts,
@@ -1093,6 +1094,7 @@ async def count_rankings(orientation: str = "", compared: str = "", min_stars: i
         visible_thumb_size=visible_thumb_size,
         cache_root=cache_root,
         text_query=text_query,
+        exclude_collapsed_stack_members=exclude_collapsed_stack_members,
         ttl_seconds=RANKING_COUNT_CACHE_TTL_SECONDS,
     )
 
@@ -1102,7 +1104,8 @@ async def get_date_groups(orientation: str = "", compared: str = "", min_stars: 
                           file_type: str = "", camera: str = "", lens: str = "",
                           visible_thumb_size: str = "", cache_root: str = "",
                           id_filter: set | None = None, text_query: str = "",
-                          _force_refresh: bool = False):
+                          _force_refresh: bool = False,
+                          exclude_collapsed_stack_members: bool = False):
     return await ranking_repository.date_groups_cached(
         DB_PATH,
         get_catalog_image_counts=get_catalog_image_counts,
@@ -1113,6 +1116,7 @@ async def get_date_groups(orientation: str = "", compared: str = "", min_stars: 
         id_filter=id_filter, text_query=text_query,
         force_refresh=_force_refresh,
         ttl_seconds=FACET_CACHE_TTL_SECONDS,
+        exclude_collapsed_stack_members=exclude_collapsed_stack_members,
     )
 
 

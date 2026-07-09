@@ -206,8 +206,6 @@ def configure_library_routes() -> None:
         get_import_batch_image_ids=lambda batch_id: db.get_import_batch_image_ids(batch_id),
     )
     library_service.configure_stacks(
-        get_rankable_image_ids=lambda: db.get_rankable_image_id_set(),
-        get_stack_collapsed_image_ids=lambda: db.stack_member_image_ids_excluding_representatives(),
         get_stack_representative_counts=lambda image_ids: db.stack_representative_counts(image_ids),
     )
 

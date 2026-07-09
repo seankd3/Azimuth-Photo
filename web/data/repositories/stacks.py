@@ -319,22 +319,6 @@ async def set_representative(db_path: str, stack_id: int, image_id: int) -> dict
     return await get_stack(db_path, stack_id)
 
 
-async def member_image_ids_excluding_representatives(db_path: str) -> set[int]:
-    conn = await data_connection.open_async(db_path)
-    try:
-        cursor = await conn.execute(
-            "SELECT sm.image_id "
-            "FROM stack_members sm JOIN stacks s ON s.id = sm.stack_id "
-            "JOIN images i ON i.id = sm.image_id "
-            "JOIN catalog_sources cs ON cs.id = i.source_id "
-            "WHERE sm.image_id != s.representative_image_id "
-            "AND cs.included = 1 AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL"
-        )
-        return {int(row["image_id"]) for row in await cursor.fetchall()}
-    finally:
-        await data_connection.close_async(conn, db_path=db_path)
-
-
 async def representative_stack_counts(db_path: str, image_ids) -> dict[int, dict]:
     ids = _unique_ids(image_ids)
     if not ids:

@@ -39,8 +39,6 @@ _get_date_histogram: Callable[..., Awaitable[dict]] | None = None
 _get_scope_counts: Callable[..., Awaitable[dict]] | None = None
 _get_visible_pairing_pool_counts: Callable[..., Awaitable[dict]] | None = None
 _get_import_batch_image_ids: Callable[[int], Awaitable[set[int] | None]] | None = None
-_get_rankable_image_ids: Callable[[], Awaitable[frozenset[int]]] | None = None
-_get_stack_collapsed_image_ids: Callable[[], Awaitable[set[int]]] | None = None
 _get_stack_representative_counts: Callable[[list[int]], Awaitable[dict[int, dict]]] | None = None
 
 
@@ -101,13 +99,9 @@ def configure_import_batches(*, get_import_batch_image_ids: Callable[[int], Awai
 
 def configure_stacks(
     *,
-    get_rankable_image_ids: Callable[[], Awaitable[frozenset[int]]],
-    get_stack_collapsed_image_ids: Callable[[], Awaitable[set[int]]],
     get_stack_representative_counts: Callable[[list[int]], Awaitable[dict[int, dict]]],
 ) -> None:
-    global _get_rankable_image_ids, _get_stack_collapsed_image_ids, _get_stack_representative_counts
-    _get_rankable_image_ids = get_rankable_image_ids
-    _get_stack_collapsed_image_ids = get_stack_collapsed_image_ids
+    global _get_stack_representative_counts
     _get_stack_representative_counts = get_stack_representative_counts
 
 
@@ -190,17 +184,8 @@ def _normalize_stacks_mode(value: str = "") -> str:
     return "collapsed" if (value or "").strip().lower() == "collapsed" else "expanded"
 
 
-async def _combined_stack_filter(current_ids, stacks: str = "expanded"):
-    if _normalize_stacks_mode(stacks) != "collapsed":
-        return current_ids
-    if _get_stack_collapsed_image_ids is None or _get_rankable_image_ids is None:
-        raise RuntimeError("Library service is not configured")
-    collapsed_ids = await _get_stack_collapsed_image_ids()
-    if not collapsed_ids:
-        return current_ids
-    if current_ids is None:
-        current_ids = await _get_rankable_image_ids()
-    return set(int(image_id) for image_id in current_ids).difference(collapsed_ids)
+def _exclude_collapsed_stack_members(stacks: str = "expanded") -> bool:
+    return _normalize_stacks_mode(stacks) == "collapsed"
 
 
 async def _attach_stack_counts(cards: list[dict], stacks: str = "expanded") -> list[dict]:
@@ -256,7 +241,7 @@ async def date_groups_payload(
 ) -> dict:
     search = await _configured_resolve_library_constraints(q, people=people, deep=deep)
     search_ids = await _combined_import_batch_filter(search.get("id_filter"), import_batch)
-    search_ids = await _combined_stack_filter(search_ids, stacks)
+    exclude_collapsed_stack_members = _exclude_collapsed_stack_members(stacks)
     visible_thumb_size = _visible_thumb_size_for_scope(import_batch)
     groups = await _configured(_get_date_groups)(
         orientation=orientation,
@@ -272,6 +257,7 @@ async def date_groups_payload(
         cache_root=_configured_cache_root(),
         id_filter=search_ids,
         text_query=search.get("text_query") or "",
+        exclude_collapsed_stack_members=exclude_collapsed_stack_members,
     )
     return {"groups": groups}
 
@@ -331,7 +317,7 @@ async def date_histogram_payload(
 ) -> dict:
     search = await _configured_resolve_library_constraints(q, people=people, deep=deep)
     search_ids = await _combined_import_batch_filter(search.get("id_filter"), import_batch)
-    search_ids = await _combined_stack_filter(search_ids, stacks)
+    exclude_collapsed_stack_members = _exclude_collapsed_stack_members(stacks)
     return await _configured(_get_date_histogram)(
         orientation=orientation,
         compared=compared,
@@ -344,6 +330,7 @@ async def date_histogram_payload(
         lens=lens,
         id_filter=search_ids,
         text_query=search.get("text_query") or "",
+        exclude_collapsed_stack_members=exclude_collapsed_stack_members,
     )
 
 
@@ -365,7 +352,7 @@ async def scope_counts_payload(
 ) -> dict:
     search = await _configured_resolve_library_constraints(q, people=people, deep=deep)
     search_ids = await _combined_import_batch_filter(search.get("id_filter"), import_batch)
-    search_ids = await _combined_stack_filter(search_ids, stacks)
+    exclude_collapsed_stack_members = _exclude_collapsed_stack_members(stacks)
     return await _configured(_get_scope_counts)(
         orientation=orientation,
         compared=compared,
@@ -377,6 +364,7 @@ async def scope_counts_payload(
         lens=lens,
         id_filter=search_ids,
         text_query=search.get("text_query") or "",
+        exclude_collapsed_stack_members=exclude_collapsed_stack_members,
     )
 
 
@@ -400,7 +388,7 @@ async def api_rankings_impl(
     search = await _configured_resolve_library_constraints(q, people=people, deep=deep)
     search_ids = await _combined_import_batch_filter(search["id_filter"], import_batch)
     stacks_mode = _normalize_stacks_mode(stacks)
-    search_ids = await _combined_stack_filter(search_ids, stacks_mode)
+    exclude_collapsed_stack_members = _exclude_collapsed_stack_members(stacks_mode)
     search_scores = search["scores"]
     search_mode = search["search_mode"]
     text_query = search["text_query"]
@@ -488,6 +476,7 @@ async def api_rankings_impl(
                 orientation=orientation, compared=compared, min_stars=min_stars,
                 folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
                 camera=camera, lens=lens, id_filter=search_ids, text_query=text_query,
+                exclude_collapsed_stack_members=exclude_collapsed_stack_members,
             )
         )
         visible_images = await _configured(_count_rankings)(
@@ -497,6 +486,7 @@ async def api_rankings_impl(
             id_filter=search_ids,
             visible_thumb_size=visible_thumb_size, cache_root=_configured_cache_root(),
             text_query=text_query,
+            exclude_collapsed_stack_members=exclude_collapsed_stack_members,
         )
         total_images = await total_task
         if visible_images <= 0:
@@ -521,6 +511,7 @@ async def api_rankings_impl(
             id_filter=search_ids,
             visible_thumb_size=visible_thumb_size, cache_root=_configured_cache_root(),
             text_query=text_query,
+            exclude_collapsed_stack_members=exclude_collapsed_stack_members,
         )
         _image_ids, matrix = await embed_cache.get_matrix(taste.get("model_key"))
         id_to_idx = embed_cache.get_index(taste.get("model_key"))
@@ -574,6 +565,7 @@ async def api_rankings_impl(
                 orientation=orientation, compared=compared, min_stars=min_stars,
                 folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
                 camera=camera, lens=lens, id_filter=search_ids, text_query=text_query,
+                exclude_collapsed_stack_members=exclude_collapsed_stack_members,
             )
         )
         visible_images = await _configured(_count_rankings)(
@@ -583,6 +575,7 @@ async def api_rankings_impl(
             id_filter=search_ids,
             visible_thumb_size=visible_thumb_size, cache_root=_configured_cache_root(),
             text_query=text_query,
+            exclude_collapsed_stack_members=exclude_collapsed_stack_members,
         )
         total_images = await total_task
         images = await _configured(_get_rankings)(
@@ -593,6 +586,7 @@ async def api_rankings_impl(
             id_filter=search_ids,
             visible_thumb_size=visible_thumb_size, cache_root=_configured_cache_root(),
             text_query=text_query,
+            exclude_collapsed_stack_members=exclude_collapsed_stack_members,
         )
         all_results = []
         for img in images:
@@ -652,6 +646,7 @@ async def api_rankings_impl(
             search.get("people_active"),
             text_query,
             _normalized_import_batch_id(import_batch),
+            exclude_collapsed_stack_members,
         )
     )
     if unfiltered_rankings:
@@ -670,6 +665,7 @@ async def api_rankings_impl(
                     camera=camera, lens=lens,
                     id_filter=search_ids,
                     text_query=text_query,
+                    exclude_collapsed_stack_members=exclude_collapsed_stack_members,
                 )
             )
             visible_task = asyncio.create_task(
@@ -680,6 +676,7 @@ async def api_rankings_impl(
                     id_filter=search_ids,
                     visible_thumb_size=visible_thumb_size, cache_root=_configured_cache_root(),
                     text_query=text_query,
+                    exclude_collapsed_stack_members=exclude_collapsed_stack_members,
                 )
             )
     quality_task = None
@@ -691,6 +688,7 @@ async def api_rankings_impl(
                 camera=camera, lens=lens,
                 id_filter=search_ids,
                 text_query=text_query,
+                exclude_collapsed_stack_members=exclude_collapsed_stack_members,
             )
         )
     images = await _configured(_get_rankings)(
@@ -701,6 +699,7 @@ async def api_rankings_impl(
         id_filter=search_ids,
         visible_thumb_size=visible_thumb_size, cache_root=_configured_cache_root(),
         text_query=text_query,
+        exclude_collapsed_stack_members=exclude_collapsed_stack_members,
     )
     if unfiltered_rankings:
         counts = await counts_task
@@ -719,6 +718,7 @@ async def api_rankings_impl(
                         camera=camera, lens=lens,
                         id_filter=search_ids,
                         text_query=text_query,
+                        exclude_collapsed_stack_members=exclude_collapsed_stack_members,
                     )
                 )
             if visible_task is None:
@@ -730,6 +730,7 @@ async def api_rankings_impl(
                         id_filter=search_ids,
                         visible_thumb_size=visible_thumb_size, cache_root=_configured_cache_root(),
                         text_query=text_query,
+                        exclude_collapsed_stack_members=exclude_collapsed_stack_members,
                     )
                 )
             visible_images = await visible_task

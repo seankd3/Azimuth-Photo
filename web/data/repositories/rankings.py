@@ -136,6 +136,7 @@ def ranking_count_cache_key(
     visible_thumb_size: str = "",
     cache_root: str = "",
     text_query: str = "",
+    exclude_collapsed_stack_members: bool = False,
 ):
     if id_filter is not None:
         return None
@@ -152,6 +153,7 @@ def ranking_count_cache_key(
         visible_thumb_size or "",
         cache_root or "",
         text_query or "",
+        bool(exclude_collapsed_stack_members),
     )
 
 
@@ -169,6 +171,7 @@ def facet_cache_key(
     cache_root: str = "",
     id_filter: set | None = None,
     text_query: str = "",
+    exclude_collapsed_stack_members: bool = False,
 ) -> tuple | None:
     if id_filter is not None or text_query:
         return None
@@ -184,6 +187,7 @@ def facet_cache_key(
         lens or "",
         visible_thumb_size or "",
         cache_root or "",
+        bool(exclude_collapsed_stack_members),
     )
 
 
@@ -250,6 +254,7 @@ def ranking_filter_parts(
     visible_thumb_size: str = "", cache_root: str = "",
     text_query: str = "",
     include_source: bool = True,
+    exclude_collapsed_stack_members: bool = False,
 ) -> tuple[list[str], list]:
     conditions = [
         "i.status IN ('kept', 'maybe')",
@@ -258,6 +263,15 @@ def ranking_filter_parts(
     if include_source:
         conditions[:0] = ["s.included = 1"]
     params = []
+
+    if exclude_collapsed_stack_members:
+        conditions.append(
+            "i.id NOT IN ("
+            "SELECT sm.image_id FROM stack_members sm "
+            "JOIN stacks s ON s.id = sm.stack_id "
+            "WHERE sm.image_id <> s.representative_image_id"
+            ")"
+        )
 
     if orientation in ("landscape", "portrait"):
         conditions.append("i.orientation = ?")
@@ -450,6 +464,7 @@ async def rankings(
     cache_root: str = "",
     text_query: str = "",
     use_cache_first_visible: bool = False,
+    exclude_collapsed_stack_members: bool = False,
 ):
     active_images = int(catalog_counts.get("active_images") or 0)
     if active_images <= 0:
@@ -476,6 +491,7 @@ async def rankings(
         cache_root=cache_root,
         text_query=text_query,
         include_source=not all_catalog_images_active,
+        exclude_collapsed_stack_members=exclude_collapsed_stack_members,
     )
 
     if id_filter is not None:
@@ -506,6 +522,7 @@ async def rankings(
                 lens=lens,
                 text_query=text_query,
                 include_source=False,
+                exclude_collapsed_stack_members=exclude_collapsed_stack_members,
             )
             cursor = await conn.execute(
                 f"SELECT {IMAGE_ROW_SELECT} "
@@ -562,6 +579,7 @@ async def rankings_cached(
     visible_thumb_size: str = "",
     cache_root: str = "",
     text_query: str = "",
+    exclude_collapsed_stack_members: bool = False,
 ):
     catalog_counts = await get_catalog_image_counts()
     active_images = int(catalog_counts.get("active_images") or 0)
@@ -616,6 +634,7 @@ async def rankings_cached(
         cache_root=cache_root,
         text_query=text_query,
         use_cache_first_visible=use_cache_first_visible,
+        exclude_collapsed_stack_members=exclude_collapsed_stack_members,
     )
 
 
@@ -631,10 +650,12 @@ def has_ranking_count_filters(
     lens: str,
     id_filter: set | None,
     text_query: str,
+    exclude_collapsed_stack_members: bool = False,
 ) -> bool:
     return bool(
         orientation or compared or min_stars > 0 or folder or flag or date_taken
         or file_type or camera or lens or id_filter is not None or text_query
+        or exclude_collapsed_stack_members
     )
 
 
@@ -656,6 +677,7 @@ async def count_rankings_uncached(
     cache_root: str = "",
     text_query: str = "",
     cached_visible_ids: set | None = None,
+    exclude_collapsed_stack_members: bool = False,
 ) -> int:
     active_images = int(catalog_counts.get("active_images") or 0)
     if not has_ranking_count_filters(
@@ -670,6 +692,7 @@ async def count_rankings_uncached(
         lens,
         id_filter,
         text_query,
+        exclude_collapsed_stack_members,
     ):
         if not visible_thumb_size or not cache_root:
             return active_images
@@ -718,6 +741,7 @@ async def count_rankings_uncached(
                 lens=lens,
                 text_query=text_query,
                 include_source=not all_sources_available,
+                exclude_collapsed_stack_members=exclude_collapsed_stack_members,
             )
             source_join = (
                 "JOIN catalog_sources s ON s.id = i.source_id "
@@ -756,6 +780,7 @@ async def count_rankings_uncached(
             cache_root=cache_root,
             text_query=text_query,
             include_source=not all_sources_available,
+            exclude_collapsed_stack_members=exclude_collapsed_stack_members,
         )
 
         if cached_id_filter is not None:
@@ -812,6 +837,7 @@ async def count_rankings_uncached_with_visible_cache(
     visible_thumb_size: str = "",
     cache_root: str = "",
     text_query: str = "",
+    exclude_collapsed_stack_members: bool = False,
 ) -> int:
     cached_visible_ids = None
     if visible_thumb_size and cache_root and id_filter is not None:
@@ -833,6 +859,7 @@ async def count_rankings_uncached_with_visible_cache(
         cache_root=cache_root,
         text_query=text_query,
         cached_visible_ids=cached_visible_ids,
+        exclude_collapsed_stack_members=exclude_collapsed_stack_members,
     )
 
 
@@ -855,6 +882,7 @@ async def count_rankings_cached(
     cache_root: str = "",
     text_query: str = "",
     ttl_seconds: float = RANKING_COUNT_CACHE_TTL_SECONDS,
+    exclude_collapsed_stack_members: bool = False,
 ) -> int:
     cache_key = ranking_count_cache_key(
         orientation=orientation,
@@ -870,6 +898,7 @@ async def count_rankings_cached(
         visible_thumb_size=visible_thumb_size,
         cache_root=cache_root,
         text_query=text_query,
+        exclude_collapsed_stack_members=exclude_collapsed_stack_members,
     )
     if cache_key is not None:
         now = _time.time()
@@ -894,6 +923,7 @@ async def count_rankings_cached(
         visible_thumb_size=visible_thumb_size,
         cache_root=cache_root,
         text_query=text_query,
+        exclude_collapsed_stack_members=exclude_collapsed_stack_members,
     )
     if cache_key is not None:
         _ranking_count_cache[cache_key] = {
@@ -982,6 +1012,7 @@ async def rank_quality(
     lens: str = "",
     id_filter: set | None = None,
     text_query: str = "",
+    exclude_collapsed_stack_members: bool = False,
 ) -> dict:
     """Summarize how well the filtered set is ranked.
 
@@ -999,6 +1030,7 @@ async def rank_quality(
         camera=camera,
         lens=lens,
         text_query=text_query,
+        exclude_collapsed_stack_members=exclude_collapsed_stack_members,
     )
     signals = "COALESCE(i.comparisons, 0) + COALESCE(i.propagated_updates, 0)"
     select = (
@@ -1059,6 +1091,7 @@ async def date_histogram(
     lens: str = "",
     id_filter: set | None = None,
     text_query: str = "",
+    exclude_collapsed_stack_members: bool = False,
 ) -> dict:
     """Month histogram for the whole filtered scope.
 
@@ -1076,6 +1109,7 @@ async def date_histogram(
         camera=camera,
         lens=lens,
         text_query=text_query,
+        exclude_collapsed_stack_members=exclude_collapsed_stack_members,
     )
     select = (
         "SELECT substr(i.date_taken, 1, 7) AS month, COUNT(*) AS count "
@@ -1134,6 +1168,7 @@ async def scope_counts(
     lens: str = "",
     id_filter: set | None = None,
     text_query: str = "",
+    exclude_collapsed_stack_members: bool = False,
 ) -> dict:
     """Cheap total/picked/rejected counts for a scope in one query."""
     conditions, params = ranking_filter_parts(
@@ -1146,6 +1181,7 @@ async def scope_counts(
         camera=camera,
         lens=lens,
         text_query=text_query,
+        exclude_collapsed_stack_members=exclude_collapsed_stack_members,
     )
     select = (
         "SELECT COUNT(*) AS total, "
@@ -1209,6 +1245,7 @@ async def date_groups(
     cache_root: str = "",
     id_filter: set | None = None,
     text_query: str = "",
+    exclude_collapsed_stack_members: bool = False,
 ) -> list[dict]:
     active_images = int(catalog_counts.get("active_images") or 0)
     if active_images <= 0:
@@ -1223,6 +1260,7 @@ async def date_groups(
         file_type=file_type, camera=camera, lens=lens,
         text_query=text_query,
         include_source=not all_sources_available,
+        exclude_collapsed_stack_members=exclude_collapsed_stack_members,
     )
     if id_filter is not None:
         if not id_filter:
@@ -1309,6 +1347,7 @@ async def date_groups_cached(
     text_query: str = "",
     force_refresh: bool = False,
     ttl_seconds: float = FACET_CACHE_TTL_SECONDS,
+    exclude_collapsed_stack_members: bool = False,
 ):
     cache_key = facet_cache_key(
         orientation=orientation,
@@ -1324,6 +1363,7 @@ async def date_groups_cached(
         cache_root=cache_root,
         id_filter=id_filter,
         text_query=text_query,
+        exclude_collapsed_stack_members=exclude_collapsed_stack_members,
     )
     now = _time.time()
     cached = _date_groups_cache.get(cache_key) if cache_key is not None else None
@@ -1353,6 +1393,7 @@ async def date_groups_cached(
                         text_query=text_query,
                         force_refresh=True,
                         ttl_seconds=ttl_seconds,
+                        exclude_collapsed_stack_members=exclude_collapsed_stack_members,
                     )
                 finally:
                     _date_groups_refreshing.discard(cache_key)
@@ -1377,6 +1418,7 @@ async def date_groups_cached(
         cache_root=cache_root,
         id_filter=id_filter,
         text_query=text_query,
+        exclude_collapsed_stack_members=exclude_collapsed_stack_members,
     )
     if cache_key is not None and int(catalog_counts.get("active_images") or 0) > 0:
         _date_groups_cache[cache_key] = {

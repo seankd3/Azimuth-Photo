@@ -92,6 +92,55 @@ class StackTestCase(unittest.IsolatedAsyncioTestCase):
         finally:
             await conn.close()
 
+    async def _bulk_cached_images(self, source, count):
+        rows = []
+        now = 1000.0
+        root = thumbnails.SSD_CACHE_DIR
+        for index in range(count):
+            image_id = index + 1
+            filename = f"bulk-{index:04d}.jpg"
+            filepath = os.path.join(source["path"], filename)
+            rows.append((
+                int(source["id"]),
+                filename,
+                filepath,
+                2000.0 - index,
+                "kept",
+                "jpg",
+                100,
+                100,
+                100,
+                root,
+                "sm",
+                os.path.join(self.tempdir.name, f"{image_id}.jpg"),
+                f"sig-{image_id}",
+                now,
+            ))
+        conn = await db.get_db()
+        try:
+            ids = []
+            for row in rows:
+                cursor = await conn.execute(
+                    "INSERT INTO images "
+                    "(source_id, filename, filepath, elo, comparisons, propagated_updates, "
+                    "status, flag, file_ext, file_size, width, height) "
+                    "VALUES (?, ?, ?, ?, 0, 0, ?, 'unflagged', ?, ?, ?, ?)",
+                    row[:9],
+                )
+                image_id = int(cursor.lastrowid)
+                ids.append(image_id)
+                await conn.execute(
+                    "INSERT OR REPLACE INTO cache_entries "
+                    "(cache_root, size, image_id, path, source_signature, size_bytes, last_accessed, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, 100, ?, ?)",
+                    (row[9], row[10], image_id, row[11], row[12], row[13], row[13]),
+                )
+            await db._update_source_counts(conn, int(source["id"]))
+            await conn.commit()
+            return ids
+        finally:
+            await conn.close()
+
     def _stub_embeddings(self, image_ids, matrix):
         async def fake_get_matrix(_model_key=None):
             return image_ids, matrix
@@ -324,6 +373,83 @@ class StackTestCase(unittest.IsolatedAsyncioTestCase):
         histogram = await library_routes.api_date_histogram(stacks="collapsed")
         self.assertEqual(counts["total"], 2)
         self.assertEqual(histogram["total"], 2)
+
+    async def test_full_library_collapsed_rankings_do_not_materialize_id_filter(self):
+        source = await self._source("catalog")
+        image_ids = await self._bulk_cached_images(source, 1200)
+        representative, first_hidden, second_hidden = image_ids[:3]
+        await stack_repository.create_stack(
+            db.DB_PATH,
+            kind="manual",
+            representative_image_id=representative,
+            member_rows=[
+                {"image_id": representative},
+                {"image_id": first_hidden},
+                {"image_id": second_hidden},
+            ],
+            auto=False,
+        )
+        cache_events.invalidate_stats_cache()
+        library_service._rankings_response_cache.clear()
+
+        expanded = await library_routes.api_rankings(limit=1500, stacks="expanded")
+        collapsed = await library_routes.api_rankings(limit=1500, stacks="collapsed")
+        collapsed_ids = {image["id"] for image in collapsed["images"]}
+        counts = await library_routes.api_counts(stacks="collapsed")
+        date_groups = await library_routes.api_date_groups(stacks="collapsed")
+        histogram = await library_routes.api_date_histogram(stacks="collapsed")
+
+        self.assertEqual(expanded["total_kept"], 1200)
+        self.assertEqual(collapsed["total_kept"], 1198)
+        self.assertEqual(len(collapsed["images"]), 1198)
+        self.assertIn(representative, collapsed_ids)
+        self.assertNotIn(first_hidden, collapsed_ids)
+        self.assertNotIn(second_hidden, collapsed_ids)
+        self.assertEqual(counts["total"], collapsed["total_kept"])
+        self.assertEqual(sum(group["count"] for group in date_groups["groups"]), collapsed["total_kept"])
+        self.assertEqual(histogram["total"], collapsed["total_kept"])
+
+    async def test_collapsed_rankings_apply_search_id_filter_and_stack_exclusion(self):
+        source = await self._source("catalog")
+        representative = await self._image(source, "rep.jpg", elo=1500)
+        hidden = await self._image(source, "hidden.jpg", elo=1400)
+        outside_search = await self._image(source, "outside.jpg", elo=1300)
+        for image_id in (representative, hidden, outside_search):
+            await self._cache_entry(image_id)
+        await stack_repository.create_stack(
+            db.DB_PATH,
+            kind="manual",
+            representative_image_id=representative,
+            member_rows=[{"image_id": representative}, {"image_id": hidden}],
+            auto=False,
+        )
+        cache_events.invalidate_stats_cache()
+        library_service._rankings_response_cache.clear()
+
+        old_resolver = library_service._resolve_library_constraints
+
+        async def search_subset(_q, *, people="", deep=False):
+            return {
+                "id_filter": {representative, hidden},
+                "scores": {},
+                "search_mode": "metadata",
+                "text_query": "",
+                "active": True,
+                "ai_unavailable": False,
+                "fallback_reason": "",
+                "search_sources": [],
+                "people_ids": [],
+                "people_active": False,
+            }
+
+        library_service._resolve_library_constraints = search_subset
+        try:
+            collapsed = await library_routes.api_rankings(limit=10, q="stack-search", stacks="collapsed")
+        finally:
+            library_service._resolve_library_constraints = old_resolver
+
+        self.assertEqual([image["id"] for image in collapsed["images"]], [representative])
+        self.assertEqual(collapsed["total_kept"], 1)
 
 
 class StackRouteTests(unittest.TestCase):
