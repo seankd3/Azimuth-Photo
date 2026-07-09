@@ -6,7 +6,7 @@ from date_inference import infer_image_date
 from data.repositories import catalog as catalog_repository
 
 EXPECTED_EMBEDDING_DIM = 2048  # Qwen3-VL-Embedding-2B native dimension
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS catalog_sources (
@@ -475,6 +475,7 @@ CREATE TABLE IF NOT EXISTS collections (
     description TEXT NOT NULL DEFAULT '',
     visibility TEXT NOT NULL DEFAULT 'private',
     status TEXT NOT NULL DEFAULT 'draft',
+    query TEXT DEFAULT NULL,
     cover_image_id INTEGER REFERENCES images(id) DEFAULT NULL,
     created_at REAL NOT NULL DEFAULT (strftime('%s', 'now')),
     updated_at REAL NOT NULL DEFAULT (strftime('%s', 'now'))
@@ -501,6 +502,14 @@ CREATE TABLE IF NOT EXISTS collection_shares (
     last_viewed_at REAL DEFAULT NULL
 );
 
+CREATE TABLE IF NOT EXISTS share_images (
+    share_id INTEGER NOT NULL REFERENCES collection_shares(id) ON DELETE CASCADE,
+    image_id INTEGER NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL DEFAULT 0,
+    added_at REAL NOT NULL DEFAULT (strftime('%s', 'now')),
+    PRIMARY KEY (share_id, image_id)
+);
+
 CREATE TABLE IF NOT EXISTS share_favorites (
     id INTEGER PRIMARY KEY,
     share_id INTEGER NOT NULL REFERENCES collection_shares(id),
@@ -518,6 +527,10 @@ CREATE INDEX IF NOT EXISTS idx_collection_images_position
 ON collection_images(collection_id, position, added_at);
 CREATE INDEX IF NOT EXISTS idx_collection_shares_active
 ON collection_shares(collection_id, revoked_at);
+CREATE INDEX IF NOT EXISTS idx_share_images_image
+ON share_images(image_id, share_id);
+CREATE INDEX IF NOT EXISTS idx_share_images_position
+ON share_images(share_id, position, added_at);
 CREATE INDEX IF NOT EXISTS idx_share_favorites_share
 ON share_favorites(share_id);
 
@@ -657,6 +670,10 @@ CATALOG_SOURCE_COMPAT_COLUMNS = (
     ("last_scan_at", "REAL DEFAULT NULL"),
     ("last_seen_at", "REAL DEFAULT NULL"),
     ("removed_at", "REAL DEFAULT NULL"),
+)
+
+COLLECTION_COMPAT_COLUMNS = (
+    ("query", "TEXT DEFAULT NULL"),
 )
 
 COLLECTION_SHARE_COMPAT_COLUMNS = (
@@ -842,6 +859,7 @@ REQUIRED_TABLES = {
     "collections",
     "collection_images",
     "collection_shares",
+    "share_images",
     "share_favorites",
     "people",
     "face_detections",
@@ -893,6 +911,7 @@ REQUIRED_COLUMNS = {
     "cache_metadata": {"replace_stale_thumbnails"},
     "stacks": {"kind", "representative_image_id", "auto", "created_at", "updated_at"},
     "stack_members": {"stack_id", "image_id", "score", "added_at"},
+    "collections": {"query"},
     "collection_shares": {"password_hash", "view_count", "first_viewed_at", "last_viewed_at"},
 }
 
@@ -920,6 +939,8 @@ REQUIRED_INDEXES = {
     "idx_collection_images_image",
     "idx_collection_images_position",
     "idx_collection_shares_active",
+    "idx_share_images_image",
+    "idx_share_images_position",
     "idx_share_favorites_share",
     "idx_people_status_seen",
     "idx_face_detections_image_model",
@@ -966,6 +987,7 @@ async def prepare_existing_database_for_schema(conn) -> None:
     await conn.execute(PRE_SCHEMA_CATALOG_SOURCES_DDL)
     await _add_columns_if_missing(conn, "images", IMAGE_COMPAT_COLUMNS)
     await _add_columns_if_missing(conn, "comparisons", (("action_id", "TEXT DEFAULT NULL"),))
+    await _add_columns_if_missing(conn, "collections", COLLECTION_COMPAT_COLUMNS)
 
 
 async def ensure_compatibility_columns(conn) -> None:
@@ -977,6 +999,7 @@ async def ensure_compatibility_columns(conn) -> None:
     )
     await _add_columns_if_missing(conn, "comparisons", (("action_id", "TEXT DEFAULT NULL"),))
     await _add_columns_if_missing(conn, "catalog_sources", CATALOG_SOURCE_COMPAT_COLUMNS)
+    await _add_columns_if_missing(conn, "collections", COLLECTION_COMPAT_COLUMNS)
     await _add_columns_if_missing(conn, "collection_shares", COLLECTION_SHARE_COMPAT_COLUMNS)
 
 
@@ -1032,6 +1055,25 @@ async def backfill_image_date_sources(conn) -> int:
     return changed
 
 
+async def backfill_share_images(conn) -> None:
+    await conn.execute(
+        """
+        INSERT OR IGNORE INTO share_images (share_id, image_id, position, added_at)
+        SELECT
+            s.id,
+            ci.image_id,
+            ci.position,
+            COALESCE(ci.added_at, s.created_at)
+        FROM collection_shares s
+        JOIN collection_images ci ON ci.collection_id = s.collection_id
+        WHERE NOT EXISTS (
+            SELECT 1 FROM share_images existing WHERE existing.share_id = s.id
+        )
+        ORDER BY s.id, ci.position ASC, ci.added_at ASC, ci.image_id ASC
+        """
+    )
+
+
 async def _executescript_in_transaction(conn, script: str) -> None:
     try:
         await conn.executescript(f"BEGIN;\n{script}\nCOMMIT;")
@@ -1057,6 +1099,7 @@ async def apply_schema_and_migrations(conn, *, db_exists: bool) -> None:
             await conn.execute(f"DROP TABLE IF EXISTS {table}")
         await ensure_compatibility_columns(conn)
         await ensure_compatibility_indexes(conn)
+        await backfill_share_images(conn)
         await backfill_legacy_aspect_ratios(conn)
         await conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         await conn.commit()

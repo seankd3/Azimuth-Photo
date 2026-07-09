@@ -458,8 +458,8 @@ async def get_collection(collection_id: int, **kwargs):
     return await collection_repository.get_collection(DB_PATH, collection_id, **kwargs)
 
 
-async def rename_collection(collection_id: int, *, name: str):
-    return await collection_repository.rename_collection(DB_PATH, collection_id, name=name)
+async def rename_collection(collection_id: int, **kwargs):
+    return await collection_repository.rename_collection(DB_PATH, collection_id, **kwargs)
 
 
 async def delete_collection(collection_id: int) -> bool:
@@ -478,12 +478,17 @@ async def collection_image_ids(collection_id: int, *, limit: int = 2000) -> list
     return await collection_repository.collection_image_ids(DB_PATH, collection_id, limit=limit)
 
 
+async def collection_is_smart(collection_id: int) -> bool | None:
+    return await collection_repository.collection_is_smart(DB_PATH, collection_id)
+
+
 async def create_or_rotate_share(
     collection_id: int,
     *,
     expires_at: float | None = None,
     rotate: bool = False,
     password_hash: str | None = None,
+    snapshot_image_ids: list[int] | None = None,
 ):
     return await share_repository.create_or_rotate_share(
         DB_PATH,
@@ -491,6 +496,7 @@ async def create_or_rotate_share(
         expires_at=expires_at,
         rotate=rotate,
         password_hash=password_hash,
+        snapshot_image_ids=snapshot_image_ids,
     )
 
 
@@ -550,6 +556,7 @@ async def set_image_status(image_id: int, status: str):
 
 async def set_image_flag(image_id: int, flag: str):
     await image_repository.set_image_flag(DB_PATH, image_id, flag)
+    cache_events.invalidate_rankings_cache()
     _invalidate_ranking_count_cache()
     _invalidate_filter_options_cache()
 
@@ -562,6 +569,7 @@ async def batch_set_image_flags(image_ids: list[int], flag: str, chunk_size: int
         chunk_size,
     )
     if updated:
+        cache_events.invalidate_rankings_cache()
         _invalidate_ranking_count_cache()
         _invalidate_filter_options_cache()
     return updated

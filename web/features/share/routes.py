@@ -28,6 +28,8 @@ SetFavorite = Callable[..., Awaitable[bool]]
 ListFavorites = Callable[[int], Awaitable[list[dict]]]
 FavoritesForCollection = Callable[[int], Awaitable[list[dict]]]
 ThumbnailResponse = Callable[..., Awaitable[Response]]
+GetCollection = Callable[..., Awaitable[dict | None]]
+ResolveSmartImageIds = Callable[[dict], Awaitable[list[int]]]
 
 _templates: Jinja2Templates | None = None
 _create_or_rotate_share: CreateOrRotateShare | None = None
@@ -41,6 +43,8 @@ _set_favorite: SetFavorite | None = None
 _list_favorites: ListFavorites | None = None
 _favorites_for_collection: FavoritesForCollection | None = None
 _thumbnail_response: ThumbnailResponse | None = None
+_get_collection: GetCollection | None = None
+_resolve_smart_image_ids: ResolveSmartImageIds | None = None
 _unlock_failures: dict[str, dict[str, float | int]] = {}
 
 
@@ -71,11 +75,14 @@ def configure(
     list_favorites: ListFavorites,
     favorites_for_collection: FavoritesForCollection,
     thumbnail_response: ThumbnailResponse,
+    get_collection: GetCollection | None = None,
+    resolve_smart_image_ids: ResolveSmartImageIds | None = None,
 ) -> None:
     global _templates, _create_or_rotate_share, _get_share, _revoke_share
     global _set_share_password, _record_share_view, _resolve_token
     global _token_allows_image, _set_favorite, _list_favorites
     global _favorites_for_collection, _thumbnail_response
+    global _get_collection, _resolve_smart_image_ids
     _templates = templates
     _create_or_rotate_share = create_or_rotate_share
     _get_share = get_share
@@ -88,6 +95,8 @@ def configure(
     _list_favorites = list_favorites
     _favorites_for_collection = favorites_for_collection
     _thumbnail_response = thumbnail_response
+    _get_collection = get_collection
+    _resolve_smart_image_ids = resolve_smart_image_ids
 
 
 def _configured() -> None:
@@ -106,6 +115,17 @@ def _configured() -> None:
         or _thumbnail_response is None
     ):
         raise RuntimeError("Share routes are not configured")
+
+
+async def _snapshot_image_ids_for_collection(collection_id: int) -> list[int] | None:
+    if _get_collection is None:
+        return None
+    collection = await _get_collection(collection_id, limit=1, offset=0)
+    if collection is None or not collection.get("smart"):
+        return None
+    if _resolve_smart_image_ids is None:
+        raise RuntimeError("Share routes are not configured")
+    return await _resolve_smart_image_ids(collection["query"] or {})
 
 
 def _share_url(request: Request, token: str) -> str:
@@ -251,6 +271,7 @@ async def api_create_share(collection_id: int, payload: ShareBody, request: Requ
         expires_at=expires_at,
         rotate=payload.rotate,
         password_hash=password_hash,
+        snapshot_image_ids=await _snapshot_image_ids_for_collection(collection_id),
     )
     if share is None:
         return JSONResponse({"error": "Collection not found"}, status_code=404)

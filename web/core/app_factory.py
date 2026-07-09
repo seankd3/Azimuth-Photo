@@ -275,6 +275,7 @@ def configure_app_runtime_services(shell: AppShell) -> AppRuntimeServices:
         cache_events.invalidate_rankings_cache()
 
     def invalidate_image_flag_caches() -> None:
+        cache_events.invalidate_rankings_cache()
         db._invalidate_ranking_count_cache()
         db._invalidate_filter_options_cache()
 
@@ -331,6 +332,11 @@ def configure_app_runtime_services(shell: AppShell) -> AppRuntimeServices:
         schedule_thumbnail_prefetch=media_warm.schedule_thumbnail_prefetch,
         schedule_result_thumbnail_memory_warm=media_warm.schedule_result_thumbnail_memory_warm,
         rankings_response_cache_ttl_seconds=lambda: library_service._rankings_response_cache_ttl_seconds,
+    )
+    wiring.configure_collection_routes(resolve_library_constraints=resolve_library_constraints)
+    wiring.configure_share_routes(
+        templates=shell.templates,
+        resolve_library_constraints=resolve_library_constraints,
     )
     wiring.configure_export_routes(
         resolve_library_constraints=resolve_library_constraints,

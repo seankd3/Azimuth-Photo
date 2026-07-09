@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+import json
 
 from data import connection as data_connection
 from data.repositories.common import chunked
@@ -34,22 +35,25 @@ async def create_collection(
     image_ids: list[int] | None = None,
     visibility: str = "private",
     status: str = "draft",
+    query: str | None = None,
 ) -> dict:
     now = time.time()
     clean_name = _clean_text(name, fallback="Untitled collection")
     clean_description = _clean_text(description)
-    image_ids = _unique_ids(image_ids or [])
+    clean_query = _clean_query_json(query)
+    image_ids = [] if clean_query else _unique_ids(image_ids or [])
     conn = await data_connection.open_async(db_path)
     try:
         cursor = await conn.execute(
             "INSERT INTO collections "
-            "(name, description, visibility, status, cover_image_id, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "(name, description, visibility, status, query, cover_image_id, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 clean_name,
                 clean_description,
                 _normalize_visibility(visibility),
                 _normalize_status(status),
+                clean_query,
                 None,
                 now,
                 now,
@@ -67,17 +71,40 @@ async def create_collection(
     return await get_collection(db_path, collection_id) or {"id": collection_id}
 
 
-async def rename_collection(db_path: str, collection_id: int, *, name: str) -> dict | None:
+async def rename_collection(
+    db_path: str,
+    collection_id: int,
+    *,
+    name: str | None = None,
+    query: str | None = None,
+    query_supplied: bool = False,
+    materialize_image_ids: list[int] | None = None,
+) -> dict | None:
     now = time.time()
-    clean_name = _clean_text(name)
     conn = await data_connection.open_async(db_path)
     try:
         if not await _collection_exists(conn, collection_id):
             return None
-        await conn.execute(
-            "UPDATE collections SET name = ?, updated_at = ? WHERE id = ?",
-            (clean_name, now, int(collection_id)),
-        )
+        updates = []
+        params = []
+        if name is not None:
+            updates.append("name = ?")
+            params.append(_clean_text(name))
+        if query_supplied:
+            updates.append("query = ?")
+            params.append(_clean_query_json(query))
+        if materialize_image_ids is not None:
+            await conn.execute("DELETE FROM collection_images WHERE collection_id = ?", (int(collection_id),))
+            await _insert_members(conn, collection_id, _unique_ids(materialize_image_ids), now=now)
+            await _ensure_cover(conn, collection_id)
+            updates.append("query = NULL")
+        if updates:
+            updates.append("updated_at = ?")
+            params.extend([now, int(collection_id)])
+            await conn.execute(
+                f"UPDATE collections SET {', '.join(updates)} WHERE id = ?",
+                params,
+            )
         await conn.commit()
     finally:
         await data_connection.close_async(conn, db_path=db_path)
@@ -92,6 +119,15 @@ async def delete_collection(db_path: str, collection_id: int) -> bool:
         await conn.execute(
             """
             DELETE FROM share_favorites
+            WHERE share_id IN (
+                SELECT id FROM collection_shares WHERE collection_id = ?
+            )
+            """,
+            (int(collection_id),),
+        )
+        await conn.execute(
+            """
+            DELETE FROM share_images
             WHERE share_id IN (
                 SELECT id FROM collection_shares WHERE collection_id = ?
             )
@@ -150,18 +186,21 @@ async def get_collection(db_path: str, collection_id: int, *, limit: int = 200, 
         if row is None:
             return None
         collection = _collection_summary(dict(row))
-        image_cursor = await conn.execute(
-            """
-            SELECT i.*
-            FROM collection_images ci
-            JOIN images i ON i.id = ci.image_id
-            WHERE ci.collection_id = ?
-            ORDER BY ci.position ASC, ci.added_at ASC, ci.image_id ASC
-            LIMIT ? OFFSET ?
-            """,
-            (int(collection_id), max(1, min(int(limit), 1000)), max(0, int(offset))),
-        )
-        collection["images"] = [dict(row) for row in await image_cursor.fetchall()]
+        if collection["smart"]:
+            collection["images"] = []
+        else:
+            image_cursor = await conn.execute(
+                """
+                SELECT i.*
+                FROM collection_images ci
+                JOIN images i ON i.id = ci.image_id
+                WHERE ci.collection_id = ?
+                ORDER BY ci.position ASC, ci.added_at ASC, ci.image_id ASC
+                LIMIT ? OFFSET ?
+                """,
+                (int(collection_id), max(1, min(int(limit), 1000)), max(0, int(offset))),
+            )
+            collection["images"] = [dict(row) for row in await image_cursor.fetchall()]
     finally:
         await data_connection.close_async(conn, db_path=db_path)
     return collection
@@ -183,6 +222,18 @@ async def collection_image_ids(db_path: str, collection_id: int, *, limit: int =
             (int(collection_id), max(1, int(limit))),
         )
         return [int(row["image_id"]) for row in await cursor.fetchall()]
+    finally:
+        await data_connection.close_async(conn, db_path=db_path)
+
+
+async def collection_is_smart(db_path: str, collection_id: int) -> bool | None:
+    conn = await data_connection.open_async(db_path)
+    try:
+        cursor = await conn.execute("SELECT query FROM collections WHERE id = ?", (int(collection_id),))
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        return bool(row["query"])
     finally:
         await data_connection.close_async(conn, db_path=db_path)
 
@@ -240,6 +291,23 @@ def _unique_ids(image_ids: list[int]) -> list[int]:
     return unique
 
 
+def _clean_query_json(value: str | None) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _parse_query_json(value: str | None) -> dict | None:
+    if not value:
+        return None
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
 async def _collection_exists(conn, collection_id: int) -> bool:
     cursor = await conn.execute("SELECT 1 FROM collections WHERE id = ?", (int(collection_id),))
     return await cursor.fetchone() is not None
@@ -292,12 +360,16 @@ async def _ensure_cover(conn, collection_id: int) -> None:
 
 def _collection_summary(row: dict) -> dict:
     cover_image_id = row.get("cover_image_id")
+    query = _parse_query_json(row.get("query"))
+    smart = query is not None
     return {
         "id": int(row["id"]),
         "name": row.get("name") or "Untitled collection",
         "description": row.get("description") or "",
         "visibility": row.get("visibility") or "private",
         "status": row.get("status") or "draft",
+        "smart": smart,
+        "query": query if smart else None,
         "image_count": int(row.get("image_count") or 0),
         "cover_image_id": int(cover_image_id) if cover_image_id is not None else None,
         "cover_filename": row.get("cover_filename") or "",

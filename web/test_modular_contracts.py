@@ -99,6 +99,7 @@ PUBLIC_ROUTE_CONTRACT = {
     ("GET", "/api/user-collections"),
     ("POST", "/api/user-collections"),
     ("GET", "/api/user-collections/{collection_id}"),
+    ("POST", "/api/user-collections/{collection_id}"),
     ("GET", "/api/user-collections/{collection_id}/share"),
     ("GET", "/api/user-collections/{collection_id}/share/favorites"),
     ("POST", "/api/user-collections/{collection_id}/share"),

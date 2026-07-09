@@ -1,13 +1,24 @@
 from fastapi.testclient import TestClient
 
 from test_support import *  # noqa: F401,F403
+from features.collections import smart as smart_collections
 from features.collections import suggestions as collection_suggestions
 from features.collections import routes as collection_routes
+from features.share import routes as share_routes
 
 
 class CollectionTests(BackendTestCase):
     async def asyncSetUp(self):
         await super().asyncSetUp()
+        self._configure_collection_routes()
+
+    async def _resolve_library_constraints(self, q: str = "", *, people: str = "", deep: bool = False):
+        return {
+            "id_filter": None,
+            "text_query": (q or "").strip(),
+        }
+
+    def _configure_collection_routes(self):
         collection_routes.configure(
             create_collection=lambda **kwargs: db.create_collection(**kwargs),
             list_collections=lambda: db.list_collections(),
@@ -18,6 +29,27 @@ class CollectionTests(BackendTestCase):
             remove_collection_images=lambda collection_id, image_ids: db.remove_collection_images(
                 collection_id,
                 image_ids,
+            ),
+            collection_is_smart=lambda collection_id: db.collection_is_smart(collection_id),
+            resolve_smart_detail=lambda query, **kwargs: smart_collections.resolve_detail(
+                query,
+                resolve_library_constraints=self._resolve_library_constraints,
+                count_rankings=lambda **count_kwargs: db.count_rankings(**count_kwargs),
+                get_rankings=lambda **ranking_kwargs: db.get_rankings(**ranking_kwargs),
+                **kwargs,
+            ),
+            resolve_smart_summary=lambda query: smart_collections.resolve_summary(
+                query,
+                resolve_library_constraints=self._resolve_library_constraints,
+                count_rankings=lambda **count_kwargs: db.count_rankings(**count_kwargs),
+                get_rankings=lambda **ranking_kwargs: db.get_rankings(**ranking_kwargs),
+                db_signature=lambda: db.DB_PATH,
+            ),
+            resolve_smart_image_ids=lambda query: smart_collections.resolve_image_ids(
+                query,
+                resolve_library_constraints=self._resolve_library_constraints,
+                count_rankings=lambda **count_kwargs: db.count_rankings(**count_kwargs),
+                get_rankings=lambda **ranking_kwargs: db.get_rankings(**ranking_kwargs),
             ),
             get_suggestions=lambda: collection_suggestions.collection_suggestions(
                 db.DB_PATH,
@@ -150,6 +182,140 @@ class CollectionTests(BackendTestCase):
         response = await collection_routes.api_collection(999999)
 
         self.assertEqual(response.status_code, 404)
+
+    async def test_smart_collection_resolves_live_query_and_materializes(self):
+        source = await self._source()
+        first = await self._image(source["id"], "picked-a.jpg", elo=1400)
+        second = await self._image(source["id"], "picked-b.jpg", elo=1300)
+        third = await self._image(source["id"], "later-picked.jpg", elo=1500)
+        await db.set_image_flag(first, "picked")
+        await db.set_image_flag(second, "picked")
+
+        created = await collection_routes.api_create_collection(
+            collection_routes.CreateCollectionBody(
+                name="Picked",
+                query={"flag": "picked", "sort": "elo"},
+            )
+        )
+        collection_id = created["collection"]["id"]
+        detail = await collection_routes.api_collection(collection_id)
+        listed = await collection_routes.api_user_collections()
+
+        self.assertTrue(created["collection"]["smart"])
+        self.assertEqual(created["collection"]["query"], {"flag": "picked", "sort": "elo"})
+        self.assertEqual([image["id"] for image in detail["collection"]["images"]], [first, second])
+        self.assertEqual(listed["collections"][0]["image_count"], 2)
+        self.assertEqual(listed["collections"][0]["cover_image_id"], first)
+
+        await db.set_image_flag(third, "picked")
+        after_flag = await collection_routes.api_user_collections()
+
+        self.assertEqual(after_flag["collections"][0]["image_count"], 3)
+        self.assertEqual(after_flag["collections"][0]["cover_image_id"], third)
+
+        renamed = await collection_routes.api_update_collection(
+            collection_id,
+            collection_routes.UpdateCollectionBody(name="Picked keepers"),
+        )
+        self.assertEqual(renamed["collection"]["name"], "Picked keepers")
+        self.assertEqual(renamed["collection"]["query"], {"flag": "picked", "sort": "elo"})
+
+        conflict = await collection_routes.api_add_collection_images(
+            collection_id,
+            collection_routes.CollectionImagesBody(image_ids=[third]),
+        )
+        self.assertEqual(conflict.status_code, 409)
+
+        materialized = await collection_routes.api_update_collection(
+            collection_id,
+            collection_routes.UpdateCollectionBody(materialize=True),
+        )
+        self.assertFalse(materialized["collection"]["smart"])
+        self.assertIsNone(materialized["collection"]["query"])
+        self.assertEqual(materialized["collection"]["image_count"], 3)
+
+        await db.set_image_flag(first, "unflagged")
+        frozen = await collection_routes.api_collection(collection_id)
+
+        self.assertFalse(frozen["collection"]["smart"])
+        self.assertEqual([image["id"] for image in frozen["collection"]["images"]], [third, first, second])
+
+    async def test_smart_collection_rejects_invalid_query_key(self):
+        def probe():
+            client = TestClient(app_module.app)
+            try:
+                return client.post(
+                    "/api/user-collections",
+                    json={"name": "Bad smart", "query": {"flag": "picked", "rating": 5}},
+                )
+            finally:
+                client.close()
+
+        response = await asyncio.to_thread(probe)
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("Unknown smart collection query key", response.json()["detail"])
+
+    async def test_smart_collection_share_snapshots_membership(self):
+        source = await self._source()
+        first = await self._image(source["id"], "share-picked-a.jpg", elo=1400)
+        second = await self._image(source["id"], "share-picked-b.jpg", elo=1300)
+        third = await self._image(source["id"], "share-picked-c.jpg", elo=1500)
+        await db.set_image_flag(first, "picked")
+        await db.set_image_flag(second, "picked")
+        templates = app_module.app.state.photoarchive_shell.templates
+        share_routes.configure(
+            templates=templates,
+            create_or_rotate_share=lambda collection_id, **kwargs: db.create_or_rotate_share(
+                collection_id,
+                **kwargs,
+            ),
+            get_share=lambda collection_id: db.get_collection_share(collection_id),
+            revoke_share=lambda collection_id: db.revoke_collection_share(collection_id),
+            set_share_password=lambda collection_id, password_hash: db.set_collection_share_password(
+                collection_id,
+                password_hash,
+            ),
+            record_share_view=lambda token: db.record_share_view(token),
+            resolve_token=lambda token: db.resolve_share_token(token),
+            token_allows_image=lambda token, image_id: db.share_token_allows_image(token, image_id),
+            set_favorite=lambda share_id, image_id, on, client_name=None: db.set_share_favorite(
+                share_id,
+                image_id,
+                on,
+                client_name=client_name,
+            ),
+            list_favorites=lambda share_id: db.list_share_favorites(share_id),
+            favorites_for_collection=lambda collection_id: db.favorites_for_collection(collection_id),
+            thumbnail_response=lambda *_args, **_kwargs: Response(content=b"thumb", media_type="image/jpeg"),
+            get_collection=lambda collection_id, **kwargs: db.get_collection(collection_id, **kwargs),
+            resolve_smart_image_ids=lambda query: smart_collections.resolve_image_ids(
+                query,
+                resolve_library_constraints=self._resolve_library_constraints,
+                count_rankings=lambda **count_kwargs: db.count_rankings(**count_kwargs),
+                get_rankings=lambda **ranking_kwargs: db.get_rankings(**ranking_kwargs),
+            ),
+        )
+        created = await collection_routes.api_create_collection(
+            collection_routes.CreateCollectionBody(
+                name="Share picked",
+                query={"flag": "picked", "sort": "elo"},
+            )
+        )
+        collection_id = created["collection"]["id"]
+
+        share = await share_routes.api_create_share(
+            collection_id,
+            share_routes.ShareBody(),
+            SimpleNamespace(base_url="http://testserver/"),
+        )
+        await db.set_image_flag(third, "picked")
+        smart_detail = await collection_routes.api_collection(collection_id)
+        resolved = await db.resolve_share_token(share["share"]["token"])
+
+        self.assertEqual([image["id"] for image in smart_detail["collection"]["images"]], [third, first, second])
+        self.assertEqual([image["id"] for image in resolved["images"]], [first, second])
+        self.assertFalse(await db.share_token_allows_image(share["share"]["token"], third))
 
     async def test_collection_suggestions_route_returns_suggestions_shape(self):
         source = await self._source()

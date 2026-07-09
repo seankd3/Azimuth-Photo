@@ -239,9 +239,43 @@ def configure_search_routes() -> None:
     )
 
 
-def configure_collection_routes() -> None:
+def configure_collection_routes(*, resolve_library_constraints=None) -> None:
     import db
     from features.collections import suggestions as collection_suggestions
+    from features.collections import smart as smart_collections
+
+    async def resolve_smart_detail(query, *, limit=200, offset=0):
+        if resolve_library_constraints is None:
+            raise RuntimeError("Smart collection routes are not configured")
+        return await smart_collections.resolve_detail(
+            query,
+            limit=limit,
+            offset=offset,
+            resolve_library_constraints=resolve_library_constraints,
+            count_rankings=lambda **kwargs: db.count_rankings(**kwargs),
+            get_rankings=lambda **kwargs: db.get_rankings(**kwargs),
+        )
+
+    async def resolve_smart_summary(query):
+        if resolve_library_constraints is None:
+            raise RuntimeError("Smart collection routes are not configured")
+        return await smart_collections.resolve_summary(
+            query,
+            resolve_library_constraints=resolve_library_constraints,
+            count_rankings=lambda **kwargs: db.count_rankings(**kwargs),
+            get_rankings=lambda **kwargs: db.get_rankings(**kwargs),
+            db_signature=lambda: db.DB_PATH,
+        )
+
+    async def resolve_smart_image_ids(query):
+        if resolve_library_constraints is None:
+            raise RuntimeError("Smart collection routes are not configured")
+        return await smart_collections.resolve_image_ids(
+            query,
+            resolve_library_constraints=resolve_library_constraints,
+            count_rankings=lambda **kwargs: db.count_rankings(**kwargs),
+            get_rankings=lambda **kwargs: db.get_rankings(**kwargs),
+        )
 
     collection_routes.configure(
         create_collection=lambda **kwargs: db.create_collection(**kwargs),
@@ -251,6 +285,10 @@ def configure_collection_routes() -> None:
         delete_collection=lambda collection_id: db.delete_collection(collection_id),
         add_collection_images=lambda collection_id, image_ids: db.add_collection_images(collection_id, image_ids),
         remove_collection_images=lambda collection_id, image_ids: db.remove_collection_images(collection_id, image_ids),
+        collection_is_smart=lambda collection_id: db.collection_is_smart(collection_id),
+        resolve_smart_detail=resolve_smart_detail,
+        resolve_smart_summary=resolve_smart_summary,
+        resolve_smart_image_ids=resolve_smart_image_ids,
         get_suggestions=lambda: collection_suggestions.collection_suggestions(
             db.DB_PATH,
             db_signature=db.DB_PATH,
@@ -296,8 +334,19 @@ def configure_trash_routes() -> None:
     )
 
 
-def configure_share_routes(*, templates) -> None:
+def configure_share_routes(*, templates, resolve_library_constraints=None) -> None:
     import db
+    from features.collections import smart as smart_collections
+
+    async def resolve_smart_image_ids(query):
+        if resolve_library_constraints is None:
+            raise RuntimeError("Smart share routes are not configured")
+        return await smart_collections.resolve_image_ids(
+            query,
+            resolve_library_constraints=resolve_library_constraints,
+            count_rankings=lambda **kwargs: db.count_rankings(**kwargs),
+            get_rankings=lambda **kwargs: db.get_rankings(**kwargs),
+        )
 
     share_routes.configure(
         templates=templates,
@@ -320,6 +369,8 @@ def configure_share_routes(*, templates) -> None:
         list_favorites=lambda share_id: db.list_share_favorites(share_id),
         favorites_for_collection=lambda collection_id: db.favorites_for_collection(collection_id),
         thumbnail_response=media_routes.thumbnail_response,
+        get_collection=lambda collection_id, **kwargs: db.get_collection(collection_id, **kwargs),
+        resolve_smart_image_ids=resolve_smart_image_ids,
     )
 
 

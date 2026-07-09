@@ -48,6 +48,7 @@ async def create_or_rotate_share(
     expires_at: float | None = None,
     rotate: bool = False,
     password_hash: str | None = None,
+    snapshot_image_ids: list[int] | None = None,
 ) -> dict | None:
     collection_id = int(collection_id)
     now = time.time()
@@ -78,6 +79,13 @@ async def create_or_rotate_share(
                     (collection_id, token, now, expires_at, password_hash),
                 )
                 share_id = int(cursor.lastrowid)
+                await _snapshot_share_images(
+                    conn,
+                    share_id,
+                    collection_id,
+                    snapshot_image_ids=snapshot_image_ids,
+                    now=now,
+                )
                 if previous_share_id is not None:
                     await conn.execute(
                         """
@@ -207,13 +215,13 @@ async def resolve_token(db_path: str, token: str) -> dict | None:
                 s.view_count,
                 s.first_viewed_at,
                 s.last_viewed_at,
-                COUNT(ci.image_id) AS image_count,
+                COUNT(si.image_id) AS image_count,
                 MIN(i.date_taken) AS date_min,
                 MAX(i.date_taken) AS date_max
             FROM collection_shares s
             JOIN collections c ON c.id = s.collection_id
-            LEFT JOIN collection_images ci ON ci.collection_id = c.id
-            LEFT JOIN images i ON i.id = ci.image_id
+            LEFT JOIN share_images si ON si.share_id = s.id
+            LEFT JOIN images i ON i.id = si.image_id
             WHERE s.token = ? AND {_active_unexpired_clause("s")}
             GROUP BY c.id, s.id
             """,
@@ -233,12 +241,12 @@ async def resolve_token(db_path: str, token: str) -> dict | None:
                 i.filename,
                 COALESCE(i.aspect_ratio, 1.5) AS aspect_ratio,
                 i.date_taken
-            FROM collection_images ci
-            JOIN images i ON i.id = ci.image_id
-            WHERE ci.collection_id = ?
-            ORDER BY ci.position ASC, ci.added_at ASC, ci.image_id ASC
+            FROM share_images si
+            JOIN images i ON i.id = si.image_id
+            WHERE si.share_id = ?
+            ORDER BY si.position ASC, si.added_at ASC, si.image_id ASC
             """,
-            (int(collection["id"]),),
+            (int(collection["share_id"]),),
         )
         collection["images"] = [dict(image) for image in await images_cursor.fetchall()]
         return collection
@@ -255,9 +263,9 @@ async def token_allows_image(db_path: str, token: str, image_id: int) -> bool:
             SELECT EXISTS(
                 SELECT 1
                 FROM collection_shares s
-                JOIN collection_images ci ON ci.collection_id = s.collection_id
+                JOIN share_images si ON si.share_id = s.id
                 WHERE s.token = ?
-                AND ci.image_id = ?
+                AND si.image_id = ?
                 AND {_active_unexpired_clause("s")}
             ) AS allowed
             """,
@@ -330,13 +338,13 @@ async def favorites_for_collection(db_path: str, collection_id: int) -> list[dic
             """
             SELECT sf.image_id, sf.client_name, sf.created_at
             FROM share_favorites sf
-            JOIN collection_images ci
-                ON ci.collection_id = ?
-                AND ci.image_id = sf.image_id
+            JOIN share_images si
+                ON si.share_id = sf.share_id
+                AND si.image_id = sf.image_id
             WHERE sf.share_id = ?
             ORDER BY sf.created_at ASC, sf.image_id ASC
             """,
-            (int(collection_id), int(active["id"])),
+            (int(active["id"]),),
         )
         return [_favorite_summary(row) for row in await cursor.fetchall()]
     finally:
@@ -354,9 +362,9 @@ async def _share_contains_image(conn, share_id: int, image_id: int) -> bool:
         SELECT EXISTS(
             SELECT 1
             FROM collection_shares s
-            JOIN collection_images ci ON ci.collection_id = s.collection_id
+            JOIN share_images si ON si.share_id = s.id
             WHERE s.id = ?
-            AND ci.image_id = ?
+            AND si.image_id = ?
         ) AS allowed
         """,
         (int(share_id), int(image_id)),
@@ -378,3 +386,43 @@ async def _active_share_on_conn(conn, collection_id: int) -> dict | None:
     )
     row = await cursor.fetchone()
     return _share_summary(row) if row is not None else None
+
+
+async def _snapshot_share_images(
+    conn,
+    share_id: int,
+    collection_id: int,
+    *,
+    snapshot_image_ids: list[int] | None,
+    now: float,
+) -> None:
+    if snapshot_image_ids is None:
+        await conn.execute(
+            """
+            INSERT OR IGNORE INTO share_images (share_id, image_id, position, added_at)
+            SELECT ?, image_id, position, ?
+            FROM collection_images
+            WHERE collection_id = ?
+            ORDER BY position ASC, added_at ASC, image_id ASC
+            """,
+            (int(share_id), now, int(collection_id)),
+        )
+        return
+
+    rows = []
+    seen = set()
+    for position, raw_id in enumerate(snapshot_image_ids):
+        try:
+            image_id = int(raw_id)
+        except (TypeError, ValueError):
+            continue
+        if image_id <= 0 or image_id in seen:
+            continue
+        seen.add(image_id)
+        rows.append((int(share_id), image_id, position, now))
+    if rows:
+        await conn.executemany(
+            "INSERT OR IGNORE INTO share_images (share_id, image_id, position, added_at) "
+            "VALUES (?, ?, ?, ?)",
+            rows,
+        )

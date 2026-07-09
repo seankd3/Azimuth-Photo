@@ -95,6 +95,7 @@ def invalidate_rankings_cache() -> None:
     _, library_service, query_constraints, *_ = _configured()
     library_service.invalidate_rankings_response_cache()
     query_constraints.clear_text_search_caches()
+    _invalidate_smart_collection_cache()
 
 
 def invalidate_vector_derived_caches(*, invalidate_embedding_matrix: bool = True) -> None:
@@ -230,6 +231,7 @@ def invalidate_rating_facet_caches() -> None:
 def invalidate_ranking_count_cache() -> None:
     ranking_repository.invalidate_ranking_count_cache()
     rating_repository.invalidate_visible_pairing_pool_counts_cache()
+    _invalidate_smart_collection_cache()
 
 
 cache_scope_matches = ranking_repository.cache_scope_matches
@@ -262,6 +264,14 @@ def note_cached_image_ids_added(cache_root: str, size: str, image_ids) -> None:
 
 def invalidate_rankable_image_ids_cache() -> None:
     ranking_repository.invalidate_rankable_image_ids_cache()
+
+
+def _invalidate_smart_collection_cache() -> None:
+    try:
+        from features.collections import smart as smart_collections
+        smart_collections.invalidate_smart_collection_cache()
+    except Exception:
+        logger.debug("Smart collection cache invalidation skipped", exc_info=True)
 
 
 def invalidate_embedding_count_cache() -> None:
