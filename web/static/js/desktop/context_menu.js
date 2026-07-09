@@ -48,7 +48,7 @@ function render() {
     menu.innerHTML = '<div class="pm-group">'
         + `<button data-act="pick">${icon('star')} Pick</button>`
         + `<button data-act="reject">${icon('x')} Reject</button>`
-        + `<button data-act="unflag">${icon('circle')} Unflag</button>`
+        + `<button data-act="unflag">${icon('circle')} Clear flag</button>`
         + '</div><div class="pm-group">'
         + `<button data-act="collection">${icon('plus')} Add ${count > 1 ? `${count} to collection` : 'to collection'}</button>`
         + `<button data-act="loupe">${icon('image')} Open in Loupe</button>`
@@ -57,9 +57,9 @@ function render() {
         + `<div class="pm-label">Export ${count > 1 ? 'selection' : 'photo'}</div>`
         + `<button data-act="export-csv">${icon('download')} CSV</button>`
         + `<button data-act="export-json">${icon('download')} JSON</button>`
-        + `<button data-act="export-zip-original">${icon('download')} Download files · Original</button>`
-        + `<button data-act="export-zip-lg">${icon('download')} Download files · Large</button>`
-        + `<button data-act="export-zip-md">${icon('download')} Download files · Medium</button>`
+        + `<button data-act="export-zip-original">${icon('download')} Download files · original</button>`
+        + `<button data-act="export-zip-lg">${icon('download')} Download files · large</button>`
+        + `<button data-act="export-zip-md">${icon('download')} Download files · medium</button>`
         + '</div>';
     for (const button of menu.querySelectorAll('[data-act]')) {
         button.addEventListener('click', () => run(button.dataset.act));

@@ -20,7 +20,7 @@ function dateLabel(value) {
 }
 
 function chipHtml(key, label, extra = '') {
-    return `<span class="chip" data-facet="${key}">${extra}<span>${esc(label)}</span><button class="chip-x" aria-label="Remove ${esc(label)}">${icon('x')}</button></span>`;
+    return `<span class="chip" data-facet="${key}" title="${esc(label)}">${extra}<span title="${esc(label)}">${esc(label)}</span><button class="chip-x" aria-label="Remove ${esc(label)}">${icon('x')}</button></span>`;
 }
 
 function renderChips() {
@@ -34,9 +34,9 @@ function renderChips() {
     if (scope.folder) chips.push(chipHtml('folder', scope.folder.split('/').filter(Boolean).pop() || scope.folder));
     if (scope.date_taken) chips.push(chipHtml('date_taken', dateLabel(scope.date_taken)));
     if (scope.file_type) chips.push(chipHtml('file_type', String(scope.file_type).toUpperCase()));
-    if (scope.camera) chips.push(chipHtml('camera', `camera:${scope.camera}`));
-    if (scope.lens) chips.push(chipHtml('lens', `lens:${scope.lens}`));
-    if (scope.orientation) chips.push(chipHtml('orientation', scope.orientation));
+    if (scope.camera) chips.push(chipHtml('camera', `Camera · ${scope.camera}`));
+    if (scope.lens) chips.push(chipHtml('lens', `Lens · ${scope.lens}`));
+    if (scope.orientation) chips.push(chipHtml('orientation', scope.orientation === 'landscape' ? 'Landscape' : scope.orientation === 'portrait' ? 'Portrait' : scope.orientation));
     if (scope.compared) {
         const labels = { compared: 'Ranked', uncompared: 'Unranked', confident: 'High confidence' };
         chips.push(chipHtml('compared', labels[scope.compared] || scope.compared));
@@ -130,12 +130,26 @@ export function initContextbar() {
 export function scopeTokenHtml() {
     const count = viewState.visibleImages ? `<span class="tk-count">- ${fmt(viewState.visibleImages)}</span>` : '';
     if (scope.people) {
+        const label = cleanPersonLabel({ label: scope.personLabel });
         const img = scope.personThumb ? `<img src="${esc(scope.personThumb)}" alt="">` : `<span class="tk-glyph">${icon('users')}</span>`;
-        return `<span class="scope-token">${img}<b>${esc(cleanPersonLabel({ label: scope.personLabel }))}</b>${count}</span>`;
+        return `<span class="scope-token" title="${esc(label)}">${img}<b title="${esc(label)}">${esc(label)}</b>${count}</span>`;
     }
-    if (scope.collectionId) return `<span class="scope-token"><span class="tk-glyph">${icon('folder')}</span><b>${esc(scope.collectionName || 'Collection')}</b>${count}</span>`;
-    if (scope.import_batch) return `<span class="scope-token"><span class="tk-glyph">${icon('upload')}</span><b>${esc(scope.importBatchLabel || `Import ${scope.import_batch}`)}</b>${count}</span>`;
-    if (scope.similarIds.length) return `<span class="scope-token"><span class="tk-glyph">${icon('scan-search')}</span><b>${esc(scope.similarLabel || 'Similar photos')}</b>${count}</span>`;
-    if (scope.q) return `<span class="scope-token semantic"><span class="tk-glyph tk-spark">${icon('sparkles')}</span><b>“${esc(scope.q)}”</b>${count}</span>`;
-    return `<span class="scope-token"><span class="tk-glyph">${icon('house')}</span><b>${esc(describeScope())}</b>${count}</span>`;
+    if (scope.collectionId) {
+        const label = scope.collectionName || 'Collection';
+        return `<span class="scope-token" title="${esc(label)}"><span class="tk-glyph">${icon('folder')}</span><b title="${esc(label)}">${esc(label)}</b>${count}</span>`;
+    }
+    if (scope.import_batch) {
+        const label = scope.importBatchLabel || `Import ${scope.import_batch}`;
+        return `<span class="scope-token" title="${esc(label)}"><span class="tk-glyph">${icon('upload')}</span><b title="${esc(label)}">${esc(label)}</b>${count}</span>`;
+    }
+    if (scope.similarIds.length) {
+        const label = scope.similarLabel || 'Similar photos';
+        return `<span class="scope-token" title="${esc(label)}"><span class="tk-glyph">${icon('scan-search')}</span><b title="${esc(label)}">${esc(label)}</b>${count}</span>`;
+    }
+    if (scope.q) {
+        const label = `“${scope.q}”`;
+        return `<span class="scope-token semantic" title="${esc(label)}"><span class="tk-glyph tk-spark">${icon('sparkles')}</span><b title="${esc(label)}">${esc(label)}</b>${count}</span>`;
+    }
+    const label = describeScope();
+    return `<span class="scope-token" title="${esc(label)}"><span class="tk-glyph">${icon('house')}</span><b title="${esc(label)}">${esc(label)}</b>${count}</span>`;
 }

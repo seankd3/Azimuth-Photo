@@ -38,8 +38,6 @@ function enhanceSection(section, index) {
     toggle.setAttribute('aria-label', `Toggle ${title.textContent.trim()}`);
     toggle.innerHTML = icon('chevron-down');
     head.prepend(toggle);
-    head.setAttribute('role', 'button');
-    head.setAttribute('tabindex', '0');
     const doToggle = () => {
         const collapsed = !section.classList.contains('collapsed');
         applyCollapsed(section, collapsed);
@@ -50,6 +48,7 @@ function enhanceSection(section, index) {
         doToggle();
     });
     head.addEventListener('keydown', (event) => {
+        if (event.target.closest('.psec-act, .psec-toggle')) return;
         if (event.key !== 'Enter' && event.key !== ' ') return;
         event.preventDefault();
         doToggle();

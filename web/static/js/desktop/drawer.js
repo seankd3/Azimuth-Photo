@@ -301,7 +301,7 @@ function renderSources() {
         const scanning = scanSourceId === id;
         return `<article class="src-card" data-source-id="${id}">`
             + `<span class="sc-dot ${online ? 'on' : ''}"></span><div>`
-            + `<div class="sc-name">${esc(sourceName(source))}</div>`
+            + `<div class="sc-name" title="${esc(sourceName(source))}">${esc(sourceName(source))}</div>`
             + `<div class="sc-sub">${fmt(sourceCount(source))} photos · ${esc(lastScan(source))}${online ? '' : ' · offline'}</div>`
             + '<div class="src-actions">'
             + `<button class="mini-btn" data-act="rescan" ${online ? '' : 'aria-disabled="true"'}>Rescan</button>`
@@ -332,7 +332,7 @@ function renderWork() {
     const peoplePct = worker.progress_pct != null
         ? pct(worker.progress_pct)
         : progress(counts.detected_faces || counts.people || 0, (counts.detected_faces || 0) + (counts.pending_cached_images || 0));
-    return '<section class="dr-sec"><h3>Background Work</h3>'
+    return '<section class="dr-sec"><h3>Background work</h3>'
         + workerRow('ai', 'AI embeddings', aiStatus ? aiStatus.progress_pct : 0, aiStatus ? statusText('AI', aiStatus) : 'unavailable', aiStatus && aiStatus.embedding_manual_pause)
         + workerRow('cache', 'Cache pregeneration', (preview.progress_pct || pregen.progress_pct || 0), cacheStatus ? statusText('Cache', cacheStatus) : 'unavailable', pregen.manual_pause || pregen.state === 'paused', pregen.manual_pause || pregen.state === 'paused' ? 'Resume' : 'Pause')
         + workerRow('people', 'People scan', peoplePct, peopleStatus ? statusText('People', peopleStatus) : 'unavailable', worker.manual_pause)
@@ -355,7 +355,7 @@ function renderRemote() {
     const url = (remoteAccess && remoteAccess.tailscale && remoteAccess.tailscale.url)
         || (remoteAccess && remoteAccess.current_url)
         || '';
-    return '<section class="dr-sec"><h3>Remote Access</h3>'
+    return '<section class="dr-sec"><h3>Remote access</h3>'
         + '<div class="remote-row">'
         + `<span class="remote-url" title="${esc(url)}">${esc(url || 'Unavailable')}</span>`
         + `<button class="mini-btn" id="copy-remote" ${url ? '' : 'aria-disabled="true"'}>Copy</button>`
@@ -473,7 +473,7 @@ function renderPeopleSettings() {
 
 function renderSettingsSections() {
     if (!settingsPageData) {
-        return '<section class="dr-sec"><h3>Settings</h3><div class="muted">Loading settings...</div></section>';
+        return '<section class="dr-sec"><h3>Settings</h3><div class="muted">Loading settings…</div></section>';
     }
     return renderAiSettings() + renderImageCacheSettings() + renderThumbnailSettings() + renderPeopleSettings();
 }

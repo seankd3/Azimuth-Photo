@@ -49,16 +49,16 @@ export function cellHtml(img, index) {
     const stackId = Number(img.stack_id) || 0;
     const stackCount = Number(img.stack_count) || 0;
     const stackBadge = stackId && stackCount > 1
-        ? `<button class="c-stack" data-stack-id="${stackId}" data-tip="Expand stack · S" aria-label="Expand stack with ${stackCount} photos" aria-expanded="false">${icon('layers')}<span>${stackCount}</span></button>`
+        ? `<button class="c-stack" data-stack-id="${stackId}" data-tip="Expand stack · S" aria-label="Expand stack with ${stackCount} photos" aria-expanded="false" tabindex="-1">${icon('layers')}<span>${stackCount}</span></button>`
         : '';
     return `<figure class="cell ${selection.has(Number(img.id)) ? 'sel' : ''}" data-id="${img.id}" data-idx="${index}" draggable="true" tabindex="-1" style="--ar:${aspect(img)}">`
         + `<img data-src="${esc(img.thumb_url || thumbUrl('sm', img.id))}" loading="lazy" decoding="async" alt="${esc(img.filename || '')}">`
         + stackBadge
-        + `<button class="c-check" aria-label="Select photo">${icon('check')}</button>`
+        + `<button class="c-check" aria-label="Select photo" tabindex="-1">${icon('check')}</button>`
         + `<span class="c-idx">${index + 1}</span>`
         + `<span class="c-flag ${flag}">${flagGlyph(flag)}</span>`
         + `<span class="c-elo"><span class="elo-chip">${Math.round(Number(img.elo) || 0)}</span></span>`
-        + `<button class="c-menu" data-tip="Photo actions" aria-label="Photo actions">${icon('ellipsis')}</button></figure>`;
+        + `<button class="c-menu" data-tip="Photo actions" aria-label="Photo actions" tabindex="-1">${icon('ellipsis')}</button></figure>`;
 }
 
 function memberCellHtml(img, index) {
@@ -362,7 +362,7 @@ function handleClick(event) {
         return;
     }
     if (event.target.closest('.c-check')) {
-        enterSelection(id, index);
+        toggleSelection(id, index, { range: event.shiftKey });
         return;
     }
     if (event.target.closest('.c-menu')) {
@@ -444,7 +444,7 @@ export function initGrid() {
         clearTimeout(resizeTimer);
         resizeTimer = setTimeout(() => {
             if (!mounted) return;
-            invalidateHeights(1);
+            invalidateHeights();
             setFocus(viewState.focusIndex);
         }, 120);
     };

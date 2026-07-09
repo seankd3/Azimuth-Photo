@@ -106,6 +106,7 @@ export async function applyFlags(rawIds, flag) {
         }
         return;
     }
+    emit('flags', { imageIds, flag, committed: true });
     const label = flag === 'picked' ? 'Picked' : flag === 'rejected' ? 'Rejected' : 'Flags cleared';
     showToast(`${label} · ${imageIds.length} photos`, {
         undo: async () => {
@@ -130,6 +131,7 @@ export async function applyFlags(rawIds, flag) {
                 showToast("Undo didn't save");
                 return;
             }
+            emit('flags', { imageIds, committed: true });
             showToast('Undone');
         },
     });

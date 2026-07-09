@@ -8,6 +8,7 @@ import { personLabel } from '../people_labels.js';
 let popover = null;
 let loaded = false;
 let loading = false;
+let lastOptionsLoadedAt = 0;
 let expandedYear = '';
 let monthsLoadingKey = '';
 let monthsLoadSeq = 0;
@@ -28,6 +29,7 @@ const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c
 }[c]));
 const fmt = (n) => Number(n || 0).toLocaleString('en-US');
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const OPTIONS_MAX_AGE_MS = 60000;
 
 function countLabel(item, fallback = '') {
     const count = item.count ?? item.image_count ?? item.face_count;
@@ -55,9 +57,16 @@ function optionRows(items, key, valueOf, labelOf) {
         const value = String(valueOf(item) || '');
         if (!value) return '';
         const active = String(scope[key] || '') === value;
-        return `<button class="filter-row ${active ? 'active' : ''}" data-key="${key}" data-value="${esc(value)}">`
-            + `<span>${esc(labelOf(item))}</span><span class="num">${esc(countLabel(item))}</span></button>`;
+        const label = labelOf(item);
+        return `<button class="filter-row ${active ? 'active' : ''}" data-key="${key}" data-value="${esc(value)}" title="${esc(label)}">`
+            + `<span title="${esc(label)}">${esc(label)}</span><span class="num">${esc(countLabel(item))}</span></button>`;
     }).join('');
+}
+
+function emptyOption(copy, glyph = 'search') {
+    return '<div class="filter-empty chrome-empty">'
+        + `<span class="chrome-empty-glyph">${icon(glyph)}</span>`
+        + `<span>${esc(copy)}</span></div>`;
 }
 
 function selectBlock(title, body, attrs = '') {
@@ -86,7 +95,7 @@ function renderPeople() {
     );
     return `<section class="filter-sec" data-filter-section="people"><h3>People</h3>`
         + '<input class="filter-search" id="filter-people-search" placeholder="Search people" autocomplete="off">'
-        + `<div class="filter-list">${rows || '<div class="filter-empty">No people found.</div>'}</div></section>`;
+        + `<div class="filter-list">${rows || emptyOption('No people found.', 'users')}</div></section>`;
 }
 
 function renderDate() {
@@ -102,18 +111,18 @@ function renderDate() {
             ? '<div class="filter-months">'
                 + (loadingMonths && !months.length ? '<div class="filter-empty">Loading months…</div>' : months.map((month) => {
                     const activeMonth = scope.date_taken === month.value;
-                    return `<button class="filter-row filter-month ${activeMonth ? 'active' : ''}" data-key="date_taken" data-value="${month.value}">`
-                        + `<span>${esc(month.label)}</span><span class="num">${fmt(month.count)}</span></button>`;
-                }).join('') || '<div class="filter-empty">No months in this year.</div>')
+                    return `<button class="filter-row filter-month ${activeMonth ? 'active' : ''}" data-key="date_taken" data-value="${month.value}" title="${esc(month.label)}">`
+                        + `<span title="${esc(month.label)}">${esc(month.label)}</span><span class="num">${fmt(month.count)}</span></button>`;
+                }).join('') || emptyOption('No months in this year.', 'calendar'))
                 + '</div>'
             : '';
-        return `<button class="filter-row ${active ? 'active' : ''}" data-key="date_taken" data-value="${esc(year)}" data-year="${esc(year)}">`
-            + `<span>${esc(year)}</span><span class="num">${esc(countLabel(item))}</span></button>${monthRows}`;
+        return `<button class="filter-row ${active ? 'active' : ''}" data-key="date_taken" data-value="${esc(year)}" data-year="${esc(year)}" title="${esc(year)}">`
+            + `<span title="${esc(year)}">${esc(year)}</span><span class="num">${esc(countLabel(item))}</span></button>${monthRows}`;
     }).join('');
     const undated = Number(options.undated || 0) > 0
-        ? `<button class="filter-row ${scope.date_taken === 'undated' ? 'active' : ''}" data-key="date_taken" data-value="undated"><span>Undated</span><span class="num">${fmt(options.undated)}</span></button>`
+        ? `<button class="filter-row ${scope.date_taken === 'undated' ? 'active' : ''}" data-key="date_taken" data-value="undated" title="Undated"><span title="Undated">Undated</span><span class="num">${fmt(options.undated)}</span></button>`
         : '';
-    return selectBlock('Date', yearRows + undated, 'data-filter-section="date"');
+    return selectBlock('Date', yearRows + undated || emptyOption('No dates found.', 'calendar'), 'data-filter-section="date"');
 }
 
 function monthLabel(value) {
@@ -225,11 +234,11 @@ function render() {
         + (loading ? '<div class="filter-loading skel"></div>' : [
             renderFlag(),
             renderPeople(),
-            selectBlock('Folder', optionRows(options.folders, 'folder', (item) => item.path, (item) => item.path), 'data-filter-section="folder"'),
+            selectBlock('Folder', optionRows(options.folders, 'folder', (item) => item.path, (item) => item.path) || emptyOption('No folders found.', 'folder'), 'data-filter-section="folder"'),
             renderDate(),
-            selectBlock('File type', optionRows(options.fileTypes, 'file_type', (item) => item.ext || item.value, (item) => String(item.ext || item.value).replace('.', '').toUpperCase()), 'data-filter-section="filetype"'),
-            selectBlock('Camera', optionRows(options.cameras, 'camera', (item) => item.camera || item.value, (item) => item.camera || item.value), 'data-filter-section="camera"'),
-            selectBlock('Lens', optionRows(options.lenses, 'lens', (item) => item.lens || item.value, (item) => item.lens || item.value), 'data-filter-section="lens"'),
+            selectBlock('File type', optionRows(options.fileTypes, 'file_type', (item) => item.ext || item.value, (item) => String(item.ext || item.value).replace('.', '').toUpperCase()) || emptyOption('No file types found.', 'file-type'), 'data-filter-section="filetype"'),
+            selectBlock('Camera', optionRows(options.cameras, 'camera', (item) => item.camera || item.value, (item) => item.camera || item.value) || emptyOption('No cameras found.', 'camera'), 'data-filter-section="camera"'),
+            selectBlock('Lens', optionRows(options.lenses, 'lens', (item) => item.lens || item.value, (item) => item.lens || item.value) || emptyOption('No lenses found.', 'aperture'), 'data-filter-section="lens"'),
             selectBlock('Orientation', [
                 ['landscape', 'Landscape'],
                 ['portrait', 'Portrait'],
@@ -280,8 +289,12 @@ function bindRows() {
     }
 }
 
-async function loadOptions() {
-    if (loaded || loading) return;
+function optionsAreFresh() {
+    return loaded && Date.now() - lastOptionsLoadedAt < OPTIONS_MAX_AGE_MS;
+}
+
+async function loadOptions({ force = false } = {}) {
+    if ((optionsAreFresh() && !force) || loading) return;
     loading = true;
     render();
     const [peopleData, folderData, filterData] = await Promise.all([
@@ -299,8 +312,16 @@ async function loadOptions() {
         undated: Number(filterData && filterData.undated) || 0,
     };
     loaded = true;
+    lastOptionsLoadedAt = Date.now();
     loading = false;
     render();
+}
+
+function invalidateOptions() {
+    loaded = false;
+    lastOptionsLoadedAt = 0;
+    resetMonthCacheIfScopeChanged();
+    if (filtersOpen()) loadOptions({ force: true });
 }
 
 function ensurePopover() {
@@ -367,6 +388,10 @@ export function initFilters() {
         resetMonthCacheIfScopeChanged();
         if (!popover.hidden) render();
     });
+    on('flags', invalidateOptions);
+    on('trash:changed', invalidateOptions);
+    on('import:changed', invalidateOptions);
+    on('collections:changed', invalidateOptions);
     document.addEventListener('pointerdown', outsideClose);
     window.addEventListener('resize', () => {
         if (filtersOpen()) positionPopover();

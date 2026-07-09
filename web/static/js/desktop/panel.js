@@ -6,7 +6,7 @@ import {
 } from './api.js';
 import { loadCollectionImageIds } from './scope_data.js';
 import {
-    byId, on, scope, scopeActive, scopeParams, selection, selectionChanged, setActiveLens, setLeftCollapsed, setScope, viewState,
+    byId, emit, on, scope, scopeActive, scopeParams, selection, selectionChanged, setActiveLens, setLeftCollapsed, setScope, viewState,
 } from './state.js';
 import { applyFlags, selectedIds, setCollectionPicker } from './selection.js';
 import { showToast } from './toast.js';
@@ -22,38 +22,46 @@ let collections = [];
 let catalog = null;
 let libraryCounts = null;
 let trashTotal = null;
+let collectionsLoading = true;
+let sourcesLoading = true;
 let drawerOpen = false;
 let collectionMenu = null;
 let collectionMenuReturn = null;
 let shareOverlay = null;
 let shareOverlayToken = 0;
+let chromeRefreshTimer = 0;
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 }[c]));
 const fmt = (n) => Number(n || 0).toLocaleString('en-US');
 const narrowPanel = () => window.matchMedia('(max-width: 880px)').matches;
+const emptyState = (glyph, copy, action = '') => (
+    `<div class="chrome-empty"><span class="chrome-empty-glyph">${icon(glyph)}</span><span>${esc(copy)}</span>${action}</div>`
+);
+const skeletonRows = (count = 3) => Array.from({ length: count }, () => '<div class="chrome-skel nav-row skel"></div>').join('');
 
 function renderCollections() {
     const host = document.getElementById('collection-list');
+    if (collectionsLoading) {
+        host.innerHTML = skeletonRows(3);
+        return;
+    }
     if (!collections.length) {
-        host.innerHTML = '<div class="muted">No collections yet. Create one, then drag photos onto it.</div>';
+        host.innerHTML = emptyState('folder-plus', 'No collections yet.', '<button type="button" data-new-collection>Create one</button>');
+        host.querySelector('[data-new-collection]')?.addEventListener('click', requestNewCollection);
         return;
     }
     host.innerHTML = collections.map((c) => (
-        `<div class="nav-row coll-row ${String(scope.collectionId || '') === String(c.id) ? 'active' : ''}" data-coll-id="${c.id}" data-coll-name="${esc(c.name)}" role="button" tabindex="0">`
+        `<div class="nav-row coll-row ${String(scope.collectionId || '') === String(c.id) ? 'active' : ''}" data-coll-id="${c.id}" data-coll-name="${esc(c.name)}">`
+        + `<button class="coll-main" type="button" title="${esc(c.name)}">`
         + `<span class="coll-cover">${c.cover_image_id ? `<img src="${esc(thumbUrl('sm', c.cover_image_id))}" alt="">` : icon('folder')}</span>`
-        + `<span class="nr-label">${esc(c.name)}</span><span class="nr-count">${fmt(c.image_count)}</span>`
+        + `<span class="nr-label" title="${esc(c.name)}">${esc(c.name)}</span><span class="nr-count">${fmt(c.image_count)}</span></button>`
         + `<button class="coll-menu-btn" type="button" data-tip="Collection actions" aria-label="Collection actions">${icon('ellipsis')}</button></div>`
     )).join('');
     for (const row of host.querySelectorAll('.coll-row')) {
-        row.addEventListener('click', () => {
-            setScope({ collectionId: row.dataset.collId, collectionName: row.dataset.collName || 'Collection' });
-            closeLeftDrawer();
-        });
-        row.addEventListener('keydown', (event) => {
-            if (event.target.closest('.coll-menu-btn') || (event.key !== 'Enter' && event.key !== ' ')) return;
-            event.preventDefault();
+        const mainButton = row.querySelector('.coll-main');
+        mainButton?.addEventListener('click', () => {
             setScope({ collectionId: row.dataset.collId, collectionName: row.dataset.collName || 'Collection' });
             closeLeftDrawer();
         });
@@ -491,17 +499,17 @@ function renderSuggestions() {
     const host = document.getElementById('suggestions-wrap');
     if (!host) return;
     if (suggestionsAreLoading()) {
-        host.innerHTML = '<div class="suggest-row skel" style="height:30px"></div>';
+        host.innerHTML = '<div class="chrome-skel nav-row skel"></div>';
         return;
     }
     const count = visibleSuggestions().length;
     if (!count) {
-        host.innerHTML = '';
+        host.innerHTML = emptyState('sparkles', 'No suggestions to review.');
         return;
     }
     host.innerHTML = '<button class="nav-row suggest-row" id="review-suggestions" type="button">'
         + `<span class="nr-glyph">${icon('sparkles')}</span>`
-        + '<span class="nr-label">Suggested collections</span>'
+        + '<span class="nr-label" title="Suggested collections">Suggested collections</span>'
         + `<span class="nr-count">${fmt(count)}</span></button>`;
     host.querySelector('#review-suggestions')?.addEventListener('click', () => {
         openSuggestionsReview();
@@ -511,7 +519,7 @@ function renderSuggestions() {
 
 function renderLibrary() {
     const rows = [
-        ['all', 'house', 'All Photos', '', libraryCounts?.total, ''],
+        ['all', 'house', 'All photos', '', libraryCounts?.total, ''],
         ['picked', 'star', 'Picked', 'picked', libraryCounts?.picked, ''],
         ['rejected', 'x', 'Rejected', 'rejected', libraryCounts?.rejected, ''],
         ['trash', 'trash-2', 'Trash', '', trashTotal, 'Deleted photos'],
@@ -520,7 +528,7 @@ function renderLibrary() {
     document.getElementById('library-list').innerHTML = rows.map(([id, glyph, label, , count, tip]) => {
         const hasCount = count != null || id !== 'recent';
         return `<button class="nav-row" data-lib="${id}"${tip ? ` data-tip="${esc(tip)}"` : ''}>`
-            + `<span class="nr-glyph">${icon(glyph)}</span><span class="nr-label">${label}</span>`
+            + `<span class="nr-glyph">${icon(glyph)}</span><span class="nr-label" title="${esc(label)}">${esc(label)}</span>`
             + (hasCount ? `<span class="nr-count">${count == null ? '…' : fmt(count)}</span>` : '')
             + '</button>';
     }).join('');
@@ -547,13 +555,18 @@ async function loadLibraryCounts() {
 function renderSources() {
     const host = document.getElementById('source-list');
     const sources = (catalog && catalog.sources) || [];
+    if (sourcesLoading) {
+        host.innerHTML = skeletonRows(3);
+        return;
+    }
     host.innerHTML = sources.length ? sources.map((s) => {
         const online = Number(s.online) === 1;
         const count = s.active_image_count != null ? s.active_image_count : s.image_count;
-        return `<button class="nav-row" data-source="${esc(s.path)}">`
-            + `<span class="nr-dot ${online ? 'on' : 'off'}"></span><span class="nr-label">${esc(s.display_name || s.path)}</span>`
+        const label = s.display_name || s.path;
+        return `<button class="nav-row" data-source="${esc(s.path)}" title="${esc(label)}">`
+            + `<span class="nr-dot ${online ? 'on' : 'off'}"></span><span class="nr-label" title="${esc(label)}">${esc(label)}</span>`
             + `<span class="nr-count">${fmt(count)}</span>${online ? '' : '<span class="nr-tag">offline</span>'}</button>`;
-    }).join('') : '<div class="muted">No sources yet.</div>';
+    }).join('') : emptyState('hard-drive', 'No sources yet.');
     for (const row of host.querySelectorAll('[data-source]')) {
         row.addEventListener('click', () => {
             setScope({ folder: row.dataset.source });
@@ -563,9 +576,29 @@ function renderSources() {
 }
 
 async function loadCollections() {
+    collectionsLoading = true;
+    renderCollections();
     const data = await listCollections();
     collections = (data && data.collections) || [];
+    collectionsLoading = false;
     renderCollections();
+    emit('collections:changed', { collections });
+}
+
+async function loadCatalogChrome() {
+    sourcesLoading = true;
+    renderSources();
+    catalog = await getCatalog();
+    sourcesLoading = false;
+    renderSources();
+}
+
+function scheduleChromeRefresh() {
+    window.clearTimeout(chromeRefreshTimer);
+    chromeRefreshTimer = window.setTimeout(() => {
+        loadLibraryCounts();
+        loadCatalogChrome();
+    }, 300);
 }
 
 async function addImagesToCollection(collectionId, imageIds) {
@@ -630,7 +663,7 @@ export async function openCollectionPicker(imageIds, { onDone = null } = {}) {
     });
     const list = picker.querySelector('.picker-list');
     list.innerHTML = collections.length ? collections.map((c) => (
-        `<button data-coll-id="${c.id}"><span>${esc(c.name)}</span><span class="num">${fmt(c.image_count)}</span></button>`
+        `<button data-coll-id="${c.id}" title="${esc(c.name)}"><span title="${esc(c.name)}">${esc(c.name)}</span><span class="num">${fmt(c.image_count)}</span></button>`
     )).join('') : '<div class="muted">No collections yet.</div>';
     for (const row of list.querySelectorAll('[data-coll-id]')) {
         row.addEventListener('click', async () => {
@@ -782,6 +815,9 @@ export async function initPanel() {
     });
     on('panel:toggle', toggleLeftPanel);
     on('collection:new', requestNewCollection);
+    on('flags', scheduleChromeRefresh);
+    on('trash:changed', scheduleChromeRefresh);
+    on('import:changed', scheduleChromeRefresh);
     on('scope', () => {
         for (const row of document.querySelectorAll('[data-source]')) row.classList.toggle('active', row.dataset.source === scope.folder);
         for (const row of document.querySelectorAll('[data-coll-id]')) row.classList.toggle('active', row.dataset.collId === String(scope.collectionId || ''));
@@ -798,12 +834,12 @@ export async function initPanel() {
     on('lens', (lens) => {
         document.querySelector('[data-lib="trash"]')?.classList.toggle('active', lens === 'trash');
     });
-    on('trash:changed', loadLibraryCounts);
     renderLibrary();
+    renderCollections();
+    renderSources();
     loadLibraryCounts();
     await loadCollections();
-    catalog = await getCatalog();
+    await loadCatalogChrome();
     await initFoldersPanel({ closeDrawer: closeLeftDrawer });
-    renderSources();
     setTimeout(loadSuggestionsOnce, 0);
 }

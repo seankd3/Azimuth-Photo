@@ -403,10 +403,10 @@ export function describeScope() {
         return scope.date_taken === 'undated' ? 'Undated' : scope.date_taken;
     }
     if (scope.file_type) return String(scope.file_type).toUpperCase();
-    if (scope.camera) return `camera:${scope.camera}`;
-    if (scope.lens) return `lens:${scope.lens}`;
-    if (scope.orientation) return scope.orientation;
+    if (scope.camera) return `Camera · ${scope.camera}`;
+    if (scope.lens) return `Lens · ${scope.lens}`;
+    if (scope.orientation) return scope.orientation === 'landscape' ? 'Landscape' : scope.orientation === 'portrait' ? 'Portrait' : scope.orientation;
     if (scope.compared) return { compared: 'Ranked', uncompared: 'Unranked', confident: 'High confidence' }[scope.compared] || scope.compared;
     if (scope.min_stars) return `${scope.min_stars}+ rating`;
-    return 'All Photos';
+    return 'All photos';
 }

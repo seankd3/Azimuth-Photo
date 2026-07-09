@@ -24,7 +24,7 @@
                     <div id="scope-field">
                         <span class="sf-icon"><svg class="icon" aria-hidden="true"><use href="#i-search"></use></svg></span>
                         <span id="scope-token-slot"></span>
-                        <input id="scope-input" placeholder="Search photos, people, cameras…" autocomplete="off" spellcheck="false" aria-label="Scope and search">
+                        <input id="scope-input" placeholder="Search photos, people, cameras…" autocomplete="off" spellcheck="false" aria-label="Scope and search" aria-controls="scope-drop" aria-autocomplete="list">
                         <span id="scope-kbd"><kbd>/</kbd></span>
                     </div>
                     <div id="scope-drop" role="listbox"></div>
@@ -47,7 +47,7 @@
             <aside id="panel-left" class="side-panel">
                 <div class="panel-inner">
                     <section class="psec" id="sec-collections">
-                        <div class="psec-head"><h3>Collections</h3><button class="psec-act" id="new-coll-btn">+ New</button></div>
+                        <div class="psec-head"><h3>Collections</h3><button class="psec-act" id="new-coll-btn">New</button></div>
                         <form id="new-coll-form" hidden>
                             <input id="new-coll-name" type="text" autocomplete="off" placeholder="Collection name">
                         </form>
@@ -62,7 +62,7 @@
                         <div class="psec-head"><h3>Folders</h3></div>
                         <div class="folder-filter-wrap">
                             <span class="folder-filter-icon"><svg class="icon" aria-hidden="true"><use href="#i-search"></use></svg></span>
-                            <input id="folder-filter" type="search" autocomplete="off" spellcheck="false" placeholder="Filter folders..." aria-label="Filter folders">
+                            <input id="folder-filter" type="search" autocomplete="off" spellcheck="false" placeholder="Filter folders…" aria-label="Filter folders">
                         </div>
                         <div id="folder-tree"></div>
                     </section>
@@ -150,6 +150,7 @@
                                     <button id="lp-unflag" data-tip="Clear flag (U)" aria-label="Clear flag"><svg class="icon" aria-hidden="true"><use href="#i-circle"></use></svg></button>
                                     <button id="lp-coll" data-tip="Add to collection" aria-label="Add to collection"><svg class="icon" aria-hidden="true"><use href="#i-plus"></use></svg></button>
                                     <button id="lp-similar" data-tip="Find similar" aria-label="Find similar"><svg class="icon" aria-hidden="true"><use href="#i-scan-search"></use></svg></button>
+                                    <button id="lp-info" data-tip="Info (I)" aria-label="Info" aria-pressed="false"><svg class="icon" aria-hidden="true"><use href="#i-info"></use></svg></button>
                                     <button id="lp-lights" data-tip="Lights (L)" aria-label="Lights"><svg class="icon" aria-hidden="true"><use href="#i-eye"></use></svg></button>
                                 </div>
                                 <div id="loupe-strip"></div>
@@ -167,8 +168,8 @@
                                     <span id="propagation-badge" class="prop-badge" aria-live="polite"></span>
                                 </div>
                                 <div id="refine-modes" role="group" aria-label="Refine mode">
-                                    <button data-mode="mosaic">Mosaic</button>
-                                    <button data-mode="duel">Duel</button>
+                                    <button data-mode="mosaic" aria-pressed="true">Mosaic</button>
+                                    <button data-mode="duel" aria-pressed="false">Duel</button>
                                 </div>
                                 <select class="ctl" id="refine-size" aria-label="Grid size" data-tip="Grid size · more photos per pick">
                                     <option value="2x2">2×2</option>
@@ -233,7 +234,7 @@
         <span id="sel-count">0 selected</span>
         <button id="sel-pick" data-tip="Pick (P)">Pick</button>
         <button id="sel-reject" data-tip="Reject (X)">Reject</button>
-        <button id="sel-clear-flags" data-tip="Clear flag (U)">Clear flags</button>
+        <button id="sel-clear-flags" data-tip="Clear flags (U)">Clear flags</button>
         <button id="sel-collection" data-tip="Add to collection">Collection</button>
         <button id="sel-export" data-tip="Export selected">Export</button>
         <button id="sel-close" aria-label="Clear selection"><svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg></button>

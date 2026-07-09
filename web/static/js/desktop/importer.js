@@ -133,12 +133,12 @@ function upload(formData) {
         xhr.open('POST', '/api/imports');
         xhr.upload.onprogress = (event) => {
             if (!event.lengthComputable) {
-                setStatus('Uploading...');
+                setStatus('Uploading…');
                 return;
             }
             const percent = Math.round((event.loaded / event.total) * 100);
             setProgress(percent);
-            setStatus(`Uploading... ${percent}%`);
+            setStatus(`Uploading… ${percent}%`);
         };
         xhr.onload = () => {
             let data = {};
@@ -175,6 +175,7 @@ async function startImport() {
         const imported = Number(data.imported_files || 0);
         showToast(`Imported ${fmt(imported)} photo${imported === 1 ? '' : 's'}`);
         closeImport();
+        emit('import:changed', data);
         if (data.batch_id) {
             setScope({
                 import_batch: String(data.batch_id),

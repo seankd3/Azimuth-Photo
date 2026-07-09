@@ -58,7 +58,7 @@ const COMMANDS = [
     { icon: 'sparkles', label: 'Review suggested collections', run: openSuggestionsReview },
     { icon: 'funnel', label: 'Filter…', run: () => emit('filters:open') },
     { icon: 'upload', label: 'Import', run: () => emit('import:open') },
-    { icon: 'star', label: 'Toggle Best-of', kbd: 'B', run: toggleBestOf },
+    { icon: 'star', label: 'Toggle Best of', kbd: 'B', run: toggleBestOf },
     { icon: 'download', label: 'Export CSV', run: () => exportCurrentScope('csv') },
     { icon: 'download', label: 'Export JSON', run: () => exportCurrentScope('json') },
     { icon: 'download', label: 'Download files (zip)', run: () => exportCurrentScope('zip', 'original') },
@@ -66,16 +66,16 @@ const COMMANDS = [
     { icon: 'share-2', label: 'Share this collection', when: () => Boolean(scope.collectionId), run: requestShareCurrentCollection },
     { icon: 'pencil', label: 'Rename this collection', when: () => Boolean(scope.collectionId), run: requestRenameCurrentCollection },
     { icon: 'trash-2', label: 'Delete this collection', when: () => Boolean(scope.collectionId), run: requestDeleteCurrentCollection },
-    { icon: 'layout-grid', label: 'Switch lens: Grid', kbd: 'G', run: () => switchLens('grid') },
-    { icon: 'rows-3', label: 'Switch lens: Events', run: () => switchLens('events') },
-    { icon: 'users', label: 'Switch lens: People', kbd: 'O', run: () => switchLens('people') },
-    { icon: 'map-pin', label: 'Switch lens: Map', kbd: 'M', run: () => switchLens('map') },
+    { icon: 'layout-grid', label: 'Switch lens: grid', kbd: 'G', run: () => switchLens('grid') },
+    { icon: 'rows-3', label: 'Switch lens: events', run: () => switchLens('events') },
+    { icon: 'users', label: 'Switch lens: people', kbd: 'O', run: () => switchLens('people') },
+    { icon: 'map-pin', label: 'Switch lens: map', kbd: 'M', run: () => switchLens('map') },
     { icon: 'panel-left', label: 'Toggle left panel', kbd: '[', run: toggleLeftPanel },
     { icon: 'keyboard', label: 'Keyboard shortcuts', kbd: '?', run: () => emit('help:open') },
-    { icon: 'house', label: 'Clear scope / All Photos', run: () => setScope({}) },
+    { icon: 'house', label: 'Clear scope / All photos', run: () => setScope({}) },
     { icon: 'arrow-down-wide-narrow', label: 'Sort by Elo', run: () => setSort('elo') },
-    { icon: 'calendar', label: 'Sort by Date', run: () => setSort('date_taken') },
-    { icon: 'file-type', label: 'Sort by Filename', run: () => setSort('filename') },
+    { icon: 'calendar', label: 'Sort by date', run: () => setSort('date_taken') },
+    { icon: 'file-type', label: 'Sort by filename', run: () => setSort('filename') },
 ];
 
 let people = [];
@@ -159,12 +159,12 @@ function scopeLabel(value) {
     if (value.personLabel) return personLabel({ label: value.personLabel });
     if (value.folder) return value.folder.split('/').filter(Boolean).pop() || value.folder;
     if (value.date_taken) return dateLabel(value.date_taken);
-    if (value.camera) return `camera:${value.camera}`;
-    if (value.lens) return `lens:${value.lens}`;
+    if (value.camera) return `Camera · ${value.camera}`;
+    if (value.lens) return `Lens · ${value.lens}`;
     if (value.file_type) return String(value.file_type).toUpperCase();
     if (value.flag) return value.flag === 'picked' ? 'Picked' : value.flag === 'rejected' ? 'Rejected' : 'Unflagged';
     if (value.q) return `“${value.q}”`;
-    return 'All Photos';
+    return 'All photos';
 }
 
 function scopeIcon(value) {
@@ -203,6 +203,11 @@ async function ensureSuggestionData() {
     return dataPromise;
 }
 
+function invalidateSuggestionData() {
+    dataPromise = null;
+    if (document.getElementById('scopebox')?.classList.contains('open')) ensureSuggestionData();
+}
+
 function open() {
     document.getElementById('scopebox').classList.add('open');
 }
@@ -210,6 +215,7 @@ function open() {
 function close() {
     document.getElementById('scopebox').classList.remove('open');
     hot = -1;
+    document.getElementById('scope-input')?.removeAttribute('aria-activedescendant');
 }
 
 function sectionHead(label, action = '') {
@@ -226,7 +232,8 @@ function rowHtml(row, index) {
         ? ''
         : `<button class="sd-recent-x" data-recent-index="${row.recentIndex}" aria-label="Remove recent">${icon('x')}</button>`;
     const cls = ['sd-item', index === hot ? 'hot' : '', row.muted ? 'muted' : ''].filter(Boolean).join(' ');
-    return `<div class="${cls}" role="option" data-index="${index}">${face}<span class="sd-label">${label}</span><span class="sd-meta">${meta}</span>${recentRemove}</div>`;
+    const title = row.label || '';
+    return `<div id="scope-option-${index}" class="${cls}" role="option" aria-selected="${index === hot ? 'true' : 'false'}" data-index="${index}" title="${esc(title)}">${face}<span class="sd-label" title="${esc(title)}">${label}</span><span class="sd-meta">${meta}</span>${recentRemove}</div>`;
 }
 
 function photoStripHtml(items) {
@@ -235,7 +242,7 @@ function photoStripHtml(items) {
             const index = row.runIndex;
             const img = row.photo;
             const cls = `sd-photo ${index === hot ? 'hot' : ''}`;
-            return `<button class="${cls}" data-index="${index}" aria-label="${esc(img.filename || `Photo ${img.id}`)}" style="--ar:${aspect(img)}">`
+            return `<button id="scope-option-${index}" class="${cls}" role="option" aria-selected="${index === hot ? 'true' : 'false'}" data-index="${index}" aria-label="${esc(img.filename || `Photo ${img.id}`)}" title="${esc(img.filename || `Photo ${img.id}`)}" style="--ar:${aspect(img)}">`
                 + `<img src="${esc(img.thumb_url || thumbUrl('sm', img.id))}" alt="">`
                 + '</button>';
         }).join('')
@@ -596,6 +603,12 @@ function render() {
         }
     }
     drop.innerHTML = html || '<div class="sd-empty">Type to search this archive</div>';
+    const input = document.getElementById('scope-input');
+    if (hot >= 0 && drop.querySelector(`#scope-option-${CSS.escape(String(hot))}`)) {
+        input.setAttribute('aria-activedescendant', `scope-option-${hot}`);
+    } else {
+        input.removeAttribute('aria-activedescendant');
+    }
     bindDropdown(drop);
 }
 
@@ -881,6 +894,10 @@ export function initOmnibox() {
         renderToken();
     });
     on('meta', renderToken);
+    on('collections:changed', invalidateSuggestionData);
+    on('import:changed', invalidateSuggestionData);
+    on('trash:changed', invalidateSuggestionData);
+    on('flags', invalidateSuggestionData);
     renderToken();
     ensureSuggestionData();
 }

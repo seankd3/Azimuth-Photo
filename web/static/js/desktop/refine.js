@@ -82,11 +82,20 @@ function normalizeImage(img) {
 
 function renderModes() {
     for (const button of document.querySelectorAll('#refine-modes button')) {
-        button.classList.toggle('active', button.dataset.mode === mode);
+        const active = button.dataset.mode === mode;
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-pressed', active ? 'true' : 'false');
     }
     document.getElementById('refine-size').value = gridSize;
     document.getElementById('refine-size').disabled = mode === 'duel';
     document.getElementById('refine-strategy').value = strategy;
+}
+
+function renderUndoState() {
+    const button = document.getElementById('refine-undo');
+    if (!button) return;
+    button.disabled = history.length === 0;
+    button.setAttribute('aria-disabled', button.disabled ? 'true' : 'false');
 }
 
 function renderStats() {
@@ -443,6 +452,7 @@ async function applyRefinePick(winnerId) {
     const entry = { snapshot, actionSeq: seq, savePromise: null };
     history.push(entry);
     if (history.length > HISTORY_LIMIT) history.shift();
+    renderUndoState();
     picks += 1;
     renderStats();
 
@@ -463,6 +473,7 @@ async function applyRefinePick(winnerId) {
     if (!saveResult.ok) {
         const historyIndex = history.indexOf(entry);
         if (historyIndex >= 0) history.splice(historyIndex, 1);
+        renderUndoState();
         picks = Math.max(0, picks - 1);
         if (open && seq === actionSeq) {
             restoreSnapshot(snapshot);
@@ -492,15 +503,18 @@ export function pickRefine(winnerId) {
 export async function undoRefine() {
     if (!open || !history.length) return;
     const entry = history.pop();
+    renderUndoState();
     if (entry.savePromise) await entry.savePromise;
     const result = await compareUndo();
     if (!result || !result.ok) {
         history.push(entry);
+        renderUndoState();
         showToast('Nothing to undo');
         return;
     }
     picks = Math.max(0, picks - 1);
     restoreSnapshot(entry.snapshot);
+    renderUndoState();
     refreshQuality();
     showToast('Pick undone');
 }
@@ -520,6 +534,7 @@ export function unmountRefine() {
     generation += 1;
     selectedIndex = -1;
     document.getElementById('view-refine').classList.remove('active');
+    renderUndoState();
 }
 
 export function openRefine() {
@@ -639,4 +654,5 @@ export function initRefine() {
     });
     on('refine:open', openRefine);
     renderModes();
+    renderUndoState();
 }

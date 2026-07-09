@@ -120,8 +120,8 @@ function rowHtml(suggestion, index) {
     return `<button class="suggest-review-row ${active ? 'active' : ''}" data-suggest-index="${index}" type="button">`
         + `<span class="suggest-row-cover">${suggestion.cover_image_id ? `<img src="${esc(thumbUrl('sm', suggestion.cover_image_id))}" alt="">` : icon('sparkles')}</span>`
         + '<span class="suggest-row-copy">'
-        + `<b>${esc(suggestion.title)}</b>`
-        + `<span>${esc(suggestion.reason || 'Suggested')} · ${fmt(suggestion.count)} photos</span>`
+        + `<b title="${esc(suggestion.title)}">${esc(suggestion.title)}</b>`
+        + `<span title="${esc(`${suggestion.reason || 'Suggested'} · ${fmt(suggestion.count)} photos`)}">${esc(suggestion.reason || 'Suggested')} · ${fmt(suggestion.count)} photos</span>`
         + '</span></button>';
 }
 
@@ -148,6 +148,7 @@ function render() {
         root.innerHTML = '<div class="suggest-review empty"><div>'
             + `<span class="suggest-empty-glyph">${icon('sparkles')}</span>`
             + '<h2>Nothing to review</h2>'
+            + '<p>New collection ideas will appear here after the archive has more patterns to suggest.</p>'
             + '</div></div>';
         return;
     }
@@ -159,7 +160,7 @@ function render() {
         + '<section class="suggest-review-main">'
         + '<header class="suggest-review-head">'
         + '<div>'
-        + `<h2>${esc(suggestion.title)}</h2>`
+        + `<h2 title="${esc(suggestion.title)}">${esc(suggestion.title)}</h2>`
         + `<p>${esc(suggestion.reason || 'Suggested')} · ${esc(suggestion.subtitle || `${fmt(suggestion.count)} photos`)}</p>`
         + '</div>'
         + '<div class="suggest-review-actions">'

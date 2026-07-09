@@ -97,6 +97,7 @@ function dimLabel(img) {
 function updateInfoOverlay() {
     const host = document.getElementById('loupe-info');
     const img = current();
+    updateInfoControl();
     if (!host || !img || infoMode === 'off') {
         if (host) host.hidden = true;
         return;
@@ -157,8 +158,19 @@ function updateZoomChip() {
 
 function updateCursor() {
     const root = document.getElementById('loupe');
+    if (!root) return;
+    root.classList.toggle('can-zoom', fitScale < 0.999);
     root.classList.toggle('zoomed', zoomMode !== 'fit' && scale > fitScale + 0.001);
     root.classList.toggle('dragging', Boolean(dragState?.dragging));
+}
+
+function updateInfoControl() {
+    const button = document.getElementById('lp-info');
+    if (!button) return;
+    const active = infoMode !== 'off';
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', active ? 'true' : 'false');
+    button.setAttribute('aria-label', active ? `Info: ${infoMode}` : 'Info');
 }
 
 function applyTransform({ animate = false } = {}) {
@@ -446,7 +458,9 @@ function setLightMode(next) {
     const button = document.getElementById('lp-lights');
     if (button) {
         button.classList.toggle('active', lightMode !== 'normal');
-        button.setAttribute('aria-label', lightMode === 'normal' ? 'Lights' : `Lights: ${lightMode}`);
+        const label = lightMode === 'normal' ? 'Lights' : `Lights: ${lightMode}`;
+        button.setAttribute('aria-label', label);
+        button.setAttribute('data-tip', `${label} (L)`);
     }
 }
 
@@ -627,6 +641,7 @@ export function initLoupe() {
     document.getElementById('lp-pick').addEventListener('click', () => flagCurrent('picked'));
     document.getElementById('lp-reject').addEventListener('click', () => flagCurrent('rejected'));
     document.getElementById('lp-unflag').addEventListener('click', () => flagCurrent('unflagged'));
+    document.getElementById('lp-info')?.addEventListener('click', () => toggleLoupeInfo());
     document.getElementById('lp-lights')?.addEventListener('click', () => toggleLoupeLights());
     document.getElementById('lp-coll').addEventListener('click', () => {
         const img = current();

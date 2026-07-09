@@ -183,7 +183,7 @@ function renderSelection() {
         + '<div class="sel-actions">'
         + '<button class="btn" data-proxy="sel-pick">Pick</button>'
         + '<button class="btn" data-proxy="sel-reject">Reject</button>'
-        + '<button class="btn" data-proxy="sel-clear-flags">Unflag</button>'
+        + '<button class="btn" data-proxy="sel-clear-flags">Clear flags</button>'
         + '<button class="btn" data-proxy="sel-collection">Collection</button>'
         + '<button class="btn" data-proxy="sel-export">Export</button>'
         + '</div>';

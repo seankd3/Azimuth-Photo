@@ -38,6 +38,7 @@ function chunkHtml(chunk) {
 function materialize(chunk) {
     if (chunk.live || !renderCell) return;
     chunk.el.classList.remove('ghost');
+    chunk.el.inert = false;
     chunk.el.style.height = '';
     chunk.el.innerHTML = chunkHtml(chunk);
     chunk.live = true;
@@ -52,6 +53,7 @@ function despawn(chunk) {
     chunk.el.style.height = `${chunk.height}px`;
     chunk.el.replaceChildren();
     chunk.el.classList.add('ghost');
+    chunk.el.inert = true;
     chunk.live = false;
 }
 
@@ -72,6 +74,7 @@ export function appendChunk(startIndex, images) {
         live: true,
     };
     chunk.el.className = 'grid-chunk';
+    chunk.el.inert = false;
     chunk.el.dataset.start = String(chunk.start);
     chunk.el.innerHTML = (images || []).map((img, i) => renderCell(img, chunk.start + i)).join('');
     flow().appendChild(chunk.el);
@@ -102,7 +105,17 @@ export function invalidateHeights(scale = 1) {
         if (chunk.live) {
             chunk.height = chunk.el.offsetHeight || chunk.height;
         } else if (chunk.height) {
-            chunk.height *= ratio;
+            if (ratio === 1 && renderCell) {
+                chunk.el.inert = true;
+                chunk.el.classList.remove('ghost');
+                chunk.el.style.height = '';
+                chunk.el.innerHTML = chunkHtml(chunk);
+                chunk.height = chunk.el.offsetHeight || chunk.height;
+                chunk.el.replaceChildren();
+                chunk.el.classList.add('ghost');
+            } else {
+                chunk.height *= ratio;
+            }
             chunk.el.style.height = `${chunk.height}px`;
         }
     }
