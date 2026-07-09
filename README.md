@@ -2,9 +2,18 @@
 
 **Your own photo cloud — with Lightroom Classic instincts.**
 
-photoArchive is a self-hosted library for serious photo archives: tens of thousands of images across external drives, years of exports, RAW-adjacent workflows, and the need to *browse, cull, rank, search, and share* — without uploading a single byte to anyone else's cloud.
+photoArchive is a self-hosted library for serious photo archives — and it is **fast**. Where Lightroom chugs, photoArchive flies: browse terabytes of photos at lightning speed from your own computer, NAS, or server. Cull, rank, search, and share tens of thousands of images without uploading a single byte to anyone else's cloud.
 
 It runs on your own hardware. Your files never move, never get edited, never leave your network unless you explicitly share them.
+
+## Built for speed
+
+- **A tiered preview cache** (small / medium / large / originals) with configurable size budgets pre-generates in the background, so browsing never waits on a slow external drive.
+- **An in-memory hot cache** serves the thumbnails you're actually looking at from RAM.
+- **A virtualized grid** keeps the DOM tiny no matter how deep you scroll — 50,000 photos feel like 50.
+- **Response caching** on every heavy query means filters, counts, and date histograms come back instantly.
+
+Point it at terabytes on a sleepy USB drive and it still feels instant — the archive wakes the drive only when it truly needs original pixels.
 
 ![Library grid](docs/assets/screens/library-grid.jpg)
 
@@ -96,4 +105,4 @@ Open `http://localhost:8000`, add a source folder in the system drawer, and let 
 
 ---
 
-*All screenshots show a real 47,000-photo archive running on a single machine with an RTX 2060 Super.*
+*photoArchive is developed against the author's own 47,000-photo working archive — every screenshot above is that real library running on a single machine with an RTX 2060 Super. Your photos are your own; the app ships empty and hungry.*
