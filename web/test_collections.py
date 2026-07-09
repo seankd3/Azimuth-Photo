@@ -440,6 +440,125 @@ class CollectionTests(BackendTestCase):
 
         self.assertEqual(response, {"suggestions": []})
 
+    async def test_theme_suggestions_from_active_caption_tags_and_pairs(self):
+        source = await self._source()
+        config = settings.active_caption_config()
+        aurora_ids = []
+        for index in range(14):
+            image_id = await self._image(source["id"], f"plain-{index}.jpg", elo=1500 - index)
+            aurora_ids.append(image_id)
+            tags = ["aurora"]
+            if index < 12:
+                tags.append("winter")
+            await db.store_caption_result(
+                image_id=image_id,
+                caption_config=config,
+                caption="Captioned theme fixture.",
+                tags=tags,
+                status="done",
+            )
+        ignored = await self._image(source["id"], "old-model.jpg", elo=1800)
+        await db.store_caption_result(
+            image_id=ignored,
+            caption_config={**config, "model_key": "old-caption-model"},
+            caption="Old model should not count.",
+            tags=["aurora"],
+            status="done",
+        )
+
+        themes = await collection_suggestions._theme_suggestions(db.DB_PATH)
+        by_title = {item["title"]: item for item in themes}
+
+        self.assertIn("Aurora", by_title)
+        self.assertIn("Aurora · Winter", by_title)
+        self.assertEqual(by_title["Aurora"]["query"], {"tag": "aurora"})
+        self.assertIsNone(by_title["Aurora · Winter"]["query"])
+        self.assertEqual(by_title["Aurora"]["count"], 14)
+        self.assertEqual(by_title["Aurora · Winter"]["count"], 12)
+        self.assertEqual(by_title["Aurora"]["cover_image_id"], aurora_ids[0])
+
+    async def test_theme_suggestions_require_minimum_and_captioned_share(self):
+        source = await self._source()
+        config = settings.active_caption_config()
+        old_ratio = collection_suggestions.THEME_MIN_CAPTIONED_RATIO
+        collection_suggestions.THEME_MIN_CAPTIONED_RATIO = 0.5
+        try:
+            for index in range(26):
+                image_id = await self._image(source["id"], f"ratio-{index}.jpg")
+                tags = ["blue sky"] if index < 12 else [f"filler-{index}"]
+                await db.store_caption_result(
+                    image_id=image_id,
+                    caption_config=config,
+                    caption="Coverage threshold fixture.",
+                    tags=tags,
+                    status="done",
+                )
+
+            themes = await collection_suggestions._theme_suggestions(db.DB_PATH)
+        finally:
+            collection_suggestions.THEME_MIN_CAPTIONED_RATIO = old_ratio
+
+        self.assertNotIn("Blue sky", {item["title"] for item in themes})
+
+    async def test_theme_suggestions_dedup_existing_collection_members(self):
+        source = await self._source()
+        config = settings.active_caption_config()
+        image_ids = []
+        for index in range(12):
+            image_id = await self._image(source["id"], f"existing-theme-{index}.jpg")
+            image_ids.append(image_id)
+            await db.store_caption_result(
+                image_id=image_id,
+                caption_config=config,
+                caption="Existing collection fixture.",
+                tags=["aurora"],
+                status="done",
+            )
+        await db.create_collection(name="Already saved", image_ids=image_ids)
+
+        response = await collection_suggestions.collection_suggestions(
+            db.DB_PATH,
+            db_signature=f"{db.DB_PATH}:existing-theme",
+        )
+
+        self.assertNotIn("Aurora", {item["title"] for item in response["suggestions"]})
+
+    async def test_theme_suggestion_accepts_as_smart_collection(self):
+        source = await self._source()
+        config = settings.active_caption_config()
+        image_ids = []
+        for index in range(12):
+            image_id = await self._image(source["id"], f"IMG_{index:04d}.jpg", elo=1300 + index)
+            image_ids.append(image_id)
+            await db.store_caption_result(
+                image_id=image_id,
+                caption_config=config,
+                caption="Smart accept fixture.",
+                tags=["aurora"],
+                status="done",
+            )
+        themes = await collection_suggestions._theme_suggestions(db.DB_PATH)
+        theme = collection_suggestions._public_suggestion(
+            next(item for item in themes if item["title"] == "Aurora")
+        )
+
+        created = await collection_routes.api_create_collection(
+            collection_routes.CreateCollectionBody(name=theme["title"], query=theme["query"])
+        )
+        detail = await collection_routes.api_collection(created["collection"]["id"], limit=20)
+
+        self.assertTrue(created["collection"]["smart"])
+        self.assertEqual(created["collection"]["query"], {"tag": "aurora"})
+        self.assertEqual({image["id"] for image in detail["collection"]["images"]}, set(image_ids))
+
+    def test_theme_coverage_dampens_rank(self):
+        low = collection_suggestions._coverage_rank_multiplier(captioned_count=10, total_count=1000)
+        high = collection_suggestions._coverage_rank_multiplier(captioned_count=300, total_count=1000)
+
+        self.assertLess(low, high)
+        self.assertLess(low, 0.4)
+        self.assertEqual(high, 1.0)
+
 
 class SuggestionGroupingTests(unittest.TestCase):
     def _row(self, image_id, taken, elo=1200.0, camera=""):

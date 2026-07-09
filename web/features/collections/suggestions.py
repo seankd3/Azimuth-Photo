@@ -17,6 +17,7 @@ from pathlib import PurePosixPath
 
 from date_inference import DATE_RE
 from data import connection
+import settings
 
 EVENT_GAP_SECONDS = 6 * 3600
 SUGGESTION_MIN_PHOTOS = 8
@@ -28,6 +29,11 @@ CLUSTER_MAX_SUGGESTIONS = 6
 CLUSTER_COUNT = 24
 MEMBER_ID_LIMIT = 500
 EXISTING_OVERLAP_LIMIT = 0.7
+THEME_MIN_PHOTOS = 12
+THEME_MIN_CAPTIONED_RATIO = 0.005
+THEME_PAIR_MAX_TAGS = 80
+THEME_MAX_CANDIDATES = 24
+THEME_FULL_STRENGTH_COVERAGE = 0.25
 _CACHE_TTL_SECONDS = 600.0
 _DEFAULT_COHERENCE = 0.72
 _DATE_RE = DATE_RE
@@ -258,6 +264,23 @@ def _subtitle(count: int, start_ts: float | None, end_ts: float | None) -> str:
     if start_ts is None or end_ts is None:
         return f"{count:,} photos"
     return f"{count:,} photos - {_event_title(start_ts, end_ts, short=True)}"
+
+
+def _caption_tag_title(tag: str) -> str:
+    words = re.sub(r"\s+", " ", str(tag or "").replace("_", " ")).strip()
+    return words[:1].upper() + words[1:].lower() if words else "Caption theme"
+
+
+def _theme_threshold(captioned_count: int) -> int:
+    return max(THEME_MIN_PHOTOS, math.ceil(max(0, int(captioned_count)) * THEME_MIN_CAPTIONED_RATIO))
+
+
+def _coverage_rank_multiplier(captioned_count: int, total_count: int) -> float:
+    if total_count <= 0:
+        return 0.35
+    coverage = max(0.0, min(1.0, float(captioned_count) / float(total_count)))
+    strength = min(1.0, coverage / THEME_FULL_STRENGTH_COVERAGE)
+    return 0.35 + (0.65 * strength)
 
 
 def _fingerprint(kind: str, key: str, start_ts: float | None, end_ts: float | None, ids: list[int]) -> str:
@@ -578,13 +601,169 @@ async def _cluster_suggestions(db_path: str) -> list[dict]:
     return suggestions
 
 
+async def _caption_theme_stats(conn, model_key: str) -> dict:
+    cursor = await conn.execute(
+        "SELECT COUNT(*) AS c "
+        "FROM images i JOIN catalog_sources s ON s.id = i.source_id "
+        "WHERE s.included = 1 AND i.status IN ('kept', 'maybe') "
+        "AND i.missing_at IS NULL"
+    )
+    total_row = await cursor.fetchone()
+    cursor = await conn.execute(
+        "SELECT COUNT(DISTINCT c.image_id) AS c "
+        "FROM image_captions c "
+        "JOIN images i ON i.id = c.image_id "
+        "JOIN catalog_sources s ON s.id = i.source_id "
+        "WHERE c.model_key = ? AND s.included = 1 "
+        "AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL",
+        (model_key,),
+    )
+    captioned_row = await cursor.fetchone()
+    return {
+        "total": int(total_row["c"] if total_row else 0),
+        "captioned": int(captioned_row["c"] if captioned_row else 0),
+    }
+
+
+def _theme_candidate_from_rows(
+    *,
+    tags: tuple[str, ...],
+    rows: list[dict],
+    captioned_count: int,
+    total_count: int,
+    query: dict | None = None,
+) -> dict | None:
+    if len(rows) < _theme_threshold(captioned_count):
+        return None
+    ordered = sorted(rows, key=lambda row: (-float(row.get("elo") or 0), int(row["id"])))
+    ids = [int(row["id"]) for row in ordered]
+    dated = sorted(
+        ts for ts in (_parse_taken(row.get("date_taken")) for row in ordered)
+        if ts is not None
+    )
+    start_ts = dated[0] if dated else None
+    end_ts = dated[-1] if dated else None
+    cover = ordered[0]
+    title = " · ".join(_caption_tag_title(tag) for tag in tags)
+    return {
+        "kind": "theme",
+        "title": title,
+        "subtitle": _subtitle(len(ids), start_ts, end_ts),
+        "reason": "Caption theme" if len(tags) == 1 else "Shared caption tags",
+        "count": len(ids),
+        "cover_image_id": int(cover["id"]),
+        "image_ids": ids[:MEMBER_ID_LIMIT],
+        "_all_ids": ids,
+        "_key": "tag:" + "+".join(tags),
+        "_start": start_ts,
+        "_end": end_ts,
+        "_coherence": _DEFAULT_COHERENCE,
+        "_rank_multiplier": _coverage_rank_multiplier(captioned_count, total_count),
+        "query": query,
+    }
+
+
+async def _theme_suggestions(db_path: str) -> list[dict]:
+    model_key = settings.active_caption_config()["model_key"]
+    conn = await connection.open_async(db_path)
+    try:
+        stats = await _caption_theme_stats(conn, model_key)
+        threshold = _theme_threshold(stats["captioned"])
+        if stats["captioned"] <= 0:
+            return []
+
+        cursor = await conn.execute(
+            "SELECT it.tag, COUNT(DISTINCT it.image_id) AS count "
+            "FROM image_tags it "
+            "JOIN images i ON i.id = it.image_id "
+            "JOIN catalog_sources s ON s.id = i.source_id "
+            "WHERE it.model_key = ? AND s.included = 1 "
+            "AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL "
+            "GROUP BY it.tag HAVING count >= ? "
+            "ORDER BY count DESC, it.tag ASC LIMIT ?",
+            (model_key, threshold, THEME_PAIR_MAX_TAGS),
+        )
+        tag_rows = [dict(row) for row in await cursor.fetchall()]
+        if not tag_rows:
+            return []
+
+        candidates: list[dict] = []
+        for row in tag_rows:
+            tag = str(row["tag"])
+            cursor = await conn.execute(
+                "SELECT i.id, i.date_taken, i.elo "
+                "FROM image_tags it "
+                "JOIN images i ON i.id = it.image_id "
+                "JOIN catalog_sources s ON s.id = i.source_id "
+                "WHERE it.model_key = ? AND it.tag = ? AND s.included = 1 "
+                "AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL "
+                "ORDER BY i.elo DESC, i.id ASC",
+                (model_key, tag),
+            )
+            candidate = _theme_candidate_from_rows(
+                tags=(tag,),
+                rows=[dict(item) for item in await cursor.fetchall()],
+                captioned_count=stats["captioned"],
+                total_count=stats["total"],
+                query={"tag": tag},
+            )
+            if candidate:
+                candidates.append(candidate)
+
+        top_tags = [str(row["tag"]) for row in tag_rows]
+        if len(top_tags) > 1:
+            placeholders = ",".join("?" for _ in top_tags)
+            cursor = await conn.execute(
+                "SELECT a.tag AS tag_a, b.tag AS tag_b, COUNT(DISTINCT a.image_id) AS count "
+                "FROM image_tags a "
+                "JOIN image_tags b ON b.model_key = a.model_key "
+                "AND b.image_id = a.image_id AND b.tag > a.tag "
+                "JOIN images i ON i.id = a.image_id "
+                "JOIN catalog_sources s ON s.id = i.source_id "
+                f"WHERE a.model_key = ? AND a.tag IN ({placeholders}) "
+                f"AND b.tag IN ({placeholders}) AND s.included = 1 "
+                "AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL "
+                "GROUP BY a.tag, b.tag HAVING count >= ? "
+                "ORDER BY count DESC, a.tag ASC, b.tag ASC LIMIT ?",
+                (model_key, *top_tags, *top_tags, threshold, THEME_MAX_CANDIDATES),
+            )
+            pair_rows = [dict(row) for row in await cursor.fetchall()]
+            for row in pair_rows:
+                tag_a = str(row["tag_a"])
+                tag_b = str(row["tag_b"])
+                cursor = await conn.execute(
+                    "SELECT i.id, i.date_taken, i.elo "
+                    "FROM image_tags a "
+                    "JOIN image_tags b ON b.model_key = a.model_key "
+                    "AND b.image_id = a.image_id AND b.tag = ? "
+                    "JOIN images i ON i.id = a.image_id "
+                    "JOIN catalog_sources s ON s.id = i.source_id "
+                    "WHERE a.model_key = ? AND a.tag = ? AND s.included = 1 "
+                    "AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL "
+                    "ORDER BY i.elo DESC, i.id ASC",
+                    (tag_b, model_key, tag_a),
+                )
+                candidate = _theme_candidate_from_rows(
+                    tags=(tag_a, tag_b),
+                    rows=[dict(item) for item in await cursor.fetchall()],
+                    captioned_count=stats["captioned"],
+                    total_count=stats["total"],
+                )
+                if candidate:
+                    candidates.append(candidate)
+        return candidates[:THEME_MAX_CANDIDATES]
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+
+
 def _candidate_rank(candidate: dict, now_ts: float) -> float:
     end_ts = candidate.get("_end") or candidate.get("_start") or 0
     age_days = max(0.0, (now_ts - float(end_ts or 0)) / 86400.0) if end_ts else 3650.0
     recency = 1.0 / (1.0 + age_days / 730.0)
     size = min(int(candidate.get("count") or 0), MEMBER_ID_LIMIT)
     coherence = float(candidate.get("_coherence") or _DEFAULT_COHERENCE)
-    return coherence * max(1.0, math.sqrt(size)) * recency
+    multiplier = float(candidate.get("_rank_multiplier") or 1.0)
+    return coherence * max(1.0, math.sqrt(size)) * recency * multiplier
 
 
 def _score_coherence(candidates: list[dict], image_ids, matrix) -> list[dict]:
@@ -686,7 +865,7 @@ async def _enrich_people(db_path: str, candidates: list[dict]) -> list[dict]:
 
 def _public_suggestion(candidate: dict) -> dict:
     ids = candidate.get("_all_ids") or candidate.get("image_ids") or []
-    return {
+    suggestion = {
         "kind": candidate.get("kind") or "shoot",
         "title": candidate.get("title") or "Suggested collection",
         "subtitle": candidate.get("subtitle") or _subtitle(len(ids), candidate.get("_start"), candidate.get("_end")),
@@ -703,6 +882,9 @@ def _public_suggestion(candidate: dict) -> dict:
         ),
         "cohesion": round(float(candidate.get("_coherence") or candidate.get("cohesion") or _DEFAULT_COHERENCE), 3),
     }
+    if candidate.get("query"):
+        suggestion["query"] = dict(candidate["query"])
+    return suggestion
 
 
 def _distinct_candidates(candidates: list[dict]) -> list[dict]:
@@ -738,17 +920,20 @@ async def _existing_member_ids(db_path: str) -> set[int]:
 
 async def collection_suggestions(db_path: str, *, db_signature: str = "") -> dict:
     now = time.monotonic()
-    cache_key = db_signature or db_path
+    model_key = settings.active_caption_config()["model_key"]
+    caption_signature = await _caption_tag_signature(db_path, model_key)
+    cache_key = (db_signature or db_path, model_key, caption_signature)
     if _cache["key"] == cache_key and _cache["data"] is not None and now < _cache["expires"]:
         return _cache["data"]
 
-    shoots, existing = await asyncio.gather(
+    shoots, themes, existing = await asyncio.gather(
         _shoot_suggestions(db_path),
+        _theme_suggestions(db_path),
         _existing_member_ids(db_path),
     )
 
     candidates = []
-    for suggestion in shoots:
+    for suggestion in shoots + themes:
         ids = suggestion.get("_all_ids") or suggestion.get("image_ids") or []
         if existing and ids:
             overlap = sum(1 for image_id in ids if image_id in existing) / len(ids)
@@ -778,3 +963,16 @@ async def collection_suggestions(db_path: str, *, db_signature: str = "") -> dic
 
 def invalidate_cache() -> None:
     _cache.update({"key": None, "data": None, "expires": 0.0})
+
+
+async def _caption_tag_signature(db_path: str, model_key: str) -> int:
+    conn = await connection.open_async(db_path)
+    try:
+        cursor = await conn.execute(
+            "SELECT COUNT(*) AS c FROM image_tags WHERE model_key = ?",
+            (model_key,),
+        )
+        row = await cursor.fetchone()
+        return int(row["c"] if row else 0)
+    finally:
+        await connection.close_async(conn, db_path=db_path)

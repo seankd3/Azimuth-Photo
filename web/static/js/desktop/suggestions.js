@@ -85,7 +85,12 @@ export async function createSuggestion(suggestion) {
         dismissFingerprint(fp);
         notifyChange();
         render();
-        const result = await createCollection(suggestion.title, suggestion.image_ids || [], suggestion.subtitle || '');
+        const result = await createCollection(
+            suggestion.title,
+            suggestion.image_ids || [],
+            suggestion.subtitle || '',
+            suggestion.query || null,
+        );
         if (!(result && result.ok)) {
             restoreFingerprint(fp);
             notifyChange();
@@ -118,12 +123,23 @@ export function dismissSuggestion(suggestion) {
     });
 }
 
+function kindLabel(kind) {
+    if (kind === 'theme') return 'Theme';
+    if (kind === 'cluster') return 'Cluster';
+    return 'Shoot';
+}
+
+function liveMark(suggestion) {
+    if (!suggestion.query) return '';
+    return `<span class="suggest-live-mark" title="Live collection">${icon('sparkles')}</span>`;
+}
+
 function rowHtml(suggestion, index) {
     const active = index === activeIndex;
     return `<button class="suggest-review-row ${active ? 'active' : ''}" data-suggest-index="${index}" type="button">`
         + `<span class="suggest-row-cover">${suggestion.cover_image_id ? `<img src="${esc(thumbUrl('sm', suggestion.cover_image_id))}" alt="">` : icon('sparkles')}</span>`
         + '<span class="suggest-row-copy">'
-        + `<b title="${esc(suggestion.title)}">${esc(suggestion.title)}</b>`
+        + `<b title="${esc(suggestion.title)}"><span class="suggest-kind-badge">${esc(kindLabel(suggestion.kind))}</span>${liveMark(suggestion)}${esc(suggestion.title)}</b>`
         + `<span title="${esc(`${suggestion.reason || 'Suggested'} · ${fmt(suggestion.count)} photos`)}">${esc(suggestion.reason || 'Suggested')} · ${fmt(suggestion.count)} photos</span>`
         + '</span></button>';
 }
@@ -158,11 +174,13 @@ function render() {
 
     const suggestion = visible[activeIndex];
     const creating = creatingFingerprints.has(suggestionFingerprint(suggestion));
+    const liveCopy = suggestion.query ? 'Live collection — grows automatically' : '';
     root.innerHTML = '<div class="suggest-review">'
         + `<aside class="suggest-review-rail">${visible.map(rowHtml).join('')}</aside>`
         + '<section class="suggest-review-main">'
         + '<header class="suggest-review-head">'
         + '<div>'
+        + `<div class="suggest-head-meta"><span class="suggest-kind-badge">${esc(kindLabel(suggestion.kind))}</span>${liveCopy ? `<span class="suggest-live-copy">${icon('sparkles')}${esc(liveCopy)}</span>` : ''}</div>`
         + `<h2 title="${esc(suggestion.title)}">${esc(suggestion.title)}</h2>`
         + `<p>${esc(suggestion.reason || 'Suggested')} · ${esc(suggestion.subtitle || `${fmt(suggestion.count)} photos`)}</p>`
         + '</div>'

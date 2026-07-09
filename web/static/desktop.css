@@ -528,10 +528,17 @@ html[data-badges-index="0"] .cell .c-idx { display: none; }
 .suggest-row-cover { width: 42px; height: 42px; display: grid; place-items: center; overflow: hidden; border-radius: var(--r-ctl); background: var(--card); color: var(--text-3); }
 .suggest-row-cover img { width: 100%; height: 100%; object-fit: cover; }
 .suggest-row-copy { min-width: 0; display: grid; gap: 2px; }
-.suggest-row-copy b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; font-weight: 650; }
-.suggest-row-copy span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.suggest-row-copy b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; font-weight: 650; display: block; }
+.suggest-row-copy > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.suggest-kind-badge { display: inline-flex; align-items: center; height: 17px; margin-right: 6px; padding: 0 6px; border: 1px solid rgba(255,255,255,.12); border-radius: 5px; background: rgba(255,255,255,.045); color: var(--text-2); font-size: 10px; font-weight: 720; line-height: 1; text-transform: uppercase; letter-spacing: 0; vertical-align: 1px; }
+.suggest-live-mark { display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; margin-right: 5px; color: var(--accent); vertical-align: -2px; }
+.suggest-live-mark .icon { width: 13px; height: 13px; stroke-width: 2.3; }
 .suggest-review-main { min-width: 0; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); }
 .suggest-review-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s4); padding: var(--s4) var(--s4) var(--s3); border-bottom: 1px solid var(--line); background: var(--surface-chrome); }
+.suggest-head-meta { display: flex; align-items: center; gap: 7px; margin-bottom: 7px; min-height: 18px; }
+.suggest-head-meta .suggest-kind-badge { margin-right: 0; }
+.suggest-live-copy { display: inline-flex; align-items: center; gap: 5px; color: var(--accent); font-size: 11.5px; font-weight: 650; }
+.suggest-live-copy .icon { width: 13px; height: 13px; stroke-width: 2.25; }
 .suggest-review-head h2 { font-size: 18px; line-height: 1.2; font-weight: 680; }
 .suggest-review-head p { margin-top: 3px; color: var(--text-3); font-size: 12px; font-variant-numeric: tabular-nums; }
 .suggest-review-actions { display: flex; gap: var(--s2); flex: none; }
