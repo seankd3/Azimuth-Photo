@@ -42,7 +42,9 @@ async def get_active_images_by_ids(db_path: str, image_ids: list[int]) -> dict[i
             cursor = await conn.execute(
                 f"SELECT i.* FROM images i NOT INDEXED "
                 f"JOIN catalog_sources s ON s.id = i.source_id "
-                f"WHERE s.included = 1 AND i.missing_at IS NULL "
+                f"WHERE s.included = 1 "
+                f"AND i.status IN ('kept', 'maybe') "
+                f"AND i.missing_at IS NULL "
                 f"AND i.id IN ({placeholders})",
                 chunk,
             )
@@ -106,6 +108,7 @@ async def get_unclassified_images(db_path: str, limit: int = 200):
             "SELECT i.id, i.filepath FROM images i "
             "JOIN catalog_sources s ON s.id = i.source_id "
             "WHERE i.orientation IS NULL AND s.included = 1 "
+            "AND i.status IN ('kept', 'maybe') "
             "AND i.missing_at IS NULL "
             "LIMIT ?",
             (limit,),
@@ -141,6 +144,7 @@ async def get_images_needing_metadata(
             "i.metadata_scanned_at IS NULL "
             "OR i.metadata_version IS NULL "
             "OR i.metadata_version < ?) "
+            "AND i.status IN ('kept', 'maybe') "
             "AND i.missing_at IS NULL "
             "LIMIT ?",
             (metadata_version, limit),
@@ -185,7 +189,9 @@ async def get_recent_active_images(db_path: str, limit: int = 10):
         cursor = await conn.execute(
             "SELECT i.id, i.filename, i.filepath FROM images i "
             "JOIN catalog_sources s ON s.id = i.source_id "
-            "WHERE s.included = 1 AND i.missing_at IS NULL "
+            "WHERE s.included = 1 "
+            "AND i.status IN ('kept', 'maybe') "
+            "AND i.missing_at IS NULL "
             "ORDER BY i.id DESC LIMIT ?",
             (limit,),
         )

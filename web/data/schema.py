@@ -5,7 +5,7 @@ import os
 from data.repositories import catalog as catalog_repository
 
 EXPECTED_EMBEDDING_DIM = 2048  # Qwen3-VL-Embedding-2B native dimension
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS catalog_sources (
@@ -47,6 +47,8 @@ CREATE TABLE IF NOT EXISTS images (
     metadata_scanned_at REAL DEFAULT NULL,
     metadata_version INTEGER DEFAULT NULL,
     missing_at REAL DEFAULT NULL,
+    trashed_at REAL DEFAULT NULL,
+    trash_path TEXT DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -572,6 +574,8 @@ IMAGE_COMPAT_COLUMNS = (
     ("longitude", "REAL DEFAULT NULL"),
     ("metadata_version", "INTEGER DEFAULT NULL"),
     ("missing_at", "REAL DEFAULT NULL"),
+    ("trashed_at", "REAL DEFAULT NULL"),
+    ("trash_path", "TEXT DEFAULT NULL"),
 )
 
 CATALOG_SOURCE_COMPAT_COLUMNS = (
@@ -797,6 +801,8 @@ REQUIRED_COLUMNS = {
         "longitude",
         "metadata_version",
         "missing_at",
+        "trashed_at",
+        "trash_path",
     },
     "catalog_sources": {
         "display_name",
@@ -962,9 +968,10 @@ async def normalize_legacy_image_state(conn) -> bool:
         changed = True
 
     # Status used to control membership in older versions. Sources now own
-    # membership, so normalize old statuses after preserving rejection as a flag.
+    # source membership, but trash still uses status as an explicit exclusion.
     cursor = await conn.execute(
-        "UPDATE images SET status = 'kept' WHERE status IS NULL OR status != 'kept'"
+        "UPDATE images SET status = 'kept' "
+        "WHERE status IS NULL OR status NOT IN ('kept', 'maybe', 'trashed')"
     )
     if cursor.rowcount:
         changed = True
@@ -1022,7 +1029,7 @@ async def schema_is_current(conn) -> bool:
 
     for sql in (
         "SELECT 1 FROM images WHERE source_id IS NULL LIMIT 1",
-        "SELECT 1 FROM images WHERE COALESCE(status, '') != 'kept' LIMIT 1",
+        "SELECT 1 FROM images WHERE COALESCE(status, '') NOT IN ('kept', 'maybe', 'trashed') LIMIT 1",
     ):
         cursor = await conn.execute(sql)
         if await cursor.fetchone():

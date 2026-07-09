@@ -13,6 +13,7 @@ from features.search import routes as search_routes
 from features.share import routes as share_routes
 from features.stacks import routes as stack_routes
 from features.settings import routes as settings_routes
+from features.trash import routes as trash_routes
 
 
 def configure_database_backed_providers() -> None:
@@ -258,6 +259,29 @@ def configure_stack_routes() -> None:
     stack_routes.configure(
         db_path=lambda: db.DB_PATH,
         invalidate_rankings_cache=invalidate_stack_dependent_caches,
+    )
+
+
+def configure_trash_routes() -> None:
+    import db
+    from core import cache_events
+    from features.cache import status as cache_status_service
+    from features.settings import status as settings_status
+
+    def invalidate_trash_dependent_caches() -> None:
+        cache_events.invalidate_rankings_cache()
+        cache_events.invalidate_stats_cache()
+        cache_events.invalidate_ranking_count_cache()
+        cache_events.invalidate_facet_caches()
+        cache_events.invalidate_pairing_cache(matchups=True)
+        cache_events.invalidate_cached_image_ids_cache()
+        cache_events.invalidate_filter_options_cache()
+        cache_status_service.invalidate_cache_status_cache()
+        settings_status.invalidate_settings_response_cache()
+
+    trash_routes.configure(
+        db_path=lambda: db.DB_PATH,
+        invalidate=invalidate_trash_dependent_caches,
     )
 
 

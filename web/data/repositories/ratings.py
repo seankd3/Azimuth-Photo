@@ -201,8 +201,10 @@ async def visible_pairing_pool_counts(
     try:
         if all_catalog_images_active or all_sources_available:
             cursor = await conn.execute(
-                "SELECT COUNT(*) AS count FROM cache_entries "
-                "WHERE cache_root = ? AND size = ?",
+                "SELECT COUNT(*) AS count FROM cache_entries c "
+                "JOIN images i ON i.id = c.image_id "
+                "WHERE c.cache_root = ? AND c.size = ? "
+                "AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL",
                 (cache_root, size),
             )
         else:
@@ -592,7 +594,8 @@ async def record_active_comparison(
                 "SELECT i.id, i.elo, COALESCE(i.comparisons, 0) AS comparisons, "
                 "COALESCE(i.propagated_updates, 0) AS propagated_updates "
                 "FROM images i NOT INDEXED "
-                "WHERE i.missing_at IS NULL AND i.id IN (?, ?)",
+                "WHERE i.status IN ('kept', 'maybe') "
+                "AND i.missing_at IS NULL AND i.id IN (?, ?)",
                 (winner_id, loser_id),
             )
         else:
@@ -601,7 +604,9 @@ async def record_active_comparison(
                 "COALESCE(i.propagated_updates, 0) AS propagated_updates "
                 "FROM images i NOT INDEXED "
                 "JOIN catalog_sources s ON s.id = i.source_id "
-                "WHERE s.included = 1 AND i.missing_at IS NULL "
+                "WHERE s.included = 1 "
+                "AND i.status IN ('kept', 'maybe') "
+                "AND i.missing_at IS NULL "
                 "AND i.id IN (?, ?)",
                 (winner_id, loser_id),
             )
@@ -663,7 +668,8 @@ async def record_active_mosaic_pick(
                 "SELECT i.id, i.elo, COALESCE(i.comparisons, 0) AS comparisons, "
                 "COALESCE(i.propagated_updates, 0) AS propagated_updates "
                 "FROM images i NOT INDEXED "
-                "WHERE i.missing_at IS NULL "
+                "WHERE i.status IN ('kept', 'maybe') "
+                "AND i.missing_at IS NULL "
                 f"AND i.id IN ({placeholders})",
                 unique_ids,
             )
@@ -673,7 +679,9 @@ async def record_active_mosaic_pick(
                 "COALESCE(i.propagated_updates, 0) AS propagated_updates "
                 "FROM images i NOT INDEXED "
                 "JOIN catalog_sources s ON s.id = i.source_id "
-                "WHERE s.included = 1 AND i.missing_at IS NULL "
+                "WHERE s.included = 1 "
+                "AND i.status IN ('kept', 'maybe') "
+                "AND i.missing_at IS NULL "
                 f"AND i.id IN ({placeholders})",
                 unique_ids,
             )

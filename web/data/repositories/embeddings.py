@@ -24,7 +24,9 @@ async def _searchable_embedding_count_on_conn(conn, model_key: str) -> int:
         "SELECT COUNT(*) AS c FROM embeddings_by_model e "
         "JOIN images i ON e.image_id = i.id "
         "JOIN catalog_sources s ON s.id = i.source_id "
-        "WHERE e.model_key = ? AND s.included = 1 AND i.missing_at IS NULL",
+        "WHERE e.model_key = ? AND s.included = 1 "
+        "AND i.status IN ('kept', 'maybe') "
+        "AND i.missing_at IS NULL",
         (model_key,),
     )
     return int((await cursor.fetchone())["c"] or 0)
@@ -37,6 +39,7 @@ async def _online_embedding_count_on_conn(conn, model_key: str, legacy_model_key
         "JOIN images i ON e.image_id = i.id "
         "JOIN catalog_sources s ON s.id = i.source_id "
         "WHERE e.model_key = ? AND s.included = 1 "
+        "AND i.status IN ('kept', 'maybe') "
         "AND i.missing_at IS NULL",
         (model_key,),
     )
@@ -215,6 +218,7 @@ async def get_unembedded_images(
                 "JOIN cache_entries c "
                 "  ON c.cache_root = ? AND c.size = ? AND c.image_id = i.id "
                 "WHERE s.included = 1 "
+                "AND i.status IN ('kept', 'maybe') "
                 "AND i.missing_at IS NULL "
                 f"{after_id_filter}"
                 "AND NOT EXISTS ("
@@ -236,6 +240,7 @@ async def get_unembedded_images(
                 "SELECT i.id, i.filepath FROM images i "
                 "JOIN catalog_sources s ON s.id = i.source_id "
                 "WHERE s.included = 1 "
+                "AND i.status IN ('kept', 'maybe') "
                 "AND i.missing_at IS NULL "
                 f"{after_id_filter}"
                 "AND NOT EXISTS ("
@@ -337,7 +342,9 @@ async def count_embeddings_for_model(
             cursor = await conn.execute(
                 "SELECT COUNT(*) AS c FROM embeddings_by_model e "
                 "JOIN images i ON e.image_id = i.id "
-                f"WHERE e.model_key = ? AND i.source_id IN ({placeholders}) AND i.missing_at IS NULL",
+                f"WHERE e.model_key = ? AND i.source_id IN ({placeholders}) "
+                "AND i.status IN ('kept', 'maybe') "
+                "AND i.missing_at IS NULL",
                 [model_key] + list(active_source_ids),
             )
         return int((await cursor.fetchone())["c"] or 0)
@@ -390,7 +397,9 @@ async def get_all_embeddings(
             "JOIN images i ON e.image_id = i.id "
             "JOIN catalog_sources s ON s.id = i.source_id "
             "WHERE e.model_key = ? "
-            "AND s.included = 1 AND i.missing_at IS NULL",
+            "AND s.included = 1 "
+            "AND i.status IN ('kept', 'maybe') "
+            "AND i.missing_at IS NULL",
             (model_key,),
         )
         return await cursor.fetchall()

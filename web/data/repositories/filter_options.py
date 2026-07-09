@@ -142,7 +142,7 @@ async def filter_options(
         bare_source_clause = f"source_id IN ({source_placeholders}) AND "
         source_params = tuple(int(source_id) for source_id in active_source_ids)
 
-    base_where = f"{bare_source_clause}missing_at IS NULL"
+    base_where = f"{bare_source_clause}status IN ('kept', 'maybe') AND missing_at IS NULL"
     (
         year_rows,
         undated_rows,

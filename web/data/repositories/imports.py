@@ -132,7 +132,9 @@ async def import_batch_image_ids(db_path: str, batch_id: int) -> set[int] | None
             "SELECT ibi.image_id FROM import_batch_images ibi "
             "JOIN images i ON i.id = ibi.image_id "
             "JOIN catalog_sources s ON s.id = i.source_id "
-            "WHERE ibi.batch_id = ? AND s.included = 1 AND i.missing_at IS NULL",
+            "WHERE ibi.batch_id = ? AND s.included = 1 "
+            "AND i.status IN ('kept', 'maybe') "
+            "AND i.missing_at IS NULL",
             (int(batch_id),),
         )
         return {int(row["image_id"]) for row in await cursor.fetchall()}

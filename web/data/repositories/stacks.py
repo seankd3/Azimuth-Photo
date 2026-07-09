@@ -325,7 +325,10 @@ async def member_image_ids_excluding_representatives(db_path: str) -> set[int]:
         cursor = await conn.execute(
             "SELECT sm.image_id "
             "FROM stack_members sm JOIN stacks s ON s.id = sm.stack_id "
-            "WHERE sm.image_id != s.representative_image_id"
+            "JOIN images i ON i.id = sm.image_id "
+            "JOIN catalog_sources cs ON cs.id = i.source_id "
+            "WHERE sm.image_id != s.representative_image_id "
+            "AND cs.included = 1 AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL"
         )
         return {int(row["image_id"]) for row in await cursor.fetchall()}
     finally:
@@ -344,7 +347,10 @@ async def representative_stack_counts(db_path: str, image_ids) -> dict[int, dict
             cursor = await conn.execute(
                 "SELECT s.representative_image_id, s.id AS stack_id, COUNT(sm.image_id) AS member_count "
                 "FROM stacks s JOIN stack_members sm ON sm.stack_id = s.id "
+                "JOIN images i ON i.id = sm.image_id "
+                "JOIN catalog_sources cs ON cs.id = i.source_id "
                 f"WHERE s.representative_image_id IN ({placeholders}) "
+                "AND cs.included = 1 AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL "
                 "GROUP BY s.id",
                 chunk,
             )

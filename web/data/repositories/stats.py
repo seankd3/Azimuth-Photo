@@ -80,7 +80,9 @@ async def full_stats(db_path: str) -> dict:
         elif all_catalog_images_active:
             cursor = await conn.execute(
                 "SELECT flag, COUNT(*) AS count FROM images "
-                "WHERE flag IN ('picked', 'rejected') GROUP BY flag"
+                "WHERE status IN ('kept', 'maybe') "
+                "AND missing_at IS NULL "
+                "AND flag IN ('picked', 'rejected') GROUP BY flag"
             )
             flag_counts = {
                 row["flag"]: int(row["count"] or 0)
@@ -90,7 +92,9 @@ async def full_stats(db_path: str) -> dict:
             cursor = await conn.execute(
                 "SELECT i.flag, COUNT(*) AS count "
                 "FROM images i JOIN catalog_sources s ON s.id = i.source_id "
-                "WHERE s.included = 1 AND i.missing_at IS NULL "
+                "WHERE s.included = 1 "
+                "AND i.status IN ('kept', 'maybe') "
+                "AND i.missing_at IS NULL "
                 "AND i.flag IN ('picked', 'rejected') "
                 "GROUP BY i.flag"
             )
@@ -114,12 +118,12 @@ async def full_stats(db_path: str) -> dict:
                 "  SELECT c.rowid AS comparison_rowid "
                 "  FROM images i JOIN catalog_sources s ON s.id = i.source_id "
                 "  JOIN comparisons c INDEXED BY idx_comparisons_pair ON c.winner_id = i.id "
-                "  WHERE NOT (s.included = 1 AND i.missing_at IS NULL) "
+                "  WHERE NOT (s.included = 1 AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL) "
                 "  UNION ALL "
                 "  SELECT c.rowid AS comparison_rowid "
                 "  FROM images i JOIN catalog_sources s ON s.id = i.source_id "
                 "  JOIN comparisons c INDEXED BY idx_comparisons_loser ON c.loser_id = i.id "
-                "  WHERE NOT (s.included = 1 AND i.missing_at IS NULL)"
+                "  WHERE NOT (s.included = 1 AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL)"
                 ") "
                 "SELECT COUNT(DISTINCT comparison_rowid) AS invalid_rows, "
                 "COUNT(*) AS invalid_endpoints FROM invalid_endpoints"
@@ -144,7 +148,8 @@ async def full_stats(db_path: str) -> dict:
                 "      OR COALESCE(propagated_updates, 0) > 0 "
                 "      OR ABS(COALESCE(elo, 1200.0) - 1200.0) > 0.0001 "
                 "    THEN 1 ELSE 0 END) AS rated_images "
-                "FROM images"
+                "FROM images "
+                "WHERE status IN ('kept', 'maybe') AND missing_at IS NULL"
             )
             ranking_counts = await cursor.fetchone()
         else:
@@ -158,7 +163,9 @@ async def full_stats(db_path: str) -> dict:
                 "    THEN 1 ELSE 0 END) AS rated_images "
                 "FROM images i INDEXED BY idx_images_source_missing_rating_signal "
                 "LEFT JOIN catalog_sources s ON s.id = i.source_id "
-                "WHERE s.included = 1 AND i.missing_at IS NULL"
+                "WHERE s.included = 1 "
+                "AND i.status IN ('kept', 'maybe') "
+                "AND i.missing_at IS NULL"
             )
             ranking_counts = await cursor.fetchone()
 
@@ -441,7 +448,8 @@ async def browser_original_summary(
         if all_catalog_images_active:
             cursor = await conn.execute(
                 "SELECT COUNT(*) AS count, COALESCE(SUM(i.file_size), 0) AS bytes FROM images i "
-                "WHERE i.missing_at IS NULL "
+                "WHERE i.status IN ('kept', 'maybe') "
+                "AND i.missing_at IS NULL "
                 f"AND i.file_ext IN ({placeholders})",
                 browser_extensions,
             )
@@ -449,7 +457,9 @@ async def browser_original_summary(
             cursor = await conn.execute(
                 "SELECT COUNT(*) AS count, COALESCE(SUM(i.file_size), 0) AS bytes FROM images i "
                 "JOIN catalog_sources s ON s.id = i.source_id "
-                "WHERE s.included = 1 AND i.missing_at IS NULL "
+                "WHERE s.included = 1 "
+                "AND i.status IN ('kept', 'maybe') "
+                "AND i.missing_at IS NULL "
                 f"AND i.file_ext IN ({placeholders})",
                 browser_extensions,
             )
@@ -461,14 +471,17 @@ async def browser_original_summary(
             if all_catalog_images_active:
                 cursor = await conn.execute(
                     "SELECT i.filepath, i.file_size FROM images i "
-                    "WHERE i.missing_at IS NULL "
+                    "WHERE i.status IN ('kept', 'maybe') "
+                    "AND i.missing_at IS NULL "
                     f"AND {condition}"
                 )
             else:
                 cursor = await conn.execute(
                     "SELECT i.filepath, i.file_size FROM images i "
                     "JOIN catalog_sources s ON s.id = i.source_id "
-                    "WHERE s.included = 1 AND i.missing_at IS NULL "
+                    "WHERE s.included = 1 "
+                    "AND i.status IN ('kept', 'maybe') "
+                    "AND i.missing_at IS NULL "
                     f"AND {condition}"
                 )
             rows = await cursor.fetchall()
@@ -494,7 +507,9 @@ async def cache_ahead_counts(
             "WITH ahead_images AS ("
             "  SELECT i.id FROM images i "
             "  JOIN catalog_sources s ON s.id = i.source_id "
-            "  WHERE s.included = 1 AND i.missing_at IS NULL "
+            "  WHERE s.included = 1 "
+            "  AND i.status IN ('kept', 'maybe') "
+            "  AND i.missing_at IS NULL "
             "  ORDER BY i.id LIMIT ?"
             ") "
             "SELECT COUNT(a.id) AS total, COUNT(c.image_id) AS cached "
@@ -548,7 +563,8 @@ async def ai_status_counts(
                 "      OR COALESCE(propagated_updates, 0) > 0 "
                 "      OR ABS(COALESCE(elo, 1200.0) - 1200.0) > 0.0001 "
                 "    THEN 1 ELSE 0 END) AS rated_images "
-                "FROM images"
+                "FROM images "
+                "WHERE status IN ('kept', 'maybe') AND missing_at IS NULL"
             )
             ranking_counts = await cursor.fetchone()
             image_comparison_count = int(ranking_counts["image_comparison_count"] or 0)
@@ -560,11 +576,13 @@ async def ai_status_counts(
                 "WITH invalid_endpoints AS ("
                 "  SELECT c.rowid AS comparison_rowid "
                 "  FROM images i JOIN comparisons c INDEXED BY idx_comparisons_pair ON c.winner_id = i.id "
-                f"  WHERE NOT (i.source_id IN ({source_placeholders}) AND i.missing_at IS NULL) "
+                f"  WHERE NOT (i.source_id IN ({source_placeholders}) "
+                "AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL) "
                 "  UNION ALL "
                 "  SELECT c.rowid AS comparison_rowid "
                 "  FROM images i JOIN comparisons c INDEXED BY idx_comparisons_loser ON c.loser_id = i.id "
-                f"  WHERE NOT (i.source_id IN ({source_placeholders}) AND i.missing_at IS NULL)"
+                f"  WHERE NOT (i.source_id IN ({source_placeholders}) "
+                "AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL)"
                 ") "
                 "SELECT COUNT(DISTINCT comparison_rowid) AS invalid_rows, "
                 "COUNT(*) AS invalid_endpoints FROM invalid_endpoints",
@@ -589,7 +607,9 @@ async def ai_status_counts(
                 "      OR ABS(COALESCE(i.elo, 1200.0) - 1200.0) > 0.0001 "
                 "    THEN 1 ELSE 0 END) AS rated_images "
                 "FROM images i INDEXED BY idx_images_source_missing_rating_signal "
-                f"WHERE i.source_id IN ({source_placeholders}) AND i.missing_at IS NULL",
+                f"WHERE i.source_id IN ({source_placeholders}) "
+                "AND i.status IN ('kept', 'maybe') "
+                "AND i.missing_at IS NULL",
                 active_source_ids,
             )
             ranking_counts = await cursor.fetchone()

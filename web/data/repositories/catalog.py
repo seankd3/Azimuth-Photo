@@ -38,6 +38,7 @@ def active_source_condition(source_alias: str = "s") -> str:
 def active_image_condition(image_alias: str = "i", source_alias: str = "s") -> str:
     return (
         f"{source_alias}.included = 1 "
+        f"AND {image_alias}.status IN ('kept', 'maybe') "
         f"AND {image_alias}.missing_at IS NULL"
     )
 
@@ -139,7 +140,9 @@ async def update_source_counts_on_conn(conn, source_id: int | None = None):
         "UPDATE catalog_sources SET active_image_count = CASE "
         "WHEN included = 1 THEN ("
         "  SELECT COUNT(*) FROM images "
-        "  WHERE images.source_id = catalog_sources.id AND images.missing_at IS NULL"
+        "  WHERE images.source_id = catalog_sources.id "
+        "  AND images.status IN ('kept', 'maybe') "
+        "  AND images.missing_at IS NULL"
         ") ELSE 0 END"
         f"{where}",
         params,
@@ -466,6 +469,7 @@ def folder_directory_counts_by_source(db_path: str, source_ids: list[int]) -> di
                 "COUNT(*) AS count "
                 "FROM images "
                 f"WHERE source_id IN ({placeholders}) "
+                "AND status IN ('kept', 'maybe') "
                 "AND missing_at IS NULL "
                 "AND filepath IS NOT NULL "
                 "AND filename IS NOT NULL "
@@ -492,7 +496,9 @@ def folder_image_filepaths_by_source(db_path: str, source_ids: list[int]) -> dic
             placeholders = ",".join("?" for _ in chunk)
             rows = conn.execute(
                 "SELECT source_id, filepath FROM images "
-                f"WHERE source_id IN ({placeholders}) AND missing_at IS NULL",
+                f"WHERE source_id IN ({placeholders}) "
+                "AND status IN ('kept', 'maybe') "
+                "AND missing_at IS NULL",
                 chunk,
             ).fetchall()
             for source_id, filepath in rows:
@@ -525,95 +531,90 @@ async def get_source_image_ids(db_path: str, source_id: int) -> list[int]:
         await connection.close_async(conn, db_path=db_path)
 
 
+async def delete_image_catalog_rows_on_conn(conn, image_ids: list[int]) -> dict:
+    image_ids = [int(image_id) for image_id in dict.fromkeys(image_ids or []) if int(image_id) > 0]
+    if not image_ids:
+        return {"images_deleted": 0, "comparisons_deleted": 0}
+
+    comparison_count = 0
+    comparison_decrements: dict[int, int] = {}
+    image_id_set = set(image_ids)
+    for chunk in _chunked(image_ids):
+        placeholders = ",".join("?" for _ in chunk)
+        await conn.execute(f"DELETE FROM embeddings WHERE image_id IN ({placeholders})", chunk)
+        await conn.execute(f"DELETE FROM embeddings_by_model WHERE image_id IN ({placeholders})", chunk)
+        cursor = await conn.execute(
+            f"SELECT winner_id, loser_id FROM comparisons "
+            f"WHERE winner_id IN ({placeholders}) OR loser_id IN ({placeholders})",
+            chunk + chunk,
+        )
+        for row in await cursor.fetchall():
+            winner_id = int(row["winner_id"])
+            loser_id = int(row["loser_id"])
+            if winner_id in image_id_set and loser_id not in image_id_set:
+                comparison_decrements[loser_id] = comparison_decrements.get(loser_id, 0) + 1
+            elif loser_id in image_id_set and winner_id not in image_id_set:
+                comparison_decrements[winner_id] = comparison_decrements.get(winner_id, 0) + 1
+        cursor = await conn.execute(
+            f"DELETE FROM comparisons "
+            f"WHERE winner_id IN ({placeholders}) OR loser_id IN ({placeholders})",
+            chunk + chunk,
+        )
+        comparison_count += max(0, cursor.rowcount or 0)
+        await conn.execute(f"DELETE FROM cache_entries WHERE image_id IN ({placeholders})", chunk)
+        await conn.execute(f"DELETE FROM propagation_updates WHERE image_id IN ({placeholders})", chunk)
+        await conn.execute(f"DELETE FROM collection_images WHERE image_id IN ({placeholders})", chunk)
+        await conn.execute(f"DELETE FROM import_batch_images WHERE image_id IN ({placeholders})", chunk)
+        await conn.execute(f"DELETE FROM stack_members WHERE image_id IN ({placeholders})", chunk)
+        await conn.execute(
+            f"DELETE FROM stacks WHERE representative_image_id IN ({placeholders}) "
+            "AND id NOT IN (SELECT stack_id FROM stack_members)",
+            chunk,
+        )
+        await conn.execute(
+            f"DELETE FROM face_assignments WHERE face_id IN ("
+            f"SELECT id FROM face_detections WHERE image_id IN ({placeholders}))",
+            chunk,
+        )
+        await conn.execute(f"DELETE FROM face_detections WHERE image_id IN ({placeholders})", chunk)
+        await conn.execute(f"DELETE FROM person_image_membership WHERE image_id IN ({placeholders})", chunk)
+        await conn.execute(f"DELETE FROM face_scan_images WHERE image_id IN ({placeholders})", chunk)
+        await conn.execute(
+            f"UPDATE collections SET cover_image_id = NULL "
+            f"WHERE cover_image_id IN ({placeholders})",
+            chunk,
+        )
+        await conn.execute(f"DELETE FROM images WHERE id IN ({placeholders})", chunk)
+    if comparison_decrements:
+        await conn.executemany(
+            "UPDATE images SET comparisons = MAX(COALESCE(comparisons, 0) - ?, 0) WHERE id = ?",
+            [(count, image_id) for image_id, count in comparison_decrements.items()],
+        )
+    return {"images_deleted": len(image_ids), "comparisons_deleted": comparison_count}
+
+
+async def delete_image_catalog_rows(db_path: str, image_ids: list[int]) -> dict:
+    conn = await connection.open_async(db_path)
+    try:
+        result = await delete_image_catalog_rows_on_conn(conn, image_ids)
+        await update_source_counts_on_conn(conn)
+        await conn.commit()
+        return result
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+
+
 async def purge_source_catalog_data(db_path: str, source_id: int) -> dict:
     image_ids = await get_source_image_ids(db_path, source_id)
     conn = await connection.open_async(db_path)
     try:
-        comparison_count = 0
-        comparison_decrements: dict[int, int] = {}
-        if image_ids:
-            source_id_set = set(image_ids)
-            for chunk in _chunked(image_ids):
-                placeholders = ",".join("?" for _ in chunk)
-                await conn.execute(
-                    f"DELETE FROM embeddings WHERE image_id IN ({placeholders})",
-                    chunk,
-                )
-                await conn.execute(
-                    f"DELETE FROM embeddings_by_model WHERE image_id IN ({placeholders})",
-                    chunk,
-                )
-                cursor = await conn.execute(
-                    f"SELECT winner_id, loser_id FROM comparisons "
-                    f"WHERE winner_id IN ({placeholders}) OR loser_id IN ({placeholders})",
-                    chunk + chunk,
-                )
-                for row in await cursor.fetchall():
-                    winner_id = int(row["winner_id"])
-                    loser_id = int(row["loser_id"])
-                    if winner_id in source_id_set and loser_id not in source_id_set:
-                        comparison_decrements[loser_id] = comparison_decrements.get(loser_id, 0) + 1
-                    elif loser_id in source_id_set and winner_id not in source_id_set:
-                        comparison_decrements[winner_id] = comparison_decrements.get(winner_id, 0) + 1
-                cursor = await conn.execute(
-                    f"DELETE FROM comparisons "
-                    f"WHERE winner_id IN ({placeholders}) OR loser_id IN ({placeholders})",
-                    chunk + chunk,
-                )
-                comparison_count += max(0, cursor.rowcount or 0)
-                await conn.execute(
-                    f"DELETE FROM cache_entries WHERE image_id IN ({placeholders})",
-                    chunk,
-                )
-                await conn.execute(
-                    f"DELETE FROM propagation_updates WHERE image_id IN ({placeholders})",
-                    chunk,
-                )
-                await conn.execute(
-                    f"DELETE FROM collection_images WHERE image_id IN ({placeholders})",
-                    chunk,
-                )
-                await conn.execute(
-                    f"DELETE FROM import_batch_images WHERE image_id IN ({placeholders})",
-                    chunk,
-                )
-                await conn.execute(
-                    f"DELETE FROM face_assignments WHERE face_id IN ("
-                    f"SELECT id FROM face_detections WHERE image_id IN ({placeholders}))",
-                    chunk,
-                )
-                await conn.execute(
-                    f"DELETE FROM face_detections WHERE image_id IN ({placeholders})",
-                    chunk,
-                )
-                await conn.execute(
-                    f"DELETE FROM person_image_membership WHERE image_id IN ({placeholders})",
-                    chunk,
-                )
-                await conn.execute(
-                    f"DELETE FROM face_scan_images WHERE image_id IN ({placeholders})",
-                    chunk,
-                )
-                await conn.execute(
-                    f"UPDATE collections SET cover_image_id = NULL "
-                    f"WHERE cover_image_id IN ({placeholders})",
-                    chunk,
-                )
-                await conn.execute(
-                    f"DELETE FROM images WHERE id IN ({placeholders})",
-                    chunk,
-                )
-            if comparison_decrements:
-                await conn.executemany(
-                    "UPDATE images SET comparisons = MAX(COALESCE(comparisons, 0) - ?, 0) WHERE id = ?",
-                    [(count, image_id) for image_id, count in comparison_decrements.items()],
-                )
+        result = await delete_image_catalog_rows_on_conn(conn, image_ids)
         await conn.execute("DELETE FROM catalog_sources WHERE id = ?", (source_id,))
         await update_source_counts_on_conn(conn)
         await conn.commit()
         return {
-            "images_deleted": len(image_ids),
-            "comparisons_deleted": comparison_count,
+            "images_deleted": result["images_deleted"],
+            "comparisons_deleted": result["comparisons_deleted"],
         }
     finally:
         await connection.close_async(conn, db_path=db_path)
@@ -630,7 +631,9 @@ async def get_scan_folder(db_path: str):
         if row:
             return row["path"]
         cursor = await conn.execute(
-            "SELECT filepath FROM images WHERE missing_at IS NULL ORDER BY RANDOM() LIMIT 50"
+            "SELECT filepath FROM images "
+            "WHERE status IN ('kept', 'maybe') AND missing_at IS NULL "
+            "ORDER BY RANDOM() LIMIT 50"
         )
         rows = await cursor.fetchall()
         if not rows:
