@@ -19,6 +19,7 @@ function ensureMenu() {
     menu.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') {
             event.preventDefault();
+            event.stopPropagation();
             closeExportMenu();
         }
     });

@@ -5,6 +5,7 @@ import {
 import {
     enterSelection, isSelectionMode, selectedIds, toggleSelection,
 } from './selection.js';
+import { releaseFocus, trapFocus } from './focusTrap.js';
 import { showToast } from './toast.js';
 import { icon } from '../icons.js';
 
@@ -14,6 +15,7 @@ let images = [];
 let total = 0;
 let totalBytes = 0;
 let loading = false;
+let loadGeneration = 0;
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -42,6 +44,7 @@ export function confirmTypedCount({
 } = {}) {
     const required = String(Number(count) || 0);
     return new Promise((resolve) => {
+        let done = false;
         const overlay = document.createElement('div');
         overlay.className = 'typed-confirm';
         overlay.innerHTML = '<div class="typed-confirm-card" role="dialog" aria-modal="true">'
@@ -53,12 +56,16 @@ export function confirmTypedCount({
             + `<button class="btn ${danger ? 'danger' : 'primary'}" data-confirm disabled>${esc(confirmLabel)}</button>`
             + '</div></div>';
         const finish = (ok) => {
+            if (done) return;
+            done = true;
+            releaseFocus(overlay);
             overlay.remove();
             resolve(ok);
         };
         document.body.appendChild(overlay);
         const input = overlay.querySelector('input');
         const confirm = overlay.querySelector('[data-confirm]');
+        trapFocus(overlay, input);
         input.addEventListener('input', () => {
             confirm.disabled = input.value.trim() !== required;
         });
@@ -68,10 +75,17 @@ export function confirmTypedCount({
             if (event.target === overlay) finish(false);
         });
         overlay.addEventListener('keydown', (event) => {
-            if (event.key === 'Escape') finish(false);
-            if (event.key === 'Enter' && !confirm.disabled) finish(true);
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                event.stopPropagation();
+                finish(false);
+            }
+            if (event.key === 'Enter' && !confirm.disabled) {
+                event.preventDefault();
+                event.stopPropagation();
+                finish(true);
+            }
         });
-        requestAnimationFrame(() => input.focus());
     });
 }
 
@@ -166,9 +180,11 @@ function patchSelection() {
 
 async function loadTrash() {
     ensureView();
+    const seq = ++loadGeneration;
     loading = true;
     render();
     const data = await getTrash({ limit: 500, offset: 0 });
+    if (seq !== loadGeneration || !root?.isConnected || !open) return;
     images = (data && data.images || []).map((img) => ({ ...img, id: Number(img.id) })).filter((img) => img.id);
     total = Number(data?.total) || images.length;
     totalBytes = Number(data?.total_bytes) || 0;
@@ -180,12 +196,12 @@ async function loadTrash() {
 export async function trashSelectedImages() {
     const imageIds = selectedIds();
     if (!imageIds.length) return false;
-    clearSelection();
     const result = await trashImages(imageIds);
     if (!result) {
         showToast("Selection couldn't be trashed");
-        return true;
+        return false;
     }
+    clearSelection();
     emit('trash:changed', { imageIds });
     showToast(`Moved ${fmt(imageIds.length)} photo${imageIds.length === 1 ? '' : 's'} to Trash`, {
         undo: async () => {
@@ -200,10 +216,14 @@ export async function trashSelectedImages() {
 async function restoreSelectedTrash() {
     const imageIds = selectedIds();
     if (!imageIds.length) return;
-    clearSelection();
     const result = await restoreImages(imageIds);
+    if (!result) {
+        showToast("Restore didn't save");
+        return;
+    }
+    clearSelection();
     emit('trash:changed', { imageIds });
-    showToast(result ? `Restored ${fmt(imageIds.length)} photos` : "Restore didn't save");
+    showToast(`Restored ${fmt(imageIds.length)} photos`);
 }
 
 async function emptyTrashWithConfirm() {
@@ -215,9 +235,14 @@ async function emptyTrashWithConfirm() {
         confirmLabel: 'Empty trash',
     });
     if (!ok) return;
+    const freed = totalBytes;
     const result = await emptyTrash();
+    if (!result) {
+        showToast("Trash couldn't be emptied");
+        return;
+    }
     emit('trash:changed', {});
-    showToast(result ? `Trash emptied · ${bytesLabel(totalBytes)} freed` : "Trash couldn't be emptied");
+    showToast(`Trash emptied · ${bytesLabel(freed)} freed`);
 }
 
 export function openTrash() {
@@ -244,6 +269,7 @@ export function mountTrash() {
 export function unmountTrash() {
     if (!root) return;
     open = false;
+    loadGeneration += 1;
     root.hidden = true;
     document.getElementById('view-trash').classList.remove('active');
 }

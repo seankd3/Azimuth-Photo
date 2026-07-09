@@ -14,6 +14,7 @@ let menu = null;
 let menuReturn = null;
 let loading = true;
 let refreshTimer = 0;
+let refreshGeneration = 0;
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -92,6 +93,7 @@ function ensureMenu() {
     menu.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') {
             event.preventDefault();
+            event.stopPropagation();
             closeFolderMenu();
         }
     });
@@ -293,9 +295,11 @@ function syncActiveRows() {
 }
 
 export async function refreshFoldersPanel({ toastEmpty = false } = {}) {
+    const seq = ++refreshGeneration;
     loading = true;
     renderTree();
     const data = await getFolderTree();
+    if (seq !== refreshGeneration) return;
     sources = ((data && data.sources) || []).map(normalizeSource);
     loading = false;
     renderTree();

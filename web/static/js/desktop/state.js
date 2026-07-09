@@ -382,8 +382,7 @@ function loadHash() {
     patch.similarIds = [];
     patch.similarLabel = '';
     if (!patch.sort) patch.sort = 'elo';
-    Object.assign(scope, patch);
-    emit('scope', scope);
+    setScope(patch, { pushHash: false });
 }
 
 export function initState() {

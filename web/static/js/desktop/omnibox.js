@@ -705,6 +705,7 @@ function run(index) {
         input.blur();
     }
     row.run();
+    if (!commandMode && !document.getElementById('scopebox')?.classList.contains('open')) input.blur();
 }
 
 function applyScope(patch, { keepFocus = false } = {}) {
@@ -718,6 +719,7 @@ function applyScope(patch, { keepFocus = false } = {}) {
         document.getElementById('scope-input').focus();
     } else {
         close();
+        input.blur();
     }
 }
 
@@ -920,9 +922,12 @@ export function initOmnibox() {
         } else if (event.key === 'Escape') {
             if (tokenSelected) {
                 event.preventDefault();
+                event.stopPropagation();
                 setTokenSelected(false);
                 return;
             }
+            event.preventDefault();
+            event.stopPropagation();
             input.value = '';
             input.blur();
             close();

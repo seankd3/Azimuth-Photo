@@ -603,6 +603,11 @@ export function pickByKey(key) {
         return true;
     }
     if (mode === 'mosaic') {
+        if (/^[1-4]$/.test(String(key))) {
+            const img = currentSet[Number(key) - 1];
+            if (img) pickRefine(img.id);
+            return true;
+        }
         if (key === 'ArrowRight') return selectIndex(selectedIndex < 0 ? 0 : selectedIndex + 1);
         if (key === 'ArrowLeft') return selectIndex(selectedIndex < 0 ? 0 : selectedIndex - 1);
         if (key === 'ArrowDown') return selectInVerticalDirection(1);

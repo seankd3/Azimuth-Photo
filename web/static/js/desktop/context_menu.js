@@ -2,6 +2,7 @@ import { emit, on, selection } from './state.js';
 import { applyFlags } from './selection.js';
 import { openCollectionPicker } from './panel.js';
 import { downloadExport } from './export_menu.js';
+import { releaseFocus, trapFocus } from './focusTrap.js';
 import { icon } from '../icons.js';
 
 let menu = null;
@@ -24,6 +25,7 @@ function ensureMenu() {
     menu.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') {
             event.preventDefault();
+            event.stopPropagation();
             closeGridContextMenu();
         }
     });
@@ -99,12 +101,13 @@ export function openGridContextMenu({ id, index = 0, x = 0, y = 0, returnTo = nu
     menu.style.left = `${x}px`;
     menu.style.top = `${y}px`;
     requestAnimationFrame(() => clampPosition(x, y));
-    menu.querySelector('button')?.focus({ preventScroll: true });
+    trapFocus(menu, menu.querySelector('button'));
 }
 
 export function closeGridContextMenu() {
     if (!menu || menu.hidden) return;
     menu.hidden = true;
+    releaseFocus(menu);
     if (returnEl && document.contains(returnEl) && returnEl.focus) returnEl.focus({ preventScroll: true });
 }
 

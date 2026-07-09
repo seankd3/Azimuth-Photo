@@ -847,6 +847,7 @@ export function initDrawer() {
     document.getElementById('drawer').addEventListener('keydown', (event) => {
         if (event.key === 'Escape') {
             event.preventDefault();
+            event.stopPropagation();
             closeSystemDrawer();
         }
     });

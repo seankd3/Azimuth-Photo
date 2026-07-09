@@ -35,6 +35,7 @@ let stackTotal = 0;
 let stackOffset = 0;
 let stackDone = false;
 let stackLoading = false;
+let stackGeneration = 0;
 let stackSentinel = null;
 let stackObserver = null;
 let loading = false;
@@ -588,16 +589,21 @@ function renderStacks({ append = false } = {}) {
 }
 
 async function loadStackCounts() {
+    const seq = stackGeneration;
     const entries = await Promise.all(STACK_KINDS.map(async ([id, value]) => {
         const data = await listStacks({ kind: value, limit: 1, offset: 0 });
         return [id === 'all' ? 'all' : value, Number(data?.total) || 0];
     }));
+    if (seq !== stackGeneration || !root?.isConnected || !open || mode !== 'stacks') return;
     stackCounts = Object.fromEntries(entries);
     renderKindChips();
 }
 
 async function loadStackPage({ reset = false } = {}) {
-    if (!root || stackLoading || (stackDone && !reset)) return;
+    if (!root || mode !== 'stacks' || (!reset && stackLoading) || (stackDone && !reset)) return;
+    const seq = stackGeneration;
+    const requestMode = mode;
+    const requestKind = stackKind;
     if (reset) {
         stackOffset = 0;
         stackDone = false;
@@ -605,7 +611,9 @@ async function loadStackPage({ reset = false } = {}) {
         renderStackSkeleton();
     }
     stackLoading = true;
-    const data = await listStacks({ kind: stackKind, limit: STACK_LIMIT, offset: stackOffset });
+    const requestOffset = stackOffset;
+    const data = await listStacks({ kind: requestKind, limit: STACK_LIMIT, offset: requestOffset });
+    if (seq !== stackGeneration || !root?.isConnected || !open || requestMode !== mode || mode !== 'stacks' || requestKind !== stackKind) return;
     stackLoading = false;
     if (!data) {
         root.querySelector('#duplicates-body').innerHTML = '<div class="load-error dupe-error"><h4>Couldn\'t load stacks</h4><p>GET /api/stacks did not respond.</p><button class="btn" id="stacks-retry">Try again</button></div>';
@@ -622,8 +630,14 @@ async function loadStackPage({ reset = false } = {}) {
 }
 
 function bindStackSentinel() {
-    stackSentinel = root.querySelector('#stacks-sentinel');
-    if (!stackSentinel || stackObserver) return;
+    const nextSentinel = root.querySelector('#stacks-sentinel');
+    if (!nextSentinel) {
+        resetStackObserver();
+        return;
+    }
+    if (stackSentinel === nextSentinel && stackObserver) return;
+    if (stackObserver) stackObserver.disconnect();
+    stackSentinel = nextSentinel;
     stackObserver = new IntersectionObserver((entries) => {
         if (entries.some((entry) => entry.isIntersecting)) loadStackPage();
     }, { root: root.querySelector('#duplicates-body'), rootMargin: '600px 0px' });
@@ -637,8 +651,12 @@ function resetStackObserver() {
 }
 
 async function reloadStacks() {
+    stackGeneration += 1;
+    stackLoading = false;
+    const seq = stackGeneration;
     resetStackObserver();
     await loadStackCounts();
+    if (seq !== stackGeneration || mode !== 'stacks') return;
     await loadStackPage({ reset: true });
 }
 
@@ -684,10 +702,14 @@ async function keepCoverForStack(stackId) {
         return;
     }
     emit('trash:changed', { imageIds });
+    stacks = stacks.filter((item) => Number(item.id) !== Number(stackId));
+    stackTotal = Math.max(0, stackTotal - 1);
+    renderStacks();
     showToast(`Trashed ${fmt(imageIds.length)} stack member${imageIds.length === 1 ? '' : 's'}`, {
         undo: async () => {
             const restored = await restoreImages(imageIds);
             emit('trash:changed', { imageIds });
+            if (open && mode === 'stacks') await reloadStacks();
             showToast(restored ? 'Restored' : "Restore didn't save");
         },
     });
@@ -728,13 +750,19 @@ async function keepCoversEverywhere() {
     });
     if (!ok) return;
     const result = await trashImages(imageIds);
+    if (!result) {
+        showToast("Trash didn't save");
+        return;
+    }
     emit('trash:changed', { imageIds });
-    showToast(result ? `Trashed ${fmt(imageIds.length)} non-cover photos` : "Trash didn't save", {
-        undo: result ? async () => {
+    await reloadStacks();
+    showToast(`Trashed ${fmt(imageIds.length)} non-cover photos`, {
+        undo: async () => {
             const restored = await restoreImages(imageIds);
             emit('trash:changed', { imageIds });
+            if (open && mode === 'stacks') await reloadStacks();
             showToast(restored ? 'Restored' : "Restore didn't save");
-        } : null,
+        },
     });
 }
 
@@ -766,6 +794,9 @@ async function rescanStacks() {
 }
 
 function switchMode(nextMode) {
+    stackGeneration += 1;
+    stackLoading = false;
+    resetStackObserver();
     mode = nextMode === 'adhoc' ? 'adhoc' : 'stacks';
     root.querySelector('#stacks-review-tools').hidden = mode !== 'stacks';
     root.querySelector('#duplicates-adhoc-tools').hidden = mode !== 'adhoc';
@@ -809,6 +840,7 @@ function ensureView() {
     root.querySelector('#stacks-kind-chips').addEventListener('click', (event) => {
         const button = event.target.closest('[data-kind]');
         if (!button) return;
+        if (stackKind === (button.dataset.kind || '')) return;
         stackKind = button.dataset.kind || '';
         reloadStacks();
     });

@@ -27,6 +27,7 @@ let lastThumbSize = viewState.thumbSize;
 let previousFocusedCell = null;
 let savedScrollTop = 0;
 let expandedStack = null;
+let stackExpansionRequest = 0;
 const stackCache = new Map();
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
@@ -129,6 +130,9 @@ async function expandStack(stackId, cell) {
         return true;
     }
     closeExpandedStack();
+    const request = ++stackExpansionRequest;
+    const seq = generation;
+    const cellId = Number(cell.dataset.id) || 0;
     const badge = cell.querySelector(`.c-stack[data-stack-id="${id}"]`);
     if (badge) {
         badge.classList.add('loading');
@@ -136,10 +140,12 @@ async function expandStack(stackId, cell) {
     }
     const data = stackCache.get(id) || await getStack(id);
     if (data) stackCache.set(id, data);
-    if (badge) {
+    const current = mounted && request === stackExpansionRequest && seq === generation && cell.isConnected && Number(cell.dataset.id) === cellId;
+    if (badge?.isConnected) {
         badge.classList.remove('loading');
         badge.disabled = false;
     }
+    if (!current) return false;
     const members = (data && data.members || []).filter((img) => Number(img?.id) !== Number(cell.dataset.id));
     if (!members.length) {
         showToast("Stack didn't return expandable members");
@@ -172,6 +178,7 @@ async function expandStack(stackId, cell) {
 function render({ append = false, start = 0, images = [] } = {}) {
     const flow = document.getElementById('grid-flow');
     if (!append) {
+        stackExpansionRequest += 1;
         closeExpandedStack();
         resetImageObserver();
         resetGridWindow();
@@ -182,6 +189,7 @@ function render({ append = false, start = 0, images = [] } = {}) {
 }
 
 function renderSkeletons() {
+    stackExpansionRequest += 1;
     closeExpandedStack();
     resetImageObserver();
     resetGridWindow();
@@ -193,6 +201,7 @@ function renderSkeletons() {
 }
 
 function renderEmptyState() {
+    stackExpansionRequest += 1;
     closeExpandedStack();
     resetImageObserver();
     resetGridWindow();
@@ -515,6 +524,7 @@ export function unmountGrid() {
     mounted = false;
     savedScrollTop = document.getElementById('canvas').scrollTop;
     generation += 1;
+    stackExpansionRequest += 1;
     loading = false;
     closeExpandedStack();
     resetImageObserver();

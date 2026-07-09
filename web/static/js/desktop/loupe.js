@@ -29,6 +29,7 @@ let fullImageLoadingId = null;
 let imageWaiters = [];
 let lightMode = 'normal';
 let infoMode = 'off';
+let returnLens = 'grid';
 const INFO_MODES = ['off', 'basic', 'full'];
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
@@ -380,6 +381,7 @@ function maybeRequestMore() {
 }
 
 export function openLoupe(target = 0) {
+    returnLens = typeof target === 'object' && target.returnLens ? target.returnLens : viewState.activeLens || 'grid';
     sessionImages = Array.isArray(target.images) && target.images.length ? target.images : null;
     if (sessionImages) rememberImages(sessionImages);
     const list = images();
@@ -408,7 +410,7 @@ export function closeLoupe(options = {}) {
         return;
     }
     setLightMode('normal');
-    setActiveLens('grid');
+    setActiveLens(returnLens === 'loupe' ? 'grid' : returnLens);
 }
 
 export function mountLoupe() {
@@ -628,7 +630,11 @@ export function initLoupe() {
     ensureLoupeChrome();
     bindPointer();
     bindKeyboard();
-    on('loupe:open', ({ id, index: startIndex, images: sourceImages }) => openLoupe({ id, index: startIndex, images: sourceImages }));
+    on('loupe:open', ({
+        id, index: startIndex, images: sourceImages, returnLens: sourceLens,
+    }) => openLoupe({
+        id, index: startIndex, images: sourceImages, returnLens: sourceLens,
+    }));
     document.getElementById('loupe-prev').addEventListener('click', (event) => {
         event.stopPropagation();
         navLoupe(-1);

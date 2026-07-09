@@ -13,7 +13,7 @@ import { closeLeftDrawer, leftDrawerOpen, toggleLeftPanel } from './panel.js';
 import { closeSystemDrawer, systemDrawerOpen } from './drawer.js';
 import { toggleRightPanel } from './panel_right.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
-import { switchLens } from './lenses.js';
+import { activeLens, switchLens } from './lenses.js';
 import { closeFilters, filtersOpen } from './filters.js';
 import { closeImport, importOpen } from './importer.js';
 import { closeGridContextMenu, gridContextMenuOpen } from './context_menu.js';
@@ -28,6 +28,23 @@ function inputFocused() {
 
 function helpOpen() {
     return !document.getElementById('help').hidden;
+}
+
+function foregroundLayerOpen() {
+    return helpOpen()
+        || filtersOpen()
+        || importOpen()
+        || Boolean(
+            document.querySelector('.typed-confirm')
+            || document.querySelector('#collection-picker')
+            || document.querySelector('#collection-pop-menu:not([hidden])')
+            || document.querySelector('#grid-pop-menu:not([hidden])')
+            || document.querySelector('#export-pop-menu:not([hidden])')
+            || document.querySelector('#folder-pop-menu:not([hidden])')
+            || document.querySelector('#share-overlay:not([hidden])')
+            || document.querySelector('#publish-overlay:not([hidden])')
+            || document.querySelector('#people-merge-pop'),
+        );
 }
 
 export function openHelp() {
@@ -126,26 +143,32 @@ export function initKeyboard() {
     });
     window.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') {
-            if (escapeOneLayer()) event.preventDefault();
+            if (escapeOneLayer()) {
+                event.preventDefault();
+                event.stopPropagation();
+            }
             return;
         }
         if (event.ctrlKey || event.metaKey) {
-            if (event.key.toLowerCase() === 'k') {
+            const key = event.key.toLowerCase();
+            if (foregroundLayerOpen() || inputFocused()) return;
+            if (key === 'k') {
+                if (activeLens() !== 'grid') return;
                 event.preventDefault();
                 openCommandPalette();
                 return;
             }
-            if (duplicatesOpen()) return;
-            if (refineOpen() && event.key.toLowerCase() === 'z') {
+            if (refineOpen() && key === 'z') {
                 event.preventDefault();
                 undoRefine();
                 return;
             }
-            if (event.key.toLowerCase() === 'z') {
+            if (activeLens() !== 'grid') return;
+            if (key === 'z') {
                 if (undoLatestToast()) event.preventDefault();
                 return;
             }
-            if (event.key.toLowerCase() === 'a' && !inputFocused() && viewState.activeLens === 'grid') {
+            if (key === 'a') {
                 const count = selectLoadedImages();
                 if (count) {
                     event.preventDefault();
@@ -195,6 +218,7 @@ export function initKeyboard() {
             }
             return;
         }
+        if (activeLens() !== 'grid') return;
         const key = event.key.toLowerCase();
         if (key === '/') {
             event.preventDefault();

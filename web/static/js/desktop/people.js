@@ -2,6 +2,7 @@ import {
     getPeople, ignorePerson, labelPerson, mergePeople, rejectMergeSuggestion,
 } from './api.js';
 import { on, setActiveLens, setRankingsMeta, setScope } from './state.js';
+import { releaseFocus, trapFocus } from './focusTrap.js';
 import { showToast } from './toast.js';
 import { icon } from '../icons.js';
 import { personLabel as cleanPersonLabel, isUnnamedPersonLabel } from '../people_labels.js';
@@ -201,7 +202,28 @@ function openPerson(person) {
 }
 
 function closeMenus() {
-    for (const card of document.querySelectorAll('.person-card.menu-open')) card.classList.remove('menu-open');
+    for (const card of document.querySelectorAll('.person-card.menu-open')) {
+        releaseFocus(card.querySelector('.person-menu'));
+        card.classList.remove('menu-open');
+    }
+}
+
+function closeMergePopover() {
+    const pop = document.getElementById('people-merge-pop');
+    if (pop) {
+        releaseFocus(pop);
+        pop.remove();
+    }
+    pendingMerge = null;
+}
+
+function focusPersonCard(personId) {
+    requestAnimationFrame(() => {
+        const id = String(personId || '');
+        if (!id) return;
+        const card = document.querySelector(`.person-card[data-person-id="${CSS.escape(id)}"]`);
+        if (card) card.focus({ preventScroll: true });
+    });
 }
 
 function beginRename(card, person) {
@@ -230,17 +252,21 @@ async function commitRename(form, person) {
         person_label: person.person_label || '',
     };
     if (!next) {
+        const personId = person.id;
         render();
+        focusPersonCard(personId);
         return;
     }
     updatePerson(person.id, { name: next, label: next });
     render();
+    focusPersonCard(person.id);
     const result = await labelPerson(person.id, next);
     if (result && result.ok) {
         showToast(`Renamed to "${next}"`);
     } else {
         updatePerson(person.id, previous);
         render();
+        focusPersonCard(person.id);
         showToast("Couldn't rename person");
     }
 }
@@ -320,7 +346,7 @@ function showMergePopover(sourceId, targetId, rect) {
     const source = findPerson(sourceId);
     const target = findPerson(targetId);
     if (!source || !target) return;
-    document.getElementById('people-merge-pop')?.remove();
+    closeMergePopover();
     pendingMerge = { sourceId, targetId };
     document.body.insertAdjacentHTML('beforeend', mergePopoverHtml(source, target));
     const pop = document.getElementById('people-merge-pop');
@@ -328,6 +354,7 @@ function showMergePopover(sourceId, targetId, rect) {
     const top = Math.min(window.innerHeight - 140, Math.max(12, rect.top + 12));
     pop.style.left = `${left}px`;
     pop.style.top = `${top}px`;
+    trapFocus(pop, pop.querySelector('button'));
 }
 
 function clearDropTargets() {
@@ -357,7 +384,11 @@ export function initPeople() {
             event.stopPropagation();
             const open = card.classList.contains('menu-open');
             closeMenus();
-            card.classList.toggle('menu-open', !open);
+            if (!open) {
+                card.classList.add('menu-open');
+                const menu = card.querySelector('.person-menu');
+                trapFocus(menu, menu?.querySelector('button'));
+            }
         } else if (action === 'rename') {
             event.stopPropagation();
             closeMenus();
@@ -367,7 +398,9 @@ export function initPeople() {
             requestIgnore(card, person);
         } else if (action === 'cancel-rename') {
             event.stopPropagation();
+            const personId = card.dataset.personId;
             render();
+            focusPersonCard(personId);
         } else if (!event.target.closest('form')) {
             openPerson(person);
         }
@@ -381,12 +414,25 @@ export function initPeople() {
     flow.addEventListener('keydown', (event) => {
         if (event.key === 'Escape' && event.target.closest('.person-rename')) {
             event.preventDefault();
+            event.stopPropagation();
+            const personId = event.target.closest('.person-card')?.dataset.personId;
             render();
+            focusPersonCard(personId);
+            return;
+        }
+        if (event.key === 'Escape' && event.target.closest('.person-card.menu-open')) {
+            event.preventDefault();
+            event.stopPropagation();
+            closeMenus();
             return;
         }
         if (event.key !== 'Enter' || event.target.closest('input, button')) return;
         const card = event.target.closest('.person-card[data-person-id]');
-        if (card) openPerson(findPerson(card.dataset.personId));
+        if (card) {
+            event.preventDefault();
+            event.stopPropagation();
+            openPerson(findPerson(card.dataset.personId));
+        }
     });
     flow.addEventListener('dragstart', (event) => {
         const card = event.target.closest('.person-card[data-person-id]');
@@ -423,18 +469,25 @@ export function initPeople() {
     document.addEventListener('click', (event) => {
         if (!event.target.closest('.person-card')) closeMenus();
         const pop = document.getElementById('people-merge-pop');
-        if (pop && !pop.contains(event.target) && !event.target.closest('.person-card')) pop.remove();
+        if (pop && !pop.contains(event.target) && !event.target.closest('.person-card')) closeMergePopover();
     });
     document.addEventListener('click', (event) => {
         const confirm = event.target.closest('[data-act="confirm-drop-merge"]');
         const cancel = event.target.closest('[data-act="cancel-drop-merge"]');
         if (confirm && pendingMerge) {
-            document.getElementById('people-merge-pop')?.remove();
-            runMerge(pendingMerge.sourceId, pendingMerge.targetId);
-            pendingMerge = null;
+            const merge = pendingMerge;
+            closeMergePopover();
+            runMerge(merge.sourceId, merge.targetId);
         } else if (cancel) {
-            document.getElementById('people-merge-pop')?.remove();
-            pendingMerge = null;
+            closeMergePopover();
+        }
+    });
+    document.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') return;
+        if (document.getElementById('people-merge-pop')) {
+            event.preventDefault();
+            event.stopPropagation();
+            closeMergePopover();
         }
     });
     on('scope', () => {

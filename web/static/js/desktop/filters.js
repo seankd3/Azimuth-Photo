@@ -338,6 +338,7 @@ function ensurePopover() {
     popover.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') {
             event.preventDefault();
+            event.stopPropagation();
             closeFilters();
         }
     });

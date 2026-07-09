@@ -118,6 +118,7 @@ function ensureCollectionMenu() {
     collectionMenu.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') {
             event.preventDefault();
+            event.stopPropagation();
             closeCollectionMenu();
         }
     });
@@ -303,6 +304,7 @@ function ensureShareOverlay() {
     shareOverlay.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') {
             event.preventDefault();
+            event.stopPropagation();
             closeShareOverlay();
         }
     });
@@ -468,6 +470,7 @@ function ensurePublishOverlay() {
     publishOverlay.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') {
             event.preventDefault();
+            event.stopPropagation();
             closePublishOverlay();
         }
     });
@@ -703,6 +706,7 @@ function startCollectionRename(collectionId) {
     input.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') {
             event.preventDefault();
+            event.stopPropagation();
             cancel();
         }
     });
@@ -917,6 +921,7 @@ export async function openCollectionPicker(imageIds, { onDone = null } = {}) {
     picker.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') {
             event.preventDefault();
+            event.stopPropagation();
             close();
         }
     });
@@ -1071,8 +1076,7 @@ async function saveSmartCollectionFromForm() {
     if (button) button.disabled = true;
     let result = null;
     if (editingSmartCollection) {
-        if (name !== editingSmartCollection.name) await renameCollection(editingSmartCollection.id, name);
-        result = await updateCollection(editingSmartCollection.id, { query });
+        result = await updateCollection(editingSmartCollection.id, { name, query });
     } else {
         result = await createCollection(name, [], '', query);
     }

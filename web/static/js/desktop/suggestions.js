@@ -58,11 +58,14 @@ export async function loadSuggestionsOnce() {
     if (suggestions || suggestionsLoading) return;
     suggestionsLoading = true;
     notifyChange();
-    const data = await getCollectionSuggestions();
-    suggestions = (data && data.suggestions) || [];
-    suggestionsLoading = false;
-    notifyChange();
-    if (mounted) render();
+    try {
+        const data = await getCollectionSuggestions();
+        if (data && Array.isArray(data.suggestions)) suggestions = data.suggestions;
+    } finally {
+        suggestionsLoading = false;
+        notifyChange();
+        if (mounted) render();
+    }
 }
 
 export function suggestionsAreLoading() {
@@ -188,6 +191,7 @@ function render() {
 
 function handleKeydown(event) {
     if (!mounted || event.ctrlKey || event.metaKey || event.altKey) return;
+    if (foregroundLayerOpen()) return;
     const visible = currentSuggestions();
     const key = event.key.toLowerCase();
     if (key === 'escape') {
@@ -213,6 +217,26 @@ function handleKeydown(event) {
         event.stopImmediatePropagation();
         dismissSuggestion(visible[activeIndex]);
     }
+}
+
+function foregroundLayerOpen() {
+    return Boolean(
+        document.querySelector('.typed-confirm')
+        || document.querySelector('#scopebox.open')
+        || document.querySelector('#help:not([hidden])')
+        || document.querySelector('#filter-popover:not([hidden])')
+        || document.querySelector('#import-scrim:not([hidden])')
+        || document.querySelector('#collection-picker')
+        || document.querySelector('#collection-pop-menu:not([hidden])')
+        || document.querySelector('#grid-pop-menu:not([hidden])')
+        || document.querySelector('#export-pop-menu:not([hidden])')
+        || document.querySelector('#folder-pop-menu:not([hidden])')
+        || document.querySelector('#share-overlay:not([hidden])')
+        || document.querySelector('#publish-overlay:not([hidden])')
+        || document.querySelector('#drawer-scrim:not([hidden])')
+        || document.querySelector('.person-card.menu-open')
+        || document.querySelector('#people-merge-pop'),
+    );
 }
 
 export function mountSuggestions() {
