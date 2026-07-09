@@ -184,7 +184,11 @@ def _load_model(config: dict[str, Any]):
             bnb_4bit_quant_type="nf4",
             bnb_4bit_use_double_quant=True,
             bnb_4bit_compute_dtype=torch.float16,
+            llm_int8_enable_fp32_cpu_offload=True,
         )
+        # 2060S shares the card with a persistent voice daemon; cap the GPU
+        # slice and let a thin layer spill to CPU rather than fail the load.
+        kwargs["max_memory"] = {0: "5.4GiB", "cpu": "12GiB"}
     _processor = AutoProcessor.from_pretrained(
         config["model_dir"],
         local_files_only=True,
