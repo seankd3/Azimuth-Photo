@@ -105,17 +105,7 @@ export function invalidateHeights(scale = 1) {
         if (chunk.live) {
             chunk.height = chunk.el.offsetHeight || chunk.height;
         } else if (chunk.height) {
-            if (ratio === 1 && renderCell) {
-                chunk.el.inert = true;
-                chunk.el.classList.remove('ghost');
-                chunk.el.style.height = '';
-                chunk.el.innerHTML = chunkHtml(chunk);
-                chunk.height = chunk.el.offsetHeight || chunk.height;
-                chunk.el.replaceChildren();
-                chunk.el.classList.add('ghost');
-            } else {
-                chunk.height *= ratio;
-            }
+            chunk.height *= ratio;
             chunk.el.style.height = `${chunk.height}px`;
         }
     }

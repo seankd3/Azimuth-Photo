@@ -11,6 +11,7 @@ const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c
 }[c]));
 const fmt = (n) => Number(n || 0).toLocaleString('en-US');
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+let thumbInputTimer = 0;
 
 function dateLabel(value) {
     if (value === 'undated') return 'Undated';
@@ -125,14 +126,17 @@ export function initContextbar() {
     document.getElementById('sort-select').addEventListener('change', (event) => {
         setSort(event.target.value || 'elo');
     });
-    document.getElementById('thumb-size').addEventListener('input', (event) => setThumbSize(event.target.value));
+    document.getElementById('thumb-size').addEventListener('input', (event) => {
+        window.clearTimeout(thumbInputTimer);
+        const value = event.target.value;
+        thumbInputTimer = window.setTimeout(() => setThumbSize(value), 70);
+    });
     document.getElementById('canvas').addEventListener('wheel', adjustThumbWithWheel, { passive: false });
     on('scope', render);
     on('meta', render);
     on('bestof', render);
     on('bestof:unsupported', () => showToast('Collection Best of needs backend collection filtering first.'));
     on('thumbsize', render);
-    on('images', render);
     render();
 }
 

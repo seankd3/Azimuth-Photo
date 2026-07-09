@@ -106,6 +106,7 @@ function render() {
         flow.innerHTML = '<div class="load-error"><h4>No dated photos loaded yet</h4><p>Events group this view by gaps in capture time. Try a broader view or keep scrolling as photos load.</p></div>';
         return;
     }
+    const imageIndexes = new Map(images.map((img, idx) => [Number(img.id), idx]));
     flow.innerHTML = groups.map((group, groupIndex) => {
         const title = titleFor(group);
         const hero = [...group.images].sort((a, b) => (Number(b.elo) || 0) - (Number(a.elo) || 0))[0];
@@ -118,7 +119,7 @@ function render() {
             + `<button class="ev-menu-btn" data-menu="${groupIndex}" data-tip="Event actions" aria-label="Event actions">${icon('ellipsis')}</button></header>`
             + '<div class="event-body">'
             + `<figure class="event-hero" data-id="${hero.id}"><img data-src="${esc(thumbUrl('md', hero.id))}" alt="${esc(hero.filename || '')}"><figcaption class="hero-cap"><span>${esc(hero.filename || '')}</span><span>${Math.round(Number(hero.elo) || 0)}</span></figcaption></figure>`
-            + `<div class="event-tiles">${visibleTiles.map((img) => cellHtml(img, images.findIndex((item) => Number(item.id) === Number(img.id)))).join('')}`
+            + `<div class="event-tiles">${visibleTiles.map((img) => cellHtml(img, imageIndexes.get(Number(img.id)) ?? 0)).join('')}`
             + `${hidden > 0 ? `<button class="ev-more" data-expand="${groupIndex}">+${fmt(hidden)} more</button>` : ''}</div></div></article>`;
     }).join('') + '<div id="events-sentinel"></div><div class="grid-end" id="events-end" hidden>End of scope</div>';
     document.getElementById('events-end').hidden = !done || images.length === 0;

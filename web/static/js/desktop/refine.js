@@ -147,7 +147,7 @@ function renderSet() {
         const key = mode === 'duel' ? (index === 0 ? '←' : '→') : String(index + 1);
         const selected = index === selectedIndex ? ' selected' : '';
         return `<button class="ref-card${selected}" data-id="${img.id}" data-index="${index}" aria-label="Pick ${esc(img.filename || img.id)}">`
-            + `<img src="${esc(imageUrl(img))}" decoding="async" alt="${esc(img.filename || '')}"><span class="ref-key">${key}</span></button>`;
+            + `<img src="${esc(imageUrl(img))}" loading="lazy" decoding="async" alt="${esc(img.filename || '')}"><span class="ref-key">${key}</span></button>`;
     }).join('');
     setImagesLoadedHandlers();
 }

@@ -64,7 +64,7 @@ function renderCollections() {
         const title = smart ? `${c.name} · ${queryTitle}` : c.name;
         return `<div class="nav-row coll-row ${smart ? 'smart' : ''} ${String(scope.collectionId || '') === String(c.id) ? 'active' : ''}" data-coll-id="${c.id}" data-coll-name="${esc(c.name)}" data-coll-smart="${smart ? '1' : ''}">`
         + `<button class="coll-main" type="button" title="${esc(title)}">`
-        + `<span class="coll-cover">${c.cover_image_id ? `<img src="${esc(thumbUrl('sm', c.cover_image_id))}" alt="">` : icon(smart ? 'sparkles' : 'folder')}${smart && c.cover_image_id ? `<span class="coll-smart-badge">${icon('sparkles')}</span>` : ''}</span>`
+        + `<span class="coll-cover">${c.cover_image_id ? `<img src="${esc(thumbUrl('sm', c.cover_image_id))}" loading="lazy" decoding="async" alt="">` : icon(smart ? 'sparkles' : 'folder')}${smart && c.cover_image_id ? `<span class="coll-smart-badge">${icon('sparkles')}</span>` : ''}</span>`
         + `<span class="nr-label" title="${esc(c.name)}">${esc(c.name)}</span><span class="nr-count">${fmt(c.image_count)}</span>`
         + `${c.published ? `<span class="coll-published" data-tip="Published to website">${icon('globe')}</span>` : ''}</button>`
         + `<button class="coll-menu-btn" type="button" data-tip="Collection actions" aria-label="Collection actions">${icon('ellipsis')}</button></div>`
@@ -717,8 +717,9 @@ function startCollectionRename(collectionId) {
 function startCollectionDelete(collectionId, name = 'Collection') {
     const row = document.querySelector(`.coll-row[data-coll-id="${collectionId}"]`);
     if (!row) return;
-    row.outerHTML = `<div class="coll-confirm" data-delete-coll="${collectionId}">Delete? `
-        + '<button data-yes="1">Yes</button> / <button data-no="1">No</button></div>';
+    row.outerHTML = `<div class="coll-confirm" data-delete-coll="${collectionId}">`
+        + `<b>Delete “${esc(name)}”?</b><span>Photos stay in the archive. This removes the collection from the sidebar.</span>`
+        + '<div><button class="btn danger" data-yes="1">Delete</button><button class="btn" data-no="1">Cancel</button></div></div>';
     const confirm = document.querySelector(`.coll-confirm[data-delete-coll="${collectionId}"]`);
     confirm.querySelector('[data-no]')?.addEventListener('click', renderCollections);
     confirm.querySelector('[data-yes]')?.addEventListener('click', async () => {
@@ -748,8 +749,9 @@ function startSmartQueryEdit(collectionId) {
 function startSmartMaterialize(collectionId, name = 'Collection') {
     const row = document.querySelector(`.coll-row[data-coll-id="${collectionId}"]`);
     if (!row) return;
-    row.outerHTML = `<div class="coll-confirm" data-materialize-coll="${collectionId}">Convert to static? `
-        + '<button data-yes="1">Yes</button> / <button data-no="1">No</button></div>';
+    row.outerHTML = `<div class="coll-confirm" data-materialize-coll="${collectionId}">`
+        + `<b>Convert “${esc(name)}” to static?</b><span>The live query is removed; the current photos stay in a normal collection.</span>`
+        + '<div><button class="btn primary" data-yes="1">Convert</button><button class="btn" data-no="1">Cancel</button></div></div>';
     const confirm = document.querySelector(`.coll-confirm[data-materialize-coll="${collectionId}"]`);
     confirm.querySelector('[data-no]')?.addEventListener('click', renderCollections);
     confirm.querySelector('[data-yes]')?.addEventListener('click', async () => {
@@ -1034,6 +1036,18 @@ export function requestNewCollection() {
     input.select();
 }
 
+function cancelSmartCollectionEdit() {
+    if (!editingSmartCollection) return;
+    const name = editingSmartCollection.name;
+    editingSmartCollection = null;
+    const form = document.getElementById('new-coll-form');
+    const input = document.getElementById('new-coll-name');
+    if (input) input.value = '';
+    if (form) form.hidden = true;
+    renderNewCollectionForm();
+    showToast(`Stopped updating “${name}”`);
+}
+
 export function requestSaveSmartCollection() {
     if (!smartQueryActive()) {
         showToast('Add a filter or search first');
@@ -1048,15 +1062,27 @@ function renderNewCollectionForm({ resetName = false, preferSmart = false } = {}
     const input = document.getElementById('new-coll-name');
     const smartButton = document.getElementById('new-coll-smart');
     const createButton = document.getElementById('new-coll-create');
+    const cancelButton = document.getElementById('new-coll-cancel-edit');
+    const editBanner = document.getElementById('new-coll-edit-banner');
     const query = smartQueryFromScope();
     const canSaveSmart = smartQueryActive(query);
+    if (editBanner) {
+        editBanner.hidden = !editingSmartCollection;
+        editBanner.querySelector('span').textContent = editingSmartCollection
+            ? `Updating ${editingSmartCollection.name} · ${smartQuerySummary(query)}`
+            : '';
+    }
+    if (cancelButton) cancelButton.hidden = !editingSmartCollection;
     if (smartButton) {
-        smartButton.hidden = !canSaveSmart;
+        smartButton.hidden = !canSaveSmart && !editingSmartCollection;
         smartButton.disabled = !canSaveSmart;
         smartButton.textContent = editingSmartCollection ? 'Update Smart Collection' : 'Save as Smart Collection';
         smartButton.title = canSaveSmart ? smartQuerySummary(query) : '';
     }
-    if (createButton) createButton.textContent = canSaveSmart ? 'Create Static' : 'Create';
+    if (createButton) {
+        createButton.hidden = Boolean(editingSmartCollection);
+        createButton.textContent = canSaveSmart ? 'Create Static' : 'Create';
+    }
     if (resetName && canSaveSmart && (preferSmart || !input.value.trim())) {
         input.value = editingSmartCollection?.name || smartQueryName(query);
     } else if (resetName && !canSaveSmart && preferSmart) {
@@ -1142,8 +1168,13 @@ export async function initPanel() {
     document.getElementById('export-view').addEventListener('click', (event) => openScopeExportMenu(event.currentTarget));
     document.getElementById('new-coll-btn').addEventListener('click', requestNewCollection);
     document.getElementById('new-coll-smart')?.addEventListener('click', saveSmartCollectionFromForm);
+    document.getElementById('new-coll-cancel-edit')?.addEventListener('click', cancelSmartCollectionEdit);
     document.getElementById('new-coll-form').addEventListener('submit', async (event) => {
         event.preventDefault();
+        if (editingSmartCollection) {
+            await saveSmartCollectionFromForm();
+            return;
+        }
         const input = document.getElementById('new-coll-name');
         const name = input.value.trim();
         if (!name) return;
@@ -1165,7 +1196,6 @@ export async function initPanel() {
     on('trash:changed', scheduleChromeRefresh);
     on('import:changed', scheduleChromeRefresh);
     on('scope', () => {
-        if (!smartQueryActive()) editingSmartCollection = null;
         renderNewCollectionForm();
         for (const row of document.querySelectorAll('[data-source]')) row.classList.toggle('active', row.dataset.source === scope.folder);
         for (const row of document.querySelectorAll('[data-coll-id]')) row.classList.toggle('active', row.dataset.collId === String(scope.collectionId || ''));

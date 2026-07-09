@@ -39,6 +39,7 @@ let stackGeneration = 0;
 let stackSentinel = null;
 let stackObserver = null;
 let loading = false;
+let stackRescanning = false;
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -363,7 +364,7 @@ function renderError({ title, copy, retry = true } = {}) {
     const button = retry ? '<button class="btn" id="duplicates-retry">Try again</button>' : '';
     root.querySelector('#duplicates-body').innerHTML = '<div class="load-error dupe-error">'
         + `<h4>${esc(title || "Couldn't load duplicates")}</h4>`
-        + `<p>${esc(copy || 'GET /api/duplicates did not respond.')}</p>${button}</div>`;
+        + `<p>${esc(copy || 'The archive did not respond. Try again.')}</p>${button}</div>`;
     root.querySelector('#duplicates-retry')?.addEventListener('click', loadDuplicates);
 }
 
@@ -459,11 +460,11 @@ async function loadDuplicates() {
             loading = false;
             renderError({
                 title: 'Duplicates unavailable',
-                copy: 'GET /api/duplicates returned 503. Embeddings need to be installed and indexed before duplicate scanning can run.',
+                copy: 'Duplicate matching needs embeddings to be installed and indexed first.',
             });
             return;
         }
-        if (!response.ok) throw new Error(`GET /api/duplicates returned ${response.status}`);
+        if (!response.ok) throw new Error(`Duplicate scan returned ${response.status}`);
         const data = await response.json();
         loading = false;
         renderLoaded(data);
@@ -476,8 +477,8 @@ async function loadDuplicates() {
         renderError({
             title: error.name === 'AbortError' ? 'Duplicate scan timed out' : "Couldn't load duplicates",
             copy: error.name === 'AbortError'
-                ? 'GET /api/duplicates took more than 30 seconds.'
-                : `${error.message || 'GET /api/duplicates failed'}.`,
+                ? 'The scan took more than 30 seconds. Try again when the archive is less busy.'
+                : 'The archive did not respond. Try again.',
         });
     }
 }
@@ -549,7 +550,7 @@ function stackPhotoHtml(stack, image, diff) {
         + metaRow('folder', 'Folder', values.folder, image, diff)
         + '</div>'
         + '<div class="dupe-actions stack-member-actions" aria-label="Stack photo actions">'
-        + (isCover ? '<span class="stack-cover-text">Cover</span>' : `<button data-set-cover="${image.id}" data-stack-id="${stack.id}" aria-label="Set cover">${icon('star')}</button>`)
+        + (isCover ? '<span class="stack-cover-text">Cover</span>' : `<button data-set-cover="${image.id}" data-stack-id="${stack.id}" aria-label="Make cover" data-tip="Make cover">${icon('image')}</button>`)
         + `<button data-flag="picked" data-id="${image.id}" aria-label="Pick ${esc(image.filename || image.id)}">${icon('star')}</button>`
         + `<button data-flag="rejected" data-id="${image.id}" aria-label="Reject ${esc(image.filename || image.id)}">${icon('x')}</button>`
         + `<button data-flag="unflagged" data-id="${image.id}" aria-label="Clear flag for ${esc(image.filename || image.id)}">${icon('circle')}</button>`
@@ -559,31 +560,37 @@ function stackPhotoHtml(stack, image, diff) {
 function stackRowHtml(stack) {
     const members = stackMembers(stack);
     const diff = groupDiffs({ images: members });
+    const actionDisabled = stackRescanning ? ' disabled' : '';
     return `<section class="dupe-row stack-row" data-stack="${stack.id}">`
         + '<div class="dupe-row-head">'
-        + `<div><b>${esc(stackKindLabel(stack.kind))}</b><span>${esc(metaNote(stack))}</span></div>`
+        + `<div><b>${fmt(members.length)} photos</b><span>${esc(metaNote(stack))}</span></div>`
         + '<div class="dupe-row-actions">'
-        + `<button class="btn" data-stack-keep="${stack.id}">Keep cover, trash rest</button>`
-        + `<button class="btn" data-stack-unstack="${stack.id}">Unstack</button>`
+        + `<button class="btn" data-stack-keep="${stack.id}"${actionDisabled}>Keep cover, trash rest</button>`
+        + `<button class="btn" data-stack-unstack="${stack.id}"${actionDisabled}>Unstack</button>`
         + '</div></div>'
         + `<div class="dupe-photos">${members.map((image) => stackPhotoHtml(stack, image, diff)).join('')}</div>`
         + '</section>';
 }
 
 function renderStacks({ append = false } = {}) {
-    root.querySelector('#duplicates-count').textContent = `${fmt(stackTotal)} stack${stackTotal === 1 ? '' : 's'}`;
-    root.querySelector('#stacks-keep-covers').disabled = !stackTotal || stackLoading;
+    root.querySelector('#duplicates-count').textContent = stackRescanning
+        ? `Rescanning... ${fmt(stackTotal)} stack${stackTotal === 1 ? '' : 's'} shown`
+        : `${fmt(stackTotal)} stack${stackTotal === 1 ? '' : 's'}`;
+    root.querySelector('#stacks-keep-covers').disabled = !stackTotal || stackLoading || stackRescanning;
+    root.querySelector('#stacks-rescan').disabled = stackRescanning;
     renderKindChips();
     const body = root.querySelector('#duplicates-body');
+    const banner = stackRescanning ? '<div class="stack-status-banner">Rescanning stacks. Review actions are paused until fresh results are ready.</div>' : '';
     if (!append) {
         if (!stacks.length && !stackLoading) {
-            body.innerHTML = '<div class="load-error dupe-empty"><h4>No stacks in this filter.</h4><p>Try another kind or rescan stacks.</p></div><div id="stacks-sentinel"></div>';
+            body.innerHTML = banner + '<div class="load-error dupe-empty"><h4>No stacks in this filter.</h4><p>Try another kind or rescan stacks.</p></div><div id="stacks-sentinel"></div>';
         } else {
-            body.innerHTML = stacks.map(stackRowHtml).join('') + '<div id="stacks-sentinel"></div>';
+            body.innerHTML = banner + stacks.map(stackRowHtml).join('') + `<div id="stacks-sentinel">${stackLoading && stacks.length ? 'Loading more stacks...' : ''}</div>`;
         }
     } else {
         const sentinel = root.querySelector('#stacks-sentinel');
         sentinel?.insertAdjacentHTML('beforebegin', stacks.slice(Math.max(0, stacks.length - STACK_LIMIT)).map(stackRowHtml).join(''));
+        if (sentinel) sentinel.textContent = stackLoading && stacks.length ? 'Loading more stacks...' : '';
     }
     bindStackSentinel();
 }
@@ -616,7 +623,7 @@ async function loadStackPage({ reset = false } = {}) {
     if (seq !== stackGeneration || !root?.isConnected || !open || requestMode !== mode || mode !== 'stacks' || requestKind !== stackKind) return;
     stackLoading = false;
     if (!data) {
-        root.querySelector('#duplicates-body').innerHTML = '<div class="load-error dupe-error"><h4>Couldn\'t load stacks</h4><p>GET /api/stacks did not respond.</p><button class="btn" id="stacks-retry">Try again</button></div>';
+        root.querySelector('#duplicates-body').innerHTML = '<div class="load-error dupe-error"><h4>Couldn\'t load stacks</h4><p>The archive did not respond. Try again.</p><button class="btn" id="stacks-retry">Try again</button></div>';
         root.querySelector('#stacks-retry')?.addEventListener('click', () => loadStackPage({ reset: true }));
         return;
     }
@@ -680,6 +687,16 @@ async function setCover(stackId, imageId) {
 }
 
 async function unstackOne(stackId) {
+    const stack = findStack(stackId);
+    const members = stackMembers(stack);
+    const ok = await confirmTypedCount({
+        title: 'Unstack photos',
+        message: `Remove this ${esc(stackKindLabel(stack?.kind).toLowerCase())} stack for ${fmt(members.length)} photos? Photos stay in the archive. Type ${fmt(members.length).replace(/,/g, '')} to confirm.`,
+        count: members.length,
+        confirmLabel: 'Unstack',
+        danger: false,
+    });
+    if (!ok) return;
     const result = await unstack(stackId);
     if (!result) {
         showToast("Unstack didn't save");
@@ -696,14 +713,25 @@ async function keepCoverForStack(stackId) {
     const repId = representativeId(stack);
     const imageIds = stackMembers(stack).map((image) => Number(image.id)).filter((id) => id && id !== repId);
     if (!imageIds.length) return;
+    const ok = await confirmTypedCount({
+        title: 'Keep cover',
+        message: `Trash ${fmt(imageIds.length)} non-cover photo${imageIds.length === 1 ? '' : 's'} from this stack? They can be restored. Type ${fmt(imageIds.length).replace(/,/g, '')} to confirm.`,
+        count: imageIds.length,
+        confirmLabel: 'Trash members',
+    });
+    if (!ok) return;
     const result = await trashImages(imageIds);
     if (!result) {
         showToast("Trash didn't save");
         return;
     }
     emit('trash:changed', { imageIds });
-    stacks = stacks.filter((item) => Number(item.id) !== Number(stackId));
-    stackTotal = Math.max(0, stackTotal - 1);
+    const keep = stackMembers(stack).find((image) => Number(image.id) === repId);
+    if (keep) {
+        stack.members = [keep];
+        stack.members_preview = [keep];
+        stack.member_count = 1;
+    }
     renderStacks();
     showToast(`Trashed ${fmt(imageIds.length)} stack member${imageIds.length === 1 ? '' : 's'}`, {
         undo: async () => {
@@ -768,12 +796,16 @@ async function keepCoversEverywhere() {
 
 async function rescanStacks() {
     const button = root.querySelector('#stacks-rescan');
+    stackRescanning = true;
     button.disabled = true;
     button.textContent = 'Rescanning...';
+    renderStacks();
     const started = await rebuildStacks();
     if (!started) {
+        stackRescanning = false;
         button.disabled = false;
         button.textContent = 'Rescan stacks';
+        renderStacks();
         showToast('Rescan could not start');
         return;
     }
@@ -784,6 +816,7 @@ async function rescanStacks() {
             setTimeout(poll, 1200);
             return;
         }
+        stackRescanning = false;
         button.disabled = false;
         button.textContent = 'Rescan stacks';
         await reloadStacks();
@@ -902,6 +935,9 @@ function ensureView() {
         if (!open) return;
         if (mode === 'adhoc' && !loading) renderGroups();
         if (mode === 'stacks' && !stackLoading) renderStacks();
+    });
+    on('trash:changed', () => {
+        if (open && mode === 'stacks' && !stackLoading) reloadStacks();
     });
     return root;
 }

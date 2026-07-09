@@ -1,5 +1,5 @@
 import {
-    getPeople, ignorePerson, labelPerson, mergePeople, rejectMergeSuggestion,
+    getPeople, getPeopleStatus, ignorePerson, labelPerson, mergePeople, rejectMergeSuggestion,
 } from './api.js';
 import { on, setActiveLens, setRankingsMeta, setScope } from './state.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
@@ -14,6 +14,9 @@ let loading = false;
 let generation = 0;
 let dragPersonId = null;
 let pendingMerge = null;
+let mergeSourceId = null;
+let loadError = false;
+let peopleStatus = null;
 
 const hiddenPeople = new Set();
 const ignoreTimers = new Map();
@@ -81,7 +84,10 @@ function personCard(person) {
     return `<article class="person-card ${named ? 'is-named' : 'is-unnamed'}" data-person-id="${esc(person.id)}" tabindex="0" draggable="true">`
         + '<div class="person-card-top">'
         + `<button class="person-kebab" data-act="menu" data-tip="Person actions" aria-label="Person actions">${icon('ellipsis')}</button>`
-        + '<div class="person-menu" role="menu"><button data-act="ignore" role="menuitem">'
+        + '<div class="person-menu" role="menu">'
+        + `<button data-act="rename" role="menuitem">${icon('pencil')}<span>Rename</span></button>`
+        + `<button data-act="merge-start" role="menuitem">${icon('users')}<span>Merge with...</span></button>`
+        + '<button data-act="ignore" role="menuitem">'
         + `${icon('eye')}<span>Hide person</span></button></div></div>`
         + faceHtml(person)
         + `<button class="person-title ${named ? '' : 'add-name'}" data-act="rename" title="${esc(label)}">${esc(label)}</button>`
@@ -145,12 +151,23 @@ function render() {
             + '</div></section>';
         return;
     }
+    if (loadError) {
+        flow.innerHTML = '<div class="load-error"><h4>Couldn\'t load People</h4><p>The archive did not respond. Try again.</p><button class="btn" id="people-retry">Try again</button></div>';
+        flow.querySelector('#people-retry')?.addEventListener('click', load);
+        return;
+    }
     const { named, unnamed, review } = arrangedSections();
+    const emptyCopy = peopleStatus && String(peopleStatus.state || peopleStatus.status || '').toLowerCase().includes('paused')
+        ? 'Face scanning is paused. Resume scanning to find reusable identities.'
+        : 'People will appear here after face scanning finds reusable identities.';
     flow.innerHTML = [
         reviewStripHtml(review),
         sectionHtml('Named people', named),
         sectionHtml('Unnamed', unnamed),
-    ].join('') || '<div class="load-error"><h4>No people yet</h4><p>People will appear here after face scanning finds reusable identities.</p></div>';
+    ].join('') || `<div class="load-error"><h4>No people yet</h4><p>${esc(emptyCopy)}</p></div>`;
+    if (mergeSourceId) {
+        flow.querySelector(`.person-card[data-person-id="${CSS.escape(String(mergeSourceId))}"]`)?.classList.add('merge-source');
+    }
     bindLoadedImages(flow);
 }
 
@@ -164,11 +181,20 @@ function bindLoadedImages(root) {
 async function load() {
     if (!mounted || loading) return;
     loading = true;
+    loadError = false;
     const seq = ++generation;
     render();
-    const data = await getPeople(500);
+    const [data, status] = await Promise.all([getPeople(500), getPeopleStatus()]);
     if (seq !== generation) return;
     loading = false;
+    peopleStatus = status;
+    if (!data) {
+        peopleData = null;
+        loadError = true;
+        setRankingsMeta({ visibleImages: 0, sortQuality: null });
+        render();
+        return;
+    }
     peopleData = data;
     const total = allPeople().length;
     setRankingsMeta({ visibleImages: total, sortQuality: null });
@@ -304,6 +330,7 @@ async function runMerge(sourceId, targetId, trigger = null) {
     const result = await mergePeople(sourceId, targetId);
     if (result && result.ok) {
         showToast('People merged');
+        mergeSourceId = null;
         peopleData = null;
         load();
     } else {
@@ -317,38 +344,43 @@ async function handleReview(button, card) {
     const suggestionId = card.dataset.suggestionId;
     const sourceId = card.dataset.sourceId;
     const targetId = card.dataset.targetId;
+    if (action === 'merge') {
+        const rect = button.getBoundingClientRect();
+        showMergePopover(sourceId, targetId, rect, { suggestionId, sourceLabel: 'Suggested match' });
+        return;
+    }
     card.classList.add('is-pending');
-    const result = action === 'merge'
-        ? await mergePeople(sourceId, targetId)
-        : await rejectMergeSuggestion(suggestionId);
+    const result = await rejectMergeSuggestion(suggestionId);
     if (result && result.ok) {
         removeSuggestion(suggestionId);
-        showToast(action === 'merge' ? 'People merged' : 'Suggestion rejected');
+        showToast('Suggestion rejected');
         render();
         load();
     } else {
         card.classList.remove('is-pending');
-        showToast(action === 'merge' ? "Couldn't merge people" : "Couldn't reject suggestion");
+        showToast("Couldn't reject suggestion");
     }
 }
 
-function mergePopoverHtml(source, target) {
+function mergePopoverHtml(source, target, options = {}) {
     const sourceLabel = personActionLabel(source);
     const targetLabel = personActionLabel(target);
+    const sourceCount = countFor(source);
+    const targetCount = countFor(target);
     return '<div id="people-merge-pop" role="dialog" aria-label="Confirm merge">'
         + `<b>Merge ${esc(sourceLabel)} into ${esc(targetLabel)}</b>`
-        + '<p>The target keeps the name.</p>'
+        + `<p>${fmt(sourceCount + targetCount)} photos will use one identity. The target keeps the name.</p>`
         + '<div><button class="btn primary" data-act="confirm-drop-merge">Merge</button>'
         + '<button class="btn" data-act="cancel-drop-merge">Cancel</button></div></div>';
 }
 
-function showMergePopover(sourceId, targetId, rect) {
-    const source = findPerson(sourceId);
-    const target = findPerson(targetId);
+function showMergePopover(sourceId, targetId, rect, options = {}) {
+    const source = findPerson(sourceId) || { id: sourceId, label: options.sourceLabel || '' };
+    const target = findPerson(targetId) || { id: targetId, label: options.targetLabel || '' };
     if (!source || !target) return;
     closeMergePopover();
-    pendingMerge = { sourceId, targetId };
-    document.body.insertAdjacentHTML('beforeend', mergePopoverHtml(source, target));
+    pendingMerge = { sourceId, targetId, suggestionId: options.suggestionId || null };
+    document.body.insertAdjacentHTML('beforeend', mergePopoverHtml(source, target, options));
     const pop = document.getElementById('people-merge-pop');
     const left = Math.min(window.innerWidth - 280, Math.max(12, rect.left + rect.width / 2 - 130));
     const top = Math.min(window.innerHeight - 140, Math.max(12, rect.top + 12));
@@ -393,6 +425,13 @@ export function initPeople() {
             event.stopPropagation();
             closeMenus();
             beginRename(card, person);
+        } else if (action === 'merge-start') {
+            event.stopPropagation();
+            closeMenus();
+            mergeSourceId = card.dataset.personId;
+            render();
+            focusPersonCard(mergeSourceId);
+            showToast('Choose another person to merge with');
         } else if (action === 'ignore') {
             event.stopPropagation();
             requestIgnore(card, person);
@@ -401,6 +440,9 @@ export function initPeople() {
             const personId = card.dataset.personId;
             render();
             focusPersonCard(personId);
+        } else if (mergeSourceId && String(mergeSourceId) !== String(card.dataset.personId) && !event.target.closest('form')) {
+            event.stopPropagation();
+            showMergePopover(mergeSourceId, card.dataset.personId, card.getBoundingClientRect());
         } else if (!event.target.closest('form')) {
             openPerson(person);
         }
@@ -478,6 +520,7 @@ export function initPeople() {
             const merge = pendingMerge;
             closeMergePopover();
             runMerge(merge.sourceId, merge.targetId);
+            if (merge.suggestionId) removeSuggestion(merge.suggestionId);
         } else if (cancel) {
             closeMergePopover();
         }
@@ -508,4 +551,5 @@ export function unmountPeople() {
     loading = false;
     document.getElementById('view-people').classList.remove('active');
     document.getElementById('people-merge-pop')?.remove();
+    mergeSourceId = null;
 }

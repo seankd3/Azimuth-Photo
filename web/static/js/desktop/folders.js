@@ -15,6 +15,7 @@ let menuReturn = null;
 let loading = true;
 let refreshTimer = 0;
 let refreshGeneration = 0;
+let filterTimer = 0;
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -316,7 +317,10 @@ export async function initFoldersPanel(options = {}) {
     ensureMenu();
     renderTree();
     const filter = document.getElementById('folder-filter');
-    filter?.addEventListener('input', renderTree);
+    filter?.addEventListener('input', () => {
+        window.clearTimeout(filterTimer);
+        filterTimer = window.setTimeout(renderTree, 120);
+    });
     document.addEventListener('pointerdown', (event) => {
         if (!menu || menu.hidden || menu.contains(event.target)) return;
         closeFolderMenu();

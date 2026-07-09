@@ -16,6 +16,7 @@ let total = 0;
 let totalBytes = 0;
 let loading = false;
 let loadGeneration = 0;
+let loadError = false;
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -115,6 +116,7 @@ function viewHtml() {
     return '<div id="trash" hidden>'
         + '<header id="trash-head">'
         + '<div><b>Trash</b><span id="trash-count" class="num"></span></div>'
+        + '<button class="btn" id="trash-select-all" disabled>Select all</button>'
         + '<button class="btn primary" id="trash-restore" disabled>Restore selected</button>'
         + '<button class="btn danger" id="trash-empty" disabled>Empty trash</button>'
         + `<button class="icon-btn" id="trash-close" data-tip="Grid (G / Esc)" aria-label="Return to Grid">${icon('x')}</button>`
@@ -130,6 +132,7 @@ function ensureView() {
     root = wrap.firstElementChild;
     document.getElementById('view-trash').appendChild(root);
     root.querySelector('#trash-close').addEventListener('click', closeTrash);
+    root.querySelector('#trash-select-all').addEventListener('click', selectAllTrash);
     root.querySelector('#trash-restore').addEventListener('click', restoreSelectedTrash);
     root.querySelector('#trash-empty').addEventListener('click', emptyTrashWithConfirm);
     root.querySelector('#trash-body').addEventListener('click', (event) => {
@@ -154,11 +157,17 @@ function ensureView() {
 function render() {
     ensureView();
     root.querySelector('#trash-count').textContent = `${fmt(total)} photos · ${bytesLabel(totalBytes)}`;
+    root.querySelector('#trash-select-all').disabled = !images.length || loading;
     root.querySelector('#trash-restore').disabled = !selection.size || loading;
     root.querySelector('#trash-empty').disabled = !total || loading;
     const body = root.querySelector('#trash-body');
     if (loading) {
         body.innerHTML = '<div class="trash-grid">' + Array.from({ length: 18 }, () => '<div class="cell skel-cell" style="--ar:1.4"></div>').join('') + '</div>';
+        return;
+    }
+    if (loadError) {
+        body.innerHTML = '<div class="load-error"><h4>Couldn\'t load Trash</h4><p>The archive did not respond. Try again.</p><button class="btn" id="trash-retry">Try again</button></div>';
+        body.querySelector('#trash-retry')?.addEventListener('click', loadTrash);
         return;
     }
     if (!images.length) {
@@ -171,6 +180,7 @@ function render() {
 function patchSelection() {
     if (!root) return;
     root.querySelector('#trash-restore').disabled = !selection.size || loading;
+    root.querySelector('#trash-select-all').disabled = !images.length || loading;
     const grid = root.querySelector('.trash-grid');
     if (grid) grid.classList.toggle('selmode', selection.size > 0);
     for (const cell of root.querySelectorAll('.cell[data-id]')) {
@@ -182,15 +192,32 @@ async function loadTrash() {
     ensureView();
     const seq = ++loadGeneration;
     loading = true;
+    loadError = false;
     render();
     const data = await getTrash({ limit: 500, offset: 0 });
     if (seq !== loadGeneration || !root?.isConnected || !open) return;
+    if (!data) {
+        images = [];
+        total = 0;
+        totalBytes = 0;
+        loading = false;
+        loadError = true;
+        render();
+        return;
+    }
     images = (data && data.images || []).map((img) => ({ ...img, id: Number(img.id) })).filter((img) => img.id);
     total = Number(data?.total) || images.length;
     totalBytes = Number(data?.total_bytes) || 0;
     for (const img of images) byId.set(Number(img.id), img);
     loading = false;
     render();
+}
+
+function selectAllTrash() {
+    if (!images.length) return;
+    selection.clear();
+    images.forEach((img) => selection.add(Number(img.id)));
+    selectionChanged(images.map((img) => Number(img.id)));
 }
 
 export async function trashSelectedImages() {
@@ -223,7 +250,13 @@ async function restoreSelectedTrash() {
     }
     clearSelection();
     emit('trash:changed', { imageIds });
-    showToast(`Restored ${fmt(imageIds.length)} photos`);
+    showToast(`Restored ${fmt(imageIds.length)} photo${imageIds.length === 1 ? '' : 's'}`, {
+        undo: async () => {
+            const trashed = await trashImages(imageIds);
+            emit('trash:changed', { imageIds });
+            showToast(trashed ? 'Moved back to Trash' : "Undo didn't save");
+        },
+    });
 }
 
 async function emptyTrashWithConfirm() {

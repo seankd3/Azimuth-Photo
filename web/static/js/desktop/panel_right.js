@@ -6,6 +6,9 @@ import { getImageExif } from './api.js';
 const exifCache = new Map();
 let currentImageId = null;
 let focusedImage = null;
+let histogramCache = { signature: '', bins: [], min: 0, max: 0, empty: true };
+let rankCache = { signature: '', byId: new Map(), total: 0 };
+let imageVersion = 0;
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -50,37 +53,53 @@ function highlightedIds() {
     return new Set(img ? [Number(img.id)] : []);
 }
 
-function renderHistogram() {
-    const host = document.getElementById('info-histogram');
+function imagesSignature() {
+    return String(imageVersion);
+}
+
+function histogramData() {
+    const signature = imagesSignature();
+    if (histogramCache.signature === signature) return histogramCache;
     const images = viewState.images.filter((img) => Number.isFinite(Number(img.elo)));
     if (!images.length) {
-        host.innerHTML = '<div class="panel-empty">Load a scope to see its Elo shape.</div>';
-        return;
+        histogramCache = { signature, bins: [], min: 0, max: 0, empty: true };
+        return histogramCache;
     }
-    const bins = Array.from({ length: 24 }, () => 0);
-    const selectedBins = new Set();
-    const ids = highlightedIds();
+    const bins = Array.from({ length: 24 }, () => ({ count: 0, ids: [] }));
     const values = images.map((img) => Number(img.elo));
     const min = Math.min(...values);
     const max = Math.max(...values);
     const span = Math.max(1, max - min);
     for (const img of images) {
         const bin = Math.min(23, Math.max(0, Math.floor(((Number(img.elo) - min) / span) * 24)));
-        bins[bin] += 1;
-        if (ids.has(Number(img.id))) selectedBins.add(bin);
+        bins[bin].count += 1;
+        bins[bin].ids.push(Number(img.id));
     }
-    const top = Math.max(...bins, 1);
+    histogramCache = { signature, bins, min, max, empty: false };
+    return histogramCache;
+}
+
+function renderHistogram() {
+    const host = document.getElementById('info-histogram');
+    const data = histogramData();
+    if (data.empty) {
+        host.innerHTML = '<div class="panel-empty">Load a scope to see its Elo shape.</div>';
+        return;
+    }
+    const ids = highlightedIds();
+    const top = Math.max(...data.bins.map((bin) => bin.count), 1);
     const barW = 5;
     const gap = 3;
-    const width = bins.length * barW + (bins.length - 1) * gap;
-    const rects = bins.map((count, index) => {
-        const h = Math.max(2, Math.round((count / top) * 64));
+    const width = data.bins.length * barW + (data.bins.length - 1) * gap;
+    const rects = data.bins.map((bin, index) => {
+        const h = Math.max(2, Math.round((bin.count / top) * 64));
         const x = index * (barW + gap);
         const y = 68 - h;
-        return `<rect class="${selectedBins.has(index) ? 'sel-bin' : ''}" x="${x}" y="${y}" width="${barW}" height="${h}" rx="2"></rect>`;
+        const selected = bin.ids.some((id) => ids.has(id));
+        return `<rect class="${selected ? 'sel-bin' : ''}" x="${x}" y="${y}" width="${barW}" height="${h}" rx="2"></rect>`;
     }).join('');
     host.innerHTML = `<svg viewBox="0 0 ${width} 68" preserveAspectRatio="none" aria-label="Elo histogram">${rects}</svg>`
-        + `<div class="histo-cap"><span>${Math.round(min)}</span><span>Elo across loaded scope</span><span>${Math.round(max)}</span></div>`;
+        + `<div class="histo-cap"><span>${Math.round(data.min)}</span><span>Elo across loaded scope</span><span>${Math.round(data.max)}</span></div>`;
 }
 
 function confidence(comparisons) {
@@ -91,13 +110,21 @@ function confidence(comparisons) {
 }
 
 function topPercent(img) {
-    const ranked = viewState.images
-        .filter((item) => Number.isFinite(Number(item.elo)))
-        .slice()
-        .sort((a, b) => Number(b.elo) - Number(a.elo));
-    const index = ranked.findIndex((item) => Number(item.id) === Number(img.id));
-    if (index < 0 || !ranked.length) return '—';
-    return `top ${Math.max(1, Math.ceil(((index + 1) / ranked.length) * 100))}% of scope`;
+    const signature = imagesSignature();
+    if (rankCache.signature !== signature) {
+        const ranked = viewState.images
+            .filter((item) => Number.isFinite(Number(item.elo)))
+            .slice()
+            .sort((a, b) => Number(b.elo) - Number(a.elo));
+        rankCache = {
+            signature,
+            total: ranked.length,
+            byId: new Map(ranked.map((item, index) => [Number(item.id), index])),
+        };
+    }
+    const index = rankCache.byId.get(Number(img.id));
+    if (index == null || !rankCache.total) return '—';
+    return `top ${Math.max(1, Math.ceil(((index + 1) / rankCache.total) * 100))}% of scope`;
 }
 
 function renderRanking(img) {
@@ -210,7 +237,10 @@ export function initRightPanel() {
     document.getElementById('collapse-right').addEventListener('click', toggleRightPanel);
     document.getElementById('btn-right-panel').addEventListener('click', toggleRightPanel);
     on('rightpanel', (collapsed) => shell.classList.toggle('right-collapsed', collapsed));
-    on('images', render);
+    on('images', () => {
+        imageVersion += 1;
+        render();
+    });
     on('selection', render);
     on('flags', render);
     on('focus', ({ image } = {}) => {

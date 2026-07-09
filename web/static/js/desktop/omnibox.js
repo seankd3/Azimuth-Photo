@@ -2,7 +2,7 @@ import {
     getFilterOptions, getFolders, getPeople, getRankings, listCollections, thumbUrl,
 } from './api.js';
 import {
-    emit, on, scope, scopeActive, setScope, setSort, smartQueryActive, toggleBestOf,
+    emit, on, scope, scopeActive, setScope, setSort, smartQueryActive, smartQuerySummary, toggleBestOf,
 } from './state.js';
 import { currentFocusedImage } from './grid.js';
 import { openLoupe, toggleLoupeLights } from './loupe.js';
@@ -63,7 +63,7 @@ const COMMANDS = [
     { icon: 'download', label: 'Export JSON', run: () => exportCurrentScope('json') },
     { icon: 'download', label: 'Download files (zip)', run: () => exportCurrentScope('zip', 'original') },
     { icon: 'plus', label: 'New collection', run: requestNewCollection },
-    { icon: 'sparkles', label: 'Save as Smart Collection', when: smartQueryActive, run: requestSaveSmartCollection },
+    { icon: 'sparkles', label: 'Save as Smart Collection', meta: () => smartQuerySummary(), when: smartQueryActive, run: requestSaveSmartCollection },
     { icon: 'share-2', label: 'Share this collection', when: () => Boolean(scope.collectionId), run: requestShareCurrentCollection },
     { icon: 'pencil', label: 'Rename this collection', when: () => Boolean(scope.collectionId), run: requestRenameCurrentCollection },
     { icon: 'trash-2', label: 'Delete this collection', when: () => Boolean(scope.collectionId), run: requestDeleteCurrentCollection },
@@ -229,7 +229,8 @@ function rowHtml(row, index) {
     const face = row.thumb
         ? `<img class="sd-face" src="${esc(row.thumb)}" alt="">`
         : `<span class="sd-glyph">${row.icon ? icon(row.icon) : esc(row.glyph || '')}</span>`;
-    const meta = row.kbd ? `<kbd>${esc(row.kbd)}</kbd>` : esc(row.meta || '');
+    const rawMeta = typeof row.meta === 'function' ? row.meta() : row.meta;
+    const meta = row.kbd ? `<kbd>${esc(row.kbd)}</kbd>` : esc(rawMeta || '');
     const label = row.labelHtml || esc(row.label);
     const recentRemove = row.recentIndex == null
         ? ''
@@ -812,10 +813,11 @@ function scheduleLiveSearch() {
     }
     window.clearTimeout(liveTimer);
     if (liveAbort) liveAbort.abort();
-    live = { q: term, loading: true, data: null };
-    render();
+    live = { q: term, loading: false, data: null };
     const seq = ++liveSeq;
     liveTimer = window.setTimeout(async () => {
+        live = { q: term, loading: true, data: null };
+        render();
         const controller = new AbortController();
         liveAbort = controller;
         const params = new URLSearchParams({ q: term, limit: String(LIVE_LIMIT), offset: '0', sort: 'similarity' });

@@ -215,11 +215,10 @@ async def create_stack(
             (kind, int(representative_image_id), 1 if auto else 0, now, now),
         )
         stack_id = int(cursor.lastrowid)
-        for row in rows:
-            await conn.execute(
-                "INSERT INTO stack_members (stack_id, image_id, score, added_at) VALUES (?, ?, ?, ?)",
-                (stack_id, int(row["image_id"]), row.get("score"), now),
-            )
+        await conn.executemany(
+            "INSERT INTO stack_members (stack_id, image_id, score, added_at) VALUES (?, ?, ?, ?)",
+            [(stack_id, int(row["image_id"]), row.get("score"), now) for row in rows],
+        )
         await conn.commit()
     except Exception:
         await conn.rollback()
@@ -294,14 +293,50 @@ async def list_stacks(
             [*params, safe_limit, safe_offset],
         )
         rows = [dict(row) for row in await cursor.fetchall()]
+        stack_ids = [int(row["id"]) for row in rows]
+        member_rows = []
+        if stack_ids:
+            placeholders = ",".join("?" for _ in stack_ids)
+            member_cursor = await conn.execute(
+                "SELECT sm.stack_id, i.*, sm.score "
+                "FROM stack_members sm JOIN images i ON i.id = sm.image_id "
+                f"WHERE sm.stack_id IN ({placeholders}) "
+                "ORDER BY sm.stack_id ASC, sm.score DESC, i.id ASC",
+                stack_ids,
+            )
+            member_rows = [dict(row) for row in await member_cursor.fetchall()]
     finally:
         await data_connection.close_async(conn, db_path=db_path)
+    members_by_stack: dict[int, list[dict]] = {}
+    for row in member_rows:
+        members_by_stack.setdefault(int(row["stack_id"]), []).append(_member_card(row))
     stacks = []
     for row in rows:
-        stack = await get_stack(db_path, int(row["id"]))
-        if stack is not None:
-            stack["member_count"] = int(row["member_count"] or stack["member_count"])
-            stacks.append(stack)
+        stack_id = int(row["id"])
+        members = members_by_stack.get(stack_id, [])
+        representative_id = int(row["representative_image_id"])
+        members.sort(
+            key=lambda member: (
+                0 if int(member["id"]) == representative_id else 1,
+                -(float(member.get("score") or 0)),
+                int(member["id"]),
+            )
+        )
+        representative = next(
+            (member for member in members if int(member["id"]) == representative_id),
+            members[0] if members else None,
+        )
+        stacks.append({
+            "id": stack_id,
+            "kind": row["kind"],
+            "auto": bool(row["auto"]),
+            "created_at": row.get("created_at"),
+            "updated_at": row.get("updated_at"),
+            "member_count": int(row["member_count"] or len(members)),
+            "representative": representative,
+            "members": members,
+            "members_preview": members[:4],
+        })
     return {"stacks": stacks, "total": total}
 
 

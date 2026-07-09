@@ -109,7 +109,11 @@ function closeExpandedStack() {
     const { stackId, trayEl } = expandedStack;
     if (trayEl?.isConnected) {
         unobserveImages(trayEl);
-        trayEl.remove();
+        trayEl.classList.add('closing');
+        window.setTimeout(() => {
+            if (trayEl.isConnected) trayEl.remove();
+            invalidateHeights(1);
+        }, 140);
     }
     const badge = document.querySelector(`.c-stack[data-stack-id="${stackId}"]`);
     if (badge) {
@@ -159,9 +163,11 @@ async function expandStack(stackId, cell) {
     const tray = document.createElement('div');
     tray.className = 'stack-tray';
     tray.dataset.stackId = String(id);
-    tray.innerHTML = '<div class="stack-tray-rail"></div><div class="stack-tray-cells">'
+    tray.innerHTML = '<div class="stack-tray-rail"></div><div class="stack-tray-main">'
+        + `<div class="stack-tray-head"><span>${members.length.toLocaleString('en-US')} more in this stack</span><button class="icon-btn stack-tray-collapse" data-tip="Collapse stack" aria-label="Collapse stack">${icon('x')}</button></div>`
+        + '<div class="stack-tray-cells">'
         + members.map((member) => memberCellHtml(member, index)).join('')
-        + '</div>';
+        + '</div></div>';
     cell.insertAdjacentElement('afterend', tray);
     observeImages(tray);
     if (badge) {
@@ -359,6 +365,12 @@ function columns() {
 }
 
 function handleClick(event) {
+    if (event.target.closest('.stack-tray-collapse')) {
+        event.preventDefault();
+        event.stopPropagation();
+        closeExpandedStack();
+        return;
+    }
     const cell = event.target.closest('.cell[data-id]');
     if (!cell) return;
     const id = Number(cell.dataset.id);
@@ -422,6 +434,11 @@ export function initGrid() {
     configureGridWindow({ renderCell: cellHtml, observeImages, unobserveImages });
     const flow = document.getElementById('grid-flow');
     flow.addEventListener('click', handleClick);
+    document.addEventListener('pointerdown', (event) => {
+        if (!expandedStack || !mounted) return;
+        if (event.target.closest('.stack-tray, .c-stack')) return;
+        closeExpandedStack();
+    });
     flow.addEventListener('contextmenu', (event) => {
         const cell = event.target.closest('.cell[data-id]');
         if (!cell) return;
