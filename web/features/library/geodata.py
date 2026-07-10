@@ -207,7 +207,11 @@ async def ensure_geo_schema(db_path: str) -> None:
     try:
         columns = {row[1] for row in await (await conn.execute("PRAGMA table_info(images)")).fetchall()}
         if "location_source" not in columns:
-            await conn.execute("ALTER TABLE images ADD COLUMN location_source TEXT DEFAULT NULL")
+            try:
+                await conn.execute("ALTER TABLE images ADD COLUMN location_source TEXT DEFAULT NULL")
+            except Exception as exc:  # concurrent caller won the ALTER race
+                if "duplicate column" not in str(exc).lower():
+                    raise
         await conn.execute("CREATE TABLE IF NOT EXISTS geo_trail (ts REAL, lat REAL, lon REAL, source TEXT)")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_geo_trail_ts ON geo_trail(ts)")
         await conn.commit()
