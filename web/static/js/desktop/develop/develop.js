@@ -218,6 +218,7 @@ async function openImage(image) {
                     ...(payload.meta || {}),
                     as_shot_temperature: payload.meta?.as_shot?.temperature ?? payload.meta?.as_shot_temperature,
                     as_shot_tint: payload.meta?.as_shot?.tint ?? payload.meta?.as_shot_tint,
+                    color: payload.meta?.color ?? null,
                 },
                 undo: [], redo: [], serverHistory: payload.history || [],
             };

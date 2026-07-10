@@ -28,6 +28,53 @@ XYZD50_TO_SRGB = np.array(
 )
 
 
+def _map_polynomials(page) -> list[tuple[float, ...]] | None:
+    """Parse DNG OpcodeList2 MapPolynomial (id 8) coefficients per plane.
+
+    Adobe's lossy (JPEG XL) DNGs store scene-adaptively companded values; the
+    per-channel polynomial restores true linear camera-space data. Skipping it
+    renders images up to ~3 EV too bright, nonlinearly.
+    """
+    import struct
+
+    tag = page.tags.get("OpcodeList2")
+    if tag is None:
+        return None
+    raw = tag.value if isinstance(tag.value, bytes) else bytes(tag.value)
+    if len(raw) < 4:
+        return None
+    count = struct.unpack(">I", raw[:4])[0]
+    offset = 4
+    planes: dict[int, tuple[float, ...]] = {}
+    for _ in range(count):
+        if offset + 16 > len(raw):
+            return None
+        opcode_id, _ver, _flags, size = struct.unpack(">IIII", raw[offset : offset + 16])
+        body = raw[offset + 16 : offset + 16 + size]
+        offset += 16 + size
+        if opcode_id != 8 or len(body) < 44:
+            continue
+        _top, _left, _bottom, _right, plane, _nplanes, _rp, _cp, degree = struct.unpack(">IIIIIIIII", body[:36])
+        ncoef = degree + 1
+        if len(body) < 36 + 8 * ncoef:
+            continue
+        planes[int(plane)] = struct.unpack(f">{ncoef}d", body[36 : 36 + 8 * ncoef])
+    if not planes:
+        return None
+    return [planes.get(i, (0.0, 1.0)) for i in range(3)]
+
+
+def _poly_eval(coefs, x):
+    result = 0.0 if not hasattr(x, "shape") else None
+    acc = None
+    for c in reversed(coefs):
+        if acc is None:
+            acc = np.full_like(x, np.float32(c)) if hasattr(x, "shape") else float(c)
+        else:
+            acc = acc * x + (np.float32(c) if hasattr(x, "shape") else float(c))
+    return acc
+
+
 class LossyDngError(RuntimeError):
     pass
 
@@ -113,6 +160,8 @@ def decode_lossy_dng(path: str, max_px: int | None = None):
         as_shot = _rationals(_tag(target, ifd0, "AsShotNeutral", (1.0, 1.0, 1.0)))
         forward = _rationals(_tag(target, ifd0, "ForwardMatrix1")) if _tag(target, ifd0, "ForwardMatrix1") is not None else None
         forward2 = _rationals(_tag(target, ifd0, "ForwardMatrix2")) if _tag(target, ifd0, "ForwardMatrix2") is not None else None
+        color_matrix1 = _rationals(_tag(target, ifd0, "ColorMatrix1")) if _tag(target, ifd0, "ColorMatrix1") is not None else None
+        color_matrix2 = _rationals(_tag(target, ifd0, "ColorMatrix2")) if _tag(target, ifd0, "ColorMatrix2") is not None else None
         baseline_ev = _rationals(_tag(target, ifd0, "BaselineExposure", 0.0))[0]
 
         black3 = np.array((black * 3)[:3] if len(black) < 3 else black[:3], dtype=np.float64)
@@ -124,6 +173,13 @@ def decode_lossy_dng(path: str, max_px: int | None = None):
             (white3 - black3).astype(np.float32), 1.0
         )
         np.clip(v, 0.0, None, out=v)
+
+        polynomials = _map_polynomials(full) or _map_polynomials(target)
+        if polynomials:
+            for channel in range(3):
+                v[..., channel] = _poly_eval(polynomials[channel], v[..., channel])
+            np.clip(v, 0.0, None, out=v)
+
         v /= asn.astype(np.float32)
 
         fm = forward2 or forward
@@ -149,6 +205,10 @@ def decode_lossy_dng(path: str, max_px: int | None = None):
             "level_shape": [int(target.shape[0]), int(target.shape[1])],
             "full_shape": [int(full.shape[0]), int(full.shape[1])],
             "cam_mul": [float(cam_mul[0]), 1.0, float(cam_mul[2]), 0.0],
+            "as_shot_neutral": [float(asn[0]), float(asn[1]), float(asn[2])],
+            "color_matrix1": [float(x) for x in color_matrix1] if color_matrix1 and len(color_matrix1) == 9 else None,
+            "color_matrix2": [float(x) for x in color_matrix2] if color_matrix2 and len(color_matrix2) == 9 else None,
+            "forward_matrix": [float(x) for x in fm] if fm is not None and len(fm) == 9 else None,
             "baseline_exposure": float(baseline_ev),
         }
         return out, meta

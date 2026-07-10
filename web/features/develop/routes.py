@@ -316,6 +316,11 @@ async def api_export_develop(image_id: int, body: DevelopExportBody):
         return JSONResponse({"error": "Develop export renderer is not installed yet"}, status_code=503)
     row = await _load_settings(image_id)
     cached_meta = rawproc.read_base_metadata(image_id) or {}
+    if not cached_meta.get("color"):
+        try:
+            _paths, cached_meta = await _ensure_base(image_id, image)
+        except Exception:
+            pass
     asshot = cached_meta.get("as_shot") if isinstance(cached_meta, dict) else {}
     try:
         return await render_export_response(
@@ -325,6 +330,8 @@ async def api_export_develop(image_id: int, body: DevelopExportBody):
             quality=body.quality,
             max_px=body.max_px,
             asshot_temperature=asshot.get("temperature") if isinstance(asshot, dict) else None,
+            asshot_tint=asshot.get("tint") if isinstance(asshot, dict) else None,
+            color_profile=cached_meta.get("color") if isinstance(cached_meta, dict) else None,
         )
     except (rawproc.RawDecodeError, RenderError, ValueError) as exc:
         return JSONResponse({"error": str(exc)}, status_code=422)

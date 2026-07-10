@@ -192,7 +192,11 @@ def _pipeline_overlap(settings: Mapping[str, object], minimum_dimension: int) ->
 
 
 def _apply_pipeline_tiled(
-    linear: np.ndarray, settings: Mapping[str, object], asshot_temperature: float | None
+    linear: np.ndarray,
+    settings: Mapping[str, object],
+    asshot_temperature: float | None,
+    asshot_tint: float | None = None,
+    color_profile=None,
 ) -> np.ndarray:
     """Keep a native RAW export below the process memory ceiling.
 
@@ -212,6 +216,8 @@ def _apply_pipeline_tiled(
             linear[source_top:source_bottom],
             settings,
             asshot_temperature=asshot_temperature,
+            asshot_tint=asshot_tint,
+            color_profile=color_profile,
             pixel_offset=(0, source_top),
             canvas_size=(width, height),
             blur_min_dimension=minimum_dimension,
@@ -230,6 +236,8 @@ def render_export(
     quality: int = 90,
     max_px: int | None = None,
     asshot_temperature: float | None = None,
+    asshot_tint: float | None = None,
+    color_profile=None,
 ) -> Path:
     """Render one RAW to the expansion-disk export folder and return its path."""
     normalized_format = output_format.lower()
@@ -237,7 +245,7 @@ def render_export(
         raise ValueError("output_format must be 'jpeg' or 'tiff16'")
     EXPORT_DIRECTORY.mkdir(parents=True, exist_ok=True)
     linear = decode_full_resolution(raw_path)
-    developed = _apply_pipeline_tiled(linear, settings, asshot_temperature)
+    developed = _apply_pipeline_tiled(linear, settings, asshot_temperature, asshot_tint, color_profile)
     developed = apply_geometry(developed, settings, max_px=max_px)
     suffix = ".jpg" if normalized_format == "jpeg" else ".tiff"
     output_path = EXPORT_DIRECTORY / f"develop-{uuid.uuid4().hex}{suffix}"
@@ -263,6 +271,8 @@ async def render_export_response(
     quality: int = 90,
     max_px: int | None = None,
     asshot_temperature: float | None = None,
+    asshot_tint: float | None = None,
+    color_profile=None,
 ) -> FileResponse:
     """Render then construct the cleanup-safe response used by the develop route."""
     output_path = await render_export_async(
@@ -272,6 +282,8 @@ async def render_export_response(
         quality=quality,
         max_px=max_px,
         asshot_temperature=asshot_temperature,
+        asshot_tint=asshot_tint,
+        color_profile=color_profile,
     )
     is_jpeg = output_format.lower() == "jpeg"
     filename = f"{Path(raw_path).stem}-develop.{'jpg' if is_jpeg else 'tiff'}"

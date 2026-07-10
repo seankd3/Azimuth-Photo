@@ -1,16 +1,28 @@
 import {
-    BAND_NAMES, BLUR_LARGE_FACTOR, BLUR_SMALL_FACTOR, CLARITY_FACTOR,
-    CONTRAST_FACTOR, DEHAZE_AIRLIGHT_FACTOR, DEHAZE_SATURATION_FACTOR,
+    BAND_NAMES, BASE_PROFILE_SAT, BLUR_LARGE_FACTOR, BLUR_SMALL_FACTOR, CLARITY_FACTOR,
+    CLARITY_RESIDUAL_MAX, CONTRAST_FACTOR, DEHAZE_AIRLIGHT_FACTOR, DEHAZE_SATURATION_FACTOR,
     GRAIN_CELL_SIZE_MIN, GRAIN_CELL_SIZE_RANGE, GRAIN_FACTOR, GRAIN_HASH_MULTIPLIER,
     GRAIN_HASH_SHIFT, GRAIN_OUTPUT_MASK, GRAIN_OUTPUT_SHIFT, GRAIN_SEED,
     GRAIN_X_MULTIPLIER, GRAIN_Y_MULTIPLIER, GRAY_MIXER_FACTOR, HSL_LUMINANCE_FACTOR,
-    HUE_SHIFT_DEGREES, K_TEMP, K_TINT, LUMA_BLUE, LUMA_GREEN, LUMA_RED,
-    SHARPEN_FACTOR, TEXTURE_FACTOR, TONE_BLACKS_FACTOR, TONE_HIGHLIGHTS_FACTOR,
-    TONE_WHITES_FACTOR, VIBRANCE_FACTOR, VIGNETTE_FACTOR, VIGNETTE_FEATHER_MIN,
+    HUE_SHIFT_DEGREES, LUMA_BLUE, LUMA_GREEN, LUMA_RED, TINT_UV_SCALE,
+    OKLAB_C_NORM, OKLAB_M1, OKLAB_M1_INV, OKLAB_M2, OKLAB_M2_INV,
+    SHARPEN_FACTOR, SHARPEN_THRESHOLD, TEXTURE_FACTOR, TONE_BLACKS_FACTOR,
+    TONE_EV_BLACKS_CENTER, TONE_EV_HIGHLIGHTS_CENTER, TONE_EV_SHADOWS_CENTER,
+    TONE_EV_SIGMA, TONE_EV_WHITES_CENTER, TONE_HIGHLIGHTS_FACTOR,
+    TONE_HIGHLIGHTS_POS_SCALE, TONE_SHADOWS_FACTOR, TONE_WHITES_FACTOR,
+    VIBRANCE_FACTOR, VIGNETTE_FACTOR, VIGNETTE_FEATHER_MIN,
     VIGNETTE_FEATHER_RANGE, VIGNETTE_MIDPOINT_MIN, VIGNETTE_MIDPOINT_RANGE,
     VIGNETTE_ROUNDNESS_FACTOR, boolSetting, numberSetting,
 } from './ops_constants.js';
-import { buildCombinedCurveTexture } from './curve_lut.js';
+import { buildBaseProfileLut, buildCombinedCurveTexture } from './curve_lut.js';
+
+/** Emit a GLSL float literal (JS 2.0 stringifies as "2", which GLSL treats as int). */
+const f = (value) => {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return '0.0';
+    const text = String(n);
+    return /[eE.]/.test(text) ? text : `${text}.0`;
+};
 
 const VERTEX = `#version 300 es
 in vec2 a_position;
@@ -21,14 +33,78 @@ void main() {
 }`;
 
 const COLOR_MATH = `
-const vec3 LUMW = vec3(${LUMA_RED}, ${LUMA_GREEN}, ${LUMA_BLUE});
+const vec3 LUMW = vec3(${f(LUMA_RED)}, ${f(LUMA_GREEN)}, ${f(LUMA_BLUE)});
+const mat3 OKM1 = mat3(
+    ${f(OKLAB_M1[0][0])}, ${f(OKLAB_M1[1][0])}, ${f(OKLAB_M1[2][0])},
+    ${f(OKLAB_M1[0][1])}, ${f(OKLAB_M1[1][1])}, ${f(OKLAB_M1[2][1])},
+    ${f(OKLAB_M1[0][2])}, ${f(OKLAB_M1[1][2])}, ${f(OKLAB_M1[2][2])}
+);
+const mat3 OKM2 = mat3(
+    ${f(OKLAB_M2[0][0])}, ${f(OKLAB_M2[1][0])}, ${f(OKLAB_M2[2][0])},
+    ${f(OKLAB_M2[0][1])}, ${f(OKLAB_M2[1][1])}, ${f(OKLAB_M2[2][1])},
+    ${f(OKLAB_M2[0][2])}, ${f(OKLAB_M2[1][2])}, ${f(OKLAB_M2[2][2])}
+);
+const mat3 OKM1I = mat3(
+    ${f(OKLAB_M1_INV[0][0])}, ${f(OKLAB_M1_INV[1][0])}, ${f(OKLAB_M1_INV[2][0])},
+    ${f(OKLAB_M1_INV[0][1])}, ${f(OKLAB_M1_INV[1][1])}, ${f(OKLAB_M1_INV[2][1])},
+    ${f(OKLAB_M1_INV[0][2])}, ${f(OKLAB_M1_INV[1][2])}, ${f(OKLAB_M1_INV[2][2])}
+);
+const mat3 OKM2I = mat3(
+    ${f(OKLAB_M2_INV[0][0])}, ${f(OKLAB_M2_INV[1][0])}, ${f(OKLAB_M2_INV[2][0])},
+    ${f(OKLAB_M2_INV[0][1])}, ${f(OKLAB_M2_INV[1][1])}, ${f(OKLAB_M2_INV[2][1])},
+    ${f(OKLAB_M2_INV[0][2])}, ${f(OKLAB_M2_INV[1][2])}, ${f(OKLAB_M2_INV[2][2])}
+);
 float sat(float value) { return clamp(value, 0.0, 1.0); }
 float setting(float value) { return value / 100.0; }
+float gaussEv(float ev, float center) {
+    float z = (ev - center) / ${f(TONE_EV_SIGMA)};
+    return exp(-0.5 * z * z);
+}
 vec3 linearToSrgb(vec3 c) {
     bvec3 low = lessThanEqual(c, vec3(.0031308));
     vec3 lo = c * 12.92;
     vec3 hi = 1.055 * pow(max(c, vec3(0.0)), vec3(1.0 / 2.4)) - .055;
     return mix(hi, lo, low);
+}
+vec3 srgbToLinear(vec3 c) {
+    bvec3 low = lessThanEqual(c, vec3(.04045));
+    vec3 lo = c / 12.92;
+    vec3 hi = pow((c + .055) / 1.055, vec3(2.4));
+    return mix(hi, lo, low);
+}
+vec3 linearToOklab(vec3 c) {
+    vec3 lms = OKM1 * c;
+    lms = sign(lms) * pow(abs(lms), vec3(1.0 / 3.0));
+    return OKM2 * lms;
+}
+vec3 oklabToLinear(vec3 lab) {
+    vec3 lms = OKM2I * lab;
+    lms = lms * lms * lms;
+    return OKM1I * lms;
+}
+vec3 gamutClipDesat(vec3 linear, vec3 lab) {
+    if (all(greaterThanEqual(linear, vec3(0.0))) && all(lessThanEqual(linear, vec3(1.0)))) return clamp(linear, 0.0, 1.0);
+    float lo = 0.0;
+    float hi = 1.0;
+    for (int i = 0; i < 8; i++) {
+        float mid = 0.5 * (lo + hi);
+        vec3 candidate = oklabToLinear(vec3(lab.x, lab.yz * mid));
+        bool ok = all(greaterThanEqual(candidate, vec3(0.0))) && all(lessThanEqual(candidate, vec3(1.0)));
+        if (ok) lo = mid; else hi = mid;
+    }
+    return clamp(oklabToLinear(vec3(lab.x, lab.yz * lo)), 0.0, 1.0);
+}
+vec3 scaleOklabChroma(vec3 srgb, float multiply, float saturation, float vibrance, float dehaze) {
+    if (abs(multiply - 1.0) < 1e-6 && abs(saturation) < 1e-6 && abs(vibrance) < 1e-6 && abs(dehaze) < 1e-6) return srgb;
+    vec3 linear = srgbToLinear(srgb);
+    vec3 lab = linearToOklab(linear);
+    float chroma = length(lab.yz);
+    float satness = clamp(chroma / ${f(OKLAB_C_NORM)}, 0.0, 1.0);
+    float scale = multiply * (1.0 + saturation + ${f(DEHAZE_SATURATION_FACTOR)} * dehaze);
+    float chromaNew = max(chroma * scale + vibrance * (1.0 - satness) * satness * ${f(VIBRANCE_FACTOR)} * ${f(OKLAB_C_NORM)}, 0.0);
+    if (chroma > 1e-6) lab.yz *= chromaNew / chroma;
+    else lab.yz = vec2(0.0);
+    return linearToSrgb(gamutClipDesat(oklabToLinear(lab), lab));
 }
 vec3 rgbToHsv(vec3 c) {
     float maximum = max(c.r, max(c.g, c.b));
@@ -69,13 +145,113 @@ float bandWeight(float hue, int index) {
 }
 `;
 
+// Twin of wb_gains() in features/develop/pipeline.py — keep identical.
+function cctToXy(cct) {
+    const t = Math.min(Math.max(Number(cct), 1667), 25000);
+    const inv = 1000 / t;
+    const x = t < 4000
+        ? ((-0.2661239 * inv - 0.2343589) * inv + 0.8776956) * inv + 0.179910
+        : ((-3.0258469 * inv + 2.1070379) * inv + 0.2226347) * inv + 0.240390;
+    let y;
+    if (t < 2222) y = ((-1.1063814 * x - 1.34811020) * x + 2.18555832) * x - 0.20219683;
+    else if (t < 4000) y = ((-0.9549476 * x - 1.37418593) * x + 2.09137015) * x - 0.16748867;
+    else y = ((3.0817580 * x - 5.87338670) * x + 3.75112997) * x - 0.37001483;
+    return [x, y];
+}
+
+function whiteLinearSrgb(cct, tint) {
+    const [x, y] = cctToXy(cct);
+    const d = -2 * x + 12 * y + 3;
+    const u = 4 * x / d;
+    const v = 9 * y / d + Number(tint) / TINT_UV_SCALE;
+    const d2 = 6 * u - 16 * v + 12;
+    const x2 = 9 * u / d2;
+    const y2 = Math.max(4 * v / d2, 1e-6);
+    const X = x2 / y2;
+    const Z = (1 - x2 - y2) / y2;
+    return [
+        Math.max(3.2404542 * X - 1.5371385 - 0.4985314 * Z, 1e-4),
+        Math.max(-0.9692660 * X + 1.8760108 + 0.0415560 * Z, 1e-4),
+        Math.max(0.0556434 * X - 0.2040259 + 1.0572252 * Z, 1e-4),
+    ];
+}
+
+export function wbGains(asShotTemperature, asShotTint, temperature, tint) {
+    const wa = whiteLinearSrgb(asShotTemperature, asShotTint);
+    const wu = whiteLinearSrgb(temperature, tint);
+    return [0, 1, 2].map((i) => Math.min(Math.max((wa[i] / wa[1]) / (wu[i] / wu[1]), 0.125), 8));
+}
+
+const XYZD50_TO_SRGB = [
+    [3.1338561, -1.6168667, -0.4906146],
+    [-0.9787684, 1.9161415, 0.0334540],
+    [0.0719453, -0.2289914, 1.4052427],
+];
+
+function mat3Mul(a, b) {
+    const out = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+    for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) for (let k = 0; k < 3; k++) out[i][j] += a[i][k] * b[k][j];
+    return out;
+}
+
+function mat3Inv(m) {
+    const [a, b, c] = m[0], [d, e, f] = m[1], [g, h, i] = m[2];
+    const det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+    if (!Number.isFinite(det) || Math.abs(det) < 1e-12) return null;
+    const s = 1 / det;
+    return [
+        [(e * i - f * h) * s, (c * h - b * i) * s, (b * f - c * e) * s],
+        [(f * g - d * i) * s, (a * i - c * g) * s, (c * d - a * f) * s],
+        [(d * h - e * g) * s, (b * g - a * h) * s, (a * e - b * d) * s],
+    ];
+}
+
+function xyFromCctTint(cct, tint) {
+    const [x, y] = cctToXy(cct);
+    const d = -2 * x + 12 * y + 3;
+    const u = 4 * x / d;
+    const v = 9 * y / d + Number(tint) / TINT_UV_SCALE;
+    const d2 = 6 * u - 16 * v + 12;
+    return [9 * u / d2, Math.max(4 * v / d2, 1e-6)];
+}
+
+// Twin of wb_matrix() in features/develop/pipeline.py — keep identical.
+export function wbMatrix(color, asShotTemperature, asShotTint, temperature, tint) {
+    if (!color || !color.as_shot_neutral || !color.forward_matrix) return null;
+    const asn = color.as_shot_neutral.slice(0, 3).map(Number);
+    if (asn.length < 3 || asn.some((v) => !(v > 0))) return null;
+    const rows = (flat) => [flat.slice(0, 3), flat.slice(3, 6), flat.slice(6, 9)];
+    const cm2 = color.color_matrix2 ? rows(color.color_matrix2.map(Number)) : null;
+    const cm1 = color.color_matrix1 ? rows(color.color_matrix1.map(Number)) : null;
+    if (!cm2 && !cm1) return null;
+    const mired = 1e6 / Math.min(Math.max(Number(temperature), 2000), 50000);
+    let cm;
+    if (!cm1) cm = cm2;
+    else if (!cm2) cm = cm1;
+    else {
+        let w = (mired - 1e6 / 6504) / (1e6 / 2856 - 1e6 / 6504);
+        w = Math.min(Math.max(w, 0), 1);
+        cm = cm2.map((row, i) => row.map((v, j) => v + w * (cm1[i][j] - v)));
+    }
+    const [x, y] = xyFromCctTint(Number(temperature), Number(tint));
+    const xyz = [x / y, 1, (1 - x - y) / y];
+    const nUser = cm.map((row) => row[0] * xyz[0] + row[1] * xyz[1] + row[2] * xyz[2]);
+    if (nUser.some((v) => !Number.isFinite(v) || v <= 0)) return null;
+    const ng = nUser[1];
+    const gains = [0, 1, 2].map((i) => (asn[i] / asn[1]) / (nUser[i] / ng));
+    const m = mat3Mul(XYZD50_TO_SRGB, rows(color.forward_matrix.map(Number)));
+    const mInv = mat3Inv(m);
+    if (!mInv) return null;
+    const diag = [[gains[0], 0, 0], [0, gains[1], 0], [0, 0, gains[2]]];
+    return mat3Mul(mat3Mul(m, diag), mInv);
+}
+
 const COLOR_UNIFORMS = `
 uniform sampler2D u_source;
 uniform sampler2D u_curve;
+uniform sampler2D u_baseCurve;
 uniform vec2 u_sourceSize;
-uniform float u_temperature;
-uniform float u_asShotTemperature;
-uniform float u_tint;
+uniform mat3 u_wbMatrix;
 uniform bool u_applyWb;
 uniform float u_exposure;
 uniform float u_contrast;
@@ -116,29 +292,31 @@ vec3 applyColor(vec2 uv, out vec2 imageUv) {
     imageUv = orientedUv(uv);
     if (any(lessThan(imageUv, vec2(0.0))) || any(greaterThan(imageUv, vec2(1.0)))) return vec3(0.0);
     vec3 rgb = texture(u_source, imageUv).rgb;
-    if (u_applyWb) {
-        float dm = 1000000.0 / max(u_asShotTemperature, 1000.0) - 1000000.0 / max(u_temperature, 1000.0);
-        rgb.r *= exp2(dm * ${K_TEMP});
-        rgb.b *= exp2(-dm * ${K_TEMP});
-        rgb.g *= exp2(-u_tint * ${K_TINT});
-    }
+    if (u_applyWb) rgb = max(u_wbMatrix * rgb, vec3(0.0));
     rgb *= exp2(u_exposure);
     float Y = dot(rgb, LUMW);
-    float t = pow(clamp(Y, 0.0, 1.0), 1.0 / 2.2);
-    float wh = smoothstep(.45, 1.0, t);
-    float ws = 1.0 - smoothstep(0.0, .55, t);
-    float ww = smoothstep(.75, 1.0, t);
-    float wb = 1.0 - smoothstep(0.0, .25, t);
-    float t2 = t + ${TONE_HIGHLIGHTS_FACTOR} * (setting(u_regions.x) * wh * (1.0 - t)
-        + setting(u_regions.y) * ws * (1.0 - t) * t * 2.0)
-        + ${TONE_WHITES_FACTOR} * setting(u_regions.z) * ww
-        + ${TONE_BLACKS_FACTOR} * setting(u_regions.w) * wb;
-    float t3 = .5 + (t2 - .5) * (1.0 + ${CONTRAST_FACTOR} * setting(u_contrast));
+    float ev = log2(max(Y, 1e-6));
+    float wh = gaussEv(ev, ${f(TONE_EV_HIGHLIGHTS_CENTER)});
+    float ws = gaussEv(ev, ${f(TONE_EV_SHADOWS_CENTER)});
+    float ww = gaussEv(ev, ${f(TONE_EV_WHITES_CENTER)});
+    float wb = gaussEv(ev, ${f(TONE_EV_BLACKS_CENTER)});
+    float hl = setting(u_regions.x);
+    float hlScale = hl < 0.0 ? 1.0 : ${f(TONE_HIGHLIGHTS_POS_SCALE)};
+    float deltaEv = ${f(TONE_HIGHLIGHTS_FACTOR)} * hl * hlScale * wh
+        + ${f(TONE_SHADOWS_FACTOR)} * setting(u_regions.y) * ws
+        + ${f(TONE_WHITES_FACTOR)} * setting(u_regions.z) * ww
+        + ${f(TONE_BLACKS_FACTOR)} * setting(u_regions.w) * wb;
+    rgb *= exp2(deltaEv);
+    float Y2 = dot(rgb, LUMW);
+    float t = pow(clamp(Y2, 0.0, 1.0), 1.0 / 2.2);
+    float t3 = .5 + (t - .5) * (1.0 + ${f(CONTRAST_FACTOR)} * setting(u_contrast));
     t3 = t3 < 0.0 ? 0.0 : (t3 > 1.0 ? 1.0 + (t3 - 1.0) / (1.0 + 4.0 * (t3 - 1.0)) : t3);
-    rgb *= pow(max(t3, 0.0), 2.2) / max(Y, 1e-6);
+    rgb *= pow(max(t3, 0.0), 2.2) / max(Y2, 1e-6);
     float d = setting(u_dehaze);
-    if (abs(d) > 1e-5) rgb = max((rgb - vec3(${DEHAZE_AIRLIGHT_FACTOR} * d)) / (1.0 - ${DEHAZE_AIRLIGHT_FACTOR} * d), vec3(0.0));
+    if (abs(d) > 1e-5) rgb = max((rgb - vec3(${f(DEHAZE_AIRLIGHT_FACTOR)} * d)) / (1.0 - ${f(DEHAZE_AIRLIGHT_FACTOR)} * d), vec3(0.0));
     vec3 c = linearToSrgb(clamp(rgb, 0.0, 1.0));
+    c = vec3(texture(u_baseCurve, vec2(c.r, .5)).r, texture(u_baseCurve, vec2(c.g, .5)).r, texture(u_baseCurve, vec2(c.b, .5)).r);
+    c = scaleOklabChroma(c, ${f(BASE_PROFILE_SAT)}, 0.0, 0.0, 0.0);
     vec3 mainCurve = vec3(texture(u_curve, vec2(c.r, .5)).r, texture(u_curve, vec2(c.g, .5)).r, texture(u_curve, vec2(c.b, .5)).r);
     c = vec3(texture(u_curve, vec2(mainCurve.r, .5)).g, texture(u_curve, vec2(mainCurve.g, .5)).b, texture(u_curve, vec2(mainCurve.b, .5)).a);
     if (!u_useHsl) return c;
@@ -152,10 +330,10 @@ vec3 applyColor(vec2 uv, out vec2 imageUv) {
     float grayDelta = 0.0;
     for (int i = 0; i < 8; i++) {
         float weight = bandWeight(hue, i);
-        hueDelta += weight * neutral * setting(u_hue[i]) * ${HUE_SHIFT_DEGREES.toFixed(1)};
+        hueDelta += weight * neutral * setting(u_hue[i]) * ${f(HUE_SHIFT_DEGREES)};
         satDelta += weight * neutral * setting(u_hslSat[i]);
-        lumDelta += weight * neutral * setting(u_hslLum[i]) * ${HSL_LUMINANCE_FACTOR};
-        grayDelta += weight * setting(u_gray[i]) * ${GRAY_MIXER_FACTOR};
+        lumDelta += weight * neutral * setting(u_hslLum[i]) * ${f(HSL_LUMINANCE_FACTOR)};
+        grayDelta += weight * setting(u_gray[i]) * ${f(GRAY_MIXER_FACTOR)};
     }
     if (u_grayscale) {
         c = vec3(dot(beforeHsl, LUMW) * (1.0 + grayDelta));
@@ -163,10 +341,8 @@ vec3 applyColor(vec2 uv, out vec2 imageUv) {
         hsv.x = fract((hue + hueDelta) / 360.0);
         hsv.y *= 1.0 + satDelta;
         hsv.z *= 1.0 + lumDelta;
-        hsv.y *= 1.0 + setting(u_saturation) + ${DEHAZE_SATURATION_FACTOR} * d;
-        hsv.y += setting(u_vibrance) * (1.0 - hsv.y) * hsv.y * ${VIBRANCE_FACTOR};
         hsv.y = sat(hsv.y);
-        c = hsvToRgb(hsv);
+        c = scaleOklabChroma(hsvToRgb(hsv), 1.0, setting(u_saturation), setting(u_vibrance), d);
     }
     return c;
 }
@@ -239,28 +415,37 @@ void main() {
     float L = dot(c, LUMW);
     if (u_useLarge) {
         float wm = clamp(4.0 * L * (1.0 - L), 0.0, 1.0);
-        c += vec3((L - texture(u_blurLarge, v_uv).r) * ${CLARITY_FACTOR} * setting(u_clarity) * wm);
+        float residual = clamp(L - texture(u_blurLarge, v_uv).r, -${f(CLARITY_RESIDUAL_MAX)}, ${f(CLARITY_RESIDUAL_MAX)});
+        c += vec3(residual * ${f(CLARITY_FACTOR)} * setting(u_clarity) * wm);
     }
-    if (u_useSmall) c += vec3((L - texture(u_blurSmall, v_uv).r) * ${TEXTURE_FACTOR} * setting(u_texture));
-    if (u_useSharp) c += vec3((L - texture(u_blurSharp, v_uv).r) * (u_sharpness / 150.0) * ${SHARPEN_FACTOR});
+    if (u_useSmall) {
+        float residual = clamp(L - texture(u_blurSmall, v_uv).r, -${f(CLARITY_RESIDUAL_MAX)}, ${f(CLARITY_RESIDUAL_MAX)});
+        c += vec3(residual * ${f(TEXTURE_FACTOR)} * setting(u_texture));
+    }
+    if (u_useSharp) {
+        float r = L - texture(u_blurSharp, v_uv).r;
+        float mag = abs(r);
+        float gated = max(mag - ${f(SHARPEN_THRESHOLD)}, 0.0) / max(1.0 - ${f(SHARPEN_THRESHOLD)}, 1e-6);
+        c += vec3(sign(r) * gated * (u_sharpness / 150.0) * ${f(SHARPEN_FACTOR)});
+    }
     float a = setting(u_vignette);
     if (abs(a) > 1e-5) {
         vec2 center = (u_crop.xy + u_crop.zw) * .5;
         float cropAspect = (u_crop.z - u_crop.x) * u_sourceSize.x / max((u_crop.w - u_crop.y) * u_sourceSize.y, 1.0);
-        float roundness = 1.0 + setting(u_vignetteShape.z) * ${VIGNETTE_ROUNDNESS_FACTOR};
+        float roundness = 1.0 + setting(u_vignetteShape.z) * ${f(VIGNETTE_ROUNDNESS_FACTOR)};
         vec2 p = imageUv - center;
         p.x *= 2.0 * cropAspect / max(roundness, 1e-6);
         p.y *= 2.0 * max(roundness, 1e-6);
         float rho = length(p);
-        float mid = ${VIGNETTE_MIDPOINT_MIN} + clamp(u_vignetteShape.x / 100.0, 0.0, 1.0) * ${VIGNETTE_MIDPOINT_RANGE};
-        float feather = ${VIGNETTE_FEATHER_MIN} + clamp(u_vignetteShape.y / 100.0, 0.0, 1.0) * ${VIGNETTE_FEATHER_RANGE};
-        float amount = a * smoothstep(mid, mid + feather, rho) * ${VIGNETTE_FACTOR};
+        float mid = ${f(VIGNETTE_MIDPOINT_MIN)} + clamp(u_vignetteShape.x / 100.0, 0.0, 1.0) * ${f(VIGNETTE_MIDPOINT_RANGE)};
+        float feather = ${f(VIGNETTE_FEATHER_MIN)} + clamp(u_vignetteShape.y / 100.0, 0.0, 1.0) * ${f(VIGNETTE_FEATHER_RANGE)};
+        float amount = a * smoothstep(mid, mid + feather, rho) * ${f(VIGNETTE_FACTOR)};
         c = amount < 0.0 ? c * (1.0 + amount) : c + (1.0 - c) * amount;
     }
     if (u_grain > 0.0) {
-        float cell = ${GRAIN_CELL_SIZE_MIN.toFixed(1)} + clamp(u_grainSize / 100.0, 0.0, 1.0) * ${GRAIN_CELL_SIZE_RANGE.toFixed(1)};
+        float cell = ${f(GRAIN_CELL_SIZE_MIN)} + clamp(u_grainSize / 100.0, 0.0, 1.0) * ${f(GRAIN_CELL_SIZE_RANGE)};
         ivec2 pixel = ivec2(floor(imageUv * u_sourceSize / cell));
-        c += vec3((noiseHash(pixel) - .5) * setting(u_grain) * ${GRAIN_FACTOR});
+        c += vec3((noiseHash(pixel) - .5) * setting(u_grain) * ${f(GRAIN_FACTOR)});
     }
     outColor = vec4(clamp(c, 0.0, 1.0), 1.0);
 }`;
@@ -370,6 +555,8 @@ export class DevelopRenderer {
         });
         this.canvas.width = 1;
         this.canvas.height = 1;
+        this.baseCurve = null;
+        this.updateBaseCurve();
         this.updateCurve({});
     }
 
@@ -418,6 +605,23 @@ export class DevelopRenderer {
         this.targets = next;
     }
 
+    updateBaseCurve() {
+        const gl = this.gl;
+        if (this.baseCurve) gl.deleteTexture(this.baseCurve);
+        const lut = buildBaseProfileLut();
+        const data = new Float32Array(256 * 4);
+        for (let i = 0; i < 256; i += 1) {
+            data[i * 4] = lut[i];
+            data[i * 4 + 1] = lut[i];
+            data[i * 4 + 2] = lut[i];
+            data[i * 4 + 3] = 1;
+        }
+        this.baseCurve = texture(gl, 256, 1, {
+            data: float32ToHalf(data), filter: gl.LINEAR,
+            internalFormat: gl.RGBA16F, type: gl.HALF_FLOAT,
+        });
+    }
+
     updateCurve(settings) {
         const gl = this.gl;
         if (this.curve) gl.deleteTexture(this.curve);
@@ -446,10 +650,22 @@ export class DevelopRenderer {
         const uniform = (name) => gl.getUniformLocation(p, name);
         gl.uniform1i(uniform('u_source'), 0);
         gl.uniform1i(uniform('u_curve'), 1);
+        gl.uniform1i(uniform('u_baseCurve'), 5);
         gl.uniform2f(uniform('u_sourceSize'), this.width, this.height);
-        gl.uniform1f(uniform('u_temperature'), numberSetting(s, 'Temperature', this.meta.as_shot_temperature || 5500));
-        gl.uniform1f(uniform('u_asShotTemperature'), Number(this.meta.as_shot_temperature || this.meta.temperature || 5500));
-        gl.uniform1f(uniform('u_tint'), numberSetting(s, 'Tint'));
+        const asShotT = Number(this.meta.as_shot_temperature || this.meta.temperature || 5500);
+        const asShotTint = Number(this.meta.as_shot_tint || 0);
+        const userT = numberSetting(s, 'Temperature', asShotT);
+        const userTint = numberSetting(s, 'Tint');
+        let wb = wbMatrix(this.meta.color, asShotT, asShotTint, userT, userTint);
+        if (!wb) {
+            const gains = wbGains(asShotT, asShotTint, userT, userTint);
+            wb = [[gains[0], 0, 0], [0, gains[1], 0], [0, 0, gains[2]]];
+        }
+        gl.uniformMatrix3fv(uniform('u_wbMatrix'), true, new Float32Array([
+            wb[0][0], wb[0][1], wb[0][2],
+            wb[1][0], wb[1][1], wb[1][2],
+            wb[2][0], wb[2][1], wb[2][2],
+        ]));
         gl.uniform1i(uniform('u_applyWb'), s.WhiteBalance !== 'As Shot' && s.Temperature != null ? 1 : 0);
         gl.uniform1f(uniform('u_exposure'), numberSetting(s, 'Exposure2012'));
         gl.uniform1f(uniform('u_contrast'), numberSetting(s, 'Contrast2012'));
@@ -480,6 +696,7 @@ export class DevelopRenderer {
         gl.useProgram(this.lumaProgram);
         bindUnit(gl, this.source, 0);
         bindUnit(gl, this.curve, 1);
+        bindUnit(gl, this.baseCurve, 5);
         this.uniforms(this.lumaProgram);
         gl.bindFramebuffer(gl.FRAMEBUFFER, this.lumaTarget.framebuffer);
         gl.viewport(0, 0, this.lumaTarget.width, this.lumaTarget.height);
@@ -525,6 +742,7 @@ export class DevelopRenderer {
         bindUnit(gl, this.blurLarge.texture, 2);
         bindUnit(gl, this.blurSmall.texture, 3);
         bindUnit(gl, this.blurSharp.texture, 4);
+        bindUnit(gl, this.baseCurve, 5);
         this.uniforms(this.mainProgram);
         const uniform = (name) => gl.getUniformLocation(this.mainProgram, name);
         gl.uniform1i(uniform('u_blurLarge'), 2);
@@ -565,6 +783,7 @@ export class DevelopRenderer {
         }
         gl.deleteTexture(this.source);
         gl.deleteTexture(this.curve);
+        if (this.baseCurve) gl.deleteTexture(this.baseCurve);
     }
 }
 
@@ -597,7 +816,7 @@ export async function renderSyntheticPixels(settings = {}) {
     const renderer = new DevelopRenderer(canvas);
     renderer.geometryEnabled = false;
     renderer.uploadSource(syntheticLinearRgba(64), 64, 64);
-    renderer.setSettings(settings, { as_shot_temperature: 5150 });
+    renderer.setSettings(settings, { as_shot_temperature: 5150, as_shot_tint: 0 });
     renderer.render();
     const result = renderer.readPixels(64, 64);
     renderer.destroy();

@@ -1,3 +1,5 @@
+import { BASE_PROFILE_POINTS } from './ops_constants.js';
+
 const SIZE = 256;
 
 function parsePoint(value) {
@@ -76,6 +78,10 @@ export function buildCurveLut(points) {
         lut[i] = Math.max(0, Math.min(1, y));
     }
     return lut;
+}
+
+export function buildBaseProfileLut() {
+    return buildCurveLut(BASE_PROFILE_POINTS);
 }
 
 export function buildCombinedCurveTexture(settings = {}) {

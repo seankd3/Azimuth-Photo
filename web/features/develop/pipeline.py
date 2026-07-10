@@ -1,4 +1,4 @@
-"""Pure NumPy implementation of the frozen develop v1 color pipeline.
+"""Pure NumPy implementation of the develop v1.5 color pipeline.
 
 The input is linear sRGB float data and the result is gamma-encoded sRGB in
 the inclusive 0..1 range. Geometry remains outside this module; crop values are
@@ -32,6 +32,11 @@ def _smoothstep(edge0: float, edge1: float, value: np.ndarray) -> np.ndarray:
     return t * t * (3.0 - 2.0 * t)
 
 
+def _gaussian_ev(ev: np.ndarray, center: float, sigma: float = C.TONE_EV_SIGMA) -> np.ndarray:
+    z = (ev - center) / max(sigma, C.TONE_EPSILON)
+    return np.exp(-0.5 * z * z).astype(np.float32)
+
+
 def linear_to_srgb(linear: np.ndarray) -> np.ndarray:
     """Encode clipped linear RGB with the IEC sRGB transfer curve."""
     linear = np.clip(linear, 0.0, 1.0).astype(np.float32, copy=False)
@@ -39,6 +44,16 @@ def linear_to_srgb(linear: np.ndarray) -> np.ndarray:
         linear <= C.SRGB_LINEAR_THRESHOLD,
         linear * C.SRGB_ENCODE_SCALE,
         C.SRGB_ENCODE_A * np.power(linear, C.SRGB_ENCODE_GAMMA) - C.SRGB_ENCODE_B,
+    ).astype(np.float32)
+
+
+def srgb_to_linear(srgb: np.ndarray) -> np.ndarray:
+    """Decode gamma sRGB with the IEC transfer curve."""
+    srgb = np.clip(srgb, 0.0, 1.0).astype(np.float32, copy=False)
+    return np.where(
+        srgb <= C.SRGB_DECODE_THRESHOLD,
+        srgb * C.SRGB_DECODE_SCALE,
+        np.power((srgb + C.SRGB_DECODE_A) / C.SRGB_ENCODE_A, C.SRGB_DECODE_GAMMA),
     ).astype(np.float32)
 
 
@@ -60,19 +75,144 @@ def _as_shot_temperature(settings: Mapping[str, object], explicit: float | None)
     return 5500.0
 
 
+def cct_to_xy(cct: float) -> tuple[float, float]:
+    """Planckian locus chromaticity (Kim et al. cubic spline approximation)."""
+    t = min(max(float(cct), 1667.0), 25000.0)
+    inv = 1000.0 / t
+    if t < 4000.0:
+        x = ((-0.2661239 * inv - 0.2343589) * inv + 0.8776956) * inv + 0.179910
+    else:
+        x = ((-3.0258469 * inv + 2.1070379) * inv + 0.2226347) * inv + 0.240390
+    if t < 2222.0:
+        y = ((-1.1063814 * x - 1.34811020) * x + 2.18555832) * x - 0.20219683
+    elif t < 4000.0:
+        y = ((-0.9549476 * x - 1.37418593) * x + 2.09137015) * x - 0.16748867
+    else:
+        y = ((3.0817580 * x - 5.87338670) * x + 3.75112997) * x - 0.37001483
+    return x, y
+
+
+def white_linear_srgb(cct: float, tint: float) -> tuple[float, float, float]:
+    """Linear-sRGB color of a Planckian white at cct with LR-style tint (Duv via v')."""
+    x, y = cct_to_xy(cct)
+    d = -2.0 * x + 12.0 * y + 3.0
+    u = 4.0 * x / d
+    v = 9.0 * y / d + float(tint) / C.TINT_UV_SCALE
+    d2 = 6.0 * u - 16.0 * v + 12.0
+    x2 = 9.0 * u / d2
+    y2 = max(4.0 * v / d2, 1e-6)
+    big_x = x2 / y2
+    big_z = (1.0 - x2 - y2) / y2
+    r = 3.2404542 * big_x - 1.5371385 - 0.4985314 * big_z
+    g = -0.9692660 * big_x + 1.8760108 + 0.0415560 * big_z
+    b = 0.0556434 * big_x - 0.2040259 + 1.0572252 * big_z
+    return max(r, 1e-4), max(g, 1e-4), max(b, 1e-4)
+
+
+def _xy_from_cct_tint(cct: float, tint: float) -> tuple[float, float]:
+    x, y = cct_to_xy(cct)
+    d = -2.0 * x + 12.0 * y + 3.0
+    u = 4.0 * x / d
+    v = 9.0 * y / d + float(tint) / C.TINT_UV_SCALE
+    d2 = 6.0 * u - 16.0 * v + 12.0
+    return 9.0 * u / d2, max(4.0 * v / d2, 1e-6)
+
+
+def wb_matrix(
+    color: Mapping[str, object],
+    asshot_temperature: float,
+    asshot_tint: float,
+    temperature: float,
+    tint: float,
+) -> np.ndarray | None:
+    """DNG-correct WB: diagonal camera-space gains ASN/n(T_user), expressed in the
+    base's sRGB space as M·D·M⁻¹ with M = XYZD50→sRGB · ForwardMatrix.
+
+    Twin of wbMatrix() in static/js/desktop/develop/gl.js — keep identical.
+    Returns None when the needed matrices are absent (caller falls back to
+    Planckian per-channel gains, which run hotter).
+    """
+    asn = color.get("as_shot_neutral") if isinstance(color, Mapping) else None
+    fm = color.get("forward_matrix") if isinstance(color, Mapping) else None
+    cm2 = color.get("color_matrix2") if isinstance(color, Mapping) else None
+    cm1 = color.get("color_matrix1") if isinstance(color, Mapping) else None
+    if not asn or fm is None or (cm2 is None and cm1 is None):
+        return None
+    asn = np.asarray(asn, dtype=np.float64)[:3]
+    if asn.shape != (3,) or np.any(asn <= 0):
+        return None
+    m_cm2 = np.asarray(cm2, dtype=np.float64).reshape(3, 3) if cm2 is not None else None
+    m_cm1 = np.asarray(cm1, dtype=np.float64).reshape(3, 3) if cm1 is not None else None
+    mired = 1_000_000.0 / min(max(float(temperature), 2000.0), 50000.0)
+    if m_cm1 is None:
+        cm = m_cm2
+    elif m_cm2 is None:
+        cm = m_cm1
+    else:
+        weight_a = (mired - 1_000_000.0 / 6504.0) / (1_000_000.0 / 2856.0 - 1_000_000.0 / 6504.0)
+        weight_a = min(max(weight_a, 0.0), 1.0)
+        cm = m_cm2 + weight_a * (m_cm1 - m_cm2)
+    x, y = _xy_from_cct_tint(float(temperature), float(tint))
+    xyz = np.array([x / y, 1.0, (1.0 - x - y) / y], dtype=np.float64)
+    n_user = cm @ xyz
+    if np.any(~np.isfinite(n_user)) or n_user[1] <= 1e-9 or np.any(n_user <= 0):
+        return None
+    n_user /= n_user[1]
+    gains = (asn / asn[1]) / n_user
+    m = XYZD50_TO_SRGB_PIPE @ np.asarray(fm, dtype=np.float64).reshape(3, 3)
+    try:
+        w = m @ np.diag(gains) @ np.linalg.inv(m)
+    except np.linalg.LinAlgError:
+        return None
+    return w.astype(np.float32)
+
+
+XYZD50_TO_SRGB_PIPE = np.array(
+    [
+        [3.1338561, -1.6168667, -0.4906146],
+        [-0.9787684, 1.9161415, 0.0334540],
+        [0.0719453, -0.2289914, 1.4052427],
+    ],
+    dtype=np.float64,
+)
+
+
+def wb_gains(
+    asshot_temperature: float, asshot_tint: float, temperature: float, tint: float
+) -> tuple[float, float, float]:
+    """Per-channel linear-sRGB gains taking the as-shot white to the user white.
+
+    Twin of wbGains() in static/js/desktop/develop/gl.js — keep identical.
+    """
+    wa = white_linear_srgb(asshot_temperature, asshot_tint)
+    wu = white_linear_srgb(temperature, tint)
+    gains = tuple((wa[i] / wa[1]) / (wu[i] / wu[1]) for i in range(3))
+    return tuple(min(max(g, 0.125), 8.0) for g in gains)
+
+
 def _apply_white_balance(
-    rgb: np.ndarray, settings: Mapping[str, object], asshot_temperature: float | None
+    rgb: np.ndarray,
+    settings: Mapping[str, object],
+    asshot_temperature: float | None,
+    asshot_tint: float | None = None,
+    color_profile: Mapping[str, object] | None = None,
 ) -> np.ndarray:
     temperature = _number(settings, "Temperature")
     white_balance = str(settings.get("WhiteBalance", "")).strip().lower()
     if temperature <= 0.0 or white_balance == "as shot":
         return rgb
     asshot = max(_as_shot_temperature(settings, asshot_temperature), 1.0)
-    dm = 1_000_000.0 / asshot - 1_000_000.0 / max(temperature, 1.0)
+    tint = _number(settings, "Tint")
+    if color_profile:
+        matrix = wb_matrix(color_profile, asshot, float(asshot_tint or 0.0), max(temperature, 1.0), tint)
+        if matrix is not None:
+            shape = rgb.shape
+            return np.ascontiguousarray((rgb.reshape(-1, 3) @ matrix.T).reshape(shape), dtype=np.float32)
+    gains = wb_gains(asshot, float(asshot_tint or 0.0), max(temperature, 1.0), tint)
     result = rgb.copy()
-    result[..., 0] *= np.float32(np.exp2(dm * C.K_TEMP))
-    result[..., 2] *= np.float32(np.exp2(-dm * C.K_TEMP))
-    result[..., 1] *= np.float32(np.exp2(-_number(settings, "Tint") * C.K_TINT))
+    result[..., 0] *= np.float32(gains[0])
+    result[..., 1] *= np.float32(gains[1])
+    result[..., 2] *= np.float32(gains[2])
     return result
 
 
@@ -87,25 +227,28 @@ def _soft_clamp(value: np.ndarray) -> np.ndarray:
 
 def _region_tone_map(rgb: np.ndarray, settings: Mapping[str, object]) -> np.ndarray:
     y = luma(rgb)
-    t = np.power(np.clip(y, 0.0, 1.0), 1.0 / C.TONE_GAMMA)
+    ev = np.log2(np.maximum(y, C.TONE_EPSILON))
     highlights = _slider(settings, "Highlights2012")
     shadows = _slider(settings, "Shadows2012")
     whites = _slider(settings, "Whites2012")
     blacks = _slider(settings, "Blacks2012")
-    wh = _smoothstep(0.45, 1.0, t)
-    ws = 1.0 - _smoothstep(0.0, 0.55, t)
-    ww = _smoothstep(0.75, 1.0, t)
-    wb = 1.0 - _smoothstep(0.0, 0.25, t)
-    t2 = (
-        t
-        + C.TONE_HIGHLIGHTS_FACTOR
-        * (highlights * wh * (1.0 - t) + shadows * ws * (1.0 - t) * t * 2.0)
+    wh = _gaussian_ev(ev, C.TONE_EV_HIGHLIGHTS_CENTER)
+    ws = _gaussian_ev(ev, C.TONE_EV_SHADOWS_CENTER)
+    ww = _gaussian_ev(ev, C.TONE_EV_WHITES_CENTER)
+    wb = _gaussian_ev(ev, C.TONE_EV_BLACKS_CENTER)
+    hl_scale = np.where(highlights < 0.0, 1.0, C.TONE_HIGHLIGHTS_POS_SCALE)
+    delta_ev = (
+        C.TONE_HIGHLIGHTS_FACTOR * highlights * hl_scale * wh
+        + C.TONE_SHADOWS_FACTOR * shadows * ws
         + C.TONE_WHITES_FACTOR * whites * ww
         + C.TONE_BLACKS_FACTOR * blacks * wb
     )
-    t3 = 0.5 + (t2 - 0.5) * (1.0 + C.CONTRAST_FACTOR * _slider(settings, "Contrast2012"))
+    rgb = (rgb * np.exp2(delta_ev)[..., None]).astype(np.float32)
+    y2 = luma(rgb)
+    t = np.power(np.clip(y2, 0.0, 1.0), 1.0 / C.TONE_GAMMA)
+    t3 = 0.5 + (t - 0.5) * (1.0 + C.CONTRAST_FACTOR * _slider(settings, "Contrast2012"))
     t3 = _soft_clamp(t3)
-    gain = np.power(t3, C.TONE_GAMMA) / np.maximum(y, C.TONE_EPSILON)
+    gain = np.power(t3, C.TONE_GAMMA) / np.maximum(y2, C.TONE_EPSILON)
     return (rgb * gain[..., None]).astype(np.float32)
 
 
@@ -175,17 +318,107 @@ def _apply_lut(channel: np.ndarray, lut: np.ndarray) -> np.ndarray:
     return np.interp(np.clip(channel, 0.0, 1.0), positions, lut).astype(np.float32)
 
 
+def _matmul_rows(pixels: np.ndarray, matrix: Sequence[Sequence[float]]) -> np.ndarray:
+    m = np.asarray(matrix, dtype=np.float32)
+    return pixels @ m.T
+
+
+def linear_to_oklab(linear: np.ndarray) -> np.ndarray:
+    lms = _matmul_rows(linear, C.OKLAB_M1)
+    lms = np.sign(lms) * np.power(np.abs(lms), 1.0 / 3.0)
+    return _matmul_rows(lms, C.OKLAB_M2).astype(np.float32)
+
+
+def oklab_to_linear(lab: np.ndarray) -> np.ndarray:
+    lms = _matmul_rows(lab, C.OKLAB_M2_INV)
+    lms = lms * lms * lms
+    return _matmul_rows(lms, C.OKLAB_M1_INV).astype(np.float32)
+
+
+def _gamut_clip_desaturate(linear: np.ndarray) -> np.ndarray:
+    """Soft-clip out-of-gamut by desaturating toward OKLab L (not channel clamp)."""
+    lab = linear_to_oklab(linear)
+    lightness = lab[..., 0:1]
+    chroma_ab = lab[..., 1:3]
+    achromatic = oklab_to_linear(np.concatenate((lightness, np.zeros_like(chroma_ab)), axis=-1))
+    result = linear.astype(np.float32, copy=True)
+    outside = np.any((result < 0.0) | (result > 1.0), axis=-1)
+    if not np.any(outside):
+        return np.clip(result, 0.0, 1.0)
+    # Binary-search chroma scale per out-of-gamut pixel.
+    lo = np.zeros(result.shape[:2], dtype=np.float32)
+    hi = np.ones(result.shape[:2], dtype=np.float32)
+    for _ in range(8):
+        mid = 0.5 * (lo + hi)
+        candidate_lab = np.concatenate((lightness, chroma_ab * mid[..., None]), axis=-1)
+        candidate = oklab_to_linear(candidate_lab)
+        ok = np.all((candidate >= 0.0) & (candidate <= 1.0), axis=-1)
+        hi = np.where(ok, hi, mid)
+        lo = np.where(ok, mid, lo)
+    scale = lo
+    clipped_lab = np.concatenate((lightness, chroma_ab * scale[..., None]), axis=-1)
+    clipped = oklab_to_linear(clipped_lab)
+    result = np.where(outside[..., None], clipped, result)
+    # Tiny residual overshoot from float error → mix toward achromatic gray.
+    still = np.any((result < -1e-5) | (result > 1.0 + 1e-5), axis=-1)
+    if np.any(still):
+        result = np.where(still[..., None], achromatic, result)
+    return np.clip(result, 0.0, 1.0).astype(np.float32)
+
+
+def scale_oklab_chroma(
+    srgb: np.ndarray,
+    *,
+    multiply: float = 1.0,
+    saturation: float = 0.0,
+    vibrance: float = 0.0,
+    dehaze: float = 0.0,
+) -> np.ndarray:
+    """Scale OKLab chroma at fixed L/hue; soft-clip gamut by desaturation."""
+    if (
+        abs(multiply - 1.0) < 1e-8
+        and abs(saturation) < 1e-8
+        and abs(vibrance) < 1e-8
+        and abs(dehaze) < 1e-8
+    ):
+        return srgb
+    linear = srgb_to_linear(srgb)
+    lab = linear_to_oklab(linear)
+    a = lab[..., 1]
+    b = lab[..., 2]
+    chroma = np.sqrt(a * a + b * b)
+    satness = np.clip(chroma / max(C.OKLAB_C_NORM, C.TONE_EPSILON), 0.0, 1.0)
+    scale = multiply * (1.0 + saturation + C.DEHAZE_SATURATION_FACTOR * dehaze)
+    chroma_new = chroma * scale
+    chroma_new = chroma_new + vibrance * (1.0 - satness) * satness * C.VIBRANCE_FACTOR * C.OKLAB_C_NORM
+    chroma_new = np.maximum(chroma_new, 0.0)
+    safe = np.maximum(chroma, C.TONE_EPSILON)
+    lab_new = lab.copy()
+    lab_new[..., 1] = a * (chroma_new / safe)
+    lab_new[..., 2] = b * (chroma_new / safe)
+    zero = chroma <= C.TONE_EPSILON
+    lab_new[..., 1] = np.where(zero, 0.0, lab_new[..., 1])
+    lab_new[..., 2] = np.where(zero, 0.0, lab_new[..., 2])
+    linear_out = _gamut_clip_desaturate(oklab_to_linear(lab_new))
+    return linear_to_srgb(linear_out)
+
+
 def _apply_tone_curves(c: np.ndarray, settings: Mapping[str, object]) -> np.ndarray:
     result = c.copy()
+    base_lut = build_monotone_cubic_lut(C.BASE_PROFILE_POINTS)
+    for index in range(3):
+        result[..., index] = _apply_lut(c[..., index], base_lut)
+    result = scale_oklab_chroma(result, multiply=C.BASE_PROFILE_SAT)
     main_lut = build_monotone_cubic_lut(settings.get("ToneCurvePV2012"))
     # A main curve is RGB-linked; component curves are applied after it.
+    curved = result.copy()
     for index in range(3):
-        result[..., index] = _apply_lut(c[..., index], main_lut)
+        curved[..., index] = _apply_lut(result[..., index], main_lut)
     for index, suffix in enumerate(("Red", "Green", "Blue")):
-        result[..., index] = _apply_lut(
-            result[..., index], build_monotone_cubic_lut(settings.get(f"ToneCurvePV2012{suffix}"))
+        curved[..., index] = _apply_lut(
+            curved[..., index], build_monotone_cubic_lut(settings.get(f"ToneCurvePV2012{suffix}"))
         )
-    return result
+    return curved
 
 
 def rgb_to_hsv(rgb: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -289,9 +522,14 @@ def _hsl_and_black_white(c: np.ndarray, settings: Mapping[str, object], dehaze: 
         hue[mask] += hue_adjustment * neutral[mask] * C.HUE_SHIFT_DEGREES
         saturation[mask] *= 1.0 + saturation_adjustment * neutral[mask]
         value[mask] *= 1.0 + luminance_adjustment * neutral[mask] * C.HSL_LUMINANCE_FACTOR
-    saturation *= 1.0 + _slider(settings, "Saturation") + C.DEHAZE_SATURATION_FACTOR * dehaze
-    saturation += _slider(settings, "Vibrance") * (1.0 - saturation) * saturation * C.VIBRANCE_FACTOR
-    return hsv_to_rgb(hue, np.clip(saturation, 0.0, 1.0), value)
+    # HSL bands stay HSV; global Vibrance/Saturation move to OKLab chroma.
+    rgb = hsv_to_rgb(hue, np.clip(saturation, 0.0, 1.0), value)
+    return scale_oklab_chroma(
+        rgb,
+        saturation=_slider(settings, "Saturation"),
+        vibrance=_slider(settings, "Vibrance"),
+        dehaze=dehaze,
+    )
 
 
 def gaussian_blur(field: np.ndarray, sigma: float) -> np.ndarray:
@@ -308,6 +546,12 @@ def gaussian_blur(field: np.ndarray, sigma: float) -> np.ndarray:
     return np.apply_along_axis(lambda column: np.convolve(column, kernel, mode="valid"), 0, padded_y).astype(np.float32)
 
 
+def _soft_threshold_residual(residual: np.ndarray, threshold: float) -> np.ndarray:
+    magnitude = np.abs(residual)
+    gated = np.maximum(magnitude - threshold, 0.0) / max(1.0 - threshold, C.TONE_EPSILON)
+    return np.sign(residual) * gated
+
+
 def _detail(c: np.ndarray, settings: Mapping[str, object], *, blur_min_dimension: int | None = None) -> np.ndarray:
     lightness = luma(c)
     result = c.copy()
@@ -315,17 +559,20 @@ def _detail(c: np.ndarray, settings: Mapping[str, object], *, blur_min_dimension
     clarity = _slider(settings, "Clarity2012")
     if clarity != 0.0:
         large = gaussian_blur(lightness, C.BLUR_LARGE_FACTOR * minimum_dimension)
+        residual = np.clip(lightness - large, -C.CLARITY_RESIDUAL_MAX, C.CLARITY_RESIDUAL_MAX)
         midtones = np.clip(4.0 * lightness * (1.0 - lightness), 0.0, 1.0)
-        result += ((lightness - large) * C.CLARITY_FACTOR * clarity * midtones)[..., None]
+        result += (residual * C.CLARITY_FACTOR * clarity * midtones)[..., None]
     texture = _slider(settings, "Texture")
     if texture != 0.0:
         small = gaussian_blur(lightness, C.BLUR_SMALL_FACTOR * minimum_dimension)
-        result += ((lightness - small) * C.TEXTURE_FACTOR * texture)[..., None]
+        residual = np.clip(lightness - small, -C.CLARITY_RESIDUAL_MAX, C.CLARITY_RESIDUAL_MAX)
+        result += (residual * C.TEXTURE_FACTOR * texture)[..., None]
     sharpness = np.clip(_number(settings, "Sharpness"), 0.0, 150.0)
     if sharpness != 0.0:
         radius = np.clip(_number(settings, "SharpenRadius", 1.0), 0.5, 3.0)
         sharp = gaussian_blur(lightness, radius)
-        result += ((lightness - sharp) * (sharpness / 150.0) * C.SHARPEN_FACTOR)[..., None]
+        residual = _soft_threshold_residual(lightness - sharp, C.SHARPEN_THRESHOLD)
+        result += (residual * (sharpness / 150.0) * C.SHARPEN_FACTOR)[..., None]
     return result
 
 
@@ -397,16 +644,18 @@ def apply_pipeline(
     settings: Mapping[str, object] | None = None,
     *,
     asshot_temperature: float | None = None,
+    asshot_tint: float | None = None,
+    color_profile: Mapping[str, object] | None = None,
     pixel_offset: tuple[int, int] = (0, 0),
     canvas_size: tuple[int, int] | None = None,
     blur_min_dimension: int | None = None,
 ) -> np.ndarray:
-    """Apply v1 color operations in their frozen order and return float32 sRGB."""
+    """Apply v1.5 color operations in order and return float32 sRGB."""
     settings = settings or {}
     rgb = np.asarray(linear_rgb, dtype=np.float32)
     if rgb.ndim != 3 or rgb.shape[-1] != 3:
         raise ValueError("linear_rgb must have shape (height, width, 3)")
-    rgb = _apply_white_balance(rgb, settings, asshot_temperature)
+    rgb = _apply_white_balance(rgb, settings, asshot_temperature, asshot_tint, color_profile)
     rgb *= np.float32(np.exp2(_number(settings, "Exposure2012")))
     rgb = _region_tone_map(rgb, settings)
     dehaze = _slider(settings, "Dehaze")

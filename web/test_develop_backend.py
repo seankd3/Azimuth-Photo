@@ -40,7 +40,7 @@ class DevelopBackendTests(unittest.TestCase):
         self.old_cache_root = rawproc.BASE_CACHE_ROOT
         db.DB_PATH = os.path.join(self.tempdir.name, "develop.db")
         rawproc.BASE_CACHE_ROOT = Path(self.tempdir.name) / "develop-cache"
-        rawproc.BASE_CACHE_DIR = rawproc.BASE_CACHE_ROOT / "base"
+        rawproc.BASE_CACHE_DIR = rawproc.BASE_CACHE_ROOT / "base" / "v2"
         rawproc._recent_decodes.clear()
         asyncio.run(db.init_db())
         source = asyncio.run(db.add_or_restore_source(os.path.join(self.tempdir.name, "raws")))
@@ -152,11 +152,31 @@ class DevelopBackendTests(unittest.TestCase):
         np.testing.assert_array_equal(parsed, rgb)
 
     def test_mired_white_balance_math(self):
-        neutral = rawproc.estimate_as_shot_white_balance([2.0, 1.0, 1.0, 0.0], [2.0, 1.0, 1.0, 0.0])
-        cooler = rawproc.estimate_as_shot_white_balance([4.0, 1.0, 1.0, 0.0], [2.0, 1.0, 1.0, 0.0])
+        neutral = rawproc.estimate_as_shot_white_balance_mired([2.0, 1.0, 1.0, 0.0], [2.0, 1.0, 1.0, 0.0])
+        cooler = rawproc.estimate_as_shot_white_balance_mired([4.0, 1.0, 1.0, 0.0], [2.0, 1.0, 1.0, 0.0])
         self.assertEqual(neutral["temperature"], 5500)
         self.assertLess(cooler["temperature"], neutral["temperature"])
         self.assertIn("camera_whitebalance", cooler)
+        self.assertEqual(neutral["method"], "mired")
+
+    def test_dng_mccamy_white_balance_math(self):
+        # ColorMatrix2 + AsShotNeutral from a measured daylight-ish DNG.
+        asn = [0.501961, 1.0, 0.554713]
+        cm2 = [
+            0.9766, -0.2953, -0.1254,
+            -0.4276, 1.2116, 0.2433,
+            -0.0437, 0.1336, 0.5131,
+        ]
+        result = rawproc.estimate_as_shot_white_balance(
+            [asn[1] / asn[0], 1.0, asn[1] / asn[2], 0.0],
+            [],
+            as_shot_neutral=asn,
+            color_matrix2=cm2,
+        )
+        self.assertEqual(result["method"], "dng_mccamy")
+        self.assertAlmostEqual(result["temperature"], 5613, delta=25)
+        self.assertGreaterEqual(result["tint"], -30)
+        self.assertLessEqual(result["tint"], 30)
 
     def test_reset_restores_the_xmp_baseline(self):
         async def seed_xmp():

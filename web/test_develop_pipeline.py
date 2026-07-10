@@ -13,33 +13,55 @@ from features.develop import pipeline  # noqa: E402
 
 
 class DevelopPipelineTests(unittest.TestCase):
-    def test_white_balance_temperature_and_tint_have_the_specified_direction(self):
+    def test_white_balance_is_planckian_white_point_adaptation(self):
         source = np.ones((1, 1, 3), dtype=np.float32)
-        result = pipeline._apply_white_balance(
-            source, {"Temperature": 6500, "Tint": 10, "WhiteBalance": "Custom"}, 5500
+        identity = pipeline._apply_white_balance(
+            source, {"Temperature": 5500, "Tint": 12, "WhiteBalance": "Custom"}, 5500, 12
         )
-        dm = 1_000_000 / 5500 - 1_000_000 / 6500
-        self.assertAlmostEqual(result[0, 0, 0], math.exp2(dm * C.K_TEMP), places=6)
-        self.assertAlmostEqual(result[0, 0, 2], math.exp2(-dm * C.K_TEMP), places=6)
-        self.assertAlmostEqual(result[0, 0, 1], math.exp2(-10 * C.K_TINT), places=6)
-        self.assertGreater(result[0, 0, 0], result[0, 0, 2])
+        np.testing.assert_allclose(identity[0, 0], [1.0, 1.0, 1.0], atol=1e-5)
+
+        warmer = pipeline._apply_white_balance(
+            source, {"Temperature": 9969, "Tint": 0, "WhiteBalance": "Custom"}, 5613, 0
+        )
+        self.assertGreater(warmer[0, 0, 0], 1.15)
+        self.assertLess(warmer[0, 0, 2], 0.85)
+        self.assertAlmostEqual(warmer[0, 0, 1], 1.0, places=2)
+
+        magenta = pipeline._apply_white_balance(
+            source, {"Temperature": 5500, "Tint": 60, "WhiteBalance": "Custom"}, 5500, 0
+        )
+        self.assertLess(magenta[0, 0, 1], min(magenta[0, 0, 0], magenta[0, 0, 2]))
 
     def test_exposure_is_exact_exp2(self):
-        source = np.full((2, 2, 3), 0.125, dtype=np.float32)
-        result = pipeline.apply_pipeline(source, {"Exposure2012": 2})
-        expected = pipeline.linear_to_srgb(np.full_like(source, 0.5))
-        np.testing.assert_allclose(result, expected, atol=2e-6)
+        # Exposure is exact exp2 in linear; the shared base profile then remaps gamma.
+        dark = np.full((2, 2, 3), 0.125, dtype=np.float32)
+        bright = np.full((2, 2, 3), 0.5, dtype=np.float32)
+        boosted = pipeline.apply_pipeline(dark, {"Exposure2012": 2})
+        reference = pipeline.apply_pipeline(bright, {})
+        np.testing.assert_allclose(boosted, reference, atol=2e-6)
 
-    def test_region_weights_at_known_t_values(self):
-        t = np.array([0.0, 0.25, 0.55, 0.75, 1.0], dtype=np.float32)
-        highlights = pipeline._smoothstep(0.45, 1.0, t)
-        shadows = 1.0 - pipeline._smoothstep(0.0, 0.55, t)
-        whites = pipeline._smoothstep(0.75, 1.0, t)
-        blacks = 1.0 - pipeline._smoothstep(0.0, 0.25, t)
-        np.testing.assert_allclose(highlights[[0, -1]], [0.0, 1.0])
-        np.testing.assert_allclose(shadows[[0, 2]], [1.0, 0.0])
-        np.testing.assert_allclose(whites[[0, 3, 4]], [0.0, 0.0, 1.0])
-        np.testing.assert_allclose(blacks[[0, 1]], [1.0, 0.0])
+    def test_region_weights_at_known_ev_centers(self):
+        # Gaussian weights peak at their EV centers and fall off by ~1σ.
+        centers = {
+            "hl": C.TONE_EV_HIGHLIGHTS_CENTER,
+            "sh": C.TONE_EV_SHADOWS_CENTER,
+            "wh": C.TONE_EV_WHITES_CENTER,
+            "bl": C.TONE_EV_BLACKS_CENTER,
+        }
+        for name, center in centers.items():
+            peak = pipeline._gaussian_ev(np.array([center], dtype=np.float32), center)[0]
+            side = pipeline._gaussian_ev(np.array([center + C.TONE_EV_SIGMA], dtype=np.float32), center)[0]
+            self.assertAlmostEqual(float(peak), 1.0, places=5)
+            self.assertAlmostEqual(float(side), math.exp(-0.5), places=5)
+
+    def test_negative_highlights_recover_about_two_ev(self):
+        # At the highlights Gaussian center, −100 recovers ~2 EV (ratio-preserving).
+        y = float(2.0 ** C.TONE_EV_HIGHLIGHTS_CENTER)
+        source = np.full((1, 1, 3), y, dtype=np.float32)
+        result = pipeline._region_tone_map(source, {"Highlights2012": -100, "Contrast2012": 0})
+        recovered = float(pipeline.luma(result)[0, 0])
+        expected = y * (2.0 ** -C.TONE_HIGHLIGHTS_FACTOR)
+        self.assertAlmostEqual(recovered, expected, delta=expected * 0.08)
 
     def test_zero_contrast_is_region_tone_identity(self):
         source = np.array([[[0.07, 0.19, 0.42], [0.8, 0.1, 0.3]]], dtype=np.float32)
@@ -63,7 +85,8 @@ class DevelopPipelineTests(unittest.TestCase):
     def test_vibrance_protects_already_saturated_colors(self):
         saturated_red = np.array([[[1.0, 0.0, 0.0]]], dtype=np.float32)
         result = pipeline._hsl_and_black_white(saturated_red, {"Vibrance": 100}, 0.0)
-        np.testing.assert_allclose(result, saturated_red, atol=1e-7)
+        # OKLab vibrance weights by (1−satness); fully chromatic red barely moves.
+        np.testing.assert_allclose(result, saturated_red, atol=3e-2)
 
     def test_vignette_has_center_and_corner_radial_values(self):
         image = np.ones((101, 101, 3), dtype=np.float32)

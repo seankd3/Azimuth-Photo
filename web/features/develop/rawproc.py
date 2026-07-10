@@ -26,10 +26,13 @@ try:
 except ImportError:  # pragma: no cover - rawpy is an application dependency.
     rawpy = None
 
+from . import ops_constants as C
+
 
 RAW_EXTENSIONS = {".dng", ".cr2", ".cr3"}
 BASE_CACHE_ROOT = Path(os.environ.get("PHOTOARCHIVE_DEVELOP_CACHE_DIR", "/mnt/expansion/PhotoArchiveCache/develop"))
-BASE_CACHE_DIR = BASE_CACHE_ROOT / "base"
+# v3: lossy-DNG decode applies OpcodeList2 MapPolynomial (true linear); v2 bases are ~EVs too bright.
+BASE_CACHE_DIR = BASE_CACHE_ROOT / "base" / "v3"
 BASE_MAGIC = b"PABASE1\0"
 BASE_HEADER = struct.Struct("<8sII")
 MAX_BASE_EDGE = 2048
@@ -74,22 +77,119 @@ def _finite_positive(value: Any) -> float | None:
     return number if math.isfinite(number) and number > 0 else None
 
 
-def estimate_as_shot_white_balance(camera_whitebalance: Any, daylight_whitebalance: Any) -> dict[str, Any]:
-    """Estimate UI temp/tint from camera gains using an explicitly mired model.
+def _matrix_3x3(values: Any) -> np.ndarray | None:
+    if values is None:
+        return None
+    try:
+        flat = [float(x) for x in list(values)]
+    except (TypeError, ValueError):
+        return None
+    if len(flat) != 9 or not all(math.isfinite(x) for x in flat):
+        return None
+    return np.asarray(flat, dtype=np.float64).reshape(3, 3)
+
+
+def _planckian_uv_prime(cct: float) -> tuple[float, float]:
+    """Approximate Planckian locus in CIE 1976 u'v' (Krystek 1985 → u'v')."""
+    t = float(np.clip(cct, 1000.0, 20000.0))
+    u = (0.860117757 + 1.54118254e-4 * t + 1.28641212e-7 * t * t) / (
+        1.0 + 8.42420235e-4 * t + 7.08145163e-7 * t * t
+    )
+    v = (0.317398726 + 4.22806245e-5 * t + 4.20481691e-8 * t * t) / (
+        1.0 - 2.89741816e-5 * t + 1.61456053e-7 * t * t
+    )
+    return float(u), float(1.5 * v)
+
+
+def estimate_temp_tint_from_neutral(
+    as_shot_neutral: Any, color_matrix: Any, color_matrix_a: Any = None
+) -> dict[str, float] | None:
+    """DNG-correct CCT/tint from AsShotNeutral + ColorMatrix (camera←XYZ).
+
+    When both matrices are present (color_matrix = D65/6504K ColorMatrix2,
+    color_matrix_a = StdA/2856K ColorMatrix1) the matrix is interpolated by
+    inverse mired and the CCT solved iteratively, per the DNG spec — a single
+    fixed matrix can misplace dusk/tungsten whites by >1500K.
+    """
+    asn_list = list(as_shot_neutral or [])
+    if len(asn_list) < 3:
+        return None
+    asn = np.asarray([float(asn_list[0]), float(asn_list[1]), float(asn_list[2])], dtype=np.float64)
+    if not np.all(np.isfinite(asn)) or np.any(asn <= 0):
+        return None
+    matrix_d65 = _matrix_3x3(color_matrix)
+    matrix_a = _matrix_3x3(color_matrix_a)
+    if matrix_d65 is None and matrix_a is None:
+        return None
+
+    def interpolated(cct_guess: float):
+        if matrix_d65 is None:
+            return matrix_a
+        if matrix_a is None:
+            return matrix_d65
+        mired = 1_000_000.0 / min(max(cct_guess, 2000.0), 50000.0)
+        weight_a = (mired - 1_000_000.0 / 6504.0) / (1_000_000.0 / 2856.0 - 1_000_000.0 / 6504.0)
+        weight_a = min(max(weight_a, 0.0), 1.0)
+        return matrix_d65 + weight_a * (matrix_a - matrix_d65)
+
+    x = y = None
+    cct_guess = 5000.0
+    for _ in range(6):
+        try:
+            xyz = np.linalg.inv(interpolated(cct_guess)) @ asn
+        except np.linalg.LinAlgError:
+            return None
+        if not np.all(np.isfinite(xyz)) or float(xyz.sum()) <= 0:
+            return None
+        x = float(xyz[0] / xyz.sum())
+        y = float(xyz[1] / xyz.sum())
+        denom_i = 0.1858 - y
+        if abs(denom_i) < 1e-9:
+            return None
+        n_i = (x - 0.3320) / denom_i
+        new_guess = 449.0 * n_i**3 + 3525.0 * n_i**2 + 6823.3 * n_i + 5520.33
+        new_guess = float(np.clip(new_guess, 2000.0, 12000.0))
+        if abs(new_guess - cct_guess) < 1.0:
+            cct_guess = new_guess
+            break
+        cct_guess = new_guess
+    denom = 0.1858 - y
+    if abs(denom) < 1e-9:
+        return None
+    n = (x - 0.3320) / denom
+    cct = 449.0 * n**3 + 3525.0 * n**2 + 6823.3 * n + 5520.33
+    cct = float(np.clip(cct, 2000.0, 12000.0))
+    d = -2.0 * x + 12.0 * y + 3.0
+    if abs(d) < 1e-9:
+        return None
+    up, vp = 4.0 * x / d, 9.0 * y / d
+    up_p, vp_p = _planckian_uv_prime(cct)
+    # Positive tint = greener = above the locus in v' (Lightroom convention).
+    tint = float(np.clip((vp - vp_p) * C.TINT_UV_SCALE, -150.0, 150.0))
+    return {"temperature": cct, "tint": tint}
+
+
+def estimate_as_shot_white_balance_mired(camera_whitebalance: Any, daylight_whitebalance: Any) -> dict[str, Any]:
+    """Fallback UI temp/tint from camera gains using an explicitly mired model.
 
     RAW camera gains are relative multipliers.  Let q be the camera R/B gain
     ratio divided by the daylight R/B ratio.  We estimate
     ``mired = 1e6/5500 + 285*log2(q)`` and ``temperature = 1e6/mired``.  More
     red gain therefore means a cooler scene and a larger mired value.  Tint is
     the green residual in stops relative to the red/blue geometric mean,
-    scaled to Lightroom's approximately +/-150 control range.  This is an
-    as-shot UI estimate, not a color-science replacement for a camera matrix.
+    scaled to Lightroom's approximately +/-150 control range.
     """
 
     camera = list(camera_whitebalance or [])
     daylight = list(daylight_whitebalance or [])
     if len(camera) < 3:
-        return {"temperature": 5500, "tint": 0, "camera_whitebalance": [], "daylight_whitebalance": []}
+        return {
+            "temperature": 5500,
+            "tint": 0,
+            "camera_whitebalance": [],
+            "daylight_whitebalance": [],
+            "method": "default",
+        }
 
     red = _finite_positive(camera[0])
     green = _finite_positive(camera[1])
@@ -97,7 +197,13 @@ def estimate_as_shot_white_balance(camera_whitebalance: Any, daylight_whitebalan
     day_red = _finite_positive(daylight[0]) if len(daylight) >= 3 else None
     day_blue = _finite_positive(daylight[2]) if len(daylight) >= 3 else None
     if red is None or green is None or blue is None:
-        return {"temperature": 5500, "tint": 0, "camera_whitebalance": [float(x) for x in camera if _finite_positive(x)], "daylight_whitebalance": [float(x) for x in daylight if _finite_positive(x)]}
+        return {
+            "temperature": 5500,
+            "tint": 0,
+            "camera_whitebalance": [float(x) for x in camera if _finite_positive(x)],
+            "daylight_whitebalance": [float(x) for x in daylight if _finite_positive(x)],
+            "method": "default",
+        }
 
     daylight_ratio = (day_red / day_blue) if day_red and day_blue else 1.0
     relative_rb = (red / blue) / daylight_ratio
@@ -110,7 +216,41 @@ def estimate_as_shot_white_balance(camera_whitebalance: Any, daylight_whitebalan
         "tint": tint,
         "camera_whitebalance": [float(value) for value in camera[:4]],
         "daylight_whitebalance": [float(value) for value in daylight[:4]],
+        "method": "mired",
     }
+
+
+def estimate_as_shot_white_balance(
+    camera_whitebalance: Any = None,
+    daylight_whitebalance: Any = None,
+    *,
+    as_shot_neutral: Any = None,
+    color_matrix: Any = None,
+    color_matrix2: Any = None,
+) -> dict[str, Any]:
+    """Prefer DNG ColorMatrix/McCamy; fall back to the crude mired gain model."""
+    asn = as_shot_neutral
+    if asn is None and camera_whitebalance is not None:
+        camera = list(camera_whitebalance or [])
+        if len(camera) >= 3:
+            red = _finite_positive(camera[0])
+            green = _finite_positive(camera[1])
+            blue = _finite_positive(camera[2])
+            if red and green and blue:
+                # Camera multipliers are relative to green; ASN ∝ G / gains.
+                asn = [green / red, 1.0, green / blue]
+    dng = estimate_temp_tint_from_neutral(asn, color_matrix2, color_matrix)
+    if dng is not None:
+        fallback = estimate_as_shot_white_balance_mired(camera_whitebalance, daylight_whitebalance)
+        return {
+            "temperature": int(round(dng["temperature"])),
+            "tint": int(round(dng["tint"])),
+            "camera_whitebalance": fallback.get("camera_whitebalance") or [],
+            "daylight_whitebalance": fallback.get("daylight_whitebalance") or [],
+            "as_shot_neutral": [float(x) for x in list(asn)[:3]],
+            "method": "dng_mccamy",
+        }
+    return estimate_as_shot_white_balance_mired(camera_whitebalance, daylight_whitebalance)
 
 
 def _resize_linear_uint16(rgb: np.ndarray, max_edge: int = MAX_BASE_EDGE) -> np.ndarray:
@@ -136,6 +276,21 @@ def _resize_linear_uint16(rgb: np.ndarray, max_edge: int = MAX_BASE_EDGE) -> np.
     return np.ascontiguousarray(np.clip(np.rint(resized), 0, np.iinfo(np.uint16).max), dtype=np.uint16)
 
 
+def _rawpy_color_matrix(raw: Any) -> list[float] | None:
+    for attr in ("color_matrix", "rgb_xyz_matrix"):
+        matrix = _matrix_3x3(getattr(raw, attr, None))
+        if matrix is None:
+            continue
+        # rawpy rgb_xyz_matrix is camera→XYZ; DNG ColorMatrix is XYZ→camera.
+        if attr == "rgb_xyz_matrix":
+            try:
+                matrix = np.linalg.inv(matrix)
+            except np.linalg.LinAlgError:
+                continue
+        return [float(x) for x in matrix.reshape(-1)]
+    return None
+
+
 def decode_base(path: str | os.PathLike[str]) -> tuple[np.ndarray, dict[str, Any]]:
     """Decode a half-size, linear uint16 sRGB-primary Develop base image."""
 
@@ -146,10 +301,15 @@ def decode_base(path: str | os.PathLike[str]) -> tuple[np.ndarray, dict[str, Any
         raise FileNotFoundError(source)
     if not is_raw_path(source):
         raise RawDecodeError("Develop supports DNG, CR2, and CR3 files only")
+    as_shot_neutral = None
+    color_matrix = None
+    color_matrix2 = None
+    forward_matrix = None
     try:
         with rawpy.imread(str(source)) as raw:
             camera_wb = list(raw.camera_whitebalance or [])
             daylight_wb = list(raw.daylight_whitebalance or [])
+            color_matrix = _rawpy_color_matrix(raw)
             rgb = raw.postprocess(
                 use_camera_wb=True,
                 output_bps=16,
@@ -172,16 +332,33 @@ def decode_base(path: str | os.PathLike[str]) -> tuple[np.ndarray, dict[str, Any
                 raise RawDecodeError(f"RAW decode failed: {lossy_exc}") from lossy_exc
             camera_wb = list(lossy_meta.get("cam_mul") or [])
             daylight_wb = []
+            as_shot_neutral = lossy_meta.get("as_shot_neutral")
+            color_matrix = lossy_meta.get("color_matrix1")
+            color_matrix2 = lossy_meta.get("color_matrix2")
+            forward_matrix = lossy_meta.get("forward_matrix")
         else:
             raise RawDecodeError(f"RAW decode failed: {exc}") from exc
     rgb = _resize_linear_uint16(np.asarray(rgb, dtype=np.uint16))
     meta = {
-        "as_shot": estimate_as_shot_white_balance(camera_wb, daylight_wb),
+        "as_shot": estimate_as_shot_white_balance(
+            camera_wb,
+            daylight_wb,
+            as_shot_neutral=as_shot_neutral,
+            color_matrix=color_matrix,
+            color_matrix2=color_matrix2,
+        ),
         "width": int(rgb.shape[1]),
         "height": int(rgb.shape[0]),
         "dtype": "uint16",
         "linear": True,
     }
+    if as_shot_neutral and forward_matrix and (color_matrix or color_matrix2):
+        meta["color"] = {
+            "as_shot_neutral": [float(v) for v in as_shot_neutral],
+            "forward_matrix": [float(v) for v in forward_matrix],
+            "color_matrix1": [float(v) for v in color_matrix] if color_matrix else None,
+            "color_matrix2": [float(v) for v in color_matrix2] if color_matrix2 else None,
+        }
     return rgb, meta
 
 

@@ -6,17 +6,29 @@ aberration, noise reduction, color grading, spot removal, pano, and HDR are
 intentionally stored-but-not-rendered in develop v1.
 """
 
-K_TEMP = 0.0007
-K_TINT = 0.0035
+
+# As-shot tint: signed Δv' from the Planckian locus × this scale → LR-ish −150..150.
+TINT_UV_SCALE = 3000.0
 
 LUMA_RED = 0.2126
 LUMA_GREEN = 0.7152
 LUMA_BLUE = 0.0722
 TONE_GAMMA = 2.2
-TONE_HIGHLIGHTS_FACTOR = 0.28
-TONE_SHADOWS_FACTOR = 0.28
-TONE_WHITES_FACTOR = 0.20
-TONE_BLACKS_FACTOR = 0.16
+
+# Log-EV region tone (toneequal-style overlapping Gaussians). Factors are EV at
+# slider ±100 when the Gaussian weight is 1.0. Highlights −100 recovers ~2 EV.
+TONE_HIGHLIGHTS_FACTOR = 2.0
+TONE_SHADOWS_FACTOR = 1.5
+TONE_WHITES_FACTOR = 1.0
+TONE_BLACKS_FACTOR = 1.0
+TONE_EV_SIGMA = 1.8
+TONE_EV_HIGHLIGHTS_CENTER = 1.5
+TONE_EV_WHITES_CENTER = 3.0
+TONE_EV_SHADOWS_CENTER = -3.5
+TONE_EV_BLACKS_CENTER = -6.0
+# Positive Highlights are gentler than recovery so whites do not blow out.
+TONE_HIGHLIGHTS_POS_SCALE = 0.55
+
 CONTRAST_FACTOR = 0.85
 SOFT_CLAMP_FACTOR = 4.0
 TONE_EPSILON = 1e-6
@@ -29,9 +41,51 @@ SRGB_ENCODE_SCALE = 12.92
 SRGB_ENCODE_A = 1.055
 SRGB_ENCODE_B = 0.055
 SRGB_ENCODE_GAMMA = 1.0 / 2.4
+SRGB_DECODE_THRESHOLD = 0.04045
+SRGB_DECODE_SCALE = 1.0 / 12.92
+SRGB_DECODE_A = 0.055
+SRGB_DECODE_GAMMA = 2.4
 
 CURVE_LUT_SIZE = 256
 CURVE_MONOTONE_LIMIT = 3.0
+
+# Fixed Adobe-Color-ish base profile (0..255 control points) + mild chroma lift.
+BASE_PROFILE_POINTS = (
+    (0.0, 0.0),
+    (20.0, 20.0),
+    (40.0, 39.0),
+    (64.0, 81.0),
+    (96.0, 156.0),
+    (128.0, 205.0),
+    (176.0, 232.0),
+    (216.0, 245.0),
+    (255.0, 255.0),
+)
+BASE_PROFILE_SAT = 1.22
+
+# OKLab (Ottosson): linear sRGB → LMS → OKLab. Nested rows, row-major.
+OKLAB_M1 = (
+    (0.4122214708, 0.5363325363, 0.0514459929),
+    (0.2119034982, 0.6806995451, 0.1073969566),
+    (0.0883024619, 0.2817188376, 0.6299787005),
+)
+OKLAB_M2 = (
+    (0.2104542553, 0.7936177850, -0.0040720468),
+    (1.9779984951, -2.4285922050, 0.4505937099),
+    (0.0259040371, 0.7827717662, -0.8086757660),
+)
+OKLAB_M1_INV = (
+    (4.0767416621, -3.3077115913, 0.2309699292),
+    (-1.2684380046, 2.6097574011, -0.3413193965),
+    (-0.0041960863, -0.7034186147, 1.7076147010),
+)
+OKLAB_M2_INV = (
+    (1.0, 0.3963377774, 0.2158037583),
+    (1.0, -0.1055613458, -0.0638541748),
+    (1.0, -0.0894841775, -1.2914855480),
+)
+# Typical max OKLab C for in-gamut sRGB; vibrance sat-ness = C / this.
+OKLAB_C_NORM = 0.13
 
 BAND_NAMES = ("Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple", "Magenta")
 BAND_CENTERS = (0.0, 30.0, 60.0, 120.0, 180.0, 240.0, 280.0, 320.0)
@@ -45,6 +99,8 @@ VIBRANCE_FACTOR = 1.8
 CLARITY_FACTOR = 0.35
 TEXTURE_FACTOR = 0.30
 SHARPEN_FACTOR = 0.9
+SHARPEN_THRESHOLD = 0.004
+CLARITY_RESIDUAL_MAX = 0.25
 BLUR_LARGE_FACTOR = 0.02
 BLUR_SMALL_FACTOR = 0.004
 GAUSSIAN_TRUNCATE = 3.0

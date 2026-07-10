@@ -10,7 +10,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from core.requests import json_object
-from features.develop import importer
+from features.develop import importer, lrcat_import
 
 
 router = APIRouter()
@@ -65,3 +65,30 @@ async def api_scan_develop_import(request: Request):
 @router.get("/api/develop/import/status")
 async def api_develop_import_status():
     return importer.import_status()
+
+
+async def _scan_lrcat_in_background(paths: list[str], db_path: str) -> None:
+    await asyncio.to_thread(lrcat_import.scan_catalogs, paths, db_path, claimed=True)
+
+
+@router.post("/api/develop/lrcat/scan")
+async def api_scan_lrcat(request: Request):
+    payload, error = await json_object(request)
+    if error:
+        return error
+    requested_path = str(payload.get("catalog_path") or "").strip()
+    scan_all = payload.get("all") is True
+    if not requested_path and not scan_all:
+        return JSONResponse({"error": "Provide catalog_path or all: true"}, status_code=400)
+    paths = [requested_path] if requested_path else lrcat_import.catalog_paths()
+    if not paths:
+        return JSONResponse({"error": "No Lightroom catalogs found"}, status_code=404)
+    if not lrcat_import.begin_scan():
+        return JSONResponse({"error": "Lightroom catalog import is already running", "status": lrcat_import.import_status()}, status_code=409)
+    asyncio.create_task(_scan_lrcat_in_background(paths, _configured_db_path()))
+    return {"started": True, "catalogs": paths, "status": lrcat_import.import_status()}
+
+
+@router.get("/api/develop/lrcat/status")
+async def api_lrcat_status():
+    return lrcat_import.import_status()
