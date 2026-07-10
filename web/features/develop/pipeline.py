@@ -27,6 +27,11 @@ def _slider(settings: Mapping[str, object], key: str) -> float:
     return np.clip(_number(settings, key), -100.0, 100.0) / 100.0
 
 
+def _bool(settings: Mapping[str, object], key: str) -> bool:
+    value = settings.get(key)
+    return value is True or value == 1 or str(value).strip().lower() == "true"
+
+
 def _smoothstep(edge0: float, edge1: float, value: np.ndarray) -> np.ndarray:
     t = np.clip((value - edge0) / (edge1 - edge0), 0.0, 1.0)
     return t * t * (3.0 - 2.0 * t)
@@ -403,12 +408,40 @@ def scale_oklab_chroma(
     return linear_to_srgb(linear_out)
 
 
-def _apply_tone_curves(c: np.ndarray, settings: Mapping[str, object]) -> np.ndarray:
+def _camera_profile(color_profile: Mapping[str, object] | None) -> Mapping[str, object] | None:
+    profile = color_profile.get("camera_profile") if isinstance(color_profile, Mapping) else None
+    return profile if isinstance(profile, Mapping) else None
+
+
+def _profile_curve_points(profile: Mapping[str, object] | None) -> object:
+    if not profile:
+        return C.BASE_PROFILE_POINTS
+    nodes = profile.get("tone_nodes")
+    values = profile.get("tone_values")
+    if (
+        not isinstance(nodes, Sequence)
+        or not isinstance(values, Sequence)
+        or len(nodes) != C.CAMERA_PROFILE_TONE_NODES
+        or len(values) != C.CAMERA_PROFILE_TONE_NODES
+    ):
+        return C.BASE_PROFILE_POINTS
+    try:
+        return [(float(node) * 255.0, float(values[index]) * 255.0) for index, node in enumerate(nodes)]
+    except (TypeError, ValueError):
+        return C.BASE_PROFILE_POINTS
+
+
+def _apply_tone_curves(
+    c: np.ndarray,
+    settings: Mapping[str, object],
+    camera_profile: Mapping[str, object] | None = None,
+) -> np.ndarray:
     result = c.copy()
-    base_lut = build_monotone_cubic_lut(C.BASE_PROFILE_POINTS)
+    base_lut = build_monotone_cubic_lut(_profile_curve_points(camera_profile))
     for index in range(3):
         result[..., index] = _apply_lut(c[..., index], base_lut)
-    result = scale_oklab_chroma(result, multiply=C.BASE_PROFILE_SAT)
+    if camera_profile is None:
+        result = scale_oklab_chroma(result, multiply=C.BASE_PROFILE_SAT)
     main_lut = build_monotone_cubic_lut(settings.get("ToneCurvePV2012"))
     # A main curve is RGB-linked; component curves are applied after it.
     curved = result.copy()
@@ -419,6 +452,157 @@ def _apply_tone_curves(c: np.ndarray, settings: Mapping[str, object]) -> np.ndar
             curved[..., index], build_monotone_cubic_lut(settings.get(f"ToneCurvePV2012{suffix}"))
         )
     return curved
+
+
+def apply_camera_profile_ab(srgb: np.ndarray, profile: Mapping[str, object] | None) -> np.ndarray:
+    """Apply the fitted circular hue x chroma OKLab residual table."""
+    if not profile:
+        return srgb
+    try:
+        table = np.asarray(profile["oklab_ab_delta"], dtype=np.float32)
+        edges = np.asarray(profile["chroma_edges"], dtype=np.float32)
+    except (KeyError, TypeError, ValueError):
+        return srgb
+    if table.shape != (C.CAMERA_PROFILE_HUE_BINS, C.CAMERA_PROFILE_CHROMA_BINS, 2) or edges.shape != (4,):
+        return srgb
+    linear = srgb_to_linear(srgb)
+    lab = linear_to_oklab(linear)
+    a, b = lab[..., 1], lab[..., 2]
+    hue_position = (
+        (np.arctan2(b, a) + C.CAMERA_PROFILE_PI)
+        / C.CAMERA_PROFILE_TWO_PI
+        * C.CAMERA_PROFILE_HUE_BINS
+        - C.CAMERA_PROFILE_BIN_CENTER
+    )
+    hue_floor = np.floor(hue_position)
+    hue_mix = (hue_position - hue_floor).astype(np.float32)
+    hue0 = np.mod(hue_floor.astype(np.intp), C.CAMERA_PROFILE_HUE_BINS)
+    hue1 = (hue0 + 1) % C.CAMERA_PROFILE_HUE_BINS
+
+    chroma = np.hypot(a, b)
+    centers = np.asarray(
+        [
+            edges[0] * C.CAMERA_PROFILE_BIN_CENTER,
+            (edges[0] + edges[1]) * C.CAMERA_PROFILE_BIN_CENTER,
+            (edges[1] + edges[2]) * C.CAMERA_PROFILE_BIN_CENTER,
+        ],
+        dtype=np.float32,
+    )
+    chroma0 = np.where(chroma < centers[1], 0, 1).astype(np.intp)
+    chroma1 = np.minimum(chroma0 + 1, C.CAMERA_PROFILE_CHROMA_BINS - 1)
+    left, right = centers[chroma0], centers[chroma1]
+    chroma_mix = np.divide(
+        chroma - left,
+        right - left,
+        out=np.zeros_like(chroma, dtype=np.float32),
+        where=right > left,
+    )
+    chroma_mix = np.clip(chroma_mix, 0.0, 1.0)
+    delta0 = table[hue0, chroma0] * (1.0 - hue_mix[..., None]) + table[hue1, chroma0] * hue_mix[..., None]
+    delta1 = table[hue0, chroma1] * (1.0 - hue_mix[..., None]) + table[hue1, chroma1] * hue_mix[..., None]
+    delta = delta0 * (1.0 - chroma_mix[..., None]) + delta1 * chroma_mix[..., None]
+    adjusted = lab.copy()
+    adjusted[..., 1:3] += delta
+    return linear_to_srgb(_gamut_clip_desaturate(oklab_to_linear(adjusted)))
+
+
+def lens_radial_scale(radius: np.ndarray | float, distortion: Mapping[str, object] | None) -> np.ndarray:
+    """Map corrected radius to distorted source radius for Lensfun models."""
+    r = np.asarray(radius, dtype=np.float32)
+    if not distortion:
+        return np.ones_like(r)
+    try:
+        terms = [float(value) for value in distortion.get("terms", ())]
+    except (TypeError, ValueError):
+        return np.ones_like(r)
+    model = str(distortion.get("model") or "").lower()
+    r2 = r * r
+    if model == "poly3" and terms:
+        return (1.0 - terms[0] + terms[0] * r2).astype(np.float32)
+    if model == "poly5" and len(terms) >= 2:
+        return (1.0 + terms[0] * r2 + terms[1] * r2 * r2).astype(np.float32)
+    if model == "ptlens" and len(terms) >= 3:
+        a, b, c = terms[:3]
+        return (a * r * r2 + b * r2 + c * r + 1.0 - a - b - c).astype(np.float32)
+    return np.ones_like(r)
+
+
+def lens_vignetting_gain(radius: np.ndarray | float, vignetting: Mapping[str, object] | None) -> np.ndarray:
+    """Return Lensfun's PA linear-domain radial correction gain."""
+    r = np.asarray(radius, dtype=np.float32)
+    if not vignetting or str(vignetting.get("model") or "").lower() != "pa":
+        return np.ones_like(r)
+    try:
+        k1, k2, k3 = [float(value) for value in vignetting.get("terms", ())[:3]]
+    except (TypeError, ValueError):
+        return np.ones_like(r)
+    r2 = r * r
+    gain = 1.0 + k1 * r2 + k2 * r2 * r2 + k3 * r2 * r2 * r2
+    return np.clip(gain, C.LENS_VIGNETTE_GAIN_MIN, C.LENS_VIGNETTE_GAIN_MAX).astype(np.float32)
+
+
+def _full_canvas_source(rgb: np.ndarray, canvas_size: tuple[int, int]) -> np.ndarray | None:
+    root = rgb
+    while isinstance(getattr(root, "base", None), np.ndarray):
+        root = root.base
+    width, height = canvas_size
+    return root if root.ndim == 3 and root.shape == (height, width, 3) else None
+
+
+def _bilinear_sample(rgb: np.ndarray, x: np.ndarray, y: np.ndarray) -> np.ndarray:
+    height, width = rgb.shape[:2]
+    valid = (x >= 0.0) & (x <= width - 1) & (y >= 0.0) & (y <= height - 1)
+    x0 = np.clip(np.floor(x).astype(np.intp), 0, width - 1)
+    y0 = np.clip(np.floor(y).astype(np.intp), 0, height - 1)
+    x1, y1 = np.minimum(x0 + 1, width - 1), np.minimum(y0 + 1, height - 1)
+    wx, wy = (x - x0)[..., None], (y - y0)[..., None]
+    top = rgb[y0, x0] * (1.0 - wx) + rgb[y0, x1] * wx
+    bottom = rgb[y1, x0] * (1.0 - wx) + rgb[y1, x1] * wx
+    sampled = top * (1.0 - wy) + bottom * wy
+    sampled[~valid] = 0.0
+    return sampled.astype(np.float32)
+
+
+def _apply_lens_correction(
+    rgb: np.ndarray,
+    settings: Mapping[str, object],
+    color_profile: Mapping[str, object] | None,
+    *,
+    pixel_offset: tuple[int, int],
+    canvas_size: tuple[int, int] | None,
+) -> np.ndarray:
+    if (
+        not _bool(settings, "LensProfileEnable")
+        or not isinstance(color_profile, Mapping)
+        or _bool(color_profile, "hdr")
+    ):
+        return rgb
+    correction = color_profile.get("lens_correction")
+    if not isinstance(correction, Mapping):
+        return rgb
+    height, width = rgb.shape[:2]
+    canvas_width, canvas_height = canvas_size or (width, height)
+    offset_x, offset_y = pixel_offset
+    x = np.arange(width, dtype=np.float32) + offset_x + C.LENS_IMAGE_CENTER
+    y = np.arange(height, dtype=np.float32) + offset_y + C.LENS_IMAGE_CENTER
+    half_min = min(canvas_width, canvas_height) / C.LENS_NORMALIZED_HALF_MIN
+    crop_ratio = float(correction.get("lens_crop_factor") or 1.0) / max(
+        float(correction.get("camera_crop_factor") or 1.0), C.TONE_EPSILON
+    )
+    px = (x[None, :] - canvas_width * C.LENS_IMAGE_CENTER) / half_min * crop_ratio
+    py = (y[:, None] - canvas_height * C.LENS_IMAGE_CENTER) / half_min * crop_ratio
+    radius = np.sqrt(px * px + py * py)
+    radial_scale = lens_radial_scale(radius, correction.get("distortion"))
+    source_x = canvas_width * C.LENS_IMAGE_CENTER + px / crop_ratio * radial_scale * half_min - C.LENS_IMAGE_CENTER
+    source_y = canvas_height * C.LENS_IMAGE_CENTER + py / crop_ratio * radial_scale * half_min - C.LENS_IMAGE_CENTER
+    full_source = _full_canvas_source(rgb, (canvas_width, canvas_height))
+    if full_source is not None:
+        result = _bilinear_sample(full_source, source_x, source_y)
+    else:
+        result = _bilinear_sample(rgb, source_x - offset_x, source_y - offset_y)
+    source_radius = radius * radial_scale
+    gain = lens_vignetting_gain(source_radius, correction.get("vignetting"))
+    return (result * gain[..., None]).astype(np.float32)
 
 
 def rgb_to_hsv(rgb: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -663,6 +847,13 @@ def apply_pipeline(
     rgb = np.asarray(linear_rgb, dtype=np.float32)
     if rgb.ndim != 3 or rgb.shape[-1] != 3:
         raise ValueError("linear_rgb must have shape (height, width, 3)")
+    rgb = _apply_lens_correction(
+        rgb,
+        settings,
+        color_profile,
+        pixel_offset=pixel_offset,
+        canvas_size=canvas_size,
+    )
     rgb = _apply_white_balance(rgb, settings, asshot_temperature, asshot_tint, color_profile)
     rgb *= np.float32(np.exp2(_number(settings, "Exposure2012")))
     rgb = _region_tone_map(rgb, settings)
@@ -671,8 +862,11 @@ def apply_pipeline(
         rgb = (rgb - C.DEHAZE_AIRLIGHT_FACTOR * dehaze) / (1.0 - C.DEHAZE_AIRLIGHT_FACTOR * dehaze)
         rgb = np.maximum(rgb, 0.0)
     c = linear_to_srgb(rgb)
-    c = _apply_tone_curves(c, settings)
+    fitted_profile = _camera_profile(color_profile)
+    c = _apply_tone_curves(c, settings, fitted_profile)
     c = _hsl_and_black_white(c, settings, dehaze)
+    if not _bool(settings, "ConvertToGrayscale"):
+        c = apply_camera_profile_ab(c, fitted_profile)
     # Local corrections live exactly between global HSL/vibrance and global
     # detail. Import lazily so masks.py can remain a standalone raster/math twin.
     from .masks import apply_local_corrections, has_local_adjustments

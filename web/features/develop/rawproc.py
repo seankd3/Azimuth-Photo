@@ -27,6 +27,8 @@ except ImportError:  # pragma: no cover - rawpy is an application dependency.
     rawpy = None
 
 from . import ops_constants as C
+from .camera_profile import load_camera_profile
+from .lens import normalized_source_metadata, read_exif, resolve_lens_correction
 
 
 RAW_EXTENSIONS = {".dng", ".cr2", ".cr3"}
@@ -37,6 +39,7 @@ BASE_MAGIC = b"PABASE1\0"
 BASE_HEADER = struct.Struct("<8sII")
 MAX_BASE_EDGE = 2048
 MEMORY_BASE_LIMIT = 2
+SOURCE_META_VERSION = 1
 
 
 class RawDecodeError(RuntimeError):
@@ -368,7 +371,32 @@ def decode_base(path: str | os.PathLike[str]) -> tuple[np.ndarray, dict[str, Any
             "color_matrix1": [float(v) for v in color_matrix] if color_matrix else None,
             "color_matrix2": [float(v) for v in color_matrix2] if color_matrix2 else None,
         }
-    return rgb, meta
+    return rgb, _enrich_source_metadata(meta, source)
+
+
+def _enrich_source_metadata(meta: dict[str, Any], path: str | os.PathLike[str]) -> dict[str, Any]:
+    """Attach camera/profile/lens data, including to already-cached bases."""
+    if int(meta.get("source_meta_version") or 0) >= SOURCE_META_VERSION:
+        return meta
+    source = dict(read_exif(str(path)))
+    source.update({key: value for key, value in meta.items() if value not in (None, "")})
+    normalized = normalized_source_metadata(source)
+    for key, value in normalized.items():
+        if value not in (None, ""):
+            meta[key] = value
+    fitted = load_camera_profile(normalized.get("camera_model") or "")
+    correction = resolve_lens_correction(normalized)
+    color = dict(meta.get("color") or {})
+    if fitted is not None:
+        meta["camera_profile"] = fitted
+        color["camera_profile"] = fitted
+    if correction is not None:
+        meta["lens_correction"] = correction
+        color["lens_correction"] = correction
+    if color:
+        meta["color"] = color
+    meta["source_meta_version"] = SOURCE_META_VERSION
+    return meta
 
 
 def _linear_to_srgb(linear: np.ndarray) -> np.ndarray:
@@ -390,9 +418,13 @@ def _write_base_cache(paths: BasePaths, rgb: np.ndarray, meta: dict[str, Any]) -
     Image.fromarray(encoded, mode="RGB").save(preview_temp, format="JPEG", quality=88)
     os.replace(preview_temp, paths.preview)
 
-    metadata_temp = paths.metadata.with_suffix(".json.tmp")
+    _write_base_metadata(paths.metadata, meta)
+
+
+def _write_base_metadata(path: Path, meta: dict[str, Any]) -> None:
+    metadata_temp = path.with_suffix(".json.tmp")
     metadata_temp.write_text(json.dumps(meta, separators=(",", ":")), encoding="utf-8")
-    os.replace(metadata_temp, paths.metadata)
+    os.replace(metadata_temp, path)
 
 
 def read_base_metadata(image_id: int) -> dict[str, Any] | None:
@@ -400,6 +432,15 @@ def read_base_metadata(image_id: int) -> dict[str, Any] | None:
         return json.loads(base_paths(image_id).metadata.read_text(encoding="utf-8"))
     except (OSError, ValueError, TypeError):
         return None
+
+
+def _upgrade_cached_metadata(paths: BasePaths, source_path: str | os.PathLike[str]) -> dict[str, Any]:
+    meta = read_base_metadata(int(paths.metadata.stem)) or {}
+    before = json.dumps(meta, sort_keys=True, separators=(",", ":"))
+    meta = _enrich_source_metadata(meta, source_path)
+    if json.dumps(meta, sort_keys=True, separators=(",", ":")) != before:
+        _write_base_metadata(paths.metadata, meta)
+    return meta
 
 
 def parse_base_payload(payload: bytes) -> tuple[np.ndarray, int, int]:
@@ -422,13 +463,13 @@ def ensure_base_cache(image_id: int, path: str | os.PathLike[str]) -> tuple[Base
 
     paths = base_paths(image_id)
     if paths.binary.exists() and paths.metadata.exists() and paths.preview.exists():
-        return paths, read_base_metadata(image_id) or {}
+        return paths, _upgrade_cached_metadata(paths, path)
     if is_hdr_merge_path(path):
         raise RawDecodeError("HDR merge base cache is unavailable")
     lock = _image_lock(image_id)
     with lock:
         if paths.binary.exists() and paths.metadata.exists() and paths.preview.exists():
-            return paths, read_base_metadata(image_id) or {}
+            return paths, _upgrade_cached_metadata(paths, path)
         recent = _recent_decodes.pop(int(image_id), None)
         if recent is None:
             rgb, meta = decode_base(path)

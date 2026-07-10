@@ -1,10 +1,13 @@
 import {
-    BAND_NAMES, BASE_PROFILE_SAT, BLUR_LARGE_FACTOR, BLUR_SMALL_FACTOR, CLARITY_FACTOR,
+    BAND_NAMES, BASE_PROFILE_SAT, BLUR_LARGE_FACTOR, BLUR_SMALL_FACTOR, CAMERA_PROFILE_BIN_CENTER,
+    CAMERA_PROFILE_CHROMA_BINS, CAMERA_PROFILE_HUE_BINS, CAMERA_PROFILE_PI,
+    CAMERA_PROFILE_TWO_PI, CLARITY_FACTOR,
     CLARITY_RESIDUAL_MAX, CONTRAST_FACTOR, DEHAZE_AIRLIGHT_FACTOR, DEHAZE_SATURATION_FACTOR,
     GRAIN_CELL_SIZE_MIN, GRAIN_CELL_SIZE_RANGE, GRAIN_FACTOR, GRAIN_HASH_MULTIPLIER,
     GRAIN_HASH_SHIFT, GRAIN_OUTPUT_MASK, GRAIN_OUTPUT_SHIFT, GRAIN_SEED,
     GRAIN_X_MULTIPLIER, GRAIN_Y_MULTIPLIER, GRAY_MIXER_FACTOR, HSL_LUMINANCE_FACTOR,
-    HUE_SHIFT_DEGREES, LUMA_BLUE, LUMA_GREEN, LUMA_RED, TINT_UV_SCALE,
+    HUE_SHIFT_DEGREES, LENS_IMAGE_CENTER, LENS_NORMALIZED_HALF_MIN, LENS_VIGNETTE_GAIN_MAX,
+    LENS_VIGNETTE_GAIN_MIN, LUMA_BLUE, LUMA_GREEN, LUMA_RED, TINT_UV_SCALE,
     LOCAL_HUE_DEGREES, LOCAL_MASK_ATLAS_COLUMNS, LOCAL_RENDER_CAP,
     LOCAL_WB_TEMP_FACTOR, LOCAL_WB_TINT_FACTOR,
     OKLAB_C_NORM, OKLAB_M1, OKLAB_M1_INV, OKLAB_M2, OKLAB_M2_INV,
@@ -110,6 +113,38 @@ vec3 scaleOklabChroma(vec3 srgb, float multiply, float saturation, float vibranc
     float chromaNew = max(chroma * scale + vibrance * (1.0 - satness) * satness * ${f(VIBRANCE_FACTOR)} * ${f(OKLAB_C_NORM)}, 0.0);
     if (chroma > 1e-6) lab.yz *= chromaNew / chroma;
     else lab.yz = vec2(0.0);
+    return linearToSrgb(gamutClipDesat(oklabToLinear(lab), lab));
+}
+vec3 applyCameraProfileAb(vec3 srgb) {
+    if (!u_cameraProfile) return srgb;
+    vec3 lab = linearToOklab(srgbToLinear(srgb));
+    float chroma = length(lab.yz);
+    float huePosition = (atan(lab.z, lab.y) + ${f(CAMERA_PROFILE_PI)})
+        / ${f(CAMERA_PROFILE_TWO_PI)} * ${f(CAMERA_PROFILE_HUE_BINS)} - ${f(CAMERA_PROFILE_BIN_CENTER)};
+    float hueFloor = floor(huePosition);
+    float hueMix = huePosition - hueFloor;
+    int hue0 = int(mod(hueFloor, float(${CAMERA_PROFILE_HUE_BINS})));
+    if (hue0 < 0) hue0 += ${CAMERA_PROFILE_HUE_BINS};
+    int hue1 = (hue0 + 1) % ${CAMERA_PROFILE_HUE_BINS};
+    vec3 centers = vec3(
+        u_cameraChromaEdges[0] * ${f(CAMERA_PROFILE_BIN_CENTER)},
+        (u_cameraChromaEdges[0] + u_cameraChromaEdges[1]) * ${f(CAMERA_PROFILE_BIN_CENTER)},
+        (u_cameraChromaEdges[1] + u_cameraChromaEdges[2]) * ${f(CAMERA_PROFILE_BIN_CENTER)}
+    );
+    int chroma0 = chroma < centers.y ? 0 : 1;
+    int chroma1 = min(chroma0 + 1, ${CAMERA_PROFILE_CHROMA_BINS - 1});
+    float left = centers[chroma0];
+    float right = centers[chroma1];
+    float chromaMix = right > left ? clamp((chroma - left) / (right - left), 0.0, 1.0) : 0.0;
+    vec2 delta0 = mix(
+        u_cameraAbDelta[hue0 * ${CAMERA_PROFILE_CHROMA_BINS} + chroma0],
+        u_cameraAbDelta[hue1 * ${CAMERA_PROFILE_CHROMA_BINS} + chroma0], hueMix
+    );
+    vec2 delta1 = mix(
+        u_cameraAbDelta[hue0 * ${CAMERA_PROFILE_CHROMA_BINS} + chroma1],
+        u_cameraAbDelta[hue1 * ${CAMERA_PROFILE_CHROMA_BINS} + chroma1], hueMix
+    );
+    lab.yz += mix(delta0, delta1, chromaMix);
     return linearToSrgb(gamutClipDesat(oklabToLinear(lab), lab));
 }
 vec3 rgbToHsv(vec3 c) {
@@ -257,6 +292,16 @@ uniform sampler2D u_source;
 uniform sampler2D u_curve;
 uniform sampler2D u_baseCurve;
 uniform vec2 u_sourceSize;
+uniform float u_baseProfileSat;
+uniform bool u_cameraProfile;
+uniform vec2 u_cameraAbDelta[${CAMERA_PROFILE_HUE_BINS * CAMERA_PROFILE_CHROMA_BINS}];
+uniform float u_cameraChromaEdges[${CAMERA_PROFILE_CHROMA_BINS + 1}];
+uniform bool u_lensProfile;
+uniform int u_lensModel;
+uniform vec3 u_lensTerms;
+uniform bool u_lensVignetting;
+uniform vec3 u_lensVignetteTerms;
+uniform float u_lensCropRatio;
 uniform mat3 u_wbMatrix;
 uniform bool u_applyWb;
 uniform float u_exposure;
@@ -278,26 +323,56 @@ uniform bool u_applyGeometry;
 `;
 
 const COLOR_FUNCTION = `
+float lensRadius(vec2 uv) {
+    float halfMin = min(u_sourceSize.x, u_sourceSize.y) / ${f(LENS_NORMALIZED_HALF_MIN)};
+    vec2 p = (uv * u_sourceSize - u_sourceSize * ${f(LENS_IMAGE_CENTER)}) / halfMin * u_lensCropRatio;
+    return length(p);
+}
+float lensRadialScale(float radius) {
+    float r2 = radius * radius;
+    if (u_lensModel == 1) return 1.0 - u_lensTerms.x + u_lensTerms.x * r2;
+    if (u_lensModel == 2) return 1.0 + u_lensTerms.x * r2 + u_lensTerms.y * r2 * r2;
+    if (u_lensModel == 3) return u_lensTerms.x * radius * r2 + u_lensTerms.y * r2
+        + u_lensTerms.z * radius + 1.0 - u_lensTerms.x - u_lensTerms.y - u_lensTerms.z;
+    return 1.0;
+}
+vec2 lensDistortedUv(vec2 uv) {
+    if (!u_lensProfile) return uv;
+    float halfMin = min(u_sourceSize.x, u_sourceSize.y) / ${f(LENS_NORMALIZED_HALF_MIN)};
+    vec2 p = (uv * u_sourceSize - u_sourceSize * ${f(LENS_IMAGE_CENTER)}) / halfMin * u_lensCropRatio;
+    p *= lensRadialScale(length(p));
+    return (u_sourceSize * ${f(LENS_IMAGE_CENTER)} + p / u_lensCropRatio * halfMin) / u_sourceSize;
+}
+float lensVignetteGain(vec2 sourceUv) {
+    if (!u_lensVignetting) return 1.0;
+    float radius = lensRadius(sourceUv);
+    float r2 = radius * radius;
+    return clamp(1.0 + u_lensVignetteTerms.x * r2 + u_lensVignetteTerms.y * r2 * r2
+        + u_lensVignetteTerms.z * r2 * r2 * r2,
+        ${f(LENS_VIGNETTE_GAIN_MIN)}, ${f(LENS_VIGNETTE_GAIN_MAX)});
+}
 vec2 orientedUv(vec2 uv) {
-    if (!u_applyGeometry) return uv;
-    if (u_orientation == 3) uv = vec2(1.0) - uv;
-    else if (u_orientation == 6) uv = vec2(uv.y, 1.0 - uv.x);
-    else if (u_orientation == 8) uv = vec2(1.0 - uv.y, uv.x);
-    vec2 cropSize = max(u_crop.zw - u_crop.xy, vec2(.0001));
-    vec2 p = u_crop.xy + uv * cropSize;
-    vec2 center = (u_crop.xy + u_crop.zw) * .5;
-    vec2 q = p - center;
-    float aspect = u_sourceSize.x / max(u_sourceSize.y, 1.0);
-    q.x *= aspect;
-    float a = radians(u_angle);
-    q = mat2(cos(a), -sin(a), sin(a), cos(a)) * q;
-    q.x /= aspect;
-    return center + q;
+    if (u_applyGeometry) {
+        if (u_orientation == 3) uv = vec2(1.0) - uv;
+        else if (u_orientation == 6) uv = vec2(uv.y, 1.0 - uv.x);
+        else if (u_orientation == 8) uv = vec2(1.0 - uv.y, uv.x);
+        vec2 cropSize = max(u_crop.zw - u_crop.xy, vec2(.0001));
+        vec2 p = u_crop.xy + uv * cropSize;
+        vec2 center = (u_crop.xy + u_crop.zw) * .5;
+        vec2 q = p - center;
+        float aspect = u_sourceSize.x / max(u_sourceSize.y, 1.0);
+        q.x *= aspect;
+        float a = radians(u_angle);
+        q = mat2(cos(a), -sin(a), sin(a), cos(a)) * q;
+        q.x /= aspect;
+        uv = center + q;
+    }
+    return lensDistortedUv(uv);
 }
 vec3 applyColor(vec2 uv, out vec2 imageUv) {
     imageUv = orientedUv(uv);
     if (any(lessThan(imageUv, vec2(0.0))) || any(greaterThan(imageUv, vec2(1.0)))) return vec3(0.0);
-    vec3 rgb = texture(u_source, imageUv).rgb;
+    vec3 rgb = texture(u_source, imageUv).rgb * lensVignetteGain(imageUv);
     if (u_applyWb) rgb = max(u_wbMatrix * rgb, vec3(0.0));
     rgb *= exp2(u_exposure);
     float Y = dot(rgb, LUMW);
@@ -322,34 +397,36 @@ vec3 applyColor(vec2 uv, out vec2 imageUv) {
     if (abs(d) > 1e-5) rgb = max((rgb - vec3(${f(DEHAZE_AIRLIGHT_FACTOR)} * d)) / (1.0 - ${f(DEHAZE_AIRLIGHT_FACTOR)} * d), vec3(0.0));
     vec3 c = linearToSrgb(clamp(rgb, 0.0, 1.0));
     c = vec3(texture(u_baseCurve, vec2(c.r, .5)).r, texture(u_baseCurve, vec2(c.g, .5)).r, texture(u_baseCurve, vec2(c.b, .5)).r);
-    c = scaleOklabChroma(c, ${f(BASE_PROFILE_SAT)}, 0.0, 0.0, 0.0);
+    c = scaleOklabChroma(c, u_baseProfileSat, 0.0, 0.0, 0.0);
     vec3 mainCurve = vec3(texture(u_curve, vec2(c.r, .5)).r, texture(u_curve, vec2(c.g, .5)).r, texture(u_curve, vec2(c.b, .5)).r);
     c = vec3(texture(u_curve, vec2(mainCurve.r, .5)).g, texture(u_curve, vec2(mainCurve.g, .5)).b, texture(u_curve, vec2(mainCurve.b, .5)).a);
-    if (!u_useHsl) return c;
-    vec3 beforeHsl = c;
-    vec3 hsv = rgbToHsv(c);
-    float hue = hsv.x * 360.0;
-    float neutral = smoothstep(.04, .18, hsv.y);
-    float hueDelta = 0.0;
-    float satDelta = 0.0;
-    float lumDelta = 0.0;
-    float grayDelta = 0.0;
-    for (int i = 0; i < 8; i++) {
-        float weight = bandWeight(hue, i);
-        hueDelta += weight * neutral * setting(u_hue[i]) * ${f(HUE_SHIFT_DEGREES)};
-        satDelta += weight * neutral * setting(u_hslSat[i]);
-        lumDelta += weight * neutral * setting(u_hslLum[i]) * ${f(HSL_LUMINANCE_FACTOR)};
-        grayDelta += weight * setting(u_gray[i]) * ${f(GRAY_MIXER_FACTOR)};
+    if (u_useHsl) {
+        vec3 beforeHsl = c;
+        vec3 hsv = rgbToHsv(c);
+        float hue = hsv.x * 360.0;
+        float neutral = smoothstep(.04, .18, hsv.y);
+        float hueDelta = 0.0;
+        float satDelta = 0.0;
+        float lumDelta = 0.0;
+        float grayDelta = 0.0;
+        for (int i = 0; i < 8; i++) {
+            float weight = bandWeight(hue, i);
+            hueDelta += weight * neutral * setting(u_hue[i]) * ${f(HUE_SHIFT_DEGREES)};
+            satDelta += weight * neutral * setting(u_hslSat[i]);
+            lumDelta += weight * neutral * setting(u_hslLum[i]) * ${f(HSL_LUMINANCE_FACTOR)};
+            grayDelta += weight * setting(u_gray[i]) * ${f(GRAY_MIXER_FACTOR)};
+        }
+        if (u_grayscale) {
+            c = vec3(dot(beforeHsl, LUMW) * (1.0 + grayDelta));
+        } else {
+            hsv.x = fract((hue + hueDelta) / 360.0);
+            hsv.y *= 1.0 + satDelta;
+            hsv.z *= 1.0 + lumDelta;
+            hsv.y = sat(hsv.y);
+            c = scaleOklabChroma(hsvToRgb(hsv), 1.0, setting(u_saturation), setting(u_vibrance), d);
+        }
     }
-    if (u_grayscale) {
-        c = vec3(dot(beforeHsl, LUMW) * (1.0 + grayDelta));
-    } else {
-        hsv.x = fract((hue + hueDelta) / 360.0);
-        hsv.y *= 1.0 + satDelta;
-        hsv.z *= 1.0 + lumDelta;
-        hsv.y = sat(hsv.y);
-        c = scaleOklabChroma(hsvToRgb(hsv), 1.0, setting(u_saturation), setting(u_vibrance), d);
-    }
+    if (!u_grayscale) c = applyCameraProfileAb(c);
     return c;
 }
 `;
@@ -660,7 +737,8 @@ export class DevelopRenderer {
         this.maskAtlas = maskTexture(this.gl, LOCAL_MASK_ATLAS_COLUMNS, LOCAL_MASK_ATLAS_COLUMNS, new Uint8Array(LOCAL_MASK_ATLAS_COLUMNS ** 2));
         this.maskRasters = [];
         this.maskOverlay = -1;
-        this.updateBaseCurve();
+        this.baseProfileKey = '';
+        this.updateBaseCurve(null);
         this.updateCurve({});
     }
 
@@ -711,10 +789,10 @@ export class DevelopRenderer {
         this.targets = next;
     }
 
-    updateBaseCurve() {
+    updateBaseCurve(profile = null) {
         const gl = this.gl;
         if (this.baseCurve) gl.deleteTexture(this.baseCurve);
-        const lut = buildBaseProfileLut();
+        const lut = buildBaseProfileLut(profile);
         const data = new Float32Array(256 * 4);
         for (let i = 0; i < 256; i += 1) {
             data[i * 4] = lut[i];
@@ -740,6 +818,12 @@ export class DevelopRenderer {
     setSettings(settings, meta = this.meta, _opts = {}) {
         this.settings = settings || {};
         this.meta = meta || {};
+        const profile = this.meta.camera_profile || this.meta.color?.camera_profile || null;
+        const profileKey = profile?.slug || profile?.model || '';
+        if (profileKey !== this.baseProfileKey) {
+            this.baseProfileKey = profileKey;
+            this.updateBaseCurve(profile);
+        }
         this.updateCurve(this.settings);
         this.requestRender();
     }
@@ -801,6 +885,40 @@ export class DevelopRenderer {
         gl.uniform1i(uniform('u_curve'), 1);
         gl.uniform1i(uniform('u_baseCurve'), 5);
         gl.uniform2f(uniform('u_sourceSize'), this.width, this.height);
+        const profile = this.meta.camera_profile || this.meta.color?.camera_profile || null;
+        const profileTable = new Float32Array(CAMERA_PROFILE_HUE_BINS * CAMERA_PROFILE_CHROMA_BINS * 2);
+        if (Array.isArray(profile?.oklab_ab_delta)) {
+            let cursor = 0;
+            for (const hueRow of profile.oklab_ab_delta.slice(0, CAMERA_PROFILE_HUE_BINS)) {
+                for (const delta of (Array.isArray(hueRow) ? hueRow : []).slice(0, CAMERA_PROFILE_CHROMA_BINS)) {
+                    profileTable[cursor] = Number(delta?.[0]) || 0;
+                    profileTable[cursor + 1] = Number(delta?.[1]) || 0;
+                    cursor += 2;
+                }
+            }
+        }
+        const profileEdges = Array.isArray(profile?.chroma_edges)
+            && profile.chroma_edges.length === CAMERA_PROFILE_CHROMA_BINS + 1
+            ? profile.chroma_edges.map(Number) : [0.02, 0.06, 0.12, 1.0];
+        gl.uniform1f(uniform('u_baseProfileSat'), profile ? 1 : BASE_PROFILE_SAT);
+        gl.uniform1i(uniform('u_cameraProfile'), profile ? 1 : 0);
+        gl.uniform2fv(uniform('u_cameraAbDelta[0]'), profileTable);
+        gl.uniform1fv(uniform('u_cameraChromaEdges[0]'), new Float32Array(profileEdges));
+        const lens = this.meta.lens_correction || this.meta.color?.lens_correction || null;
+        const lensEnabled = boolSetting(s, 'LensProfileEnable') && !this.meta.hdr && !!lens;
+        const distortion = lens?.distortion || null;
+        const lensModel = { poly3: 1, poly5: 2, ptlens: 3 }[String(distortion?.model || '').toLowerCase()] || 0;
+        const lensTerms = Array.isArray(distortion?.terms) ? distortion.terms.map(Number) : [0, 0, 0];
+        const lensVignetting = lens?.vignetting?.model === 'pa' ? lens.vignetting : null;
+        const vignetteTerms = Array.isArray(lensVignetting?.terms) ? lensVignetting.terms.map(Number) : [0, 0, 0];
+        const cameraCrop = Number(lens?.camera_crop_factor) || 1;
+        const lensCrop = Number(lens?.lens_crop_factor) || 1;
+        gl.uniform1i(uniform('u_lensProfile'), lensEnabled && lensModel ? 1 : 0);
+        gl.uniform1i(uniform('u_lensModel'), lensModel);
+        gl.uniform3f(uniform('u_lensTerms'), lensTerms[0] || 0, lensTerms[1] || 0, lensTerms[2] || 0);
+        gl.uniform1i(uniform('u_lensVignetting'), lensEnabled && lensVignetting ? 1 : 0);
+        gl.uniform3f(uniform('u_lensVignetteTerms'), vignetteTerms[0] || 0, vignetteTerms[1] || 0, vignetteTerms[2] || 0);
+        gl.uniform1f(uniform('u_lensCropRatio'), lensCrop / cameraCrop);
         const asShotT = Number(this.meta.as_shot_temperature || this.meta.temperature || 5500);
         const asShotTint = Number(this.meta.as_shot_tint || 0);
         const userT = numberSetting(s, 'Temperature', asShotT);
@@ -1011,14 +1129,14 @@ export function syntheticLinearRgba(size = 64) {
     return data;
 }
 
-export async function renderSyntheticPixels(settings = {}) {
+export async function renderSyntheticPixels(settings = {}, meta = {}) {
     const canvas = document.createElement('canvas');
     canvas.width = 64;
     canvas.height = 64;
     const renderer = new DevelopRenderer(canvas);
     renderer.geometryEnabled = false;
     renderer.uploadSource(syntheticLinearRgba(64), 64, 64);
-    renderer.setSettings(settings, { as_shot_temperature: 5150, as_shot_tint: 0 });
+    renderer.setSettings(settings, { as_shot_temperature: 5150, as_shot_tint: 0, ...meta });
     if (Array.isArray(settings.MaskGroupBasedCorrections)) {
         renderer.setMaskRasters(await buildMaskRasters({ corrections: settings.MaskGroupBasedCorrections, width: 64, height: 64 }));
     }

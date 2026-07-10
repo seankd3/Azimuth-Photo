@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 from fastapi.testclient import TestClient
@@ -127,6 +128,37 @@ class DevelopBackendTests(unittest.TestCase):
         self.assertEqual(preview.headers["content-type"], "image/jpeg")
         self.assertEqual(pregen.status_code, 202)
         self.assertEqual(pregen.json()["queued"], [])
+
+    def test_get_meta_self_heals_camera_profile_and_lens_data(self):
+        self._write_cached_base()
+        fitted = {
+            "slug": "canon-eos-r5",
+            "model": "Canon EOS R5",
+            "tone_nodes": [index / 15 for index in range(16)],
+            "tone_values": [index / 15 for index in range(16)],
+            "oklab_ab_delta": np.zeros((12, 3, 2)).tolist(),
+            "chroma_edges": [0.02, 0.06, 0.12, 1.0],
+        }
+        correction = {"distortion": {"model": "ptlens", "terms": [0.01, 0.02, 0.03]}}
+        exif = {
+            "Make": "Canon",
+            "UniqueCameraModel": "Canon EOS R5",
+            "LensModel": "RF24-105mm F4 L IS USM",
+            "FocalLength": 37,
+            "FNumber": 11,
+        }
+        with (
+            mock.patch.object(rawproc, "read_exif", return_value=exif),
+            mock.patch.object(rawproc, "load_camera_profile", return_value=fitted),
+            mock.patch.object(rawproc, "resolve_lens_correction", return_value=correction),
+        ):
+            response = self.client.get(f"/api/develop/{self.raw_id}")
+        self.assertEqual(response.status_code, 200)
+        meta = response.json()["meta"]
+        self.assertEqual(meta["camera_model"], "Canon EOS R5")
+        self.assertEqual(meta["camera_profile"]["slug"], "canon-eos-r5")
+        self.assertEqual(meta["lens_correction"]["distortion"]["model"], "ptlens")
+        self.assertEqual(meta["color"]["camera_profile"]["slug"], "canon-eos-r5")
 
     async def _history_rows(self):
         conn = await db.get_db()

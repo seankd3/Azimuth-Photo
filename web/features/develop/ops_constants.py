@@ -1,9 +1,8 @@
 """Shared develop-operation constants.
 
-Keep this module data-only: ``PARITY_TABLE`` is the source the desktop lane uses
-to produce the JavaScript twin.  Local adjustments, lens corrections, chromatic
-aberration, noise reduction, color grading, spot removal, pano, and HDR are
-intentionally stored-but-not-rendered in develop v1.
+Keep this module data-only: ``PARITY_TABLE`` is the source mirrored by the
+desktop renderer. Camera-profile, lens, and local-adjustment math consume these
+same named values in the NumPy and WebGL twins.
 """
 
 
@@ -62,6 +61,20 @@ BASE_PROFILE_POINTS = (
     (255.0, 255.0),
 )
 BASE_PROFILE_SAT = 1.22
+
+# Fitted camera profiles: 12 circular OKLab hue bins x 3 chroma bins.
+CAMERA_PROFILE_TONE_NODES = 16
+CAMERA_PROFILE_HUE_BINS = 12
+CAMERA_PROFILE_CHROMA_BINS = 3
+CAMERA_PROFILE_BIN_CENTER = 0.5
+CAMERA_PROFILE_PI = 3.141592653589793
+CAMERA_PROFILE_TWO_PI = 6.283185307179586
+
+# Lensfun radial models normalize radius against half the image's short edge.
+LENS_NORMALIZED_HALF_MIN = 2.0
+LENS_IMAGE_CENTER = 0.5
+LENS_VIGNETTE_GAIN_MIN = 0.0
+LENS_VIGNETTE_GAIN_MAX = 8.0
 
 # OKLab (Ottosson): linear sRGB → LMS → OKLab. Nested rows, row-major.
 OKLAB_M1 = (

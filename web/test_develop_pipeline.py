@@ -9,10 +9,29 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
 from features.develop import ops_constants as C  # noqa: E402
-from features.develop import pipeline  # noqa: E402
+from features.develop import camera_profile, pipeline  # noqa: E402
 
 
 class DevelopPipelineTests(unittest.TestCase):
+    def test_fitted_profile_replaces_base_curve_and_skips_generic_saturation(self):
+        source = np.full((2, 2, 3), 0.25, dtype=np.float32)
+        identity_profile = {
+            "tone_nodes": np.linspace(0.0, 1.0, 16).tolist(),
+            "tone_values": np.linspace(0.0, 1.0, 16).tolist(),
+            "oklab_ab_delta": np.zeros((12, 3, 2), dtype=np.float32).tolist(),
+            "chroma_edges": [0.02, 0.06, 0.12, 1.0],
+        }
+        profiled = pipeline.apply_pipeline(source, {}, color_profile={"camera_profile": identity_profile})
+        np.testing.assert_allclose(profiled, pipeline.linear_to_srgb(source), atol=2e-6)
+        generic = pipeline.apply_pipeline(source, {})
+        self.assertGreater(float(np.max(np.abs(profiled - generic))), 0.05)
+
+    def test_camera_profile_loader_uses_fitter_slug(self):
+        fitted = camera_profile.load_camera_profile("Canon EOS R5")
+        self.assertIsNotNone(fitted)
+        self.assertEqual(fitted["slug"], "canon-eos-r5")
+        self.assertEqual(np.asarray(fitted["oklab_ab_delta"]).shape, (12, 3, 2))
+
     def test_white_balance_is_planckian_white_point_adaptation(self):
         source = np.ones((1, 1, 3), dtype=np.float32)
         identity = pipeline._apply_white_balance(

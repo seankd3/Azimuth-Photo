@@ -1,13 +1,16 @@
 """Golden data contract for the Python half of develop renderer parity."""
 
 import os
+import re
 import sys
 import unittest
+from pathlib import Path
 
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
 from features.develop.pipeline import apply_pipeline, hsv_to_rgb  # noqa: E402
+from features.develop import ops_constants as C  # noqa: E402
 
 
 def synthetic_linear_image() -> np.ndarray:
@@ -45,6 +48,16 @@ def torture_settings() -> dict[str, object]:
 
 
 class DevelopParityTests(unittest.TestCase):
+    def test_camera_and_lens_constant_names_match_javascript_twin(self):
+        javascript = (Path(__file__).parent / "static/js/desktop/develop/ops_constants.js").read_text()
+        for name, value in C.PARITY_TABLE.items():
+            if not name.startswith(("CAMERA_PROFILE_", "LENS_")) or not isinstance(value, (int, float)):
+                continue
+            match = re.search(rf"export const {name} = ([^;]+);", javascript)
+            self.assertIsNotNone(match, name)
+            actual = eval(match.group(1).strip(), {"__builtins__": {}}, {})
+            self.assertAlmostEqual(float(actual), float(value), places=12, msg=name)
+
     def test_torture_settings_have_stable_golden_statistics(self):
         output = apply_pipeline(synthetic_linear_image(), torture_settings(), asshot_temperature=5150)
         stats = np.array(

@@ -1,4 +1,4 @@
-import { BASE_PROFILE_POINTS } from './ops_constants.js';
+import { BASE_PROFILE_POINTS, CAMERA_PROFILE_TONE_NODES } from './ops_constants.js';
 
 const SIZE = 256;
 
@@ -80,7 +80,13 @@ export function buildCurveLut(points) {
     return lut;
 }
 
-export function buildBaseProfileLut() {
+export function buildBaseProfileLut(profile = null) {
+    const nodes = profile?.tone_nodes;
+    const values = profile?.tone_values;
+    if (Array.isArray(nodes) && nodes.length === CAMERA_PROFILE_TONE_NODES
+        && Array.isArray(values) && values.length === CAMERA_PROFILE_TONE_NODES) {
+        return buildCurveLut(nodes.map((node, index) => [Number(node) * 255, Number(values[index]) * 255]));
+    }
     return buildCurveLut(BASE_PROFILE_POINTS);
 }
 

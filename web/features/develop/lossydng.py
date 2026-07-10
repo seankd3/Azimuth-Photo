@@ -163,6 +163,11 @@ def decode_lossy_dng(path: str, max_px: int | None = None):
         color_matrix1 = _rationals(_tag(target, ifd0, "ColorMatrix1")) if _tag(target, ifd0, "ColorMatrix1") is not None else None
         color_matrix2 = _rationals(_tag(target, ifd0, "ColorMatrix2")) if _tag(target, ifd0, "ColorMatrix2") is not None else None
         baseline_ev = _rationals(_tag(target, ifd0, "BaselineExposure", 0.0))[0]
+        camera_model = _tag(target, ifd0, "UniqueCameraModel") or _tag(target, ifd0, "Model")
+        camera_make = _tag(target, ifd0, "Make")
+        lens_model = _tag(target, ifd0, "LensModel") or _tag(target, ifd0, "Lens")
+        focal_length = _rationals(_tag(target, ifd0, "FocalLength"))[0] if _tag(target, ifd0, "FocalLength") is not None else None
+        aperture = _rationals(_tag(target, ifd0, "FNumber"))[0] if _tag(target, ifd0, "FNumber") is not None else None
 
         black3 = np.array((black * 3)[:3] if len(black) < 3 else black[:3], dtype=np.float64)
         white3 = np.array((white * 3)[:3] if len(white) < 3 else white[:3], dtype=np.float64)
@@ -210,5 +215,10 @@ def decode_lossy_dng(path: str, max_px: int | None = None):
             "color_matrix2": [float(x) for x in color_matrix2] if color_matrix2 and len(color_matrix2) == 9 else None,
             "forward_matrix": [float(x) for x in fm] if fm is not None and len(fm) == 9 else None,
             "baseline_exposure": float(baseline_ev),
+            "camera_model": str(camera_model).strip() if camera_model else "",
+            "camera_make": str(camera_make).strip() if camera_make else "",
+            "lens_model": str(lens_model).strip() if lens_model else "",
+            "focal_length": float(focal_length) if focal_length is not None else None,
+            "aperture": float(aperture) if aperture is not None else None,
         }
         return out, meta
