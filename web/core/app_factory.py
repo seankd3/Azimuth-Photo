@@ -9,6 +9,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.gzip import GZipMiddleware
 
 from core import background as background_runtime
+from core.browser_origin import BrowserOriginGuardMiddleware
 from core.static_assets import StaticAssetContext, warm_templates
 from features.access import routes as access_routes
 from features.ai import routes as ai_routes
@@ -189,6 +190,7 @@ def create_base_app(*, base_dir: str | None = None, title: str = "photoArchive")
     app = FastAPI(title=title)
     app.add_middleware(SelectiveGZipMiddleware, minimum_size=1000)
     app.add_middleware(StaticCacheHeadersMiddleware, max_age=300)
+    app.add_middleware(BrowserOriginGuardMiddleware)
     app.mount("/static", StaticFiles(directory=os.path.join(root, "static")), name="static")
     return app
 
