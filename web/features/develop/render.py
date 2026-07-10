@@ -1,4 +1,4 @@
-"""Full-resolution RAW develop exports.
+"""Full-resolution Develop exports.
 
 Color operations live in :mod:`features.develop.pipeline`; this module only
 decodes, applies display geometry, optional post-resize output sharpening
@@ -26,8 +26,9 @@ from PIL import Image
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 
-from . import ops_constants as C
+from . import ops_constants as C, rawproc
 from .pipeline import apply_pipeline, gaussian_blur, luma
+from .transform import apply_transform
 
 
 EXPORT_DIRECTORY = Path("/mnt/expansion/PhotoArchiveCache/develop/exports")
@@ -42,7 +43,7 @@ _TOKEN_RE = re.compile(r"\{(stem|filename|id|ext|date)\}")
 
 
 class RenderError(RuntimeError):
-    """A RAW could not be decoded or rendered for export."""
+    """A source image could not be decoded or rendered for export."""
 
 
 def _number(settings: Mapping[str, object], key: str, default: float) -> float:
@@ -53,7 +54,14 @@ def _number(settings: Mapping[str, object], key: str, default: float) -> float:
 
 
 def decode_full_resolution(path: str | Path) -> np.ndarray:
-    """Decode linear 16-bit sRGB-primary RAW data without automatic brightening."""
+    """Decode a full-resolution source into linear sRGB-primary floats."""
+    if rawproc.is_display_path(path):
+        try:
+            decoded = rawproc.decode_display_image(path, max_edge=None)
+        except (rawproc.RawDecodeError, OSError) as exc:
+            raise RenderError(f"Image export decode failed: {exc}") from exc
+        return np.asarray(decoded, dtype=np.float32) / np.float32(65535.0)
+
     import rawpy
 
     try:
@@ -143,6 +151,7 @@ def apply_geometry(rgb: np.ndarray, settings: Mapping[str, object], max_px: int 
         rgb = np.rot90(rgb, 1)
     rgb = _crop(rgb, settings)
     rgb = _rotate(rgb, _number(settings, "CropAngle", 0.0))
+    rgb = apply_transform(rgb, settings)
     if max_px is not None and max_px > 0:
         height, width = rgb.shape[:2]
         largest = max(width, height)
@@ -310,7 +319,7 @@ def render_export(
     asshot_tint: float | None = None,
     color_profile=None,
 ) -> Path:
-    """Render one RAW to the expansion-disk export folder and return its path."""
+    """Render one source image to the expansion-disk export folder and return its path."""
     normalized_format = output_format.lower()
     if normalized_format not in {"jpeg", "tiff16"}:
         raise ValueError("output_format must be 'jpeg' or 'tiff16'")

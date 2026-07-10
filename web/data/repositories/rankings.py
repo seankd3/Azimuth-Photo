@@ -320,6 +320,7 @@ def ranking_filter_parts(
     conditions = [
         "i.status IN ('kept', 'maybe')",
         "i.missing_at IS NULL",
+        "i.vc_of IS NULL",
     ]
     if include_source:
         conditions[:0] = ["s.included = 1"]

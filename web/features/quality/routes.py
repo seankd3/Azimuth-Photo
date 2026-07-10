@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from features.quality import scorer as quality_scorer
+from features.quality import autocull
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -54,6 +55,15 @@ def _resolve_db_path() -> str:
 
 class ScanBody(BaseModel):
     limit: int | None = Field(default=None, ge=1, le=_MAX_LIMIT)
+
+
+class AutocullBody(BaseModel):
+    stack_ids: list[int] | None = Field(default=None, max_length=500)
+    all: bool = False
+
+
+class AutocullApplyBody(BaseModel):
+    stack_ids: list[int] = Field(min_length=1, max_length=500)
 
 
 def _status_payload() -> dict[str, Any]:
@@ -415,3 +425,30 @@ async def api_quality_image(image_id: int):
         return payload
     finally:
         await conn.close()
+
+
+@router.post("/api/quality/autocull")
+async def api_quality_autocull(body: AutocullBody | None = None):
+    """Suggest one best photo per fully-scored burst/variant stack; no writes."""
+    stack_ids = None if body is None or body.all or not body.stack_ids else body.stack_ids
+    conn = await _open_conn()
+    try:
+        return await autocull.suggestions(conn, stack_ids=stack_ids)
+    finally:
+        await conn.close()
+
+
+@router.post("/api/quality/autocull/apply")
+async def api_quality_autocull_apply(body: AutocullApplyBody):
+    """Explicitly accept the current stack suggestions and retain an audit row."""
+    conn = await _open_conn()
+    try:
+        payload = await autocull.apply(conn, stack_ids=body.stack_ids)
+    finally:
+        await conn.close()
+    if payload.get("ok"):
+        from core import cache_events
+
+        cache_events.invalidate_rankings_cache()
+        cache_events.invalidate_pairing_cache(matchups=True)
+    return JSONResponse(payload, status_code=200 if payload.get("ok") else 400)

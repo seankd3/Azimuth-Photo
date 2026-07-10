@@ -1,4 +1,4 @@
-"""HTTP surface for RAW Develop settings and base-preview artifacts."""
+"""HTTP surface for Develop settings and base-preview artifacts."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 from data import connection
 from data.repositories import images as image_repository
 from data.repositories import stacks as stack_repository
-from features.develop import rawproc
+from features.develop import rawproc, transform, virtual_copies
 
 
 router = APIRouter()
@@ -113,6 +113,11 @@ class DevelopSettingsBody(BaseModel):
     label: str | None = Field(default=None, max_length=160)
 
 
+class DevelopSnapshotBody(BaseModel):
+    label: str = Field(min_length=1, max_length=160)
+    settings: dict[str, Any] = Field(default_factory=dict)
+
+
 class DevelopPregenBody(BaseModel):
     image_ids: list[int] = Field(default_factory=list, max_length=12)
 
@@ -163,6 +168,16 @@ def _json_settings(raw: str | None) -> dict[str, Any]:
     except (TypeError, ValueError):
         return {}
     return result if isinstance(result, dict) else {}
+
+
+def _pipeline_metadata(meta: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Carry source-kind semantics alongside RAW color metadata to exports."""
+    if not isinstance(meta, dict):
+        return None
+    color = dict(meta.get("color") or {})
+    if meta.get("base_kind"):
+        color["base_kind"] = meta["base_kind"]
+    return color or None
 
 
 def _normalize_sync_groups(groups: list[str] | None) -> list[str]:
@@ -261,9 +276,17 @@ async def _image_or_error(image_id: int):
         return None, JSONResponse({"error": "Image not found"}, status_code=404)
     image = dict(image)
     if not rawproc.is_develop_path(image.get("filepath") or ""):
-        return None, JSONResponse({"error": "Develop editing is available only for RAW files and HDR merges"}, status_code=400)
+        return None, JSONResponse(
+            {
+                "error": (
+                    "Develop supports RAW and HDR sources plus JPEG, PNG, TIFF, and WebP images; "
+                    "HEIC requires Pillow codec support"
+                )
+            },
+            status_code=400,
+        )
     if not await asyncio.to_thread(os.path.exists, image["filepath"]):
-        return None, JSONResponse({"error": "RAW source file is unavailable"}, status_code=404)
+        return None, JSONResponse({"error": "Source image file is unavailable"}, status_code=404)
     return image, None
 
 
@@ -440,6 +463,21 @@ async def api_develop_base_jpg(image_id: int):
     return FileResponse(paths.preview, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
 
+@router.post("/api/develop/{image_id}/transform/auto")
+async def api_develop_transform_auto(image_id: int):
+    image, error = await _image_or_error(image_id)
+    if error:
+        return error
+    paths, _meta = await _ensure_base(image_id, image)
+    import gzip
+    payload = await asyncio.to_thread(paths.binary.read_bytes)
+    linear_u16, _width, _height = rawproc.parse_base_payload(gzip.decompress(payload))
+    result = await asyncio.to_thread(transform.auto_level_settings, linear_u16.astype("float32") / 65535.0)
+    if result is None:
+        return JSONResponse({"error": "No reliable horizon found"}, status_code=422)
+    return result
+
+
 @router.get("/api/develop/{image_id}")
 async def api_get_develop(image_id: int):
     image, error = await _image_or_error(image_id)
@@ -456,6 +494,117 @@ async def api_get_develop(image_id: int):
         "meta": meta,
         "history": await _history(image_id),
     }
+
+
+@router.get("/api/develop/{image_id}/history")
+async def api_develop_history(image_id: int):
+    _image, error = await _image_or_error(image_id)
+    if error:
+        return error
+    return await _history(image_id)
+
+
+@router.post("/api/develop/{image_id}/virtual-copy")
+async def api_create_virtual_copy(image_id: int):
+    _image, error = await _image_or_error(image_id)
+    if error:
+        return error
+    conn = await connection.open_async(_configured_db_path())
+    try:
+        await conn.execute("BEGIN")
+        copy = await virtual_copies.create_virtual_copy(conn, image_id)
+        if copy is None:
+            await conn.rollback()
+            return JSONResponse({"error": "Image not found"}, status_code=404)
+        await conn.commit()
+        return copy
+    except Exception:
+        await conn.rollback()
+        raise
+    finally:
+        await connection.close_async(conn, db_path=_configured_db_path())
+
+
+@router.get("/api/develop/{image_id}/virtual-copies")
+async def api_list_virtual_copies(image_id: int):
+    _image, error = await _image_or_error(image_id)
+    if error:
+        return error
+    conn = await connection.open_async(_configured_db_path())
+    try:
+        copies = await virtual_copies.list_virtual_copies(conn, image_id)
+        return {"virtual_copies": copies or []}
+    finally:
+        await connection.close_async(conn, db_path=_configured_db_path())
+
+
+@router.delete("/api/develop/{image_id}/virtual-copy/{copy_id}")
+async def api_delete_virtual_copy(image_id: int, copy_id: int):
+    _image, error = await _image_or_error(image_id)
+    if error:
+        return error
+    conn = await connection.open_async(_configured_db_path())
+    try:
+        await conn.execute("BEGIN")
+        deleted = await virtual_copies.delete_virtual_copy(conn, copy_id)
+        if not deleted:
+            await conn.rollback()
+            return JSONResponse({"error": "Virtual copy not found"}, status_code=404)
+        await conn.commit()
+        return {"deleted": copy_id}
+    except Exception:
+        await conn.rollback()
+        raise
+    finally:
+        await connection.close_async(conn, db_path=_configured_db_path())
+
+
+@router.get("/api/develop/{image_id}/snapshots")
+async def api_list_snapshots(image_id: int):
+    _image, error = await _image_or_error(image_id)
+    if error:
+        return error
+    history = await _history(image_id)
+    return {"snapshots": [entry for entry in history if str(entry["label"] or "").lower().startswith("snapshot:")]}
+
+
+@router.post("/api/develop/{image_id}/snapshots")
+async def api_save_snapshot(image_id: int, body: DevelopSnapshotBody):
+    _image, error = await _image_or_error(image_id)
+    if error:
+        return error
+    now = _now()
+    entry = {
+        "settings": body.settings,
+        "label": f"Snapshot: {body.label.strip()}",
+        "created_at": now,
+    }
+    conn = await connection.open_async(_configured_db_path())
+    try:
+        cursor = await conn.execute(
+            "INSERT INTO develop_history (image_id, settings, label, created_at) VALUES (?, ?, ?, ?)",
+            (image_id, json.dumps(body.settings, separators=(",", ":")), entry["label"], now),
+        )
+        await conn.commit()
+        return {"id": int(cursor.lastrowid), **entry}
+    finally:
+        await connection.close_async(conn, db_path=_configured_db_path())
+
+
+@router.delete("/api/develop/{image_id}/snapshots/{history_id}")
+async def api_delete_snapshot(image_id: int, history_id: int):
+    conn = await connection.open_async(_configured_db_path())
+    try:
+        cursor = await conn.execute(
+            "DELETE FROM develop_history WHERE id = ? AND image_id = ? AND label LIKE 'Snapshot:%'",
+            (history_id, image_id),
+        )
+        await conn.commit()
+        if not cursor.rowcount:
+            return JSONResponse({"error": "Snapshot not found"}, status_code=404)
+        return {"deleted": history_id}
+    finally:
+        await connection.close_async(conn, db_path=_configured_db_path())
 
 
 @router.put("/api/develop/{image_id}")
@@ -534,7 +683,7 @@ async def api_export_develop(image_id: int, body: DevelopExportBody):
             image_id=image_id,
             asshot_temperature=asshot.get("temperature") if isinstance(asshot, dict) else None,
             asshot_tint=asshot.get("tint") if isinstance(asshot, dict) else None,
-            color_profile=cached_meta.get("color") if isinstance(cached_meta, dict) else None,
+            color_profile=_pipeline_metadata(cached_meta),
         )
     except (rawproc.RawDecodeError, RenderError, ValueError) as exc:
         return JSONResponse({"error": str(exc)}, status_code=422)
@@ -621,7 +770,7 @@ async def _run_batch_export(body: DevelopBatchExportBody) -> None:
                 image_id=image_id,
                 asshot_temperature=asshot.get("temperature") if isinstance(asshot, dict) else None,
                 asshot_tint=asshot.get("tint") if isinstance(asshot, dict) else None,
-                color_profile=cached_meta.get("color") if isinstance(cached_meta, dict) else None,
+                color_profile=_pipeline_metadata(cached_meta),
             )
             filename = _download_name_for(
                 output_path,

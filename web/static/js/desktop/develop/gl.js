@@ -8,6 +8,8 @@ import {
     GRAIN_X_MULTIPLIER, GRAIN_Y_MULTIPLIER, GRAY_MIXER_FACTOR, HSL_LUMINANCE_FACTOR,
     HUE_SHIFT_DEGREES, LENS_AUTO_CROP_EDGE_SAMPLES, LENS_IMAGE_CENTER, LENS_NORMALIZED_HALF_MIN, LENS_VIGNETTE_GAIN_MAX,
     LENS_VIGNETTE_GAIN_MIN, LUMA_BLUE, LUMA_GREEN, LUMA_RED, TINT_UV_SCALE,
+    PERSPECTIVE_AMOUNT_SCALE, PERSPECTIVE_ASPECT_SCALE, PERSPECTIVE_OFFSET_SCALE,
+    PERSPECTIVE_SCALE_BASE, PERSPECTIVE_SCALE_MIN,
     LOCAL_HUE_DEGREES, LOCAL_MASK_ATLAS_COLUMNS, LOCAL_RENDER_CAP,
     LOCAL_WB_TEMP_FACTOR, LOCAL_WB_TINT_FACTOR,
     OKLAB_C_NORM, OKLAB_M1, OKLAB_M1_INV, OKLAB_M2, OKLAB_M2_INV,
@@ -308,6 +310,40 @@ function mat3Inv(m) {
     ];
 }
 
+// JS twin of transform.inverse_homography(): projective -> rotate -> affine,
+// then invert and flatten by columns for WebGL's column-major mat3 upload.
+export function transformInverseColumnMajor(settings = {}) {
+    const finite = (key, fallback) => {
+        const value = Number(settings?.[key]);
+        return Number.isFinite(value) ? value : fallback;
+    };
+    const bounded = (key, fallback, min, max) => Math.min(max, Math.max(min, finite(key, fallback)));
+    const vertical = bounded('PerspectiveVertical', 0, -100, 100) * PERSPECTIVE_AMOUNT_SCALE;
+    const horizontal = bounded('PerspectiveHorizontal', 0, -100, 100) * PERSPECTIVE_AMOUNT_SCALE;
+    const angle = bounded('PerspectiveRotate', 0, -45, 45) * Math.PI / 180;
+    const scale = Math.max(PERSPECTIVE_SCALE_MIN, finite('PerspectiveScale', PERSPECTIVE_SCALE_BASE)) / PERSPECTIVE_SCALE_BASE;
+    const aspect = Math.max(
+        PERSPECTIVE_SCALE_MIN / PERSPECTIVE_SCALE_BASE,
+        1 + bounded('PerspectiveAspect', 0, -100, 100) * PERSPECTIVE_ASPECT_SCALE,
+    );
+    const offsetX = bounded('PerspectiveX', 0, -100, 100) * PERSPECTIVE_OFFSET_SCALE;
+    const offsetY = bounded('PerspectiveY', 0, -100, 100) * PERSPECTIVE_OFFSET_SCALE;
+    const projective = [[1, 0, 0], [0, 1, 0], [horizontal, vertical, 1]];
+    const rotate = [
+        [Math.cos(angle), -Math.sin(angle), 0],
+        [Math.sin(angle), Math.cos(angle), 0],
+        [0, 0, 1],
+    ];
+    const affine = [[scale * aspect, 0, offsetX], [0, scale, offsetY], [0, 0, 1]];
+    const inverse = mat3Inv(mat3Mul(mat3Mul(affine, rotate), projective))
+        || [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+    return new Float32Array([
+        inverse[0][0], inverse[1][0], inverse[2][0],
+        inverse[0][1], inverse[1][1], inverse[2][1],
+        inverse[0][2], inverse[1][2], inverse[2][2],
+    ]);
+}
+
 function xyFromCctTint(cct, tint) {
     const [x, y] = cctToXy(cct);
     const d = -2 * x + 12 * y + 3;
@@ -382,6 +418,7 @@ uniform vec4 u_crop;
 uniform float u_angle;
 uniform int u_orientation;
 uniform bool u_applyGeometry;
+uniform mat3 u_transformInverse;
 uniform vec3 u_gradeShadow;
 uniform vec3 u_gradeMidtone;
 uniform vec3 u_gradeHighlight;
@@ -435,6 +472,8 @@ vec2 orientedUv(vec2 uv) {
         q.x /= aspect;
         uv = center + q;
     }
+    vec3 transformed = u_transformInverse * vec3((uv - .5) * 2.0, 1.0);
+    uv = transformed.z == 0.0 ? vec2(-1.0) : transformed.xy / transformed.z * .5 + .5;
     if (u_lensProfile) uv = vec2(.5) + (uv - vec2(.5)) * u_lensAutoCrop;
     return lensDistortedUv(uv);
 }
@@ -988,10 +1027,10 @@ export class DevelopRenderer {
         this.retouchTarget = target(gl, this.width, this.height);
     }
 
-    updateBaseCurve(profile = null, settings = {}) {
+    updateBaseCurve(profile = null, settings = {}, baseKind = 'raw') {
         const gl = this.gl;
         if (this.baseCurve) gl.deleteTexture(this.baseCurve);
-        const lut = buildBaseProfileLut(profile, settings);
+        const lut = buildBaseProfileLut(profile, settings, baseKind);
         const data = new Float32Array(256 * 4);
         for (let i = 0; i < 256; i += 1) {
             data[i * 4] = lut[i];
@@ -1017,17 +1056,18 @@ export class DevelopRenderer {
     setSettings(settings, meta = this.meta, _opts = {}) {
         this.settings = effectiveLookSettings(settings || {});
         this.meta = meta || {};
-        const profile = this.meta.camera_profile || this.meta.color?.camera_profile || null;
+        const baseKind = this.meta.base_kind || 'raw';
+        const profile = baseKind === 'display' ? null : (this.meta.camera_profile || this.meta.color?.camera_profile || null);
         const profileKey = profile?.slug || profile?.model || '';
         const look = this.settings.Look;
         const lookKey = JSON.stringify([
             look?.Amount ?? null,
             look?.Parameters?.ToneCurvePV2012 ?? null,
         ]);
-        const baseProfileKey = `${profileKey}|${lookKey}`;
+        const baseProfileKey = `${baseKind}|${profileKey}|${lookKey}`;
         if (baseProfileKey !== this.baseProfileKey) {
             this.baseProfileKey = baseProfileKey;
-            this.updateBaseCurve(profile, this.settings);
+            this.updateBaseCurve(profile, this.settings, baseKind);
         }
         this.updateCurve(this.settings);
         this.requestRender();
@@ -1095,7 +1135,8 @@ export class DevelopRenderer {
         gl.uniform1i(uniform('u_curve'), 1);
         gl.uniform1i(uniform('u_baseCurve'), 5);
         gl.uniform2f(uniform('u_sourceSize'), this.width, this.height);
-        const profile = this.meta.camera_profile || this.meta.color?.camera_profile || null;
+        const displayBase = this.meta.base_kind === 'display';
+        const profile = displayBase ? null : (this.meta.camera_profile || this.meta.color?.camera_profile || null);
         const profileTable = new Float32Array(CAMERA_PROFILE_HUE_BINS * CAMERA_PROFILE_CHROMA_BINS * 2);
         if (Array.isArray(profile?.oklab_ab_delta)) {
             let cursor = 0;
@@ -1110,7 +1151,7 @@ export class DevelopRenderer {
         const profileEdges = Array.isArray(profile?.chroma_edges)
             && profile.chroma_edges.length === CAMERA_PROFILE_CHROMA_BINS + 1
             ? profile.chroma_edges.map(Number) : [0.02, 0.06, 0.12, 1.0];
-        gl.uniform1f(uniform('u_baseProfileSat'), profile ? 1 : BASE_PROFILE_SAT);
+        gl.uniform1f(uniform('u_baseProfileSat'), displayBase || profile ? 1 : BASE_PROFILE_SAT);
         gl.uniform1i(uniform('u_cameraProfile'), profile ? 1 : 0);
         gl.uniform2fv(uniform('u_cameraAbDelta[0]'), profileTable);
         gl.uniform1fv(uniform('u_cameraChromaEdges[0]'), new Float32Array(profileEdges));
@@ -1167,6 +1208,7 @@ export class DevelopRenderer {
         gl.uniform1f(uniform('u_angle'), numberSetting(s, 'CropAngle'));
         gl.uniform1i(uniform('u_orientation'), numberSetting(s, 'Orientation', 1));
         gl.uniform1i(uniform('u_applyGeometry'), this.geometryEnabled ? 1 : 0);
+        gl.uniformMatrix3fv(uniform('u_transformInverse'), false, transformInverseColumnMajor(s));
         const grade = (name) => [
             numberSetting(s, `ColorGrade${name}Hue`), numberSetting(s, `ColorGrade${name}Sat`), numberSetting(s, `ColorGrade${name}Lum`),
         ];

@@ -661,6 +661,9 @@ export function initGrid() {
         if (mounted) loadFirstPage();
     });
     on('flags', ({ imageIds } = {}) => patchCells(imageIds));
+    document.addEventListener('photoarchive:cull-applied', () => {
+        if (mounted) loadFirstPage();
+    });
     on('selection', ({ imageIds } = {}) => patchCells(imageIds));
     on('trash:changed', () => {
         if (mounted) loadFirstPage();

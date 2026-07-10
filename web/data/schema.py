@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS images (
     id INTEGER PRIMARY KEY,
     source_id INTEGER REFERENCES catalog_sources(id),
     filename TEXT NOT NULL,
-    filepath TEXT NOT NULL UNIQUE,
+    filepath TEXT NOT NULL,
     elo REAL DEFAULT 1200.0,
     comparisons INTEGER DEFAULT 0,
     propagated_updates INTEGER DEFAULT 0,
@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS images (
     missing_at REAL DEFAULT NULL,
     trashed_at REAL DEFAULT NULL,
     trash_path TEXT DEFAULT NULL,
+    vc_of INTEGER REFERENCES images(id) ON DELETE CASCADE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -822,6 +823,7 @@ IMAGE_COMPAT_COLUMNS = (
     ("missing_at", "REAL DEFAULT NULL"),
     ("trashed_at", "REAL DEFAULT NULL"),
     ("trash_path", "TEXT DEFAULT NULL"),
+    ("vc_of", "INTEGER REFERENCES images(id) ON DELETE CASCADE"),
 )
 
 CATALOG_SOURCE_COMPAT_COLUMNS = (
@@ -1089,6 +1091,7 @@ REQUIRED_COLUMNS = {
         "missing_at",
         "trashed_at",
         "trash_path",
+        "vc_of",
     },
     "catalog_sources": {
         "display_name",
@@ -1193,6 +1196,8 @@ REQUIRED_INDEXES = {
     "idx_people_merge_suggestions_pending",
     "idx_face_scan_images_status",
     "idx_image_checksums_checked",
+    "idx_images_vc_of",
+    "idx_images_original_filepath",
 }
 
 
@@ -1611,6 +1616,8 @@ async def apply_schema_and_migrations(conn, *, db_exists: bool) -> None:
     if db_exists:
         await prepare_existing_database_for_schema(conn)
     await _executescript_in_transaction(conn, SCHEMA)
+    from features.develop.virtual_copies import ensure_virtual_copies
+    await ensure_virtual_copies(conn)
     try:
         await conn.execute("BEGIN")
         for table in (

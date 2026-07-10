@@ -10,6 +10,7 @@ from unittest import mock
 
 import numpy as np
 from fastapi.testclient import TestClient
+from PIL import Image
 
 try:
     import pytest
@@ -49,7 +50,10 @@ class DevelopBackendTests(unittest.TestCase):
         self.raw_path.parent.mkdir(parents=True, exist_ok=True)
         self.raw_path.write_bytes(b"not decoded in settings tests")
         self.raw_id = self._image(source["id"], self.raw_path)
-        self.jpg_id = self._image(source["id"], Path(self.tempdir.name) / "raws" / "sample.jpg")
+        self.jpg_path = Path(self.tempdir.name) / "raws" / "sample.jpg"
+        self.jpg_id = self._image(source["id"], self.jpg_path)
+        Image.new("RGB", (8, 6), (128, 128, 128)).save(self.jpg_path, quality=100, subsampling=0)
+        self.unsupported_id = self._image(source["id"], Path(self.tempdir.name) / "raws" / "sample.xyz")
         self.client = TestClient(app_module.app)
 
     def tearDown(self):
@@ -203,6 +207,59 @@ class DevelopBackendTests(unittest.TestCase):
         self.assertEqual((width, height), (3, 2))
         np.testing.assert_array_equal(parsed, rgb)
 
+    def test_display_extensions_follow_pillow_heic_support(self):
+        formats = {
+            "jpg": "JPEG",
+            "jpeg": "JPEG",
+            "png": "PNG",
+            "tif": "TIFF",
+            "tiff": "TIFF",
+            "webp": "WEBP",
+        }
+        for extension, image_format in formats.items():
+            with self.subTest(extension=extension):
+                self.assertTrue(rawproc.is_develop_path(f"photo.{extension}"))
+                path = Path(self.tempdir.name) / f"display.{extension}"
+                Image.new("RGB", (5, 4), (96, 128, 160)).save(path, format=image_format)
+                rgb, meta = rawproc.decode_base(path)
+                self.assertEqual(
+                    (rgb.shape, rgb.dtype, meta["base_kind"]),
+                    ((4, 5, 3), np.dtype(np.uint16), "display"),
+                )
+        heic_supported = ".heic" in Image.registered_extensions()
+        self.assertEqual(rawproc.is_develop_path("photo.heic"), heic_supported)
+
+    def test_jpeg_decode_creates_a_linear_display_base_without_raw_profile_metadata(self):
+        with (
+            mock.patch.object(rawproc, "read_exif") as read_exif,
+            mock.patch.object(rawproc, "load_camera_profile") as load_camera_profile,
+            mock.patch.object(rawproc, "resolve_lens_correction") as resolve_lens_correction,
+        ):
+            rgb, meta = rawproc.decode_base(self.jpg_path)
+
+        self.assertEqual((rgb.shape, rgb.dtype), ((6, 8, 3), np.dtype(np.uint16)))
+        self.assertEqual(meta["base_kind"], "display")
+        self.assertEqual(meta["as_shot"], {"temperature": 6500, "tint": 0.0, "method": "display"})
+        self.assertTrue(meta["linear"])
+        self.assertNotIn("color", meta)
+        read_exif.assert_not_called()
+        load_camera_profile.assert_not_called()
+        resolve_lens_correction.assert_not_called()
+
+        round_trip = np.rint(rawproc._linear_to_srgb(rgb.astype(np.float32) / 65535.0) * 255.0)
+        self.assertLessEqual(float(np.mean(np.abs(round_trip - 128.0))), 1.0)
+
+    def test_jpeg_develop_get_and_base_endpoints(self):
+        settings = self.client.get(f"/api/develop/{self.jpg_id}")
+        binary = self.client.get(f"/api/develop/{self.jpg_id}/base.bin")
+        preview = self.client.get(f"/api/develop/{self.jpg_id}/base.jpg")
+
+        self.assertEqual(settings.status_code, 200, settings.text)
+        self.assertEqual(settings.json()["meta"]["base_kind"], "display")
+        parsed, width, height = rawproc.parse_base_payload(binary.content)
+        self.assertEqual((binary.status_code, width, height, parsed.dtype), (200, 8, 6, np.dtype("<u2")))
+        self.assertEqual(preview.status_code, 200)
+
     def test_mired_white_balance_math(self):
         neutral = rawproc.estimate_as_shot_white_balance_mired([2.0, 1.0, 1.0, 0.0], [2.0, 1.0, 1.0, 0.0])
         cooler = rawproc.estimate_as_shot_white_balance_mired([4.0, 1.0, 1.0, 0.0], [2.0, 1.0, 1.0, 0.0])
@@ -249,12 +306,14 @@ class DevelopBackendTests(unittest.TestCase):
         self.assertEqual(reset.json()["origin"], "xmp")
         self.assertEqual(reset.json()["settings"], {"Exposure2012": 0.25, "FutureCrsKey": "kept"})
 
-    def test_honest_non_raw_and_missing_errors(self):
-        non_raw = self.client.get(f"/api/develop/{self.jpg_id}")
-        self.assertEqual(non_raw.status_code, 400)
+    def test_honest_unsupported_and_missing_errors(self):
+        unsupported = self.client.get(f"/api/develop/{self.unsupported_id}")
+        self.assertEqual(unsupported.status_code, 400)
+        self.assertIn("Pillow", unsupported.json()["error"])
         self.raw_path.unlink()
         missing = self.client.get(f"/api/develop/{self.raw_id}/base.jpg")
         self.assertEqual(missing.status_code, 404)
+        self.assertEqual(missing.json()["error"], "Source image file is unavailable")
 
     def test_export_honors_resize_quality_and_sharpen_byte_sizes(self):
         from features.develop import render as develop_render

@@ -286,6 +286,19 @@ async def run_startup(
     except Exception:
         log.exception("worker=caption startup failed; caption worker was not scheduled")
 
+    try:
+        import db as _db
+        from features.system import backups as _catalog_backups
+
+        track_background_task(
+            _start_background_daemon(
+                lambda: _catalog_backups.run_daily_backup_scheduler(lambda: _db.DB_PATH),
+                delay=15.0,
+            )
+        )
+    except Exception:
+        log.exception("worker=catalog_backup scheduler failed to arm")
+
     async def _warm_interaction_caches():
         await asyncio.sleep(interaction_cache_warmup_delay_seconds)
         await _gather_logged(

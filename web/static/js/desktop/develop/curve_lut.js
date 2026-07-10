@@ -125,11 +125,13 @@ export function effectiveLookSettings(settings = {}) {
     return effective;
 }
 
-export function buildBaseProfileLut(profile = null, settings = {}) {
+export function buildBaseProfileLut(profile = null, settings = {}, baseKind = 'raw') {
     const nodes = profile?.tone_nodes;
     const values = profile?.tone_values;
     let base;
-    if (Array.isArray(nodes) && nodes.length === CAMERA_PROFILE_TONE_NODES
+    if (baseKind === 'display') {
+        base = buildCurveLut(null);
+    } else if (Array.isArray(nodes) && nodes.length === CAMERA_PROFILE_TONE_NODES
         && Array.isArray(values) && values.length === CAMERA_PROFILE_TONE_NODES) {
         base = buildCurveLut(nodes.map((node, index) => [Number(node) * 255, Number(values[index]) * 255]));
     } else {

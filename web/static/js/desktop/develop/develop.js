@@ -6,9 +6,11 @@ import { DevelopRenderer, renderSyntheticPixels } from './gl.js';
 import { DevelopHistogram } from './histogram.js';
 import { DevelopPanels } from './panels.js';
 import { mountPresetsPanel } from './presets.js';
+import { mountHistoryPanel } from './history_panel.js';
 import { openExportDialog, openSyncDialog } from './export_dialog.js';
 
-const RAW_EXTENSIONS = new Set(['dng', 'cr3', 'cr2', 'exr']);
+const DIRECT_DEVELOP_EXTENSIONS = new Set(['dng', 'cr3', 'cr2', 'exr', 'jpg', 'jpeg', 'png', 'tif', 'tiff', 'webp']);
+const RAW_DEVELOP_EXTENSIONS = new Set(['dng', 'cr3', 'cr2', 'exr']);
 const stateCache = new Map();
 const saveTimers = new Map();
 let clipboardSettings = null;
@@ -24,6 +26,7 @@ let loadingToken = 0;
 let beforeHeld = false;
 let spaceHeld = false;
 let activePopover = null;
+let historyPanel = null;
 
 const root = document.getElementById('view-develop');
 const stage = document.getElementById('develop-stage');
@@ -38,9 +41,24 @@ function clone(value) {
     return JSON.parse(JSON.stringify(value || {}));
 }
 
-function isRaw(image) {
+function imageExtension(image) {
     const name = String(image?.filename || image?.filepath || image?.path || '');
-    return RAW_EXTENSIONS.has(name.split('.').pop().toLowerCase());
+    return name.split('.').pop().toLowerCase();
+}
+
+function developTip(image) {
+    const extension = imageExtension(image);
+    if (DIRECT_DEVELOP_EXTENSIONS.has(extension)) return 'Open in Develop';
+    if (extension === 'heic') return 'Open in Develop · HEIC requires Pillow codec support';
+    return 'Open in Develop · this format requires Pillow image support';
+}
+
+function isDevelopImage(image) {
+    return Boolean(image);
+}
+
+function isRaw(image) {
+    return RAW_DEVELOP_EXTENSIONS.has(imageExtension(image));
 }
 
 function chosenImage() {
@@ -71,7 +89,10 @@ function originSettings(payload) {
 
 async function fetchDevelop(imageId) {
     const response = await fetch(`/api/develop/${imageId}`, { headers: { Accept: 'application/json' } });
-    if (!response.ok) throw new Error(response.status === 404 ? 'Develop settings are not ready for this photo.' : 'Could not load develop settings.');
+    if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.error || (response.status === 404 ? 'Develop settings are not ready for this photo.' : 'Could not load develop settings.'));
+    }
     return response.json();
 }
 
@@ -101,14 +122,17 @@ const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function fetchBaseWithRetry(imageId, token, scale = 1) {
     for (let attempt = 0; attempt <= 20; attempt += 1) {
         if (token !== loadingToken) return null;
-        if (attempt === 2) setStatus('Reading RAW from disk…', { busy: true });
+        if (attempt === 2) setStatus('Reading source image from disk…', { busy: true });
         if (attempt === 8) setStatus('Developing preview…', { busy: true });
         const response = await fetch(`/api/develop/${imageId}/base.bin`);
         if (response.ok) return parseBase(await response.arrayBuffer(), scale);
-        if (![404, 503].includes(response.status)) throw new Error('The RAW preview could not be loaded.');
+        if (![404, 503].includes(response.status)) {
+            const payload = await response.json().catch(() => null);
+            throw new Error(payload?.error || 'The image preview could not be loaded.');
+        }
         if (attempt < 20) await delay(1000);
     }
-    throw new Error('The RAW preview is still being prepared. Try again in a moment.');
+    throw new Error('The image preview is still being prepared. Try again in a moment.');
 }
 
 async function paintPlaceholder(imageId, token) {
@@ -134,12 +158,18 @@ function scheduleSave(label = 'Develop adjustment') {
         fetch(`/api/develop/${imageId}`, {
             method: 'PUT', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ settings: entry.settings, label }),
+        }).then((response) => {
+            if (!response.ok) throw new Error('save failed');
+            historyPanel?.reload();
         }).catch(() => {});
     }, 400));
 }
 
 function applySettings(entry) {
-    panels.setSettings(entry.settings);
+    const panelSettings = entry.meta?.base_kind === 'display' && entry.settings.Temperature == null
+        ? { ...entry.settings, Temperature: 6500 }
+        : entry.settings;
+    panels.setSettings(panelSettings);
     crop.setSettings(entry.settings);
     renderer?.setSettings(entry.settings, entry.meta);
 }
@@ -154,6 +184,30 @@ function applyPresetSettings(settings, label = 'Preset') {
     entry.settings = { ...entry.settings, ...clone(settings) };
     applySettings(entry);
     scheduleSave(label);
+}
+
+function restoreHistoricalSettings(settings, label) {
+    const entry = currentImage && stateCache.get(Number(currentImage.id));
+    if (!entry) return;
+    entry.undo.push(clone(entry.settings));
+    entry.redo.length = 0;
+    entry.settings = clone(settings);
+    applySettings(entry);
+    scheduleSave(label);
+    showToast('Develop state restored');
+}
+
+export async function createVirtualCopy() {
+    if (!currentImage || !isRaw(currentImage)) return;
+    try {
+        const response = await fetch(`/api/develop/${currentImage.id}/virtual-copy`, { method: 'POST' });
+        if (!response.ok) throw new Error('copy failed');
+        const copy = await response.json();
+        showToast('Virtual copy created');
+        openImage({ ...currentImage, ...copy, id: copy.id });
+    } catch {
+        showToast('Could not create virtual copy');
+    }
 }
 
 function settingsChanged(key, value, label, { history = true, previousSettings = null } = {}) {
@@ -190,13 +244,13 @@ function redo() {
 }
 
 function syncFilmstrip() {
-    filmstrip.innerHTML = viewState.images.map((image, index) => `<button class="develop-thumb ${Number(image.id) === Number(currentImage?.id) ? 'cur' : ''} ${isRaw(image) ? '' : 'not-raw'}" data-index="${index}" data-tip="${isRaw(image) ? 'Open in Develop' : 'RAW editing only (for now)'}" aria-label="${String(image.filename || `Photo ${index + 1}`).replaceAll('"', '&quot;')}"><img src="${image.thumb_url || thumbUrl('sm', image.id)}" loading="lazy" decoding="async" alt=""></button>`).join('');
+    filmstrip.innerHTML = viewState.images.map((image, index) => `<button class="develop-thumb ${Number(image.id) === Number(currentImage?.id) ? 'cur' : ''}" data-index="${index}" data-tip="${developTip(image)}" aria-label="${String(image.filename || `Photo ${index + 1}`).replaceAll('"', '&quot;')}"><img src="${image.thumb_url || thumbUrl('sm', image.id)}" loading="lazy" decoding="async" alt=""></button>`).join('');
     filmstrip.querySelector('.cur')?.scrollIntoView({ block: 'nearest', inline: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
 }
 
 function pregenNeighbors(image) {
     const index = viewState.images.findIndex((item) => Number(item.id) === Number(image.id));
-    const imageIds = viewState.images.slice(Math.max(0, index - 2), index + 3).filter(isRaw).map((item) => Number(item.id));
+    const imageIds = viewState.images.slice(Math.max(0, index - 2), index + 3).map((item) => Number(item.id));
     if (!imageIds.length) return;
     fetch('/api/develop/pregen', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image_ids: imageIds }) }).catch(() => {});
 }
@@ -209,12 +263,7 @@ async function openImage(image) {
     placeholder.hidden = true;
     canvas.classList.remove('ready');
     if (!image) {
-        setStatus('Choose a RAW photo in Grid, then open Develop.', { error: false });
-        panelHost.toggleAttribute('inert', true);
-        return;
-    }
-    if (!isRaw(image)) {
-        setStatus('RAW editing only (for now)', { error: false });
+        setStatus('Choose a photo in Grid, then open Develop.', { error: false });
         panelHost.toggleAttribute('inert', true);
         return;
     }
@@ -222,7 +271,7 @@ async function openImage(image) {
     pregenNeighbors(image);
     setStatus('Loading develop settings…', { busy: true });
     setTimeout(() => {
-        if (token === loadingToken && !canvas.classList.contains('ready')) setStatus('Reading RAW from disk…', { busy: true });
+        if (token === loadingToken && !canvas.classList.contains('ready')) setStatus('Reading source image from disk…', { busy: true });
     }, 1000);
     setTimeout(() => {
         if (token === loadingToken && !canvas.classList.contains('ready')) setStatus('Developing preview…', { busy: true });
@@ -244,12 +293,14 @@ async function openImage(image) {
             stateCache.set(Number(image.id), entry);
         }
         if (token !== loadingToken) return;
+        entry.imageId = Number(image.id);
+        historyPanel?.setHistory(entry.serverHistory || []);
         applySettings(entry);
         if (!renderer) {
             setStatus('WebGL2 is required for Develop.', { error: true });
             return;
         }
-        setStatus('Reading RAW from disk…', { busy: true });
+        setStatus('Reading source image from disk…', { busy: true });
         const base = await fetchBaseWithRetry(image.id, token, Number(entry.meta?.hdr?.scale) || 1);
         if (!base || token !== loadingToken) return;
         renderer.uploadSource(base.rgba, base.width, base.height);
@@ -331,12 +382,12 @@ function openExportPopover(button) {
         anchoredPopover,
         closePopover,
         showToast,
-        isRaw,
+        isRaw: isDevelopImage,
     });
 }
 
 function openSyncPopover(button) {
-    if (!currentImage || !isRaw(currentImage)) return;
+    if (!isDevelopImage(currentImage)) return;
     const targetIds = selection.size
         ? [...selection].map(Number)
         : viewState.images.map((image) => Number(image.id)).filter((id) => id > 0);
@@ -351,7 +402,7 @@ function openSyncPopover(button) {
 }
 
 async function resetCurrent() {
-    if (!currentImage || !isRaw(currentImage)) return;
+    if (!isDevelopImage(currentImage)) return;
     try {
         const response = await fetch(`/api/develop/${currentImage.id}/reset`, { method: 'POST' });
         if (!response.ok) throw new Error();
@@ -361,6 +412,7 @@ async function resetCurrent() {
         entry.settings = clone(payload?.settings || entry.origin || {});
         entry.redo.length = 0;
         applySettings(entry);
+        historyPanel?.reload();
         showToast('Develop settings reset');
     } catch { showToast('Could not reset develop settings'); }
 }
@@ -398,9 +450,8 @@ export function developOpen() {
 function updateTabState() {
     const tab = document.querySelector('#view-switch [data-view="develop"]');
     const image = chosenImage();
-    const enabled = !image || isRaw(image);
-    tab.setAttribute('aria-disabled', String(!enabled));
-    tab.dataset.tip = enabled ? 'Develop · D' : 'RAW editing only (for now)';
+    tab.setAttribute('aria-disabled', 'false');
+    tab.dataset.tip = image ? `${developTip(image)} · D` : 'Develop · D';
 }
 
 function ensureRenderer() {
@@ -518,15 +569,25 @@ function init() {
     histogram = new DevelopHistogram(histogramSlot);
     const cropSlot = document.createElement('div');
     cropSlot.id = 'develop-crop-controls';
+    const transformSlot = document.createElement('div');
+    transformSlot.id = 'develop-transform-controls';
     panels = new DevelopPanels(panelHost, {
-        histogramHost: histogramSlot, cropHost: cropSlot, onChange: settingsChanged,
+        histogramHost: histogramSlot, cropHost: cropSlot, transformHost: transformSlot, onChange: settingsChanged,
+        transform: {
+            stage, canvas,
+            onAutoLevel: async () => {
+                if (!currentImage) return null;
+                const response = await fetch(`/api/develop/${currentImage.id}/transform/auto`, { method: 'POST' });
+                return response.ok ? response.json() : null;
+            },
+        },
         masking: { toolbar, stage, canvas, getImageId: () => currentImage?.id, getRenderer: () => renderer },
         heal: { toolbar, stage, canvas, getRenderer: () => renderer },
     });
     masking = panels.masking;
     heal = panels.heal;
     crop = new CropController({ stage, canvas, overlay: document.getElementById('develop-crop-overlay'), controls: cropSlot, onChange: settingsChanged });
-    mountPresetsPanel(root.querySelector('.develop-layout') || root, {
+    const presetsPanel = mountPresetsPanel(root.querySelector('.develop-layout') || root, {
         getRenderer: () => renderer,
         getEntry: () => currentImage && stateCache.get(Number(currentImage.id)),
         applyPresetSettings,
@@ -534,6 +595,12 @@ function init() {
             const entry = currentImage && stateCache.get(Number(currentImage.id));
             return clone(entry?.settings || {});
         },
+    });
+    historyPanel = mountHistoryPanel(presetsPanel?.root, {
+        getEntry: () => currentImage && stateCache.get(Number(currentImage.id)),
+        getImageId: () => currentImage?.id,
+        restoreSettings: restoreHistoricalSettings,
+        notify: showToast,
     });
     bindUi();
     updateTabState();

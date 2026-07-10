@@ -147,8 +147,16 @@ PUBLIC_ROUTE_CONTRACT = {
     ("GET", "/api/folders/tree"),
     ("GET", "/api/develop/import/status"),
     ("GET", "/api/develop/{image_id}"),
+    ("GET", "/api/develop/{image_id}/history"),
     ("GET", "/api/develop/{image_id}/base.bin"),
     ("GET", "/api/develop/{image_id}/base.jpg"),
+    ("POST", "/api/develop/{image_id}/transform/auto"),
+    ("POST", "/api/develop/{image_id}/virtual-copy"),
+    ("GET", "/api/develop/{image_id}/virtual-copies"),
+    ("DELETE", "/api/develop/{image_id}/virtual-copy/{copy_id}"),
+    ("GET", "/api/develop/{image_id}/snapshots"),
+    ("POST", "/api/develop/{image_id}/snapshots"),
+    ("DELETE", "/api/develop/{image_id}/snapshots/{history_id}"),
     ("POST", "/api/develop/import/scan"),
     ("POST", "/api/develop/pregen"),
     ("POST", "/api/develop/{image_id}/export"),
@@ -185,6 +193,8 @@ PUBLIC_ROUTE_CONTRACT = {
     ("GET", "/api/quality/status"),
     ("POST", "/api/quality/scan"),
     ("GET", "/api/quality/{image_id}"),
+    ("POST", "/api/quality/autocull"),
+    ("POST", "/api/quality/autocull/apply"),
 }
 
 class ModularContractTests(unittest.TestCase):

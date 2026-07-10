@@ -20,6 +20,7 @@ import { initGridContextMenu } from './context_menu.js';
 import { initExportMenu } from './export_menu.js';
 import { mountIconSprite } from '../icons.js';
 import { initPanelSections } from './panel_sections.js';
+import { initCullBrief } from './cull_brief.js';
 
 async function boot() {
     await mountIconSprite();
@@ -30,6 +31,7 @@ async function boot() {
     initContextbar();
     initFilters();
     initImporter();
+    initCullBrief();
     initSimilar();
     initGridContextMenu();
     initExportMenu();

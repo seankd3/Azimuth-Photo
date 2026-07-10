@@ -133,6 +133,11 @@
                 </div>
                 <div id="canvas">
                     <section id="view-grid" class="view active" role="tabpanel" aria-label="Grid">
+                        <section id="cull-brief-banner" hidden>
+                            <span><b data-cull-scenes>0</b> scenes analyzed · <b data-cull-picks>0</b> suggested picks</span>
+                            <button class="btn primary" type="button" data-cull-review>Review</button>
+                        </section>
+                        <section id="cull-brief" hidden aria-label="Cull brief"></section>
                         <div id="grid-flow"></div>
                         <div id="grid-error"></div>
                         <div id="grid-sentinel"></div>

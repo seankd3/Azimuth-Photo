@@ -437,9 +437,12 @@ def _apply_tone_curves(
     c: np.ndarray,
     settings: Mapping[str, object],
     camera_profile: Mapping[str, object] | None = None,
+    *,
+    base_kind: str = "raw",
 ) -> np.ndarray:
     result = c.copy()
-    base_lut = build_monotone_cubic_lut(_profile_curve_points(camera_profile))
+    display_base = base_kind == "display"
+    base_lut = build_monotone_cubic_lut(None if display_base else _profile_curve_points(camera_profile))
     imported_look_curve = look_curve(settings)
     if imported_look_curve is not None:
         base_lut = compose_curve_luts(
@@ -449,7 +452,7 @@ def _apply_tone_curves(
         )
     for index in range(3):
         result[..., index] = _apply_lut(c[..., index], base_lut)
-    if camera_profile is None:
+    if not display_base and camera_profile is None:
         result = scale_oklab_chroma(result, multiply=C.BASE_PROFILE_SAT)
     main_lut = build_monotone_cubic_lut(settings.get("ToneCurvePV2012"))
     # A main curve is RGB-linked; component curves are applied after it.
@@ -970,8 +973,9 @@ def apply_pipeline(
         rgb = (rgb - C.DEHAZE_AIRLIGHT_FACTOR * dehaze) / (1.0 - C.DEHAZE_AIRLIGHT_FACTOR * dehaze)
         rgb = np.maximum(rgb, 0.0)
     c = linear_to_srgb(rgb)
-    fitted_profile = _camera_profile(color_profile)
-    c = _apply_tone_curves(c, settings, fitted_profile)
+    base_kind = str(color_profile.get("base_kind") or "raw") if isinstance(color_profile, Mapping) else "raw"
+    fitted_profile = None if base_kind == "display" else _camera_profile(color_profile)
+    c = _apply_tone_curves(c, settings, fitted_profile, base_kind=base_kind)
     c = _hsl_and_black_white(c, settings, dehaze)
     if not _bool(settings, "ConvertToGrayscale"):
         c = apply_camera_profile_ab(c, fitted_profile)

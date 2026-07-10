@@ -3,6 +3,7 @@ import { buildCurveLut, normalizeCurve } from './curve_lut.js';
 import { MaskingController } from './masking.js';
 import { ColorWheels } from './color_wheels.js';
 import { HealController } from './heal.js';
+import { TransformPanel } from './transform_panel.js';
 
 const slider = (key, label, min, max, step = 1, fallback = DEFAULTS[key] ?? 0) => ({ key, label, min, max, step, fallback });
 const BASIC = [slider('Temperature', 'Temp', 2000, 50000, 50, 5500), slider('Tint', 'Tint', -150, 150)];
@@ -175,7 +176,7 @@ class CurveEditor {
 }
 
 export class DevelopPanels {
-    constructor(host, { histogramHost, cropHost, onChange, masking, heal }) {
+    constructor(host, { histogramHost, cropHost, transformHost, onChange, masking, heal, transform }) {
         this.host = host;
         this.onChange = onChange;
         this.settings = {};
@@ -187,6 +188,7 @@ export class DevelopPanels {
             + section('HSL / B&W', 'hsl', '<label class="develop-toggle" data-tip="Convert to black and white"><span>Black & White</span><input id="develop-bw" type="checkbox" data-tip="Toggle black and white"><i></i></label><div id="develop-hsl-controls"><div class="develop-tabs" role="tablist"><button class="active" data-hsl-tab="Hue" data-tip="Hue adjustments">Hue</button><button data-hsl-tab="Saturation" data-tip="Saturation adjustments">Sat</button><button data-hsl-tab="Luminance" data-tip="Luminance adjustments">Lum</button></div><div data-hsl-panel="Hue">' + hslHtml('HueAdjustment') + '</div><div data-hsl-panel="Saturation" hidden>' + hslHtml('SaturationAdjustment') + '</div><div data-hsl-panel="Luminance" hidden>' + hslHtml('LuminanceAdjustment') + '</div></div><div id="develop-gray-controls" hidden>' + hslHtml('GrayMixer') + '</div>')
             + section('Color Grading', 'color-grading', '<div id="develop-color-wheels"></div>' + slidersHtml(COLOR_GRADE), false)
             + section('Detail', 'detail', slidersHtml(DETAIL), false)
+            + section('Transform', 'transform', '<div id="develop-transform-slot"></div>', false)
             + section('Effects', 'effects', slidersHtml(EFFECTS), false)
             + section('Crop', 'crop', '<div id="develop-crop-slot"></div>', false)
             + section('Masking', 'masking', '<div id="develop-masking"></div>', false)
@@ -194,10 +196,12 @@ export class DevelopPanels {
             + '<p class="develop-v1-note">Manual defringe and circular heal/clone spots are available. Automatic lateral CA remains planned.</p>';
         host.querySelector('#develop-histogram-slot').replaceWith(histogramHost);
         host.querySelector('#develop-crop-slot').replaceWith(cropHost);
+        host.querySelector('#develop-transform-slot').replaceWith(transformHost);
         this.curve = new CurveEditor(host.querySelector('[data-section="curve"]'), (key, value, label) => this.change(key, value, label));
         this.colorWheels = new ColorWheels(host.querySelector('#develop-color-wheels'), (key, value, label) => this.change(key, value, label));
         this.masking = new MaskingController({ host: host.querySelector('#develop-masking'), onChange, ...masking });
         this.heal = new HealController({ host: host.querySelector('#develop-healing'), onChange, ...heal });
+        this.transform = new TransformPanel({ host: transformHost, onChange, ...transform });
         this.bindSliders();
         this.bindOtherControls();
         this.setSettings(this.settings);
@@ -303,5 +307,6 @@ export class DevelopPanels {
         this.colorWheels.setSettings(settings);
         this.masking.setSettings(settings);
         this.heal.setSettings(settings);
+        this.transform.setSettings(settings);
     }
 }

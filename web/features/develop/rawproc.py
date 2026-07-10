@@ -1,6 +1,6 @@
-"""Linear RAW base-preview decode and cache helpers for Develop.
+"""Linear base-preview decode and cache helpers for Develop.
 
-The cache lives on the expansion volume: large RAW previews must never consume
+The cache lives on the expansion volume: large Develop previews must never consume
 the nearly-full root disk.  The `.bin.gz` payload starts with a 16-byte PABASE1
 header and then little-endian interleaved uint16 RGB pixels.
 """
@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageOps
 
 try:
     import rawpy
@@ -32,6 +32,8 @@ from .lens import normalized_source_metadata, read_exif, resolve_lens_correction
 
 
 RAW_EXTENSIONS = {".dng", ".cr2", ".cr3"}
+DISPLAY_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp"}
+OPTIONAL_DISPLAY_EXTENSIONS = {".heic"}
 BASE_CACHE_ROOT = Path(os.environ.get("PHOTOARCHIVE_DEVELOP_CACHE_DIR", "/mnt/expansion/PhotoArchiveCache/develop"))
 # v3: lossy-DNG decode applies OpcodeList2 MapPolynomial (true linear); v2 bases are ~EVs too bright.
 BASE_CACHE_DIR = BASE_CACHE_ROOT / "base" / "v3"
@@ -43,7 +45,7 @@ SOURCE_META_VERSION = 1
 
 
 class RawDecodeError(RuntimeError):
-    """A RAW exists but could not be decoded into a usable preview."""
+    """An image exists but could not be decoded into a usable Develop base."""
 
 
 @dataclass(frozen=True)
@@ -62,6 +64,13 @@ def is_raw_path(path: str | os.PathLike[str]) -> bool:
     return Path(path).suffix.lower() in RAW_EXTENSIONS
 
 
+def is_display_path(path: str | os.PathLike[str]) -> bool:
+    suffix = Path(path).suffix.lower()
+    if suffix in DISPLAY_EXTENSIONS:
+        return True
+    return suffix in OPTIONAL_DISPLAY_EXTENSIONS and suffix in Image.registered_extensions()
+
+
 def is_hdr_merge_path(path: str | os.PathLike[str]) -> bool:
     candidate = Path(path)
     return candidate.suffix.lower() == ".exr" and candidate.parent == BASE_CACHE_ROOT / "hdr"
@@ -73,7 +82,7 @@ def is_pano_merge_path(path: str | os.PathLike[str]) -> bool:
 
 
 def is_develop_path(path: str | os.PathLike[str]) -> bool:
-    return is_raw_path(path) or is_hdr_merge_path(path) or is_pano_merge_path(path)
+    return is_raw_path(path) or is_display_path(path) or is_hdr_merge_path(path) or is_pano_merge_path(path)
 
 
 def base_paths(image_id: int) -> BasePaths:
@@ -270,7 +279,9 @@ def estimate_as_shot_white_balance(
     return estimate_as_shot_white_balance_mired(camera_whitebalance, daylight_whitebalance)
 
 
-def _resize_linear_uint16(rgb: np.ndarray, max_edge: int = MAX_BASE_EDGE) -> np.ndarray:
+def _resize_linear_uint16(rgb: np.ndarray, max_edge: int | None = MAX_BASE_EDGE) -> np.ndarray:
+    if max_edge is None:
+        return np.ascontiguousarray(rgb, dtype=np.uint16)
     height, width = rgb.shape[:2]
     longest = max(width, height)
     if longest <= max_edge:
@@ -308,16 +319,56 @@ def _rawpy_color_matrix(raw: Any) -> list[float] | None:
     return None
 
 
-def decode_base(path: str | os.PathLike[str]) -> tuple[np.ndarray, dict[str, Any]]:
-    """Decode a half-size, linear uint16 sRGB-primary Develop base image."""
+def _srgb_to_linear(srgb: np.ndarray) -> np.ndarray:
+    clipped = np.clip(np.asarray(srgb, dtype=np.float32), 0.0, 1.0)
+    return np.where(
+        clipped <= C.SRGB_DECODE_THRESHOLD,
+        clipped * C.SRGB_DECODE_SCALE,
+        np.power((clipped + C.SRGB_DECODE_A) / C.SRGB_ENCODE_A, C.SRGB_DECODE_GAMMA),
+    ).astype(np.float32)
 
-    if rawpy is None:
-        raise RawDecodeError("rawpy is unavailable")
+
+def decode_display_image(path: str | os.PathLike[str], *, max_edge: int | None = MAX_BASE_EDGE) -> np.ndarray:
+    """Decode a display-referred image into linear uint16 sRGB-primary pixels."""
+
     source = Path(path)
     if not source.exists():
         raise FileNotFoundError(source)
+    if not is_display_path(source):
+        raise RawDecodeError(
+            "Develop supports JPEG, PNG, TIFF, and WebP; HEIC requires Pillow codec support"
+        )
+    try:
+        with Image.open(source) as image:
+            display_rgb = np.asarray(ImageOps.exif_transpose(image).convert("RGB"), dtype=np.float32)
+    except (OSError, ValueError) as exc:
+        raise RawDecodeError(f"Image decode failed: {exc}") from exc
+    linear = _srgb_to_linear(display_rgb / np.float32(255.0))
+    rgb = np.asarray(np.clip(np.rint(linear * 65535.0), 0, 65535), dtype=np.uint16)
+    return _resize_linear_uint16(rgb, max_edge=max_edge)
+
+
+def decode_base(path: str | os.PathLike[str]) -> tuple[np.ndarray, dict[str, Any]]:
+    """Decode a linear uint16 sRGB-primary Develop base image."""
+
+    source = Path(path)
+    if not source.exists():
+        raise FileNotFoundError(source)
+    if is_display_path(source):
+        rgb = decode_display_image(source)
+        return rgb, {
+            "as_shot": {"temperature": 6500, "tint": 0.0, "method": "display"},
+            "base_kind": "display",
+            "width": int(rgb.shape[1]),
+            "height": int(rgb.shape[0]),
+            "dtype": "uint16",
+            "linear": True,
+            "source_meta_version": SOURCE_META_VERSION,
+        }
+    if rawpy is None:
+        raise RawDecodeError("rawpy is unavailable")
     if not is_raw_path(source):
-        raise RawDecodeError("Develop supports DNG, CR2, and CR3 files only")
+        raise RawDecodeError("Develop supports DNG, CR2, CR3, JPEG, PNG, TIFF, and WebP files")
     as_shot_neutral = None
     color_matrix = None
     color_matrix2 = None
@@ -368,6 +419,7 @@ def decode_base(path: str | os.PathLike[str]) -> tuple[np.ndarray, dict[str, Any
         "height": int(rgb.shape[0]),
         "dtype": "uint16",
         "linear": True,
+        "base_kind": "raw",
     }
     if as_shot_neutral and forward_matrix and (color_matrix or color_matrix2):
         meta["color"] = {
@@ -381,6 +433,9 @@ def decode_base(path: str | os.PathLike[str]) -> tuple[np.ndarray, dict[str, Any
 
 def _enrich_source_metadata(meta: dict[str, Any], path: str | os.PathLike[str]) -> dict[str, Any]:
     """Attach camera/profile/lens data, including to already-cached bases."""
+    if meta.get("base_kind") == "display":
+        meta["source_meta_version"] = SOURCE_META_VERSION
+        return meta
     if int(meta.get("source_meta_version") or 0) >= SOURCE_META_VERSION:
         return meta
     source = dict(read_exif(str(path)))

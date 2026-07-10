@@ -79,6 +79,17 @@ LENS_VIGNETTE_GAIN_MAX = 8.0
 # returned UV scale is <= 1: identity is 1, lower values zoom to remove borders.
 LENS_AUTO_CROP_EDGE_SAMPLES = 32
 
+# Transform/Upright (§28): normalized centred-UV homography coefficients.
+PERSPECTIVE_AMOUNT_SCALE = 0.0035
+PERSPECTIVE_ASPECT_SCALE = 0.01
+PERSPECTIVE_OFFSET_SCALE = 0.01
+PERSPECTIVE_SCALE_BASE = 100.0
+PERSPECTIVE_SCALE_MIN = 1.0
+HORIZON_ANGLE_LIMIT = 20.0
+HORIZON_THETA_STEPS = 81
+HORIZON_EDGE_PERCENTILE = 92.0
+HORIZON_MAX_POINTS = 12000
+
 # §22 order: HSL/vibrance -> grade -> defringe -> NR -> local -> detail.
 # Grade works in OKLab-ish ab; wheel luminance is a band exposure adjustment.
 COLOR_GRADE_AB_SCALE = 0.12

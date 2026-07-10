@@ -27,7 +27,7 @@ import { closeGridContextMenu, gridContextMenuOpen } from './context_menu.js';
 import { closeDuplicates, duplicatesOpen } from './duplicates.js';
 import { closeTrash, trashOpen, trashSelectedImages } from './trash.js';
 import { showToast, undoLatestToast } from './toast.js';
-import { developOpen, openDevelop } from './develop/develop.js';
+import { createVirtualCopy, developOpen, openDevelop } from './develop/develop.js';
 
 function inputFocused() {
     const el = document.activeElement;
@@ -274,6 +274,11 @@ export function initKeyboard() {
         if (event.ctrlKey || event.metaKey) {
             const key = event.key.toLowerCase();
             if (foregroundLayerOpen() || inputFocused()) return;
+            if (event.code === 'Quote' && developOpen()) {
+                event.preventDefault();
+                createVirtualCopy();
+                return;
+            }
             if (key === 'k') {
                 if (activeLens() !== 'grid') return;
                 event.preventDefault();
