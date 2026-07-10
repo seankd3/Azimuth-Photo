@@ -552,25 +552,33 @@ def _soft_threshold_residual(residual: np.ndarray, threshold: float) -> np.ndarr
     return np.sign(residual) * gated
 
 
-def _detail(c: np.ndarray, settings: Mapping[str, object], *, blur_min_dimension: int | None = None) -> np.ndarray:
-    lightness = luma(c)
+def _detail(
+    c: np.ndarray,
+    settings: Mapping[str, object],
+    *,
+    blur_min_dimension: int | None = None,
+    lightness: np.ndarray | None = None,
+    blurs: Mapping[str, np.ndarray] | None = None,
+) -> np.ndarray:
+    lightness = luma(c) if lightness is None else np.asarray(lightness, dtype=np.float32)
+    blurs = blurs or {}
     result = c.copy()
     minimum_dimension = blur_min_dimension or min(lightness.shape)
     clarity = _slider(settings, "Clarity2012")
     if clarity != 0.0:
-        large = gaussian_blur(lightness, C.BLUR_LARGE_FACTOR * minimum_dimension)
+        large = np.asarray(blurs.get("large"), dtype=np.float32) if "large" in blurs else gaussian_blur(lightness, C.BLUR_LARGE_FACTOR * minimum_dimension)
         residual = np.clip(lightness - large, -C.CLARITY_RESIDUAL_MAX, C.CLARITY_RESIDUAL_MAX)
         midtones = np.clip(4.0 * lightness * (1.0 - lightness), 0.0, 1.0)
         result += (residual * C.CLARITY_FACTOR * clarity * midtones)[..., None]
     texture = _slider(settings, "Texture")
     if texture != 0.0:
-        small = gaussian_blur(lightness, C.BLUR_SMALL_FACTOR * minimum_dimension)
+        small = np.asarray(blurs.get("small"), dtype=np.float32) if "small" in blurs else gaussian_blur(lightness, C.BLUR_SMALL_FACTOR * minimum_dimension)
         residual = np.clip(lightness - small, -C.CLARITY_RESIDUAL_MAX, C.CLARITY_RESIDUAL_MAX)
         result += (residual * C.TEXTURE_FACTOR * texture)[..., None]
     sharpness = np.clip(_number(settings, "Sharpness"), 0.0, 150.0)
     if sharpness != 0.0:
         radius = np.clip(_number(settings, "SharpenRadius", 1.0), 0.5, 3.0)
-        sharp = gaussian_blur(lightness, radius)
+        sharp = np.asarray(blurs.get("sharp"), dtype=np.float32) if "sharp" in blurs else gaussian_blur(lightness, radius)
         residual = _soft_threshold_residual(lightness - sharp, C.SHARPEN_THRESHOLD)
         result += (residual * (sharpness / 150.0) * C.SHARPEN_FACTOR)[..., None]
     return result
@@ -665,7 +673,44 @@ def apply_pipeline(
     c = linear_to_srgb(rgb)
     c = _apply_tone_curves(c, settings)
     c = _hsl_and_black_white(c, settings, dehaze)
-    c = _detail(c, settings, blur_min_dimension=blur_min_dimension)
+    # Local corrections live exactly between global HSL/vibrance and global
+    # detail. Import lazily so masks.py can remain a standalone raster/math twin.
+    from .masks import apply_local_corrections, has_local_adjustments
+
+    detail_lightness = None
+    detail_blurs = None
+    if has_local_adjustments(settings):
+        local_luma = luma(c)
+        corrections = settings.get("MaskGroupBasedCorrections", ())
+        local_clarity = any(
+            isinstance(correction, Mapping) and _number(correction, "LocalClarity2012") != 0.0
+            for correction in corrections[: C.LOCAL_RENDER_CAP]
+        )
+        local_texture = any(
+            isinstance(correction, Mapping) and _number(correction, "LocalTexture") != 0.0
+            for correction in corrections[: C.LOCAL_RENDER_CAP]
+        )
+        global_clarity = _slider(settings, "Clarity2012") != 0.0
+        global_texture = _slider(settings, "Texture") != 0.0
+        global_sharpness = np.clip(_number(settings, "Sharpness"), 0.0, 150.0) != 0.0
+        minimum_dimension = blur_min_dimension or min(local_luma.shape)
+        local_blurs = {
+            "large": gaussian_blur(local_luma, C.BLUR_LARGE_FACTOR * minimum_dimension) if local_clarity or global_clarity else local_luma,
+            "small": gaussian_blur(local_luma, C.BLUR_SMALL_FACTOR * minimum_dimension) if local_texture or global_texture else local_luma,
+        }
+        if global_sharpness:
+            local_blurs["sharp"] = gaussian_blur(local_luma, np.clip(_number(settings, "SharpenRadius", 1.0), 0.5, 3.0))
+        c = apply_local_corrections(
+            c,
+            settings,
+            luma=local_luma,
+            blurs=local_blurs,
+            pixel_offset=pixel_offset,
+            canvas_size=canvas_size,
+        )
+        detail_lightness = local_luma
+        detail_blurs = local_blurs
+    c = _detail(c, settings, blur_min_dimension=blur_min_dimension, lightness=detail_lightness, blurs=detail_blurs)
     c = _vignette(c, settings, pixel_offset=pixel_offset, canvas_size=canvas_size)
     c = _grain(c, settings, pixel_offset=pixel_offset)
     return np.clip(c, 0.0, 1.0).astype(np.float32)

@@ -124,6 +124,26 @@ GRAIN_OUTPUT_DIVISOR = 65535.0
 GRAIN_CELL_SIZE_MIN = 1.0
 GRAIN_CELL_SIZE_RANGE = 7.0
 
+# Local corrections (§12).  A 2023-v13.lrcat exposure-only brush on
+# 20230111-R5__9359 stores LocalExposure2012=-0.4835; Lightroom history calls
+# that step "Update Exposure Adjustment". Mapping Adobe's stored fraction by
+# ×4 gives a plausible -1.934 EV, while observed exact ±1 values map to the
+# documented ±4 EV endpoints. Keep Adobe-native fractions in settings JSON.
+LOCAL_RENDER_CAP = 16
+LOCAL_MASK_DOWNSAMPLE = 4
+LOCAL_MASK_ATLAS_COLUMNS = 4
+LOCAL_EXPOSURE_EV_SCALE = 4.0
+LOCAL_SLIDER_SCALE = 100.0
+LOCAL_WB_MIRED_SCALE = 30.0
+LOCAL_WB_TEMP_FACTOR = 0.0007
+LOCAL_WB_TINT_FACTOR = 0.0035
+LOCAL_HUE_DEGREES = 180.0
+LOCAL_BRUSH_DEFAULT_RADIUS = 0.05
+LOCAL_BRUSH_GAUSSIAN_SIGMA = 1.0 / 3.0
+LOCAL_COLOR_SIGMA_MIN = 0.015
+LOCAL_COLOR_SIGMA_RANGE = 0.18
+LOCAL_RANGE_EPSILON = 1e-6
+
 PARITY_TABLE = {
     name: value
     for name, value in tuple(globals().items())

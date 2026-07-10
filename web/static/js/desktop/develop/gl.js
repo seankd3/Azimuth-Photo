@@ -5,6 +5,8 @@ import {
     GRAIN_HASH_SHIFT, GRAIN_OUTPUT_MASK, GRAIN_OUTPUT_SHIFT, GRAIN_SEED,
     GRAIN_X_MULTIPLIER, GRAIN_Y_MULTIPLIER, GRAY_MIXER_FACTOR, HSL_LUMINANCE_FACTOR,
     HUE_SHIFT_DEGREES, LUMA_BLUE, LUMA_GREEN, LUMA_RED, TINT_UV_SCALE,
+    LOCAL_HUE_DEGREES, LOCAL_MASK_ATLAS_COLUMNS, LOCAL_RENDER_CAP,
+    LOCAL_WB_TEMP_FACTOR, LOCAL_WB_TINT_FACTOR,
     OKLAB_C_NORM, OKLAB_M1, OKLAB_M1_INV, OKLAB_M2, OKLAB_M2_INV,
     SHARPEN_FACTOR, SHARPEN_THRESHOLD, TEXTURE_FACTOR, TONE_BLACKS_FACTOR,
     TONE_EV_BLACKS_CENTER, TONE_EV_HIGHLIGHTS_CENTER, TONE_EV_SHADOWS_CENTER,
@@ -15,6 +17,7 @@ import {
     VIGNETTE_ROUNDNESS_FACTOR, boolSetting, numberSetting,
 } from './ops_constants.js';
 import { buildBaseProfileLut, buildCombinedCurveTexture } from './curve_lut.js';
+import { buildMaskRasters, localToSlider } from './mask_raster.js';
 
 /** Emit a GLSL float literal (JS 2.0 stringifies as "2", which GLSL treats as int). */
 const f = (value) => {
@@ -23,6 +26,9 @@ const f = (value) => {
     const text = String(n);
     return /[eE.]/.test(text) ? text : `${text}.0`;
 };
+
+const correctionEnabled = (correction) => correction?.CorrectionActive == null
+    || !['false', '0'].includes(String(correction.CorrectionActive).toLowerCase());
 
 const VERTEX = `#version 300 es
 in vec2 a_position;
@@ -402,8 +408,61 @@ uniform vec3 u_vignetteShape;
 uniform float u_grain;
 uniform float u_grainSize;
 uniform uint u_seed;
+uniform sampler2D u_maskAtlas;
+uniform int u_localActive[${LOCAL_RENDER_CAP}];
+uniform float u_localAmount[${LOCAL_RENDER_CAP}];
+uniform vec4 u_localLightA[${LOCAL_RENDER_CAP}];
+uniform vec4 u_localLightB[${LOCAL_RENDER_CAP}];
+uniform vec4 u_localEffects[${LOCAL_RENDER_CAP}];
+uniform vec4 u_localColor[${LOCAL_RENDER_CAP}];
+uniform int u_maskOverlay;
 ${COLOR_MATH}
 ${COLOR_FUNCTION}
+float localMask(int index, vec2 imageUv) {
+    int column = index % ${LOCAL_MASK_ATLAS_COLUMNS};
+    int row = index / ${LOCAL_MASK_ATLAS_COLUMNS};
+    // Settings/canvas mask coordinates have a top-left origin. The source
+    // texture's typed upload has a GL bottom-left origin, so only mask Y flips.
+    vec2 maskUv = vec2(imageUv.x, 1.0 - imageUv.y);
+    vec2 atlasUv = (vec2(float(column), float(row)) + clamp(maskUv, 0.0, 1.0)) / float(${LOCAL_MASK_ATLAS_COLUMNS});
+    return texture(u_maskAtlas, atlasUv).r;
+}
+vec3 applyLocalCorrection(vec3 rgbLinear, float baseLuma, vec2 blurs, vec4 lightA, vec4 lightB, vec4 effects, vec4 color, float m) {
+    vec3 rgb = rgbLinear * exp2(lightA.x * m);
+    float mired = effects.y * m;
+    float tint = effects.z * m;
+    rgb.r *= exp2(mired * ${f(LOCAL_WB_TEMP_FACTOR)});
+    rgb.b *= exp2(-mired * ${f(LOCAL_WB_TEMP_FACTOR)});
+    rgb.g *= exp2(-tint * ${f(LOCAL_WB_TINT_FACTOR)});
+    float Y = dot(rgb, LUMW);
+    float ev = log2(max(Y, 1e-6));
+    float hlScale = lightA.z < 0.0 ? 1.0 : ${f(TONE_HIGHLIGHTS_POS_SCALE)};
+    float deltaEv = m * (
+        ${f(TONE_HIGHLIGHTS_FACTOR)} * lightA.z * hlScale * gaussEv(ev, ${f(TONE_EV_HIGHLIGHTS_CENTER)})
+        + ${f(TONE_SHADOWS_FACTOR)} * lightA.w * gaussEv(ev, ${f(TONE_EV_SHADOWS_CENTER)})
+        + ${f(TONE_WHITES_FACTOR)} * lightB.x * gaussEv(ev, ${f(TONE_EV_WHITES_CENTER)})
+        + ${f(TONE_BLACKS_FACTOR)} * lightB.y * gaussEv(ev, ${f(TONE_EV_BLACKS_CENTER)}));
+    rgb *= exp2(deltaEv);
+    float Y2 = dot(rgb, LUMW);
+    float tone = pow(clamp(Y2, 0.0, 1.0), 1.0 / 2.2);
+    tone = .5 + (tone - .5) * (1.0 + ${f(CONTRAST_FACTOR)} * lightA.y * m);
+    tone = tone < 0.0 ? 0.0 : (tone > 1.0 ? 1.0 + (tone - 1.0) / (1.0 + 4.0 * (tone - 1.0)) : tone);
+    rgb *= pow(max(tone, 0.0), 2.2) / max(Y2, 1e-6);
+    float dehaze = lightB.w * m;
+    rgb = max((rgb - vec3(${f(DEHAZE_AIRLIGHT_FACTOR)} * dehaze)) / (1.0 - ${f(DEHAZE_AIRLIGHT_FACTOR)} * dehaze), vec3(0.0));
+    vec3 c = linearToSrgb(clamp(rgb, 0.0, 1.0));
+    vec3 lab = linearToOklab(srgbToLinear(c));
+    float angle = radians(color.x) * m;
+    mat2 rotateHue = mat2(cos(angle), sin(angle), -sin(angle), cos(angle));
+    lab.yz = rotateHue * lab.yz * max(1.0 + effects.w * m, 0.0);
+    c = linearToSrgb(clamp(oklabToLinear(lab), 0.0, 1.0));
+    float midtones = clamp(4.0 * baseLuma * (1.0 - baseLuma), 0.0, 1.0);
+    float largeResidual = clamp(baseLuma - blurs.x, -${f(CLARITY_RESIDUAL_MAX)}, ${f(CLARITY_RESIDUAL_MAX)});
+    float smallResidual = clamp(baseLuma - blurs.y, -${f(CLARITY_RESIDUAL_MAX)}, ${f(CLARITY_RESIDUAL_MAX)});
+    c += vec3(largeResidual * ${f(CLARITY_FACTOR)} * lightB.z * midtones * m);
+    c += vec3(smallResidual * ${f(TEXTURE_FACTOR)} * effects.x * m);
+    return clamp(c, 0.0, 1.0);
+}
 float noiseHash(ivec2 pixel) {
     uint h = (uint(pixel.x) * ${GRAIN_X_MULTIPLIER}u + uint(pixel.y) * ${GRAIN_Y_MULTIPLIER}u) ^ u_seed;
     h = (h ^ (h >> ${GRAIN_HASH_SHIFT}u)) * ${GRAIN_HASH_MULTIPLIER}u;
@@ -413,6 +472,12 @@ void main() {
     vec2 imageUv;
     vec3 c = applyColor(v_uv, imageUv);
     float L = dot(c, LUMW);
+    vec2 localBlurs = vec2(texture(u_blurLarge, v_uv).r, texture(u_blurSmall, v_uv).r);
+    for (int i = 0; i < ${LOCAL_RENDER_CAP}; i++) {
+        if (u_localActive[i] == 0) continue;
+        float m = clamp(localMask(i, imageUv) * u_localAmount[i], 0.0, 2.0);
+        if (m > 1e-6) c = applyLocalCorrection(srgbToLinear(c), L, localBlurs, u_localLightA[i], u_localLightB[i], u_localEffects[i], u_localColor[i], m);
+    }
     if (u_useLarge) {
         float wm = clamp(4.0 * L * (1.0 - L), 0.0, 1.0);
         float residual = clamp(L - texture(u_blurLarge, v_uv).r, -${f(CLARITY_RESIDUAL_MAX)}, ${f(CLARITY_RESIDUAL_MAX)});
@@ -446,6 +511,10 @@ void main() {
         float cell = ${f(GRAIN_CELL_SIZE_MIN)} + clamp(u_grainSize / 100.0, 0.0, 1.0) * ${f(GRAIN_CELL_SIZE_RANGE)};
         ivec2 pixel = ivec2(floor(imageUv * u_sourceSize / cell));
         c += vec3((noiseHash(pixel) - .5) * setting(u_grain) * ${f(GRAIN_FACTOR)});
+    }
+    if (u_maskOverlay >= 0) {
+        float overlay = clamp(localMask(u_maskOverlay, imageUv), 0.0, 1.0) * .5;
+        c = mix(c, vec3(1.0, 0.0, 0.0), overlay);
     }
     outColor = vec4(clamp(c, 0.0, 1.0), 1.0);
 }`;
@@ -531,6 +600,38 @@ function bindUnit(gl, value, unit) {
     gl.bindTexture(gl.TEXTURE_2D, value);
 }
 
+function maskTexture(gl, width, height, data = null) {
+    const result = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, result);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, width, height, 0, gl.RED, gl.UNSIGNED_BYTE, data);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+    return result;
+}
+
+function maskSourceSize(source) {
+    return [Number(source?.width || source?.naturalWidth || 1), Number(source?.height || source?.naturalHeight || 1)];
+}
+
+function drawMaskSource(context, source, x, y, width, height) {
+    if (!source) return;
+    if (source.data && Number(source.width) > 0 && Number(source.height) > 0) {
+        const scratch = document.createElement('canvas');
+        scratch.width = Number(source.width); scratch.height = Number(source.height);
+        const scratchContext = scratch.getContext('2d');
+        const imageData = typeof ImageData !== 'undefined' && source instanceof ImageData
+            ? source : new ImageData(new Uint8ClampedArray(source.data), source.width, source.height);
+        scratchContext.putImageData(imageData, 0, 0);
+        context.drawImage(scratch, x, y, width, height);
+    } else {
+        context.drawImage(source, x, y, width, height);
+    }
+}
+
 export class DevelopRenderer {
     constructor(canvas) {
         this.canvas = canvas;
@@ -556,6 +657,9 @@ export class DevelopRenderer {
         this.canvas.width = 1;
         this.canvas.height = 1;
         this.baseCurve = null;
+        this.maskAtlas = maskTexture(this.gl, LOCAL_MASK_ATLAS_COLUMNS, LOCAL_MASK_ATLAS_COLUMNS, new Uint8Array(LOCAL_MASK_ATLAS_COLUMNS ** 2));
+        this.maskRasters = [];
+        this.maskOverlay = -1;
         this.updateBaseCurve();
         this.updateCurve({});
     }
@@ -633,10 +737,53 @@ export class DevelopRenderer {
         });
     }
 
-    setSettings(settings, meta = this.meta) {
+    setSettings(settings, meta = this.meta, _opts = {}) {
         this.settings = settings || {};
         this.meta = meta || {};
         this.updateCurve(this.settings);
+        this.requestRender();
+    }
+
+    setMaskRasters(rasters = []) {
+        const entries = (Array.isArray(rasters) ? rasters : []).filter((entry) => {
+            const index = Number(entry?.correctionIndex);
+            return Number.isInteger(index) && index >= 0 && index < LOCAL_RENDER_CAP && entry.canvasOrImageData;
+        });
+        const sizes = entries.map((entry) => maskSourceSize(entry.canvasOrImageData));
+        const tileWidth = Math.max(1, ...sizes.map(([width]) => width));
+        const tileHeight = Math.max(1, ...sizes.map(([, height]) => height));
+        const canvas = document.createElement('canvas');
+        canvas.width = tileWidth * LOCAL_MASK_ATLAS_COLUMNS;
+        canvas.height = tileHeight * LOCAL_MASK_ATLAS_COLUMNS;
+        const context = canvas.getContext('2d', { willReadFrequently: true });
+        for (const entry of entries) {
+            const index = Number(entry.correctionIndex);
+            drawMaskSource(
+                context,
+                entry.canvasOrImageData,
+                (index % LOCAL_MASK_ATLAS_COLUMNS) * tileWidth,
+                Math.floor(index / LOCAL_MASK_ATLAS_COLUMNS) * tileHeight,
+                tileWidth,
+                tileHeight,
+            );
+        }
+        const rgba = context.getImageData(0, 0, canvas.width, canvas.height).data;
+        const red = new Uint8Array(canvas.width * canvas.height);
+        for (let i = 0; i < red.length; i += 1) red[i] = rgba[i * 4];
+        if (this.maskAtlas) this.gl.deleteTexture(this.maskAtlas);
+        this.maskAtlas = maskTexture(this.gl, canvas.width, canvas.height, red);
+        this.maskRasters = entries;
+        if (this.maskOverlay >= LOCAL_RENDER_CAP) this.maskOverlay = -1;
+        this.requestRender();
+    }
+
+    setMaskOverlay(indexOrNull) {
+        if (indexOrNull == null || indexOrNull === false) this.maskOverlay = -1;
+        else if (indexOrNull === true) this.maskOverlay = Number(this.maskRasters[0]?.correctionIndex ?? -1);
+        else {
+            const index = Number(indexOrNull);
+            this.maskOverlay = Number.isInteger(index) && index >= 0 && index < LOCAL_RENDER_CAP ? index : -1;
+        }
         this.requestRender();
     }
 
@@ -693,6 +840,52 @@ export class DevelopRenderer {
         gl.uniform1i(uniform('u_applyGeometry'), this.geometryEnabled ? 1 : 0);
     }
 
+    localUniforms() {
+        const gl = this.gl;
+        const p = this.mainProgram;
+        const uniform = (name) => gl.getUniformLocation(p, name);
+        const corrections = Array.isArray(this.settings.MaskGroupBasedCorrections)
+            ? this.settings.MaskGroupBasedCorrections.slice(0, LOCAL_RENDER_CAP) : [];
+        const active = new Int32Array(LOCAL_RENDER_CAP);
+        const amount = new Float32Array(LOCAL_RENDER_CAP);
+        const lightA = new Float32Array(LOCAL_RENDER_CAP * 4);
+        const lightB = new Float32Array(LOCAL_RENDER_CAP * 4);
+        const effects = new Float32Array(LOCAL_RENDER_CAP * 4);
+        const color = new Float32Array(LOCAL_RENDER_CAP * 4);
+        for (let i = 0; i < corrections.length; i += 1) {
+            const local = corrections[i] || {};
+            active[i] = correctionEnabled(local) ? 1 : 0;
+            amount[i] = Math.min(Math.max(numberSetting(local, 'CorrectionAmount', 1), 0), 2);
+            lightA.set([
+                localToSlider(local, 'LocalExposure2012'),
+                localToSlider(local, 'LocalContrast2012') / 100,
+                localToSlider(local, 'LocalHighlights2012') / 100,
+                localToSlider(local, 'LocalShadows2012') / 100,
+            ], i * 4);
+            lightB.set([
+                localToSlider(local, 'LocalWhites2012') / 100,
+                localToSlider(local, 'LocalBlacks2012') / 100,
+                localToSlider(local, 'LocalClarity2012') / 100,
+                localToSlider(local, 'LocalDehaze') / 100,
+            ], i * 4);
+            effects.set([
+                localToSlider(local, 'LocalTexture') / 100,
+                localToSlider(local, 'LocalTemperature'),
+                localToSlider(local, 'LocalTint'),
+                localToSlider(local, 'LocalSaturation') / 100,
+            ], i * 4);
+            color[i * 4] = localToSlider(local, 'LocalHue') / 100 * LOCAL_HUE_DEGREES;
+        }
+        gl.uniform1iv(uniform('u_localActive[0]'), active);
+        gl.uniform1fv(uniform('u_localAmount[0]'), amount);
+        gl.uniform4fv(uniform('u_localLightA[0]'), lightA);
+        gl.uniform4fv(uniform('u_localLightB[0]'), lightB);
+        gl.uniform4fv(uniform('u_localEffects[0]'), effects);
+        gl.uniform4fv(uniform('u_localColor[0]'), color);
+        gl.uniform1i(uniform('u_maskOverlay'), this.maskOverlay);
+        gl.uniform1i(uniform('u_maskAtlas'), 6);
+    }
+
     drawColorTarget() {
         const gl = this.gl;
         gl.useProgram(this.lumaProgram);
@@ -730,12 +923,16 @@ export class DevelopRenderer {
         const clarity = numberSetting(this.settings, 'Clarity2012');
         const textureValue = numberSetting(this.settings, 'Texture');
         const sharpness = numberSetting(this.settings, 'Sharpness');
-        const useBlur = clarity !== 0 || textureValue !== 0 || sharpness > 0;
+        const localCorrections = Array.isArray(this.settings.MaskGroupBasedCorrections)
+            ? this.settings.MaskGroupBasedCorrections.slice(0, LOCAL_RENDER_CAP).filter(correctionEnabled) : [];
+        const localClarity = localCorrections.some((correction) => numberSetting(correction, 'LocalClarity2012') !== 0);
+        const localTexture = localCorrections.some((correction) => numberSetting(correction, 'LocalTexture') !== 0);
+        const useBlur = clarity !== 0 || textureValue !== 0 || sharpness > 0 || localClarity || localTexture;
         if (useBlur) {
             this.drawColorTarget();
             const minSide = Math.min(this.width, this.height);
-            if (clarity !== 0) this.blur(BLUR_LARGE_FACTOR * minSide, this.blurLarge);
-            if (textureValue !== 0) this.blur(BLUR_SMALL_FACTOR * minSide, this.blurSmall);
+            if (clarity !== 0 || localClarity) this.blur(BLUR_LARGE_FACTOR * minSide, this.blurLarge);
+            if (textureValue !== 0 || localTexture) this.blur(BLUR_SMALL_FACTOR * minSide, this.blurSmall);
             if (sharpness > 0) this.blur(numberSetting(this.settings, 'SharpenRadius', 1), this.blurSharp);
         }
         gl.useProgram(this.mainProgram);
@@ -745,7 +942,9 @@ export class DevelopRenderer {
         bindUnit(gl, this.blurSmall.texture, 3);
         bindUnit(gl, this.blurSharp.texture, 4);
         bindUnit(gl, this.baseCurve, 5);
+        bindUnit(gl, this.maskAtlas, 6);
         this.uniforms(this.mainProgram);
+        this.localUniforms();
         const uniform = (name) => gl.getUniformLocation(this.mainProgram, name);
         gl.uniform1i(uniform('u_blurLarge'), 2);
         gl.uniform1i(uniform('u_blurSmall'), 3);
@@ -786,6 +985,7 @@ export class DevelopRenderer {
         gl.deleteTexture(this.source);
         gl.deleteTexture(this.curve);
         if (this.baseCurve) gl.deleteTexture(this.baseCurve);
+        if (this.maskAtlas) gl.deleteTexture(this.maskAtlas);
     }
 }
 
@@ -819,6 +1019,9 @@ export async function renderSyntheticPixels(settings = {}) {
     renderer.geometryEnabled = false;
     renderer.uploadSource(syntheticLinearRgba(64), 64, 64);
     renderer.setSettings(settings, { as_shot_temperature: 5150, as_shot_tint: 0 });
+    if (Array.isArray(settings.MaskGroupBasedCorrections)) {
+        renderer.setMaskRasters(await buildMaskRasters({ corrections: settings.MaskGroupBasedCorrections, width: 64, height: 64 }));
+    }
     renderer.render();
     const result = renderer.readPixels(64, 64);
     renderer.destroy();
