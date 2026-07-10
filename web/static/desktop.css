@@ -322,6 +322,7 @@ body.loupe-lights-out #ctxbar { display: none; }
 .similar-depth { position: relative; height: 24px; display: inline-flex; align-items: center; gap: 6px; padding: 0 6px 0 8px; border: 1px solid var(--line); border-radius: var(--r-ctl); background: var(--card); color: var(--text-2); font-size: var(--fs-caption); flex: none; }
 .similar-depth select { height: 20px; border: 0; background: transparent; color: var(--text); font: inherit; outline: 0; }
 #ctx-mid { display: flex; align-items: center; gap: var(--s3); flex: 1 1 auto; justify-content: center; min-width: 0; }
+#ctx-mid[hidden], #ctx-right[hidden] { display: none; }
 #ctx-mid::before, #ctx-right::before { content: ""; width: 1px; height: 20px; background: var(--line-soft); flex: none; }
 #ctx-mid > *, #ctx-right > * { flex-shrink: 0; }
 #ctx-count { min-width: 0; max-width: clamp(82px, 16vw, 180px); color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
