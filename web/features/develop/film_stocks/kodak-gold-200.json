@@ -1,0 +1,71 @@
+{
+  "slug": "kodak-gold-200",
+  "name": "Kodak Gold 200",
+  "iso": 200,
+  "process": "C-41",
+  "type": "negative_color",
+  "white_point_hint": "daylight",
+  "white_point_kelvin": 5500,
+  "hd_curves": {
+    "r": [
+      [-2.0, 0.02],
+      [-1.2, 0.05],
+      [-0.6, 0.10],
+      [0.0, 0.15],
+      [0.6, 0.50],
+      [1.2, 0.86],
+      [1.8, 1.16],
+      [2.6, 1.38]
+    ],
+    "g": [
+      [-2.0, 0.01],
+      [-1.2, 0.05],
+      [-0.6, 0.10],
+      [0.0, 0.15],
+      [0.6, 0.49],
+      [1.2, 0.84],
+      [1.8, 1.14],
+      [2.6, 1.36]
+    ],
+    "b": [
+      [-2.0, 0.01],
+      [-1.2, 0.04],
+      [-0.6, 0.09],
+      [0.0, 0.15],
+      [0.6, 0.47],
+      [1.2, 0.81],
+      [1.8, 1.10],
+      [2.6, 1.32]
+    ]
+  },
+  "spectral_crosstalk": [
+    [0.84, 0.13, 0.03],
+    [0.09, 0.80, 0.11],
+    [0.03, 0.16, 0.81]
+  ],
+  "dir_coupler": [
+    [1.00, -0.06, -0.04],
+    [-0.05, 1.00, -0.06],
+    [-0.04, -0.05, 1.00]
+  ],
+  "grain": {
+    "r": {"rms_granularity": 5.5, "size_px_at_4k": 2.4, "shadow_bias": 0.72},
+    "g": {"rms_granularity": 5.5, "size_px_at_4k": 2.4, "shadow_bias": 0.72},
+    "b": {"rms_granularity": 5.5, "size_px_at_4k": 2.4, "shadow_bias": 0.72}
+  },
+  "halation": {
+    "amount": 0.07,
+    "threshold": 0.60,
+    "radius_frac": 0.03,
+    "green_fraction": 0.09
+  },
+  "base": {
+    "orange_mask_rgb": [0.94, 0.55, 0.24],
+    "base_fog_density": 0.11
+  },
+  "print_paper": {
+    "gamma": 2.55,
+    "shoulder": 0.84
+  },
+  "notes": "H&D approx from Kodak Gold 200 consumer datasheet Status M curves. Warm bias encoded partly via slightly higher red-layer density build and warmer orange mask; straight-line gamma ≈ 0.58. Spectral crosstalk from consumer Gold sensitivity plots — broader overlap than Portra (less layer isolation). Weak consumer DIR. Diffuse RMS Granularity ~5–6 (Kodak consumer Gold family; exact published figure varies by generation — using 5.5 as midpoint). Halation subtle. Memory approximation; Gold datasheets are thinner than Portra pubs."
+}

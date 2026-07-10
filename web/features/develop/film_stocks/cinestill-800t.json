@@ -1,0 +1,71 @@
+{
+  "slug": "cinestill-800t",
+  "name": "CineStill 800T",
+  "iso": 800,
+  "process": "C-41",
+  "type": "negative_color",
+  "white_point_hint": "tungsten",
+  "white_point_kelvin": 3200,
+  "hd_curves": {
+    "r": [
+      [-2.0, 0.01],
+      [-1.2, 0.04],
+      [-0.6, 0.09],
+      [0.0, 0.15],
+      [0.6, 0.46],
+      [1.2, 0.79],
+      [1.8, 1.08],
+      [2.6, 1.32]
+    ],
+    "g": [
+      [-2.0, 0.01],
+      [-1.2, 0.05],
+      [-0.6, 0.10],
+      [0.0, 0.15],
+      [0.6, 0.48],
+      [1.2, 0.81],
+      [1.8, 1.10],
+      [2.6, 1.34]
+    ],
+    "b": [
+      [-2.0, 0.01],
+      [-1.2, 0.04],
+      [-0.6, 0.09],
+      [0.0, 0.15],
+      [0.6, 0.47],
+      [1.2, 0.80],
+      [1.8, 1.09],
+      [2.6, 1.33]
+    ]
+  },
+  "spectral_crosstalk": [
+    [0.82, 0.14, 0.04],
+    [0.10, 0.78, 0.12],
+    [0.03, 0.18, 0.79]
+  ],
+  "dir_coupler": [
+    [1.00, -0.12, -0.09],
+    [-0.11, 1.00, -0.12],
+    [-0.08, -0.11, 1.00]
+  ],
+  "grain": {
+    "r": {"rms_granularity": 7.0, "size_px_at_4k": 3.0, "shadow_bias": 0.75},
+    "g": {"rms_granularity": 7.0, "size_px_at_4k": 3.0, "shadow_bias": 0.75},
+    "b": {"rms_granularity": 7.0, "size_px_at_4k": 3.0, "shadow_bias": 0.75}
+  },
+  "halation": {
+    "amount": 0.58,
+    "threshold": 0.32,
+    "radius_frac": 0.09,
+    "green_fraction": 0.12
+  },
+  "base": {
+    "orange_mask_rgb": [0.91, 0.50, 0.20],
+    "base_fog_density": 0.12
+  },
+  "print_paper": {
+    "gamma": 2.55,
+    "shoulder": 0.82
+  },
+  "notes": "CineStill 800T = Kodak Vision3 500T (5219) with remjet removed, rated ~EI 800 in C-41. H&D approx from Kodak E-4050 / H-1-5219 Vision3 500T Status M curves; straight-line gamma ≈ 0.55 (motion-picture negative aim). logE = 0 at ISO speed point (D ≈ 0.15 above fog). Spectral crosstalk reasoned from Vision3 500T tungsten-balanced sensitivity plots (red layer weighted for 3200 K; modest G↔R and G↔B overlap). DIR strength at pro/motion-picture level. Halation intentionally strong — no remjet anti-halation layer is the stock's signature red highlight glow. RMS granularity 7 from Vision3 500T datasheet Diffuse RMS Granularity. Curves/matrices are faithful memory approximations of the published plots, not point-digitized from a scanned datasheet PDF."
+}

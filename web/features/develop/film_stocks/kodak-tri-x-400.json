@@ -1,0 +1,45 @@
+{
+  "slug": "kodak-tri-x-400",
+  "name": "Kodak Tri-X 400",
+  "iso": 400,
+  "process": "B&W",
+  "type": "negative_bw",
+  "white_point_hint": "daylight",
+  "white_point_kelvin": 5500,
+  "hd_curves": {
+    "pan": [
+      [-2.0, 0.02],
+      [-1.2, 0.06],
+      [-0.6, 0.12],
+      [0.0, 0.15],
+      [0.6, 0.54],
+      [1.2, 0.94],
+      [1.8, 1.28],
+      [2.6, 1.52]
+    ]
+  },
+  "spectral_crosstalk": [
+    [0.28, 0.52, 0.20]
+  ],
+  "dir_coupler": [
+    [1.0]
+  ],
+  "grain": {
+    "pan": {"rms_granularity": 17.0, "size_px_at_4k": 3.4, "shadow_bias": 0.80}
+  },
+  "halation": {
+    "amount": 0.08,
+    "threshold": 0.55,
+    "radius_frac": 0.035,
+    "green_fraction": 0.0
+  },
+  "base": {
+    "orange_mask_rgb": [0.0, 0.0, 0.0],
+    "base_fog_density": 0.08
+  },
+  "print_paper": {
+    "gamma": 2.10,
+    "shoulder": 0.78
+  },
+  "notes": "B&W single-layer path. H&D approx from Kodak Tri-X 400 (400TX) datasheet characteristic curve for D-76 / recommended processing; straight-line gamma ≈ 0.65 (typical pictorial aim; Tri-X can be developed steeper). logE = 0 at ISO speed point (D ≈ 0.10–0.15 above fog per Kodak B&W speed method — using 0.15 for engine consistency with color stocks). spectral_crosstalk is a 1×3 panchromatic weight row (not 3×3), reasoned from Tri-X panchromatic sensitivity (strong green, solid red, useful blue). dir_coupler is identity 1×1 (no color DIR). Diffuse RMS Granularity 17 from Kodak Tri-X datasheet. Mild halation (B&W AH layer; no red dye glow — green_fraction 0). Print paper = grade ~2–3 silver-gelatin enlarging paper, gamma ≈ 2.1. Memory approximation."
+}
