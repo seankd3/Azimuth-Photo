@@ -14,6 +14,27 @@ cd ..
 ./scripts/photoarchive-server start
 ```
 
+That is the fast core install: library browsing, metadata search, Refine,
+Develop, sharing, and publishing do not require the local AI stack. Install
+only the inference packs you want, from `web/`:
+
+```bash
+python -m pip install -r requirements-ai-search.txt    # semantic search
+python -m pip install -r requirements-ai-people.txt    # face recognition
+python -m pip install -r requirements-ai-captions.txt  # generated captions/tags
+python -m pip install -r requirements-ai-develop.txt   # Develop subject masks
+python -m pip install -r requirements-ai-all.txt       # every optional pack
+```
+
+The 8B search model and current 4-bit caption preset use bitsandbytes, which the
+manifests install only on supported Linux x86-64 systems. Other platforms can
+use the compact 2B search model without bitsandbytes; captions stay unavailable
+rather than risking an unsafe full-precision model load.
+
+Missing packs are reported in System status and do not hide stored embeddings,
+People labels, captions, or tags. photoArchive never installs Python packages
+at runtime; install a pack explicitly, then restart the app when convenient.
+
 The app runs at `http://127.0.0.1:8000` by default.
 
 ## App Shape

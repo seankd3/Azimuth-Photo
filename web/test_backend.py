@@ -54,7 +54,7 @@ class BackendIntegrationTests(BackendTestCase):
         self.assertIn('strategy="explore"', light_warmup)
 
     async def test_startup_pauses_search_index_without_cold_loading_model(self):
-        startup_source = inspect.getsource(background_runtime.run_startup)
+        startup_source = inspect.getsource(background_runtime.schedule_optional_workers)
 
         self.assertIn("pause_embedding_worker", startup_source)
         self.assertIn("_start_background_daemon(embedding_worker.run_embedding_worker)", startup_source)
@@ -66,7 +66,7 @@ class BackendIntegrationTests(BackendTestCase):
         )
 
     async def test_startup_starts_ai_and_people_worker_status_loops_without_idle_gate(self):
-        startup_source = inspect.getsource(background_runtime.run_startup)
+        startup_source = inspect.getsource(background_runtime.schedule_optional_workers)
 
         self.assertIn("_start_background_daemon(embedding_worker.run_embedding_worker)", startup_source)
         self.assertIn("_start_background_daemon(face_worker.run_face_worker", startup_source)
@@ -122,10 +122,8 @@ class BackendIntegrationTests(BackendTestCase):
         self.assertEqual(error_log.call_args.args[1], "test_warmup")
 
     async def test_caption_startup_failure_is_not_silently_swallowed(self):
-        startup_source = inspect.getsource(background_runtime.run_startup)
-        caption_block = startup_source.split("import settings as _settings", 1)[1].split(
-            "async def _warm_interaction_caches", 1
-        )[0]
+        startup_source = inspect.getsource(background_runtime.schedule_optional_workers)
+        caption_block = startup_source.split('if statuses["captions"]["available"]:', 1)[1]
 
         self.assertIn("log.exception", caption_block)
         self.assertNotIn("except Exception:\n        pass", caption_block)

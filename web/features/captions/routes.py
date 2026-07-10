@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 import caption_worker
 import settings
+from core import capabilities
 
 
 router = APIRouter()
@@ -61,9 +62,21 @@ async def caption_status_payload() -> dict:
     config = settings.get_settings()
     caption_config = settings.active_caption_config(config)
     worker = caption_worker.get_worker_status()
+    capability = capabilities.capability_status("captions")
+    if not capability["available"]:
+        worker = {
+            **worker,
+            "state": "unavailable",
+            "ready": False,
+            "running": False,
+            "message": capability["message"],
+            "last_error": "",
+        }
     counts = await _get_caption_status_counts(caption_config=caption_config)
     return {
-        "active": bool(config.get("caption_scan_enabled", False))
+        "capability": capability,
+        "active": capability["available"]
+        and bool(config.get("caption_scan_enabled", False))
         and not caption_worker.manual_pause_active(),
         "automatic": False,
         "model_id": caption_config["model_id"],
@@ -140,6 +153,9 @@ async def api_pause_captions():
 @router.post("/api/captions/scan/resume")
 async def api_resume_captions():
     _configured()
+    capability = capabilities.capability_status("captions")
+    if not capability["available"]:
+        return JSONResponse(capabilities.unavailable_response("captions"), status_code=409)
     try:
         caption_worker.resume_caption_worker()
     except Exception:

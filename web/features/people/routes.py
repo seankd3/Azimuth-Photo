@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse, Response
 import face_worker
 import settings
 import thumbnails
+from core import capabilities
 from core.requests import json_object, positive_int
 from data import connection as data_connection
 
@@ -117,6 +118,16 @@ async def people_status_payload(review: dict | None = None) -> dict:
     started = time.perf_counter()
     config = settings.get_settings()
     worker = face_worker.get_worker_status()
+    capability = capabilities.capability_status("people")
+    if not capability["available"]:
+        worker = {
+            **worker,
+            "state": "unavailable",
+            "ready": False,
+            "running": False,
+            "message": capability["message"],
+            "last_error": "",
+        }
     counts_stale = False
     if review is None:
         counts, counts_stale = await _fast_people_counts(worker)
@@ -124,9 +135,14 @@ async def people_status_payload(review: dict | None = None) -> dict:
         counts = dict(review.get("counts", {}) if isinstance(review, dict) else {})
     counts.setdefault("pending_cached_images", int(worker.get("pending_cached_images") or 0))
     return {
-        "active": bool(config.get("people_scan_enabled", True)) and not face_worker.manual_pause_active(),
+        "capability": capability,
+        "active": capability["available"]
+        and bool(config.get("people_scan_enabled", True))
+        and not face_worker.manual_pause_active(),
         "automatic": False,
-        "auto_install": bool(config.get("people_auto_install", True)),
+        "auto_install": False,
+        "auto_install_legacy": bool(config.get("people_auto_install", True)),
+        "runtime_install": False,
         "model_id": config.get("face_model_id") or "buffalo_l",
         "model_dir": config.get("face_model_dir") or "",
         "detection_size": int(config.get("face_detection_size") or 640),
@@ -243,6 +259,9 @@ async def api_people_scan_pause():
 
 @router.post("/api/people/scan/resume")
 async def api_people_scan_resume():
+    capability = capabilities.capability_status("people")
+    if not capability["available"]:
+        return JSONResponse(capabilities.unavailable_response("people"), status_code=409)
     thumbnails.start_pregeneration()
     face_worker.resume_face_worker()
     return {"ok": True, "status": await people_status_payload()}

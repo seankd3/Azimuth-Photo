@@ -1,0 +1,10 @@
+-r requirements.txt
+
+# Local semantic search and image embeddings.
+torch
+sentence-transformers[image]
+transformers
+huggingface_hub
+accelerate
+qwen-vl-utils
+bitsandbytes; sys_platform == "linux" and platform_machine == "x86_64"

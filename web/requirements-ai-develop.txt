@@ -1,0 +1,4 @@
+-r requirements.txt
+
+# Local subject masks in Develop. Sky masks remain dependency-free.
+onnxruntime

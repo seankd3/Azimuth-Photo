@@ -5,10 +5,6 @@ Pillow
 rawpy
 jinja2
 python-multipart
+numpy
+opencv-python-headless
 scikit-learn
-sentence-transformers[image]
-transformers
-huggingface_hub
-bitsandbytes
-accelerate
-qwen-vl-utils

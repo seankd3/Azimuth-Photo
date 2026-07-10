@@ -115,6 +115,18 @@ def get_worker_status() -> dict[str, Any]:
     return dict(_status)
 
 
+def mark_dependencies_unavailable(capability: dict[str, Any]) -> None:
+    """Publish one stable missing-pack state without starting a retry loop."""
+
+    _set_status(
+        state="unavailable",
+        ready=False,
+        running=False,
+        message=capability["message"],
+        last_error="",
+    )
+
+
 def manual_pause_active() -> bool:
     if _load_failure_cooldown_until and time.time() < _load_failure_cooldown_until:
         return True

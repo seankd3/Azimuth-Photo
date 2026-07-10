@@ -1,0 +1,4 @@
+-r requirements-ai-search.txt
+-r requirements-ai-people.txt
+-r requirements-ai-captions.txt
+-r requirements-ai-develop.txt

@@ -2,6 +2,8 @@ import asyncio
 import logging
 import os
 
+from core import capabilities
+
 
 log = logging.getLogger(__name__)
 
@@ -70,6 +72,50 @@ async def _gather_logged(worker_name: str, *awaitables) -> None:
                 task_index,
                 exc_info=(type(result), result, result.__traceback__),
             )
+
+
+async def _start_background_daemon(coro_factory, delay: float = 5.0):
+    await asyncio.sleep(delay)
+    await coro_factory()
+
+
+def schedule_optional_workers(*, track_background_task, settings, face_worker, caption_worker) -> dict:
+    """Arm only inference workers whose explicit dependency packs are present."""
+
+    statuses = {
+        key: capabilities.capability_status(key)
+        for key in ("search", "people", "captions")
+    }
+    if statuses["search"]["available"]:
+        try:
+            import embedding_worker
+
+            embedding_worker.pause_embedding_worker(
+                "Search is stopped until you start it from Background Work."
+            )
+            track_background_task(_start_background_daemon(embedding_worker.run_embedding_worker))
+        except ImportError:
+            log.exception("worker=embedding startup import failed")
+
+    if statuses["people"]["available"]:
+        track_background_task(_start_background_daemon(face_worker.run_face_worker, delay=25.0))
+    else:
+        face_worker.mark_dependencies_unavailable(statuses["people"])
+
+    if statuses["captions"]["available"]:
+        try:
+            if not settings.get_settings().get("caption_scan_enabled"):
+                caption_worker.pause_caption_worker(
+                    "Captions are stopped until you start them from Background Work."
+                )
+            else:
+                caption_worker.resume_caption_worker()
+            track_background_task(_start_background_daemon(caption_worker.run_caption_worker, delay=30.0))
+        except Exception:
+            log.exception("worker=caption startup failed; caption worker was not scheduled")
+    else:
+        caption_worker.mark_dependencies_unavailable(statuses["captions"])
+    return statuses
 
 
 async def track_idle_activity(request, call_next, *, thumbnails, excluded_paths: set[str]):
@@ -258,33 +304,16 @@ async def run_startup(
 
     track_background_task(_warm_priority_interaction_caches())
 
-    async def _start_background_daemon(coro_factory, delay: float = 5.0):
-        await asyncio.sleep(delay)
-        await coro_factory()
-
     track_background_task(_start_background_daemon(thumbnails.run_prefetch_worker))
     track_background_task(_start_background_daemon(_cleanup_stale_cache_temps_when_quiet, delay=20.0))
     track_background_task(_start_background_daemon(classify_orientations_background))
     track_background_task(_start_background_daemon(scan_metadata_background))
-    try:
-        import embedding_worker
-        embedding_worker.pause_embedding_worker("Search is stopped until you start it from Background Work.")
-        track_background_task(_start_background_daemon(embedding_worker.run_embedding_worker))
-    except ImportError:
-        pass  # AI features disabled - missing dependencies
-
-    track_background_task(_start_background_daemon(face_worker.run_face_worker, delay=25.0))
-    try:
-        import settings as _settings
-        if not _settings.get_settings().get("caption_scan_enabled"):
-            caption_worker.pause_caption_worker(
-                "Captions are stopped until you start them from Background Work."
-            )
-        else:
-            caption_worker.resume_caption_worker()
-        track_background_task(_start_background_daemon(caption_worker.run_caption_worker, delay=30.0))
-    except Exception:
-        log.exception("worker=caption startup failed; caption worker was not scheduled")
+    schedule_optional_workers(
+        track_background_task=track_background_task,
+        settings=settings,
+        face_worker=face_worker,
+        caption_worker=caption_worker,
+    )
 
     try:
         import db as _db

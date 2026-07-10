@@ -408,9 +408,9 @@ def _load_model(model_dir: str, model_id: str):
             "min_pixels": 4096,
             "max_pixels": 65536,
         }
-    model = SentenceTransformer(
-        model_dir,
-        model_kwargs={
+    model_kwargs = {}
+    if importlib.util.find_spec("bitsandbytes") is not None:
+        model_kwargs = {
             "quantization_config": {
                 "load_in_4bit": True,
                 "bnb_4bit_compute_dtype": torch.float16,
@@ -418,7 +418,20 @@ def _load_model(model_dir: str, model_id: str):
                 "bnb_4bit_quant_type": "nf4",
             },
             "torch_dtype": torch.float16,
-        },
+        }
+    elif model_id == settings.EMBED_MODEL_PRESETS[settings.LEGACY_2B_PRESET_KEY]["model_id"]:
+        # The compact model has a deliberate CPU-compatible path on platforms
+        # where bitsandbytes is unavailable. Do not attempt the 8B model at
+        # full precision: that can exhaust ordinary workstation memory.
+        model_kwargs = {"torch_dtype": torch.float32}
+    else:
+        raise RuntimeError(
+            "The configured 8B search model needs bitsandbytes. "
+            "Install the search pack on Linux x86-64 or select the compact 2B search model."
+        )
+    model = SentenceTransformer(
+        model_dir,
+        model_kwargs=model_kwargs,
         processor_kwargs=processor_kwargs,
         trust_remote_code=True,
         local_files_only=True,

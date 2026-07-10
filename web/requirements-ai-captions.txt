@@ -1,0 +1,9 @@
+-r requirements.txt
+
+# Local vision-language captions and tags.
+torch
+transformers
+huggingface_hub
+accelerate
+qwen-vl-utils
+bitsandbytes; sys_platform == "linux" and platform_machine == "x86_64"

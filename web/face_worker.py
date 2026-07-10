@@ -10,9 +10,8 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass
+from importlib.util import find_spec
 import os
-import subprocess
-import sys
 import threading
 import time
 from typing import Any
@@ -60,6 +59,7 @@ _status: dict[str, Any] = {
     "model_dir": "",
     "model_license": FACE_MODEL_LICENSE_TEXT,
     "auto_install": True,
+    "runtime_install": False,
     "last_error": "",
     "last_scan_at": None,
     "last_batch_size": 0,
@@ -123,6 +123,19 @@ def get_worker_status() -> dict[str, Any]:
     return status
 
 
+def mark_dependencies_unavailable(capability: dict[str, Any]) -> None:
+    """Publish one stable missing-pack state without starting the worker loop."""
+
+    _set_status(
+        state="unavailable",
+        ready=False,
+        running=False,
+        runtime_install=False,
+        message=capability["message"],
+        last_error="",
+    )
+
+
 def manual_pause_active() -> bool:
     return _face_manual_pause
 
@@ -167,28 +180,15 @@ def _people_background_decision(config: dict[str, Any]) -> PeopleBackgroundDecis
 
 
 def _missing_face_dependencies() -> list[str]:
-    missing = []
-    for module_name, package_name in (
+    return [
+        package_name
+        for module_name, package_name in (
         ("insightface", "insightface"),
         ("onnxruntime", "onnxruntime"),
         ("cv2", "opencv-python-headless"),
-    ):
-        try:
-            __import__(module_name)
-        except Exception:
-            missing.append(package_name)
-    return missing
-
-
-def _install_face_dependencies(missing: list[str]) -> None:
-    if not missing:
-        return
-    _set_status(
-        state="installing",
-        ready=False,
-        message=f"Installing People recognition dependencies: {', '.join(missing)}.",
-    )
-    subprocess.check_call([sys.executable, "-m", "pip", "install", *missing])
+        )
+        if find_spec(module_name) is None
+    ]
 
 
 def _load_face_app(config: dict[str, Any]):
@@ -202,12 +202,12 @@ def _load_face_app(config: dict[str, Any]):
 
     missing = _missing_face_dependencies()
     if missing:
-        if not bool(config.get("people_auto_install", True)):
-            raise RuntimeError(
-                "People recognition dependencies are not installed and people_auto_install is off: "
-                + ", ".join(missing)
-            )
-        _install_face_dependencies(missing)
+        raise RuntimeError(
+            "People recognition optional pack is not installed: "
+            + ", ".join(missing)
+            + ". Run python -m pip install -r requirements-ai-people.txt. "
+            "Runtime package installation is disabled."
+        )
 
     from insightface.app import FaceAnalysis
 

@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 
 import ai_models
 import settings
+from core import capabilities
 from core import responses as response_helpers
 
 
@@ -54,7 +55,36 @@ def invalidate_ai_status_response_cache() -> None:
     _ai_status_response_refreshing = False
 
 
-def _ai_model_status_cache_key(model_status: dict) -> tuple:
+def embedding_runtime_status(capability: dict | None = None) -> dict:
+    capability = capability or capabilities.capability_status("search")
+    config = settings.active_embedding_config()
+    needs_bitsandbytes = config["model_id"] == "Qwen/Qwen3-VL-Embedding-8B"
+    missing_bitsandbytes = "bitsandbytes" in capability.get("optional_missing", ())
+    ready = bool(capability["available"]) and not (needs_bitsandbytes and missing_bitsandbytes)
+    if ready:
+        message = "The configured search model can run on this system."
+    elif not capability["available"]:
+        message = capability["message"]
+    else:
+        message = (
+            "The configured 8B search model needs bitsandbytes. Install the search pack "
+            "on Linux x86-64 or select the compact 2B search model."
+        )
+    return {
+        "ready": ready,
+        "model_id": config["model_id"],
+        "requires_bitsandbytes": needs_bitsandbytes,
+        "message": message,
+    }
+
+
+def _ai_model_status_cache_key(
+    model_status: dict,
+    capability: dict | None = None,
+    runtime: dict | None = None,
+) -> tuple:
+    capability = capability or capabilities.capability_status("search")
+    runtime = runtime or embedding_runtime_status(capability)
     install = model_status.get("install") or {}
     return (
         bool(model_status.get("installed")),
@@ -65,6 +95,9 @@ def _ai_model_status_cache_key(model_status: dict) -> tuple:
         bool(install.get("running")),
         str(install.get("status") or ""),
         str(install.get("message") or ""),
+        bool(capability["available"]),
+        tuple(capability["missing"]),
+        bool(runtime["ready"]),
     )
 
 
@@ -99,8 +132,10 @@ def _refresh_ai_status_response_cache(model_status: dict) -> bool:
 
 async def build_ai_status(model_status: dict | None = None, *, force: bool = False):
     """Embedding worker + model install status for UI surfaces."""
+    capability = capabilities.capability_status("search")
+    runtime = embedding_runtime_status(capability)
     model_status = model_status or ai_models.get_model_status()
-    cache_key = _ai_model_status_cache_key(model_status)
+    cache_key = _ai_model_status_cache_key(model_status, capability, runtime)
     if not force:
         cached = _ai_status_response_cache.get("data")
         if (
@@ -134,12 +169,14 @@ async def build_ai_status(model_status: dict | None = None, *, force: bool = Fal
 
     worker_status = {}
     try:
+        if not runtime["ready"]:
+            raise ImportError(runtime["message"])
         import embedding_worker
         worker_status = embedding_worker.get_worker_status()
     except Exception:
         worker_status = {
             "state": "unavailable",
-            "message": "AI worker unavailable",
+            "message": runtime["message"],
             "ready": False,
             "manual_pause": False,
             "model_id": "",
@@ -195,9 +232,13 @@ async def build_ai_status(model_status: dict | None = None, *, force: bool = Fal
         "worker_state": worker_status["state"],
         "worker_message": worker_status["message"],
         "manual_pause": bool(worker_status.get("manual_pause")),
+        "capability": capability,
+        "runtime": runtime,
     }
 
     response = {
+        "capability": capability,
+        "runtime": runtime,
         "embedded": embedded,
         "total_images": total_images,
         "total_kept": total_images,
@@ -258,6 +299,9 @@ async def build_ai_status(model_status: dict | None = None, *, force: bool = Fal
 @router.post("/api/ai/embeddings/pause")
 async def api_pause_embeddings():
     invalidate_settings_response_cache = _configured()
+    capability = capabilities.capability_status("search")
+    if not capability["available"]:
+        return JSONResponse(capabilities.unavailable_response("search"), status_code=409)
     try:
         import embedding_worker
     except ImportError:
@@ -271,6 +315,20 @@ async def api_pause_embeddings():
 @router.post("/api/ai/embeddings/resume")
 async def api_resume_embeddings():
     invalidate_settings_response_cache = _configured()
+    capability = capabilities.capability_status("search")
+    if not capability["available"]:
+        return JSONResponse(capabilities.unavailable_response("search"), status_code=409)
+    runtime = embedding_runtime_status(capability)
+    if not runtime["ready"]:
+        return JSONResponse(
+            {
+                "error": runtime["message"],
+                "capability": capability,
+                "runtime": runtime,
+                "install_command": capability["install_command"],
+            },
+            status_code=409,
+        )
     try:
         import embedding_worker
     except ImportError:
@@ -290,6 +348,9 @@ async def api_resume_embeddings():
 async def api_install_ai_model(role: str = "fast"):
     del role
     _configured()
+    capability = capabilities.capability_status("search")
+    if not capability["available"]:
+        return JSONResponse(capabilities.unavailable_response("search"), status_code=409)
     selected_role = "active"
     install_config = settings.active_embedding_config()
     existing_status = ai_models.get_model_status(install_config)
