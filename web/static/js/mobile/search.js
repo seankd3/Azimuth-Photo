@@ -3,7 +3,7 @@
 // raw|jpg|tif file_type group aliases and flag scopes.
 
 import { getFilterOptions, getPeople, getTags, ignorePerson, labelPerson, writeFailureMessage } from './api.js';
-import { nav, setScope } from './state.js';
+import { nav, patchScope, setScope } from './state.js';
 import { dismissSheetThen, openSheet } from './selection.js';
 import { showToast } from './toast.js';
 import { icon } from '../icons.js';
@@ -251,9 +251,9 @@ function render() {
             if (longPressed) return;
             const p = ppl && ppl[Number(el.dataset.pi)];
             if (!p) return;
-            setScope({
+            patchScope({
                 people: String(p.id),
-                label: personLabel(p),
+                peopleLabel: personLabel(p),
                 thumb: p.face_thumb_url || p.thumb_url || '',
             });
             nav.setTab('photos');
@@ -261,14 +261,14 @@ function render() {
     }
     for (const el of root.querySelectorAll('.ms-chip[data-type]')) {
         el.addEventListener('click', () => {
-            setScope({ fileType: el.dataset.type, label: el.dataset.type.toUpperCase() });
+            patchScope({ fileType: el.dataset.type });
             nav.setTab('photos');
         });
     }
     for (const el of root.querySelectorAll('.ms-chip[data-flag]')) {
         el.addEventListener('click', () => {
             const flag = el.dataset.flag;
-            setScope({ flag, label: flag === 'picked' ? 'Picked' : 'Rejected' });
+            patchScope({ flag });
             nav.setTab('photos');
         });
     }
@@ -276,37 +276,28 @@ function render() {
         el.addEventListener('click', () => {
             const cam = cams[Number(el.dataset.cam)];
             if (!cam) return;
-            setScope({ camera: cam.camera, label: cam.camera });
+            patchScope({ camera: cam.camera });
             nav.setTab('photos');
         });
     }
     for (const el of root.querySelectorAll('.ms-chip[data-stars]')) {
         el.addEventListener('click', () => {
             const stars = el.dataset.stars;
-            setScope({ minStars: stars, label: `${stars}+ stars` });
+            patchScope({ minStars: stars });
             nav.setTab('photos');
         });
     }
     for (const el of root.querySelectorAll('.ms-pill[data-orientation]')) {
         el.addEventListener('click', () => {
             const orientation = el.dataset.orientation;
-            setScope({
-                orientation,
-                label: orientation === 'landscape' ? 'Landscape' : 'Portrait',
-            });
+            patchScope({ orientation });
             nav.setTab('photos');
         });
     }
     for (const el of root.querySelectorAll('.ms-pill[data-compared]')) {
         el.addEventListener('click', () => {
             const compared = el.dataset.compared;
-            const labels = {
-                compared: 'Ranked',
-                uncompared: 'Unranked',
-                direct_uncompared: 'Not compared yet',
-                confident: 'High confidence',
-            };
-            setScope({ compared, label: labels[compared] || compared });
+            patchScope({ compared });
             nav.setTab('photos');
         });
     }
@@ -315,7 +306,7 @@ function render() {
             const tag = tags[Number(el.dataset.tag)];
             const value = tag && (tag.tag || tag.value);
             if (!value) return;
-            setScope({ tag: value, label: `#${value}` });
+            patchScope({ tag: value });
             nav.setTab('photos');
         });
     }

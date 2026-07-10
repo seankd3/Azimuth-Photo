@@ -45,6 +45,10 @@ export async function getRankings(params) {
     return fetchJson(`/api/rankings?${params.toString()}`, { defaultValue: null });
 }
 
+export async function getStack(stackId) {
+    return fetchJson(`/api/stacks/${encodeURIComponent(stackId)}`, { defaultValue: null });
+}
+
 export async function getSimilar(imageId, limit = 100) {
     return fetchJson(`/api/similar/${imageId}?limit=${limit}`, { defaultValue: null });
 }

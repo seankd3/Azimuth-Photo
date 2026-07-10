@@ -2,6 +2,26 @@
 // and a tiny event bus that keeps the modules decoupled.
 
 const listeners = new Map();
+const VIEW_PREFS_KEY = 'pa-m-view-prefs';
+const VIEW_PREF_DEFAULTS = {
+    sort: 'date_taken',
+    collapseStacks: false,
+};
+const VIEW_SORTS = new Set(['date_taken', 'date_taken_asc', 'elo', 'elo_asc', 'taste']);
+
+function savedViewPrefs() {
+    try {
+        const saved = JSON.parse(localStorage.getItem(VIEW_PREFS_KEY) || '{}');
+        return {
+            sort: VIEW_SORTS.has(saved.sort) ? saved.sort : VIEW_PREF_DEFAULTS.sort,
+            collapseStacks: saved.collapseStacks == null
+                ? VIEW_PREF_DEFAULTS.collapseStacks
+                : Boolean(saved.collapseStacks),
+        };
+    } catch {
+        return { ...VIEW_PREF_DEFAULTS };
+    }
+}
 
 export function on(event, fn) {
     if (!listeners.has(event)) listeners.set(event, []);
@@ -34,13 +54,11 @@ export const scope = {
     similarId: '',
     similarImages: null,
     label: '',
+    peopleLabel: '',
     thumb: '',
 };
 
-export const viewPrefs = {
-    sort: 'date_taken',
-    collapseStacks: false,
-};
+export const viewPrefs = savedViewPrefs();
 
 export function scopeActive() {
     return Boolean(
@@ -85,6 +103,7 @@ export function setScope(patch) {
     scope.similarId = '';
     scope.similarImages = null;
     scope.label = '';
+    scope.peopleLabel = '';
     scope.thumb = '';
     Object.assign(scope, patch);
     emit('scope', scope);
@@ -97,6 +116,11 @@ export function patchScope(patch) {
 
 export function setViewPrefs(patch) {
     Object.assign(viewPrefs, patch);
+    try {
+        localStorage.setItem(VIEW_PREFS_KEY, JSON.stringify(viewPrefs));
+    } catch {
+        // Preferences are best-effort when storage is unavailable.
+    }
     emit('view-prefs', viewPrefs);
 }
 

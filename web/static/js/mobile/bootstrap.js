@@ -91,13 +91,9 @@ function installOfflineBanner() {
         document.body.classList.toggle('offline', offline);
         const selectors = [
             '[data-mutating]',
-            '#msb-pick',
-            '#msb-reject',
-            '#msb-coll',
-            '#msb-more',
             '#m-sel-actions [data-action="pick"]',
             '#m-sel-actions [data-action="reject"]',
-            '#m-sel-actions [data-action="more"]',
+            '#m-sel-actions [data-action="collection"]',
             '#mv-pick',
             '#mv-reject',
             '#mv-unflag',

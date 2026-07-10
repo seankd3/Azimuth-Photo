@@ -4,7 +4,7 @@
 // jumps across the WHOLE archive (undated photos land in a proper
 // "Undated" section at the end, matching the SQL sort order).
 
-import { getDateHistogram, getRankings, thumbUrl } from './api.js';
+import { getDateHistogram, getRankings, getStack, thumbUrl } from './api.js';
 import {
     byId, clearScope, clearSelection, emit, on, rememberImages,
     isOffline, scope, scopeActive, scopeParams, selState, selection, selectionChanged,
@@ -43,6 +43,9 @@ let pane = null;
 let timeline = null;
 let sentinel = null;
 let endEl = null;
+let expandedStack = null;
+let stackRequest = 0;
+const stackCache = new Map();
 
 let images = [];
 let startOffset = 0;
@@ -115,7 +118,7 @@ function stackBadge(img) {
     const stackId = Number(img.stack_id) || 0;
     const stackCount = Number(img.stack_count) || 0;
     if (!stackId || stackCount <= 1) return '';
-    return `<span class="c-stack" aria-label="Stack of ${stackCount} photos">${icon('layers')}<b>${stackCount}</b></span>`;
+    return `<button type="button" class="c-stack" data-stack-id="${stackId}" aria-label="Expand stack of ${stackCount} photos" aria-expanded="false">${icon('layers')}<b>${stackCount}</b></button>`;
 }
 
 function cellFor(img, mi) {
@@ -158,7 +161,8 @@ function mkDaySection(dk, d) {
     return sec;
 }
 
-const dayIds = (sec) => [...sec.querySelectorAll('.mcell[data-id]')].map((c) => Number(c.dataset.id));
+const dayIds = (sec) => [...sec.querySelectorAll('.mcell[data-id]:not([data-stack-member])')]
+    .map((c) => Number(c.dataset.id));
 
 function toggleDay(sec) {
     const ids = dayIds(sec);
@@ -188,14 +192,87 @@ function updateDayChecks() {
 
 function reindexCells() {
     flatIds = [];
-    for (const cell of timeline.querySelectorAll('.mcell[data-id]')) {
+    for (const cell of timeline.querySelectorAll('.mcell[data-id]:not([data-stack-member])')) {
         cell.dataset.mi = String(flatIds.length);
         flatIds.push(Number(cell.dataset.id));
     }
 }
 
+function closeExpandedStack() {
+    if (!expandedStack) return false;
+    const { badge, tray } = expandedStack;
+    if (badge?.isConnected) {
+        badge.classList.remove('expanded', 'loading');
+        badge.disabled = false;
+        badge.setAttribute('aria-expanded', 'false');
+        badge.setAttribute('aria-label', badge.getAttribute('aria-label')?.replace(/^Collapse/, 'Expand') || 'Expand stack');
+    }
+    if (tray?.isConnected) tray.remove();
+    expandedStack = null;
+    return true;
+}
+
+function stackMemberCell(member) {
+    const cell = cellFor({ ...member, stack_id: null, stack_count: null }, -1);
+    cell.dataset.stackMember = '1';
+    return cell;
+}
+
+async function expandStack(stackId, cell, badge) {
+    const id = Number(stackId) || 0;
+    if (!id || !cell || !badge) return;
+    if (expandedStack?.id === id) {
+        stackRequest += 1;
+        closeExpandedStack();
+        return;
+    }
+    for (const pending of timeline.querySelectorAll('.c-stack.loading')) {
+        pending.classList.remove('loading');
+        pending.disabled = false;
+    }
+    stackRequest += 1;
+    closeExpandedStack();
+    const request = stackRequest;
+    const gen = generation;
+    badge.classList.add('loading');
+    badge.disabled = true;
+    let data = stackCache.get(id) || null;
+    if (!data) {
+        try {
+            data = await getStack(id);
+        } catch {
+            data = null;
+        }
+    }
+    if (request !== stackRequest || gen !== generation || !cell.isConnected) return;
+    badge.classList.remove('loading');
+    badge.disabled = false;
+    const members = Array.isArray(data?.members) ? data.members.filter(Boolean) : [];
+    const extras = members.filter((member) => Number(member.id) !== Number(cell.dataset.id));
+    if (!extras.length) {
+        showToast('Couldn’t expand this stack');
+        return;
+    }
+    stackCache.set(id, data);
+    rememberImages(members);
+    const tray = document.createElement('div');
+    tray.className = 'm-stack-tray';
+    tray.dataset.stackId = String(id);
+    tray.innerHTML = `<div class="m-stack-head"><span>${extras.length.toLocaleString('en-US')} more in this stack</span></div>`;
+    const grid = document.createElement('div');
+    grid.className = 'm-stack-members';
+    for (const member of extras) grid.appendChild(stackMemberCell(member));
+    tray.appendChild(grid);
+    cell.insertAdjacentElement('afterend', tray);
+    badge.classList.add('expanded');
+    badge.setAttribute('aria-expanded', 'true');
+    badge.setAttribute('aria-label', `Collapse stack of ${Number(data.member_count || members.length)} photos`);
+    expandedStack = { id, badge, tray, members };
+}
+
 /* ---------- rendering ---------- */
 function renderSkeleton() {
+    closeExpandedStack();
     timeline.innerHTML =
         '<section class="m-day"><div class="m-day-head"><h3 class="skel" style="width:140px;height:16px;border-radius:4px"></h3></div>'
         + `<div class="m-day-grid">${'<div class="skel-cell"></div>'.repeat(12)}</div></section>`;
@@ -255,6 +332,7 @@ function renderFixedImages(batch) {
 }
 
 function prependImages(batch) {
+    closeExpandedStack();
     const frag = document.createDocumentFragment();
     let currentDay = null;
     for (const img of batch) {
@@ -288,6 +366,7 @@ function prependImages(batch) {
 
 /* ---------- month (zoomed-out) view ---------- */
 function renderMonths() {
+    closeExpandedStack();
     timeline.classList.remove('m-z5');
     timeline.innerHTML = '';
     const wrap = document.createElement('div');
@@ -413,6 +492,8 @@ async function loadHistogram() {
 
 export async function reload() {
     const gen = ++generation;
+    stackRequest += 1;
+    closeExpandedStack();
     images = [];
     flatIds = [];
     startOffset = 0;
@@ -589,7 +670,7 @@ function renderScopeBar() {
         + `<span class="chip-x" role="button" aria-label="Clear ${esc(kind)}" data-clear="${clear}">${icon('x')}</span></span>`;
     if (scope.people) {
         const face = scope.thumb ? `<img src="${esc(scope.thumb)}" alt="">` : '';
-        chips.push(chip('person', personLabel({ label: scope.label }), 'people', face));
+        chips.push(chip('person', personLabel({ label: scope.peopleLabel }), 'people', face));
     }
     if (scope.q) chips.push(chip('search', scope.q, 'q'));
     if (scope.flag) chips.push(chip('flag', scope.flag === 'picked' ? 'Picked' : 'Rejected', 'flag'));
@@ -619,7 +700,7 @@ function renderScopeBar() {
             }
             if (field === 'people') {
                 scope.thumb = '';
-                scope.label = '';
+                scope.peopleLabel = '';
             }
             if (field === 'folder' && scope.label) scope.label = '';
             emit('scope', scope);
@@ -689,11 +770,11 @@ function installSelectionGestures() {
     }
 
     function edgeScrollSpeed(y) {
-        const selbar = document.getElementById('m-selbar');
         const bottomActions = document.getElementById('m-sel-actions');
         const tabbar = document.getElementById('m-tabbar');
-        const topLimit = (selbar && selbar.classList.contains('on'))
-            ? selbar.getBoundingClientRect().bottom + 16
+        const scopebar = document.getElementById('m-scopebar');
+        const topLimit = (scopebar && scopebar.classList.contains('on'))
+            ? scopebar.getBoundingClientRect().bottom + 16
             : 84;
         const tabbarH = tabbar ? tabbar.getBoundingClientRect().height : 0;
         const actionsH = bottomActions && bottomActions.classList.contains('on')
@@ -739,6 +820,7 @@ function installSelectionGestures() {
 
     timeline.addEventListener('pointerdown', (e) => {
         if (e.pointerType === 'mouse') return;
+        if (e.target.closest('.c-stack, .m-stack-tray')) return;
         const cell = e.target.closest('.mcell[data-id]');
         if (!cell) return;
         const mi = Number(cell.dataset.mi);
@@ -796,9 +878,21 @@ function installSelectionGestures() {
 
     timeline.addEventListener('click', (e) => {
         if (Date.now() < suppressClickUntil) return;
+        const badge = e.target.closest('.c-stack[data-stack-id]');
+        if (badge) {
+            const owner = badge.closest('.mcell[data-id]');
+            expandStack(badge.dataset.stackId, owner, badge);
+            return;
+        }
         const cell = e.target.closest('.mcell[data-id]');
         if (!cell) return;
         const id = Number(cell.dataset.id);
+        if (cell.dataset.stackMember) {
+            const members = expandedStack?.members || [];
+            const memberIndex = members.findIndex((member) => Number(member.id) === id);
+            if (memberIndex >= 0) openViewer(members, memberIndex);
+            return;
+        }
         if (selState.mode) {
             toggleSel(id);
         } else {

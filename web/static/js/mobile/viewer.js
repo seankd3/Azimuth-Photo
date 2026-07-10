@@ -101,11 +101,17 @@ function showCurrent() {
     const image = current();
     if (!image) return;
     loadToken += 1;
+    const token = loadToken;
     resetZoom();
     img.src = thumbUrl('md', image.id);
     loadLg();
     const date = image.date_taken ? String(image.date_taken).slice(0, 16).replace('T', ' · ') : '';
     cap.textContent = [image.filename, date].filter(Boolean).join('  —  ');
+    getImageCaption(image.id).then((data) => {
+        if (!viewerRequestCurrent(image.id, token)) return;
+        const caption = data?.has_caption ? String(data.caption || '').trim() : '';
+        cap.textContent = [caption || image.filename, date].filter(Boolean).join('  —  ');
+    });
     syncFlagButtons();
     preload(1);
     preload(-1);

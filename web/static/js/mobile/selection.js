@@ -285,14 +285,14 @@ export function exportImages(ids, format = 'csv', size = '') {
 
 /* ---------- selection bar ---------- */
 export function initSelection() {
-    const bar = document.getElementById('m-selbar');
-    const count = document.getElementById('msb-count');
     const bottomBar = document.createElement('div');
     bottomBar.id = 'm-sel-actions';
     bottomBar.innerHTML =
-        `<button type="button" data-action="pick">${icon('star')}<span>Pick</span></button>`
+        `<button type="button" data-action="clear" aria-label="Clear selection">${icon('x')}</button>`
+        + '<span class="msa-count">0 selected</span>'
+        + `<button type="button" data-action="pick">${icon('star')}<span>Pick</span></button>`
         + `<button type="button" data-action="reject">${icon('x')}<span>Reject</span></button>`
-        + `<button type="button" data-action="collection" aria-label="Add to collection">${icon('plus')}</button>`
+        + `<button type="button" data-action="collection" data-mutating aria-label="Add to collection">${icon('plus')}</button>`
         + `<button type="button" data-action="more" aria-label="More selection actions">${icon('ellipsis')}</button>`;
     document.body.appendChild(bottomBar);
     document.dispatchEvent(new CustomEvent('selection-actions-mutated'));
@@ -310,9 +310,9 @@ export function initSelection() {
         const sheet = openSheet(
             `<h3>${ids.length} selected</h3>`
             + `<button class="sheet-row" data-act="unflag" data-mutating><span class="g">${icon('circle')}</span>Unflag</button>`
-            + `<button class="sheet-row" data-act="csv"><span class="g">${icon('download')}</span>Export CSV</button>`
-            + `<button class="sheet-row" data-act="json"><span class="g">${icon('download')}</span>Export JSON</button>`
-            + `<button class="sheet-row" data-act="zip"><span class="g">${icon('download')}</span>Download files (zip)</button>`
+            + `<button class="sheet-row" data-act="csv" data-mutating><span class="g">${icon('download')}</span>Export CSV</button>`
+            + `<button class="sheet-row" data-act="json" data-mutating><span class="g">${icon('download')}</span>Export JSON</button>`
+            + `<button class="sheet-row" data-act="zip" data-mutating><span class="g">${icon('download')}</span>Download files (zip)</button>`
         );
         for (const row of sheet.querySelectorAll('.sheet-row[data-act]')) {
             row.addEventListener('click', () => {
@@ -329,10 +329,9 @@ export function initSelection() {
 
     on('selection', () => {
         const n = selection.size;
-        bar.classList.toggle('on', n > 0);
         bottomBar.classList.toggle('on', n > 0);
         document.body.classList.toggle('m-selecting', n > 0);
-        count.textContent = `${n} selected`;
+        bottomBar.querySelector('.msa-count').textContent = `${n} selected`;
         if (n > 0 && !layerActive('selection')) pushLayer('selection');
         else if (n === 0) syncLayerClosed('selection');
     });
@@ -342,19 +341,11 @@ export function initSelection() {
     installSheetSwipe();
     installSheetKeyboardLift();
 
-    document.getElementById('msb-clear').addEventListener('click', () => dismissLayer('selection', clearSelection));
-    document.getElementById('msb-pick').addEventListener('click', pickSelection);
-    document.getElementById('msb-reject').addEventListener('click', rejectSelection);
-    document.getElementById('msb-coll').addEventListener('click', () => {
-        openCollectionSheet([...selection], {
-            onDone: () => dismissLayer('selection', clearSelection),
-        });
-    });
-    document.getElementById('msb-more').addEventListener('click', openMoreActions);
     bottomBar.addEventListener('click', (e) => {
         const btn = e.target.closest('button[data-action]');
         if (!btn) return;
-        if (btn.dataset.action === 'pick') pickSelection();
+        if (btn.dataset.action === 'clear') dismissLayer('selection', clearSelection);
+        else if (btn.dataset.action === 'pick') pickSelection();
         else if (btn.dataset.action === 'reject') rejectSelection();
         else if (btn.dataset.action === 'collection') {
             openCollectionSheet([...selection], {
