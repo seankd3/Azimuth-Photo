@@ -157,7 +157,6 @@ class ImageHelperTests(unittest.TestCase):
 
     def test_db_backed_helpers_use_configured_providers(self):
         old_cached = helpers._cached_image_ids_provider
-        old_active = helpers._get_active_images_by_ids_provider
         old_thresholds = helpers._star_thresholds
         calls = []
 
@@ -165,34 +164,23 @@ class ImageHelperTests(unittest.TestCase):
             calls.append(("cached", tuple(image_ids), size, cache_root))
             return {2, 3}
 
-        async def fake_active_images_by_ids(image_ids):
-            calls.append(("active", tuple(image_ids)))
-            return {int(image_id): self.image(int(image_id)) for image_id in image_ids}
-
         try:
             helpers.configure(
                 cached_image_ids=fake_cached_image_ids,
-                get_active_images_by_ids=fake_active_images_by_ids,
                 star_thresholds={4: 1300},
             )
             cached = asyncio.run(helpers.cached_image_ids([1, "2", "bad", 2, 3], "sm", "/tmp/cache"))
-            visible = asyncio.run(helpers.visible_ranked_images([1, 2, 3], 1, "sm", "/tmp/cache"))
-            visible_count = asyncio.run(helpers.count_visible_ranked_ids([1, 2, 3], "sm", "/tmp/cache"))
             filtered = helpers.filter_compare_mosaic_candidates(
                 [self.image(1, elo=1299), self.image(2, elo=1301)],
                 min_stars=4,
             )
         finally:
             helpers._cached_image_ids_provider = old_cached
-            helpers._get_active_images_by_ids_provider = old_active
             helpers._star_thresholds = old_thresholds
 
         self.assertEqual(cached, {2, 3})
-        self.assertEqual([img["id"] for img in visible], [2])
-        self.assertEqual(visible_count, 2)
         self.assertEqual([img["id"] for img in filtered], [2])
         self.assertIn(("cached", (1, 2, 3), "sm", "/tmp/cache"), calls)
-        self.assertIn(("active", (2, 3)), calls)
 
 
 class WorkCoordinationTests(unittest.TestCase):

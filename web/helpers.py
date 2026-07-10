@@ -2,8 +2,6 @@ from collections.abc import Awaitable, Callable
 
 from core.responses import (
     METADATA_FIELDS,
-    _MISSING,
-    _rounded_elo,
     image_card,
     metadata_payload,
 )
@@ -11,24 +9,18 @@ from data.repositories import rankings as ranking_repository
 
 
 CachedImageIdsProvider = Callable[[list[int], str, str], Awaitable[set[int]]]
-GetActiveImagesByIdsProvider = Callable[[list[int]], Awaitable[dict[int, dict]]]
-
 _cached_image_ids_provider: CachedImageIdsProvider | None = None
-_get_active_images_by_ids_provider: GetActiveImagesByIdsProvider | None = None
 _star_thresholds: dict[int, int] = ranking_repository.STAR_THRESHOLDS
 
 
 def configure(
     *,
     cached_image_ids: CachedImageIdsProvider | None = None,
-    get_active_images_by_ids: GetActiveImagesByIdsProvider | None = None,
     star_thresholds: dict[int, int] | None = None,
 ) -> None:
-    global _cached_image_ids_provider, _get_active_images_by_ids_provider, _star_thresholds
+    global _cached_image_ids_provider, _star_thresholds
     if cached_image_ids is not None:
         _cached_image_ids_provider = cached_image_ids
-    if get_active_images_by_ids is not None:
-        _get_active_images_by_ids_provider = get_active_images_by_ids
     if star_thresholds is not None:
         _star_thresholds = star_thresholds
 
@@ -157,11 +149,6 @@ def filter_compare_mosaic_candidates(
     return filter_by_metadata(candidates, date_taken, file_type, camera, lens)
 
 
-def _chunks(values: list[int], size: int = 900):
-    for start in range(0, len(values), size):
-        yield values[start:start + size]
-
-
 def _unique_int_ids(values) -> list[int]:
     ids = []
     seen = set()
@@ -187,49 +174,3 @@ async def filter_visible_candidates(candidates: list[dict], size: str, cache_roo
         return []
     cached_ids = await cached_image_ids([c.get("id") for c in candidates], size, cache_root)
     return [c for c in candidates if _as_int(c.get("id")) in cached_ids]
-
-
-async def visible_ranked_images(
-    ranked_ids: list[int],
-    limit: int,
-    size: str,
-    cache_root: str,
-) -> list[dict]:
-    """Fetch active images in ranked order, skipping IDs without the displayed tier."""
-    if limit <= 0 or not ranked_ids:
-        return []
-
-    results: list[dict] = []
-    unique_ids = _unique_int_ids(ranked_ids)
-    for chunk in _chunks(unique_ids):
-        cached_ids = await cached_image_ids(chunk, size, cache_root)
-        if not cached_ids:
-            continue
-        active_rows = await _configured(
-            _get_active_images_by_ids_provider,
-            "get_active_images_by_ids",
-        )([image_id for image_id in chunk if image_id in cached_ids])
-        for image_id in chunk:
-            row = active_rows.get(image_id)
-            if row is None:
-                continue
-            results.append(row)
-            if len(results) >= limit:
-                return results
-    return results
-
-
-async def count_visible_ranked_ids(ranked_ids: list[int], size: str, cache_root: str) -> int:
-    if not ranked_ids:
-        return 0
-    visible = 0
-    for chunk in _chunks(_unique_int_ids(ranked_ids)):
-        cached_ids = await cached_image_ids(chunk, size, cache_root)
-        if not cached_ids:
-            continue
-        active_rows = await _configured(
-            _get_active_images_by_ids_provider,
-            "get_active_images_by_ids",
-        )([image_id for image_id in chunk if image_id in cached_ids])
-        visible += len(active_rows)
-    return visible

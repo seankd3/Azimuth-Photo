@@ -36,10 +36,6 @@ export function thumbUrl(size, imageId) {
     return `/api/thumb/${size}/${imageId}`;
 }
 
-export function exportUrl(params) {
-    return `/api/export?${params.toString()}`;
-}
-
 export async function getRankings(params, options = {}) {
     return fetchJson(`/api/rankings?${params.toString()}`, { defaultValue: null, ...options });
 }
@@ -277,10 +273,6 @@ export async function publishCollection(collectionId, { slug = '', title = '' } 
 
 export async function revokeCollectionPublish(collectionId) {
     return postJsonWithStatus(`/api/user-collections/${collectionId}/publish/revoke`);
-}
-
-export async function listPublishes() {
-    return fetchJson('/api/publishes', { defaultValue: { publishes: [] } });
 }
 
 export async function listSharedSurfaces() {

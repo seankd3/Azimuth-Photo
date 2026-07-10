@@ -273,13 +273,6 @@ function selectClientPicks(ids) {
     showToast(`${fmt(ids.length)} client picks selected`);
 }
 
-export async function viewClientPicks(collectionId) {
-    const pickData = await getCollectionShareFavorites(collectionId);
-    const ids = clientPickIds(pickData);
-    await rememberCollectionImages(collectionId);
-    selectClientPicks(ids);
-}
-
 async function applyClientPicks(collectionId, ids) {
     if (!ids.length) {
         showToast('No client picks yet');

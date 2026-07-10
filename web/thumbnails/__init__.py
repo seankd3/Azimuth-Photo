@@ -139,15 +139,6 @@ def _cache_marker_path() -> str:
     return thumbnail_maintenance.cache_marker_path(SSD_CACHE_DIR, CACHE_MARKER)
 
 
-def _cache_dir_has_marker() -> bool:
-    return thumbnail_maintenance.cache_dir_has_marker(SSD_CACHE_DIR, CACHE_MARKER)
-
-
-def _cache_dir_is_legacy_cache_layout() -> bool:
-    """True for empty or old unmarked cache roots containing only cache tiers."""
-    return thumbnail_maintenance.cache_dir_is_legacy_cache_layout(SSD_CACHE_DIR, ALL_TIERS, CACHE_MARKER)
-
-
 def _write_cache_marker():
     thumbnail_maintenance.write_cache_marker(SSD_CACHE_DIR, CACHE_MARKER)
 
@@ -205,10 +196,6 @@ def _active_memory_ratios() -> dict[str, float]:
 
 
 _allocate_by_ratios = thumbnail_config.allocate_by_ratios
-
-
-def _quality_size_factor() -> float:
-    return thumbnail_config.quality_size_factor(THUMB_QUALITY)
 
 
 def estimated_tier_bytes(size: str) -> int:
@@ -405,18 +392,6 @@ def _memory_tier_budget(size: str) -> int:
         return 0
     ratios = _active_memory_ratios()
     return int(MEMORY_CACHE_BYTES * ratios.get(size, 0.0))
-
-
-def _memory_remove_locked(key: tuple[str, int]) -> bool:
-    removed = _memory_store.remove(key)
-    _sync_memory_cache_bytes()
-    return removed
-
-
-def _evict_memory_oldest_locked(size: str | None = None) -> bool:
-    removed = _memory_store.evict_oldest(size)
-    _sync_memory_cache_bytes()
-    return removed
 
 
 def _enforce_memory_budget_locked():
@@ -1179,11 +1154,6 @@ def _full_candidate_signature(row, full_room: dict[str, int], full_budget: int) 
         build_source_signature_from_bits=_build_source_signature_from_bits,
         full_cache_has_room=_full_cache_has_room,
     )
-
-
-async def _run_pregen_phase(size: str, generate_batch: int | None = None) -> int:
-    """Compatibility wrapper: bulk warm-up now handles all thumbnail tiers together."""
-    return await _run_pregen_bulk_batch(generate_batch=generate_batch)
 
 
 def _record_pregen_result(result: dict) -> int:

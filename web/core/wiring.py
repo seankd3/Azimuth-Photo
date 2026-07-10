@@ -77,7 +77,6 @@ def configure_database_backed_providers() -> None:
     )
     app_helpers.configure(
         cached_image_ids=lambda image_ids, size, cache_root: db.get_cached_image_ids(image_ids, size, cache_root),
-        get_active_images_by_ids=lambda image_ids: db.get_active_images_by_ids(image_ids),
         star_thresholds=db.STAR_THRESHOLDS,
     )
     catalog_metadata.configure(
