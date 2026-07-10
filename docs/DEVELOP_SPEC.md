@@ -344,3 +344,71 @@ Masks: create/edit/render all five manual kinds + AI subject; LR-imported masks 
 render recognizably (spot-check vs LR export where a pair exists); presets save/apply with live hover preview;
 lrcat parser round-trips the sampled blob; HDR merges one real bracket; suite green; screenshots of masking UI,
 before/after of an AI subject mask, HDR result.
+
+---
+
+# PHASE 3 — close remaining Lightroom parity gaps (appended 2026-07-10)
+
+## 20. RAW <-> Edit version stacks (product design, decided)
+Ratified roadmap item: "link Exported Edits files to their originals, so the loupe can toggle
+edited/original and duplicates never pit an edit against its own raw."
+- New stack kind "version" (extends STACK_KINDS): members = one RAW + its edited exports.
+- Matching (builder `build_version_groups`): (a) exact basename tail match (raw stem == export stem);
+  (b) capture-time + camera-model match (exports are renamed like SKD-Starbase-…): same
+  DateTimeOriginal second + same Model ⇒ version pair (EXIF via images metadata; exiftool fallback).
+  Idempotent, incremental, auto=1.
+- Representative = the newest EDIT (the finished photo wins the grid); RAW is a member. Grid badge for
+  version stacks shows "RAW+N" (distinct from burst count pill).
+- Loupe/Develop: version stacks expose members in the existing stack strip; pressing V (or the strip)
+  toggles edit <-> raw; "Edit RAW" affordance opens Develop on the raw member.
+- Develop export endpoint: when exporting a render of a RAW that belongs to (or gains) a version stack,
+  the exported file (if registered into the library later) joins the same stack — v1: exports are
+  download-only, so instead add "Save to library" option on export that registers the JPEG under
+  /mnt/expansion/PhotoArchiveCache/develop/library-exports/ as an image AND stacks it with its raw.
+- Refine/duplicates: version-stack members are excluded from pairing against each other (same idiom
+  as existing stack exclusions — verify how burst stacks are excluded and mirror it).
+- Flags: existing stack flag semantics apply unchanged.
+
+## 21. Looks rendering + trusted tone refit
+Imported settings may carry Look (name + Parameters incl. ToneCurvePV2012, Clarity2012, ConvertToGrayscale,
+Amount). Render: fold Look.Parameters.ToneCurvePV2012 into the per-image base LUT (compose AFTER camera
+profile/base curve: LUT_total = LookCurve ∘ BaseOrProfileCurve), scale by Look.Amount; apply Look's simple
+params (Clarity/grayscale) by merging them into effective settings AT READ TIME (never mutating stored
+settings). LookTable 3D LUTs are unavailable (catalog table empty) — parameters-only, documented.
+Then REFIT camera profiles (eval/fit_camera_profile.py) with Looks rendered in the "ours" pipeline; if the
+new tone fit improves median luma on ≥80% of held-out pairs per camera, write profiles with tone_trusted=true.
+
+## 22. Color grading wheels, noise reduction, CA/defringe, distortion auto-crop
+- ColorGrade{Shadow,Midtone,Highlight}{Hue,Sat,Lum} + Global + Blending + Balance: standard 3-way lift
+  gamma gain in OKLab-ish (hue+sat per wheel as ab offset scaled by luma-band weight from Blending/Balance;
+  Lum as band exposure) — twins, constants shared. UI: three wheels + global, LR-style, in a "Color Grading"
+  panel section (canvas-drawn wheels, drag pucks, double-click reset).
+- NR: LuminanceSmoothing (edge-preserving smooth — GL: bilateral-lite on luma at half res mixed by amount;
+  numpy: same kernel) + ColorNoiseReduction (chroma median/blur in OKLab ab). Approximation documented.
+- CA/Defringe: DefringePurpleAmount/GreenAmount with Hue ranges (desaturate offending hue band near
+  high-contrast edges — edge mask from the sharpen blur field); auto lateral CA (AutoLateralCA) via
+  per-channel radial scale fitted from... v1: honor manual defringe only, note auto-CA as later.
+- Distortion auto-crop: after lensfun distortion remap, scale uv to the maximal inscribed axis-aligned
+  rect (compute from the polynomial at the frame edges) so no dark borders — twins.
+
+## 23. Healing / spot removal
+Adobe RetouchAreas / PaintBasedCorrections with clone/heal: v1 = circular clone-stamp spots
+{{src x,y, dst x,y, radius, feather, opacity, mode: clone|heal}} stored under our key "pa_RetouchSpots"
+(import Adobe RetouchInfo when parseable, else skip honestly). Render twins: clone = copy source disc
+(feathered) at dest; heal = clone + mean-color match of dest ring. GL: second source sample in the main
+pass loop (cap 32 spots); numpy identical. UI: Heal tool in the toolbar — click sets dest, drag picks
+source, handles to adjust, list in a panel section with delete.
+
+## 24. Export dialog + batch settings sync
+- Export popover grows: format (JPEG/TIFF16), quality, long-edge resize, output sharpening
+  (screen/print low/std/high — post-resize unsharp), filename pattern, and "Save to library" (§20).
+  Batch: export selection from grid (queue endpoint, sequential, toast progress).
+- Batch sync: in Develop, "Sync…" button — copies chosen setting groups (checkbox popover: WB/Tone/
+  Presence/Curve/HSL/Grade/Detail/Effects/Masks) from current photo to the grid selection via one API
+  call (POST /api/develop/sync {source_id, target_ids, groups}); history entries on each target.
+
+## 25. Panorama merge
+Mirror the HDR pattern: detect candidate pano sequences (same lens/focal, ≤10s apart, 2-8 frames,
+overlapping content), POST /api/develop/pano/merge {image_ids} — OpenCV (opencv-python-headless) stitcher
+on our decoded linears (downscale to 3000px for v1), result registered like HDR merges (EXR + base cache,
+kind tag pano). Honest failure states (stitch confidence).
