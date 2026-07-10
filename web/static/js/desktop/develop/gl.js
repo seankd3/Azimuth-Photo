@@ -1,0 +1,605 @@
+import {
+    BAND_NAMES, BLUR_LARGE_FACTOR, BLUR_SMALL_FACTOR, CLARITY_FACTOR,
+    CONTRAST_FACTOR, DEHAZE_AIRLIGHT_FACTOR, DEHAZE_SATURATION_FACTOR,
+    GRAIN_CELL_SIZE_MIN, GRAIN_CELL_SIZE_RANGE, GRAIN_FACTOR, GRAIN_HASH_MULTIPLIER,
+    GRAIN_HASH_SHIFT, GRAIN_OUTPUT_MASK, GRAIN_OUTPUT_SHIFT, GRAIN_SEED,
+    GRAIN_X_MULTIPLIER, GRAIN_Y_MULTIPLIER, GRAY_MIXER_FACTOR, HSL_LUMINANCE_FACTOR,
+    HUE_SHIFT_DEGREES, K_TEMP, K_TINT, LUMA_BLUE, LUMA_GREEN, LUMA_RED,
+    SHARPEN_FACTOR, TEXTURE_FACTOR, TONE_BLACKS_FACTOR, TONE_HIGHLIGHTS_FACTOR,
+    TONE_WHITES_FACTOR, VIBRANCE_FACTOR, VIGNETTE_FACTOR, VIGNETTE_FEATHER_MIN,
+    VIGNETTE_FEATHER_RANGE, VIGNETTE_MIDPOINT_MIN, VIGNETTE_MIDPOINT_RANGE,
+    VIGNETTE_ROUNDNESS_FACTOR, boolSetting, numberSetting,
+} from './ops_constants.js';
+import { buildCombinedCurveTexture } from './curve_lut.js';
+
+const VERTEX = `#version 300 es
+in vec2 a_position;
+out vec2 v_uv;
+void main() {
+    v_uv = a_position * .5 + .5;
+    gl_Position = vec4(a_position, 0.0, 1.0);
+}`;
+
+const COLOR_MATH = `
+const vec3 LUMW = vec3(${LUMA_RED}, ${LUMA_GREEN}, ${LUMA_BLUE});
+float sat(float value) { return clamp(value, 0.0, 1.0); }
+float setting(float value) { return value / 100.0; }
+vec3 linearToSrgb(vec3 c) {
+    bvec3 low = lessThanEqual(c, vec3(.0031308));
+    vec3 lo = c * 12.92;
+    vec3 hi = 1.055 * pow(max(c, vec3(0.0)), vec3(1.0 / 2.4)) - .055;
+    return mix(hi, lo, low);
+}
+vec3 rgbToHsv(vec3 c) {
+    float maximum = max(c.r, max(c.g, c.b));
+    float minimum = min(c.r, min(c.g, c.b));
+    float delta = maximum - minimum;
+    float hue = 0.0;
+    if (delta > 1e-10) {
+        if (maximum == c.r) hue = mod((c.g - c.b) / delta, 6.0);
+        else if (maximum == c.g) hue = (c.b - c.r) / delta + 2.0;
+        else hue = (c.r - c.g) / delta + 4.0;
+        hue = mod(hue / 6.0, 1.0);
+    }
+    return vec3(hue, maximum > 0.0 ? delta / maximum : 0.0, maximum);
+}
+vec3 hsvToRgb(vec3 c) {
+    float h = fract(c.x) * 6.0;
+    float chroma = c.z * c.y;
+    float x = chroma * (1.0 - abs(mod(h, 2.0) - 1.0));
+    vec3 prime;
+    if (h < 1.0) prime = vec3(chroma, x, 0.0);
+    else if (h < 2.0) prime = vec3(x, chroma, 0.0);
+    else if (h < 3.0) prime = vec3(0.0, chroma, x);
+    else if (h < 4.0) prime = vec3(0.0, x, chroma);
+    else if (h < 5.0) prime = vec3(x, 0.0, chroma);
+    else prime = vec3(chroma, 0.0, x);
+    return prime + vec3(c.z - chroma);
+}
+float hueDistance(float a, float b) { return abs(mod(a - b + 180.0, 360.0) - 180.0); }
+float bandWeight(float hue, int index) {
+    float centers[8] = float[8](0.0, 30.0, 60.0, 120.0, 180.0, 240.0, 280.0, 320.0);
+    float center = centers[index];
+    float left = centers[(index + 7) % 8];
+    float right = centers[(index + 1) % 8];
+    float signedDelta = mod(hue - center + 540.0, 360.0) - 180.0;
+    float span = signedDelta < 0.0 ? mod(center - left + 360.0, 360.0) : mod(right - center + 360.0, 360.0);
+    float t = abs(signedDelta) / max(span, 1.0);
+    return t < 1.0 ? .5 + .5 * cos(3.14159265359 * t) : 0.0;
+}
+`;
+
+const COLOR_UNIFORMS = `
+uniform sampler2D u_source;
+uniform sampler2D u_curve;
+uniform vec2 u_sourceSize;
+uniform float u_temperature;
+uniform float u_asShotTemperature;
+uniform float u_tint;
+uniform bool u_applyWb;
+uniform float u_exposure;
+uniform float u_contrast;
+uniform vec4 u_regions;
+uniform float u_dehaze;
+uniform float u_vibrance;
+uniform float u_saturation;
+uniform float u_hue[8];
+uniform float u_hslSat[8];
+uniform float u_hslLum[8];
+uniform float u_gray[8];
+uniform bool u_grayscale;
+uniform bool u_useHsl;
+uniform vec4 u_crop;
+uniform float u_angle;
+uniform int u_orientation;
+uniform bool u_applyGeometry;
+`;
+
+const COLOR_FUNCTION = `
+vec2 orientedUv(vec2 uv) {
+    if (!u_applyGeometry) return uv;
+    if (u_orientation == 3) uv = vec2(1.0) - uv;
+    else if (u_orientation == 6) uv = vec2(uv.y, 1.0 - uv.x);
+    else if (u_orientation == 8) uv = vec2(1.0 - uv.y, uv.x);
+    vec2 cropSize = max(u_crop.zw - u_crop.xy, vec2(.0001));
+    vec2 p = u_crop.xy + uv * cropSize;
+    vec2 center = (u_crop.xy + u_crop.zw) * .5;
+    vec2 q = p - center;
+    float aspect = u_sourceSize.x / max(u_sourceSize.y, 1.0);
+    q.x *= aspect;
+    float a = radians(u_angle);
+    q = mat2(cos(a), -sin(a), sin(a), cos(a)) * q;
+    q.x /= aspect;
+    return center + q;
+}
+vec3 applyColor(vec2 uv, out vec2 imageUv) {
+    imageUv = orientedUv(uv);
+    if (any(lessThan(imageUv, vec2(0.0))) || any(greaterThan(imageUv, vec2(1.0)))) return vec3(0.0);
+    vec3 rgb = texture(u_source, imageUv).rgb;
+    if (u_applyWb) {
+        float dm = 1000000.0 / max(u_asShotTemperature, 1000.0) - 1000000.0 / max(u_temperature, 1000.0);
+        rgb.r *= exp2(dm * ${K_TEMP});
+        rgb.b *= exp2(-dm * ${K_TEMP});
+        rgb.g *= exp2(-u_tint * ${K_TINT});
+    }
+    rgb *= exp2(u_exposure);
+    float Y = dot(rgb, LUMW);
+    float t = pow(clamp(Y, 0.0, 1.0), 1.0 / 2.2);
+    float wh = smoothstep(.45, 1.0, t);
+    float ws = 1.0 - smoothstep(0.0, .55, t);
+    float ww = smoothstep(.75, 1.0, t);
+    float wb = 1.0 - smoothstep(0.0, .25, t);
+    float t2 = t + ${TONE_HIGHLIGHTS_FACTOR} * (setting(u_regions.x) * wh * (1.0 - t)
+        + setting(u_regions.y) * ws * (1.0 - t) * t * 2.0)
+        + ${TONE_WHITES_FACTOR} * setting(u_regions.z) * ww
+        + ${TONE_BLACKS_FACTOR} * setting(u_regions.w) * wb;
+    float t3 = .5 + (t2 - .5) * (1.0 + ${CONTRAST_FACTOR} * setting(u_contrast));
+    t3 = t3 < 0.0 ? 0.0 : (t3 > 1.0 ? 1.0 + (t3 - 1.0) / (1.0 + 4.0 * (t3 - 1.0)) : t3);
+    rgb *= pow(max(t3, 0.0), 2.2) / max(Y, 1e-6);
+    float d = setting(u_dehaze);
+    if (abs(d) > 1e-5) rgb = max((rgb - vec3(${DEHAZE_AIRLIGHT_FACTOR} * d)) / (1.0 - ${DEHAZE_AIRLIGHT_FACTOR} * d), vec3(0.0));
+    vec3 c = linearToSrgb(clamp(rgb, 0.0, 1.0));
+    vec3 mainCurve = vec3(texture(u_curve, vec2(c.r, .5)).r, texture(u_curve, vec2(c.g, .5)).r, texture(u_curve, vec2(c.b, .5)).r);
+    c = vec3(texture(u_curve, vec2(mainCurve.r, .5)).g, texture(u_curve, vec2(mainCurve.g, .5)).b, texture(u_curve, vec2(mainCurve.b, .5)).a);
+    if (!u_useHsl) return c;
+    vec3 beforeHsl = c;
+    vec3 hsv = rgbToHsv(c);
+    float hue = hsv.x * 360.0;
+    float neutral = smoothstep(.04, .18, hsv.y);
+    float hueDelta = 0.0;
+    float satDelta = 0.0;
+    float lumDelta = 0.0;
+    float grayDelta = 0.0;
+    for (int i = 0; i < 8; i++) {
+        float weight = bandWeight(hue, i);
+        hueDelta += weight * neutral * setting(u_hue[i]) * ${HUE_SHIFT_DEGREES.toFixed(1)};
+        satDelta += weight * neutral * setting(u_hslSat[i]);
+        lumDelta += weight * neutral * setting(u_hslLum[i]) * ${HSL_LUMINANCE_FACTOR};
+        grayDelta += weight * setting(u_gray[i]) * ${GRAY_MIXER_FACTOR};
+    }
+    if (u_grayscale) {
+        c = vec3(dot(beforeHsl, LUMW) * (1.0 + grayDelta));
+    } else {
+        hsv.x = fract((hue + hueDelta) / 360.0);
+        hsv.y *= 1.0 + satDelta;
+        hsv.z *= 1.0 + lumDelta;
+        hsv.y *= 1.0 + setting(u_saturation) + ${DEHAZE_SATURATION_FACTOR} * d;
+        hsv.y += setting(u_vibrance) * (1.0 - hsv.y) * hsv.y * ${VIBRANCE_FACTOR};
+        hsv.y = sat(hsv.y);
+        c = hsvToRgb(hsv);
+    }
+    return c;
+}
+`;
+
+const LUMA_FRAGMENT = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+out vec4 outColor;
+${COLOR_UNIFORMS}
+${COLOR_MATH}
+${COLOR_FUNCTION}
+void main() {
+    vec2 imageUv;
+    vec3 c = applyColor(v_uv, imageUv);
+    outColor = vec4(vec3(dot(c, LUMW)), 1.0);
+}`;
+
+const BLUR_FRAGMENT = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+out vec4 outColor;
+uniform sampler2D u_image;
+uniform vec2 u_direction;
+uniform float u_sigma;
+void main() {
+    float sigma = max(u_sigma, .35);
+    vec4 sum = texture(u_image, v_uv);
+    float total = 1.0;
+    for (int i = 1; i <= 64; i++) {
+        float x = float(i);
+        float weight = exp(-.5 * x * x / (sigma * sigma));
+        if (x > sigma * 3.0) weight = 0.0;
+        sum += (texture(u_image, v_uv + u_direction * x) + texture(u_image, v_uv - u_direction * x)) * weight;
+        total += 2.0 * weight;
+    }
+    outColor = sum / max(total, 1e-6);
+}`;
+
+const MAIN_FRAGMENT = `#version 300 es
+precision highp float;
+precision highp int;
+in vec2 v_uv;
+out vec4 outColor;
+${COLOR_UNIFORMS}
+uniform sampler2D u_blurLarge;
+uniform sampler2D u_blurSmall;
+uniform sampler2D u_blurSharp;
+uniform bool u_useLarge;
+uniform bool u_useSmall;
+uniform bool u_useSharp;
+uniform float u_clarity;
+uniform float u_texture;
+uniform float u_sharpness;
+uniform float u_vignette;
+uniform vec3 u_vignetteShape;
+uniform float u_grain;
+uniform float u_grainSize;
+uniform uint u_seed;
+${COLOR_MATH}
+${COLOR_FUNCTION}
+float noiseHash(ivec2 pixel) {
+    uint h = (uint(pixel.x) * ${GRAIN_X_MULTIPLIER}u + uint(pixel.y) * ${GRAIN_Y_MULTIPLIER}u) ^ u_seed;
+    h = (h ^ (h >> ${GRAIN_HASH_SHIFT}u)) * ${GRAIN_HASH_MULTIPLIER}u;
+    return float((h >> ${GRAIN_OUTPUT_SHIFT}u) & ${GRAIN_OUTPUT_MASK}u) / 65535.0;
+}
+void main() {
+    vec2 imageUv;
+    vec3 c = applyColor(v_uv, imageUv);
+    float L = dot(c, LUMW);
+    if (u_useLarge) {
+        float wm = clamp(4.0 * L * (1.0 - L), 0.0, 1.0);
+        c += vec3((L - texture(u_blurLarge, v_uv).r) * ${CLARITY_FACTOR} * setting(u_clarity) * wm);
+    }
+    if (u_useSmall) c += vec3((L - texture(u_blurSmall, v_uv).r) * ${TEXTURE_FACTOR} * setting(u_texture));
+    if (u_useSharp) c += vec3((L - texture(u_blurSharp, v_uv).r) * (u_sharpness / 150.0) * ${SHARPEN_FACTOR});
+    float a = setting(u_vignette);
+    if (abs(a) > 1e-5) {
+        vec2 center = (u_crop.xy + u_crop.zw) * .5;
+        float cropAspect = (u_crop.z - u_crop.x) * u_sourceSize.x / max((u_crop.w - u_crop.y) * u_sourceSize.y, 1.0);
+        float roundness = 1.0 + setting(u_vignetteShape.z) * ${VIGNETTE_ROUNDNESS_FACTOR};
+        vec2 p = imageUv - center;
+        p.x *= 2.0 * cropAspect / max(roundness, 1e-6);
+        p.y *= 2.0 * max(roundness, 1e-6);
+        float rho = length(p);
+        float mid = ${VIGNETTE_MIDPOINT_MIN} + clamp(u_vignetteShape.x / 100.0, 0.0, 1.0) * ${VIGNETTE_MIDPOINT_RANGE};
+        float feather = ${VIGNETTE_FEATHER_MIN} + clamp(u_vignetteShape.y / 100.0, 0.0, 1.0) * ${VIGNETTE_FEATHER_RANGE};
+        float amount = a * smoothstep(mid, mid + feather, rho) * ${VIGNETTE_FACTOR};
+        c = amount < 0.0 ? c * (1.0 + amount) : c + (1.0 - c) * amount;
+    }
+    if (u_grain > 0.0) {
+        float cell = ${GRAIN_CELL_SIZE_MIN.toFixed(1)} + clamp(u_grainSize / 100.0, 0.0, 1.0) * ${GRAIN_CELL_SIZE_RANGE.toFixed(1)};
+        ivec2 pixel = ivec2(floor(imageUv * u_sourceSize / cell));
+        c += vec3((noiseHash(pixel) - .5) * setting(u_grain) * ${GRAIN_FACTOR});
+    }
+    outColor = vec4(clamp(c, 0.0, 1.0), 1.0);
+}`;
+
+function compile(gl, type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        const message = gl.getShaderInfoLog(shader);
+        gl.deleteShader(shader);
+        throw new Error(`Develop shader compile failed: ${message}`);
+    }
+    return shader;
+}
+
+function program(gl, fragment) {
+    const result = gl.createProgram();
+    gl.attachShader(result, compile(gl, gl.VERTEX_SHADER, VERTEX));
+    gl.attachShader(result, compile(gl, gl.FRAGMENT_SHADER, fragment));
+    gl.linkProgram(result);
+    if (!gl.getProgramParameter(result, gl.LINK_STATUS)) throw new Error(`Develop shader link failed: ${gl.getProgramInfoLog(result)}`);
+    return result;
+}
+
+function texture(gl, width, height, {
+    data = null, filter = gl.LINEAR, internalFormat = gl.RGBA32F, type = gl.FLOAT,
+} = {}) {
+    const result = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, result);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texImage2D(gl.TEXTURE_2D, 0, internalFormat, width, height, 0, gl.RGBA, type, data);
+    return result;
+}
+
+function float32ToHalf(values) {
+    const result = new Uint16Array(values.length);
+    const float = new Float32Array(1);
+    const bits = new Uint32Array(float.buffer);
+    for (let index = 0; index < values.length; index += 1) {
+        float[0] = values[index];
+        const value = bits[0];
+        const sign = (value >>> 16) & 0x8000;
+        let exponent = ((value >>> 23) & 0xff) - 127 + 15;
+        let mantissa = value & 0x7fffff;
+        if (exponent <= 0) {
+            if (exponent < -10) result[index] = sign;
+            else {
+                mantissa = (mantissa | 0x800000) >>> (1 - exponent);
+                result[index] = sign | ((mantissa + 0x1000) >>> 13);
+            }
+        } else if (exponent >= 31) {
+            result[index] = sign | 0x7c00 | (mantissa ? 0x0200 : 0);
+        } else {
+            if (mantissa & 0x1000) {
+                mantissa += 0x2000;
+                if (mantissa & 0x800000) { mantissa = 0; exponent += 1; }
+            }
+            result[index] = sign | (Math.min(31, exponent) << 10) | (mantissa >>> 13);
+        }
+    }
+    return result;
+}
+
+function target(gl, width, height) {
+    const color = texture(gl, width, height, { internalFormat: gl.RGBA16F, type: gl.HALF_FLOAT });
+    const framebuffer = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, color, 0);
+    const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+    if (status !== gl.FRAMEBUFFER_COMPLETE) {
+        const error = gl.getError();
+        throw new Error(`Develop float framebuffer unavailable (${width}×${height}, 0x${status.toString(16)}, gl 0x${error.toString(16)})`);
+    }
+    return { framebuffer, texture: color, width, height };
+}
+
+function bindUnit(gl, value, unit) {
+    gl.activeTexture(gl.TEXTURE0 + unit);
+    gl.bindTexture(gl.TEXTURE_2D, value);
+}
+
+export class DevelopRenderer {
+    constructor(canvas) {
+        this.canvas = canvas;
+        this.gl = canvas.getContext('webgl2', { alpha: false, antialias: false, preserveDrawingBuffer: true });
+        if (!this.gl) throw new Error('WebGL2 is required for Develop');
+        if (!this.gl.getExtension('EXT_color_buffer_float')) throw new Error('Float render targets are unavailable');
+        this.mainProgram = program(this.gl, MAIN_FRAGMENT);
+        this.lumaProgram = program(this.gl, LUMA_FRAGMENT);
+        this.blurProgram = program(this.gl, BLUR_FRAGMENT);
+        this.settings = {};
+        this.meta = {};
+        this.geometryEnabled = true;
+        this.width = 1;
+        this.height = 1;
+        this.dirty = false;
+        this.ready = false;
+        this.frame = 0;
+        this.createGeometry();
+        this.source = texture(this.gl, 1, 1, {
+            data: float32ToHalf(new Float32Array([0, 0, 0, 1])),
+            internalFormat: this.gl.RGBA16F, type: this.gl.HALF_FLOAT,
+        });
+        this.canvas.width = 1;
+        this.canvas.height = 1;
+        this.updateCurve({});
+    }
+
+    createGeometry() {
+        const gl = this.gl;
+        const vao = gl.createVertexArray();
+        gl.bindVertexArray(vao);
+        const buffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]), gl.STATIC_DRAW);
+        for (const p of [this.mainProgram, this.lumaProgram, this.blurProgram]) {
+            const location = gl.getAttribLocation(p, 'a_position');
+            gl.enableVertexAttribArray(location);
+            gl.vertexAttribPointer(location, 2, gl.FLOAT, false, 0, 0);
+        }
+        this.vao = vao;
+    }
+
+    uploadSource(data, width, height) {
+        const gl = this.gl;
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        if (this.source) gl.deleteTexture(this.source);
+        this.source = texture(gl, width, height, {
+            data: float32ToHalf(data), internalFormat: gl.RGBA16F, type: gl.HALF_FLOAT,
+        });
+        this.width = width;
+        this.height = height;
+        this.canvas.width = width;
+        this.canvas.height = height;
+        this.rebuildTargets();
+        this.ready = true;
+        this.requestRender();
+    }
+
+    rebuildTargets() {
+        const gl = this.gl;
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        const width = Math.max(1, Math.ceil(this.width / 2));
+        const height = Math.max(1, Math.ceil(this.height / 2));
+        const next = [target(gl, width, height), target(gl, width, height), target(gl, width, height), target(gl, width, height), target(gl, width, height)];
+        for (const item of this.targets || []) {
+            gl.deleteFramebuffer(item.framebuffer);
+            gl.deleteTexture(item.texture);
+        }
+        [this.lumaTarget, this.blurTemp, this.blurLarge, this.blurSmall, this.blurSharp] = next;
+        this.targets = next;
+    }
+
+    updateCurve(settings) {
+        const gl = this.gl;
+        if (this.curve) gl.deleteTexture(this.curve);
+        this.curve = texture(gl, 256, 1, {
+            data: float32ToHalf(buildCombinedCurveTexture(settings)), filter: gl.LINEAR,
+            internalFormat: gl.RGBA16F, type: gl.HALF_FLOAT,
+        });
+    }
+
+    setSettings(settings, meta = this.meta) {
+        this.settings = settings || {};
+        this.meta = meta || {};
+        this.updateCurve(this.settings);
+        this.requestRender();
+    }
+
+    requestRender() {
+        this.dirty = true;
+        if (!this.ready) return;
+        if (!this.frame) this.frame = requestAnimationFrame(() => this.render());
+    }
+
+    uniforms(p) {
+        const gl = this.gl;
+        const s = this.settings;
+        const uniform = (name) => gl.getUniformLocation(p, name);
+        gl.uniform1i(uniform('u_source'), 0);
+        gl.uniform1i(uniform('u_curve'), 1);
+        gl.uniform2f(uniform('u_sourceSize'), this.width, this.height);
+        gl.uniform1f(uniform('u_temperature'), numberSetting(s, 'Temperature', this.meta.as_shot_temperature || 5500));
+        gl.uniform1f(uniform('u_asShotTemperature'), Number(this.meta.as_shot_temperature || this.meta.temperature || 5500));
+        gl.uniform1f(uniform('u_tint'), numberSetting(s, 'Tint'));
+        gl.uniform1i(uniform('u_applyWb'), s.WhiteBalance !== 'As Shot' && s.Temperature != null ? 1 : 0);
+        gl.uniform1f(uniform('u_exposure'), numberSetting(s, 'Exposure2012'));
+        gl.uniform1f(uniform('u_contrast'), numberSetting(s, 'Contrast2012'));
+        gl.uniform4f(uniform('u_regions'), numberSetting(s, 'Highlights2012'), numberSetting(s, 'Shadows2012'), numberSetting(s, 'Whites2012'), numberSetting(s, 'Blacks2012'));
+        gl.uniform1f(uniform('u_dehaze'), numberSetting(s, 'Dehaze'));
+        gl.uniform1f(uniform('u_vibrance'), numberSetting(s, 'Vibrance'));
+        gl.uniform1f(uniform('u_saturation'), numberSetting(s, 'Saturation'));
+        gl.uniform1fv(uniform('u_hue[0]'), new Float32Array(BAND_NAMES.map((name) => numberSetting(s, `HueAdjustment${name}`))));
+        gl.uniform1fv(uniform('u_hslSat[0]'), new Float32Array(BAND_NAMES.map((name) => numberSetting(s, `SaturationAdjustment${name}`))));
+        gl.uniform1fv(uniform('u_hslLum[0]'), new Float32Array(BAND_NAMES.map((name) => numberSetting(s, `LuminanceAdjustment${name}`))));
+        gl.uniform1fv(uniform('u_gray[0]'), new Float32Array(BAND_NAMES.map((name) => numberSetting(s, `GrayMixer${name}`))));
+        gl.uniform1i(uniform('u_grayscale'), boolSetting(s, 'ConvertToGrayscale') ? 1 : 0);
+        const useHsl = boolSetting(s, 'ConvertToGrayscale')
+            || numberSetting(s, 'Dehaze') !== 0 || numberSetting(s, 'Vibrance') !== 0 || numberSetting(s, 'Saturation') !== 0
+            || BAND_NAMES.some((name) => numberSetting(s, `HueAdjustment${name}`) !== 0
+                || numberSetting(s, `SaturationAdjustment${name}`) !== 0
+                || numberSetting(s, `LuminanceAdjustment${name}`) !== 0
+                || numberSetting(s, `GrayMixer${name}`) !== 0);
+        gl.uniform1i(uniform('u_useHsl'), useHsl ? 1 : 0);
+        gl.uniform4f(uniform('u_crop'), numberSetting(s, 'CropLeft'), numberSetting(s, 'CropTop'), numberSetting(s, 'CropRight'), numberSetting(s, 'CropBottom'));
+        gl.uniform1f(uniform('u_angle'), numberSetting(s, 'CropAngle'));
+        gl.uniform1i(uniform('u_orientation'), numberSetting(s, 'Orientation', 1));
+        gl.uniform1i(uniform('u_applyGeometry'), this.geometryEnabled ? 1 : 0);
+    }
+
+    drawColorTarget() {
+        const gl = this.gl;
+        gl.useProgram(this.lumaProgram);
+        bindUnit(gl, this.source, 0);
+        bindUnit(gl, this.curve, 1);
+        this.uniforms(this.lumaProgram);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, this.lumaTarget.framebuffer);
+        gl.viewport(0, 0, this.lumaTarget.width, this.lumaTarget.height);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+    }
+
+    blur(sigma, output) {
+        const gl = this.gl;
+        gl.useProgram(this.blurProgram);
+        gl.uniform1i(gl.getUniformLocation(this.blurProgram, 'u_image'), 0);
+        gl.uniform1f(gl.getUniformLocation(this.blurProgram, 'u_sigma'), Math.max(.5, sigma / 2));
+        bindUnit(gl, this.lumaTarget.texture, 0);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, this.blurTemp.framebuffer);
+        gl.viewport(0, 0, this.blurTemp.width, this.blurTemp.height);
+        gl.uniform2f(gl.getUniformLocation(this.blurProgram, 'u_direction'), 1 / this.blurTemp.width, 0);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+        bindUnit(gl, this.blurTemp.texture, 0);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, output.framebuffer);
+        gl.uniform2f(gl.getUniformLocation(this.blurProgram, 'u_direction'), 0, 1 / this.blurTemp.height);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+    }
+
+    render() {
+        this.frame = 0;
+        if (!this.dirty || !this.ready || !this.targets?.length) return;
+        this.dirty = false;
+        const gl = this.gl;
+        gl.bindVertexArray(this.vao);
+        const clarity = numberSetting(this.settings, 'Clarity2012');
+        const textureValue = numberSetting(this.settings, 'Texture');
+        const sharpness = numberSetting(this.settings, 'Sharpness');
+        const useBlur = clarity !== 0 || textureValue !== 0 || sharpness > 0;
+        if (useBlur) {
+            this.drawColorTarget();
+            const minSide = Math.min(this.width, this.height);
+            if (clarity !== 0) this.blur(BLUR_LARGE_FACTOR * minSide, this.blurLarge);
+            if (textureValue !== 0) this.blur(BLUR_SMALL_FACTOR * minSide, this.blurSmall);
+            if (sharpness > 0) this.blur(numberSetting(this.settings, 'SharpenRadius', 1), this.blurSharp);
+        }
+        gl.useProgram(this.mainProgram);
+        bindUnit(gl, this.source, 0);
+        bindUnit(gl, this.curve, 1);
+        bindUnit(gl, this.blurLarge.texture, 2);
+        bindUnit(gl, this.blurSmall.texture, 3);
+        bindUnit(gl, this.blurSharp.texture, 4);
+        this.uniforms(this.mainProgram);
+        const uniform = (name) => gl.getUniformLocation(this.mainProgram, name);
+        gl.uniform1i(uniform('u_blurLarge'), 2);
+        gl.uniform1i(uniform('u_blurSmall'), 3);
+        gl.uniform1i(uniform('u_blurSharp'), 4);
+        gl.uniform1i(uniform('u_useLarge'), clarity !== 0 ? 1 : 0);
+        gl.uniform1i(uniform('u_useSmall'), textureValue !== 0 ? 1 : 0);
+        gl.uniform1i(uniform('u_useSharp'), sharpness > 0 ? 1 : 0);
+        gl.uniform1f(uniform('u_clarity'), clarity);
+        gl.uniform1f(uniform('u_texture'), textureValue);
+        gl.uniform1f(uniform('u_sharpness'), sharpness);
+        gl.uniform1f(uniform('u_vignette'), numberSetting(this.settings, 'PostCropVignetteAmount'));
+        gl.uniform3f(uniform('u_vignetteShape'), numberSetting(this.settings, 'PostCropVignetteMidpoint', 50), numberSetting(this.settings, 'PostCropVignetteFeather', 50), numberSetting(this.settings, 'PostCropVignetteRoundness'));
+        gl.uniform1f(uniform('u_grain'), numberSetting(this.settings, 'GrainAmount'));
+        gl.uniform1f(uniform('u_grainSize'), numberSetting(this.settings, 'GrainSize', 25));
+        gl.uniform1ui(uniform('u_seed'), GRAIN_SEED >>> 0);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+        this.canvas.dispatchEvent(new CustomEvent('develop:rendered'));
+    }
+
+    readPixels(width = this.canvas.width, height = this.canvas.height) {
+        this.render();
+        const pixels = new Uint8Array(width * height * 4);
+        this.gl.readPixels(0, 0, width, height, this.gl.RGBA, this.gl.UNSIGNED_BYTE, pixels);
+        const error = this.gl.getError();
+        if (error !== this.gl.NO_ERROR) throw new Error(`Develop readback failed (gl 0x${error.toString(16)})`);
+        return pixels;
+    }
+
+    destroy() {
+        if (this.frame) cancelAnimationFrame(this.frame);
+        const gl = this.gl;
+        for (const item of this.targets || []) {
+            gl.deleteFramebuffer(item.framebuffer);
+            gl.deleteTexture(item.texture);
+        }
+        gl.deleteTexture(this.source);
+        gl.deleteTexture(this.curve);
+    }
+}
+
+export function syntheticLinearRgba(size = 64) {
+    const data = new Float32Array(size * size * 4);
+    for (let y = 0; y < size; y += 1) {
+        for (let x = 0; x < size; x += 1) {
+            const i = (y * size + x) * 4;
+            const hue = ((x * (360 / Math.max(1, size - 1)) + y * .75) % 360) / 360;
+            const saturation = .15 + .85 * x / Math.max(1, size - 1);
+            const value = .03 + .97 * y / Math.max(1, size - 1);
+            const rgb = (() => {
+                const p = Math.floor(hue * 6);
+                const f = hue * 6 - p;
+                const q = value * (1 - saturation * f);
+                const t = value * (1 - saturation * (1 - f));
+                const low = value * (1 - saturation);
+                return [[value, t, low], [q, value, low], [low, value, t], [low, q, value], [t, low, value], [value, low, q]][p % 6];
+            })();
+            data.set([...rgb, 1], i);
+        }
+    }
+    return data;
+}
+
+export async function renderSyntheticPixels(settings = {}) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 64;
+    canvas.height = 64;
+    const renderer = new DevelopRenderer(canvas);
+    renderer.geometryEnabled = false;
+    renderer.uploadSource(syntheticLinearRgba(64), 64, 64);
+    renderer.setSettings(settings, { as_shot_temperature: 5150 });
+    renderer.render();
+    const result = renderer.readPixels(64, 64);
+    renderer.destroy();
+    return result;
+}

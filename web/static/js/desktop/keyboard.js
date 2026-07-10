@@ -27,6 +27,7 @@ import { closeGridContextMenu, gridContextMenuOpen } from './context_menu.js';
 import { closeDuplicates, duplicatesOpen } from './duplicates.js';
 import { closeTrash, trashOpen, trashSelectedImages } from './trash.js';
 import { showToast, undoLatestToast } from './toast.js';
+import { developOpen, openDevelop } from './develop/develop.js';
 
 function inputFocused() {
     const el = document.activeElement;
@@ -305,6 +306,11 @@ export function initKeyboard() {
                 event.preventDefault();
                 closeFilters();
             }
+            return;
+        }
+        if (event.key.toLowerCase() === 'd' && !foregroundLayerOpen()) {
+            event.preventDefault();
+            if (!developOpen()) openDevelop();
             return;
         }
         if (event.key.toLowerCase() === 'h' && !foregroundLayerOpen()) {
