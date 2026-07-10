@@ -161,6 +161,15 @@ CREATE INDEX IF NOT EXISTS idx_images_active_elo
 ON images(elo DESC) WHERE status IN ('kept', 'maybe');
 CREATE INDEX IF NOT EXISTS idx_images_active_elo_asc
 ON images(elo ASC) WHERE status IN ('kept', 'maybe');
+CREATE INDEX IF NOT EXISTS idx_images_active_flag_elo
+ON images(flag, elo DESC, id DESC) WHERE status IN ('kept', 'maybe') AND missing_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_images_source_flag_elo
+ON images(source_id, flag, elo DESC) WHERE status IN ('kept', 'maybe') AND missing_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_images_active_camera_label_elo
+ON images(TRIM(COALESCE(camera_make, '') || ' ' || COALESCE(camera_model, '')), elo DESC, id DESC)
+WHERE status IN ('kept', 'maybe') AND missing_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_images_trashed_at
+ON images(trashed_at DESC) WHERE status = 'trashed';
 CREATE INDEX IF NOT EXISTS idx_images_active_comparisons
 ON images(comparisons DESC) WHERE status IN ('kept', 'maybe');
 CREATE INDEX IF NOT EXISTS idx_images_active_comparisons_asc
@@ -505,6 +514,10 @@ CREATE TABLE IF NOT EXISTS stack_members (
     PRIMARY KEY(stack_id, image_id)
 );
 
+CREATE INDEX IF NOT EXISTS idx_stacks_representative_image_id
+ON stacks(representative_image_id);
+CREATE INDEX IF NOT EXISTS idx_stacks_updated_at
+ON stacks(updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_stacks_kind
 ON stacks(kind);
 CREATE INDEX IF NOT EXISTS idx_stack_members_stack_id
