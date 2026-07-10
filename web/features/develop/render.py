@@ -59,7 +59,15 @@ def decode_full_resolution(path: str | Path) -> np.ndarray:
                 half_size=False,
             )
     except Exception as exc:
-        raise RenderError(f"RAW export decode failed: {exc}") from exc
+        from features.develop import lossydng
+
+        if lossydng.is_lossy_dng(str(path)):
+            try:
+                decoded, _meta = lossydng.decode_lossy_dng(str(path), max_px=None)
+            except Exception as lossy_exc:
+                raise RenderError(f"RAW export decode failed: {lossy_exc}") from lossy_exc
+        else:
+            raise RenderError(f"RAW export decode failed: {exc}") from exc
     return np.asarray(decoded, dtype=np.float32) / np.float32(65535.0)
 
 

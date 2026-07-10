@@ -160,7 +160,20 @@ def decode_base(path: str | os.PathLike[str]) -> tuple[np.ndarray, dict[str, Any
                 half_size=True,
             )
     except Exception as exc:
-        raise RawDecodeError(f"RAW decode failed: {exc}") from exc
+        # LR 14+ lossy DNGs are JPEG XL inside the TIFF container; LibRaw
+        # cannot unpack them, but their LinearRaw SubIFD pyramid can be
+        # decoded directly (already demosaiced camera RGB).
+        from features.develop import lossydng
+
+        if lossydng.is_lossy_dng(str(source)):
+            try:
+                rgb, lossy_meta = lossydng.decode_lossy_dng(str(source), max_px=MAX_BASE_EDGE)
+            except Exception as lossy_exc:
+                raise RawDecodeError(f"RAW decode failed: {lossy_exc}") from lossy_exc
+            camera_wb = list(lossy_meta.get("cam_mul") or [])
+            daylight_wb = []
+        else:
+            raise RawDecodeError(f"RAW decode failed: {exc}") from exc
     rgb = _resize_linear_uint16(np.asarray(rgb, dtype=np.uint16))
     meta = {
         "as_shot": estimate_as_shot_white_balance(camera_wb, daylight_wb),

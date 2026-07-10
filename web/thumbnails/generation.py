@@ -46,9 +46,26 @@ def load_source_image(
 
         import rawpy
 
-        with rawpy.imread(filepath) as raw:
-            rgb = raw.postprocess(use_camera_wb=True, no_auto_bright=True)
-        return Image.fromarray(rgb)
+        try:
+            with rawpy.imread(filepath) as raw:
+                rgb = raw.postprocess(use_camera_wb=True, no_auto_bright=True)
+            return Image.fromarray(rgb)
+        except Exception:
+            # Lossy (JPEG XL) DNGs: decode a pyramid level and display-encode.
+            from features.develop.lossydng import decode_lossy_dng, is_lossy_dng
+
+            if not is_lossy_dng(filepath):
+                raise
+            import numpy as _np
+
+            arr, _meta = decode_lossy_dng(filepath, max_px=max(max_target, 512))
+            linear = arr.astype(_np.float32) / 65535.0
+            encoded = _np.where(
+                linear <= 0.0031308,
+                linear * 12.92,
+                1.055 * _np.power(_np.clip(linear, 0.0, 1.0), 1.0 / 2.4) - 0.055,
+            )
+            return Image.fromarray((_np.clip(encoded, 0.0, 1.0) * 255.0 + 0.5).astype(_np.uint8))
 
     with Image.open(filepath) as source:
         if ext in jpeg_extensions:
