@@ -22,7 +22,7 @@ class LightroomCatalogImportTests(unittest.TestCase):
         with sqlite3.connect(self.db_path) as conn:
             conn.executescript("""
                 CREATE TABLE images (id INTEGER PRIMARY KEY, filename TEXT, filepath TEXT UNIQUE,
-                    date_taken TEXT, flag TEXT DEFAULT 'unflagged');
+                    date_taken TEXT, flag TEXT DEFAULT 'unflagged', status TEXT DEFAULT 'kept', missing_at REAL);
                 CREATE TABLE develop_settings (image_id INTEGER PRIMARY KEY, settings TEXT NOT NULL DEFAULT '{}',
                     origin TEXT NOT NULL DEFAULT 'user', xmp_path TEXT, xmp_mtime REAL, updated_at TEXT NOT NULL);
                 CREATE TABLE collections (id INTEGER PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
@@ -140,7 +140,7 @@ class LightroomCatalogImportTests(unittest.TestCase):
     def _make_library_copy(self, destination):
         with sqlite3.connect(destination) as conn:
             conn.executescript("""
-                CREATE TABLE images (id INTEGER PRIMARY KEY, filename TEXT, filepath TEXT UNIQUE, date_taken TEXT, flag TEXT DEFAULT 'unflagged');
+                CREATE TABLE images (id INTEGER PRIMARY KEY, filename TEXT, filepath TEXT UNIQUE, date_taken TEXT, flag TEXT DEFAULT 'unflagged', status TEXT DEFAULT 'kept', missing_at REAL);
                 CREATE TABLE develop_settings (image_id INTEGER PRIMARY KEY, settings TEXT NOT NULL DEFAULT '{}', origin TEXT NOT NULL DEFAULT 'user', xmp_path TEXT, xmp_mtime REAL, updated_at TEXT NOT NULL);
                 CREATE TABLE collections (id INTEGER PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', visibility TEXT NOT NULL DEFAULT 'private', status TEXT NOT NULL DEFAULT 'draft', query TEXT, cover_image_id INTEGER, created_at REAL NOT NULL, updated_at REAL NOT NULL);
                 CREATE TABLE collection_images (collection_id INTEGER, image_id INTEGER, position INTEGER NOT NULL DEFAULT 0, added_at REAL NOT NULL DEFAULT 0, PRIMARY KEY(collection_id, image_id));
