@@ -284,9 +284,16 @@ async def api_add_collection_link(collection_id: int, payload: CollectionLinkBod
 
 
 @router.delete("/api/collections/{collection_id}/links")
-async def api_delete_collection_link(collection_id: int, payload: CollectionLinkBody):
+async def api_delete_collection_link(
+    collection_id: int,
+    payload: CollectionLinkBody | None = None,
+    child_id: int | None = None,
+):
     _graph_configured()
-    deleted = await graph.delete_link(_db_path(), collection_id, payload.child_id)
+    target_child_id = child_id if child_id is not None else payload.child_id if payload else None
+    if target_child_id is None:
+        return JSONResponse({"error": "child_id is required"}, status_code=422)
+    deleted = await graph.delete_link(_db_path(), collection_id, target_child_id)
     if deleted is None:
         return JSONResponse({"error": "Collection not found"}, status_code=404)
     if not deleted:
@@ -303,13 +310,16 @@ async def api_collection_tree():
 @router.get("/api/collections/{collection_id}/images")
 async def api_collection_graph_images(collection_id: int, recursive: int = 0):
     _graph_configured()
-    result = await graph.recursive_images(
-        _db_path(),
-        collection_id,
-        recursive=bool(recursive),
-        resolve_smart_image_ids=_resolve_smart_image_ids,
-        get_images_by_ids=_get_images_by_ids,
-    )
+    try:
+        result = await graph.recursive_images(
+            _db_path(),
+            collection_id,
+            recursive=bool(recursive),
+            resolve_smart_image_ids=_resolve_smart_image_ids,
+            get_images_by_ids=_get_images_by_ids,
+        )
+    except graph.CollectionGraphConflict as exc:
+        return JSONResponse({"error": str(exc)}, status_code=409)
     if result is None:
         return JSONResponse({"error": "Collection not found"}, status_code=404)
     image_ids, images = result

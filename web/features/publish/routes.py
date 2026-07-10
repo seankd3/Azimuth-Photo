@@ -13,7 +13,8 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
 import settings
-from features.publish.builder import build_public_gallery_bundle
+from data.repositories import shares as share_repository
+from features.publish.builder import build_public_gallery_bundle, export_website_tree
 from features.publish.deployer import GalleryDeployer, HookStatus, PublishConflict, PublishDeployError, PublishSetupError
 from features.publish import nodes as published_nodes
 from features.share import auth as share_auth
@@ -196,9 +197,6 @@ async def api_patch_published_node(node_id: int, payload: PatchPublishedNodeBody
         return JSONResponse({"error": str(exc)}, status_code=409)
     if node is None:
         return JSONResponse({"error": "Published node not found"}, status_code=404)
-    if node["area"] == "private":
-        await _ensure_private_node_shares(root_node_id=int(node["id"]))
-        node = await published_nodes.get_node(_db_path(), int(node["id"]))
     return {"ok": True, "node": node}
 
 
@@ -237,14 +235,12 @@ async def api_update_published_node(node_id: int, payload: UpdatePublishedNodeBo
             attach_child_collection_ids=payload.attach_child_collection_ids,
             resolve_smart_image_ids=_resolve_smart_image_ids,
         )
+    except published_nodes.PublishedNodeSourceDeleted as exc:
+        return JSONResponse({"error": str(exc)}, status_code=410)
     except published_nodes.PublishedNodeConflict as exc:
-        status = 410 if "deleted" in str(exc).lower() else 409
-        return JSONResponse({"error": str(exc)}, status_code=status)
+        return JSONResponse({"error": str(exc)}, status_code=409)
     if node is None:
         return JSONResponse({"error": "Published node not found"}, status_code=404)
-    if node["area"] == "private":
-        await _ensure_private_node_shares(root_node_id=int(node["id"]))
-        node = await published_nodes.get_node(_db_path(), int(node["id"]))
     return {"ok": True, "node": node}
 
 
@@ -256,12 +252,52 @@ async def api_share_published_node(node_id: int, payload: PublishedNodeShareBody
         return JSONResponse({"error": "Published node not found"}, status_code=404)
     if node["area"] != "private":
         return JSONResponse({"error": "Only private published nodes can be shared"}, status_code=409)
+    password_supplied = "password" in _model_fields_set(payload)
     password_hash = share_auth.hash_password(payload.password) if payload.password else None
     try:
-        share = await _create_published_node_share(node_id, password_hash=password_hash)
+        share = await _create_published_node_share(
+            node_id,
+            password_hash=password_hash,
+            update_password=password_supplied,
+        )
     except ValueError as exc:
         return JSONResponse({"error": str(exc)}, status_code=409)
     return {"ok": True, "share": _published_share_payload(share)}
+
+
+@router.delete("/api/published/nodes/{node_id}/share")
+async def api_revoke_published_node_share(node_id: int):
+    _nodes_configured()
+    node = await published_nodes.get_node(_db_path(), node_id)
+    if node is None:
+        return JSONResponse({"error": "Published node not found"}, status_code=404)
+    revoked = await share_repository.revoke_share(
+        _db_path(),
+        published_node_id=node_id,
+    )
+    if not revoked:
+        return JSONResponse({"error": "Share not found"}, status_code=404)
+    return {"ok": True}
+
+
+@router.post("/api/published/export")
+async def api_export_published_area(area: str):
+    _nodes_configured()
+    if area != "website":
+        return JSONResponse({"error": "area must be website"}, status_code=400)
+    publish_dir = str(settings.get_settings().get("publish_dir") or "").strip()
+    if not publish_dir:
+        return JSONResponse(
+            {"error": "Choose a publishing folder before publishing this gallery."},
+            status_code=409,
+        )
+    manifest = await export_website_tree(
+        db_path=_db_path(),
+        destination=publish_dir,
+        templates=_templates,
+        thumbnails=_thumbnails,
+    )
+    return {"ok": True, "area": "website", "manifest": manifest}
 
 
 @router.post("/api/user-collections/{collection_id}/publish")
@@ -575,24 +611,8 @@ def _published_share_payload(share: dict | None) -> dict | None:
 
 
 async def _ensure_private_node_shares(*, root_node_id: int) -> dict | None:
-    tree = await published_nodes.published_tree(_db_path(), "private")
-    children: dict[int, list[int]] = {}
-    nodes_by_id = {int(node["id"]): node for node in tree["nodes"]}
-    for node in tree["nodes"]:
-        if node["parent_id"] is not None:
-            children.setdefault(int(node["parent_id"]), []).append(int(node["id"]))
-
-    root_share = None
-    pending = [int(root_node_id)]
-    while pending:
-        node_id = pending.pop()
-        node = nodes_by_id.get(node_id)
-        if node is None:
-            continue
-        pending.extend(reversed(children.get(node_id, [])))
-        if node.get("share_token"):
-            continue
-        created = await _create_published_node_share(node_id, password_hash=None)
-        if node_id == int(root_node_id):
-            root_share = created
-    return root_share
+    return await _create_published_node_share(
+        int(root_node_id),
+        password_hash=None,
+        update_password=False,
+    )

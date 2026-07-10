@@ -80,8 +80,10 @@ async def add_link(db_path: str, parent_id: int, child_id: int, position: int = 
 async def delete_link(db_path: str, parent_id: int, child_id: int) -> bool | None:
     conn = await data_connection.open_async(db_path)
     try:
+        await conn.execute("BEGIN IMMEDIATE")
         cursor = await conn.execute("SELECT 1 FROM collections WHERE id = ?", (int(parent_id),))
         if await cursor.fetchone() is None:
+            await conn.rollback()
             return None
         cursor = await conn.execute(
             "DELETE FROM collection_links WHERE parent_id = ? AND child_id = ?",
@@ -89,6 +91,10 @@ async def delete_link(db_path: str, parent_id: int, child_id: int) -> bool | Non
         )
         await conn.commit()
         return bool(cursor.rowcount)
+    except Exception:
+        if conn.in_transaction:
+            await conn.rollback()
+        raise
     finally:
         await data_connection.close_async(conn, db_path=db_path)
 
@@ -196,16 +202,18 @@ async def recursive_image_ids(
     ordered_collections: list[int] = []
     visited: set[int] = set()
 
-    def visit(current_id: int) -> None:
+    def visit(current_id: int, path: frozenset[int]) -> None:
+        if current_id in path:
+            raise CollectionGraphConflict("Collection link would create a cycle")
         if current_id in visited:
             return
         visited.add(current_id)
         ordered_collections.append(current_id)
         if recursive:
             for child_id in children.get(current_id, []):
-                visit(child_id)
+                visit(child_id, path | {current_id})
 
-    visit(collection_id)
+    visit(collection_id, frozenset())
     image_ids: list[int] = []
     seen_images: set[int] = set()
     for current_id in ordered_collections:
@@ -265,8 +273,8 @@ def _parse_query(value: str | None) -> dict | None:
     try:
         parsed = json.loads(value)
     except (TypeError, ValueError):
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
+        return None
+    return parsed if isinstance(parsed, dict) else None
 
 
 def _unique_ids(values) -> list[int]:

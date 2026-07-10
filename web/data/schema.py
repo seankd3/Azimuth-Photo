@@ -1,12 +1,14 @@
 """Schema contract checks for the SQLite catalog database."""
 
+import asyncio
 import os
+import shutil
 
 from date_inference import infer_image_date
 from data.repositories import catalog as catalog_repository
 
 EXPECTED_EMBEDDING_DIM = 2048  # Qwen3-VL-Embedding-2B native dimension
-SCHEMA_VERSION = 20
+SCHEMA_VERSION = 21
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS catalog_sources (
@@ -581,7 +583,7 @@ CREATE TABLE IF NOT EXISTS share_images (
 
 CREATE TABLE IF NOT EXISTS share_favorites (
     id INTEGER PRIMARY KEY,
-    share_id INTEGER NOT NULL REFERENCES collection_shares(id),
+    share_id INTEGER NOT NULL REFERENCES collection_shares(id) ON DELETE CASCADE,
     image_id INTEGER NOT NULL,
     client_name TEXT NULL,
     created_at REAL NOT NULL,
@@ -629,6 +631,9 @@ CREATE INDEX IF NOT EXISTS idx_collection_shares_active
 ON collection_shares(collection_id, revoked_at);
 CREATE INDEX IF NOT EXISTS idx_collection_shares_published_active
 ON collection_shares(published_node_id, revoked_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_collection_shares_one_active_published
+ON collection_shares(published_node_id)
+WHERE revoked_at IS NULL AND published_node_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_share_images_image
 ON share_images(image_id, share_id);
 CREATE INDEX IF NOT EXISTS idx_share_images_position
@@ -1113,6 +1118,7 @@ REQUIRED_INDEXES = {
     "idx_published_node_images_image",
     "idx_collection_shares_active",
     "idx_collection_shares_published_active",
+    "idx_collection_shares_one_active_published",
     "idx_share_images_image",
     "idx_share_images_position",
     "idx_share_favorites_share",
@@ -1167,6 +1173,7 @@ async def prepare_existing_database_for_schema(conn) -> None:
     await _add_columns_if_missing(conn, "collection_publishes", COLLECTION_PUBLISH_COMPAT_COLUMNS)
     await _add_columns_if_missing(conn, "image_captions", IMAGE_CAPTION_COMPAT_COLUMNS)
     await migrate_collection_shares_for_published_nodes(conn)
+    await migrate_share_owner_cascades(conn)
 
 
 async def migrate_collection_shares_for_published_nodes(conn) -> None:
@@ -1178,9 +1185,11 @@ async def migrate_collection_shares_for_published_nodes(conn) -> None:
     columns = {row["name"]: row for row in await cursor.fetchall()}
     collection_id = columns.get("collection_id")
     if "published_node_id" in columns and collection_id is not None and not bool(collection_id["notnull"]):
+        await _ensure_collection_share_indexes(conn)
         return
 
     await conn.commit()
+    await _backup_before_v20_rebuild(conn)
     await conn.execute("PRAGMA foreign_keys=OFF")
     try:
         await conn.executescript(
@@ -1211,6 +1220,13 @@ async def migrate_collection_shares_for_published_nodes(conn) -> None:
             FROM collection_shares;
             DROP TABLE collection_shares;
             ALTER TABLE collection_shares_new RENAME TO collection_shares;
+            CREATE INDEX idx_collection_shares_active
+            ON collection_shares(collection_id, revoked_at);
+            CREATE INDEX idx_collection_shares_published_active
+            ON collection_shares(published_node_id, revoked_at);
+            CREATE UNIQUE INDEX idx_collection_shares_one_active_published
+            ON collection_shares(published_node_id)
+            WHERE revoked_at IS NULL AND published_node_id IS NOT NULL;
             COMMIT;
             """
         )
@@ -1222,6 +1238,153 @@ async def migrate_collection_shares_for_published_nodes(conn) -> None:
         raise
     finally:
         await conn.execute("PRAGMA foreign_keys=ON")
+
+
+async def migrate_share_owner_cascades(conn) -> None:
+    """Make deleting a share cascade through both snapshot child tables."""
+
+    rebuild_images = await table_exists(conn, "share_images") and not await _has_cascade_fk(
+        conn,
+        "share_images",
+        from_column="share_id",
+        target_table="collection_shares",
+    )
+    rebuild_favorites = await table_exists(conn, "share_favorites") and not await _has_cascade_fk(
+        conn,
+        "share_favorites",
+        from_column="share_id",
+        target_table="collection_shares",
+    )
+    if not rebuild_images and not rebuild_favorites:
+        return
+
+    statements = ["BEGIN;"]
+    if rebuild_images:
+        statements.extend(
+            [
+                "DROP TABLE IF EXISTS share_images_new;",
+                """
+                CREATE TABLE share_images_new (
+                    share_id INTEGER NOT NULL REFERENCES collection_shares(id) ON DELETE CASCADE,
+                    image_id INTEGER NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+                    position INTEGER NOT NULL DEFAULT 0,
+                    added_at REAL NOT NULL DEFAULT (strftime('%s', 'now')),
+                    PRIMARY KEY (share_id, image_id)
+                );
+                """,
+                """
+                INSERT INTO share_images_new (share_id, image_id, position, added_at)
+                SELECT share_id, image_id, position, added_at FROM share_images;
+                """,
+                "DROP TABLE share_images;",
+                "ALTER TABLE share_images_new RENAME TO share_images;",
+                "CREATE INDEX idx_share_images_image ON share_images(image_id, share_id);",
+                """
+                CREATE INDEX idx_share_images_position
+                ON share_images(share_id, position, added_at);
+                """,
+            ]
+        )
+    if rebuild_favorites:
+        statements.extend(
+            [
+                "DROP TABLE IF EXISTS share_favorites_new;",
+                """
+                CREATE TABLE share_favorites_new (
+                    id INTEGER PRIMARY KEY,
+                    share_id INTEGER NOT NULL REFERENCES collection_shares(id) ON DELETE CASCADE,
+                    image_id INTEGER NOT NULL,
+                    client_name TEXT NULL,
+                    created_at REAL NOT NULL,
+                    UNIQUE(share_id, image_id)
+                );
+                """,
+                """
+                INSERT INTO share_favorites_new (id, share_id, image_id, client_name, created_at)
+                SELECT id, share_id, image_id, client_name, created_at FROM share_favorites;
+                """,
+                "DROP TABLE share_favorites;",
+                "ALTER TABLE share_favorites_new RENAME TO share_favorites;",
+                "CREATE INDEX idx_share_favorites_share ON share_favorites(share_id);",
+            ]
+        )
+    statements.append("COMMIT;")
+
+    await conn.commit()
+    await conn.execute("PRAGMA foreign_keys=OFF")
+    try:
+        await conn.executescript("\n".join(statements))
+    except Exception:
+        try:
+            await conn.rollback()
+        except Exception:
+            pass
+        raise
+    finally:
+        await conn.execute("PRAGMA foreign_keys=ON")
+
+
+async def _has_cascade_fk(
+    conn,
+    table: str,
+    *,
+    from_column: str,
+    target_table: str,
+) -> bool:
+    cursor = await conn.execute(f"PRAGMA foreign_key_list({table})")
+    return any(
+        row["from"] == from_column
+        and row["table"] == target_table
+        and str(row["on_delete"] or "").upper() == "CASCADE"
+        for row in await cursor.fetchall()
+    )
+
+
+async def _ensure_collection_share_indexes(conn) -> None:
+    now_sql = "strftime('%s', 'now')"
+    await conn.execute(
+        f"""
+        UPDATE collection_shares
+        SET revoked_at = {now_sql}
+        WHERE published_node_id IS NOT NULL
+          AND revoked_at IS NULL
+          AND id NOT IN (
+              SELECT MAX(id)
+              FROM collection_shares
+              WHERE published_node_id IS NOT NULL AND revoked_at IS NULL
+              GROUP BY published_node_id
+          )
+        """
+    )
+    await conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_collection_shares_active "
+        "ON collection_shares(collection_id, revoked_at)"
+    )
+    await conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_collection_shares_published_active "
+        "ON collection_shares(published_node_id, revoked_at)"
+    )
+    await conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_collection_shares_one_active_published "
+        "ON collection_shares(published_node_id) "
+        "WHERE revoked_at IS NULL AND published_node_id IS NOT NULL"
+    )
+
+
+async def _backup_before_v20_rebuild(conn) -> None:
+    cursor = await conn.execute("PRAGMA database_list")
+    main = next((row for row in await cursor.fetchall() if row["name"] == "main"), None)
+    db_path = str(main["file"] or "") if main is not None else ""
+    if not db_path or db_path == ":memory:":
+        return
+    backup_path = f"{db_path}.pre-v20.bak"
+    if os.path.exists(backup_path):
+        return
+    try:
+        await conn.execute("PRAGMA wal_checkpoint(FULL)")
+    except Exception:
+        pass
+    await asyncio.to_thread(shutil.copy2, db_path, backup_path)
 
 
 async def ensure_compatibility_columns(conn) -> None:

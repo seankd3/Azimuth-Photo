@@ -529,11 +529,17 @@ async def get_collection_share(collection_id: int):
     return await share_repository.get_share(DB_PATH, collection_id)
 
 
-async def create_published_node_share(published_node_id: int, *, password_hash: str | None = None):
+async def create_published_node_share(
+    published_node_id: int,
+    *,
+    password_hash: str | None = None,
+    update_password: bool = False,
+):
     return await share_repository.create_published_node_share(
         DB_PATH,
         published_node_id,
         password_hash=password_hash,
+        update_password=update_password,
     )
 
 
@@ -543,6 +549,14 @@ async def list_active_collection_shares():
 
 async def revoke_collection_share(collection_id: int) -> bool:
     return await share_repository.revoke_share(DB_PATH, collection_id)
+
+
+async def revoke_published_node_share(published_node_id: int) -> bool:
+    return await share_repository.revoke_share(DB_PATH, published_node_id=published_node_id)
+
+
+async def revoke_share_by_id(share_id: int) -> bool:
+    return await share_repository.revoke_share(DB_PATH, share_id=share_id)
 
 
 async def set_collection_share_password(collection_id: int, password_hash: str | None):

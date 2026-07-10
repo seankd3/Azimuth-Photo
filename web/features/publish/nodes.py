@@ -25,6 +25,10 @@ class PublishedNodeNotFound(LookupError):
     pass
 
 
+class PublishedNodeSourceDeleted(PublishedNodeConflict):
+    pass
+
+
 async def published_tree(db_path: str, area: str) -> dict:
     area = _valid_area(area)
     conn = await data_connection.open_async(db_path)
@@ -195,7 +199,24 @@ async def node_diff(
     *,
     resolve_smart_image_ids: ResolveSmartImageIds,
 ) -> dict | None:
-    node = await get_node(db_path, node_id)
+    conn = await data_connection.open_async(db_path)
+    try:
+        return await _node_diff_on_conn(
+            conn,
+            int(node_id),
+            resolve_smart_image_ids=resolve_smart_image_ids,
+        )
+    finally:
+        await data_connection.close_async(conn, db_path=db_path)
+
+
+async def _node_diff_on_conn(
+    conn,
+    node_id: int,
+    *,
+    resolve_smart_image_ids: ResolveSmartImageIds,
+) -> dict | None:
+    node = await _get_node_on_conn(conn, int(node_id))
     if node is None:
         return None
     source_id = node.get("source_collection_id")
@@ -209,12 +230,12 @@ async def node_diff(
             "attachable_child_nodes": [],
         }
 
-    current_ids = await collection_graph.collection_own_image_ids(
-        db_path,
-        int(source_id),
-        resolve_smart_image_ids=resolve_smart_image_ids,
+    cursor = await conn.execute(
+        "SELECT query FROM collections WHERE id = ?",
+        (int(source_id),),
     )
-    if current_ids is None:
+    source = await cursor.fetchone()
+    if source is None:
         return {
             "node_id": int(node_id),
             "source_deleted": True,
@@ -224,34 +245,44 @@ async def node_diff(
             "attachable_child_nodes": [],
         }
 
-    conn = await data_connection.open_async(db_path)
-    try:
-        snapshot_ids = await _node_image_ids_on_conn(conn, int(node_id))
+    query = _parse_query(source["query"])
+    if query is None:
         cursor = await conn.execute(
             """
-            SELECT links.child_id, links.position, collections.name
-            FROM collection_links links
-            JOIN collections ON collections.id = links.child_id
-            WHERE links.parent_id = ?
-              AND NOT EXISTS (
-                  SELECT 1 FROM published_nodes child
-                  WHERE child.parent_id = ?
-                    AND child.source_collection_id = links.child_id
-              )
-            ORDER BY links.position ASC, links.added_at ASC, links.child_id ASC
+            SELECT image_id FROM collection_images
+            WHERE collection_id = ?
+            ORDER BY position ASC, added_at ASC, image_id ASC
             """,
-            (int(source_id), int(node_id)),
+            (int(source_id),),
         )
-        attachable = [
-            {
-                "collection_id": int(row["child_id"]),
-                "title": row["name"] or "Untitled collection",
-                "position": int(row["position"]),
-            }
-            for row in await cursor.fetchall()
-        ]
-    finally:
-        await data_connection.close_async(conn, db_path=db_path)
+        current_ids = [int(row["image_id"]) for row in await cursor.fetchall()]
+    else:
+        current_ids = _unique_ids(await resolve_smart_image_ids(query))
+
+    snapshot_ids = await _node_image_ids_on_conn(conn, int(node_id))
+    cursor = await conn.execute(
+        """
+        SELECT links.child_id, links.position, collections.name
+        FROM collection_links links
+        JOIN collections ON collections.id = links.child_id
+        WHERE links.parent_id = ?
+          AND NOT EXISTS (
+              SELECT 1 FROM published_nodes child
+              WHERE child.parent_id = ?
+                AND child.source_collection_id = links.child_id
+          )
+        ORDER BY links.position ASC, links.added_at ASC, links.child_id ASC
+        """,
+        (int(source_id), int(node_id)),
+    )
+    attachable = [
+        {
+            "collection_id": int(row["child_id"]),
+            "title": row["name"] or "Untitled collection",
+            "position": int(row["position"]),
+        }
+        for row in await cursor.fetchall()
+    ]
 
     current_set = set(current_ids)
     snapshot_set = set(snapshot_ids)
@@ -275,48 +306,46 @@ async def update_node(
     attach_child_collection_ids: list[int],
     resolve_smart_image_ids: ResolveSmartImageIds,
 ) -> dict | None:
-    diff = await node_diff(
-        db_path,
-        node_id,
-        resolve_smart_image_ids=resolve_smart_image_ids,
-    )
-    if diff is None:
-        return None
-    if diff["source_deleted"]:
-        raise PublishedNodeConflict("Source collection was deleted")
-
     add_ids = _unique_ids(add_image_ids)
     remove_ids = _unique_ids(remove_image_ids)
     attach_ids = _unique_ids(attach_child_collection_ids)
-    if not set(add_ids).issubset(diff["added"]):
-        raise PublishedNodeConflict("Accepted additions must come from the current diff")
-    if not set(remove_ids).issubset(diff["removed"]):
-        raise PublishedNodeConflict("Accepted removals must come from the current diff")
-    if not set(attach_ids).issubset(diff["attachable_children"]):
-        raise PublishedNodeConflict("Accepted child collections must come from the current diff")
-
-    attach_positions = {
-        int(item["collection_id"]): int(item["position"])
-        for item in diff["attachable_child_nodes"]
-    }
-    specs = []
-    for collection_id in attach_ids:
-        spec = await _source_tree_spec(
-            db_path,
-            collection_id,
-            resolve_smart_image_ids=resolve_smart_image_ids,
-        )
-        if spec is None:
-            raise PublishedNodeConflict("An accepted child collection no longer exists")
-        specs.append(spec)
 
     conn = await data_connection.open_async(db_path)
     try:
         await conn.execute("BEGIN IMMEDIATE")
-        node = await _get_node_on_conn(conn, int(node_id))
-        if node is None:
+        diff = await _node_diff_on_conn(
+            conn,
+            int(node_id),
+            resolve_smart_image_ids=resolve_smart_image_ids,
+        )
+        if diff is None:
             await conn.rollback()
             return None
+        if diff["source_deleted"]:
+            raise PublishedNodeSourceDeleted("Source collection was deleted")
+        if not set(add_ids).issubset(diff["added"]):
+            raise PublishedNodeConflict("Accepted additions must come from the current diff")
+        if not set(remove_ids).issubset(diff["removed"]):
+            raise PublishedNodeConflict("Accepted removals must come from the current diff")
+        if not set(attach_ids).issubset(diff["attachable_children"]):
+            raise PublishedNodeConflict("Accepted child collections must come from the current diff")
+
+        attach_positions = {
+            int(item["collection_id"]): int(item["position"])
+            for item in diff["attachable_child_nodes"]
+        }
+        specs = []
+        for collection_id in attach_ids:
+            spec = await _source_tree_spec_on_conn(
+                conn,
+                collection_id,
+                resolve_smart_image_ids=resolve_smart_image_ids,
+            )
+            if spec is None:
+                raise PublishedNodeConflict("An accepted child collection no longer exists")
+            specs.append(spec)
+
+        node = await _get_node_on_conn(conn, int(node_id))
         if remove_ids:
             await conn.executemany(
                 "DELETE FROM published_node_images WHERE node_id = ? AND image_id = ?",
@@ -355,7 +384,14 @@ async def update_node(
     except sqlite3.IntegrityError as exc:
         if conn.in_transaction:
             await conn.rollback()
-        raise PublishedNodeConflict("Destination update conflicted with a newer change") from exc
+        error_name = str(getattr(exc, "sqlite_errorname", "") or "")
+        if "FOREIGNKEY" in error_name:
+            message = "Destination update references an image or collection that no longer exists"
+        elif "UNIQUE" in error_name:
+            message = "Slug is already used under this destination"
+        else:
+            message = "Destination update conflicted with a newer change"
+        raise PublishedNodeConflict(message) from exc
     except Exception:
         if conn.in_transaction:
             await conn.rollback()
@@ -405,39 +441,52 @@ async def _source_tree_spec(
 ) -> dict | None:
     conn = await data_connection.open_async(db_path)
     try:
-        cursor = await conn.execute("SELECT id, name, query FROM collections")
-        collections = {
-            int(row["id"]): {
-                "collection_id": int(row["id"]),
-                "title": row["name"] or "Untitled collection",
-                "query": _parse_query(row["query"]),
-            }
-            for row in await cursor.fetchall()
-        }
-        if int(source_collection_id) not in collections:
-            return None
-        cursor = await conn.execute(
-            """
-            SELECT parent_id, child_id, position
-            FROM collection_links
-            ORDER BY parent_id ASC, position ASC, added_at ASC, child_id ASC
-            """
+        return await _source_tree_spec_on_conn(
+            conn,
+            int(source_collection_id),
+            resolve_smart_image_ids=resolve_smart_image_ids,
         )
-        child_links: dict[int, list[tuple[int, int]]] = defaultdict(list)
-        for row in await cursor.fetchall():
-            child_links[int(row["parent_id"])].append((int(row["child_id"]), int(row["position"])))
-        cursor = await conn.execute(
-            """
-            SELECT collection_id, image_id
-            FROM collection_images
-            ORDER BY collection_id ASC, position ASC, added_at ASC, image_id ASC
-            """
-        )
-        manual_ids: dict[int, list[int]] = defaultdict(list)
-        for row in await cursor.fetchall():
-            manual_ids[int(row["collection_id"])].append(int(row["image_id"]))
     finally:
         await data_connection.close_async(conn, db_path=db_path)
+
+
+async def _source_tree_spec_on_conn(
+    conn,
+    source_collection_id: int,
+    *,
+    resolve_smart_image_ids: ResolveSmartImageIds,
+) -> dict | None:
+    cursor = await conn.execute("SELECT id, name, query FROM collections")
+    collections = {
+        int(row["id"]): {
+            "collection_id": int(row["id"]),
+            "title": row["name"] or "Untitled collection",
+            "query": _parse_query(row["query"]),
+        }
+        for row in await cursor.fetchall()
+    }
+    if int(source_collection_id) not in collections:
+        return None
+    cursor = await conn.execute(
+        """
+        SELECT parent_id, child_id, position
+        FROM collection_links
+        ORDER BY parent_id ASC, position ASC, added_at ASC, child_id ASC
+        """
+    )
+    child_links: dict[int, list[tuple[int, int]]] = defaultdict(list)
+    for row in await cursor.fetchall():
+        child_links[int(row["parent_id"])].append((int(row["child_id"]), int(row["position"])))
+    cursor = await conn.execute(
+        """
+        SELECT collection_id, image_id
+        FROM collection_images
+        ORDER BY collection_id ASC, position ASC, added_at ASC, image_id ASC
+        """
+    )
+    manual_ids: dict[int, list[int]] = defaultdict(list)
+    for row in await cursor.fetchall():
+        manual_ids[int(row["collection_id"])].append(int(row["image_id"]))
 
     own_ids_cache: dict[int, list[int]] = {}
 
@@ -644,8 +693,8 @@ def _parse_query(value: str | None) -> dict | None:
     try:
         parsed = json.loads(value)
     except (TypeError, ValueError):
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
+        return None
+    return parsed if isinstance(parsed, dict) else None
 
 
 def _unique_ids(values) -> list[int]:
