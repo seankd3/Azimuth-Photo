@@ -122,3 +122,27 @@ class DevelopImporterTests(unittest.TestCase):
         self.assertEqual(result["status"]["skipped"], 1)
         self.assertEqual(protected["origin"], "user")
         self.assertEqual(json.loads(protected["settings"])["Exposure2012"], -2)
+
+    def test_embedded_dng_xmp_imported_when_no_sidecar(self):
+        raw_path = os.path.join(self.root, "IMG_0002.dng")
+        packet = ATTR_XMP.encode("utf-8")
+        with open(raw_path, "wb") as handle:
+            handle.write(b"\x49\x49\x2a\x00" + b"\x00" * 4096)
+            handle.write(packet)
+            handle.write(b"\x00" * 1024)
+
+        importer.begin_scan(self.root)
+        importer.scan_raws(self.root, self.db_path, claimed=True)
+
+        row = self._setting_row(raw_path)
+        self.assertIsNotNone(row)
+        self.assertEqual(row["origin"], "xmp")
+        self.assertEqual(row["xmp_path"], raw_path)
+        settings = json.loads(row["settings"])
+        self.assertIn("Exposure2012", settings)
+
+    def test_read_embedded_xmp_returns_none_without_packet(self):
+        raw_path = os.path.join(self.root, "IMG_0003.dng")
+        with open(raw_path, "wb") as handle:
+            handle.write(b"\x49\x49\x2a\x00" + b"\x00" * 8192)
+        self.assertIsNone(importer.read_embedded_xmp(raw_path))

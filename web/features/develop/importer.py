@@ -137,6 +137,36 @@ def parse_xmp_text(payload: str | bytes) -> dict[str, Any]:
     return settings
 
 
+def read_embedded_xmp(raw_path: str) -> bytes | None:
+    """Extract the XMP packet embedded in a DNG/TIFF container (LR writes
+    develop settings into DNGs directly; sidecars only exist for proprietary raws)."""
+    start_tag, end_tag = b"<x:xmpmeta", b"</x:xmpmeta>"
+    chunk_size = 1 << 22
+    overlap = len(start_tag)
+    buf = b""
+    packet_start = -1
+    collected = bytearray()
+    with open(raw_path, "rb") as handle:
+        while True:
+            chunk = handle.read(chunk_size)
+            if not chunk:
+                return None
+            buf = buf[-overlap:] + chunk if packet_start < 0 else chunk
+            if packet_start < 0:
+                idx = buf.find(start_tag)
+                if idx < 0:
+                    continue
+                packet_start = idx
+                collected.extend(buf[idx:])
+            else:
+                collected.extend(chunk)
+            end = collected.find(end_tag)
+            if end >= 0:
+                return bytes(collected[: end + len(end_tag)])
+            if len(collected) > (1 << 24):
+                return None
+
+
 def parse_xmp_file(xmp_path: str) -> dict[str, Any]:
     with open(xmp_path, "rb") as handle:
         return parse_xmp_text(handle.read())
@@ -201,6 +231,17 @@ def _ensure_image(conn, source_id: int, row: tuple[str, str, str, int | None, fl
     if image is None:
         raise RuntimeError(f"could not register RAW: {filepath}")
     return int(image["id"]), created
+
+
+def _needs_settings(conn, image_id: int, source_mtime: float) -> bool:
+    existing = conn.execute(
+        "SELECT origin, xmp_mtime FROM develop_settings WHERE image_id = ?", (image_id,)
+    ).fetchone()
+    if existing is None:
+        return True
+    if existing["origin"] == "user":
+        return False
+    return existing["xmp_mtime"] is None or float(existing["xmp_mtime"]) != source_mtime
 
 
 def _write_settings(conn, image_id: int, xmp_path: str, xmp_mtime: float, settings: dict[str, Any]) -> bool:
@@ -268,10 +309,23 @@ def scan_raws(root: str, db_path: str, *, claimed: bool = False) -> dict[str, An
                 if len(imported_images) < 60:
                     imported_images.append({"id": image_id, "filepath": row[1]})
                 xmp_path = os.path.splitext(row[1])[0] + ".xmp"
-                if not os.path.isfile(xmp_path):
+                if os.path.isfile(xmp_path):
+                    xmp_mtime = float(os.path.getmtime(xmp_path))
+                    settings = parse_xmp_text(open(xmp_path, "rb").read())
+                elif row[1].lower().endswith((".dng", ".tif", ".tiff")):
+                    xmp_mtime = float(os.path.getmtime(row[1]))
+                    if not _needs_settings(conn, image_id, xmp_mtime):
+                        _increment("skipped")
+                        continue
+                    packet = read_embedded_xmp(row[1])
+                    if packet is None:
+                        continue
+                    xmp_path = row[1]
+                    settings = parse_xmp_text(packet)
+                else:
                     continue
-                xmp_mtime = float(os.path.getmtime(xmp_path))
-                settings = parse_xmp_file(xmp_path)
+                if not settings:
+                    continue
                 if _write_settings(conn, image_id, xmp_path, xmp_mtime, settings):
                     _increment("sidecars")
                 else:
