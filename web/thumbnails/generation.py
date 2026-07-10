@@ -80,6 +80,7 @@ def load_source_image(
     *,
     jpeg_extensions: set[str],
     raw_extensions: set[str],
+    image_id: int | None = None,
 ) -> Image.Image:
     ext = os.path.splitext(filepath)[1].lower()
     if ext in raw_extensions:
@@ -87,14 +88,25 @@ def load_source_image(
         if preview is not None:
             return preview
 
+        if image_id is not None:
+            # Same color truth as the Develop canvas (camera-space WB,
+            # dual-illuminant matrices, saved edits); LibRaw only as last resort.
+            try:
+                from features.develop.render import render_display_preview
+
+                developed = render_display_preview(image_id, filepath, max_px=max_target)
+            except Exception:
+                developed = None
+            if developed is not None:
+                return developed
+
         import rawpy
 
-        raw_flip = 0
         try:
             with rawpy.imread(filepath) as raw:
-                raw_flip = _raw_preview_flip(raw, filepath)
                 rgb = raw.postprocess(use_camera_wb=True, no_auto_bright=True)
-            return apply_raw_orientation(Image.fromarray(rgb), raw_flip)
+            # postprocess already applies the container rotation; do not rotate again.
+            return Image.fromarray(rgb)
         except Exception:
             # Lossy (JPEG XL) DNGs: decode a pyramid level and display-encode.
             from features.develop.lossydng import decode_lossy_dng, is_lossy_dng
@@ -111,7 +123,7 @@ def load_source_image(
                 1.055 * _np.power(_np.clip(linear, 0.0, 1.0), 1.0 / 2.4) - 0.055,
             )
             image = Image.fromarray((_np.clip(encoded, 0.0, 1.0) * 255.0 + 0.5).astype(_np.uint8))
-            return apply_raw_orientation(image, raw_flip or _exiftool_raw_flip(filepath))
+            return apply_raw_orientation(image, _exiftool_raw_flip(filepath))
 
     with Image.open(filepath) as source:
         if ext in jpeg_extensions:
@@ -324,7 +336,7 @@ def generate_missing_thumbnails(
     try:
         max_target = max(sizes[size] for size in needed_sizes)
         prefer_draft = max_target <= sizes["sm"]
-        img = load_source_image(filepath, max_target, prefer_draft=prefer_draft)
+        img = load_source_image(filepath, max_target, prefer_draft=prefer_draft, image_id=image_id)
         queue_orientation(image_id, img)
 
         current = img
@@ -434,7 +446,7 @@ def generate_thumbnail_set(
                 )
                 metrics["source_bytes"] = len(source_data)
             else:
-                img = load_source_image(filepath, max_target, prefer_draft=prefer_draft)
+                img = load_source_image(filepath, max_target, prefer_draft=prefer_draft, image_id=image_id)
                 metrics["source_bytes"] = int(source_bytes or 0)
             metrics["read_seconds"] = max(0.0, monotonic_provider() - read_started)
             metrics["source_reads"] = 1
@@ -558,7 +570,7 @@ def load_embedding_image(
 
     try:
         md_size = sizes["md"]
-        img = load_source_image(filepath, md_size, prefer_draft=False)
+        img = load_source_image(filepath, md_size, prefer_draft=False, image_id=image_id)
         resized = resize_to_long_side(img, md_size)
         if resized is not img:
             img.close()

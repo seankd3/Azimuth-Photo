@@ -503,3 +503,55 @@ async def render_export_response(
         filename=filename,
         background=BackgroundTask(_cleanup_export, output_path),
     )
+
+
+def render_display_preview(image_id: int, raw_path: str | Path, max_px: int | None = None) -> Image.Image | None:
+    """Develop-quality sRGB preview for library full views.
+
+    Renders the cached linear base through the shared pipeline with the
+    image's saved develop settings (camera-space WB, dual-illuminant color
+    matrices, fitted profile), so the library loupe shows the same color
+    truth as the Develop canvas instead of LibRaw's default look.
+    Returns None on any failure so callers can fall back.
+    """
+    import gzip as _gzip
+    import json as _json
+    import sqlite3 as _sqlite3
+
+    from features.develop import rawproc
+
+    try:
+        paths, meta = rawproc.ensure_base_cache(int(image_id), raw_path)
+        linear16, _width, _height = rawproc.parse_base_payload(_gzip.decompress(paths.binary.read_bytes()))
+        linear = linear16.astype(np.float32) / 65535.0
+        settings: dict[str, object] = {}
+        try:
+            from core import db as _db
+
+            conn = _sqlite3.connect(_db.DB_PATH)
+            try:
+                row = conn.execute(
+                    "SELECT settings FROM develop_settings WHERE image_id = ?", (int(image_id),)
+                ).fetchone()
+            finally:
+                conn.close()
+            if row and row[0]:
+                settings = _json.loads(row[0]) or {}
+        except Exception:
+            settings = {}
+        as_shot = meta.get("as_shot") if isinstance(meta, dict) else None
+        color = dict(meta.get("color") or {}) if isinstance(meta, dict) else {}
+        if isinstance(meta, dict) and meta.get("base_kind"):
+            color["base_kind"] = meta["base_kind"]
+        developed = apply_pipeline(
+            linear,
+            settings,
+            asshot_temperature=(as_shot or {}).get("temperature") if isinstance(as_shot, dict) else None,
+            asshot_tint=(as_shot or {}).get("tint") if isinstance(as_shot, dict) else None,
+            color_profile=color or None,
+        )
+        developed = apply_geometry(developed, settings, max_px=max_px)
+        encoded = np.asarray(np.clip(developed * 255.0 + 0.5, 0, 255), dtype=np.uint8)
+        return Image.fromarray(encoded, mode="RGB")
+    except Exception:
+        return None
