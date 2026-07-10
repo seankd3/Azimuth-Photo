@@ -6,7 +6,7 @@ from features.captions import routes as caption_routes
 from features.catalog import routes as catalog_routes
 from features.collections import routes as collection_routes
 from features.compare import routes as compare_routes
-from features.develop import import_routes, routes as develop_routes
+from features.develop import ai_mask_routes, hdr_routes, import_routes, preset_routes, routes as develop_routes
 from features.export import routes as export_routes
 from features.library import routes as library_routes
 from features.media import routes as media_routes
@@ -216,6 +216,24 @@ def configure_develop_import_routes() -> None:
             images, "sm", limit=len(images)
         ),
     )
+
+
+def configure_develop_preset_routes() -> None:
+    import db
+
+    preset_routes.configure(db_path=lambda: db.DB_PATH)
+
+
+def configure_develop_ai_mask_routes() -> None:
+    import db
+
+    ai_mask_routes.configure(db_path=lambda: db.DB_PATH)
+
+
+def configure_develop_hdr_routes() -> None:
+    import db
+
+    hdr_routes.configure(db_path=lambda: db.DB_PATH)
 
 
 def configure_library_routes() -> None:

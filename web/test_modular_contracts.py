@@ -154,6 +154,18 @@ PUBLIC_ROUTE_CONTRACT = {
     ("PUT", "/api/develop/{image_id}"),
     ("GET", "/api/develop/lrcat/status"),
     ("POST", "/api/develop/lrcat/scan"),
+    ("POST", "/api/develop/{image_id}/ai-mask"),
+    ("GET", "/api/develop/ai-mask/{cache_key}.png"),
+    ("GET", "/api/develop/presets"),
+    ("POST", "/api/develop/presets"),
+    ("GET", "/api/develop/presets/{preset_id}"),
+    ("PATCH", "/api/develop/presets/{preset_id}"),
+    ("DELETE", "/api/develop/presets/{preset_id}"),
+    ("POST", "/api/develop/presets/{preset_id}/apply"),
+    ("POST", "/api/develop/presets/import-lightroom"),
+    ("POST", "/api/develop/hdr/detect"),
+    ("POST", "/api/develop/hdr/merge"),
+    ("GET", "/api/develop/hdr/status"),
 }
 
 class ModularContractTests(unittest.TestCase):

@@ -8,7 +8,7 @@ from date_inference import infer_image_date
 from data.repositories import catalog as catalog_repository
 
 EXPECTED_EMBEDDING_DIM = 2048  # Qwen3-VL-Embedding-2B native dimension
-SCHEMA_VERSION = 21
+SCHEMA_VERSION = 22
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS catalog_sources (
@@ -77,6 +77,16 @@ CREATE TABLE IF NOT EXISTS develop_history (
 
 CREATE INDEX IF NOT EXISTS idx_develop_history_image
 ON develop_history(image_id, id DESC);
+
+CREATE TABLE IF NOT EXISTS develop_presets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    folder TEXT NOT NULL DEFAULT '',
+    settings TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_develop_presets_folder
+ON develop_presets(folder, name);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS images_metadata_fts
 USING fts5(
@@ -1007,6 +1017,7 @@ REQUIRED_TABLES = {
     "images",
     "develop_settings",
     "develop_history",
+    "develop_presets",
     "images_metadata_fts",
     "comparisons",
     "embeddings",
@@ -1122,6 +1133,7 @@ REQUIRED_COLUMNS = {
 
 REQUIRED_INDEXES = {
     "idx_develop_history_image",
+    "idx_develop_presets_folder",
     "idx_catalog_sources_active",
     "idx_images_missing_source_filepath_id",
     "idx_images_source_missing_id",
@@ -1548,6 +1560,8 @@ async def apply_schema_and_migrations(conn, *, db_exists: bool) -> None:
             await conn.execute(f"DROP TABLE IF EXISTS {table}")
         await ensure_compatibility_columns(conn)
         await ensure_compatibility_indexes(conn)
+        from features.develop.presets import ensure_develop_presets
+        await ensure_develop_presets(conn)
         await backfill_share_images(conn)
         await backfill_image_tags(conn)
         await backfill_legacy_aspect_ratios(conn)
