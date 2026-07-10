@@ -1,0 +1,86 @@
+import asyncio
+import json
+import os
+import tempfile
+import unittest
+from fractions import Fraction
+
+from PIL import Image
+
+from features.library import geodata
+from features.library.timeline_import import parse_timeline_file, parse_timeline_payload
+
+
+class GeoDataTests(unittest.TestCase):
+    def test_pillow_exif_gps_is_signed_and_invalid_origin_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "gps.jpg")
+            exif = Image.Exif()
+            exif[0x8825] = {
+                1: "N", 2: (Fraction(41), Fraction(30), Fraction(0)),
+                3: "W", 4: (Fraction(87), Fraction(45), Fraction(0)),
+            }
+            Image.new("RGB", (2, 2)).save(path, exif=exif)
+            metadata = geodata.extract_file_metadata(path)
+        self.assertEqual((metadata["latitude"], metadata["longitude"]), (41.5, -87.75))
+        self.assertIsNone(geodata.validate_coordinates(0, 0))
+        self.assertIsNone(geodata.validate_coordinates(91, 0))
+
+    def test_location_priority_never_downgrades_existing_coordinates(self):
+        self.assertFalse(geodata.location_can_replace("exif", "timeline", has_coordinates=True))
+        self.assertTrue(geodata.location_can_replace("timeline", "exif", has_coordinates=True))
+        self.assertFalse(geodata.location_can_replace(None, "exif", has_coordinates=True))
+        self.assertTrue(geodata.location_can_replace(None, "exif", has_coordinates=False))
+
+    def test_interpolation_windows_distance_and_one_side_edges(self):
+        trail = [
+            {"ts": 0, "lat": 41.0, "lon": -87.0, "source": "exif"},
+            {"ts": 600, "lat": 41.1, "lon": -87.0, "source": "timeline"},
+        ]
+        self.assertEqual(geodata.infer_location(300, trail), (41.05, -87.0, "timeline"))
+        self.assertEqual(geodata.infer_location(700, trail), (41.1, -87.0, "timeline"))
+        self.assertIsNone(geodata.infer_location(1600, trail))
+        far = [{"ts": 0, "lat": 0.1, "lon": 0.1, "source": "exif"}, {"ts": 600, "lat": 45.0, "lon": 45.0, "source": "exif"}]
+        self.assertIsNone(geodata.infer_location(300, far))
+
+    def test_timeline_import_reads_modern_and_legacy_formats(self):
+        modern = {
+            "semanticSegments": [{"startTime": "2024-01-01T00:00:00Z", "timelinePath": [
+                {"time": "2024-01-01T00:00:10Z", "point": "geo:41.5,-87.75"}
+            ]}]
+        }
+        legacy = {"locations": [{"timestampMs": "1704067200000", "latitudeE7": 415000000, "longitudeE7": -877500000}]}
+        self.assertEqual(parse_timeline_payload(modern)[0][1:], (41.5, -87.75))
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "Records.json")
+            with open(path, "w", encoding="utf-8") as handle:
+                json.dump(legacy, handle)
+            self.assertEqual(parse_timeline_file(path)[0][1:], (41.5, -87.75))
+
+    def test_backfill_fills_gps_and_null_metadata_without_overwriting(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "camera.jpg")
+            exif = Image.Exif()
+            exif[271], exif[272] = "Nikon", "Nikon Zf"
+            exif[0x8825] = {1: "N", 2: (Fraction(41), Fraction(0), Fraction(0)), 3: "W", 4: (Fraction(87), Fraction(0), Fraction(0))}
+            Image.new("RGB", (2, 2)).save(path, exif=exif)
+            db_path = os.path.join(directory, "geo.db")
+            self._make_geo_db(db_path, path)
+            _, changes = asyncio.run(geodata.backfill_batch(db_path))
+            self.assertEqual(changes["gps"], 1)
+            import sqlite3
+            row = sqlite3.connect(db_path).execute("SELECT latitude, longitude, location_source, camera_make, camera_model FROM images").fetchone()
+            self.assertEqual(row, (41.0, -87.0, "exif", "Nikon", "Zf"))
+
+    @staticmethod
+    def _make_geo_db(path, image_path):
+        import sqlite3
+        conn = sqlite3.connect(path)
+        conn.execute("CREATE TABLE images (id INTEGER PRIMARY KEY, filepath TEXT, latitude REAL, longitude REAL, location_source TEXT, date_taken TEXT, camera_make TEXT, camera_model TEXT, lens TEXT)")
+        conn.execute("INSERT INTO images(id, filepath) VALUES (1, ?)", (image_path,))
+        conn.commit()
+        conn.close()
+
+
+if __name__ == "__main__":
+    unittest.main()
