@@ -46,7 +46,10 @@ def _dms(value: Any, ref: Any) -> float | None:
     if None in (degrees, minutes, seconds):
         return None
     decimal = degrees + minutes / 60 + seconds / 3600
-    if _text(ref).upper() in {"S", "W"}:
+    hemisphere = _text(ref).upper()
+    if hemisphere not in {"N", "S", "E", "W"}:
+        return None  # missing/corrupt ref: sign would be a guess
+    if hemisphere in {"S", "W"}:
         decimal = -decimal
     return decimal
 
@@ -156,13 +159,17 @@ def parse_taken_timestamp(value: Any) -> float | None:
     try:
         parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
         if parsed.tzinfo is None:
-            return parsed.replace(tzinfo=timezone.utc).timestamp()
+            # EXIF date_taken is naive local wall time. Interpreting it in the
+            # host timezone keeps photo-trail math consistent AND aligns with
+            # true-UTC Google Timeline points (stacks/builders treats these
+            # strings as local the same way).
+            return parsed.timestamp()
         return parsed.timestamp()
     except ValueError:
         pass
     for fmt in ("%Y-%m-%d %H:%M:%S", "%Y:%m:%d %H:%M:%S", "%Y-%m-%d"):
         try:
-            return datetime.strptime(raw[:19], fmt).replace(tzinfo=timezone.utc).timestamp()
+            return datetime.strptime(raw[:19], fmt).timestamp()
         except ValueError:
             continue
     return None
@@ -174,19 +181,25 @@ def distance_km(left: tuple[float, float], right: tuple[float, float]) -> float:
     return 6371.0088 * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
+def _derived_source(neighbor_source: str) -> str:
+    """A location copied or interpolated from a neighbor is never 'exif':
+    provenance must not outrank a future real EXIF value for the same photo."""
+    return "timeline" if neighbor_source == "timeline" else "inferred"
+
+
 def infer_location(timestamp: float, trail: list[dict[str, Any]]) -> tuple[float, float, str] | None:
     """Infer from a sorted trail according to the deliberately tight safety windows."""
     before = next((point for point in reversed(trail) if point["ts"] <= timestamp), None)
     after = next((point for point in trail if point["ts"] >= timestamp), None)
     if before and after and before is after:
-        return before["lat"], before["lon"], before["source"]
+        return before["lat"], before["lon"], _derived_source(before["source"])
     if before and after:
         left_delta, right_delta = timestamp - before["ts"], after["ts"] - timestamp
         if left_delta <= 45 * 60 and right_delta <= 45 * 60 and distance_km((before["lat"], before["lon"]), (after["lat"], after["lon"])) < 50:
             if left_delta == 0:
-                return before["lat"], before["lon"], before["source"]
+                return before["lat"], before["lon"], _derived_source(before["source"])
             if right_delta == 0:
-                return after["lat"], after["lon"], after["source"]
+                return after["lat"], after["lon"], _derived_source(after["source"])
             left_weight, right_weight = 1 / left_delta, 1 / right_delta
             lat = (before["lat"] * left_weight + after["lat"] * right_weight) / (left_weight + right_weight)
             lon = (before["lon"] * left_weight + after["lon"] * right_weight) / (left_weight + right_weight)
@@ -198,7 +211,7 @@ def infer_location(timestamp: float, trail: list[dict[str, Any]]) -> tuple[float
             return None
     one_side = before or after
     if one_side and abs(timestamp - one_side["ts"]) <= 15 * 60:
-        return one_side["lat"], one_side["lon"], one_side["source"]
+        return one_side["lat"], one_side["lon"], _derived_source(one_side["source"])
     return None
 
 
@@ -246,7 +259,10 @@ async def backfill_batch(db_path: str, *, after_id: int = 0, limit: int = BACKFI
             (after_id, limit),
         )).fetchall()
         changes = {"gps": 0, "date_taken": 0, "camera_make": 0, "camera_model": 0, "lens": 0}
+        pending_updates: list[tuple[str, tuple]] = []
         for row in rows:
+            # File reads happen before any UPDATE so the write transaction is
+            # only held for the fast SQL tail of the batch, not the slow IO.
             metadata = await asyncio.to_thread(extract_file_metadata, row["filepath"])
             coords = validate_coordinates(metadata.get("latitude"), metadata.get("longitude"))
             has_coords = row["latitude"] is not None and row["longitude"] is not None
@@ -261,7 +277,9 @@ async def backfill_batch(db_path: str, *, after_id: int = 0, limit: int = BACKFI
                     changes[field] += 1
             if assignments:
                 clause = ", ".join(f"{field} = ?" for field in assignments)
-                await conn.execute(f"UPDATE images SET {clause} WHERE id = ?", (*assignments.values(), row["id"]))
+                pending_updates.append((f"UPDATE images SET {clause} WHERE id = ?", (*assignments.values(), row["id"])))
+        for statement, params in pending_updates:
+            await conn.execute(statement, params)
         await conn.commit()
         return (int(rows[-1]["id"]) if rows else after_id), changes
     finally:
