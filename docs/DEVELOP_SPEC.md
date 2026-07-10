@@ -218,3 +218,129 @@ matches canvas within tolerance; suite green; screenshots captured. Honest notes
   handle the bitmap form (encode to JPEG via PIL) and fall back to half-size decode when thumb is unusable.
 - Sample as-shot WB multipliers: cam_wb [2.207, 1.0, 1.506, 0.0] — R/B gains relative to G; derive temp/tint
   estimate from the R/B ratio vs daylight_whitebalance as speced.
+
+---
+
+# PHASE 2 — Local adjustments (masks), AI masks, HDR, presets, camera profiles, lens corrections
+Appended 2026-07-10. Same rules as v1: this spec is frozen; the GL and numpy implementations MUST share
+math; constants live only in the twin ops_constants files; darktable (~/Projects/darktable-ref) is
+reference-only, never copied.
+
+## 12. Mask model (canonical, Adobe schema verbatim)
+Settings JSON gains `MaskGroupBasedCorrections`: a list of *corrections*. Each correction:
+- `CorrectionActive` (bool), `CorrectionAmount` (0..2, scales all its local settings), `CorrectionID`
+- Local adjustment keys, Adobe names, fraction-scaled (−1..+1 unless noted): `LocalExposure2012` (EV/4? NO —
+  Adobe stores EV·0.25? measured: LocalExposure2012 = EV × 0.25 is WRONG; it is EV × 1/4? — VERIFY against a
+  known catalog value once and normalize; whatever the finding, STORE Adobe-native and convert in ONE shared
+  helper `localToSlider()` with the mapping documented there): `LocalExposure2012, LocalContrast2012,
+  LocalHighlights2012, LocalShadows2012, LocalWhites2012, LocalBlacks2012, LocalClarity2012, LocalDehaze,
+  LocalTexture, LocalTemperature, LocalTint, LocalSaturation, LocalHue, LocalSharpness, LocalGrain` (v1 renders
+  the first 13; Sharpness/Grain stored only).
+- `CorrectionMasks`: list of masks combined per `MaskBlendMode` (0=add, 1=intersect via multiply) and
+  `MaskInverted`, `MaskValue` (opacity 0..1). Mask kinds (`Masks[i]` entries or `What` field):
+  - **Gradient** (linear): `ZeroX, ZeroY, FullX, FullY` (normalized coords; value 0 at Zero line → 1 at Full line,
+    smoothstep between, constant beyond).
+  - **CircularGradient** (radial): `Top,Left,Bottom,Right` (ellipse bbox), `Angle`, `Feather` (0..1),
+    `Flipped`/inside-out via MaskInverted. Value 1 inside, feathered falloff to 0 at edge·(1+feather).
+  - **Paint** (brush): `Dabs` list of "d x y" / "r radius" strings (normalized to the LONG edge? — Adobe dab
+    coords are normalized to width for x and height for y; VERIFY against a known brush position on one photo),
+    plus `Flow`, `CenterWeight`. Rasterize: stamp gaussian-soft circles (hardness from CenterWeight) at dab
+    positions with radius r, accumulate with flow, clamp 0..1.
+  - **RangeMask / luminance** (`CorrectionRangeMask` with `Type=1`): `LumRange` "lo/hiSoft lo hi hiSoft" style
+    quad + `LuminanceDepthSampleInfo`; v1: smoothstep window on gamma luma with the 4 params.
+  - **RangeMask / color** (`Type=2`): `ColorAmount`, sampled point colors → v1: gaussian distance in OKLab ab
+    plane around sampled hue, width from ColorAmount.
+  - **AI masks** (ours, non-Adobe): `{ "What": "Mask/Image", "MaskSubType": "1"(subject)|"2"(sky),
+    "ReferencePoint": ..., "pa_cache_key": "<sha>" }` — the raster comes from the AI mask cache (§14). When an
+    Adobe AI mask is imported (MaskSubType present without our cache key), regenerate with OUR segmenter lazily.
+
+### 12b. Rendering contract (BOTH renderers)
+1. After the GLOBAL pipeline stages up to and including HSL/vibrance (i.e. on gamma-domain sRGB), each active
+   correction is applied sequentially: compute mask value m∈[0,1] per pixel (combine its CorrectionMasks:
+   start 0, add-mode masks max-accumulate scaled by MaskValue, intersect-mode multiply; apply MaskInverted per
+   mask; final m *= CorrectionAmount clamp 0..2).
+2. Local adjustment application = run a REDUCED version of the global ops parameterized by the local values,
+   blended by m: exposure (linear-domain exp2 → approximate in gamma domain via pow(2, ev·m)^(1/2.2) factor —
+   define exactly: convert pixel to linear (srgb_to_linear), apply exp2(localEV·m·4)·? — SEE §12c scaling —
+   then WB temp/tint via the SAME wb math at reduced strength m, region tones with the log-EV weights,
+   clarity/texture reuse the existing blur fields, saturation via OKLab chroma. Implement as ONE shared
+   function `applyLocalCorrection(rgbLinear, luma, blurs, local, m)` mirrored in GLSL/numpy.
+3. Performance: GL evaluates masks from PRE-RASTERIZED single-channel textures (one per correction, quarter
+   resolution, generated in JS — analytic gradients could be shader-evaluated but rasterizing keeps ONE code
+   path with numpy). numpy rasterizes identically (shared constants; brush stamp = same gaussian).
+   Cap: 16 corrections rendered (log a warning beyond; store unlimited).
+4. Mask rasters cache-key on (image_id, correction hash, base dims).
+
+### 12c. Local value scaling
+Adobe local fractions: LocalExposure2012 ±4EV ↔ ±1.0 (so EV = value·4); most others ±100 ↔ ±1.0
+(slider = value·100); LocalTemperature/Tint ±100 slider mapping to a REDUCED WB shift (temp delta = value·? —
+use mired delta = value·30 mired as v1 approximation, documented constant LOCAL_WB_MIRED_SCALE). Put every
+scale constant in ops_constants twins.
+
+### 12d. UI (Masking panel — LR idiom, Notion-level polish)
+Toolbar button + panel section "Masking": list of corrections (auto-named "Mask 1…", rename inline, eye toggle,
+delete, duplicate), each expands to: mask chips (its CorrectionMasks with kind icon, add/subtract menu,
+invert), "+ Add Mask" menu (Subject, Sky, Brush, Linear Gradient, Radial Gradient, Luminance Range, Color
+Range), and the local sliders (Light: exposure→blacks; Color: temp/tint/saturation/hue; Effects:
+clarity/texture/dehaze/sharpness). Canvas interactions: drag-to-create for gradients (live preview),
+brush with [ ] size keys + soft cursor ring, O toggles red overlay (rubylith, 50% red where m>0), overlay
+auto-shows while dragging. Esc exits mask mode. Every control has data-tip. Undo integrates with the existing
+history stack (masks are part of settings JSON — free).
+
+## 13. lrcat full develop settings (Lua table parser)
+`Adobe_imageDevelopSettings.text` is a Lua table literal (`s = { ... }`). Write `parse_lua_table(text) → dict`
+(tokenizer: strings, numbers, booleans, nested {}, ["quoted"] keys, bare keys, lists; no Lua exec). Import maps
+it to canonical settings for pre-2024 images (catalog wins over embedded XMP when both exist and catalog
+timestamp newer — actually: catalog wins unless origin='user'). Masks come along for free. Also capture
+`Look` (profile name + its Parameters curve — apply Look.Parameters.ToneCurvePV2012 as base curve when
+present) and lens profile fields (stored for §17).
+
+## 14. AI masks service
+`web/features/develop/ai_masks.py`: onnxruntime (CPU) with u2net (subject; use rembg's u2net.onnx, download
+once to /mnt/expansion/PhotoArchiveCache/develop/models/) and skyseg (use u2net trained variant or
+semantic-segmentation ONNX for sky; if no good off-the-shelf sky model, v1 sky = gradient+color heuristic:
+luminance/position/blue prior refined by guided filter — honest about it in code).
+Endpoints: `POST /api/develop/{id}/ai-mask {kind: "subject"|"sky"}` → runs on the base preview (jpg),
+saves single-channel PNG at base resolution to the develop cache, returns `{cache_key, url}`;
+`GET /api/develop/ai-mask/{cache_key}.png`. Client adds a mask entry referencing pa_cache_key; renderer loads
+the PNG raster like any other mask texture. Idempotent by content hash.
+
+## 15. Presets
+Table `develop_presets(id, name, folder, settings TEXT, created_at)` (v22 migration). API: list/create
+(from current image's settings minus geometry/WB? — LR asks; we store FULL and apply selectively)/apply/
+delete/rename. Import: scan for LR preset .xmp files if present on expansion (report what's found, don't block).
+UI: "Presets" section in the LEFT side of Develop (new slim panel): folders, hover = live preview on the GL
+canvas (apply settings non-destructively in preview flag, revert on mouseout — cheap, it's just uniforms),
+click = apply (history entry "Preset: name").
+
+## 16. Camera profile fitting (eat-their-lunch color)
+Offline fitting script `web/eval/fit_camera_profile.py`: for each camera model (R5, R7), gather RAW↔LR-export
+pairs (capture-time matching like tonight), decode our linear base, run our pipeline WITHOUT base profile at
+the pair's XMP settings, downsample both to ~128px pixel-matched sets, then fit:
+(a) a 1D tone LUT (monotone, 16 control points) minimizing luma error,
+(b) a hue×sat 2D delta table (6×3 nodes in OKLab hue×chroma, bilinear) minimizing ab error.
+Output `web/features/develop/profiles/<model>.json`. Pipeline hook (§4 step 5.5): apply camera profile LUT +
+hue/sat table (twins) when profile file exists for the image's camera; falls back to BASE_PROFILE_POINTS.
+Report residual stats per camera honestly.
+
+## 17. Lens corrections (after masks land)
+lensfunpy (python) + GL uv-distortion twin. v1: distortion (poly3/ptlens from lensfun DB by camera+lens EXIF)
++ vignetting; honor `LensProfileEnable` imported from LR. GL applies inverse distortion in orientedUv();
+numpy warps with the same polynomial (bilinear sample). CA later.
+
+## 18. HDR merge
+`web/features/develop/hdr.py`: detect brackets (same lens/focal, ≤2s apart, ≥3 frames, distinct
+ExposureBiasValue/shutter). `POST /api/develop/hdr/merge {image_ids}`: decode linears (our decoders),
+align (phase correlation on downsampled luma, translation-only v1), merge = radiance-weighted average in
+linear (weights hat-function on exposure validity, normalized by relative EV from shutter·ISO·aperture),
+write float32 EXR (imagecodecs) + a 16-bit "HDR DNG-like" base into the develop cache, register a new library
+image (source: virtual "HDR Merges" folder path on expansion cache) whose base decode short-circuits to the
+merged data, Develop works on it with extended headroom (values >1 allowed pre-tonemap; Highlights slider
+recovers). Grid gets "Merge to HDR" in the selection context when a detected bracket is selected (v1: also
+allow manual multi-select merge).
+
+## 19. Definition of done, Phase 2 wave 1
+Masks: create/edit/render all five manual kinds + AI subject; LR-imported masks from a 2023 catalog image
+render recognizably (spot-check vs LR export where a pair exists); presets save/apply with live hover preview;
+lrcat parser round-trips the sampled blob; HDR merges one real bracket; suite green; screenshots of masking UI,
+before/after of an AI subject mask, HDR result.
