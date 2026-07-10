@@ -717,3 +717,19 @@ async def api_sync_develop(body: DevelopSyncBody):
         "skipped": skipped,
         "keys": sorted(slice_.keys()),
     }
+
+@router.get("/api/develop/film/stocks")
+async def api_film_stocks():
+    from features.develop import film
+
+    return {"stocks": film.list_stocks()}
+
+
+@router.get("/api/develop/film/stocks/{slug}")
+async def api_film_stock(slug: str):
+    from features.develop import film
+
+    stock = film.load_stock(slug)
+    if stock is None:
+        return JSONResponse({"error": f"Unknown film stock: {slug}"}, status_code=404)
+    return stock

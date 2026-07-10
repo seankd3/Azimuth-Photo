@@ -172,6 +172,8 @@ PUBLIC_ROUTE_CONTRACT = {
     ("GET", "/api/develop/pano/status"),
     ("POST", "/api/develop/pano/detect"),
     ("POST", "/api/develop/pano/merge"),
+    ("GET", "/api/develop/film/stocks"),
+    ("GET", "/api/develop/film/stocks/{slug}"),
 }
 
 class ModularContractTests(unittest.TestCase):
