@@ -28,7 +28,30 @@ function groupByFolder(presets) {
         if (!groups.has(folder)) groups.set(folder, []);
         groups.get(folder).push(preset);
     }
-    return [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0], undefined, { sensitivity: 'base' }));
+    return [...groups.entries()]
+        .map(([folder, items]) => [folder, items.sort((a, b) => shortPresetName(a).localeCompare(shortPresetName(b), undefined, { sensitivity: 'base' }))])
+        .sort((a, b) => shortFolderName(a[0]).localeCompare(shortFolderName(b[0]), undefined, { sensitivity: 'base' }));
+}
+
+function shortFolderName(folder) {
+    const leaf = String(folder || 'User').split(/[\\/]/).filter(Boolean).pop() || 'User';
+    return leaf
+        .replace(/\([^)]*\)/g, '')
+        .replace(/lightroom\s+presets?/ig, '')
+        .replace(/[–—-]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim() || 'User';
+}
+
+function shortPresetName(preset) {
+    const name = String(preset?.name || 'Untitled').trim();
+    const folder = String(preset?.folder || '').trim();
+    const leaf = name.split(/[\\/]/).filter(Boolean).pop()?.trim() || name;
+    if (leaf !== name) return leaf;
+    if (folder && name.toLocaleLowerCase().startsWith(folder.toLocaleLowerCase())) {
+        return name.slice(folder.length).replace(/^[\\/\s–—-]+/, '') || name;
+    }
+    return name;
 }
 
 export function mountPresetsPanel(host, api) {
@@ -42,7 +65,10 @@ export function mountPresetsPanel(host, api) {
         '  <strong>Presets</strong>',
         '  <button type="button" data-preset-save data-tip="Save current settings as a preset">Save</button>',
         '</header>',
-        '<div class="develop-presets-body" data-preset-list></div>',
+        '<div class="develop-presets-body">',
+        '  <label class="develop-preset-search"><span class="sr-only">Search presets</span><input type="search" data-preset-search placeholder="Search presets" autocomplete="off"></label>',
+        '  <div data-preset-list></div>',
+        '</div>',
         '<div class="develop-presets-empty" data-preset-empty hidden>No presets yet. Save the look you like.</div>',
     ].join('');
 
@@ -56,7 +82,11 @@ export function mountPresetsPanel(host, api) {
 
     const listEl = root.querySelector('[data-preset-list]');
     const emptyEl = root.querySelector('[data-preset-empty]');
+    const searchEl = root.querySelector('[data-preset-search]');
     let presets = [];
+    let activePresetId = null;
+    let filterQuery = '';
+    const collapsedFolders = new Set();
     let previewing = false;
     let previewBaseline = null;
     let activePopover = null;
@@ -101,6 +131,8 @@ export function mountPresetsPanel(host, api) {
     function applyPreset(preset) {
         endPreview();
         if (!preset?.settings) return;
+        activePresetId = Number(preset.id);
+        render();
         api.applyPresetSettings?.(clone(preset.settings), `Preset: ${preset.name}`);
     }
 
@@ -127,19 +159,35 @@ export function mountPresetsPanel(host, api) {
             listEl.innerHTML = '';
             return;
         }
-        const groups = groupByFolder(presets);
+        const query = filterQuery.trim().toLocaleLowerCase();
+        const groups = groupByFolder(presets).map(([folder, items]) => [
+            folder,
+            items.filter((preset) => !query || `${folder} ${preset.name}`.toLocaleLowerCase().includes(query)),
+        ]).filter(([, items]) => items.length);
+        if (!groups.length) {
+            listEl.innerHTML = '<p class="develop-presets-no-results">No matching presets.</p>';
+            return;
+        }
         listEl.innerHTML = groups.map(([folder, items]) => {
             const rows = items.map((preset) => (
-                `<div class="develop-preset-row" data-preset-id="${preset.id}" draggable="false">`
-                + `<button type="button" class="develop-preset-name" data-preset-apply data-tip="Apply ${escapeHtml(preset.name)}">${escapeHtml(preset.name)}</button>`
+                `<div class="develop-preset-row ${Number(preset.id) === activePresetId ? 'active' : ''}" data-preset-id="${preset.id}" draggable="false">`
+                + `<button type="button" class="develop-preset-name" data-preset-apply data-tip="Apply ${escapeHtml(preset.name)}"${Number(preset.id) === activePresetId ? ' aria-current="true"' : ''}>${escapeHtml(shortPresetName(preset))}</button>`
                 + `<button type="button" class="develop-preset-edit" data-preset-rename data-tip="Rename">✎</button>`
                 + `<button type="button" class="develop-preset-edit" data-preset-delete data-tip="Delete">×</button>`
                 + `</div>`
             )).join('');
-            return `<details class="develop-preset-folder" open>`
-                + `<summary data-tip="${escapeHtml(folder)}">${escapeHtml(folder)} <span>${items.length}</span></summary>`
+            return `<details class="develop-preset-folder"${collapsedFolders.has(folder) && !query ? '' : ' open'}>`
+                + `<summary data-folder="${escapeHtml(folder)}" data-tip="${escapeHtml(folder)}"><b>${escapeHtml(shortFolderName(folder))}</b><span>${items.length}</span></summary>`
                 + `<div class="develop-preset-folder-body">${rows}</div></details>`;
         }).join('');
+        listEl.querySelectorAll('.develop-preset-folder').forEach((details) => {
+            details.addEventListener('toggle', () => {
+                const folder = details.querySelector('summary')?.dataset.folder;
+                if (!folder) return;
+                if (details.open) collapsedFolders.delete(folder);
+                else collapsedFolders.add(folder);
+            });
+        });
     }
 
     async function saveCurrent() {
@@ -218,6 +266,10 @@ export function mountPresetsPanel(host, api) {
     }
 
     root.querySelector('[data-preset-save]').addEventListener('click', saveCurrent);
+    searchEl.addEventListener('input', () => {
+        filterQuery = searchEl.value;
+        render();
+    });
 
     listEl.addEventListener('pointerover', (event) => {
         const row = event.target.closest('[data-preset-id]');

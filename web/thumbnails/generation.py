@@ -1,8 +1,46 @@
 import io
+import json
 import os
+import subprocess
 import time
 
 from PIL import Image, ImageOps
+
+
+def apply_raw_orientation(img: Image.Image, flip: int) -> Image.Image:
+    """Apply libraw's container orientation to an untagged RAW image."""
+    transforms = {
+        1: Image.Transpose.FLIP_LEFT_RIGHT,
+        2: Image.Transpose.FLIP_TOP_BOTTOM,
+        3: Image.Transpose.ROTATE_180,
+        4: Image.Transpose.TRANSPOSE,
+        5: Image.Transpose.ROTATE_90,
+        6: Image.Transpose.ROTATE_270,
+        7: Image.Transpose.TRANSVERSE,
+    }
+    transform = transforms.get(int(flip or 0))
+    return img.transpose(transform) if transform is not None else img
+
+
+def _exiftool_raw_flip(filepath: str) -> int:
+    """Map the container Orientation tag to libraw's flip values when needed."""
+    try:
+        result = subprocess.run(
+            ["exiftool", "-n", "-j", "-Orientation", filepath],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        orientation = int((json.loads(result.stdout) or [{}])[0].get("Orientation", 1))
+    except (OSError, ValueError, TypeError, json.JSONDecodeError, IndexError):
+        return 0
+    return {2: 1, 3: 3, 4: 2, 5: 4, 6: 6, 7: 7, 8: 5}.get(orientation, 0)
+
+
+def _raw_preview_flip(raw, filepath: str) -> int:
+    flip = getattr(getattr(raw, "sizes", None), "flip", None)
+    return int(flip) if flip is not None else _exiftool_raw_flip(filepath)
 
 
 def load_raw_preview(filepath: str, max_target: int) -> Image.Image | None:
@@ -11,14 +49,19 @@ def load_raw_preview(filepath: str, max_target: int) -> Image.Image | None:
     try:
         with rawpy.imread(filepath) as raw:
             thumb = raw.extract_thumb()
+            raw_flip = _raw_preview_flip(raw, filepath)
         if thumb.format == rawpy.ThumbFormat.JPEG:
             with Image.open(io.BytesIO(thumb.data)) as source:
                 source.load()
+                has_embedded_orientation = source.getexif().get(274, 1) != 1
                 img = ImageOps.exif_transpose(source)
                 if img is source:
                     img = source.copy()
+                if not has_embedded_orientation:
+                    img = apply_raw_orientation(img, raw_flip)
         elif thumb.format == rawpy.ThumbFormat.BITMAP:
             img = Image.fromarray(thumb.data)
+            img = apply_raw_orientation(img, raw_flip)
         else:
             return None
 
@@ -46,10 +89,12 @@ def load_source_image(
 
         import rawpy
 
+        raw_flip = 0
         try:
             with rawpy.imread(filepath) as raw:
+                raw_flip = _raw_preview_flip(raw, filepath)
                 rgb = raw.postprocess(use_camera_wb=True, no_auto_bright=True)
-            return Image.fromarray(rgb)
+            return apply_raw_orientation(Image.fromarray(rgb), raw_flip)
         except Exception:
             # Lossy (JPEG XL) DNGs: decode a pyramid level and display-encode.
             from features.develop.lossydng import decode_lossy_dng, is_lossy_dng
@@ -65,7 +110,8 @@ def load_source_image(
                 linear * 12.92,
                 1.055 * _np.power(_np.clip(linear, 0.0, 1.0), 1.0 / 2.4) - 0.055,
             )
-            return Image.fromarray((_np.clip(encoded, 0.0, 1.0) * 255.0 + 0.5).astype(_np.uint8))
+            image = Image.fromarray((_np.clip(encoded, 0.0, 1.0) * 255.0 + 0.5).astype(_np.uint8))
+            return apply_raw_orientation(image, raw_flip or _exiftool_raw_flip(filepath))
 
     with Image.open(filepath) as source:
         if ext in jpeg_extensions:

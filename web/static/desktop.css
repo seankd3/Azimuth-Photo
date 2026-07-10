@@ -1358,8 +1358,48 @@ body.develop-active #canvas > .view:not(#view-develop) { display: none !importan
 .develop-popover input,
 .develop-popover select { min-width: 0; height: 27px; padding: 0 6px; border: 1px solid var(--line); border-radius: var(--r-ctl); color: var(--text); font-size: 10px; background: #111317; }
 
+/* Presets — slim, searchable left rail. */
+#develop-presets { display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; border-right: 1px solid var(--line); background: #17191d; }
+.develop-presets-head { display: flex; align-items: center; justify-content: space-between; min-height: 42px; padding: 0 10px 0 12px; border-bottom: 1px solid var(--line); }
+.develop-presets-head strong { color: var(--text); font-size: 11px; font-weight: 650; letter-spacing: .02em; }
+.develop-presets-head button { height: 24px; padding: 0 7px; border: 1px solid var(--line); border-radius: var(--r-ctl); color: var(--text-2); font-size: 10px; background: #202328; }
+.develop-presets-head button:hover { border-color: var(--accent-lin); color: var(--text); background: var(--accent-dim); }
+.develop-presets-body { min-width: 0; min-height: 0; flex: 1 1 auto; overflow-x: hidden; overflow-y: auto; scrollbar-gutter: stable; scrollbar-width: thin; }
+.develop-preset-search { position: sticky; z-index: 2; top: 0; display: block; padding: 8px 9px; border-bottom: 1px solid var(--line-soft); background: #17191d; }
+.develop-preset-search input { display: block; box-sizing: border-box; width: 100%; height: 27px; min-width: 0; padding: 0 8px; border: 1px solid var(--line); border-radius: var(--r-ctl); color: var(--text); font-size: 11px; background: #101216; outline: none; }
+.develop-preset-search input::placeholder { color: var(--text-3); }
+.develop-preset-search input:focus { border-color: var(--accent-lin); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent); }
+.develop-preset-folder { min-width: 0; border-bottom: 1px solid var(--line-soft); }
+.develop-preset-folder > summary { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 6px; min-height: 29px; padding: 0 10px; color: var(--text-2); font-size: 11px; list-style: none; cursor: pointer; user-select: none; }
+.develop-preset-folder > summary::-webkit-details-marker { display: none; }
+.develop-preset-folder > summary::before { content: '›'; position: absolute; color: var(--text-3); font-size: 13px; transform: translateX(-6px) rotate(0); transition: transform var(--dur-fast) var(--ease); }
+.develop-preset-folder[open] > summary::before { transform: translateX(-6px) rotate(90deg); }
+.develop-preset-folder > summary b { min-width: 0; overflow: hidden; padding-left: 7px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.develop-preset-folder > summary span { color: var(--text-3); font: 10px/1 var(--font-mono); font-variant-numeric: tabular-nums; }
+.develop-preset-folder-body { padding: 1px 5px 5px; }
+.develop-preset-row { display: grid; grid-template-columns: minmax(0, 1fr) 19px 19px; align-items: center; min-width: 0; min-height: 25px; border-radius: 3px; }
+.develop-preset-row:hover { background: rgba(255,255,255,.055); }
+.develop-preset-row.active { background: color-mix(in srgb, var(--accent) 22%, transparent); box-shadow: inset 2px 0 0 var(--accent); }
+.develop-preset-name { min-width: 0; height: 25px; padding: 0 6px 0 8px; overflow: hidden; border: 0; color: var(--text-2); font-size: 11px; text-align: left; text-overflow: ellipsis; white-space: nowrap; background: transparent; }
+.develop-preset-row.active .develop-preset-name { color: #eef6ff; font-weight: 600; }
+.develop-preset-edit { width: 19px; height: 21px; padding: 0; border: 0; border-radius: 3px; color: var(--text-3); font-size: 11px; background: transparent; opacity: 0; }
+.develop-preset-row:hover .develop-preset-edit,
+.develop-preset-edit:focus-visible { opacity: 1; }
+.develop-preset-edit:hover { color: var(--text); background: rgba(255,255,255,.08); }
+.develop-preset-rename-input { box-sizing: border-box; width: 100%; height: 23px; min-width: 0; padding: 0 5px; border: 1px solid var(--accent-lin); border-radius: 3px; color: var(--text); font-size: 11px; background: #101216; outline: none; }
+.develop-presets-empty,
+.develop-presets-no-results { margin: 12px; color: var(--text-3); font-size: 11px; line-height: 1.45; }
+.develop-presets-popover { position: absolute; z-index: var(--z-popover); left: 9px; top: 48px; display: grid; gap: 8px; width: min(250px, calc(100% - 18px)); padding: 10px; border: 1px solid var(--line); border-radius: var(--r-card); color: var(--text-2); font-size: 10px; background: var(--surface-popover); box-shadow: 0 16px 48px rgba(0,0,0,.5); }
+.develop-presets-popover strong { color: var(--text); font-size: 11px; }
+.develop-presets-popover label { display: grid; gap: 3px; }
+.develop-presets-popover input { min-width: 0; height: 26px; padding: 0 6px; border: 1px solid var(--line); border-radius: var(--r-ctl); color: var(--text); font-size: 11px; background: #111317; }
+.develop-presets-popover-actions { display: flex; justify-content: flex-end; gap: 5px; }
+.develop-presets-popover-actions button { height: 25px; padding: 0 8px; border: 1px solid var(--line); border-radius: var(--r-ctl); color: var(--text-2); font-size: 10px; background: var(--card); }
+.develop-presets-popover-actions .primary { border-color: var(--accent-lin); color: #fff; background: var(--accent); }
+
 @media (max-width: 1050px) {
     .develop-layout { grid-template-columns: minmax(0, 1fr) 286px; }
+    #develop-presets { display: none; }
     .develop-slider { grid-template-columns: 66px minmax(56px, 1fr) 40px; gap: 5px; }
     .develop-slider-value { width: 40px; }
 }
@@ -1383,7 +1423,7 @@ body.develop-active #canvas > .view:not(#view-develop) { display: none !importan
 .develop-mask-name { overflow: hidden; text-align: left; }
 .develop-mask-name > span { display: block; overflow: hidden; color: var(--text); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .develop-mask-name input { width: 100%; height: 22px; padding: 0 4px; border: 1px solid var(--accent-lin); border-radius: 3px; color: var(--text); font-size: 11px; background: #101216; outline: 0; }
-.develop-mask-card-body { padding: 7px 8px 9px; border-top: 1px solid var(--line-soft); }
+.develop-mask-card-body { padding: 8px 8px 10px; border-top: 1px solid var(--line-soft); }
 .develop-mask-chips { display: flex; flex-wrap: wrap; gap: 4px; }
 .develop-mask-chip,
 .develop-mask-chips > button:last-child,
@@ -1392,8 +1432,8 @@ body.develop-active #canvas > .view:not(#view-develop) { display: none !importan
 .develop-mask-tools button:hover,
 .develop-mask-tools button[aria-pressed="true"] { border-color: var(--accent-lin); color: var(--text); background: var(--accent-dim); }
 .develop-mask-chip i { display: inline-block; margin-right: 3px; color: var(--accent); font-size: 11px; font-style: normal; }
-.develop-mask-tools { display: flex; justify-content: flex-end; gap: 5px; margin: 7px 0 5px; }
-.develop-mask-slider-group { margin-top: 9px; }
+.develop-mask-tools { display: flex; justify-content: flex-end; gap: 5px; margin: 8px 0 6px; }
+.develop-mask-slider-group { margin-top: 10px; }
 .develop-mask-slider-group > b { display: block; margin-bottom: 2px; color: var(--text-3); font-size: 9px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; }
 .develop-mask-slider { display: grid; grid-template-columns: 67px minmax(0, 1fr) 39px; align-items: center; gap: 6px; min-height: 25px; color: var(--text-2); font-size: 10px; cursor: ew-resize; }
 .develop-mask-slider input { width: 100%; min-width: 0; height: 14px; margin: 0; accent-color: var(--accent); cursor: ew-resize; }

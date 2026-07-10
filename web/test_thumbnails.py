@@ -25,6 +25,19 @@ from thumbnails import runtime as thumbnail_runtime  # noqa: E402
 from thumbnails import status as thumbnail_status  # noqa: E402
 
 
+class RawPreviewOrientationTests(unittest.TestCase):
+    def test_raw_container_flip_rotates_untagged_portrait_preview_upright(self):
+        preview = Image.new("RGB", (24, 12), color=(20, 40, 60))
+        try:
+            self.assertEqual(thumbnail_generation.apply_raw_orientation(preview, 6).size, (12, 24))
+            self.assertEqual(thumbnail_generation.apply_raw_orientation(preview, 5).size, (12, 24))
+            self.assertEqual(thumbnail_generation.apply_raw_orientation(preview, 4).size, (12, 24))
+            self.assertEqual(thumbnail_generation.apply_raw_orientation(preview, 7).size, (12, 24))
+            self.assertEqual(thumbnail_generation.apply_raw_orientation(preview, 3).size, (24, 12))
+        finally:
+            preview.close()
+
+
 class ThumbnailConfigFacadeTests(unittest.TestCase):
     def test_thumbnail_defaults_remain_available_from_facade(self):
         for name in thumbnail_config.DEFAULT_EXPORT_NAMES:
