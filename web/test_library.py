@@ -662,6 +662,98 @@ class LibraryTests(BackendTestCase):
         self.assertEqual(fourth["comparison_count"], third["comparison_count"])
         self.assertEqual(taste_service._cache["key"][2], 5)
 
+    async def test_taste_blend_warm_pages_reuse_predictions_and_precomputed_order(self):
+        self._set_taste_blend(enabled=True, min_signal=1)
+        source = await self._source()
+        config = settings.active_embedding_config()
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "INSERT OR IGNORE INTO embedding_models "
+                "(model_key, model_id, revision, dimension) VALUES (?, ?, ?, ?)",
+                (config["model_key"], config["model_id"], config["revision"], 2),
+            )
+            for index in range(160):
+                cursor = await conn.execute(
+                    "INSERT INTO images "
+                    "(source_id, filename, filepath, elo, comparisons, status) "
+                    "VALUES (?, ?, ?, ?, ?, 'kept')",
+                    (
+                        source["id"],
+                        f"perf-taste-{index:03d}.jpg",
+                        os.path.join(self.tempdir.name, f"perf-taste-{index:03d}.jpg"),
+                        1200 + (index % 20),
+                        1 if index < 6 else 0,
+                    ),
+                )
+                image_id = int(cursor.lastrowid)
+                direction = 1.0 if index < 3 or index % 2 == 0 else -1.0
+                vector = np.asarray([direction, 0.0], dtype=np.float32)
+                await conn.execute(
+                    "INSERT INTO embeddings_by_model "
+                    "(model_key, image_id, embedding, dimension) VALUES (?, ?, ?, ?)",
+                    (config["model_key"], image_id, vector.tobytes(), 2),
+                )
+                await conn.execute(
+                    "INSERT INTO cache_entries "
+                    "(cache_root, size, image_id, path, source_signature, size_bytes, last_accessed, created_at) "
+                    "VALUES (?, 'sm', ?, ?, ?, 1, 1, 1)",
+                    (
+                        thumbnails.SSD_CACHE_DIR,
+                        image_id,
+                        os.path.join(self.tempdir.name, f"sm-{image_id}.jpg"),
+                        f"perf-{image_id}",
+                    ),
+                )
+            cursor = await conn.execute(
+                "SELECT id FROM images WHERE filename LIKE 'perf-taste-%' ORDER BY id"
+            )
+            ids = [int(row["id"]) for row in await cursor.fetchall()]
+            await conn.executemany(
+                "INSERT INTO comparisons "
+                "(winner_id, loser_id, mode, elo_before_winner, elo_before_loser, action_id) "
+                "VALUES (?, ?, 'swiss', 1200, 1200, ?)",
+                [(ids[index % 3], ids[3 + (index % 3)], f"perf-{index}") for index in range(5)],
+            )
+            await db._update_source_counts(conn, source["id"])
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        db.invalidate_stats_cache()
+        db.invalidate_cached_image_ids_cache()
+        embed_cache.invalidate()
+        taste_service.invalidate_taste_cache()
+        cache_events.invalidate_rankings_cache()
+        compute_calls = 0
+        ranking_limits = []
+        original_compute = taste_service._compute_scaled_scores
+        original_get_rankings = library_service._get_rankings
+
+        def counted_compute(*args, **kwargs):
+            nonlocal compute_calls
+            compute_calls += 1
+            return original_compute(*args, **kwargs)
+
+        async def counted_get_rankings(**kwargs):
+            ranking_limits.append(int(kwargs.get("limit") or 0))
+            return await original_get_rankings(**kwargs)
+
+        taste_service._compute_scaled_scores = counted_compute
+        library_service._get_rankings = counted_get_rankings
+        try:
+            first = await library_routes.api_rankings(limit=20, offset=0, sort="elo")
+            library_service._rankings_response_cache.clear()
+            second = await library_routes.api_rankings(limit=20, offset=20, sort="elo")
+        finally:
+            taste_service._compute_scaled_scores = original_compute
+            library_service._get_rankings = original_get_rankings
+
+        self.assertEqual(len(first["images"]), 20)
+        self.assertEqual(len(second["images"]), 20)
+        self.assertEqual(compute_calls, 1)
+        self.assertEqual(sum(limit > 20 for limit in ranking_limits), 1)
+
     async def test_taste_blend_uses_confidence_weighted_display_score_for_elo_sort(self):
         self._set_taste_blend(enabled=True, min_signal=1)
         source = await self._source()

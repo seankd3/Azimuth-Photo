@@ -787,14 +787,14 @@ async def undo_last_comparison(db_path: str) -> dict | None:
         # Subtract the recorded delta instead of restoring the absolute
         # elo_before snapshot, so ratings written by other actions between
         # propagation and undo are preserved.
-        for row in propagation_rows:
-            await conn.execute(
+        if propagation_rows:
+            await conn.executemany(
                 "UPDATE images SET elo = COALESCE(elo, 0) - ?, "
                 "propagated_updates = MAX(COALESCE(propagated_updates, 1) - 1, 0) WHERE id = ?",
-                (
-                    float(row["delta"]),
-                    int(row["image_id"]),
-                ),
+                [
+                    (float(row["delta"]), int(row["image_id"]))
+                    for row in propagation_rows
+                ],
             )
 
         restore_elo: dict[int, float] = {}
@@ -807,10 +807,13 @@ async def undo_last_comparison(db_path: str) -> dict | None:
             comparison_decrements[winner_id] = comparison_decrements.get(winner_id, 0) + 1
             comparison_decrements[loser_id] = comparison_decrements.get(loser_id, 0) + 1
 
-        for image_id, elo in restore_elo.items():
-            await conn.execute(
+        if restore_elo:
+            await conn.executemany(
                 "UPDATE images SET elo = ?, comparisons = MAX(COALESCE(comparisons, 0) - ?, 0) WHERE id = ?",
-                (elo, comparison_decrements.get(image_id, 0), image_id),
+                [
+                    (elo, comparison_decrements.get(image_id, 0), image_id)
+                    for image_id, elo in restore_elo.items()
+                ],
             )
 
         if action_id:

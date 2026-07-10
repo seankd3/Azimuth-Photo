@@ -3,7 +3,7 @@
 import asyncio
 from collections.abc import Callable
 import hashlib
-import os
+import time
 
 import numpy as np
 
@@ -20,6 +20,7 @@ TASTE_ELO_RANGE = 400.0
 ELO_CONFIDENCE_COMPARISONS = 10
 RANK_BASIS_PREDICTED_MAX = 0.2
 RANK_BASIS_MEASURED_MIN = 0.8
+TASTE_SOURCE_VERIFY_TTL_SECONDS = 5.0
 
 DbPath = Callable[[], str]
 DbSignature = Callable[[], str]
@@ -29,24 +30,37 @@ _db_signature: DbSignature | None = None
 _cache: dict[str, object] = {
     "key": None,
     "payload": None,
+    "verified_at": 0.0,
 }
 _prediction_cache: dict[str, object] = {
     "key": None,
     "scores": None,
 }
+_cache_generation = 0
 
 
 def configure(*, db_path: DbPath, db_signature: DbSignature) -> None:
     global _db_path, _db_signature
     _db_path = db_path
     _db_signature = db_signature
+    from core import cache_events
+
+    cache_events.register_embedding_batch_listener(_embedding_batch_stored)
 
 
 def invalidate_taste_cache() -> None:
+    global _cache_generation
+    _cache_generation += 1
     _cache["key"] = None
     _cache["payload"] = None
+    _cache["verified_at"] = 0.0
     _prediction_cache["key"] = None
     _prediction_cache["scores"] = None
+
+
+def _embedding_batch_stored(model_key: str, _image_ids: list[int]) -> None:
+    if str(model_key or "") == _active_model_key():
+        invalidate_taste_cache()
 
 
 def _configured(provider, name: str):
@@ -59,31 +73,34 @@ def _active_model_key() -> str:
     return settings.active_embedding_config()["model_key"]
 
 
-def _db_file_signature(db_path: str) -> tuple:
-    signature = []
-    for path in (db_path, f"{db_path}-wal", f"{db_path}-shm"):
-        try:
-            stat = os.stat(path)
-            signature.append((os.path.basename(path), stat.st_size, stat.st_mtime_ns))
-        except OSError:
-            signature.append((os.path.basename(path), -1, -1))
-    return tuple(signature)
-
-
-def _comparison_summary_sync(db_path: str) -> dict:
+def _taste_source_signature_sync(db_path: str, model_key: str) -> dict:
     conn = connection.open_sync(db_path)
     try:
-        summary = conn.execute(
+        comparisons = conn.execute(
             "SELECT COUNT(*) AS count, COALESCE(MAX(id), 0) AS max_id FROM comparisons"
         ).fetchone()
+        embeddings = conn.execute(
+            "SELECT COUNT(*) AS count, COALESCE(MAX(rowid), 0) AS max_rowid "
+            "FROM embeddings_by_model WHERE model_key = ?",
+            (model_key,),
+        ).fetchone()
+        return {
+            "comparison_count": int(comparisons["count"] or 0),
+            "comparison_max_id": int(comparisons["max_id"] or 0),
+            "embedding_count": int(embeddings["count"] or 0),
+            "embedding_max_rowid": int(embeddings["max_rowid"] or 0),
+        }
+    finally:
+        connection.close_sync(conn, db_path=db_path)
+
+
+def _comparison_rows_sync(db_path: str) -> list[tuple[int, int]]:
+    conn = connection.open_sync(db_path)
+    try:
         rows = conn.execute(
             "SELECT winner_id, loser_id FROM comparisons ORDER BY id ASC"
         ).fetchall()
-        return {
-            "count": int(summary["count"] or 0),
-            "max_id": int(summary["max_id"] or 0),
-            "rows": [(int(row["winner_id"]), int(row["loser_id"])) for row in rows],
-        }
+        return [(int(row["winner_id"]), int(row["loser_id"])) for row in rows]
     finally:
         connection.close_sync(conn, db_path=db_path)
 
@@ -175,6 +192,12 @@ def rank_basis(confidence: float) -> str:
     return "blended"
 
 
+def _matrix_identity(matrix: np.ndarray | None) -> int:
+    if matrix is None:
+        return 0
+    return int(matrix.__array_interface__["data"][0])
+
+
 async def taste_scaled_scores(taste: dict) -> dict[int, float] | None:
     """Return image_id -> taste-scaled Elo prediction for the warm embedding matrix."""
     if not taste.get("available") or taste.get("vector") is None:
@@ -184,13 +207,18 @@ async def taste_scaled_scores(taste: dict) -> dict[int, float] | None:
     if not image_ids or matrix is None:
         return None
     signature = taste_vector_signature(taste)
-    db_signature = _configured(_db_signature, "db_signature")()
-    cache_key = (db_signature, signature, len(image_ids))
+    cache_key = (taste.get("_cache_key"), signature, len(image_ids), _matrix_identity(matrix))
     if _prediction_cache.get("key") == cache_key:
         cached = _prediction_cache.get("scores")
-        return dict(cached) if isinstance(cached, dict) else None
+        return cached if isinstance(cached, dict) else None
 
-    vector = np.asarray(taste["vector"], dtype=np.float32)
+    scores = _compute_scaled_scores(image_ids, matrix, taste["vector"])
+    _prediction_cache.update({"key": cache_key, "scores": scores})
+    return scores
+
+
+def _compute_scaled_scores(image_ids, matrix: np.ndarray, vector) -> dict[int, float]:
+    vector = np.asarray(vector, dtype=np.float32)
     row_norms = np.linalg.norm(matrix, axis=1)
     valid = row_norms > 0
     similarities = np.full(len(image_ids), np.nan, dtype=np.float32)
@@ -200,46 +228,75 @@ async def taste_scaled_scores(taste: dict) -> dict[int, float] | None:
         for image_id, similarity in zip(image_ids, similarities, strict=False)
         if (scaled := taste_to_elo(float(similarity))) is not None
     }
-    _prediction_cache.update({"key": cache_key, "scores": scores})
-    return dict(scores)
+    return scores
 
 
 async def taste_vector() -> dict:
     """Return the learned taste vector and availability metadata."""
     model_key = _active_model_key()
     db_path = _configured(_db_path, "db_path")()
-    db_signature = (
-        _configured(_db_signature, "db_signature")(),
-        _db_file_signature(db_path),
+    db_signature = _configured(_db_signature, "db_signature")()
+    now = time.monotonic()
+    cached_payload = _cache.get("payload")
+    cached_source_key = cached_payload.get("_cache_key") if isinstance(cached_payload, dict) else None
+    if (
+        isinstance(cached_payload, dict)
+        and cached_payload.get("model_key") == model_key
+        and cached_source_key
+        and cached_source_key[0] == db_signature
+        and now - float(_cache.get("verified_at") or 0.0) < TASTE_SOURCE_VERIFY_TTL_SECONDS
+    ):
+        return dict(cached_payload)
+
+    generation = _cache_generation
+    source = await _to_thread(_taste_source_signature_sync, db_path, model_key)
+    comparison_count = int(source["comparison_count"] or 0)
+    max_id = int(source["comparison_max_id"] or 0)
+    embedding_count = int(source["embedding_count"] or 0)
+    if comparison_count >= MIN_COMPARISON_ROWS:
+        image_ids, matrix = await embed_cache.get_matrix(model_key)
+    else:
+        image_ids, matrix = None, None
+    active_embedding_count = len(image_ids or [])
+    cache_key = (
+        db_signature,
+        model_key,
+        active_embedding_count,
+        comparison_count,
+        max_id,
+        int(source["embedding_max_rowid"] or 0),
+        embedding_count,
+        _matrix_identity(matrix),
+        generation,
     )
-    summary = await _to_thread(_comparison_summary_sync, db_path)
-    comparison_count = int(summary["count"] or 0)
-    max_id = int(summary["max_id"] or 0)
+    if _cache.get("key") == cache_key and isinstance(cached_payload, dict):
+        _cache["verified_at"] = now
+        return dict(cached_payload)
     if comparison_count < MIN_COMPARISON_ROWS:
-        return _unavailable(
+        payload = _unavailable(
             f"Taste needs at least {MIN_COMPARISON_ROWS} direct comparisons.",
             comparison_count=comparison_count,
             model_key=model_key,
         )
+        payload["_cache_key"] = cache_key
+        _cache.update({"key": cache_key, "payload": payload, "verified_at": now})
+        return dict(payload)
 
-    image_ids, matrix = await embed_cache.get_matrix(model_key)
-    embedding_count = len(image_ids or [])
-    cache_key = (db_signature, model_key, embedding_count, comparison_count, max_id)
-    if _cache.get("key") == cache_key:
-        return dict(_cache.get("payload") or {})
     if not image_ids or matrix is None:
         payload = _unavailable(
             "Taste needs embeddings for compared photos.",
             comparison_count=comparison_count,
             model_key=model_key,
         )
-        _cache.update({"key": cache_key, "payload": payload})
+        payload["_cache_key"] = cache_key
+        _cache.update({"key": cache_key, "payload": payload, "verified_at": now})
         return dict(payload)
 
+    comparison_rows = await _to_thread(_comparison_rows_sync, db_path)
     id_to_idx = embed_cache.get_index(model_key)
     winner_vectors = []
     loser_vectors = []
-    for winner_id, loser_id in summary["rows"]:
+    for winner_id, loser_id in comparison_rows:
         winner_idx = id_to_idx.get(winner_id)
         if winner_idx is not None:
             winner_vectors.append(matrix[winner_idx])
@@ -260,7 +317,8 @@ async def taste_vector() -> dict:
             loser_count=loser_count,
             model_key=model_key,
         )
-        _cache.update({"key": cache_key, "payload": payload})
+        payload["_cache_key"] = cache_key
+        _cache.update({"key": cache_key, "payload": payload, "verified_at": now})
         return dict(payload)
 
     vector = np.mean(winner_vectors, axis=0) - np.mean(loser_vectors, axis=0)
@@ -273,7 +331,8 @@ async def taste_vector() -> dict:
             loser_count=loser_count,
             model_key=model_key,
         )
-        _cache.update({"key": cache_key, "payload": payload})
+        payload["_cache_key"] = cache_key
+        _cache.update({"key": cache_key, "payload": payload, "verified_at": now})
         return dict(payload)
 
     payload = {
@@ -285,8 +344,10 @@ async def taste_vector() -> dict:
         "embedded_loser_count": loser_count,
         "signal_count": min(winner_count, loser_count),
         "fallback_reason": "",
+        "_cache_key": cache_key,
     }
-    _cache.update({"key": cache_key, "payload": payload})
+    if generation == _cache_generation:
+        _cache.update({"key": cache_key, "payload": payload, "verified_at": now})
     return dict(payload)
 
 

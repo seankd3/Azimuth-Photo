@@ -36,9 +36,9 @@ RANKING_INDEXES = {
     "least_compared": "idx_images_active_comparisons_asc",
     "filename": "idx_images_active_filename",
     "filename_asc": "idx_images_active_filename",
-    "filename_desc": "idx_images_active_filename",
+    "filename_desc": None,
     "newest": "idx_images_active_id",
-    "oldest": "idx_images_active_id",
+    "oldest": None,
     "date_taken": "idx_images_active_date_taken_sort_desc",
     "date_taken_asc": "idx_images_active_date_taken_sort_asc",
     "file_size": "idx_images_active_file_size_sort_desc",
@@ -89,7 +89,7 @@ VISIBLE_CACHE_FIRST_SORTS = {
 }
 
 STAR_THRESHOLDS = {5: 1500, 4: 1350, 3: 1250, 2: 1150, 1: 0}
-RANKING_COUNT_CACHE_TTL_SECONDS = 2.0
+RANKING_COUNT_CACHE_TTL_SECONDS = 30.0
 FACET_CACHE_TTL_SECONDS = 30.0
 RANKING_VISIBLE_ID_FILTER_LIMIT = 5000
 RANKING_CACHE_FIRST_VISIBLE_LIMIT = 12000
@@ -185,6 +185,7 @@ def ranking_count_cache_key(
     camera: str = "",
     lens: str = "",
     tag: str = "",
+    caption_model_key: str = "",
     id_filter: set | None = None,
     visible_thumb_size: str = "",
     cache_root: str = "",
@@ -204,6 +205,7 @@ def ranking_count_cache_key(
         camera or "",
         lens or "",
         tag or "",
+        (caption_model_key or "") if tag else "",
         visible_thumb_size or "",
         cache_root or "",
         text_query or "",
@@ -222,6 +224,7 @@ def facet_cache_key(
     camera: str = "",
     lens: str = "",
     tag: str = "",
+    caption_model_key: str = "",
     visible_thumb_size: str = "",
     cache_root: str = "",
     id_filter: set | None = None,
@@ -241,6 +244,7 @@ def facet_cache_key(
         camera or "",
         lens or "",
         tag or "",
+        (caption_model_key or "") if tag else "",
         visible_thumb_size or "",
         cache_root or "",
         bool(exclude_collapsed_stack_members),
@@ -272,8 +276,8 @@ def invalidate_visible_facet_caches(cache_root: str | None = None, size: str | N
 
     for cache in (_date_groups_cache, _map_markers_cache):
         for key in list(cache.keys()):
-            key_size = key[10]
-            key_root = key[11]
+            key_size = key[11]
+            key_root = key[12]
             if key_size and key_root and cache_scope_matches(key_root, key_size, cache_root, size):
                 cache.pop(key, None)
                 _date_groups_refreshing.discard(key)
@@ -290,8 +294,8 @@ def invalidate_rating_facet_caches() -> None:
 
 def invalidate_visible_cache_dependent_counts(cache_root: str | None = None, size: str | None = None) -> None:
     for key in list(_ranking_count_cache.keys()):
-        key_size = key[10]
-        key_root = key[11]
+        key_size = key[11]
+        key_root = key[12]
         if key_size and key_root and cache_scope_matches(key_root, key_size, cache_root, size):
             _ranking_count_cache.pop(key, None)
 
@@ -483,7 +487,10 @@ def ranking_image_source(
     orientation: str = "",
     id_filter: set | None,
     text_query: str,
+    allow_forced_index: bool = True,
 ) -> str:
+    if not allow_forced_index:
+        return "images i"
     index_name = ranking_index_for_query(
         sort,
         orientation=orientation,
@@ -609,6 +616,7 @@ async def rankings(
             orientation=orientation,
             id_filter=id_filter,
             text_query=text_query,
+            allow_forced_index=all_catalog_images_active,
         )
         source_join = (
             "JOIN catalog_sources s ON s.id = i.source_id "
@@ -982,6 +990,7 @@ async def count_rankings_cached(
         camera=camera,
         lens=lens,
         tag=tag,
+        caption_model_key=caption_model_key,
         id_filter=id_filter,
         visible_thumb_size=visible_thumb_size,
         cache_root=cache_root,
@@ -1467,6 +1476,7 @@ async def date_groups_cached(
         camera=camera,
         lens=lens,
         tag=tag,
+        caption_model_key=caption_model_key,
         visible_thumb_size=visible_thumb_size,
         cache_root=cache_root,
         id_filter=id_filter,
@@ -1604,7 +1614,7 @@ async def map_markers(
     try:
         if all_sources_available:
             gps_total_cursor = await conn.execute(
-                "SELECT COUNT(*) AS count FROM images i "
+                "SELECT COUNT(*) AS count FROM images i INDEXED BY idx_images_active_gps_count "
                 f"WHERE {' AND '.join(gps_conditions)}",
                 params,
             )
@@ -1710,6 +1720,7 @@ async def map_markers_cached(
         camera=camera,
         lens=lens,
         tag=tag,
+        caption_model_key=caption_model_key,
         visible_thumb_size=visible_thumb_size,
         cache_root=cache_root,
         id_filter=id_filter,

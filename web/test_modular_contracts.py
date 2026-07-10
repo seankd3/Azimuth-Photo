@@ -123,6 +123,8 @@ PUBLIC_ROUTE_CONTRACT = {
     ("GET", "/api/published/nodes/{node_id}/diff"),
     ("POST", "/api/published/nodes/{node_id}/update"),
     ("POST", "/api/published/nodes/{node_id}/share"),
+    ("DELETE", "/api/published/nodes/{node_id}/share"),
+    ("POST", "/api/published/export"),
     ("GET", "/api/shares"),
     ("POST", "/api/user-collections/{collection_id}/rename"),
     ("POST", "/api/user-collections/{collection_id}/delete"),

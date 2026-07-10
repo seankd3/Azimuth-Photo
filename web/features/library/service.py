@@ -17,8 +17,10 @@ from features.library import taste as taste_service
 
 
 _rankings_response_cache: dict[tuple, dict] = {}
+_blended_rankings_order_cache: dict[tuple, dict] = {}
 _rankings_response_cache_ttl_seconds = 1800.0
 _rankings_response_cache_max_entries = 256
+_blended_rankings_order_cache_max_entries = 12
 MAX_RANKINGS_LIMIT = 5000
 ELO_FAMILY_SORTS = {"elo", "elo_asc"}
 
@@ -110,6 +112,7 @@ def configure_stacks(
 
 def invalidate_rankings_response_cache() -> None:
     _rankings_response_cache.clear()
+    _blended_rankings_order_cache.clear()
 
 
 def _configured_cache_root() -> str:
@@ -236,6 +239,97 @@ def _sort_blended_rankings(rows: list[dict], db_sort: str) -> list[dict]:
         ),
         reverse=reverse,
     )
+
+
+def _blended_order_cache_key(
+    *,
+    blend_context: dict,
+    db_sort: str,
+    orientation: str,
+    compared: str,
+    min_stars: int,
+    folder,
+    flag: str,
+    date_taken: str,
+    file_type: str,
+    camera: str,
+    lens: str,
+    tag: str,
+    search_ids,
+    text_query: str,
+    visible_thumb_size: str,
+    exclude_collapsed_stack_members: bool,
+) -> tuple | None:
+    if not blend_context.get("active") or search_ids is not None or text_query:
+        return None
+    return (
+        _configured_db_signature(),
+        _configured_cache_root(),
+        db_sort,
+        orientation,
+        compared,
+        int(min_stars or 0),
+        _folder_cache_value(folder),
+        flag,
+        date_taken,
+        file_type,
+        camera,
+        lens,
+        tag,
+        visible_thumb_size,
+        bool(exclude_collapsed_stack_members),
+        blend_context.get("cache_key"),
+    )
+
+
+def _cache_blended_order(cache_key: tuple | None, rows: list[dict], *, total_images: int) -> None:
+    if cache_key is None:
+        return
+    annotations = {
+        int(row["id"]): {
+            "_display_score": row.get("_display_score"),
+            "_rank_basis": row.get("_rank_basis"),
+            "_taste_weight": row.get("_taste_weight"),
+        }
+        for row in rows
+    }
+    _blended_rankings_order_cache[cache_key] = {
+        "ids": [int(row["id"]) for row in rows],
+        "annotations": annotations,
+        "total_images": int(total_images or 0),
+    }
+    while len(_blended_rankings_order_cache) > _blended_rankings_order_cache_max_entries:
+        _blended_rankings_order_cache.pop(next(iter(_blended_rankings_order_cache)))
+
+
+async def _blended_order_page(
+    cached: dict,
+    *,
+    offset: int,
+    limit: int,
+    visible_thumb_size: str,
+) -> list[dict]:
+    page_ids = cached["ids"][offset:offset + limit]
+    if not page_ids:
+        return []
+    rows = await _configured(_get_rankings)(
+        limit=len(page_ids),
+        offset=0,
+        sort="elo",
+        id_filter=set(page_ids),
+        visible_thumb_size=visible_thumb_size,
+        cache_root=_configured_cache_root(),
+    )
+    rows_by_id = {int(row["id"]): dict(row) for row in rows}
+    annotations = cached.get("annotations") or {}
+    ordered = []
+    for image_id in page_ids:
+        row = rows_by_id.get(image_id)
+        if row is None:
+            continue
+        row.update(annotations.get(image_id) or {})
+        ordered.append(row)
+    return ordered
 
 
 def _blend_card_kwargs(data: dict, blend_context: dict) -> dict:
@@ -775,6 +869,29 @@ async def api_rankings_impl(
         return response
 
     ranking_filter_min_stars = 0 if blend_context.get("active") and int(min_stars or 0) > 0 else min_stars
+    blended_order_key = _blended_order_cache_key(
+        blend_context=blend_context,
+        db_sort=db_sort,
+        orientation=orientation,
+        compared=compared,
+        min_stars=min_stars,
+        folder=folder,
+        flag=flag,
+        date_taken=date_taken,
+        file_type=file_type,
+        camera=camera,
+        lens=lens,
+        tag=tag,
+        search_ids=search_ids,
+        text_query=text_query,
+        visible_thumb_size=visible_thumb_size,
+        exclude_collapsed_stack_members=exclude_collapsed_stack_members,
+    )
+    cached_blended_order = (
+        _blended_rankings_order_cache.get(blended_order_key)
+        if blended_order_key is not None
+        else None
+    )
     unfiltered_rankings = not any(
         (
             orientation,
@@ -794,11 +911,11 @@ async def api_rankings_impl(
             exclude_collapsed_stack_members,
         )
     )
-    if unfiltered_rankings:
+    if unfiltered_rankings and cached_blended_order is None:
         counts_task = asyncio.create_task(
             _configured(_get_visible_pairing_pool_counts)("sm", _configured_cache_root())
         )
-    else:
+    elif not unfiltered_rankings and cached_blended_order is None:
         defer_empty_first_page_counts = bool(text_query) and offset == 0 and not blend_context.get("active")
         total_task = None
         visible_task = None
@@ -836,7 +953,16 @@ async def api_rankings_impl(
                 exclude_collapsed_stack_members=exclude_collapsed_stack_members,
             )
         )
-    if blend_context.get("active"):
+    if blend_context.get("active") and cached_blended_order is not None:
+        total_images = int(cached_blended_order.get("total_images") or 0)
+        visible_images = len(cached_blended_order.get("ids") or [])
+        images = await _blended_order_page(
+            cached_blended_order,
+            offset=offset,
+            limit=limit,
+            visible_thumb_size=visible_thumb_size,
+        )
+    elif blend_context.get("active"):
         if unfiltered_rankings:
             counts = await counts_task
             total_images = int(counts.get("active_images") or 0)
@@ -903,6 +1029,11 @@ async def api_rankings_impl(
                 )
             else:
                 total_images = 0
+        _cache_blended_order(
+            blended_order_key,
+            blended_rows,
+            total_images=total_images,
+        )
         images = blended_rows[offset:offset + limit]
     else:
         images = await _configured(_get_rankings)(

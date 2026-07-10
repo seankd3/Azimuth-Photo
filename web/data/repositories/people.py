@@ -127,27 +127,34 @@ async def refresh_people_membership_on_conn(
 
     if person_ids is None:
         target_filter = ""
+        face_filter = ""
+        face_params: list = []
         target_params: list = []
     else:
         placeholders = ",".join("?" for _ in person_ids)
         target_filter = f" WHERE id IN ({placeholders})"
+        face_filter = f" AND fa.person_id IN ({placeholders})"
+        face_params = list(person_ids)
         target_params = list(person_ids)
-    cursor = await conn.execute(f"SELECT id FROM people{target_filter}", target_params)
-    target_ids = [int(row["id"]) for row in await cursor.fetchall()]
-    for person_id in target_ids:
-        cursor = await conn.execute(
-            "SELECT fd.id FROM face_detections fd "
-            "JOIN face_assignments fa ON fa.face_id = fd.id "
-            "WHERE fa.active = 1 AND fa.person_id = ? AND fd.ignored = 0 "
-            "ORDER BY fd.quality DESC, fd.confidence DESC, fd.updated_at DESC LIMIT 1",
-            (person_id,),
-        )
-        row = await cursor.fetchone()
-        representative_id = int(row["id"]) if row else None
-        await conn.execute(
-            "UPDATE people SET representative_face_id = ?, updated_at = ? WHERE id = ?",
-            (representative_id, _time.time(), person_id),
-        )
+    await conn.execute(
+        "WITH ranked_faces AS ("
+        "  SELECT fa.person_id, fd.id AS face_id, "
+        "  ROW_NUMBER() OVER ("
+        "    PARTITION BY fa.person_id "
+        "    ORDER BY fd.quality DESC, fd.confidence DESC, fd.updated_at DESC"
+        "  ) AS rank "
+        "  FROM face_assignments fa "
+        "  JOIN face_detections fd ON fd.id = fa.face_id "
+        "  WHERE fa.active = 1 AND fd.ignored = 0"
+        f"{face_filter}"
+        ") "
+        "UPDATE people SET representative_face_id = ("
+        "  SELECT face_id FROM ranked_faces "
+        "  WHERE ranked_faces.person_id = people.id AND rank = 1"
+        "), updated_at = ?"
+        f"{target_filter}",
+        [*face_params, _time.time(), *target_params],
+    )
 
 
 async def refresh_people_membership(db_path: str, person_ids: tuple[int, ...] | None = None) -> None:

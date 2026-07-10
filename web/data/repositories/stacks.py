@@ -547,6 +547,7 @@ def upsert_auto_stacks_sync(db_path: str, kind: str, groups) -> dict:
                 continue
             memberships = _sync_auto_membership(conn, available)
             final_ids: list[int] = []
+            displaced_memberships: list[tuple[int, int]] = []
             for image_id in available:
                 membership = memberships.get(image_id)
                 if membership is None:
@@ -556,13 +557,15 @@ def upsert_auto_stacks_sync(db_path: str, kind: str, groups) -> dict:
                     continue
                 existing_priority = AUTO_PRIORITIES.get(membership["kind"], 0)
                 if existing_priority < priority:
-                    conn.execute(
-                        "DELETE FROM stack_members WHERE stack_id = ? AND image_id = ?",
-                        (membership["stack_id"], image_id),
-                    )
+                    displaced_memberships.append((membership["stack_id"], image_id))
                     final_ids.append(image_id)
             if len(final_ids) < 2:
                 continue
+            if displaced_memberships:
+                conn.executemany(
+                    "DELETE FROM stack_members WHERE stack_id = ? AND image_id = ?",
+                    displaced_memberships,
+                )
             rep_id = representative_id if representative_id in final_ids else final_ids[0]
             cursor = conn.execute(
                 "INSERT INTO stacks (kind, representative_image_id, auto, created_at, updated_at) "
@@ -570,11 +573,13 @@ def upsert_auto_stacks_sync(db_path: str, kind: str, groups) -> dict:
                 (kind, rep_id, now, now),
             )
             stack_id = int(cursor.lastrowid)
-            for image_id in final_ids:
-                conn.execute(
-                    "INSERT INTO stack_members (stack_id, image_id, score, added_at) VALUES (?, ?, ?, ?)",
-                    (stack_id, image_id, _member_score(rows, image_id), now),
-                )
+            conn.executemany(
+                "INSERT INTO stack_members (stack_id, image_id, score, added_at) VALUES (?, ?, ?, ?)",
+                [
+                    (stack_id, image_id, _member_score(rows, image_id), now)
+                    for image_id in final_ids
+                ],
+            )
             created += 1
         _sync_repair_auto_stacks(conn, now)
         conn.commit()
