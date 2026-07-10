@@ -389,7 +389,10 @@ def normalize_settings(raw: dict | None) -> dict:
         "embed_model_dir": (
             _default_model_dir(preset_config["model_id"])
             if os.environ.get("PHOTOARCHIVE_MODELS_DIR")
-            else raw.get("embed_model_dir") or _default_model_dir(preset_config["model_id"])
+            else raw.get("embed_model_dir")
+            if raw.get("embed_model_id") == preset_config["model_id"]
+            and raw.get("embed_model_dir")
+            else _default_model_dir(preset_config["model_id"])
         ),
     }
 
@@ -407,7 +410,10 @@ def normalize_settings(raw: dict | None) -> dict:
         "caption_model_dir": (
             _default_model_dir(caption_preset_config["model_id"])
             if os.environ.get("PHOTOARCHIVE_MODELS_DIR")
-            else raw.get("caption_model_dir") or _default_model_dir(caption_preset_config["model_id"])
+            else raw.get("caption_model_dir")
+            if raw.get("caption_model_id") == caption_preset_config["model_id"]
+            and raw.get("caption_model_dir")
+            else _default_model_dir(caption_preset_config["model_id"])
         ),
         "caption_model_quantization": caption_preset_config["quantization"],
         "caption_prompt_version": caption_preset_config["prompt_version"],

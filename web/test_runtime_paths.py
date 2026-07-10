@@ -216,8 +216,10 @@ class RuntimePathTests(unittest.TestCase):
             "settings_version": settings.SETTINGS_VERSION,
             "ssd_cache_dir": "/archive/previews",
             "embed_model_preset": "qwen3-vl-embedding-8b",
+            "embed_model_id": "Qwen/Qwen3-VL-Embedding-8B",
             "embed_model_dir": "/archive/models/embed",
             "caption_model_preset": "qwen2.5-vl-3b-instruct-bnb-4bit",
+            "caption_model_id": "Qwen/Qwen2.5-VL-3B-Instruct",
             "caption_model_dir": "/archive/models/caption",
             "face_model_dir": "/archive/models/faces",
         }
