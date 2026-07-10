@@ -1,7 +1,7 @@
 import {
     byId, emit, on, rememberImages, setActiveLens, viewState,
 } from './state.js';
-import { thumbUrl, writeFlag } from './api.js';
+import { getImageExif, thumbUrl, writeFlag } from './api.js';
 import { applyFlags, beginFlagMutation, flagMutationIsLatest } from './selection.js';
 import { openCollectionPicker } from './panel.js';
 import { requestMorePhotos } from './grid.js';
@@ -11,10 +11,10 @@ const ZOOM_STEP = 1.15;
 const MAX_SCALE = 4;
 const PREFETCH_AHEAD = 10;
 const LOAD_WAIT_MS = 5000;
+const KEYBOARD_PAN_STEP = 48;
 
 let index = 0;
 let open = false;
-let returnCell = null;
 let sessionImages = null;
 let naturalWidth = 0;
 let naturalHeight = 0;
@@ -24,13 +24,15 @@ let panX = 0;
 let panY = 0;
 let zoomMode = 'fit';
 let dragState = null;
-let suppressNextClick = false;
 let renderToken = 0;
 let fullImageLoadingId = null;
 let imageWaiters = [];
 let lightMode = 'normal';
 let infoMode = 'off';
 let returnLens = 'grid';
+let stripSignature = '';
+let previousStripIndex = -1;
+const exifCache = new Map();
 const INFO_MODES = ['off', 'basic', 'full'];
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
@@ -96,6 +98,27 @@ function dimLabel(img) {
     return w && h ? `${Math.round(w)} × ${Math.round(h)}` : '';
 }
 
+function exposureLine(img, exif = {}) {
+    const metadata = { ...img, ...exif };
+    const iso = metadata.iso ? `ISO ${String(metadata.iso).replace(/^ISO\s*/i, '')}` : '';
+    return [metadata.focal_length, metadata.aperture, metadata.shutter_speed, iso]
+        .filter(Boolean)
+        .join(' · ');
+}
+
+async function loadExposure(img) {
+    const imageId = Number(img?.id);
+    if (!imageId || exifCache.has(imageId)) return;
+    exifCache.set(imageId, null);
+    try {
+        const data = await getImageExif(imageId);
+        exifCache.set(imageId, (data && data.exif) || {});
+    } catch {
+        exifCache.set(imageId, {});
+    }
+    if (open && currentIs(imageId)) updateInfoOverlay();
+}
+
 function updateInfoOverlay() {
     const host = document.getElementById('loupe-info');
     const img = current();
@@ -106,16 +129,18 @@ function updateInfoOverlay() {
     }
     const name = img.filename || `Photo ${img.id}`;
     const date = shortDate(img.date_taken);
-    const basic = [date].filter(Boolean).join(' · ');
+    const exposure = exposureLine(img, exifCache.get(Number(img.id)) || {});
+    const basic = [date, exposure].filter(Boolean);
     const full = [
         cameraLabel(img),
         img.lens,
         [dimLabel(img), bytes(img.file_size)].filter(Boolean).join(' · '),
     ].filter(Boolean);
     host.innerHTML = `<b>${esc(name)}</b>`
-        + (basic ? `<span>${esc(basic)}</span>` : '')
+        + basic.map((line) => `<span>${esc(line)}</span>`).join('')
         + (infoMode === 'full' ? full.map((line) => `<span>${esc(line)}</span>`).join('') : '');
     host.hidden = false;
+    loadExposure(img);
 }
 
 function imageSizeFromMetadata(img, imageEl) {
@@ -192,9 +217,26 @@ function centerFit({ animate = true } = {}) {
     clampPan();
     useMediumTier();
     applyTransform({ animate });
+    preloadLargeTier();
 }
 
-function setImageMetrics({ animate = false } = {}) {
+function relativeFocus() {
+    if (!naturalWidth || !naturalHeight || !scale) return { x: 0.5, y: 0.5 };
+    const rect = stageRect();
+    return {
+        x: Math.max(0, Math.min(1, (rect.width / 2 - panX) / (naturalWidth * scale))),
+        y: Math.max(0, Math.min(1, (rect.height / 2 - panY) / (naturalHeight * scale))),
+    };
+}
+
+function restoreRelativeFocus(focus) {
+    const rect = stageRect();
+    panX = rect.width / 2 - focus.x * naturalWidth * scale;
+    panY = rect.height / 2 - focus.y * naturalHeight * scale;
+    clampPan();
+}
+
+function setImageMetrics({ animate = false, focus = null } = {}) {
     const img = current();
     const image = document.getElementById('loupe-img');
     const size = imageSizeFromMetadata(img, image);
@@ -206,8 +248,10 @@ function setImageMetrics({ animate = false } = {}) {
         return;
     }
     scale = Math.max(fitScale, Math.min(MAX_SCALE, scale));
-    clampPan();
+    if (focus) restoreRelativeFocus(focus);
+    else clampPan();
     applyTransform({ animate });
+    requestFullImage();
 }
 
 function clientPointInStage(clientX, clientY) {
@@ -279,23 +323,50 @@ function updateFlagControls() {
     }
 }
 
-function renderStrip() {
-    const host = document.getElementById('loupe-strip');
-    const loaded = images();
-    host.innerHTML = loaded.map((img, i) => {
+function stripMarkup() {
+    return images().map((img, i) => {
         if (!img) return '';
-        return `<button class="loupe-thumb ${i === index ? 'cur' : ''}" data-index="${i}" aria-label="Photo ${i + 1}">`
+        const glyph = flagGlyph(img.flag || 'unflagged');
+        return `<button class="loupe-thumb ${i === index ? 'cur' : ''}" data-index="${i}" data-id="${esc(img.id)}" aria-label="Photo ${i + 1}"${i === index ? ' aria-current="true"' : ''}>`
             + `<img loading="lazy" decoding="async" src="${esc(img.thumb_url || thumbUrl('sm', img.id))}" alt="">`
+            + `<span class="loupe-thumb-flag" aria-hidden="true">${esc(glyph)}</span>`
             + '</button>';
     }).join('');
-    for (const item of host.querySelectorAll('.loupe-thumb[data-index]')) {
-        item.addEventListener('click', () => {
-            index = Number(item.dataset.index);
-            render();
-        });
+}
+
+function renderStrip() {
+    const host = document.getElementById('loupe-strip');
+    const signature = images().map((img) => Number(img?.id) || 0).join(',');
+    if (signature !== stripSignature) {
+        host.innerHTML = stripMarkup();
+        stripSignature = signature;
+        previousStripIndex = index;
     }
-    const currentThumb = host.querySelector('.cur');
-    if (currentThumb) currentThumb.scrollIntoView({ block: 'nearest', inline: 'center' });
+    updateStrip();
+}
+
+function updateStripFlag(imageId) {
+    const item = document.querySelector(`#loupe-strip .loupe-thumb[data-id="${Number(imageId)}"]`);
+    const img = images().find((candidate) => Number(candidate?.id) === Number(imageId));
+    if (!item || !img) return;
+    item.querySelector('.loupe-thumb-flag').textContent = flagGlyph(img.flag || 'unflagged');
+}
+
+function updateStrip() {
+    const host = document.getElementById('loupe-strip');
+    const previous = host.querySelector(`.loupe-thumb[data-index="${previousStripIndex}"]`);
+    const next = host.querySelector(`.loupe-thumb[data-index="${index}"]`);
+    if (previous && previous !== next) {
+        previous.classList.remove('cur');
+        previous.removeAttribute('aria-current');
+    }
+    if (next) {
+        next.classList.add('cur');
+        next.setAttribute('aria-current', 'true');
+        next.scrollIntoView({ block: 'nearest', inline: 'center' });
+    }
+    previousStripIndex = index;
+    updateStripFlag(current()?.id);
 }
 
 function preloadNeighbors() {
@@ -303,6 +374,15 @@ function preloadNeighbors() {
         if (!neighbor) continue;
         const preload = new Image();
         preload.src = thumbUrl('md', neighbor.id);
+    }
+}
+
+function preloadLargeTier() {
+    if (!open || zoomMode !== 'fit') return;
+    for (const candidate of [images()[index - 1], current(), images()[index + 1]]) {
+        if (!candidate) continue;
+        const preload = new Image();
+        preload.src = thumbUrl('lg', candidate.id);
     }
 }
 
@@ -323,24 +403,35 @@ function render() {
         closeLoupe({ force: true });
         return;
     }
+    const stickyZoom = zoomMode !== 'fit';
+    const focus = stickyZoom ? relativeFocus() : null;
     renderToken += 1;
     fullImageLoadingId = null;
     const token = renderToken;
     const image = document.getElementById('loupe-img');
+    image.dataset.imageId = String(img.id);
     image.dataset.tier = 'md';
     image.onload = () => {
         if (token !== renderToken) return;
-        setImageMetrics();
+        setImageMetrics({ focus });
     };
     image.src = thumbUrl('md', img.id);
     const size = imageSizeFromMetadata(img, image);
     naturalWidth = size.width;
     naturalHeight = size.height;
-    zoomMode = 'fit';
-    centerFit({ animate: false });
+    if (stickyZoom) {
+        fitScale = computeFitScale();
+        scale = Math.max(fitScale, Math.min(MAX_SCALE, scale));
+        restoreRelativeFocus(focus);
+        applyTransform();
+        requestFullImage();
+    } else {
+        centerFit({ animate: false });
+    }
     updateChrome();
     renderStrip();
     preloadNeighbors();
+    preloadLargeTier();
     maybeRequestMore();
 }
 
@@ -389,10 +480,8 @@ export function openLoupe(target = 0) {
     const startIndex = typeof target === 'object' ? Number(target.index || 0) : Number(target);
     const id = typeof target === 'object' ? Number(target.id) : null;
     const resolvedIndex = id ? list.findIndex((img) => Number(img?.id) === id) : -1;
-    returnCell = id
-        ? document.querySelector(`.cell[data-id="${id}"]`)
-        : document.querySelector(`.cell[data-idx="${startIndex}"]`);
     index = Math.max(0, Math.min(list.length - 1, resolvedIndex >= 0 ? resolvedIndex : startIndex));
+    centerFit({ animate: false });
     open = true;
     setLightMode('normal');
     setActiveLens('loupe');
@@ -402,15 +491,8 @@ export function openLoupe(target = 0) {
 
 export function closeLoupe(options = {}) {
     if (!open) return;
-    if (!options.force && lightMode !== 'normal') {
-        setLightMode(lightMode === 'lights-out' ? 'dim' : 'normal');
-        return;
-    }
-    if (!options.force && zoomMode !== 'fit') {
-        centerFit();
-        return;
-    }
     setLightMode('normal');
+    centerFit({ animate: false });
     setActiveLens(returnLens === 'loupe' ? 'grid' : returnLens);
 }
 
@@ -424,6 +506,7 @@ export function mountLoupe() {
 }
 
 export function unmountLoupe() {
+    const endedImageId = Number(current()?.id);
     open = false;
     sessionImages = null;
     imageWaiters = [];
@@ -431,10 +514,15 @@ export function unmountLoupe() {
     root.hidden = true;
     document.getElementById('view-loupe').classList.remove('active');
     setLightMode('normal');
-    if (returnCell) {
-        const target = returnCell;
-        requestAnimationFrame(() => target.focus({ preventScroll: true }));
-    }
+    stripSignature = '';
+    previousStripIndex = -1;
+    requestAnimationFrame(() => {
+        const target = document.querySelector(`.cell[data-id="${endedImageId}"]`)
+            || document.querySelector(`[data-image-id="${endedImageId}"]`);
+        if (!target) return;
+        target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        target.focus({ preventScroll: true });
+    });
 }
 
 export function loupeOpen() {
@@ -450,6 +538,38 @@ export async function navLoupe(delta) {
     if (!available) return;
     index = targetIndex;
     render();
+}
+
+export async function navLoupeTo(targetIndex) {
+    if (!open || !images().length) return;
+    const bounded = Math.max(0, Math.min(images().length - 1, Number(targetIndex)));
+    if (bounded === index) return;
+    index = bounded;
+    render();
+}
+
+export function loupeImageId() {
+    return Number(current()?.id) || null;
+}
+
+export function fitLoupe() {
+    if (open) centerFit();
+}
+
+export function zoomLoupeBy(direction) {
+    if (!open) return;
+    const rect = stageRect();
+    const base = zoomMode === 'fit' ? fitScale : scale;
+    zoomTo(base * (ZOOM_STEP ** Number(direction)), rect.left + rect.width / 2, rect.top + rect.height / 2);
+}
+
+export function panLoupe(dx, dy) {
+    if (!open || zoomMode === 'fit') return false;
+    panX += Number(dx) * KEYBOARD_PAN_STEP;
+    panY += Number(dy) * KEYBOARD_PAN_STEP;
+    clampPan();
+    applyTransform();
+    return true;
 }
 
 function setLightMode(next) {
@@ -572,10 +692,6 @@ function ensureLoupeChrome() {
 function bindPointer() {
     const stage = document.getElementById('loupe-stage');
     stage.addEventListener('click', (event) => {
-        if (suppressNextClick) {
-            suppressNextClick = false;
-            return;
-        }
         if (dragState?.moved) {
             dragState = null;
             updateCursor();
@@ -583,11 +699,6 @@ function bindPointer() {
         }
         if (!eventHitsImage(event)) return;
         toggleFitOneToOne(event);
-    });
-    stage.addEventListener('dblclick', (event) => {
-        if (!eventHitsImage(event)) return;
-        event.preventDefault();
-        centerFit();
     });
     stage.addEventListener('wheel', (event) => {
         if (!event.target.closest('#loupe-img') && zoomMode === 'fit') return;
@@ -622,14 +733,7 @@ function bindPointer() {
     });
     stage.addEventListener('pointerup', (event) => {
         if (!dragState || dragState.pointerId !== event.pointerId) return;
-        const wasClick = !dragState.moved;
         dragState.dragging = false;
-        if (wasClick && eventHitsImage(event)) {
-            suppressNextClick = true;
-            centerFit();
-            dragState = null;
-            return;
-        }
         updateCursor();
     });
     stage.addEventListener('pointercancel', () => {
@@ -654,6 +758,12 @@ export function initLoupe() {
     ensureLoupeChrome();
     bindPointer();
     bindKeyboard();
+    document.getElementById('loupe-strip').addEventListener('click', (event) => {
+        const item = event.target.closest('.loupe-thumb[data-index]');
+        if (!item) return;
+        index = Number(item.dataset.index);
+        render();
+    });
     on('loupe:open', ({
         id, index: startIndex, images: sourceImages, returnLens: sourceLens,
     }) => openLoupe({
@@ -684,6 +794,7 @@ export function initLoupe() {
     on('flags', ({ imageIds } = {}) => {
         for (const id of imageIds || []) {
             const img = byId.get(Number(id));
+            updateStripFlag(id);
             if (img && current() && Number(img.id) === Number(current().id)) updateChrome();
         }
     });
@@ -691,6 +802,10 @@ export function initLoupe() {
         resolveImageWaiters();
         if (!open || !isGridScope()) return;
         if (index >= images().length) index = Math.max(0, images().length - 1);
+        if (Number(document.getElementById('loupe-img').dataset.imageId) !== Number(current()?.id)) {
+            render();
+            return;
+        }
         updateChrome();
         renderStrip();
     });

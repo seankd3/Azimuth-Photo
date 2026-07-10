@@ -18,6 +18,14 @@ const REPLACEMENT_PROBE_CONCURRENCY = 4;
 const REPLACEMENT_PRELOAD_TIMEOUT_MS = 120;
 const RECENT_EXCLUDE_LIMIT = 48;
 const HISTORY_LIMIT = 20;
+const WINNER_HOLD_MS = 400;
+
+const STRATEGY_TIPS = {
+    diverse: 'Diverse — spreads picks across visually different photos',
+    random: 'Random — gives every photo an even chance',
+    explore: 'Explore — prioritizes photos with the fewest comparisons',
+    compete: 'Compete — groups photos with similar ratings',
+};
 
 const GRID_SIZES = {
     '2x2': { columns: 2, rows: 2, count: 4 },
@@ -88,7 +96,9 @@ function renderModes() {
     }
     document.getElementById('refine-size').value = gridSize;
     document.getElementById('refine-size').disabled = mode === 'duel';
-    document.getElementById('refine-strategy').value = strategy;
+    const strategySelect = document.getElementById('refine-strategy');
+    strategySelect.value = strategy;
+    strategySelect.dataset.tip = STRATEGY_TIPS[strategy];
 }
 
 function renderUndoState() {
@@ -154,10 +164,12 @@ function renderSet() {
     }
     if (selectedIndex >= currentSet.length) selectedIndex = currentSet.length - 1;
     stage.innerHTML = currentSet.map((img, index) => {
-        const key = mode === 'duel' ? (index === 0 ? '←' : '→') : String(index + 1);
+        const key = mode === 'duel'
+            ? (index === 0 ? '←' : '→')
+            : (index < 9 ? String(index + 1) : (index === 9 ? '0' : ''));
         const selected = index === selectedIndex ? ' selected' : '';
         return `<button class="ref-card${selected}" data-id="${img.id}" data-index="${index}" aria-label="Pick ${esc(img.filename || img.id)}">`
-            + `<img src="${esc(imageUrl(img))}" loading="lazy" decoding="async" alt="${esc(img.filename || '')}"><span class="ref-key">${key}</span></button>`;
+            + `<img src="${esc(imageUrl(img))}" loading="lazy" decoding="async" alt="${esc(img.filename || '')}">${key ? `<span class="ref-key">${key}</span>` : ''}</button>`;
     }).join('');
     setImagesLoadedHandlers();
 }
@@ -220,7 +232,7 @@ async function fetchImages(count, excludeIds = []) {
         strategy,
         gridElo(),
     );
-    renderSemanticPairing(data && data.pairing === 'semantic');
+    if (count === 2) renderSemanticPairing(data && data.pairing === 'semantic');
     return ((data && data.images) || []).map(normalizeImage).filter(Boolean);
 }
 
@@ -401,6 +413,16 @@ async function replaceAt(index, token) {
     return swapCell(index, next);
 }
 
+function holdWinnerThenReplace(index, token) {
+    const card = document.querySelector(`#refine-stage .ref-card[data-index="${index}"]`);
+    card?.classList.add('winner-hold');
+    setTimeout(() => {
+        if (token !== generation) return;
+        card?.classList.remove('winner-hold');
+        replaceAt(index, token);
+    }, WINNER_HOLD_MS);
+}
+
 function enqueuePickSave(winnerId, loserIds) {
     const run = () => mosaicPick(winnerId, loserIds)
         .then((result) => ({ ok: Boolean(result && result.ok), result }))
@@ -484,7 +506,7 @@ async function applyRefinePick(winnerId) {
     const idx = currentSet.findIndex((img) => Number(img.id) === winner);
     if (idx < 0) return;
     const pickedCard = document.querySelector(`#refine-stage .ref-card[data-index="${idx}"]`);
-    if (pickedCard?.classList.contains('replacing')) return;
+    if (pickedCard?.classList.contains('replacing') || pickedCard?.classList.contains('winner-hold')) return;
     const loserIds = currentSet.filter((img) => Number(img.id) !== winner).map((img) => Number(img.id));
     if (!loserIds.length) return;
     const seq = ++actionSeq;
@@ -510,7 +532,10 @@ async function applyRefinePick(winnerId) {
     }
     const indices = replacementIndices(idx);
     const token = generation;
-    for (const index of indices) replaceAt(index, token);
+    for (const index of indices) {
+        if (mode === 'mosaic' && index === idx) holdWinnerThenReplace(index, token);
+        else replaceAt(index, token);
+    }
     selectedIndex = Math.min(idx, currentSet.length - 1);
     updateSelectedCell();
     fillReplacements();
@@ -569,6 +594,7 @@ export function mountRefine() {
     if (open) return;
     open = true;
     document.getElementById('view-refine').classList.add('active');
+    picks = 0;
     startedAt = Date.now();
     renderStats();
     resetSet();
@@ -647,8 +673,9 @@ export function pickByKey(key) {
         return true;
     }
     if (mode === 'mosaic') {
-        if (/^[1-4]$/.test(String(key))) {
-            const img = currentSet[Number(key) - 1];
+        if (/^[0-9]$/.test(String(key))) {
+            const index = key === '0' ? 9 : Number(key) - 1;
+            const img = currentSet[index];
             if (img) pickRefine(img.id);
             return true;
         }

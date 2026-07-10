@@ -94,6 +94,7 @@ let liveAbort = null;
 let liveSeq = 0;
 let live = { q: '', loading: false, data: null, error: false };
 let tokenSelected = false;
+let pendingDeep = null;
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -227,6 +228,7 @@ function open() {
 function close() {
     document.getElementById('scopebox').classList.remove('open');
     hot = -1;
+    pendingDeep = null;
     const input = document.getElementById('scope-input');
     input?.removeAttribute('aria-activedescendant');
     input?.setAttribute('aria-expanded', 'false');
@@ -328,7 +330,12 @@ function buildPhotoRows(term) {
     }
     if (live.q !== term || !live.data) return section;
     if (live.data.ai_unavailable) {
-        section.push({ note: 'filename search only — AI model not ready', icon: 'info' });
+        section.push({
+            note: live.data.fallback_reason === 'model_loading'
+                ? 'AI model still loading — showing filename matches for now'
+                : 'AI search is off — showing filename matches',
+            icon: 'info',
+        });
     }
     const images = (live.data.images || []).slice(0, LIVE_LIMIT);
     if (images.length) {
@@ -621,7 +628,7 @@ function buildEmptyRows() {
             meta: '',
             recentIndex: i,
             navRow: 100 + i,
-            run: () => applyScope(item.scope || {}),
+            run: () => applyScope(item.scope || {}, { merge: false }),
         })));
     }
     return result;
@@ -685,8 +692,9 @@ function render() {
                 + `<button data-orient="portrait" class="${scope.orientation === 'portrait' ? 'active' : ''}"><span class="rot90">${icon('image')}</span>Vertical</button>`
                 + '</div>';
         } else if (row.deepToggle) {
+            const deep = pendingDeep == null ? scope.deep : pendingDeep;
             html += '<div class="sd-tools">'
-                + `<button class="sd-chip ${scope.deep ? 'active' : ''}" data-deep-toggle="1" data-tip="${esc(DEEP_SEARCH_TIP)}" aria-pressed="${scope.deep ? 'true' : 'false'}">${icon('sparkles')} Deep</button>`
+                + `<button class="sd-chip ${deep ? 'active' : ''}" data-deep-toggle="1" data-tip="${esc(DEEP_SEARCH_TIP)}" aria-pressed="${deep ? 'true' : 'false'}">${icon('sparkles')} Deep</button>`
                 + '</div>';
         } else if (row.photoSkeleton) {
             html += skeletonPhotosHtml();
@@ -786,11 +794,13 @@ function run(index) {
     if (!commandMode && !document.getElementById('scopebox')?.classList.contains('open')) input.blur();
 }
 
-function applyScope(patch, { keepFocus = false } = {}) {
+function applyScope(patch, { keepFocus = false, merge = true } = {}) {
     const clean = { ...patch };
-    remember(clean);
-    setScope(clean);
-    document.getElementById('scope-input').value = '';
+    const next = merge ? { ...scope, ...clean } : clean;
+    remember(next);
+    setScope(clean, { merge });
+    const input = document.getElementById('scope-input');
+    input.value = '';
     if (keepFocus) {
         open();
         render();
@@ -802,23 +812,21 @@ function applyScope(patch, { keepFocus = false } = {}) {
 }
 
 function applySearch(term) {
-    applyScope({ q: term, deep: scope.deep });
+    applyScope({ q: term, deep: pendingDeep == null ? scope.deep : pendingDeep, sort: 'similarity' });
     switchLens('grid');
 }
 
 function toggleDeepSearch() {
-    const input = document.getElementById('scope-input');
-    const term = input.value.trim() || scope.q || '';
-    const next = !scope.deep;
-    if (term) patchScope({ q: term, deep: next });
-    else patchScope({ deep: false });
+    pendingDeep = !(pendingDeep == null ? scope.deep : pendingDeep);
     scheduleLiveSearch();
     open();
 }
 
 function openPhotoResult(term, photo, images) {
-    remember({ q: term });
-    setScope({ q: term });
+    const deep = pendingDeep == null ? scope.deep : pendingDeep;
+    const next = { ...scope, q: term, deep, sort: 'similarity' };
+    remember(next);
+    setScope({ q: term, deep, sort: 'similarity' }, { merge: true });
     switchLens('grid');
     document.getElementById('scope-input').value = '';
     close();
@@ -916,7 +924,11 @@ function scheduleLiveSearch() {
         const controller = new AbortController();
         liveAbort = controller;
         const params = new URLSearchParams({ q: term, limit: String(LIVE_LIMIT), offset: '0', sort: 'similarity' });
-        if (scope.deep) params.set('deep', '1');
+        if (pendingDeep == null ? scope.deep : pendingDeep) params.set('deep', '1');
+        if (scope.people) params.set('people', scope.people);
+        if (scope.tag) params.set('tag', scope.tag);
+        if (scope.camera) params.set('camera', scope.camera);
+        for (const folder of folderValues()) params.append('folder', folder);
         try {
             const data = await getRankings(params, { fetchOptions: { signal: controller.signal } });
             if (seq !== liveSeq || controller.signal.aborted) return;

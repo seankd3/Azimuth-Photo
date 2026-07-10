@@ -1,5 +1,5 @@
 import {
-    byId, clearSelection, emit, nonSearchFacetCount, on, scope, scopeActive, scopeParams, selection, setBestOfTotal, setImages, setRankingsMeta, setScope, viewState,
+    byId, clearFacet, clearSelection, emit, nonSearchFacetCount, on, scope, scopeActive, selection, setBestOfTotal, setImages, setRankingsMeta, setScope, viewState,
 } from './state.js';
 import { createStack, getCatalog, getScanStatus, getStack, thumbUrl, unstack } from './api.js';
 import { loadScopePage } from './scope_data.js';
@@ -9,7 +9,7 @@ import {
 import { openGridContextMenu } from './context_menu.js';
 import { icon } from '../icons.js';
 import {
-    appendChunk, configureGridWindow, ensureChunkLive, firstLiveChunk, invalidateHeights, reset as resetGridWindow,
+    appendChunk, configureGridWindow, ensureChunkLive, firstLiveChunk, invalidateHeights, prependChunk, reset as resetGridWindow,
 } from './grid_window.js';
 import { afterMotion } from './motion.js';
 import { showToast } from './toast.js';
@@ -21,6 +21,7 @@ let done = false;
 let generation = 0;
 let imageObserver = null;
 let sentinelObserver = null;
+let prependObserver = null;
 let mounted = false;
 let initialized = false;
 let resizeHandler = null;
@@ -33,6 +34,10 @@ let stackExpansionRequest = 0;
 let creatingStack = false;
 let emptyStateRequest = 0;
 let emptyScanTimer = 0;
+let windowStart = 0;
+let windowEnd = 0;
+let beforeDone = true;
+let loadToken = 0;
 const stackCache = new Map();
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
@@ -118,7 +123,7 @@ function closeExpandedStack() {
         trayEl.classList.add('closing');
         afterMotion('base', () => {
             if (trayEl.isConnected) trayEl.remove();
-            invalidateHeights(1);
+            invalidateHeights({ remeasureGhosts: true });
         });
     }
     const badge = document.querySelector(`.c-stack[data-stack-id="${stackId}"]`);
@@ -128,7 +133,7 @@ function closeExpandedStack() {
         badge.setAttribute('aria-label', badge.getAttribute('aria-label')?.replace(/^Collapse/, 'Expand') || 'Expand stack');
     }
     expandedStack = null;
-    invalidateHeights(1);
+    invalidateHeights({ remeasureGhosts: true });
     return true;
 }
 
@@ -195,7 +200,7 @@ async function expandStack(stackId, cell) {
         badge.setAttribute('data-tip', 'Collapse stack · S');
     }
     expandedStack = { stackId: id, trayEl: tray };
-    invalidateHeights(1);
+    invalidateHeights({ remeasureGhosts: true });
     return true;
 }
 
@@ -278,6 +283,15 @@ function renderEmptyState() {
     const showClearFilters = nonSearchFacetCount() > 0;
     const showClearScope = scopeActive() || viewState.bestOf;
     const request = ++emptyStateRequest;
+    if (scope.q) {
+        const deepNudge = scope.deep ? '' : '<p>Try Deep search for a more thorough visual search.</p>';
+        flow.innerHTML = '<div class="grid-empty">'
+            + `<h3>No matches for “${esc(scope.q)}”</h3>`
+            + deepNudge
+            + '<div class="grid-empty-actions"><button class="btn primary" id="grid-clear-query">Clear search</button></div></div>';
+        document.getElementById('grid-clear-query')?.addEventListener('click', () => clearFacet('q'));
+        return;
+    }
     flow.innerHTML = '<div class="grid-empty">'
         + '<h3>No photos in this view.</h3>'
         + '<p>Try widening this view or clearing filters.</p>'
@@ -292,21 +306,28 @@ function renderEmptyState() {
     hydrateFirstRunEmpty(request);
 }
 
-function renderError(message) {
+function renderError(message, retry = loadFirstPage) {
     document.getElementById('grid-error').innerHTML = '<div class="load-error"><h4>Couldn\'t load this view</h4>'
         + `<p>${esc(message || 'The archive did not respond.')}</p><button class="btn" id="grid-retry">Retry</button></div>`;
-    document.getElementById('grid-retry').addEventListener('click', () => loadFirstPage());
+    document.getElementById('grid-retry').addEventListener('click', retry);
 }
 
-async function loadPage() {
-    if (loading || done) return false;
+function watchWindowStart(chunkEl) {
+    if (!prependObserver || beforeDone || !chunkEl) return;
+    prependObserver.disconnect();
+    prependObserver.observe(chunkEl);
+}
+
+async function loadPage({ direction = 'after', start = null, jump = false } = {}) {
+    if (loading || (direction === 'after' && done)) return false;
     loading = true;
+    const token = ++loadToken;
     const seq = generation;
     const pageSize = 100;
-    const requestStart = offset;
-    let limit = pageSize;
+    const requestStart = start == null ? offset : Math.max(0, Number(start) || 0);
+    let limit = direction === 'before' ? Math.min(pageSize, windowStart - requestStart) : pageSize;
     if (viewState.bestOf && viewState.bestOfLimit != null) {
-        const remaining = viewState.bestOfLimit - offset;
+        const remaining = viewState.bestOfLimit - requestStart;
         if (remaining <= 0) {
             done = true;
             loading = false;
@@ -315,21 +336,20 @@ async function loadPage() {
         }
         limit = Math.min(pageSize, remaining);
     }
-    const params = scopeParams({ limit, offset });
-    const data = await loadScopePage({ limit, offset });
-    if (seq !== generation) {
-        loading = false;
+    const data = await loadScopePage({ limit, offset: requestStart });
+    if (seq !== generation || token !== loadToken) {
         return false;
     }
     loading = false;
     if (!data) {
-        renderError('Retry when the local service is ready.');
+        renderError('Retry when the local service is ready.', jump ? () => jumpToOffset(requestStart) : loadFirstPage);
+        if (jump) emit('grid:jump-loading', { loading: false });
         return false;
     }
     const rawIncoming = data.images || [];
     if (offset === 0 && viewState.bestOf) setBestOfTotal(data.visible_images);
     const cap = viewState.bestOf ? viewState.bestOfLimit : null;
-    const remaining = cap == null ? rawIncoming.length : Math.max(0, cap - offset);
+    const remaining = cap == null ? rawIncoming.length : Math.max(0, cap - requestStart);
     const incoming = cap == null ? rawIncoming : rawIncoming.slice(0, remaining);
     const wasEmpty = viewState.images.length === 0;
     const next = viewState.images.slice();
@@ -337,18 +357,57 @@ async function loadPage() {
     incoming.forEach((img, i) => {
         next[requestStart + i] = img;
     });
-    offset += incoming.length;
-    done = data.source === 'similar' || rawIncoming.length < limit || (cap != null && offset >= cap);
+    if (direction === 'before') {
+        windowStart = requestStart;
+        beforeDone = requestStart === 0 || rawIncoming.length < limit;
+    } else {
+        offset = requestStart + incoming.length;
+        windowEnd = offset;
+        done = data.source === 'similar' || rawIncoming.length < limit || (cap != null && offset >= cap);
+    }
     setImages(next);
     if (wasEmpty) viewState.focusIndex = requestStart;
     if (wasEmpty) {
-        setRankingsMeta({ visibleImages: data.visible_images, sortQuality: data.sort_quality });
+        setRankingsMeta({
+            visibleImages: data.visible_images,
+            sortQuality: data.sort_quality,
+            searchMode: data.search_mode,
+            searchSources: data.search_sources,
+        });
     }
     document.getElementById('grid-error').innerHTML = '';
     document.getElementById('grid-end').hidden = !done || next.length === 0;
     if (next.length === 0 && done) renderEmptyState();
-    else render({ append: !wasEmpty, start: requestStart, images: incoming });
+    else {
+        const chunkEl = direction === 'before'
+            ? prependChunk(requestStart, incoming)
+            : (render({ append: !wasEmpty, start: requestStart, images: incoming }), ensureChunkLive(requestStart));
+        if (direction === 'before') watchWindowStart(chunkEl);
+        if (jump && chunkEl) {
+            viewState.focusIndex = requestStart;
+            chunkEl.scrollIntoView({ block: 'start', behavior: 'auto' });
+            setFocus(requestStart);
+            watchWindowStart(chunkEl);
+            emit('grid:jump-loading', { loading: false });
+        }
+    }
+    if (jump && !incoming.length) {
+        emit('grid:jump-loading', { loading: false });
+    }
     return incoming.length > 0;
+}
+
+async function loadPreviousPage() {
+    if (loading || beforeDone || windowStart <= 0) return false;
+    const requestStart = Math.max(0, windowStart - 100);
+    const existing = ensureChunkLive(requestStart);
+    if (existing) {
+        windowStart = Number(existing.dataset.start) || requestStart;
+        beforeDone = windowStart === 0;
+        watchWindowStart(existing);
+        return true;
+    }
+    return loadPage({ direction: 'before', start: requestStart });
 }
 
 export async function requestMorePhotos() {
@@ -359,9 +418,13 @@ export async function requestMorePhotos() {
 export function loadFirstPage() {
     if (!mounted) return;
     window.clearTimeout(emptyScanTimer);
+    prependObserver?.disconnect();
     generation += 1;
     viewState.generation = generation;
     offset = 0;
+    windowStart = 0;
+    windowEnd = 0;
+    beforeDone = true;
     done = false;
     loading = false;
     setImages([]);
@@ -375,18 +438,33 @@ export function loadFirstPage() {
 
 export function jumpToOffset(nextOffset = 0) {
     if (!mounted) return;
+    const target = Math.max(0, Number(nextOffset) || 0);
+    const existing = ensureChunkLive(target);
+    if (existing && viewState.images[target]) {
+        windowStart = Number(existing.dataset.start) || target;
+        windowEnd = windowStart + (Number(existing.dataset.count) || 0);
+        offset = windowEnd;
+        beforeDone = windowStart === 0;
+        done = false;
+        viewState.focusIndex = target;
+        setFocus(target);
+        watchWindowStart(existing);
+        return;
+    }
     generation += 1;
     viewState.generation = generation;
-    offset = Math.max(0, Number(nextOffset) || 0);
+    loadToken += 1;
+    offset = target;
+    windowStart = target;
+    windowEnd = target;
+    beforeDone = target === 0;
     done = false;
     loading = false;
-    setImages([]);
-    viewState.focusIndex = offset;
+    viewState.focusIndex = target;
     document.getElementById('grid-error').innerHTML = '';
     document.getElementById('grid-end').hidden = true;
-    renderSkeletons();
-    document.getElementById('canvas').scrollTo({ top: 0, behavior: 'auto' });
-    loadPage();
+    emit('grid:jump-loading', { loading: true });
+    loadPage({ start: target, jump: true });
 }
 
 export function setFocus(index) {
@@ -410,6 +488,7 @@ export function setFocus(index) {
     current.classList.add('kb-focus');
     current.tabIndex = 0;
     current.focus({ preventScroll: true });
+    current.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'auto' });
     previousFocusedCell = current;
     emit('focus', { image: viewState.images[viewState.focusIndex] || null, index: viewState.focusIndex });
 }
@@ -508,6 +587,9 @@ export function initGrid() {
     if (initialized) return;
     initialized = true;
     configureGridWindow({ renderCell: cellHtml, observeImages, unobserveImages });
+    prependObserver = new IntersectionObserver((entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) loadPreviousPage();
+    }, { root: document.getElementById('canvas'), rootMargin: '900px 0px 900px 0px' });
     const flow = document.getElementById('grid-flow');
     flow.addEventListener('click', handleClick);
     document.addEventListener('pointerdown', (event) => {
@@ -551,14 +633,14 @@ export function initGrid() {
         clearTimeout(resizeTimer);
         resizeTimer = setTimeout(() => {
             if (!mounted) return;
-            invalidateHeights();
+            invalidateHeights({ remeasureGhosts: true });
             setFocus(viewState.focusIndex);
         }, 120);
     };
     window.addEventListener('resize', resizeHandler);
     on('thumbsize', (size) => {
         const next = Number(size) || lastThumbSize;
-        invalidateHeights(next / lastThumbSize);
+        requestAnimationFrame(() => invalidateHeights({ remeasureGhosts: true }));
         lastThumbSize = next;
     });
 }
@@ -605,6 +687,15 @@ export function focusColumns() {
     return columns();
 }
 
+export function focusPageStep() {
+    const canvas = document.getElementById('canvas');
+    const cell = ensureChunkLive(viewState.focusIndex)?.querySelector('.cell[data-id]');
+    const gap = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--cell-gap')) || 0;
+    const rowHeight = cell?.getBoundingClientRect().height || viewState.thumbSize || 1;
+    const rows = Math.max(1, Math.floor((canvas?.clientHeight || rowHeight) / Math.max(1, rowHeight + gap)));
+    return rows * columns();
+}
+
 export function mountGrid() {
     mounted = true;
     document.getElementById('view-grid').classList.add('active');
@@ -614,6 +705,7 @@ export function mountGrid() {
     sentinelObserver.observe(document.getElementById('grid-sentinel'));
     if (viewState.images.length || offset > 0) {
         observeImages(document.getElementById('grid-flow'));
+        watchWindowStart(ensureChunkLive(windowStart));
         requestAnimationFrame(() => {
             document.getElementById('canvas').scrollTo({ top: savedScrollTop, behavior: 'auto' });
             setFocus(viewState.focusIndex);
@@ -632,6 +724,7 @@ export function unmountGrid() {
     closeExpandedStack();
     resetImageObserver();
     if (sentinelObserver) sentinelObserver.disconnect();
+    if (prependObserver) prependObserver.disconnect();
     sentinelObserver = null;
     document.getElementById('view-grid').classList.remove('active');
 }

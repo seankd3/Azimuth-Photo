@@ -8,11 +8,13 @@ let generation = 0;
 let dragging = false;
 let pendingY = null;
 let lastKey = '';
-let jumpTimer = null;
 let releaseJump = null;
 let framePending = false;
 let scrollFramePending = false;
 let currentKey = '';
+let loadFailed = false;
+let jumpLocked = false;
+let suppressClick = false;
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const MONTH_LABEL_PX = 14;
@@ -143,10 +145,19 @@ function render() {
         scrub.innerHTML = '<div class="ds-rail"><div class="ds-track"><div class="ds-current"></div></div><div class="ds-labels"></div></div><div id="date-scrub-bubble"></div>';
         document.getElementById('center').appendChild(scrub);
     }
-    const on = active() && months.length > 0;
+    const on = active() && (months.length > 0 || loadFailed);
     scrub.classList.toggle('on', on);
+    scrub.classList.toggle('locked', jumpLocked);
+    scrub.setAttribute('aria-busy', jumpLocked ? 'true' : 'false');
     setGutter(on);
     if (!on) return;
+    if (loadFailed) {
+        scrub.innerHTML = '<button class="ds-retry" type="button">Dates unavailable · Retry</button>';
+        return;
+    }
+    if (!scrub.querySelector('.ds-rail')) {
+        scrub.innerHTML = '<div class="ds-rail"><div class="ds-track"><div class="ds-current"></div></div><div class="ds-labels"></div></div><div id="date-scrub-bubble"></div>';
+    }
     const track = scrub.querySelector('.ds-track');
     const labels = scrub.querySelector('.ds-labels');
     const markers = markerItems(scrub);
@@ -162,6 +173,7 @@ function render() {
 async function load() {
     const seq = ++generation;
     months = [];
+    loadFailed = false;
     currentKey = '';
     lastKey = '';
     render();
@@ -174,10 +186,16 @@ async function load() {
     } catch {
         if (seq !== generation) return;
         months = [];
+        loadFailed = true;
         render();
         return;
     }
-    if (seq !== generation || !data) return;
+    if (seq !== generation) return;
+    if (!data) {
+        loadFailed = true;
+        render();
+        return;
+    }
     let offset = 0;
     const datedMonths = sortAscending() ? [...(data.months || [])].reverse() : (data.months || []);
     months = datedMonths.map((month) => {
@@ -225,7 +243,6 @@ function preview(month, { commitOnRelease = false } = {}) {
     if (commitOnRelease) releaseJump = month;
     if (month.key !== lastKey) {
         lastKey = month.key;
-        clearTimeout(jumpTimer);
         setCurrentMonth(month);
     }
     const bubble = document.getElementById('date-scrub-bubble');
@@ -252,7 +269,7 @@ function hoverTo(clientY) {
 export function initDateScrubber() {
     document.getElementById('center').addEventListener('pointerdown', (event) => {
         const scrub = event.target.closest('#date-scrubber');
-        if (!scrub || !active() || !months.length) return;
+        if (!scrub || jumpLocked || !active() || !months.length) return;
         dragging = true;
         lastKey = '';
         scrub.classList.add('dragging');
@@ -276,8 +293,10 @@ export function initDateScrubber() {
         });
     });
     const stop = () => {
+        const committed = Boolean(releaseJump);
         if (releaseJump) {
-            clearTimeout(jumpTimer);
+            suppressClick = true;
+            window.setTimeout(() => { suppressClick = false; }, 0);
             jumpToOffset(releaseJump.offset);
             releaseJump = null;
         }
@@ -285,7 +304,7 @@ export function initDateScrubber() {
         framePending = false;
         document.getElementById('date-scrubber')?.classList.remove('dragging');
         document.getElementById('date-scrub-bubble')?.classList.remove('on');
-        updateViewportMonth();
+        if (!committed) updateViewportMonth();
     };
     document.getElementById('center').addEventListener('pointerup', stop);
     document.getElementById('center').addEventListener('pointercancel', stop);
@@ -296,12 +315,20 @@ export function initDateScrubber() {
         }
     });
     document.getElementById('center').addEventListener('click', (event) => {
+        if (event.target.closest('#date-scrubber .ds-retry')) {
+            load();
+            return;
+        }
+        if (suppressClick) {
+            suppressClick = false;
+            return;
+        }
+        if (jumpLocked) return;
         const button = event.target.closest('#date-scrubber button[data-month]');
         if (!button) return;
         const month = months.find((item) => item.key === button.dataset.month);
         if (!month) return;
         lastKey = month.key;
-        clearTimeout(jumpTimer);
         preview(month);
         jumpToOffset(month.offset);
         const bubble = document.getElementById('date-scrub-bubble');
@@ -311,6 +338,10 @@ export function initDateScrubber() {
     });
     on('scope', load);
     on('lens', load);
+    on('grid:jump-loading', ({ loading } = {}) => {
+        jumpLocked = Boolean(loading);
+        render();
+    });
     document.getElementById('canvas')?.addEventListener('scroll', scheduleViewportMonthUpdate, { passive: true });
     load();
 }

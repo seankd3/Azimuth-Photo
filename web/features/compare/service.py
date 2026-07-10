@@ -1,6 +1,7 @@
 """Compare and mosaic cache/state helpers."""
 
 import asyncio
+import hashlib
 import time
 from collections.abc import Awaitable, Callable
 
@@ -10,7 +11,9 @@ import pairing
 import settings
 from core import query_constraints
 from core import responses as response_helpers
+from data.repositories.rankings import folder_cache_value
 from features.compare import semantic_pairing
+from features.library import taste as taste_service
 
 
 _pairing_cache = {"data": None, "valid": False}
@@ -190,6 +193,7 @@ def _configured_schedule_cached_thumbnail_memory_warm(rows, size: str, *, limit:
 
 
 def _invalidate_rankings() -> None:
+    taste_service.invalidate_taste_cache()
     if _invalidate_rankings_cache is not None:
         _invalidate_rankings_cache()
 
@@ -198,14 +202,14 @@ def invalidate_interaction_response_cache() -> None:
     _interaction_response_cache.clear()
 
 
-async def get_pairing_images():
-    """Cached wrapper - invalidated by mosaic_pick and submit_comparison."""
-    if _pairing_cache["valid"] and _pairing_cache["data"] is not None:
-        return _pairing_cache["data"]
-    rows = await _configured(_get_active_images_for_pairing)()
-    _pairing_cache["data"] = rows
-    _pairing_cache["valid"] = True
-    return rows
+async def get_pairing_images(size: str):
+    """Return a bounded visible reservoir instead of materializing the archive."""
+    return await default_visible_pairing_candidates(
+        size,
+        limit=_MOSAIC_DIVERSE_WINDOW,
+        order="elo",
+        include_card_metadata=True,
+    )
 
 
 def invalidate_pairing_cache(*, matchups: bool = False) -> None:
@@ -245,9 +249,13 @@ async def get_past_matchups_for_candidate_ids(size: str, image_ids: list[int]):
     unique_ids = tuple(dict.fromkeys(int(image_id) for image_id in image_ids or [] if int(image_id) > 0))
     if len(unique_ids) < 2:
         return set()
+    id_digest = hashlib.blake2b(
+        ",".join(str(image_id) for image_id in unique_ids).encode("ascii"),
+        digest_size=12,
+    ).hexdigest()
     cache_key = (
         f"{_configured_db_signature()}:{_configured_cache_root()}:"
-        f"{size}:candidates:{len(unique_ids)}:{hash(unique_ids)}"
+        f"{size}:candidates:{len(unique_ids)}:{id_digest}"
     )
     cached = _visible_matchups_cache.get(cache_key)
     if cached is not None:
@@ -423,7 +431,7 @@ async def filtered_visible_ranked_candidates(
     cache_root = _configured_cache_root()
     cache_key = (
         f"filtered:{_configured_db_signature()}:{cache_root}:{size}:{max(1, int(limit))}:"
-        f"{sort}:{orientation}:{compared}:{int(min_stars or 0)}:{folder}:{flag}:"
+        f"{sort}:{orientation}:{compared}:{int(min_stars or 0)}:{folder_cache_value(folder)}:{flag}:"
         f"{date_taken}:{file_type}:{camera}:{lens}:{tag}"
     )
     now = time.monotonic()
@@ -1417,7 +1425,7 @@ async def mosaic_next_impl(
         if strategy == "top":
             images = await _configured(_get_top_images)(limit=50)
         else:
-            images = await get_pairing_images()
+            images = await get_pairing_images("sm")
         candidates = app_helpers.filter_compare_mosaic_candidates(
             images,
             exclude_ids=exclude_ids,
@@ -1537,7 +1545,7 @@ async def mosaic_next_impl(
         "ai_unavailable": search["ai_unavailable"],
         "fallback_reason": search.get("fallback_reason", ""),
         "candidate_source": candidate_source,
-        "pairing": pairing_mode,
+        "pairing": pairing_mode if count == 2 else "strategy",
         "counts_stale": counts_stale,
         "cache_hit": cache_hit,
         "reservoir_remaining": max(0, len(candidates) - len(result)),
@@ -1663,7 +1671,7 @@ async def compare_next_impl(
         if mode == "topn":
             images = await _configured(_get_top_images)(limit=50)
         else:
-            images = await get_pairing_images()
+            images = await get_pairing_images("md")
         image_dicts = app_helpers.filter_compare_mosaic_candidates(
             images,
             orientation=orientation,
@@ -1681,6 +1689,9 @@ async def compare_next_impl(
         filtered_total = len(image_dicts)
         image_dicts = await filter_visible_candidates(image_dicts, "md")
         visible_count = len(image_dicts)
+        past_task = asyncio.create_task(
+            get_past_matchups_for_candidate_ids("md", [row["id"] for row in image_dicts])
+        )
 
     if len(image_dicts) < 2:
         stats = stats or response_helpers.interaction_pool_stats(filtered_total, visible_count)

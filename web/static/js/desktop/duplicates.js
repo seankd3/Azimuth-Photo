@@ -1,5 +1,5 @@
 import {
-    getStackRebuildStatus, listStacks, rebuildStacks, restoreImages, setStackRepresentative,
+    createStack, getStackRebuildStatus, listStacks, rebuildStacks, restoreImages, setStackRepresentative,
     thumbUrl, trashImages, unstack, writeFlags,
 } from './api.js';
 import { applyFlags } from './selection.js';
@@ -705,6 +705,22 @@ function findStack(stackId) {
     return stacks.find((stack) => Number(stack.id) === id);
 }
 
+function removeFinishedStack(stackId) {
+    const id = Number(stackId);
+    const finished = findStack(id);
+    const previousLength = stacks.length;
+    stacks = stacks.filter((stack) => Number(stack.id) !== id);
+    if (stacks.length === previousLength) return;
+    stackTotal = Math.max(0, stackTotal - 1);
+    if (stackCounts.all != null) stackCounts.all = Math.max(0, stackCounts.all - 1);
+    if (finished?.kind && stackCounts[finished.kind] != null) {
+        stackCounts[finished.kind] = Math.max(0, stackCounts[finished.kind] - 1);
+    }
+    invalidateBulkNonCoverCount();
+    renderStacks();
+    refreshBulkNonCoverCount();
+}
+
 async function setCover(stackId, imageId) {
     const stack = findStack(stackId);
     if (!stack) return;
@@ -727,10 +743,16 @@ async function unstackOne(stackId) {
         showToast('Couldn’t unstack photos');
         return;
     }
-    stacks = stacks.filter((stack) => Number(stack.id) !== Number(stackId));
-    stackTotal = Math.max(0, stackTotal - 1);
-    showToast('Stack removed');
-    renderStacks();
+    const imageIds = members.map((image) => Number(image.id)).filter((id) => id > 0);
+    const coverId = representativeId(stack);
+    removeFinishedStack(stackId);
+    showToast('Stack removed', {
+        undo: async () => {
+            const restored = await createStack(imageIds, coverId);
+            if (restored && open && mode === 'stacks') await reloadStacks();
+            showToast(restored ? 'Stack restored' : 'Couldn’t restore stack');
+        },
+    });
 }
 
 async function keepCoverForStack(stackId) {
@@ -744,15 +766,7 @@ async function keepCoverForStack(stackId) {
         return;
     }
     emit('trash:changed', { imageIds });
-    const keep = stackMembers(stack).find((image) => Number(image.id) === repId);
-    if (keep) {
-        stack.members = [keep];
-        stack.members_preview = [keep];
-        stack.member_count = 1;
-    }
-    invalidateBulkNonCoverCount();
-    renderStacks();
-    refreshBulkNonCoverCount();
+    removeFinishedStack(stackId);
     showToast(`Trashed ${fmt(imageIds.length)} stack member${imageIds.length === 1 ? '' : 's'}`, {
         undo: async () => {
             const restored = await restoreImages(imageIds);
@@ -920,7 +934,11 @@ function ensureView() {
         const rejectStackButton = event.target.closest('[data-stack-reject]');
         if (rejectStackButton) {
             const stack = findStack(rejectStackButton.dataset.stackReject);
-            if (stack) keepCoverRejectRest(stackMembers(stack), representativeId(stack));
+            if (stack) {
+                keepCoverRejectRest(stackMembers(stack), representativeId(stack)).then((kept) => {
+                    if (kept) removeFinishedStack(stack.id);
+                });
+            }
             return;
         }
         const unstackButton = event.target.closest('[data-stack-unstack]');

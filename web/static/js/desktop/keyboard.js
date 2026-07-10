@@ -1,9 +1,13 @@
-import { clearSelection, selection } from './state.js';
+import { clearSelection, selection, selectionChanged } from './state.js';
 import { focusOmnibox, openCommandPalette } from './omnibox.js';
-import { createStackFromSelection, moveFocus, focusColumns, currentFocusedImage, toggleFocusedStack } from './grid.js';
+import {
+    createStackFromSelection, moveFocus, focusColumns, focusPageStep, currentFocusedImage,
+    setFocus, toggleFocusedStack,
+} from './grid.js';
 import { applyFlags, selectLoadedImages, toggleFocusedSelection } from './selection.js';
 import {
-    closeLoupe, flagLoupeOrFocused, loupeOpen, navLoupe, openLoupe, toggleLoupeInfo, toggleLoupeLights,
+    closeLoupe, fitLoupe, flagLoupeOrFocused, loupeImageId, loupeOpen, navLoupe, navLoupeTo,
+    openLoupe, panLoupe, toggleLoupeInfo, toggleLoupeLights, zoomLoupeBy,
 } from './loupe.js';
 import {
     closeRefine, refineOpen, openRefine, pickByKey, undoRefine,
@@ -131,6 +135,15 @@ function focusStackPhoto(delta) {
     return true;
 }
 
+function flagFocusedStackPhoto(flag) {
+    const photo = document.activeElement?.closest?.('.stack-photo')
+        || activeStackRow()?.querySelector('.stack-photo.is-cover, .stack-photo');
+    const button = photo?.querySelector(`[data-flag="${flag}"][data-id]`);
+    if (!button || button.disabled) return false;
+    button.click();
+    return true;
+}
+
 function clickAndFocusNextStack(button, row) {
     if (!button || button.disabled) return false;
     const rows = stackRows();
@@ -150,23 +163,21 @@ function handleStackKey(event) {
     if (key === 'g') {
         closeDuplicates();
     } else if (event.key === 'ArrowDown') {
-        moveStackFocus(1);
+        if (!moveStackFocus(1)) return false;
     } else if (event.key === 'ArrowUp') {
-        moveStackFocus(-1);
+        if (!moveStackFocus(-1)) return false;
     } else if (event.key === 'ArrowRight') {
-        focusStackPhoto(1);
+        if (!focusStackPhoto(1)) return false;
     } else if (event.key === 'ArrowLeft') {
-        focusStackPhoto(-1);
+        if (!focusStackPhoto(-1)) return false;
     } else if (key === 'k' || event.key === 'Enter') {
         const row = activeStackRow();
         if (!clickAndFocusNextStack(row?.querySelector('[data-stack-keep]'), row)) return false;
     } else if (key === 'u') {
         const row = activeStackRow();
         if (!clickAndFocusNextStack(row?.querySelector('[data-stack-unstack]'), row)) return false;
-    } else if (key === 'x') {
-        const row = activeStackRow();
-        if (!row?.querySelector('[data-stack-reject]')) return false;
-        row.querySelector('[data-stack-reject]').click();
+    } else if (key === 'p' || key === 'x') {
+        if (!flagFocusedStackPhoto(key === 'p' ? 'picked' : 'rejected')) return false;
     } else if (key === 'c') {
         const photo = document.activeElement?.closest?.('.stack-photo') || activeStackRow()?.querySelector('.stack-photo.is-cover, .stack-photo');
         const button = photo?.querySelector('[data-set-cover][data-stack-id]');
@@ -296,14 +307,38 @@ export function initKeyboard() {
             }
             return;
         }
+        if (event.key.toLowerCase() === 'h' && !foregroundLayerOpen()) {
+            event.preventDefault();
+            switchLens('shared');
+            return;
+        }
         if (refineOpen() && pickByKey(event.key)) {
             event.preventDefault();
             return;
         }
         if (loupeOpen()) {
             const lk = event.key.toLowerCase();
-            if (event.key === 'ArrowLeft') navLoupe(-1);
+            if (event.shiftKey && event.key === 'ArrowLeft') panLoupe(1, 0);
+            else if (event.shiftKey && event.key === 'ArrowRight') panLoupe(-1, 0);
+            else if (event.shiftKey && event.key === 'ArrowUp') panLoupe(0, 1);
+            else if (event.shiftKey && event.key === 'ArrowDown') panLoupe(0, -1);
+            else if (event.key === 'ArrowLeft') navLoupe(-1);
             else if (event.key === 'ArrowRight') navLoupe(1);
+            else if (event.key === 'Home') navLoupeTo(0);
+            else if (event.key === 'End') navLoupeTo(Number.MAX_SAFE_INTEGER);
+            else if (event.key === '+' || event.key === '=') zoomLoupeBy(1);
+            else if (event.key === '-') zoomLoupeBy(-1);
+            else if (event.key === '0') fitLoupe();
+            else if (event.key === 'Delete' || event.key === 'Backspace') {
+                const imageId = loupeImageId();
+                if (!imageId) return;
+                clearSelection();
+                selection.add(imageId);
+                selectionChanged([imageId]);
+                trashSelectedImages();
+            }
+            else if (lk === '[') toggleLeftPanel();
+            else if (lk === ']') toggleRightPanel();
             else if (lk === 'g') closeLoupe({ force: true });
             else if (lk === 'l') toggleLoupeLights();
             else if (lk === 'i') toggleLoupeInfo();
@@ -314,8 +349,7 @@ export function initKeyboard() {
             event.preventDefault();
             return;
         }
-        if (duplicatesOpen()) {
-            handleStackKey(event);
+        if (duplicatesOpen() && handleStackKey(event)) {
             return;
         }
         if (trashOpen()) {
@@ -405,6 +439,18 @@ export function initKeyboard() {
         } else if (event.key === 'Enter') {
             const img = currentFocusedImage();
             if (img) openLoupe({ id: img.id, index: viewState.focusIndex });
+        } else if (viewState.activeLens === 'grid' && event.key === 'Home') {
+            event.preventDefault();
+            setFocus(0);
+        } else if (viewState.activeLens === 'grid' && event.key === 'End') {
+            event.preventDefault();
+            setFocus(viewState.images.length - 1);
+        } else if (viewState.activeLens === 'grid' && event.key === 'PageDown') {
+            event.preventDefault();
+            setFocus(viewState.focusIndex + focusPageStep());
+        } else if (viewState.activeLens === 'grid' && event.key === 'PageUp') {
+            event.preventDefault();
+            setFocus(viewState.focusIndex - focusPageStep());
         } else if (event.key === 'ArrowRight') {
             event.preventDefault();
             moveFocus(1);

@@ -16,6 +16,32 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 let thumbInputTimer = 0;
 let tasteAvailable = false;
 
+function searchSourceLabel(source) {
+    return ({ embedding: 'vision', caption: 'captions', captions: 'captions', metadata: 'metadata' })[source]
+        || String(source || '').replaceAll('_', ' ');
+}
+
+function renderSearchModeChip() {
+    if (!scope.q || !viewState.searchMode || !viewState.searchSources.length) return '';
+    const mode = viewState.searchMode.charAt(0).toUpperCase() + viewState.searchMode.slice(1);
+    const sources = viewState.searchSources.map(searchSourceLabel);
+    const label = `${mode} · ${sources.join(' + ')}`;
+    return `<span class="chip search-mode-chip" title="Search sources: ${esc(viewState.searchSources.join(', '))}">${esc(label)}</span>`;
+}
+
+function syncSimilarityOption() {
+    const select = document.getElementById('sort-select');
+    let option = select.querySelector('option[value="similarity"]');
+    if (scope.q && !option) {
+        option = document.createElement('option');
+        option.value = 'similarity';
+        option.textContent = 'Similarity';
+        select.prepend(option);
+    } else if (!scope.q && option) {
+        option.remove();
+    }
+}
+
 async function loadTasteStatus() {
     const data = await getRankings(new URLSearchParams({ sort: 'taste', limit: '0' })).catch(() => null);
     tasteAvailable = Boolean(data?.taste_available);
@@ -49,6 +75,8 @@ function renderChips() {
             + '</select></label>');
     }
     if (scope.q) chips.push(chipHtml('q', `“${scope.q}”`, `<span class="tk-glyph tk-spark">${icon('sparkles')}</span>`));
+    const searchMode = renderSearchModeChip();
+    if (searchMode) chips.push(searchMode);
     if (scope.q && scope.deep) chips.push(chipHtml('deep', 'Deep search', `<span class="tk-glyph tk-spark">${icon('sparkles')}</span>`, 'smart-chip', 'Slower, more thorough visual search'));
     if (scope.collectionId) {
         const glyph = scope.collectionSmart ? `<span class="tk-glyph tk-spark">${icon('sparkles')}</span>` : '';
@@ -106,6 +134,7 @@ function renderQuality() {
 }
 
 function render() {
+    syncSimilarityOption();
     renderChips();
     renderQuality();
     if (viewState.bestOf) {
@@ -132,7 +161,7 @@ function render() {
     sortDir.classList.toggle('active', ascending);
     sortDir.setAttribute('aria-pressed', ascending ? 'true' : 'false');
     sortDir.setAttribute('aria-label', ascending ? 'Sort ascending' : 'Sort descending');
-    sortDir.disabled = sortBase() === 'taste';
+    sortDir.disabled = sortBase() === 'taste' || sortBase() === 'similarity';
     document.getElementById('thumb-size').value = String(viewState.thumbSize);
 }
 

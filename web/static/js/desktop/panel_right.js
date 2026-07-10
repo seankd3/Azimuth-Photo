@@ -5,6 +5,7 @@ import { getCaptionStatus, getImageCaption, getImageExif, saveImageCaption } fro
 import { showToast } from './toast.js';
 
 const exifCache = new Map();
+const exifPromises = new Map();
 const captionCache = new Map();
 let currentImageId = null;
 let focusedImage = null;
@@ -159,6 +160,29 @@ function takenLabel(img) {
     return img.date_source && img.date_source !== 'exif' ? `${date} · approx` : date;
 }
 
+function exposureLine(img, exif = {}) {
+    const metadata = { ...img, ...exif };
+    const iso = metadata.iso ? `ISO ${String(metadata.iso).replace(/^ISO\s*/i, '')}` : '';
+    return [metadata.focal_length, metadata.aperture, metadata.shutter_speed, iso]
+        .filter(Boolean)
+        .join(' · ');
+}
+
+async function fetchExif(img) {
+    const imageId = Number(img.id);
+    if (exifCache.has(imageId)) return exifCache.get(imageId);
+    if (!exifPromises.has(imageId)) {
+        exifPromises.set(imageId, getImageExif(imageId)
+            .then((data) => {
+                const result = data || { exif: {} };
+                exifCache.set(imageId, result);
+                return result;
+            })
+            .finally(() => exifPromises.delete(imageId)));
+    }
+    return exifPromises.get(imageId);
+}
+
 function renderExifRows(host, exif) {
     const entries = Object.entries(exif || {})
         .filter(([, value]) => value != null && value !== '')
@@ -179,16 +203,13 @@ async function loadExif(img, details) {
     const rows = details.querySelector('.exif-rows');
     if (!rows || details.dataset.loaded === '1') return;
     rows.innerHTML = '<div class="panel-empty">Reading EXIF…</div>';
-    let data = exifCache.get(Number(img.id));
-    if (!data) {
-        try {
-            data = await getImageExif(img.id);
-            exifCache.set(Number(img.id), data || { exif: {} });
-        } catch {
-            if (Number(img.id) !== currentImageId) return;
-            renderExifError(rows, img, details);
-            return;
-        }
+    let data;
+    try {
+        data = await fetchExif(img);
+    } catch {
+        if (Number(img.id) !== currentImageId) return;
+        renderExifError(rows, img, details);
+        return;
     }
     if (Number(img.id) !== currentImageId) return;
     details.dataset.loaded = '1';
@@ -209,6 +230,8 @@ function renderMetadata(img) {
         return;
     }
     const size = img.width && img.height ? `${fmt(img.width)} × ${fmt(img.height)}` : '—';
+    const cachedExif = exifCache.get(Number(img.id));
+    const exposure = exposureLine(img, (cachedExif && cachedExif.exif) || {});
     host.innerHTML = '<div class="meta-rows">'
         + metaRow('File', img.filename)
         + metaRow('Taken', takenLabel(img))
@@ -216,12 +239,18 @@ function renderMetadata(img) {
         + metaRow('Lens', img.lens)
         + metaRow('Size', `${size}${img.file_size ? ` · ${bytes(img.file_size)}` : ''}`)
         + metaRow('Type', fileType(img))
+        + (exposure ? metaRow('Exposure', exposure) : '')
         + '</div>'
         + '<details class="more-exif"><summary>More</summary><div class="exif-rows"></div></details>';
     const details = host.querySelector('details');
     details.addEventListener('toggle', () => {
         if (details.open) loadExif(img, details);
     });
+    if (!cachedExif) {
+        fetchExif(img).then(() => {
+            if (Number(img.id) === currentImageId) renderMetadata(img);
+        }).catch(() => {});
+    }
 }
 
 function captionProgressHint() {

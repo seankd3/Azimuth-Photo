@@ -25,6 +25,7 @@ const SMART_QUERY_KEYS = [
 const SMART_ACTIVE_KEYS = SMART_QUERY_KEYS.filter((key) => key !== 'sort');
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const SORT_VARIANTS = {
+    similarity: { desc: 'similarity', asc: 'similarity' },
     elo: { desc: 'elo', asc: 'elo_asc' },
     taste: { desc: 'taste', asc: 'taste' },
     date_taken: { desc: 'date_taken', asc: 'date_taken_asc' },
@@ -103,6 +104,9 @@ export const viewState = {
     bestOfLimit: null,
     bestOfTotal: 0,
     bestOfPreviousSort: null,
+    searchPreviousSort: null,
+    searchMode: '',
+    searchSources: [],
     thumbSize: Number(localStorage.getItem(THUMB_KEY) || 176),
     leftCollapsed: localStorage.getItem(PANEL_KEY) === '1',
     rightCollapsed: localStorage.getItem(RIGHT_PANEL_KEY) === '1',
@@ -272,6 +276,7 @@ export function setScope(patch = {}, { merge = false, pushHash = true } = {}) {
         similarIds: [], similarSourceId: '', similarLimit: 100, similarLabel: '', collectionId: '', collectionName: '', collectionSmart: false,
         sort: scope.sort || 'elo', ...patch,
     };
+    preserveSearchSort(next);
     if (!Array.isArray(next.similarIds)) next.similarIds = [];
     next.similarLimit = [100, 250, 500].includes(Number(next.similarLimit)) ? Number(next.similarLimit) : 100;
     next.deep = Boolean(next.deep && next.q);
@@ -291,9 +296,23 @@ export function patchScope(patch, { pushHash = true } = {}) {
     if (Object.prototype.hasOwnProperty.call(patch, 'folder')) patch.folder = normalizeFolderValue(patch.folder);
     if (Object.prototype.hasOwnProperty.call(patch, 'deep')) patch.deep = Boolean(patch.deep);
     if (Object.prototype.hasOwnProperty.call(patch, 'q') && !patch.q) patch.deep = false;
+    preserveSearchSort(patch, { merge: true });
     Object.assign(scope, patch);
     emit('scope', scope);
     if (pushHash) writeHash();
+}
+
+function preserveSearchSort(next, { merge = false } = {}) {
+    const nextQ = merge && !Object.prototype.hasOwnProperty.call(next, 'q') ? scope.q : next.q;
+    const nextSort = merge && !Object.prototype.hasOwnProperty.call(next, 'sort') ? scope.sort : next.sort;
+    if (!scope.q && nextQ && nextSort === 'similarity') {
+        viewState.searchPreviousSort = scope.sort === 'similarity' ? 'elo' : (scope.sort || 'elo');
+    } else if (scope.q && !nextQ && viewState.searchPreviousSort) {
+        next.sort = viewState.searchPreviousSort;
+        viewState.searchPreviousSort = null;
+    }
+    viewState.searchMode = '';
+    viewState.searchSources = [];
 }
 
 function clearBestOfState() {
@@ -392,9 +411,11 @@ export function clearFacet(key) {
     patchScope(patch);
 }
 
-export function setRankingsMeta({ visibleImages, sortQuality }) {
+export function setRankingsMeta({ visibleImages, sortQuality, searchMode = '', searchSources = [] }) {
     viewState.visibleImages = Number(visibleImages) || 0;
     viewState.sortQuality = sortQuality || null;
+    viewState.searchMode = String(searchMode || '');
+    viewState.searchSources = Array.isArray(searchSources) ? searchSources.filter(Boolean).map(String) : [];
     emit('meta', viewState);
 }
 
