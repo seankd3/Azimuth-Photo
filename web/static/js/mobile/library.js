@@ -191,7 +191,7 @@ function render() {
     html += '<div class="ms-sec" style="padding-left:0;padding-right:0"><h3>Quick access</h3>'
         + `<button class="m-lib-row" data-q="picked"><span class="g">${icon('star')}</span><span class="body">Picked</span><span class="n num">${fmtInt(counts && counts.picked)}</span></button>`
         + `<button class="m-lib-row" data-q="rejected"><span class="g">${icon('x')}</span><span class="body">Rejected</span><span class="n num">${fmtInt(counts && counts.rejected)}</span></button>`
-        + `<button class="m-lib-row" data-q="all"><span class="g">${icon('clock-3')}</span><span class="body">All photos</span><span class="n num">${fmtInt(counts && counts.total)}</span></button></div>`;
+        + `<button class="m-lib-row" data-q="all"><span class="g">${icon('house')}</span><span class="body">All photos</span><span class="n num">${fmtInt(counts && counts.total)}</span></button></div>`;
 
     html += '<div class="ms-sec" style="padding-left:0;padding-right:0"><h3>Sources</h3>';
     const sources = (catalog && catalog.sources) || null;

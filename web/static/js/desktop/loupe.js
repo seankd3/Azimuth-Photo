@@ -6,6 +6,7 @@ import { applyFlags, beginFlagMutation, flagMutationIsLatest } from './selection
 import { openCollectionPicker } from './panel.js';
 import { requestMorePhotos } from './grid.js';
 import { showToast } from './toast.js';
+import { icon } from '../icons.js';
 
 const ZOOM_STEP = 1.15;
 const MAX_SCALE = 4;
@@ -56,16 +57,22 @@ function scopeTotal() {
     return viewState.visibleImages || images().length;
 }
 
+function flagLabel(flag) {
+    if (flag === 'picked') return 'Pick';
+    if (flag === 'rejected') return 'Reject';
+    return '';
+}
+
 function flagGlyph(flag) {
-    if (flag === 'picked') return '★';
-    if (flag === 'rejected') return '×';
+    if (flag === 'picked') return icon('star');
+    if (flag === 'rejected') return icon('x');
     return '';
 }
 
 function caption(img) {
     const name = img.filename || img.id;
     const elo = Math.round(Number(img.elo) || 0);
-    const flag = flagGlyph(img.flag || 'unflagged');
+    const flag = flagLabel(img.flag || 'unflagged');
     return [name, `${index + 1} / ${scopeTotal() || images().length}`, `Rating ${elo}`, flag]
         .filter(Boolean)
         .map(esc)
@@ -329,7 +336,7 @@ function stripMarkup() {
         const glyph = flagGlyph(img.flag || 'unflagged');
         return `<button class="loupe-thumb ${i === index ? 'cur' : ''}" data-index="${i}" data-id="${esc(img.id)}" aria-label="Photo ${i + 1}"${i === index ? ' aria-current="true"' : ''}>`
             + `<img loading="lazy" decoding="async" src="${esc(img.thumb_url || thumbUrl('sm', img.id))}" alt="">`
-            + `<span class="loupe-thumb-flag" aria-hidden="true">${esc(glyph)}</span>`
+            + `<span class="loupe-thumb-flag" aria-hidden="true">${glyph}</span>`
             + '</button>';
     }).join('');
 }
@@ -349,7 +356,7 @@ function updateStripFlag(imageId) {
     const item = document.querySelector(`#loupe-strip .loupe-thumb[data-id="${Number(imageId)}"]`);
     const img = images().find((candidate) => Number(candidate?.id) === Number(imageId));
     if (!item || !img) return;
-    item.querySelector('.loupe-thumb-flag').textContent = flagGlyph(img.flag || 'unflagged');
+    item.querySelector('.loupe-thumb-flag').innerHTML = flagGlyph(img.flag || 'unflagged');
 }
 
 function updateStrip() {

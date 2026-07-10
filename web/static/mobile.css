@@ -348,6 +348,7 @@ body.m-scoped #m-timeline { padding-top: var(--scopebar-h); }
 }
 .mcell .c-flag.picked { color: var(--accent); }
 .mcell .c-flag.rejected { color: var(--danger); }
+.mcell .c-flag .icon { width: 11px; height: 11px; }
 #m-timeline.m-anim { animation: mzoom .2s var(--ease); }
 @keyframes mzoom { from { opacity: .3; transform: scale(.965); } to { opacity: 1; transform: none; } }
 

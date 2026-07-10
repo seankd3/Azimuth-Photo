@@ -522,7 +522,7 @@ function renderKindChips() {
     host.innerHTML = STACK_KINDS.map(([id, value, label]) => {
         const count = id === 'all' ? stackCounts.all : stackCounts[value];
         const active = stackKind === value;
-        return `<button class="stack-kind-chip ${active ? 'active' : ''}" data-kind="${esc(value)}">${esc(label)} <span>${count == null ? '…' : fmt(count)}</span></button>`;
+        return `<button class="filter-pill ${active ? 'active' : ''}" data-kind="${esc(value)}">${esc(label)} <span>${count == null ? '…' : fmt(count)}</span></button>`;
     }).join('');
 }
 
@@ -546,7 +546,7 @@ function stackPhotoHtml(stack, image, diff) {
         + `<img src="${esc(thumbUrl('md', image.id))}" loading="lazy" decoding="async" alt="${esc(image.filename || '')}">`
         + `<span class="dupe-elo elo-chip">${Math.round(Number(image.elo) || 0)}</span>`
         + `<span class="dupe-flag ${flag}" title="${esc(flag)}">${flagGlyph(flag)}</span>`
-        + (isCover ? `<span class="stack-cover-badge">${icon('star')} Cover</span>` : '')
+        + (isCover ? `<span class="stack-cover-badge">${icon('image')} Cover</span>` : '')
         + '</button>'
         + '<div class="dupe-facts">'
         + `<div class="dupe-name ${diff.differs.filename ? 'diff' : 'muted'}" title="${esc(values.filename)}">${esc(values.filename)}</div>`
@@ -557,7 +557,7 @@ function stackPhotoHtml(stack, image, diff) {
         + metaRow('folder', 'Folder', values.folder, image, diff)
         + '</div>'
         + '<div class="dupe-actions stack-member-actions" aria-label="Stack photo actions">'
-        + (isCover ? '<span class="stack-cover-text">Cover</span>' : `<button data-set-cover="${image.id}" data-stack-id="${stack.id}" aria-label="Make cover" data-tip="Make cover">${icon('image')}</button>`)
+        + (isCover ? `<span class="stack-cover-text">${icon('image')} Cover</span>` : `<button data-set-cover="${image.id}" data-stack-id="${stack.id}" aria-label="Make cover" data-tip="Make cover">${icon('image')}</button>`)
         + `<button data-flag="picked" data-id="${image.id}" aria-label="Pick ${esc(image.filename || image.id)}">${icon('star')}</button>`
         + `<button data-flag="rejected" data-id="${image.id}" aria-label="Reject ${esc(image.filename || image.id)}">${icon('x')}</button>`
         + `<button data-flag="unflagged" data-id="${image.id}" aria-label="Clear flag for ${esc(image.filename || image.id)}">${icon('circle')}</button>`
