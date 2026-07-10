@@ -1357,6 +1357,15 @@ body.develop-active #canvas > .view:not(#view-develop) { display: none !importan
 .develop-popover label { display: grid; grid-template-columns: 72px minmax(0, 1fr); align-items: center; gap: 7px; }
 .develop-popover input,
 .develop-popover select { min-width: 0; height: 27px; padding: 0 6px; border: 1px solid var(--line); border-radius: var(--r-ctl); color: var(--text); font-size: 10px; background: #111317; }
+.develop-export-dialog,
+.develop-sync-dialog { width: 268px; }
+.develop-export-check,
+.develop-sync-check { display: flex !important; grid-template-columns: none !important; align-items: center; gap: 8px; min-height: 22px; color: var(--text-2); cursor: pointer; }
+.develop-export-check input,
+.develop-sync-check input { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); }
+.develop-sync-hint { margin: 0; color: var(--text-3); font-size: 10px; line-height: 1.4; }
+.develop-sync-groups { display: grid; gap: 4px; max-height: 220px; overflow: auto; padding: 2px 0; scrollbar-width: thin; }
+.develop-popover button.primary { border-color: var(--accent-lin); color: #fff; background: var(--accent); }
 
 /* Presets — slim, searchable left rail. */
 #develop-presets { display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; border-right: 1px solid var(--line); background: #17191d; }

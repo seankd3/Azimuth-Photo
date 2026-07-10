@@ -236,6 +236,76 @@ class DevelopBackendTests(unittest.TestCase):
         missing = self.client.get(f"/api/develop/{self.raw_id}/base.jpg")
         self.assertEqual(missing.status_code, 404)
 
+    def test_export_honors_resize_quality_and_sharpen_byte_sizes(self):
+        from features.develop import render as develop_render
+
+        export_root = Path(self.tempdir.name) / "exports"
+        library_root = Path(self.tempdir.name) / "library-exports"
+        old_export = develop_render.EXPORT_DIRECTORY
+        old_library = develop_render.LIBRARY_EXPORT_DIRECTORY
+        develop_render.EXPORT_DIRECTORY = export_root
+        develop_render.LIBRARY_EXPORT_DIRECTORY = library_root
+        linear = np.linspace(0.05, 0.95, 48 * 64 * 3, dtype=np.float32).reshape(48, 64, 3)
+        try:
+            with (
+                mock.patch.object(develop_render, "decode_full_resolution", return_value=linear.copy()),
+                mock.patch.object(
+                    develop_render,
+                    "_apply_pipeline_tiled",
+                    side_effect=lambda rgb, *args, **kwargs: np.asarray(rgb, dtype=np.float32).copy(),
+                ),
+            ):
+                low = self.client.post(
+                    f"/api/develop/{self.raw_id}/export",
+                    json={"format": "jpeg", "quality": 40, "max_px": 32, "sharpen": "none", "filename_pattern": "{stem}-q40"},
+                )
+                high = self.client.post(
+                    f"/api/develop/{self.raw_id}/export",
+                    json={
+                        "format": "jpeg",
+                        "quality": 95,
+                        "max_px": 64,
+                        "sharpen": "print_high",
+                        "filename_pattern": "{stem}-q95",
+                    },
+                )
+                batch = self.client.post(
+                    "/api/develop/export/batch",
+                    json={"image_ids": [self.raw_id], "format": "jpeg", "quality": 80, "sharpen": "screen_low"},
+                )
+            self.assertEqual(low.status_code, 200, low.text)
+            self.assertEqual(high.status_code, 200, high.text)
+            self.assertEqual(batch.status_code, 202, batch.text)
+            self.assertLess(len(low.content), len(high.content))
+            self.assertIn("sample-q40", low.headers.get("content-disposition", ""))
+            self.assertIn("sample-q95", high.headers.get("content-disposition", ""))
+            # Sharpened full-edge export should differ from the small unsharp one.
+            self.assertNotEqual(low.content, high.content)
+            status = self.client.get("/api/develop/export/batch/status")
+            self.assertEqual(status.status_code, 200)
+            self.assertIn(status.json()["state"], {"running", "complete", "idle"})
+        finally:
+            develop_render.EXPORT_DIRECTORY = old_export
+            develop_render.LIBRARY_EXPORT_DIRECTORY = old_library
+
+    def test_filename_pattern_and_output_sharpen_helpers(self):
+        from features.develop import render as develop_render
+
+        name = develop_render.format_export_filename(
+            raw_path="/tmp/RAWS/demo.dng",
+            image_id=42,
+            output_format="jpeg",
+            pattern="{stem}_{id}_{date}",
+        )
+        self.assertTrue(name.startswith("demo_42_"))
+        self.assertTrue(name.endswith(".jpg"))
+        rgb = np.linspace(0.1, 0.9, 16 * 16 * 3, dtype=np.float32).reshape(16, 16, 3)
+        sharpened = develop_render.apply_output_sharpen(rgb, "screen_high")
+        untouched = develop_render.apply_output_sharpen(rgb, "none")
+        self.assertEqual(untouched.shape, rgb.shape)
+        self.assertFalse(np.allclose(sharpened, rgb))
+        self.assertTrue(np.allclose(untouched, rgb))
+
 
 @pytest.mark.skipif(not RAW_ROOT.exists(), reason="expansion RAW library is not mounted")
 def test_real_dng_decode_has_linear_uint16_base():

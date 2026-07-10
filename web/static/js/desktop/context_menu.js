@@ -2,6 +2,7 @@ import { emit, on, selection } from './state.js';
 import { applyFlags } from './selection.js';
 import { openCollectionPicker } from './panel.js';
 import { downloadExport } from './export_menu.js';
+import { queueBatchExport } from './develop/export_dialog.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
 import { icon } from '../icons.js';
 import { showToast } from './toast.js';
@@ -71,6 +72,14 @@ async function mergeHdr(ids) {
     }
 }
 
+async function batchDevelopExport(ids) {
+    try {
+        await queueBatchExport(ids, { format: 'jpeg', quality: 92, sharpen: 'screen_standard' }, { showToast });
+    } catch (error) {
+        showToast(error?.message || 'Develop batch export could not start');
+    }
+}
+
 function render() {
     const count = target.ids.length;
     menu.innerHTML = '<div class="pm-group">'
@@ -84,6 +93,7 @@ function render() {
         + (count >= 3 ? `<button data-act="hdr-merge">${icon('layers')} Merge ${count} to HDR</button>` : '')
         + '</div><div class="pm-group">'
         + `<div class="pm-label">Export ${count > 1 ? 'selection' : 'photo'}</div>`
+        + `<button data-act="export-develop">${icon('sliders-horizontal')} Develop export${count > 1 ? ` · ${count}` : ''}</button>`
         + `<button data-act="export-csv">${icon('download')} CSV</button>`
         + `<button data-act="export-json">${icon('download')} JSON</button>`
         + `<button data-act="export-zip-original">${icon('download')} Download files · original</button>`
@@ -106,6 +116,7 @@ function run(action) {
     else if (action === 'loupe') emit('loupe:open', { id: target.id, index: target.index });
     else if (action === 'similar') emit('similar:find', { imageId: target.id });
     else if (action === 'hdr-merge') mergeHdr(ids);
+    else if (action === 'export-develop') batchDevelopExport(ids);
     else if (action === 'export-csv') exportIds(ids, 'csv');
     else if (action === 'export-json') exportIds(ids, 'json');
     else if (action.startsWith('export-zip-')) exportIds(ids, 'zip', action.replace('export-zip-', ''));

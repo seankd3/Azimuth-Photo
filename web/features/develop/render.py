@@ -1,7 +1,8 @@
 """Full-resolution RAW develop exports.
 
 Color operations live in :mod:`features.develop.pipeline`; this module only
-decodes, applies display geometry, encodes a selected file format, and keeps
+decodes, applies display geometry, optional post-resize output sharpening
+(§24 — export-only, no GL twin), encodes a selected file format, and keeps
 the blocking work in a small thread pool.  v1 deliberately does not render
 local masks, lens/CA correction, noise reduction, color grading, spot removal,
 or pano/HDR settings.
@@ -11,7 +12,10 @@ from __future__ import annotations
 
 import asyncio
 import math
+import re
+import shutil
 import struct
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -22,14 +26,19 @@ from PIL import Image
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 
-from .pipeline import apply_pipeline
+from . import ops_constants as C
+from .pipeline import apply_pipeline, gaussian_blur, luma
 
 
 EXPORT_DIRECTORY = Path("/mnt/expansion/PhotoArchiveCache/develop/exports")
+LIBRARY_EXPORT_DIRECTORY = Path("/mnt/expansion/PhotoArchiveCache/develop/library-exports")
+LIBRARY_SOURCE_NAME = "Develop Exports"
 # A native RAW render has a substantial working set; serialize exports rather
 # than allowing two 45 MP pipelines to contend for memory.
 _EXPORT_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="develop-export")
 PIPELINE_TILE_HEIGHT = 192
+DEFAULT_FILENAME_PATTERN = "{stem}-develop"
+_TOKEN_RE = re.compile(r"\{(stem|filename|id|ext|date)\}")
 
 
 class RenderError(RuntimeError):
@@ -143,6 +152,65 @@ def apply_geometry(rgb: np.ndarray, settings: Mapping[str, object], max_px: int 
     return rgb
 
 
+def resolve_output_sharpen(sharpen: str | None) -> tuple[float, float]:
+    """Return (amount, radius) for an export sharpening preset name."""
+    key = str(sharpen or "none").strip().lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "screen": "screen_standard",
+        "print": "print_standard",
+        "low": "screen_low",
+        "standard": "screen_standard",
+        "high": "screen_high",
+        "off": "none",
+        "": "none",
+    }
+    key = aliases.get(key, key)
+    if key not in C.OUTPUT_SHARPEN_PRESETS:
+        raise ValueError(
+            "sharpen must be one of: none, screen_low, screen_standard, screen_high, "
+            "print_low, print_standard, print_high"
+        )
+    return C.OUTPUT_SHARPEN_PRESETS[key]
+
+
+def apply_output_sharpen(rgb: np.ndarray, sharpen: str | None) -> np.ndarray:
+    """Post-resize unsharp mask on gamma-domain RGB (export-only, §24)."""
+    amount, radius = resolve_output_sharpen(sharpen)
+    if amount <= 0.0 or radius <= 0.0:
+        return rgb
+    lightness = luma(rgb)
+    blurred = gaussian_blur(lightness, radius)
+    residual = (lightness - blurred) * amount
+    return np.clip(rgb + residual[..., None], 0.0, 1.0).astype(np.float32)
+
+
+def format_export_filename(
+    *,
+    raw_path: str | Path,
+    image_id: int | None = None,
+    output_format: str = "jpeg",
+    pattern: str | None = None,
+) -> str:
+    """Expand a Lightroom-ish filename pattern into a download basename."""
+    path = Path(raw_path)
+    stem = path.stem or "developed"
+    filename = path.name or stem
+    ext = "jpg" if str(output_format).lower() == "jpeg" else "tiff"
+    tokens = {
+        "stem": stem,
+        "filename": filename,
+        "id": str(image_id or ""),
+        "ext": ext,
+        "date": time.strftime("%Y%m%d"),
+    }
+    template = (pattern or DEFAULT_FILENAME_PATTERN).strip() or DEFAULT_FILENAME_PATTERN
+    rendered = _TOKEN_RE.sub(lambda match: tokens.get(match.group(1), ""), template)
+    rendered = re.sub(r"[^\w.\-+=() ]+", "_", rendered).strip(" ._") or stem
+    if not rendered.lower().endswith(f".{ext}"):
+        rendered = f"{rendered}.{ext}"
+    return rendered
+
+
 def _write_tiff16(path: Path, rgb: np.ndarray) -> None:
     """Write an uncompressed little-endian RGB16 TIFF without another dependency."""
     array = np.ascontiguousarray(np.clip(rgb, 0.0, 1.0) * 65535.0 + 0.5, dtype="<u2")
@@ -235,6 +303,9 @@ def render_export(
     output_format: str,
     quality: int = 90,
     max_px: int | None = None,
+    sharpen: str | None = None,
+    filename_pattern: str | None = None,
+    image_id: int | None = None,
     asshot_temperature: float | None = None,
     asshot_tint: float | None = None,
     color_profile=None,
@@ -243,24 +314,136 @@ def render_export(
     normalized_format = output_format.lower()
     if normalized_format not in {"jpeg", "tiff16"}:
         raise ValueError("output_format must be 'jpeg' or 'tiff16'")
+    resolve_output_sharpen(sharpen)  # validate early
     EXPORT_DIRECTORY.mkdir(parents=True, exist_ok=True)
     linear = decode_full_resolution(raw_path)
     developed = _apply_pipeline_tiled(linear, settings, asshot_temperature, asshot_tint, color_profile)
     developed = apply_geometry(developed, settings, max_px=max_px)
-    suffix = ".jpg" if normalized_format == "jpeg" else ".tiff"
+    developed = apply_output_sharpen(developed, sharpen)
+    download_name = format_export_filename(
+        raw_path=raw_path,
+        image_id=image_id,
+        output_format=normalized_format,
+        pattern=filename_pattern,
+    )
+    suffix = Path(download_name).suffix or (".jpg" if normalized_format == "jpeg" else ".tiff")
     output_path = EXPORT_DIRECTORY / f"develop-{uuid.uuid4().hex}{suffix}"
     if normalized_format == "jpeg":
         encoded = np.asarray(np.clip(developed * 255.0 + 0.5, 0, 255), dtype=np.uint8)
-        Image.fromarray(encoded, mode="RGB").save(output_path, format="JPEG", quality=int(np.clip(quality, 1, 100)), subsampling=0)
+        Image.fromarray(encoded, mode="RGB").save(
+            output_path, format="JPEG", quality=int(np.clip(quality, 1, 100)), subsampling=0
+        )
     else:
         _write_tiff16(output_path, developed)
+    # Stash the intended download name beside the file for the response layer.
+    output_path.with_suffix(output_path.suffix + ".name").write_text(download_name, encoding="utf-8")
     return output_path
+
+
+def save_export_to_library(
+    export_path: Path,
+    *,
+    db_path: str,
+    source_image: Mapping[str, object],
+    download_name: str | None = None,
+) -> dict:
+    """Register an exported JPEG/TIFF under library-exports (§20 / §24).
+
+    Stack join for kind ``version`` is owned by the VERSTACKS lane; this helper
+    only registers the catalog row so Save-to-library works immediately.
+    """
+    import sqlite3
+
+    LIBRARY_EXPORT_DIRECTORY.mkdir(parents=True, exist_ok=True)
+    name = download_name or export_path.name
+    safe = re.sub(r"[^\w.\-+=() ]+", "_", name).strip(" ._") or export_path.name
+    destination = LIBRARY_EXPORT_DIRECTORY / safe
+    if destination.exists():
+        destination = LIBRARY_EXPORT_DIRECTORY / f"{destination.stem}-{uuid.uuid4().hex[:8]}{destination.suffix}"
+    shutil.copy2(export_path, destination)
+    now = time.time()
+    width = height = None
+    try:
+        with Image.open(destination) as image:
+            width, height = image.size
+    except Exception:
+        pass
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute(
+            "INSERT INTO catalog_sources (path, display_name, included, online, created_at, last_scan_at, last_seen_at) "
+            "VALUES (?, ?, 1, 1, ?, ?, ?) "
+            "ON CONFLICT(path) DO UPDATE SET included=1, online=1, last_seen_at=excluded.last_seen_at, removed_at=NULL",
+            (str(LIBRARY_EXPORT_DIRECTORY), LIBRARY_SOURCE_NAME, now, now, now),
+        )
+        source_id = int(
+            conn.execute(
+                "SELECT id FROM catalog_sources WHERE path = ?",
+                (str(LIBRARY_EXPORT_DIRECTORY),),
+            ).fetchone()["id"]
+        )
+        cursor = conn.execute(
+            "INSERT INTO images (source_id, filename, filepath, status, file_ext, file_size, file_modified_at, "
+            "width, height, date_taken, camera_make, camera_model, lens) "
+            "VALUES (?, ?, ?, 'kept', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                source_id,
+                destination.name,
+                str(destination),
+                destination.suffix.lower(),
+                int(destination.stat().st_size),
+                destination.stat().st_mtime,
+                width,
+                height,
+                source_image.get("date_taken"),
+                source_image.get("camera_make"),
+                source_image.get("camera_model"),
+                source_image.get("lens") or source_image.get("lens_model"),
+            ),
+        )
+        library_id = int(cursor.lastrowid)
+        conn.execute(
+            "UPDATE catalog_sources SET image_count=(SELECT COUNT(*) FROM images WHERE source_id=?), "
+            "active_image_count=(SELECT COUNT(*) FROM images WHERE source_id=? AND status IN ('kept', 'maybe') "
+            "AND missing_at IS NULL) WHERE id=?",
+            (source_id, source_id, source_id),
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        destination.unlink(missing_ok=True)
+        raise
+    finally:
+        conn.close()
+    return {
+        "library_image_id": library_id,
+        "filepath": str(destination),
+        "filename": destination.name,
+        "source_image_id": int(source_image.get("id") or 0) or None,
+    }
 
 
 async def render_export_async(*args, **kwargs) -> Path:
     """Run the full RAW render off FastAPI's event loop."""
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(_EXPORT_EXECUTOR, lambda: render_export(*args, **kwargs))
+
+
+def _download_name_for(path: Path, fallback: str) -> str:
+    sidecar = path.with_suffix(path.suffix + ".name")
+    try:
+        if sidecar.is_file():
+            return sidecar.read_text(encoding="utf-8").strip() or fallback
+    except OSError:
+        pass
+    return fallback
+
+
+def _cleanup_export(path: Path) -> None:
+    path.unlink(missing_ok=True)
+    path.with_suffix(path.suffix + ".name").unlink(missing_ok=True)
 
 
 async def render_export_response(
@@ -270,6 +453,9 @@ async def render_export_response(
     output_format: str,
     quality: int = 90,
     max_px: int | None = None,
+    sharpen: str | None = None,
+    filename_pattern: str | None = None,
+    image_id: int | None = None,
     asshot_temperature: float | None = None,
     asshot_tint: float | None = None,
     color_profile=None,
@@ -281,15 +467,24 @@ async def render_export_response(
         output_format=output_format,
         quality=quality,
         max_px=max_px,
+        sharpen=sharpen,
+        filename_pattern=filename_pattern,
+        image_id=image_id,
         asshot_temperature=asshot_temperature,
         asshot_tint=asshot_tint,
         color_profile=color_profile,
     )
     is_jpeg = output_format.lower() == "jpeg"
-    filename = f"{Path(raw_path).stem}-develop.{'jpg' if is_jpeg else 'tiff'}"
+    fallback = format_export_filename(
+        raw_path=raw_path,
+        image_id=image_id,
+        output_format=output_format,
+        pattern=filename_pattern,
+    )
+    filename = _download_name_for(output_path, fallback)
     return FileResponse(
         output_path,
         media_type="image/jpeg" if is_jpeg else "image/tiff",
         filename=filename,
-        background=BackgroundTask(output_path.unlink, missing_ok=True),
+        background=BackgroundTask(_cleanup_export, output_path),
     )

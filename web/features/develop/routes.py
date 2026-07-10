@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import time
 from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
@@ -22,6 +23,88 @@ router = APIRouter()
 DbPathProvider = Callable[[], str]
 _db_path: DbPathProvider | None = None
 _pregen_tasks: set[asyncio.Task] = set()
+_batch_tasks: set[asyncio.Task] = set()
+_batch_status: dict[str, Any] = {
+    "state": "idle",
+    "started_at": None,
+    "finished_at": None,
+    "total": 0,
+    "done": 0,
+    "current_id": None,
+    "results": [],
+    "errors": [],
+}
+
+# §24 sync groups — masks copies MaskGroupBasedCorrections wholesale.
+_HSL_BANDS = ("Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple", "Magenta")
+SYNC_GROUP_KEYS: dict[str, tuple[str, ...]] = {
+    "wb": ("Temperature", "Tint", "WhiteBalance"),
+    "tone": (
+        "Exposure2012",
+        "Contrast2012",
+        "Highlights2012",
+        "Shadows2012",
+        "Whites2012",
+        "Blacks2012",
+    ),
+    "presence": ("Texture", "Clarity2012", "Dehaze", "Vibrance", "Saturation"),
+    "curve": (
+        "ToneCurvePV2012",
+        "ToneCurvePV2012Red",
+        "ToneCurvePV2012Green",
+        "ToneCurvePV2012Blue",
+    ),
+    "hsl": (
+        "ConvertToGrayscale",
+        *(f"HueAdjustment{band}" for band in _HSL_BANDS),
+        *(f"SaturationAdjustment{band}" for band in _HSL_BANDS),
+        *(f"LuminanceAdjustment{band}" for band in _HSL_BANDS),
+        *(f"GrayMixer{band}" for band in _HSL_BANDS),
+    ),
+    "grade": (
+        "ColorGradeShadowHue",
+        "ColorGradeShadowSat",
+        "ColorGradeShadowLum",
+        "ColorGradeMidtoneHue",
+        "ColorGradeMidtoneSat",
+        "ColorGradeMidtoneLum",
+        "ColorGradeHighlightHue",
+        "ColorGradeHighlightSat",
+        "ColorGradeHighlightLum",
+        "ColorGradeGlobalHue",
+        "ColorGradeGlobalSat",
+        "ColorGradeGlobalLum",
+        "ColorGradeBlending",
+        "ColorGradeBalance",
+    ),
+    "detail": (
+        "Sharpness",
+        "SharpenRadius",
+        "SharpenDetail",
+        "SharpenEdgeMasking",
+        "LuminanceSmoothing",
+        "ColorNoiseReduction",
+        "LuminanceNoiseReductionDetail",
+        "ColorNoiseReductionDetail",
+        "ColorNoiseReductionSmoothness",
+    ),
+    "effects": (
+        "PostCropVignetteAmount",
+        "PostCropVignetteMidpoint",
+        "PostCropVignetteFeather",
+        "PostCropVignetteRoundness",
+        "GrainAmount",
+        "GrainSize",
+        "GrainFrequency",
+        "DefringePurpleAmount",
+        "DefringePurpleHueLo",
+        "DefringePurpleHueHi",
+        "DefringeGreenAmount",
+        "DefringeGreenHueLo",
+        "DefringeGreenHueHi",
+    ),
+}
+SYNC_GROUP_NAMES = tuple(SYNC_GROUP_KEYS) + ("masks",)
 
 
 class DevelopSettingsBody(BaseModel):
@@ -37,6 +120,25 @@ class DevelopExportBody(BaseModel):
     format: str
     quality: int = Field(default=88, ge=1, le=100)
     max_px: int | None = Field(default=None, ge=1, le=100000)
+    sharpen: str | None = Field(default="none", max_length=32)
+    filename_pattern: str | None = Field(default=None, max_length=160)
+    save_to_library: bool = False
+
+
+class DevelopBatchExportBody(BaseModel):
+    image_ids: list[int] = Field(default_factory=list, max_length=200)
+    format: str = "jpeg"
+    quality: int = Field(default=88, ge=1, le=100)
+    max_px: int | None = Field(default=None, ge=1, le=100000)
+    sharpen: str | None = Field(default="none", max_length=32)
+    filename_pattern: str | None = Field(default=None, max_length=160)
+    save_to_library: bool = False
+
+
+class DevelopSyncBody(BaseModel):
+    source_id: int
+    target_ids: list[int] = Field(default_factory=list, max_length=500)
+    groups: list[str] = Field(default_factory=list, max_length=16)
 
 
 def configure(*, db_path: DbPathProvider) -> None:
@@ -60,6 +162,96 @@ def _json_settings(raw: str | None) -> dict[str, Any]:
     except (TypeError, ValueError):
         return {}
     return result if isinstance(result, dict) else {}
+
+
+def _normalize_sync_groups(groups: list[str] | None) -> list[str]:
+    cleaned: list[str] = []
+    for group in groups or []:
+        name = str(group or "").strip().lower()
+        if name in SYNC_GROUP_NAMES and name not in cleaned:
+            cleaned.append(name)
+    return cleaned
+
+
+def extract_sync_slice(settings: dict[str, Any], groups: list[str]) -> dict[str, Any]:
+    """Copy the selected setting groups from one develop JSON blob."""
+    selected = _normalize_sync_groups(groups)
+    if not selected:
+        return {}
+    slice_: dict[str, Any] = {}
+    for group in selected:
+        if group == "masks":
+            if "MaskGroupBasedCorrections" in settings:
+                slice_["MaskGroupBasedCorrections"] = settings["MaskGroupBasedCorrections"]
+            continue
+        for key in SYNC_GROUP_KEYS[group]:
+            if key in settings:
+                slice_[key] = settings[key]
+        if group == "grade":
+            for key, value in settings.items():
+                if str(key).startswith("ColorGrade") and key not in slice_:
+                    slice_[key] = value
+    return slice_
+
+
+async def _write_synced_settings(
+    image_id: int,
+    incoming: dict[str, Any],
+    *,
+    label: str,
+) -> dict[str, Any]:
+    """Merge a sync slice into a target and append a history entry."""
+    conn = await connection.open_async(_configured_db_path())
+    try:
+        await conn.execute("BEGIN")
+        cursor = await conn.execute(
+            "SELECT settings, origin, xmp_path, xmp_mtime FROM develop_settings WHERE image_id = ?",
+            (image_id,),
+        )
+        existing = await cursor.fetchone()
+        now = _now()
+        if existing is None:
+            merged = dict(incoming)
+            origin = "user"
+            xmp_path = None
+            xmp_mtime = None
+        else:
+            prior = _json_settings(existing["settings"])
+            merged = {**prior, **incoming}
+            origin = existing["origin"] or "user"
+            xmp_path = existing["xmp_path"]
+            xmp_mtime = existing["xmp_mtime"]
+            if origin == "xmp":
+                await conn.execute(
+                    "INSERT INTO develop_history (image_id, settings, label, created_at) VALUES (?, ?, ?, ?)",
+                    (image_id, json.dumps(prior, separators=(",", ":")), "Import from XMP", now),
+                )
+                origin = "user"
+        settings_json = json.dumps(merged, separators=(",", ":"))
+        await conn.execute(
+            """
+            INSERT INTO develop_settings (image_id, settings, origin, xmp_path, xmp_mtime, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(image_id) DO UPDATE SET
+                settings = excluded.settings,
+                origin = excluded.origin,
+                xmp_path = excluded.xmp_path,
+                xmp_mtime = excluded.xmp_mtime,
+                updated_at = excluded.updated_at
+            """,
+            (image_id, settings_json, origin, xmp_path, xmp_mtime, now),
+        )
+        await conn.execute(
+            "INSERT INTO develop_history (image_id, settings, label, created_at) VALUES (?, ?, ?, ?)",
+            (image_id, settings_json, label, now),
+        )
+        await conn.commit()
+        return {"settings": merged, "origin": origin, "updated_at": now}
+    except Exception:
+        await conn.rollback()
+        raise
+    finally:
+        await connection.close_async(conn, db_path=_configured_db_path())
 
 
 async def _image_or_error(image_id: int):
@@ -311,7 +503,13 @@ async def api_export_develop(image_id: int, body: DevelopExportBody):
     # The RENDER lane owns the shared full-resolution pipeline. Keep this
     # endpoint's contract ready without duplicating color math in RAWPROC.
     try:
-        from features.develop.render import RenderError, render_export_response
+        from features.develop.render import (
+            RenderError,
+            _download_name_for,
+            format_export_filename,
+            render_export_async,
+            save_export_to_library,
+        )
     except ImportError:
         return JSONResponse({"error": "Develop export renderer is not installed yet"}, status_code=503)
     row = await _load_settings(image_id)
@@ -322,16 +520,200 @@ async def api_export_develop(image_id: int, body: DevelopExportBody):
         except Exception:
             pass
     asshot = cached_meta.get("as_shot") if isinstance(cached_meta, dict) else {}
+    settings = _json_settings(row["settings"]) if row else {}
     try:
-        return await render_export_response(
+        output_path = await render_export_async(
             image["filepath"],
-            _json_settings(row["settings"]) if row else {},
+            settings,
             output_format=body.format,
             quality=body.quality,
             max_px=body.max_px,
+            sharpen=body.sharpen,
+            filename_pattern=body.filename_pattern,
+            image_id=image_id,
             asshot_temperature=asshot.get("temperature") if isinstance(asshot, dict) else None,
             asshot_tint=asshot.get("tint") if isinstance(asshot, dict) else None,
             color_profile=cached_meta.get("color") if isinstance(cached_meta, dict) else None,
         )
     except (rawproc.RawDecodeError, RenderError, ValueError) as exc:
         return JSONResponse({"error": str(exc)}, status_code=422)
+
+    fallback = format_export_filename(
+        raw_path=image["filepath"],
+        image_id=image_id,
+        output_format=body.format,
+        pattern=body.filename_pattern,
+    )
+    filename = _download_name_for(output_path, fallback)
+    library_info = None
+    if body.save_to_library:
+        try:
+            library_info = await asyncio.to_thread(
+                save_export_to_library,
+                output_path,
+                db_path=_configured_db_path(),
+                source_image=image,
+                download_name=filename,
+            )
+        except Exception as exc:
+            return JSONResponse({"error": f"Export rendered but library save failed: {exc}"}, status_code=422)
+
+    from starlette.background import BackgroundTask
+    from features.develop.render import _cleanup_export
+
+    headers = {}
+    if library_info:
+        headers["X-Develop-Library-Image-Id"] = str(library_info["library_image_id"])
+    return FileResponse(
+        output_path,
+        media_type="image/jpeg" if body.format == "jpeg" else "image/tiff",
+        filename=filename,
+        headers=headers,
+        background=BackgroundTask(_cleanup_export, output_path),
+    )
+
+
+async def _run_batch_export(body: DevelopBatchExportBody) -> None:
+    from features.develop.render import (
+        RenderError,
+        _download_name_for,
+        format_export_filename,
+        render_export_async,
+        save_export_to_library,
+    )
+
+    image_ids = list(dict.fromkeys(image_id for image_id in body.image_ids if image_id > 0))
+    _batch_status.update(
+        {
+            "state": "running",
+            "started_at": time.time(),
+            "finished_at": None,
+            "total": len(image_ids),
+            "done": 0,
+            "current_id": None,
+            "results": [],
+            "errors": [],
+        }
+    )
+    for image_id in image_ids:
+        _batch_status["current_id"] = image_id
+        image, error = await _image_or_error(image_id)
+        if error:
+            _batch_status["errors"].append({"image_id": image_id, "error": "unavailable"})
+            _batch_status["done"] += 1
+            continue
+        row = await _load_settings(image_id)
+        cached_meta = rawproc.read_base_metadata(image_id) or {}
+        asshot = cached_meta.get("as_shot") if isinstance(cached_meta, dict) else {}
+        try:
+            output_path = await render_export_async(
+                image["filepath"],
+                _json_settings(row["settings"]) if row else {},
+                output_format=body.format,
+                quality=body.quality,
+                max_px=body.max_px,
+                sharpen=body.sharpen,
+                filename_pattern=body.filename_pattern,
+                image_id=image_id,
+                asshot_temperature=asshot.get("temperature") if isinstance(asshot, dict) else None,
+                asshot_tint=asshot.get("tint") if isinstance(asshot, dict) else None,
+                color_profile=cached_meta.get("color") if isinstance(cached_meta, dict) else None,
+            )
+            filename = _download_name_for(
+                output_path,
+                format_export_filename(
+                    raw_path=image["filepath"],
+                    image_id=image_id,
+                    output_format=body.format,
+                    pattern=body.filename_pattern,
+                ),
+            )
+            result = {
+                "image_id": image_id,
+                "path": str(output_path),
+                "filename": filename,
+                "bytes": output_path.stat().st_size,
+            }
+            if body.save_to_library:
+                result["library"] = await asyncio.to_thread(
+                    save_export_to_library,
+                    output_path,
+                    db_path=_configured_db_path(),
+                    source_image=image,
+                    download_name=filename,
+                )
+            _batch_status["results"].append(result)
+        except (rawproc.RawDecodeError, RenderError, ValueError, OSError) as exc:
+            _batch_status["errors"].append({"image_id": image_id, "error": str(exc)})
+        _batch_status["done"] += 1
+    _batch_status.update({"state": "complete", "finished_at": time.time(), "current_id": None})
+
+
+@router.post("/api/develop/export/batch", status_code=202)
+async def api_batch_export_develop(body: DevelopBatchExportBody):
+    if body.format not in {"jpeg", "tiff16"}:
+        return JSONResponse({"error": "format must be jpeg or tiff16"}, status_code=400)
+    image_ids = list(dict.fromkeys(image_id for image_id in body.image_ids if image_id > 0))
+    if not image_ids:
+        return JSONResponse({"error": "image_ids required"}, status_code=400)
+    if _batch_status.get("state") == "running":
+        return JSONResponse({"error": "A batch export is already running", "status": dict(_batch_status)}, status_code=409)
+    try:
+        from features.develop.render import resolve_output_sharpen
+
+        resolve_output_sharpen(body.sharpen)
+    except (ImportError, ValueError) as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    task = asyncio.create_task(_run_batch_export(body))
+    _batch_tasks.add(task)
+    task.add_done_callback(_batch_tasks.discard)
+    return {"queued": image_ids, "status": dict(_batch_status)}
+
+
+@router.get("/api/develop/export/batch/status")
+async def api_batch_export_status():
+    return dict(_batch_status)
+
+
+@router.post("/api/develop/sync")
+async def api_sync_develop(body: DevelopSyncBody):
+    _source, error = await _image_or_error(body.source_id)
+    if error:
+        return error
+    groups = _normalize_sync_groups(body.groups)
+    if not groups:
+        return JSONResponse(
+            {"error": "groups must include one or more of: " + ", ".join(SYNC_GROUP_NAMES)},
+            status_code=400,
+        )
+    target_ids = [
+        image_id
+        for image_id in dict.fromkeys(body.target_ids)
+        if image_id > 0 and image_id != body.source_id
+    ]
+    if not target_ids:
+        return JSONResponse({"error": "target_ids required"}, status_code=400)
+
+    source_row = await _load_settings(body.source_id)
+    source_settings = _json_settings(source_row["settings"]) if source_row else {}
+    slice_ = extract_sync_slice(source_settings, groups)
+    if not slice_:
+        return JSONResponse({"error": "Source has no settings in the selected groups"}, status_code=400)
+
+    label = f"Sync from #{body.source_id}"
+    synced: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    for target_id in target_ids:
+        _target, target_error = await _image_or_error(target_id)
+        if target_error:
+            skipped.append({"image_id": target_id, "error": "unavailable"})
+            continue
+        result = await _write_synced_settings(target_id, slice_, label=label)
+        synced.append({"image_id": target_id, "origin": result["origin"], "updated_at": result["updated_at"]})
+    return {
+        "source_id": body.source_id,
+        "groups": groups,
+        "synced": synced,
+        "skipped": skipped,
+        "keys": sorted(slice_.keys()),
+    }

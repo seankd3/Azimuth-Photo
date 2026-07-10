@@ -6,6 +6,7 @@ import { DevelopRenderer, renderSyntheticPixels } from './gl.js';
 import { DevelopHistogram } from './histogram.js';
 import { DevelopPanels } from './panels.js';
 import { mountPresetsPanel } from './presets.js';
+import { openExportDialog, openSyncDialog } from './export_dialog.js';
 
 const RAW_EXTENSIONS = new Set(['dng', 'cr3', 'cr2', 'exr']);
 const stateCache = new Map();
@@ -323,25 +324,28 @@ function pasteSettings() {
 }
 
 function openExportPopover(button) {
+    openExportDialog({
+        button,
+        image: currentImage,
+        anchoredPopover,
+        closePopover,
+        showToast,
+        isRaw,
+    });
+}
+
+function openSyncPopover(button) {
     if (!currentImage || !isRaw(currentImage)) return;
-    const popover = anchoredPopover(button, '<strong>Export developed photo</strong><label>Format<select data-export-format data-tip="Export format"><option value="jpeg">JPEG</option><option value="tiff16">16-bit TIFF</option></select></label><label>Quality<input data-export-quality type="number" min="1" max="100" value="92" data-tip="JPEG quality"></label><label>Max pixels<input data-export-size type="number" min="256" placeholder="Full size" data-tip="Optional longest edge"></label><button data-export-confirm data-tip="Render and download export">Export</button>');
-    popover.querySelector('[data-export-confirm]').addEventListener('click', async () => {
-        const format = popover.querySelector('[data-export-format]').value;
-        const quality = Number(popover.querySelector('[data-export-quality]').value) || 92;
-        const maxPx = Number(popover.querySelector('[data-export-size]').value) || undefined;
-        closePopover();
-        showToast('Rendering full-resolution export…');
-        try {
-            const response = await fetch(`/api/develop/${currentImage.id}/export`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ format, quality, ...(maxPx ? { max_px: maxPx } : {}) }) });
-            if (!response.ok) throw new Error();
-            const url = URL.createObjectURL(await response.blob());
-            const link = document.getElementById('download-link');
-            link.href = url;
-            link.download = `${String(currentImage.filename || 'developed').replace(/\.[^.]+$/, '')}.${format === 'jpeg' ? 'jpg' : 'tif'}`;
-            link.click();
-            setTimeout(() => URL.revokeObjectURL(url), 30000);
-            showToast('Export ready');
-        } catch { showToast('Export failed'); }
+    const targetIds = selection.size
+        ? [...selection].map(Number)
+        : viewState.images.map((image) => Number(image.id)).filter((id) => id > 0);
+    openSyncDialog({
+        button,
+        sourceId: Number(currentImage.id),
+        targetIds,
+        anchoredPopover,
+        closePopover,
+        showToast,
     });
 }
 
@@ -436,8 +440,17 @@ function bindUi() {
         else if (action === 'copy') openCopyPopover(button);
         else if (action === 'paste') pasteSettings();
         else if (action === 'reset') resetCurrent();
+        else if (action === 'sync') openSyncPopover(button);
         else if (action === 'export') openExportPopover(button);
     });
+    if (!toolbar.querySelector('[data-action="sync"]')) {
+        const exportButton = toolbar.querySelector('[data-action="export"]');
+        const syncButton = document.createElement('button');
+        syncButton.dataset.action = 'sync';
+        syncButton.dataset.tip = 'Sync settings to grid selection';
+        syncButton.textContent = 'Sync…';
+        exportButton?.parentNode?.insertBefore(syncButton, exportButton);
+    }
     const beforeButton = toolbar.querySelector('[data-action="before"]');
     beforeButton.addEventListener('pointerdown', () => showBefore(true));
     for (const eventName of ['pointerup', 'pointercancel', 'pointerleave']) beforeButton.addEventListener(eventName, () => showBefore(false));
@@ -445,7 +458,7 @@ function bindUi() {
         if (!crop.active && !masking?.mode && !event.target.closest('button')) setZoom(!stage.classList.contains('zoomed'));
     });
     document.addEventListener('pointerdown', (event) => {
-        if (activePopover && !activePopover.contains(event.target) && !event.target.closest('[data-action="copy"], [data-action="export"]')) closePopover();
+        if (activePopover && !activePopover.contains(event.target) && !event.target.closest('[data-action="copy"], [data-action="export"], [data-action="sync"]')) closePopover();
     });
     document.addEventListener('keydown', handleKey, true);
     document.addEventListener('keyup', handleKeyUp, true);

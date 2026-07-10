@@ -162,3 +162,34 @@ PARITY_TABLE = {
     for name, value in tuple(globals().items())
     if name.isupper() and name != "PARITY_TABLE"
 }
+
+# ---------------------------------------------------------------------------
+# Export-only output sharpening (§24). Applied AFTER geometry/resize in the
+# Python export path as a classic unsharp mask on gamma luma. There is NO
+# WebGL twin — these constants intentionally stay out of PARITY_TABLE and
+# ops_constants.js.
+# Amounts are residual multipliers; radii are Gaussian σ in pixels at the
+# export pixel size (screen = fine, print = coarser for ink spread).
+# ---------------------------------------------------------------------------
+OUTPUT_SHARPEN_SCREEN_LOW_AMOUNT = 0.35
+OUTPUT_SHARPEN_SCREEN_LOW_RADIUS = 0.5
+OUTPUT_SHARPEN_SCREEN_STANDARD_AMOUNT = 0.55
+OUTPUT_SHARPEN_SCREEN_STANDARD_RADIUS = 0.6
+OUTPUT_SHARPEN_SCREEN_HIGH_AMOUNT = 0.85
+OUTPUT_SHARPEN_SCREEN_HIGH_RADIUS = 0.7
+OUTPUT_SHARPEN_PRINT_LOW_AMOUNT = 0.45
+OUTPUT_SHARPEN_PRINT_LOW_RADIUS = 1.0
+OUTPUT_SHARPEN_PRINT_STANDARD_AMOUNT = 0.75
+OUTPUT_SHARPEN_PRINT_STANDARD_RADIUS = 1.2
+OUTPUT_SHARPEN_PRINT_HIGH_AMOUNT = 1.1
+OUTPUT_SHARPEN_PRINT_HIGH_RADIUS = 1.4
+
+OUTPUT_SHARPEN_PRESETS = {
+    "none": (0.0, 0.0),
+    "screen_low": (OUTPUT_SHARPEN_SCREEN_LOW_AMOUNT, OUTPUT_SHARPEN_SCREEN_LOW_RADIUS),
+    "screen_standard": (OUTPUT_SHARPEN_SCREEN_STANDARD_AMOUNT, OUTPUT_SHARPEN_SCREEN_STANDARD_RADIUS),
+    "screen_high": (OUTPUT_SHARPEN_SCREEN_HIGH_AMOUNT, OUTPUT_SHARPEN_SCREEN_HIGH_RADIUS),
+    "print_low": (OUTPUT_SHARPEN_PRINT_LOW_AMOUNT, OUTPUT_SHARPEN_PRINT_LOW_RADIUS),
+    "print_standard": (OUTPUT_SHARPEN_PRINT_STANDARD_AMOUNT, OUTPUT_SHARPEN_PRINT_STANDARD_RADIUS),
+    "print_high": (OUTPUT_SHARPEN_PRINT_HIGH_AMOUNT, OUTPUT_SHARPEN_PRINT_HIGH_RADIUS),
+}

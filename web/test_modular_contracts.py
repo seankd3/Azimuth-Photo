@@ -150,6 +150,9 @@ PUBLIC_ROUTE_CONTRACT = {
     ("POST", "/api/develop/import/scan"),
     ("POST", "/api/develop/pregen"),
     ("POST", "/api/develop/{image_id}/export"),
+    ("POST", "/api/develop/export/batch"),
+    ("GET", "/api/develop/export/batch/status"),
+    ("POST", "/api/develop/sync"),
     ("POST", "/api/develop/{image_id}/reset"),
     ("PUT", "/api/develop/{image_id}"),
     ("GET", "/api/develop/lrcat/status"),
@@ -166,6 +169,9 @@ PUBLIC_ROUTE_CONTRACT = {
     ("POST", "/api/develop/hdr/detect"),
     ("POST", "/api/develop/hdr/merge"),
     ("GET", "/api/develop/hdr/status"),
+    ("GET", "/api/develop/pano/status"),
+    ("POST", "/api/develop/pano/detect"),
+    ("POST", "/api/develop/pano/merge"),
 }
 
 class ModularContractTests(unittest.TestCase):
