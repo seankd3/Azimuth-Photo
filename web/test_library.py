@@ -1,5 +1,7 @@
 from test_support import *  # noqa: F401,F403
 import embed_cache
+import shutil
+import unittest.mock
 from fastapi.testclient import TestClient
 from features.library import taste as taste_service
 
@@ -1443,6 +1445,68 @@ class LibraryTests(BackendTestCase):
         self.assertEqual([row["filename"] for row in rows], ["first.jpg", "second.jpg"])
         restored = await self._image_row(rows[1]["id"])
         self.assertIsNone(restored["missing_at"])
+
+    async def test_scan_preserves_catalog_when_source_goes_offline_before_finalize(self):
+        source = await self._source("scan-offline")
+        filepath = os.path.join(source["path"], "preserve.jpg")
+        with open(filepath, "wb") as handle:
+            handle.write(b"photo")
+        await scanner.scan_folder(source["path"], source_id=source["id"])
+        shutil.rmtree(source["path"])
+
+        with unittest.mock.patch.object(catalog_routes.log, "error") as error_log:
+            await catalog_routes._run_scan(source["path"], int(source["id"]))
+
+        conn = await db.get_db()
+        try:
+            image = await (await conn.execute(
+                "SELECT missing_at FROM images WHERE filepath = ?", (filepath,)
+            )).fetchone()
+            refreshed_source = await (await conn.execute(
+                "SELECT online FROM catalog_sources WHERE id = ?", (source["id"],)
+            )).fetchone()
+        finally:
+            await conn.close()
+
+        self.assertIsNone(image["missing_at"])
+        self.assertEqual(refreshed_source["online"], 0)
+        self.assertIn("existing catalog entries were preserved", scanner.scan_state["error"])
+        error_log.assert_called_once()
+
+    async def test_scan_quarantines_zero_byte_file_and_logs_only_first_detection(self):
+        source = await self._source("scan-zero")
+        filepath = os.path.join(source["path"], "empty.jpg")
+        open(filepath, "wb").close()
+
+        with unittest.mock.patch.object(db.log, "warning") as warning:
+            await scanner.scan_folder(source["path"], source_id=source["id"])
+            await scanner.scan_folder(source["path"], source_id=source["id"])
+
+        conn = await db.get_db()
+        try:
+            image = await (await conn.execute(
+                "SELECT id, missing_at FROM images WHERE filepath = ?", (filepath,)
+            )).fetchone()
+        finally:
+            await conn.close()
+
+        self.assertIsNotNone(image)
+        self.assertIsNotNone(image["missing_at"])
+        self.assertEqual(warning.call_count, 1)
+        self.assertIn(f"image_id={image['id']}", warning.call_args.args[0] % warning.call_args.args[1:])
+
+    async def test_catalog_browse_returns_safe_actionable_error_and_logs_internal_detail(self):
+        secret = "/mnt/private/permission-detail"
+        with unittest.mock.patch.object(
+            catalog_routes.os,
+            "scandir",
+            side_effect=OSError(secret),
+        ), unittest.mock.patch.object(catalog_routes.log, "exception") as error_log:
+            result = await catalog_routes.api_catalog_browse(self.tempdir.name)
+
+        self.assertNotIn(secret, result["error"])
+        self.assertIn("check that the source is connected", result["error"])
+        error_log.assert_called_once()
 
     async def test_missing_images_are_excluded_from_active_views_and_workers(self):
         source = await self._source()

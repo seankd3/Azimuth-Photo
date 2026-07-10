@@ -88,11 +88,6 @@ export function undoLatestToast() {
     return false;
 }
 
-export function hideToast() {
-    const item = [...toasts].reverse().find((toast) => toast.visible);
-    if (item) dismiss(item);
-}
-
 export function initToast() {
     document.getElementById('toast').innerHTML = '';
 }

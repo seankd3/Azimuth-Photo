@@ -36,13 +36,6 @@ def _optional_dependency(name: str):
     return _CONFIG.get(name)
 
 
-def _call_dependency(name: str, *args, **kwargs):
-    value = _dependency(name)
-    if not callable(value):
-        return value
-    return value(*args, **kwargs)
-
-
 def sync_configured_ttls() -> None:
     global _text_search_resolution_cache_ttl_seconds
 
@@ -80,18 +73,6 @@ def start_search_model_load(embedding_worker) -> bool:
         return bool(start())
     except Exception:
         return False
-
-
-def _similarity_scores(matrix, text_vec, image_ids, threshold) -> dict[int, float]:
-    """Score the embedding matrix against a text vector (CPU-heavy; run off-loop)."""
-    import numpy as np
-
-    similarities = matrix @ text_vec
-    matching_indices = np.flatnonzero(similarities >= threshold)
-    return {
-        int(image_ids[int(i)]): float(similarities[int(i)])
-        for i in matching_indices
-    }
 
 
 def _embedding_ranked_scores(matrix, text_vec, image_ids, threshold, max_results: int) -> dict[int, float]:

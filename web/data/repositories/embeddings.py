@@ -19,19 +19,6 @@ def normalize_search_query(query: str) -> str:
     return " ".join(str(query or "").split())
 
 
-async def _searchable_embedding_count_on_conn(conn, model_key: str) -> int:
-    cursor = await conn.execute(
-        "SELECT COUNT(*) AS c FROM embeddings_by_model e "
-        "JOIN images i ON e.image_id = i.id "
-        "JOIN catalog_sources s ON s.id = i.source_id "
-        "WHERE e.model_key = ? AND s.included = 1 "
-        "AND i.status IN ('kept', 'maybe') "
-        "AND i.missing_at IS NULL",
-        (model_key,),
-    )
-    return int((await cursor.fetchone())["c"] or 0)
-
-
 async def _online_embedding_count_on_conn(conn, model_key: str, legacy_model_key: str = "") -> int:
     del legacy_model_key
     cursor = await conn.execute(

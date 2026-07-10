@@ -78,7 +78,6 @@ def configure_database_backed_providers() -> None:
     )
     app_helpers.configure(
         cached_image_ids=lambda image_ids, size, cache_root: db.get_cached_image_ids(image_ids, size, cache_root),
-        get_active_images_by_ids=lambda image_ids: db.get_active_images_by_ids(image_ids),
         star_thresholds=db.STAR_THRESHOLDS,
     )
     catalog_metadata.configure(
@@ -134,6 +133,7 @@ def configure_status_media_search_providers() -> None:
         cached_image_ids=media_warm.cached_image_ids,
         schedule_cached_thumbnail_memory_warm=media_warm.schedule_cached_thumbnail_memory_warm,
         db_path=lambda: db.DB_PATH,
+        mark_image_missing=lambda image_id: db.mark_image_missing(image_id),
     )
     settings_status.configure(
         build_cache_status=cache_status_service.build_cache_status,
@@ -336,7 +336,7 @@ def configure_collection_routes(*, resolve_library_constraints=None) -> None:
         resolve_smart_summary=resolve_smart_summary,
         resolve_smart_image_ids=resolve_smart_image_ids,
         db_path=lambda: db.DB_PATH,
-        get_images_by_ids=lambda image_ids: db.get_images_by_ids(image_ids),
+        get_images_by_ids=lambda image_ids: db.get_active_images_by_ids(image_ids),
         get_suggestions=lambda: collection_suggestions.collection_suggestions(
             db.DB_PATH,
             db_signature=db.DB_PATH,
@@ -440,7 +440,7 @@ def configure_publish_routes(*, templates, resolve_library_constraints=None, tra
     publish_routes.configure(
         templates=templates,
         get_collection=lambda collection_id, **kwargs: db.get_collection(collection_id, **kwargs),
-        get_images_by_ids=lambda image_ids: db.get_images_by_ids(image_ids),
+        get_images_by_ids=lambda image_ids: db.get_active_images_by_ids(image_ids),
         collection_image_ids=lambda collection_id: db.collection_image_ids(collection_id),
         resolve_smart_image_ids=resolve_smart_image_ids,
         get_publish=lambda collection_id: db.get_collection_publish(collection_id),

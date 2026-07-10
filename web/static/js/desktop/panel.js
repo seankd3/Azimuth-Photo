@@ -273,13 +273,6 @@ function selectClientPicks(ids) {
     showToast(`${fmt(ids.length)} client picks selected`);
 }
 
-export async function viewClientPicks(collectionId) {
-    const pickData = await getCollectionShareFavorites(collectionId);
-    const ids = clientPickIds(pickData);
-    await rememberCollectionImages(collectionId);
-    selectClientPicks(ids);
-}
-
 async function applyClientPicks(collectionId, ids) {
     if (!ids.length) {
         showToast('No client picks yet');
@@ -294,7 +287,7 @@ function sharePasswordControls(share) {
     const isProtected = Boolean(share?.protected);
     return '<div class="share-password-row">'
         + '<div class="share-password-head"><span>Password</span>'
-        + (isProtected ? `<span class="share-badge">${icon('lock')} Protected</span>` : '')
+        + (isProtected ? `<span class="shared-badge">${icon('lock')} Protected</span>` : '')
         + '</div>'
         + '<div class="share-link-row">'
         + `<input id="share-password" type="password" autocomplete="new-password" placeholder="${isProtected ? 'Protected' : 'No password'}">`

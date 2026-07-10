@@ -92,3 +92,40 @@ class BackendIntegrationTests(BackendTestCase):
         self.assertTrue(cancelled.is_set())
         self.assertTrue(task.cancelled())
         self.assertEqual(shell.background_tasks, set())
+
+    async def test_background_task_tracker_logs_unhandled_task_failure(self):
+        tracker = background_runtime.BackgroundTaskTracker()
+
+        async def fail_worker():
+            raise RuntimeError("worker exploded")
+
+        with unittest.mock.patch.object(background_runtime.log, "error") as error_log:
+            task = tracker.track(fail_worker())
+            await asyncio.gather(task, return_exceptions=True)
+            await asyncio.sleep(0)
+
+        self.assertEqual(tracker.tasks, set())
+        error_log.assert_called_once()
+        self.assertIn("worker=", error_log.call_args.args[0])
+
+    async def test_startup_warmup_logs_individual_gather_failures(self):
+        async def succeed():
+            return "ok"
+
+        async def fail():
+            raise RuntimeError("warmup failed")
+
+        with unittest.mock.patch.object(background_runtime.log, "error") as error_log:
+            await background_runtime._gather_logged("test_warmup", succeed(), fail())
+
+        error_log.assert_called_once()
+        self.assertEqual(error_log.call_args.args[1], "test_warmup")
+
+    async def test_caption_startup_failure_is_not_silently_swallowed(self):
+        startup_source = inspect.getsource(background_runtime.run_startup)
+        caption_block = startup_source.split("import settings as _settings", 1)[1].split(
+            "async def _warm_interaction_caches", 1
+        )[0]
+
+        self.assertIn("log.exception", caption_block)
+        self.assertNotIn("except Exception:\n        pass", caption_block)

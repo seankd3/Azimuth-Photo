@@ -80,6 +80,29 @@ class ShareTests(BackendTestCase):
     async def test_share_create_returns_none_for_missing_collection(self):
         self.assertIsNone(await db.create_or_rotate_share(999999))
 
+    async def test_existing_share_hides_trashed_snapshot_member(self):
+        collection, first, second, _third = await self._collection_with_images()
+        share = await db.create_or_rotate_share(collection["id"])
+        await db.set_image_status(first, "trashed")
+
+        resolved = await db.resolve_share_token(share["token"])
+
+        self.assertEqual([image["id"] for image in resolved["images"]], [second])
+        self.assertEqual(resolved["image_count"], 1)
+        self.assertFalse(await db.share_token_allows_image(share["token"], first))
+        self.assertTrue(await db.share_token_allows_image(share["token"], second))
+
+    async def test_unicode_filename_roundtrips_through_private_share(self):
+        source = await self._source("share-unicode")
+        image_id = await self._image(source["id"], "été 📸.jpg")
+        collection = await db.create_collection(name="Famille 🎉", image_ids=[image_id])
+        share = await db.create_or_rotate_share(collection["id"])
+
+        resolved = await db.resolve_share_token(share["token"])
+
+        self.assertEqual(resolved["name"], "Famille 🎉")
+        self.assertEqual(resolved["images"][0]["filename"], "été 📸.jpg")
+
     async def test_password_hash_roundtrip(self):
         stored = share_auth.hash_password("correct horse")
 

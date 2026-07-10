@@ -42,6 +42,8 @@ function syncChrome(lens) {
     document.getElementById('find-duplicates')?.classList.toggle('active', lens === 'duplicates');
     document.querySelector('[data-lib="trash"]')?.classList.toggle('active', lens === 'trash');
     document.getElementById('shared-view')?.classList.toggle('active', lens === 'shared');
+    document.getElementById('ctx-mid').hidden = lens === 'shared';
+    document.getElementById('ctx-right').hidden = lens === 'shared';
 }
 
 function activate(lens) {

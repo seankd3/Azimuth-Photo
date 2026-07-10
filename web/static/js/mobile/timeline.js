@@ -26,8 +26,8 @@ const FULL_MONTHS = [
 ];
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const SORT_OPTIONS = [
-    { value: 'date_taken', label: 'Date ↓', detail: 'Newest first', glyph: 'calendar-days' },
-    { value: 'date_taken_asc', label: 'Date ↑', detail: 'Oldest first', glyph: 'calendar-days' },
+    { value: 'date_taken', label: 'Date ↓', detail: 'Newest first', glyph: 'calendar' },
+    { value: 'date_taken_asc', label: 'Date ↑', detail: 'Oldest first', glyph: 'calendar' },
     { value: 'elo', label: 'Rating ↓', detail: 'Highest first', glyph: 'star' },
     { value: 'elo_asc', label: 'Rating ↑', detail: 'Lowest first', glyph: 'star' },
     { value: 'taste', label: 'Taste', detail: 'your eye, learned from Refine', glyph: 'sparkles' },
@@ -111,7 +111,7 @@ const imgObserver = new IntersectionObserver((entries) => {
 /* ---------- cells & day sections ---------- */
 function flagBadge(flag) {
     if (flag !== 'picked' && flag !== 'rejected') return '';
-    return `<span class="c-flag ${flag}">${flag === 'picked' ? '★' : '✕'}</span>`;
+    return `<span class="c-flag ${flag}">${flag === 'picked' ? icon('star') : icon('x')}</span>`;
 }
 
 function stackBadge(img) {

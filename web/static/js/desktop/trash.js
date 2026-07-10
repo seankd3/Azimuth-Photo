@@ -112,8 +112,8 @@ function aspect(img) {
 }
 
 function flagGlyph(flag) {
-    if (flag === 'picked') return '★';
-    if (flag === 'rejected') return '×';
+    if (flag === 'picked') return icon('star');
+    if (flag === 'rejected') return icon('x');
     return '';
 }
 

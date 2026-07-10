@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from collections.abc import Callable
 
@@ -15,6 +16,7 @@ from features.stacks import builders
 
 
 router = APIRouter()
+log = logging.getLogger(__name__)
 DbPath = Callable[[], str]
 Invalidate = Callable[[], None]
 
@@ -90,11 +92,12 @@ async def _run_rebuild_task(kinds: list[str]) -> None:
         })
         _invalidate()
     except Exception as exc:
+        log.exception("worker=stack_rebuild kinds=%s failed", ",".join(kinds))
         _rebuild_status.update({
             "state": "error",
             "finished_at": time.time(),
             "result": None,
-            "error": str(exc),
+            "error": "Stack rebuild failed. Check the server log and try again.",
         })
 
 

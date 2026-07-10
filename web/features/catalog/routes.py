@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import shutil
 import subprocess
@@ -18,6 +19,7 @@ from features.catalog import metadata as catalog_metadata
 
 
 router = APIRouter()
+log = logging.getLogger(__name__)
 InvalidatePairing = Callable[..., None]
 InvalidateCacheStatus = Callable[[], None]
 DbPathProvider = Callable[[], str]
@@ -139,6 +141,18 @@ async def scan_prefetch_on_batch(count):
         )
 
 
+async def _run_scan(folder: str, source_id: int) -> None:
+    await scanner.scan_folder(folder, source_id=source_id, on_batch=scan_prefetch_on_batch)
+    error = str(scanner.scan_state.get("error") or "").strip()
+    if error:
+        log.error(
+            "worker=catalog_scan source_id=%s folder=%r failed: %s",
+            source_id,
+            folder,
+            error,
+        )
+
+
 @router.post("/api/scan")
 async def start_scan(request: Request):
     body, error = await json_object(request)
@@ -156,9 +170,7 @@ async def start_scan(request: Request):
     except Exception:
         scanner.release_scan_claim()
         raise
-    asyncio.create_task(
-        scanner.scan_folder(source["path"], source_id=source["id"], on_batch=scan_prefetch_on_batch)
-    )
+    asyncio.create_task(_run_scan(source["path"], int(source["id"])))
     _catalog_changed(matchups=True)
     return {"status": "started", "folder": source["path"], "source_id": source["id"]}
 
@@ -420,8 +432,9 @@ async def api_catalog_browse(path: str = ""):
     except PermissionError:
         result["readable"] = False
         result["error"] = "Directory is not readable"
-    except OSError as exc:
-        result["error"] = str(exc)
+    except OSError:
+        log.exception("catalog folder browse failed path=%r", current)
+        result["error"] = "Directory could not be read; check that the source is connected and accessible"
     return result
 
 
@@ -449,9 +462,7 @@ async def api_add_catalog_source(request: Request):
             scanner.release_scan_claim()
         raise
     if scan:
-        asyncio.create_task(
-            scanner.scan_folder(source["path"], source_id=source["id"], on_batch=scan_prefetch_on_batch)
-        )
+        asyncio.create_task(_run_scan(source["path"], int(source["id"])))
     _catalog_changed(matchups=True)
     return {
         "ok": True,
@@ -467,7 +478,13 @@ async def api_rescan_catalog_source(source_id: int):
     if not source:
         return JSONResponse({"error": "Source not found"}, status_code=404)
     if not os.path.isdir(source["path"]):
-        return JSONResponse({"error": "Source folder is offline"}, status_code=400)
+        return JSONResponse(
+            {
+                "error": "Source drive is offline",
+                "detail": "Reconnect the source drive before rescanning; existing catalog entries were preserved.",
+            },
+            status_code=409,
+        )
     if not scanner.try_begin_scan():
         return JSONResponse({"error": "Scan already in progress"}, status_code=409)
 
@@ -476,9 +493,7 @@ async def api_rescan_catalog_source(source_id: int):
     except Exception:
         scanner.release_scan_claim()
         raise
-    asyncio.create_task(
-        scanner.scan_folder(restored["path"], source_id=restored["id"], on_batch=scan_prefetch_on_batch)
-    )
+    asyncio.create_task(_run_scan(restored["path"], int(restored["id"])))
     _catalog_changed(matchups=True)
     return {"ok": True, "source": dict(restored), "scan_started": True}
 

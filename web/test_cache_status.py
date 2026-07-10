@@ -1,4 +1,5 @@
 from test_support import *  # noqa: F401,F403
+import unittest.mock
 
 
 class CacheStatusTests(BackendTestCase):
@@ -459,6 +460,7 @@ class CacheStatusTests(BackendTestCase):
                 HeaderRequest({"if-none-match": '"sig-42"'}),
                 "sm",
                 42,
+                cached=True,
             )
         finally:
             thumbnails._memory_get_entry_fast = old_memory_get
@@ -517,7 +519,9 @@ class CacheStatusTests(BackendTestCase):
         thumbnails.fast_disk_path_entry = fake_path_entry
         image_repository.get_image_by_id = fail_get_image
         try:
-            response = await media_routes.serve_full_image(HeaderRequest(), 42, BackgroundTasks())
+            response = await media_routes.serve_full_image(
+                HeaderRequest(), 42, BackgroundTasks(), cached=True
+            )
         finally:
             thumbnails.fast_disk_path_entry = old_path_entry
             image_repository.get_image_by_id = old_get_image
@@ -544,12 +548,80 @@ class CacheStatusTests(BackendTestCase):
                 HeaderRequest({"if-none-match": '"full-sig-42"'}),
                 42,
                 BackgroundTasks(),
+                cached=True,
             )
         finally:
             thumbnails.fast_disk_path_entry = old_path_entry
             image_repository.get_image_by_id = old_get_image
 
         self.assertEqual(response.status_code, 304)
+
+    async def test_missing_online_source_returns_gone_and_marks_catalog_row(self):
+        source = await self._source("missing-media")
+        image_id = await self._image(source["id"], "gone.jpg")
+
+        thumbnail = await media_routes.serve_thumbnail(HeaderRequest(), "sm", image_id)
+        full = await media_routes.serve_full_image(HeaderRequest(), image_id, BackgroundTasks())
+        row = await self._image_row(image_id)
+
+        self.assertEqual(thumbnail.status_code, 410)
+        self.assertEqual(json.loads(thumbnail.body)["reason"], "source_missing")
+        self.assertEqual(full.status_code, 410)
+        self.assertIsNotNone(row["missing_at"])
+
+    async def test_offline_source_uses_cached_preview_without_marking_image_missing(self):
+        source = await self._source("offline-media")
+        image_id = await self._image(source["id"], "offline.jpg")
+        cached_path = os.path.join(self.tempdir.name, "offline-cache.jpg")
+        with open(cached_path, "wb") as handle:
+            handle.write(b"cached")
+        os.rmdir(source["path"])
+
+        old_memory_get = thumbnails._memory_get_entry_fast
+        old_path_entry = thumbnails.fast_disk_path_entry
+        thumbnails._memory_get_entry_fast = lambda _size, _image_id: None
+        thumbnails.fast_disk_path_entry = lambda _size, _image_id: ("offline-sig", cached_path)
+        try:
+            cached_response = await media_routes.serve_thumbnail(HeaderRequest(), "sm", image_id)
+            thumbnails.fast_disk_path_entry = lambda _size, _image_id: None
+            uncached_response = await media_routes.serve_thumbnail(HeaderRequest(), "sm", image_id)
+        finally:
+            thumbnails._memory_get_entry_fast = old_memory_get
+            thumbnails.fast_disk_path_entry = old_path_entry
+
+        self.assertIsInstance(cached_response, FileResponse)
+        self.assertEqual(uncached_response.status_code, 404)
+        self.assertEqual(json.loads(uncached_response.body)["reason"], "source_offline")
+        self.assertIsNone((await self._image_row(image_id))["missing_at"])
+
+    async def test_zero_byte_image_is_quarantined_and_logged_once(self):
+        source = await self._source("zero-media")
+        image_id = await self._image(source["id"], "empty.jpg")
+        filepath = (await self._image_row(image_id))["filepath"]
+        open(filepath, "wb").close()
+
+        with unittest.mock.patch.object(media_routes.log, "warning") as warning:
+            first = await media_routes.serve_thumbnail(HeaderRequest(), "sm", image_id)
+            second = await media_routes.serve_thumbnail(HeaderRequest(), "sm", image_id)
+
+        self.assertEqual(first.status_code, 410)
+        self.assertEqual(json.loads(first.body)["reason"], "source_corrupt")
+        self.assertEqual(second.status_code, 410)
+        self.assertEqual(warning.call_count, 1)
+        self.assertIsNotNone((await self._image_row(image_id))["missing_at"])
+
+    async def test_corrupt_nonempty_image_returns_gone_instead_of_server_error(self):
+        source = await self._source("corrupt-media")
+        image_id = await self._image(source["id"], "corrupt.jpg")
+        filepath = (await self._image_row(image_id))["filepath"]
+        with open(filepath, "wb") as handle:
+            handle.write(b"not a jpeg")
+
+        response = await media_routes.serve_thumbnail(HeaderRequest(), "sm", image_id)
+
+        self.assertEqual(response.status_code, 410)
+        self.assertEqual(json.loads(response.body)["reason"], "source_corrupt")
+        self.assertIsNotNone((await self._image_row(image_id))["missing_at"])
 
     async def test_cache_status_reports_preview_and_original_progress_separately(self):
         source = await self._source()

@@ -128,6 +128,50 @@ class PublishBuilderTests(BackendTestCase):
         self.assertGreaterEqual(summary.file_count, 5)
         self.assertEqual({call[1] for call in thumbs.calls}, {"sm", "md"})
 
+    async def test_bundle_skips_one_unreadable_member_instead_of_aborting_publish(self):
+        templates = app_module.app.state.photoarchive_shell.templates
+        cache = Path(self.tempdir.name) / "skip-cache"
+        cache.mkdir()
+
+        class OneBadThumbnail(FakeThumbnails):
+            def fast_disk_read_entry(self, size, image_id, _signature=None):
+                if int(image_id) == 202:
+                    return None
+                return super().fast_disk_read_entry(size, image_id, _signature)
+
+            async def get_thumbnail(self, filepath, size, image_id):
+                if int(image_id) == 202:
+                    return b""
+                return await super().get_thumbnail(filepath, size, image_id)
+
+        rows = {
+            101: {"id": 101, "filename": "good.jpg", "filepath": "/photos/good.jpg"},
+            202: {"id": 202, "filename": "bad.jpg", "filepath": "/photos/bad.jpg"},
+        }
+
+        async def get_collection(*_args, **_kwargs):
+            return {"id": 7, "name": "Mixed", "smart": False}
+
+        async def get_images_by_ids(image_ids):
+            return {image_id: rows[image_id] for image_id in image_ids}
+
+        with self.assertLogs("features.publish.builder", level="WARNING") as logs:
+            summary = await build_public_gallery_bundle(
+                slug="mixed",
+                title="Mixed",
+                destination=Path(self.tempdir.name) / "mixed-bundle",
+                templates=templates,
+                get_collection=get_collection,
+                collection_id=7,
+                collection_image_ids=lambda _collection_id: asyncio.sleep(0, result=[101, 202]),
+                get_images_by_ids=get_images_by_ids,
+                thumbnails=OneBadThumbnail(cache),
+            )
+
+        self.assertEqual(summary.photo_count, 1)
+        self.assertIn("image_id=202", logs.output[0])
+        self.assertFalse((Path(self.tempdir.name) / "mixed-bundle" / "img" / "202.jpg").exists())
+
 
 class PublishDeployerTests(unittest.TestCase):
     def test_publish_writes_bundle_manifest_and_successful_hook(self):
@@ -516,3 +560,20 @@ class PublishRouteTests(BackendTestCase):
         self.assertEqual(revoke.status_code, 202)
         await asyncio.gather(*self.tasks)
         self.assertIsNone(await db.get_collection_publish(collection["id"]))
+
+    async def test_unexpected_publish_failure_is_logged_without_leaking_internal_path(self):
+        publish_routes._start_job(77, "publishing", slug="private", title="Private")
+        secret = "/home/sean/private/source.jpg"
+
+        with unittest.mock.patch.object(publish_routes.log, "error") as error_log:
+            publish_routes._fail_job(
+                77,
+                RuntimeError(f"decoder failed at {secret}"),
+                operation="publish",
+            )
+
+        job = publish_routes._jobs[77]
+        self.assertEqual(job["status_code"], 500)
+        self.assertNotIn(secret, job["error"])
+        self.assertIn("Check the server log", job["error"])
+        error_log.assert_called_once()

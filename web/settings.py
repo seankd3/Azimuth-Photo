@@ -106,9 +106,6 @@ CAPTION_MODEL_PRESETS = {
     },
 }
 
-# Compatibility name for callers that still pass the old fast role.
-FAST_SEARCH_PRESET_KEY = LEGACY_2B_PRESET_KEY
-
 INT_RANGES = {
     "thumb_size_sm": (64, 4096),
     "thumb_size_md": (128, 8192),
@@ -229,25 +226,6 @@ def active_embedding_config(config: dict | None = None) -> dict:
     }
 
 
-def caption_model_config_for_preset(preset_key: str) -> dict:
-    preset = CAPTION_MODEL_PRESETS[preset_key]
-    config = {
-        "caption_model_id": preset["model_id"],
-        "caption_model_revision": preset["revision"],
-        "caption_model_dir": _default_model_dir(preset["model_id"]),
-        "caption_model_quantization": preset["quantization"],
-        "caption_prompt_version": preset["prompt_version"],
-    }
-    return {
-        "model_key": caption_model_key(config),
-        "model_id": config["caption_model_id"],
-        "revision": config["caption_model_revision"],
-        "model_dir": config["caption_model_dir"],
-        "quantization": config["caption_model_quantization"],
-        "prompt_version": config["caption_prompt_version"],
-    }
-
-
 def active_caption_config(config: dict | None = None) -> dict:
     config = config or get_settings()
     return {
@@ -302,7 +280,6 @@ def _derive_runtime_tuning(memory_cache_gb: float) -> dict:
         "user_workers": user_workers,
         "prefetch_workers": prefetch_workers,
         "scan_prefetch_limit": _clamp(warm_factor * 8, 24, 96),
-        "review_prefetch_limit": _clamp(warm_factor * 6, 12, 48),
         "compare_prefetch_limit": _clamp(warm_factor * 4, 8, 32),
         "mosaic_prefetch_limit": _clamp(warm_factor * 6, 12, 48),
         "browser_cache_max_age": BROWSER_CACHE_MAX_AGE,

@@ -5,6 +5,7 @@ this module as a stable delegate for older callers during the migration.
 """
 
 import aiosqlite
+import logging
 import os
 import time as _time  # noqa: F401  (tests set cache expiries via db._time.time())
 
@@ -30,6 +31,7 @@ from data.repositories import stats as stats_repository
 import settings
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "photoarchive.db")
+log = logging.getLogger(__name__)
 
 
 def register_embedding_batch_listener(listener):
@@ -354,6 +356,14 @@ async def insert_images_batch(rows: list[tuple], source_id: int | None = None):
     if not rows:
         return
     await catalog_repository.insert_images_batch(DB_PATH, rows, source_id)
+    zero_byte_paths = [str(row[1]) for row in rows if len(row) > 3 and row[3] == 0]
+    quarantined = await catalog_repository.mark_zero_byte_images_missing(DB_PATH, zero_byte_paths)
+    for image in quarantined:
+        log.warning(
+            "worker=catalog_scan image_id=%s skipped zero-byte image path=%r",
+            image["id"],
+            image["filepath"],
+        )
     _invalidate_stats_cache()
     _invalidate_filter_options_cache()
     cache_events.invalidate_rankings_cache()
@@ -392,6 +402,17 @@ def mark_image_missing_sync(image_id: int, missing_at: float | None = None) -> b
         _invalidate_stats_cache()
         _invalidate_filter_options_cache()
         invalidate_cached_image_ids_cache()
+    return changed
+
+
+async def mark_image_missing(image_id: int, missing_at: float | None = None) -> bool:
+    """Mark one image missing from async request/worker code."""
+    changed = await catalog_repository.mark_image_missing(DB_PATH, image_id, missing_at)
+    if changed:
+        _invalidate_stats_cache()
+        _invalidate_filter_options_cache()
+        invalidate_cached_image_ids_cache()
+        cache_events.invalidate_rankings_cache()
     return changed
 
 

@@ -547,12 +547,3 @@ export function initViewer() {
     on('flags', syncFlagButtons);
     installGestures();
 }
-
-export function viewerCollectionTarget() {
-    const image = current();
-    return image ? [Number(image.id)] : [];
-}
-
-export function viewerIsOpen() {
-    return openState;
-}

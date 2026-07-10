@@ -36,10 +36,6 @@ export function thumbUrl(size, imageId) {
     return `/api/thumb/${size}/${imageId}`;
 }
 
-export function exportUrl(params) {
-    return `/api/export?${params.toString()}`;
-}
-
 export async function getRankings(params, options = {}) {
     return fetchJson(`/api/rankings?${params.toString()}`, { defaultValue: null, ...options });
 }
@@ -279,12 +275,75 @@ export async function revokeCollectionPublish(collectionId) {
     return postJsonWithStatus(`/api/user-collections/${collectionId}/publish/revoke`);
 }
 
-export async function listPublishes() {
-    return fetchJson('/api/publishes', { defaultValue: { publishes: [] } });
-}
-
 export async function listSharedSurfaces() {
     return fetchJson('/api/shares', { defaultValue: { items: [] } });
+}
+
+async function publishingMutation(method, url, body = null) {
+    const options = { method, headers: { Accept: 'application/json' } };
+    if (body != null) {
+        options.headers['Content-Type'] = 'application/json';
+        options.body = JSON.stringify(body);
+    }
+    let response = null;
+    try {
+        response = await fetch(url, options);
+    } catch {
+        throw new Error('The archive did not respond');
+    }
+    const data = await response.json().catch(() => null);
+    if (!response.ok) {
+        throw new Error(data?.error || data?.detail || `Request failed (${response.status})`);
+    }
+    return data;
+}
+
+export async function getCollectionTree() {
+    return fetchJson('/api/collections/tree', { defaultValue: { nodes: [], links: [], root_ids: [] } });
+}
+
+export async function getCollectionGraphImages(collectionId) {
+    return fetchJson(`/api/collections/${collectionId}/images?recursive=0`, {
+        defaultValue: { image_ids: [], images: [] },
+    });
+}
+
+export async function getPublishedTree(area) {
+    return fetchJson(`/api/published/tree?area=${encodeURIComponent(area)}`, {
+        defaultValue: { area, nodes: [], links: [], root_ids: [] },
+    });
+}
+
+export async function createPublishedNode(fields) {
+    return publishingMutation('POST', '/api/published/nodes', fields);
+}
+
+export async function patchPublishedNode(nodeId, fields) {
+    return publishingMutation('PATCH', `/api/published/nodes/${nodeId}`, fields);
+}
+
+export async function deletePublishedNode(nodeId) {
+    return publishingMutation('DELETE', `/api/published/nodes/${nodeId}`);
+}
+
+export async function getPublishedNodeDiff(nodeId) {
+    return fetchJson(`/api/published/nodes/${nodeId}/diff`, { defaultValue: null });
+}
+
+export async function updatePublishedNode(nodeId, diff) {
+    return publishingMutation('POST', `/api/published/nodes/${nodeId}/update`, diff);
+}
+
+export async function sharePublishedNode(nodeId, password) {
+    return publishingMutation('POST', `/api/published/nodes/${nodeId}/share`, { password });
+}
+
+export async function revokePublishedNodeShare(nodeId) {
+    return publishingMutation('DELETE', `/api/published/nodes/${nodeId}/share`);
+}
+
+export async function exportPublishedWebsite() {
+    return publishingMutation('POST', '/api/published/export?area=website');
 }
 
 export async function getCollectionSuggestions() {

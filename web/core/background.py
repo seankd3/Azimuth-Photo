@@ -1,5 +1,9 @@
 import asyncio
+import logging
 import os
+
+
+log = logging.getLogger(__name__)
 
 
 IDLE_ACTIVITY_EXCLUDED_PATHS = frozenset(
@@ -26,8 +30,20 @@ class BackgroundTaskTracker:
     def track(self, coro) -> asyncio.Task:
         task = asyncio.create_task(coro)
         self.tasks.add(task)
-        task.add_done_callback(self.tasks.discard)
+        task.add_done_callback(self._task_done)
         return task
+
+    def _task_done(self, task: asyncio.Task) -> None:
+        self.tasks.discard(task)
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            log.error(
+                "worker=%s background task failed",
+                task.get_coro().__qualname__,
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
 
     async def cancel_all(self) -> None:
         tasks = list(self.tasks)
@@ -40,6 +56,20 @@ class BackgroundTaskTracker:
 
 def smoke_mode_enabled() -> bool:
     return os.environ.get("PHOTOARCHIVE_SMOKE_MODE") == "1"
+
+
+async def _gather_logged(worker_name: str, *awaitables) -> None:
+    results = await asyncio.gather(*awaitables, return_exceptions=True)
+    for task_index, result in enumerate(results):
+        if isinstance(result, asyncio.CancelledError):
+            raise result
+        if isinstance(result, Exception):
+            log.error(
+                "worker=%s task_index=%s startup warmup failed",
+                worker_name,
+                task_index,
+                exc_info=(type(result), result, result.__traceback__),
+            )
 
 
 async def track_idle_activity(request, call_next, *, thumbnails, excluded_paths: set[str]):
@@ -124,7 +154,8 @@ async def run_startup(
             for item in (options.get("file_types") or [])[:3]
             if item.get("ext")
         ]
-        await asyncio.gather(
+        await _gather_logged(
+            "common_filter_cache_warmup",
             *(
                 api_rankings(limit=60, file_type=file_type)
                 for file_type in file_types
@@ -141,12 +172,12 @@ async def run_startup(
                 )
                 for file_type in file_types
             ),
-            return_exceptions=True,
         )
 
     async def _warm_light_startup_caches():
         await asyncio.sleep(0.1)
-        await asyncio.gather(
+        await _gather_logged(
+            "light_startup_cache_warmup",
             get_catalog_image_counts(),
             get_stats(),
             get_ai_status_counts(),
@@ -188,14 +219,14 @@ async def run_startup(
                 orientation="portrait",
             ),
             asyncio.to_thread(warm_templates),
-            return_exceptions=True,
         )
 
     track_background_task(_warm_light_startup_caches())
 
     async def _warm_priority_interaction_caches():
         await asyncio.sleep(0.5)
-        await asyncio.gather(
+        await _gather_logged(
+            "priority_interaction_cache_warmup",
             get_stats(),
             get_filter_options(),
             default_visible_pairing_candidates(
@@ -220,7 +251,6 @@ async def run_startup(
             api_rankings(limit=50),
             api_rankings(limit=50, sort="resolution"),
             api_settings(),
-            return_exceptions=True,
         )
         await mosaic_next(n=12, strategy="explore")
         await mosaic_next(n=12, strategy="diverse")
@@ -254,11 +284,12 @@ async def run_startup(
             caption_worker.resume_caption_worker()
         track_background_task(_start_background_daemon(caption_worker.run_caption_worker, delay=30.0))
     except Exception:
-        pass
+        log.exception("worker=caption startup failed; caption worker was not scheduled")
 
     async def _warm_interaction_caches():
         await asyncio.sleep(interaction_cache_warmup_delay_seconds)
-        await asyncio.gather(
+        await _gather_logged(
+            "interaction_cache_warmup",
             get_ai_status_counts(),
             get_visible_orientation_pairing_pool_counts("md", cache_root(), "landscape"),
             get_visible_orientation_pairing_pool_counts("md", cache_root(), "portrait"),
@@ -292,14 +323,13 @@ async def run_startup(
             api_map_markers(),
             api_rankings(limit=50, sort="newest"),
             api_rankings(limit=50, sort="camera"),
-            return_exceptions=True,
         )
-        await asyncio.gather(
+        await _gather_logged(
+            "interaction_pairing_warmup",
             mosaic_next(n=6, orientation="landscape"),
             mosaic_next(n=12, strategy="diverse"),
             mosaic_next(n=12, strategy="diverse", orientation="landscape"),
             mosaic_next(n=12, strategy="diverse", orientation="portrait"),
             compare_next(n=5, mode="topn"),
-            return_exceptions=True,
         )
     track_background_task(_warm_interaction_caches())

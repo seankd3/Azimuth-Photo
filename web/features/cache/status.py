@@ -98,10 +98,6 @@ async def _browser_original_summary() -> dict:
     return summary
 
 
-async def _browser_original_count() -> int:
-    return int((await _browser_original_summary())["count"])
-
-
 def _cache_recommendations(
     cache: dict,
     eligible_images: int,
@@ -178,10 +174,6 @@ def _cache_archive_estimates_from_status(
         "sample_count": sample_count,
         "needed_bytes": needed_bytes,
     }
-
-
-def _copy_dict_of_dicts(value: dict | None) -> dict:
-    return response_helpers.copy_dict_of_dicts(value)
 
 
 def _system_resource_status(cache_root: str) -> dict:

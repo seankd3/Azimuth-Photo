@@ -84,10 +84,6 @@ export function closeExportMenu() {
     if (returnEl && document.contains(returnEl) && returnEl.focus) returnEl.focus({ preventScroll: true });
 }
 
-export function exportMenuOpen() {
-    return Boolean(menu && !menu.hidden);
-}
-
 export function downloadExport(params, { count = 0, message = '' } = {}) {
     const format = params.get('format') || 'csv';
     if (format === 'zip' && count > ZIP_EXPORT_MAX) {

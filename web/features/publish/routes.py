@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 import time
 from collections.abc import Awaitable, Callable
@@ -21,6 +22,7 @@ from features.share import auth as share_auth
 
 
 router = APIRouter()
+log = logging.getLogger(__name__)
 
 GetCollection = Callable[..., Awaitable[dict | None]]
 GetImagesByIds = Callable[[list[int]], Awaitable[dict[int, dict]]]
@@ -415,9 +417,9 @@ async def _run_publish_job(collection_id: int, slug: str, title: str) -> None:
             hook=result.hook,
         )
     except (PublishConflict, PublishDeployError, PublishSetupError) as exc:
-        _fail_job(collection_id, exc)
+        _fail_job(collection_id, exc, operation="publish")
     except Exception as exc:
-        _fail_job(collection_id, exc)
+        _fail_job(collection_id, exc, operation="publish")
 
 
 async def _run_revoke_job(collection_id: int, slug: str) -> None:
@@ -442,9 +444,9 @@ async def _run_revoke_job(collection_id: int, slug: str) -> None:
         state = "revoked_hook_failed" if result.hook and not result.hook.ok else "revoked"
         _finish_job(collection_id, state, publish=None, push_error=result.push_error, hook=result.hook)
     except (PublishConflict, PublishDeployError, PublishSetupError) as exc:
-        _fail_job(collection_id, exc)
+        _fail_job(collection_id, exc, operation="revoke")
     except Exception as exc:
-        _fail_job(collection_id, exc)
+        _fail_job(collection_id, exc, operation="revoke")
 
 
 def _schedule(coro) -> None:
@@ -494,20 +496,40 @@ def _finish_job(
     )
 
 
-def _fail_job(collection_id: int, exc: Exception) -> None:
+def _fail_job(collection_id: int, exc: Exception, *, operation: str) -> None:
     status_code = getattr(exc, "status_code", 500)
+    expected = isinstance(exc, (PublishConflict, PublishDeployError, PublishSetupError))
+    if expected:
+        log.warning(
+            "worker=publish operation=%s collection_id=%s failed status_code=%s: %s",
+            operation,
+            collection_id,
+            status_code,
+            exc,
+        )
+    else:
+        log.error(
+            "worker=publish operation=%s collection_id=%s failed unexpectedly",
+            operation,
+            collection_id,
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
     payload = {
         "state": "error",
         "phase": "error",
         "completed_at": time.time(),
-        "error": str(exc),
+        "error": (
+            str(exc)
+            if expected
+            else f"{operation.title()} failed unexpectedly. Check the server log and try again."
+        ),
         "status_code": status_code,
     }
     paths = getattr(exc, "paths", None)
     tail = getattr(exc, "tail", None)
-    if paths:
+    if expected and paths:
         payload["paths"] = paths
-    if tail:
+    if expected and tail:
         payload["tail"] = tail
     _update_job(collection_id, **payload)
 

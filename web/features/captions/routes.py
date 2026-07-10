@@ -1,4 +1,5 @@
 from collections.abc import Awaitable, Callable
+import logging
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
@@ -9,6 +10,7 @@ import settings
 
 
 router = APIRouter()
+log = logging.getLogger(__name__)
 AsyncDictBuilder = Callable[..., Awaitable[dict]]
 AsyncMaybeDictBuilder = Callable[..., Awaitable[dict | None]]
 AsyncListBuilder = Callable[..., Awaitable[list]]
@@ -122,8 +124,15 @@ async def api_pause_captions():
     _configured()
     try:
         caption_worker.pause_caption_worker()
-    except Exception as exc:
-        return JSONResponse({"error": str(exc)}, status_code=503)
+    except Exception:
+        log.exception("worker=caption operation=pause failed")
+        return JSONResponse(
+            {
+                "error": "Captions could not be paused",
+                "detail": "Check Background Work status and try again.",
+            },
+            status_code=503,
+        )
     _invalidate_settings_response_cache()
     return {"ok": True, "captions_status": await caption_status_payload()}
 
@@ -133,7 +142,14 @@ async def api_resume_captions():
     _configured()
     try:
         caption_worker.resume_caption_worker()
-    except Exception as exc:
-        return JSONResponse({"error": str(exc)}, status_code=503)
+    except Exception:
+        log.exception("worker=caption operation=resume failed")
+        return JSONResponse(
+            {
+                "error": "Captions could not be started",
+                "detail": "Check Background Work status and try again.",
+            },
+            status_code=503,
+        )
     _invalidate_settings_response_cache()
     return {"ok": True, "captions_status": await caption_status_payload()}

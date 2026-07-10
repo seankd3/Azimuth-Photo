@@ -249,8 +249,11 @@ async def _node_diff_on_conn(
     if query is None:
         cursor = await conn.execute(
             """
-            SELECT image_id FROM collection_images
-            WHERE collection_id = ?
+            SELECT membership.image_id FROM collection_images membership
+            JOIN images i ON i.id = membership.image_id
+            JOIN catalog_sources source ON source.id = i.source_id AND source.included = 1
+            WHERE membership.collection_id = ?
+              AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL
             ORDER BY position ASC, added_at ASC, image_id ASC
             """,
             (int(source_id),),
@@ -423,7 +426,9 @@ async def node_images(db_path: str, node_id: int) -> list[dict] | None:
                 ) AS caption
             FROM published_node_images membership
             JOIN images i ON i.id = membership.image_id
+            JOIN catalog_sources source ON source.id = i.source_id AND source.included = 1
             WHERE membership.node_id = ?
+              AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL
             ORDER BY membership.position ASC, membership.added_at ASC, membership.image_id ASC
             """,
             (int(node_id),),
@@ -479,8 +484,11 @@ async def _source_tree_spec_on_conn(
         child_links[int(row["parent_id"])].append((int(row["child_id"]), int(row["position"])))
     cursor = await conn.execute(
         """
-        SELECT collection_id, image_id
-        FROM collection_images
+        SELECT membership.collection_id, membership.image_id
+        FROM collection_images membership
+        JOIN images i ON i.id = membership.image_id
+        JOIN catalog_sources source ON source.id = i.source_id AND source.included = 1
+        WHERE i.status IN ('kept', 'maybe') AND i.missing_at IS NULL
         ORDER BY collection_id ASC, position ASC, added_at ASC, image_id ASC
         """
     )
@@ -571,11 +579,17 @@ async def _get_node_on_conn(conn, node_id: int) -> dict | None:
         """
         SELECT
             node.*,
-            COUNT(DISTINCT image.image_id) AS image_count,
+            COUNT(DISTINCT active_image.id) AS image_count,
             share.token AS share_token,
             share.password_hash AS share_password_hash
         FROM published_nodes node
         LEFT JOIN published_node_images image ON image.node_id = node.id
+        LEFT JOIN images active_image ON active_image.id = image.image_id
+            AND active_image.status IN ('kept', 'maybe') AND active_image.missing_at IS NULL
+            AND EXISTS (
+                SELECT 1 FROM catalog_sources source
+                WHERE source.id = active_image.source_id AND source.included = 1
+            )
         LEFT JOIN collection_shares share
             ON share.published_node_id = node.id AND share.revoked_at IS NULL
         WHERE node.id = ?
