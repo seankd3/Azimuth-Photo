@@ -122,6 +122,27 @@ def _walk_pages(tf):
             stack.extend(subs)
 
 
+def _apply_exif_orientation(arr, orientation: int):
+    """Apply EXIF Orientation (1-8) to an (H, W, C) array."""
+    import numpy as np
+
+    if orientation == 2:
+        return np.ascontiguousarray(arr[:, ::-1])
+    if orientation == 3:
+        return np.ascontiguousarray(arr[::-1, ::-1])
+    if orientation == 4:
+        return np.ascontiguousarray(arr[::-1])
+    if orientation == 5:
+        return np.ascontiguousarray(arr.transpose(1, 0, 2))
+    if orientation == 6:
+        return np.ascontiguousarray(np.rot90(arr, k=-1))
+    if orientation == 7:
+        return np.ascontiguousarray(arr.transpose(1, 0, 2)[::-1, ::-1])
+    if orientation == 8:
+        return np.ascontiguousarray(np.rot90(arr, k=1))
+    return arr
+
+
 def decode_lossy_dng(path: str, max_px: int | None = None):
     """Decode to linear sRGB uint16 (H, W, 3) plus WB metadata.
 
@@ -203,10 +224,16 @@ def decode_lossy_dng(path: str, max_px: int | None = None):
         np.clip(v, 0.0, 1.0, out=v)
         out = (v * 65535.0 + 0.5).astype(np.uint16)
 
+        # LinearRaw pixels are stored unrotated; honor the container
+        # Orientation tag so the base matches the camera's framing.
+        orientation = int(_tag(target, ifd0, "Orientation", 1) or 1)
+        out = _apply_exif_orientation(out, orientation)
+
         # As-shot multipliers relative to green, for WB slider estimates.
         cam_mul = (asn[1] / asn).tolist()
         meta = {
             "lossy_dng": True,
+            "orientation": orientation,
             "level_shape": [int(target.shape[0]), int(target.shape[1])],
             "full_shape": [int(full.shape[0]), int(full.shape[1])],
             "cam_mul": [float(cam_mul[0]), 1.0, float(cam_mul[2]), 0.0],
