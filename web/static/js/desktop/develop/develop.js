@@ -5,8 +5,9 @@ import { CropController } from './crop.js';
 import { DevelopRenderer, renderSyntheticPixels } from './gl.js';
 import { DevelopHistogram } from './histogram.js';
 import { DevelopPanels } from './panels.js';
+import { mountPresetsPanel } from './presets.js';
 
-const RAW_EXTENSIONS = new Set(['dng', 'cr3', 'cr2']);
+const RAW_EXTENSIONS = new Set(['dng', 'cr3', 'cr2', 'exr']);
 const stateCache = new Map();
 const saveTimers = new Map();
 let clipboardSettings = null;
@@ -16,6 +17,7 @@ let renderer = null;
 let panels = null;
 let crop = null;
 let histogram = null;
+let masking = null;
 let loadingToken = 0;
 let beforeHeld = false;
 let spaceHeld = false;
@@ -71,7 +73,7 @@ async function fetchDevelop(imageId) {
     return response.json();
 }
 
-function parseBase(buffer) {
+function parseBase(buffer, scale = 1) {
     if (buffer.byteLength < 16) throw new Error('Develop base preview is incomplete.');
     const bytes = new Uint8Array(buffer, 0, 8);
     const magic = String.fromCharCode(...bytes);
@@ -83,9 +85,10 @@ function parseBase(buffer) {
     if (!width || !height || rgb.length < width * height * 3) throw new Error('Develop base preview has invalid dimensions.');
     const rgba = new Float32Array(width * height * 4);
     for (let source = 0, target = 0; target < rgba.length; source += 3, target += 4) {
-        rgba[target] = rgb[source] / 65535;
-        rgba[target + 1] = rgb[source + 1] / 65535;
-        rgba[target + 2] = rgb[source + 2] / 65535;
+        const linearScale = Number.isFinite(scale) && scale > 0 ? scale : 1;
+        rgba[target] = (rgb[source] / 65535) * linearScale;
+        rgba[target + 1] = (rgb[source + 1] / 65535) * linearScale;
+        rgba[target + 2] = (rgb[source + 2] / 65535) * linearScale;
         rgba[target + 3] = 1;
     }
     return { width, height, rgba };
@@ -93,13 +96,13 @@ function parseBase(buffer) {
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function fetchBaseWithRetry(imageId, token) {
+async function fetchBaseWithRetry(imageId, token, scale = 1) {
     for (let attempt = 0; attempt <= 20; attempt += 1) {
         if (token !== loadingToken) return null;
         if (attempt === 2) setStatus('Reading RAW from disk…', { busy: true });
         if (attempt === 8) setStatus('Developing preview…', { busy: true });
         const response = await fetch(`/api/develop/${imageId}/base.bin`);
-        if (response.ok) return parseBase(await response.arrayBuffer());
+        if (response.ok) return parseBase(await response.arrayBuffer(), scale);
         if (![404, 503].includes(response.status)) throw new Error('The RAW preview could not be loaded.');
         if (attempt < 20) await delay(1000);
     }
@@ -139,13 +142,27 @@ function applySettings(entry) {
     renderer?.setSettings(entry.settings, entry.meta);
 }
 
-function settingsChanged(key, value, label) {
-    if (!currentImage || beforeHeld) return;
+function applyPresetSettings(settings, label = 'Preset') {
+    if (!currentImage) return;
     const entry = stateCache.get(Number(currentImage.id));
     if (!entry) return;
     entry.undo.push(clone(entry.settings));
     if (entry.undo.length > 100) entry.undo.shift();
     entry.redo.length = 0;
+    entry.settings = { ...entry.settings, ...clone(settings) };
+    applySettings(entry);
+    scheduleSave(label);
+}
+
+function settingsChanged(key, value, label, { history = true, previousSettings = null } = {}) {
+    if (!currentImage || beforeHeld) return;
+    const entry = stateCache.get(Number(currentImage.id));
+    if (!entry) return;
+    if (history) {
+        entry.undo.push(clone(previousSettings || entry.settings));
+        if (entry.undo.length > 100) entry.undo.shift();
+        entry.redo.length = 0;
+    }
     if (value === undefined) delete entry.settings[key];
     else entry.settings[key] = value;
     renderer?.setSettings(entry.settings, entry.meta);
@@ -231,10 +248,11 @@ async function openImage(image) {
             return;
         }
         setStatus('Reading RAW from disk…', { busy: true });
-        const base = await fetchBaseWithRetry(image.id, token);
+        const base = await fetchBaseWithRetry(image.id, token, Number(entry.meta?.hdr?.scale) || 1);
         if (!base || token !== loadingToken) return;
         renderer.uploadSource(base.rgba, base.width, base.height);
         renderer.setSettings(entry.settings, entry.meta);
+        masking?.rebuildRasters();
         canvas.classList.add('ready');
         placeholder.hidden = true;
         setStatus('');
@@ -424,7 +442,7 @@ function bindUi() {
     beforeButton.addEventListener('pointerdown', () => showBefore(true));
     for (const eventName of ['pointerup', 'pointercancel', 'pointerleave']) beforeButton.addEventListener(eventName, () => showBefore(false));
     stage.addEventListener('dblclick', (event) => {
-        if (!crop.active && !event.target.closest('button')) setZoom(!stage.classList.contains('zoomed'));
+        if (!crop.active && !masking?.mode && !event.target.closest('button')) setZoom(!stage.classList.contains('zoomed'));
     });
     document.addEventListener('pointerdown', (event) => {
         if (activePopover && !activePopover.contains(event.target) && !event.target.closest('[data-action="copy"], [data-action="export"]')) closePopover();
@@ -442,6 +460,7 @@ function editingField(event) {
 
 function handleKey(event) {
     if (!mounted || editingField(event)) return;
+    if (masking?.keydown(event)) return;
     const key = event.key.toLowerCase();
     if (event.ctrlKey || event.metaKey) {
         if (key === 'z') { event.preventDefault(); event.stopImmediatePropagation(); event.shiftKey ? redo() : undo(); }
@@ -478,8 +497,21 @@ function init() {
     histogram = new DevelopHistogram(histogramSlot);
     const cropSlot = document.createElement('div');
     cropSlot.id = 'develop-crop-controls';
-    panels = new DevelopPanels(panelHost, { histogramHost: histogramSlot, cropHost: cropSlot, onChange: settingsChanged });
+    panels = new DevelopPanels(panelHost, {
+        histogramHost: histogramSlot, cropHost: cropSlot, onChange: settingsChanged,
+        masking: { toolbar, stage, canvas, getImageId: () => currentImage?.id, getRenderer: () => renderer },
+    });
+    masking = panels.masking;
     crop = new CropController({ stage, canvas, overlay: document.getElementById('develop-crop-overlay'), controls: cropSlot, onChange: settingsChanged });
+    mountPresetsPanel(root.querySelector('.develop-layout') || root, {
+        getRenderer: () => renderer,
+        getEntry: () => currentImage && stateCache.get(Number(currentImage.id)),
+        applyPresetSettings,
+        saveCurrentSettings: () => {
+            const entry = currentImage && stateCache.get(Number(currentImage.id));
+            return clone(entry?.settings || {});
+        },
+    });
     bindUi();
     updateTabState();
     window.__developRenderToPixels = renderSyntheticPixels;

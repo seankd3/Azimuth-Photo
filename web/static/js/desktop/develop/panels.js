@@ -1,5 +1,6 @@
 import { BAND_NAMES, DEFAULTS, boolSetting, numberSetting } from './ops_constants.js';
 import { buildCurveLut, normalizeCurve } from './curve_lut.js';
+import { MaskingController } from './masking.js';
 
 const slider = (key, label, min, max, step = 1, fallback = DEFAULTS[key] ?? 0) => ({ key, label, min, max, step, fallback });
 const BASIC = [slider('Temperature', 'Temp', 2000, 50000, 50, 5500), slider('Tint', 'Tint', -150, 150)];
@@ -168,7 +169,7 @@ class CurveEditor {
 }
 
 export class DevelopPanels {
-    constructor(host, { histogramHost, cropHost, onChange }) {
+    constructor(host, { histogramHost, cropHost, onChange, masking }) {
         this.host = host;
         this.onChange = onChange;
         this.settings = {};
@@ -181,10 +182,12 @@ export class DevelopPanels {
             + section('Detail', 'detail', slidersHtml(DETAIL), false)
             + section('Effects', 'effects', slidersHtml(EFFECTS), false)
             + section('Crop', 'crop', '<div id="develop-crop-slot"></div>', false)
-            + '<p class="develop-v1-note">Stored but not rendered in v1: masks, lens corrections, chromatic aberration, noise reduction, color grading, spot removal, pano/HDR.</p>';
+            + section('Masking', 'masking', '<div id="develop-masking"></div>', false)
+            + '<p class="develop-v1-note">Stored but not rendered yet: lens corrections, chromatic aberration, noise reduction, color grading, spot removal, pano/HDR.</p>';
         host.querySelector('#develop-histogram-slot').replaceWith(histogramHost);
         host.querySelector('#develop-crop-slot').replaceWith(cropHost);
         this.curve = new CurveEditor(host.querySelector('[data-section="curve"]'), (key, value, label) => this.change(key, value, label));
+        this.masking = new MaskingController({ host: host.querySelector('#develop-masking'), onChange, ...masking });
         this.bindSliders();
         this.bindOtherControls();
     }
@@ -286,5 +289,6 @@ export class DevelopPanels {
         this.host.querySelector('#develop-wb').value = settings.WhiteBalance || 'As Shot';
         this.syncHslMode();
         this.curve.setSettings(settings);
+        this.masking.setSettings(settings);
     }
 }

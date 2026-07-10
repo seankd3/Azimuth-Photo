@@ -1252,7 +1252,7 @@ body.develop-active #canvas { overflow: hidden; }
 body.develop-active #canvas > .view:not(#view-develop) { display: none !important; }
 #view-switch [data-view="develop"][aria-disabled="true"] { color: var(--text-3); }
 #view-develop.active { display: block; width: 100%; height: 100%; }
-.develop-layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; width: 100%; height: 100%; min-height: 0; background: #0d0f12; }
+.develop-layout { display: grid; grid-template-columns: 200px minmax(0, 1fr) 320px; width: 100%; height: 100%; min-height: 0; background: #0d0f12; }
 .develop-workspace { display: grid; grid-template-rows: 42px minmax(0, 1fr) 88px; min-width: 0; min-height: 0; }
 #develop-toolbar { display: flex; align-items: center; gap: 4px; min-width: 0; padding: 5px 10px; border-bottom: 1px solid var(--line); background: #17191d; }
 #develop-toolbar button { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; height: 30px; padding: 0 9px; border: 1px solid transparent; border-radius: var(--r-ctl); color: var(--text-2); font-size: 11px; background: transparent; }
@@ -1367,4 +1367,48 @@ body.develop-active #canvas > .view:not(#view-develop) { display: none !importan
     #develop-status i { animation-duration: 1.6s; }
     .develop-section > summary span:last-child,
     .develop-toggle i::after { transition: none; }
+}
+
+/* ===== Masking ===== */
+.develop-masking-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 9px; color: var(--text-3); font-size: 10px; }
+.develop-masking-head.generating::after { content: "Generating mask…"; color: var(--accent); font-variant-numeric: tabular-nums; }
+.develop-mask-add { min-height: 27px; padding: 0 9px; border: 1px solid var(--accent-lin); border-radius: var(--r-ctl); color: #dbeaf7; font-size: 10px; background: var(--accent-dim); }
+.develop-mask-empty { margin: 4px 0; color: var(--text-3); font-size: 11px; line-height: 1.45; }
+.develop-mask-card { margin-top: 6px; border: 1px solid var(--line); border-radius: var(--r-ctl); background: rgba(0,0,0,.12); overflow: hidden; }
+.develop-mask-card.selected { border-color: var(--accent-lin); box-shadow: inset 2px 0 0 var(--accent); }
+.develop-mask-card > header { display: grid; grid-template-columns: 24px minmax(0, 1fr) 23px 23px; align-items: center; min-height: 32px; }
+.develop-mask-card > header button { min-width: 0; height: 30px; padding: 0 4px; color: var(--text-3); font-size: 12px; background: transparent; }
+.develop-mask-card > header button:hover { color: var(--text); background: rgba(255,255,255,.05); }
+.develop-mask-card > header .develop-mask-eye[aria-pressed="true"] { color: var(--accent); }
+.develop-mask-name { overflow: hidden; text-align: left; }
+.develop-mask-name > span { display: block; overflow: hidden; color: var(--text); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.develop-mask-name input { width: 100%; height: 22px; padding: 0 4px; border: 1px solid var(--accent-lin); border-radius: 3px; color: var(--text); font-size: 11px; background: #101216; outline: 0; }
+.develop-mask-card-body { padding: 7px 8px 9px; border-top: 1px solid var(--line-soft); }
+.develop-mask-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.develop-mask-chip,
+.develop-mask-chips > button:last-child,
+.develop-mask-tools button { min-height: 23px; padding: 0 6px; border: 1px solid var(--line); border-radius: 999px; color: var(--text-2); font-size: 9px; background: #15171b; }
+.develop-mask-chip:hover,
+.develop-mask-tools button:hover,
+.develop-mask-tools button[aria-pressed="true"] { border-color: var(--accent-lin); color: var(--text); background: var(--accent-dim); }
+.develop-mask-chip i { display: inline-block; margin-right: 3px; color: var(--accent); font-size: 11px; font-style: normal; }
+.develop-mask-tools { display: flex; justify-content: flex-end; gap: 5px; margin: 7px 0 5px; }
+.develop-mask-slider-group { margin-top: 9px; }
+.develop-mask-slider-group > b { display: block; margin-bottom: 2px; color: var(--text-3); font-size: 9px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; }
+.develop-mask-slider { display: grid; grid-template-columns: 67px minmax(0, 1fr) 39px; align-items: center; gap: 6px; min-height: 25px; color: var(--text-2); font-size: 10px; cursor: ew-resize; }
+.develop-mask-slider input { width: 100%; min-width: 0; height: 14px; margin: 0; accent-color: var(--accent); cursor: ew-resize; }
+.develop-mask-slider output { color: var(--text-3); font: 9px/1 var(--font-mono); text-align: right; }
+.develop-mask-menu { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; margin: 6px 0 8px; padding: 6px; border: 1px solid var(--line); border-radius: var(--r-ctl); background: #121418; }
+.develop-mask-menu > b { grid-column: 1 / -1; padding: 1px 3px 3px; color: var(--text-3); font-size: 9px; font-weight: 650; text-transform: uppercase; }
+.develop-mask-menu button { min-height: 25px; padding: 0 5px; overflow: hidden; border: 1px solid transparent; border-radius: 3px; color: var(--text-2); font-size: 9px; text-align: left; text-overflow: ellipsis; white-space: nowrap; background: transparent; }
+.develop-mask-menu button:hover { border-color: var(--line); color: var(--text); background: var(--card); }
+.develop-mask-layer { position: absolute; z-index: 3; inset: 0; pointer-events: none; }
+#develop-stage.masking-active { cursor: crosshair; }
+#develop-stage.masking-active .develop-mask-layer { pointer-events: auto; }
+.develop-mask-preview { position: absolute; box-sizing: border-box; pointer-events: none; background: rgba(235,47,55,.30); mix-blend-mode: screen; }
+.develop-mask-preview.linear { background: linear-gradient(var(--mask-angle), rgba(235,47,55,0), rgba(235,47,55,.5)); }
+.develop-mask-preview.radial { border: 1px solid rgba(255,255,255,.85); border-radius: 50%; background: radial-gradient(ellipse, rgba(235,47,55,.45) 0 60%, rgba(235,47,55,0) 100%); }
+.develop-mask-cursor { position: absolute; z-index: 2; box-sizing: border-box; border: 1px solid rgba(255,255,255,.95); border-radius: 50%; box-shadow: 0 0 0 1px rgba(0,0,0,.7), inset 0 0 16px rgba(240,58,65,.28); transform: translate(-50%, -50%); pointer-events: none; }
+@media (prefers-reduced-motion: reduce) {
+    .develop-mask-card, .develop-mask-preview, .develop-mask-cursor { transition: none; }
 }
