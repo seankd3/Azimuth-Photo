@@ -579,9 +579,11 @@ export class DevelopRenderer {
         const gl = this.gl;
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         if (this.source) gl.deleteTexture(this.source);
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
         this.source = texture(gl, width, height, {
             data: float32ToHalf(data), internalFormat: gl.RGBA16F, type: gl.HALF_FLOAT,
         });
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
         this.width = width;
         this.height = height;
         this.canvas.width = width;
