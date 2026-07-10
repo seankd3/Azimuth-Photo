@@ -8,64 +8,196 @@
   "white_point_kelvin": 5500,
   "hd_curves": {
     "r": [
-      [-2.0, 0.01],
-      [-1.2, 0.05],
-      [-0.6, 0.10],
-      [0.0, 0.15],
-      [0.6, 0.49],
-      [1.2, 0.84],
-      [1.8, 1.14],
-      [2.6, 1.38]
+      [
+        -2.0,
+        0.01
+      ],
+      [
+        -1.2,
+        0.05
+      ],
+      [
+        -0.6,
+        0.1
+      ],
+      [
+        0.0,
+        0.15
+      ],
+      [
+        0.6,
+        0.49
+      ],
+      [
+        1.2,
+        0.84
+      ],
+      [
+        1.8,
+        1.14
+      ],
+      [
+        2.6,
+        1.38
+      ]
     ],
     "g": [
-      [-2.0, 0.01],
-      [-1.2, 0.05],
-      [-0.6, 0.10],
-      [0.0, 0.15],
-      [0.6, 0.50],
-      [1.2, 0.85],
-      [1.8, 1.15],
-      [2.6, 1.40]
+      [
+        -2.0,
+        0.01
+      ],
+      [
+        -1.2,
+        0.05
+      ],
+      [
+        -0.6,
+        0.1
+      ],
+      [
+        0.0,
+        0.15
+      ],
+      [
+        0.6,
+        0.5
+      ],
+      [
+        1.2,
+        0.85
+      ],
+      [
+        1.8,
+        1.15
+      ],
+      [
+        2.6,
+        1.4
+      ]
     ],
     "b": [
-      [-2.0, 0.01],
-      [-1.2, 0.04],
-      [-0.6, 0.09],
-      [0.0, 0.15],
-      [0.6, 0.48],
-      [1.2, 0.83],
-      [1.8, 1.13],
-      [2.6, 1.37]
+      [
+        -2.0,
+        0.01
+      ],
+      [
+        -1.2,
+        0.04
+      ],
+      [
+        -0.6,
+        0.09
+      ],
+      [
+        0.0,
+        0.15
+      ],
+      [
+        0.6,
+        0.48
+      ],
+      [
+        1.2,
+        0.83
+      ],
+      [
+        1.8,
+        1.13
+      ],
+      [
+        2.6,
+        1.37
+      ]
     ]
   },
   "spectral_crosstalk": [
-    [0.86, 0.11, 0.03],
-    [0.07, 0.84, 0.09],
-    [0.02, 0.14, 0.84]
+    [
+      0.86,
+      0.11,
+      0.03
+    ],
+    [
+      0.07,
+      0.84,
+      0.09
+    ],
+    [
+      0.02,
+      0.14,
+      0.84
+    ]
   ],
   "dir_coupler": [
-    [1.00, -0.11, -0.08],
-    [-0.10, 1.00, -0.11],
-    [-0.07, -0.10, 1.00]
+    [
+      1.0,
+      -0.11,
+      -0.08
+    ],
+    [
+      -0.1,
+      1.0,
+      -0.11
+    ],
+    [
+      -0.07,
+      -0.1,
+      1.0
+    ]
   ],
   "grain": {
-    "r": {"rms_granularity": 4.0, "size_px_at_4k": 2.2, "shadow_bias": 0.70},
-    "g": {"rms_granularity": 4.0, "size_px_at_4k": 2.2, "shadow_bias": 0.70},
-    "b": {"rms_granularity": 4.0, "size_px_at_4k": 2.2, "shadow_bias": 0.70}
+    "rms_granularity": 4.0,
+    "size_px_at_4k": 2.4,
+    "shadow_bias": 0.7,
+    "r": {
+      "rms_granularity": 4.0,
+      "size_px_at_4k": 2.4,
+      "shadow_bias": 0.7
+    },
+    "g": {
+      "rms_granularity": 4.0,
+      "size_px_at_4k": 2.4,
+      "shadow_bias": 0.7
+    },
+    "b": {
+      "rms_granularity": 4.0,
+      "size_px_at_4k": 2.4,
+      "shadow_bias": 0.7
+    }
   },
   "halation": {
-    "amount": 0.06,
-    "threshold": 0.62,
-    "radius_frac": 0.03,
+    "amount": 0.05,
+    "threshold": 0.64,
+    "radius_frac": 0.025,
     "green_fraction": 0.08
   },
   "base": {
-    "orange_mask_rgb": [0.93, 0.52, 0.22],
-    "base_fog_density": 0.10
+    "orange_mask_rgb": [
+      0.93,
+      0.52,
+      0.22
+    ],
+    "base_fog_density": 0.1
   },
   "print_paper": {
-    "gamma": 2.60,
-    "shoulder": 0.85
+    "gamma": 2.58,
+    "shoulder": 0.83
   },
-  "notes": "H&D approx from Kodak Portra 400 professional datasheet (E-4020 / successor Portra pubs) Status M characteristic curves. Soft, matched layers for skin; straight-line gamma ≈ 0.58. logE = 0 at ISO speed point. Spectral crosstalk from daylight-balanced Portra sensitivity plots: tight peaks (~450/550/650 nm) with modest neighbor spill — Portra's controlled overlap supports neutral skin. Strong C-41 pro DIR (color 'pop' without Ektar aggression). Diffuse RMS Granularity 4 from Kodak Portra 400 datasheet. Halation subtle (remjet/AH layer present). Memory approximation of published curves, not PDF-digitized."
+  "notes": "H&D approx from Kodak Portra 400 professional datasheet (E-4020 / successor Portra pubs) Status M characteristic curves. Soft, matched layers for skin; straight-line gamma \u2248 0.58. logE = 0 at ISO speed point. Spectral crosstalk from daylight-balanced Portra sensitivity plots: tight peaks (~450/550/650 nm) with modest neighbor spill \u2014 Portra's controlled overlap supports neutral skin. Strong C-41 pro DIR (color 'pop' without Ektar aggression). Diffuse RMS Granularity 4 from Kodak Portra 400 datasheet. Halation subtle (remjet/AH layer present). Memory approximation of published curves, not PDF-digitized. | tuned against 15 real San Marcos Filmlab Portra 400 scans 2026-07-10",
+  "scan_matrix": [
+    [
+      1.02,
+      -0.01,
+      -0.01
+    ],
+    [
+      -0.005,
+      1.01,
+      0.0
+    ],
+    [
+      -0.015,
+      0.0,
+      0.985
+    ]
+  ]
 }

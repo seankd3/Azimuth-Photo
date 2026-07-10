@@ -8,50 +8,161 @@
   "white_point_kelvin": 5500,
   "hd_curves": {
     "r": [
-      [-2.0, 0.01],
-      [-1.2, 0.05],
-      [-0.6, 0.10],
-      [0.0, 0.15],
-      [0.6, 0.48],
-      [1.2, 0.82],
-      [1.8, 1.12],
-      [2.6, 1.36]
+      [
+        -2.0,
+        0.01
+      ],
+      [
+        -1.2,
+        0.05
+      ],
+      [
+        -0.6,
+        0.1
+      ],
+      [
+        0.0,
+        0.15
+      ],
+      [
+        0.6,
+        0.48
+      ],
+      [
+        1.2,
+        0.82
+      ],
+      [
+        1.8,
+        1.12
+      ],
+      [
+        2.6,
+        1.36
+      ]
     ],
     "g": [
-      [-2.0, 0.01],
-      [-1.2, 0.05],
-      [-0.6, 0.10],
-      [0.0, 0.15],
-      [0.6, 0.49],
-      [1.2, 0.83],
-      [1.8, 1.13],
-      [2.6, 1.38]
+      [
+        -2.0,
+        0.01
+      ],
+      [
+        -1.2,
+        0.05
+      ],
+      [
+        -0.6,
+        0.1
+      ],
+      [
+        0.0,
+        0.15
+      ],
+      [
+        0.6,
+        0.49
+      ],
+      [
+        1.2,
+        0.83
+      ],
+      [
+        1.8,
+        1.13
+      ],
+      [
+        2.6,
+        1.38
+      ]
     ],
     "b": [
-      [-2.0, 0.01],
-      [-1.2, 0.04],
-      [-0.6, 0.09],
-      [0.0, 0.15],
-      [0.6, 0.47],
-      [1.2, 0.81],
-      [1.8, 1.11],
-      [2.6, 1.35]
+      [
+        -2.0,
+        0.01
+      ],
+      [
+        -1.2,
+        0.04
+      ],
+      [
+        -0.6,
+        0.09
+      ],
+      [
+        0.0,
+        0.15
+      ],
+      [
+        0.6,
+        0.47
+      ],
+      [
+        1.2,
+        0.81
+      ],
+      [
+        1.8,
+        1.11
+      ],
+      [
+        2.6,
+        1.35
+      ]
     ]
   },
   "spectral_crosstalk": [
-    [0.87, 0.10, 0.03],
-    [0.06, 0.85, 0.09],
-    [0.02, 0.13, 0.85]
+    [
+      0.87,
+      0.1,
+      0.03
+    ],
+    [
+      0.06,
+      0.85,
+      0.09
+    ],
+    [
+      0.02,
+      0.13,
+      0.85
+    ]
   ],
   "dir_coupler": [
-    [1.00, -0.10, -0.07],
-    [-0.09, 1.00, -0.10],
-    [-0.06, -0.09, 1.00]
+    [
+      1.0,
+      -0.1,
+      -0.07
+    ],
+    [
+      -0.09,
+      1.0,
+      -0.1
+    ],
+    [
+      -0.06,
+      -0.09,
+      1.0
+    ]
   ],
   "grain": {
-    "r": {"rms_granularity": 3.0, "size_px_at_4k": 1.7, "shadow_bias": 0.65},
-    "g": {"rms_granularity": 3.0, "size_px_at_4k": 1.7, "shadow_bias": 0.65},
-    "b": {"rms_granularity": 3.0, "size_px_at_4k": 1.7, "shadow_bias": 0.65}
+    "rms_granularity": 3.0,
+    "size_px_at_4k": 1.7,
+    "shadow_bias": 0.65,
+    "r": {
+      "rms_granularity": 3.0,
+      "size_px_at_4k": 1.7,
+      "shadow_bias": 0.65
+    },
+    "g": {
+      "rms_granularity": 3.0,
+      "size_px_at_4k": 1.7,
+      "shadow_bias": 0.65
+    },
+    "b": {
+      "rms_granularity": 3.0,
+      "size_px_at_4k": 1.7,
+      "shadow_bias": 0.65
+    }
   },
   "halation": {
     "amount": 0.05,
@@ -60,12 +171,16 @@
     "green_fraction": 0.08
   },
   "base": {
-    "orange_mask_rgb": [0.93, 0.53, 0.23],
+    "orange_mask_rgb": [
+      0.93,
+      0.53,
+      0.23
+    ],
     "base_fog_density": 0.09
   },
   "print_paper": {
-    "gamma": 2.60,
+    "gamma": 2.6,
     "shoulder": 0.86
   },
-  "notes": "H&D approx from Kodak Portra 160 professional datasheet Status M curves. Slightly softer than Portra 400; straight-line gamma ≈ 0.56. Layers closely matched (portrait aim). Spectral crosstalk from Portra 160 daylight sensitivity plots — slightly tighter than 400 (finer emulsion, less scatter). Pro DIR, a touch milder than Portra 400. Diffuse RMS Granularity 3 from Kodak Portra 160 datasheet. Halation subtle. Memory approximation of published curves."
+  "notes": "H&D approx from Kodak Portra 160 professional datasheet Status M curves. Slightly softer than Portra 400; straight-line gamma \u2248 0.56. Layers closely matched (portrait aim). Spectral crosstalk from Portra 160 daylight sensitivity plots \u2014 slightly tighter than 400 (finer emulsion, less scatter). Pro DIR, a touch milder than Portra 400. Diffuse RMS Granularity 3 from Kodak Portra 160 datasheet. Halation subtle. Memory approximation of published curves. | grain keys flattened so engine reads datasheet RMS (no local Portra 160 scans) 2026-07-10"
 }

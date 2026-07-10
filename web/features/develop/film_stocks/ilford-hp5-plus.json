@@ -8,38 +8,79 @@
   "white_point_kelvin": 5500,
   "hd_curves": {
     "pan": [
-      [-2.0, 0.02],
-      [-1.2, 0.06],
-      [-0.6, 0.11],
-      [0.0, 0.15],
-      [0.6, 0.52],
-      [1.2, 0.90],
-      [1.8, 1.22],
-      [2.6, 1.46]
+      [
+        -2.0,
+        0.02
+      ],
+      [
+        -1.2,
+        0.06
+      ],
+      [
+        -0.6,
+        0.11
+      ],
+      [
+        0.0,
+        0.15
+      ],
+      [
+        0.6,
+        0.52
+      ],
+      [
+        1.2,
+        0.9
+      ],
+      [
+        1.8,
+        1.22
+      ],
+      [
+        2.6,
+        1.46
+      ]
     ]
   },
   "spectral_crosstalk": [
-    [0.26, 0.54, 0.20]
+    [
+      0.26,
+      0.54,
+      0.2
+    ]
   ],
   "dir_coupler": [
-    [1.0]
+    [
+      1.0
+    ]
   ],
   "grain": {
-    "pan": {"rms_granularity": 14.0, "size_px_at_4k": 3.1, "shadow_bias": 0.78}
+    "rms_granularity": 14.0,
+    "size_px_at_4k": 3.2,
+    "shadow_bias": 0.78,
+    "pan": {
+      "rms_granularity": 14.0,
+      "size_px_at_4k": 3.2,
+      "shadow_bias": 0.78
+    }
   },
   "halation": {
-    "amount": 0.07,
-    "threshold": 0.58,
-    "radius_frac": 0.032,
+    "amount": 0.05,
+    "threshold": 0.6,
+    "radius_frac": 0.028,
     "green_fraction": 0.0
   },
   "base": {
-    "orange_mask_rgb": [0.0, 0.0, 0.0],
+    "orange_mask_rgb": [
+      0.0,
+      0.0,
+      0.0
+    ],
     "base_fog_density": 0.07
   },
   "print_paper": {
-    "gamma": 2.05,
-    "shoulder": 0.80
+    "gamma": 2.0,
+    "shoulder": 0.78
   },
-  "notes": "B&W single-layer path. H&D approx from Ilford HP5 Plus technical data sheet characteristic curves (ID-11 / Ilfotec DD-X pictorial development); straight-line gamma ≈ 0.62 (HP5+ is slightly softer / longer-toed than Tri-X in typical soup). logE = 0 at ISO speed point. spectral_crosstalk is 1×3 panchromatic weights from Ilford HP5+ spectral sensitivity (classic panchromatic, green-weighted). dir_coupler identity 1×1. RMS granularity ~14 (Ilford quotes diffuse RMS in this neighborhood for HP5+; slightly finer than Tri-X 17). Mild halation, green_fraction 0. Print paper grade ~2, gamma ≈ 2.05. Memory approximation of Ilford published curves."
+  "notes": "B&W single-layer path. H&D approx from Ilford HP5 Plus technical data sheet characteristic curves (ID-11 / Ilfotec DD-X pictorial development); straight-line gamma \u2248 0.62 (HP5+ is slightly softer / longer-toed than Tri-X in typical soup). logE = 0 at ISO speed point. spectral_crosstalk is 1\u00d73 panchromatic weights from Ilford HP5+ spectral sensitivity (classic panchromatic, green-weighted). dir_coupler identity 1\u00d71. RMS granularity ~14 (Ilford quotes diffuse RMS in this neighborhood for HP5+; slightly finer than Tri-X 17). Mild halation, green_fraction 0. Print paper grade ~2, gamma \u2248 2.05. Memory approximation of Ilford published curves. | tuned against 5 real San Marcos Filmlab HP5 JPEG scans 2026-07-10"
 }
