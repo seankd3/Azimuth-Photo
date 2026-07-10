@@ -204,3 +204,17 @@ GL applies crop+rotation in the vertex/UV transform live.
 Import scan over 2024 RAWS subset runs clean; open a DNG in Develop; every §7 panel functional;
 edits imported from XMP appear exactly as LR left them (spot-check known-edited photo); export JPEG
 matches canvas within tolerance; suite green; screenshots captured. Honest notes on any approximation gaps.
+
+## 11. Field notes (measured 2026-07-10, overrides §3 cache paths)
+- rawpy 0.27 decode of a 38MB DNG: **1.2s warm**, but cold file read off /mnt/expansion is **17–45s**
+  (HDD at ~2MB/s under caption/embedding worker contention). Decode cost is I/O, not CPU.
+- Therefore: base cache (**.bin.gz + .jpg + .json**) lives on the root SSD at
+  `/home/sean/.cache/photoarchive-develop/base/` with LRU eviction capped at 12GB (evict by atime/mtime,
+  check on each write). Exports stay on `/mnt/expansion/PhotoArchiveCache/develop/exports/`.
+- UI: first-open of an uncached raw takes ~20–60s — show an honest staged progress state
+  ("Reading RAW from disk…" → "Developing preview…"), never a dead spinner. Filmstrip warm-ahead
+  (pregen ±2 neighbors) is mandatory, fire it on every photo switch.
+- `raw.extract_thumb()` returned BITMAP (tiny PPM) on these LR-converted DNGs — importer thumbnails must
+  handle the bitmap form (encode to JPEG via PIL) and fall back to half-size decode when thumb is unusable.
+- Sample as-shot WB multipliers: cam_wb [2.207, 1.0, 1.506, 0.0] — R/B gains relative to G; derive temp/tint
+  estimate from the R/B ratio vs daylight_whitebalance as speced.
