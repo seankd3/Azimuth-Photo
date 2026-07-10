@@ -4,6 +4,7 @@ import { openCollectionPicker } from './panel.js';
 import { downloadExport } from './export_menu.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
 import { icon } from '../icons.js';
+import { showToast } from './toast.js';
 
 let menu = null;
 let returnEl = null;
@@ -55,6 +56,21 @@ function exportIds(ids, format = 'csv', size = '') {
     });
 }
 
+async function mergeHdr(ids) {
+    showToast('Preparing HDR merge\u2026');
+    try {
+        const response = await fetch('/api/develop/hdr/merge', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ image_ids: ids }),
+        });
+        if (!response.ok) throw new Error();
+        showToast('HDR merge is running. The result will appear in HDR Merges.');
+    } catch {
+        showToast('HDR merge could not start');
+    }
+}
+
 function render() {
     const count = target.ids.length;
     menu.innerHTML = '<div class="pm-group">'
@@ -65,6 +81,7 @@ function render() {
         + `<button data-act="collection">${icon('plus')} Add ${count > 1 ? `${count} to collection` : 'to collection'}</button>`
         + `<button data-act="loupe">${icon('image')} Open in Loupe</button>`
         + `<button data-act="similar">${icon('scan-search')} Find similar</button>`
+        + (count >= 3 ? `<button data-act="hdr-merge">${icon('layers')} Merge ${count} to HDR</button>` : '')
         + '</div><div class="pm-group">'
         + `<div class="pm-label">Export ${count > 1 ? 'selection' : 'photo'}</div>`
         + `<button data-act="export-csv">${icon('download')} CSV</button>`
@@ -88,6 +105,7 @@ function run(action) {
     else if (action === 'collection') openCollectionPicker(ids);
     else if (action === 'loupe') emit('loupe:open', { id: target.id, index: target.index });
     else if (action === 'similar') emit('similar:find', { imageId: target.id });
+    else if (action === 'hdr-merge') mergeHdr(ids);
     else if (action === 'export-csv') exportIds(ids, 'csv');
     else if (action === 'export-json') exportIds(ids, 'json');
     else if (action.startsWith('export-zip-')) exportIds(ids, 'zip', action.replace('export-zip-', ''));

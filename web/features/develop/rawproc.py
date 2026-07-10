@@ -59,6 +59,15 @@ def is_raw_path(path: str | os.PathLike[str]) -> bool:
     return Path(path).suffix.lower() in RAW_EXTENSIONS
 
 
+def is_hdr_merge_path(path: str | os.PathLike[str]) -> bool:
+    candidate = Path(path)
+    return candidate.suffix.lower() == ".exr" and candidate.parent == BASE_CACHE_ROOT / "hdr"
+
+
+def is_develop_path(path: str | os.PathLike[str]) -> bool:
+    return is_raw_path(path) or is_hdr_merge_path(path)
+
+
 def base_paths(image_id: int) -> BasePaths:
     stem = BASE_CACHE_DIR / str(int(image_id))
     return BasePaths(binary=stem.with_suffix(".bin.gz"), metadata=stem.with_suffix(".json"), preview=stem.with_suffix(".jpg"))
@@ -414,6 +423,8 @@ def ensure_base_cache(image_id: int, path: str | os.PathLike[str]) -> tuple[Base
     paths = base_paths(image_id)
     if paths.binary.exists() and paths.metadata.exists() and paths.preview.exists():
         return paths, read_base_metadata(image_id) or {}
+    if is_hdr_merge_path(path):
+        raise RawDecodeError("HDR merge base cache is unavailable")
     lock = _image_lock(image_id)
     with lock:
         if paths.binary.exists() and paths.metadata.exists() and paths.preview.exists():

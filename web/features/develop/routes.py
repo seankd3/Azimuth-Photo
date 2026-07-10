@@ -67,8 +67,8 @@ async def _image_or_error(image_id: int):
     if not image:
         return None, JSONResponse({"error": "Image not found"}, status_code=404)
     image = dict(image)
-    if not rawproc.is_raw_path(image.get("filepath") or ""):
-        return None, JSONResponse({"error": "RAW editing is available only for DNG, CR2, and CR3 images"}, status_code=400)
+    if not rawproc.is_develop_path(image.get("filepath") or ""):
+        return None, JSONResponse({"error": "Develop editing is available only for RAW files and HDR merges"}, status_code=400)
     if not await asyncio.to_thread(os.path.exists, image["filepath"]):
         return None, JSONResponse({"error": "RAW source file is unavailable"}, status_code=404)
     return image, None
