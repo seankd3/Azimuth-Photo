@@ -24,7 +24,7 @@ const PAGE_SENTINELS = {
 const PAGE_WORKFLOW_SELECTORS = {
     "/": ["#scope-input", "#view-switch", "#btn-refine", "#system-btn", "#loupe", "#refine"],
     "/d": ["#scope-input", "#view-switch", "#btn-refine", "#system-btn", "#loupe", "#refine"],
-    "/m": ["#m-zoomctl", "#m-scrub", "#m-selbar", "#m-viewer", "#m-toast"],
+    "/m": ["#m-zoomctl", "#m-scrub", "#m-sel-actions", "#m-viewer", "#m-toast"],
 };
 
 const VISIBLE_PAGE_STATE_SCRIPT = `(() => {
