@@ -113,6 +113,9 @@ export function initCullBrief() {
     // Importer calls this same event when a new batch settles.  Keeping the
     // request here means the brief does not poll or flag anything on its own.
     document.addEventListener('photoarchive:import-complete', () => { refreshCullBrief(); });
+    // One deferred load per session so existing suggestions surface without
+    // blocking boot; the banner stays hidden when there is nothing to review.
+    setTimeout(() => { refreshCullBrief().catch(() => {}); }, 3000);
 }
 
 window.__photoArchiveCullBrief = { init: initCullBrief, refresh: refreshCullBrief };
