@@ -1,0 +1,291 @@
+"""Resumable XMP-sidecar import for Develop RAW sources.
+
+This module deliberately stores all Camera Raw settings, including v1 settings
+that the renderer does not yet implement (masks, lens corrections, etc.).
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import re
+import threading
+import time
+import xml.etree.ElementTree as etree
+from collections.abc import Iterator
+from typing import Any
+
+import scanner
+from data import connection
+from data.repositories import catalog as catalog_repository
+
+
+DEFAULT_RAWS_ROOT = "/mnt/expansion/Photos/RAWS"
+RAW_EXTENSIONS = frozenset({".dng", ".cr2", ".cr3"})
+_NUMBER = re.compile(r"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$")
+_CRS_NAMESPACE_MARKER = "camera-raw-settings"
+_LOG = logging.getLogger(__name__)
+
+_status_lock = threading.Lock()
+_status: dict[str, int | bool | str] = {
+    "running": False,
+    "seen": 0,
+    "imported": 0,
+    "sidecars": 0,
+    "skipped": 0,
+    "errors": 0,
+    "root": "",
+}
+
+
+def import_status() -> dict[str, int | bool | str]:
+    """Return a point-in-time copy of the current import progress."""
+
+    with _status_lock:
+        return dict(_status)
+
+
+def _begin_status(root: str) -> bool:
+    with _status_lock:
+        if _status["running"]:
+            return False
+        _status.update(
+            running=True,
+            seen=0,
+            imported=0,
+            sidecars=0,
+            skipped=0,
+            errors=0,
+            root=root,
+        )
+        return True
+
+
+def _finish_status() -> None:
+    with _status_lock:
+        _status["running"] = False
+
+
+def finish_scan() -> None:
+    """Release a route-level scan claim if its worker cannot start."""
+
+    _finish_status()
+
+
+def _increment(name: str, amount: int = 1) -> None:
+    with _status_lock:
+        _status[name] = int(_status[name]) + amount
+
+
+def _split_name(name: str) -> tuple[str, str]:
+    if name.startswith("{"):
+        namespace, _, local = name[1:].partition("}")
+        return namespace, local
+    return "", name.split(":", 1)[-1]
+
+
+def _is_crs_name(name: str) -> bool:
+    namespace, _local = _split_name(name)
+    return _CRS_NAMESPACE_MARKER in namespace.lower() or name.startswith("crs:")
+
+
+def _normalize_value(value: str) -> bool | int | float | str:
+    clean = str(value or "").strip()
+    if clean.lower() == "true":
+        return True
+    if clean.lower() == "false":
+        return False
+    if not _NUMBER.fullmatch(clean):
+        return clean
+    numeric = float(clean)
+    return int(numeric) if numeric.is_integer() else numeric
+
+
+def _curve_values(element: etree.Element) -> list[str]:
+    values = [text.strip() for text in element.itertext() if text and text.strip()]
+    if values:
+        return values
+    return []
+
+
+def parse_xmp_text(payload: str | bytes) -> dict[str, Any]:
+    """Parse every ``crs:*`` value from either Lightroom XMP representation.
+
+    Attributes hold scalar values in some XMPs, while curves are commonly RDF
+    child arrays.  Curve point strings remain verbatim for Lightroom fidelity.
+    """
+
+    root = etree.fromstring(payload)
+    settings: dict[str, Any] = {}
+    for element in root.iter():
+        for name, value in element.attrib.items():
+            if not _is_crs_name(name):
+                continue
+            _namespace, local = _split_name(name)
+            settings[local] = _normalize_value(value)
+
+        if not _is_crs_name(element.tag):
+            continue
+        _namespace, local = _split_name(element.tag)
+        if local.startswith("ToneCurvePV2012"):
+            settings[local] = _curve_values(element)
+            continue
+        text = "".join(element.itertext()).strip()
+        if text:
+            settings[local] = _normalize_value(text)
+    return settings
+
+
+def parse_xmp_file(xmp_path: str) -> dict[str, Any]:
+    with open(xmp_path, "rb") as handle:
+        return parse_xmp_text(handle.read())
+
+
+def _iter_raw_rows(root: str) -> Iterator[tuple[str, str, str, int | None, float | None]]:
+    """Use scanner enumeration, supplementing CR2 until its shared patch lands."""
+
+    seen: set[str] = set()
+    for row in scanner.walk_images(root):
+        if row[2].lower() in RAW_EXTENSIONS:
+            seen.add(row[1])
+            yield row
+    # scanner currently omits CR2. Keep import correct before the shared scanner
+    # patch is applied, without broadening this Develop-only walk.
+    for directory, _dirs, filenames in os.walk(root):
+        for filename in filenames:
+            if os.path.splitext(filename)[1].lower() != ".cr2":
+                continue
+            filepath = os.path.join(directory, filename)
+            if filepath in seen:
+                continue
+            try:
+                stat = os.stat(filepath)
+                yield filename, filepath, ".cr2", int(stat.st_size), float(stat.st_mtime)
+            except OSError:
+                yield filename, filepath, ".cr2", None, None
+
+
+def _ensure_source(conn, root: str):
+    normalized = catalog_repository.normalize_source_path(root)
+    display_name = catalog_repository.source_display_name(normalized)
+    now = time.time()
+    conn.execute(
+        "INSERT INTO catalog_sources "
+        "(path, display_name, included, online, created_at, last_scan_at, last_seen_at) "
+        "VALUES (?, ?, 1, 1, ?, ?, ?) "
+        "ON CONFLICT(path) DO UPDATE SET "
+        "display_name = excluded.display_name, included = 1, online = excluded.online, "
+        "last_seen_at = excluded.last_seen_at, removed_at = NULL",
+        (normalized, display_name, now, now, now),
+    )
+    return conn.execute("SELECT id FROM catalog_sources WHERE path = ?", (normalized,)).fetchone()
+
+
+def _ensure_image(conn, source_id: int, row: tuple[str, str, str, int | None, float | None]) -> tuple[int, bool]:
+    filename, filepath, extension, size, modified_at = row
+    cursor = conn.execute(
+        "INSERT OR IGNORE INTO images "
+        "(source_id, filename, filepath, status, file_ext, file_size, file_modified_at) "
+        "VALUES (?, ?, ?, 'kept', ?, ?, ?)",
+        (source_id, filename, filepath, extension, size, modified_at),
+    )
+    created = cursor.rowcount > 0
+    conn.execute(
+        "UPDATE images SET source_id = CASE WHEN source_id IS NULL THEN ? ELSE source_id END, "
+        "filename = ?, file_ext = COALESCE(?, file_ext), file_size = COALESCE(?, file_size), "
+        "file_modified_at = COALESCE(?, file_modified_at), missing_at = NULL WHERE filepath = ?",
+        (source_id, filename, extension, size, modified_at, filepath),
+    )
+    image = conn.execute("SELECT id FROM images WHERE filepath = ?", (filepath,)).fetchone()
+    if image is None:
+        raise RuntimeError(f"could not register RAW: {filepath}")
+    return int(image["id"]), created
+
+
+def _write_settings(conn, image_id: int, xmp_path: str, xmp_mtime: float, settings: dict[str, Any]) -> bool:
+    """Small local helper pending Develop store merge; never overwrite user work."""
+
+    existing = conn.execute(
+        "SELECT origin, xmp_mtime FROM develop_settings WHERE image_id = ?", (image_id,)
+    ).fetchone()
+    if existing and existing["origin"] == "user":
+        return False
+    if existing and existing["xmp_mtime"] is not None and float(existing["xmp_mtime"]) == xmp_mtime:
+        return False
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    conn.execute(
+        "INSERT INTO develop_settings (image_id, settings, origin, xmp_path, xmp_mtime, updated_at) "
+        "VALUES (?, ?, 'xmp', ?, ?, ?) "
+        "ON CONFLICT(image_id) DO UPDATE SET settings = excluded.settings, origin = 'xmp', "
+        "xmp_path = excluded.xmp_path, xmp_mtime = excluded.xmp_mtime, updated_at = excluded.updated_at "
+        "WHERE develop_settings.origin != 'user'",
+        (image_id, json.dumps(settings, separators=(",", ":"), ensure_ascii=True), xmp_path, xmp_mtime, now),
+    )
+    return True
+
+
+def _update_source_counts(conn, source_id: int) -> None:
+    conn.execute(
+        "UPDATE catalog_sources SET image_count = (SELECT COUNT(*) FROM images WHERE source_id = ?), "
+        "active_image_count = (SELECT COUNT(*) FROM images WHERE source_id = ? "
+        "AND status IN ('kept', 'maybe') AND missing_at IS NULL), last_scan_at = ?, last_seen_at = ? "
+        "WHERE id = ?",
+        (source_id, source_id, time.time(), time.time(), source_id),
+    )
+
+
+def begin_scan(root: str) -> str | None:
+    """Claim a scan synchronously, so the HTTP response reports it as running."""
+
+    resolved_root = catalog_repository.normalize_source_path(root or DEFAULT_RAWS_ROOT)
+    if not os.path.isdir(resolved_root):
+        raise ValueError(f"RAW root does not exist: {resolved_root}")
+    return resolved_root if _begin_status(resolved_root) else None
+
+
+def scan_raws(root: str, db_path: str, *, claimed: bool = False) -> dict[str, Any]:
+    """Synchronously scan a RAW source; callers run this function in a thread."""
+
+    resolved_root = catalog_repository.normalize_source_path(root or DEFAULT_RAWS_ROOT)
+    if not os.path.isdir(resolved_root):
+        raise ValueError(f"RAW root does not exist: {resolved_root}")
+    if not claimed and not _begin_status(resolved_root):
+        return {"started": False, "status": import_status(), "images": []}
+
+    imported_images: list[dict[str, Any]] = []
+    conn = None
+    try:
+        conn = connection.open_sync(db_path)
+        source = _ensure_source(conn, resolved_root)
+        source_id = int(source["id"])
+        for index, row in enumerate(_iter_raw_rows(resolved_root), start=1):
+            _increment("seen")
+            try:
+                image_id, created = _ensure_image(conn, source_id, row)
+                if created:
+                    _increment("imported")
+                if len(imported_images) < 60:
+                    imported_images.append({"id": image_id, "filepath": row[1]})
+                xmp_path = os.path.splitext(row[1])[0] + ".xmp"
+                if not os.path.isfile(xmp_path):
+                    continue
+                xmp_mtime = float(os.path.getmtime(xmp_path))
+                settings = parse_xmp_file(xmp_path)
+                if _write_settings(conn, image_id, xmp_path, xmp_mtime, settings):
+                    _increment("sidecars")
+                else:
+                    _increment("skipped")
+            except Exception:
+                _increment("errors")
+                _LOG.exception("Develop import failed for %s", row[1])
+            if index % 500 == 0:
+                conn.commit()
+                _LOG.info("Develop import: %s", import_status())
+        _update_source_counts(conn, source_id)
+        conn.commit()
+        return {"started": True, "status": import_status(), "images": imported_images}
+    finally:
+        if conn is not None:
+            connection.close_sync(conn, db_path=db_path)
+        _finish_status()

@@ -6,6 +6,7 @@ from features.captions import routes as caption_routes
 from features.catalog import routes as catalog_routes
 from features.collections import routes as collection_routes
 from features.compare import routes as compare_routes
+from features.develop import import_routes, routes as develop_routes
 from features.export import routes as export_routes
 from features.library import routes as library_routes
 from features.media import routes as media_routes
@@ -196,6 +197,24 @@ def configure_catalog_routes() -> None:
         get_source_image_ids=lambda source_id: db.get_source_image_ids(source_id),
         purge_source_catalog_data=lambda source_id: db.purge_source_catalog_data(source_id),
         get_catalog_image_counts=lambda: db.get_catalog_image_counts(),
+    )
+
+
+def configure_develop_routes() -> None:
+    import db
+
+    develop_routes.configure(db_path=lambda: db.DB_PATH)
+
+
+def configure_develop_import_routes() -> None:
+    import db
+    import thumbnails
+
+    import_routes.configure(
+        db_path=lambda: db.DB_PATH,
+        prefetch_thumbnails=lambda images: thumbnails.prefetch_images(
+            images, "sm", limit=len(images)
+        ),
     )
 
 

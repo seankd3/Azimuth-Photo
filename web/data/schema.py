@@ -56,6 +56,28 @@ CREATE TABLE IF NOT EXISTS images (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Develop v21: canonical Lightroom-compatible edit state.  Unknown crs keys
+-- remain in settings so future render stages and XMP export can round-trip them.
+CREATE TABLE IF NOT EXISTS develop_settings (
+    image_id INTEGER PRIMARY KEY REFERENCES images(id) ON DELETE CASCADE,
+    settings TEXT NOT NULL DEFAULT '{}',
+    origin TEXT NOT NULL DEFAULT 'user',
+    xmp_path TEXT,
+    xmp_mtime REAL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS develop_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    image_id INTEGER NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+    settings TEXT NOT NULL,
+    label TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_develop_history_image
+ON develop_history(image_id, id DESC);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS images_metadata_fts
 USING fts5(
     filename,
@@ -983,6 +1005,8 @@ COMPAT_INDEX_SQL = (
 REQUIRED_TABLES = {
     "catalog_sources",
     "images",
+    "develop_settings",
+    "develop_history",
     "images_metadata_fts",
     "comparisons",
     "embeddings",
@@ -1097,6 +1121,7 @@ REQUIRED_COLUMNS = {
 }
 
 REQUIRED_INDEXES = {
+    "idx_develop_history_image",
     "idx_catalog_sources_active",
     "idx_images_missing_source_filepath_id",
     "idx_images_source_missing_id",

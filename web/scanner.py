@@ -2,7 +2,7 @@ import os
 import asyncio
 from collections.abc import Awaitable, Callable
 
-SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".dng", ".cr3", ".tif", ".tiff", ".webp"}
+SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".dng", ".cr2", ".cr3", ".tif", ".tiff", ".webp"}
 
 MarkSourceScanStarted = Callable[[int], Awaitable[None]]
 InsertImagesBatch = Callable[..., Awaitable[None]]

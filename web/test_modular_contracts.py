@@ -143,6 +143,15 @@ PUBLIC_ROUTE_CONTRACT = {
     ("GET", "/api/image/{image_id}/exif"),
     ("GET", "/api/folders"),
     ("GET", "/api/folders/tree"),
+    ("GET", "/api/develop/import/status"),
+    ("GET", "/api/develop/{image_id}"),
+    ("GET", "/api/develop/{image_id}/base.bin"),
+    ("GET", "/api/develop/{image_id}/base.jpg"),
+    ("POST", "/api/develop/import/scan"),
+    ("POST", "/api/develop/pregen"),
+    ("POST", "/api/develop/{image_id}/export"),
+    ("POST", "/api/develop/{image_id}/reset"),
+    ("PUT", "/api/develop/{image_id}"),
 }
 
 class ModularContractTests(unittest.TestCase):
