@@ -5,6 +5,7 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from features.collections import graph
 from features.collections import smart
 from features.collections import suggestions as collection_suggestions
 
@@ -21,6 +22,8 @@ CollectionIsSmart = Callable[[int], Awaitable[bool | None]]
 ResolveSmartDetail = Callable[..., Awaitable[dict]]
 ResolveSmartSummary = Callable[[dict], Awaitable[dict]]
 ResolveSmartImageIds = Callable[[dict], Awaitable[list[int]]]
+DbPath = Callable[[], str]
+GetImagesByIds = Callable[[list[int]], Awaitable[dict[int, dict]]]
 
 MAX_IMAGE_IDS_PER_REQUEST = 10000
 MAX_COLLECTION_NAME_LENGTH = 160
@@ -37,6 +40,8 @@ _collection_is_smart: CollectionIsSmart | None = None
 _resolve_smart_detail: ResolveSmartDetail | None = None
 _resolve_smart_summary: ResolveSmartSummary | None = None
 _resolve_smart_image_ids: ResolveSmartImageIds | None = None
+_db_path: DbPath | None = None
+_get_images_by_ids: GetImagesByIds | None = None
 
 
 class CreateCollectionBody(BaseModel):
@@ -50,6 +55,11 @@ class CreateCollectionBody(BaseModel):
 
 class CollectionImagesBody(BaseModel):
     image_ids: list[int] = Field(default_factory=list, max_length=MAX_IMAGE_IDS_PER_REQUEST)
+
+
+class CollectionLinkBody(BaseModel):
+    child_id: int
+    position: int = 0
 
 
 class RenameCollectionBody(BaseModel):
@@ -78,12 +88,14 @@ def configure(
     resolve_smart_detail: ResolveSmartDetail | None = None,
     resolve_smart_summary: ResolveSmartSummary | None = None,
     resolve_smart_image_ids: ResolveSmartImageIds | None = None,
+    db_path: DbPath | None = None,
+    get_images_by_ids: GetImagesByIds | None = None,
 ) -> None:
     global _create_collection, _list_collections, _get_collection
     global _rename_collection, _delete_collection
     global _add_collection_images, _remove_collection_images, _get_suggestions
     global _collection_is_smart, _resolve_smart_detail, _resolve_smart_summary
-    global _resolve_smart_image_ids
+    global _resolve_smart_image_ids, _db_path, _get_images_by_ids
     _create_collection = create_collection
     _list_collections = list_collections
     _get_collection = get_collection
@@ -96,6 +108,8 @@ def configure(
     _resolve_smart_detail = resolve_smart_detail
     _resolve_smart_summary = resolve_smart_summary
     _resolve_smart_image_ids = resolve_smart_image_ids
+    _db_path = db_path
+    _get_images_by_ids = get_images_by_ids
 
 
 def _configured() -> None:
@@ -109,6 +123,12 @@ def _configured() -> None:
         or _remove_collection_images is None
     ):
         raise RuntimeError("Collection routes are not configured")
+
+
+def _graph_configured() -> None:
+    _configured()
+    if _db_path is None or _get_images_by_ids is None or _resolve_smart_image_ids is None:
+        raise RuntimeError("Collection graph routes are not configured")
 
 
 def _clean_collection_name(name: str) -> str | None:
@@ -244,6 +264,62 @@ async def api_collection_suggestions():
     if _get_suggestions is None:
         return {"suggestions": []}
     return await _get_suggestions()
+
+
+@router.post("/api/collections/{collection_id}/links")
+async def api_add_collection_link(collection_id: int, payload: CollectionLinkBody):
+    _graph_configured()
+    try:
+        link = await graph.add_link(
+            _db_path(),
+            collection_id,
+            payload.child_id,
+            payload.position,
+        )
+    except graph.CollectionGraphConflict as exc:
+        return JSONResponse({"error": str(exc)}, status_code=409)
+    if link is None:
+        return JSONResponse({"error": "Collection not found"}, status_code=404)
+    return {"ok": True, "link": link}
+
+
+@router.delete("/api/collections/{collection_id}/links")
+async def api_delete_collection_link(collection_id: int, payload: CollectionLinkBody):
+    _graph_configured()
+    deleted = await graph.delete_link(_db_path(), collection_id, payload.child_id)
+    if deleted is None:
+        return JSONResponse({"error": "Collection not found"}, status_code=404)
+    if not deleted:
+        return JSONResponse({"error": "Collection link not found"}, status_code=404)
+    return {"ok": True}
+
+
+@router.get("/api/collections/tree")
+async def api_collection_tree():
+    _graph_configured()
+    return await graph.workspace_tree(_db_path())
+
+
+@router.get("/api/collections/{collection_id}/images")
+async def api_collection_graph_images(collection_id: int, recursive: int = 0):
+    _graph_configured()
+    result = await graph.recursive_images(
+        _db_path(),
+        collection_id,
+        recursive=bool(recursive),
+        resolve_smart_image_ids=_resolve_smart_image_ids,
+        get_images_by_ids=_get_images_by_ids,
+    )
+    if result is None:
+        return JSONResponse({"error": "Collection not found"}, status_code=404)
+    image_ids, images = result
+    return {
+        "collection_id": int(collection_id),
+        "recursive": bool(recursive),
+        "count": len(image_ids),
+        "image_ids": image_ids,
+        "images": images,
+    }
 
 
 @router.get("/api/user-collections/{collection_id}")

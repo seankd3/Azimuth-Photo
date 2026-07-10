@@ -529,6 +529,14 @@ async def get_collection_share(collection_id: int):
     return await share_repository.get_share(DB_PATH, collection_id)
 
 
+async def create_published_node_share(published_node_id: int, *, password_hash: str | None = None):
+    return await share_repository.create_published_node_share(
+        DB_PATH,
+        published_node_id,
+        password_hash=password_hash,
+    )
+
+
 async def list_active_collection_shares():
     return await share_repository.list_active_shares(DB_PATH)
 

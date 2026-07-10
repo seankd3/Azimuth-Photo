@@ -292,6 +292,8 @@ def configure_collection_routes(*, resolve_library_constraints=None) -> None:
         resolve_smart_detail=resolve_smart_detail,
         resolve_smart_summary=resolve_smart_summary,
         resolve_smart_image_ids=resolve_smart_image_ids,
+        db_path=lambda: db.DB_PATH,
+        get_images_by_ids=lambda image_ids: db.get_images_by_ids(image_ids),
         get_suggestions=lambda: collection_suggestions.collection_suggestions(
             db.DB_PATH,
             db_signature=db.DB_PATH,
@@ -405,6 +407,11 @@ def configure_publish_routes(*, templates, resolve_library_constraints=None, tra
         slug_available=lambda slug, **kwargs: db.collection_publish_slug_available(slug, **kwargs),
         thumbnails=thumbnails,
         track_background_task=track_background_task,
+        db_path=lambda: db.DB_PATH,
+        create_published_node_share=lambda node_id, **kwargs: db.create_published_node_share(
+            node_id,
+            **kwargs,
+        ),
     )
 
 
@@ -534,6 +541,7 @@ def configure_compare_service(
     get_visible_pairing_pool_counts=None,
     get_top_images=None,
     get_collection_image_ids=None,
+    get_import_batch_image_ids=None,
 ) -> None:
     import db
     from features.compare import service as compare_service
@@ -570,6 +578,8 @@ def configure_compare_service(
         get_top_images=get_top_images or (lambda **kwargs: db.get_top_images(**kwargs)),
         get_collection_image_ids=get_collection_image_ids
         or (lambda collection_id: db.collection_image_ids(collection_id)),
+        get_import_batch_image_ids=get_import_batch_image_ids
+        or (lambda batch_id: db.get_import_batch_image_ids(batch_id)),
     )
 
 

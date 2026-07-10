@@ -15,6 +15,8 @@ from pydantic import BaseModel, Field
 import settings
 from features.publish.builder import build_public_gallery_bundle
 from features.publish.deployer import GalleryDeployer, HookStatus, PublishConflict, PublishDeployError, PublishSetupError
+from features.publish import nodes as published_nodes
+from features.share import auth as share_auth
 
 
 router = APIRouter()
@@ -29,6 +31,8 @@ UpsertPublish = Callable[..., Awaitable[dict]]
 DeletePublish = Callable[[int], Awaitable[bool]]
 SlugAvailable = Callable[..., Awaitable[bool]]
 TrackBackgroundTask = Callable[[Awaitable], object]
+DbPath = Callable[[], str]
+CreatePublishedNodeShare = Callable[..., Awaitable[dict | None]]
 
 _templates: Jinja2Templates | None = None
 _get_collection: GetCollection | None = None
@@ -44,11 +48,38 @@ _track_background_task: TrackBackgroundTask | None = None
 _deployer: GalleryDeployer | None = None
 _thumbnails = None
 _jobs: dict[int, dict] = {}
+_db_path: DbPath | None = None
+_create_published_node_share: CreatePublishedNodeShare | None = None
 
 
 class PublishBody(BaseModel):
     slug: str | None = Field(default=None, max_length=96)
     title: str | None = Field(default=None, max_length=160)
+
+
+class CreatePublishedNodeBody(BaseModel):
+    area: str
+    parent_id: int | None = None
+    source_collection_id: int
+    slug: str | None = Field(default=None, max_length=96)
+    title: str | None = Field(default=None, max_length=160)
+
+
+class PatchPublishedNodeBody(BaseModel):
+    title: str | None = Field(default=None, max_length=160)
+    slug: str | None = Field(default=None, max_length=96)
+    position: int | None = None
+    parent_id: int | None = None
+
+
+class UpdatePublishedNodeBody(BaseModel):
+    add_image_ids: list[int] = Field(default_factory=list, max_length=10000)
+    remove_image_ids: list[int] = Field(default_factory=list, max_length=10000)
+    attach_child_collection_ids: list[int] = Field(default_factory=list, max_length=1000)
+
+
+class PublishedNodeShareBody(BaseModel):
+    password: str | None = Field(default=None, max_length=256)
 
 
 def configure(
@@ -66,11 +97,13 @@ def configure(
     thumbnails,
     deployer: GalleryDeployer | None = None,
     track_background_task: TrackBackgroundTask | None = None,
+    db_path: DbPath | None = None,
+    create_published_node_share: CreatePublishedNodeShare | None = None,
 ) -> None:
     global _templates, _get_collection, _get_images_by_ids, _collection_image_ids
     global _resolve_smart_image_ids, _get_publish, _list_publishes
     global _upsert_publish, _delete_publish, _slug_available, _track_background_task
-    global _deployer, _thumbnails
+    global _deployer, _thumbnails, _db_path, _create_published_node_share
     _templates = templates
     _get_collection = get_collection
     _get_images_by_ids = get_images_by_ids
@@ -84,6 +117,8 @@ def configure(
     _track_background_task = track_background_task
     _deployer = deployer or GalleryDeployer()
     _thumbnails = thumbnails
+    _db_path = db_path
+    _create_published_node_share = create_published_node_share
 
 
 def _configured() -> None:
@@ -102,6 +137,131 @@ def _configured() -> None:
         or _thumbnails is None
     ):
         raise RuntimeError("Publish routes are not configured")
+
+
+def _nodes_configured() -> None:
+    _configured()
+    if _db_path is None or _create_published_node_share is None:
+        raise RuntimeError("Published node routes are not configured")
+
+
+@router.get("/api/published/tree")
+async def api_published_tree(area: str):
+    _nodes_configured()
+    try:
+        return await published_nodes.published_tree(_db_path(), area)
+    except published_nodes.PublishedNodeConflict as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+
+
+@router.post("/api/published/nodes")
+async def api_create_published_node(payload: CreatePublishedNodeBody):
+    _nodes_configured()
+    try:
+        node = await published_nodes.create_snapshot_tree(
+            _db_path(),
+            area=payload.area,
+            parent_id=payload.parent_id,
+            source_collection_id=payload.source_collection_id,
+            slug=payload.slug,
+            title=payload.title,
+            resolve_smart_image_ids=_resolve_smart_image_ids,
+        )
+    except published_nodes.PublishedNodeNotFound as exc:
+        return JSONResponse({"error": str(exc)}, status_code=404)
+    except published_nodes.PublishedNodeConflict as exc:
+        return JSONResponse({"error": str(exc)}, status_code=409)
+    if node is None:
+        return JSONResponse({"error": "Collection not found"}, status_code=404)
+    share = None
+    if node["area"] == "private":
+        share = await _ensure_private_node_shares(root_node_id=int(node["id"]))
+        node = await published_nodes.get_node(_db_path(), int(node["id"]))
+    return {"ok": True, "node": node, "share": _published_share_payload(share)}
+
+
+@router.patch("/api/published/nodes/{node_id}")
+async def api_patch_published_node(node_id: int, payload: PatchPublishedNodeBody):
+    _nodes_configured()
+    fields = {
+        name: getattr(payload, name)
+        for name in _model_fields_set(payload)
+        if name in {"title", "slug", "position", "parent_id"}
+    }
+    try:
+        node = await published_nodes.patch_node(_db_path(), node_id, fields)
+    except published_nodes.PublishedNodeNotFound as exc:
+        return JSONResponse({"error": str(exc)}, status_code=404)
+    except published_nodes.PublishedNodeConflict as exc:
+        return JSONResponse({"error": str(exc)}, status_code=409)
+    if node is None:
+        return JSONResponse({"error": "Published node not found"}, status_code=404)
+    if node["area"] == "private":
+        await _ensure_private_node_shares(root_node_id=int(node["id"]))
+        node = await published_nodes.get_node(_db_path(), int(node["id"]))
+    return {"ok": True, "node": node}
+
+
+@router.delete("/api/published/nodes/{node_id}")
+async def api_delete_published_node(node_id: int):
+    _nodes_configured()
+    if not await published_nodes.delete_node(_db_path(), node_id):
+        return JSONResponse({"error": "Published node not found"}, status_code=404)
+    return {"ok": True}
+
+
+@router.get("/api/published/nodes/{node_id}/diff")
+async def api_published_node_diff(node_id: int):
+    _nodes_configured()
+    diff = await published_nodes.node_diff(
+        _db_path(),
+        node_id,
+        resolve_smart_image_ids=_resolve_smart_image_ids,
+    )
+    if diff is None:
+        return JSONResponse({"error": "Published node not found"}, status_code=404)
+    if diff["source_deleted"]:
+        return JSONResponse(diff, status_code=410)
+    return diff
+
+
+@router.post("/api/published/nodes/{node_id}/update")
+async def api_update_published_node(node_id: int, payload: UpdatePublishedNodeBody):
+    _nodes_configured()
+    try:
+        node = await published_nodes.update_node(
+            _db_path(),
+            node_id,
+            add_image_ids=payload.add_image_ids,
+            remove_image_ids=payload.remove_image_ids,
+            attach_child_collection_ids=payload.attach_child_collection_ids,
+            resolve_smart_image_ids=_resolve_smart_image_ids,
+        )
+    except published_nodes.PublishedNodeConflict as exc:
+        status = 410 if "deleted" in str(exc).lower() else 409
+        return JSONResponse({"error": str(exc)}, status_code=status)
+    if node is None:
+        return JSONResponse({"error": "Published node not found"}, status_code=404)
+    if node["area"] == "private":
+        await _ensure_private_node_shares(root_node_id=int(node["id"]))
+        node = await published_nodes.get_node(_db_path(), int(node["id"]))
+    return {"ok": True, "node": node}
+
+
+@router.post("/api/published/nodes/{node_id}/share")
+async def api_share_published_node(node_id: int, payload: PublishedNodeShareBody):
+    _nodes_configured()
+    node = await published_nodes.get_node(_db_path(), node_id)
+    if node is None:
+        return JSONResponse({"error": "Published node not found"}, status_code=404)
+    if node["area"] != "private":
+        return JSONResponse({"error": "Only private published nodes can be shared"}, status_code=409)
+    password_hash = share_auth.hash_password(payload.password) if payload.password else None
+    try:
+        share = await _create_published_node_share(node_id, password_hash=password_hash)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=409)
+    return {"ok": True, "share": _published_share_payload(share)}
 
 
 @router.post("/api/user-collections/{collection_id}/publish")
@@ -393,3 +553,46 @@ async def _unique_slug(base: str, *, collection_id: int) -> str:
 def _slugify(value: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", (value or "").strip().lower())
     return slug.strip("-")[:96]
+
+
+def _model_fields_set(payload) -> set[str]:
+    fields = getattr(payload, "model_fields_set", None)
+    if fields is None:
+        fields = getattr(payload, "__fields_set__", set())
+    return set(fields)
+
+
+def _published_share_payload(share: dict | None) -> dict | None:
+    if share is None:
+        return None
+    return {
+        "id": int(share["id"]),
+        "published_node_id": int(share["published_node_id"]),
+        "token": share["token"],
+        "protected": bool(share.get("password_hash")),
+        "created_at": float(share["created_at"]),
+    }
+
+
+async def _ensure_private_node_shares(*, root_node_id: int) -> dict | None:
+    tree = await published_nodes.published_tree(_db_path(), "private")
+    children: dict[int, list[int]] = {}
+    nodes_by_id = {int(node["id"]): node for node in tree["nodes"]}
+    for node in tree["nodes"]:
+        if node["parent_id"] is not None:
+            children.setdefault(int(node["parent_id"]), []).append(int(node["id"]))
+
+    root_share = None
+    pending = [int(root_node_id)]
+    while pending:
+        node_id = pending.pop()
+        node = nodes_by_id.get(node_id)
+        if node is None:
+            continue
+        pending.extend(reversed(children.get(node_id, [])))
+        if node.get("share_token"):
+            continue
+        created = await _create_published_node_share(node_id, password_hash=None)
+        if node_id == int(root_node_id):
+            root_share = created
+    return root_share

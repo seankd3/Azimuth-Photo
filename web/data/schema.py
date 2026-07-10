@@ -6,7 +6,7 @@ from date_inference import infer_image_date
 from data.repositories import catalog as catalog_repository
 
 EXPECTED_EMBEDDING_DIM = 2048  # Qwen3-VL-Embedding-2B native dimension
-SCHEMA_VERSION = 19
+SCHEMA_VERSION = 20
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS catalog_sources (
@@ -528,9 +528,38 @@ CREATE TABLE IF NOT EXISTS collection_images (
     PRIMARY KEY (collection_id, image_id)
 );
 
+CREATE TABLE IF NOT EXISTS collection_links (
+    parent_id INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+    child_id INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL DEFAULT 0,
+    added_at REAL NOT NULL DEFAULT (strftime('%s', 'now')),
+    PRIMARY KEY (parent_id, child_id)
+);
+
+CREATE TABLE IF NOT EXISTS published_nodes (
+    id INTEGER PRIMARY KEY,
+    area TEXT NOT NULL CHECK(area IN ('website', 'private')),
+    parent_id INTEGER DEFAULT NULL REFERENCES published_nodes(id) ON DELETE CASCADE,
+    slug TEXT NOT NULL,
+    title TEXT NOT NULL,
+    source_collection_id INTEGER DEFAULT NULL REFERENCES collections(id) ON DELETE SET NULL,
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at REAL NOT NULL DEFAULT (strftime('%s', 'now')),
+    updated_at REAL NOT NULL DEFAULT (strftime('%s', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS published_node_images (
+    node_id INTEGER NOT NULL REFERENCES published_nodes(id) ON DELETE CASCADE,
+    image_id INTEGER NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL DEFAULT 0,
+    added_at REAL NOT NULL DEFAULT (strftime('%s', 'now')),
+    PRIMARY KEY (node_id, image_id)
+);
+
 CREATE TABLE IF NOT EXISTS collection_shares (
     id INTEGER PRIMARY KEY,
-    collection_id INTEGER NOT NULL REFERENCES collections(id),
+    collection_id INTEGER DEFAULT NULL REFERENCES collections(id),
+    published_node_id INTEGER DEFAULT NULL REFERENCES published_nodes(id) ON DELETE CASCADE,
     token TEXT NOT NULL UNIQUE,
     created_at REAL NOT NULL,
     expires_at REAL DEFAULT NULL,
@@ -538,7 +567,8 @@ CREATE TABLE IF NOT EXISTS collection_shares (
     password_hash TEXT DEFAULT NULL,
     view_count INTEGER NOT NULL DEFAULT 0,
     first_viewed_at REAL DEFAULT NULL,
-    last_viewed_at REAL DEFAULT NULL
+    last_viewed_at REAL DEFAULT NULL,
+    CHECK ((collection_id IS NOT NULL) != (published_node_id IS NOT NULL))
 );
 
 CREATE TABLE IF NOT EXISTS share_images (
@@ -579,8 +609,26 @@ CREATE INDEX IF NOT EXISTS idx_collection_images_image
 ON collection_images(image_id, collection_id);
 CREATE INDEX IF NOT EXISTS idx_collection_images_position
 ON collection_images(collection_id, position, added_at);
+CREATE INDEX IF NOT EXISTS idx_collection_links_child
+ON collection_links(child_id, parent_id);
+CREATE INDEX IF NOT EXISTS idx_collection_links_parent_position
+ON collection_links(parent_id, position, added_at, child_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_published_nodes_root_slug
+ON published_nodes(area, slug) WHERE parent_id IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_published_nodes_child_slug
+ON published_nodes(area, parent_id, slug) WHERE parent_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_published_nodes_tree
+ON published_nodes(area, parent_id, position, id);
+CREATE INDEX IF NOT EXISTS idx_published_nodes_source
+ON published_nodes(source_collection_id);
+CREATE INDEX IF NOT EXISTS idx_published_node_images_position
+ON published_node_images(node_id, position, added_at, image_id);
+CREATE INDEX IF NOT EXISTS idx_published_node_images_image
+ON published_node_images(image_id, node_id);
 CREATE INDEX IF NOT EXISTS idx_collection_shares_active
 ON collection_shares(collection_id, revoked_at);
+CREATE INDEX IF NOT EXISTS idx_collection_shares_published_active
+ON collection_shares(published_node_id, revoked_at);
 CREATE INDEX IF NOT EXISTS idx_share_images_image
 ON share_images(image_id, share_id);
 CREATE INDEX IF NOT EXISTS idx_share_images_position
@@ -733,6 +781,7 @@ COLLECTION_COMPAT_COLUMNS = (
 )
 
 COLLECTION_SHARE_COMPAT_COLUMNS = (
+    ("published_node_id", "INTEGER DEFAULT NULL REFERENCES published_nodes(id) ON DELETE CASCADE"),
     ("password_hash", "TEXT DEFAULT NULL"),
     ("view_count", "INTEGER NOT NULL DEFAULT 0"),
     ("first_viewed_at", "REAL DEFAULT NULL"),
@@ -935,6 +984,9 @@ REQUIRED_TABLES = {
     "stack_members",
     "collections",
     "collection_images",
+    "collection_links",
+    "published_nodes",
+    "published_node_images",
     "collection_shares",
     "share_images",
     "share_favorites",
@@ -990,7 +1042,26 @@ REQUIRED_COLUMNS = {
     "stacks": {"kind", "representative_image_id", "auto", "created_at", "updated_at"},
     "stack_members": {"stack_id", "image_id", "score", "added_at"},
     "collections": {"query"},
-    "collection_shares": {"password_hash", "view_count", "first_viewed_at", "last_viewed_at"},
+    "collection_links": {"parent_id", "child_id", "position", "added_at"},
+    "published_nodes": {
+        "area",
+        "parent_id",
+        "slug",
+        "title",
+        "source_collection_id",
+        "position",
+        "created_at",
+        "updated_at",
+    },
+    "published_node_images": {"node_id", "image_id", "position", "added_at"},
+    "collection_shares": {
+        "collection_id",
+        "published_node_id",
+        "password_hash",
+        "view_count",
+        "first_viewed_at",
+        "last_viewed_at",
+    },
     "collection_publishes": {
         "collection_id",
         "slug",
@@ -1032,7 +1103,16 @@ REQUIRED_INDEXES = {
     "idx_collections_updated",
     "idx_collection_images_image",
     "idx_collection_images_position",
+    "idx_collection_links_child",
+    "idx_collection_links_parent_position",
+    "idx_published_nodes_root_slug",
+    "idx_published_nodes_child_slug",
+    "idx_published_nodes_tree",
+    "idx_published_nodes_source",
+    "idx_published_node_images_position",
+    "idx_published_node_images_image",
     "idx_collection_shares_active",
+    "idx_collection_shares_published_active",
     "idx_share_images_image",
     "idx_share_images_position",
     "idx_share_favorites_share",
@@ -1083,8 +1163,65 @@ async def prepare_existing_database_for_schema(conn) -> None:
     await _add_columns_if_missing(conn, "images", IMAGE_COMPAT_COLUMNS)
     await _add_columns_if_missing(conn, "comparisons", (("action_id", "TEXT DEFAULT NULL"),))
     await _add_columns_if_missing(conn, "collections", COLLECTION_COMPAT_COLUMNS)
+    await _add_columns_if_missing(conn, "collection_shares", COLLECTION_SHARE_COMPAT_COLUMNS)
     await _add_columns_if_missing(conn, "collection_publishes", COLLECTION_PUBLISH_COMPAT_COLUMNS)
     await _add_columns_if_missing(conn, "image_captions", IMAGE_CAPTION_COMPAT_COLUMNS)
+    await migrate_collection_shares_for_published_nodes(conn)
+
+
+async def migrate_collection_shares_for_published_nodes(conn) -> None:
+    """Relax the legacy collection-only share owner without losing share state."""
+
+    if not await table_exists(conn, "collection_shares"):
+        return
+    cursor = await conn.execute("PRAGMA table_info(collection_shares)")
+    columns = {row["name"]: row for row in await cursor.fetchall()}
+    collection_id = columns.get("collection_id")
+    if "published_node_id" in columns and collection_id is not None and not bool(collection_id["notnull"]):
+        return
+
+    await conn.commit()
+    await conn.execute("PRAGMA foreign_keys=OFF")
+    try:
+        await conn.executescript(
+            """
+            BEGIN;
+            DROP TABLE IF EXISTS collection_shares_new;
+            CREATE TABLE collection_shares_new (
+                id INTEGER PRIMARY KEY,
+                collection_id INTEGER DEFAULT NULL REFERENCES collections(id),
+                published_node_id INTEGER DEFAULT NULL REFERENCES published_nodes(id) ON DELETE CASCADE,
+                token TEXT NOT NULL UNIQUE,
+                created_at REAL NOT NULL,
+                expires_at REAL DEFAULT NULL,
+                revoked_at REAL DEFAULT NULL,
+                password_hash TEXT DEFAULT NULL,
+                view_count INTEGER NOT NULL DEFAULT 0,
+                first_viewed_at REAL DEFAULT NULL,
+                last_viewed_at REAL DEFAULT NULL,
+                CHECK ((collection_id IS NOT NULL) != (published_node_id IS NOT NULL))
+            );
+            INSERT INTO collection_shares_new (
+                id, collection_id, published_node_id, token, created_at, expires_at,
+                revoked_at, password_hash, view_count, first_viewed_at, last_viewed_at
+            )
+            SELECT
+                id, collection_id, NULL, token, created_at, expires_at,
+                revoked_at, password_hash, view_count, first_viewed_at, last_viewed_at
+            FROM collection_shares;
+            DROP TABLE collection_shares;
+            ALTER TABLE collection_shares_new RENAME TO collection_shares;
+            COMMIT;
+            """
+        )
+    except Exception:
+        try:
+            await conn.rollback()
+        except Exception:
+            pass
+        raise
+    finally:
+        await conn.execute("PRAGMA foreign_keys=ON")
 
 
 async def ensure_compatibility_columns(conn) -> None:

@@ -13,7 +13,10 @@ from data import connection as data_connection
 def _share_summary(row) -> dict:
     return {
         "id": int(row["id"]),
-        "collection_id": int(row["collection_id"]),
+        "collection_id": int(row["collection_id"]) if row["collection_id"] is not None else None,
+        "published_node_id": (
+            int(row["published_node_id"]) if row["published_node_id"] is not None else None
+        ),
         "token": row["token"],
         "created_at": float(row["created_at"]),
         "expires_at": float(row["expires_at"]) if row["expires_at"] is not None else None,
@@ -147,6 +150,55 @@ async def get_share(db_path: str, collection_id: int) -> dict | None:
         await data_connection.close_async(conn, db_path=db_path)
 
 
+async def create_published_node_share(
+    db_path: str,
+    published_node_id: int,
+    *,
+    password_hash: str | None = None,
+) -> dict | None:
+    published_node_id = int(published_node_id)
+    now = time.time()
+    conn = await data_connection.open_async(db_path)
+    try:
+        cursor = await conn.execute(
+            "SELECT area FROM published_nodes WHERE id = ?",
+            (published_node_id,),
+        )
+        node = await cursor.fetchone()
+        if node is None:
+            return None
+        if node["area"] != "private":
+            raise ValueError("Only private published nodes can be shared")
+        active = await _active_published_share_on_conn(conn, published_node_id)
+        if active is not None:
+            if password_hash != active.get("password_hash"):
+                await conn.execute(
+                    "UPDATE collection_shares SET password_hash = ? WHERE id = ?",
+                    (password_hash, int(active["id"])),
+                )
+                await conn.commit()
+                return await _active_published_share_on_conn(conn, published_node_id)
+            return active
+        for _attempt in range(4):
+            token = secrets.token_urlsafe(24)
+            try:
+                cursor = await conn.execute(
+                    """
+                    INSERT INTO collection_shares
+                        (collection_id, published_node_id, token, created_at, password_hash)
+                    VALUES (NULL, ?, ?, ?, ?)
+                    """,
+                    (published_node_id, token, now, password_hash),
+                )
+                await conn.commit()
+                return await _share_by_id_on_conn(conn, int(cursor.lastrowid))
+            except sqlite3.IntegrityError:
+                continue
+        raise RuntimeError("Could not create unique share token")
+    finally:
+        await data_connection.close_async(conn, db_path=db_path)
+
+
 async def list_active_shares(db_path: str) -> list[dict]:
     now = time.time()
     conn = await data_connection.open_async(db_path)
@@ -272,7 +324,14 @@ async def resolve_token(db_path: str, token: str) -> dict | None:
         cursor = await conn.execute(
             f"""
             SELECT
-                c.*,
+                COALESCE(c.id, node.id) AS id,
+                s.collection_id,
+                s.published_node_id,
+                COALESCE(c.name, node.title) AS name,
+                COALESCE(c.description, '') AS description,
+                COALESCE(c.visibility, 'private') AS visibility,
+                COALESCE(c.status, 'active') AS status,
+                c.cover_image_id,
                 s.token,
                 s.id AS share_id,
                 s.password_hash,
@@ -281,15 +340,19 @@ async def resolve_token(db_path: str, token: str) -> dict | None:
                 s.view_count,
                 s.first_viewed_at,
                 s.last_viewed_at,
-                COUNT(si.image_id) AS image_count,
+                COUNT(COALESCE(si.image_id, node_image.image_id)) AS image_count,
                 MIN(i.date_taken) AS date_min,
                 MAX(i.date_taken) AS date_max
             FROM collection_shares s
-            JOIN collections c ON c.id = s.collection_id
-            LEFT JOIN share_images si ON si.share_id = s.id
-            LEFT JOIN images i ON i.id = si.image_id
+            LEFT JOIN collections c ON c.id = s.collection_id
+            LEFT JOIN published_nodes node ON node.id = s.published_node_id
+            LEFT JOIN share_images si
+                ON si.share_id = s.id AND s.collection_id IS NOT NULL
+            LEFT JOIN published_node_images node_image
+                ON node_image.node_id = s.published_node_id
+            LEFT JOIN images i ON i.id = COALESCE(si.image_id, node_image.image_id)
             WHERE s.token = ? AND {_active_unexpired_clause("s")}
-            GROUP BY c.id, s.id
+            GROUP BY s.id
             """,
             (token, now),
         )
@@ -300,20 +363,28 @@ async def resolve_token(db_path: str, token: str) -> dict | None:
         collection["created_at"] = row["share_created_at"]
         collection["expires_at"] = row["share_expires_at"]
         collection["revoked_at"] = None
-        images_cursor = await conn.execute(
-            """
-            SELECT
-                i.id,
-                i.filename,
-                COALESCE(i.aspect_ratio, 1.5) AS aspect_ratio,
-                i.date_taken
-            FROM share_images si
-            JOIN images i ON i.id = si.image_id
-            WHERE si.share_id = ?
-            ORDER BY si.position ASC, si.added_at ASC, si.image_id ASC
-            """,
-            (int(collection["share_id"]),),
-        )
+        if collection.get("published_node_id") is not None:
+            images_cursor = await conn.execute(
+                """
+                SELECT i.id, i.filename, COALESCE(i.aspect_ratio, 1.5) AS aspect_ratio, i.date_taken
+                FROM published_node_images membership
+                JOIN images i ON i.id = membership.image_id
+                WHERE membership.node_id = ?
+                ORDER BY membership.position ASC, membership.added_at ASC, membership.image_id ASC
+                """,
+                (int(collection["published_node_id"]),),
+            )
+        else:
+            images_cursor = await conn.execute(
+                """
+                SELECT i.id, i.filename, COALESCE(i.aspect_ratio, 1.5) AS aspect_ratio, i.date_taken
+                FROM share_images si
+                JOIN images i ON i.id = si.image_id
+                WHERE si.share_id = ?
+                ORDER BY si.position ASC, si.added_at ASC, si.image_id ASC
+                """,
+                (int(collection["share_id"]),),
+            )
         collection["images"] = [dict(image) for image in await images_cursor.fetchall()]
         return collection
     finally:
@@ -329,9 +400,12 @@ async def token_allows_image(db_path: str, token: str, image_id: int) -> bool:
             SELECT EXISTS(
                 SELECT 1
                 FROM collection_shares s
-                JOIN share_images si ON si.share_id = s.id
+                LEFT JOIN share_images si
+                    ON si.share_id = s.id AND s.collection_id IS NOT NULL
+                LEFT JOIN published_node_images node_image
+                    ON node_image.node_id = s.published_node_id
                 WHERE s.token = ?
-                AND si.image_id = ?
+                AND COALESCE(si.image_id, node_image.image_id) = ?
                 AND {_active_unexpired_clause("s")}
             ) AS allowed
             """,
@@ -428,9 +502,12 @@ async def _share_contains_image(conn, share_id: int, image_id: int) -> bool:
         SELECT EXISTS(
             SELECT 1
             FROM collection_shares s
-            JOIN share_images si ON si.share_id = s.id
+            LEFT JOIN share_images si
+                ON si.share_id = s.id AND s.collection_id IS NOT NULL
+            LEFT JOIN published_node_images node_image
+                ON node_image.node_id = s.published_node_id
             WHERE s.id = ?
-            AND si.image_id = ?
+            AND COALESCE(si.image_id, node_image.image_id) = ?
         ) AS allowed
         """,
         (int(share_id), int(image_id)),
@@ -450,6 +527,27 @@ async def _active_share_on_conn(conn, collection_id: int) -> dict | None:
         """,
         (int(collection_id),),
     )
+    row = await cursor.fetchone()
+    return _share_summary(row) if row is not None else None
+
+
+async def _active_published_share_on_conn(conn, published_node_id: int) -> dict | None:
+    cursor = await conn.execute(
+        """
+        SELECT *
+        FROM collection_shares
+        WHERE published_node_id = ? AND revoked_at IS NULL
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+        """,
+        (int(published_node_id),),
+    )
+    row = await cursor.fetchone()
+    return _share_summary(row) if row is not None else None
+
+
+async def _share_by_id_on_conn(conn, share_id: int) -> dict | None:
+    cursor = await conn.execute("SELECT * FROM collection_shares WHERE id = ?", (int(share_id),))
     row = await cursor.fetchone()
     return _share_summary(row) if row is not None else None
 

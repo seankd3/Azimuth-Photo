@@ -5,10 +5,12 @@ from __future__ import annotations
 import asyncio
 import ctypes
 import errno
+import json
 import os
 import platform
 import shutil
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -17,6 +19,7 @@ from urllib.parse import urlparse
 from fastapi.templating import Jinja2Templates
 
 import settings
+from features.publish import nodes as published_nodes
 
 
 @dataclass(frozen=True)
@@ -149,6 +152,136 @@ async def build_public_gallery_bundle(
     except Exception:
         await asyncio.to_thread(shutil.rmtree, work_target, True)
         raise
+
+
+async def build_published_node_bundle(
+    *,
+    node: dict,
+    images: list[dict],
+    destination: str | Path,
+    templates: Jinja2Templates,
+    thumbnails: Any,
+) -> BundleSummary:
+    """Build one destination node with the legacy gallery renderer."""
+
+    image_ids = [int(image["id"]) for image in images]
+    rows_by_id = {int(image["id"]): image for image in images}
+
+    async def get_collection(_collection_id: int, **_kwargs):
+        return {"id": int(node["id"]), "name": node["title"], "smart": False, "images": images}
+
+    async def get_images_by_ids(_image_ids: list[int]):
+        return rows_by_id
+
+    async def collection_image_ids(_collection_id: int):
+        return image_ids
+
+    return await build_public_gallery_bundle(
+        slug=node["slug"],
+        title=node["title"],
+        destination=destination,
+        templates=templates,
+        get_collection=get_collection,
+        collection_id=int(node["id"]),
+        get_images_by_ids=get_images_by_ids,
+        collection_image_ids=collection_image_ids,
+        thumbnails=thumbnails,
+    )
+
+
+async def export_website_tree(
+    *,
+    db_path: str,
+    destination: str | Path,
+    templates: Jinja2Templates,
+    thumbnails: Any,
+) -> dict:
+    """Write the website destination tree, its node bundles, and manifest."""
+
+    tree = await published_nodes.published_tree(db_path, "website")
+    children: dict[int | None, list[dict]] = {}
+    for node in tree["nodes"]:
+        children.setdefault(node["parent_id"], []).append(node)
+
+    root = Path(destination)
+    await asyncio.to_thread(root.mkdir, parents=True, exist_ok=True)
+    images_by_node: dict[int, list[dict]] = {}
+
+    async def write_subtree(node: dict, parent_path: Path) -> None:
+        node_id = int(node["id"])
+        images = await published_nodes.node_images(db_path, node_id) or []
+        images_by_node[node_id] = images
+        node_path = parent_path / node["slug"]
+        await build_published_node_bundle(
+            node=node,
+            images=images,
+            destination=node_path,
+            templates=templates,
+            thumbnails=thumbnails,
+        )
+        for child in children.get(node_id, []):
+            await write_subtree(child, node_path)
+
+    for root_node in children.get(None, []):
+        await write_subtree(root_node, root)
+
+    manifest = website_tree_manifest(tree, images_by_node)
+    await asyncio.to_thread(_write_json_atomic, root / "manifest.json", manifest)
+    return manifest
+
+
+def website_tree_manifest(tree: dict, images_by_node: dict[int, list[dict]]) -> dict:
+    """Return nested destination JSON with stable URLs and display metadata."""
+
+    children: dict[int | None, list[dict]] = {}
+    for node in tree.get("nodes") or []:
+        children.setdefault(node.get("parent_id"), []).append(node)
+
+    def build(node: dict, parent_slugs: tuple[str, ...]) -> dict:
+        slugs = (*parent_slugs, node["slug"])
+        url_root = "/g/" + "/".join(slugs)
+        images = images_by_node.get(int(node["id"]), [])
+        photos = []
+        for index, image in enumerate(images, start=1):
+            image_id = int(image["id"])
+            photos.append(
+                {
+                    "id": image_id,
+                    "urls": {
+                        "thumb": f"{url_root}/thumb/sm/{image_id}.jpg",
+                        "preview": f"{url_root}/img/{image_id}.jpg",
+                        "full": f"{url_root}/img/{image_id}.jpg",
+                        "download": f"{url_root}/img/{image_id}.jpg",
+                    },
+                    "caption": image.get("caption") or "",
+                    "filename": image.get("filename") or f"Photo {image_id}",
+                    "aspect_ratio": float(image.get("aspect_ratio") or 1.5),
+                    "date_taken": image.get("date_taken"),
+                    "display_label": f"Photo {index} of {len(images)}",
+                }
+            )
+        return {
+            "slug": node["slug"],
+            "title": node["title"],
+            "children": [build(child, slugs) for child in children.get(int(node["id"]), [])],
+            "photos": photos,
+        }
+
+    roots = [build(node, ()) for node in children.get(None, [])]
+    if len(roots) == 1:
+        return roots[0]
+    return {"slug": "", "title": "Website", "children": roots, "photos": []}
+
+
+def _write_json_atomic(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_name(f".{path.name}.tmp-{os.getpid()}-{time.time_ns()}")
+    try:
+        temp_path.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
+        os.replace(temp_path, path)
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
 
 
 async def _snapshot_image_ids(
