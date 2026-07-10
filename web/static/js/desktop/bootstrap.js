@@ -21,6 +21,7 @@ import { initExportMenu } from './export_menu.js';
 import { mountIconSprite } from '../icons.js';
 import { initPanelSections } from './panel_sections.js';
 import { initCullBrief } from './cull_brief.js';
+import { initQuickGuide } from './quick_guide.js';
 
 async function boot() {
     await mountIconSprite();
@@ -44,6 +45,7 @@ async function boot() {
     initPanelSections();
     initDrawer();
     initKeyboard();
+    initQuickGuide();
     await initPanel();
     initLenses();
 }

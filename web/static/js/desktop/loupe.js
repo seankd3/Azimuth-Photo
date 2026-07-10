@@ -705,6 +705,7 @@ async function flagCurrent(flag) {
         showToast('Couldn’t save flag');
         return;
     }
+    emit('flags', { imageIds: [imageId], flag, committed: true });
     showToast(flag === 'picked' ? 'Picked' : flag === 'rejected' ? 'Rejected' : 'Flag cleared', {
         undo: async () => {
             const undoVersion = beginFlagMutation(imageId);

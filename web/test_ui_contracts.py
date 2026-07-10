@@ -37,6 +37,8 @@ class UiContractsTests(BackendTestCase):
 
         self.assertIn('id="topbar"', desktop_template)
         self.assertIn('id="grid-flow"', desktop_template)
+        self.assertIn('id="quick-guide"', desktop_template)
+        self.assertIn('id="help-restart-guide"', desktop_template)
         self.assertIn('href="/static/desktop.css', desktop_template)
         self.assertIn('src="/static/js/desktop/bootstrap.js', desktop_template)
         self.assertIn('id="m-timeline"', mobile_template)
@@ -58,6 +60,7 @@ class UiContractsTests(BackendTestCase):
             shared_api = fh.read()
 
         self.assertIn("initGridContextMenu", desktop_bootstrap)
+        self.assertIn("initQuickGuide", desktop_bootstrap)
         self.assertIn("initTimeline", mobile_bootstrap)
         self.assertIn("from '../api.js'", desktop_api)
         self.assertIn("from '../api.js'", mobile_api)
