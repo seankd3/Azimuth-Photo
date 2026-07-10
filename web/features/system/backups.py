@@ -1,7 +1,7 @@
 """Catalog time-machine snapshots and original-file integrity audits.
 
 Snapshots use SQLite's online BACKUP API (safe against a live WAL db), then
-gzip-compress to the Expansion cache. Restore never hot-swaps the live catalog —
+gzip-compress to the selected backup root. Restore never hot-swaps the live catalog —
 it writes ``photoarchive.restored.db`` beside it and returns human instructions.
 """
 
@@ -21,11 +21,11 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from core.runtime_paths import resolve_runtime_paths
+
 log = logging.getLogger(__name__)
 
 BACKUP_NAME_RE = re.compile(r"^photoarchive-(\d{8})-(\d{6})\.db\.gz$")
-DEFAULT_BACKUP_ROOT = Path("/mnt/expansion/PhotoArchiveCache/backups")
-FALLBACK_BACKUP_ROOT = Path(os.path.expanduser("~/.cache/photoarchive/backups"))
 DAILY_KEEP = 7
 WEEKLY_KEEP = 4
 INTEGRITY_SLEEP_SECONDS = 0.05
@@ -63,11 +63,8 @@ _scheduler_started = False
 
 
 def backup_root() -> Path:
-    """Prefer Expansion cache; fall back to ~/.cache when Expansion is absent."""
-    if DEFAULT_BACKUP_ROOT.parent.exists():
-        root = DEFAULT_BACKUP_ROOT
-    else:
-        root = FALLBACK_BACKUP_ROOT
+    """Return the selected backup root without relocating old snapshots."""
+    root = Path(resolve_runtime_paths().backup_dir)
     root.mkdir(parents=True, exist_ok=True)
     return root
 

@@ -1,3 +1,7 @@
+from core.runtime_paths import apply_environment_defaults
+
+apply_environment_defaults()
+
 from core import wiring
 from core.app_factory import create_app
 from features.develop import ai_mask_routes, hdr_routes, import_routes, pano_routes, preset_routes, routes as develop_routes, xmp_write_routes

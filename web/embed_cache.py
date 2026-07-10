@@ -13,6 +13,8 @@ import os
 import sqlite3
 import time
 
+from core.runtime_paths import resolve_runtime_paths
+
 # Avoid hitting SQLite on every semantic-search request. The embedding worker
 # patches new vectors into this cache directly; catalog/source changes call
 # invalidate(), so a longer verification window keeps search instant while the
@@ -20,7 +22,7 @@ import time
 COUNT_CHECK_TTL_SECONDS = 30.0
 MATRIX_GROWTH_MIN_ROWS = 512
 MATRIX_GROWTH_FACTOR = 1.10
-SNAPSHOT_DIR = os.path.join(os.path.dirname(__file__), ".embedcache")
+SNAPSHOT_DIR = resolve_runtime_paths().embed_cache_dir
 
 _cache = {
     "image_ids": None,

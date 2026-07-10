@@ -3,9 +3,20 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WEB="$ROOT/web"
-RUN_DIR="$WEB/.run"
+PYTHON="$WEB/.venv/bin/python"
+RUNTIME_RUN_DIR="$WEB/.run"
+RUNTIME_LOG_DIR="$WEB/.run"
+if [[ -x "$PYTHON" ]]; then
+    mapfile -t RUNTIME_PATHS < <(
+        PYTHONPATH="$WEB" "$PYTHON" -c \
+            'from core.runtime_paths import resolve_runtime_paths; p = resolve_runtime_paths(); print(p.run_dir); print(p.log_dir)'
+    )
+    RUNTIME_RUN_DIR="${RUNTIME_PATHS[0]:-$RUNTIME_RUN_DIR}"
+    RUNTIME_LOG_DIR="${RUNTIME_PATHS[1]:-$RUNTIME_LOG_DIR}"
+fi
+RUN_DIR="$RUNTIME_RUN_DIR"
 PIDFILE="$RUN_DIR/photoarchive.pid"
-LOGFILE="$RUN_DIR/server.log"
+LOGFILE="$RUNTIME_LOG_DIR/server.log"
 MAX_LOG_BYTES="${PHOTOARCHIVE_MAX_LOG_BYTES:-10485760}"
 ACCESS="${PHOTOARCHIVE_ACCESS:-local}"
 resolve_tailscale_host() {
@@ -36,7 +47,7 @@ UVICORN="$WEB/.venv/bin/uvicorn"
 PYTHON_MATCH_PATTERN="$WEB/.venv/bin/python .*uvicorn app:app --host ${HOST} --port ${PORT}"
 UVICORN_MATCH_PATTERN="$WEB/.venv/bin/uvicorn app:app --host ${HOST} --port ${PORT}"
 
-mkdir -p "$RUN_DIR"
+mkdir -p "$RUN_DIR" "$RUNTIME_LOG_DIR"
 
 rotate_log_if_needed() {
     [[ -f "$LOGFILE" ]] || return 0

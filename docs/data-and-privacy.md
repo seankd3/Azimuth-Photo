@@ -24,18 +24,23 @@ Original photo folders remain the source of truth.
 
 ## Runtime Data
 
-Runtime data lives under `web/` by default and is ignored by git.
+On a clean install, photoArchive uses platform-native application-data roots.
+The SQLite catalog and downloaded models live in the platform data directory;
+settings live in its config directory; previews, embedding snapshots, and
+Develop intermediates live in its cache directory; process files and logs live
+in its state directory. Durable library exports default to
+`~/Pictures/photoArchive Exports`.
 
-- `photoarchive.db`: SQLite catalog, ratings, comparisons, metadata, People
-  data, embeddings, and search caches.
-- `.thumbcache/`: generated thumbnails and optional fast local copies of
-  original images for browser viewing.
-- `.models/`: locally downloaded AI and face-recognition models.
-- `settings.local.json`: machine-local settings.
-- `.run/server.log`: local server log.
+Older installations are detected from their exact runtime paths and remain
+there. In particular, photoArchive does not automatically move or rebuild an
+existing catalog, preview cache, model store, settings file, Develop cache, or
+backup folder. This protects large established libraries and makes an upgrade
+behaviorally identical until the owner explicitly chooses new storage.
 
-These files are intended to stay on the machine running the app. Do not commit
-them to the repo.
+All runtime files stay on the machine running the app and remain ignored by
+git. `PHOTOARCHIVE_HOME` selects one managed root; granular environment
+overrides can select the catalog, settings, previews, models, embedding cache,
+Develop cache, exports, backups, run directory, and log directory separately.
 
 ## Local AI
 

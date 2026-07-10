@@ -12,7 +12,10 @@ ownership, and the verification ladder, read [`development.md`](development.md).
 - Service: `/etc/systemd/system/photoarchive.service` runs as `sean` from `web/`,
   waits for Tailscale, binds its IPv4 on `:8000`, restarts on failure; Tailscale
   Serve supplies the phone-facing HTTPS `:8443` URL.
-- Runtime files: `web/photoarchive.db`, `web/.run/server.log`, pid files, `web/.thumbcache/`, and model/cache directories are local state.
+- Runtime paths: `web/core/runtime_paths.py` selects platform-native data,
+  config, cache, and state roots for clean installs. Existing in-repo catalog,
+  settings, preview, model, embedding, and run paths remain exact legacy local
+  state; startup never migrates them.
 - Startup warms templates/query caches, then schedules thumbnail prefetch, cleanup, orientation/metadata scans, embedding, People, and caption loops; shutdown stops prefetch and cancels tracked tasks (`core/background.py`).
 - Embeddings start paused until Background Work resumes them; People is paused
   by default; captions auto-resume only when `caption_scan_enabled` is true;

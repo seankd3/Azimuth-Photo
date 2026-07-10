@@ -10,6 +10,7 @@ import os
 import time as _time  # noqa: F401  (tests set cache expiries via db._time.time())
 
 from core import cache_events
+from core.runtime_paths import resolve_runtime_paths
 from data import connection as data_connection
 from data import schema as data_schema
 from data.repositories import cache_entries as cache_entry_repository
@@ -30,7 +31,7 @@ from data.repositories import rankings as ranking_repository
 from data.repositories import stats as stats_repository
 import settings
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "photoarchive.db")
+DB_PATH = resolve_runtime_paths().catalog_db
 log = logging.getLogger(__name__)
 
 

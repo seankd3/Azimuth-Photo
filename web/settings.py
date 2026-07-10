@@ -3,8 +3,10 @@ import json
 import os
 import threading
 
+from core.runtime_paths import resolve_runtime_paths
+
 WEB_DIR = os.path.dirname(__file__)
-SETTINGS_PATH = os.path.join(WEB_DIR, "settings.local.json")
+SETTINGS_PATH = resolve_runtime_paths().settings_file
 SETTINGS_VERSION = 2
 DEFAULT_EMBED_MODEL_PRESET_KEY = "qwen3-vl-embedding-8b"
 LEGACY_2B_PRESET_KEY = "qwen3-vl-embedding-2b"
@@ -17,7 +19,11 @@ def _default_import_root() -> str:
 
 def _default_model_dir(model_id: str) -> str:
     safe = model_id.replace("/", "--").replace("\\", "--").replace(":", "-")
-    return os.path.join(WEB_DIR, ".models", safe)
+    return os.path.join(resolve_runtime_paths().model_root, safe)
+
+
+def _default_thumb_cache_dir() -> str:
+    return resolve_runtime_paths().thumb_cache_dir
 
 
 DEFAULT_SETTINGS = {
@@ -26,7 +32,7 @@ DEFAULT_SETTINGS = {
     "thumb_size_md": 1920,
     "thumb_size_lg": 3840,
     "thumb_quality": 92,
-    "ssd_cache_dir": os.path.join(WEB_DIR, ".thumbcache"),
+    "ssd_cache_dir": _default_thumb_cache_dir(),
     "ssd_cache_gb": 100,
     "memory_cache_gb": 0.5,
     "cache_profile": "original_heavy",
@@ -380,7 +386,11 @@ def normalize_settings(raw: dict | None) -> dict:
         "embed_model_id": preset_config["model_id"],
         "embed_model_revision": preset_config["revision"],
         "embed_model_dim": preset_config["dimension"],
-        "embed_model_dir": _default_model_dir(preset_config["model_id"]),
+        "embed_model_dir": (
+            _default_model_dir(preset_config["model_id"])
+            if os.environ.get("PHOTOARCHIVE_MODELS_DIR")
+            else raw.get("embed_model_dir") or _default_model_dir(preset_config["model_id"])
+        ),
     }
 
     caption_preset = str(
@@ -394,7 +404,11 @@ def normalize_settings(raw: dict | None) -> dict:
         **raw,
         "caption_model_id": caption_preset_config["model_id"],
         "caption_model_revision": caption_preset_config["revision"],
-        "caption_model_dir": _default_model_dir(caption_preset_config["model_id"]),
+        "caption_model_dir": (
+            _default_model_dir(caption_preset_config["model_id"])
+            if os.environ.get("PHOTOARCHIVE_MODELS_DIR")
+            else raw.get("caption_model_dir") or _default_model_dir(caption_preset_config["model_id"])
+        ),
         "caption_model_quantization": caption_preset_config["quantization"],
         "caption_prompt_version": caption_preset_config["prompt_version"],
     }
@@ -408,8 +422,9 @@ def normalize_settings(raw: dict | None) -> dict:
     normalized["embed_model_revision"] = revision or "main"
 
     normalized["ssd_cache_dir"] = _resolve_cache_dir(
-        raw.get("ssd_cache_dir", normalized["ssd_cache_dir"]),
-        DEFAULT_SETTINGS["ssd_cache_dir"],
+        os.environ.get("PHOTOARCHIVE_THUMB_CACHE_DIR")
+        or raw.get("ssd_cache_dir", normalized["ssd_cache_dir"]),
+        _default_thumb_cache_dir(),
     )
     normalized["embed_model_dir"] = _resolve_cache_dir(
         raw.get("embed_model_dir", _default_model_dir(model_id)),
@@ -433,8 +448,10 @@ def normalize_settings(raw: dict | None) -> dict:
     face_model_id = str(raw.get("face_model_id") or normalized["face_model_id"]).strip()
     normalized["face_model_id"] = face_model_id or DEFAULT_SETTINGS["face_model_id"]
     normalized["face_model_dir"] = _resolve_cache_dir(
-        raw.get("face_model_dir", normalized["face_model_dir"]),
-        DEFAULT_SETTINGS["face_model_dir"],
+        _default_model_dir("insightface")
+        if os.environ.get("PHOTOARCHIVE_MODELS_DIR")
+        else raw.get("face_model_dir", normalized["face_model_dir"]),
+        _default_model_dir("insightface"),
     )
     normalized["import_root"] = _resolve_user_dir(
         raw.get("import_root", normalized["import_root"]),

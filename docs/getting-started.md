@@ -40,6 +40,25 @@ The helper also supports:
 By default it uses `127.0.0.1:8000`. Override the host or port with
 `PHOTOARCHIVE_HOST` and `PHOTOARCHIVE_PORT`.
 
+## App Data
+
+A clean install keeps the catalog and generated data outside the source tree:
+
+- Linux follows the XDG data, config, cache, and state directories.
+- Windows uses `%LOCALAPPDATA%\photoArchive` and `%APPDATA%\photoArchive`.
+- macOS uses `~/Library/Application Support/photoArchive` and
+  `~/Library/Caches/photoArchive`.
+
+Existing installations continue using their current `web/photoarchive.db`,
+`.thumbcache`, `.models`, `.embedcache`, settings, logs, Develop cache, and
+backup folders. Startup never moves, copies, or rebuilds them.
+
+Set `PHOTOARCHIVE_HOME` to keep a new installation under one chosen root, or
+use a granular override such as `PHOTOARCHIVE_DB_PATH`,
+`PHOTOARCHIVE_THUMB_CACHE_DIR`, `PHOTOARCHIVE_MODELS_DIR`,
+`PHOTOARCHIVE_DEVELOP_CACHE_DIR`, or `PHOTOARCHIVE_BACKUP_DIR`. Environment
+overrides are deployment choices and take precedence over saved settings.
+
 ## First Catalog
 
 1. Open the app. It opens on the Grid lens.

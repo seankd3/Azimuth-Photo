@@ -186,5 +186,14 @@ curl http://127.0.0.1:8000/api/cache/status
 
 ## Runtime Files
 
-Do not commit runtime data such as `web/photoarchive.db`, `web/.thumbcache/`,
-`web/.models/`, `web/settings.local.json`, or `web/.run/server.log`.
+`core.runtime_paths` owns catalog, settings, preview, model, embedding,
+Develop, export, backup, run, and log locations. Its resolver is read-only;
+directory creation is explicit and never migrates data. Clean installs use
+platform-native roots. A checkout containing established legacy runtime data
+continues using `web/photoarchive.db`, `web/.thumbcache/`, `web/.models/`,
+`web/.embedcache/`, `web/settings.local.json`, and `web/.run/` exactly where
+they are.
+
+Do not commit runtime data. Use `PHOTOARCHIVE_HOME` for a single custom root or
+the documented granular `PHOTOARCHIVE_*_DIR` / `PHOTOARCHIVE_DB_PATH`
+overrides for test and deployment isolation.
