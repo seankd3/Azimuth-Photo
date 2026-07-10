@@ -1,19 +1,23 @@
 import {
-    BAND_NAMES, BASE_PROFILE_SAT, BLUR_LARGE_FACTOR, BLUR_SMALL_FACTOR, CAMERA_PROFILE_BIN_CENTER,
+    BAND_NAMES, BASE_PROFILE_SAT, BLUR_LARGE_FACTOR, BLUR_SMALL_FACTOR, CALIBRATION_HUE_MIX,
+    CALIBRATION_SATURATION_SCALE, CALIBRATION_SHADOW_END, CALIBRATION_SHADOW_START,
+    CALIBRATION_SHADOW_TINT_SCALE, CAMERA_PROFILE_BIN_CENTER,
     CAMERA_PROFILE_CHROMA_BINS, CAMERA_PROFILE_HUE_BINS, CAMERA_PROFILE_PI,
     CAMERA_PROFILE_TWO_PI, CLARITY_FACTOR,
     CLARITY_RESIDUAL_MAX, CONTRAST_FACTOR, DEHAZE_AIRLIGHT_FACTOR, DEHAZE_SATURATION_FACTOR,
     GRAIN_CELL_SIZE_MIN, GRAIN_CELL_SIZE_RANGE, GRAIN_FACTOR, GRAIN_HASH_MULTIPLIER,
     GRAIN_HASH_SHIFT, GRAIN_OUTPUT_MASK, GRAIN_OUTPUT_SHIFT, GRAIN_SEED,
     GRAIN_X_MULTIPLIER, GRAIN_Y_MULTIPLIER, GRAY_MIXER_FACTOR, HSL_LUMINANCE_FACTOR,
-    HUE_SHIFT_DEGREES, LENS_AUTO_CROP_EDGE_SAMPLES, LENS_IMAGE_CENTER, LENS_NORMALIZED_HALF_MIN, LENS_VIGNETTE_GAIN_MAX,
-    LENS_VIGNETTE_GAIN_MIN, LUMA_BLUE, LUMA_GREEN, LUMA_RED, TINT_UV_SCALE,
+    HUE_SHIFT_DEGREES, LENS_AUTO_CROP_EDGE_SAMPLES, LENS_IMAGE_CENTER, LENS_MANUAL_DISTORTION_FACTOR,
+    LENS_MANUAL_VIGNETTE_FACTOR, LENS_MANUAL_VIGNETTE_MIDPOINT_MIN, LENS_MANUAL_VIGNETTE_MIDPOINT_RANGE,
+    LENS_NORMALIZED_HALF_MIN, LENS_PROFILE_SCALE_DEFAULT, LENS_PROFILE_SCALE_MAX, LENS_PROFILE_SCALE_MIN,
+    LENS_VIGNETTE_GAIN_MAX, LENS_VIGNETTE_GAIN_MIN, LUMA_BLUE, LUMA_GREEN, LUMA_RED, TINT_UV_SCALE,
     PERSPECTIVE_AMOUNT_SCALE, PERSPECTIVE_ASPECT_SCALE, PERSPECTIVE_OFFSET_SCALE,
     PERSPECTIVE_SCALE_BASE, PERSPECTIVE_SCALE_MIN,
     LOCAL_HUE_DEGREES, LOCAL_MASK_ATLAS_COLUMNS, LOCAL_RENDER_CAP,
     LOCAL_WB_TEMP_FACTOR, LOCAL_WB_TINT_FACTOR,
     OKLAB_C_NORM, OKLAB_M1, OKLAB_M1_INV, OKLAB_M2, OKLAB_M2_INV,
-    SHARPEN_FACTOR, SHARPEN_THRESHOLD, TEXTURE_FACTOR, TONE_BLACKS_FACTOR,
+    SHARPEN_FACTOR, SHARPEN_THRESHOLD, SHARPEN_MASK_EDGE_LOW, SHARPEN_MASK_EDGE_HIGH, TEXTURE_FACTOR, TONE_BLACKS_FACTOR,
     TONE_EV_BLACKS_CENTER, TONE_EV_HIGHLIGHTS_CENTER, TONE_EV_SHADOWS_CENTER,
     TONE_EV_SIGMA, TONE_EV_WHITES_CENTER, TONE_HIGHLIGHTS_FACTOR,
     TONE_HIGHLIGHTS_POS_SCALE, TONE_SHADOWS_FACTOR, TONE_WHITES_FACTOR,
@@ -23,14 +27,45 @@ import {
     COLOR_GRADE_BLEND_MIN, COLOR_GRADE_BLEND_RANGE, COLOR_GRADE_HIGHLIGHT_CENTER,
     COLOR_GRADE_LUMINANCE_EV, COLOR_GRADE_SHADOW_CENTER, DEFRINGE_EDGE_HIGH,
     DEFRINGE_EDGE_LOW, DEFRINGE_HUE_SCALE, NR_LUMA_SIGMA, NR_LUMA_SPATIAL_AXIS,
-    NR_LUMA_SPATIAL_CENTER, RETOUCH_MIN_RADIUS, RETOUCH_RENDER_CAP,
-    RETOUCH_RING_SCALE, RETOUCH_RING_TAPS, boolSetting, numberSetting,
+    NR_LUMA_SPATIAL_CENTER, NR_DETAIL_EDGE_LOW, NR_DETAIL_EDGE_HIGH, NR_CONTRAST_RESIDUAL,
+    RETOUCH_MIN_RADIUS, RETOUCH_RENDER_CAP, RETOUCH_RING_SCALE, RETOUCH_RING_TAPS,
+    SOFT_PROOF_SRGB_TO_XYZ, SOFT_PROOF_XYZ_TO_SRGB, SOFT_PROOF_ADOBE_RGB_TO_XYZ,
+    SOFT_PROOF_XYZ_TO_ADOBE_RGB, SOFT_PROOF_P3_TO_XYZ, SOFT_PROOF_XYZ_TO_P3,
+    SOFT_PROOF_PAPER_WHITE, SOFT_PROOF_PAPER_BLACK, boolSetting, numberSetting,
 } from './ops_constants.js';
 import {
     buildBaseProfileLut, buildCombinedCurveTexture, effectiveLookSettings,
 } from './curve_lut.js';
 import { buildMaskRasters, localToSlider } from './mask_raster.js';
 import { RETOUCH_SETTINGS_KEY } from './heal.js';
+import { buildFilmTables, FILM_GLSL, FILM_LOGE_MAX, FILM_LOGE_MIN } from './film.js';
+
+const FILM_STOCK_CACHE = new Map();
+
+function fetchFilmStock(slug) {
+    if (!FILM_STOCK_CACHE.has(slug)) {
+        FILM_STOCK_CACHE.set(slug, fetch(`/api/develop/film/stocks/${encodeURIComponent(slug)}`, {
+            headers: { Accept: 'application/json' },
+        }).then((response) => {
+            if (!response.ok) throw new Error(`Film stock ${slug} is unavailable`);
+            return response.json();
+        }));
+    }
+    return FILM_STOCK_CACHE.get(slug);
+}
+
+const matrixColumnMajor = (matrix) => new Float32Array([
+    matrix[0][0], matrix[1][0], matrix[2][0],
+    matrix[0][1], matrix[1][1], matrix[2][1],
+    matrix[0][2], matrix[1][2], matrix[2][2],
+]);
+
+// JS stringifies integral Numbers without a decimal; GLSL then rejects the
+// film chunk's vec3 ± scalar arithmetic. Keep the shipped chunk intact and
+// normalize only its two interpolated log-exposure literals at integration.
+const FILM_SHADER = FILM_GLSL
+    .replaceAll(`(${FILM_LOGE_MIN})`, `(${Number(FILM_LOGE_MIN).toFixed(1)})`)
+    .replaceAll(`(${FILM_LOGE_MAX} -`, `(${Number(FILM_LOGE_MAX).toFixed(1)} -`);
 
 /** Emit a GLSL float literal (JS 2.0 stringifies as "2", which GLSL treats as int). */
 const f = (value) => {
@@ -42,16 +77,17 @@ const f = (value) => {
 
 // Twin of lens.distortion_auto_crop_scale(): edge-evaluate the inverse radial
 // polynomial, then zoom the output UV just enough to eliminate dark borders.
-function lensAutoCropScale(distortion, width, height, cropRatio = 1) {
+function lensAutoCropScale(distortion, width, height, cropRatio = 1, profileScale = 1) {
     if (!distortion || !(width > 0) || !(height > 0)) return 1;
     const terms = Array.isArray(distortion.terms) ? distortion.terms.map(Number) : [];
     const model = String(distortion.model || '').toLowerCase();
     const radial = (radius) => {
         const r2 = radius * radius;
-        if (model === 'poly3' && terms.length) return 1 - terms[0] + terms[0] * r2;
-        if (model === 'poly5' && terms.length >= 2) return 1 + terms[0] * r2 + terms[1] * r2 * r2;
-        if (model === 'ptlens' && terms.length >= 3) return terms[0] * radius * r2 + terms[1] * r2 + terms[2] * radius + 1 - terms[0] - terms[1] - terms[2];
-        return 1;
+        let scale = 1;
+        if (model === 'poly3' && terms.length) scale = 1 - terms[0] + terms[0] * r2;
+        else if (model === 'poly5' && terms.length >= 2) scale = 1 + terms[0] * r2 + terms[1] * r2 * r2;
+        else if (model === 'ptlens' && terms.length >= 3) scale = terms[0] * radius * r2 + terms[1] * r2 + terms[2] * radius + 1 - terms[0] - terms[1] - terms[2];
+        return 1 + (scale - 1) * profileScale;
     };
     const halfMin = Math.min(width, height) / LENS_NORMALIZED_HALF_MIN;
     let maximum = 1;
@@ -64,6 +100,23 @@ function lensAutoCropScale(distortion, width, height, cropRatio = 1) {
         }
     }
     return Math.min(1, 1 / Math.max(maximum, 1e-6));
+}
+
+// §28: columns are source primaries. This exactly mirrors pipeline.calibration_matrix().
+function calibrationMatrix(settings) {
+    const basis = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+    const luma = [LUMA_RED, LUMA_GREEN, LUMA_BLUE];
+    const columns = ['Red', 'Green', 'Blue'].map((name, index) => {
+        const saturation = Math.max(-1, Math.min(1, numberSetting(settings, `Calibration${name}PrimarySaturation`) / 100)) * CALIBRATION_SATURATION_SCALE;
+        const column = luma.map((value, row) => value + (1 + saturation) * (basis[index][row] - value));
+        const hue = Math.max(-1, Math.min(1, numberSetting(settings, `Calibration${name}PrimaryHue`) / 100));
+        if (hue !== 0) {
+            const adjacent = (index + (hue > 0 ? 1 : 2)) % 3;
+            for (let row = 0; row < 3; row += 1) column[row] += Math.abs(hue) * CALIBRATION_HUE_MIX * (basis[adjacent][row] - basis[index][row]);
+        }
+        return column;
+    });
+    return new Float32Array(columns.flat());
 }
 
 const correctionEnabled = (correction) => correction?.CorrectionActive == null
@@ -298,6 +351,28 @@ function mat3Mul(a, b) {
     return out;
 }
 
+function matrixMultiplyVector(matrix, vector) {
+    return matrix.map((row) => row[0] * vector[0] + row[1] * vector[1] + row[2] * vector[2]);
+}
+
+function proofMatrices(profile) {
+    if (profile === 'adobe-rgb') return [SOFT_PROOF_ADOBE_RGB_TO_XYZ, SOFT_PROOF_XYZ_TO_ADOBE_RGB];
+    if (profile === 'display-p3') return [SOFT_PROOF_P3_TO_XYZ, SOFT_PROOF_XYZ_TO_P3];
+    return [SOFT_PROOF_SRGB_TO_XYZ, SOFT_PROOF_XYZ_TO_SRGB];
+}
+
+// Twin of pipeline.soft_proof_transform(): clip in the target RGB space,
+// then return to sRGB for display. Paper is a deliberately simple paper-point simulation.
+export function softProofTransform(srgb, profile = 'srgb') {
+    const linear = srgb.map((value) => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4);
+    const [toXyz, fromXyz] = proofMatrices(profile);
+    const proof = matrixMultiplyVector(fromXyz, matrixMultiplyVector(SOFT_PROOF_SRGB_TO_XYZ, linear));
+    const outOfGamut = proof.some((value) => value < 0 || value > 1);
+    let displayed = matrixMultiplyVector(SOFT_PROOF_XYZ_TO_SRGB, matrixMultiplyVector(toXyz, proof.map((value) => Math.min(1, Math.max(0, value)))));
+    if (profile === 'paper') displayed = displayed.map((value) => SOFT_PROOF_PAPER_BLACK + value * (SOFT_PROOF_PAPER_WHITE - SOFT_PROOF_PAPER_BLACK));
+    return { srgb: displayed.map((value) => value <= .0031308 ? value * 12.92 : 1.055 * Math.max(0, value) ** (1 / 2.4) - .055), outOfGamut };
+}
+
 function mat3Inv(m) {
     const [a, b, c] = m[0], [d, e, f] = m[1], [g, h, i] = m[2];
     const det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
@@ -388,6 +463,20 @@ const COLOR_UNIFORMS = `
 uniform sampler2D u_source;
 uniform sampler2D u_curve;
 uniform sampler2D u_baseCurve;
+uniform sampler2D u_filmHd;
+uniform sampler2D u_filmPrint;
+uniform sampler2D u_filmGlow;
+uniform bool u_filmActive;
+uniform bool u_filmBw;
+uniform bool u_filmNegative;
+uniform mat3 u_filmCrosstalk;
+uniform mat3 u_filmDir;
+uniform mat3 u_filmScan;
+uniform vec3 u_filmMask;
+uniform vec3 u_filmDRef;
+uniform vec4 u_filmHalation;
+uniform vec3 u_filmGrain;
+uniform float u_filmStrength;
 uniform vec2 u_sourceSize;
 uniform float u_baseProfileSat;
 uniform bool u_cameraProfile;
@@ -400,8 +489,15 @@ uniform bool u_lensVignetting;
 uniform vec3 u_lensVignetteTerms;
 uniform float u_lensCropRatio;
 uniform float u_lensAutoCrop;
+uniform float u_lensDistortionScale;
+uniform float u_lensVignettingScale;
+uniform float u_lensManualDistortion;
+uniform float u_lensManualVignette;
+uniform float u_lensManualVignetteMidpoint;
 uniform mat3 u_wbMatrix;
 uniform bool u_applyWb;
+uniform mat3 u_calibrationMatrix;
+uniform float u_calibrationShadowTint;
 uniform float u_exposure;
 uniform float u_contrast;
 uniform vec4 u_regions;
@@ -435,26 +531,33 @@ float lensRadius(vec2 uv) {
 }
 float lensRadialScale(float radius) {
     float r2 = radius * radius;
-    if (u_lensModel == 1) return 1.0 - u_lensTerms.x + u_lensTerms.x * r2;
-    if (u_lensModel == 2) return 1.0 + u_lensTerms.x * r2 + u_lensTerms.y * r2 * r2;
-    if (u_lensModel == 3) return u_lensTerms.x * radius * r2 + u_lensTerms.y * r2
+    float profile = 1.0;
+    if (u_lensModel == 1) profile = 1.0 - u_lensTerms.x + u_lensTerms.x * r2;
+    else if (u_lensModel == 2) profile = 1.0 + u_lensTerms.x * r2 + u_lensTerms.y * r2 * r2;
+    else if (u_lensModel == 3) profile = u_lensTerms.x * radius * r2 + u_lensTerms.y * r2
         + u_lensTerms.z * radius + 1.0 - u_lensTerms.x - u_lensTerms.y - u_lensTerms.z;
-    return 1.0;
+    return (1.0 + (profile - 1.0) * u_lensDistortionScale)
+        * (1.0 + u_lensManualDistortion * ${f(LENS_MANUAL_DISTORTION_FACTOR)} * r2);
 }
 vec2 lensDistortedUv(vec2 uv) {
-    if (!u_lensProfile) return uv;
+    if (!u_lensProfile && abs(u_lensManualDistortion) < 1e-5) return uv;
     float halfMin = min(u_sourceSize.x, u_sourceSize.y) / ${f(LENS_NORMALIZED_HALF_MIN)};
     vec2 p = (uv * u_sourceSize - u_sourceSize * ${f(LENS_IMAGE_CENTER)}) / halfMin * u_lensCropRatio;
     p *= lensRadialScale(length(p));
     return (u_sourceSize * ${f(LENS_IMAGE_CENTER)} + p / u_lensCropRatio * halfMin) / u_sourceSize;
 }
 float lensVignetteGain(vec2 sourceUv) {
-    if (!u_lensVignetting) return 1.0;
+    if (!u_lensVignetting && abs(u_lensManualVignette) < 1e-5) return 1.0;
     float radius = lensRadius(sourceUv);
     float r2 = radius * radius;
-    return clamp(1.0 + u_lensVignetteTerms.x * r2 + u_lensVignetteTerms.y * r2 * r2
+    float profile = clamp(1.0 + u_lensVignetteTerms.x * r2 + u_lensVignetteTerms.y * r2 * r2
         + u_lensVignetteTerms.z * r2 * r2 * r2,
         ${f(LENS_VIGNETTE_GAIN_MIN)}, ${f(LENS_VIGNETTE_GAIN_MAX)});
+    float midpoint = ${f(LENS_MANUAL_VIGNETTE_MIDPOINT_MIN)}
+        + clamp(u_lensManualVignetteMidpoint / 100.0, 0.0, 1.0) * ${f(LENS_MANUAL_VIGNETTE_MIDPOINT_RANGE)};
+    float manual = 1.0 + u_lensManualVignette * ${f(LENS_MANUAL_VIGNETTE_FACTOR)}
+        * smoothstep(midpoint, 1.0, clamp(radius, 0.0, 1.0));
+    return max(0.0, (u_lensVignetting ? 1.0 + (profile - 1.0) * u_lensVignettingScale : 1.0) * manual);
 }
 vec2 orientedUv(vec2 uv) {
     if (u_applyGeometry) {
@@ -503,11 +606,19 @@ vec3 applyGrade(vec3 srgb) {
     vec3 finalLab = linearToOklab(linear);
     return linearToSrgb(gamutClipDesat(linear, finalLab));
 }
-vec3 applyColor(vec2 uv, out vec2 imageUv) {
+vec3 applyCalibration(vec3 rgb) {
+    rgb = max(u_calibrationMatrix * rgb, vec3(0.0));
+    float shadowWeight = 1.0 - smoothstep(${f(CALIBRATION_SHADOW_START)}, ${f(CALIBRATION_SHADOW_END)}, dot(rgb, LUMW));
+    vec3 shadowMultiplier = vec3(1.0) + u_calibrationShadowTint * ${f(CALIBRATION_SHADOW_TINT_SCALE)}
+        * shadowWeight * vec3(1.0, -2.0, 1.0);
+    return max(rgb * shadowMultiplier, vec3(0.0));
+}
+vec3 applyScene(vec2 uv, out vec2 imageUv) {
     imageUv = orientedUv(uv);
     if (any(lessThan(imageUv, vec2(0.0))) || any(greaterThan(imageUv, vec2(1.0)))) return vec3(0.0);
     vec3 rgb = texture(u_source, imageUv).rgb * lensVignetteGain(imageUv);
     if (u_applyWb) rgb = max(u_wbMatrix * rgb, vec3(0.0));
+    rgb = applyCalibration(rgb);
     rgb *= exp2(u_exposure);
     float Y = dot(rgb, LUMW);
     float ev = log2(max(Y, 1e-6));
@@ -529,11 +640,23 @@ vec3 applyColor(vec2 uv, out vec2 imageUv) {
     rgb *= pow(max(t3, 0.0), 2.2) / max(Y2, 1e-6);
     float d = setting(u_dehaze);
     if (abs(d) > 1e-5) rgb = max((rgb - vec3(${f(DEHAZE_AIRLIGHT_FACTOR)} * d)) / (1.0 - ${f(DEHAZE_AIRLIGHT_FACTOR)} * d), vec3(0.0));
+    return rgb;
+}
+vec3 applyColor(vec2 uv, out vec2 imageUv) {
+    vec3 rgb = applyScene(uv, imageUv);
+    if (any(lessThan(imageUv, vec2(0.0))) || any(greaterThan(imageUv, vec2(1.0)))) return vec3(0.0);
+    float d = setting(u_dehaze);
     vec3 c = linearToSrgb(clamp(rgb, 0.0, 1.0));
-    c = vec3(texture(u_baseCurve, vec2(c.r, .5)).r, texture(u_baseCurve, vec2(c.g, .5)).r, texture(u_baseCurve, vec2(c.b, .5)).r);
-    c = scaleOklabChroma(c, u_baseProfileSat, 0.0, 0.0, 0.0);
-    vec3 mainCurve = vec3(texture(u_curve, vec2(c.r, .5)).r, texture(u_curve, vec2(c.g, .5)).r, texture(u_curve, vec2(c.b, .5)).r);
-    c = vec3(texture(u_curve, vec2(mainCurve.r, .5)).g, texture(u_curve, vec2(mainCurve.g, .5)).b, texture(u_curve, vec2(mainCurve.b, .5)).a);
+    if (u_filmActive) {
+        float glow = texture(u_filmGlow, uv).r;
+        vec3 film = filmTransform(rgb, glow, imageUv * u_sourceSize, min(u_sourceSize.x, u_sourceSize.y));
+        c = mix(c, film, clamp(u_filmStrength, 0.0, 1.0));
+    } else {
+        c = vec3(texture(u_baseCurve, vec2(c.r, .5)).r, texture(u_baseCurve, vec2(c.g, .5)).r, texture(u_baseCurve, vec2(c.b, .5)).r);
+        c = scaleOklabChroma(c, u_baseProfileSat, 0.0, 0.0, 0.0);
+        vec3 mainCurve = vec3(texture(u_curve, vec2(c.r, .5)).r, texture(u_curve, vec2(c.g, .5)).r, texture(u_curve, vec2(c.b, .5)).r);
+        c = vec3(texture(u_curve, vec2(mainCurve.r, .5)).g, texture(u_curve, vec2(mainCurve.g, .5)).b, texture(u_curve, vec2(mainCurve.b, .5)).a);
+    }
     if (u_useHsl) {
         vec3 beforeHsl = c;
         vec3 hsv = rgbToHsv(c);
@@ -572,11 +695,35 @@ in vec2 v_uv;
 out vec4 outColor;
 ${COLOR_UNIFORMS}
 ${COLOR_MATH}
+${FILM_SHADER}
 ${COLOR_FUNCTION}
 void main() {
     vec2 imageUv;
     vec3 c = applyColor(v_uv, imageUv);
     outColor = vec4(vec3(dot(c, LUMW)), 1.0);
+}`;
+
+const FILM_LUMA_FRAGMENT = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+out vec4 outColor;
+${COLOR_UNIFORMS}
+${COLOR_MATH}
+${FILM_SHADER}
+${COLOR_FUNCTION}
+void main() {
+    float excess = 0.0;
+    vec2 stepUv = 1.0 / u_sourceSize;
+    // The glow field is 1/8 scale. Max-pool a sparse 8x8 footprint so a
+    // one-pixel lamp or specular is not lost before the wide optical blur.
+    for (int y = -3; y <= 3; y += 2) {
+        for (int x = -3; x <= 3; x += 2) {
+            vec2 imageUv;
+            vec3 scene = applyScene(clamp(v_uv + vec2(float(x), float(y)) * stepUv, 0.0, 1.0), imageUv);
+            excess = max(excess, max(dot(scene, LUMW) - u_filmHalation.y, 0.0));
+        }
+    }
+    outColor = vec4(vec3(excess), 1.0);
 }`;
 
 const BLUR_FRAGMENT = `#version 300 es
@@ -623,6 +770,15 @@ uniform uint u_seed;
 uniform sampler2D u_lumaNr;
 uniform float u_luminanceSmoothing;
 uniform float u_colorNoiseReduction;
+uniform float u_luminanceDetail;
+uniform float u_luminanceContrast;
+uniform float u_sharpenMasking;
+uniform int u_softProofProfile;
+uniform bool u_gamutWarning;
+uniform mat3 u_srgbToXyz;
+uniform mat3 u_xyzToSrgb;
+uniform mat3 u_proofToXyz;
+uniform mat3 u_xyzToProof;
 uniform vec4 u_defringePurple;
 uniform vec4 u_defringeGreen;
 uniform sampler2D u_maskAtlas;
@@ -634,6 +790,7 @@ uniform vec4 u_localEffects[${LOCAL_RENDER_CAP}];
 uniform vec4 u_localColor[${LOCAL_RENDER_CAP}];
 uniform int u_maskOverlay;
 ${COLOR_MATH}
+${FILM_SHADER}
 ${COLOR_FUNCTION}
 float localMask(int index, vec2 imageUv) {
     int column = index % ${LOCAL_MASK_ATLAS_COLUMNS};
@@ -714,7 +871,12 @@ vec3 noiseReduce(vec3 c, float L) {
             filtered += neighbor * weight;
             total += weight;
         }
-        c += vec3((filtered / total - L) * setting(u_luminanceSmoothing));
+        float sharp = texture(u_blurSharp, v_uv).r;
+        float edge = smoothstep(${f(NR_DETAIL_EDGE_LOW)}, ${f(NR_DETAIL_EDGE_HIGH)}, abs(L - sharp));
+        float amount = setting(u_luminanceSmoothing) * (1.0 - edge * setting(u_luminanceDetail));
+        float residual = filtered / total - L;
+        c += vec3(residual * amount);
+        c += vec3(-residual * amount * setting(u_luminanceContrast) * ${f(NR_CONTRAST_RESIDUAL)});
     }
     if (u_colorNoiseReduction > 0.0) {
         vec3 lab = linearToOklab(srgbToLinear(clamp(c, 0.0, 1.0)));
@@ -756,6 +918,8 @@ void main() {
         float r = L - texture(u_blurSharp, v_uv).r;
         float mag = abs(r);
         float gated = max(mag - ${f(SHARPEN_THRESHOLD)}, 0.0) / max(1.0 - ${f(SHARPEN_THRESHOLD)}, 1e-6);
+        float edgeMask = smoothstep(${f(SHARPEN_MASK_EDGE_LOW)}, ${f(SHARPEN_MASK_EDGE_HIGH)}, mag);
+        gated *= mix(1.0, edgeMask, setting(u_sharpenMasking));
         c += vec3(sign(r) * gated * (u_sharpness / 150.0) * ${f(SHARPEN_FACTOR)});
     }
     float a = setting(u_vignette);
@@ -781,6 +945,11 @@ void main() {
         float overlay = clamp(localMask(u_maskOverlay, imageUv), 0.0, 1.0) * .5;
         c = mix(c, vec3(1.0, 0.0, 0.0), overlay);
     }
+    vec3 proof = u_xyzToProof * (u_srgbToXyz * srgbToLinear(clamp(c, 0.0, 1.0)));
+    bool outsideProof = any(lessThan(proof, vec3(0.0))) || any(greaterThan(proof, vec3(1.0)));
+    if (u_softProofProfile > 0) c = linearToSrgb(u_xyzToSrgb * (u_proofToXyz * clamp(proof, 0.0, 1.0)));
+    if (u_softProofProfile == 4) c = vec3(${f(SOFT_PROOF_PAPER_BLACK)}) + c * ${f(SOFT_PROOF_PAPER_WHITE - SOFT_PROOF_PAPER_BLACK)};
+    if (u_gamutWarning && outsideProof) c = mix(c, vec3(1.0, .08, .48), .42);
     outColor = vec4(clamp(c, 0.0, 1.0), 1.0);
 }`;
 
@@ -948,6 +1117,7 @@ export class DevelopRenderer {
         if (!this.gl.getExtension('EXT_color_buffer_float')) throw new Error('Float render targets are unavailable');
         this.mainProgram = program(this.gl, MAIN_FRAGMENT);
         this.lumaProgram = program(this.gl, LUMA_FRAGMENT);
+        this.filmLumaProgram = program(this.gl, FILM_LUMA_FRAGMENT);
         this.blurProgram = program(this.gl, BLUR_FRAGMENT);
         this.retouchProgram = program(this.gl, RETOUCH_FRAGMENT);
         this.settings = {};
@@ -966,13 +1136,21 @@ export class DevelopRenderer {
         this.canvas.width = 1;
         this.canvas.height = 1;
         this.baseCurve = null;
+        this.filmHd = null;
+        this.filmPrint = null;
+        this.filmTables = null;
+        this.filmSlug = '';
+        this.filmRequestSlug = '';
+        this.filmReadyPromise = Promise.resolve();
         this.maskAtlas = maskTexture(this.gl, LOCAL_MASK_ATLAS_COLUMNS, LOCAL_MASK_ATLAS_COLUMNS, new Uint8Array(LOCAL_MASK_ATLAS_COLUMNS ** 2));
         this.maskRasters = [];
         this.maskOverlay = -1;
         this.healOverlay = false;
+        this.softProof = { profile: 'off', warning: false };
         this.baseProfileKey = '';
         this.updateBaseCurve(null);
         this.updateCurve({});
+        this.updateFilmTextures(null);
     }
 
     createGeometry() {
@@ -982,7 +1160,7 @@ export class DevelopRenderer {
         const buffer = gl.createBuffer();
         gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
         gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]), gl.STATIC_DRAW);
-        for (const p of [this.mainProgram, this.lumaProgram, this.blurProgram, this.retouchProgram]) {
+        for (const p of [this.mainProgram, this.lumaProgram, this.filmLumaProgram, this.blurProgram, this.retouchProgram]) {
             const location = gl.getAttribLocation(p, 'a_position');
             gl.enableVertexAttribArray(location);
             gl.vertexAttribPointer(location, 2, gl.FLOAT, false, 0, 0);
@@ -1014,7 +1192,14 @@ export class DevelopRenderer {
         const width = Math.max(1, Math.ceil(this.width / 2));
         const height = Math.max(1, Math.ceil(this.height / 2));
         const next = [target(gl, width, height), target(gl, width, height), target(gl, width, height), target(gl, width, height), target(gl, width, height)];
+        const filmWidth = Math.max(1, Math.ceil(this.width / 8));
+        const filmHeight = Math.max(1, Math.ceil(this.height / 8));
+        const filmNext = [target(gl, filmWidth, filmHeight), target(gl, filmWidth, filmHeight), target(gl, filmWidth, filmHeight)];
         for (const item of this.targets || []) {
+            gl.deleteFramebuffer(item.framebuffer);
+            gl.deleteTexture(item.texture);
+        }
+        for (const item of this.filmTargets || []) {
             gl.deleteFramebuffer(item.framebuffer);
             gl.deleteTexture(item.texture);
         }
@@ -1024,6 +1209,8 @@ export class DevelopRenderer {
         }
         [this.lumaTarget, this.blurTemp, this.blurLarge, this.blurSmall, this.blurSharp] = next;
         this.targets = next;
+        [this.filmLumaTarget, this.filmBlurTemp, this.filmGlow] = filmNext;
+        this.filmTargets = filmNext;
         this.retouchTarget = target(gl, this.width, this.height);
     }
 
@@ -1053,6 +1240,61 @@ export class DevelopRenderer {
         });
     }
 
+    updateFilmTextures(tables) {
+        const gl = this.gl;
+        if (this.filmHd) gl.deleteTexture(this.filmHd);
+        if (this.filmPrint) gl.deleteTexture(this.filmPrint);
+        const hd = new Float32Array(256 * 4);
+        const print = new Float32Array(256 * 4);
+        for (let index = 0; index < 256; index += 1) {
+            hd[index * 4] = tables?.hdLut[index * 3] ?? 0;
+            hd[index * 4 + 1] = tables?.hdLut[index * 3 + 1] ?? 0;
+            hd[index * 4 + 2] = tables?.hdLut[index * 3 + 2] ?? 0;
+            hd[index * 4 + 3] = 1;
+            const value = tables?.printLut[index] ?? 0;
+            print.set([value, value, value, 1], index * 4);
+        }
+        this.filmHd = texture(gl, 256, 1, {
+            data: float32ToHalf(hd), filter: gl.LINEAR,
+            internalFormat: gl.RGBA16F, type: gl.HALF_FLOAT,
+        });
+        this.filmPrint = texture(gl, 256, 1, {
+            data: float32ToHalf(print), filter: gl.LINEAR,
+            internalFormat: gl.RGBA16F, type: gl.HALF_FLOAT,
+        });
+    }
+
+    updateFilmStock(slug) {
+        const requested = String(slug || '').trim();
+        if (requested === this.filmRequestSlug) return this.filmReadyPromise;
+        this.filmRequestSlug = requested;
+        this.filmTables = null;
+        this.filmSlug = '';
+        if (!requested) {
+            this.filmReadyPromise = Promise.resolve();
+            this.requestRender();
+            return this.filmReadyPromise;
+        }
+        this.filmReadyPromise = fetchFilmStock(requested).then((stock) => {
+            if (this.filmRequestSlug !== requested) return;
+            this.filmTables = buildFilmTables(stock);
+            this.filmSlug = requested;
+            this.updateFilmTextures(this.filmTables);
+            this.requestRender();
+        }).catch(() => {
+            if (this.filmRequestSlug === requested) this.requestRender();
+        });
+        return this.filmReadyPromise;
+    }
+
+    waitForFilm() {
+        return this.filmReadyPromise;
+    }
+
+    filmActive() {
+        return Boolean(this.filmTables && this.filmSlug === String(this.settings.pa_FilmStock || '').trim());
+    }
+
     setSettings(settings, meta = this.meta, _opts = {}) {
         this.settings = effectiveLookSettings(settings || {});
         this.meta = meta || {};
@@ -1070,6 +1312,12 @@ export class DevelopRenderer {
             this.updateBaseCurve(profile, this.settings, baseKind);
         }
         this.updateCurve(this.settings);
+        this.updateFilmStock(this.settings.pa_FilmStock);
+        this.requestRender();
+    }
+
+    setSoftProof(proof = {}) {
+        this.softProof = { profile: proof.profile || 'off', warning: Boolean(proof.warning) };
         this.requestRender();
     }
 
@@ -1127,6 +1375,12 @@ export class DevelopRenderer {
         if (!this.frame) this.frame = requestAnimationFrame(() => this.render());
     }
 
+    bindFilmUnits() {
+        bindUnit(this.gl, this.filmHd, 8);
+        bindUnit(this.gl, this.filmPrint, 9);
+        bindUnit(this.gl, this.filmGlow?.texture, 10);
+    }
+
     uniforms(p) {
         const gl = this.gl;
         const s = this.settings;
@@ -1134,7 +1388,39 @@ export class DevelopRenderer {
         gl.uniform1i(uniform('u_source'), 0);
         gl.uniform1i(uniform('u_curve'), 1);
         gl.uniform1i(uniform('u_baseCurve'), 5);
+        gl.uniform1i(uniform('u_filmHd'), 8);
+        gl.uniform1i(uniform('u_filmPrint'), 9);
+        gl.uniform1i(uniform('u_filmGlow'), 10);
         gl.uniform2f(uniform('u_sourceSize'), this.width, this.height);
+        const film = this.filmTables;
+        const filmActive = this.filmActive();
+        const identity = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+        const halation = film?.halation || {};
+        const grain = film?.grain || {};
+        const filmPercent = (key) => Math.max(0, Math.min(1, numberSetting(s, key, 100) / 100));
+        const minSide = Math.min(this.width, this.height);
+        gl.uniform1i(uniform('u_filmActive'), filmActive ? 1 : 0);
+        gl.uniform1i(uniform('u_filmBw'), film?.bw ? 1 : 0);
+        gl.uniform1i(uniform('u_filmNegative'), film?.negative ? 1 : 0);
+        gl.uniformMatrix3fv(uniform('u_filmCrosstalk'), false, matrixColumnMajor(film?.crosstalk || identity));
+        gl.uniformMatrix3fv(uniform('u_filmDir'), false, matrixColumnMajor(film?.dir || identity));
+        gl.uniformMatrix3fv(uniform('u_filmScan'), false, matrixColumnMajor(film?.scan || identity));
+        gl.uniform3fv(uniform('u_filmMask'), film?.mask || new Float32Array(3));
+        gl.uniform3fv(uniform('u_filmDRef'), film?.dRef || new Float32Array(3));
+        gl.uniform4f(
+            uniform('u_filmHalation'),
+            Number(halation.amount || 0) * filmPercent('pa_FilmHalation'),
+            Number(halation.threshold ?? 0.7),
+            Number(halation.radiusFrac ?? 0.015),
+            Number(halation.greenFraction ?? 0.2),
+        );
+        gl.uniform3f(
+            uniform('u_filmGrain'),
+            Number(grain.rms || 0) / 1000 * 9 * filmPercent('pa_FilmGrain'),
+            Math.max(Number(grain.sizePxAt4k || 1) * filmPercent('pa_FilmGrainSize') * (minSide / 4000), 1),
+            Number(grain.shadowBias ?? 0.35),
+        );
+        gl.uniform1f(uniform('u_filmStrength'), filmPercent('pa_FilmStrength'));
         const displayBase = this.meta.base_kind === 'display';
         const profile = displayBase ? null : (this.meta.camera_profile || this.meta.color?.camera_profile || null);
         const profileTable = new Float32Array(CAMERA_PROFILE_HUE_BINS * CAMERA_PROFILE_CHROMA_BINS * 2);
@@ -1164,13 +1450,22 @@ export class DevelopRenderer {
         const vignetteTerms = Array.isArray(lensVignetting?.terms) ? lensVignetting.terms.map(Number) : [0, 0, 0];
         const cameraCrop = Number(lens?.camera_crop_factor) || 1;
         const lensCrop = Number(lens?.lens_crop_factor) || 1;
+        const lensDistortionScale = Math.max(LENS_PROFILE_SCALE_MIN, Math.min(LENS_PROFILE_SCALE_MAX,
+            numberSetting(s, 'LensProfileDistortionScale', LENS_PROFILE_SCALE_DEFAULT))) / 100;
+        const lensVignettingScale = Math.max(LENS_PROFILE_SCALE_MIN, Math.min(LENS_PROFILE_SCALE_MAX,
+            numberSetting(s, 'LensProfileVignettingScale', LENS_PROFILE_SCALE_DEFAULT))) / 100;
         gl.uniform1i(uniform('u_lensProfile'), lensEnabled && lensModel ? 1 : 0);
         gl.uniform1i(uniform('u_lensModel'), lensModel);
         gl.uniform3f(uniform('u_lensTerms'), lensTerms[0] || 0, lensTerms[1] || 0, lensTerms[2] || 0);
         gl.uniform1i(uniform('u_lensVignetting'), lensEnabled && lensVignetting ? 1 : 0);
         gl.uniform3f(uniform('u_lensVignetteTerms'), vignetteTerms[0] || 0, vignetteTerms[1] || 0, vignetteTerms[2] || 0);
         gl.uniform1f(uniform('u_lensCropRatio'), lensCrop / cameraCrop);
-        gl.uniform1f(uniform('u_lensAutoCrop'), lensEnabled && lensModel ? lensAutoCropScale(distortion, this.width, this.height, lensCrop / cameraCrop) : 1);
+        gl.uniform1f(uniform('u_lensAutoCrop'), lensEnabled && lensModel ? lensAutoCropScale(distortion, this.width, this.height, lensCrop / cameraCrop, lensDistortionScale) : 1);
+        gl.uniform1f(uniform('u_lensDistortionScale'), lensDistortionScale);
+        gl.uniform1f(uniform('u_lensVignettingScale'), lensVignettingScale);
+        gl.uniform1f(uniform('u_lensManualDistortion'), numberSetting(s, 'LensManualDistortionAmount') / 100);
+        gl.uniform1f(uniform('u_lensManualVignette'), numberSetting(s, 'LensManualVignetteAmount') / 100);
+        gl.uniform1f(uniform('u_lensManualVignetteMidpoint'), numberSetting(s, 'LensManualVignetteMidpoint', 50));
         const asShotT = Number(this.meta.as_shot_temperature || this.meta.temperature || 5500);
         const asShotTint = Number(this.meta.as_shot_tint || 0);
         const userT = numberSetting(s, 'Temperature', asShotT);
@@ -1186,6 +1481,8 @@ export class DevelopRenderer {
             wb[2][0], wb[2][1], wb[2][2],
         ]));
         gl.uniform1i(uniform('u_applyWb'), s.WhiteBalance !== 'As Shot' && s.Temperature != null ? 1 : 0);
+        gl.uniformMatrix3fv(uniform('u_calibrationMatrix'), false, calibrationMatrix(s));
+        gl.uniform1f(uniform('u_calibrationShadowTint'), numberSetting(s, 'CalibrationShadowTint') / 100);
         gl.uniform1f(uniform('u_exposure'), numberSetting(s, 'Exposure2012'));
         gl.uniform1f(uniform('u_contrast'), numberSetting(s, 'Contrast2012'));
         gl.uniform4f(uniform('u_regions'), numberSetting(s, 'Highlights2012'), numberSetting(s, 'Shadows2012'), numberSetting(s, 'Whites2012'), numberSetting(s, 'Blacks2012'));
@@ -1287,25 +1584,39 @@ export class DevelopRenderer {
         bindUnit(gl, this.source, 0);
         bindUnit(gl, this.curve, 1);
         bindUnit(gl, this.baseCurve, 5);
+        this.bindFilmUnits();
         this.uniforms(this.lumaProgram);
         gl.bindFramebuffer(gl.FRAMEBUFFER, this.lumaTarget.framebuffer);
         gl.viewport(0, 0, this.lumaTarget.width, this.lumaTarget.height);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
     }
 
-    blur(sigma, output) {
+    drawFilmLumaTarget() {
+        const gl = this.gl;
+        gl.useProgram(this.filmLumaProgram);
+        bindUnit(gl, this.source, 0);
+        bindUnit(gl, this.curve, 1);
+        bindUnit(gl, this.baseCurve, 5);
+        this.bindFilmUnits();
+        this.uniforms(this.filmLumaProgram);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, this.filmLumaTarget.framebuffer);
+        gl.viewport(0, 0, this.filmLumaTarget.width, this.filmLumaTarget.height);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+    }
+
+    blur(sigma, output, source = this.lumaTarget, temp = this.blurTemp, downsample = 2) {
         const gl = this.gl;
         gl.useProgram(this.blurProgram);
         gl.uniform1i(gl.getUniformLocation(this.blurProgram, 'u_image'), 0);
-        gl.uniform1f(gl.getUniformLocation(this.blurProgram, 'u_sigma'), Math.max(.5, sigma / 2));
-        bindUnit(gl, this.lumaTarget.texture, 0);
-        gl.bindFramebuffer(gl.FRAMEBUFFER, this.blurTemp.framebuffer);
-        gl.viewport(0, 0, this.blurTemp.width, this.blurTemp.height);
-        gl.uniform2f(gl.getUniformLocation(this.blurProgram, 'u_direction'), 1 / this.blurTemp.width, 0);
+        gl.uniform1f(gl.getUniformLocation(this.blurProgram, 'u_sigma'), Math.max(.5, sigma / downsample));
+        bindUnit(gl, source.texture, 0);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, temp.framebuffer);
+        gl.viewport(0, 0, temp.width, temp.height);
+        gl.uniform2f(gl.getUniformLocation(this.blurProgram, 'u_direction'), 1 / temp.width, 0);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
-        bindUnit(gl, this.blurTemp.texture, 0);
+        bindUnit(gl, temp.texture, 0);
         gl.bindFramebuffer(gl.FRAMEBUFFER, output.framebuffer);
-        gl.uniform2f(gl.getUniformLocation(this.blurProgram, 'u_direction'), 0, 1 / this.blurTemp.height);
+        gl.uniform2f(gl.getUniformLocation(this.blurProgram, 'u_direction'), 0, 1 / temp.height);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
     }
 
@@ -1325,13 +1636,24 @@ export class DevelopRenderer {
         const defringe = numberSetting(this.settings, 'DefringePurpleAmount') !== 0 || numberSetting(this.settings, 'DefringeGreenAmount') !== 0;
         const nr = numberSetting(this.settings, 'LuminanceSmoothing') !== 0 || numberSetting(this.settings, 'ColorNoiseReduction') !== 0;
         const spots = retouchSpots(this.settings);
+        const filmActive = this.filmActive();
+        if (filmActive && numberSetting(this.settings, 'pa_FilmHalation', 100) > 0 && Number(this.filmTables.halation.amount) > 0) {
+            this.drawFilmLumaTarget();
+            this.blur(
+                Number(this.filmTables.halation.radiusFrac) * Math.min(this.width, this.height),
+                this.filmGlow,
+                this.filmLumaTarget,
+                this.filmBlurTemp,
+                8,
+            );
+        }
         const useBlur = clarity !== 0 || textureValue !== 0 || sharpness > 0 || localClarity || localTexture || defringe || nr;
         if (useBlur) {
             this.drawColorTarget();
             const minSide = Math.min(this.width, this.height);
             if (clarity !== 0 || localClarity) this.blur(BLUR_LARGE_FACTOR * minSide, this.blurLarge);
             if (textureValue !== 0 || localTexture) this.blur(BLUR_SMALL_FACTOR * minSide, this.blurSmall);
-            if (sharpness > 0 || defringe) this.blur(sharpness > 0 ? numberSetting(this.settings, 'SharpenRadius', 1) : 1, this.blurSharp);
+            if (sharpness > 0 || defringe || nr) this.blur(sharpness > 0 ? numberSetting(this.settings, 'SharpenRadius', 1) : 1, this.blurSharp);
         }
         gl.useProgram(this.mainProgram);
         bindUnit(gl, this.source, 0);
@@ -1342,6 +1664,7 @@ export class DevelopRenderer {
         bindUnit(gl, this.baseCurve, 5);
         bindUnit(gl, this.maskAtlas, 6);
         bindUnit(gl, this.lumaTarget.texture, 7);
+        this.bindFilmUnits();
         this.uniforms(this.mainProgram);
         this.localUniforms();
         const uniform = (name) => gl.getUniformLocation(this.mainProgram, name);
@@ -1355,12 +1678,26 @@ export class DevelopRenderer {
         gl.uniform1f(uniform('u_clarity'), clarity);
         gl.uniform1f(uniform('u_texture'), textureValue);
         gl.uniform1f(uniform('u_sharpness'), sharpness);
+        gl.uniform1f(uniform('u_sharpenMasking'), numberSetting(this.settings, 'SharpenEdgeMasking'));
         gl.uniform1f(uniform('u_vignette'), numberSetting(this.settings, 'PostCropVignetteAmount'));
         gl.uniform3f(uniform('u_vignetteShape'), numberSetting(this.settings, 'PostCropVignetteMidpoint', 50), numberSetting(this.settings, 'PostCropVignetteFeather', 50), numberSetting(this.settings, 'PostCropVignetteRoundness'));
         gl.uniform1f(uniform('u_grain'), numberSetting(this.settings, 'GrainAmount'));
         gl.uniform1f(uniform('u_grainSize'), numberSetting(this.settings, 'GrainSize', 25));
         gl.uniform1f(uniform('u_luminanceSmoothing'), numberSetting(this.settings, 'LuminanceSmoothing'));
         gl.uniform1f(uniform('u_colorNoiseReduction'), numberSetting(this.settings, 'ColorNoiseReduction'));
+        gl.uniform1f(uniform('u_luminanceDetail'), numberSetting(this.settings, 'LuminanceDetail'));
+        gl.uniform1f(uniform('u_luminanceContrast'), numberSetting(this.settings, 'LuminanceContrast'));
+        const proofProfile = { off: 0, srgb: 1, 'adobe-rgb': 2, 'display-p3': 3, paper: 4 }[this.softProof?.profile] ?? 0;
+        const [proofToXyz, xyzToProof] = proofMatrices(this.softProof?.profile);
+        const columnMajor = (matrix) => new Float32Array([
+            matrix[0][0], matrix[1][0], matrix[2][0], matrix[0][1], matrix[1][1], matrix[2][1], matrix[0][2], matrix[1][2], matrix[2][2],
+        ]);
+        gl.uniform1i(uniform('u_softProofProfile'), proofProfile);
+        gl.uniform1i(uniform('u_gamutWarning'), this.softProof?.warning ? 1 : 0);
+        gl.uniformMatrix3fv(uniform('u_srgbToXyz'), false, columnMajor(SOFT_PROOF_SRGB_TO_XYZ));
+        gl.uniformMatrix3fv(uniform('u_xyzToSrgb'), false, columnMajor(SOFT_PROOF_XYZ_TO_SRGB));
+        gl.uniformMatrix3fv(uniform('u_proofToXyz'), false, columnMajor(proofToXyz));
+        gl.uniformMatrix3fv(uniform('u_xyzToProof'), false, columnMajor(xyzToProof));
         const defringeUniform = (name, defaults) => gl.uniform4f(uniform(`u_defringe${name}`),
             Math.max(0, Math.min(1, numberSetting(this.settings, `Defringe${name}Amount`) / 100)),
             numberSetting(this.settings, `Defringe${name}HueLo`, defaults[0]), numberSetting(this.settings, `Defringe${name}HueHi`, defaults[1]), 0);
@@ -1397,6 +1734,10 @@ export class DevelopRenderer {
             gl.deleteFramebuffer(item.framebuffer);
             gl.deleteTexture(item.texture);
         }
+        for (const item of this.filmTargets || []) {
+            gl.deleteFramebuffer(item.framebuffer);
+            gl.deleteTexture(item.texture);
+        }
         if (this.retouchTarget) {
             gl.deleteFramebuffer(this.retouchTarget.framebuffer);
             gl.deleteTexture(this.retouchTarget.texture);
@@ -1404,6 +1745,8 @@ export class DevelopRenderer {
         gl.deleteTexture(this.source);
         gl.deleteTexture(this.curve);
         if (this.baseCurve) gl.deleteTexture(this.baseCurve);
+        if (this.filmHd) gl.deleteTexture(this.filmHd);
+        if (this.filmPrint) gl.deleteTexture(this.filmPrint);
         if (this.maskAtlas) gl.deleteTexture(this.maskAtlas);
     }
 }
@@ -1438,6 +1781,7 @@ export async function renderSyntheticPixels(settings = {}, meta = {}) {
     renderer.geometryEnabled = false;
     renderer.uploadSource(syntheticLinearRgba(64), 64, 64);
     renderer.setSettings(settings, { as_shot_temperature: 5150, as_shot_tint: 0, ...meta });
+    await renderer.waitForFilm();
     if (Array.isArray(settings.MaskGroupBasedCorrections)) {
         renderer.setMaskRasters(await buildMaskRasters({ corrections: settings.MaskGroupBasedCorrections, width: 64, height: 64 }));
     }

@@ -2,6 +2,7 @@ import { eventGap, initEvents, mountEvents, setEventGap, unmountEvents } from '.
 import { initDateScrubber } from './date_scrubber.js';
 import { initGrid, mountGrid, unmountGrid } from './grid.js';
 import { initMap, mountMap, unmountMap } from './map.js';
+import { initTimeline, mountTimeline, unmountTimeline } from './timeline.js';
 import { initPeople, mountPeople, unmountPeople } from './people.js';
 import { mountRefine, unmountRefine } from './refine.js';
 import { mountSuggestions, unmountSuggestions } from './suggestions.js';
@@ -14,6 +15,7 @@ import { on, setActiveLens, viewState } from './state.js';
 const LENSES = {
     grid: { mount: mountGrid, unmount: unmountGrid },
     events: { mount: mountEvents, unmount: unmountEvents },
+    timeline: { mount: mountTimeline, unmount: unmountTimeline },
     people: { mount: mountPeople, unmount: unmountPeople },
     map: { mount: mountMap, unmount: unmountMap },
     refine: { mount: mountRefine, unmount: unmountRefine },
@@ -32,9 +34,9 @@ function syncChrome(lens) {
         button.classList.toggle('active', active);
         button.setAttribute('aria-selected', active ? 'true' : 'false');
     }
-    document.getElementById('shell').classList.toggle('right-hidden', lens === 'events' || lens === 'map' || lens === 'suggestions' || lens === 'shared');
+    document.getElementById('shell').classList.toggle('right-hidden', lens === 'events' || lens === 'timeline' || lens === 'map' || lens === 'suggestions' || lens === 'shared');
     document.getElementById('event-gap-wrap').hidden = lens !== 'events';
-    const sortDisabled = lens === 'people' || lens === 'map' || lens === 'refine' || lens === 'suggestions' || lens === 'loupe' || lens === 'duplicates' || lens === 'trash' || lens === 'shared';
+    const sortDisabled = lens === 'people' || lens === 'timeline' || lens === 'map' || lens === 'refine' || lens === 'suggestions' || lens === 'loupe' || lens === 'duplicates' || lens === 'trash' || lens === 'shared';
     document.getElementById('sort-select').disabled = sortDisabled;
     document.getElementById('sort-dir').disabled = sortDisabled;
     document.getElementById('thumb-size').disabled = lens === 'people' || lens === 'map' || lens === 'refine' || lens === 'suggestions' || lens === 'loupe' || lens === 'trash' || lens === 'shared';
@@ -69,6 +71,7 @@ export function activeLens() {
 export function initLenses() {
     initGrid();
     initEvents();
+    initTimeline();
     initPeople();
     initMap();
     initDateScrubber();

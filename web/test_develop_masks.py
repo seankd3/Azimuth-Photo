@@ -211,10 +211,10 @@ class LocalCorrectionTests(unittest.TestCase):
         self.assertEqual([mask["What"] for correction in settings["MaskGroupBasedCorrections"] for mask in correction["CorrectionMasks"]], ["Mask/Gradient", "Mask/Paint"])
         output = pipeline.apply_pipeline(synthetic_linear_image(), settings, asshot_temperature=5150)
         stats = [float(output.mean()), float(output.std()), *np.percentile(output, [10, 50, 90])]
-        # Intentional Phase 3 golden refresh: grade → defringe → NR now precedes local masks.
+        # Detail2 golden refresh: SharpenEdgeMasking now gates the shared sharpen residual before local masks.
         np.testing.assert_allclose(
             stats,
-            [0.6627953052520752, 0.2570503056049347, 0.30544613301754, 0.6815890669822693, 0.9896051108837128],
+            [0.6626867651939392, 0.257098525762558, 0.30526613891124726, 0.6816287934780121, 0.9896730780601501],
             rtol=0.0,
             atol=2e-6,
         )

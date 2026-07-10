@@ -9,23 +9,19 @@ from __future__ import annotations
 import json
 import logging
 import os
-import re
 import threading
 import time
-import xml.etree.ElementTree as etree
 from collections.abc import Iterator
 from typing import Any
 
 import scanner
 from data import connection
 from data.repositories import catalog as catalog_repository
-from features.develop.looks import extract_xmp_look
+from features.develop.xmp_write import parse_xmp_text
 
 
 DEFAULT_RAWS_ROOT = "/mnt/expansion/Photos/RAWS"
 RAW_EXTENSIONS = frozenset({".dng", ".cr2", ".cr3"})
-_NUMBER = re.compile(r"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$")
-_CRS_NAMESPACE_MARKER = "camera-raw-settings"
 _LOG = logging.getLogger(__name__)
 
 _status_lock = threading.Lock()
@@ -77,75 +73,6 @@ def finish_scan() -> None:
 def _increment(name: str, amount: int = 1) -> None:
     with _status_lock:
         _status[name] = int(_status[name]) + amount
-
-
-def _split_name(name: str) -> tuple[str, str]:
-    if name.startswith("{"):
-        namespace, _, local = name[1:].partition("}")
-        return namespace, local
-    return "", name.split(":", 1)[-1]
-
-
-def _is_crs_name(name: str) -> bool:
-    namespace, _local = _split_name(name)
-    return _CRS_NAMESPACE_MARKER in namespace.lower() or name.startswith("crs:")
-
-
-def _normalize_value(value: str) -> bool | int | float | str:
-    clean = str(value or "").strip()
-    if clean.lower() == "true":
-        return True
-    if clean.lower() == "false":
-        return False
-    if not _NUMBER.fullmatch(clean):
-        return clean
-    numeric = float(clean)
-    return int(numeric) if numeric.is_integer() else numeric
-
-
-def _curve_values(element: etree.Element) -> list[str]:
-    values = [text.strip() for text in element.itertext() if text and text.strip()]
-    if values:
-        return values
-    return []
-
-
-def parse_xmp_text(payload: str | bytes) -> dict[str, Any]:
-    """Parse every ``crs:*`` value from either Lightroom XMP representation.
-
-    Attributes hold scalar values in some XMPs, while curves are commonly RDF
-    child arrays.  Curve point strings remain verbatim for Lightroom fidelity.
-    """
-
-    root = etree.fromstring(payload)
-    look = extract_xmp_look(root)
-    look_nodes: set[int] = set()
-    for element in root.iter():
-        if _is_crs_name(element.tag) and _split_name(element.tag)[1] == "Look":
-            look_nodes.update(id(descendant) for descendant in element.iter())
-            break
-    settings: dict[str, Any] = {}
-    for element in root.iter():
-        if id(element) in look_nodes:
-            continue
-        for name, value in element.attrib.items():
-            if not _is_crs_name(name):
-                continue
-            _namespace, local = _split_name(name)
-            settings[local] = _normalize_value(value)
-
-        if not _is_crs_name(element.tag):
-            continue
-        _namespace, local = _split_name(element.tag)
-        if local.startswith("ToneCurvePV2012"):
-            settings[local] = _curve_values(element)
-            continue
-        text = "".join(element.itertext()).strip()
-        if text:
-            settings[local] = _normalize_value(text)
-    if look is not None:
-        settings["Look"] = look
-    return settings
 
 
 def read_embedded_xmp(raw_path: str) -> bytes | None:

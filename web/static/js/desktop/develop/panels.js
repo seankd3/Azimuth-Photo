@@ -4,6 +4,9 @@ import { MaskingController } from './masking.js';
 import { ColorWheels } from './color_wheels.js';
 import { HealController } from './heal.js';
 import { TransformPanel } from './transform_panel.js';
+import { FilmStockPicker } from './film_panel.js';
+import { LensPanel } from './lens_panel.js';
+import { CalibrationPanel } from './calibration_panel.js';
 
 const slider = (key, label, min, max, step = 1, fallback = DEFAULTS[key] ?? 0) => ({ key, label, min, max, step, fallback });
 const BASIC = [slider('Temperature', 'Temp', 2000, 50000, 50, 5500), slider('Tint', 'Tint', -150, 150)];
@@ -20,7 +23,8 @@ const PRESENCE = [
 const DETAIL = [
     slider('Sharpness', 'Amount', 0, 150, 1, 40), slider('SharpenRadius', 'Radius', .5, 3, .1, 1),
     slider('SharpenDetail', 'Detail', 0, 100, 1, 25), slider('SharpenEdgeMasking', 'Masking', 0, 100),
-    slider('LuminanceSmoothing', 'Luminance NR', 0, 100), slider('ColorNoiseReduction', 'Color NR', 0, 100),
+    slider('LuminanceSmoothing', 'Luminance NR', 0, 100), slider('LuminanceDetail', 'NR Detail', 0, 100, 1, 50),
+    slider('LuminanceContrast', 'NR Contrast', 0, 100), slider('ColorNoiseReduction', 'Color NR', 0, 100),
     slider('DefringePurpleAmount', 'Purple Defringe', 0, 100), slider('DefringePurpleHueLo', 'Purple Hue Low', 0, 100), slider('DefringePurpleHueHi', 'Purple Hue High', 0, 100),
     slider('DefringeGreenAmount', 'Green Defringe', 0, 100), slider('DefringeGreenHueLo', 'Green Hue Low', 0, 100), slider('DefringeGreenHueHi', 'Green Hue High', 0, 100),
 ];
@@ -30,6 +34,12 @@ const EFFECTS = [
     slider('PostCropVignetteFeather', 'Feather', 0, 100, 1, 50), slider('PostCropVignetteRoundness', 'Roundness', -100, 100),
     slider('GrainAmount', 'Grain', 0, 100), slider('GrainSize', 'Size', 0, 100, 1, 25),
     slider('GrainFrequency', 'Roughness', 0, 100, 1, 50),
+];
+const FILM = [
+    { ...slider('pa_FilmStrength', 'Strength', 0, 100, 1, 100), tip: 'Blend the film rendering with a neutral digital rendering' },
+    { ...slider('pa_FilmHalation', 'Halation', 0, 100, 1, 100), tip: 'Scale this stock’s optical highlight glow' },
+    { ...slider('pa_FilmGrain', 'Grain', 0, 100, 1, 100), tip: 'Scale density-dependent emulsion grain' },
+    { ...slider('pa_FilmGrainSize', 'Grain Size', 0, 100, 1, 100), tip: 'Scale the physical grain-clump pitch' },
 ];
 
 function displayValue(value, step) {
@@ -46,7 +56,7 @@ function section(title, id, inner, open = true) {
 }
 
 function sliderHtml(config) {
-    return `<div class="develop-slider" data-setting="${config.key}" data-min="${config.min}" data-max="${config.max}" data-step="${config.step}" data-default="${config.fallback}" data-tip="Drag to adjust ${config.label}; Shift for fine; double-click to reset">`
+    return `<div class="develop-slider" data-setting="${config.key}" data-min="${config.min}" data-max="${config.max}" data-step="${config.step}" data-default="${config.fallback}" data-tip="${config.tip || `Drag to adjust ${config.label}; Shift for fine; double-click to reset`}">`
         + `<span class="develop-slider-label">${config.label}</span><span class="develop-slider-track"><i></i><b></b></span>`
         + `<input class="develop-slider-value" inputmode="decimal" aria-label="${config.label} value" data-tip="Click to type ${config.label}">`
         + '</div>';
@@ -187,9 +197,12 @@ export class DevelopPanels {
             + section('Tone Curve', 'curve', '<div class="develop-curve-tools"><select data-tip="Tone curve channel" aria-label="Tone curve channel"><option value="ToneCurvePV2012">RGB</option><option value="ToneCurvePV2012Red">Red</option><option value="ToneCurvePV2012Green">Green</option><option value="ToneCurvePV2012Blue">Blue</option></select><button data-curve-reset data-tip="Reset selected curve">Reset</button></div><canvas class="develop-curve" width="288" height="180" tabindex="0" data-tip="Drag points; double-click to add" aria-label="Tone curve editor"></canvas>')
             + section('HSL / B&W', 'hsl', '<label class="develop-toggle" data-tip="Convert to black and white"><span>Black & White</span><input id="develop-bw" type="checkbox" data-tip="Toggle black and white"><i></i></label><div id="develop-hsl-controls"><div class="develop-tabs" role="tablist"><button class="active" data-hsl-tab="Hue" data-tip="Hue adjustments">Hue</button><button data-hsl-tab="Saturation" data-tip="Saturation adjustments">Sat</button><button data-hsl-tab="Luminance" data-tip="Luminance adjustments">Lum</button></div><div data-hsl-panel="Hue">' + hslHtml('HueAdjustment') + '</div><div data-hsl-panel="Saturation" hidden>' + hslHtml('SaturationAdjustment') + '</div><div data-hsl-panel="Luminance" hidden>' + hslHtml('LuminanceAdjustment') + '</div></div><div id="develop-gray-controls" hidden>' + hslHtml('GrayMixer') + '</div>')
             + section('Color Grading', 'color-grading', '<div id="develop-color-wheels"></div>' + slidersHtml(COLOR_GRADE), false)
-            + section('Detail', 'detail', slidersHtml(DETAIL), false)
+            + section('Detail', 'detail', '<p class="develop-detail-note">NR Detail protects existing edges; NR Contrast restores part of the luma residual after smoothing. Both are lightweight v1 approximations, not AI denoise.</p>' + slidersHtml(DETAIL), false)
+            + section('Lens Corrections', 'lens', '<div id="develop-lens-controls"></div>', false)
             + section('Transform', 'transform', '<div id="develop-transform-slot"></div>', false)
             + section('Effects', 'effects', slidersHtml(EFFECTS), false)
+            + section('Film', 'film', '<div id="develop-film-stocks"></div><div class="develop-film-controls">' + slidersHtml(FILM) + '</div>', false)
+            + section('Calibration', 'calibration', '<div id="develop-calibration-controls"></div>', false)
             + section('Crop', 'crop', '<div id="develop-crop-slot"></div>', false)
             + section('Masking', 'masking', '<div id="develop-masking"></div>', false)
             + section('Healing', 'healing', '<div id="develop-healing"></div>', false)
@@ -199,9 +212,15 @@ export class DevelopPanels {
         host.querySelector('#develop-transform-slot').replaceWith(transformHost);
         this.curve = new CurveEditor(host.querySelector('[data-section="curve"]'), (key, value, label) => this.change(key, value, label));
         this.colorWheels = new ColorWheels(host.querySelector('#develop-color-wheels'), (key, value, label) => this.change(key, value, label));
+        this.lens = new LensPanel({ host: host.querySelector('#develop-lens-controls'), onChange: (key, value, label) => this.change(key, value, label) });
+        this.calibration = new CalibrationPanel({ host: host.querySelector('#develop-calibration-controls'), onChange: (key, value, label) => this.change(key, value, label) });
         this.masking = new MaskingController({ host: host.querySelector('#develop-masking'), onChange, ...masking });
         this.heal = new HealController({ host: host.querySelector('#develop-healing'), onChange, ...heal });
         this.transform = new TransformPanel({ host: transformHost, onChange, ...transform });
+        this.film = new FilmStockPicker(host.querySelector('#develop-film-stocks'), (slug, name) => {
+            this.change('pa_FilmStock', slug, `Film: ${name}`);
+            this.film.setSettings(this.settings);
+        });
         this.bindSliders();
         this.bindOtherControls();
         this.setSettings(this.settings);
@@ -305,8 +324,15 @@ export class DevelopPanels {
         this.syncHslMode();
         this.curve.setSettings(settings);
         this.colorWheels.setSettings(settings);
+        this.lens.setSettings(settings);
+        this.calibration.setSettings(settings);
         this.masking.setSettings(settings);
         this.heal.setSettings(settings);
         this.transform.setSettings(settings);
+        this.film.setSettings(settings);
+    }
+
+    setMeta(meta) {
+        this.lens.setMeta(meta);
     }
 }

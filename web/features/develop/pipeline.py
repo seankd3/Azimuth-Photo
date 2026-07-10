@@ -13,6 +13,7 @@ from collections.abc import Mapping, Sequence
 import numpy as np
 
 from . import ops_constants as C
+from .film import apply_film
 from .lens import distortion_auto_crop_scale
 from .looks import compose_curve_luts, effective_settings, look_amount, look_curve
 
@@ -330,6 +331,28 @@ def _matmul_rows(pixels: np.ndarray, matrix: Sequence[Sequence[float]]) -> np.nd
     return pixels @ m.T
 
 
+def soft_proof_transform(srgb: np.ndarray, profile: str = "srgb") -> tuple[np.ndarray, np.ndarray]:
+    """Proof sRGB through a target RGB gamut and return its warning mask.
+
+    This is a matrix/clip preview rather than a full ICC CMM. ``paper`` shares
+    sRGB's gamut then maps the displayed linear endpoints to paper white/black.
+    The WebGL renderer executes the same matrix sequence.
+    """
+    profile = str(profile or "srgb").lower()
+    targets = {
+        "adobe-rgb": (C.SOFT_PROOF_ADOBE_RGB_TO_XYZ, C.SOFT_PROOF_XYZ_TO_ADOBE_RGB),
+        "display-p3": (C.SOFT_PROOF_P3_TO_XYZ, C.SOFT_PROOF_XYZ_TO_P3),
+    }
+    to_xyz, from_xyz = targets.get(profile, (C.SOFT_PROOF_SRGB_TO_XYZ, C.SOFT_PROOF_XYZ_TO_SRGB))
+    xyz = _matmul_rows(srgb_to_linear(np.clip(srgb, 0.0, 1.0)), C.SOFT_PROOF_SRGB_TO_XYZ)
+    proof = _matmul_rows(xyz, from_xyz)
+    warning = np.any((proof < 0.0) | (proof > 1.0), axis=-1)
+    displayed = _matmul_rows(_matmul_rows(np.clip(proof, 0.0, 1.0), to_xyz), C.SOFT_PROOF_XYZ_TO_SRGB)
+    if profile == "paper":
+        displayed = C.SOFT_PROOF_PAPER_BLACK + displayed * (C.SOFT_PROOF_PAPER_WHITE - C.SOFT_PROOF_PAPER_BLACK)
+    return linear_to_srgb(np.clip(displayed, 0.0, 1.0)), warning
+
+
 def linear_to_oklab(linear: np.ndarray) -> np.ndarray:
     lms = _matmul_rows(linear, C.OKLAB_M1)
     lms = np.sign(lms) * np.power(np.abs(lms), 1.0 / 3.0)
@@ -518,7 +541,11 @@ def apply_camera_profile_ab(srgb: np.ndarray, profile: Mapping[str, object] | No
     return linear_to_srgb(_gamut_clip_desaturate(oklab_to_linear(adjusted)))
 
 
-def lens_radial_scale(radius: np.ndarray | float, distortion: Mapping[str, object] | None) -> np.ndarray:
+def lens_radial_scale(
+    radius: np.ndarray | float,
+    distortion: Mapping[str, object] | None,
+    profile_scale: float = 1.0,
+) -> np.ndarray:
     """Map corrected radius to distorted source radius for Lensfun models."""
     r = np.asarray(radius, dtype=np.float32)
     if not distortion:
@@ -530,16 +557,23 @@ def lens_radial_scale(radius: np.ndarray | float, distortion: Mapping[str, objec
     model = str(distortion.get("model") or "").lower()
     r2 = r * r
     if model == "poly3" and terms:
-        return (1.0 - terms[0] + terms[0] * r2).astype(np.float32)
-    if model == "poly5" and len(terms) >= 2:
-        return (1.0 + terms[0] * r2 + terms[1] * r2 * r2).astype(np.float32)
-    if model == "ptlens" and len(terms) >= 3:
+        scale = 1.0 - terms[0] + terms[0] * r2
+    elif model == "poly5" and len(terms) >= 2:
+        scale = 1.0 + terms[0] * r2 + terms[1] * r2 * r2
+    elif model == "ptlens" and len(terms) >= 3:
         a, b, c = terms[:3]
-        return (a * r * r2 + b * r2 + c * r + 1.0 - a - b - c).astype(np.float32)
-    return np.ones_like(r)
+        scale = a * r * r2 + b * r2 + c * r + 1.0 - a - b - c
+    else:
+        return np.ones_like(r)
+    amount = np.clip(profile_scale, C.LENS_PROFILE_SCALE_MIN / 100.0, C.LENS_PROFILE_SCALE_MAX / 100.0)
+    return (1.0 + (scale - 1.0) * amount).astype(np.float32)
 
 
-def lens_vignetting_gain(radius: np.ndarray | float, vignetting: Mapping[str, object] | None) -> np.ndarray:
+def lens_vignetting_gain(
+    radius: np.ndarray | float,
+    vignetting: Mapping[str, object] | None,
+    profile_scale: float = 1.0,
+) -> np.ndarray:
     """Return Lensfun's PA linear-domain radial correction gain."""
     r = np.asarray(radius, dtype=np.float32)
     if not vignetting or str(vignetting.get("model") or "").lower() != "pa":
@@ -550,7 +584,44 @@ def lens_vignetting_gain(radius: np.ndarray | float, vignetting: Mapping[str, ob
         return np.ones_like(r)
     r2 = r * r
     gain = 1.0 + k1 * r2 + k2 * r2 * r2 + k3 * r2 * r2 * r2
+    amount = np.clip(profile_scale, C.LENS_PROFILE_SCALE_MIN / 100.0, C.LENS_PROFILE_SCALE_MAX / 100.0)
+    gain = 1.0 + (gain - 1.0) * amount
     return np.clip(gain, C.LENS_VIGNETTE_GAIN_MIN, C.LENS_VIGNETTE_GAIN_MAX).astype(np.float32)
+
+
+def calibration_matrix(settings: Mapping[str, object]) -> np.ndarray:
+    """Return the §28 linear-RGB primary calibration matrix.
+
+    Matrix columns are source primaries. For primary ``i``, saturation expands
+    its column about luma and hue mixes that one column toward the adjacent
+    RGB primary (positive: R→G→B→R; negative reverses). Consequently a red
+    primary adjustment changes red input without moving a blue-only input.
+    """
+    basis = np.eye(3, dtype=np.float32)
+    matrix = basis.copy()
+    luma_vector = np.array((C.LUMA_RED, C.LUMA_GREEN, C.LUMA_BLUE), dtype=np.float32)
+    for index, name in enumerate(("Red", "Green", "Blue")):
+        saturation = _slider(settings, f"Calibration{name}PrimarySaturation") * C.CALIBRATION_SATURATION_SCALE
+        column = luma_vector + (1.0 + saturation) * (basis[:, index] - luma_vector)
+        hue = _slider(settings, f"Calibration{name}PrimaryHue")
+        if hue != 0.0:
+            adjacent = (index + (1 if hue > 0.0 else -1)) % 3
+            column += abs(hue) * C.CALIBRATION_HUE_MIX * (basis[:, adjacent] - basis[:, index])
+        matrix[:, index] = column
+    return matrix
+
+
+def _apply_calibration(rgb: np.ndarray, settings: Mapping[str, object]) -> np.ndarray:
+    """Apply primary matrix plus the Adobe-style green↔magenta shadow tint."""
+    if not any(_number(settings, f"Calibration{name}Primary{part}") != 0.0 for name in ("Red", "Green", "Blue") for part in ("Hue", "Saturation")) and _number(settings, "CalibrationShadowTint") == 0.0:
+        return rgb
+    calibrated = np.maximum(rgb @ calibration_matrix(settings).T, 0.0)
+    tint = _slider(settings, "CalibrationShadowTint")
+    if tint == 0.0:
+        return calibrated.astype(np.float32)
+    shadow_weight = 1.0 - _smoothstep(C.CALIBRATION_SHADOW_START, C.CALIBRATION_SHADOW_END, luma(calibrated))
+    multiplier = 1.0 + tint * C.CALIBRATION_SHADOW_TINT_SCALE * shadow_weight[..., None] * np.array((1.0, -2.0, 1.0), dtype=np.float32)
+    return np.maximum(calibrated * multiplier, 0.0).astype(np.float32)
 
 
 def _full_canvas_source(rgb: np.ndarray, canvas_size: tuple[int, int]) -> np.ndarray | None:
@@ -583,14 +654,15 @@ def _apply_lens_correction(
     pixel_offset: tuple[int, int],
     canvas_size: tuple[int, int] | None,
 ) -> np.ndarray:
-    if (
-        not _bool(settings, "LensProfileEnable")
-        or not isinstance(color_profile, Mapping)
-        or _bool(color_profile, "hdr")
-    ):
+    manual_distortion = _slider(settings, "LensManualDistortionAmount")
+    manual_vignette = _slider(settings, "LensManualVignetteAmount")
+    profile_enabled = _bool(settings, "LensProfileEnable") and isinstance(color_profile, Mapping) and not _bool(color_profile, "hdr")
+    if not profile_enabled and manual_distortion == 0.0 and manual_vignette == 0.0:
         return rgb
-    correction = color_profile.get("lens_correction")
+    correction = color_profile.get("lens_correction") if profile_enabled and isinstance(color_profile, Mapping) else None
     if not isinstance(correction, Mapping):
+        correction = {}
+    if not correction and manual_distortion == 0.0 and manual_vignette == 0.0:
         return rgb
     height, width = rgb.shape[:2]
     canvas_width, canvas_height = canvas_size or (width, height)
@@ -600,9 +672,11 @@ def _apply_lens_correction(
     )
     # Crop the corrected view before inverse remapping.  This avoids black
     # borders for outward radial models; identity polynomials return scale 1.
-    auto_crop = distortion_auto_crop_scale(
-        correction.get("distortion"), canvas_width, canvas_height, crop_ratio,
-    )
+    distortion_scale = np.clip(_number(settings, "LensProfileDistortionScale", C.LENS_PROFILE_SCALE_DEFAULT) / 100.0, 0.0, 2.0)
+    scaled_distortion = correction.get("distortion")
+    if isinstance(scaled_distortion, Mapping) and distortion_scale != 1.0:
+        scaled_distortion = {**scaled_distortion, "terms": [float(term) * distortion_scale for term in scaled_distortion.get("terms", ())]}
+    auto_crop = distortion_auto_crop_scale(scaled_distortion, canvas_width, canvas_height, crop_ratio)
     x = np.arange(width, dtype=np.float32) + offset_x + C.LENS_IMAGE_CENTER
     y = np.arange(height, dtype=np.float32) + offset_y + C.LENS_IMAGE_CENTER
     x = canvas_width * C.LENS_IMAGE_CENTER + (x - canvas_width * C.LENS_IMAGE_CENTER) * auto_crop
@@ -611,7 +685,8 @@ def _apply_lens_correction(
     px = (x[None, :] - canvas_width * C.LENS_IMAGE_CENTER) / half_min * crop_ratio
     py = (y[:, None] - canvas_height * C.LENS_IMAGE_CENTER) / half_min * crop_ratio
     radius = np.sqrt(px * px + py * py)
-    radial_scale = lens_radial_scale(radius, correction.get("distortion"))
+    radial_scale = lens_radial_scale(radius, correction.get("distortion"), distortion_scale)
+    radial_scale *= 1.0 + manual_distortion * C.LENS_MANUAL_DISTORTION_FACTOR * radius * radius
     source_x = canvas_width * C.LENS_IMAGE_CENTER + px / crop_ratio * radial_scale * half_min - C.LENS_IMAGE_CENTER
     source_y = canvas_height * C.LENS_IMAGE_CENTER + py / crop_ratio * radial_scale * half_min - C.LENS_IMAGE_CENTER
     full_source = _full_canvas_source(rgb, (canvas_width, canvas_height))
@@ -620,7 +695,11 @@ def _apply_lens_correction(
     else:
         result = _bilinear_sample(rgb, source_x - offset_x, source_y - offset_y)
     source_radius = radius * radial_scale
-    gain = lens_vignetting_gain(source_radius, correction.get("vignetting"))
+    vignette_scale = np.clip(_number(settings, "LensProfileVignettingScale", C.LENS_PROFILE_SCALE_DEFAULT) / 100.0, 0.0, 2.0)
+    gain = lens_vignetting_gain(source_radius, correction.get("vignetting"), vignette_scale)
+    midpoint = C.LENS_MANUAL_VIGNETTE_MIDPOINT_MIN + np.clip(_number(settings, "LensManualVignetteMidpoint", 50.0), 0.0, 100.0) / 100.0 * C.LENS_MANUAL_VIGNETTE_MIDPOINT_RANGE
+    manual_weight = _smoothstep(midpoint, 1.0, np.clip(source_radius, 0.0, 1.0))
+    gain *= np.maximum(0.0, 1.0 + manual_vignette * C.LENS_MANUAL_VIGNETTE_FACTOR * manual_weight)
     return (result * gain[..., None]).astype(np.float32)
 
 
@@ -800,7 +879,7 @@ def _cross_blur(field: np.ndarray, radius: int = C.NR_COLOR_RADIUS) -> np.ndarra
 
 
 def _noise_reduction(c: np.ndarray, settings: Mapping[str, object]) -> np.ndarray:
-    """§22 NR: half-res bilateral-lite luma, then full-res OKLab-ab smoothing."""
+    """§22 NR with intentionally lightweight Detail/Contrast approximations."""
     luminance_amount = np.clip(_number(settings, "LuminanceSmoothing"), 0.0, 100.0) / 100.0
     chroma_amount = np.clip(_number(settings, "ColorNoiseReduction"), 0.0, 100.0) / 100.0
     if luminance_amount == 0.0 and chroma_amount == 0.0:
@@ -808,6 +887,15 @@ def _noise_reduction(c: np.ndarray, settings: Mapping[str, object]) -> np.ndarra
     result = c.astype(np.float32, copy=True)
     if luminance_amount:
         full_luma = luma(result)
+        detail = np.clip(_number(settings, "LuminanceDetail"), 0.0, 100.0) / 100.0
+        contrast = np.clip(_number(settings, "LuminanceContrast"), 0.0, 100.0) / 100.0
+        edge = _smoothstep(
+            C.NR_DETAIL_EDGE_LOW, C.NR_DETAIL_EDGE_HIGH,
+            np.abs(full_luma - gaussian_blur(full_luma, 1.0)),
+        )
+        # Higher Detail protects existing edges; Contrast restores a bounded
+        # portion of the smoothed luma residual rather than inventing detail.
+        effective_amount = luminance_amount * (1.0 - edge * detail)
         half = full_luma[::2, ::2]
         padded = np.pad(half, 1, mode="reflect")
         total = np.full_like(half, C.NR_LUMA_SPATIAL_CENTER)
@@ -818,7 +906,8 @@ def _noise_reduction(c: np.ndarray, settings: Mapping[str, object]) -> np.ndarra
             filtered += neighbor * weight
             total += weight
         smooth = (filtered / total).repeat(2, axis=0).repeat(2, axis=1)[:result.shape[0], :result.shape[1]]
-        result += ((smooth - full_luma) * luminance_amount)[..., None]
+        result += ((smooth - full_luma) * effective_amount)[..., None]
+        result += ((full_luma - smooth) * effective_amount * contrast * C.NR_CONTRAST_RESIDUAL)[..., None]
     if chroma_amount:
         lab = linear_to_oklab(srgb_to_linear(np.clip(result, 0.0, 1.0)))
         smooth_ab = np.stack((_cross_blur(lab[..., 1]), _cross_blur(lab[..., 2])), axis=-1)
@@ -875,6 +964,9 @@ def _detail(
         radius = np.clip(_number(settings, "SharpenRadius", 1.0), 0.5, 3.0)
         sharp = np.asarray(blurs.get("sharp"), dtype=np.float32) if "sharp" in blurs else gaussian_blur(lightness, radius)
         residual = _soft_threshold_residual(lightness - sharp, C.SHARPEN_THRESHOLD)
+        masking = np.clip(_number(settings, "SharpenEdgeMasking"), 0.0, 100.0) / 100.0
+        edge_mask = _smoothstep(C.SHARPEN_MASK_EDGE_LOW, C.SHARPEN_MASK_EDGE_HIGH, np.abs(lightness - sharp))
+        residual *= (1.0 - masking) + masking * edge_mask
         result += (residual * (sharpness / 150.0) * C.SHARPEN_FACTOR)[..., None]
     return result
 
@@ -966,16 +1058,30 @@ def apply_pipeline(
         canvas_size=canvas_size,
     )
     rgb = _apply_white_balance(rgb, settings, asshot_temperature, asshot_tint, color_profile)
+    rgb = _apply_calibration(rgb, settings)
     rgb *= np.float32(np.exp2(_number(settings, "Exposure2012")))
     rgb = _region_tone_map(rgb, settings)
     dehaze = _slider(settings, "Dehaze")
     if dehaze != 0.0:
         rgb = (rgb - C.DEHAZE_AIRLIGHT_FACTOR * dehaze) / (1.0 - C.DEHAZE_AIRLIGHT_FACTOR * dehaze)
         rgb = np.maximum(rgb, 0.0)
-    c = linear_to_srgb(rgb)
+    film_stock = str(settings.get("pa_FilmStock") or "").strip()
+    if film_stock:
+        c = apply_film(
+            rgb,
+            film_stock,
+            strength=np.clip(_number(settings, "pa_FilmStrength", 100.0), 0.0, 100.0) / 100.0,
+            halation_scale=np.clip(_number(settings, "pa_FilmHalation", 100.0), 0.0, 100.0) / 100.0,
+            grain_scale=np.clip(_number(settings, "pa_FilmGrain", 100.0), 0.0, 100.0) / 100.0,
+            grain_size_scale=np.clip(_number(settings, "pa_FilmGrainSize", 100.0), 0.0, 100.0) / 100.0,
+            min_dimension=blur_min_dimension,
+        )
+    else:
+        c = linear_to_srgb(rgb)
     base_kind = str(color_profile.get("base_kind") or "raw") if isinstance(color_profile, Mapping) else "raw"
     fitted_profile = None if base_kind == "display" else _camera_profile(color_profile)
-    c = _apply_tone_curves(c, settings, fitted_profile, base_kind=base_kind)
+    if not film_stock:
+        c = _apply_tone_curves(c, settings, fitted_profile, base_kind=base_kind)
     c = _hsl_and_black_white(c, settings, dehaze)
     if not _bool(settings, "ConvertToGrayscale"):
         c = apply_camera_profile_ab(c, fitted_profile)

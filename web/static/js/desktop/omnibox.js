@@ -9,7 +9,7 @@ import { openLoupe, toggleLoupeLights } from './loupe.js';
 import { scopeTokenHtml } from './contextbar.js';
 import {
     exportCurrentScope, requestDeleteCurrentCollection, requestNewCollection,
-    requestRenameCurrentCollection, requestSaveSmartCollection, requestShareCurrentCollection, toggleLeftPanel,
+    requestRenameCurrentCollection, requestSaveCurrentView, requestSaveSmartCollection, requestShareCurrentCollection, toggleLeftPanel,
 } from './panel.js';
 import { switchLens } from './lenses.js';
 import { openSuggestionsReview } from './suggestions.js';
@@ -65,12 +65,14 @@ const COMMANDS = [
     { icon: 'download', label: 'Export JSON', run: () => exportCurrentScope('json') },
     { icon: 'download', label: 'Download files (zip)', run: () => exportCurrentScope('zip', 'original') },
     { icon: 'plus', label: 'New collection', run: requestNewCollection },
+    { icon: 'bookmark', label: 'Save current view', run: requestSaveCurrentView },
     { icon: 'sparkles', label: 'Save as Smart Collection', meta: () => smartQuerySummary(), when: smartQueryActive, run: requestSaveSmartCollection },
     { icon: 'share-2', label: 'Share this collection', when: () => Boolean(scope.collectionId), run: requestShareCurrentCollection },
     { icon: 'pencil', label: 'Rename this collection', when: () => Boolean(scope.collectionId), run: requestRenameCurrentCollection },
     { icon: 'trash-2', label: 'Delete this collection', when: () => Boolean(scope.collectionId), run: requestDeleteCurrentCollection },
     { icon: 'layout-grid', label: 'Switch lens: grid', kbd: 'G', run: () => switchLens('grid') },
     { icon: 'rows-3', label: 'Switch lens: events', run: () => switchLens('events') },
+    { icon: 'calendar', label: 'Switch lens: timeline', run: () => switchLens('timeline') },
     { icon: 'users', label: 'Switch lens: people', kbd: 'O', run: () => switchLens('people') },
     { icon: 'map-pin', label: 'Switch lens: map', kbd: 'M', run: () => switchLens('map') },
     { icon: 'panel-left', label: 'Toggle left panel', kbd: '[', run: toggleLeftPanel },

@@ -27,7 +27,7 @@ import { closeGridContextMenu, gridContextMenuOpen } from './context_menu.js';
 import { closeDuplicates, duplicatesOpen } from './duplicates.js';
 import { closeTrash, trashOpen, trashSelectedImages } from './trash.js';
 import { showToast, undoLatestToast } from './toast.js';
-import { createVirtualCopy, developOpen, openDevelop } from './develop/develop.js';
+import { createVirtualCopy, developOpen, holdDevelopReference, openDevelop, toggleDevelopCompare } from './develop/develop.js';
 
 function inputFocused() {
     const el = document.activeElement;
@@ -271,6 +271,19 @@ export function initKeyboard() {
             }
             return;
         }
+        if (developOpen() && !foregroundLayerOpen() && !inputFocused()) {
+            const key = event.key.toLowerCase();
+            if (key === 'y') {
+                event.preventDefault();
+                toggleDevelopCompare(event.altKey ? 'horizontal' : 'vertical');
+                return;
+            }
+            if (key === 'r') {
+                event.preventDefault();
+                if (!event.repeat) holdDevelopReference(true);
+                return;
+            }
+        }
         if (event.ctrlKey || event.metaKey) {
             const key = event.key.toLowerCase();
             if (foregroundLayerOpen() || inputFocused()) return;
@@ -476,6 +489,9 @@ export function initKeyboard() {
             event.preventDefault();
             moveFocus(-focusColumns());
         }
+    });
+    window.addEventListener('keyup', (event) => {
+        if (developOpen() && event.key.toLowerCase() === 'r') holdDevelopReference(false);
     });
     on('help:open', openHelp);
 }

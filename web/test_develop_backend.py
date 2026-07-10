@@ -1,5 +1,6 @@
 import asyncio
 import gzip
+import io
 import json
 import os
 import sys
@@ -103,6 +104,77 @@ class DevelopBackendTests(unittest.TestCase):
         stored = json.loads(asyncio.run(read_row()))
         self.assertEqual(stored["FutureCrsKey"], {"keep": True})
         self.assertGreaterEqual(len(asyncio.run(self._history_rows())), 2)
+
+    def test_film_settings_round_trip_and_export_changes_pixels(self):
+        from features.develop import render as develop_render
+
+        film_settings = {
+            "pa_FilmStock": "cinestill-800t",
+            "pa_FilmStrength": 100,
+            "pa_FilmHalation": 100,
+            "pa_FilmGrain": 100,
+            "pa_FilmGrainSize": 100,
+        }
+        saved = self.client.put(
+            f"/api/develop/{self.raw_id}",
+            json={"settings": film_settings, "label": "Film: CineStill 800T"},
+        )
+        self.assertEqual(saved.status_code, 200, saved.text)
+        self._write_cached_base()
+        loaded = self.client.get(f"/api/develop/{self.raw_id}")
+        self.assertEqual(loaded.status_code, 200, loaded.text)
+        self.assertEqual({key: loaded.json()["settings"][key] for key in film_settings}, film_settings)
+
+        old_export = develop_render.EXPORT_DIRECTORY
+        develop_render.EXPORT_DIRECTORY = Path(self.tempdir.name) / "film-exports"
+        y, x = np.mgrid[0:48, 0:64].astype(np.float32)
+        linear = np.stack((0.03 + x / 50, 0.02 + y / 60, 0.04 + (x + y) / 110), axis=-1)
+        linear[20:28, 28:36] = 3.0
+        try:
+            with mock.patch.object(develop_render, "decode_full_resolution", return_value=linear):
+                film_export = self.client.post(
+                    f"/api/develop/{self.raw_id}/export",
+                    json={"format": "jpeg", "quality": 100, "sharpen": "none"},
+                )
+                disabled = self.client.put(
+                    f"/api/develop/{self.raw_id}",
+                    json={"settings": {"pa_FilmStock": None}, "label": "Film: None"},
+                )
+                digital_export = self.client.post(
+                    f"/api/develop/{self.raw_id}/export",
+                    json={"format": "jpeg", "quality": 100, "sharpen": "none"},
+                )
+            self.assertEqual(disabled.status_code, 200, disabled.text)
+            self.assertEqual(film_export.status_code, 200, film_export.text)
+            self.assertEqual(digital_export.status_code, 200, digital_export.text)
+            film_pixels = np.asarray(Image.open(io.BytesIO(film_export.content)).convert("RGB"), dtype=np.float32)
+            digital_pixels = np.asarray(Image.open(io.BytesIO(digital_export.content)).convert("RGB"), dtype=np.float32)
+            self.assertGreater(float(np.mean(np.abs(film_pixels - digital_pixels))), 5.0)
+        finally:
+            develop_render.EXPORT_DIRECTORY = old_export
+
+    def test_film_pipeline_bypasses_base_and_user_tone_curves(self):
+        from features.develop import pipeline
+
+        linear = np.full((12, 16, 3), 0.18, dtype=np.float32)
+        settings = {
+            "pa_FilmStock": "portra-400",
+            "pa_FilmGrain": 0,
+            "pa_FilmHalation": 0,
+            "Sharpness": 0,
+            "ToneCurvePV2012": ["0, 0", "128, 220", "255, 255"],
+        }
+        with (
+            mock.patch.object(
+                pipeline,
+                "apply_film",
+                side_effect=lambda rgb, *_args, **_kwargs: pipeline.linear_to_srgb(rgb),
+            ) as film_stage,
+            mock.patch.object(pipeline, "_apply_tone_curves", wraps=pipeline._apply_tone_curves) as tone_stage,
+        ):
+            pipeline.apply_pipeline(linear, settings)
+        film_stage.assert_called_once()
+        tone_stage.assert_not_called()
 
     def test_look_round_trip_keeps_the_imported_object_verbatim(self):
         look = {

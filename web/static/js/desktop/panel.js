@@ -4,10 +4,11 @@ import {
     createCollectionShare, deleteCollection, getCollectionShare, getCollectionShareFavorites, listCollections,
     getCollectionPublish, publishCollection, removeFromCollection, renameCollection,
     revokeCollectionPublish, revokeCollectionShare, thumbUrl, updateCollection,
+    createSavedView, deleteSavedView, listSavedViews,
 } from './api.js';
 import { loadCollectionImageIds } from './scope_data.js';
 import {
-    byId, emit, folderActive, on, scope, scopeActive, scopeParams, scopePatchFromSmartQuery, selection, selectionChanged, setActiveLens,
+    byId, emit, folderActive, on, patchPrefs, scope, scopeActive, scopeParams, scopePatchFromSmartQuery, selection, selectionChanged, setActiveLens,
     setLeftCollapsed, setScope, smartQueryActive, smartQueryFromScope, smartQueryName, smartQuerySummary, sortBase, viewState,
 } from './state.js';
 import { applyFlags, selectedIds, setCollectionPicker } from './selection.js';
@@ -39,6 +40,7 @@ let publishOverlayToken = 0;
 let publishPollTimer = 0;
 let chromeRefreshTimer = 0;
 let editingSmartCollection = null;
+let savedViews = [];
 
 const SHARED_CHANGED_EVENT = 'shares/publishes-changed';
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
@@ -943,6 +945,60 @@ async function loadCollections() {
     }
 }
 
+function savedViewSnapshot() {
+    return JSON.stringify({
+        scope: { ...scope, folder: [...scope.folder], similarIds: [...scope.similarIds] },
+        layout: { density: viewState.prefs.density, collapseStacks: viewState.prefs.collapseStacks },
+    });
+}
+
+function restoreSavedView(view) {
+    try {
+        const saved = JSON.parse(view.query);
+        setScope(saved.scope && typeof saved.scope === 'object' ? saved.scope : saved);
+        if (saved.layout) patchPrefs(saved.layout);
+        setActiveLens('grid');
+        closeLeftDrawer();
+        showToast(`Opened “${view.name}”`);
+    } catch {
+        showToast(`“${view.name}” is no longer a valid view`);
+    }
+}
+
+function renderSavedViews() {
+    const host = document.getElementById('saved-view-list');
+    host.innerHTML = savedViews.length ? savedViews.map((view) =>
+        `<div class="nav-row saved-view-row" data-saved-view="${view.id}">`
+        + `<button type="button"><span class="nr-glyph">${icon('bookmark')}</span><span class="nr-label">${esc(view.name)}</span></button>`
+        + '<button class="saved-view-delete" type="button" aria-label="Delete saved view">×</button></div>'
+    ).join('') : emptyState('bookmark', 'No saved views yet.');
+    for (const row of host.querySelectorAll('[data-saved-view]')) {
+        const view = savedViews.find((item) => Number(item.id) === Number(row.dataset.savedView));
+        row.querySelector('button')?.addEventListener('click', () => restoreSavedView(view));
+        row.querySelector('.saved-view-delete')?.addEventListener('click', async () => {
+            if (!window.confirm(`Delete “${view.name}”?`)) return;
+            if (await deleteSavedView(view.id)) {
+                savedViews = savedViews.filter((item) => item.id !== view.id);
+                renderSavedViews();
+            }
+        });
+    }
+}
+
+async function loadSavedViews() {
+    const data = await listSavedViews();
+    savedViews = data?.views || [];
+    renderSavedViews();
+}
+
+export function requestSaveCurrentView() {
+    const form = document.getElementById('saved-view-form');
+    form.hidden = false;
+    const input = document.getElementById('saved-view-name');
+    input.value = '';
+    input.focus();
+}
+
 async function loadCatalogChrome() {
     sourcesLoading = true;
     sourcesLoadError = false;
@@ -1266,6 +1322,18 @@ export async function initPanel() {
     document.getElementById('export-view').addEventListener('click', (event) => openScopeExportMenu(event.currentTarget));
     document.getElementById('shared-view')?.addEventListener('click', () => setActiveLens('shared'));
     document.getElementById('new-coll-btn').addEventListener('click', requestNewCollection);
+    document.getElementById('save-view-btn').addEventListener('click', requestSaveCurrentView);
+    document.getElementById('saved-view-cancel').addEventListener('click', () => { document.getElementById('saved-view-form').hidden = true; });
+    document.getElementById('saved-view-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const input = document.getElementById('saved-view-name');
+        const result = await createSavedView(input.value.trim() || 'Current view', savedViewSnapshot());
+        if (!result?.view) return showToast("Couldn't save this view");
+        savedViews.unshift(result.view);
+        renderSavedViews();
+        event.currentTarget.hidden = true;
+        showToast(`Saved “${result.view.name}”`);
+    });
     document.getElementById('new-coll-smart')?.addEventListener('click', saveSmartCollectionFromForm);
     document.getElementById('new-coll-cancel-edit')?.addEventListener('click', cancelSmartCollectionEdit);
     document.getElementById('new-coll-form').addEventListener('submit', async (event) => {
@@ -1316,6 +1384,7 @@ export async function initPanel() {
     renderSources();
     loadLibraryCounts();
     await loadCollections();
+    await loadSavedViews();
     await loadCatalogChrome();
     await initFoldersPanel({ closeDrawer: closeLeftDrawer });
     setTimeout(loadSuggestionsOnce, 0);

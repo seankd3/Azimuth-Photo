@@ -34,6 +34,7 @@
                 <div id="view-switch" role="tablist" aria-label="Lens">
                     <button class="active" data-view="grid" role="tab" aria-selected="true" aria-controls="view-grid" data-tip="Grid · G" aria-label="Grid lens"><svg class="icon icon-lg" aria-hidden="true"><use href="#i-layout-grid"></use></svg></button>
                     <button data-view="events" role="tab" aria-selected="false" aria-controls="view-events" data-tip="Events · Y" aria-label="Events lens"><svg class="icon icon-lg" aria-hidden="true"><use href="#i-rows-3"></use></svg></button>
+                    <button data-view="timeline" role="tab" aria-selected="false" aria-controls="view-timeline" data-tip="Timeline" aria-label="Timeline lens"><svg class="icon icon-lg" aria-hidden="true"><use href="#i-calendar"></use></svg></button>
                     <button data-view="people" role="tab" aria-selected="false" aria-controls="view-people" data-tip="People · O" aria-label="People lens"><svg class="icon icon-lg" aria-hidden="true"><use href="#i-users"></use></svg></button>
                     <button data-view="map" role="tab" aria-selected="false" aria-controls="view-map" data-tip="Map · M" aria-label="Map lens"><svg class="icon icon-lg" aria-hidden="true"><use href="#i-map-pin"></use></svg></button>
                     <button data-view="develop" role="tab" aria-selected="false" aria-controls="view-develop" data-tip="Develop · D" aria-label="Develop lens"><svg class="icon icon-lg" aria-hidden="true"><use href="#i-sliders-horizontal"></use></svg></button>
@@ -63,6 +64,14 @@
                         </form>
                         <div id="collection-list"></div>
                         <div id="suggestions-wrap"></div>
+                    </section>
+                    <section class="psec" id="sec-views">
+                        <div class="psec-head"><h3>Views</h3><button class="psec-act" id="save-view-btn">Save</button></div>
+                        <form id="saved-view-form" hidden>
+                            <input id="saved-view-name" type="text" maxlength="120" placeholder="View name" aria-label="Saved view name">
+                            <div class="new-coll-actions"><button type="submit">Save view</button><button id="saved-view-cancel" type="button">Cancel</button></div>
+                        </form>
+                        <div id="saved-view-list"></div>
                     </section>
                     <section class="psec" id="sec-library">
                         <div class="psec-head"><h3>Library</h3></div>
@@ -145,6 +154,9 @@
                     </section>
                     <section id="view-events" class="view" role="tabpanel" aria-label="Events">
                         <div id="events-flow"></div>
+                    </section>
+                    <section id="view-timeline" class="view timeline-view" role="tabpanel" aria-label="Timeline">
+                        <div id="timeline-flow"></div>
                     </section>
                     <section id="view-people" class="view" role="tabpanel" aria-label="People">
                         <div id="people-flow"></div>

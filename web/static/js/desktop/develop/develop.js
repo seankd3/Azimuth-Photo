@@ -8,6 +8,7 @@ import { DevelopPanels } from './panels.js';
 import { mountPresetsPanel } from './presets.js';
 import { mountHistoryPanel } from './history_panel.js';
 import { openExportDialog, openSyncDialog } from './export_dialog.js';
+import { DevelopCompareView, SoftProofPopover } from './compare_view.js';
 
 const DIRECT_DEVELOP_EXTENSIONS = new Set(['dng', 'cr3', 'cr2', 'exr', 'jpg', 'jpeg', 'png', 'tif', 'tiff', 'webp']);
 const RAW_DEVELOP_EXTENSIONS = new Set(['dng', 'cr3', 'cr2', 'exr']);
@@ -27,6 +28,8 @@ let beforeHeld = false;
 let spaceHeld = false;
 let activePopover = null;
 let historyPanel = null;
+let compare = null;
+let softProof = null;
 
 const root = document.getElementById('view-develop');
 const stage = document.getElementById('develop-stage');
@@ -169,9 +172,11 @@ function applySettings(entry) {
     const panelSettings = entry.meta?.base_kind === 'display' && entry.settings.Temperature == null
         ? { ...entry.settings, Temperature: 6500 }
         : entry.settings;
+    panels.setMeta(entry.meta);
     panels.setSettings(panelSettings);
     crop.setSettings(entry.settings);
     renderer?.setSettings(entry.settings, entry.meta);
+    compare?.updateCurrent(entry);
 }
 
 function applyPresetSettings(settings, label = 'Preset') {
@@ -222,6 +227,7 @@ function settingsChanged(key, value, label, { history = true, previousSettings =
     if (value === undefined) delete entry.settings[key];
     else entry.settings[key] = value;
     renderer?.setSettings(entry.settings, entry.meta);
+    compare?.updateCurrent(entry);
     scheduleSave(label);
 }
 
@@ -304,6 +310,7 @@ async function openImage(image) {
         const base = await fetchBaseWithRetry(image.id, token, Number(entry.meta?.hdr?.scale) || 1);
         if (!base || token !== loadingToken) return;
         renderer.uploadSource(base.rgba, base.width, base.height);
+        entry.base = base;
         renderer.setSettings(entry.settings, entry.meta);
         masking?.rebuildRasters();
         canvas.classList.add('ready');
@@ -334,6 +341,37 @@ function showBefore(show) {
     beforeHeld = show;
     renderer.setSettings(show ? entry.origin : entry.settings, entry.meta);
     toolbar.querySelector('[data-action="before"]').setAttribute('aria-pressed', String(show));
+}
+
+async function comparisonPreview(image) {
+    if (!image) return null;
+    let entry = stateCache.get(Number(image.id));
+    if (!entry) {
+        const payload = await fetchDevelop(image.id);
+        entry = {
+            settings: clone(payload.settings), origin: originSettings(payload), meta: {
+                ...(payload.meta || {}),
+                as_shot_temperature: payload.meta?.as_shot?.temperature ?? payload.meta?.as_shot_temperature,
+                as_shot_tint: payload.meta?.as_shot?.tint ?? payload.meta?.as_shot_tint,
+                color: payload.meta?.color ?? null,
+            }, undo: [], redo: [], serverHistory: payload.history || [],
+        };
+        stateCache.set(Number(image.id), entry);
+    }
+    if (!entry.base) {
+        const response = await fetch(`/api/develop/${image.id}/base.bin`);
+        if (!response.ok) throw new Error('Reference preview is still being prepared.');
+        entry.base = parseBase(await response.arrayBuffer(), Number(entry.meta?.hdr?.scale) || 1);
+    }
+    return { entry, base: entry.base };
+}
+
+export function toggleDevelopCompare(orientation = 'vertical') {
+    if (mounted) compare?.toggle(orientation).catch((error) => showToast(error.message || 'Could not prepare comparison'));
+}
+
+export function holdDevelopReference(held) {
+    if (mounted) compare?.holdReference(held).catch((error) => showToast(error.message || 'Could not prepare reference'));
 }
 
 function closePopover() {
@@ -485,6 +523,10 @@ function bindUi() {
         const item = event.target.closest('[data-index]');
         if (!item) return;
         const index = Number(item.dataset.index);
+        if (compare?.mode === 'reference') {
+            compare.pickReference(viewState.images[index]).catch((error) => showToast(error.message || 'Could not load reference'));
+            return;
+        }
         viewState.focusIndex = index;
         openImage(viewState.images[index]);
     });
@@ -587,6 +629,11 @@ function init() {
     masking = panels.masking;
     heal = panels.heal;
     crop = new CropController({ stage, canvas, overlay: document.getElementById('develop-crop-overlay'), controls: cropSlot, onChange: settingsChanged });
+    compare = new DevelopCompareView({ stage, canvas, loadPreview: comparisonPreview, getCurrent: () => currentImage, getImages: () => viewState.images });
+    softProof = new SoftProofPopover({ toolbar, onChange: (proof) => {
+        renderer?.setSoftProof(proof);
+        compare?.setProof(proof);
+    } });
     const presetsPanel = mountPresetsPanel(root.querySelector('.develop-layout') || root, {
         getRenderer: () => renderer,
         getEntry: () => currentImage && stateCache.get(Number(currentImage.id)),
