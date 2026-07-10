@@ -290,12 +290,24 @@ def _source_bits_from_catalog_metadata(
     )
 
 
+# Bumped when the raw full-preview renderer changes (develop-pipeline color
+# science, orientation fix); invalidates only raw lg/full cache entries.
+RAW_RENDER_VERSION = "rawrender2"
+
+
+def _effective_cache_version(filepath: str, size: str) -> str:
+    if size in ("lg", FULL_TIER) and os.path.splitext(filepath)[1].lower() in RAW_EXTENSIONS:
+        return f"{CACHE_VERSION}+{RAW_RENDER_VERSION}"
+    return CACHE_VERSION
+
+
 def _build_source_signature_from_bits(source_bits: str, size: str, image_id: int) -> str:
+    filepath = source_bits.rsplit("|", 1)[-1]
     return source_identity.build_source_signature_from_bits(
         source_bits,
         size,
         image_id,
-        cache_version=CACHE_VERSION,
+        cache_version=_effective_cache_version(filepath, size),
         full_tier=FULL_TIER,
         sizes=SIZES,
         thumb_quality=THUMB_QUALITY,
@@ -320,7 +332,7 @@ def _build_catalog_source_signature(
         file_size,
         file_modified_at,
         get_source_bits_fn=_get_source_bits,
-        cache_version=CACHE_VERSION,
+        cache_version=_effective_cache_version(filepath, size),
         full_tier=FULL_TIER,
         sizes=SIZES,
         thumb_quality=THUMB_QUALITY,
@@ -664,13 +676,16 @@ def _cache_full_image_bytes_sync(
 _load_raw_preview = generation.load_raw_preview
 
 
-def _load_source_image(filepath: str, max_target: int, prefer_draft: bool) -> Image.Image:
+def _load_source_image(
+    filepath: str, max_target: int, prefer_draft: bool, image_id: int | None = None
+) -> Image.Image:
     return generation.load_source_image(
         filepath,
         max_target,
         prefer_draft,
         jpeg_extensions=JPEG_EXTENSIONS,
         raw_extensions=RAW_EXTENSIONS,
+        image_id=image_id,
     )
 
 

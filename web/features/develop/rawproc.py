@@ -518,23 +518,37 @@ def parse_base_payload(payload: bytes) -> tuple[np.ndarray, int, int]:
     return rgb, width, height
 
 
+def _cached_source_matches(paths: BasePaths, path: str | os.PathLike[str]) -> bool:
+    """Reject a cached base generated from a different source file (id reuse)."""
+    meta = read_base_metadata(int(paths.metadata.stem)) or {}
+    recorded = meta.get("source_path")
+    return not recorded or str(recorded) == str(path)
+
+
 def ensure_base_cache(image_id: int, path: str | os.PathLike[str]) -> tuple[BasePaths, dict[str, Any]]:
     """Generate missing base artifacts once per image, even under concurrent hits."""
 
     paths = base_paths(image_id)
     if paths.binary.exists() and paths.metadata.exists() and paths.preview.exists():
-        return paths, _upgrade_cached_metadata(paths, path)
+        if _cached_source_matches(paths, path):
+            return paths, _upgrade_cached_metadata(paths, path)
+        for stale in (paths.binary, paths.metadata, paths.preview):
+            stale.unlink(missing_ok=True)
     if is_hdr_merge_path(path):
         raise RawDecodeError("HDR merge base cache is unavailable")
     lock = _image_lock(image_id)
     with lock:
         if paths.binary.exists() and paths.metadata.exists() and paths.preview.exists():
-            return paths, _upgrade_cached_metadata(paths, path)
+            if _cached_source_matches(paths, path):
+                return paths, _upgrade_cached_metadata(paths, path)
+            for stale in (paths.binary, paths.metadata, paths.preview):
+                stale.unlink(missing_ok=True)
         recent = _recent_decodes.pop(int(image_id), None)
         if recent is None:
             rgb, meta = decode_base(path)
         else:
             rgb, meta = recent
+        meta.setdefault("source_path", str(path))
         _write_base_cache(paths, rgb, meta)
         _recent_decodes[int(image_id)] = (rgb, meta)
         while len(_recent_decodes) > MEMORY_BASE_LIMIT:
