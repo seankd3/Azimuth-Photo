@@ -28,6 +28,8 @@ export class CropController {
             + '<button data-straighten data-tip="Drag a horizon line on the photo" aria-pressed="false">Straighten line</button>'
             + '<button data-crop-reset data-tip="Reset crop and angle">Reset Crop</button>';
         this.bind();
+        this.canvas.addEventListener("develop:rendered", () => this.syncOverlay());
+        window.addEventListener("resize", () => this.syncOverlay());
     }
 
     bind() {
