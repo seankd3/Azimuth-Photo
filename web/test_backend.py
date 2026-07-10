@@ -1,6 +1,37 @@
 from test_support import *  # noqa: F401,F403
 
 
+class CleanInstallSchemaTests(unittest.IsolatedAsyncioTestCase):
+    async def test_init_db_creates_clean_catalog_when_wal_is_enabled(self):
+        original_path = db.DB_PATH
+        with tempfile.TemporaryDirectory(dir=os.path.dirname(__file__)) as tempdir:
+            clean_path = os.path.join(tempdir, "clean-catalog.db")
+            db.DB_PATH = clean_path
+            db.invalidate_stats_cache()
+            try:
+                await db.init_db()
+                conn = sqlite3.connect(clean_path)
+                try:
+                    version = conn.execute("PRAGMA user_version").fetchone()[0]
+                    journal_mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+                    tables = {
+                        row[0]
+                        for row in conn.execute(
+                            "SELECT name FROM sqlite_master WHERE type = 'table'"
+                        )
+                    }
+                finally:
+                    conn.close()
+            finally:
+                db.DB_PATH = original_path
+                db.invalidate_stats_cache()
+
+        self.assertEqual(version, db.SCHEMA_VERSION)
+        self.assertEqual(journal_mode, "wal")
+        self.assertIn("images", tables)
+        self.assertIn("catalog_sources", tables)
+
+
 class BackendIntegrationTests(BackendTestCase):
     async def test_init_db_migrates_legacy_comparison_action_id_before_indexes(self):
         original_path = db.DB_PATH

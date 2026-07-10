@@ -83,7 +83,11 @@ def open_sync(
 async def enable_wal(conn, *, db_path: str | None = None) -> None:
     if db_path and is_ephemeral_db_path(db_path):
         return
-    await conn.execute("PRAGMA journal_mode=WAL")
+    cursor = await conn.execute("PRAGMA journal_mode=WAL")
+    try:
+        await cursor.fetchone()
+    finally:
+        await cursor.close()
 
 
 def is_ephemeral_db_path(db_path: str) -> bool:
