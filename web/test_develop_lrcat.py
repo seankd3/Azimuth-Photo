@@ -41,7 +41,8 @@ class LightroomCatalogImportTests(unittest.TestCase):
     def _make_catalog(self):
         with sqlite3.connect(self.catalog_path) as conn:
             conn.executescript("""
-                CREATE TABLE Adobe_images (id_local INTEGER PRIMARY KEY, rootFile INTEGER, pick INTEGER, rating INTEGER, captureTime TEXT);
+                CREATE TABLE Adobe_images (id_local INTEGER PRIMARY KEY, rootFile INTEGER, pick INTEGER, rating INTEGER, captureTime TEXT, touchTime REAL);
+                CREATE TABLE Adobe_imageDevelopSettings (id_local INTEGER PRIMARY KEY, image INTEGER, text TEXT);
                 CREATE TABLE AgLibraryFile (id_local INTEGER PRIMARY KEY, folder INTEGER, baseName TEXT, extension TEXT);
                 CREATE TABLE AgLibraryFolder (id_local INTEGER PRIMARY KEY, rootFolder INTEGER, pathFromRoot TEXT);
                 CREATE TABLE AgLibraryRootFolder (id_local INTEGER PRIMARY KEY, absolutePath TEXT);
@@ -53,7 +54,18 @@ class LightroomCatalogImportTests(unittest.TestCase):
             conn.execute("INSERT INTO AgLibraryRootFolder VALUES (1, 'D:\\Photos')")
             conn.executemany("INSERT INTO AgLibraryFolder VALUES (?, 1, ?)", [(1, 'RAWS/2023/2023-06-01'), (2, 'RAWS/2023/2023-06-02'), (3, 'Other')])
             conn.executemany("INSERT INTO AgLibraryFile VALUES (?, ?, ?, ?)", [(11, 1, 'IMG_0001', 'DNG'), (12, 2, 'IMG_0002', 'CR3'), (13, 3, 'IMG_0003', 'DNG')])
-            conn.executemany("INSERT INTO Adobe_images VALUES (?, ?, ?, ?, ?)", [(101, 11, 1, 5, '2023-06-01 10:00:00'), (102, 12, -1, 3, '2023-06-02 11:00:00'), (103, 13, 0, 2, '2023-06-03 12:00:00')])
+            conn.executemany("INSERT INTO Adobe_images VALUES (?, ?, ?, ?, ?, ?)", [
+                (101, 11, 1, 5, '2023-06-01 10:00:00', 700000000.0),
+                (102, 12, -1, 3, '2023-06-02 11:00:00', 700000100.0),
+                (103, 13, 0, 2, '2023-06-03 12:00:00', 700000200.0),
+            ])
+            conn.executemany("INSERT INTO Adobe_imageDevelopSettings VALUES (?, ?, ?)", [
+                (1, 101, '''s = { Exposure2012 = -0.25, ToneCurvePV2012 = { 0, 0, 64, 56, 255, 255 },
+                    LensProfileEnable = 1, MaskGroupBasedCorrections = { { CorrectionID = "mask-1", CorrectionActive = true } },
+                    Look = { Name = "Vintage", Parameters = { ToneCurvePV2012 = { 0, 0, 128, 110, 255, 255 } } } }'''),
+                (2, 102, 's = { Exposure2012 = 1.0, LensProfileEnable = 0 }'),
+                (3, 103, 's = { Exposure2012 = 2.0 }'),
+            ])
             conn.execute("INSERT INTO AgLibraryKeyword VALUES (1, 'travel')")
             conn.execute("INSERT INTO AgLibraryKeywordImage VALUES (101, 1)")
             conn.executemany("INSERT INTO AgLibraryCollection VALUES (?, ?, ?)", [(1, 'Favorites', 'com.adobe.ag.library.collection'), (2, 'Smart', 'com.adobe.ag.library.smart_collection')])
@@ -77,6 +89,38 @@ class LightroomCatalogImportTests(unittest.TestCase):
         self.assertEqual(json.loads(settings[1])['_lr_rating'], 5)
         self.assertEqual(json.loads(settings[2])['_lr_rating'], 3)
         self.assertEqual(members, [1, 2])
+
+    def test_imports_full_catalog_settings_and_respects_fresher_xmp_or_user_work(self):
+        epoch = 978307200.0
+        with sqlite3.connect(self.db_path) as conn:
+            conn.executemany(
+                "INSERT INTO develop_settings (image_id, settings, origin, xmp_path, xmp_mtime, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+                [
+                    (1, '{"Exposure2012":9}', 'xmp', '/tmp/one.xmp', epoch + 699999999, '2024-01-01T00:00:00Z'),
+                    (2, '{"Exposure2012":8}', 'xmp', '/tmp/two.xmp', epoch + 700000101, '2024-01-01T00:00:00Z'),
+                    (3, '{"Exposure2012":7}', 'user', None, None, '2024-01-01T00:00:00Z'),
+                ],
+            )
+        result = lrcat_import.import_lrcat(self.catalog_path, self.db_path)
+        with sqlite3.connect(self.db_path) as conn:
+            stored = {
+                image_id: (json.loads(settings), origin)
+                for image_id, settings, origin in conn.execute(
+                    'SELECT image_id, settings, origin FROM develop_settings ORDER BY image_id'
+                )
+            }
+        imported, imported_origin = stored[1]
+        self.assertEqual(imported_origin, 'lrcat')
+        self.assertEqual(imported['ToneCurvePV2012'], ['0, 0', '128, 110', '255, 255'])
+        self.assertEqual(imported['MaskGroupBasedCorrections'][0]['CorrectionID'], 'mask-1')
+        self.assertEqual(imported['Look']['Name'], 'Vintage')
+        self.assertEqual(imported['LensProfileEnable'], 1)
+        self.assertEqual(stored[2][0]['Exposure2012'], 8)
+        self.assertEqual(stored[2][1], 'xmp')
+        self.assertEqual(stored[3][0]['Exposure2012'], 7)
+        self.assertEqual(stored[3][1], 'user')
+        self.assertEqual(result['develop_settings_updated'], 1)
+        self.assertEqual(result['develop_settings_skipped'], 2)
 
     def test_is_idempotent_and_dry_run_does_not_write(self):
         first = lrcat_import.import_lrcat(self.catalog_path, self.db_path)

@@ -27,6 +27,7 @@ from urllib.parse import quote
 
 from data import connection
 from data.repositories import collections as collections_repository
+from features.develop.lua_table import LuaTableError, parse_lua_table
 
 
 DEFAULT_CATALOG_ROOT = "/mnt/expansion/Photo Library Support/Lightroom/Catalogs"
@@ -36,6 +37,8 @@ _RAW_TAIL = "raws/"
 _VERSION_RE = re.compile(r"-v(\d+)(?:\D|$)", re.IGNORECASE)
 _YEAR_RE = re.compile(r"(?:19|20)\d{2}")
 _LOG = logging.getLogger(__name__)
+_LIGHTROOM_EPOCH_OFFSET = 978307200.0
+_CURVE_PREFIX = "ToneCurvePV2012"
 
 _status_lock = threading.Lock()
 _status: dict[str, Any] = {
@@ -172,6 +175,109 @@ def _catalog_images(catalog: sqlite3.Connection) -> Iterable[sqlite3.Row]:
         LEFT JOIN AgLibraryRootFolder root ON root.id_local = folder.rootFolder
         """
     )
+
+
+def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table,)
+    ).fetchone() is not None
+
+
+def _catalog_develop_rows(catalog: sqlite3.Connection) -> Iterable[sqlite3.Row]:
+    """Read the Lua payload and Lightroom's 2001-epoch touch time when present."""
+
+    if not _table_exists(catalog, "Adobe_imageDevelopSettings"):
+        return ()
+    image_columns = {row["name"] for row in catalog.execute("PRAGMA table_info(Adobe_images)")}
+    touch_time = "ai.touchTime" if "touchTime" in image_columns else "0"
+    return catalog.execute(
+        f"SELECT settings.image, settings.text, {touch_time} AS touch_time "
+        "FROM Adobe_imageDevelopSettings settings "
+        "JOIN Adobe_images ai ON ai.id_local = settings.image "
+        "WHERE settings.text IS NOT NULL"
+    )
+
+
+def _curve_points(value: Any) -> list[str] | Any:
+    if not isinstance(value, list) or len(value) % 2:
+        return value
+    points: list[str] = []
+    for x, y in zip(value[::2], value[1::2]):
+        if not isinstance(x, (int, float)) or not isinstance(y, (int, float)):
+            return value
+        points.append(f"{_curve_number(x)}, {_curve_number(y)}")
+    return points
+
+
+def _curve_number(value: int | float) -> str:
+    return str(int(value)) if float(value).is_integer() else str(value)
+
+
+def map_lrcat_settings(text: str | bytes) -> dict[str, Any]:
+    """Convert an Adobe Lua literal into canonical settings without losing keys."""
+
+    settings = parse_lua_table(text)
+    for key, value in list(settings.items()):
+        if key.startswith(_CURVE_PREFIX):
+            settings[key] = _curve_points(value)
+    look = settings.get("Look")
+    if isinstance(look, dict):
+        parameters = look.get("Parameters")
+        if isinstance(parameters, dict):
+            curve = _curve_points(parameters.get(_CURVE_PREFIX))
+            if isinstance(curve, list):
+                parameters[_CURVE_PREFIX] = curve
+                # The Look curve is Lightroom's profile base curve; this is the
+                # one curve v1's canonical renderer can apply.
+                settings[_CURVE_PREFIX] = curve
+    return settings
+
+
+def _catalog_touch_time(value: object) -> float:
+    """Convert Lightroom's 2001 epoch to a Unix timestamp for XMP comparison."""
+
+    try:
+        touch_time = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return touch_time + _LIGHTROOM_EPOCH_OFFSET if 0 < touch_time < 1_000_000_000 else touch_time
+
+
+def _write_catalog_settings(
+    conn: sqlite3.Connection, image_id: int, settings: dict[str, Any], touch_time: float
+) -> bool:
+    """Store catalog settings only when they are authoritative over the current origin."""
+
+    existing = conn.execute(
+        "SELECT settings, origin, xmp_path, xmp_mtime FROM develop_settings WHERE image_id = ?", (image_id,)
+    ).fetchone()
+    if existing is not None:
+        origin = str(existing["origin"] or "")
+        if origin == "user":
+            return False
+        if origin == "xmp" and existing["xmp_mtime"] is not None and touch_time <= float(existing["xmp_mtime"]):
+            return False
+        try:
+            old_settings = json.loads(existing["settings"])
+        except (TypeError, ValueError, json.JSONDecodeError):
+            old_settings = {}
+        # Ratings have no dedicated column in every historical schema.  Keep
+        # this importer-owned metadata while catalog settings replace XMP.
+        settings = {key: value for key, value in old_settings.items() if key.startswith("_")} | settings
+        if origin == "lrcat" and old_settings == settings:
+            return False
+        xmp_path, xmp_mtime = existing["xmp_path"], existing["xmp_mtime"]
+    else:
+        xmp_path = xmp_mtime = None
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    conn.execute(
+        "INSERT INTO develop_settings (image_id, settings, origin, xmp_path, xmp_mtime, updated_at) "
+        "VALUES (?, ?, 'lrcat', ?, ?, ?) "
+        "ON CONFLICT(image_id) DO UPDATE SET settings = excluded.settings, origin = 'lrcat', "
+        "xmp_path = excluded.xmp_path, xmp_mtime = excluded.xmp_mtime, updated_at = excluded.updated_at",
+        (image_id, json.dumps(settings, separators=(",", ":"), ensure_ascii=True), xmp_path, xmp_mtime, now),
+    )
+    return True
 
 
 def _library_maps(conn: sqlite3.Connection) -> tuple[dict[str, sqlite3.Row], dict[str, list[sqlite3.Row]], dict[tuple[str, str], list[sqlite3.Row]]]:
@@ -324,7 +430,9 @@ def import_lrcat(catalog_path: str, db_path: str, dry_run: bool = False) -> dict
         "exact_matches": 0, "suffix_matches": 0, "filename_date_matches": 0,
         "picks_updated": 0, "picks_protected": 0, "ratings_updated": 0,
         "keywords_skipped": 0, "collections_created": 0, "collections_updated": 0,
-        "collections_skipped_empty": 0, "errors": 0, "sample_paths": [],
+        "collections_skipped_empty": 0, "develop_settings_updated": 0,
+        "develop_settings_skipped": 0, "develop_settings_errors": 0,
+        "errors": 0, "sample_paths": [],
     }
     library = connection.open_sync(db_path)
     try:
@@ -360,6 +468,24 @@ def import_lrcat(catalog_path: str, db_path: str, dry_run: bool = False) -> dict
                     _store_rating(library, image_id, rating, rating_column=rating_column)
                 if rating_changed:
                     result["ratings_updated"] += 1
+            for settings_row in _catalog_develop_rows(catalog):
+                image_id = matched_catalog_ids.get(int(settings_row["image"]))
+                if image_id is None:
+                    continue
+                try:
+                    settings = map_lrcat_settings(settings_row["text"])
+                except LuaTableError as exc:
+                    _LOG.warning("Could not parse Lightroom settings for catalog image %s: %s", settings_row["image"], exc)
+                    result["develop_settings_errors"] += 1
+                    continue
+                if dry_run:
+                    result["develop_settings_updated"] += 1
+                elif _write_catalog_settings(
+                    library, image_id, settings, _catalog_touch_time(settings_row["touch_time"])
+                ):
+                    result["develop_settings_updated"] += 1
+                else:
+                    result["develop_settings_skipped"] += 1
             result["keywords_skipped"] = _catalog_keywords(catalog, set(matched_catalog_ids))
             pending_collections = _catalog_collections(catalog, matched_catalog_ids, year)
         result["collections_skipped_empty"] = sum(1 for ids in pending_collections.values() if not ids)
