@@ -39,6 +39,7 @@ let windowEnd = 0;
 let beforeDone = true;
 let loadToken = 0;
 const stackCache = new Map();
+const stackKindCache = new Map();
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -59,8 +60,11 @@ export function cellHtml(img, index) {
     const flag = img.flag || 'unflagged';
     const stackId = Number(img.stack_id) || 0;
     const stackCount = Number(img.stack_count) || 0;
+    const versionStack = img.stack_kind === 'version';
+    const stackLabel = versionStack ? `RAW+${Math.max(1, stackCount - 1)}` : String(stackCount);
+    const stackTip = versionStack ? `Version stack · RAW plus ${Math.max(1, stackCount - 1)} edit${stackCount === 2 ? '' : 's'} · S` : 'Expand stack · S';
     const stackBadge = stackId && stackCount > 1
-        ? `<button class="c-stack" data-stack-id="${stackId}" data-tip="Expand stack · S" aria-label="Expand stack with ${stackCount} photos" aria-expanded="false" tabindex="-1">${icon('layers')}<span>${stackCount}</span></button>`
+        ? `<button class="c-stack ${versionStack ? 'version-stack' : ''}" data-stack-id="${stackId}" data-tip="${stackTip}" aria-label="Expand ${versionStack ? 'version' : 'stack'} with ${stackCount} photos" aria-expanded="false" tabindex="-1">${icon('layers')}<span>${stackLabel}</span></button>`
         : '';
     const selected = selection.has(Number(img.id));
     return `<figure class="cell ${selected ? 'sel' : ''}" data-id="${img.id}" data-idx="${index}" draggable="true" tabindex="-1" aria-selected="${selected ? 'true' : 'false'}" style="--ar:${aspect(img)}">`
@@ -71,6 +75,42 @@ export function cellHtml(img, index) {
         + `<span class="c-flag ${flag}">${flagGlyph(flag)}</span>`
         + `<span class="c-elo"><span class="elo-chip">${Math.round(Number(img.elo) || 0)}</span></span>`
         + `<button class="c-menu" data-tip="Photo actions" aria-label="Photo actions" tabindex="-1">${icon('ellipsis')}</button></figure>`;
+}
+
+function applyStackBadgeKind(imageId, stack) {
+    const cell = document.querySelector(`.cell[data-id="${Number(imageId)}"]`);
+    const badge = cell?.querySelector('.c-stack');
+    if (!badge || stack?.stack_kind !== 'version') return;
+    const count = Number(stack.stack_count) || 0;
+    const edits = Math.max(1, count - 1);
+    badge.classList.add('version-stack');
+    badge.querySelector('span').textContent = `RAW+${edits}`;
+    badge.dataset.tip = `Version stack · RAW plus ${edits} edit${edits === 1 ? '' : 's'} · S`;
+    badge.setAttribute('aria-label', `Expand version stack with ${count} photos`);
+}
+
+async function hydrateStackBadgeKinds(images) {
+    const candidates = (images || []).filter((image) => Number(image?.stack_id) && Number(image?.stack_count) > 1);
+    const unknownIds = candidates
+        .map((image) => Number(image.id))
+        .filter((imageId) => !stackKindCache.has(imageId));
+    if (unknownIds.length) {
+        try {
+            const response = await fetch(`/api/stacks/representatives?image_ids=${encodeURIComponent(unknownIds.join(','))}`);
+            const payload = response.ok ? await response.json() : {};
+            const representatives = payload?.representatives || {};
+            for (const imageId of unknownIds) stackKindCache.set(imageId, representatives[String(imageId)] || null);
+        } catch {
+            for (const imageId of unknownIds) stackKindCache.set(imageId, null);
+        }
+    }
+    for (const image of candidates) {
+        const stack = stackKindCache.get(Number(image.id));
+        if (!stack) continue;
+        image.stack_kind = stack.stack_kind;
+        image.stack_count = Number(stack.stack_count) || image.stack_count;
+        applyStackBadgeKind(image.id, stack);
+    }
 }
 
 function memberCellHtml(img, index) {
@@ -213,6 +253,7 @@ function render({ append = false, start = 0, images = [] } = {}) {
         resetGridWindow();
     }
     appendChunk(start, images);
+    hydrateStackBadgeKinds(images);
     flow.classList.toggle('selmode', isSelectionMode());
     if (!append) setFocus(viewState.focusIndex);
 }

@@ -111,7 +111,11 @@ class LightroomCatalogImportTests(unittest.TestCase):
             }
         imported, imported_origin = stored[1]
         self.assertEqual(imported_origin, 'lrcat')
-        self.assertEqual(imported['ToneCurvePV2012'], ['0, 0', '128, 110', '255, 255'])
+        self.assertEqual(imported['ToneCurvePV2012'], ['0, 0', '64, 56', '255, 255'])
+        self.assertEqual(
+            imported['Look']['Parameters']['ToneCurvePV2012'],
+            ['0, 0', '128, 110', '255, 255'],
+        )
         self.assertEqual(imported['MaskGroupBasedCorrections'][0]['CorrectionID'], 'mask-1')
         self.assertEqual(imported['Look']['Name'], 'Vintage')
         self.assertEqual(imported['LensProfileEnable'], 1)

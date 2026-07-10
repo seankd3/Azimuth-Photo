@@ -19,6 +19,7 @@ from typing import Any
 import scanner
 from data import connection
 from data.repositories import catalog as catalog_repository
+from features.develop.looks import extract_xmp_look
 
 
 DEFAULT_RAWS_ROOT = "/mnt/expansion/Photos/RAWS"
@@ -117,8 +118,16 @@ def parse_xmp_text(payload: str | bytes) -> dict[str, Any]:
     """
 
     root = etree.fromstring(payload)
+    look = extract_xmp_look(root)
+    look_nodes: set[int] = set()
+    for element in root.iter():
+        if _is_crs_name(element.tag) and _split_name(element.tag)[1] == "Look":
+            look_nodes.update(id(descendant) for descendant in element.iter())
+            break
     settings: dict[str, Any] = {}
     for element in root.iter():
+        if id(element) in look_nodes:
+            continue
         for name, value in element.attrib.items():
             if not _is_crs_name(name):
                 continue
@@ -134,6 +143,8 @@ def parse_xmp_text(payload: str | bytes) -> dict[str, Any]:
         text = "".join(element.itertext()).strip()
         if text:
             settings[local] = _normalize_value(text)
+    if look is not None:
+        settings["Look"] = look
     return settings
 
 

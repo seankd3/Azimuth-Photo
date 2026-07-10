@@ -28,6 +28,11 @@ def torture_settings() -> dict[str, object]:
         "Exposure2012": 0.73, "Contrast2012": -37, "Highlights2012": -48,
         "Shadows2012": 62, "Whites2012": 29, "Blacks2012": -34,
         "Texture": 41, "Clarity2012": -28, "Dehaze": 36, "Vibrance": 47, "Saturation": -22,
+        "ColorGradeShadowHue": 28, "ColorGradeShadowSat": 43, "ColorGradeShadowLum": -17,
+        "ColorGradeMidtoneHue": 192, "ColorGradeMidtoneSat": 28, "ColorGradeMidtoneLum": 12,
+        "ColorGradeHighlightHue": 236, "ColorGradeHighlightSat": 36, "ColorGradeHighlightLum": 9,
+        "ColorGradeGlobalHue": 328, "ColorGradeGlobalSat": 14, "ColorGradeGlobalLum": -4,
+        "ColorGradeBlending": 57, "ColorGradeBalance": -18,
         "ToneCurvePV2012": ["0, 0", "96, 80", "255, 255"],
         "ToneCurvePV2012Red": ["0, 0", "128, 154", "255, 255"],
         "ToneCurvePV2012Green": ["0, 0", "128, 105", "255, 255"],
@@ -48,10 +53,10 @@ def torture_settings() -> dict[str, object]:
 
 
 class DevelopParityTests(unittest.TestCase):
-    def test_camera_and_lens_constant_names_match_javascript_twin(self):
+    def test_all_numeric_constant_names_match_javascript_twin(self):
         javascript = (Path(__file__).parent / "static/js/desktop/develop/ops_constants.js").read_text()
         for name, value in C.PARITY_TABLE.items():
-            if not name.startswith(("CAMERA_PROFILE_", "LENS_")) or not isinstance(value, (int, float)):
+            if not isinstance(value, (int, float)):
                 continue
             match = re.search(rf"export const {name} = ([^;]+);", javascript)
             self.assertIsNotNone(match, name)
@@ -70,10 +75,10 @@ class DevelopParityTests(unittest.TestCase):
         )
         expected = np.array(
             [
-                # v1.7: measured base profile (fit vs LR exports) + camera-space WB matrix.
-                0.615360677242279, 0.255159467458725, 0.0, 1.0, 7561.5517578125, 0.048858178034424785,
-                0.6379377543926239, 1.0, 0.7523488998413086,
-                0.7556017637252808, 0.48770585656166077, 0.9238397479057312,
+                # §22 intentional golden refresh: the torture fixture now exercises the four-wheel grade stage.
+                0.6309304237365723, 0.2533798813819885, 0.0, 1.0, 7752.873046875, 0.0,
+                0.6497146487236023, 1.0, 0.6921233534812927,
+                0.7832361459732056, 0.6242139935493469, 0.9238397479057312,
                 0.9238397479057312, 0.9238397479057312,
             ],
             dtype=np.float64,

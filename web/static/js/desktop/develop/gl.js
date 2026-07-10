@@ -6,7 +6,7 @@ import {
     GRAIN_CELL_SIZE_MIN, GRAIN_CELL_SIZE_RANGE, GRAIN_FACTOR, GRAIN_HASH_MULTIPLIER,
     GRAIN_HASH_SHIFT, GRAIN_OUTPUT_MASK, GRAIN_OUTPUT_SHIFT, GRAIN_SEED,
     GRAIN_X_MULTIPLIER, GRAIN_Y_MULTIPLIER, GRAY_MIXER_FACTOR, HSL_LUMINANCE_FACTOR,
-    HUE_SHIFT_DEGREES, LENS_IMAGE_CENTER, LENS_NORMALIZED_HALF_MIN, LENS_VIGNETTE_GAIN_MAX,
+    HUE_SHIFT_DEGREES, LENS_AUTO_CROP_EDGE_SAMPLES, LENS_IMAGE_CENTER, LENS_NORMALIZED_HALF_MIN, LENS_VIGNETTE_GAIN_MAX,
     LENS_VIGNETTE_GAIN_MIN, LUMA_BLUE, LUMA_GREEN, LUMA_RED, TINT_UV_SCALE,
     LOCAL_HUE_DEGREES, LOCAL_MASK_ATLAS_COLUMNS, LOCAL_RENDER_CAP,
     LOCAL_WB_TEMP_FACTOR, LOCAL_WB_TINT_FACTOR,
@@ -17,10 +17,18 @@ import {
     TONE_HIGHLIGHTS_POS_SCALE, TONE_SHADOWS_FACTOR, TONE_WHITES_FACTOR,
     VIBRANCE_FACTOR, VIGNETTE_FACTOR, VIGNETTE_FEATHER_MIN,
     VIGNETTE_FEATHER_RANGE, VIGNETTE_MIDPOINT_MIN, VIGNETTE_MIDPOINT_RANGE,
-    VIGNETTE_ROUNDNESS_FACTOR, boolSetting, numberSetting,
+    VIGNETTE_ROUNDNESS_FACTOR, COLOR_GRADE_AB_SCALE, COLOR_GRADE_BALANCE_SHIFT,
+    COLOR_GRADE_BLEND_MIN, COLOR_GRADE_BLEND_RANGE, COLOR_GRADE_HIGHLIGHT_CENTER,
+    COLOR_GRADE_LUMINANCE_EV, COLOR_GRADE_SHADOW_CENTER, DEFRINGE_EDGE_HIGH,
+    DEFRINGE_EDGE_LOW, DEFRINGE_HUE_SCALE, NR_LUMA_SIGMA, NR_LUMA_SPATIAL_AXIS,
+    NR_LUMA_SPATIAL_CENTER, RETOUCH_MIN_RADIUS, RETOUCH_RENDER_CAP,
+    RETOUCH_RING_SCALE, RETOUCH_RING_TAPS, boolSetting, numberSetting,
 } from './ops_constants.js';
-import { buildBaseProfileLut, buildCombinedCurveTexture } from './curve_lut.js';
+import {
+    buildBaseProfileLut, buildCombinedCurveTexture, effectiveLookSettings,
+} from './curve_lut.js';
 import { buildMaskRasters, localToSlider } from './mask_raster.js';
+import { RETOUCH_SETTINGS_KEY } from './heal.js';
 
 /** Emit a GLSL float literal (JS 2.0 stringifies as "2", which GLSL treats as int). */
 const f = (value) => {
@@ -30,8 +38,61 @@ const f = (value) => {
     return /[eE.]/.test(text) ? text : `${text}.0`;
 };
 
+// Twin of lens.distortion_auto_crop_scale(): edge-evaluate the inverse radial
+// polynomial, then zoom the output UV just enough to eliminate dark borders.
+function lensAutoCropScale(distortion, width, height, cropRatio = 1) {
+    if (!distortion || !(width > 0) || !(height > 0)) return 1;
+    const terms = Array.isArray(distortion.terms) ? distortion.terms.map(Number) : [];
+    const model = String(distortion.model || '').toLowerCase();
+    const radial = (radius) => {
+        const r2 = radius * radius;
+        if (model === 'poly3' && terms.length) return 1 - terms[0] + terms[0] * r2;
+        if (model === 'poly5' && terms.length >= 2) return 1 + terms[0] * r2 + terms[1] * r2 * r2;
+        if (model === 'ptlens' && terms.length >= 3) return terms[0] * radius * r2 + terms[1] * r2 + terms[2] * radius + 1 - terms[0] - terms[1] - terms[2];
+        return 1;
+    };
+    const halfMin = Math.min(width, height) / LENS_NORMALIZED_HALF_MIN;
+    let maximum = 1;
+    for (let index = 0; index <= LENS_AUTO_CROP_EDGE_SAMPLES; index += 1) {
+        const t = index / LENS_AUTO_CROP_EDGE_SAMPLES;
+        for (const [u, v] of [[t, 0], [t, 1], [0, t], [1, t]]) {
+            const px = (u * width - width * LENS_IMAGE_CENTER) / halfMin * cropRatio;
+            const py = (v * height - height * LENS_IMAGE_CENTER) / halfMin * cropRatio;
+            maximum = Math.max(maximum, radial(Math.hypot(px, py)));
+        }
+    }
+    return Math.min(1, 1 / Math.max(maximum, 1e-6));
+}
+
 const correctionEnabled = (correction) => correction?.CorrectionActive == null
     || !['false', '0'].includes(String(correction.CorrectionActive).toLowerCase());
+
+function retouchSpots(settings) {
+    const values = settings?.[RETOUCH_SETTINGS_KEY];
+    if (!Array.isArray(values)) return [];
+    const unit = (value, fallback) => {
+        const number = Number(value);
+        return Math.max(0, Math.min(1, Number.isFinite(number) ? number : fallback));
+    };
+    const spots = [];
+    for (const value of values.slice(0, RETOUCH_RENDER_CAP)) {
+        if (!value || typeof value !== 'object') continue;
+        const mode = String(value.mode || 'clone').toLowerCase();
+        const rawRadius = Number(value.radius);
+        if (!['clone', 'heal'].includes(mode) || !(rawRadius > 0)) continue;
+        spots.push({
+            src_x: unit(value.src_x ?? value.srcX, .5),
+            src_y: unit(value.src_y ?? value.srcY, .5),
+            dst_x: unit(value.dst_x ?? value.dstX, .5),
+            dst_y: unit(value.dst_y ?? value.dstY, .5),
+            radius: Math.max(RETOUCH_MIN_RADIUS, Math.min(.5, rawRadius)),
+            feather: unit(value.feather, .5),
+            opacity: unit(value.opacity, 1),
+            mode,
+        });
+    }
+    return spots;
+}
 
 const VERTEX = `#version 300 es
 in vec2 a_position;
@@ -302,6 +363,7 @@ uniform vec3 u_lensTerms;
 uniform bool u_lensVignetting;
 uniform vec3 u_lensVignetteTerms;
 uniform float u_lensCropRatio;
+uniform float u_lensAutoCrop;
 uniform mat3 u_wbMatrix;
 uniform bool u_applyWb;
 uniform float u_exposure;
@@ -320,6 +382,12 @@ uniform vec4 u_crop;
 uniform float u_angle;
 uniform int u_orientation;
 uniform bool u_applyGeometry;
+uniform vec3 u_gradeShadow;
+uniform vec3 u_gradeMidtone;
+uniform vec3 u_gradeHighlight;
+uniform vec3 u_gradeGlobal;
+uniform float u_gradeBlending;
+uniform float u_gradeBalance;
 `;
 
 const COLOR_FUNCTION = `
@@ -367,7 +435,34 @@ vec2 orientedUv(vec2 uv) {
         q.x /= aspect;
         uv = center + q;
     }
+    if (u_lensProfile) uv = vec2(.5) + (uv - vec2(.5)) * u_lensAutoCrop;
     return lensDistortedUv(uv);
+}
+float gradeBandWeight(float lightness, int band) {
+    float width = ${f(COLOR_GRADE_BLEND_MIN)} + clamp(u_gradeBlending / 100.0, 0.0, 1.0) * ${f(COLOR_GRADE_BLEND_RANGE)};
+    float shift = setting(u_gradeBalance) * ${f(COLOR_GRADE_BALANCE_SHIFT)};
+    float shadows = 1.0 - smoothstep(${f(COLOR_GRADE_SHADOW_CENTER)} + shift - width, ${f(COLOR_GRADE_SHADOW_CENTER)} + shift + width, lightness);
+    float highlights = smoothstep(${f(COLOR_GRADE_HIGHLIGHT_CENTER)} + shift - width, ${f(COLOR_GRADE_HIGHLIGHT_CENTER)} + shift + width, lightness);
+    if (band == 0) return shadows;
+    if (band == 1) return clamp(1.0 - max(shadows, highlights), 0.0, 1.0);
+    if (band == 2) return highlights;
+    return 1.0;
+}
+vec3 applyGrade(vec3 srgb) {
+    vec3 wheels[4] = vec3[4](u_gradeShadow, u_gradeMidtone, u_gradeHighlight, u_gradeGlobal);
+    float lightness = dot(srgb, LUMW);
+    vec3 lab = linearToOklab(srgbToLinear(srgb));
+    float exposure = 0.0;
+    for (int i = 0; i < 4; i++) {
+        float weight = gradeBandWeight(lightness, i);
+        float hue = radians(wheels[i].x);
+        float saturation = setting(wheels[i].y);
+        lab.yz += vec2(cos(hue), sin(hue)) * saturation * ${f(COLOR_GRADE_AB_SCALE)} * weight;
+        exposure += setting(wheels[i].z) * ${f(COLOR_GRADE_LUMINANCE_EV)} * weight;
+    }
+    vec3 linear = gamutClipDesat(oklabToLinear(lab), lab) * exp2(exposure);
+    vec3 finalLab = linearToOklab(linear);
+    return linearToSrgb(gamutClipDesat(linear, finalLab));
 }
 vec3 applyColor(vec2 uv, out vec2 imageUv) {
     imageUv = orientedUv(uv);
@@ -427,6 +522,7 @@ vec3 applyColor(vec2 uv, out vec2 imageUv) {
         }
     }
     if (!u_grayscale) c = applyCameraProfileAb(c);
+    c = applyGrade(c);
     return c;
 }
 `;
@@ -485,6 +581,11 @@ uniform vec3 u_vignetteShape;
 uniform float u_grain;
 uniform float u_grainSize;
 uniform uint u_seed;
+uniform sampler2D u_lumaNr;
+uniform float u_luminanceSmoothing;
+uniform float u_colorNoiseReduction;
+uniform vec4 u_defringePurple;
+uniform vec4 u_defringeGreen;
 uniform sampler2D u_maskAtlas;
 uniform int u_localActive[${LOCAL_RENDER_CAP}];
 uniform float u_localAmount[${LOCAL_RENDER_CAP}];
@@ -545,10 +646,58 @@ float noiseHash(ivec2 pixel) {
     h = (h ^ (h >> ${GRAIN_HASH_SHIFT}u)) * ${GRAIN_HASH_MULTIPLIER}u;
     return float((h >> ${GRAIN_OUTPUT_SHIFT}u) & ${GRAIN_OUTPUT_MASK}u) / 65535.0;
 }
+bool hueWindow(float hue, float lo, float hi) {
+    return lo <= hi ? hue >= lo && hue <= hi : hue >= lo || hue <= hi;
+}
+vec3 defringe(vec3 c, float L) {
+    if (u_defringePurple.x <= 0.0 && u_defringeGreen.x <= 0.0) return c;
+    float sharp = texture(u_blurSharp, v_uv).r;
+    float edge = smoothstep(${f(DEFRINGE_EDGE_LOW)}, ${f(DEFRINGE_EDGE_HIGH)}, abs(L - sharp));
+    vec3 hsv = rgbToHsv(c);
+    float hue = hsv.x * 360.0;
+    float amount = 0.0;
+    if (u_defringePurple.x > 0.0 && hueWindow(hue, u_defringePurple.y * ${f(DEFRINGE_HUE_SCALE)}, u_defringePurple.z * ${f(DEFRINGE_HUE_SCALE)})) amount = u_defringePurple.x;
+    if (u_defringeGreen.x > 0.0 && hueWindow(hue, u_defringeGreen.y * ${f(DEFRINGE_HUE_SCALE)}, u_defringeGreen.z * ${f(DEFRINGE_HUE_SCALE)})) amount = max(amount, u_defringeGreen.x);
+    hsv.y *= 1.0 - amount * edge;
+    return hsvToRgb(hsv);
+}
+vec3 noiseReduce(vec3 c, float L) {
+    if (u_luminanceSmoothing > 0.0) {
+        float center = texture(u_lumaNr, v_uv).r;
+        vec2 dx = vec2(1.0 / max(u_sourceSize.x * .5, 1.0), 0.0);
+        vec2 dy = vec2(0.0, 1.0 / max(u_sourceSize.y * .5, 1.0));
+        float total = ${f(NR_LUMA_SPATIAL_CENTER)};
+        float filtered = center * ${f(NR_LUMA_SPATIAL_CENTER)};
+        for (int i = 0; i < 4; i++) {
+            vec2 offset = i == 0 ? dx : i == 1 ? -dx : i == 2 ? dy : -dy;
+            float neighbor = texture(u_lumaNr, v_uv + offset).r;
+            float weight = ${f(NR_LUMA_SPATIAL_AXIS)} * exp(-pow(neighbor - center, 2.0) / (2.0 * ${f(NR_LUMA_SIGMA)} * ${f(NR_LUMA_SIGMA)}));
+            filtered += neighbor * weight;
+            total += weight;
+        }
+        c += vec3((filtered / total - L) * setting(u_luminanceSmoothing));
+    }
+    if (u_colorNoiseReduction > 0.0) {
+        vec3 lab = linearToOklab(srgbToLinear(clamp(c, 0.0, 1.0)));
+        vec2 stepUv = 1.0 / u_sourceSize;
+        vec2 averageAb = lab.yz;
+        for (int i = 0; i < 4; i++) {
+            vec2 offset = i == 0 ? vec2(stepUv.x, 0.0) : i == 1 ? vec2(-stepUv.x, 0.0) : i == 2 ? vec2(0.0, stepUv.y) : vec2(0.0, -stepUv.y);
+            vec2 unused;
+            averageAb += linearToOklab(srgbToLinear(applyColor(clamp(v_uv + offset, 0.0, 1.0), unused))).yz;
+        }
+        lab.yz = mix(lab.yz, averageAb / 5.0, setting(u_colorNoiseReduction));
+        c = linearToSrgb(gamutClipDesat(oklabToLinear(lab), lab));
+    }
+    return clamp(c, 0.0, 1.0);
+}
 void main() {
     vec2 imageUv;
     vec3 c = applyColor(v_uv, imageUv);
     float L = dot(c, LUMW);
+    c = defringe(c, L);
+    c = noiseReduce(c, L);
+    L = dot(c, LUMW);
     vec2 localBlurs = vec2(texture(u_blurLarge, v_uv).r, texture(u_blurSmall, v_uv).r);
     for (int i = 0; i < ${LOCAL_RENDER_CAP}; i++) {
         if (u_localActive[i] == 0) continue;
@@ -594,6 +743,49 @@ void main() {
         c = mix(c, vec3(1.0, 0.0, 0.0), overlay);
     }
     outColor = vec4(clamp(c, 0.0, 1.0), 1.0);
+}`;
+
+const RETOUCH_FRAGMENT = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+out vec4 outColor;
+uniform sampler2D u_retouchSource;
+uniform int u_retouchActive[${RETOUCH_RENDER_CAP}];
+uniform vec4 u_retouchSourceData[${RETOUCH_RENDER_CAP}];
+uniform vec4 u_retouchDestinationData[${RETOUCH_RENDER_CAP}];
+uniform bool u_healOverlay;
+
+vec3 ringMean(vec2 center, float radius) {
+    vec3 total = vec3(0.0);
+    for (int tap = 0; tap < ${RETOUCH_RING_TAPS}; tap++) {
+        float angle = float(tap) * 6.283185307179586 / float(${RETOUCH_RING_TAPS});
+        vec2 offset = vec2(cos(angle), sin(angle)) * radius * ${f(RETOUCH_RING_SCALE)};
+        total += texture(u_retouchSource, clamp(center + offset, 0.0, 1.0)).rgb;
+    }
+    return total / float(${RETOUCH_RING_TAPS});
+}
+
+void main() {
+    vec3 result = texture(u_retouchSource, v_uv).rgb;
+    for (int index = 0; index < ${RETOUCH_RENDER_CAP}; index++) {
+        if (u_retouchActive[index] == 0) continue;
+        vec4 sourceData = u_retouchSourceData[index];
+        vec4 destinationData = u_retouchDestinationData[index];
+        float radius = max(sourceData.z, ${f(RETOUCH_MIN_RADIUS)});
+        float distance = length(v_uv - destinationData.xy);
+        float hardEdge = radius * (1.0 - sourceData.w);
+        float weight = (1.0 - smoothstep(hardEdge, radius, distance)) * destinationData.z;
+        vec3 sampled = texture(u_retouchSource, clamp(v_uv + sourceData.xy - destinationData.xy, 0.0, 1.0)).rgb;
+        if (destinationData.w > 0.5) {
+            sampled += ringMean(destinationData.xy, radius) - ringMean(sourceData.xy, radius);
+        }
+        result = mix(result, sampled, weight);
+        if (u_healOverlay) {
+            float line = 1.0 - smoothstep(0.0, max(radius * .04, .001), abs(distance - radius));
+            result = mix(result, vec3(1.0, .65, .15), line * .8);
+        }
+    }
+    outColor = vec4(clamp(result, 0.0, 1.0), 1.0);
 }`;
 
 function compile(gl, type, source) {
@@ -718,6 +910,7 @@ export class DevelopRenderer {
         this.mainProgram = program(this.gl, MAIN_FRAGMENT);
         this.lumaProgram = program(this.gl, LUMA_FRAGMENT);
         this.blurProgram = program(this.gl, BLUR_FRAGMENT);
+        this.retouchProgram = program(this.gl, RETOUCH_FRAGMENT);
         this.settings = {};
         this.meta = {};
         this.geometryEnabled = true;
@@ -737,6 +930,7 @@ export class DevelopRenderer {
         this.maskAtlas = maskTexture(this.gl, LOCAL_MASK_ATLAS_COLUMNS, LOCAL_MASK_ATLAS_COLUMNS, new Uint8Array(LOCAL_MASK_ATLAS_COLUMNS ** 2));
         this.maskRasters = [];
         this.maskOverlay = -1;
+        this.healOverlay = false;
         this.baseProfileKey = '';
         this.updateBaseCurve(null);
         this.updateCurve({});
@@ -749,7 +943,7 @@ export class DevelopRenderer {
         const buffer = gl.createBuffer();
         gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
         gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]), gl.STATIC_DRAW);
-        for (const p of [this.mainProgram, this.lumaProgram, this.blurProgram]) {
+        for (const p of [this.mainProgram, this.lumaProgram, this.blurProgram, this.retouchProgram]) {
             const location = gl.getAttribLocation(p, 'a_position');
             gl.enableVertexAttribArray(location);
             gl.vertexAttribPointer(location, 2, gl.FLOAT, false, 0, 0);
@@ -785,14 +979,19 @@ export class DevelopRenderer {
             gl.deleteFramebuffer(item.framebuffer);
             gl.deleteTexture(item.texture);
         }
+        if (this.retouchTarget) {
+            gl.deleteFramebuffer(this.retouchTarget.framebuffer);
+            gl.deleteTexture(this.retouchTarget.texture);
+        }
         [this.lumaTarget, this.blurTemp, this.blurLarge, this.blurSmall, this.blurSharp] = next;
         this.targets = next;
+        this.retouchTarget = target(gl, this.width, this.height);
     }
 
-    updateBaseCurve(profile = null) {
+    updateBaseCurve(profile = null, settings = {}) {
         const gl = this.gl;
         if (this.baseCurve) gl.deleteTexture(this.baseCurve);
-        const lut = buildBaseProfileLut(profile);
+        const lut = buildBaseProfileLut(profile, settings);
         const data = new Float32Array(256 * 4);
         for (let i = 0; i < 256; i += 1) {
             data[i * 4] = lut[i];
@@ -816,13 +1015,19 @@ export class DevelopRenderer {
     }
 
     setSettings(settings, meta = this.meta, _opts = {}) {
-        this.settings = settings || {};
+        this.settings = effectiveLookSettings(settings || {});
         this.meta = meta || {};
         const profile = this.meta.camera_profile || this.meta.color?.camera_profile || null;
         const profileKey = profile?.slug || profile?.model || '';
-        if (profileKey !== this.baseProfileKey) {
-            this.baseProfileKey = profileKey;
-            this.updateBaseCurve(profile);
+        const look = this.settings.Look;
+        const lookKey = JSON.stringify([
+            look?.Amount ?? null,
+            look?.Parameters?.ToneCurvePV2012 ?? null,
+        ]);
+        const baseProfileKey = `${profileKey}|${lookKey}`;
+        if (baseProfileKey !== this.baseProfileKey) {
+            this.baseProfileKey = baseProfileKey;
+            this.updateBaseCurve(profile, this.settings);
         }
         this.updateCurve(this.settings);
         this.requestRender();
@@ -868,6 +1073,11 @@ export class DevelopRenderer {
             const index = Number(indexOrNull);
             this.maskOverlay = Number.isInteger(index) && index >= 0 && index < LOCAL_RENDER_CAP ? index : -1;
         }
+        this.requestRender();
+    }
+
+    setHealOverlay(show) {
+        this.healOverlay = Boolean(show);
         this.requestRender();
     }
 
@@ -919,6 +1129,7 @@ export class DevelopRenderer {
         gl.uniform1i(uniform('u_lensVignetting'), lensEnabled && lensVignetting ? 1 : 0);
         gl.uniform3f(uniform('u_lensVignetteTerms'), vignetteTerms[0] || 0, vignetteTerms[1] || 0, vignetteTerms[2] || 0);
         gl.uniform1f(uniform('u_lensCropRatio'), lensCrop / cameraCrop);
+        gl.uniform1f(uniform('u_lensAutoCrop'), lensEnabled && lensModel ? lensAutoCropScale(distortion, this.width, this.height, lensCrop / cameraCrop) : 1);
         const asShotT = Number(this.meta.as_shot_temperature || this.meta.temperature || 5500);
         const asShotTint = Number(this.meta.as_shot_tint || 0);
         const userT = numberSetting(s, 'Temperature', asShotT);
@@ -956,6 +1167,12 @@ export class DevelopRenderer {
         gl.uniform1f(uniform('u_angle'), numberSetting(s, 'CropAngle'));
         gl.uniform1i(uniform('u_orientation'), numberSetting(s, 'Orientation', 1));
         gl.uniform1i(uniform('u_applyGeometry'), this.geometryEnabled ? 1 : 0);
+        const grade = (name) => [
+            numberSetting(s, `ColorGrade${name}Hue`), numberSetting(s, `ColorGrade${name}Sat`), numberSetting(s, `ColorGrade${name}Lum`),
+        ];
+        for (const name of ['Shadow', 'Midtone', 'Highlight', 'Global']) gl.uniform3fv(uniform(`u_grade${name}`), new Float32Array(grade(name)));
+        gl.uniform1f(uniform('u_gradeBlending'), numberSetting(s, 'ColorGradeBlending', 50));
+        gl.uniform1f(uniform('u_gradeBalance'), numberSetting(s, 'ColorGradeBalance'));
     }
 
     localUniforms() {
@@ -1004,6 +1221,24 @@ export class DevelopRenderer {
         gl.uniform1i(uniform('u_maskAtlas'), 6);
     }
 
+    retouchUniforms(spots) {
+        const gl = this.gl;
+        const uniform = (name) => gl.getUniformLocation(this.retouchProgram, name);
+        const active = new Int32Array(RETOUCH_RENDER_CAP);
+        const sourceData = new Float32Array(RETOUCH_RENDER_CAP * 4);
+        const destinationData = new Float32Array(RETOUCH_RENDER_CAP * 4);
+        spots.forEach((spot, index) => {
+            active[index] = 1;
+            sourceData.set([spot.src_x, spot.src_y, spot.radius, spot.feather], index * 4);
+            destinationData.set([spot.dst_x, spot.dst_y, spot.opacity, spot.mode === 'heal' ? 1 : 0], index * 4);
+        });
+        gl.uniform1i(uniform('u_retouchSource'), 0);
+        gl.uniform1iv(uniform('u_retouchActive[0]'), active);
+        gl.uniform4fv(uniform('u_retouchSourceData[0]'), sourceData);
+        gl.uniform4fv(uniform('u_retouchDestinationData[0]'), destinationData);
+        gl.uniform1i(uniform('u_healOverlay'), this.healOverlay ? 1 : 0);
+    }
+
     drawColorTarget() {
         const gl = this.gl;
         gl.useProgram(this.lumaProgram);
@@ -1045,13 +1280,16 @@ export class DevelopRenderer {
             ? this.settings.MaskGroupBasedCorrections.slice(0, LOCAL_RENDER_CAP).filter(correctionEnabled) : [];
         const localClarity = localCorrections.some((correction) => numberSetting(correction, 'LocalClarity2012') !== 0);
         const localTexture = localCorrections.some((correction) => numberSetting(correction, 'LocalTexture') !== 0);
-        const useBlur = clarity !== 0 || textureValue !== 0 || sharpness > 0 || localClarity || localTexture;
+        const defringe = numberSetting(this.settings, 'DefringePurpleAmount') !== 0 || numberSetting(this.settings, 'DefringeGreenAmount') !== 0;
+        const nr = numberSetting(this.settings, 'LuminanceSmoothing') !== 0 || numberSetting(this.settings, 'ColorNoiseReduction') !== 0;
+        const spots = retouchSpots(this.settings);
+        const useBlur = clarity !== 0 || textureValue !== 0 || sharpness > 0 || localClarity || localTexture || defringe || nr;
         if (useBlur) {
             this.drawColorTarget();
             const minSide = Math.min(this.width, this.height);
             if (clarity !== 0 || localClarity) this.blur(BLUR_LARGE_FACTOR * minSide, this.blurLarge);
             if (textureValue !== 0 || localTexture) this.blur(BLUR_SMALL_FACTOR * minSide, this.blurSmall);
-            if (sharpness > 0) this.blur(numberSetting(this.settings, 'SharpenRadius', 1), this.blurSharp);
+            if (sharpness > 0 || defringe) this.blur(sharpness > 0 ? numberSetting(this.settings, 'SharpenRadius', 1) : 1, this.blurSharp);
         }
         gl.useProgram(this.mainProgram);
         bindUnit(gl, this.source, 0);
@@ -1061,12 +1299,14 @@ export class DevelopRenderer {
         bindUnit(gl, this.blurSharp.texture, 4);
         bindUnit(gl, this.baseCurve, 5);
         bindUnit(gl, this.maskAtlas, 6);
+        bindUnit(gl, this.lumaTarget.texture, 7);
         this.uniforms(this.mainProgram);
         this.localUniforms();
         const uniform = (name) => gl.getUniformLocation(this.mainProgram, name);
         gl.uniform1i(uniform('u_blurLarge'), 2);
         gl.uniform1i(uniform('u_blurSmall'), 3);
         gl.uniform1i(uniform('u_blurSharp'), 4);
+        gl.uniform1i(uniform('u_lumaNr'), 7);
         gl.uniform1i(uniform('u_useLarge'), clarity !== 0 ? 1 : 0);
         gl.uniform1i(uniform('u_useSmall'), textureValue !== 0 ? 1 : 0);
         gl.uniform1i(uniform('u_useSharp'), sharpness > 0 ? 1 : 0);
@@ -1077,10 +1317,25 @@ export class DevelopRenderer {
         gl.uniform3f(uniform('u_vignetteShape'), numberSetting(this.settings, 'PostCropVignetteMidpoint', 50), numberSetting(this.settings, 'PostCropVignetteFeather', 50), numberSetting(this.settings, 'PostCropVignetteRoundness'));
         gl.uniform1f(uniform('u_grain'), numberSetting(this.settings, 'GrainAmount'));
         gl.uniform1f(uniform('u_grainSize'), numberSetting(this.settings, 'GrainSize', 25));
+        gl.uniform1f(uniform('u_luminanceSmoothing'), numberSetting(this.settings, 'LuminanceSmoothing'));
+        gl.uniform1f(uniform('u_colorNoiseReduction'), numberSetting(this.settings, 'ColorNoiseReduction'));
+        const defringeUniform = (name, defaults) => gl.uniform4f(uniform(`u_defringe${name}`),
+            Math.max(0, Math.min(1, numberSetting(this.settings, `Defringe${name}Amount`) / 100)),
+            numberSetting(this.settings, `Defringe${name}HueLo`, defaults[0]), numberSetting(this.settings, `Defringe${name}HueHi`, defaults[1]), 0);
+        defringeUniform('Purple', [30, 70]);
+        defringeUniform('Green', [40, 60]);
         gl.uniform1ui(uniform('u_seed'), GRAIN_SEED >>> 0);
-        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, spots.length ? this.retouchTarget.framebuffer : null);
         gl.viewport(0, 0, this.canvas.width, this.canvas.height);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
+        if (spots.length) {
+            gl.useProgram(this.retouchProgram);
+            bindUnit(gl, this.retouchTarget.texture, 0);
+            this.retouchUniforms(spots);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+            gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+        }
         this.canvas.dispatchEvent(new CustomEvent('develop:rendered'));
     }
 
@@ -1099,6 +1354,10 @@ export class DevelopRenderer {
         for (const item of this.targets || []) {
             gl.deleteFramebuffer(item.framebuffer);
             gl.deleteTexture(item.texture);
+        }
+        if (this.retouchTarget) {
+            gl.deleteFramebuffer(this.retouchTarget.framebuffer);
+            gl.deleteTexture(this.retouchTarget.texture);
         }
         gl.deleteTexture(this.source);
         gl.deleteTexture(this.curve);

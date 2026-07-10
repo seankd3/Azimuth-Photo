@@ -118,6 +118,23 @@ async def api_stacks_rebuild_status():
     return {"rebuild_status": dict(_rebuild_status)}
 
 
+@router.get("/api/stacks/representatives")
+async def api_stack_representatives(image_ids: str = ""):
+    """Small grid hydration payload for collapsed stack badges."""
+    ids = []
+    for token in image_ids.split(","):
+        try:
+            image_id = int(token)
+        except ValueError:
+            continue
+        if image_id > 0 and image_id not in ids:
+            ids.append(image_id)
+        if len(ids) >= 500:
+            break
+    counts = await stack_repository.representative_stack_counts(_configured_db_path(), ids)
+    return {"representatives": {str(image_id): value for image_id, value in counts.items()}}
+
+
 @router.post("/api/stacks/rebuild")
 async def api_rebuild_stacks(body: RebuildBody, background_tasks: BackgroundTasks):
     kinds = _clean_kinds(body.kinds)
@@ -127,6 +144,15 @@ async def api_rebuild_stacks(body: RebuildBody, background_tasks: BackgroundTask
         return JSONResponse({"error": "Stack rebuild already running"}, status_code=409)
     background_tasks.add_task(_run_rebuild_task, kinds)
     return JSONResponse({"accepted": True, "rebuild_status": {**_rebuild_status, "requested_kinds": kinds}}, status_code=202)
+
+
+@router.post("/api/stacks/version/scan", status_code=202)
+async def api_scan_version_stacks(background_tasks: BackgroundTasks):
+    """Incrementally rebuild RAW/export version stacks without an embedding pass."""
+    if _rebuild_status.get("state") == "running":
+        return JSONResponse({"error": "Stack rebuild already running"}, status_code=409)
+    background_tasks.add_task(_run_rebuild_task, ["version"])
+    return {"accepted": True, "rebuild_status": {**_rebuild_status, "requested_kinds": ["version"]}}
 
 
 @router.get("/api/stacks/{stack_id}")

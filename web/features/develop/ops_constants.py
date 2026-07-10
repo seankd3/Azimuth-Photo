@@ -75,6 +75,31 @@ LENS_NORMALIZED_HALF_MIN = 2.0
 LENS_IMAGE_CENTER = 0.5
 LENS_VIGNETTE_GAIN_MIN = 0.0
 LENS_VIGNETTE_GAIN_MAX = 8.0
+# Distortion auto-crop evaluates radial scale along every frame edge. The
+# returned UV scale is <= 1: identity is 1, lower values zoom to remove borders.
+LENS_AUTO_CROP_EDGE_SAMPLES = 32
+
+# §22 order: HSL/vibrance -> grade -> defringe -> NR -> local -> detail.
+# Grade works in OKLab-ish ab; wheel luminance is a band exposure adjustment.
+COLOR_GRADE_AB_SCALE = 0.12
+COLOR_GRADE_LUMINANCE_EV = 1.0
+COLOR_GRADE_SHADOW_CENTER = 0.35
+COLOR_GRADE_HIGHLIGHT_CENTER = 0.65
+COLOR_GRADE_BLEND_MIN = 0.12
+COLOR_GRADE_BLEND_RANGE = 0.28
+COLOR_GRADE_BALANCE_SHIFT = 0.18
+
+# Conservative bilateral-lite luma NR at half res, then OKLab-ab smoothing.
+NR_LUMA_SIGMA = 0.08
+NR_LUMA_SPATIAL_CENTER = 4.0
+NR_LUMA_SPATIAL_AXIS = 2.0
+NR_COLOR_RADIUS = 1
+
+# Lightroom Defringe hue endpoints are 0..100, mapped to 0..360 degrees.
+# AutoLateralCA remains a later lane; only manual defringe renders here.
+DEFRINGE_HUE_SCALE = 3.6
+DEFRINGE_EDGE_LOW = 0.004
+DEFRINGE_EDGE_HIGH = 0.04
 
 # OKLab (Ottosson): linear sRGB → LMS → OKLab. Nested rows, row-major.
 OKLAB_M1 = (
@@ -156,6 +181,12 @@ LOCAL_BRUSH_GAUSSIAN_SIGMA = 1.0 / 3.0
 LOCAL_COLOR_SIGMA_MIN = 0.015
 LOCAL_COLOR_SIGMA_RANGE = 0.18
 LOCAL_RANGE_EPSILON = 1e-6
+
+# Circular clone/heal spots (§23), rendered as the final pixel operation.
+RETOUCH_RENDER_CAP = 32
+RETOUCH_RING_TAPS = 8
+RETOUCH_RING_SCALE = 1.5
+RETOUCH_MIN_RADIUS = 1e-4
 
 PARITY_TABLE = {
     name: value

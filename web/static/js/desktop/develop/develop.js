@@ -19,6 +19,7 @@ let panels = null;
 let crop = null;
 let histogram = null;
 let masking = null;
+let heal = null;
 let loadingToken = 0;
 let beforeHeld = false;
 let spaceHeld = false;
@@ -387,6 +388,7 @@ function unmount() {
     root.classList.remove('active');
     document.body.classList.remove('develop-active');
     crop.setActive(false);
+    heal?.toggle(false);
 }
 
 export function developOpen() {
@@ -415,6 +417,11 @@ function ensureRenderer() {
 }
 
 function bindUi() {
+    on('develop:open-image', ({ image }) => {
+        if (!image) return;
+        if (!mounted) openDevelop();
+        openImage(image);
+    });
     document.querySelector('#view-switch [data-view="develop"]').addEventListener('click', (event) => {
         event.preventDefault();
         event.stopImmediatePropagation();
@@ -473,6 +480,7 @@ function editingField(event) {
 
 function handleKey(event) {
     if (!mounted || editingField(event)) return;
+    if (heal?.keydown(event)) return;
     if (masking?.keydown(event)) return;
     const key = event.key.toLowerCase();
     if (event.ctrlKey || event.metaKey) {
@@ -513,8 +521,10 @@ function init() {
     panels = new DevelopPanels(panelHost, {
         histogramHost: histogramSlot, cropHost: cropSlot, onChange: settingsChanged,
         masking: { toolbar, stage, canvas, getImageId: () => currentImage?.id, getRenderer: () => renderer },
+        heal: { toolbar, stage, canvas, getRenderer: () => renderer },
     });
     masking = panels.masking;
+    heal = panels.heal;
     crop = new CropController({ stage, canvas, overlay: document.getElementById('develop-crop-overlay'), controls: cropSlot, onChange: settingsChanged });
     mountPresetsPanel(root.querySelector('.develop-layout') || root, {
         getRenderer: () => renderer,

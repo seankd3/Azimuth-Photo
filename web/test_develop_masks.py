@@ -211,9 +211,10 @@ class LocalCorrectionTests(unittest.TestCase):
         self.assertEqual([mask["What"] for correction in settings["MaskGroupBasedCorrections"] for mask in correction["CorrectionMasks"]], ["Mask/Gradient", "Mask/Paint"])
         output = pipeline.apply_pipeline(synthetic_linear_image(), settings, asshot_temperature=5150)
         stats = [float(output.mean()), float(output.std()), *np.percentile(output, [10, 50, 90])]
+        # Intentional Phase 3 golden refresh: grade → defringe → NR now precedes local masks.
         np.testing.assert_allclose(
             stats,
-            [0.6493501663208008, 0.26172658801078796, 0.26092936992645266, 0.6696124970912933, 0.9833995044231416],
+            [0.6627953052520752, 0.2570503056049347, 0.30544613301754, 0.6815890669822693, 0.9896051108837128],
             rtol=0.0,
             atol=2e-6,
         )

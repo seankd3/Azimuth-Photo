@@ -1,7 +1,7 @@
 import {
     byId, emit, on, rememberImages, setActiveLens, viewState,
 } from './state.js';
-import { getImageExif, thumbUrl, writeFlag } from './api.js';
+import { getImageExif, getStack, thumbUrl, writeFlag } from './api.js';
 import { applyFlags, beginFlagMutation, flagMutationIsLatest } from './selection.js';
 import { openCollectionPicker } from './panel.js';
 import { requestMorePhotos } from './grid.js';
@@ -35,6 +35,8 @@ let stripSignature = '';
 let previousStripIndex = -1;
 const exifCache = new Map();
 const INFO_MODES = ['off', 'basic', 'full'];
+const RAW_EXTENSIONS = new Set(['arw', 'cr2', 'cr3', 'dng', 'nef', 'orf', 'raf', 'rw2']);
+let versionStack = null;
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&#34;', "'": '&#39;',
@@ -46,6 +48,11 @@ function images() {
 
 function current() {
     return images()[index] || null;
+}
+
+function isRaw(img) {
+    const filename = String(img?.filename || img?.filepath || '');
+    return RAW_EXTENSIONS.has(filename.split('.').pop().toLowerCase());
 }
 
 function isGridScope() {
@@ -402,6 +409,11 @@ function updateChrome() {
     updateFlagControls();
     updateZoomChip();
     updateInfoOverlay();
+    const editRaw = document.getElementById('lp-edit-raw');
+    if (editRaw) {
+        const hasVersion = img.stack_kind === 'version' || versionStack?.kind === 'version';
+        editRaw.hidden = !(hasVersion && !isRaw(img));
+    }
 }
 
 function render() {
@@ -488,6 +500,7 @@ export function openLoupe(target = 0) {
     const id = typeof target === 'object' ? Number(target.id) : null;
     const resolvedIndex = id ? list.findIndex((img) => Number(img?.id) === id) : -1;
     index = Math.max(0, Math.min(list.length - 1, resolvedIndex >= 0 ? resolvedIndex : startIndex));
+    versionStack = null;
     centerFit({ animate: false });
     open = true;
     setLightMode('normal');
@@ -516,6 +529,7 @@ export function unmountLoupe() {
     const endedImageId = Number(current()?.id);
     open = false;
     sessionImages = null;
+    versionStack = null;
     imageWaiters = [];
     const root = document.getElementById('loupe');
     root.hidden = true;
@@ -557,6 +571,51 @@ export async function navLoupeTo(targetIndex) {
 
 export function loupeImageId() {
     return Number(current()?.id) || null;
+}
+
+async function versionStackForCurrent() {
+    const image = current();
+    if (versionStack?.kind === 'version'
+        && (versionStack.members || []).some((member) => Number(member?.id) === Number(image?.id))) {
+        return versionStack;
+    }
+    const stackId = Number(image?.stack_id) || 0;
+    if (!stackId) return null;
+    try {
+        const stack = await getStack(stackId);
+        if (stack?.kind !== 'version') return null;
+        versionStack = stack;
+        return stack;
+    } catch {
+        showToast("Version stack couldn't load");
+        return null;
+    }
+}
+
+export async function toggleLoupeVersion() {
+    if (!open) return false;
+    const stack = await versionStackForCurrent();
+    if (!stack) return false;
+    const members = Array.isArray(stack.members) ? stack.members : [];
+    const raw = members.find(isRaw);
+    const image = current();
+    const edit = members.find((member) => Number(member?.id) === Number(stack.representative?.id))
+        || members.find((member) => !isRaw(member));
+    const target = isRaw(image) ? edit : raw;
+    if (!target) return false;
+    sessionImages = members;
+    rememberImages(members);
+    index = Math.max(0, members.findIndex((member) => Number(member?.id) === Number(target.id)));
+    render();
+    showToast(isRaw(target) ? 'RAW original' : 'Finished edit');
+    return true;
+}
+
+async function editRawFromLoupe() {
+    const stack = await versionStackForCurrent();
+    const raw = (stack?.members || []).find(isRaw);
+    if (!raw) return;
+    emit('develop:open-image', { image: raw });
 }
 
 export function fitLoupe() {
@@ -692,6 +751,16 @@ function ensureLoupeChrome() {
         document.getElementById('loupe-zoom').dataset.tip = 'Fit / 100% · Space';
     }
     if (close.parentElement !== actions) actions.append(close);
+    if (!document.getElementById('lp-edit-raw')) {
+        const editRaw = document.createElement('button');
+        editRaw.id = 'lp-edit-raw';
+        editRaw.className = 'icon-btn';
+        editRaw.dataset.tip = 'Edit RAW original';
+        editRaw.setAttribute('aria-label', 'Edit RAW original');
+        editRaw.textContent = 'Edit RAW';
+        editRaw.hidden = true;
+        actions.insertBefore(editRaw, close);
+    }
     if (strip.parentElement !== root) root.append(strip);
     if (stage.parentElement !== root) root.append(stage);
 }
@@ -753,7 +822,11 @@ function bindKeyboard() {
     window.addEventListener('keydown', (event) => {
         if (!open || event.ctrlKey || event.metaKey || event.altKey) return;
         const key = event.key.toLowerCase();
-        if (event.key === ' ' || key === 'z') {
+        if (key === 'v') {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            toggleLoupeVersion();
+        } else if (event.key === ' ' || key === 'z') {
             event.preventDefault();
             event.stopImmediatePropagation();
             toggleFitOneToOne();
@@ -785,6 +858,7 @@ export function initLoupe() {
         navLoupe(1);
     });
     document.getElementById('loupe-close').addEventListener('click', () => closeLoupe({ force: true }));
+    document.getElementById('lp-edit-raw')?.addEventListener('click', () => { editRawFromLoupe(); });
     document.getElementById('lp-pick').addEventListener('click', () => flagCurrent('picked'));
     document.getElementById('lp-reject').addEventListener('click', () => flagCurrent('rejected'));
     document.getElementById('lp-unflag').addEventListener('click', () => flagCurrent('unflagged'));

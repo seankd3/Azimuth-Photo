@@ -1255,6 +1255,26 @@ body.develop-active #canvas > .view:not(#view-develop) { display: none !importan
 #develop-crop-controls button,
 .develop-popover button { min-height: 26px; padding: 0 8px; border: 1px solid var(--line); border-radius: var(--r-ctl); color: var(--text-2); font-size: 10px; background: var(--card); }
 .develop-curve { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: 2px; cursor: crosshair; touch-action: none; }
+.develop-wheels { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 8px; margin-bottom: 10px; }
+.develop-wheel { display: grid; justify-items: center; gap: 3px; min-width: 0; color: var(--text-3); font-size: 9px; }
+.develop-wheel canvas { width: 100%; max-width: 112px; height: auto; border-radius: 50%; cursor: crosshair; touch-action: none; box-shadow: inset 0 0 0 1px rgba(255,255,255,.12); }
+.develop-wheel b { color: var(--text-2); font-size: 10px; font-weight: 600; }
+.develop-wheel label { display: flex; align-items: center; gap: 4px; width: 100%; color: var(--text-3); font-size: 9px; }
+.develop-wheel input { min-width: 0; width: 100%; accent-color: var(--accent); }
+.develop-heal-layer { position: absolute; z-index: 4; inset: 0; touch-action: none; }
+.develop-heal-layer[hidden] { display: none; }
+.develop-heal-handle { position: absolute; width: 15px; height: 15px; padding: 0; border: 2px solid #fff; border-radius: 50%; transform: translate(-50%, -50%); background: rgba(8,10,12,.72); box-shadow: 0 1px 5px rgba(0,0,0,.65); touch-action: none; }
+.develop-heal-handle.source { border-color: #ffb24d; }
+.develop-heal-handle.destination { border-color: #fff; }
+.develop-heal-circle { position: absolute; border: 1px solid rgba(255,178,77,.92); border-radius: 50%; transform: translate(-50%, -50%); box-shadow: 0 0 0 1px rgba(0,0,0,.55); pointer-events: none; }
+.develop-heal-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; color: var(--text-3); font-size: 10px; }
+.develop-heal-head button,
+.develop-heal-spot button,
+.develop-heal-spot select { min-height: 26px; padding: 0 7px; border: 1px solid var(--line); border-radius: var(--r-ctl); color: var(--text-2); font-size: 10px; background: var(--card); }
+.develop-heal-spot { display: grid; grid-template-columns: 1fr auto auto; gap: 5px; padding: 7px 0; border-top: 1px solid var(--line); }
+.develop-heal-spot.selected { color: var(--text); }
+.develop-heal-spot label { grid-column: 1 / -1; display: grid; grid-template-columns: 58px minmax(0, 1fr); align-items: center; gap: 7px; color: var(--text-3); font-size: 9px; }
+.develop-heal-spot input { min-width: 0; width: 100%; accent-color: var(--accent); }
 .develop-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; margin: 8px 0; padding: 2px; border-radius: var(--r-ctl); background: #101216; }
 .develop-tabs button { height: 24px; border: 0; border-radius: 3px; color: var(--text-3); font-size: 10px; background: transparent; }
 .develop-tabs button.active { color: var(--text); background: #2a2d33; }

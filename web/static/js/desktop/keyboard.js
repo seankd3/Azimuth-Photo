@@ -7,7 +7,7 @@ import {
 import { applyFlags, selectLoadedImages, toggleFocusedSelection } from './selection.js';
 import {
     closeLoupe, fitLoupe, flagLoupeOrFocused, loupeImageId, loupeOpen, navLoupe, navLoupeTo,
-    openLoupe, panLoupe, toggleLoupeInfo, toggleLoupeLights, zoomLoupeBy,
+    openLoupe, panLoupe, toggleLoupeInfo, toggleLoupeLights, toggleLoupeVersion, zoomLoupeBy,
 } from './loupe.js';
 import {
     closeRefine, refineOpen, openRefine, pickByKey, undoRefine,
@@ -348,6 +348,7 @@ export function initKeyboard() {
             else if (lk === 'g') closeLoupe({ force: true });
             else if (lk === 'l') toggleLoupeLights();
             else if (lk === 'i') toggleLoupeInfo();
+            else if (lk === 'v') toggleLoupeVersion();
             else if (lk === 'p') flagLoupeOrFocused('picked');
             else if (lk === 'x') flagLoupeOrFocused('rejected');
             else if (lk === 'u') flagLoupeOrFocused('unflagged');

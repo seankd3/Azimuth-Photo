@@ -227,9 +227,6 @@ def map_lrcat_settings(text: str | bytes) -> dict[str, Any]:
             curve = _curve_points(parameters.get(_CURVE_PREFIX))
             if isinstance(curve, list):
                 parameters[_CURVE_PREFIX] = curve
-                # The Look curve is Lightroom's profile base curve; this is the
-                # one curve v1's canonical renderer can apply.
-                settings[_CURVE_PREFIX] = curve
     return settings
 
 

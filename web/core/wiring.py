@@ -7,6 +7,7 @@ from features.catalog import routes as catalog_routes
 from features.collections import routes as collection_routes
 from features.compare import routes as compare_routes
 from features.develop import ai_mask_routes, hdr_routes, import_routes, pano_routes, preset_routes, routes as develop_routes
+from features.system import backup_routes
 from features.export import routes as export_routes
 from features.library import routes as library_routes
 from features.media import routes as media_routes
@@ -240,6 +241,12 @@ def configure_develop_pano_routes() -> None:
     import db
 
     pano_routes.configure(db_path=lambda: db.DB_PATH)
+
+
+def configure_system_backup_routes() -> None:
+    import db
+
+    backup_routes.configure(db_path=lambda: db.DB_PATH)
 
 
 def configure_library_routes() -> None:

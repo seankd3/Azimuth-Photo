@@ -90,9 +90,11 @@ PUBLIC_ROUTE_CONTRACT = {
     ("GET", "/api/stats"),
     ("GET", "/api/stacks"),
     ("GET", "/api/stacks/rebuild/status"),
+    ("GET", "/api/stacks/representatives"),
     ("GET", "/api/stacks/{stack_id}"),
     ("POST", "/api/stacks"),
     ("POST", "/api/stacks/rebuild"),
+    ("POST", "/api/stacks/version/scan"),
     ("POST", "/api/stacks/{stack_id}/representative"),
     ("POST", "/api/stacks/{stack_id}/unstack"),
     ("POST", "/api/images/trash"),
@@ -174,6 +176,15 @@ PUBLIC_ROUTE_CONTRACT = {
     ("POST", "/api/develop/pano/merge"),
     ("GET", "/api/develop/film/stocks"),
     ("GET", "/api/develop/film/stocks/{slug}"),
+    ("POST", "/api/system/backup/now"),
+    ("GET", "/api/system/backup/list"),
+    ("POST", "/api/system/backup/restore"),
+    ("POST", "/api/system/integrity/scan"),
+    ("GET", "/api/system/integrity/status"),
+    # PATCH: quality lane
+    ("GET", "/api/quality/status"),
+    ("POST", "/api/quality/scan"),
+    ("GET", "/api/quality/{image_id}"),
 }
 
 class ModularContractTests(unittest.TestCase):

@@ -12,8 +12,8 @@ from data import connection as data_connection
 from data.repositories.common import chunked
 
 
-VALID_KINDS = {"burst", "variant", "crosssource", "manual"}
-AUTO_PRIORITIES = {"burst": 1, "variant": 2, "crosssource": 3}
+VALID_KINDS = {"burst", "variant", "crosssource", "version", "manual"}
+AUTO_PRIORITIES = {"burst": 1, "variant": 2, "crosssource": 3, "version": 4}
 
 
 class ManualStackConflict(ValueError):
@@ -407,7 +407,7 @@ async def representative_stack_counts(db_path: str, image_ids) -> dict[int, dict
         for chunk in chunked(ids, 900):
             placeholders = ",".join("?" for _ in chunk)
             cursor = await conn.execute(
-                "SELECT s.representative_image_id, s.id AS stack_id, COUNT(sm.image_id) AS member_count "
+                "SELECT s.representative_image_id, s.id AS stack_id, s.kind AS stack_kind, COUNT(sm.image_id) AS member_count "
                 "FROM stacks s JOIN stack_members sm ON sm.stack_id = s.id "
                 "JOIN images i ON i.id = sm.image_id "
                 "JOIN catalog_sources cs ON cs.id = i.source_id "
@@ -420,6 +420,7 @@ async def representative_stack_counts(db_path: str, image_ids) -> dict[int, dict
                 result[int(row["representative_image_id"])] = {
                     "stack_id": int(row["stack_id"]),
                     "stack_count": int(row["member_count"] or 0),
+                    "stack_kind": str(row["stack_kind"]),
                 }
     finally:
         await data_connection.close_async(conn, db_path=db_path)
@@ -438,6 +439,96 @@ async def stack_for_image(db_path: str, image_id: int) -> dict | None:
     finally:
         await data_connection.close_async(conn, db_path=db_path)
     return await get_stack(db_path, int(row["id"])) if row is not None else None
+
+
+def join_version_stack_sync(db_path: str, raw_image_id: int, edit_image_id: int) -> dict:
+    """Attach a freshly saved developed export to its RAW's version stack.
+
+    A manual stack is user intent and therefore wins. Version stacks otherwise
+    supersede lower-priority automatic stacks just like a version rebuild does.
+    """
+    raw_id, edit_id = int(raw_image_id), int(edit_image_id)
+    if raw_id <= 0 or edit_id <= 0 or raw_id == edit_id:
+        raise ValueError("A version stack needs distinct RAW and edit images")
+    now = time.time()
+    conn = data_connection.open_sync(db_path)
+    try:
+        conn.execute("BEGIN")
+        found = {
+            int(row["id"])
+            for row in conn.execute(
+                "SELECT id FROM images WHERE id IN (?, ?)", (raw_id, edit_id)
+            ).fetchall()
+        }
+        if found != {raw_id, edit_id}:
+            raise UnknownStackImages({raw_id, edit_id} - found)
+        memberships = {
+            int(row["image_id"]): dict(row)
+            for row in conn.execute(
+                "SELECT sm.image_id, s.id AS stack_id, s.kind, s.auto "
+                "FROM stack_members sm JOIN stacks s ON s.id = sm.stack_id "
+                "WHERE sm.image_id IN (?, ?)",
+                (raw_id, edit_id),
+            ).fetchall()
+        }
+        if any(not membership["auto"] for membership in memberships.values()):
+            conn.rollback()
+            return {"joined": False, "reason": "manual_stack"}
+
+        raw_membership = memberships.get(raw_id)
+        version_stack_id = (
+            int(raw_membership["stack_id"])
+            if raw_membership and raw_membership["kind"] == "version"
+            else next(
+                (
+                    int(membership["stack_id"])
+                    for membership in memberships.values()
+                    if membership["kind"] == "version"
+                ),
+                None,
+            )
+        )
+        for image_id, membership in memberships.items():
+            if int(membership["stack_id"]) != version_stack_id:
+                conn.execute(
+                    "DELETE FROM stack_members WHERE stack_id = ? AND image_id = ?",
+                    (int(membership["stack_id"]), image_id),
+                )
+        _sync_repair_auto_stacks(conn, now)
+        if version_stack_id is None:
+            cursor = conn.execute(
+                "INSERT INTO stacks (kind, representative_image_id, auto, created_at, updated_at) "
+                "VALUES ('version', ?, 1, ?, ?)",
+                (edit_id, now, now),
+            )
+            version_stack_id = int(cursor.lastrowid)
+            conn.execute(
+                "INSERT INTO stack_members (stack_id, image_id, score, added_at) VALUES (?, ?, ?, ?)",
+                (version_stack_id, raw_id, 1.0, now),
+            )
+        conn.execute(
+            "INSERT OR IGNORE INTO stack_members (stack_id, image_id, score, added_at) VALUES (?, ?, ?, ?)",
+            (version_stack_id, raw_id, 1.0, now),
+        )
+        conn.execute(
+            "INSERT OR IGNORE INTO stack_members (stack_id, image_id, score, added_at) VALUES (?, ?, ?, ?)",
+            (version_stack_id, edit_id, 1.0, now),
+        )
+        conn.execute(
+            "UPDATE stacks SET representative_image_id = ?, auto = 1, updated_at = ? WHERE id = ?",
+            (edit_id, now, version_stack_id),
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        data_connection.close_sync(conn, db_path=db_path)
+    return {"joined": True, "stack_id": version_stack_id, "representative_image_id": edit_id}
+
+
+async def join_version_stack(db_path: str, raw_image_id: int, edit_image_id: int) -> dict:
+    return await asyncio.to_thread(join_version_stack_sync, db_path, raw_image_id, edit_image_id)
 
 
 def _sync_fetch_manual_ids(conn, image_ids: list[int]) -> set[int]:

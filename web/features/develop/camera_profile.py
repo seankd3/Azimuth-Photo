@@ -52,11 +52,10 @@ def _validated_profile(payload: object) -> dict[str, Any] | None:
         right <= left for left, right in zip(edges, edges[1:])
     ):
         return None
-    if not payload.get("tone_trusted"):
-        # The fitted tone LUT conflates per-photo Looks (film-preset curves we do
-        # not render yet) with camera rendering — measured to regress luma on
-        # reference frames. Until Looks render and the fit excludes them, keep
-        # only the fitted color table and substitute the generic base curve.
+    tone_trusted = payload.get("tone_trusted") is True
+    if not tone_trusted:
+        # Only use fitted tone after the fitter's per-camera 20% holdout gate.
+        # Color-table fitting remains useful independently of that decision.
         xs = [p[0] / 255.0 for p in C.BASE_PROFILE_POINTS]
         ys = [p[1] / 255.0 for p in C.BASE_PROFILE_POINTS]
 
@@ -74,6 +73,7 @@ def _validated_profile(payload: object) -> dict[str, Any] | None:
     return {
         **payload,
         "model": str(payload.get("model") or ""),
+        "tone_trusted": tone_trusted,
         "tone_nodes": nodes,
         "tone_values": values,
         "oklab_ab_delta": deltas,

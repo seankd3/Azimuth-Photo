@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from data import connection
 from data.repositories import images as image_repository
+from data.repositories import stacks as stack_repository
 from features.develop import rawproc
 
 
@@ -555,6 +556,9 @@ async def api_export_develop(image_id: int, body: DevelopExportBody):
                 source_image=image,
                 download_name=filename,
             )
+            library_info["version_stack"] = await stack_repository.join_version_stack(
+                _configured_db_path(), image_id, int(library_info["library_image_id"])
+            )
         except Exception as exc:
             return JSONResponse({"error": f"Export rendered but library save failed: {exc}"}, status_code=422)
 
@@ -641,6 +645,9 @@ async def _run_batch_export(body: DevelopBatchExportBody) -> None:
                     db_path=_configured_db_path(),
                     source_image=image,
                     download_name=filename,
+                )
+                result["library"]["version_stack"] = await stack_repository.join_version_stack(
+                    _configured_db_path(), image_id, int(result["library"]["library_image_id"])
                 )
             _batch_status["results"].append(result)
         except (rawproc.RawDecodeError, RenderError, ValueError, OSError) as exc:

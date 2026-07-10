@@ -13,6 +13,8 @@ from collections.abc import Mapping, Sequence
 import numpy as np
 
 from . import ops_constants as C
+from .lens import distortion_auto_crop_scale
+from .looks import compose_curve_luts, effective_settings, look_amount, look_curve
 
 
 def _number(settings: Mapping[str, object], key: str, default: float = 0.0) -> float:
@@ -438,6 +440,13 @@ def _apply_tone_curves(
 ) -> np.ndarray:
     result = c.copy()
     base_lut = build_monotone_cubic_lut(_profile_curve_points(camera_profile))
+    imported_look_curve = look_curve(settings)
+    if imported_look_curve is not None:
+        base_lut = compose_curve_luts(
+            base_lut,
+            build_monotone_cubic_lut(imported_look_curve),
+            look_amount(settings),
+        )
     for index in range(3):
         result[..., index] = _apply_lut(c[..., index], base_lut)
     if camera_profile is None:
@@ -583,12 +592,19 @@ def _apply_lens_correction(
     height, width = rgb.shape[:2]
     canvas_width, canvas_height = canvas_size or (width, height)
     offset_x, offset_y = pixel_offset
-    x = np.arange(width, dtype=np.float32) + offset_x + C.LENS_IMAGE_CENTER
-    y = np.arange(height, dtype=np.float32) + offset_y + C.LENS_IMAGE_CENTER
-    half_min = min(canvas_width, canvas_height) / C.LENS_NORMALIZED_HALF_MIN
     crop_ratio = float(correction.get("lens_crop_factor") or 1.0) / max(
         float(correction.get("camera_crop_factor") or 1.0), C.TONE_EPSILON
     )
+    # Crop the corrected view before inverse remapping.  This avoids black
+    # borders for outward radial models; identity polynomials return scale 1.
+    auto_crop = distortion_auto_crop_scale(
+        correction.get("distortion"), canvas_width, canvas_height, crop_ratio,
+    )
+    x = np.arange(width, dtype=np.float32) + offset_x + C.LENS_IMAGE_CENTER
+    y = np.arange(height, dtype=np.float32) + offset_y + C.LENS_IMAGE_CENTER
+    x = canvas_width * C.LENS_IMAGE_CENTER + (x - canvas_width * C.LENS_IMAGE_CENTER) * auto_crop
+    y = canvas_height * C.LENS_IMAGE_CENTER + (y - canvas_height * C.LENS_IMAGE_CENTER) * auto_crop
+    half_min = min(canvas_width, canvas_height) / C.LENS_NORMALIZED_HALF_MIN
     px = (x[None, :] - canvas_width * C.LENS_IMAGE_CENTER) / half_min * crop_ratio
     py = (y[:, None] - canvas_height * C.LENS_IMAGE_CENTER) / half_min * crop_ratio
     radius = np.sqrt(px * px + py * py)
@@ -714,6 +730,98 @@ def _hsl_and_black_white(c: np.ndarray, settings: Mapping[str, object], dehaze: 
         vibrance=_slider(settings, "Vibrance"),
         dehaze=dehaze,
     )
+
+
+def _color_grade(c: np.ndarray, settings: Mapping[str, object]) -> np.ndarray:
+    """§22 four-wheel grade: ab offsets plus luminance-band exposure in OKLab."""
+    wheel_names = ("Shadow", "Midtone", "Highlight", "Global")
+    if not any(_number(settings, f"ColorGrade{name}{part}") != 0.0 for name in wheel_names for part in ("Hue", "Sat", "Lum")):
+        return c
+    lightness = luma(c)
+    blending = np.clip(_number(settings, "ColorGradeBlending", 50.0), 0.0, 100.0) / 100.0
+    balance = _slider(settings, "ColorGradeBalance") * C.COLOR_GRADE_BALANCE_SHIFT
+    width = C.COLOR_GRADE_BLEND_MIN + blending * C.COLOR_GRADE_BLEND_RANGE
+    shadows = 1.0 - _smoothstep(C.COLOR_GRADE_SHADOW_CENTER + balance - width, C.COLOR_GRADE_SHADOW_CENTER + balance + width, lightness)
+    highlights = _smoothstep(C.COLOR_GRADE_HIGHLIGHT_CENTER + balance - width, C.COLOR_GRADE_HIGHLIGHT_CENTER + balance + width, lightness)
+    weights = {"Shadow": shadows, "Highlight": highlights, "Midtone": np.clip(1.0 - np.maximum(shadows, highlights), 0.0, 1.0), "Global": np.ones_like(lightness)}
+    linear = srgb_to_linear(c)
+    lab = linear_to_oklab(linear)
+    exposure = np.zeros_like(lightness)
+    for name in wheel_names:
+        weight = weights[name]
+        hue = np.deg2rad(_number(settings, f"ColorGrade{name}Hue"))
+        saturation = _slider(settings, f"ColorGrade{name}Sat")
+        lab[..., 1] += np.cos(hue) * saturation * C.COLOR_GRADE_AB_SCALE * weight
+        lab[..., 2] += np.sin(hue) * saturation * C.COLOR_GRADE_AB_SCALE * weight
+        exposure += _slider(settings, f"ColorGrade{name}Lum") * C.COLOR_GRADE_LUMINANCE_EV * weight
+    graded = _gamut_clip_desaturate(oklab_to_linear(lab)) * np.exp2(exposure)[..., None]
+    return linear_to_srgb(_gamut_clip_desaturate(graded))
+
+
+def _hue_window(hue: np.ndarray, lo: float, hi: float) -> np.ndarray:
+    """Inclusive circular 0..360-degree hue interval."""
+    lo, hi = np.mod(lo, 360.0), np.mod(hi, 360.0)
+    return ((hue >= lo) & (hue <= hi)) if lo <= hi else ((hue >= lo) | (hue <= hi))
+
+
+def _defringe(c: np.ndarray, settings: Mapping[str, object]) -> np.ndarray:
+    """Manual-only purple/green fringe desaturation on sharpen-field edges."""
+    purple = np.clip(_number(settings, "DefringePurpleAmount"), 0.0, 100.0) / 100.0
+    green = np.clip(_number(settings, "DefringeGreenAmount"), 0.0, 100.0) / 100.0
+    if purple == 0.0 and green == 0.0:
+        return c
+    source_luma = luma(c)
+    edge = _smoothstep(C.DEFRINGE_EDGE_LOW, C.DEFRINGE_EDGE_HIGH, np.abs(source_luma - gaussian_blur(source_luma, 1.0)))
+    hue, saturation, value = rgb_to_hsv(c)
+    amount = np.zeros_like(saturation)
+    for prefix, strength in (("Purple", purple), ("Green", green)):
+        if strength == 0.0:
+            continue
+        lo = _number(settings, f"Defringe{prefix}HueLo", 30.0 if prefix == "Purple" else 40.0) * C.DEFRINGE_HUE_SCALE
+        hi = _number(settings, f"Defringe{prefix}HueHi", 70.0 if prefix == "Purple" else 60.0) * C.DEFRINGE_HUE_SCALE
+        amount = np.maximum(amount, strength * _hue_window(hue, lo, hi))
+    saturation *= 1.0 - amount * edge
+    return hsv_to_rgb(hue, np.clip(saturation, 0.0, 1.0), value)
+
+
+def _cross_blur(field: np.ndarray, radius: int = C.NR_COLOR_RADIUS) -> np.ndarray:
+    """Reflect-padded center-plus-axes blur, matching the GLSL NR taps."""
+    if radius <= 0:
+        return field.astype(np.float32, copy=True)
+    padded = np.pad(field, ((radius, radius), (radius, radius)), mode="reflect")
+    center = padded[radius:radius + field.shape[0], radius:radius + field.shape[1]]
+    return (center + padded[:field.shape[0], radius:radius + field.shape[1]]
+            + padded[2 * radius:2 * radius + field.shape[0], radius:radius + field.shape[1]]
+            + padded[radius:radius + field.shape[0], :field.shape[1]]
+            + padded[radius:radius + field.shape[0], 2 * radius:2 * radius + field.shape[1]]) / 5.0
+
+
+def _noise_reduction(c: np.ndarray, settings: Mapping[str, object]) -> np.ndarray:
+    """§22 NR: half-res bilateral-lite luma, then full-res OKLab-ab smoothing."""
+    luminance_amount = np.clip(_number(settings, "LuminanceSmoothing"), 0.0, 100.0) / 100.0
+    chroma_amount = np.clip(_number(settings, "ColorNoiseReduction"), 0.0, 100.0) / 100.0
+    if luminance_amount == 0.0 and chroma_amount == 0.0:
+        return c
+    result = c.astype(np.float32, copy=True)
+    if luminance_amount:
+        full_luma = luma(result)
+        half = full_luma[::2, ::2]
+        padded = np.pad(half, 1, mode="reflect")
+        total = np.full_like(half, C.NR_LUMA_SPATIAL_CENTER)
+        filtered = half * C.NR_LUMA_SPATIAL_CENTER
+        for y, x, spatial in ((0, 1, C.NR_LUMA_SPATIAL_AXIS), (2, 1, C.NR_LUMA_SPATIAL_AXIS), (1, 0, C.NR_LUMA_SPATIAL_AXIS), (1, 2, C.NR_LUMA_SPATIAL_AXIS)):
+            neighbor = padded[y:y + half.shape[0], x:x + half.shape[1]]
+            weight = spatial * np.exp(-np.square(neighbor - half) / (2.0 * C.NR_LUMA_SIGMA ** 2))
+            filtered += neighbor * weight
+            total += weight
+        smooth = (filtered / total).repeat(2, axis=0).repeat(2, axis=1)[:result.shape[0], :result.shape[1]]
+        result += ((smooth - full_luma) * luminance_amount)[..., None]
+    if chroma_amount:
+        lab = linear_to_oklab(srgb_to_linear(np.clip(result, 0.0, 1.0)))
+        smooth_ab = np.stack((_cross_blur(lab[..., 1]), _cross_blur(lab[..., 2])), axis=-1)
+        lab[..., 1:3] = lab[..., 1:3] * (1.0 - chroma_amount) + smooth_ab * chroma_amount
+        result = linear_to_srgb(_gamut_clip_desaturate(oklab_to_linear(lab)))
+    return result.astype(np.float32)
 
 
 def gaussian_blur(field: np.ndarray, sigma: float) -> np.ndarray:
@@ -843,7 +951,7 @@ def apply_pipeline(
     blur_min_dimension: int | None = None,
 ) -> np.ndarray:
     """Apply v1.5 color operations in order and return float32 sRGB."""
-    settings = settings or {}
+    settings = effective_settings(settings)
     rgb = np.asarray(linear_rgb, dtype=np.float32)
     if rgb.ndim != 3 or rgb.shape[-1] != 3:
         raise ValueError("linear_rgb must have shape (height, width, 3)")
@@ -867,8 +975,12 @@ def apply_pipeline(
     c = _hsl_and_black_white(c, settings, dehaze)
     if not _bool(settings, "ConvertToGrayscale"):
         c = apply_camera_profile_ab(c, fitted_profile)
-    # Local corrections live exactly between global HSL/vibrance and global
-    # detail. Import lazily so masks.py can remain a standalone raster/math twin.
+    # §22 global ordering: HSL/vibrance -> grade -> defringe -> NR -> local -> detail.
+    c = _color_grade(c, settings)
+    c = _defringe(c, settings)
+    c = _noise_reduction(c, settings)
+    # Local corrections remain after grade and before global detail. Import
+    # lazily so masks.py can remain a standalone raster/math twin.
     from .masks import apply_local_corrections, has_local_adjustments
 
     detail_lightness = None
@@ -907,6 +1019,9 @@ def apply_pipeline(
     c = _detail(c, settings, blur_min_dimension=blur_min_dimension, lightness=detail_lightness, blurs=detail_blurs)
     c = _vignette(c, settings, pixel_offset=pixel_offset, canvas_size=canvas_size)
     c = _grain(c, settings, pixel_offset=pixel_offset)
+    # §23 must be the final pixel operation, after locals and global effects.
+    from .heal import apply_retouch_spots
+    c = apply_retouch_spots(c, settings)
     return np.clip(c, 0.0, 1.0).astype(np.float32)
 
 

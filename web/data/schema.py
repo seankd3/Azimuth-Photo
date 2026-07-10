@@ -8,7 +8,7 @@ from date_inference import infer_image_date
 from data.repositories import catalog as catalog_repository
 
 EXPECTED_EMBEDDING_DIM = 2048  # Qwen3-VL-Embedding-2B native dimension
-SCHEMA_VERSION = 22
+SCHEMA_VERSION = 24
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS catalog_sources (
@@ -531,7 +531,7 @@ ON import_batch_images(image_id, batch_id);
 
 CREATE TABLE IF NOT EXISTS stacks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    kind TEXT NOT NULL CHECK(kind IN ('burst','variant','crosssource','manual')),
+    kind TEXT NOT NULL CHECK(kind IN ('burst','variant','crosssource','version','manual')),
     representative_image_id INTEGER NOT NULL REFERENCES images(id),
     auto INTEGER NOT NULL DEFAULT 1,
     created_at REAL,
@@ -769,6 +769,16 @@ CREATE INDEX IF NOT EXISTS idx_people_merge_suggestions_pending
 ON people_merge_suggestions(status, confidence DESC);
 CREATE INDEX IF NOT EXISTS idx_face_scan_images_status
 ON face_scan_images(model_id, status, scanned_at);
+
+-- v24: original-file integrity checksums (bit-rot audit). Additive only.
+CREATE TABLE IF NOT EXISTS image_checksums (
+    image_id INTEGER PRIMARY KEY REFERENCES images(id) ON DELETE CASCADE,
+    sha256 TEXT NOT NULL,
+    bytes INTEGER NOT NULL,
+    checked_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_image_checksums_checked
+ON image_checksums(checked_at);
 """
 
 PRE_SCHEMA_CATALOG_SOURCES_DDL = (
@@ -1050,6 +1060,7 @@ REQUIRED_TABLES = {
     "person_image_membership",
     "people_merge_suggestions",
     "face_scan_images",
+    "image_checksums",
 }
 
 REQUIRED_COLUMNS = {
@@ -1129,6 +1140,7 @@ REQUIRED_COLUMNS = {
         "hook_ran_at",
     },
     "image_captions": {"user_edited"},
+    "image_checksums": {"image_id", "sha256", "bytes", "checked_at"},
 }
 
 REQUIRED_INDEXES = {
@@ -1180,6 +1192,7 @@ REQUIRED_INDEXES = {
     "idx_person_image_membership_image",
     "idx_people_merge_suggestions_pending",
     "idx_face_scan_images_status",
+    "idx_image_checksums_checked",
 }
 
 
@@ -1222,8 +1235,56 @@ async def prepare_existing_database_for_schema(conn) -> None:
     await _add_columns_if_missing(conn, "collection_shares", COLLECTION_SHARE_COMPAT_COLUMNS)
     await _add_columns_if_missing(conn, "collection_publishes", COLLECTION_PUBLISH_COMPAT_COLUMNS)
     await _add_columns_if_missing(conn, "image_captions", IMAGE_CAPTION_COMPAT_COLUMNS)
+    await migrate_stack_kind_for_versions(conn)
     await migrate_collection_shares_for_published_nodes(conn)
     await migrate_share_owner_cascades(conn)
+
+
+async def migrate_stack_kind_for_versions(conn) -> None:
+    """Rebuild legacy ``stacks`` CHECK constraints to admit version groups."""
+
+    if not await table_exists(conn, "stacks"):
+        return
+    cursor = await conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'stacks'"
+    )
+    row = await cursor.fetchone()
+    if row is None or "'version'" in str(row["sql"] or ""):
+        return
+
+    await conn.commit()
+    await conn.execute("PRAGMA foreign_keys=OFF")
+    try:
+        await conn.executescript(
+            """
+            BEGIN;
+            DROP TABLE IF EXISTS stacks_new;
+            CREATE TABLE stacks_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                kind TEXT NOT NULL CHECK(kind IN ('burst','variant','crosssource','version','manual')),
+                representative_image_id INTEGER NOT NULL REFERENCES images(id),
+                auto INTEGER NOT NULL DEFAULT 1,
+                created_at REAL,
+                updated_at REAL
+            );
+            INSERT INTO stacks_new (
+                id, kind, representative_image_id, auto, created_at, updated_at
+            )
+            SELECT id, kind, representative_image_id, auto, created_at, updated_at
+            FROM stacks;
+            DROP TABLE stacks;
+            ALTER TABLE stacks_new RENAME TO stacks;
+            COMMIT;
+            """
+        )
+    except Exception:
+        try:
+            await conn.rollback()
+        except Exception:
+            pass
+        raise
+    finally:
+        await conn.execute("PRAGMA foreign_keys=ON")
 
 
 async def migrate_collection_shares_for_published_nodes(conn) -> None:
@@ -1562,6 +1623,9 @@ async def apply_schema_and_migrations(conn, *, db_exists: bool) -> None:
         await ensure_compatibility_indexes(conn)
         from features.develop.presets import ensure_develop_presets
         await ensure_develop_presets(conn)
+        # PATCH: quality lane — additive image_quality table (CREATE IF NOT EXISTS; no version bump)
+        from features.quality.scorer import ensure_image_quality
+        await ensure_image_quality(conn)
         await backfill_share_images(conn)
         await backfill_image_tags(conn)
         await backfill_legacy_aspect_ratios(conn)

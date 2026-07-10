@@ -80,14 +80,64 @@ export function buildCurveLut(points) {
     return lut;
 }
 
-export function buildBaseProfileLut(profile = null) {
+function sampleLut(lut, value) {
+    const position = Math.max(0, Math.min(1, Number(value))) * (SIZE - 1);
+    const left = Math.floor(position);
+    const right = Math.min(SIZE - 1, left + 1);
+    const mix = position - left;
+    return lut[left] + (lut[right] - lut[left]) * mix;
+}
+
+export function composeCurveLuts(baseLut, lookLut, amount = 1) {
+    if (baseLut?.length !== SIZE || lookLut?.length !== SIZE) {
+        throw new Error(`curve LUTs must both have ${SIZE} entries`);
+    }
+    const strength = Math.max(0, Math.min(1, Number(amount) || 0));
+    return Float32Array.from(baseLut, value => value + (sampleLut(lookLut, value) - value) * strength);
+}
+
+export function lookAmount(settings = {}) {
+    const look = settings?.Look;
+    if (!look || typeof look !== 'object' || Array.isArray(look)) return 0;
+    let amount = Number(look.Amount ?? 1);
+    if (!Number.isFinite(amount)) amount = 1;
+    if (Math.abs(amount) > 1) amount /= 100;
+    return Math.max(0, Math.min(1, amount));
+}
+
+export function effectiveLookSettings(settings = {}) {
+    const effective = { ...(settings || {}) };
+    const look = settings?.Look;
+    const parameters = look && typeof look === 'object' && !Array.isArray(look)
+        && look.Parameters && typeof look.Parameters === 'object' && !Array.isArray(look.Parameters)
+        ? look.Parameters : {};
+    const amount = lookAmount(settings);
+    if (amount <= 0) return effective;
+    if (parameters.Clarity2012 != null) {
+        const base = Number(settings.Clarity2012) || 0;
+        const lookClarity = Number(parameters.Clarity2012) || 0;
+        effective.Clarity2012 = Math.max(-100, Math.min(100, base + lookClarity * amount));
+    }
+    if (parameters.ConvertToGrayscale === true || parameters.ConvertToGrayscale === 1
+        || String(parameters.ConvertToGrayscale).toLowerCase() === 'true') {
+        effective.ConvertToGrayscale = true;
+    }
+    return effective;
+}
+
+export function buildBaseProfileLut(profile = null, settings = {}) {
     const nodes = profile?.tone_nodes;
     const values = profile?.tone_values;
+    let base;
     if (Array.isArray(nodes) && nodes.length === CAMERA_PROFILE_TONE_NODES
         && Array.isArray(values) && values.length === CAMERA_PROFILE_TONE_NODES) {
-        return buildCurveLut(nodes.map((node, index) => [Number(node) * 255, Number(values[index]) * 255]));
+        base = buildCurveLut(nodes.map((node, index) => [Number(node) * 255, Number(values[index]) * 255]));
+    } else {
+        base = buildCurveLut(BASE_PROFILE_POINTS);
     }
-    return buildCurveLut(BASE_PROFILE_POINTS);
+    const parameters = settings?.Look?.Parameters;
+    const curve = parameters && typeof parameters === 'object' ? parameters.ToneCurvePV2012 : null;
+    return curve ? composeCurveLuts(base, buildCurveLut(curve), lookAmount(settings)) : base;
 }
 
 export function buildCombinedCurveTexture(settings = {}) {

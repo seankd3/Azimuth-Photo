@@ -100,6 +100,26 @@ class DevelopBackendTests(unittest.TestCase):
         self.assertEqual(stored["FutureCrsKey"], {"keep": True})
         self.assertGreaterEqual(len(asyncio.run(self._history_rows())), 2)
 
+    def test_look_round_trip_keeps_the_imported_object_verbatim(self):
+        look = {
+            "Name": "Agfa Precisa 100 II",
+            "Amount": 0.65,
+            "Parameters": {
+                "Clarity2012": 12,
+                "ConvertToGrayscale": False,
+                "ToneCurvePV2012": ["0, 0", "128, 150", "255, 255"],
+                "RGBTable": "unavailable-table-id",
+            },
+        }
+        saved = self.client.put(
+            f"/api/develop/{self.raw_id}",
+            json={"settings": {"Clarity2012": -4, "Look": look}, "label": "Imported Look"},
+        )
+
+        self.assertEqual(saved.status_code, 200)
+        self.assertEqual(saved.json()["settings"]["Look"], look)
+        self.assertEqual(saved.json()["settings"]["Clarity2012"], -4)
+
     def test_history_read_is_capped_at_forty(self):
         for index in range(45):
             response = self.client.put(

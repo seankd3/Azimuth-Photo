@@ -1,10 +1,12 @@
-"""Automatic stack builders for variants, bursts, and cross-source duplicates."""
+"""Automatic stack builders for variants, bursts, cross-source, and RAW versions."""
 
 from __future__ import annotations
 
 import logging
+import json
 import os
 import re
+import subprocess
 import time
 from datetime import datetime
 from pathlib import PurePath
@@ -15,7 +17,7 @@ from features.search.similarity import scan_duplicate_pairs
 
 
 logger = logging.getLogger(__name__)
-STACK_KINDS = ("burst", "variant", "crosssource")
+STACK_KINDS = ("burst", "variant", "crosssource", "version")
 RAW_EXTS = {"arw", "cr2", "cr3", "dng", "nef", "orf", "raf", "rw2"}
 TIFF_EXTS = {"tif", "tiff"}
 JPG_EXTS = {"jpg", "jpeg"}
@@ -33,6 +35,9 @@ VARIANT_MARKER_TOKENS = (
 )
 VARIANT_EXTENSION_SIBLING_EXTS = JPG_EXTS | TIFF_EXTS | {"png"}
 VARIANT_GROUP_MEMBER_CAP = 12
+VERSION_EDIT_EXTS = JPG_EXTS | TIFF_EXTS | {"png", "webp"}
+EXIFTOOL_PATH = "/usr/bin/vendor_perl/exiftool"
+EXIFTOOL_BATCH_SIZE = 250
 _TRAILING_VARIANT_COUNTER_RE = re.compile(r"-\d+$")
 _VARIANT_MARKER_SUFFIXES = tuple(sorted(VARIANT_MARKER_TOKENS, key=len, reverse=True))
 
@@ -54,7 +59,12 @@ def _capture_ts(value) -> float | None:
     if not value:
         return None
     text = str(value)
-    for fmt, length in (("%Y-%m-%d %H:%M:%S", 19), ("%Y-%m-%dT%H:%M:%S", 19), ("%Y-%m-%d", 10)):
+    for fmt, length in (
+        ("%Y-%m-%d %H:%M:%S", 19),
+        ("%Y-%m-%dT%H:%M:%S", 19),
+        ("%Y:%m:%d %H:%M:%S", 19),
+        ("%Y-%m-%d", 10),
+    ):
         try:
             return datetime.strptime(text[:length], fmt).timestamp()
         except ValueError:
@@ -100,6 +110,61 @@ def _strip_variant_marker(text: str) -> str | None:
 def _image_ext(row: dict) -> str:
     value = row.get("file_ext") or os.path.splitext(row.get("filename") or "")[1]
     return str(value or "").lower().lstrip(".")
+
+
+def _is_raw(row: dict) -> bool:
+    return _image_ext(row) in RAW_EXTS
+
+
+def _version_stem(row: dict) -> str:
+    """The exact basename tail used by RAW/export pairs (§20)."""
+    return os.path.splitext(str(row.get("filename") or ""))[0].strip().lower()
+
+
+def _version_capture_key(row: dict) -> tuple[str, str] | None:
+    """Normalized DateTimeOriginal second + Model key from catalog metadata."""
+    timestamp = _capture_ts(row.get("date_taken"))
+    model = " ".join(str(row.get("camera_model") or "").split()).casefold()
+    if timestamp is None or not model:
+        return None
+    return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S"), model
+
+
+def _exiftool_version_metadata(rows: list[dict]) -> dict[str, tuple[str, str]]:
+    """Fill absent DateTimeOriginal/Model data in batched exiftool calls.
+
+    Catalog metadata is the normal path. This fallback only touches rows whose
+    match key is incomplete, and deliberately never writes metadata back during
+    an inexpensive stack rebuild.
+    """
+    paths = [str(row.get("filepath") or "") for row in rows if row.get("filepath")]
+    if not paths or not os.path.isfile(EXIFTOOL_PATH):
+        return {}
+    metadata: dict[str, tuple[str, str]] = {}
+    for start in range(0, len(paths), EXIFTOOL_BATCH_SIZE):
+        batch = paths[start:start + EXIFTOOL_BATCH_SIZE]
+        try:
+            result = subprocess.run(
+                [EXIFTOOL_PATH, "-j", "-DateTimeOriginal", "-Model", *batch],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=90,
+            )
+            payload = json.loads(result.stdout or "[]")
+        except (OSError, subprocess.SubprocessError, ValueError):
+            logger.debug("Version stack metadata fallback unavailable", exc_info=True)
+            continue
+        for item in payload if isinstance(payload, list) else []:
+            path = str(item.get("SourceFile") or "")
+            timestamp = _capture_ts(item.get("DateTimeOriginal"))
+            model = " ".join(str(item.get("Model") or "").split()).casefold()
+            if path and timestamp is not None and model:
+                metadata[os.path.normcase(os.path.abspath(path))] = (
+                    datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S"),
+                    model,
+                )
+    return metadata
 
 
 def _top_folder(row: dict) -> str:
@@ -244,6 +309,84 @@ def build_variant_groups(db_path: str, rows: dict[int, dict] | None = None):
     return _build_variant_groups_with_stats(db_path, rows)["groups"]
 
 
+def build_version_groups(db_path: str, rows: dict[int, dict] | None = None):
+    """Pair RAW captures with their finished exports (§20).
+
+    An exact basename is the cheap, high-confidence match. Renamed exports use
+    the capture-second + camera-model fallback. Every union is RAW-to-edit, so
+    a version group can never be formed from two unrelated JPEGs alone.
+    """
+    rows = rows or _active_rows(db_path)
+    raw_rows = {image_id: row for image_id, row in rows.items() if _is_raw(row)}
+    edit_rows = {
+        image_id: row
+        for image_id, row in rows.items()
+        if not _is_raw(row) and _image_ext(row) in VERSION_EDIT_EXTS
+    }
+    if not raw_rows or not edit_rows:
+        return []
+
+    missing_metadata = [
+        row for row in [*raw_rows.values(), *edit_rows.values()]
+        if _version_capture_key(row) is None
+    ]
+    fallback_metadata = _exiftool_version_metadata(missing_metadata)
+
+    def capture_key(row: dict) -> tuple[str, str] | None:
+        return _version_capture_key(row) or fallback_metadata.get(
+            os.path.normcase(os.path.abspath(str(row.get("filepath") or "")))
+        )
+
+    raw_by_stem: dict[str, list[int]] = {}
+    raw_by_capture: dict[tuple[str, str], list[int]] = {}
+    for image_id, row in raw_rows.items():
+        stem = _version_stem(row)
+        if stem:
+            raw_by_stem.setdefault(stem, []).append(image_id)
+        key = capture_key(row)
+        if key:
+            raw_by_capture.setdefault(key, []).append(image_id)
+
+    versions = _UnionFind()
+    scores: dict[tuple[int, int], float] = {}
+    for edit_id, edit in edit_rows.items():
+        matched_raw_ids = raw_by_stem.get(_version_stem(edit), [])
+        score = 1.0
+        if not matched_raw_ids:
+            matched_raw_ids = raw_by_capture.get(capture_key(edit), []) if capture_key(edit) else []
+            score = 0.98
+        for raw_id in matched_raw_ids:
+            versions.union(raw_id, edit_id)
+            scores[tuple(sorted((raw_id, edit_id)))] = score
+
+    groups = []
+    for member_ids in versions.groups():
+        edits = [image_id for image_id in member_ids if image_id in edit_rows]
+        raws = [image_id for image_id in member_ids if image_id in raw_rows]
+        if not raws or not edits:
+            continue
+        representative = max(
+            edits,
+            key=lambda image_id: (
+                float(edit_rows[image_id].get("file_modified_at") or 0),
+                int(image_id),
+            ),
+        )
+        member_scores = {
+            image_id: max(
+                (
+                    value
+                    for pair, value in scores.items()
+                    if image_id in pair
+                ),
+                default=0.0,
+            )
+            for image_id in member_ids
+        }
+        groups.append((member_ids, representative, member_scores))
+    return groups
+
+
 def _embedding_pairs():
     try:
         import embed_cache
@@ -347,13 +490,15 @@ def rebuild_stacks(db_path: str, kinds=None) -> dict:
     else:
         embedding_groups = {"burst": [], "crosssource": [], "skipped": ""}
 
-    build_order = [kind for kind in ("burst", "variant", "crosssource") if kind in requested]
+    build_order = [kind for kind in ("burst", "variant", "crosssource", "version") if kind in requested]
     for kind in build_order:
         kind_started = time.perf_counter()
         variant_stats = {}
         if kind == "variant":
             variant_stats = _build_variant_groups_with_stats(db_path, rows)
             groups = variant_stats["groups"]
+        elif kind == "version":
+            groups = build_version_groups(db_path, rows)
         else:
             if embedding_groups.get("skipped"):
                 results[kind] = {

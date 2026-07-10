@@ -1,6 +1,8 @@
 import { BAND_NAMES, DEFAULTS, boolSetting, numberSetting } from './ops_constants.js';
 import { buildCurveLut, normalizeCurve } from './curve_lut.js';
 import { MaskingController } from './masking.js';
+import { ColorWheels } from './color_wheels.js';
+import { HealController } from './heal.js';
 
 const slider = (key, label, min, max, step = 1, fallback = DEFAULTS[key] ?? 0) => ({ key, label, min, max, step, fallback });
 const BASIC = [slider('Temperature', 'Temp', 2000, 50000, 50, 5500), slider('Tint', 'Tint', -150, 150)];
@@ -17,7 +19,11 @@ const PRESENCE = [
 const DETAIL = [
     slider('Sharpness', 'Amount', 0, 150, 1, 40), slider('SharpenRadius', 'Radius', .5, 3, .1, 1),
     slider('SharpenDetail', 'Detail', 0, 100, 1, 25), slider('SharpenEdgeMasking', 'Masking', 0, 100),
+    slider('LuminanceSmoothing', 'Luminance NR', 0, 100), slider('ColorNoiseReduction', 'Color NR', 0, 100),
+    slider('DefringePurpleAmount', 'Purple Defringe', 0, 100), slider('DefringePurpleHueLo', 'Purple Hue Low', 0, 100), slider('DefringePurpleHueHi', 'Purple Hue High', 0, 100),
+    slider('DefringeGreenAmount', 'Green Defringe', 0, 100), slider('DefringeGreenHueLo', 'Green Hue Low', 0, 100), slider('DefringeGreenHueHi', 'Green Hue High', 0, 100),
 ];
+const COLOR_GRADE = [slider('ColorGradeBlending', 'Blending', 0, 100, 1, 50), slider('ColorGradeBalance', 'Balance', -100, 100)];
 const EFFECTS = [
     slider('PostCropVignetteAmount', 'Vignette', -100, 100), slider('PostCropVignetteMidpoint', 'Midpoint', 0, 100, 1, 50),
     slider('PostCropVignetteFeather', 'Feather', 0, 100, 1, 50), slider('PostCropVignetteRoundness', 'Roundness', -100, 100),
@@ -169,7 +175,7 @@ class CurveEditor {
 }
 
 export class DevelopPanels {
-    constructor(host, { histogramHost, cropHost, onChange, masking }) {
+    constructor(host, { histogramHost, cropHost, onChange, masking, heal }) {
         this.host = host;
         this.onChange = onChange;
         this.settings = {};
@@ -179,17 +185,22 @@ export class DevelopPanels {
             + section('Presence', 'presence', slidersHtml(PRESENCE))
             + section('Tone Curve', 'curve', '<div class="develop-curve-tools"><select data-tip="Tone curve channel" aria-label="Tone curve channel"><option value="ToneCurvePV2012">RGB</option><option value="ToneCurvePV2012Red">Red</option><option value="ToneCurvePV2012Green">Green</option><option value="ToneCurvePV2012Blue">Blue</option></select><button data-curve-reset data-tip="Reset selected curve">Reset</button></div><canvas class="develop-curve" width="288" height="180" tabindex="0" data-tip="Drag points; double-click to add" aria-label="Tone curve editor"></canvas>')
             + section('HSL / B&W', 'hsl', '<label class="develop-toggle" data-tip="Convert to black and white"><span>Black & White</span><input id="develop-bw" type="checkbox" data-tip="Toggle black and white"><i></i></label><div id="develop-hsl-controls"><div class="develop-tabs" role="tablist"><button class="active" data-hsl-tab="Hue" data-tip="Hue adjustments">Hue</button><button data-hsl-tab="Saturation" data-tip="Saturation adjustments">Sat</button><button data-hsl-tab="Luminance" data-tip="Luminance adjustments">Lum</button></div><div data-hsl-panel="Hue">' + hslHtml('HueAdjustment') + '</div><div data-hsl-panel="Saturation" hidden>' + hslHtml('SaturationAdjustment') + '</div><div data-hsl-panel="Luminance" hidden>' + hslHtml('LuminanceAdjustment') + '</div></div><div id="develop-gray-controls" hidden>' + hslHtml('GrayMixer') + '</div>')
+            + section('Color Grading', 'color-grading', '<div id="develop-color-wheels"></div>' + slidersHtml(COLOR_GRADE), false)
             + section('Detail', 'detail', slidersHtml(DETAIL), false)
             + section('Effects', 'effects', slidersHtml(EFFECTS), false)
             + section('Crop', 'crop', '<div id="develop-crop-slot"></div>', false)
             + section('Masking', 'masking', '<div id="develop-masking"></div>', false)
-            + '<p class="develop-v1-note">Stored but not rendered yet: lens corrections, chromatic aberration, noise reduction, color grading, spot removal, pano/HDR.</p>';
+            + section('Healing', 'healing', '<div id="develop-healing"></div>', false)
+            + '<p class="develop-v1-note">Manual defringe and circular heal/clone spots are available. Automatic lateral CA remains planned.</p>';
         host.querySelector('#develop-histogram-slot').replaceWith(histogramHost);
         host.querySelector('#develop-crop-slot').replaceWith(cropHost);
         this.curve = new CurveEditor(host.querySelector('[data-section="curve"]'), (key, value, label) => this.change(key, value, label));
+        this.colorWheels = new ColorWheels(host.querySelector('#develop-color-wheels'), (key, value, label) => this.change(key, value, label));
         this.masking = new MaskingController({ host: host.querySelector('#develop-masking'), onChange, ...masking });
+        this.heal = new HealController({ host: host.querySelector('#develop-healing'), onChange, ...heal });
         this.bindSliders();
         this.bindOtherControls();
+        this.setSettings(this.settings);
     }
 
     bindSliders() {
@@ -289,6 +300,8 @@ export class DevelopPanels {
         this.host.querySelector('#develop-wb').value = settings.WhiteBalance || 'As Shot';
         this.syncHslMode();
         this.curve.setSettings(settings);
+        this.colorWheels.setSettings(settings);
         this.masking.setSettings(settings);
+        this.heal.setSettings(settings);
     }
 }
