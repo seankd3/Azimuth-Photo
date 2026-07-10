@@ -86,8 +86,15 @@ export async function getCatalog() {
     return fetchJson('/api/catalog', { defaultValue: null });
 }
 
+export async function browseCatalogFolders(path = '') {
+    const params = new URLSearchParams();
+    if (path) params.set('path', path);
+    const suffix = params.toString() ? `?${params.toString()}` : '';
+    return fetchJson(`/api/catalog/browse${suffix}`, { defaultValue: null });
+}
+
 export async function addCatalogSource(path, scan = true) {
-    return postJson('/api/catalog/sources', { path, scan });
+    return postJsonWithStatus('/api/catalog/sources', { path, scan });
 }
 
 export async function rescanCatalogSource(sourceId) {

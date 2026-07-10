@@ -1036,7 +1036,38 @@ body:has(#view-loupe.active):has(#sel-pill.on) #toast { transform: translateX(-5
 .mini-btn:hover { background: var(--card-hi); color: var(--text); }
 .mini-btn.btn-danger { color: var(--danger); border-color: var(--danger-line); background: var(--danger-dim); }
 .mini-btn.btn-danger:hover, .mini-btn.btn-danger:focus-visible { background: var(--danger-hover); border-color: var(--danger-hover); color: #fff; }
-.add-source { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--s2); margin-top: var(--s3); }
+.source-empty { display: grid; gap: 4px; padding: 9px 10px; border: 1px solid var(--line); border-radius: var(--r-ctl); background: var(--card); color: var(--text-2); font-size: var(--fs-ui); line-height: var(--lh-body); }
+.source-empty b { color: var(--text); font-weight: 600; }
+.source-empty span { color: var(--text-3); }
+.source-add-ui { display: grid; gap: var(--s2); margin-top: var(--s3); }
+.source-add-copy { margin: 0; color: var(--text-3); font-size: var(--fs-caption); line-height: 1.45; }
+.source-selected { display: grid; gap: 3px; min-width: 0; padding: 8px 9px; border: 1px solid var(--line); border-radius: var(--r-ctl); background: var(--bg); }
+.source-selected span { color: var(--text-3); font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: var(--ls-tag); }
+.source-selected code { color: var(--text); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.source-selected.empty { color: var(--text-3); }
+.source-add-actions { display: flex; gap: var(--s2); flex-wrap: wrap; }
+.source-picker-browser { display: grid; gap: var(--s2); padding: var(--s2); border: 1px solid var(--line); border-radius: var(--r-ctl); background: rgba(255,255,255,.025); }
+.source-picker-roots { display: flex; gap: var(--s2); flex-wrap: wrap; }
+.source-picker-roots button { height: 24px; padding: 0 8px; border: 1px solid var(--line); border-radius: var(--r-ctl); color: var(--text-2); font-size: var(--fs-caption); }
+.source-picker-roots button:hover, .source-picker-roots button:focus-visible { background: var(--card-hi); color: var(--text); }
+.source-picker-current { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--s2); align-items: center; }
+.source-picker-current code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-size: 11px; }
+.source-picker-list { display: grid; gap: 2px; max-height: 240px; overflow: auto; }
+.source-picker-list button { min-width: 0; min-height: 30px; display: flex; align-items: center; justify-content: space-between; gap: var(--s2); padding: 6px 8px; border-radius: var(--r-ctl); color: var(--text-2); text-align: left; }
+.source-picker-list button:hover:not(:disabled), .source-picker-list button:focus-visible:not(:disabled) { background: var(--card-hi); color: var(--text); }
+.source-picker-list button:disabled { opacity: .55; cursor: not-allowed; }
+.source-picker-list button > span:first-child { min-width: 0; display: inline-flex; align-items: center; gap: 7px; }
+.source-picker-list b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.source-picker-note { flex: none; color: var(--warn); font-size: var(--fs-micro); }
+.source-picker-status { padding: 8px; color: var(--text-3); font-size: var(--fs-caption); }
+.source-picker-status.error, .source-add-error { color: var(--warn); }
+.source-picker-browser-actions { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--s2); align-items: center; }
+.source-picker-browser-actions span { color: var(--text-3); font-size: var(--fs-caption); line-height: 1.35; }
+.source-manual { border-top: 1px solid var(--line-soft); padding-top: var(--s2); color: var(--text-3); font-size: var(--fs-caption); }
+.source-manual summary { cursor: pointer; color: var(--text-2); }
+.source-manual label { display: grid; gap: 5px; margin-top: var(--s2); }
+.source-manual p { margin: 6px 0 0; }
+.source-add-error { font-size: var(--fs-caption); line-height: 1.4; }
 .drawer-input { min-width: 0; height: 30px; padding: 0 var(--s2); border: 1px solid var(--line); border-radius: var(--r-ctl); background: var(--bg); outline: 0; }
 .drawer-input:focus-visible { border-color: var(--accent-lin); }
 .drawer-input:invalid { border-color: rgba(201,106,95,.7); }

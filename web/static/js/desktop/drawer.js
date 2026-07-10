@@ -12,6 +12,9 @@ import { releaseFocus, trapFocus } from './focusTrap.js';
 import { afterMotion } from './motion.js';
 import { showToast } from './toast.js';
 import { confirmTypedCount } from './trash.js';
+import {
+    bindSourcePicker, clearSourcePickerSelection, renderSourceAddUi, setSourceAddError,
+} from './source_picker.js';
 
 let open = false;
 let drawerTimer = null;
@@ -400,10 +403,10 @@ function renderSources() {
             + `<div class="remove-choice" hidden><button class="mini-btn" data-mode="keep">Keep photos</button><button class="mini-btn btn-danger" data-mode="delete">Remove from library index</button><button class="mini-btn" data-remove-cancel>Cancel</button></div>`
             + `<div class="scan-progress" ${scanning ? '' : 'hidden'}>Scanning…</div>`
             + '</div></article>';
-    }).join('') : '<div class="muted">No sources yet.</div>';
+    }).join('') : '<div class="source-empty"><b>No photo folders yet.</b><span>Add a folder to catalog your archive. photoArchive reads originals in place; original photo files are never moved or changed.</span></div>';
     return '<section class="dr-sec"><h3>Sources</h3>'
         + `<div id="drawer-sources">${rows}</div>`
-        + '<form class="add-source" id="add-source-form"><input class="drawer-input" name="path" placeholder="/path/to/photos" autocomplete="off" aria-label="Source path"><button class="btn">Add & scan</button></form>'
+        + renderSourceAddUi()
         + '</section>';
 }
 
@@ -806,6 +809,26 @@ async function handleRemove(card, mode) {
     } else showToast('Couldn’t remove source');
 }
 
+function sourceAddErrorMessage(result) {
+    const bodyError = String(result?.data?.error || result?.data?.detail || '').trim();
+    if (result?.status === 400) {
+        return bodyError
+            ? `That folder cannot be found or read on the computer running photoArchive: ${bodyError}.`
+            : 'That folder cannot be found or read on the computer running photoArchive.';
+    }
+    if (result?.status === 409) {
+        return bodyError
+            ? `Another scan is already running: ${bodyError}.`
+            : 'Another scan is already running. Wait for it to finish, then add this folder.';
+    }
+    if (result?.status === 0) {
+        return 'Could not reach photoArchive. Check the connection and try again.';
+    }
+    return bodyError
+        ? `Could not add that folder (${result?.status || 'unknown status'}): ${bodyError}.`
+        : `Could not add that folder (${result?.status || 'unknown status'}).`;
+}
+
 function updateSaveBar() {
     const save = document.getElementById('drawer-save-settings');
     const reset = document.getElementById('drawer-reset-settings');
@@ -991,21 +1014,24 @@ function bindDrawerActions() {
     body.querySelector('#drawer-reset-settings')?.addEventListener('click', (event) => withBusyAction('settings-reset', event.currentTarget, resetDrawerSettings));
     body.querySelector('#drawer-install-model')?.addEventListener('click', (event) => withBusyAction('model-install', event.currentTarget, saveAndInstallModel));
     body.querySelector('#drawer-return-publish')?.addEventListener('click', returnToPublish);
-    body.querySelector('#add-source-form')?.addEventListener('submit', async (event) => {
-        event.preventDefault();
-        const input = event.currentTarget.querySelector('input[name="path"]');
-        const path = input ? input.value.trim() : '';
-        if (!path) return;
-        await withBusyAction('source-add', event.currentTarget.querySelector('button'), async () => {
-        const result = await addCatalogSource(path, true);
-        if (result && result.ok) {
-            catalog = result.catalog || catalog;
-            event.currentTarget.reset();
-            renderDrawer();
-            showToast('Source added · scanning for photos');
-            pollScanUntilDone(result.source && result.source.id);
-        } else showToast('Couldn’t add source');
-        });
+    bindSourcePicker(body, {
+        onSubmit: async ({ path, form }) => {
+            await withBusyAction('source-add', form?.querySelector('button[type="submit"]'), async () => {
+                const result = await addCatalogSource(path, true);
+                if (result && result.ok) {
+                    const data = result.data || {};
+                    catalog = data.catalog || catalog;
+                    clearSourcePickerSelection();
+                    renderDrawer();
+                    showToast('Source added · scanning for photos');
+                    pollScanUntilDone(data.source && data.source.id);
+                } else {
+                    const message = sourceAddErrorMessage(result);
+                    setSourceAddError(message);
+                    showToast(message);
+                }
+            });
+        },
     });
     for (const btn of body.querySelectorAll('[data-act]')) {
         btn.addEventListener('click', () => {
