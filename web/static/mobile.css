@@ -463,7 +463,7 @@ body[data-tab="photos"] #m-scopebar.on { display: flex; }
 #m-scopebar .chip.ghost { background: transparent; color: var(--text-3); }
 #m-scopebar .chip img { width: 20px; height: 20px; border-radius: 50%; object-fit: cover; }
 #m-scopebar .chip .chip-kind { color: var(--text-3); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
-#m-scopebar .chip b { font-weight: 600; max-width: 40vw; overflow: hidden; text-overflow: ellipsis; }
+#m-scopebar .chip b { display: block; min-width: 0; font-weight: 600; max-width: 40vw; overflow: hidden; text-overflow: ellipsis; }
 #m-scopebar .chip .chip-x {
     position: relative;
     width: 28px; height: 28px;
@@ -509,7 +509,6 @@ body[data-tab="photos"] #m-scopebar.on { display: flex; }
 }
 body[data-tab="photos"] #m-scrub { display: block; }
 #m-scrub.avail { opacity: 1; pointer-events: auto; }
-#m-scrub.dragging { width: 56px; }
 #m-scrub .ms-handle {
     position: absolute;
     right: 8px; top: 0;
@@ -863,9 +862,7 @@ body.sheet-keyboard #m-sel-actions.on { opacity: 0; transform: translateY(16px);
 .ml-suggest-cover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .ml-suggest-body { padding: 8px 10px 6px; min-width: 0; }
 .ml-suggest-body b {
-    display: flex;
-    align-items: center;
-    gap: 5px;
+    display: block;
     min-width: 0;
     font-size: 13px;
     font-weight: 600;
