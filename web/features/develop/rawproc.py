@@ -67,8 +67,13 @@ def is_hdr_merge_path(path: str | os.PathLike[str]) -> bool:
     return candidate.suffix.lower() == ".exr" and candidate.parent == BASE_CACHE_ROOT / "hdr"
 
 
+def is_pano_merge_path(path: str | os.PathLike[str]) -> bool:
+    candidate = Path(path)
+    return candidate.suffix.lower() == ".exr" and candidate.parent == BASE_CACHE_ROOT / "pano"
+
+
 def is_develop_path(path: str | os.PathLike[str]) -> bool:
-    return is_raw_path(path) or is_hdr_merge_path(path)
+    return is_raw_path(path) or is_hdr_merge_path(path) or is_pano_merge_path(path)
 
 
 def base_paths(image_id: int) -> BasePaths:
