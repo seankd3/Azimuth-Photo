@@ -196,6 +196,10 @@ PUBLIC_ROUTE_CONTRACT = {
     ("POST", "/api/system/integrity/scan"),
     ("GET", "/api/system/integrity/status"),
     # PATCH: quality lane
+    ("GET", "/api/geo/status"),
+    ("POST", "/api/geo/backfill/start"),
+    ("POST", "/api/geo/infer/start"),
+    ("POST", "/api/geo/timeline/import"),
     ("GET", "/api/quality/status"),
     ("POST", "/api/quality/scan"),
     ("GET", "/api/quality/{image_id}"),
