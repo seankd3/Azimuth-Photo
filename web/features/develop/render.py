@@ -27,6 +27,7 @@ from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 
 from . import ops_constants as C, rawproc
+from .film import load_stock
 from .pipeline import apply_pipeline, gaussian_blur, luma
 from .transform import apply_transform
 
@@ -265,6 +266,11 @@ def _pipeline_overlap(settings: Mapping[str, object], minimum_dimension: int) ->
         sigma = max(sigma, 0.004 * minimum_dimension)
     if _number(settings, "Sharpness", 0.0) != 0.0:
         sigma = max(sigma, np.clip(_number(settings, "SharpenRadius", 1.0), 0.5, 3.0))
+    film_stock = load_stock(str(settings.get("pa_FilmStock") or "").strip())
+    if film_stock and _number(settings, "pa_FilmHalation", 100.0) > 0.0:
+        halation = film_stock.get("halation") or {}
+        if _number(halation, "amount", 0.0) > 0.0:
+            sigma = max(sigma, _number(halation, "radius_frac", 0.015) * minimum_dimension)
     return int(math.ceil(3.0 * sigma))
 
 

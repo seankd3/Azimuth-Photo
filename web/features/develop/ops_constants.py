@@ -78,6 +78,25 @@ LENS_VIGNETTE_GAIN_MAX = 8.0
 # Distortion auto-crop evaluates radial scale along every frame edge. The
 # returned UV scale is <= 1: identity is 1, lower values zoom to remove borders.
 LENS_AUTO_CROP_EDGE_SAMPLES = 32
+# Lens Corrections panel scales are percentage multipliers: 100 preserves the
+# Lensfun profile, 0 is identity, and 200 doubles the profile delta.
+LENS_PROFILE_SCALE_MIN = 0.0
+LENS_PROFILE_SCALE_MAX = 200.0
+LENS_PROFILE_SCALE_DEFAULT = 100.0
+LENS_MANUAL_DISTORTION_FACTOR = 0.25
+LENS_MANUAL_VIGNETTE_FACTOR = 0.75
+LENS_MANUAL_VIGNETTE_MIDPOINT_MIN = 0.15
+LENS_MANUAL_VIGNETTE_MIDPOINT_RANGE = 0.85
+
+# Calibration (§28) is a linear-RGB 3x3 primary-column perturbation. A hue
+# control moves only its matching input-primary column; saturation expands or
+# contracts that column around luma. Shadow Tint is a restrained
+# green↔magenta multiplier under the shadow luma cutoff.
+CALIBRATION_HUE_MIX = 0.18
+CALIBRATION_SATURATION_SCALE = 0.50
+CALIBRATION_SHADOW_TINT_SCALE = 0.12
+CALIBRATION_SHADOW_START = 0.02
+CALIBRATION_SHADOW_END = 0.30
 
 # Transform/Upright (§28): normalized centred-UV homography coefficients.
 PERSPECTIVE_AMOUNT_SCALE = 0.0035
@@ -105,6 +124,12 @@ NR_LUMA_SIGMA = 0.08
 NR_LUMA_SPATIAL_CENTER = 4.0
 NR_LUMA_SPATIAL_AXIS = 2.0
 NR_COLOR_RADIUS = 1
+# Detail/Contrast are intentionally modest v1 NR controls: Detail protects
+# existing sharpen-field edges, while Contrast returns a portion of the luma
+# residual after smoothing.  They are not a frequency decomposition.
+NR_DETAIL_EDGE_LOW = 0.004
+NR_DETAIL_EDGE_HIGH = 0.04
+NR_CONTRAST_RESIDUAL = 0.5
 
 # Lightroom Defringe hue endpoints are 0..100, mapped to 0..360 degrees.
 # AutoLateralCA remains a later lane; only manual defringe renders here.
@@ -149,6 +174,8 @@ CLARITY_FACTOR = 0.35
 TEXTURE_FACTOR = 0.30
 SHARPEN_FACTOR = 0.9
 SHARPEN_THRESHOLD = 0.004
+SHARPEN_MASK_EDGE_LOW = 0.004
+SHARPEN_MASK_EDGE_HIGH = 0.04
 CLARITY_RESIDUAL_MAX = 0.25
 BLUR_LARGE_FACTOR = 0.02
 BLUR_SMALL_FACTOR = 0.004
@@ -172,6 +199,43 @@ GRAIN_OUTPUT_MASK = 0xFFFF
 GRAIN_OUTPUT_DIVISOR = 65535.0
 GRAIN_CELL_SIZE_MIN = 1.0
 GRAIN_CELL_SIZE_RANGE = 7.0
+
+# Soft proof (§28): RGB matrices are linear RGB -> XYZ D65. Proofing clips in
+# the selected target RGB space, converts back to sRGB for the display, and
+# reports pixels that were outside that target gamut. Paper adds an intentionally
+# simple white/black-point simulation after that clip; it is not an ICC profile.
+SOFT_PROOF_SRGB_TO_XYZ = (
+    (0.4124564, 0.3575761, 0.1804375),
+    (0.2126729, 0.7151522, 0.0721750),
+    (0.0193339, 0.1191920, 0.9503041),
+)
+SOFT_PROOF_XYZ_TO_SRGB = (
+    (3.2404542, -1.5371385, -0.4985314),
+    (-0.9692660, 1.8760108, 0.0415560),
+    (0.0556434, -0.2040259, 1.0572252),
+)
+SOFT_PROOF_ADOBE_RGB_TO_XYZ = (
+    (0.5767309, 0.1855540, 0.1881852),
+    (0.2973769, 0.6273491, 0.0752741),
+    (0.0270343, 0.0706872, 0.9911085),
+)
+SOFT_PROOF_XYZ_TO_ADOBE_RGB = (
+    (2.0413690, -0.5649464, -0.3446944),
+    (-0.9692660, 1.8760108, 0.0415560),
+    (0.0134474, -0.1183897, 1.0154096),
+)
+SOFT_PROOF_P3_TO_XYZ = (
+    (0.4865709, 0.2656676, 0.1982173),
+    (0.2289746, 0.6917385, 0.0792869),
+    (0.0000000, 0.0451134, 1.0439444),
+)
+SOFT_PROOF_XYZ_TO_P3 = (
+    (2.4934969, -0.9313836, -0.4027108),
+    (-0.8294890, 1.7626641, 0.0236247),
+    (0.0358458, -0.0761724, 0.9568845),
+)
+SOFT_PROOF_PAPER_WHITE = 0.92
+SOFT_PROOF_PAPER_BLACK = 0.02
 
 # Local corrections (§12).  A 2023-v13.lrcat exposure-only brush on
 # 20230111-R5__9359 stores LocalExposure2012=-0.4835; Lightroom history calls

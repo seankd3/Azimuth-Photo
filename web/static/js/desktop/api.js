@@ -366,6 +366,32 @@ export async function getDateHistogram(params) {
     return fetchJson(`/api/date-histogram?${params.toString()}`, { defaultValue: null });
 }
 
+export async function getDateGroups(params) {
+    return fetchJson(`/api/date-groups?${params.toString()}`, { defaultValue: null });
+}
+
+export async function listSavedViews() {
+    return fetchJson('/api/saved-views', { defaultValue: { views: [] } });
+}
+
+async function savedViewMutation(method, url, body = null) {
+    try {
+        const response = await fetch(url, {
+            method,
+            headers: body ? { 'Content-Type': 'application/json' } : undefined,
+            body: body ? JSON.stringify(body) : undefined,
+        });
+        return response.ok ? await response.json() : null;
+    } catch {
+        return null;
+    }
+}
+
+export const createSavedView = (name, query) =>
+    savedViewMutation('POST', '/api/saved-views', { name, query });
+export const deleteSavedView = (id) =>
+    savedViewMutation('DELETE', `/api/saved-views/${encodeURIComponent(id)}`);
+
 export async function getCounts(params = new URLSearchParams()) {
     return fetchJson(`/api/counts?${params.toString()}`, { defaultValue: null });
 }

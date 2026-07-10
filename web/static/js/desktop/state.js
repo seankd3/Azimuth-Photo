@@ -4,7 +4,7 @@ const RIGHT_PANEL_KEY = 'pa_d_right_collapsed';
 const THUMB_KEY = 'pa_d_thumb_size';
 const PREFS_KEY = 'pa_d_prefs';
 const LENS_KEY = 'pa_d_lens';
-const PERSISTENT_LENSES = new Set(['grid', 'events', 'people', 'map']);
+const PERSISTENT_LENSES = new Set(['grid', 'events', 'timeline', 'people', 'map']);
 const VALID_LENSES = new Set([...PERSISTENT_LENSES, 'refine', 'suggestions', 'loupe', 'duplicates', 'trash', 'shared']);
 const DEFAULT_PREFS = {
     density: 'comfortable',

@@ -54,6 +54,25 @@ export const LENS_IMAGE_CENTER = 0.5;
 export const LENS_VIGNETTE_GAIN_MIN = 0.0;
 export const LENS_VIGNETTE_GAIN_MAX = 8.0;
 export const LENS_AUTO_CROP_EDGE_SAMPLES = 32;
+// Lens Corrections panel scales are percentage multipliers: 100 preserves the
+// Lensfun profile, 0 is identity, and 200 doubles the profile delta.
+export const LENS_PROFILE_SCALE_MIN = 0.0;
+export const LENS_PROFILE_SCALE_MAX = 200.0;
+export const LENS_PROFILE_SCALE_DEFAULT = 100.0;
+export const LENS_MANUAL_DISTORTION_FACTOR = 0.25;
+export const LENS_MANUAL_VIGNETTE_FACTOR = 0.75;
+export const LENS_MANUAL_VIGNETTE_MIDPOINT_MIN = 0.15;
+export const LENS_MANUAL_VIGNETTE_MIDPOINT_RANGE = 0.85;
+
+// Calibration (§28) is a linear-RGB 3x3 primary-column perturbation. A hue
+// control moves only its matching input-primary column; saturation expands or
+// contracts that column around luma. Shadow Tint is a restrained
+// green↔magenta multiplier under the shadow luma cutoff.
+export const CALIBRATION_HUE_MIX = 0.18;
+export const CALIBRATION_SATURATION_SCALE = 0.50;
+export const CALIBRATION_SHADOW_TINT_SCALE = 0.12;
+export const CALIBRATION_SHADOW_START = 0.02;
+export const CALIBRATION_SHADOW_END = 0.30;
 export const PERSPECTIVE_AMOUNT_SCALE = 0.0035;
 export const PERSPECTIVE_ASPECT_SCALE = 0.01;
 export const PERSPECTIVE_OFFSET_SCALE = 0.01;
@@ -74,6 +93,9 @@ export const NR_LUMA_SIGMA = 0.08;
 export const NR_LUMA_SPATIAL_CENTER = 4.0;
 export const NR_LUMA_SPATIAL_AXIS = 2.0;
 export const NR_COLOR_RADIUS = 1;
+export const NR_DETAIL_EDGE_LOW = 0.004;
+export const NR_DETAIL_EDGE_HIGH = 0.04;
+export const NR_CONTRAST_RESIDUAL = 0.5;
 export const DEFRINGE_HUE_SCALE = 3.6;
 export const DEFRINGE_EDGE_LOW = 0.004;
 export const DEFRINGE_EDGE_HIGH = 0.04;
@@ -110,6 +132,8 @@ export const CLARITY_FACTOR = 0.35;
 export const TEXTURE_FACTOR = 0.30;
 export const SHARPEN_FACTOR = 0.9;
 export const SHARPEN_THRESHOLD = 0.004;
+export const SHARPEN_MASK_EDGE_LOW = 0.004;
+export const SHARPEN_MASK_EDGE_HIGH = 0.04;
 export const CLARITY_RESIDUAL_MAX = 0.25;
 export const BLUR_LARGE_FACTOR = 0.02;
 export const BLUR_SMALL_FACTOR = 0.004;
@@ -131,6 +155,26 @@ export const GRAIN_OUTPUT_MASK = 0xFFFF;
 export const GRAIN_OUTPUT_DIVISOR = 65535.0;
 export const GRAIN_CELL_SIZE_MIN = 1.0;
 export const GRAIN_CELL_SIZE_RANGE = 7.0;
+export const SOFT_PROOF_SRGB_TO_XYZ = Object.freeze([
+    Object.freeze([0.4124564, 0.3575761, 0.1804375]), Object.freeze([0.2126729, 0.7151522, 0.0721750]), Object.freeze([0.0193339, 0.1191920, 0.9503041]),
+]);
+export const SOFT_PROOF_XYZ_TO_SRGB = Object.freeze([
+    Object.freeze([3.2404542, -1.5371385, -0.4985314]), Object.freeze([-0.9692660, 1.8760108, 0.0415560]), Object.freeze([0.0556434, -0.2040259, 1.0572252]),
+]);
+export const SOFT_PROOF_ADOBE_RGB_TO_XYZ = Object.freeze([
+    Object.freeze([0.5767309, 0.1855540, 0.1881852]), Object.freeze([0.2973769, 0.6273491, 0.0752741]), Object.freeze([0.0270343, 0.0706872, 0.9911085]),
+]);
+export const SOFT_PROOF_XYZ_TO_ADOBE_RGB = Object.freeze([
+    Object.freeze([2.0413690, -0.5649464, -0.3446944]), Object.freeze([-0.9692660, 1.8760108, 0.0415560]), Object.freeze([0.0134474, -0.1183897, 1.0154096]),
+]);
+export const SOFT_PROOF_P3_TO_XYZ = Object.freeze([
+    Object.freeze([0.4865709, 0.2656676, 0.1982173]), Object.freeze([0.2289746, 0.6917385, 0.0792869]), Object.freeze([0.0000000, 0.0451134, 1.0439444]),
+]);
+export const SOFT_PROOF_XYZ_TO_P3 = Object.freeze([
+    Object.freeze([2.4934969, -0.9313836, -0.4027108]), Object.freeze([-0.8294890, 1.7626641, 0.0236247]), Object.freeze([0.0358458, -0.0761724, 0.9568845]),
+]);
+export const SOFT_PROOF_PAPER_WHITE = 0.92;
+export const SOFT_PROOF_PAPER_BLACK = 0.02;
 // Adobe-native local fractions. Catalog evidence and the EV choice are
 // documented beside the exact Python twins in features/develop/ops_constants.py.
 export const LOCAL_RENDER_CAP = 16;
@@ -165,6 +209,11 @@ export const PARITY_TABLE = Object.freeze({
     CAMERA_PROFILE_TONE_NODES, CAMERA_PROFILE_HUE_BINS, CAMERA_PROFILE_CHROMA_BINS,
     CAMERA_PROFILE_BIN_CENTER, CAMERA_PROFILE_PI, CAMERA_PROFILE_TWO_PI,
     LENS_NORMALIZED_HALF_MIN, LENS_IMAGE_CENTER, LENS_VIGNETTE_GAIN_MIN, LENS_VIGNETTE_GAIN_MAX, LENS_AUTO_CROP_EDGE_SAMPLES,
+    LENS_PROFILE_SCALE_MIN, LENS_PROFILE_SCALE_MAX, LENS_PROFILE_SCALE_DEFAULT,
+    LENS_MANUAL_DISTORTION_FACTOR, LENS_MANUAL_VIGNETTE_FACTOR,
+    LENS_MANUAL_VIGNETTE_MIDPOINT_MIN, LENS_MANUAL_VIGNETTE_MIDPOINT_RANGE,
+    CALIBRATION_HUE_MIX, CALIBRATION_SATURATION_SCALE, CALIBRATION_SHADOW_TINT_SCALE,
+    CALIBRATION_SHADOW_START, CALIBRATION_SHADOW_END,
     PERSPECTIVE_AMOUNT_SCALE, PERSPECTIVE_ASPECT_SCALE, PERSPECTIVE_OFFSET_SCALE,
     PERSPECTIVE_SCALE_BASE, PERSPECTIVE_SCALE_MIN, HORIZON_ANGLE_LIMIT,
     HORIZON_THETA_STEPS, HORIZON_EDGE_PERCENTILE, HORIZON_MAX_POINTS,
@@ -206,6 +255,12 @@ export const DEFAULTS = Object.freeze({
     PerspectiveVertical: 0, PerspectiveHorizontal: 0, PerspectiveRotate: 0,
     PerspectiveScale: 100, PerspectiveAspect: 0, PerspectiveX: 0, PerspectiveY: 0,
     PerspectiveUpright: 'Off',
+    LensProfileEnable: false, LensProfileDistortionScale: 100, LensProfileVignettingScale: 100,
+    LensManualDistortionAmount: 0, LensManualVignetteAmount: 0, LensManualVignetteMidpoint: 50,
+    CalibrationShadowTint: 0,
+    CalibrationRedPrimaryHue: 0, CalibrationRedPrimarySaturation: 0,
+    CalibrationGreenPrimaryHue: 0, CalibrationGreenPrimarySaturation: 0,
+    CalibrationBluePrimaryHue: 0, CalibrationBluePrimarySaturation: 0,
 });
 
 export function numberSetting(settings, key, fallback = DEFAULTS[key] ?? 0) {
