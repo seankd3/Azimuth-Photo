@@ -152,6 +152,8 @@ PUBLIC_ROUTE_CONTRACT = {
     ("POST", "/api/develop/{image_id}/export"),
     ("POST", "/api/develop/{image_id}/reset"),
     ("PUT", "/api/develop/{image_id}"),
+    ("GET", "/api/develop/lrcat/status"),
+    ("POST", "/api/develop/lrcat/scan"),
 }
 
 class ModularContractTests(unittest.TestCase):
