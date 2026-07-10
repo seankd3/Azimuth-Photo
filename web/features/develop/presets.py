@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from features.develop.discovery import lightroom_preset_roots
 from features.develop.importer import parse_xmp_text
 
 _LOG = logging.getLogger(__name__)
@@ -28,16 +29,6 @@ CREATE TABLE IF NOT EXISTS develop_presets (
 CREATE INDEX IF NOT EXISTS idx_develop_presets_folder
 ON develop_presets(folder, name);
 """
-
-# Known Lightroom preset roots on the expansion drive (scanned, never blocking).
-# Primary: classic Lightroom/Presets. Secondary root is reported but only shallow-imported
-# (RNI packs under Presets/ can be thousands of files — explicit import-lightroom still walks all).
-LR_PRESET_ROOTS = (
-    Path("/mnt/expansion/Photo Library Support/Lightroom/Presets"),
-)
-LR_PRESET_EXTRA_ROOTS = (
-    Path("/mnt/expansion/Photo Library Support/Presets"),
-)
 
 LIGHTROOM_FOLDER = "Lightroom"
 
@@ -84,8 +75,8 @@ def import_report() -> dict[str, Any]:
 
 
 def discover_lr_preset_paths(roots: tuple[Path, ...] | None = None) -> list[Path]:
-    """Return .xmp files under known LR preset folders (report-only friendly)."""
-    search_roots = roots if roots is not None else (LR_PRESET_ROOTS + LR_PRESET_EXTRA_ROOTS)
+    """Return .xmp files under explicit or platform Lightroom preset folders."""
+    search_roots = roots if roots is not None else tuple(Path(path) for path in lightroom_preset_roots())
     found: list[Path] = []
     for root in search_roots:
         if not root.is_dir():
@@ -98,9 +89,9 @@ def discover_lr_preset_paths(roots: tuple[Path, ...] | None = None) -> list[Path
 
 
 def discover_lr_preset_summary() -> dict[str, Any]:
-    """Fast-ish summary of what exists on expansion without importing."""
+    """Summarize platform Lightroom preset roots without importing."""
     summary = {"roots": []}
-    for root in LR_PRESET_ROOTS + LR_PRESET_EXTRA_ROOTS:
+    for root in (Path(path) for path in lightroom_preset_roots()):
         entry = {"path": str(root), "exists": root.is_dir(), "xmp_count": 0}
         if entry["exists"]:
             entry["xmp_count"] = sum(
@@ -123,11 +114,12 @@ def _preset_name_for_path(path: Path, root: Path) -> str:
     return " / ".join(stem_parts) if stem_parts else path.stem
 
 
-def import_lightroom_presets_sync(conn, *, roots: tuple[Path, ...] = LR_PRESET_ROOTS) -> dict[str, Any]:
+def import_lightroom_presets_sync(conn, *, roots: tuple[Path, ...] | None = None) -> dict[str, Any]:
     """Parse LR .xmp presets into folder ``Lightroom``. Idempotent by name+folder.
 
     Uses the shared XMP parser. Never raises for missing roots — reports only.
     """
+    roots = roots if roots is not None else tuple(Path(path) for path in lightroom_preset_roots())
     report = {
         "scanned": True,
         "roots_found": [],
@@ -177,9 +169,10 @@ def import_lightroom_presets_sync(conn, *, roots: tuple[Path, ...] = LR_PRESET_R
     return report
 
 
-async def import_lightroom_presets(conn, *, roots: tuple[Path, ...] = LR_PRESET_ROOTS) -> dict[str, Any]:
+async def import_lightroom_presets(conn, *, roots: tuple[Path, ...] | None = None) -> dict[str, Any]:
     """Async wrapper — runs the sync importer against an aiosqlite connection."""
     await ensure_develop_presets(conn)
+    roots = roots if roots is not None else tuple(Path(path) for path in lightroom_preset_roots())
     # aiosqlite connections expose the same execute API; reuse sync logic via thread
     # would need a sync sqlite3 handle. Inline the async path instead.
     report = {

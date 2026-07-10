@@ -21,9 +21,10 @@ from typing import Literal
 import numpy as np
 from PIL import Image
 
+from core.runtime_paths import resolve_runtime_paths
 
 MaskKind = Literal["subject", "sky"]
-DEVELOP_CACHE_ROOT = Path(os.environ.get("PHOTOARCHIVE_DEVELOP_CACHE_DIR", "/mnt/expansion/PhotoArchiveCache/develop"))
+DEVELOP_CACHE_ROOT = Path(resolve_runtime_paths().develop_cache_dir)
 MODEL_DIRECTORY = DEVELOP_CACHE_ROOT / "models"
 MASK_DIRECTORY = DEVELOP_CACHE_ROOT / "ai-masks"
 U2NET_MODEL_URL = "https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2net.onnx"

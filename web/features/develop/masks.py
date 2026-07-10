@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import logging
 import math
-import os
 import re
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
@@ -16,6 +15,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
+from core.runtime_paths import resolve_runtime_paths
 from . import ops_constants as C
 
 
@@ -303,7 +303,7 @@ def load_ai_raster(
         key = Path(str(mask.get("pa_cache_key") or "")).name
         if not key or not re.fullmatch(r"[A-Za-z0-9._-]+", key):
             return np.zeros((height, width), dtype=np.float32)
-        root = Path(cache_root or os.environ.get("PHOTOARCHIVE_DEVELOP_CACHE_DIR", "/mnt/expansion/PhotoArchiveCache/develop"))
+        root = Path(cache_root or resolve_runtime_paths().develop_cache_dir)
         filename = key if key.lower().endswith(".png") else f"{key}.png"
         path = next((candidate for candidate in (root / "ai-masks" / filename, root / "ai_masks" / filename, root / "masks" / filename, root / filename) if candidate.is_file()), None)
         if path is None:

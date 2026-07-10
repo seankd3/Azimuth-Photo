@@ -25,11 +25,15 @@ import imagecodecs
 import numpy as np
 from PIL import Image
 
+from core.runtime_paths import apply_environment_defaults, resolve_runtime_paths
+
+apply_environment_defaults()
+
 from features.develop import rawproc
 
 
 EXIFTOOL = "/usr/bin/vendor_perl/exiftool"
-HDR_CACHE_DIR = Path(os.environ.get("PHOTOARCHIVE_DEVELOP_CACHE_DIR", "/mnt/expansion/PhotoArchiveCache/develop")) / "hdr"
+HDR_CACHE_DIR = Path(resolve_runtime_paths().develop_cache_dir) / "hdr"
 HDR_SOURCE_NAME = "HDR Merges"
 RAW_EXTENSIONS = frozenset({".dng", ".cr2", ".cr3"})
 _EXIF_FIELDS = (

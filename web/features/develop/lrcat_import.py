@@ -27,11 +27,10 @@ from urllib.parse import quote
 
 from data import connection
 from data.repositories import collections as collections_repository
+from features.develop.discovery import lightroom_catalog_roots
 from features.develop.lua_table import LuaTableError, parse_lua_table
 
 
-DEFAULT_CATALOG_ROOT = "/mnt/expansion/Photo Library Support/Lightroom/Catalogs"
-CATALOG_YEARS = frozenset({"2020", "2021", "2022", "2023"})
 _RAW_MARKER = "photos/raws/"
 _RAW_TAIL = "raws/"
 _VERSION_RE = re.compile(r"-v(\d+)(?:\D|$)", re.IGNORECASE)
@@ -88,21 +87,26 @@ def _record_result(result: dict[str, Any]) -> None:
         _status["results"].append(result)
 
 
-def catalog_paths(root: str = DEFAULT_CATALOG_ROOT) -> list[str]:
-    """Return one highest-version catalog for every year directory."""
+def catalog_paths(root: str | None = None) -> list[str]:
+    """Return the highest-version catalog in each discovered catalog group."""
 
-    candidates = sorted(Path(root).glob("**/*.lrcat")) if os.path.isdir(root) else []
-    per_year: dict[str, tuple[int, str]] = {}
+    roots = (root,) if root else lightroom_catalog_roots()
+    candidates = sorted(
+        candidate
+        for search_root in roots
+        if os.path.isdir(search_root)
+        for candidate in Path(search_root).glob("**/*.lrcat")
+    )
+    selected: dict[str, tuple[int, str]] = {}
     for candidate in candidates:
         year = _catalog_year(str(candidate))
-        if year not in CATALOG_YEARS:
-            continue
         version_match = _VERSION_RE.search(candidate.name)
         version = int(version_match.group(1)) if version_match else 0
-        current = per_year.get(year)
+        group = year or str(candidate.parent.resolve())
+        current = selected.get(group)
         if current is None or version > current[0] or (version == current[0] and str(candidate) > current[1]):
-            per_year[year] = (version, str(candidate))
-    return [per_year[year][1] for year in sorted(per_year)]
+            selected[group] = (version, str(candidate))
+    return [selected[group][1] for group in sorted(selected)]
 
 
 def _catalog_year(catalog_path: str) -> str | None:

@@ -17,10 +17,11 @@ from typing import Any
 import scanner
 from data import connection
 from data.repositories import catalog as catalog_repository
+from features.develop.discovery import default_raw_import_root
 from features.develop.xmp_write import parse_xmp_text
 
 
-DEFAULT_RAWS_ROOT = "/mnt/expansion/Photos/RAWS"
+DEFAULT_RAWS_ROOT = default_raw_import_root()
 RAW_EXTENSIONS = frozenset({".dng", ".cr2", ".cr3"})
 _LOG = logging.getLogger(__name__)
 

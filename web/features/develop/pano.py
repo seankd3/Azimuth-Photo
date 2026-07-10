@@ -32,10 +32,11 @@ import imagecodecs
 import numpy as np
 from PIL import Image
 
+from core.runtime_paths import resolve_runtime_paths
 from features.develop import hdr, rawproc
 
 
-PANO_CACHE_DIR = Path(os.environ.get("PHOTOARCHIVE_DEVELOP_CACHE_DIR", "/mnt/expansion/PhotoArchiveCache/develop")) / "pano"
+PANO_CACHE_DIR = Path(resolve_runtime_paths().develop_cache_dir) / "pano"
 PANO_SOURCE_NAME = "Panorama Merges"
 PANO_MAX_EDGE = 3000
 PANO_MIN_FRAMES = 2
