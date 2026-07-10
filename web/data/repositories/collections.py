@@ -151,14 +151,18 @@ async def list_collections(db_path: str) -> list[dict]:
             """
             SELECT
                 c.*,
-                COUNT(ci.image_id) AS image_count,
+                COUNT(member.id) AS image_count,
+                cover.id AS active_cover_image_id,
                 cover.filename AS cover_filename,
                 p.slug AS publish_slug,
                 p.published_at AS publish_published_at,
                 p.updated_at AS publish_updated_at
             FROM collections c
             LEFT JOIN collection_images ci ON ci.collection_id = c.id
+            LEFT JOIN images member ON member.id = ci.image_id
+                AND member.status IN ('kept', 'maybe') AND member.missing_at IS NULL
             LEFT JOIN images cover ON cover.id = c.cover_image_id
+                AND cover.status IN ('kept', 'maybe') AND cover.missing_at IS NULL
             LEFT JOIN collection_publishes p ON p.collection_id = c.id
             GROUP BY c.id
             ORDER BY c.updated_at DESC, c.id DESC
@@ -177,14 +181,18 @@ async def get_collection(db_path: str, collection_id: int, *, limit: int = 200, 
             """
             SELECT
                 c.*,
-                COUNT(ci.image_id) AS image_count,
+                COUNT(member.id) AS image_count,
+                cover.id AS active_cover_image_id,
                 cover.filename AS cover_filename,
                 p.slug AS publish_slug,
                 p.published_at AS publish_published_at,
                 p.updated_at AS publish_updated_at
             FROM collections c
             LEFT JOIN collection_images ci ON ci.collection_id = c.id
+            LEFT JOIN images member ON member.id = ci.image_id
+                AND member.status IN ('kept', 'maybe') AND member.missing_at IS NULL
             LEFT JOIN images cover ON cover.id = c.cover_image_id
+                AND cover.status IN ('kept', 'maybe') AND cover.missing_at IS NULL
             LEFT JOIN collection_publishes p ON p.collection_id = c.id
             WHERE c.id = ?
             GROUP BY c.id
@@ -204,6 +212,7 @@ async def get_collection(db_path: str, collection_id: int, *, limit: int = 200, 
                 FROM collection_images ci
                 JOIN images i ON i.id = ci.image_id
                 WHERE ci.collection_id = ?
+                  AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL
                 ORDER BY ci.position ASC, ci.added_at ASC, ci.image_id ASC
                 LIMIT ? OFFSET ?
                 """,
@@ -222,9 +231,11 @@ async def collection_image_ids(db_path: str, collection_id: int, *, limit: int =
             return None
         cursor = await conn.execute(
             """
-            SELECT image_id
-            FROM collection_images
-            WHERE collection_id = ?
+            SELECT ci.image_id
+            FROM collection_images ci
+            JOIN images i ON i.id = ci.image_id
+            WHERE ci.collection_id = ?
+              AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL
             ORDER BY position ASC, added_at ASC, image_id ASC
             LIMIT ?
             """,
@@ -331,7 +342,8 @@ async def _insert_members(conn, collection_id: int, image_ids: list[int], *, now
     existing_ids: set[int] = set()
     for ids in chunked(image_ids):
         existing_cursor = await conn.execute(
-            "SELECT id FROM images WHERE id IN ({})".format(",".join("?" for _ in ids)),
+            "SELECT id FROM images WHERE status IN ('kept', 'maybe') AND missing_at IS NULL "
+            "AND id IN ({})".format(",".join("?" for _ in ids)),
             ids,
         )
         existing_ids.update(int(row["id"]) for row in await existing_cursor.fetchall())
@@ -352,9 +364,11 @@ async def _insert_members(conn, collection_id: int, image_ids: list[int], *, now
 async def _ensure_cover(conn, collection_id: int) -> None:
     cursor = await conn.execute(
         """
-        SELECT image_id
-        FROM collection_images
-        WHERE collection_id = ?
+        SELECT ci.image_id
+        FROM collection_images ci
+        JOIN images i ON i.id = ci.image_id
+        WHERE ci.collection_id = ?
+          AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL
         ORDER BY position ASC, added_at ASC, image_id ASC
         LIMIT 1
         """,
@@ -368,7 +382,7 @@ async def _ensure_cover(conn, collection_id: int) -> None:
 
 
 def _collection_summary(row: dict) -> dict:
-    cover_image_id = row.get("cover_image_id")
+    cover_image_id = row.get("active_cover_image_id", row.get("cover_image_id"))
     query = _parse_query_json(row.get("query"))
     smart = query is not None
     return {

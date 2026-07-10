@@ -1,12 +1,29 @@
 from test_support import *  # noqa: F401,F403
 
 import caption_worker
+import unittest.mock
 from fastapi.testclient import TestClient
 from data.repositories import captions
+from features.captions import routes as caption_routes
 from features.search.fusion import reciprocal_rank_fusion
 
 
 class CaptionTests(BackendTestCase):
+    async def test_caption_control_failure_returns_actionable_error_without_internal_detail(self):
+        secret = "/home/sean/private/model.bin"
+        with unittest.mock.patch.object(
+            caption_worker,
+            "pause_caption_worker",
+            side_effect=RuntimeError(f"failed reading {secret}"),
+        ), unittest.mock.patch.object(caption_routes.log, "exception") as error_log:
+            response = await caption_routes.api_pause_captions()
+
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 503)
+        self.assertNotIn(secret, str(payload))
+        self.assertIn("try again", payload["detail"])
+        error_log.assert_called_once()
+
     async def test_caption_store_and_fts_update_delete_round_trip(self):
         source = await self._source()
         image_id = await self._image(source["id"], "wedding.jpg")

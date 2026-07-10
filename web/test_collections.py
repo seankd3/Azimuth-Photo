@@ -256,6 +256,50 @@ class CollectionTests(BackendTestCase):
         self.assertEqual(response.status_code, 422)
         self.assertIn("Unknown smart collection query key", response.json()["detail"])
 
+    async def test_smart_collection_with_no_matches_is_a_normal_empty_collection(self):
+        created = await collection_routes.api_create_collection(
+            collection_routes.CreateCollectionBody(
+                name="No matches",
+                query={"q": "definitely-not-in-this-catalog"},
+            )
+        )
+        collection_id = created["collection"]["id"]
+
+        detail = await collection_routes.api_collection(collection_id)
+        listed = await collection_routes.api_user_collections()
+        summary = next(row for row in listed["collections"] if row["id"] == collection_id)
+
+        self.assertEqual(detail["collection"]["image_count"], 0)
+        self.assertEqual(detail["collection"]["images"], [])
+        self.assertEqual(summary["image_count"], 0)
+        self.assertIsNone(summary["cover_image_id"])
+
+    async def test_unicode_and_emoji_names_roundtrip_through_scan_and_collection(self):
+        source = await self._source("unicode-source")
+        filename = "夏の旅 📷.jpg"
+        filepath = os.path.join(source["path"], filename)
+        with open(filepath, "wb") as handle:
+            handle.write(b"unicode-photo")
+        await scanner.scan_folder(source["path"], source_id=source["id"])
+        conn = await db.get_db()
+        try:
+            image = await (await conn.execute(
+                "SELECT id FROM images WHERE filepath = ?", (filepath,)
+            )).fetchone()
+        finally:
+            await conn.close()
+
+        created = await collection_routes.api_create_collection(
+            collection_routes.CreateCollectionBody(
+                name="京都の夏 🌸",
+                image_ids=[int(image["id"])],
+            )
+        )
+        detail = await collection_routes.api_collection(created["collection"]["id"])
+
+        self.assertEqual(detail["collection"]["name"], "京都の夏 🌸")
+        self.assertEqual(detail["collection"]["images"][0]["filename"], filename)
+
     async def test_smart_collection_rejects_oversize_string_fields(self):
         def probe():
             client = TestClient(app_module.app)

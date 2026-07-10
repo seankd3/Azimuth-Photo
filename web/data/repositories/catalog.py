@@ -17,6 +17,10 @@ _active_source_ids_cache = {"ids": frozenset(), "expires": 0}
 ACTIVE_SOURCE_IDS_TTL_SECONDS = 5.0
 
 
+class SourceOfflineDuringScan(RuntimeError):
+    """Raised when a source disappears before a scan can be finalized safely."""
+
+
 def normalize_source_path(path: str) -> str:
     """Return the canonical local path used as a catalog source key."""
 
@@ -227,10 +231,21 @@ async def insert_images_batch(db_path: str, rows: list[tuple], source_id: int | 
                 "file_modified_at = COALESCE(?, file_modified_at), "
                 "date_taken = CASE WHEN date_taken IS NULL OR date_taken = '' THEN ? ELSE date_taken END, "
                 "date_source = CASE WHEN date_taken IS NULL OR date_taken = '' THEN ? ELSE date_source END, "
-                "missing_at = NULL "
+                "missing_at = CASE WHEN ? = 0 THEN missing_at ELSE NULL END "
                 "WHERE filepath = ? AND (source_id = ? OR source_id IS NULL)",
                 [
-                    (source_id, row[0], row[2], row[3], row[4], row[5], row[6], row[1], source_id)
+                    (
+                        source_id,
+                        row[0],
+                        row[2],
+                        row[3],
+                        row[4],
+                        row[5],
+                        row[6],
+                        row[3],
+                        row[1],
+                        source_id,
+                    )
                     for row in normalized_rows
                 ],
             )
@@ -265,7 +280,8 @@ async def mark_source_missing_files_on_conn(
         )
     await conn.execute(
         "UPDATE images SET missing_at = NULL "
-        "WHERE source_id = ? AND filepath IN (SELECT filepath FROM source_scan_seen)",
+        "WHERE source_id = ? AND filepath IN (SELECT filepath FROM source_scan_seen) "
+        "AND COALESCE(file_size, -1) != 0",
         (source_id,),
     )
     await conn.execute(
@@ -311,6 +327,21 @@ async def mark_source_scan_finished(
 ):
     conn = await connection.open_async(db_path)
     try:
+        cursor = await conn.execute(
+            "SELECT path FROM catalog_sources WHERE id = ?",
+            (int(source_id),),
+        )
+        source = await cursor.fetchone()
+        source_path = str(source["path"] or "") if source is not None else ""
+        if not source_path or not await asyncio.to_thread(os.path.isdir, source_path):
+            await conn.execute(
+                "UPDATE catalog_sources SET online = 0 WHERE id = ?",
+                (int(source_id),),
+            )
+            await conn.commit()
+            raise SourceOfflineDuringScan(
+                "Source drive went offline during scan; existing catalog entries were preserved"
+            )
         now = _time.time()
         await conn.execute(
             "UPDATE catalog_sources SET last_scan_at = ?, last_seen_at = ?, online = ? WHERE id = ?",
@@ -324,18 +355,100 @@ async def mark_source_scan_finished(
         await connection.close_async(conn, db_path=db_path)
 
 
+_REPAIR_COLLECTION_COVER_SQL = (
+    "UPDATE collections SET cover_image_id = ("
+    "  SELECT ci.image_id FROM collection_images ci "
+    "  JOIN images i ON i.id = ci.image_id "
+    "  WHERE ci.collection_id = collections.id "
+    "    AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL "
+    "  ORDER BY ci.position ASC, ci.added_at ASC, ci.image_id ASC LIMIT 1"
+    ") WHERE cover_image_id = ?"
+)
+
+
 def mark_image_missing_sync(db_path: str, image_id: int, missing_at: float | None = None) -> bool:
     when = _time.time() if missing_at is None else float(missing_at)
     conn = connection.open_sync(db_path)
     try:
         cursor = conn.execute(
-            "UPDATE images SET missing_at = COALESCE(missing_at, ?) WHERE id = ?",
+            "UPDATE images SET missing_at = ? WHERE id = ? AND missing_at IS NULL",
             (when, int(image_id)),
         )
+        if cursor.rowcount > 0:
+            source = conn.execute("SELECT source_id FROM images WHERE id = ?", (int(image_id),)).fetchone()
+            conn.execute(_REPAIR_COLLECTION_COVER_SQL, (int(image_id),))
+            if source is not None and source["source_id"] is not None:
+                conn.execute(
+                    "UPDATE catalog_sources SET active_image_count = ("
+                    "SELECT COUNT(*) FROM images WHERE source_id = ? "
+                    "AND status IN ('kept', 'maybe') AND missing_at IS NULL"
+                    ") WHERE id = ?",
+                    (int(source["source_id"]), int(source["source_id"])),
+                )
         conn.commit()
         return cursor.rowcount > 0
     finally:
         connection.close_sync(conn, db_path=db_path)
+
+
+async def mark_image_missing(db_path: str, image_id: int, missing_at: float | None = None) -> bool:
+    when = _time.time() if missing_at is None else float(missing_at)
+    conn = await connection.open_async(db_path)
+    try:
+        cursor = await conn.execute(
+            "UPDATE images SET missing_at = ? WHERE id = ? AND missing_at IS NULL",
+            (when, int(image_id)),
+        )
+        if cursor.rowcount > 0:
+            source_cursor = await conn.execute(
+                "SELECT source_id FROM images WHERE id = ?",
+                (int(image_id),),
+            )
+            source = await source_cursor.fetchone()
+            await conn.execute(_REPAIR_COLLECTION_COVER_SQL, (int(image_id),))
+            if source is not None and source["source_id"] is not None:
+                await update_source_counts_on_conn(conn, int(source["source_id"]))
+        await conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+
+
+async def mark_zero_byte_images_missing(db_path: str, filepaths: list[str]) -> list[dict]:
+    """Quarantine newly seen zero-byte files and return only rows changed now."""
+    if not filepaths:
+        return []
+    unique_paths = list(dict.fromkeys(str(path) for path in filepaths if path))
+    if not unique_paths:
+        return []
+    conn = await connection.open_async(db_path)
+    try:
+        changed: list[dict] = []
+        now = _time.time()
+        for paths in _chunked(unique_paths):
+            placeholders = ",".join("?" for _ in paths)
+            cursor = await conn.execute(
+                f"SELECT id, source_id, filepath FROM images WHERE missing_at IS NULL "
+                f"AND file_size = 0 AND filepath IN ({placeholders})",
+                paths,
+            )
+            rows = [dict(row) for row in await cursor.fetchall()]
+            if rows:
+                await conn.executemany(
+                    "UPDATE images SET missing_at = ? WHERE id = ? AND missing_at IS NULL",
+                    [(now, int(row["id"])) for row in rows],
+                )
+                for row in rows:
+                    await conn.execute(_REPAIR_COLLECTION_COVER_SQL, (int(row["id"]),))
+                changed.extend(rows)
+        for source_id in sorted(
+            {int(row["source_id"]) for row in changed if row.get("source_id") is not None}
+        ):
+            await update_source_counts_on_conn(conn, source_id)
+        await conn.commit()
+        return changed
+    finally:
+        await connection.close_async(conn, db_path=db_path)
 
 
 async def get_source(db_path: str, source_id: int):

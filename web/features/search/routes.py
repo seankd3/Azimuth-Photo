@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 from collections.abc import Awaitable, Callable
 
 from fastapi import APIRouter
@@ -11,6 +12,7 @@ from features.search.similarity import scan_duplicate_pairs
 
 
 router = APIRouter()
+log = logging.getLogger(__name__)
 ApiRankings = Callable[..., Awaitable[dict]]
 VisibleEmbeddingPage = Callable[..., Awaitable[tuple[list[dict], int, int]]]
 CachedImageIds = Callable[[list[int], str], Awaitable[set[int]]]
@@ -281,6 +283,7 @@ async def api_exif(image_id: int):
         # a slow disk); keep it off the event loop.
         exif = await asyncio.to_thread(photo_metadata.extract_image_metadata, image["filepath"])
     except Exception:
+        log.exception("worker=exif_reader image_id=%s extraction failed", image_id)
         exif = {}
 
     row = dict(image)
@@ -299,7 +302,7 @@ async def api_exif(image_id: int):
         await _batch_update_metadata([_metadata_update_tuple(image_id, exif)])
         _invalidate_pairing_cache()
     except Exception:
-        pass
+        log.exception("worker=exif_backfill image_id=%s metadata update failed", image_id)
 
     result = {"exif": exif}
     _exif_cache[image_id] = result

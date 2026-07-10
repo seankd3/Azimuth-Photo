@@ -173,6 +173,26 @@ class PublishedNodeTests(BackendTestCase):
         self.assertEqual(diff["removed"], [first])
         self.assertFalse(diff["source_deleted"])
 
+    async def test_published_snapshot_hides_member_that_is_later_trashed(self):
+        source = await self._source("published-trash")
+        image_id = await self._image(source["id"], "trashed-after-publish.jpg")
+        collection = await db.create_collection(name="Published", image_ids=[image_id])
+        node = await published_nodes.create_snapshot_tree(
+            db.DB_PATH,
+            area="website",
+            parent_id=None,
+            source_collection_id=collection["id"],
+            slug="published",
+            title=None,
+            resolve_smart_image_ids=self._resolve_smart,
+        )
+
+        await db.set_image_status(image_id, "trashed")
+        refreshed = await published_nodes.get_node(db.DB_PATH, node["id"])
+
+        self.assertEqual(await self._node_image_ids(node["id"]), [])
+        self.assertEqual(refreshed["image_count"], 0)
+
     async def test_explicit_update_applies_only_accepted_changes_and_attaches_children(self):
         source = await self._source()
         first = await self._image(source["id"], "first.jpg")

@@ -211,6 +211,36 @@ class TrashTests(BackendTestCase):
 
         self.assertIsNotNone(stack)
         self.assertEqual(stack["representative"]["id"], next_best)
+        self.assertEqual(stack["member_count"], 2)
+        self.assertNotIn(representative, [member["id"] for member in stack["members"]])
+
+    async def test_trashing_collection_cover_hides_member_and_reassigns_cover(self):
+        source, _root = await self._source_root()
+        cover, _ = await self._file_image(source, "cover.jpg", data=b"cover")
+        remaining, _ = await self._file_image(source, "remaining.jpg", data=b"remaining")
+        collection = await db.create_collection(
+            name="Trash-safe collection",
+            image_ids=[cover, remaining],
+        )
+
+        await trash_service.trash_images(db.DB_PATH, [cover])
+        detail = await db.get_collection(collection["id"])
+
+        self.assertEqual(detail["image_count"], 1)
+        self.assertEqual(detail["cover_image_id"], remaining)
+        self.assertEqual([image["id"] for image in detail["images"]], [remaining])
+
+    async def test_restoring_only_collection_member_restores_cover(self):
+        source, _root = await self._source_root()
+        image_id, _ = await self._file_image(source, "only.jpg", data=b"only")
+        collection = await db.create_collection(name="Only", image_ids=[image_id])
+        await trash_service.trash_images(db.DB_PATH, [image_id])
+
+        await trash_service.restore_images(db.DB_PATH, [image_id])
+        detail = await db.get_collection(collection["id"])
+
+        self.assertEqual(detail["image_count"], 1)
+        self.assertEqual(detail["cover_image_id"], image_id)
 
     async def test_missing_file_trash_still_marks_row(self):
         source, _root = await self._source_root()

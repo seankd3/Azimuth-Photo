@@ -1,6 +1,8 @@
 import asyncio
+import logging
 import os
 import sqlite3
+import stat
 from collections.abc import Awaitable, Callable
 
 from fastapi import APIRouter, BackgroundTasks, Request
@@ -15,10 +17,13 @@ router = APIRouter()
 CachedImageIds = Callable[[list[int], str], Awaitable[set[int]]]
 ScheduleMemoryWarm = Callable[..., None]
 DbPathProvider = Callable[[], str]
+MarkImageMissing = Callable[[int], Awaitable[bool]]
 _cached_image_ids: CachedImageIds | None = None
 _schedule_cached_thumbnail_memory_warm: ScheduleMemoryWarm | None = None
 _db_path: DbPathProvider | None = None
+_mark_image_missing: MarkImageMissing | None = None
 _browser_image_extensions = thumbnails.BROWSER_ORIGINAL_EXTENSIONS
+log = logging.getLogger(__name__)
 
 
 def configure(
@@ -26,11 +31,13 @@ def configure(
     cached_image_ids: CachedImageIds,
     schedule_cached_thumbnail_memory_warm: ScheduleMemoryWarm,
     db_path: DbPathProvider,
+    mark_image_missing: MarkImageMissing,
 ) -> None:
-    global _cached_image_ids, _schedule_cached_thumbnail_memory_warm, _db_path
+    global _cached_image_ids, _schedule_cached_thumbnail_memory_warm, _db_path, _mark_image_missing
     _cached_image_ids = cached_image_ids
     _schedule_cached_thumbnail_memory_warm = schedule_cached_thumbnail_memory_warm
     _db_path = db_path
+    _mark_image_missing = mark_image_missing
 
 
 def _configured_db_path() -> str:
@@ -49,6 +56,61 @@ def _cache_headers(signature: str) -> dict:
     }
 
 
+async def _source_state(image) -> str:
+    if image["missing_at"] is not None:
+        return "missing"
+    filepath = str(image["filepath"] or "")
+    try:
+        source_stat = await asyncio.to_thread(os.stat, filepath)
+    except FileNotFoundError:
+        source_path = str(image["source_path"] or "")
+        source_online = bool(
+            image["source_online"]
+            and source_path
+            and await asyncio.to_thread(os.path.isdir, source_path)
+        )
+        return "missing" if source_online else "offline"
+    except OSError:
+        return "unavailable"
+    if not stat.S_ISREG(source_stat.st_mode) or int(source_stat.st_size or 0) <= 0:
+        return "corrupt"
+    return "available"
+
+
+async def _source_error_response(image, state: str) -> JSONResponse | None:
+    image_id = int(image["id"])
+    if state in {"missing", "corrupt"}:
+        changed = False
+        if _mark_image_missing is not None:
+            changed = await _mark_image_missing(image_id)
+        if changed:
+            log.warning(
+                "worker=media_request image_id=%s marked unavailable reason=%s path=%r",
+                image_id,
+                state,
+                image["filepath"],
+            )
+        detail = (
+            "The source file is empty or unreadable. Replace it, then rescan the source."
+            if state == "corrupt"
+            else "The source file is no longer on disk. Restore it, then rescan the source."
+        )
+        return JSONResponse(
+            {"error": "Photo unavailable", "reason": f"source_{state}", "detail": detail},
+            status_code=410,
+        )
+    if state == "unavailable":
+        return JSONResponse(
+            {
+                "error": "Source file could not be read",
+                "reason": "source_unavailable",
+                "detail": "Check the source drive and file permissions, then try again.",
+            },
+            status_code=503,
+        )
+    return None
+
+
 @router.get("/api/thumb/{size}/{image_id}")
 async def serve_thumbnail(request: Request, size: str, image_id: int, cached: bool = False):
     return await thumbnail_response(request, size, image_id, cached=cached)
@@ -58,7 +120,18 @@ async def thumbnail_response(request: Request, size: str, image_id: int, cached:
     if size not in thumbnails.SIZES:
         return JSONResponse({"error": "Invalid size"}, status_code=400)
 
-    # Fast path: check memory cache, then SSD disk cache with no DB lookup.
+    image = None
+    source_state = "available"
+    if not cached:
+        image = await image_repository.get_media_image_by_id(_configured_db_path(), image_id)
+        if not image:
+            return JSONResponse({"error": "Image not found"}, status_code=404)
+        source_state = await _source_state(image)
+        source_error = await _source_error_response(image, source_state)
+        if source_error is not None:
+            return source_error
+
+    # Cached probes remain DB-free; normal requests validate the original first.
     request_etag = request.headers.get("if-none-match")
     entry = thumbnails._memory_get_entry_fast(size, image_id)
     if entry is None:
@@ -88,21 +161,33 @@ async def thumbnail_response(request: Request, size: str, image_id: int, cached:
     if cached:
         return Response(status_code=204, headers={"Cache-Control": "no-store"})
 
-    image = await image_repository.get_image_by_id(_configured_db_path(), image_id)
-    if not image:
-        return JSONResponse({"error": "Image not found"}, status_code=404)
+    if source_state == "offline":
+        return JSONResponse(
+            {
+                "error": "Source drive is offline",
+                "reason": "source_offline",
+                "detail": "Reconnect the source drive or use a cached preview.",
+            },
+            status_code=404,
+        )
 
     data = await thumbnails.get_thumbnail(image["filepath"], size, image_id)
     if not data:
-        # Distinguish an unreachable source (spun-down or unplugged drive)
-        # from a genuine generation failure so the UI can react sensibly.
-        source_exists = await asyncio.to_thread(os.path.exists, image["filepath"])
-        if not source_exists:
-            return JSONResponse(
-                {"error": "Source file unavailable", "reason": "source_offline"},
-                status_code=404,
+        changed = await _mark_image_missing(image_id) if _mark_image_missing is not None else False
+        if changed:
+            log.warning(
+                "worker=media_request image_id=%s marked unavailable reason=decode_failed path=%r",
+                image_id,
+                image["filepath"],
             )
-        return JSONResponse({"error": "Thumbnail generation failed"}, status_code=500)
+        return JSONResponse(
+            {
+                "error": "Photo preview could not be created",
+                "reason": "source_corrupt",
+                "detail": "The file appears unreadable. Replace it, then rescan the source.",
+            },
+            status_code=410,
+        )
 
     # response_headers stats the original file; keep slow/offline disks off
     # the event loop so one sleeping drive can't stall every request.
@@ -123,6 +208,14 @@ async def serve_full_image(request: Request, image_id: int, background_tasks: Ba
             return Response(status_code=304, headers=headers)
         return FileResponse(path, headers=headers)
 
+    image = await image_repository.get_media_image_by_id(_configured_db_path(), image_id)
+    if not image:
+        return JSONResponse({"error": "Image not found"}, status_code=404)
+    source_state = await _source_state(image)
+    source_error = await _source_error_response(image, source_state)
+    if source_error is not None:
+        return source_error
+
     full_entry = thumbnails.fast_disk_path_entry(thumbnails.FULL_TIER, image_id)
     if full_entry is not None:
         signature, path = full_entry
@@ -131,9 +224,15 @@ async def serve_full_image(request: Request, image_id: int, background_tasks: Ba
             return Response(status_code=304, headers=headers)
         return FileResponse(path, headers=headers)
 
-    image = await image_repository.get_image_by_id(_configured_db_path(), image_id)
-    if not image:
-        return JSONResponse({"error": "Image not found"}, status_code=404)
+    if source_state == "offline":
+        return JSONResponse(
+            {
+                "error": "Source drive is offline",
+                "reason": "source_offline",
+                "detail": "Reconnect the source drive or use a cached preview.",
+            },
+            status_code=404,
+        )
 
     ext = os.path.splitext(image["filepath"])[1].lower()
     if ext not in _browser_image_extensions:
@@ -143,13 +242,21 @@ async def serve_full_image(request: Request, image_id: int, background_tasks: Ba
 
         data = await thumbnails.get_thumbnail(image["filepath"], "lg", image_id)
         if not data:
-            source_exists = await asyncio.to_thread(os.path.exists, image["filepath"])
-            if not source_exists:
-                return JSONResponse(
-                    {"error": "Source file unavailable", "reason": "source_offline"},
-                    status_code=404,
+            changed = await _mark_image_missing(image_id) if _mark_image_missing is not None else False
+            if changed:
+                log.warning(
+                    "worker=media_request image_id=%s marked unavailable reason=decode_failed path=%r",
+                    image_id,
+                    image["filepath"],
                 )
-            return JSONResponse({"error": "Preview generation failed"}, status_code=500)
+            return JSONResponse(
+                {
+                    "error": "Photo preview could not be created",
+                    "reason": "source_corrupt",
+                    "detail": "The file appears unreadable. Replace it, then rescan the source.",
+                },
+                status_code=410,
+            )
         return Response(content=data, media_type="image/jpeg", headers=headers)
 
     headers = await asyncio.to_thread(
@@ -164,7 +271,21 @@ async def serve_full_image(request: Request, image_id: int, background_tasks: Ba
         background_tasks.add_task(thumbnails.schedule_full_image_cache, image["filepath"], image_id)
 
     if not path or not await asyncio.to_thread(os.path.exists, path):
-        return JSONResponse({"error": "Full image unavailable"}, status_code=404)
+        changed = await _mark_image_missing(image_id) if _mark_image_missing is not None else False
+        if changed:
+            log.warning(
+                "worker=media_request image_id=%s marked unavailable reason=missing path=%r",
+                image_id,
+                image["filepath"],
+            )
+        return JSONResponse(
+            {
+                "error": "Photo unavailable",
+                "reason": "source_missing",
+                "detail": "The source file is no longer on disk. Restore it, then rescan the source.",
+            },
+            status_code=410,
+        )
 
     return FileResponse(path, headers=headers)
 
@@ -264,10 +385,10 @@ async def warm_images(request: Request):
     try:
         rows_by_id = await image_repository.get_active_images_by_ids(_configured_db_path(), list(all_ids))
     except (sqlite3.OperationalError, OSError) as exc:
-        print(f"Warm image lookup skipped: {exc}")
+        log.warning("worker=media_warm image_ids=%s lookup skipped: %s", sorted(all_ids), exc)
         return {"scheduled": {tier: 0 for tier in requested}, "images": len(all_ids)}
-    except Exception as exc:
-        print(f"Warm image lookup skipped: {exc}")
+    except Exception:
+        log.exception("worker=media_warm image_ids=%s lookup failed", sorted(all_ids))
         return {"scheduled": {tier: 0 for tier in requested}, "images": len(all_ids)}
 
     scheduled = {}
@@ -302,10 +423,19 @@ async def warm_images(request: Request):
                     hot=True,
                 )
             except (sqlite3.OperationalError, OSError) as exc:
-                print(f"Warm {tier} skipped: {exc}")
+                log.warning(
+                    "worker=media_warm tier=%s image_ids=%s skipped: %s",
+                    tier,
+                    [int(row["id"]) for row in rows],
+                    exc,
+                )
                 scheduled[tier] = 0
-            except Exception as exc:
-                print(f"Warm {tier} skipped: {exc}")
+            except Exception:
+                log.exception(
+                    "worker=media_warm tier=%s image_ids=%s failed",
+                    tier,
+                    [int(row["id"]) for row in rows],
+                )
                 scheduled[tier] = 0
         elif tier == thumbnails.FULL_TIER:
             count = 0
@@ -317,9 +447,16 @@ async def warm_images(request: Request):
                     await thumbnails.schedule_full_image_cache(row["filepath"], row["id"], hot=True)
                     count += 1
                 except (sqlite3.OperationalError, OSError) as exc:
-                    print(f"Warm full image {row['id']} skipped: {exc}")
-                except Exception as exc:
-                    print(f"Warm full image {row['id']} skipped: {exc}")
+                    log.warning(
+                        "worker=media_warm tier=full image_id=%s skipped: %s",
+                        row["id"],
+                        exc,
+                    )
+                except Exception:
+                    log.exception(
+                        "worker=media_warm tier=full image_id=%s failed",
+                        row["id"],
+                    )
             scheduled[tier] = count
 
     return {"scheduled": scheduled, "images": len(all_ids)}

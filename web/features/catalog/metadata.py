@@ -1,6 +1,8 @@
 """Catalog metadata and orientation backfill workers."""
 
 import asyncio
+import logging
+import os
 import time
 from collections.abc import Callable
 
@@ -8,6 +10,9 @@ from date_inference import infer_image_date
 import photo_metadata
 from core import work_coordination
 from data.repositories import images as image_repository
+
+
+log = logging.getLogger(__name__)
 
 
 DbPathProvider = Callable[[], str]
@@ -102,22 +107,29 @@ async def batch_update_metadata(updates: list[tuple]):
 
 async def classify_orientations_background():
     """Continuously classify unclassified images by reading just the image header."""
-    from PIL import Image as PILImage
+    from PIL import Image as PILImage, UnidentifiedImageError
     loop = asyncio.get_event_loop()
 
     def _classify_batch(rows):
         results = []
+        failures = []
         for row in rows:
             try:
-                img = PILImage.open(row["filepath"])
-                w, h = img.size
-                img.close()
+                with PILImage.open(row["filepath"]) as img:
+                    w, h = img.size
                 orient = "landscape" if w >= h else "portrait"
                 ar = round(w / h, 4) if h > 0 else 1.5
                 results.append((orient, ar, row["id"]))
-            except Exception:
-                results.append(("landscape", 1.5, row["id"]))
-        return results
+            except (FileNotFoundError, UnidentifiedImageError, OSError) as exc:
+                failures.append(
+                    (
+                        int(row["id"]),
+                        str(row["filepath"]),
+                        type(exc).__name__,
+                        os.path.isdir(str(row["source_root"] or "")),
+                    )
+                )
+        return results, failures
 
     while True:
         try:
@@ -139,7 +151,21 @@ async def classify_orientations_background():
             started = time.perf_counter()
             _status.update(state="running", message=f"Classifying {len(rows)} image orientations.")
             with work_coordination.manual_bulk("catalog_metadata"):
-                results = await loop.run_in_executor(None, _classify_batch, rows)
+                results, failures = await loop.run_in_executor(None, _classify_batch, rows)
+            for image_id, filepath, reason, source_online in failures:
+                if not source_online:
+                    continue
+                changed = await image_repository.mark_image_missing(
+                    _configured_db_path(),
+                    image_id,
+                )
+                if changed:
+                    log.warning(
+                        "worker=orientation_classifier image_id=%s skipped unreadable image reason=%s path=%r",
+                        image_id,
+                        reason,
+                        filepath,
+                    )
             if results:
                 await batch_set_orientations(results)
             _status.update(
@@ -151,9 +177,13 @@ async def classify_orientations_background():
                 orientation_scanned=int(_status.get("orientation_scanned") or 0) + len(results),
             )
             await asyncio.sleep(0.05)
-        except Exception as e:
-            _status.update(state="error", message="Orientation classifier failed.", last_error=str(e))
-            print(f"Orientation classifier error: {e}")
+        except Exception:
+            _status.update(
+                state="error",
+                message="Orientation classifier failed.",
+                last_error="See the server log for details.",
+            )
+            log.exception("worker=orientation_classifier failed")
             await asyncio.sleep(5)
 
 
@@ -169,7 +199,7 @@ def metadata_update_tuple(image_id: int, metadata: dict):
             if height_num > 0:
                 orientation = "landscape" if width_num >= height_num else "portrait"
                 aspect_ratio = round(width_num / height_num, 4)
-        except Exception:
+        except (TypeError, ValueError, ZeroDivisionError):
             pass
 
     date_taken = metadata.get("date_taken") or None
@@ -258,7 +288,11 @@ async def scan_metadata_background():
                 metadata_scanned=int(_status.get("metadata_scanned") or 0) + len(updates),
             )
             await asyncio.sleep(0.05)
-        except Exception as e:
-            _status.update(state="error", message="Metadata scanner failed.", last_error=str(e))
-            print(f"Metadata scanner error: {e}")
+        except Exception:
+            _status.update(
+                state="error",
+                message="Metadata scanner failed.",
+                last_error="See the server log for details.",
+            )
+            log.exception("worker=catalog_metadata failed")
             await asyncio.sleep(10)

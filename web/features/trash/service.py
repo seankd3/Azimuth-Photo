@@ -201,6 +201,12 @@ async def _repair_stacks_after_trash(conn, image_ids: list[int]) -> None:
         stack_ids.update(int(row["stack_id"]) for row in await cursor.fetchall())
     now = time.time()
     for stack_id in sorted(stack_ids):
+        for chunk in catalog_repository._chunked(image_ids):
+            placeholders = ",".join("?" for _ in chunk)
+            await conn.execute(
+                f"DELETE FROM stack_members WHERE stack_id = ? AND image_id IN ({placeholders})",
+                (stack_id, *chunk),
+            )
         cursor = await conn.execute(
             "SELECT s.kind, sm.image_id "
             "FROM stacks s JOIN stack_members sm ON sm.stack_id = s.id "
@@ -222,6 +228,31 @@ async def _repair_stacks_after_trash(conn, image_ids: list[int]) -> None:
         await conn.execute(
             "UPDATE stacks SET representative_image_id = ?, updated_at = ? WHERE id = ?",
             (representative_id, now, stack_id),
+        )
+
+
+async def _repair_collection_covers(conn, image_ids: list[int]) -> None:
+    if not image_ids:
+        return
+    collection_ids: set[int] = set()
+    for chunk in catalog_repository._chunked(image_ids):
+        placeholders = ",".join("?" for _ in chunk)
+        cursor = await conn.execute(
+            f"SELECT DISTINCT collection_id FROM collection_images WHERE image_id IN ({placeholders})",
+            chunk,
+        )
+        collection_ids.update(int(row["collection_id"]) for row in await cursor.fetchall())
+    now = time.time()
+    for collection_id in sorted(collection_ids):
+        await conn.execute(
+            "UPDATE collections SET cover_image_id = ("
+            "  SELECT ci.image_id FROM collection_images ci "
+            "  JOIN images i ON i.id = ci.image_id "
+            "  WHERE ci.collection_id = collections.id "
+            "    AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL "
+            "  ORDER BY ci.position ASC, ci.added_at ASC, ci.image_id ASC LIMIT 1"
+            "), updated_at = ? WHERE id = ?",
+            (now, collection_id),
         )
 
 
@@ -300,7 +331,9 @@ async def trash_images(db_path: str, image_ids: list[int]) -> dict:
                 await _revert_failed_trash_moves(conn, failed, rows)
             if successful:
                 await conn.execute("BEGIN")
-                await _repair_stacks_after_trash(conn, [plan["id"] for plan in successful])
+                successful_ids = [plan["id"] for plan in successful]
+                await _repair_stacks_after_trash(conn, successful_ids)
+                await _repair_collection_covers(conn, successful_ids)
                 await conn.commit()
     except Exception:
         await conn.rollback()
@@ -414,6 +447,14 @@ async def restore_images(db_path: str, image_ids: list[int]) -> dict:
                 restored.append(plan["id"])
             if failed:
                 await _revert_failed_restores(conn, failed, rows)
+            failed_ids = {int(plan["id"]) for plan in failed}
+            restored_update_ids = [
+                int(plan["id"]) for plan in updates if int(plan["id"]) not in failed_ids
+            ]
+            if restored_update_ids:
+                await conn.execute("BEGIN")
+                await _repair_collection_covers(conn, restored_update_ids)
+                await conn.commit()
     except Exception:
         await conn.rollback()
         raise

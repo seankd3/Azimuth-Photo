@@ -1,7 +1,33 @@
 from test_support import *  # noqa: F401,F403
+import unittest.mock
 
 
 class SearchTests(BackendTestCase):
+    async def test_exif_failures_log_image_context_without_failing_request(self):
+        source = await self._source("exif-errors")
+        image_id = await self._image(source["id"], "broken.jpg")
+        old_batch_update = search_routes._batch_update_metadata
+
+        async def fail_backfill(_updates):
+            raise RuntimeError("database write failed")
+
+        search_routes._batch_update_metadata = fail_backfill
+        try:
+            with unittest.mock.patch.object(
+                search_routes.photo_metadata,
+                "extract_image_metadata",
+                side_effect=OSError("decode failed"),
+            ), unittest.mock.patch.object(search_routes.log, "exception") as error_log:
+                result = await search_routes.api_exif(image_id)
+        finally:
+            search_routes._batch_update_metadata = old_batch_update
+            search_routes._exif_cache.pop(image_id, None)
+
+        self.assertIn("exif", result)
+        self.assertEqual(error_log.call_count, 2)
+        rendered = [call.args[0] % call.args[1:] for call in error_log.call_args_list]
+        self.assertTrue(all(f"image_id={image_id}" in message for message in rendered))
+
     async def test_text_search_exact_extension_uses_file_type_filter(self):
         conditions, params = db._ranking_filter_parts(text_query="jpg", include_source=False)
         where = " AND ".join(conditions)

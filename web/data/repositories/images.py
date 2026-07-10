@@ -13,6 +13,21 @@ async def get_image_by_id(db_path: str, image_id: int):
         await connection.close_async(conn, db_path=db_path)
 
 
+async def get_media_image_by_id(db_path: str, image_id: int):
+    """Load media-serving state together with its source availability context."""
+    conn = await connection.open_async(db_path)
+    try:
+        cursor = await conn.execute(
+            "SELECT i.*, s.path AS source_path, s.online AS source_online "
+            "FROM images i LEFT JOIN catalog_sources s ON s.id = i.source_id "
+            "WHERE i.id = ?",
+            (int(image_id),),
+        )
+        return await cursor.fetchone()
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+
+
 async def get_images_by_ids(db_path: str, image_ids: list[int]) -> dict[int, dict]:
     if not image_ids:
         return {}
@@ -108,6 +123,7 @@ async def get_unclassified_images(db_path: str, limit: int = 200):
             "SELECT i.id, i.filepath, s.path AS source_root FROM images i "
             "JOIN catalog_sources s ON s.id = i.source_id "
             "WHERE i.orientation IS NULL AND s.included = 1 "
+            "AND s.online = 1 "
             "AND i.status IN ('kept', 'maybe') "
             "AND i.missing_at IS NULL "
             "LIMIT ?",
@@ -138,9 +154,9 @@ async def get_images_needing_metadata(
     conn = await connection.open_async(db_path)
     try:
         cursor = await conn.execute(
-            "SELECT i.id, i.filepath FROM images i "
+            "SELECT i.id, i.filepath, s.path AS source_root FROM images i "
             "JOIN catalog_sources s ON s.id = i.source_id "
-            "WHERE s.included = 1 AND ("
+            "WHERE s.included = 1 AND s.online = 1 AND ("
             "i.metadata_scanned_at IS NULL "
             "OR i.metadata_version IS NULL "
             "OR i.metadata_version < ?) "

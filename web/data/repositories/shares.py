@@ -385,7 +385,7 @@ async def resolve_token(db_path: str, token: str) -> dict | None:
                 s.view_count,
                 s.first_viewed_at,
                 s.last_viewed_at,
-                COUNT(COALESCE(si.image_id, node_image.image_id)) AS image_count,
+                COUNT(i.id) AS image_count,
                 MIN(i.date_taken) AS date_min,
                 MAX(i.date_taken) AS date_max
             FROM collection_shares s
@@ -396,6 +396,11 @@ async def resolve_token(db_path: str, token: str) -> dict | None:
             LEFT JOIN published_node_images node_image
                 ON node_image.node_id = s.published_node_id
             LEFT JOIN images i ON i.id = COALESCE(si.image_id, node_image.image_id)
+                AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL
+                AND EXISTS (
+                    SELECT 1 FROM catalog_sources source
+                    WHERE source.id = i.source_id AND source.included = 1
+                )
             WHERE s.token = ? AND {_active_unexpired_clause("s")}
             GROUP BY s.id
             """,
@@ -424,7 +429,9 @@ async def resolve_token(db_path: str, token: str) -> dict | None:
                 SELECT i.id, i.filename, COALESCE(i.aspect_ratio, 1.5) AS aspect_ratio, i.date_taken
                 FROM share_images si
                 JOIN images i ON i.id = si.image_id
+                JOIN catalog_sources source ON source.id = i.source_id AND source.included = 1
                 WHERE si.share_id = ?
+                  AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL
                 ORDER BY si.position ASC, si.added_at ASC, si.image_id ASC
                 """,
                 (int(collection["share_id"]),),
@@ -451,7 +458,11 @@ async def token_allows_image(db_path: str, token: str, image_id: int) -> bool:
                         s.collection_id IS NOT NULL
                         AND EXISTS (
                             SELECT 1 FROM share_images si
+                            JOIN images i ON i.id = si.image_id
+                            JOIN catalog_sources source ON source.id = i.source_id
                             WHERE si.share_id = s.id AND si.image_id = ?
+                              AND source.included = 1
+                              AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL
                         )
                     )
                     OR (
@@ -468,7 +479,11 @@ async def token_allows_image(db_path: str, token: str, image_id: int) -> bool:
                             FROM subtree
                             JOIN published_node_images membership
                                 ON membership.node_id = subtree.id
+                            JOIN images i ON i.id = membership.image_id
+                            JOIN catalog_sources source ON source.id = i.source_id
                             WHERE membership.image_id = ?
+                              AND source.included = 1
+                              AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL
                         )
                     )
                 )
@@ -546,7 +561,10 @@ async def favorites_for_collection(db_path: str, collection_id: int) -> list[dic
             JOIN share_images si
                 ON si.share_id = sf.share_id
                 AND si.image_id = sf.image_id
+            JOIN images i ON i.id = si.image_id
+            JOIN catalog_sources source ON source.id = i.source_id AND source.included = 1
             WHERE sf.share_id = ?
+              AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL
             ORDER BY sf.created_at ASC, sf.image_id ASC
             """,
             (int(active["id"]),),
@@ -573,7 +591,11 @@ async def _share_contains_image(conn, share_id: int, image_id: int) -> bool:
                     s.collection_id IS NOT NULL
                     AND EXISTS (
                         SELECT 1 FROM share_images si
+                        JOIN images i ON i.id = si.image_id
+                        JOIN catalog_sources source ON source.id = i.source_id
                         WHERE si.share_id = s.id AND si.image_id = ?
+                          AND source.included = 1
+                          AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL
                     )
                 )
                 OR (
@@ -590,7 +612,11 @@ async def _share_contains_image(conn, share_id: int, image_id: int) -> bool:
                         FROM subtree
                         JOIN published_node_images membership
                             ON membership.node_id = subtree.id
+                        JOIN images i ON i.id = membership.image_id
+                        JOIN catalog_sources source ON source.id = i.source_id
                         WHERE membership.image_id = ?
+                          AND source.included = 1
+                          AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL
                     )
                 )
             )
@@ -678,7 +704,9 @@ async def _published_subtree_images_on_conn(conn, root_node_id: int) -> list[dic
             i.date_taken
         FROM published_node_images membership
         JOIN images i ON i.id = membership.image_id
+        JOIN catalog_sources source ON source.id = i.source_id AND source.included = 1
         WHERE membership.node_id IN ({placeholders})
+          AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL
         ORDER BY membership.position ASC, membership.added_at ASC, membership.image_id ASC
         """,
         ordered_nodes,
@@ -714,16 +742,19 @@ async def _snapshot_share_images(
         await conn.execute(
             """
             INSERT OR IGNORE INTO share_images (share_id, image_id, position, added_at)
-            SELECT ?, image_id, position, ?
-            FROM collection_images
-            WHERE collection_id = ?
+            SELECT ?, membership.image_id, membership.position, ?
+            FROM collection_images membership
+            JOIN images i ON i.id = membership.image_id
+            JOIN catalog_sources source ON source.id = i.source_id AND source.included = 1
+            WHERE membership.collection_id = ?
+              AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL
             ORDER BY position ASC, added_at ASC, image_id ASC
             """,
             (int(share_id), now, int(collection_id)),
         )
         return
 
-    rows = []
+    candidate_ids = []
     seen = set()
     for position, raw_id in enumerate(snapshot_image_ids):
         try:
@@ -733,7 +764,23 @@ async def _snapshot_share_images(
         if image_id <= 0 or image_id in seen:
             continue
         seen.add(image_id)
-        rows.append((int(share_id), image_id, position, now))
+        candidate_ids.append((position, image_id))
+    if candidate_ids:
+        placeholders = ",".join("?" for _ in candidate_ids)
+        cursor = await conn.execute(
+            "SELECT i.id FROM images i JOIN catalog_sources source ON source.id = i.source_id "
+            f"WHERE i.id IN ({placeholders}) AND source.included = 1 "
+            "AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL",
+            [image_id for _position, image_id in candidate_ids],
+        )
+        active_ids = {int(row["id"]) for row in await cursor.fetchall()}
+        rows = [
+            (int(share_id), image_id, position, now)
+            for position, image_id in candidate_ids
+            if image_id in active_ids
+        ]
+    else:
+        rows = []
     if rows:
         await conn.executemany(
             "INSERT OR IGNORE INTO share_images (share_id, image_id, position, added_at) "

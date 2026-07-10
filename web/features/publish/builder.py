@@ -6,6 +6,7 @@ import asyncio
 import ctypes
 import errno
 import json
+import logging
 import os
 import platform
 import shutil
@@ -20,6 +21,13 @@ from fastapi.templating import Jinja2Templates
 
 import settings
 from features.publish import nodes as published_nodes
+
+
+log = logging.getLogger(__name__)
+
+
+class GalleryImageUnavailable(RuntimeError):
+    """One source image cannot produce a gallery derivative."""
 
 
 @dataclass(frozen=True)
@@ -85,18 +93,32 @@ async def build_public_gallery_bundle(
         gallery_images = []
         for image in images:
             image_id = int(image["id"])
-            await _write_cached_jpeg(
-                thumbnails=thumbnails,
-                image=image,
-                size="sm",
-                output_path=work_target / "thumb" / "sm" / f"{image_id}.jpg",
-            )
-            await _write_cached_jpeg(
-                thumbnails=thumbnails,
-                image=image,
-                size="md",
-                output_path=work_target / "img" / f"{image_id}.jpg",
-            )
+            thumb_path = work_target / "thumb" / "sm" / f"{image_id}.jpg"
+            preview_path = work_target / "img" / f"{image_id}.jpg"
+            try:
+                await _write_cached_jpeg(
+                    thumbnails=thumbnails,
+                    image=image,
+                    size="sm",
+                    output_path=thumb_path,
+                )
+                await _write_cached_jpeg(
+                    thumbnails=thumbnails,
+                    image=image,
+                    size="md",
+                    output_path=preview_path,
+                )
+            except GalleryImageUnavailable as exc:
+                await asyncio.gather(
+                    asyncio.to_thread(thumb_path.unlink, missing_ok=True),
+                    asyncio.to_thread(preview_path.unlink, missing_ok=True),
+                )
+                log.warning(
+                    "worker=publish image_id=%s skipped unavailable image: %s",
+                    image_id,
+                    exc,
+                )
+                continue
             gallery_images.append(
                 {
                     "id": image_id,
@@ -305,8 +327,11 @@ async def _write_cached_jpeg(*, thumbnails, image: dict, size: str, output_path:
     path_entry = await asyncio.to_thread(thumbnails.fast_disk_path_entry, size, image_id)
     if path_entry is not None:
         _signature, cached_path = path_entry
-        await asyncio.to_thread(shutil.copyfile, cached_path, output_path)
-        return
+        try:
+            await asyncio.to_thread(shutil.copyfile, cached_path, output_path)
+            return
+        except FileNotFoundError:
+            pass
 
     read_entry = await asyncio.to_thread(thumbnails.fast_disk_read_entry, size, image_id, None)
     if read_entry is not None:
@@ -314,9 +339,12 @@ async def _write_cached_jpeg(*, thumbnails, image: dict, size: str, output_path:
         await asyncio.to_thread(output_path.write_bytes, data)
         return
 
-    data = await thumbnails.get_thumbnail(image["filepath"], size, image_id)
+    try:
+        data = await thumbnails.get_thumbnail(image["filepath"], size, image_id)
+    except OSError as exc:
+        raise GalleryImageUnavailable(f"could not read source for {size} derivative") from exc
     if not data:
-        raise RuntimeError(f"Could not build {size} image for photo {image_id}")
+        raise GalleryImageUnavailable(f"could not build {size} derivative")
     await asyncio.to_thread(output_path.write_bytes, data)
 
 

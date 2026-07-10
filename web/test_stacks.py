@@ -3,6 +3,7 @@ import math
 import os
 import tempfile
 import unittest
+import unittest.mock
 
 import numpy as np
 from fastapi.testclient import TestClient
@@ -16,6 +17,7 @@ from data.repositories import stacks as stack_repository
 from features.library import routes as library_routes
 from features.library import service as library_service
 from features.stacks import builders
+from features.stacks import routes as stack_routes
 
 
 class StackTestCase(unittest.IsolatedAsyncioTestCase):
@@ -466,6 +468,20 @@ class StackTestCase(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual([image["id"] for image in collapsed["images"]], [representative])
         self.assertEqual(collapsed["total_kept"], 1)
+
+    async def test_rebuild_failure_is_logged_and_status_hides_internal_path(self):
+        secret = "/home/sean/private/catalog.db"
+        with unittest.mock.patch.object(
+            builders,
+            "rebuild_stacks",
+            side_effect=RuntimeError(f"failed opening {secret}"),
+        ), unittest.mock.patch.object(stack_routes.log, "exception") as error_log:
+            await stack_routes._run_rebuild_task(["burst"])
+
+        self.assertEqual(stack_routes._rebuild_status["state"], "error")
+        self.assertNotIn(secret, stack_routes._rebuild_status["error"])
+        self.assertIn("try again", stack_routes._rebuild_status["error"])
+        error_log.assert_called_once()
 
 
 class StackRouteTests(unittest.TestCase):
