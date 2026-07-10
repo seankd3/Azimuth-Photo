@@ -77,6 +77,7 @@ class BackupUnitTests(unittest.TestCase):
         self.tempdir.cleanup()
 
     def test_snapshot_list_restore_roundtrip(self):
+        live_before = self.db_path.read_bytes()
         created = backups.create_snapshot(str(self.db_path))
         self.assertTrue(created["ok"])
         self.assertTrue(created["name"].endswith(".db.gz"))
@@ -102,8 +103,39 @@ class BackupUnitTests(unittest.TestCase):
             conn.close()
         self.assertIn("images", tables)
 
-        # Live db untouched (same inode content path still exists).
-        self.assertTrue(self.db_path.is_file())
+        # Live db remains byte-for-byte untouched.
+        self.assertEqual(self.db_path.read_bytes(), live_before)
+        status = backups.restore_status(str(self.db_path))
+        self.assertTrue(status["prepared"])
+        self.assertEqual(status["name"], created["name"])
+        with self.assertRaises(backups.RestoreStageExistsError):
+            backups.restore_backup(str(self.db_path), created["name"])
+        discarded = backups.discard_staged_restore(str(self.db_path))
+        self.assertTrue(discarded["discarded"])
+        self.assertFalse(discarded["prepared"])
+        self.assertEqual(self.db_path.read_bytes(), live_before)
+
+    def test_restore_rejects_invalid_catalog_and_cleans_temps(self):
+        name = "photoarchive-20260710-120000.db.gz"
+        with gzip.open(self.root / name, "wb") as gz:
+            gz.write(b"not a sqlite database")
+
+        with self.assertRaises(backups.RestoreValidationError):
+            backups.restore_backup(str(self.db_path), name)
+
+        self.assertFalse((self.db_path.parent / "photoarchive.restored.db").exists())
+        self.assertFalse((self.db_path.parent / "photoarchive.restored.json").exists())
+        self.assertFalse((self.db_path.parent / ".photoarchive.restored.db.tmp").exists())
+
+    def test_restore_requires_photoarchive_tables(self):
+        empty_db = Path(self.tempdir.name) / "empty.db"
+        sqlite3.connect(empty_db).close()
+        name = "photoarchive-20260710-121500.db.gz"
+        with open(empty_db, "rb") as raw, gzip.open(self.root / name, "wb") as gz:
+            gz.write(raw.read())
+
+        with self.assertRaisesRegex(backups.RestoreValidationError, "required catalog tables"):
+            backups.restore_backup(str(self.db_path), name)
 
     def test_retention_keeps_daily_and_weekly(self):
         now = datetime(2026, 7, 10, 4, 0, 0)
@@ -231,6 +263,7 @@ class BackupRouteTests(unittest.TestCase):
         self.tempdir.cleanup()
 
     def test_backup_endpoints_roundtrip(self):
+        live_before = self.db_path.read_bytes()
         now = self.client.post("/api/system/backup/now")
         self.assertEqual(now.status_code, 200, now.text)
         body = now.json()
@@ -247,6 +280,46 @@ class BackupRouteTests(unittest.TestCase):
         payload = restored.json()
         self.assertFalse(payload["hot_swapped"])
         self.assertTrue(Path(payload["staging_path"]).is_file())
+        self.assertEqual(self.db_path.read_bytes(), live_before)
+
+        status = self.client.get("/api/system/backup/restore-status")
+        self.assertEqual(status.status_code, 200)
+        self.assertTrue(status.json()["prepared"])
+        self.assertEqual(status.json()["name"], name)
+
+        conflict = self.client.post("/api/system/backup/restore", json={"name": name})
+        self.assertEqual(conflict.status_code, 409)
+        self.assertTrue(conflict.json()["restore"]["prepared"])
+
+        discarded = self.client.delete("/api/system/backup/restore-staged")
+        self.assertEqual(discarded.status_code, 200)
+        self.assertTrue(discarded.json()["discarded"])
+        self.assertFalse(discarded.json()["prepared"])
+        self.assertEqual(self.db_path.read_bytes(), live_before)
+
+    def test_restore_endpoint_reports_validation_and_storage_failures(self):
+        missing = self.client.post(
+            "/api/system/backup/restore",
+            json={"name": "photoarchive-20260710-130000.db.gz"},
+        )
+        self.assertEqual(missing.status_code, 404)
+
+        invalid = self.client.post("/api/system/backup/restore", json={"name": "../catalog.db"})
+        self.assertEqual(invalid.status_code, 400)
+
+        corrupt_name = "photoarchive-20260710-131500.db.gz"
+        with gzip.open(self.root / corrupt_name, "wb") as gz:
+            gz.write(b"not sqlite")
+        corrupt = self.client.post("/api/system/backup/restore", json={"name": corrupt_name})
+        self.assertEqual(corrupt.status_code, 422, corrupt.text)
+
+        with mock.patch.object(
+            backups,
+            "restore_backup",
+            side_effect=backups.RestoreStorageError("disk full"),
+        ):
+            storage = self.client.post("/api/system/backup/restore", json={"name": corrupt_name})
+        self.assertEqual(storage.status_code, 507)
 
     def test_integrity_endpoints(self):
         started = self.client.post("/api/system/integrity/scan", json={"limit": 3})

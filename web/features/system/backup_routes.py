@@ -38,9 +38,11 @@ def _configured_db_path() -> str:
 
 
 @router.post("/api/system/backup/now")
-async def api_backup_now() -> dict[str, Any]:
-    result = await asyncio.to_thread(backups.create_snapshot, _configured_db_path())
-    return result
+async def api_backup_now():
+    try:
+        return await asyncio.to_thread(backups.create_snapshot, _configured_db_path())
+    except (OSError, backups.RestoreStorageError) as exc:
+        return JSONResponse({"error": f"Could not back up the catalog: {exc}"}, status_code=507)
 
 
 @router.get("/api/system/backup/list")
@@ -57,7 +59,26 @@ async def api_backup_restore(body: RestoreBody):
         return JSONResponse({"error": str(exc)}, status_code=404)
     except ValueError as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
+    except backups.RestoreStageExistsError as exc:
+        return JSONResponse({"error": str(exc), "restore": backups.restore_status(_configured_db_path())}, status_code=409)
+    except backups.RestoreValidationError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=422)
+    except backups.RestoreStorageError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=507)
     return result
+
+
+@router.get("/api/system/backup/restore-status")
+async def api_backup_restore_status() -> dict[str, Any]:
+    return await asyncio.to_thread(backups.restore_status, _configured_db_path())
+
+
+@router.delete("/api/system/backup/restore-staged")
+async def api_backup_restore_discard():
+    try:
+        return await asyncio.to_thread(backups.discard_staged_restore, _configured_db_path())
+    except backups.RestoreStorageError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=507)
 
 
 @router.post("/api/system/integrity/scan")

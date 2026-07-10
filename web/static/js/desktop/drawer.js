@@ -15,6 +15,9 @@ import { confirmTypedCount } from './trash.js';
 import {
     bindSourcePicker, clearSourcePickerSelection, renderSourceAddUi, setSourceAddError,
 } from './source_picker.js';
+import {
+    bindLibraryHealth, refreshLibraryHealth, renderLibraryHealth, stopLibraryHealthPolling,
+} from './library_health.js';
 
 let open = false;
 let drawerTimer = null;
@@ -729,7 +732,7 @@ function renderDrawer() {
     openSettingSections = new Set(Array.from(body.querySelectorAll('.dr-details[open] summary span'))
         .map((el) => el.textContent || ''));
     if (publishingFocusPending || publishReturn) openSettingSections.add('Publishing');
-    body.innerHTML = renderSources() + renderWork() + renderSharedHome() + renderSettingsSections() + renderStorage() + renderRemote() + renderPrefs() + renderSettingsSaveBar();
+    body.innerHTML = renderSources() + renderLibraryHealth(catalog) + renderWork() + renderSharedHome() + renderSettingsSections() + renderStorage() + renderRemote() + renderPrefs() + renderSettingsSaveBar();
     updateDrawerContext();
     bindDrawerActions();
     if (publishingFocusPending && body.querySelector('.dr-details[data-settings-section="Publishing"]')) {
@@ -748,6 +751,7 @@ async function refreshDrawer() {
         getMetadataStatus().catch(() => null),
         getRemoteAccess().catch(() => null),
         getSettings().catch(() => null),
+        refreshLibraryHealth(),
     ]);
     if (settingsData) applySettingsData(settingsData, { preserveDirtyExcept: new Set() });
     catalog = nextCatalog || catalog;
@@ -1008,6 +1012,16 @@ async function saveAndInstallModel() {
 
 function bindDrawerActions() {
     const body = document.getElementById('drawer-body');
+    bindLibraryHealth(body, {
+        rerender: () => {
+            if (!drawerEditing()) renderDrawer();
+        },
+        refreshCatalog: async () => {
+            catalog = await getCatalog().catch(() => catalog);
+            if (!drawerEditing()) renderDrawer();
+            showToast('Sources checked');
+        },
+    });
     bindSettingInputs(body);
     body.querySelector('#drawer-cache-defaults')?.addEventListener('click', applyCacheDefaults);
     body.querySelector('#drawer-save-settings')?.addEventListener('click', (event) => withBusyAction('settings-save', event.currentTarget, saveDrawerSettings));
@@ -1115,6 +1129,7 @@ function stopDrawerPolling() {
     drawerTimer = null;
     clearInterval(installTimer);
     installTimer = null;
+    stopLibraryHealthPolling();
 }
 
 function resolvePublishReturnTarget() {

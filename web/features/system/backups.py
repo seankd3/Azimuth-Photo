@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import gzip
 import hashlib
+import json
 import logging
 import os
 import re
@@ -30,6 +31,19 @@ DAILY_KEEP = 7
 WEEKLY_KEEP = 4
 INTEGRITY_SLEEP_SECONDS = 0.05
 CHECKSUM_CHUNK = 1024 * 1024
+RESTORE_REQUIRED_TABLES = frozenset({"images", "catalog_sources"})
+
+
+class RestoreStageExistsError(RuntimeError):
+    """A prepared restore already exists beside the live catalog."""
+
+
+class RestoreValidationError(RuntimeError):
+    """The selected backup is not a valid photoArchive catalog."""
+
+
+class RestoreStorageError(RuntimeError):
+    """The restore could not be staged because local storage failed."""
 
 _IMAGE_CHECKSUMS_DDL = """
 CREATE TABLE IF NOT EXISTS image_checksums (
@@ -225,30 +239,135 @@ def apply_retention(root: Path | None = None) -> list[str]:
     return pruned
 
 
+def _restore_paths(db_path: str) -> tuple[Path, Path, Path, Path, Path]:
+    live = Path(db_path).resolve()
+    staging = live.with_name("photoarchive.restored.db")
+    metadata = live.with_name("photoarchive.restored.json")
+    tmp = live.with_name(".photoarchive.restored.db.tmp")
+    metadata_tmp = live.with_name(".photoarchive.restored.json.tmp")
+    return live, staging, metadata, tmp, metadata_tmp
+
+
+def _validate_restored_catalog(path: Path) -> None:
+    try:
+        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=30.0)
+        try:
+            quick_check = conn.execute("PRAGMA quick_check").fetchone()
+            if not quick_check or str(quick_check[0]).lower() != "ok":
+                raise RestoreValidationError("Backup catalog failed SQLite integrity validation")
+            tables = {
+                str(row[0])
+                for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+            }
+        finally:
+            conn.close()
+    except RestoreValidationError:
+        raise
+    except sqlite3.Error as exc:
+        raise RestoreValidationError("Backup is not a readable SQLite catalog") from exc
+    missing = sorted(RESTORE_REQUIRED_TABLES - tables)
+    if missing:
+        raise RestoreValidationError(f"Backup is missing required catalog tables: {', '.join(missing)}")
+
+
+def restore_status(db_path: str) -> dict[str, Any]:
+    """Describe a prepared restore without mutating either catalog."""
+    _live, staging, metadata, _tmp, _metadata_tmp = _restore_paths(db_path)
+    payload: dict[str, Any] = {
+        "prepared": staging.is_file(),
+        "staging_path": str(staging),
+        "bytes": 0,
+        "name": None,
+        "created_at": None,
+        "prepared_at": None,
+    }
+    if staging.is_file():
+        try:
+            payload["bytes"] = staging.stat().st_size
+        except OSError:
+            pass
+    if metadata.is_file():
+        try:
+            stored = json.loads(metadata.read_text(encoding="utf-8"))
+            if isinstance(stored, dict):
+                for key in ("name", "created_at", "prepared_at"):
+                    payload[key] = stored.get(key)
+        except (OSError, ValueError, TypeError):
+            payload["metadata_unavailable"] = True
+    payload["artifacts_present"] = bool(staging.exists() or metadata.exists())
+    return payload
+
+
+def discard_staged_restore(db_path: str) -> dict[str, Any]:
+    """Remove only the reproducible staged catalog and its metadata."""
+    _live, staging, metadata, tmp, metadata_tmp = _restore_paths(db_path)
+    removed: list[str] = []
+    with _backup_lock:
+        for path in (staging, metadata, tmp, metadata_tmp):
+            try:
+                if path.exists():
+                    path.unlink()
+                    removed.append(path.name)
+            except OSError as exc:
+                raise RestoreStorageError("Could not discard the prepared restore; check file permissions") from exc
+    return {"ok": True, "discarded": bool(removed), "removed": removed, **restore_status(db_path)}
+
+
 def restore_backup(db_path: str, name: str) -> dict[str, Any]:
-    """Decompress a named backup beside the live db. Never replaces the live file."""
+    """Validate and stage a named backup beside the live db; never replace it."""
     if not BACKUP_NAME_RE.match(name):
         raise ValueError(f"Invalid backup name: {name}")
     source = backup_root() / name
     if not source.is_file():
         raise FileNotFoundError(f"Backup not found: {name}")
 
-    live = Path(db_path).resolve()
-    staging = live.with_name("photoarchive.restored.db")
-    tmp = live.with_name(".photoarchive.restored.db.tmp")
+    live, staging, metadata, tmp, metadata_tmp = _restore_paths(db_path)
+    parsed = _parse_backup_name(name)
+    prepared_at = datetime.now().astimezone().isoformat()
+    meta_payload = {
+        "name": name,
+        "created_at": parsed.isoformat() if parsed else None,
+        "prepared_at": prepared_at,
+    }
 
     with _backup_lock:
-        if tmp.exists():
-            tmp.unlink()
-        with gzip.open(source, "rb") as gz, open(tmp, "wb") as out:
-            shutil.copyfileobj(gz, out, length=1024 * 1024)
-        os.replace(tmp, staging)
+        if staging.exists() or metadata.exists():
+            raise RestoreStageExistsError("A restore is already prepared; discard it before preparing another")
+        for leftover in (tmp, metadata_tmp):
+            try:
+                if leftover.exists():
+                    leftover.unlink()
+            except OSError as exc:
+                raise RestoreStorageError("Could not clear an incomplete restore; check file permissions") from exc
+        try:
+            with gzip.open(source, "rb") as gz, open(tmp, "wb") as out:
+                shutil.copyfileobj(gz, out, length=1024 * 1024)
+            _validate_restored_catalog(tmp)
+            size = tmp.stat().st_size
+            metadata_tmp.write_text(json.dumps(meta_payload, indent=2) + "\n", encoding="utf-8")
+            os.replace(metadata_tmp, metadata)
+            try:
+                os.replace(tmp, staging)
+            except OSError:
+                metadata.unlink(missing_ok=True)
+                raise
+        except (gzip.BadGzipFile, EOFError, RestoreValidationError) as exc:
+            if isinstance(exc, RestoreValidationError):
+                raise
+            raise RestoreValidationError("Backup archive is corrupt or incomplete") from exc
+        except OSError as exc:
+            raise RestoreStorageError("Could not prepare the restore; check free space and file permissions") from exc
+        finally:
+            for leftover in (tmp, metadata_tmp):
+                try:
+                    if leftover.exists():
+                        leftover.unlink()
+                except OSError:
+                    pass
 
     instructions = (
-        f"Restored backup '{name}' to staging path '{staging}'. "
-        "The live catalog was NOT replaced. To swap: stop the server, "
-        f"move '{live.name}' aside, rename '{staging.name}' to '{live.name}', "
-        "then start the server again."
+        f"Prepared backup '{name}' at '{staging}'. "
+        "The live catalog was NOT replaced. A desktop app can apply this prepared restore after restart."
     )
     log.info("catalog_backup restore staged name=%s staging=%s", name, staging)
     return {
@@ -256,7 +375,9 @@ def restore_backup(db_path: str, name: str) -> dict[str, Any]:
         "name": name,
         "staging_path": str(staging),
         "live_path": str(live),
-        "bytes": staging.stat().st_size,
+        "bytes": size,
+        "created_at": meta_payload["created_at"],
+        "prepared_at": prepared_at,
         "instructions": instructions,
         "hot_swapped": False,
     }

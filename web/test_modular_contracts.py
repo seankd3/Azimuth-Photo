@@ -193,6 +193,8 @@ PUBLIC_ROUTE_CONTRACT = {
     ("POST", "/api/system/backup/now"),
     ("GET", "/api/system/backup/list"),
     ("POST", "/api/system/backup/restore"),
+    ("GET", "/api/system/backup/restore-status"),
+    ("DELETE", "/api/system/backup/restore-staged"),
     ("POST", "/api/system/integrity/scan"),
     ("GET", "/api/system/integrity/status"),
     # PATCH: quality lane

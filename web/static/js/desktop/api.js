@@ -32,6 +32,16 @@ export async function postJsonWithStatus(url, body = null) {
     }
 }
 
+export async function deleteJsonWithStatus(url) {
+    try {
+        const response = await fetch(url, { method: 'DELETE', headers: { Accept: 'application/json' } });
+        const data = await response.json().catch(() => null);
+        return { ok: response.ok, status: response.status, data };
+    } catch {
+        return { ok: false, status: 0, data: null };
+    }
+}
+
 export function thumbUrl(size, imageId) {
     return `/api/thumb/${size}/${imageId}`;
 }
@@ -107,6 +117,34 @@ export async function removeCatalogSource(sourceId, mode = 'keep') {
 
 export async function getScanStatus() {
     return fetchJson('/api/scan/status', { defaultValue: null });
+}
+
+export async function getCatalogBackups() {
+    return fetchJson('/api/system/backup/list', { defaultValue: null });
+}
+
+export async function createCatalogBackup() {
+    return postJsonWithStatus('/api/system/backup/now');
+}
+
+export async function prepareCatalogRestore(name) {
+    return postJsonWithStatus('/api/system/backup/restore', { name });
+}
+
+export async function getCatalogRestoreStatus() {
+    return fetchJson('/api/system/backup/restore-status', { defaultValue: null });
+}
+
+export async function discardCatalogRestore() {
+    return deleteJsonWithStatus('/api/system/backup/restore-staged');
+}
+
+export async function getIntegrityStatus() {
+    return fetchJson('/api/system/integrity/status', { defaultValue: null });
+}
+
+export async function startIntegrityScan(limit = 50) {
+    return postJsonWithStatus('/api/system/integrity/scan', { limit });
 }
 
 export async function getMetadataStatus() {
