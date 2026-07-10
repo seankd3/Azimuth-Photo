@@ -164,12 +164,9 @@ function renderSet() {
     }
     if (selectedIndex >= currentSet.length) selectedIndex = currentSet.length - 1;
     stage.innerHTML = currentSet.map((img, index) => {
-        const key = mode === 'duel'
-            ? (index === 0 ? '←' : '→')
-            : (index < 9 ? String(index + 1) : (index === 9 ? '0' : ''));
         const selected = index === selectedIndex ? ' selected' : '';
         return `<button class="ref-card${selected}" data-id="${img.id}" data-index="${index}" aria-label="Pick ${esc(img.filename || img.id)}">`
-            + `<img src="${esc(imageUrl(img))}" loading="lazy" decoding="async" alt="${esc(img.filename || '')}">${key ? `<span class="ref-key">${key}</span>` : ''}</button>`;
+            + `<img src="${esc(imageUrl(img))}" loading="lazy" decoding="async" alt="${esc(img.filename || '')}"></button>`;
     }).join('');
     setImagesLoadedHandlers();
 }
