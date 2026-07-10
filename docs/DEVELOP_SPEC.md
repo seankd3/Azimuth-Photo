@@ -412,3 +412,84 @@ Mirror the HDR pattern: detect candidate pano sequences (same lens/focal, ≤10s
 overlapping content), POST /api/develop/pano/merge {image_ids} — OpenCV (opencv-python-headless) stitcher
 on our decoded linears (downscale to 3000px for v1), result registered like HDR merges (EXR + base cache,
 kind tag pano). Honest failure states (stitch confidence).
+
+---
+
+# PHASE 4 — Film emulation engine, Renditions model, final parity closure (appended 2026-07-10)
+
+## 26. Film emulation — physically modeled, not preset LUTs
+Goal: the most accurate film emulation shipping anywhere. Not a color preset: a model of the
+photochemical chain, per stock, operating on LINEAR scene-referred data. When Film is enabled it
+REPLACES the digital tone mapping (base/profile curve + BASE_PROFILE_SAT are bypassed; user Tone
+sliders still work — they modify scene exposure BEFORE film, like printing/pushing).
+
+Stage order (both twins; after WB/exposure/region-tone in linear, replacing stage 5-6 tone path):
+1. **Layer exposures**: logE_i = log10(dot(S_i, rgb_linear)) per emulsion layer i∈{R,G,B}-sensitive,
+   with 3×3 spectral sensitivity crosstalk matrix S (layers overlap — from datasheet sensitivity curves).
+2. **Halation** (optical, pre-development): h = blur_wide(max(scene_luma − H_thresh, 0));
+   logE_red += log10(1 + H_amount·h) (dominantly red layer, small green fraction H_GREEN_FRACTION).
+   Kernel: exponential-tailed blur, radius H_RADIUS as fraction of frame min-edge (reuse the blur-field
+   machinery with one extra large-σ field when Film is on). CineStill 800T (remjet removed): H_amount
+   high, threshold low, radius large — the signature red glow around tungsten highlights. Normal C-41
+   stocks: subtle values. All per-stock constants.
+3. **Characteristic curves** (H&D) per layer: density D_i = hd_curve_i(logE_i) — monotone control
+   points encoding toe / straight-line (gamma ~0.55–0.65 neg, ~1.6–1.9 slide) / shoulder, digitized
+   from published Kodak/Fuji datasheets per stock.
+4. **DIR coupler inhibition**: D = M_dir · D (3×3, small negative off-diagonals) — inter-layer
+   development inhibition that creates film's color separation "pop".
+5. **Grain**: per-layer stochastic density noise σ_i(D) peaking at mid densities (RMS granularity from
+   datasheets), generated at stock grain pitch (value-noise at G_SIZE px at base resolution, NOT white
+   pixel noise), monochromatic per layer (layers uncorrelated). Exposure-dependent: negative film is
+   grainier in shadows (low density on neg = shadows of positive).
+6. **Print/scan transform**: negative: subtract base+fog and orange mask, invert through a print-paper
+   curve (paper gamma ~2.6 with soft shoulder — this is where blacks roll); slide: direct positive.
+   Output → display sRGB. A per-stock 3×3 "scanner calibration" matrix lands the final palette.
+7. UI: "Film" panel section (after Effects): stock picker (elegant cards: name, ISO, format vibe),
+   Strength (blend film vs digital output — 100% default), Halation, Grain, Grain Size overrides,
+   plus per-stock defaults. Data-tips explain each stock in one line.
+Stocks v1 (data files web/features/develop/film_stocks/<slug>.json — curves as control points +
+matrices + grain/halation params): CineStill 800T, Portra 400, Portra 160, Ektar 100, Kodak Gold 200,
+Fuji Superia X-TRA 400, Kodak Tri-X 400 (B&W path: single layer, panchromatic weighting), Ilford HP5+.
+**Validation, honest**: Sean's real film scans live at /mnt/expansion/Photos/Film Scans (lab scans incl.
+800T-era rolls; the Tungsten800 project implies 800T familiarity). Numeric parity with a specific scan
+isn't the bar (scenes differ) — the bar is characteristic behavior: halation on point highlights,
+grain structure at 1:1, palette on skin/sky/tungsten. Produce comparison contact sheets.
+
+## 27. Renditions — one photo, many faces (RAW↔edit unification; the elegant version)
+Concept shift: the library's unit is the PHOTO (a capture moment), not the file. Files are RENDITIONS:
+- the RAW (source of truth, always kept),
+- baked exports (LR-era JPEGs found on disk, or our §24 saved exports),
+- and LIVE renditions = develop settings states (virtual copies — no file at all, rendered on demand).
+Storage: version stacks (§20, kind='version') group RAW+exports; virtual copies are lightweight image
+rows sharing the RAW's filepath with their own develop_settings (vc_of column, v23 migration) so every
+existing surface (grid, elo, flags, collections) works on them unchanged.
+Behavior contract:
+- Grid shows ONE cell per photo: representative = newest edit rendition (live edit beats baked export
+  beats raw). Badge: small film-frame glyph + count. Expand like any stack.
+- Loupe/Develop: V cycles renditions; the strip labels them ("RAW", "Export · 2024", "Virtual Copy 2").
+- Opening Develop on a baked export offers "Edit original RAW" — and because we import the XMP/lrcat
+  settings, the RAW opens LOOKING LIKE the export: the baked file becomes just a frozen proof of a
+  state we can keep editing. That's the unification: old exports aren't dead ends, they're bookmarks.
+- "Create Virtual Copy" in Develop (Ctrl+') — new live rendition starting from current settings.
+- Snapshots panel (named states within one rendition) rides develop_history with labels.
+- Culling/refine/search/dedup operate on photos; renditions never compete against each other.
+
+## 28. Remaining parity closure (after §20-25 lanes land)
+- **Transform/Upright panel**: perspective (vertical/horizontal/rotate/scale/aspect + offset), auto
+  level (horizon detect), guided upright (2/4 line picks). Twins: 3×3 homography in uv (GL vertex/uv,
+  numpy warp).
+- **Lens Corrections UI panel** (backend §17 exists): Profile tab (enable, maker/model override,
+  amount sliders) + Manual tab (distortion, vignette amount/midpoint).
+- **Calibration panel**: shadows tint + per-primary hue/sat (legacy but users expect it) — small twin math.
+- **Detail panel completion**: sharpen Masking slider (edge mask a-la LR, from existing blur fields),
+  NR Detail/Contrast sub-sliders; render NR masking honestly.
+- **Before/After side-by-side** (Y key: split view left/right + top/bottom) and Reference view (R held:
+  pick any photo as reference beside canvas).
+- **Soft proofing**: sRGB/AdobeRGB/P3 + a paper profile sim with gamut warning overlay.
+- **Quick Develop** in grid: batch relative adjustments on selection (uses §24 sync machinery).
+- **Watched folder auto-import** (scanner already rescans; add an inotify/poll watcher toggle per source).
+- **Red-eye**: click-fix (desaturate+darken pupil disc) — low priority, tiny.
+- **Panel layout parity pass**: final Develop right-panel order mirrors LR Classic exactly:
+  Histogram · Basic · Tone Curve · HSL/Color · Color Grading · Detail · Lens Corrections · Transform ·
+  Effects · Film (ours) · Calibration; left rail: Presets · Snapshots · History · Collections.
+- Explicit non-goals: Print/Book/Slideshow modules, tethered capture (hardware), Adobe cloud sync.
