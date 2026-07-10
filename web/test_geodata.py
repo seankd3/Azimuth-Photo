@@ -26,6 +26,26 @@ class GeoDataTests(unittest.TestCase):
         self.assertIsNone(geodata.validate_coordinates(0, 0))
         self.assertIsNone(geodata.validate_coordinates(91, 0))
 
+
+    def test_derived_locations_never_claim_exif_provenance(self):
+        trail = [{"ts": 0, "lat": 41.0, "lon": -87.0, "source": "exif"}]
+        self.assertEqual(geodata.infer_location(300, trail), (41.0, -87.0, "inferred"))
+        self.assertEqual(geodata.infer_location(0, trail), (41.0, -87.0, "inferred"))
+        timeline_trail = [{"ts": 0, "lat": 41.0, "lon": -87.0, "source": "timeline"}]
+        self.assertEqual(geodata.infer_location(300, timeline_trail), (41.0, -87.0, "timeline"))
+
+    def test_naive_date_taken_parses_as_local_wall_time(self):
+        from datetime import datetime
+
+        ts = geodata.parse_taken_timestamp("2024-06-01 15:00:00")
+        self.assertEqual(ts, datetime(2024, 6, 1, 15, 0, 0).timestamp())
+        utc = geodata.parse_taken_timestamp("2024-06-01T15:00:00Z")
+        self.assertEqual(utc, 1717254000.0)
+
+    def test_missing_hemisphere_ref_rejects_gps(self):
+        gps = {2: (Fraction(41), Fraction(30), Fraction(0)), 3: "W", 4: (Fraction(87), Fraction(45), Fraction(0))}
+        self.assertIsNone(geodata.parse_gps_ifd(gps))
+
     def test_location_priority_never_downgrades_existing_coordinates(self):
         self.assertFalse(geodata.location_can_replace("exif", "timeline", has_coordinates=True))
         self.assertTrue(geodata.location_can_replace("timeline", "exif", has_coordinates=True))
