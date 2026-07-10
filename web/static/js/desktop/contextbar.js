@@ -6,6 +6,7 @@ import { toggleLeftPanel } from './panel.js';
 import { showToast } from './toast.js';
 import { icon } from '../icons.js';
 import { personLabel as cleanPersonLabel } from '../people_labels.js';
+import { getRankings } from './api.js';
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -13,6 +14,18 @@ const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c
 const fmt = (n) => Number(n || 0).toLocaleString('en-US');
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 let thumbInputTimer = 0;
+let tasteAvailable = false;
+
+async function loadTasteStatus() {
+    const data = await getRankings(new URLSearchParams({ sort: 'taste', limit: '0' })).catch(() => null);
+    tasteAvailable = Boolean(data?.taste_available);
+    const option = document.querySelector('#sort-select option[value="taste"]');
+    if (!option) return;
+    option.disabled = !tasteAvailable;
+    option.textContent = tasteAvailable ? 'Taste' : 'Taste — Refine a few duels to teach it';
+    option.title = tasteAvailable ? 'your eye, learned from Refine' : 'Refine a few duels to teach it';
+    render();
+}
 
 function dateLabel(value) {
     if (value === 'undated') return 'Undated';
@@ -119,6 +132,7 @@ function render() {
     sortDir.classList.toggle('active', ascending);
     sortDir.setAttribute('aria-pressed', ascending ? 'true' : 'false');
     sortDir.setAttribute('aria-label', ascending ? 'Sort ascending' : 'Sort descending');
+    sortDir.disabled = sortBase() === 'taste';
     document.getElementById('thumb-size').value = String(viewState.thumbSize);
 }
 
@@ -157,7 +171,11 @@ export function initContextbar() {
     on('bestof', render);
     on('bestof:unsupported', () => showToast('Best of isn’t available in collections yet.'));
     on('thumbsize', render);
+    on('lens', (lens) => {
+        if (lens === 'grid') loadTasteStatus();
+    });
     render();
+    loadTasteStatus();
 }
 
 export function scopeTokenHtml() {

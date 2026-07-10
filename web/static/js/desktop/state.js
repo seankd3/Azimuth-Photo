@@ -26,6 +26,7 @@ const SMART_ACTIVE_KEYS = SMART_QUERY_KEYS.filter((key) => key !== 'sort');
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const SORT_VARIANTS = {
     elo: { desc: 'elo', asc: 'elo_asc' },
+    taste: { desc: 'taste', asc: 'taste' },
     date_taken: { desc: 'date_taken', asc: 'date_taken_asc' },
     camera: { desc: 'camera_desc', asc: 'camera' },
     filename: { desc: 'filename_desc', asc: 'filename' },

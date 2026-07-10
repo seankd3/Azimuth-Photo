@@ -13,6 +13,7 @@ import {
 } from './grid_window.js';
 import { afterMotion } from './motion.js';
 import { showToast } from './toast.js';
+import { keepCoverRejectRest } from './stack_cull.js';
 
 let offset = 0;
 let loading = false;
@@ -181,7 +182,7 @@ async function expandStack(stackId, cell) {
     tray.className = 'stack-tray';
     tray.dataset.stackId = String(id);
     tray.innerHTML = '<div class="stack-tray-rail"></div><div class="stack-tray-main">'
-        + `<div class="stack-tray-head"><span>${members.length.toLocaleString('en-US')} more in this stack</span><button class="icon-btn stack-tray-collapse" data-tip="Collapse stack" aria-label="Collapse stack">${icon('x')}</button></div>`
+        + `<div class="stack-tray-head"><span>${members.length.toLocaleString('en-US')} more in this stack</span><div class="stack-tray-actions"><button class="btn btn-danger" data-stack-reject-rest="${id}">Keep cover, reject rest</button><button class="icon-btn stack-tray-collapse" data-tip="Collapse stack" aria-label="Collapse stack">${icon('x')}</button></div></div>`
         + '<div class="stack-tray-cells">'
         + members.map((member) => memberCellHtml(member, index)).join('')
         + '</div></div>';
@@ -430,6 +431,16 @@ function columns() {
 }
 
 function handleClick(event) {
+    const rejectRestButton = event.target.closest('[data-stack-reject-rest]');
+    if (rejectRestButton) {
+        event.preventDefault();
+        event.stopPropagation();
+        const stack = stackCache.get(Number(rejectRestButton.dataset.stackRejectRest));
+        const members = stack?.members || [];
+        const coverId = Number(stack?.representative?.id || stack?.representative_id);
+        keepCoverRejectRest(members, coverId);
+        return;
+    }
     if (event.target.closest('.stack-tray-collapse')) {
         event.preventDefault();
         event.stopPropagation();

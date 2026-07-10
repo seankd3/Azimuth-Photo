@@ -125,7 +125,8 @@ async def mosaic_next(
     n: int = 12, exclude: str = "", strategy: str = "explore", grid_elo: float = 0,
     orientation: str = "", compared: str = "", min_stars: int = 0, folder: str = "",
     flag: str = "", date_taken: str = "", file_type: str = "", camera: str = "", lens: str = "",
-    tag: str = "", q: str = "", deep: bool = False, people: str = "", ids: str | None = None, collection_id: int = 0,
+    tag: str = "", q: str = "", deep: bool = False, people: str = "", ids: str | None = None,
+    collection_id: int = 0, import_batch: int = 0,
 ):
     if _mosaic_next_handler is None:
         raise RuntimeError("Compare routes are not configured")
@@ -155,6 +156,7 @@ async def mosaic_next(
                 people=people,
                 ids=scoped_ids,
                 collection_id=collection_id,
+                import_batch=import_batch,
             )
     except Exception as exc:
         if not data_connection.is_sqlite_locked_error(exc):
@@ -284,7 +286,8 @@ async def compare_next(
     n: int = 5, mode: str = "swiss",
     orientation: str = "", compared: str = "", min_stars: int = 0, folder: str = "",
     flag: str = "", date_taken: str = "", file_type: str = "", camera: str = "", lens: str = "",
-    tag: str = "", q: str = "", deep: bool = False, people: str = "", ids: str | None = None, collection_id: int = 0,
+    tag: str = "", q: str = "", deep: bool = False, people: str = "", ids: str | None = None,
+    collection_id: int = 0, import_batch: int = 0,
 ):
     if _compare_next_handler is None:
         raise RuntimeError("Compare routes are not configured")
@@ -312,6 +315,7 @@ async def compare_next(
                 people=people,
                 ids=scoped_ids,
                 collection_id=collection_id,
+                import_batch=import_batch,
             )
     except Exception as exc:
         if not data_connection.is_sqlite_locked_error(exc):

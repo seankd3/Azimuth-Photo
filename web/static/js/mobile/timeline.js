@@ -30,6 +30,7 @@ const SORT_OPTIONS = [
     { value: 'date_taken_asc', label: 'Date ↑', detail: 'Oldest first', glyph: 'calendar-days' },
     { value: 'elo', label: 'Rating ↓', detail: 'Highest first', glyph: 'star' },
     { value: 'elo_asc', label: 'Rating ↑', detail: 'Lowest first', glyph: 'star' },
+    { value: 'taste', label: 'Taste', detail: 'your eye, learned from Refine', glyph: 'sparkles' },
 ];
 const COMPARED_LABELS = {
     compared: 'Ranked',
@@ -57,6 +58,12 @@ let suppressClickUntil = 0;
 let currentSortQuality = null;
 let longPressPending = false;
 let cancelLongPressGesture = () => {};
+let tasteAvailable = false;
+
+async function loadTasteStatus() {
+    const data = await getRankings(new URLSearchParams({ sort: 'taste', limit: '0' })).catch(() => null);
+    tasteAvailable = Boolean(data?.taste_available);
+}
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -626,9 +633,11 @@ function renderScopeBar() {
 function openPhotoOptionsSheet() {
     const sortRows = SORT_OPTIONS.map((option) => {
         const active = option.value === viewPrefs.sort;
-        return `<button class="sheet-row m-sort-row${active ? ' active' : ''}" data-sort="${esc(option.value)}">`
+        const tasteDisabled = option.value === 'taste' && !tasteAvailable;
+        const detail = tasteDisabled ? 'Refine a few duels to teach it' : option.detail;
+        return `<button class="sheet-row m-sort-row${active ? ' active' : ''}" data-sort="${esc(option.value)}"${tasteDisabled ? ' disabled' : ''}>`
             + `<span class="g">${icon(option.glyph)}</span>`
-            + `<span class="body">${esc(option.label)}<span class="sub">${esc(option.detail)}</span></span>`
+            + `<span class="body">${esc(option.label)}<span class="sub">${esc(detail)}</span></span>`
             + `<span class="n">${active ? icon('check') : ''}</span></button>`;
     }).join('');
     const sheet = openSheet(
@@ -928,6 +937,7 @@ export function initTimeline() {
     on('view-prefs', reload);
 
     reload();
+    loadTasteStatus();
 }
 
 export function scrollInfo() {

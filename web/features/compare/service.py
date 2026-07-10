@@ -49,6 +49,7 @@ _get_rankings: Callable[..., Awaitable[list]] | None = None
 _get_visible_pairing_pool_counts: Callable[..., Awaitable[dict]] | None = None
 _get_top_images: Callable[..., Awaitable[list]] | None = None
 _get_collection_image_ids: Callable[..., Awaitable[list[int] | None]] | None = None
+_get_import_batch_image_ids: Callable[[int], Awaitable[set[int] | None]] | None = None
 
 
 def configure(
@@ -72,6 +73,7 @@ def configure(
     get_visible_pairing_pool_counts: Callable[..., Awaitable[dict]] | None = None,
     get_top_images: Callable[..., Awaitable[list]] | None = None,
     get_collection_image_ids: Callable[..., Awaitable[list[int] | None]] | None = None,
+    get_import_batch_image_ids: Callable[[int], Awaitable[set[int] | None]] | None = None,
 ) -> None:
     global _invalidate_rankings_cache, _invalidate_interaction_response_cache, _cache_root
     global _resolve_library_constraints, _schedule_thumbnail_prefetch
@@ -81,7 +83,7 @@ def configure(
     global _get_active_images_by_ids, _get_visible_images_for_pairing
     global _get_visible_orientation_pairing_pool_counts, _count_rankings
     global _get_rankings, _get_visible_pairing_pool_counts, _get_top_images
-    global _get_collection_image_ids
+    global _get_collection_image_ids, _get_import_batch_image_ids
     _invalidate_rankings_cache = invalidate_rankings_cache
     _invalidate_interaction_response_cache = invalidate_interaction_response_cache
     _cache_root = cache_root
@@ -117,6 +119,8 @@ def configure(
         _get_top_images = get_top_images
     if get_collection_image_ids is not None:
         _get_collection_image_ids = get_collection_image_ids
+    if get_import_batch_image_ids is not None:
+        _get_import_batch_image_ids = get_import_batch_image_ids
 
 
 def _configured(provider):
@@ -141,7 +145,12 @@ async def _configured_resolve_library_constraints(q: str, *, people: str = "", d
     return await _resolve_library_constraints(q, people=people, deep=deep)
 
 
-async def _scoped_search(search: dict, ids: list[int] | None, collection_id: int = 0) -> dict:
+async def _scoped_search(
+    search: dict,
+    ids: list[int] | None,
+    collection_id: int = 0,
+    import_batch: int = 0,
+) -> dict:
     scoped_ids = set(int(image_id) for image_id in ids or [] if int(image_id) > 0)
     if collection_id and collection_id > 0:
         collection_ids = await _configured(_get_collection_image_ids)(int(collection_id))
@@ -151,7 +160,15 @@ async def _scoped_search(search: dict, ids: list[int] | None, collection_id: int
             scoped_ids.intersection_update(int(image_id) for image_id in collection_ids)
         else:
             scoped_ids = {int(image_id) for image_id in collection_ids}
-    if not scoped_ids and not ids and not collection_id:
+    if import_batch and import_batch > 0:
+        batch_ids = await _configured(_get_import_batch_image_ids)(int(import_batch))
+        if batch_ids is None:
+            scoped_ids = set()
+        elif scoped_ids:
+            scoped_ids.intersection_update(int(image_id) for image_id in batch_ids)
+        else:
+            scoped_ids = {int(image_id) for image_id in batch_ids}
+    if not scoped_ids and not ids and not collection_id and not import_batch:
         return search
     scoped = dict(search)
     current_filter = scoped.get("id_filter")
@@ -1242,7 +1259,8 @@ async def mosaic_next_impl(
     n: int = 12, exclude: str = "", strategy: str = "explore", grid_elo: float = 0,
     orientation: str = "", compared: str = "", min_stars: int = 0, folder: str = "",
     flag: str = "", date_taken: str = "", file_type: str = "", camera: str = "", lens: str = "",
-    tag: str = "", q: str = "", deep: bool = False, people: str = "", ids: list[int] | None = None, collection_id: int = 0,
+    tag: str = "", q: str = "", deep: bool = False, people: str = "", ids: list[int] | None = None,
+    collection_id: int = 0, import_batch: int = 0,
 ):
     """Get active images for mosaic ranking with configurable sampling strategy."""
     candidate_source = "mosaic_window"
@@ -1252,7 +1270,7 @@ async def mosaic_next_impl(
     if exclude:
         exclude_ids = {int(x) for x in exclude.split(",") if x.strip().isdigit()}
     search = await _configured_resolve_library_constraints(q, people=people, deep=deep)
-    search = await _scoped_search(search, ids, collection_id)
+    search = await _scoped_search(search, ids, collection_id, import_batch)
     default_pool_only = not has_candidate_filters(
         orientation=orientation,
         compared=compared,
@@ -1536,13 +1554,14 @@ async def compare_next_impl(
     n: int = 5, mode: str = "swiss",
     orientation: str = "", compared: str = "", min_stars: int = 0, folder: str = "",
     flag: str = "", date_taken: str = "", file_type: str = "", camera: str = "", lens: str = "",
-    tag: str = "", q: str = "", deep: bool = False, people: str = "", ids: list[int] | None = None, collection_id: int = 0,
+    tag: str = "", q: str = "", deep: bool = False, people: str = "", ids: list[int] | None = None,
+    collection_id: int = 0, import_batch: int = 0,
 ):
     candidate_source = "compare_window"
     cache_hit = False
     counts_stale = False
     search = await _configured_resolve_library_constraints(q, people=people, deep=deep)
-    search = await _scoped_search(search, ids, collection_id)
+    search = await _scoped_search(search, ids, collection_id, import_batch)
     default_limited_candidates = False
     ranked_candidate_order = False
     has_filters = has_candidate_filters(

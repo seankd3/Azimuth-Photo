@@ -629,6 +629,34 @@ class CompareTests(BackendTestCase):
         self.assertNotIn(outside, {image["id"] for image in result["images"]})
         self.assertEqual(result["total_images"], 2)
 
+    async def test_refine_restricts_mosaic_and_duel_to_import_batch(self):
+        source = await self._source()
+        first = await self._image(source["id"], "batch-first.jpg", elo=1500)
+        second = await self._image(source["id"], "batch-second.jpg", elo=1400)
+        outside = await self._image(source["id"], "outside.jpg", elo=1300)
+        for image_id in (first, second, outside):
+            await self._cache_entry(image_id, "sm")
+            await self._cache_entry(image_id, "md")
+        conn = await db.get_db()
+        try:
+            cursor = await conn.execute("INSERT INTO import_batches(name) VALUES ('Refine batch')")
+            batch_id = int(cursor.lastrowid)
+            await conn.executemany(
+                "INSERT INTO import_batch_images(batch_id, image_id, filepath) VALUES (?, ?, ?)",
+                [(batch_id, first, "batch-first.jpg"), (batch_id, second, "batch-second.jpg")],
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        mosaic = await compare_routes.mosaic_next(n=2, import_batch=batch_id)
+        duel = await compare_routes.compare_next(n=1, import_batch=batch_id)
+
+        self.assertEqual({image["id"] for image in mosaic["images"]}, {first, second})
+        duel_ids = {duel["pairs"][0]["left"]["id"], duel["pairs"][0]["right"]["id"]}
+        self.assertEqual(duel_ids, {first, second})
+        self.assertNotIn(outside, duel_ids)
+
     async def test_mosaic_next_scoped_tiny_pool_returns_not_enough_shape(self):
         source = await self._source()
         first = await self._image(source["id"], "first.jpg", elo=1500)

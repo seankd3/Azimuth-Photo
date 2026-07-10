@@ -603,6 +603,16 @@ async def api_rankings_impl(
             if rankings_cache_key is not None:
                 cache_rankings_response(rankings_cache_key, response)
             return response
+        if int(limit) <= 0:
+            return {
+                "images": [],
+                **response_helpers.visibility_counts(0, 0),
+                "total_kept": 0,
+                "search_mode": search_mode,
+                "search_sources": search.get("search_sources") or [],
+                "ai_unavailable": search["ai_unavailable"],
+                **taste_fields,
+            }
 
         total_task = asyncio.create_task(
             _configured(_count_rankings)(

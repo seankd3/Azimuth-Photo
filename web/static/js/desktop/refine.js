@@ -590,10 +590,6 @@ export function openRefine() {
         closeRefine();
         return;
     }
-    if (scope.import_batch) {
-        showToast('Refine isn’t available for imports yet.');
-        return;
-    }
     if (scope.similarIds.length > MAX_SCOPED_IDS) {
         showToast(`Refine can use up to ${MAX_SCOPED_IDS.toLocaleString('en-US')} similar photos`);
         return;

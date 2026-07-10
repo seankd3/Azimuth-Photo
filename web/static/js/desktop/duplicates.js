@@ -8,6 +8,7 @@ import {
 } from './state.js';
 import { showToast } from './toast.js';
 import { icon } from '../icons.js';
+import { keepCoverRejectRest } from './stack_cull.js';
 
 const DEFAULT_THRESHOLD = 0.95;
 const LIMIT = 100;
@@ -571,6 +572,7 @@ function stackRowHtml(stack) {
         + '<div class="dupe-row-head">'
         + `<div><b>${fmt(members.length)} photos</b><span>${esc(metaNote(stack))}</span></div>`
         + '<div class="dupe-row-actions">'
+        + `<button class="btn btn-danger" data-stack-reject="${stack.id}"${actionDisabled}>Keep cover, reject rest</button>`
         + `<button class="btn btn-danger" data-stack-keep="${stack.id}"${actionDisabled}>Keep cover, trash rest</button>`
         + `<button class="btn" data-stack-unstack="${stack.id}"${actionDisabled}>Unstack</button>`
         + '</div></div>'
@@ -913,6 +915,12 @@ function ensureView() {
         const keepStackButton = event.target.closest('[data-stack-keep]');
         if (keepStackButton) {
             keepCoverForStack(keepStackButton.dataset.stackKeep);
+            return;
+        }
+        const rejectStackButton = event.target.closest('[data-stack-reject]');
+        if (rejectStackButton) {
+            const stack = findStack(rejectStackButton.dataset.stackReject);
+            if (stack) keepCoverRejectRest(stackMembers(stack), representativeId(stack));
             return;
         }
         const unstackButton = event.target.closest('[data-stack-unstack]');

@@ -163,6 +163,10 @@ function handleStackKey(event) {
     } else if (key === 'u') {
         const row = activeStackRow();
         if (!clickAndFocusNextStack(row?.querySelector('[data-stack-unstack]'), row)) return false;
+    } else if (key === 'x') {
+        const row = activeStackRow();
+        if (!row?.querySelector('[data-stack-reject]')) return false;
+        row.querySelector('[data-stack-reject]').click();
     } else if (key === 'c') {
         const photo = document.activeElement?.closest?.('.stack-photo') || activeStackRow()?.querySelector('.stack-photo.is-cover, .stack-photo');
         const button = photo?.querySelector('[data-set-cover][data-stack-id]');
