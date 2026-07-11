@@ -72,6 +72,7 @@ DEFAULT_SETTINGS = {
     "publish_site_base_url": "",
     "share_brand_name": "",
     "share_cookie_secret": "",
+    "sync_bandwidth_mbps": 0,
 }
 
 PRIVATE_SETTING_KEYS = {"share_cookie_secret"}
@@ -127,6 +128,7 @@ INT_RANGES = {
     "taste_blend_min_signal": (1, 10000),
     "face_detection_size": (160, 1280),
     "caption_batch_size": (1, 4),
+    "sync_bandwidth_mbps": (0, 10000),
 }
 
 FLOAT_RANGES = {

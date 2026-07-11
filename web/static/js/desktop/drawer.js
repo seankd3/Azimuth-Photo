@@ -566,6 +566,7 @@ function renderImageCacheSettings() {
 function renderImportSettings() {
     return detailsSection('Imports',
         settingInput('import_root', 'Import inbox')
+        + '<div id="watched-folders-settings"></div>'
     );
 }
 

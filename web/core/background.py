@@ -328,6 +328,18 @@ async def run_startup(
     except Exception:
         log.exception("worker=catalog_backup scheduler failed to arm")
 
+    try:
+        import db as _db
+        from features.library import watched_folders
+        track_background_task(
+            _start_background_daemon(
+                lambda: watched_folders.run_poller(lambda: _db.DB_PATH),
+                delay=35.0,
+            )
+        )
+    except Exception:
+        log.exception("worker=watched_folder_poller failed to arm")
+
     async def _warm_interaction_caches():
         await asyncio.sleep(interaction_cache_warmup_delay_seconds)
         await _gather_logged(

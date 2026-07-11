@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS images (
     source_id INTEGER REFERENCES catalog_sources(id),
     filename TEXT NOT NULL,
     filepath TEXT NOT NULL,
+    content_hash TEXT DEFAULT NULL,
     elo REAL DEFAULT 1200.0,
     comparisons INTEGER DEFAULT 0,
     propagated_updates INTEGER DEFAULT 0,
@@ -156,6 +157,8 @@ CREATE TABLE IF NOT EXISTS comparisons (
 );
 
 CREATE INDEX IF NOT EXISTS idx_images_status ON images(status);
+CREATE INDEX IF NOT EXISTS idx_images_content_hash
+ON images(content_hash) WHERE content_hash IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_images_source_id ON images(source_id);
 CREATE INDEX IF NOT EXISTS idx_catalog_sources_path ON catalog_sources(path);
 CREATE INDEX IF NOT EXISTS idx_catalog_sources_active ON catalog_sources(included, online);
@@ -817,6 +820,7 @@ IMAGE_COMPAT_COLUMNS = (
     ("file_ext", "TEXT DEFAULT NULL"),
     ("file_size", "INTEGER DEFAULT NULL"),
     ("file_modified_at", "REAL DEFAULT NULL"),
+    ("content_hash", "TEXT DEFAULT NULL"),
     ("width", "INTEGER DEFAULT NULL"),
     ("height", "INTEGER DEFAULT NULL"),
     ("metadata_scanned_at", "REAL DEFAULT NULL"),
@@ -873,6 +877,10 @@ IMAGE_CAPTION_COMPAT_COLUMNS = (
 
 COMPAT_INDEX_SQL = (
     "CREATE INDEX IF NOT EXISTS idx_images_flag ON images(flag)",
+    (
+        "CREATE INDEX IF NOT EXISTS idx_images_content_hash "
+        "ON images(content_hash) WHERE content_hash IS NOT NULL"
+    ),
     "CREATE INDEX IF NOT EXISTS idx_comparisons_action_id ON comparisons(action_id)",
     "CREATE INDEX IF NOT EXISTS idx_comparisons_loser ON comparisons(loser_id)",
     "CREATE INDEX IF NOT EXISTS idx_images_source_id ON images(source_id)",

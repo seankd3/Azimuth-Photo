@@ -1,0 +1,86 @@
+{
+  "slug": "portra-800",
+  "name": "Kodak Portra 800",
+  "iso": 800,
+  "process": "C-41",
+  "type": "negative_color",
+  "white_point_hint": "daylight",
+  "white_point_kelvin": 5500,
+  "hd_curves": {
+    "r": [
+      [-2.0, 0.02],
+      [-1.2, 0.06],
+      [-0.6, 0.11],
+      [0.0, 0.15],
+      [0.6, 0.50],
+      [1.2, 0.85],
+      [1.8, 1.17],
+      [2.6, 1.44]
+    ],
+    "g": [
+      [-2.0, 0.02],
+      [-1.2, 0.06],
+      [-0.6, 0.11],
+      [0.0, 0.15],
+      [0.6, 0.51],
+      [1.2, 0.86],
+      [1.8, 1.18],
+      [2.6, 1.45]
+    ],
+    "b": [
+      [-2.0, 0.02],
+      [-1.2, 0.05],
+      [-0.6, 0.10],
+      [0.0, 0.15],
+      [0.6, 0.49],
+      [1.2, 0.84],
+      [1.8, 1.16],
+      [2.6, 1.42]
+    ]
+  },
+  "spectral_crosstalk": [
+    [0.85, 0.11, 0.04],
+    [0.07, 0.83, 0.10],
+    [0.03, 0.14, 0.83]
+  ],
+  "dir_coupler": [
+    [1.0, -0.10, -0.07],
+    [-0.09, 1.0, -0.11],
+    [-0.06, -0.09, 1.0]
+  ],
+  "grain": {
+    "rms_granularity": 6.0,
+    "size_px_at_4k": 2.9,
+    "shadow_bias": 0.7,
+    "r": {
+      "rms_granularity": 6.0,
+      "size_px_at_4k": 2.9,
+      "shadow_bias": 0.7
+    },
+    "g": {
+      "rms_granularity": 6.0,
+      "size_px_at_4k": 2.9,
+      "shadow_bias": 0.7
+    },
+    "b": {
+      "rms_granularity": 6.0,
+      "size_px_at_4k": 2.9,
+      "shadow_bias": 0.7
+    }
+  },
+  "halation": {
+    "amount": 0.06,
+    "threshold": 0.6,
+    "radius_frac": 0.028,
+    "green_fraction": 0.08
+  },
+  "base": {
+    "orange_mask_rgb": [0.93, 0.53, 0.24],
+    "base_fog_density": 0.10
+  },
+  "print_paper": {
+    "gamma": 2.55,
+    "shoulder": 0.84
+  },
+  "notes": "H&D approx from memory of Kodak Portra 800 (E-4051) Status M characteristic curves; straight-line gamma ~0.58 with the Portra family's long soft shoulder and wide underexposure latitude. Layers closely matched (portrait aim), blue a touch lower like the rest of the family. ESTIMATED (not datasheet numbers): spectral crosstalk (Portra family shape with slightly more layer overlap than 400 - faster emulsion, more scatter), DIR matrix (pro-grade, a touch stronger than Portra 400 to hold saturation at speed), halation, orange mask, print paper. Grain: Kodak publishes Print Grain Index rather than RMS for Portra 800; rms_granularity 6.0 is an ESTIMATE placed between Portra 400 (RMS 4) and consumer 800-speed stocks, grain pitch/shadow_bias engine-derived. Grain keys flattened so the engine reads them (nested r/g/b blocks are documentation mirrors). No local Portra 800-labeled scan tuning yet - /mnt/expansion Portra 800 folder exists as a future tuning candidate. 2026-07-11"
+}

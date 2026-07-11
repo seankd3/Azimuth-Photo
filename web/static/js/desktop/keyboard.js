@@ -13,7 +13,7 @@ import {
     closeRefine, refineOpen, openRefine, pickByKey, undoRefine,
 } from './refine.js';
 import {
-    cycleDensity, emit, on, patchPrefs, toggleBestOf, viewState,
+    cycleDensity, emit, on, patchPrefs, patchScope, scope, toggleBestOf, viewState,
 } from './state.js';
 import { closeLeftDrawer, leftDrawerOpen, toggleLeftPanel } from './panel.js';
 import { closeSystemDrawer, systemDrawerOpen } from './drawer.js';
@@ -28,18 +28,15 @@ import { closeDuplicates, duplicatesOpen } from './duplicates.js';
 import { closeTrash, trashOpen, trashSelectedImages } from './trash.js';
 import { showToast, undoLatestToast } from './toast.js';
 import { createVirtualCopy, developOpen, holdDevelopReference, openDevelop, toggleDevelopCompare } from './develop/develop.js';
+import { shortcutSheetOpen } from './shortcut_sheet.js';
 
 function inputFocused() {
     const el = document.activeElement;
     return el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
 }
 
-function helpOpen() {
-    return !document.getElementById('help').hidden;
-}
-
 function foregroundLayerOpen() {
-    return helpOpen()
+    return shortcutSheetOpen()
         || filtersOpen()
         || importOpen()
         || Boolean(
@@ -215,7 +212,7 @@ function escapeOneLayer() {
         document.getElementById('scope-input').blur();
         return true;
     }
-    if (helpOpen()) {
+    if (shortcutSheetOpen()) {
         closeHelp();
         return true;
     }
@@ -318,7 +315,7 @@ export function initKeyboard() {
             return;
         }
         if (event.altKey || inputFocused()) return;
-        if (helpOpen()) return;
+        if (shortcutSheetOpen()) return;
         if (filtersOpen()) {
             if (event.key.toLowerCase() === 'f') {
                 event.preventDefault();
@@ -441,6 +438,12 @@ export function initKeyboard() {
             event.preventDefault();
             const next = cycleDensity();
             showToast(`Density: ${next[0].toUpperCase()}${next.slice(1)}`);
+        } else if (/^[1-5]$/.test(event.key)) {
+            event.preventDefault();
+            const rating = Number(event.key);
+            const next = Number(scope.min_stars || 0) === rating ? '' : rating;
+            patchScope({ min_stars: next });
+            showToast(next ? `Rating ${rating}+` : 'Rating filter cleared');
         } else if (event.key === 'Delete' || event.key === 'Backspace') {
             if (selection.size) {
                 event.preventDefault();

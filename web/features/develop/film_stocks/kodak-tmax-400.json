@@ -1,0 +1,52 @@
+{
+  "slug": "kodak-tmax-400",
+  "name": "Kodak T-Max 400",
+  "iso": 400,
+  "process": "B&W",
+  "type": "negative_bw",
+  "white_point_hint": "daylight",
+  "white_point_kelvin": 5500,
+  "hd_curves": {
+    "pan": [
+      [-2.0, 0.02],
+      [-1.2, 0.05],
+      [-0.6, 0.10],
+      [0.0, 0.15],
+      [0.6, 0.52],
+      [1.2, 0.89],
+      [1.8, 1.23],
+      [2.6, 1.50]
+    ]
+  },
+  "spectral_crosstalk": [
+    [0.31, 0.50, 0.19]
+  ],
+  "dir_coupler": [
+    [1.0]
+  ],
+  "grain": {
+    "rms_granularity": 10.0,
+    "size_px_at_4k": 2.0,
+    "shadow_bias": 0.75,
+    "pan": {
+      "rms_granularity": 10.0,
+      "size_px_at_4k": 2.0,
+      "shadow_bias": 0.75
+    }
+  },
+  "halation": {
+    "amount": 0.05,
+    "threshold": 0.6,
+    "radius_frac": 0.03,
+    "green_fraction": 0.0
+  },
+  "base": {
+    "orange_mask_rgb": [0.0, 0.0, 0.0],
+    "base_fog_density": 0.07
+  },
+  "print_paper": {
+    "gamma": 2.1,
+    "shoulder": 0.8
+  },
+  "notes": "B&W single-layer path (pan curve + 1x3 panchromatic weights + identity DIR), following the Tri-X 400 file's conventions. H&D approx from memory of the Kodak T-Max 400 (TMY-2) datasheet characteristic curve for D-76; straight-line gamma ~0.62, slightly more linear toe-to-shoulder than Tri-X (T-grain's straighter curve). logE = 0 at the ISO speed point with density 0.15 above fog for engine consistency. Diffuse RMS Granularity 10 is from the Kodak T-Max 400 datasheet (vs Tri-X's 17 - the T-grain fine-grain signature), grain pitch 2.0 px engine-derived (tighter than Tri-X's 3.4). ESTIMATED: panchromatic weights (TMY-2's extended, more even pan sensitivity vs Tri-X - slightly more red, less green weight), halation (modern AH layer, subtle, no red dye glow so green_fraction 0), base fog, print paper (grade ~2-3 silver-gelatin, same aim as Tri-X). Grain keys flattened for the engine (nested pan block is a documentation mirror). No local T-Max scans. Memory approximation. 2026-07-11"
+}

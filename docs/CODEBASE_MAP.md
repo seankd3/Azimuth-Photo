@@ -33,24 +33,38 @@ ownership, and the verification ladder, read [`development.md`](development.md).
 - `collections/` — regular/smart collections and collection graph operations.
 - `compare/` — Refine pair/mosaic interactions and rating writes.
 - `dev/` — development/status diagnostics.
+- `develop/` — the RAW editor: pipeline + GL-twin render, masks, presets,
+  camera/lens profiles, HDR/pano merge, heal, transform, film engine
+  (`film.py`, `film_stocks/`), virtual copies, export presets, lrcat import,
+  XMP write-back. Spec: `docs/DEVELOP_SPEC.md`.
 - `export/` — catalog/image export endpoints.
-- `foreground/` — foreground/manual work coordination endpoints.
 - `imports/` — import execution and import-history scoping.
-- `library/` — ranked library, filters, dates, maps, and visible-image queries.
+- `library/` — ranked library, filters, dates, and visible-image queries; plus
+  `keywords.py` (keyword/IPTC store + painter), `geodata.py` (GPS backfill,
+  trail interpolation, Timeline import), `timeline_import.py`,
+  `saved_views.py`, `watched_folders.py` (in flight), `taste.py`.
 - `media/` — thumbnail/full-image/media response endpoints and warming.
 - `pages/` — desktop, mobile, and share-gallery page routes.
 - `people/` — face scan, labels, merges, and People status.
 - `publish/` — published-node snapshots and static website bundle publishing.
+- `publishing/` — client galleries v2 (per-link watermarks, download sizes,
+  protected selects).
+- `quality/` — technical quality scorer and review-first autocull (cull brief).
 - `search/` — metadata/embedding search routes and result shaping.
 - `settings/` — settings reads/writes and composed background status.
 - `share/` — private share-token/gallery routes and share mutations.
 - `shared/` — Shared triage/aggregation across published and private work.
 - `stacks/` — burst/variant/cross-source/manual stack operations.
+- `sync/` — (in flight) satellite/hub field sync: hashing, read-through media,
+  sync worker. Contract: `docs/FIELD_SPEC.md`.
+- `system/` — catalog time machine: DB snapshots/backups + restore.
 - `trash/` — source-local trash, restore, and permanent empty-trash actions.
 
 `web/data/` — `schema.py` owns SQLite schema/migrations; `connection.py` owns async connections; `repositories/` owns catalog/images, rankings/ratings, collections, cache, captions, embeddings, imports, people, publishing, shares, stacks, stats, filters, and common helpers.
 
 `web/core/` — `app_factory.py` composition/lifecycle; `background.py` tasks; `wiring.py` injection; `query_constraints.py` normalization; `requests.py` / `responses.py` helpers; `static_assets.py` versioning; `cache_events.py` invalidation; `propagation_queue.py` Elo propagation; `work_coordination.py` GPU/manual-turn governance.
+
+`web/perf/` — `bench.py` measured-performance harness (perf claims need numbers from it).
 
 ## Frontend layout
 
@@ -74,14 +88,23 @@ Desktop modules (`web/static/js/desktop/`):
 - `refine.js` — pair/mosaic Refine workflows.
 - `loupe.js` — focused image/loupe viewer.
 - `people.js` — People review UI.
-- `map.js` — map view and markers.
+- `map.js` / `world_land.js` — map view with real markers.
+- `timeline.js` — timeline (date river) view and saved views.
+- `keywords_panel.js` — keyword/IPTC panel and keyword painter.
+- `cull_brief.js` — autocull review banner/brief (A accept / S skip).
+- `gallery_editor.js` / `publishing_data.js` — client-gallery editing and publishing data.
 - `omnibox.js` — global search/scope input.
 - `suggestions.js` — collection suggestions.
 - `shared.js` — Shared triage UI.
 - `duplicates.js` / `similar.js` / `stack_cull.js` — duplicate/similarity/stack tools.
 - `trash.js` — Trash UI.
 - `importer.js` / `export_menu.js` — import and export controls.
+- `watched_folders.js` / `sync_chip.js` / `shortcut_sheet.js` — (in flight) watched folders, field-sync status, shortcut overlay.
 - `motion.js` / `toast.js` — motion preferences and notifications.
+- `develop/` — Develop editor: `develop.js` shell, `gl.js` WebGL twin,
+  `panels.js` + per-panel modules (film/lens/calibration/transform/history/
+  compare), `masking.js`/`mask_raster.js`, `presets.js`, `crop.js`, `heal.js`,
+  `export_dialog.js`, `histogram.js`, `curve_lut.js`, `color_wheels.js`.
 
 Mobile: `mobile.html`, `mobile.css`, `sw.js`, manifest, and
 `web/static/js/mobile/` (`bootstrap`, `api`, `state`, `timeline`, `viewer`,
@@ -91,13 +114,15 @@ Mobile: `mobile.html`, `mobile.css`, `sw.js`, manifest, and
 CSS token system: `desktop.css` and `mobile.css` each define `:root` tokens for
 surfaces, text, accent/status colors, radii, spacing, motion, typography, and
 layout/safe-area dimensions; components consume `var(--token)`. Desktop also
-overrides density tokens on `html[data-density]`.
+overrides density tokens on `html[data-density]`. Note: `--surface-popover` /
+`--surface-raised` are real; `--bg-1`/`--bg-2`/`--shadow-2` do not exist.
 
 ## Data model highlights
 
 - `catalog_sources` owns source path/online/included state; `images` is the
   central catalog row (filepath, metadata, status/flags, Elo/comparison counts,
-  GPS, missing/trash state). Metadata FTS mirrors searchable image fields.
+  GPS + `location_source`, missing/trash state). Metadata FTS mirrors
+  searchable image fields.
 - `collections` stores named regular or query-backed smart collections;
   `collection_images` is ordered membership. `collection_links` is the ordered
   parent/child collection graph; graph validation lives in `features/collections`.
@@ -109,10 +134,14 @@ overrides density tokens on `html[data-density]`.
   counters; `share_images` freezes share membership and `share_favorites` stores
   visitor favorites.
 - `stacks` describes burst/variant/cross-source/manual groups; `stack_members`
-  maps images to a stack and stores match scores/order metadata.
+  maps images to a stack and stores match scores/order metadata. Version stacks
+  (kind-checked) link RAW↔edit lineage.
 - `image_captions` is keyed by `(model_key, image_id)` and stores caption, JSON
   tags, quality, and `user_edited`; triggers maintain `image_tags` and the active
   model's `image_captions_fts`. `caption_scan_images` tracks pending/done/error.
+- Develop settings are Adobe-native values (LR-compatible XMP round-trip);
+  `develop_presets`, virtual copies/snapshots, and quality/autocull suggestion
+  tables live alongside.
 
 ## Tests and checks
 
@@ -145,3 +174,5 @@ overrides density tokens on `html[data-density]`.
   stale counts, or incorrect visible-image filtering.
 - Do not use plain `:8000` for phone/PWA verification: use the Tailscale HTTPS
   `https://omarchy.tail0eeded.ts.net:8443/m` endpoint.
+- Concurrent lanes share this worktree: touch only the files your task owns,
+  and expect untracked in-flight files (sync/, watched folders, shortcut sheet).

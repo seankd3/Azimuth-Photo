@@ -196,6 +196,26 @@ class QualityRoutesTests(BackendTestCase):
         self.assertGreater(sharp["score"], blur["score"])
         self.assertGreater(sharp["score"], dark["score"])
 
+    async def test_scoped_scan_leaves_unrelated_images_unscored(self):
+        source = await self._source()
+        imported = await self._image(source["id"], "imported.jpg")
+        unrelated = await self._image(source["id"], "unrelated.jpg")
+        await self._write_thumb(imported, _sharp_pattern())
+        await self._write_thumb(unrelated, _blurry_pattern())
+
+        result = await quality_routes.scan_image_ids([imported])
+
+        self.assertEqual(result["scored"], 1)
+        self.assertTrue((await quality_routes.api_quality_image(imported))["scored"])
+        conn = await db.get_db()
+        try:
+            row = await (await conn.execute(
+                "SELECT 1 FROM image_quality WHERE image_id = ?", (unrelated,)
+            )).fetchone()
+        finally:
+            await conn.close()
+        self.assertIsNone(row)
+
 
 if __name__ == "__main__":
     unittest.main()

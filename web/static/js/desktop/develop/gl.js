@@ -151,10 +151,14 @@ function retouchSpots(settings) {
 
 const VERTEX = `#version 300 es
 in vec2 a_position;
+uniform vec2 u_viewCenter;
+uniform float u_viewScale;
 out vec2 v_uv;
 void main() {
     v_uv = a_position * .5 + .5;
-    gl_Position = vec4(a_position, 0.0, 1.0);
+    vec2 imagePosition = vec2(v_uv.x, 1.0 - v_uv.y);
+    vec2 viewed = (imagePosition - u_viewCenter) * u_viewScale + .5;
+    gl_Position = vec4(viewed.x * 2.0 - 1.0, 1.0 - viewed.y * 2.0, 0.0, 1.0);
 }`;
 
 const COLOR_MATH = `
@@ -1123,6 +1127,7 @@ export class DevelopRenderer {
         this.settings = {};
         this.meta = {};
         this.geometryEnabled = true;
+        this.view = { scale: 1, center: { u: .5, v: .5 } };
         this.width = 1;
         this.height = 1;
         this.dirty = false;
@@ -1321,6 +1326,46 @@ export class DevelopRenderer {
         this.requestRender();
     }
 
+    setViewTransform({ scale = 1, center = { u: .5, v: .5 } } = {}) {
+        const finiteScale = Number.isFinite(Number(scale)) ? Number(scale) : 1;
+        const clamp = (value) => Math.max(0, Math.min(1, Number.isFinite(Number(value)) ? Number(value) : .5));
+        this.view = {
+            scale: Math.max(1, finiteScale),
+            center: { u: clamp(center?.u), v: clamp(center?.v) },
+        };
+        this.requestRender();
+    }
+
+    canvasToImage(clientX, clientY) {
+        const box = this.canvas.getBoundingClientRect();
+        const x = (Number(clientX) - box.left) / Math.max(1, box.width);
+        const y = (Number(clientY) - box.top) / Math.max(1, box.height);
+        return {
+            u: this.view.center.u + (x - .5) / this.view.scale,
+            v: this.view.center.v + (y - .5) / this.view.scale,
+        };
+    }
+
+    imageToCanvas(u, v) {
+        return {
+            x: .5 + (Number(u) - this.view.center.u) * this.view.scale,
+            y: .5 + (Number(v) - this.view.center.v) * this.view.scale,
+        };
+    }
+
+    imageRectToStage(left, top, right, bottom) {
+        const canvasBox = this.canvas.getBoundingClientRect();
+        const stageBox = this.canvas.parentElement.getBoundingClientRect();
+        const start = this.imageToCanvas(left, top);
+        const end = this.imageToCanvas(right, bottom);
+        return {
+            left: canvasBox.left - stageBox.left + start.x * canvasBox.width,
+            top: canvasBox.top - stageBox.top + start.y * canvasBox.height,
+            width: (end.x - start.x) * canvasBox.width,
+            height: (end.y - start.y) * canvasBox.height,
+        };
+    }
+
     setMaskRasters(rasters = []) {
         const entries = (Array.isArray(rasters) ? rasters : []).filter((entry) => {
             const index = Number(entry?.correctionIndex);
@@ -1379,6 +1424,14 @@ export class DevelopRenderer {
         bindUnit(this.gl, this.filmHd, 8);
         bindUnit(this.gl, this.filmPrint, 9);
         bindUnit(this.gl, this.filmGlow?.texture, 10);
+    }
+
+    setProgramView(program, view = null) {
+        const selected = view || { scale: 1, center: { u: .5, v: .5 } };
+        const scale = this.gl.getUniformLocation(program, 'u_viewScale');
+        const center = this.gl.getUniformLocation(program, 'u_viewCenter');
+        if (scale) this.gl.uniform1f(scale, selected.scale);
+        if (center) this.gl.uniform2f(center, selected.center.u, selected.center.v);
     }
 
     uniforms(p) {
@@ -1586,6 +1639,7 @@ export class DevelopRenderer {
         bindUnit(gl, this.baseCurve, 5);
         this.bindFilmUnits();
         this.uniforms(this.lumaProgram);
+        this.setProgramView(this.lumaProgram);
         gl.bindFramebuffer(gl.FRAMEBUFFER, this.lumaTarget.framebuffer);
         gl.viewport(0, 0, this.lumaTarget.width, this.lumaTarget.height);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
@@ -1599,6 +1653,7 @@ export class DevelopRenderer {
         bindUnit(gl, this.baseCurve, 5);
         this.bindFilmUnits();
         this.uniforms(this.filmLumaProgram);
+        this.setProgramView(this.filmLumaProgram);
         gl.bindFramebuffer(gl.FRAMEBUFFER, this.filmLumaTarget.framebuffer);
         gl.viewport(0, 0, this.filmLumaTarget.width, this.filmLumaTarget.height);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
@@ -1607,6 +1662,7 @@ export class DevelopRenderer {
     blur(sigma, output, source = this.lumaTarget, temp = this.blurTemp, downsample = 2) {
         const gl = this.gl;
         gl.useProgram(this.blurProgram);
+        this.setProgramView(this.blurProgram);
         gl.uniform1i(gl.getUniformLocation(this.blurProgram, 'u_image'), 0);
         gl.uniform1f(gl.getUniformLocation(this.blurProgram, 'u_sigma'), Math.max(.5, sigma / downsample));
         bindUnit(gl, source.texture, 0);
@@ -1666,6 +1722,7 @@ export class DevelopRenderer {
         bindUnit(gl, this.lumaTarget.texture, 7);
         this.bindFilmUnits();
         this.uniforms(this.mainProgram);
+        this.setProgramView(this.mainProgram, spots.length ? null : this.view);
         this.localUniforms();
         const uniform = (name) => gl.getUniformLocation(this.mainProgram, name);
         gl.uniform1i(uniform('u_blurLarge'), 2);
@@ -1709,6 +1766,7 @@ export class DevelopRenderer {
         gl.drawArrays(gl.TRIANGLES, 0, 6);
         if (spots.length) {
             gl.useProgram(this.retouchProgram);
+            this.setProgramView(this.retouchProgram, this.view);
             bindUnit(gl, this.retouchTarget.texture, 0);
             this.retouchUniforms(spots);
             gl.bindFramebuffer(gl.FRAMEBUFFER, null);

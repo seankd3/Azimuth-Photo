@@ -157,6 +157,11 @@ def folder_cache_value(folder):
     return tuple(values)
 
 
+def _prefix_upper_bound(prefix: str) -> str:
+    """Smallest string greater than every string starting with prefix (byte order)."""
+    return prefix[:-1] + chr(ord(prefix[-1]) + 1)
+
+
 def folder_filter_sql(folder) -> tuple[str, list] | None:
     values = normalized_folder_values(folder)
     if not values:
@@ -164,10 +169,15 @@ def folder_filter_sql(folder) -> tuple[str, list] | None:
     parts = []
     params = []
     for value in values:
-        parts.append("i.filepath LIKE ? ESCAPE '\\'")
         if value.startswith("/"):
-            params.append(f"{escape_like(value)}/%")
+            # Absolute folder scopes are hot (grid browse): a range predicate
+            # rides idx_images_active_filepath instead of a LIKE full scan
+            # (folder-scoped rankings on 141k rows: seconds -> milliseconds).
+            prefix = f"{value}/"
+            parts.append("(i.filepath >= ? AND i.filepath < ?)")
+            params.extend([prefix, _prefix_upper_bound(prefix)])
         else:
+            parts.append("i.filepath LIKE ? ESCAPE '\\'")
             params.append(f"%/{escape_like(value)}/%")
     if len(parts) == 1:
         return parts[0], params

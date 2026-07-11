@@ -493,3 +493,75 @@ Behavior contract:
   Histogram · Basic · Tone Curve · HSL/Color · Color Grading · Detail · Lens Corrections · Transform ·
   Effects · Film (ours) · Calibration; left rail: Presets · Snapshots · History · Collections.
 - Explicit non-goals: Print/Book/Slideshow modules, tethered capture (hardware), Adobe cloud sync.
+
+
+## §29 Editing depth wave (frozen 2026-07-11)
+
+### 29.1 Zoom & navigation (lane ZOOMNAV)
+True zoom replaces the binary `.zoomed` class. Zoom state = {mode: fit|level, level: 1|2|4,
+center: image-space (u,v)}. Levels are BASE-pixel ratios: level 1 maps one base pixel to one
+device pixel (devicePixelRatio-aware). Wheel zooms about the cursor (exponential steps, clamp
+fit..4). Drag pans when zoomed (pointer capture); space-hold also pans. Z toggles fit<->1;
+double-click zooms to cursor at 1. Toolbar readout shows "Fit" or "100% / 200% / 400%" of base.
+Rendering: the existing GL quad gets a view transform (scale+translate in clip space) — the
+base texture is already resident; no re-upload on zoom/pan. Keep crop/masking overlays in sync
+via the same transform (they already map canvas->image coords through one helper — extend it).
+1:1 ORIGINAL zoom ("pixel proof"): new endpoint GET /api/develop/{id}/proof-tile?u=&v=&edge=1024
+renders a 1024px tile from the ORIGINAL raw around (u,v) through the numpy pipeline with current
+saved settings at native resolution (LibRaw full decode of that region is acceptable v1: decode
+full, crop, pipeline the crop only). Client: holding P (or toolbar "1:1") swaps in the tile
+(fetched debounced 250ms after pan settles) with a subtle "proof" badge; any edit invalidates.
+Cache tiles keyed (image, settings-hash, u, v) in the browser only. Non-goal v1: tiled full-res
+canvas, GPU mip pyramid.
+
+### 29.2 Auto tone (lane AUTOTONE)
+features/develop/autotone.py — pure function auto_tone_settings(linear_base, current_settings)
+-> dict of crs keys {Exposure2012, Contrast2012, Highlights2012, Shadows2012, Whites2012,
+Blacks2012}. Method (darktable-inspired, deterministic): compute scene luma Y on the WB'd linear
+base (reuse pipeline WB stage; do NOT double-apply); Exposure = log2(0.18 / median(Y)) clamped
+[-3,+3] with highlight-protection backoff (if >0.5% of Y*2^E > 0.95, reduce E until not);
+Whites/Blacks from 99.7/0.3 percentiles mapped to +-N via the same response curve constants the
+pipeline uses (document formula w/ constants in ops_constants.py — no GL twin needed, output is
+settings); Highlights = -min(80, k*clipped_highlight_mass); Shadows = +min(60, k2*shadow_mass);
+Contrast from IQR(Y) vs target 0.55. Fitted k/k2 tuned on >=8 dev-DB raws to visually sane
+results (judge: histogram coverage without clipping; include before/after renders in report).
+API: POST /api/develop/{image_id}/auto -> {settings_patch}, applies via the normal settings PUT
+path with history label "Auto tone"; POST /api/develop/auto/batch {image_ids} (skips
+origin=user images unless force=true). UI via PATCH: "Auto" button in the Basic panel header
+row; grid context menu "Auto tone" on selection. Tests: deterministic goldens per dev image
+(exact dict), batch skip rules, over/under-exposed fixtures move exposure the right direction.
+
+### 29.3 Editing flow (lane EDITFLOW — round 2)
+Copy/paste settings: Ctrl+Shift+C opens group-picker popover (reuse sync groups) -> copies
+selected groups of the focused photo to an in-memory+localStorage clipboard; Ctrl+Shift+V
+applies to focus/selection (history label "Pasted settings"). "Previous" (Ctrl+Alt+V): applies
+the full settings of the most recently edited OTHER image (track last-saved image id in the
+develop module). Grid: same shortcuts operate on selection via the batch settings endpoint
+(exists — sync route); toast with count + undo hint. Non-goal: cross-session clipboard fidelity
+beyond localStorage JSON.
+
+### 29.4 Range masks completion (lane RANGEMASK2)
+Color range mask: CorrectionRangeMask {Type: color, ColorAmount, PointModels/sampled colors} —
+match Adobe semantics where cheap; v1: N sampled sRGB anchors + tolerance -> weight = max over
+anchors of gaussian(OKLab distance)/tolerance, luminance-feathered; numpy in masks.py +
+GL chunk twin (constants shared; extend PARITY_TABLE + goldens). UI in masking.js: per-mask
+"Range" section — Luminance (exposes the EXISTING backend luminance range: lo/hi + feather
+sliders + honest histogram strip) and Color (eyedropper samples up to 4 anchors from the canvas,
+tolerance slider, anchor chips removable). Invert toggle per range. Tests: directional weights
+(sampled red region weights reds >> blues), parity goldens.
+
+### 29.5 Preset live preview (lane PRESETLIVE — round 2)
+Hover a preset >=150ms -> apply its settings to the GL renderer transiently (no history, no
+save) with a "Previewing <name>" chip; leave reverts. Requires renderer-side transient settings
+override entry point (develop.js PATCH). Preset strip thumbnails: lazy 112px renders of the
+CURRENT image per preset, cached per (image, preset-updated_at), rendered via the existing
+__developRenderToPixels harness at reduced size — budgeted queue (2 concurrent), cancel on
+image change. Non-goal: server-side preset thumbs.
+
+### 29.6 Interactive latency budget (lane PERF-EDIT — round 2, after ZOOMNAV lands)
+Instrument slider->frame: performance.mark around settings-change -> GL draw done; dev overlay
+(?debug=perf) shows p50/p95. Budgets: basic sliders <=16ms p95 @2048 base; +5 masks <=50ms;
+film active <=33ms. Known suspects to verify then fix: full film/profile LUT rebuild per tick
+(cache by param hash), mask raster re-blur on unrelated slider changes (dirty-flag per mask),
+redundant texture re-uploads (only re-upload changed LUT textures). Numbers before/after per
+fix; parity goldens stay green.

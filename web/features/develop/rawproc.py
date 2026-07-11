@@ -543,6 +543,23 @@ def ensure_base_cache(image_id: int, path: str | os.PathLike[str]) -> tuple[Base
                 return paths, _upgrade_cached_metadata(paths, path)
             for stale in (paths.binary, paths.metadata, paths.preview):
                 stale.unlink(missing_ok=True)
+        if not Path(path).is_file():
+            from features.sync import readthrough
+
+            if readthrough.can_read_through():
+                import db
+
+                try:
+                    meta = readthrough.fetch_base_cache_for_image(
+                        image_id,
+                        paths,
+                        db_path=db.DB_PATH,
+                        source_path=str(path),
+                    )
+                except readthrough.BaseReadthroughError as exc:
+                    raise RawDecodeError(str(exc)) from exc
+                if meta is not None:
+                    return paths, meta
         recent = _recent_decodes.pop(int(image_id), None)
         if recent is None:
             rgb, meta = decode_base(path)

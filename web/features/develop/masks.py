@@ -261,12 +261,17 @@ def _linear_to_srgb(linear: np.ndarray) -> np.ndarray:
 
 
 def _sample_colors(range_mask: Mapping[str, object]) -> list[tuple[float, float, float]]:
+    """Read both our simple samples and Lightroom's PointModels resources."""
     raw = next((range_mask.get(key) for key in ("SampledColors", "ColorSamples", "Colors", "PointModels") if range_mask.get(key) is not None), [])
     if isinstance(raw, (str, bytes)):
         raw = [raw]
+    if isinstance(raw, Mapping):
+        raw = raw.get("PointModel") or raw.get("Color") or raw.get("RGB") or [raw]
     colors: list[tuple[float, float, float]] = []
     if isinstance(raw, Sequence):
         for item in raw:
+            if isinstance(item, Mapping):
+                item = item.get("Color") or item.get("RGB") or item.get("Value") or item
             values = [float(value) for value in _NUMBER_RE.findall(str(item))[:3]]
             if len(values) == 3:
                 if max(abs(value) for value in values) > 1.0:
@@ -279,14 +284,23 @@ def rasterize_color_range(range_mask: Mapping[str, object], image: np.ndarray, w
     colors = _sample_colors(range_mask)
     if not colors:
         return np.zeros((height, width), dtype=np.float32)
-    lab = _linear_to_oklab(_srgb_to_linear(_image_rgb(image, width, height)))
+    rgb = _image_rgb(image, width, height)
+    lab = _linear_to_oklab(_srgb_to_linear(rgb))
     samples = _linear_to_oklab(_srgb_to_linear(np.asarray(colors, dtype=np.float32)))
     distance2 = np.min(np.sum((lab[..., None, 1:3] - samples[None, None, :, 1:3]) ** 2, axis=-1), axis=-1)
     amount = _number(range_mask, "ColorAmount", 0.5)
     if amount > 1.0:
         amount /= 100.0
     sigma = C.LOCAL_COLOR_SIGMA_MIN + float(np.clip(amount, 0.0, 1.0)) * C.LOCAL_COLOR_SIGMA_RANGE
-    return np.exp(-0.5 * distance2 / max(sigma * sigma, C.LOCAL_RANGE_EPSILON)).astype(np.float32)
+    weight = np.exp(-0.5 * distance2 / max(sigma * sigma, C.LOCAL_RANGE_EPSILON))
+    # Lightroom may retain a luminance window on a color range.  It is the
+    # same gamma-sRGB feather used by a standalone Type=1 range, multiplied
+    # into the color weight rather than discarded during XMP round-tripping.
+    if range_mask.get("LumRange") is not None:
+        luminance = rgb[..., 0] * C.LUMA_RED + rgb[..., 1] * C.LUMA_GREEN + rgb[..., 2] * C.LUMA_BLUE
+        low_soft, low, high, high_soft = _quad(range_mask.get("LumRange"))
+        weight *= _smoothstep(low_soft, low, luminance) * (1.0 - _smoothstep(high, high_soft, luminance))
+    return weight.astype(np.float32)
 
 
 def load_ai_raster(

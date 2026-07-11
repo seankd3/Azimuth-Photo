@@ -13,6 +13,7 @@ from data.repositories import catalog as catalog_repository
 from data.repositories import images as image_repository
 from features.catalog import metadata as catalog_metadata
 from features.settings import status as settings_status
+from features.sync import satellite
 
 
 logger = logging.getLogger(__name__)
@@ -183,6 +184,7 @@ async def api_set_image_flag(image_id: int, request: Request):
         return JSONResponse({"error": "Image not found"}, status_code=404)
 
     await image_repository.set_image_flag(_configured_db_path(), image_id, flag)
+    await satellite.mark_image_dirty(image_id, db_path=_configured_db_path())
     _invalidate_image_flag_caches()
     _invalidate_pairing_cache()
     return {"ok": True, "id": image_id, "flag": flag}
@@ -217,6 +219,7 @@ async def api_batch_set_flag(request: Request):
         return JSONResponse({"error": "No valid image ids"}, status_code=400)
 
     count = await image_repository.batch_set_image_flags(_configured_db_path(), normalized_ids, flag)
+    await satellite.mark_images_dirty(normalized_ids, db_path=_configured_db_path())
     if count:
         _invalidate_image_flag_caches()
     _invalidate_pairing_cache()

@@ -14,6 +14,7 @@ from typing import Any
 import xml.etree.ElementTree as etree
 
 import db
+from features.sync import satellite
 
 
 KEYWORD_DDL = """
@@ -243,6 +244,7 @@ async def assign_keyword(image_ids: Iterable[int], keyword_id: int, *, origin: s
             [(image_id, keyword_id, origin) for image_id in ids],
         )
         await conn.commit()
+        await satellite.mark_images_dirty(ids)
         return max(int(cursor.rowcount or 0), 0)
     finally:
         await conn.close()
@@ -261,6 +263,7 @@ async def unassign_keyword(image_ids: Iterable[int], keyword_id: int) -> int:
             (keyword_id, *ids),
         )
         await conn.commit()
+        await satellite.mark_images_dirty(ids)
         return max(int(cursor.rowcount or 0), 0)
     finally:
         await conn.close()
@@ -361,6 +364,7 @@ async def save_iptc(image_id: int, *, title: str = "", caption: str = "", copyri
             (image_id, values["title"], values["caption"], values["copyright"], values["creator"], _now()),
         )
         await conn.commit()
+        await satellite.mark_image_dirty(image_id)
         return await get_iptc(image_id)
     finally:
         await conn.close()

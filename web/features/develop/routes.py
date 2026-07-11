@@ -18,6 +18,7 @@ from data import connection
 from data.repositories import images as image_repository
 from data.repositories import stacks as stack_repository
 from features.develop import rawproc, transform, virtual_copies
+from features.sync import satellite
 
 
 router = APIRouter()
@@ -262,6 +263,7 @@ async def _write_synced_settings(
             (image_id, settings_json, label, now),
         )
         await conn.commit()
+        await satellite.mark_image_dirty(image_id, db_path=_configured_db_path())
         return {"settings": merged, "origin": origin, "updated_at": now}
     except Exception:
         await conn.rollback()
@@ -372,6 +374,7 @@ async def _upsert_settings(image_id: int, incoming: dict[str, Any], label: str |
             (image_id, settings_json, label, now),
         )
         await conn.commit()
+        await satellite.mark_image_dirty(image_id, db_path=_configured_db_path())
         return {"settings": merged, "origin": origin, "updated_at": now}
     except Exception:
         await conn.rollback()
@@ -427,6 +430,7 @@ async def _reset_settings(image_id: int) -> dict[str, Any]:
             (image_id, encoded, "Reset", now),
         )
         await conn.commit()
+        await satellite.mark_image_dirty(image_id, db_path=_configured_db_path())
         return {"settings": snapshot, "origin": origin, "updated_at": now}
     except Exception:
         await conn.rollback()

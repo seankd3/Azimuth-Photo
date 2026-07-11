@@ -9,6 +9,7 @@ import { mountPresetsPanel } from './presets.js';
 import { mountHistoryPanel } from './history_panel.js';
 import { openExportDialog, openSyncDialog } from './export_dialog.js';
 import { DevelopCompareView, SoftProofPopover } from './compare_view.js';
+import { ProofTileController } from './proof_tile.js';
 
 const DIRECT_DEVELOP_EXTENSIONS = new Set(['dng', 'cr3', 'cr2', 'exr', 'jpg', 'jpeg', 'png', 'tif', 'tiff', 'webp']);
 const RAW_DEVELOP_EXTENSIONS = new Set(['dng', 'cr3', 'cr2', 'exr']);
@@ -30,6 +31,14 @@ let activePopover = null;
 let historyPanel = null;
 let compare = null;
 let softProof = null;
+let proofTile = null;
+let panGesture = null;
+
+const zoomState = {
+    mode: 'fit',
+    level: 1,
+    center: { u: .5, v: .5 },
+};
 
 const root = document.getElementById('view-develop');
 const stage = document.getElementById('develop-stage');
@@ -177,6 +186,7 @@ function applySettings(entry) {
     crop.setSettings(entry.settings);
     renderer?.setSettings(entry.settings, entry.meta);
     compare?.updateCurrent(entry);
+    proofTile?.settingsChanged(currentImage?.id);
 }
 
 function applyPresetSettings(settings, label = 'Preset') {
@@ -228,6 +238,7 @@ function settingsChanged(key, value, label, { history = true, previousSettings =
     else entry.settings[key] = value;
     renderer?.setSettings(entry.settings, entry.meta);
     compare?.updateCurrent(entry);
+    proofTile?.settingsChanged(currentImage.id);
     scheduleSave(label);
 }
 
@@ -264,6 +275,8 @@ function pregenNeighbors(image) {
 async function openImage(image) {
     const token = ++loadingToken;
     currentImage = image;
+    setZoomFit();
+    proofTile?.imageChanged();
     syncFilmstrip();
     closePopover();
     placeholder.hidden = true;
@@ -312,6 +325,7 @@ async function openImage(image) {
         renderer.uploadSource(base.rgba, base.width, base.height);
         entry.base = base;
         renderer.setSettings(entry.settings, entry.meta);
+        applyZoomState();
         masking?.rebuildRasters();
         canvas.classList.add('ready');
         placeholder.hidden = true;
@@ -330,9 +344,113 @@ function nav(delta) {
     openImage(viewState.images[next]);
 }
 
-function setZoom(zoomed) {
-    stage.classList.toggle('zoomed', Boolean(zoomed));
-    toolbar.querySelector('[data-action="zoom"]').setAttribute('aria-pressed', String(Boolean(zoomed)));
+function fitPixelRatio() {
+    if (!renderer?.ready) return 1;
+    const box = canvas.getBoundingClientRect();
+    return Math.max(1e-6, Math.min(box.width / renderer.width, box.height / renderer.height));
+}
+
+function zoomScale() {
+    if (zoomState.mode === 'fit') return 1;
+    const deviceScale = Math.max(1, window.devicePixelRatio || 1);
+    return Math.max(1, (zoomState.level / deviceScale) / fitPixelRatio());
+}
+
+function clampZoomCenter(center, scale = zoomScale()) {
+    const margin = .5 / Math.max(1, scale);
+    const clamp = (value) => Math.max(margin, Math.min(1 - margin, Number(value) || .5));
+    return { u: clamp(center?.u), v: clamp(center?.v) };
+}
+
+function syncViewDependents() {
+    crop?.syncOverlay();
+    heal?.drawHandles();
+    stage.dispatchEvent(new CustomEvent('develop:viewchange', { detail: { ...zoomState, scale: zoomScale() } }));
+    proofTile?.viewChanged();
+}
+
+function applyZoomState() {
+    const scale = zoomScale();
+    zoomState.center = clampZoomCenter(zoomState.center, scale);
+    renderer?.setViewTransform({ scale, center: zoomState.center });
+    stage.dataset.zoomMode = zoomState.mode;
+    stage.dataset.zoomLevel = zoomState.mode === 'fit' ? '' : String(zoomState.level);
+    const button = toolbar.querySelector('[data-action="zoom"]');
+    if (button) {
+        button.textContent = zoomState.mode === 'fit' ? 'Fit' : `${zoomState.level * 100}%`;
+        button.setAttribute('aria-pressed', String(zoomState.mode !== 'fit'));
+        button.dataset.tip = zoomState.mode === 'fit' ? 'Zoom to 100% (Z)' : 'Fit image (Z)';
+    }
+    if (!crop?.active && !masking?.mode && !heal?.active) {
+        stage.style.cursor = panGesture ? 'grabbing' : (zoomState.mode === 'level' && scale > 1 ? 'grab' : 'default');
+    }
+    syncViewDependents();
+}
+
+function setZoomFit() {
+    zoomState.mode = 'fit';
+    zoomState.center = { u: .5, v: .5 };
+    applyZoomState();
+}
+
+function setZoomLevel(level, anchor = null) {
+    const oldPoint = anchor && renderer?.ready ? renderer.canvasToImage(anchor.clientX, anchor.clientY) : null;
+    zoomState.mode = 'level';
+    zoomState.level = [1, 2, 4].includes(Number(level)) ? Number(level) : 1;
+    const scale = zoomScale();
+    if (oldPoint && anchor) {
+        const box = canvas.getBoundingClientRect();
+        const x = (anchor.clientX - box.left) / Math.max(1, box.width);
+        const y = (anchor.clientY - box.top) / Math.max(1, box.height);
+        zoomState.center = { u: oldPoint.u - (x - .5) / scale, v: oldPoint.v - (y - .5) / scale };
+    } else {
+        zoomState.center = clampZoomCenter(zoomState.center, scale);
+    }
+    applyZoomState();
+}
+
+function toggleZoom(anchor = null) {
+    if (zoomState.mode === 'fit') setZoomLevel(1, anchor);
+    else setZoomFit();
+}
+
+function wheelZoom(event) {
+    if (!renderer?.ready || !canvas.classList.contains('ready')) return;
+    event.preventDefault();
+    const levels = ['fit', 1, 2, 4];
+    const current = zoomState.mode === 'fit' ? 0 : levels.indexOf(zoomState.level);
+    const next = Math.max(0, Math.min(levels.length - 1, current + (event.deltaY < 0 ? 1 : -1)));
+    if (next === 0) setZoomFit();
+    else setZoomLevel(levels[next], event);
+}
+
+function beginPan(event) {
+    if (event.button !== 0 || !renderer?.ready || proofTile?.held) return;
+    const scale = zoomScale();
+    if (scale <= 1 || (crop?.active || masking?.mode || heal?.active) && !spaceHeld) return;
+    event.preventDefault();
+    if (spaceHeld) event.stopPropagation();
+    panGesture = { x: event.clientX, y: event.clientY, center: { ...zoomState.center } };
+    stage.setPointerCapture?.(event.pointerId);
+    stage.style.cursor = 'grabbing';
+}
+
+function movePan(event) {
+    if (!panGesture) return;
+    const box = canvas.getBoundingClientRect();
+    const scale = zoomScale();
+    zoomState.center = clampZoomCenter({
+        u: panGesture.center.u - (event.clientX - panGesture.x) / Math.max(1, box.width) / scale,
+        v: panGesture.center.v - (event.clientY - panGesture.y) / Math.max(1, box.height) / scale,
+    }, scale);
+    applyZoomState();
+}
+
+function endPan(event) {
+    if (!panGesture) return;
+    panGesture = null;
+    stage.releasePointerCapture?.(event.pointerId);
+    applyZoomState();
 }
 
 function showBefore(show) {
@@ -479,6 +597,7 @@ function unmount() {
     document.body.classList.remove('develop-active');
     crop.setActive(false);
     heal?.toggle(false);
+    proofTile?.setHeld(false);
 }
 
 export function developOpen() {
@@ -496,6 +615,7 @@ function ensureRenderer() {
     if (renderer && !renderer.gl.isContextLost()) return true;
     try {
         renderer = new DevelopRenderer(canvas);
+        renderer.setViewTransform({ scale: zoomScale(), center: zoomState.center });
         canvas.addEventListener('develop:rendered', () => histogram.updateFromRenderer(renderer));
         return true;
     } catch (error) {
@@ -530,13 +650,37 @@ function bindUi() {
         viewState.focusIndex = index;
         openImage(viewState.images[index]);
     });
+    if (!toolbar.querySelector('[data-action="proof"]')) {
+        const proofButton = document.createElement('button');
+        proofButton.type = 'button';
+        proofButton.dataset.action = 'proof';
+        proofButton.dataset.tip = 'Hold for original-pixel proof (P)';
+        proofButton.setAttribute('aria-label', 'Hold for original 1:1 proof');
+        proofButton.setAttribute('aria-pressed', 'false');
+        proofButton.textContent = '1:1';
+        toolbar.querySelector('[data-action="before"]')?.before(proofButton);
+        proofButton.addEventListener('pointerdown', (event) => {
+            if (event.button !== 0) return;
+            event.preventDefault();
+            proofButton.setPointerCapture?.(event.pointerId);
+            proofButton.setAttribute('aria-pressed', 'true');
+            proofTile?.setHeld(true);
+        });
+        const releaseProof = () => {
+            proofButton.setAttribute('aria-pressed', 'false');
+            proofTile?.setHeld(false);
+        };
+        proofButton.addEventListener('pointerup', releaseProof);
+        proofButton.addEventListener('pointercancel', releaseProof);
+        proofButton.addEventListener('lostpointercapture', releaseProof);
+    }
     toolbar.addEventListener('click', (event) => {
         const button = event.target.closest('[data-action]');
         if (!button) return;
         const action = button.dataset.action;
         if (action === 'prev') nav(-1);
         else if (action === 'next') nav(1);
-        else if (action === 'zoom') setZoom(!stage.classList.contains('zoomed'));
+        else if (action === 'zoom') toggleZoom();
         else if (action === 'copy') openCopyPopover(button);
         else if (action === 'paste') pasteSettings();
         else if (action === 'reset') resetCurrent();
@@ -555,8 +699,14 @@ function bindUi() {
     beforeButton.addEventListener('pointerdown', () => showBefore(true));
     for (const eventName of ['pointerup', 'pointercancel', 'pointerleave']) beforeButton.addEventListener(eventName, () => showBefore(false));
     stage.addEventListener('dblclick', (event) => {
-        if (!crop.active && !masking?.mode && !event.target.closest('button')) setZoom(!stage.classList.contains('zoomed'));
+        if (!crop.active && !masking?.mode && !heal?.active && !event.target.closest('button')) toggleZoom(event);
     });
+    stage.addEventListener('wheel', wheelZoom, { passive: false });
+    stage.addEventListener('pointerdown', beginPan, true);
+    stage.addEventListener('pointermove', movePan);
+    stage.addEventListener('pointerup', endPan);
+    stage.addEventListener('pointercancel', endPan);
+    window.addEventListener('resize', applyZoomState);
     document.addEventListener('pointerdown', (event) => {
         if (activePopover && !activePopover.contains(event.target) && !event.target.closest('[data-action="copy"], [data-action="export"], [data-action="sync"]')) closePopover();
     });
@@ -587,10 +737,16 @@ function handleKey(event) {
     } else if (event.key === '\\') {
         event.preventDefault(); event.stopImmediatePropagation(); if (!event.repeat) showBefore(true);
     } else if (key === 'z') {
-        event.preventDefault(); event.stopImmediatePropagation(); if (!event.repeat) setZoom(!stage.classList.contains('zoomed'));
+        event.preventDefault(); event.stopImmediatePropagation(); if (!event.repeat) toggleZoom();
+    } else if (key === 'p') {
+        event.preventDefault(); event.stopImmediatePropagation();
+        if (!event.repeat) {
+            toolbar.querySelector('[data-action="proof"]')?.setAttribute('aria-pressed', 'true');
+            proofTile?.setHeld(true);
+        }
     } else if (event.code === 'Space') {
         event.preventDefault(); event.stopImmediatePropagation();
-        if (!spaceHeld) { spaceHeld = true; stage.dataset.previousZoom = String(stage.classList.contains('zoomed')); setZoom(true); }
+        if (!spaceHeld) { spaceHeld = true; if (zoomScale() > 1) stage.style.cursor = 'grab'; }
     } else if (event.key === 'Escape') {
         closePopover(); crop.setActive(false);
     }
@@ -599,9 +755,13 @@ function handleKey(event) {
 function handleKeyUp(event) {
     if (!mounted) return;
     if (event.key === '\\') showBefore(false);
+    if (event.key.toLowerCase() === 'p') {
+        toolbar.querySelector('[data-action="proof"]')?.setAttribute('aria-pressed', 'false');
+        proofTile?.setHeld(false);
+    }
     if (event.code === 'Space' && spaceHeld) {
         spaceHeld = false;
-        setZoom(stage.dataset.previousZoom === 'true');
+        applyZoomState();
     }
 }
 
@@ -629,11 +789,44 @@ function init() {
     masking = panels.masking;
     heal = panels.heal;
     crop = new CropController({ stage, canvas, overlay: document.getElementById('develop-crop-overlay'), controls: cropSlot, onChange: settingsChanged });
+    const transformedCanvasBox = () => renderer?.imageRectToStage(0, 0, 1, 1) || { left: 0, top: 0, width: 1, height: 1 };
+    crop.canvasBox = transformedCanvasBox;
+    masking.canvasBox = transformedCanvasBox;
+    masking.point = (event) => {
+        const point = renderer?.canvasToImage(event.clientX, event.clientY) || { u: .5, v: .5 };
+        return { x: Math.max(0, Math.min(1, point.u)), y: Math.max(0, Math.min(1, point.v)) };
+    };
     compare = new DevelopCompareView({ stage, canvas, loadPreview: comparisonPreview, getCurrent: () => currentImage, getImages: () => viewState.images });
     softProof = new SoftProofPopover({ toolbar, onChange: (proof) => {
         renderer?.setSoftProof(proof);
         compare?.setProof(proof);
     } });
+    proofTile = new ProofTileController({
+        stage,
+        getRenderer: () => renderer,
+        getContext: () => {
+            const entry = currentImage && stateCache.get(Number(currentImage.id));
+            return { imageId: currentImage?.id, settings: entry?.settings, center: zoomState.center };
+        },
+        onDisplayChange: (show) => {
+            for (const overlay of stage.querySelectorAll('#develop-crop-overlay, .develop-mask-layer, .develop-heal-layer')) {
+                if (show) {
+                    overlay.dataset.proofVisibility = overlay.style.visibility;
+                    overlay.style.visibility = 'hidden';
+                } else {
+                    overlay.style.visibility = overlay.dataset.proofVisibility || '';
+                    delete overlay.dataset.proofVisibility;
+                }
+            }
+            if (show) {
+                renderer?.setMaskOverlay(null);
+                renderer?.setHealOverlay(false);
+            } else {
+                masking?.setRendererOverlay(masking.overlayShown);
+                heal?.syncOverlay();
+            }
+        },
+    });
     const presetsPanel = mountPresetsPanel(root.querySelector('.develop-layout') || root, {
         getRenderer: () => renderer,
         getEntry: () => currentImage && stateCache.get(Number(currentImage.id)),
