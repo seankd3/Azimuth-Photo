@@ -2,20 +2,22 @@ import { thumbUrl } from '../api.js';
 import { on, selection, viewState } from '../state.js';
 import { showToast } from '../toast.js';
 import { CropController } from './crop.js';
-import { DevelopRenderer, renderSyntheticPixels } from './gl.js';
+import { DevelopRenderer } from './gl.js';
 import { DevelopHistogram } from './histogram.js';
 import { DevelopPanels } from './panels.js';
 import { mountPresetsPanel } from './presets.js';
 import { mountHistoryPanel } from './history_panel.js';
 import { openExportDialog, openSyncDialog } from './export_dialog.js';
+import { DevelopSettingsClipboard, applyPrevious, openCopyDialog, pasteClipboard } from './settings_clipboard.js';
 import { DevelopCompareView, SoftProofPopover } from './compare_view.js';
 import { ProofTileController } from './proof_tile.js';
+import { markSettingsChange } from './perf_overlay.js';
 
 const DIRECT_DEVELOP_EXTENSIONS = new Set(['dng', 'cr3', 'cr2', 'exr', 'jpg', 'jpeg', 'png', 'tif', 'tiff', 'webp']);
 const RAW_DEVELOP_EXTENSIONS = new Set(['dng', 'cr3', 'cr2', 'exr']);
 const stateCache = new Map();
 const saveTimers = new Map();
-let clipboardSettings = null;
+const settingsClipboard = new DevelopSettingsClipboard();
 let mounted = false;
 let currentImage = null;
 let renderer = null;
@@ -33,6 +35,8 @@ let compare = null;
 let softProof = null;
 let proofTile = null;
 let panGesture = null;
+let presetsPanel = null;
+let transientSettingsOverride = null;
 
 const zoomState = {
     mode: 'fit',
@@ -172,9 +176,59 @@ function scheduleSave(label = 'Develop adjustment') {
             body: JSON.stringify({ settings: entry.settings, label }),
         }).then((response) => {
             if (!response.ok) throw new Error('save failed');
+            settingsClipboard.markSaved(imageId);
             historyPanel?.reload();
         }).catch(() => {});
     }, 400));
+}
+
+function renderedSettings(entry) {
+    if (beforeHeld) return entry.origin;
+    return transientSettingsOverride ? { ...entry.settings, ...transientSettingsOverride } : entry.settings;
+}
+
+// This is intentionally renderer-only: transient overrides never touch history or saves.
+function setTransientSettingsOverride(settings = null) {
+    transientSettingsOverride = settings && typeof settings === 'object' ? clone(settings) : null;
+    const entry = currentImage && stateCache.get(Number(currentImage.id));
+    if (entry) renderer?.setSettings(renderedSettings(entry), entry.meta);
+}
+
+function resizeRgba(source, sourceWidth, sourceHeight, maxSide) {
+    const ratio = Math.min(1, maxSide / Math.max(sourceWidth, sourceHeight));
+    const width = Math.max(1, Math.round(sourceWidth * ratio));
+    const height = Math.max(1, Math.round(sourceHeight * ratio));
+    const data = new Float32Array(width * height * 4);
+    for (let y = 0; y < height; y += 1) {
+        const sourceY = Math.min(sourceHeight - 1, Math.floor(y * sourceHeight / height));
+        for (let x = 0; x < width; x += 1) {
+            const sourceX = Math.min(sourceWidth - 1, Math.floor(x * sourceWidth / width));
+            const sourceOffset = (sourceY * sourceWidth + sourceX) * 4;
+            data.set(source.subarray(sourceOffset, sourceOffset + 4), (y * width + x) * 4);
+        }
+    }
+    return { data, width, height };
+}
+
+async function renderCurrentImagePixels(settings = {}, { size = 112, signal } = {}) {
+    const entry = currentImage && stateCache.get(Number(currentImage.id));
+    if (!entry?.base || signal?.aborted) return null;
+    const base = resizeRgba(entry.base.rgba, entry.base.width, entry.base.height, size);
+    const thumbCanvas = document.createElement('canvas');
+    thumbCanvas.width = base.width;
+    thumbCanvas.height = base.height;
+    const thumbRenderer = new DevelopRenderer(thumbCanvas);
+    try {
+        thumbRenderer.geometryEnabled = false;
+        thumbRenderer.uploadSource(base.data, base.width, base.height);
+        thumbRenderer.setSettings({ ...entry.settings, ...clone(settings) }, entry.meta);
+        await thumbRenderer.waitForFilm();
+        if (signal?.aborted) return null;
+        thumbRenderer.render();
+        return { pixels: thumbRenderer.readPixels(base.width, base.height), width: base.width, height: base.height };
+    } finally {
+        thumbRenderer.destroy();
+    }
 }
 
 function applySettings(entry) {
@@ -184,7 +238,7 @@ function applySettings(entry) {
     panels.setMeta(entry.meta);
     panels.setSettings(panelSettings);
     crop.setSettings(entry.settings);
-    renderer?.setSettings(entry.settings, entry.meta);
+    renderer?.setSettings(renderedSettings(entry), entry.meta);
     compare?.updateCurrent(entry);
     proofTile?.settingsChanged(currentImage?.id);
 }
@@ -236,7 +290,7 @@ function applySettingsPatch(patch, label) {
         if (value === undefined) delete entry.settings[key];
         else entry.settings[key] = value;
     }
-    renderer?.setSettings(entry.settings, entry.meta);
+    renderer?.setSettings(renderedSettings(entry), entry.meta);
     compare?.updateCurrent(entry);
     proofTile?.settingsChanged(currentImage.id);
     scheduleSave(label);
@@ -265,7 +319,8 @@ function settingsChanged(key, value, label, { history = true, previousSettings =
     }
     if (value === undefined) delete entry.settings[key];
     else entry.settings[key] = value;
-    renderer?.setSettings(entry.settings, entry.meta);
+    markSettingsChange(label || key);
+    renderer?.setSettings(renderedSettings(entry), entry.meta);
     compare?.updateCurrent(entry);
     proofTile?.settingsChanged(currentImage.id);
     scheduleSave(label);
@@ -304,6 +359,8 @@ function pregenNeighbors(image) {
 async function openImage(image) {
     const token = ++loadingToken;
     currentImage = image;
+    transientSettingsOverride = null;
+    presetsPanel?.imageChanged();
     setZoomFit();
     proofTile?.imageChanged();
     syncFilmstrip();
@@ -353,13 +410,14 @@ async function openImage(image) {
         if (!base || token !== loadingToken) return;
         renderer.uploadSource(base.rgba, base.width, base.height);
         entry.base = base;
-        renderer.setSettings(entry.settings, entry.meta);
+        renderer.setSettings(renderedSettings(entry), entry.meta);
         applyZoomState();
         masking?.rebuildRasters();
         canvas.classList.add('ready');
         placeholder.hidden = true;
         setStatus('');
         crop.setSettings(entry.settings);
+        presetsPanel?.imageReady();
     } catch (error) {
         if (token === loadingToken) setStatus(error.message || 'Develop could not open this photo.', { error: true });
     }
@@ -486,7 +544,7 @@ function showBefore(show) {
     const entry = currentImage && stateCache.get(Number(currentImage.id));
     if (!entry || !renderer) return;
     beforeHeld = show;
-    renderer.setSettings(show ? entry.origin : entry.settings, entry.meta);
+    renderer.setSettings(show ? entry.origin : renderedSettings(entry), entry.meta);
     toolbar.querySelector('[data-action="before"]').setAttribute('aria-pressed', String(show));
 }
 
@@ -539,25 +597,100 @@ function anchoredPopover(button, html) {
     return activePopover;
 }
 
+function gridAnchoredPopover(button, html) {
+    closePopover();
+    activePopover = document.createElement('div');
+    activePopover.className = 'develop-popover';
+    activePopover.innerHTML = html;
+    activePopover.style.position = 'fixed';
+    document.body.appendChild(activePopover);
+    const rect = button?.getBoundingClientRect?.() || { left: window.innerWidth * .5, bottom: 40 };
+    activePopover.style.left = `${Math.max(8, Math.min(window.innerWidth - 250, rect.left))}px`;
+    activePopover.style.top = `${Math.max(8, Math.min(window.innerHeight - 360, rect.bottom + 6))}px`;
+    return activePopover;
+}
+
 function openCopyPopover(button) {
-    const popover = anchoredPopover(button, '<strong>Copy settings</strong><label data-tip="Copy all rendered settings"><input type="checkbox" checked disabled> All adjustments</label><button data-copy-confirm data-tip="Copy all settings">Copy</button>');
-    popover.querySelector('[data-copy-confirm]').addEventListener('click', () => {
-        const entry = currentImage && stateCache.get(Number(currentImage.id));
-        clipboardSettings = clone(entry?.settings || {});
-        closePopover();
-        showToast('Develop settings copied');
+    const entry = currentImage && stateCache.get(Number(currentImage.id));
+    return openCopyDialog({
+        button, sourceId: currentImage?.id, settings: entry?.settings,
+        anchoredPopover, closePopover, showToast, clipboard: settingsClipboard,
     });
 }
 
-function pasteSettings() {
+function applySyncedSettings(payload) {
     const entry = currentImage && stateCache.get(Number(currentImage.id));
-    if (!entry || !clipboardSettings) return showToast('Copy develop settings first');
+    const synced = payload?.synced?.find((row) => Number(row.image_id) === Number(currentImage?.id));
+    if (!entry || !synced?.settings) return;
     entry.undo.push(clone(entry.settings));
-    entry.settings = clone(clipboardSettings);
+    if (entry.undo.length > 100) entry.undo.shift();
+    entry.settings = clone(synced.settings);
     entry.redo.length = 0;
     applySettings(entry);
-    scheduleSave('Paste Settings');
-    showToast('Develop settings pasted');
+    historyPanel?.reload();
+}
+
+function targetImageIds() {
+    return selection.size ? [...selection].map(Number) : [Number(currentImage?.id)].filter(Boolean);
+}
+
+async function pasteSettings() {
+    if (!currentImage) return;
+    try {
+        const payload = await pasteClipboard({ clipboard: settingsClipboard, targetIds: targetImageIds(), onApplied: applySyncedSettings });
+        const count = payload.synced?.length || 0;
+        showToast(count ? `Pasted settings to ${count} photo${count === 1 ? '' : 's'} · Undo with Ctrl+Z` : 'Nothing pasted');
+    } catch (error) { showToast(error.message || 'Could not paste settings'); }
+}
+
+async function fromPrevious() {
+    if (!currentImage) return;
+    const sourceId = settingsClipboard.lastSavedOtherThan(currentImage.id);
+    if (!sourceId) return showToast('Edit another photo, then save it first');
+    try {
+        const source = stateCache.get(sourceId) || await fetchDevelop(sourceId);
+        const payload = await applyPrevious({ sourceId, sourceSettings: source.settings, targetIds: targetImageIds(), onApplied: applySyncedSettings });
+        const count = payload.synced?.length || 0;
+        showToast(count ? `Applied previous settings to ${count} photo${count === 1 ? '' : 's'} · Undo with Ctrl+Z` : 'Nothing applied');
+    } catch (error) { showToast(error.message || 'Could not apply previous settings'); }
+}
+
+function gridTargetIds(imageIds) {
+    return [...new Set((imageIds || []).map(Number).filter((id) => id > 0))];
+}
+
+/** Grid shortcuts share the same persistent clipboard and batch sync request. */
+export async function copyDevelopSettingsFromGrid(image, anchor = document.getElementById('grid-flow')) {
+    if (!image?.id) return;
+    try {
+        const payload = await fetchDevelop(image.id);
+        openCopyDialog({
+            button: anchor, sourceId: image.id, settings: payload.settings,
+            anchoredPopover: gridAnchoredPopover, closePopover, showToast, clipboard: settingsClipboard,
+        });
+    } catch (error) { showToast(error.message || 'Could not read develop settings'); }
+}
+
+export async function pasteDevelopSettingsToGrid(imageIds) {
+    const targetIds = gridTargetIds(imageIds);
+    if (!targetIds.length) return showToast('Select photos to paste into');
+    try {
+        const payload = await pasteClipboard({ clipboard: settingsClipboard, targetIds });
+        const count = payload.synced?.length || 0;
+        showToast(count ? `Pasted settings to ${count} photo${count === 1 ? '' : 's'} · Undo with Ctrl+Z` : 'Nothing pasted');
+    } catch (error) { showToast(error.message || 'Could not paste settings'); }
+}
+
+export async function applyPreviousDevelopSettingsToGrid(imageIds) {
+    const targetIds = gridTargetIds(imageIds);
+    const sourceId = settingsClipboard.lastSavedOtherThan(targetIds.length === 1 ? targetIds[0] : null);
+    if (!sourceId) return showToast('Edit another photo, then save it first');
+    try {
+        const source = stateCache.get(sourceId) || await fetchDevelop(sourceId);
+        const payload = await applyPrevious({ sourceId, sourceSettings: source.settings, targetIds });
+        const count = payload.synced?.length || 0;
+        showToast(count ? `Applied previous settings to ${count} photo${count === 1 ? '' : 's'} · Undo with Ctrl+Z` : 'Nothing applied');
+    } catch (error) { showToast(error.message || 'Could not apply previous settings'); }
 }
 
 function openExportPopover(button) {
@@ -627,6 +760,7 @@ function unmount() {
     crop.setActive(false);
     heal?.toggle(false);
     proofTile?.setHeld(false);
+    presetsPanel?.endPreview();
 }
 
 export function developOpen() {
@@ -712,6 +846,7 @@ function bindUi() {
         else if (action === 'zoom') toggleZoom();
         else if (action === 'copy') openCopyPopover(button);
         else if (action === 'paste') pasteSettings();
+        else if (action === 'previous') fromPrevious();
         else if (action === 'reset') resetCurrent();
         else if (action === 'sync') openSyncPopover(button);
         else if (action === 'export') openExportPopover(button);
@@ -723,6 +858,14 @@ function bindUi() {
         syncButton.dataset.tip = 'Sync settings to grid selection';
         syncButton.textContent = 'Sync…';
         exportButton?.parentNode?.insertBefore(syncButton, exportButton);
+    }
+    if (!toolbar.querySelector('[data-action="previous"]')) {
+        const pasteButton = toolbar.querySelector('[data-action="paste"]');
+        const previousButton = document.createElement('button');
+        previousButton.dataset.action = 'previous';
+        previousButton.dataset.tip = 'Apply the last saved other photo (Ctrl+Alt+V)';
+        previousButton.textContent = 'Previous';
+        pasteButton?.after(previousButton);
     }
     const beforeButton = toolbar.querySelector('[data-action="before"]');
     beforeButton.addEventListener('pointerdown', () => showBefore(true));
@@ -759,6 +902,7 @@ function handleKey(event) {
         if (key === 'z') { event.preventDefault(); event.stopImmediatePropagation(); event.shiftKey ? redo() : undo(); }
         else if (event.shiftKey && key === 'c') { event.preventDefault(); event.stopImmediatePropagation(); openCopyPopover(toolbar.querySelector('[data-action="copy"]')); }
         else if (event.shiftKey && key === 'v') { event.preventDefault(); event.stopImmediatePropagation(); pasteSettings(); }
+        else if (event.altKey && key === 'v') { event.preventDefault(); event.stopImmediatePropagation(); fromPrevious(); }
         return;
     }
     if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
@@ -856,9 +1000,11 @@ function init() {
             }
         },
     });
-    const presetsPanel = mountPresetsPanel(root.querySelector('.develop-layout') || root, {
+    presetsPanel = mountPresetsPanel(root.querySelector('.develop-layout') || root, {
         getRenderer: () => renderer,
         getEntry: () => currentImage && stateCache.get(Number(currentImage.id)),
+        setTransientSettingsOverride,
+        renderPresetThumbnail: renderCurrentImagePixels,
         applyPresetSettings,
         saveCurrentSettings: () => {
             const entry = currentImage && stateCache.get(Number(currentImage.id));
@@ -873,7 +1019,8 @@ function init() {
     });
     bindUi();
     updateTabState();
-    window.__developRenderToPixels = renderSyntheticPixels;
+    // Keep the established harness name, but render the current decoded image for preset thumbnails.
+    window.__developRenderToPixels = renderCurrentImagePixels;
 }
 
 init();

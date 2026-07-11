@@ -1498,8 +1498,9 @@ body.develop-active #canvas > .view:not(#view-develop) { display: none !importan
 
 /* Presets — slim, searchable left rail. */
 #develop-presets { display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; border-right: 1px solid var(--line); background: #17191d; }
-.develop-presets-head { display: flex; align-items: center; justify-content: space-between; min-height: 42px; padding: 0 10px 0 12px; border-bottom: 1px solid var(--line); }
+.develop-presets-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-height: 42px; padding: 0 10px 0 12px; border-bottom: 1px solid var(--line); }
 .develop-presets-head strong { color: var(--text); font-size: 11px; font-weight: 650; letter-spacing: .02em; }
+.develop-preset-preview-chip { min-width: 0; overflow: hidden; padding: 3px 6px; border: 1px solid var(--accent-lin); border-radius: 999px; color: var(--accent); font-size: 9px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; background: var(--accent-dim); }
 .develop-presets-head button { height: 24px; padding: 0 7px; border: 1px solid var(--line); border-radius: var(--r-ctl); color: var(--text-2); font-size: 10px; background: #202328; }
 .develop-presets-head button:hover { border-color: var(--accent-lin); color: var(--text); background: var(--accent-dim); }
 .develop-presets-body { min-width: 0; min-height: 0; flex: 1 1 auto; overflow-x: hidden; overflow-y: auto; scrollbar-gutter: stable; scrollbar-width: thin; }
@@ -1515,10 +1516,12 @@ body.develop-active #canvas > .view:not(#view-develop) { display: none !importan
 .develop-preset-folder > summary b { min-width: 0; overflow: hidden; padding-left: 7px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .develop-preset-folder > summary span { color: var(--text-3); font: 10px/1 var(--font-mono); font-variant-numeric: tabular-nums; }
 .develop-preset-folder-body { padding: 1px 5px 5px; }
-.develop-preset-row { display: grid; grid-template-columns: minmax(0, 1fr) 19px 19px; align-items: center; min-width: 0; min-height: 25px; border-radius: 3px; }
+.develop-preset-row { display: grid; grid-template-columns: minmax(0, 1fr) 19px 19px; align-items: center; min-width: 0; min-height: 136px; border-radius: 3px; }
 .develop-preset-row:hover { background: rgba(255,255,255,.055); }
 .develop-preset-row.active { background: color-mix(in srgb, var(--accent) 22%, transparent); box-shadow: inset 2px 0 0 var(--accent); }
-.develop-preset-name { min-width: 0; height: 25px; padding: 0 6px 0 8px; overflow: hidden; border: 0; color: var(--text-2); font-size: 11px; text-align: left; text-overflow: ellipsis; white-space: nowrap; background: transparent; }
+.develop-preset-name { display: grid; grid-template-rows: 112px minmax(18px, auto); gap: 4px; min-width: 0; min-height: 132px; padding: 4px 6px; overflow: hidden; border: 0; color: var(--text-2); font-size: 11px; text-align: left; background: transparent; }
+.develop-preset-name img { display: block; width: 112px; height: 112px; max-width: 100%; justify-self: center; border-radius: 3px; object-fit: cover; background: #101216; }
+.develop-preset-name span { overflow: hidden; padding: 0 2px; text-overflow: ellipsis; white-space: nowrap; }
 .develop-preset-row.active .develop-preset-name { color: #eef6ff; font-weight: 600; }
 .develop-preset-edit { width: 19px; height: 21px; padding: 0; border: 0; border-radius: 3px; color: var(--text-3); font-size: 11px; background: transparent; opacity: 0; }
 .develop-preset-row:hover .develop-preset-edit,

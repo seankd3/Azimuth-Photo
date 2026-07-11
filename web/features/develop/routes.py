@@ -146,6 +146,11 @@ class DevelopSyncBody(BaseModel):
     source_id: int
     target_ids: list[int] = Field(default_factory=list, max_length=500)
     groups: list[str] = Field(default_factory=list, max_length=16)
+    # A clipboard carries a snapshot, rather than a mutable reference to its
+    # source image.  The groups are still sliced server-side below.
+    source_settings: dict[str, Any] | None = None
+    full: bool = False
+    label: str | None = Field(default=None, max_length=160)
 
 
 def configure(*, db_path: DbPathProvider) -> None:
@@ -216,6 +221,7 @@ async def _write_synced_settings(
     incoming: dict[str, Any],
     *,
     label: str,
+    replace: bool = False,
 ) -> dict[str, Any]:
     """Merge a sync slice into a target and append a history entry."""
     conn = await connection.open_async(_configured_db_path())
@@ -234,7 +240,7 @@ async def _write_synced_settings(
             xmp_mtime = None
         else:
             prior = _json_settings(existing["settings"])
-            merged = {**prior, **incoming}
+            merged = dict(incoming) if replace else {**prior, **incoming}
             origin = existing["origin"] or "user"
             xmp_path = existing["xmp_path"]
             xmp_mtime = existing["xmp_mtime"]
@@ -953,7 +959,7 @@ async def api_sync_develop(body: DevelopSyncBody):
     if error:
         return error
     groups = _normalize_sync_groups(body.groups)
-    if not groups:
+    if not body.full and not groups:
         return JSONResponse(
             {"error": "groups must include one or more of: " + ", ".join(SYNC_GROUP_NAMES)},
             status_code=400,
@@ -967,12 +973,12 @@ async def api_sync_develop(body: DevelopSyncBody):
         return JSONResponse({"error": "target_ids required"}, status_code=400)
 
     source_row = await _load_settings(body.source_id)
-    source_settings = _json_settings(source_row["settings"]) if source_row else {}
-    slice_ = extract_sync_slice(source_settings, groups)
+    source_settings = body.source_settings if body.source_settings is not None else (_json_settings(source_row["settings"]) if source_row else {})
+    slice_ = dict(source_settings) if body.full else extract_sync_slice(source_settings, groups)
     if not slice_:
         return JSONResponse({"error": "Source has no settings in the selected groups"}, status_code=400)
 
-    label = f"Sync from #{body.source_id}"
+    label = body.label or f"Sync from #{body.source_id}"
     synced: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
     for target_id in target_ids:
@@ -980,11 +986,12 @@ async def api_sync_develop(body: DevelopSyncBody):
         if target_error:
             skipped.append({"image_id": target_id, "error": "unavailable"})
             continue
-        result = await _write_synced_settings(target_id, slice_, label=label)
-        synced.append({"image_id": target_id, "origin": result["origin"], "updated_at": result["updated_at"]})
+        result = await _write_synced_settings(target_id, slice_, label=label, replace=body.full)
+        synced.append({"image_id": target_id, "origin": result["origin"], "updated_at": result["updated_at"], "settings": result["settings"]})
     return {
         "source_id": body.source_id,
         "groups": groups,
+        "full": body.full,
         "synced": synced,
         "skipped": skipped,
         "keys": sorted(slice_.keys()),

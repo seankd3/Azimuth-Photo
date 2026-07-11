@@ -39,6 +39,7 @@ import {
 import { buildMaskRasters, localToSlider } from './mask_raster.js';
 import { RETOUCH_SETTINGS_KEY } from './heal.js';
 import { buildFilmTables, FILM_GLSL, FILM_LOGE_MAX, FILM_LOGE_MIN } from './film.js';
+import { markFrameDone } from './perf_overlay.js';
 
 const FILM_STOCK_CACHE = new Map();
 
@@ -1149,6 +1150,7 @@ export class DevelopRenderer {
         this.filmReadyPromise = Promise.resolve();
         this.maskAtlas = maskTexture(this.gl, LOCAL_MASK_ATLAS_COLUMNS, LOCAL_MASK_ATLAS_COLUMNS, new Uint8Array(LOCAL_MASK_ATLAS_COLUMNS ** 2));
         this.maskRasters = [];
+        this.maskRasterSources = [];
         this.maskOverlay = -1;
         this.healOverlay = false;
         this.softProof = { profile: 'off', warning: false };
@@ -1237,6 +1239,14 @@ export class DevelopRenderer {
     }
 
     updateCurve(settings) {
+        const key = JSON.stringify([
+            settings?.ToneCurvePV2012 || null,
+            settings?.ToneCurvePV2012Red || null,
+            settings?.ToneCurvePV2012Green || null,
+            settings?.ToneCurvePV2012Blue || null,
+        ]);
+        if (key === this.curveKey) return;
+        this.curveKey = key;
         const gl = this.gl;
         if (this.curve) gl.deleteTexture(this.curve);
         this.curve = texture(gl, 256, 1, {
@@ -1246,6 +1256,8 @@ export class DevelopRenderer {
     }
 
     updateFilmTextures(tables) {
+        if (tables === this.filmTextureTables) return;
+        this.filmTextureTables = tables;
         const gl = this.gl;
         if (this.filmHd) gl.deleteTexture(this.filmHd);
         if (this.filmPrint) gl.deleteTexture(this.filmPrint);
@@ -1372,6 +1384,10 @@ export class DevelopRenderer {
             return Number.isInteger(index) && index >= 0 && index < LOCAL_RENDER_CAP && entry.canvasOrImageData;
         });
         const sizes = entries.map((entry) => maskSourceSize(entry.canvasOrImageData));
+        const sources = entries.map((entry) => [entry.correctionIndex, entry.canvasOrImageData]);
+        if (sources.length === this.maskRasterSources.length
+            && sources.every(([index, source], position) => index === this.maskRasterSources[position][0] && source === this.maskRasterSources[position][1])) return;
+        this.maskRasterSources = sources;
         const tileWidth = Math.max(1, ...sizes.map(([width]) => width));
         const tileHeight = Math.max(1, ...sizes.map(([, height]) => height));
         const canvas = document.createElement('canvas');
@@ -1774,6 +1790,7 @@ export class DevelopRenderer {
             gl.drawArrays(gl.TRIANGLES, 0, 6);
         }
         this.canvas.dispatchEvent(new CustomEvent('develop:rendered'));
+        markFrameDone();
     }
 
     readPixels(width = this.canvas.width, height = this.canvas.height) {
