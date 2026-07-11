@@ -11,14 +11,18 @@ or pano/HDR settings.
 from __future__ import annotations
 
 import asyncio
+import io
 import math
 import re
 import shutil
 import struct
 import time
 import uuid
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
+from threading import RLock
 from typing import Mapping
 
 import numpy as np
@@ -38,13 +42,28 @@ LIBRARY_SOURCE_NAME = "Develop Exports"
 # A native RAW render has a substantial working set; serialize exports rather
 # than allowing two 45 MP pipelines to contend for memory.
 _EXPORT_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="develop-export")
+_PROOF_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="develop-proof")
 PIPELINE_TILE_HEIGHT = 192
 DEFAULT_FILENAME_PATTERN = "{stem}-develop"
 _TOKEN_RE = re.compile(r"\{(stem|filename|id|ext|date)\}")
+PROOF_DECODE_CACHE_SIZE = 2
+_PROOF_DECODE_CACHE: OrderedDict[tuple[str, int, int], np.ndarray] = OrderedDict()
+_PROOF_DECODE_LOCK = RLock()
 
 
 class RenderError(RuntimeError):
     """A source image could not be decoded or rendered for export."""
+
+
+@dataclass(frozen=True)
+class ProofTile:
+    png: bytes
+    left: int
+    top: int
+    width: int
+    height: int
+    source_width: int
+    source_height: int
 
 
 def _number(settings: Mapping[str, object], key: str, default: float) -> float:
@@ -87,6 +106,99 @@ def decode_full_resolution(path: str | Path) -> np.ndarray:
         else:
             raise RenderError(f"RAW export decode failed: {exc}") from exc
     return np.asarray(decoded, dtype=np.float32) / np.float32(65535.0)
+
+
+def clear_proof_decode_cache() -> None:
+    """Release native decodes (public for focused tests and memory-pressure hooks)."""
+    with _PROOF_DECODE_LOCK:
+        _PROOF_DECODE_CACHE.clear()
+
+
+def _proof_decode(path: str | Path) -> np.ndarray:
+    source = Path(path)
+    try:
+        stat = source.stat()
+    except OSError as exc:
+        raise RenderError(f"Original proof source is unavailable: {exc}") from exc
+    key = (str(source.resolve()), int(stat.st_mtime_ns), int(stat.st_size))
+    with _PROOF_DECODE_LOCK:
+        cached = _PROOF_DECODE_CACHE.pop(key, None)
+        if cached is not None:
+            _PROOF_DECODE_CACHE[key] = cached
+            return cached
+        decoded = np.ascontiguousarray(decode_full_resolution(source), dtype=np.float32)
+        decoded.setflags(write=False)
+        _PROOF_DECODE_CACHE[key] = decoded
+        while len(_PROOF_DECODE_CACHE) > PROOF_DECODE_CACHE_SIZE:
+            _PROOF_DECODE_CACHE.popitem(last=False)
+        return decoded
+
+
+def render_proof_tile(
+    raw_path: str | Path,
+    settings: Mapping[str, object],
+    *,
+    u: float,
+    v: float,
+    edge: int = 1024,
+    asshot_temperature: float | None = None,
+    asshot_tint: float | None = None,
+    color_profile=None,
+) -> ProofTile:
+    """Render one native-resolution source tile through the shared NumPy look.
+
+    v1 intentionally decodes the full original, then runs only the requested
+    crop (plus blur overlap) through the pipeline. Geometry remains represented
+    by the client's image-space location; no full-resolution canvas is built.
+    """
+    linear = _proof_decode(raw_path)
+    source_height, source_width = linear.shape[:2]
+    tile_edge = int(np.clip(int(edge), 128, 2048))
+    tile_width = min(tile_edge, source_width)
+    tile_height = min(tile_edge, source_height)
+    center_x = int(round(np.clip(float(u), 0.0, 1.0) * max(0, source_width - 1)))
+    center_y = int(round(np.clip(float(v), 0.0, 1.0) * max(0, source_height - 1)))
+    left = int(np.clip(center_x - tile_width // 2, 0, source_width - tile_width))
+    top = int(np.clip(center_y - tile_height // 2, 0, source_height - tile_height))
+    overlap = _pipeline_overlap(settings, min(source_width, source_height))
+    source_left = max(0, left - overlap)
+    source_top = max(0, top - overlap)
+    source_right = min(source_width, left + tile_width + overlap)
+    source_bottom = min(source_height, top + tile_height + overlap)
+    developed = apply_pipeline(
+        linear[source_top:source_bottom, source_left:source_right],
+        settings,
+        asshot_temperature=asshot_temperature,
+        asshot_tint=asshot_tint,
+        color_profile=color_profile,
+        pixel_offset=(source_left, source_top),
+        canvas_size=(source_width, source_height),
+        blur_min_dimension=min(source_width, source_height),
+    )
+    retained_left = left - source_left
+    retained_top = top - source_top
+    developed = developed[
+        retained_top:retained_top + tile_height,
+        retained_left:retained_left + tile_width,
+    ]
+    encoded = np.asarray(np.clip(developed * 255.0 + 0.5, 0, 255), dtype=np.uint8)
+    output = io.BytesIO()
+    Image.fromarray(encoded, mode="RGB").save(output, format="PNG", optimize=False)
+    return ProofTile(
+        png=output.getvalue(),
+        left=left,
+        top=top,
+        width=tile_width,
+        height=tile_height,
+        source_width=source_width,
+        source_height=source_height,
+    )
+
+
+async def render_proof_tile_async(*args, **kwargs) -> ProofTile:
+    """Keep native decode and NumPy work off FastAPI's event loop."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_PROOF_EXECUTOR, lambda: render_proof_tile(*args, **kwargs))
 
 
 def _crop(rgb: np.ndarray, settings: Mapping[str, object]) -> np.ndarray:

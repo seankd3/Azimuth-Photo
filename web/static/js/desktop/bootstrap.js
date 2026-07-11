@@ -14,6 +14,8 @@ import { initRefine } from './refine.js';
 import { initDuplicates } from './duplicates.js';
 import { initTrash } from './trash.js';
 import { initKeyboard } from './keyboard.js';
+import { initShortcutSheet } from './shortcut_sheet.js';
+import { initWatchedFolders } from './watched_folders.js';
 import { initFilters } from './filters.js';
 import { initImporter } from './importer.js';
 import { initSimilar } from './similar.js';
@@ -22,6 +24,7 @@ import { initExportMenu } from './export_menu.js';
 import { mountIconSprite } from '../icons.js';
 import { initPanelSections } from './panel_sections.js';
 import { initCullBrief } from './cull_brief.js';
+import { initSyncChip } from './sync_chip.js';
 
 async function boot() {
     await mountIconSprite();
@@ -45,6 +48,9 @@ async function boot() {
     initRightPanel();
     initPanelSections();
     initDrawer();
+    initWatchedFolders();
+    initSyncChip();
+    initShortcutSheet();
     initKeyboard();
     await initPanel();
     initLenses();

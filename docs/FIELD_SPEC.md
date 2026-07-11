@@ -11,20 +11,28 @@ the background; the full hub library stays browsable remotely through a read-thr
   own originals dir for field imports. AI models optional (smoke-degraded is fine).
 
 ## Identity
-- Every image gets `content_hash` = BLAKE2b-128 of the first 8MB + file size (fast, stable,
-  collision-safe for this purpose). New column on images (additive migration, both roles).
+- Every image gets `content_hash = hex(BLAKE2b-128(prefix || le_u64(size)))`, where `prefix`
+  is exactly `file[0:min(size, 8 MiB)]` and `le_u64(size)` is one unsigned 8-byte
+  little-endian integer. Files below 8 MiB hash the entire file and still append the size.
+  The shared hashing helper is used by satellite discovery, hub backfill, and upload verify.
+  New column on images (additive migration, both roles).
+- Upload integrity is separate from identity: a manifest's `full_hash` is BLAKE2b-128 over
+  every file byte. The hub verifies both digests before registering the original.
 - Sync matches by content_hash ONLY. Filepath differences are expected and irrelevant.
 
 ## Hub sync API (all endpoints hub-side, tailnet-only like everything else)
-1. `POST /api/sync/manifest`  body `{items: [{content_hash, bytes, filename, date_taken?}]}`
+1. `POST /api/sync/manifest`  body `{items: [{content_hash, full_hash, bytes, filename, date_taken?}]}`
    → `{missing: [content_hash...], known: [{content_hash, image_id}]}`.
    "missing" = hub wants the original uploaded. "known" = already present (any path).
 2. `POST /api/sync/upload/{content_hash}`  chunked/resumable:
    headers `X-Offset`, `X-Total-Bytes`; body = raw chunk (≤32MB). Hub appends to
-   `/mnt/expansion/Photos/_intake/<content_hash>.part`; when complete, verifies hash,
+   `/mnt/expansion/Photos/_intake/<content_hash>.part`; each chunk is fsynced before an
+   offset journal advances. Resume truncates any uncommitted tail. When complete, the hub
+   verifies both `content_hash` and the satellite-supplied full-file `full_hash`,
    moves to `/mnt/expansion/Photos/RAWS/<YYYY>/<YYYY-MM-DD>/<original filename>`
    (date from EXIF DateTimeOriginal; collision → suffix), registers through the EXISTING
-   importer machinery (idempotent), returns `{image_id}`.
+   importer machinery (idempotent), returns `{image_id}`. Finalize keeps `.part` intact until
+   registration succeeds, so a failed or interrupted registration is retry-safe.
    `GET /api/sync/upload/{content_hash}/status` → `{offset}` for resume.
 3. `POST /api/sync/metadata`  body `{items: [{content_hash, flag?, rating?, develop_settings?,
    develop_updated_at?, keywords?: [path...], iptc?}]}` — applied to the hub image matched by

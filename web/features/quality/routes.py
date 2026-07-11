@@ -338,6 +338,25 @@ async def _scan_async(limit: int) -> None:
         await conn.close()
 
 
+async def scan_image_ids(image_ids: list[int]) -> dict[str, int]:
+    """Score only the supplied imported images, then refresh cull suggestions."""
+    ids = sorted({int(image_id) for image_id in image_ids if int(image_id) > 0})
+    result = {"scored": 0, "skipped": 0, "errors": 0}
+    for image_id in ids:
+        try:
+            payload = await api_quality_image(image_id)
+            if isinstance(payload, JSONResponse) or not payload.get("scored"):
+                result["skipped"] += 1
+            else:
+                result["scored"] += 1
+        except Exception:
+            log.exception("quality score error image_id=%s", image_id)
+            result["errors"] += 1
+        await asyncio.sleep(_THROTTLE_SECONDS)
+    invalidate_autocull_cache()
+    return result
+
+
 @router.get("/api/quality/status")
 async def api_quality_status():
     conn = await _open_conn()

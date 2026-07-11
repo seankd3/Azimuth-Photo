@@ -7,6 +7,7 @@ from core import cache_events
 from data.repositories import imports as import_repository
 from features.catalog import routes as catalog_routes
 from features.imports import service as import_service
+from features.quality import routes as quality_routes
 
 
 router = APIRouter()
@@ -149,6 +150,10 @@ async def api_create_import(
         await import_repository.fail_import_batch(db.DB_PATH, batch_id, str(exc))
         raise
 
+    if image_rows:
+        await quality_routes.scan_image_ids(
+            [int(row["image_id"]) for row in image_rows]
+        )
     cache_events.invalidate_rankings_cache()
     cache_events.invalidate_pairing_cache(matchups=True)
     catalog_routes.invalidate_folders_cache()

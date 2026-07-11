@@ -9,6 +9,7 @@ import settings
 from core import responses as response_helpers
 from data.repositories import catalog as catalog_repository
 from features.catalog import metadata as catalog_metadata
+from features.sync import satellite
 
 
 AsyncDictBuilder = Callable[..., Awaitable[dict]]
@@ -96,10 +97,11 @@ async def catalog_light_summary_payload() -> dict:
 
 
 def _stale_cache_status(latency_ms: float) -> dict:
+    empty_tiers = {tier: {"count": 0} for tier in ("sm", "md", "lg")}
     return {
         "pregen": {},
-        "disk": {"tiers": {}},
-        "memory": {"tiers": {}},
+        "disk": {"tiers": {tier: dict(values) for tier, values in empty_tiers.items()}},
+        "memory": {"tiers": {tier: dict(values) for tier, values in empty_tiers.items()}},
         "counts_stale": True,
         "status_stale": True,
         "latency_ms": latency_ms,
@@ -178,6 +180,7 @@ async def build_settings_response() -> dict:
         "people_status": people_status,
         "metadata_status": catalog_metadata.catalog_metadata_status(),
         "catalog": catalog,
+        "sync": satellite.bootstrap_payload(),
         **settings.settings_metadata(),
     }
 
