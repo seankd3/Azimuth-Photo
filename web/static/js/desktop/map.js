@@ -1,6 +1,7 @@
 import { getCollection, getMapMarkers, thumbUrl } from './api.js';
 import { emit, on, scope, scopeParams, setImages, setRankingsMeta } from './state.js';
 import { icon } from '../icons.js';
+import { LAND_PATHS } from './world_land.js';
 
 let mounted = false;
 let initialized = false;
@@ -71,7 +72,8 @@ function renderMap(data = {}) {
         return;
     }
     stage.innerHTML = '<svg id="map-svg" viewBox="0 0 1000 500" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Photo map">'
-        + `<rect x="0" y="0" width="1000" height="500" class="map-ocean"/>${graticule()}`
+        + `<rect x="0" y="0" width="1000" height="500" class="map-ocean"/>`
+        + `<g id="map-land">${LAND_PATHS.map((d) => `<path d="${d}"/>`).join('')}</g>${graticule()}`
         + '</svg><div id="map-pins">'
         + clusters.map((item, index) => {
             const count = item.markers.length;
