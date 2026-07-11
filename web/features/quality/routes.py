@@ -427,15 +427,37 @@ async def api_quality_image(image_id: int):
         await conn.close()
 
 
+_autocull_cache: dict = {"payload": None, "at": 0.0}
+_AUTOCULL_CACHE_TTL_SECONDS = 900.0
+
+
+def invalidate_autocull_cache() -> None:
+    _autocull_cache["payload"] = None
+    _autocull_cache["at"] = 0.0
+
+
 @router.post("/api/quality/autocull")
 async def api_quality_autocull(body: AutocullBody | None = None):
-    """Suggest one best photo per fully-scored burst/variant stack; no writes."""
+    """Suggest one best photo per fully-scored burst/variant stack; no writes.
+
+    The whole-library pass is expensive at 141k images and the desktop banner
+    requests it on every session, so the all-stacks payload is cached briefly
+    and invalidated whenever a suggestion is applied or a scan finishes.
+    """
     stack_ids = None if body is None or body.all or not body.stack_ids else body.stack_ids
+    if stack_ids is None:
+        cached = _autocull_cache["payload"]
+        if cached is not None and time.time() - _autocull_cache["at"] < _AUTOCULL_CACHE_TTL_SECONDS:
+            return cached
     conn = await _open_conn()
     try:
-        return await autocull.suggestions(conn, stack_ids=stack_ids)
+        payload = await autocull.suggestions(conn, stack_ids=stack_ids)
     finally:
         await conn.close()
+    if stack_ids is None:
+        _autocull_cache["payload"] = payload
+        _autocull_cache["at"] = time.time()
+    return payload
 
 
 @router.post("/api/quality/autocull/apply")
@@ -451,4 +473,5 @@ async def api_quality_autocull_apply(body: AutocullApplyBody):
 
         cache_events.invalidate_rankings_cache()
         cache_events.invalidate_pairing_cache(matchups=True)
+        invalidate_autocull_cache()
     return JSONResponse(payload, status_code=200 if payload.get("ok") else 400)
