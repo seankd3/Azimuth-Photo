@@ -1,0 +1,91 @@
+{
+  "slug": "fuji-velvia-50",
+  "name": "Fujifilm Velvia 50",
+  "iso": 50,
+  "process": "E-6",
+  "type": "positive_slide",
+  "white_point_hint": "daylight",
+  "white_point_kelvin": 5500,
+  "hd_curves": {
+    "r": [
+      [-2.0, 3.55],
+      [-1.2, 3.30],
+      [-0.6, 2.45],
+      [0.0, 1.05],
+      [0.6, 0.40],
+      [1.2, 0.24],
+      [1.8, 0.19],
+      [2.6, 0.18]
+    ],
+    "g": [
+      [-2.0, 3.60],
+      [-1.2, 3.35],
+      [-0.6, 2.50],
+      [0.0, 1.05],
+      [0.6, 0.40],
+      [1.2, 0.23],
+      [1.8, 0.18],
+      [2.6, 0.17]
+    ],
+    "b": [
+      [-2.0, 3.55],
+      [-1.2, 3.28],
+      [-0.6, 2.42],
+      [0.0, 1.06],
+      [0.6, 0.42],
+      [1.2, 0.26],
+      [1.8, 0.21],
+      [2.6, 0.20]
+    ]
+  },
+  "spectral_crosstalk": [
+    [0.92, 0.06, 0.02],
+    [0.04, 0.90, 0.06],
+    [0.01, 0.08, 0.91]
+  ],
+  "dir_coupler": [
+    [1.0, -0.12, -0.08],
+    [-0.10, 1.0, -0.12],
+    [-0.07, -0.10, 1.0]
+  ],
+  "grain": {
+    "rms_granularity": 9.0,
+    "size_px_at_4k": 1.6,
+    "shadow_bias": 0.3,
+    "r": {
+      "rms_granularity": 9.0,
+      "size_px_at_4k": 1.6,
+      "shadow_bias": 0.3
+    },
+    "g": {
+      "rms_granularity": 9.0,
+      "size_px_at_4k": 1.6,
+      "shadow_bias": 0.3
+    },
+    "b": {
+      "rms_granularity": 9.0,
+      "size_px_at_4k": 1.6,
+      "shadow_bias": 0.3
+    }
+  },
+  "halation": {
+    "amount": 0.03,
+    "threshold": 0.7,
+    "radius_frac": 0.02,
+    "green_fraction": 0.1
+  },
+  "base": {
+    "orange_mask_rgb": [0.0, 0.0, 0.0],
+    "base_fog_density": 0.05
+  },
+  "print_paper": {
+    "gamma": 2.6,
+    "shoulder": 0.9
+  },
+  "scan_matrix": [
+    [2.16, -0.08, -0.06],
+    [-0.07, 2.14, -0.07],
+    [-0.05, -0.10, 2.17]
+  ],
+  "notes": "First reversal (slide) stock: type positive_slide so the engine's is-negative flag is false - densities DECREASE with exposure (H&D control points are monotone decreasing), no orange mask, direct-positive print path. H&D approx from memory of Fujifilm Velvia 50 (RVP50) datasheet characteristic curves: D-max ~3.6, D-min ~0.18-0.20, steep straight-line (reversal gamma magnitude ~1.7-1.8), hard highlight shoulder and crushed shadows - the classic ~5-stop slide envelope. Mid-gray density ~1.05 is a reasoned anchor consistent with published curves. Grain: RMS Granularity 9 is from the Fujifilm Velvia 50 datasheet; pitch/shadow_bias engine-derived (fine tight grain). ESTIMATED: spectral crosstalk (narrow, pure layer separations feeding Velvia's saturation), inter-image/DIR matrix (E-6 inter-image effects expressed through the DIR stage - reasoned engine parameter, strong to push Velvia's vivid separation), halation (slides show little). scan_matrix carries diagonal gain ~2x: the engine's direct-positive path lands unscanned mid-gray near display 0.20, and real slide scanners expose the transparency up to mid-gray - this matrix is that scanner calibration (engine anchor verified in tests), with slight channel skew for Velvia's magenta-leaning vividness. print_paper block unused on the positive path, kept for schema uniformity. No local Velvia scans. Memory approximation. Grain keys flattened for the engine. 2026-07-11"
+}

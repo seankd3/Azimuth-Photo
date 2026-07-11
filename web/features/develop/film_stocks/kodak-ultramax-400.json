@@ -1,0 +1,86 @@
+{
+  "slug": "kodak-ultramax-400",
+  "name": "Kodak UltraMax 400",
+  "iso": 400,
+  "process": "C-41",
+  "type": "negative_color",
+  "white_point_hint": "daylight",
+  "white_point_kelvin": 5500,
+  "hd_curves": {
+    "r": [
+      [-2.0, 0.02],
+      [-1.2, 0.06],
+      [-0.6, 0.11],
+      [0.0, 0.15],
+      [0.6, 0.52],
+      [1.2, 0.88],
+      [1.8, 1.20],
+      [2.6, 1.46]
+    ],
+    "g": [
+      [-2.0, 0.02],
+      [-1.2, 0.06],
+      [-0.6, 0.11],
+      [0.0, 0.15],
+      [0.6, 0.51],
+      [1.2, 0.87],
+      [1.8, 1.19],
+      [2.6, 1.45]
+    ],
+    "b": [
+      [-2.0, 0.02],
+      [-1.2, 0.05],
+      [-0.6, 0.10],
+      [0.0, 0.15],
+      [0.6, 0.50],
+      [1.2, 0.85],
+      [1.8, 1.17],
+      [2.6, 1.43]
+    ]
+  },
+  "spectral_crosstalk": [
+    [0.83, 0.13, 0.04],
+    [0.08, 0.80, 0.12],
+    [0.03, 0.17, 0.80]
+  ],
+  "dir_coupler": [
+    [1.0, -0.08, -0.05],
+    [-0.06, 1.0, -0.08],
+    [-0.05, -0.07, 1.0]
+  ],
+  "grain": {
+    "rms_granularity": 5.7,
+    "size_px_at_4k": 2.6,
+    "shadow_bias": 0.7,
+    "r": {
+      "rms_granularity": 5.7,
+      "size_px_at_4k": 2.6,
+      "shadow_bias": 0.7
+    },
+    "g": {
+      "rms_granularity": 5.7,
+      "size_px_at_4k": 2.6,
+      "shadow_bias": 0.7
+    },
+    "b": {
+      "rms_granularity": 5.7,
+      "size_px_at_4k": 2.6,
+      "shadow_bias": 0.7
+    }
+  },
+  "halation": {
+    "amount": 0.06,
+    "threshold": 0.6,
+    "radius_frac": 0.026,
+    "green_fraction": 0.08
+  },
+  "base": {
+    "orange_mask_rgb": [0.94, 0.55, 0.24],
+    "base_fog_density": 0.11
+  },
+  "print_paper": {
+    "gamma": 2.55,
+    "shoulder": 0.82
+  },
+  "notes": "H&D approx from memory of Kodak UltraMax 400 (GC 400) consumer datasheet characteristic curves; straight-line gamma ~0.60, slightly punchier than Gold 200 with red layer marginally steeper (UltraMax's warm saturated consumer look). rms_granularity 5.7 traces to the older Kodak GC/UltraMax 400 datasheet Diffuse RMS figure - treat as datasheet-era but lower confidence than the pro stocks (current sheets publish Print Grain Index instead). ESTIMATED: spectral crosstalk (consumer-emulsion overlap, Gold-family shape), weak consumer DIR, halation, warm orange mask, print paper. Grain pitch/shadow_bias engine-derived. Grain keys flattened for the engine (nested r/g/b are documentation mirrors). Real UltraMax lab scans exist under /mnt/expansion/Photos/Film Scans (README inventory) - untuned so far, prime candidate for a scan-tuning pass. 2026-07-11"
+}
