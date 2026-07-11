@@ -211,7 +211,7 @@ export function mountPresetsPanel(host, api) {
     function runThumbnailQueue() {
         while (thumbnailActive < 2 && thumbnailQueue.length) {
             const job = thumbnailQueue.shift();
-            const render = api.renderPresetThumbnail || window.__developRenderToPixels;
+            const render = window.__developRenderToPixels || api.renderPresetThumbnail;
             if (!render) continue;
             thumbnailActive += 1;
             render(clone(job.preset.settings), { size: 112, signal: thumbnailAbort.signal })

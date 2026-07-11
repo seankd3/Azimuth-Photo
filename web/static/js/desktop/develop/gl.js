@@ -1803,6 +1803,7 @@ export class DevelopRenderer {
     }
 
     destroy() {
+        try { this.gl.getExtension('WEBGL_lose_context')?.loseContext(); } catch { /* already lost */ }
         if (this.frame) cancelAnimationFrame(this.frame);
         const gl = this.gl;
         for (const item of this.targets || []) {

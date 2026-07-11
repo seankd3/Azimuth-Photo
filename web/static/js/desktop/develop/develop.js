@@ -210,25 +210,49 @@ function resizeRgba(source, sourceWidth, sourceHeight, maxSide) {
     return { data, width, height };
 }
 
+// One shared offscreen renderer for every thumbnail/harness render: a fresh
+// WebGL context per call trips the browser's context limit and evicts the
+// MAIN develop canvas (blank/white canvas, dead harness).
+let thumbShared = null;
+let thumbBaseKey = '';
+let thumbChain = Promise.resolve();
+
+function thumbRenderer() {
+    if (thumbShared) return thumbShared;
+    const canvas = document.createElement('canvas');
+    thumbShared = { canvas, renderer: new DevelopRenderer(canvas) };
+    thumbShared.renderer.geometryEnabled = false;
+    return thumbShared;
+}
+
+export function disposeThumbRenderer() {
+    if (!thumbShared) return;
+    thumbShared.renderer.destroy();
+    thumbShared = null;
+    thumbBaseKey = '';
+}
+
 async function renderCurrentImagePixels(settings = {}, { size = 112, signal } = {}) {
-    const entry = currentImage && stateCache.get(Number(currentImage.id));
-    if (!entry?.base || signal?.aborted) return null;
-    const base = resizeRgba(entry.base.rgba, entry.base.width, entry.base.height, size);
-    const thumbCanvas = document.createElement('canvas');
-    thumbCanvas.width = base.width;
-    thumbCanvas.height = base.height;
-    const thumbRenderer = new DevelopRenderer(thumbCanvas);
-    try {
-        thumbRenderer.geometryEnabled = false;
-        thumbRenderer.uploadSource(base.data, base.width, base.height);
-        thumbRenderer.setSettings({ ...entry.settings, ...clone(settings) }, entry.meta);
-        await thumbRenderer.waitForFilm();
+    const run = thumbChain.then(async () => {
+        const entry = currentImage && stateCache.get(Number(currentImage.id));
+        if (!entry?.base || signal?.aborted) return null;
+        const shared = thumbRenderer();
+        const baseKey = `${currentImage.id}:${size}`;
+        const base = resizeRgba(entry.base.rgba, entry.base.width, entry.base.height, size);
+        shared.canvas.width = base.width;
+        shared.canvas.height = base.height;
+        if (thumbBaseKey !== baseKey) {
+            shared.renderer.uploadSource(base.data, base.width, base.height);
+            thumbBaseKey = baseKey;
+        }
+        shared.renderer.setSettings({ ...entry.settings, ...clone(settings) }, entry.meta);
+        await shared.renderer.waitForFilm();
         if (signal?.aborted) return null;
-        thumbRenderer.render();
-        return { pixels: thumbRenderer.readPixels(base.width, base.height), width: base.width, height: base.height };
-    } finally {
-        thumbRenderer.destroy();
-    }
+        shared.renderer.render();
+        return { pixels: shared.renderer.readPixels(base.width, base.height), width: base.width, height: base.height };
+    });
+    thumbChain = run.catch(() => {});
+    return run;
 }
 
 function applySettings(entry) {
