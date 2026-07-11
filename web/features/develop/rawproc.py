@@ -469,7 +469,7 @@ def _write_base_cache(paths: BasePaths, rgb: np.ndarray, meta: dict[str, Any]) -
     height, width = rgb.shape[:2]
     payload = BASE_HEADER.pack(BASE_MAGIC, width, height) + np.ascontiguousarray(rgb.astype("<u2", copy=False)).tobytes()
     binary_temp = paths.binary.with_suffix(".bin.gz.tmp")
-    with gzip.open(binary_temp, "wb") as handle:
+    with gzip.open(binary_temp, "wb", compresslevel=1) as handle:
         handle.write(payload)
     os.replace(binary_temp, paths.binary)
 
