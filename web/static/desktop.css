@@ -1681,34 +1681,34 @@ body.develop-active #canvas > .view:not(#view-develop) { display: none !importan
 
 /* Keywords panel + painter */
 #keywords-panel .keyword-tokens { display: flex; flex-wrap: wrap; gap: var(--s1); margin-bottom: var(--s2); }
-.keyword-token { border: 1px solid var(--line); border-radius: 999px; background: var(--bg-2); color: var(--text); padding: 2px 10px; font-size: 12px; cursor: pointer; }
+.keyword-token { border: 1px solid var(--line); border-radius: 999px; background: var(--surface-raised); color: var(--text); padding: 2px 10px; font-size: 12px; cursor: pointer; }
 .keyword-token:hover { border-color: var(--accent-lin); color: var(--accent); }
 .keyword-empty { color: var(--text-3); font-size: 12px; }
 .keyword-input-wrap { position: relative; }
-.keyword-suggestions { position: absolute; top: 100%; left: 0; right: 0; z-index: 30; background: var(--bg-1); border: 1px solid var(--line); border-radius: var(--r-card); box-shadow: var(--shadow-2); overflow: hidden; }
+.keyword-suggestions { position: absolute; top: 100%; left: 0; right: 0; z-index: 30; background: var(--surface-popover); border: 1px solid var(--line); border-radius: var(--r-card); box-shadow: 0 16px 48px rgba(0,0,0,.55); overflow: hidden; }
 .keyword-suggestions[hidden] { display: none; }
 .keyword-suggestions button { display: block; width: 100%; text-align: left; padding: 6px 10px; font-size: 12px; color: var(--text-2); background: none; border: 0; cursor: pointer; }
-.keyword-suggestions button:hover { background: var(--bg-2); color: var(--text); }
+.keyword-suggestions button:hover { background: var(--surface-raised); color: var(--text); }
 .keyword-tree { margin-top: var(--s2); }
 .keyword-tree summary { font-size: 12px; color: var(--text-3); cursor: pointer; }
 .keyword-tree-list { max-height: 220px; overflow-y: auto; margin-top: var(--s1); }
 .keyword-tree-list button { display: block; width: 100%; text-align: left; padding: 3px 8px; padding-left: calc(8px + var(--keyword-depth, 0) * 14px); font-size: 12px; color: var(--text-2); background: none; border: 0; border-radius: 4px; cursor: pointer; }
-.keyword-tree-list button:hover { background: var(--bg-2); color: var(--text); }
+.keyword-tree-list button:hover { background: var(--surface-raised); color: var(--text); }
 .keyword-recents { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s1); margin-top: var(--s2); font-size: 11px; color: var(--text-3); }
 .keyword-recent { border: 1px dashed var(--line); border-radius: 999px; background: none; color: var(--text-2); padding: 1px 9px; font-size: 11px; cursor: pointer; }
 .keyword-recent:hover { border-color: var(--accent-lin); color: var(--accent); }
-#keyword-painter-status { position: fixed; bottom: var(--s4); left: 50%; transform: translateX(-50%); z-index: 80; background: var(--accent-dim); border: 1px solid var(--accent-lin); color: var(--text); border-radius: 999px; padding: 6px 16px; font-size: 12px; box-shadow: var(--shadow-2); }
+#keyword-painter-status { position: fixed; bottom: var(--s4); left: 50%; transform: translateX(-50%); z-index: 80; background: var(--accent-dim); border: 1px solid var(--accent-lin); color: var(--text); border-radius: 999px; padding: 6px 16px; font-size: 12px; box-shadow: 0 16px 48px rgba(0,0,0,.55); }
 #keyword-painter-status[hidden] { display: none; }
 .iptc-editor { margin-top: var(--s2); }
 .iptc-editor summary { font-size: 12px; color: var(--text-3); cursor: pointer; }
 .iptc-fields { display: flex; flex-direction: column; gap: var(--s2); margin-top: var(--s2); }
 .iptc-fields label { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--text-3); }
-.iptc-fields input, .iptc-fields textarea { background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--r-input, 6px); color: var(--text); padding: 5px 8px; font-size: 12px; }
+.iptc-fields input, .iptc-fields textarea { background: var(--surface-raised); border: 1px solid var(--line); border-radius: 6px; color: var(--text); padding: 5px 8px; font-size: 12px; }
 
 /* Client gallery editor popover */
-.gallery-editor { display: flex; flex-direction: column; gap: var(--s2); width: 320px; max-width: calc(100vw - 24px); max-height: min(560px, calc(100vh - 32px)); overflow-y: auto; padding: var(--s3); background: var(--bg-1); border: 1px solid var(--line); border-radius: var(--r-card); box-shadow: var(--shadow-2); z-index: 90; }
+.gallery-editor { display: flex; flex-direction: column; gap: var(--s2); width: 320px; max-width: calc(100vw - 24px); max-height: min(560px, calc(100vh - 32px)); overflow-y: auto; padding: var(--s3); background: var(--surface-popover); border: 1px solid var(--line); border-radius: var(--r-card); box-shadow: 0 16px 48px rgba(0,0,0,.55); z-index: 90; }
 .gallery-editor strong { font-size: 13px; color: var(--text); }
 .gallery-editor label { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--text-3); }
-.gallery-editor input, .gallery-editor select { background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--r-input, 6px); color: var(--text); padding: 6px 8px; font-size: 12px; }
+.gallery-editor input, .gallery-editor select { background: var(--surface-raised); border: 1px solid var(--line); border-radius: 6px; color: var(--text); padding: 6px 8px; font-size: 12px; }
 .gallery-editor label.gallery-download-all { flex-direction: row; align-items: center; gap: var(--s2); font-size: 12px; color: var(--text-2); }
 .gallery-editor button.primary { margin-top: var(--s1); }
