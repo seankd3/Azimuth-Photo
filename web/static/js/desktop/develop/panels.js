@@ -186,12 +186,13 @@ class CurveEditor {
 }
 
 export class DevelopPanels {
-    constructor(host, { histogramHost, cropHost, transformHost, onChange, masking, heal, transform }) {
+    constructor(host, { histogramHost, cropHost, transformHost, onChange, onAutoTone, masking, heal, transform }) {
+        this.onAutoTone = onAutoTone;
         this.host = host;
         this.onChange = onChange;
         this.settings = {};
         host.innerHTML = section('Histogram', 'histogram', '<div id="develop-histogram-slot"></div>')
-            + section('Basic', 'basic', '<div class="develop-wb-row"><select id="develop-wb" data-tip="White balance mode" aria-label="White balance"><option>As Shot</option><option>Custom</option><option>Daylight</option><option>Cloudy</option><option>Shade</option><option>Tungsten</option><option>Fluorescent</option><option>Flash</option></select><button data-wb-reset data-tip="Reset white balance to As Shot">As Shot</button></div>' + slidersHtml(BASIC))
+            + section('Basic', 'basic', '<div class="develop-wb-row"><select id="develop-wb" data-tip="White balance mode" aria-label="White balance"><option>As Shot</option><option>Custom</option><option>Daylight</option><option>Cloudy</option><option>Shade</option><option>Tungsten</option><option>Fluorescent</option><option>Flash</option></select><button data-wb-reset data-tip="Reset white balance to As Shot">As Shot</button><button data-auto-tone data-tip="Auto tone — deterministic histogram fit">Auto</button></div>' + slidersHtml(BASIC))
             + section('Tone', 'tone', slidersHtml(TONE))
             + section('Presence', 'presence', slidersHtml(PRESENCE))
             + section('Tone Curve', 'curve', '<div class="develop-curve-tools"><select data-tip="Tone curve channel" aria-label="Tone curve channel"><option value="ToneCurvePV2012">RGB</option><option value="ToneCurvePV2012Red">Red</option><option value="ToneCurvePV2012Green">Green</option><option value="ToneCurvePV2012Blue">Blue</option></select><button data-curve-reset data-tip="Reset selected curve">Reset</button></div><canvas class="develop-curve" width="288" height="180" tabindex="0" data-tip="Drag points; double-click to add" aria-label="Tone curve editor"></canvas>')
@@ -275,6 +276,11 @@ export class DevelopPanels {
         const wb = this.host.querySelector('#develop-wb');
         wb.addEventListener('change', () => this.change('WhiteBalance', wb.value, 'White Balance'));
         this.host.querySelector('[data-wb-reset]').addEventListener('click', () => {
+        this.root.querySelector('[data-auto-tone]')?.addEventListener('click', async (event) => {
+            const button = event.currentTarget;
+            button.disabled = true;
+            try { await this.onAutoTone?.(); } finally { button.disabled = false; }
+        });
             this.change('WhiteBalance', 'As Shot', 'White Balance');
             delete this.settings.Temperature;
             delete this.settings.Tint;

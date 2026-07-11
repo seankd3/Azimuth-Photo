@@ -219,6 +219,12 @@ CREATE INDEX IF NOT EXISTS idx_images_active_id
 ON images(id DESC) WHERE status IN ('kept', 'maybe');
 CREATE INDEX IF NOT EXISTS idx_images_active_filepath
 ON images(filepath ASC) WHERE status IN ('kept', 'maybe');
+CREATE INDEX IF NOT EXISTS idx_images_active_filepath_elo
+ON images(filepath, elo DESC, id)
+WHERE status IN ('kept', 'maybe') AND missing_at IS NULL AND vc_of IS NULL;
+CREATE INDEX IF NOT EXISTS idx_images_active_filepath_date_taken
+ON images(filepath, (date_taken IS NULL), date_taken DESC, id)
+WHERE status IN ('kept', 'maybe') AND missing_at IS NULL AND vc_of IS NULL;
 CREATE INDEX IF NOT EXISTS idx_images_active_orientation_elo
 ON images(orientation, elo DESC) WHERE status IN ('kept', 'maybe');
 CREATE INDEX IF NOT EXISTS idx_images_active_visible_orientation_elo
@@ -900,6 +906,16 @@ COMPAT_INDEX_SQL = (
     "CREATE INDEX IF NOT EXISTS idx_images_source_filename ON images(source_id, filename ASC)",
     "CREATE INDEX IF NOT EXISTS idx_images_source_id_desc ON images(source_id, id DESC)",
     "CREATE INDEX IF NOT EXISTS idx_images_source_filepath ON images(source_id, filepath ASC)",
+    (
+        "CREATE INDEX IF NOT EXISTS idx_images_active_filepath_elo "
+        "ON images(filepath, elo DESC, id) "
+        "WHERE status IN ('kept', 'maybe') AND missing_at IS NULL AND vc_of IS NULL"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_images_active_filepath_date_taken "
+        "ON images(filepath, (date_taken IS NULL), date_taken DESC, id) "
+        "WHERE status IN ('kept', 'maybe') AND missing_at IS NULL AND vc_of IS NULL"
+    ),
     "CREATE INDEX IF NOT EXISTS idx_images_source_orientation_elo ON images(source_id, orientation, elo DESC)",
     "CREATE INDEX IF NOT EXISTS idx_images_source_date_taken ON images(source_id, date_taken DESC)",
     "CREATE INDEX IF NOT EXISTS idx_images_source_file_size ON images(source_id, file_size DESC)",

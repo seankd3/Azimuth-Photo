@@ -1252,9 +1252,10 @@ body.develop-active #canvas > .view:not(#view-develop) { display: none !importan
 #develop-stage.compare-horizontal .develop-compare-divider i { top: 2px; left: 50%; width: 28px; height: 16px; transform: translateX(-50%); }
 .develop-compare-label { position: absolute; z-index: 5; top: 24px; left: 24px; padding: 4px 7px; border: 1px solid rgba(255,255,255,.18); border-radius: 3px; color: #fff; font-size: 10px; font-weight: 650; background: rgba(0,0,0,.58); pointer-events: none; }
 #develop-placeholder[hidden] { display: none; }
-#develop-stage.zoomed { display: block; overflow: auto; padding: 16px; }
-#develop-stage.zoomed #develop-canvas,
-#develop-stage.zoomed #develop-placeholder { max-width: none; max-height: none; margin: auto; }
+#develop-stage[data-zoom-mode="level"] { touch-action: none; }
+#develop-stage[data-zoom-mode="level"]:not(.crop-active):not(.masking-active):not(.heal-active) { cursor: grab; }
+/* legacy zoomed class retired by ZOOMNAV */
+
 #develop-status { position: absolute; z-index: 5; left: 50%; top: 50%; display: flex; align-items: center; gap: 10px; transform: translate(-50%, -50%); max-width: min(360px, calc(100% - 32px)); padding: 11px 14px; border: 1px solid rgba(255,255,255,.12); border-radius: var(--r-card); color: var(--text-2); font-size: 12px; text-align: center; background: rgba(19,21,24,.9); box-shadow: 0 16px 50px rgba(0,0,0,.35); backdrop-filter: blur(10px); }
 #develop-status[hidden] { display: none; }
 #develop-status i { display: none; flex: 0 0 auto; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,.2); border-top-color: var(--accent); border-radius: 50%; }

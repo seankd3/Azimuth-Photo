@@ -124,9 +124,10 @@ function linearToOklab(rgb) {
 
 function sampledColors(rangeMask) {
     let raw = ['SampledColors', 'ColorSamples', 'Colors', 'PointModels'].map((key) => rangeMask?.[key]).find((value) => value != null) || [];
-    if (!Array.isArray(raw)) raw = [raw];
+    if (!Array.isArray(raw)) raw = raw?.PointModel || [raw];
     const result = [];
-    for (const item of raw) {
+    for (let item of raw) {
+        if (item && typeof item === 'object') item = item.Color || item.RGB || item.Value || item;
         const values = (String(item).match(/[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[-+]?\d+)?/gi) || []).slice(0, 3).map(Number);
         if (values.length !== 3) continue;
         if (Math.max(...values.map(Math.abs)) > 1) for (let i = 0; i < 3; i += 1) values[i] /= 255;
@@ -169,7 +170,13 @@ export function rasterizeColorRange(rangeMask, image, width, height) {
         const lab = linearToOklab([srgbToLinear(pixels[i * 3]), srgbToLinear(pixels[i * 3 + 1]), srgbToLinear(pixels[i * 3 + 2])]);
         let distance2 = Infinity;
         for (const sample of samples) distance2 = Math.min(distance2, (lab[1] - sample[1]) ** 2 + (lab[2] - sample[2]) ** 2);
-        result[i] = Math.exp(-.5 * distance2 / Math.max(sigma * sigma, LOCAL_RANGE_EPSILON));
+        const colorWeight = Math.exp(-.5 * distance2 / Math.max(sigma * sigma, LOCAL_RANGE_EPSILON));
+        const [lowSoft, low, high, highSoft] = quad(rangeMask?.LumRange);
+        const luma = pixels[i * 3] * LUMA_RED + pixels[i * 3 + 1] * LUMA_GREEN + pixels[i * 3 + 2] * LUMA_BLUE;
+        const luminanceWeight = rangeMask?.LumRange != null
+            ? smoothstep(lowSoft, low, luma) * (1 - smoothstep(high, highSoft, luma))
+            : 1;
+        result[i] = colorWeight * luminanceWeight;
     }
     return result;
 }
