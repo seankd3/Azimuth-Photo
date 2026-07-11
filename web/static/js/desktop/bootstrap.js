@@ -1,4 +1,5 @@
 import { initState } from './state.js';
+import { initKeywordsPanel } from './keywords_panel.js';
 import { initMotion } from './motion.js';
 import { initToast } from './toast.js';
 import { initSelection } from './selection.js';
@@ -32,6 +33,7 @@ async function boot() {
     initFilters();
     initImporter();
     initCullBrief();
+    initKeywordsPanel();
     initSimilar();
     initGridContextMenu();
     initExportMenu();

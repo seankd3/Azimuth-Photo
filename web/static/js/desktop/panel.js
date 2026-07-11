@@ -174,6 +174,7 @@ function openCollectionMenu(row, anchor) {
     collectionMenu.innerHTML = '<div class="pm-group">'
         + (smart ? `<button data-act="edit-query">${icon('sparkles')} Edit query</button>`
             + `<button data-act="materialize">${icon('archive')} Convert to static</button>` : '')
+        + `<button data-act="gallery">${icon('image')} Client gallery…</button>`
         + `<button data-act="share">${icon('share-2')} Share…</button>`
         + `<button data-act="publish">${icon('globe')} Publish to website…</button>`
         + `<button data-act="rename">${icon('pencil')} Rename</button>`
@@ -187,6 +188,11 @@ function openCollectionMenu(row, anchor) {
             closeCollectionMenu();
             if (action === 'edit-query') startSmartQueryEdit(id);
             if (action === 'materialize') startSmartMaterialize(id, name);
+            if (action === 'gallery') {
+                import('./gallery_editor.js').then((module) => module.openGalleryEditor({
+                    button: anchor, collection: { id, name }, showToast,
+                })).catch(() => showToast("Couldn't open the gallery editor"));
+            }
             if (action === 'share') openShareOverlay(id, name);
             if (action === 'publish') openPublishOverlay(id, name);
             if (action === 'rename') startCollectionRename(id);

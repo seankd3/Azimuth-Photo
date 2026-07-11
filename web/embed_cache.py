@@ -103,13 +103,22 @@ def _rows_to_matrix(rows, *, overallocate: bool = True):
     return image_ids, matrix
 
 
-def _db_file_signature() -> list[list[str | int]]:
-    db_path = _configured(_db_path, "db_path")()
+def _embedding_source_signature(model_key: str) -> list[str | int]:
+    """Stable snapshot identity unaffected by unrelated catalog/cache writes."""
+    conn = sqlite3.connect(_configured(_db_path, "db_path")(), timeout=30)
     try:
-        stat = os.stat(db_path)
-        return [[os.path.basename(db_path), stat.st_size, stat.st_mtime_ns]]
-    except OSError:
-        return [[os.path.basename(db_path), -1, -1]]
+        row = conn.execute(
+            "SELECT COUNT(*), COALESCE(MAX(e.rowid), 0), "
+            "COALESCE(MAX(e.created_at), ''), COALESCE(SUM(e.image_id), 0) "
+            "FROM embeddings_by_model e "
+            "JOIN images i ON e.image_id = i.id "
+            "JOIN catalog_sources s ON s.id = i.source_id "
+            "WHERE e.model_key = ? AND s.included = 1 AND i.missing_at IS NULL",
+            (model_key,),
+        ).fetchone()
+        return [model_key, int(row[0]), int(row[1]), str(row[2]), int(row[3])]
+    finally:
+        conn.close()
 
 
 def _snapshot_paths(model_key: str):
@@ -136,7 +145,7 @@ def _load_snapshot_sync(expected_count: int, model_key: str):
             return None
         if meta.get("model_key") != model_key:
             return None
-        if meta.get("db_signature") != _db_file_signature():
+        if meta.get("embedding_signature") != _embedding_source_signature(model_key):
             return None
         # Load into RAM rather than returning a memmap. Search/similar should
         # pay a predictable warmup cost instead of page-faulting during the
@@ -163,7 +172,7 @@ def _save_snapshot_sync(image_ids: list[int], matrix: np.ndarray, model_key: str
             json.dump({
                 "model_key": model_key,
                 "count": len(image_ids),
-                "db_signature": _db_file_signature(),
+                "embedding_signature": _embedding_source_signature(model_key),
                 "created_at": time.time(),
             }, f)
         os.replace(f"{ids_tmp}.npy", ids_path)

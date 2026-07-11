@@ -1221,7 +1221,8 @@ async def date_histogram(
     )
     select = (
         "SELECT substr(i.date_taken, 1, 7) AS month, COUNT(*) AS count "
-        "FROM images i JOIN catalog_sources s ON s.id = i.source_id WHERE "
+        "FROM images i INDEXED BY idx_images_active_month_source "
+        "JOIN catalog_sources s ON s.id = i.source_id WHERE "
     )
     conn = await connection.open_async(db_path)
     try:

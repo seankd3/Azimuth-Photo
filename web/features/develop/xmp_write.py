@@ -260,9 +260,16 @@ def _atomic_write(path: Path, payload: bytes) -> bool:
     return True
 
 
-def write_sidecar(raw_path: str, settings: Mapping[str, object]) -> dict[str, Any]:
+def write_sidecar(
+    raw_path: str, settings: Mapping[str, object], *, metadata: Mapping[str, object] | None = None
+) -> dict[str, Any]:
     target = sidecar_path(raw_path)
-    changed = _atomic_write(target, serialize(settings).encode("utf-8"))
+    packet = serialize(settings)
+    if metadata and (metadata.get("keywords") or metadata.get("iptc")):
+        from features.library import keywords as _keywords
+
+        packet = _keywords.decorate_xmp_packet(packet, dict(metadata))
+    changed = _atomic_write(target, packet.encode("utf-8"))
     return {
         "mode": "sidecar",
         "status": "written" if changed else "unchanged",
@@ -443,7 +450,19 @@ def write_image_xmp(db_path: str, image_id: int, *, mode: str = "sidecar") -> di
             "origin": "user",
             "note": "Stored Develop settings are not a JSON object; nothing was written.",
         }
-    result = write_sidecar(filepath, settings) if mode == "sidecar" else write_embedded_dng(filepath, settings)
+    metadata = None
+    if mode == "sidecar":
+        try:
+            from features.library import keywords as _keywords
+
+            metadata = _keywords.xmp_metadata_for_image(db_path, image_id)
+        except Exception:
+            metadata = None
+    result = (
+        write_sidecar(filepath, settings, metadata=metadata)
+        if mode == "sidecar"
+        else write_embedded_dng(filepath, settings)
+    )
     return {"image_id": image_id, "origin": "user", **result}
 
 

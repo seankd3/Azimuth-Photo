@@ -60,6 +60,7 @@ function exportDialogHtml(image) {
     )).join('');
     return [
         '<strong>Export developed photo</strong>',
+        '<label>Preset<select data-export-preset data-tip="Saved export presets"><option value="">Custom</option></select></label>',
         '<label>Format<select data-export-format data-tip="Export format"><option value="jpeg">JPEG</option><option value="tiff16">16-bit TIFF</option></select></label>',
         '<label>Quality<input data-export-quality type="number" min="1" max="100" value="92" data-tip="JPEG quality"></label>',
         '<label>Long edge<input data-export-size type="number" min="256" placeholder="Full size" data-tip="Optional longest-edge resize in pixels"></label>',
@@ -67,6 +68,7 @@ function exportDialogHtml(image) {
         `<label>Filename<input data-export-filename type="text" value="${escapeHtml(defaultFilenamePattern(image))}" data-tip="Tokens: {stem} {filename} {id} {ext} {date}"></label>`,
         '<label class="develop-export-check" data-tip="Register the JPEG under Develop Exports and keep it with this RAW"><input data-export-library type="checkbox"> Save to library</label>',
         '<button data-export-confirm class="primary" data-tip="Render and download export">Export</button>',
+        '<button data-export-save-preset type="button" data-tip="Save these options as a named preset">Save preset…</button>',
     ].join('');
 }
 
@@ -113,10 +115,60 @@ async function downloadExportBlob(image, options, { showToast }) {
     showToast?.(libraryId ? `Export ready · saved to library (#${libraryId})` : 'Export ready');
 }
 
+async function loadPresetsInto(popover) {
+    try {
+        const response = await fetch('/api/develop/export-presets');
+        const payload = await response.json();
+        const select = popover.querySelector('[data-export-preset]');
+        if (!select) return;
+        for (const preset of payload.presets || []) {
+            const option = document.createElement('option');
+            option.value = String(preset.id);
+            option.textContent = preset.name;
+            option.dataset.options = JSON.stringify(preset.options || {});
+            select.appendChild(option);
+        }
+        select.addEventListener('change', () => {
+            const selected = select.selectedOptions[0];
+            if (!selected?.dataset.options) return;
+            const options = JSON.parse(selected.dataset.options);
+            const assign = (attr, value) => {
+                const field = popover.querySelector(attr);
+                if (field != null && value !== undefined && value !== null) field.value = value;
+            };
+            assign('[data-export-format]', options.format);
+            assign('[data-export-quality]', options.quality);
+            assign('[data-export-size]', options.max_px ?? '');
+            assign('[data-export-sharpen]', options.sharpen);
+            if (options.filename_pattern) assign('[data-export-filename]', options.filename_pattern);
+        });
+    } catch { /* presets are optional */ }
+}
+
+function bindPresetSave(popover, { showToast }) {
+    popover.querySelector('[data-export-save-preset]')?.addEventListener('click', async () => {
+        const name = prompt('Preset name');
+        if (!name?.trim()) return;
+        try {
+            const response = await fetch('/api/develop/export-presets', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: name.trim(), options: readExportOptions(popover) }),
+            });
+            if (!response.ok) throw new Error();
+            showToast?.(`Preset “${name.trim()}” saved`);
+        } catch {
+            showToast?.("Couldn't save the preset");
+        }
+    });
+}
+
 export function openExportDialog({ button, image, anchoredPopover, closePopover, showToast, isRaw }) {
     if (!image || (isRaw && !isRaw(image))) return null;
     const popover = anchoredPopover(button, exportDialogHtml(image));
     popover.classList.add('develop-export-dialog');
+    loadPresetsInto(popover);
+    bindPresetSave(popover, { showToast });
     popover.querySelector('[data-export-confirm]')?.addEventListener('click', async () => {
         const options = readExportOptions(popover);
         closePopover?.();

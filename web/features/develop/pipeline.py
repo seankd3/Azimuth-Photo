@@ -368,31 +368,35 @@ def oklab_to_linear(lab: np.ndarray) -> np.ndarray:
 def _gamut_clip_desaturate(linear: np.ndarray) -> np.ndarray:
     """Soft-clip out-of-gamut by desaturating toward OKLab L (not channel clamp)."""
     lab = linear_to_oklab(linear)
-    lightness = lab[..., 0:1]
-    chroma_ab = lab[..., 1:3]
-    achromatic = oklab_to_linear(np.concatenate((lightness, np.zeros_like(chroma_ab)), axis=-1))
     result = linear.astype(np.float32, copy=True)
     outside = np.any((result < 0.0) | (result > 1.0), axis=-1)
     if not np.any(outside):
         return np.clip(result, 0.0, 1.0)
-    # Binary-search chroma scale per out-of-gamut pixel.
-    lo = np.zeros(result.shape[:2], dtype=np.float32)
-    hi = np.ones(result.shape[:2], dtype=np.float32)
+
+    # Gamut repair is sparse for normal photographs. Preserve the exact math
+    # while running the eight-pass search only for pixels that need it.
+    selected = lab[outside]
+    lightness = selected[:, 0:1]
+    chroma_ab = selected[:, 1:3]
+    achromatic = oklab_to_linear(
+        np.concatenate((lightness, np.zeros_like(chroma_ab)), axis=-1)
+    )
+    lo = np.zeros(len(selected), dtype=np.float32)
+    hi = np.ones(len(selected), dtype=np.float32)
     for _ in range(8):
         mid = 0.5 * (lo + hi)
-        candidate_lab = np.concatenate((lightness, chroma_ab * mid[..., None]), axis=-1)
+        candidate_lab = np.concatenate((lightness, chroma_ab * mid[:, None]), axis=-1)
         candidate = oklab_to_linear(candidate_lab)
         ok = np.all((candidate >= 0.0) & (candidate <= 1.0), axis=-1)
         hi = np.where(ok, hi, mid)
         lo = np.where(ok, mid, lo)
-    scale = lo
-    clipped_lab = np.concatenate((lightness, chroma_ab * scale[..., None]), axis=-1)
+
+    clipped_lab = np.concatenate((lightness, chroma_ab * lo[:, None]), axis=-1)
     clipped = oklab_to_linear(clipped_lab)
-    result = np.where(outside[..., None], clipped, result)
-    # Tiny residual overshoot from float error → mix toward achromatic gray.
-    still = np.any((result < -1e-5) | (result > 1.0 + 1e-5), axis=-1)
+    still = np.any((clipped < -1e-5) | (clipped > 1.0 + 1e-5), axis=-1)
     if np.any(still):
-        result = np.where(still[..., None], achromatic, result)
+        clipped = np.where(still[:, None], achromatic, clipped)
+    result[outside] = clipped
     return np.clip(result, 0.0, 1.0).astype(np.float32)
 
 

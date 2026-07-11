@@ -227,6 +227,9 @@ ON images(lens) WHERE status IN ('kept', 'maybe');
 CREATE INDEX IF NOT EXISTS idx_images_active_date_taken_sort_desc
 ON images((date_taken IS NULL), date_taken DESC, id DESC)
 WHERE status IN ('kept', 'maybe') AND missing_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_images_active_month_source
+ON images(substr(date_taken, 1, 7), source_id)
+WHERE status IN ('kept', 'maybe') AND missing_at IS NULL AND vc_of IS NULL;
 CREATE INDEX IF NOT EXISTS idx_images_active_date_taken_sort_asc
 ON images((date_taken IS NULL), date_taken ASC, id ASC)
 WHERE status IN ('kept', 'maybe') AND missing_at IS NULL;
@@ -951,6 +954,11 @@ COMPAT_INDEX_SQL = (
     (
         "CREATE INDEX IF NOT EXISTS idx_images_active_date_taken "
         "ON images(date_taken DESC) WHERE status IN ('kept', 'maybe')"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_images_active_month_source "
+        "ON images(substr(date_taken, 1, 7), source_id) "
+        "WHERE status IN ('kept', 'maybe') AND missing_at IS NULL AND vc_of IS NULL"
     ),
     (
         "CREATE INDEX IF NOT EXISTS idx_images_active_file_size "
