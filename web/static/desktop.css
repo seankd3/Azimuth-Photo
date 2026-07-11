@@ -1795,3 +1795,11 @@ body.develop-active #canvas > .view:not(#view-develop) { display: none !importan
 .iptc-fields { display: flex; flex-direction: column; gap: var(--s2); margin-top: var(--s2); }
 .iptc-fields label { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--text-3); }
 .iptc-fields input, .iptc-fields textarea { background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--r-input, 6px); color: var(--text); padding: 5px 8px; font-size: 12px; }
+
+/* Client gallery editor popover */
+.gallery-editor { display: flex; flex-direction: column; gap: var(--s2); width: 320px; max-width: calc(100vw - 24px); max-height: min(560px, calc(100vh - 32px)); overflow-y: auto; padding: var(--s3); background: var(--bg-1); border: 1px solid var(--line); border-radius: var(--r-card); box-shadow: var(--shadow-2); z-index: 90; }
+.gallery-editor strong { font-size: 13px; color: var(--text); }
+.gallery-editor label { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--text-3); }
+.gallery-editor input, .gallery-editor select { background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--r-input, 6px); color: var(--text); padding: 6px 8px; font-size: 12px; }
+.gallery-editor label.gallery-download-all { flex-direction: row; align-items: center; gap: var(--s2); font-size: 12px; color: var(--text-2); }
+.gallery-editor button.primary { margin-top: var(--s1); }
