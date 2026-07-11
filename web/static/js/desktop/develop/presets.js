@@ -4,7 +4,8 @@
  *
  * Mounted from develop.js (see PATCH). Expects a host API:
  *   mountPresetsPanel(hostEl, {
- *     getRenderer, getEntry, getMeta, applyPresetSettings, saveCurrentSettings
+ *     getRenderer, getEntry, setTransientSettingsOverride, renderPresetThumbnail,
+ *     applyPresetSettings, saveCurrentSettings
  *   })
  */
 const API = '/api/develop/presets';
@@ -63,6 +64,7 @@ export function mountPresetsPanel(host, api) {
     root.innerHTML = [
         '<header class="develop-presets-head">',
         '  <strong>Presets</strong>',
+        '  <span class="develop-preset-preview-chip" data-preset-preview hidden></span>',
         '  <button type="button" data-preset-save data-tip="Save current settings as a preset">Save</button>',
         '</header>',
         '<div class="develop-presets-body">',
@@ -83,14 +85,22 @@ export function mountPresetsPanel(host, api) {
     const listEl = root.querySelector('[data-preset-list]');
     const emptyEl = root.querySelector('[data-preset-empty]');
     const searchEl = root.querySelector('[data-preset-search]');
+    const previewChip = root.querySelector('[data-preset-preview]');
     let presets = [];
     let activePresetId = null;
     let filterQuery = '';
     const collapsedFolders = new Set();
     let previewing = false;
-    let previewBaseline = null;
+    let previewTimer = 0;
+    let hoveredPresetId = null;
     let activePopover = null;
     let loadToken = 0;
+    const thumbnailCache = new Map();
+    let thumbnailQueue = [];
+    let thumbnailActive = 0;
+    let thumbnailEpoch = 0;
+    let thumbnailAbort = new AbortController();
+    let thumbnailObserver = null;
 
     function closePopover() {
         activePopover?.remove();
@@ -105,27 +115,39 @@ export function mountPresetsPanel(host, api) {
         return api.getRenderer?.() || null;
     }
 
+    function setPreviewChip(name = '') {
+        previewChip.hidden = !name;
+        previewChip.textContent = name ? `Previewing ${name}` : '';
+    }
+
     function endPreview() {
-        if (!previewing) return;
-        previewing = false;
-        const gl = renderer();
-        const entry = currentEntry();
-        if (gl && entry && previewBaseline) {
-            gl.setSettings(previewBaseline, entry.meta, { preview: true });
+        clearTimeout(previewTimer);
+        previewTimer = 0;
+        hoveredPresetId = null;
+        if (!previewing) {
+            setPreviewChip();
+            return;
         }
-        previewBaseline = null;
+        previewing = false;
+        api.setTransientSettingsOverride?.(null);
+        setPreviewChip();
     }
 
     function startPreview(preset) {
-        const gl = renderer();
-        const entry = currentEntry();
-        if (!gl || !entry || !preset?.settings) return;
-        if (!previewing) {
-            previewBaseline = clone(entry.settings);
-            previewing = true;
-        }
-        const merged = { ...previewBaseline, ...preset.settings };
-        gl.setSettings(merged, entry.meta, { preview: true });
+        if (!renderer() || !currentEntry() || !preset?.settings) return;
+        previewing = true;
+        api.setTransientSettingsOverride?.(clone(preset.settings));
+        setPreviewChip(preset.name);
+    }
+
+    function schedulePreview(preset) {
+        if (!preset || hoveredPresetId === Number(preset.id)) return;
+        clearTimeout(previewTimer);
+        hoveredPresetId = Number(preset.id);
+        previewTimer = setTimeout(() => {
+            previewTimer = 0;
+            if (hoveredPresetId === Number(preset.id)) startPreview(preset);
+        }, 150);
     }
 
     function applyPreset(preset) {
@@ -152,6 +174,112 @@ export function mountPresetsPanel(host, api) {
         }
     }
 
+    function thumbnailKey(preset) {
+        const imageId = currentEntry()?.imageId;
+        const version = preset.updated_at || preset.created_at || JSON.stringify(preset.settings || {});
+        return imageId ? `${imageId}:${preset.id}:${version}` : '';
+    }
+
+    function setThumbnail(presetId, url) {
+        listEl.querySelectorAll('[data-preset-thumb]').forEach((image) => {
+            if (Number(image.dataset.presetThumb) === Number(presetId)) image.src = url;
+        });
+    }
+
+    function clearQueuedThumbnail(presetId, key) {
+        listEl.querySelectorAll('[data-preset-thumb]').forEach((image) => {
+            if (Number(image.dataset.presetThumb) === Number(presetId) && image.dataset.thumbQueued === key) {
+                delete image.dataset.thumbQueued;
+            }
+        });
+    }
+
+    function pixelsToThumbnail({ pixels, width, height }) {
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext('2d');
+        const image = context.createImageData(width, height);
+        const stride = width * 4;
+        for (let y = 0; y < height; y += 1) {
+            image.data.set(pixels.subarray((height - y - 1) * stride, (height - y) * stride), y * stride);
+        }
+        context.putImageData(image, 0, 0);
+        return canvas.toDataURL('image/jpeg', .86);
+    }
+
+    function runThumbnailQueue() {
+        while (thumbnailActive < 2 && thumbnailQueue.length) {
+            const job = thumbnailQueue.shift();
+            const render = api.renderPresetThumbnail || window.__developRenderToPixels;
+            if (!render) continue;
+            thumbnailActive += 1;
+            render(clone(job.preset.settings), { size: 112, signal: thumbnailAbort.signal })
+                .then((rendered) => {
+                    if (!rendered) {
+                        if (job.epoch === thumbnailEpoch && !thumbnailAbort.signal.aborted) clearQueuedThumbnail(job.preset.id, job.key);
+                        return;
+                    }
+                    if (job.epoch !== thumbnailEpoch || thumbnailAbort.signal.aborted) return;
+                    const url = pixelsToThumbnail(rendered);
+                    thumbnailCache.set(job.key, url);
+                    setThumbnail(job.preset.id, url);
+                })
+                .catch(() => {})
+                .finally(() => {
+                    thumbnailActive -= 1;
+                    runThumbnailQueue();
+                });
+        }
+    }
+
+    function queueThumbnail(preset, image) {
+        const key = thumbnailKey(preset);
+        if (!key || image.dataset.thumbQueued === key) return;
+        image.dataset.thumbQueued = key;
+        const cached = thumbnailCache.get(key);
+        if (cached) {
+            image.src = cached;
+            return;
+        }
+        thumbnailQueue.push({ preset, key, epoch: thumbnailEpoch });
+        runThumbnailQueue();
+    }
+
+    function observeThumbnails() {
+        thumbnailObserver?.disconnect();
+        const visiblePresets = new Map(presets.map((preset) => [Number(preset.id), preset]));
+        const images = [...listEl.querySelectorAll('[data-preset-thumb]')];
+        if (!images.length) return;
+        const enqueue = (image) => {
+            const preset = visiblePresets.get(Number(image.dataset.presetThumb));
+            if (preset) queueThumbnail(preset, image);
+        };
+        if (!('IntersectionObserver' in window)) {
+            images.forEach(enqueue);
+            return;
+        }
+        thumbnailObserver = new IntersectionObserver((entries) => {
+            entries.filter((entry) => entry.isIntersecting).forEach((entry) => {
+                thumbnailObserver.unobserve(entry.target);
+                enqueue(entry.target);
+            });
+        }, { root: listEl, rootMargin: '180px 0px' });
+        images.forEach((image) => thumbnailObserver.observe(image));
+    }
+
+    function imageChanged() {
+        thumbnailEpoch += 1;
+        thumbnailQueue = [];
+        thumbnailAbort.abort();
+        thumbnailAbort = new AbortController();
+        endPreview();
+    }
+
+    function imageReady() {
+        observeThumbnails();
+    }
+
     function render() {
         closePopover();
         emptyEl.hidden = presets.length > 0;
@@ -171,7 +299,7 @@ export function mountPresetsPanel(host, api) {
         listEl.innerHTML = groups.map(([folder, items]) => {
             const rows = items.map((preset) => (
                 `<div class="develop-preset-row ${Number(preset.id) === activePresetId ? 'active' : ''}" data-preset-id="${preset.id}" draggable="false">`
-                + `<button type="button" class="develop-preset-name" data-preset-apply data-tip="Apply ${escapeHtml(preset.name)}"${Number(preset.id) === activePresetId ? ' aria-current="true"' : ''}>${escapeHtml(shortPresetName(preset))}</button>`
+                + `<button type="button" class="develop-preset-name" data-preset-apply data-tip="Apply ${escapeHtml(preset.name)}"${Number(preset.id) === activePresetId ? ' aria-current="true"' : ''}><img data-preset-thumb="${preset.id}" alt="" aria-hidden="true"><span>${escapeHtml(shortPresetName(preset))}</span></button>`
                 + `<button type="button" class="develop-preset-edit" data-preset-rename data-tip="Rename">✎</button>`
                 + `<button type="button" class="develop-preset-edit" data-preset-delete data-tip="Delete">×</button>`
                 + `</div>`
@@ -188,6 +316,7 @@ export function mountPresetsPanel(host, api) {
                 else collapsedFolders.add(folder);
             });
         });
+        observeThumbnails();
     }
 
     async function saveCurrent() {
@@ -275,14 +404,16 @@ export function mountPresetsPanel(host, api) {
         const row = event.target.closest('[data-preset-id]');
         if (!row || event.target.closest('[data-preset-rename], [data-preset-delete]')) return;
         const preset = presets.find((item) => Number(item.id) === Number(row.dataset.presetId));
-        if (preset) startPreview(preset);
+        if (preset) schedulePreview(preset);
     });
     listEl.addEventListener('pointerout', (event) => {
         const row = event.target.closest('[data-preset-id]');
         if (!row) return;
         const next = event.relatedTarget?.closest?.('[data-preset-id]');
         if (next && next === row) return;
-        endPreview();
+        const nextPreset = presets.find((item) => Number(item.id) === Number(next?.dataset.presetId));
+        if (nextPreset) schedulePreview(nextPreset);
+        else endPreview();
     });
     listEl.addEventListener('click', (event) => {
         const row = event.target.closest('[data-preset-id]');
@@ -311,7 +442,7 @@ export function mountPresetsPanel(host, api) {
     });
 
     host.dataset.presetsMounted = '1';
-    const controller = { reload: load, root, endPreview };
+    const controller = { reload: load, root, endPreview, imageChanged, imageReady };
     host.__presetsController = controller;
     load();
     return controller;

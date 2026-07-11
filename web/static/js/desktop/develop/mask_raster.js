@@ -18,6 +18,23 @@ const smoothstep = (edge0, edge1, value) => {
     const t = clamp((value - edge0) / (edge1 - edge0));
     return t * t * (3 - 2 * t);
 };
+const MASK_RASTER_CACHE = new Map();
+const MASK_RASTER_CACHE_LIMIT = 96;
+
+function correctionRasterKey(correction, imageId, width, height) {
+    return JSON.stringify([
+        imageId, width, height,
+        correction?.CorrectionActive ?? true,
+        correction?.CorrectionMasks || [],
+        correction?.CorrectionRangeMask || null,
+    ]);
+}
+
+function rememberRaster(key, raster) {
+    MASK_RASTER_CACHE.set(key, raster);
+    if (MASK_RASTER_CACHE.size > MASK_RASTER_CACHE_LIMIT) MASK_RASTER_CACHE.delete(MASK_RASTER_CACHE.keys().next().value);
+    return raster;
+}
 
 /** Sole Adobe-native local normalization seam; exact twin of Python. */
 export function localToSlider(local, key) {
@@ -271,7 +288,12 @@ export async function buildMaskRasters({ imageId = null, corrections = [], width
     const limited = corrections.slice(0, LOCAL_RENDER_CAP);
     if (corrections.length > LOCAL_RENDER_CAP) console.warn(`Rendering the first ${LOCAL_RENDER_CAP} of ${corrections.length} local corrections`);
     const [rasterWidth, rasterHeight] = rasterSize(width, height);
-    const image = imageId != null && needsRangeImage(limited) ? await imageUrlPixels(`/api/develop/${imageId}/base.jpg`, rasterWidth, rasterHeight) : null;
+    const keyed = limited.map((correction) => ({
+        correction,
+        key: correctionRasterKey(correction, imageId, width, height),
+    }));
+    const dirty = keyed.filter(({ key }) => !MASK_RASTER_CACHE.has(key)).map(({ correction }) => correction);
+    const image = imageId != null && needsRangeImage(dirty) ? await imageUrlPixels(`/api/develop/${imageId}/base.jpg`, rasterWidth, rasterHeight) : null;
     const aiLoader = async (mask, maskWidth, maskHeight) => {
         let key = mask.pa_cache_key;
         if (!key && imageId != null && mask.MaskSubType != null) {
@@ -286,10 +308,13 @@ export async function buildMaskRasters({ imageId = null, corrections = [], width
         }
         return key ? imageUrlPixels(`/api/develop/ai-mask/${encodeURIComponent(key)}.png`, maskWidth, maskHeight) : null;
     };
-    return Promise.all(limited.map(async (correction, correctionIndex) => ({
-        correctionIndex,
-        canvasOrImageData: rasterToImageData(await rasterizeCorrection(correction, width, height, { image, aiLoader })),
-    })));
+    return Promise.all(keyed.map(async ({ correction, key }, correctionIndex) => {
+        let canvasOrImageData = MASK_RASTER_CACHE.get(key);
+        if (!canvasOrImageData) {
+            canvasOrImageData = rememberRaster(key, rasterToImageData(await rasterizeCorrection(correction, width, height, { image, aiLoader })));
+        }
+        return { correctionIndex, canvasOrImageData };
+    }));
 }
 
 export const buildRasters = buildMaskRasters;

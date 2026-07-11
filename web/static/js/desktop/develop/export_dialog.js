@@ -16,7 +16,7 @@ const SHARPEN_OPTIONS = [
     ['print_high', 'Print · High'],
 ];
 
-const SYNC_GROUPS = [
+export const SYNC_GROUPS = [
     ['wb', 'White Balance'],
     ['tone', 'Tone'],
     ['presence', 'Presence'],

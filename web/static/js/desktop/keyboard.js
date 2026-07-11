@@ -27,7 +27,10 @@ import { closeGridContextMenu, gridContextMenuOpen } from './context_menu.js';
 import { closeDuplicates, duplicatesOpen } from './duplicates.js';
 import { closeTrash, trashOpen, trashSelectedImages } from './trash.js';
 import { showToast, undoLatestToast } from './toast.js';
-import { createVirtualCopy, developOpen, holdDevelopReference, openDevelop, toggleDevelopCompare } from './develop/develop.js';
+import {
+    applyPreviousDevelopSettingsToGrid, copyDevelopSettingsFromGrid, createVirtualCopy,
+    developOpen, holdDevelopReference, openDevelop, pasteDevelopSettingsToGrid, toggleDevelopCompare,
+} from './develop/develop.js';
 import { shortcutSheetOpen } from './shortcut_sheet.js';
 
 function inputFocused() {
@@ -299,6 +302,24 @@ export function initKeyboard() {
                 event.preventDefault();
                 undoRefine();
                 return;
+            }
+            if (activeLens() === 'grid') {
+                const targets = selection.size ? [...selection] : [currentFocusedImage()?.id];
+                if (event.shiftKey && key === 'c') {
+                    event.preventDefault();
+                    copyDevelopSettingsFromGrid(currentFocusedImage(), document.getElementById('grid-flow'));
+                    return;
+                }
+                if (event.shiftKey && key === 'v') {
+                    event.preventDefault();
+                    pasteDevelopSettingsToGrid(targets);
+                    return;
+                }
+                if (event.altKey && key === 'v') {
+                    event.preventDefault();
+                    applyPreviousDevelopSettingsToGrid(targets);
+                    return;
+                }
             }
             if (activeLens() !== 'grid') return;
             if (key === 'z') {

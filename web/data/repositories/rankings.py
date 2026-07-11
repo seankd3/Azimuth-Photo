@@ -1735,17 +1735,22 @@ async def map_markers(
         params.extend(int(image_id) for image_id in id_filter)
 
     gps_conditions = conditions + ["i.latitude IS NOT NULL", "i.longitude IS NOT NULL"]
+    gps_image_source = (
+        "images i INDEXED BY idx_images_active_filepath_elo"
+        if has_absolute_folder_range(folder) and id_filter is None and not text_query
+        else "images i INDEXED BY idx_images_active_gps_count"
+    )
     conn = await connection.open_async(db_path)
     try:
         if all_sources_available:
             gps_total_cursor = await conn.execute(
-                "SELECT COUNT(*) AS count FROM images i INDEXED BY idx_images_active_gps_count "
+                f"SELECT COUNT(*) AS count FROM {gps_image_source} "
                 f"WHERE {' AND '.join(gps_conditions)}",
                 params,
             )
         else:
             gps_total_cursor = await conn.execute(
-                "SELECT COUNT(*) AS count FROM images i INDEXED BY idx_images_active_gps_count "
+                f"SELECT COUNT(*) AS count FROM {gps_image_source} "
                 "JOIN catalog_sources s ON s.id = i.source_id "
                 f"WHERE {' AND '.join(gps_conditions)}",
                 params,
@@ -1758,7 +1763,21 @@ async def map_markers(
             )
 
         if visible_thumb_size and cache_root:
-            if all_sources_available:
+            if has_absolute_folder_range(folder) and id_filter is None and not text_query:
+                source_join = (
+                    "JOIN catalog_sources s ON s.id = i.source_id "
+                    if not all_sources_available
+                    else ""
+                )
+                cursor = await conn.execute(
+                    "SELECT i.id, i.filename, i.latitude, i.longitude "
+                    f"FROM {gps_image_source} {source_join}"
+                    f"WHERE {' AND '.join(gps_conditions)} AND EXISTS ("
+                    "SELECT 1 FROM cache_entries c "
+                    "WHERE c.cache_root = ? AND c.size = ? AND c.image_id = i.id)",
+                    params + [cache_root, visible_thumb_size],
+                )
+            elif all_sources_available:
                 cursor = await conn.execute(
                     "SELECT i.id, i.filename, i.latitude, i.longitude "
                     "FROM cache_entries c INDEXED BY sqlite_autoindex_cache_entries_1 "
@@ -1777,13 +1796,13 @@ async def map_markers(
                 )
         elif all_sources_available:
             cursor = await conn.execute(
-                "SELECT i.id, i.filename, i.latitude, i.longitude FROM images i "
+                f"SELECT i.id, i.filename, i.latitude, i.longitude FROM {gps_image_source} "
                 f"WHERE {' AND '.join(gps_conditions)}",
                 params,
             )
         else:
             cursor = await conn.execute(
-                "SELECT i.id, i.filename, i.latitude, i.longitude FROM images i "
+                f"SELECT i.id, i.filename, i.latitude, i.longitude FROM {gps_image_source} "
                 "JOIN catalog_sources s ON s.id = i.source_id "
                 f"WHERE {' AND '.join(gps_conditions)}",
                 params,

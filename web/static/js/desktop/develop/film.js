@@ -7,6 +7,8 @@ export const FILM_LOGE_MIN = -3.0;
 export const FILM_LOGE_MAX = 3.0;
 export const FILM_LUT_SIZE = 256;
 export const FILM_MID_GRAY = 0.18;
+const FILM_TABLE_CACHE = new Map();
+const FILM_TABLE_CACHE_LIMIT = 16;
 
 function interpCurve(points, x) {
     const pts = [...points].sort((a, b) => a[0] - b[0]);
@@ -26,6 +28,8 @@ const mat3 = (rows) => rows.map((r) => r.map(Number));
 const matVec = (m, v) => [0, 1, 2].map((i) => m[i][0] * v[0] + m[i][1] * v[1] + m[i][2] * v[2]);
 
 export function buildFilmTables(stock) {
+    const cacheKey = JSON.stringify(stock || {});
+    if (FILM_TABLE_CACHE.has(cacheKey)) return FILM_TABLE_CACHE.get(cacheKey);
     const bw = Object.keys(stock.hd_curves || {}).join(",") === "pan";
     const xs = new Array(FILM_LUT_SIZE).fill(0).map((_, i) =>
         FILM_LOGE_MIN + (FILM_LOGE_MAX - FILM_LOGE_MIN) * (i / (FILM_LUT_SIZE - 1)));
@@ -76,7 +80,7 @@ export function buildFilmTables(stock) {
         ? mat3(stock.scan_matrix) : mat3([[1, 0, 0], [0, 1, 0], [0, 0, 1]]);
     const halation = stock.halation || {};
     const grain = stock.grain || {};
-    return {
+    const tables = {
         hdLut: hd, printLut,
         crosstalk, dir, scan,
         mask: new Float32Array(mask), dRef: new Float32Array(dRef),
@@ -93,6 +97,9 @@ export function buildFilmTables(stock) {
             shadowBias: Number(grain.shadow_bias ?? 0.35),
         },
     };
+    FILM_TABLE_CACHE.set(cacheKey, tables);
+    if (FILM_TABLE_CACHE.size > FILM_TABLE_CACHE_LIMIT) FILM_TABLE_CACHE.delete(FILM_TABLE_CACHE.keys().next().value);
+    return tables;
 }
 
 // GLSL chunk: expects the integrating pass to provide
