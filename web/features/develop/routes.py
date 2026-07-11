@@ -10,8 +10,8 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import APIRouter, Query
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from data import connection
@@ -465,6 +465,118 @@ async def api_develop_base_jpg(image_id: int):
     except rawproc.RawDecodeError as exc:
         return JSONResponse({"error": str(exc)}, status_code=422)
     return FileResponse(paths.preview, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=31536000, immutable"})
+
+
+@router.post("/api/develop/{image_id}/auto")
+async def api_develop_auto_tone(image_id: int):
+    """Compute a deterministic Auto tone patch for this image (no writes)."""
+    import gzip as _gzip
+
+    import numpy as _np
+
+    from features.develop import autotone
+    from features.develop.pipeline import _apply_white_balance
+
+    image, error = await _image_or_error(image_id)
+    if error:
+        return error
+    try:
+        paths, cached_meta = await _ensure_base(image_id, image)
+    except rawproc.RawDecodeError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=422)
+    row = await _load_settings(image_id)
+    settings = _json_settings(row["settings"]) if row else {}
+    asshot = cached_meta.get("as_shot") if isinstance(cached_meta, dict) else {}
+
+    def _compute():
+        linear16, _w, _h = rawproc.parse_base_payload(_gzip.decompress(paths.binary.read_bytes()))
+        linear = linear16.astype(_np.float32) / _np.float32(65535.0)
+        balanced = _apply_white_balance(
+            linear,
+            settings,
+            asshot.get("temperature") if isinstance(asshot, dict) else None,
+            asshot.get("tint") if isinstance(asshot, dict) else None,
+            _pipeline_metadata(cached_meta),
+        )
+        return autotone.auto_tone_settings(balanced, settings)
+
+    patch = await asyncio.to_thread(_compute)
+    return {"image_id": image_id, "patch": patch}
+
+
+@router.post("/api/develop/auto/batch")
+async def api_develop_auto_tone_batch(body: dict):
+    """Apply Auto tone to many images server-side (skips user-edited unless force)."""
+    from features.develop import autotone
+
+    image_ids = [int(v) for v in (body.get("image_ids") or [])][:500]
+    force = bool(body.get("force"))
+    results = []
+    for image_id in image_ids:
+        row = await _load_settings(image_id)
+        if autotone.should_skip_batch_origin(row["origin"] if row else None, force=force):
+            results.append({"image_id": image_id, "status": "skipped", "reason": "user-edited"})
+            continue
+        response = await api_develop_auto_tone(image_id)
+        if not isinstance(response, dict):
+            results.append({"image_id": image_id, "status": "error"})
+            continue
+        await _upsert_settings(image_id, dict(response["patch"]), "Auto tone")
+        results.append({"image_id": image_id, "status": "applied"})
+    return {
+        "requested": len(image_ids),
+        "applied": sum(1 for r in results if r["status"] == "applied"),
+        "skipped": sum(1 for r in results if r["status"] == "skipped"),
+        "results": results,
+    }
+
+
+@router.get("/api/develop/{image_id}/proof-tile")
+async def api_develop_proof_tile(
+    image_id: int,
+    u: float = Query(..., ge=0.0, le=1.0),
+    v: float = Query(..., ge=0.0, le=1.0),
+    edge: int = Query(1024, ge=128, le=2048),
+):
+    image, error = await _image_or_error(image_id)
+    if error:
+        return error
+    from features.develop.render import RenderError, render_proof_tile_async
+
+    row = await _load_settings(image_id)
+    cached_meta = rawproc.read_base_metadata(image_id) or {}
+    if not cached_meta.get("color"):
+        try:
+            _paths, cached_meta = await _ensure_base(image_id, image)
+        except rawproc.RawDecodeError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=422)
+    asshot = cached_meta.get("as_shot") if isinstance(cached_meta, dict) else {}
+    try:
+        tile = await render_proof_tile_async(
+            image["filepath"],
+            _json_settings(row["settings"]) if row else {},
+            u=u,
+            v=v,
+            edge=edge,
+            asshot_temperature=asshot.get("temperature") if isinstance(asshot, dict) else None,
+            asshot_tint=asshot.get("tint") if isinstance(asshot, dict) else None,
+            color_profile=_pipeline_metadata(cached_meta),
+        )
+    except (RenderError, ValueError) as exc:
+        return JSONResponse({"error": str(exc)}, status_code=422)
+    return Response(
+        content=tile.png,
+        media_type="image/png",
+        headers={
+            "Cache-Control": "no-store",
+            "X-Proof-Left": str(tile.left),
+            "X-Proof-Top": str(tile.top),
+            "X-Proof-Width": str(tile.width),
+            "X-Proof-Height": str(tile.height),
+            "X-Proof-Source-Width": str(tile.source_width),
+            "X-Proof-Source-Height": str(tile.source_height),
+        },
+    )
 
 
 @router.post("/api/develop/{image_id}/transform/auto")

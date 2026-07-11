@@ -225,6 +225,35 @@ export async function createVirtualCopy() {
     }
 }
 
+function applySettingsPatch(patch, label) {
+    if (!currentImage || beforeHeld || !patch || !Object.keys(patch).length) return;
+    const entry = stateCache.get(Number(currentImage.id));
+    if (!entry) return;
+    entry.undo.push(clone(entry.settings));
+    if (entry.undo.length > 100) entry.undo.shift();
+    entry.redo.length = 0;
+    for (const [key, value] of Object.entries(patch)) {
+        if (value === undefined) delete entry.settings[key];
+        else entry.settings[key] = value;
+    }
+    renderer?.setSettings(entry.settings, entry.meta);
+    compare?.updateCurrent(entry);
+    proofTile?.settingsChanged(currentImage.id);
+    scheduleSave(label);
+}
+
+async function requestAutoTone() {
+    if (!currentImage) return;
+    try {
+        const response = await fetch(`/api/develop/${currentImage.id}/auto`, { method: 'POST' });
+        if (!response.ok) throw new Error();
+        const payload = await response.json();
+        applySettingsPatch(payload.patch || {}, 'Auto tone');
+    } catch {
+        showToast("Couldn't compute Auto tone");
+    }
+}
+
 function settingsChanged(key, value, label, { history = true, previousSettings = null } = {}) {
     if (!currentImage || beforeHeld) return;
     const entry = stateCache.get(Number(currentImage.id));
@@ -774,7 +803,7 @@ function init() {
     const transformSlot = document.createElement('div');
     transformSlot.id = 'develop-transform-controls';
     panels = new DevelopPanels(panelHost, {
-        histogramHost: histogramSlot, cropHost: cropSlot, transformHost: transformSlot, onChange: settingsChanged,
+        histogramHost: histogramSlot, cropHost: cropSlot, transformHost: transformSlot, onChange: settingsChanged, onAutoTone: requestAutoTone,
         transform: {
             stage, canvas,
             onAutoLevel: async () => {

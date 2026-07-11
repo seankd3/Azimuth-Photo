@@ -184,6 +184,12 @@ def folder_filter_sql(folder) -> tuple[str, list] | None:
     return f"({' OR '.join(parts)})", params
 
 
+def has_absolute_folder_range(folder) -> bool:
+    """Return whether every requested folder can use the filepath range indexes."""
+    values = normalized_folder_values(folder)
+    return bool(values) and all(value.startswith("/") for value in values)
+
+
 def ranking_count_cache_key(
     orientation: str = "",
     compared: str = "",
@@ -481,12 +487,17 @@ def date_taken_filter_range(date_taken: str) -> tuple[str, str] | None:
 def ranking_index_for_query(
     sort: str,
     *,
+    folder: str = "",
     orientation: str = "",
     id_filter: set | None,
     text_query: str,
 ) -> str | None:
     if id_filter is not None or text_query:
         return None
+    if has_absolute_folder_range(folder):
+        if sort in ("date_taken", "date_taken_asc"):
+            return "idx_images_active_filepath_date_taken"
+        return "idx_images_active_filepath_elo"
     if sort == "elo" and orientation in ("landscape", "portrait"):
         return "idx_images_active_visible_orientation_elo"
     return RANKING_INDEXES.get(sort)
@@ -495,15 +506,18 @@ def ranking_index_for_query(
 def ranking_image_source(
     sort: str,
     *,
+    folder: str = "",
     orientation: str = "",
     id_filter: set | None,
     text_query: str,
     allow_forced_index: bool = True,
 ) -> str:
-    if not allow_forced_index:
+    folder_range = has_absolute_folder_range(folder)
+    if not allow_forced_index and not folder_range:
         return "images i"
     index_name = ranking_index_for_query(
         sort,
+        folder=folder,
         orientation=orientation,
         id_filter=id_filter,
         text_query=text_query,
@@ -515,13 +529,35 @@ def ranking_image_source(
 
 def ranking_count_image_source(
     *,
+    folder: str = "",
     file_type: str = "",
     id_filter: set | None,
     text_query: str = "",
 ) -> str:
+    if has_absolute_folder_range(folder) and id_filter is None and not text_query:
+        return "images i INDEXED BY idx_images_active_filepath_elo"
     if file_type and id_filter is None and not text_query:
         return "images i INDEXED BY idx_images_missing_lower_file_ext_source"
     return "images i"
+
+
+def folder_page_projection(sort: str) -> tuple[str, str] | None:
+    """Small tuple carried through a folder sort before loading full card rows."""
+    if sort == "elo":
+        return "i.id, i.elo", "page.elo DESC"
+    if sort == "elo_asc":
+        return "i.id, i.elo", "page.elo ASC"
+    if sort == "date_taken":
+        return (
+            "i.id, i.date_taken",
+            "page.date_taken IS NULL ASC, page.date_taken DESC, page.id DESC",
+        )
+    if sort == "date_taken_asc":
+        return (
+            "i.id, i.date_taken",
+            "page.date_taken IS NULL ASC, page.date_taken ASC, page.id ASC",
+        )
+    return None
 
 
 async def rankings(
@@ -594,6 +630,7 @@ async def rankings(
             and id_filter is None
             and all_sources_available
             and use_cache_first_visible
+            and not has_absolute_folder_range(folder)
         ):
             conditions_no_source, params_no_source = ranking_filter_parts(
                 orientation=orientation,
@@ -621,9 +658,9 @@ async def rankings(
             )
             return await cursor.fetchall()
 
-        params.extend([limit, offset])
         image_source = ranking_image_source(
             sort,
+            folder=folder,
             orientation=orientation,
             id_filter=id_filter,
             text_query=text_query,
@@ -634,11 +671,29 @@ async def rankings(
             if not all_catalog_images_active
             else ""
         )
+        page_projection = (
+            folder_page_projection(sort)
+            if has_absolute_folder_range(folder) and id_filter is None and not text_query
+            else None
+        )
+        if page_projection is not None:
+            page_columns, page_order = page_projection
+            cursor = await conn.execute(
+                "WITH page AS MATERIALIZED ("
+                f"SELECT {page_columns} FROM {image_source} {source_join}"
+                f"WHERE {' AND '.join(conditions)} ORDER BY {order} LIMIT ? OFFSET ?"
+                ") "
+                f"SELECT {IMAGE_ROW_SELECT} FROM page JOIN images i ON i.id = page.id "
+                f"ORDER BY {page_order}",
+                params + [limit, offset],
+            )
+            return await cursor.fetchall()
+
         cursor = await conn.execute(
             f"SELECT {IMAGE_ROW_SELECT} "
             f"FROM {image_source} {source_join}"
             f"WHERE {' AND '.join(conditions)} ORDER BY {order} LIMIT ? OFFSET ?",
-            params,
+            params + [limit, offset],
         )
         return await cursor.fetchall()
     finally:
@@ -841,20 +896,36 @@ async def count_rankings_uncached(
                 include_source=not all_sources_available,
                 exclude_collapsed_stack_members=exclude_collapsed_stack_members,
             )
-            source_join = (
-                "JOIN catalog_sources s ON s.id = i.source_id "
-                if not all_sources_available
-                else ""
-            )
-            cursor = await conn.execute(
-                "SELECT COUNT(*) AS count FROM cache_entries c INDEXED BY sqlite_autoindex_cache_entries_1 "
-                "CROSS JOIN images i "
-                f"{source_join}"
-                "WHERE c.cache_root = ? AND c.size = ? "
-                "AND i.id = c.image_id "
-                f"AND {' AND '.join(conditions)}",
-                [cache_root, visible_thumb_size] + params,
-            )
+            if has_absolute_folder_range(folder):
+                source_join = (
+                    "JOIN catalog_sources s ON s.id = i.source_id "
+                    if not all_sources_available
+                    else ""
+                )
+                cursor = await conn.execute(
+                    "SELECT COUNT(*) AS count "
+                    "FROM images i INDEXED BY idx_images_active_filepath_elo "
+                    f"{source_join}"
+                    f"WHERE {' AND '.join(conditions)} AND EXISTS ("
+                    "SELECT 1 FROM cache_entries c "
+                    "WHERE c.cache_root = ? AND c.size = ? AND c.image_id = i.id)",
+                    params + [cache_root, visible_thumb_size],
+                )
+            else:
+                source_join = (
+                    "JOIN catalog_sources s ON s.id = i.source_id "
+                    if not all_sources_available
+                    else ""
+                )
+                cursor = await conn.execute(
+                    "SELECT COUNT(*) AS count FROM cache_entries c INDEXED BY sqlite_autoindex_cache_entries_1 "
+                    "CROSS JOIN images i "
+                    f"{source_join}"
+                    "WHERE c.cache_root = ? AND c.size = ? "
+                    "AND i.id = c.image_id "
+                    f"AND {' AND '.join(conditions)}",
+                    [cache_root, visible_thumb_size] + params,
+                )
             row = await cursor.fetchone()
             return int(row["count"] or 0)
 
@@ -903,6 +974,7 @@ async def count_rankings_uncached(
             else ""
         )
         image_source = ranking_count_image_source(
+            folder=folder,
             file_type=file_type,
             id_filter=id_filter,
             text_query=text_query,
@@ -1147,11 +1219,16 @@ async def rank_quality(
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
     )
     signals = "COALESCE(i.comparisons, 0) + COALESCE(i.propagated_updates, 0)"
+    image_source = ranking_count_image_source(
+        folder=folder,
+        id_filter=id_filter,
+        text_query=text_query,
+    )
     select = (
         f"SELECT COUNT(*) AS total, "
         f"SUM(CASE WHEN {signals} >= ? THEN 1 ELSE 0 END) AS well_ranked, "
         f"AVG({signals}) AS avg_signals "
-        f"FROM images i JOIN catalog_sources s ON s.id = i.source_id WHERE "
+        f"FROM {image_source} JOIN catalog_sources s ON s.id = i.source_id WHERE "
     )
     conn = await connection.open_async(db_path)
     try:
@@ -1229,9 +1306,14 @@ async def date_histogram(
         text_query=text_query,
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
     )
+    image_source = (
+        "images i INDEXED BY idx_images_active_filepath_date_taken"
+        if has_absolute_folder_range(folder) and id_filter is None and not text_query
+        else "images i INDEXED BY idx_images_active_month_source"
+    )
     select = (
         "SELECT substr(i.date_taken, 1, 7) AS month, COUNT(*) AS count "
-        "FROM images i INDEXED BY idx_images_active_month_source "
+        f"FROM {image_source} "
         "JOIN catalog_sources s ON s.id = i.source_id WHERE "
     )
     conn = await connection.open_async(db_path)
@@ -1306,11 +1388,16 @@ async def scope_counts(
         text_query=text_query,
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
     )
+    image_source = ranking_count_image_source(
+        folder=folder,
+        id_filter=id_filter,
+        text_query=text_query,
+    )
     select = (
         "SELECT COUNT(*) AS total, "
         "SUM(CASE WHEN i.flag = 'picked' THEN 1 ELSE 0 END) AS picked, "
         "SUM(CASE WHEN i.flag = 'rejected' THEN 1 ELSE 0 END) AS rejected "
-        "FROM images i JOIN catalog_sources s ON s.id = i.source_id WHERE "
+        f"FROM {image_source} JOIN catalog_sources s ON s.id = i.source_id WHERE "
     )
     conn = await connection.open_async(db_path)
     try:
@@ -1404,7 +1491,23 @@ async def date_groups(
     conn = await connection.open_async(db_path)
     try:
         if visible_thumb_size and cache_root:
-            if all_sources_available:
+            if has_absolute_folder_range(folder):
+                image_source = "images i INDEXED BY idx_images_active_filepath_date_taken"
+                source_join = (
+                    "JOIN catalog_sources s ON s.id = i.source_id "
+                    if not all_sources_available
+                    else ""
+                )
+                cursor = await conn.execute(
+                    select_sql
+                    + f"FROM {image_source} {source_join}"
+                    f"WHERE {' AND '.join(conditions)} AND EXISTS ("
+                    "SELECT 1 FROM cache_entries c "
+                    "WHERE c.cache_root = ? AND c.size = ? AND c.image_id = i.id) "
+                    "GROUP BY date_group ORDER BY date_group DESC",
+                    params + [cache_root, visible_thumb_size],
+                )
+            elif all_sources_available:
                 cursor = await conn.execute(
                     select_sql
                     + "FROM cache_entries c INDEXED BY sqlite_autoindex_cache_entries_1 "
@@ -1426,17 +1529,27 @@ async def date_groups(
                 )
         else:
             if all_sources_available:
+                image_source = (
+                    "images i INDEXED BY idx_images_active_filepath_date_taken"
+                    if has_absolute_folder_range(folder) and id_filter is None and not text_query
+                    else "images i"
+                )
                 cursor = await conn.execute(
                     select_sql
-                    + "FROM images i "
+                    + f"FROM {image_source} "
                     f"WHERE {' AND '.join(conditions)} "
                     "GROUP BY date_group ORDER BY date_group DESC",
                     params,
                 )
             else:
+                image_source = (
+                    "images i INDEXED BY idx_images_active_filepath_date_taken"
+                    if has_absolute_folder_range(folder) and id_filter is None and not text_query
+                    else "images i"
+                )
                 cursor = await conn.execute(
                     select_sql
-                    + "FROM images i JOIN catalog_sources s ON s.id = i.source_id "
+                    + f"FROM {image_source} JOIN catalog_sources s ON s.id = i.source_id "
                     f"WHERE {' AND '.join(conditions)} "
                     "GROUP BY date_group ORDER BY date_group DESC",
                     params,
