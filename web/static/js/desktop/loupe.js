@@ -767,12 +767,7 @@ function ensureLoupeChrome() {
 
 function bindPointer() {
     const stage = document.getElementById('loupe-stage');
-    stage.addEventListener('click', (event) => {
-        if (dragState?.moved) {
-            dragState = null;
-            updateCursor();
-            return;
-        }
+    stage.addEventListener('dblclick', (event) => {
         if (!eventHitsImage(event)) return;
         toggleFitOneToOne(event);
     });
@@ -809,7 +804,7 @@ function bindPointer() {
     });
     stage.addEventListener('pointerup', (event) => {
         if (!dragState || dragState.pointerId !== event.pointerId) return;
-        dragState.dragging = false;
+        dragState = null;
         updateCursor();
     });
     stage.addEventListener('pointercancel', () => {
