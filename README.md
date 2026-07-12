@@ -1,6 +1,6 @@
 # azimuthphoto.com
 
-Marketing site for [Azimuth Photo](https://github.com/Sean-Kenneth-Doherty/photo-archive) —
+Marketing site for [Azimuth Photo](https://github.com/Sean-Kenneth-Doherty/azimuth-photo) —
 a self-hosted photo library with Lightroom Classic instincts.
 
 **Show, don't tell:** there are no screenshots of the app here. Every panel is a live
