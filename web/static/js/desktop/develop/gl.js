@@ -780,6 +780,16 @@ void main() {
     outColor = sum / max(total, 1e-6);
 }`;
 
+// Display-referred Develop and Library previews bypass the linear RAW pipeline.
+// This tiny present pass keeps the first image inside the same canvas that the
+// full-quality renderer will take over, so the swap cannot move the workspace.
+const DISPLAY_PREVIEW_FRAGMENT = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+out vec4 outColor;
+uniform sampler2D u_preview;
+void main() { outColor = texture(u_preview, v_uv); }`;
+
 const MAIN_FRAGMENT = `#version 300 es
 precision highp float;
 precision highp int;
@@ -1157,6 +1167,7 @@ export class DevelopRenderer {
         this.filmLumaProgram = program(this.gl, FILM_LUMA_FRAGMENT);
         this.blurProgram = program(this.gl, BLUR_FRAGMENT);
         this.retouchProgram = program(this.gl, RETOUCH_FRAGMENT);
+        this.displayPreviewProgram = program(this.gl, DISPLAY_PREVIEW_FRAGMENT);
         this.settings = {};
         this.meta = {};
         this.geometryEnabled = true;
@@ -1165,6 +1176,8 @@ export class DevelopRenderer {
         this.height = 1;
         this.dirty = false;
         this.ready = false;
+        this.displayPreview = false;
+        this.previewSource = null;
         this.frame = 0;
         this.createGeometry();
         this.source = texture(this.gl, 1, 1, {
@@ -1206,7 +1219,7 @@ export class DevelopRenderer {
         const buffer = gl.createBuffer();
         gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
         gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]), gl.STATIC_DRAW);
-        for (const p of [this.mainProgram, this.lumaProgram, this.filmLumaProgram, this.blurProgram, this.retouchProgram]) {
+        for (const p of [this.mainProgram, this.lumaProgram, this.filmLumaProgram, this.blurProgram, this.retouchProgram, this.displayPreviewProgram]) {
             const location = gl.getAttribLocation(p, 'a_position');
             gl.enableVertexAttribArray(location);
             gl.vertexAttribPointer(location, 2, gl.FLOAT, false, 0, 0);
@@ -1217,6 +1230,11 @@ export class DevelopRenderer {
     uploadSource(data, width, height) {
         const gl = this.gl;
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        this.displayPreview = false;
+        if (this.previewSource) {
+            gl.deleteTexture(this.previewSource);
+            this.previewSource = null;
+        }
         if (this.source) gl.deleteTexture(this.source);
         gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
         this.source = texture(gl, width, height, {
@@ -1228,6 +1246,31 @@ export class DevelopRenderer {
         this.canvas.width = width;
         this.canvas.height = height;
         this.rebuildTargets();
+        this.ready = true;
+        this.requestRender();
+    }
+
+    uploadDisplayPreview(image) {
+        // Paint an 8-bit display-referred preview without applying RAW settings.
+        const gl = this.gl;
+        const width = Number(image?.width);
+        const height = Number(image?.height);
+        if (!(width > 0 && height > 0)) throw new Error('Develop preview has invalid dimensions.');
+        if (this.previewSource) gl.deleteTexture(this.previewSource);
+        this.previewSource = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, this.previewSource);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+        this.displayPreview = true;
+        this.width = width;
+        this.height = height;
+        this.canvas.width = width;
+        this.canvas.height = height;
         this.ready = true;
         this.requestRender();
     }
@@ -1792,10 +1835,22 @@ export class DevelopRenderer {
 
     render() {
         this.frame = 0;
-        if (!this.dirty || !this.ready || !this.targets?.length) return;
+        if (!this.dirty || !this.ready) return;
         this.dirty = false;
         const gl = this.gl;
         gl.bindVertexArray(this.vao);
+        if (this.displayPreview && this.previewSource) {
+            gl.useProgram(this.displayPreviewProgram);
+            bindUnit(gl, this.previewSource, 0);
+            gl.uniform1i(gl.getUniformLocation(this.displayPreviewProgram, 'u_preview'), 0);
+            this.setProgramView(this.displayPreviewProgram, this.view);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+            gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+            this.canvas.dispatchEvent(new CustomEvent('develop:rendered'));
+            return;
+        }
+        if (!this.targets?.length) return;
         const clarity = numberSetting(this.settings, 'Clarity2012');
         const textureValue = numberSetting(this.settings, 'Texture');
         const sharpness = numberSetting(this.settings, 'Sharpness');
@@ -1923,6 +1978,7 @@ export class DevelopRenderer {
         if (this.filmHd) gl.deleteTexture(this.filmHd);
         if (this.filmPrint) gl.deleteTexture(this.filmPrint);
         if (this.maskAtlas) gl.deleteTexture(this.maskAtlas);
+        if (this.previewSource) gl.deleteTexture(this.previewSource);
     }
 }
 

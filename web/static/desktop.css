@@ -1239,7 +1239,8 @@ body.develop-active #canvas > .view:not(#view-develop) { display: none !importan
 #develop-canvas,
 #develop-placeholder { position: relative; z-index: 1; display: block; max-width: calc(100% - 32px); max-height: calc(100% - 32px); width: auto; height: auto; object-fit: contain; box-shadow: 0 8px 40px rgba(0,0,0,.45); }
 #develop-canvas { opacity: 0; }
-#develop-canvas.ready { opacity: 1; }
+#develop-canvas.ready,
+#develop-canvas.preview-ready { opacity: 1; }
 #develop-stage.compare-active #develop-canvas,
 #develop-stage.compare-active .develop-compare-canvas { position: absolute; z-index: 1; max-width: calc(100% - 32px); max-height: calc(100% - 32px); box-shadow: 0 8px 40px rgba(0,0,0,.45); }
 #develop-stage.compare-active #develop-canvas { z-index: 2; }
@@ -1359,6 +1360,9 @@ body.develop-active #canvas > .view:not(#view-develop) { display: none !importan
 .develop-toggle input:checked + i::after { transform: translateX(14px); background: var(--accent); }
 .develop-hist-wrap { position: relative; height: 112px; }
 .develop-hist { display: block; width: 100%; height: 112px; border-radius: 2px; }
+#develop-histogram[data-loading="true"] .develop-hist-wrap::after { content: ""; position: absolute; inset: 0; border-radius: 2px; pointer-events: none; background: linear-gradient(100deg, transparent 25%, rgba(255,255,255,.12) 50%, transparent 75%); background-size: 220% 100%; animation: develop-histogram-shimmer 1.5s ease-in-out infinite; }
+#develop-panels[data-loading="true"] { opacity: .62; }
+@keyframes develop-histogram-shimmer { from { background-position: 110% 0; } to { background-position: -110% 0; } }
 .develop-clip { position: absolute; z-index: 2; top: 2px; width: 22px; height: 20px; padding: 0; border: 0; color: rgba(255,255,255,.34); font-size: 12px; background: transparent; }
 .develop-clip-shadow { left: 2px; }
 .develop-clip-highlight { right: 2px; }
