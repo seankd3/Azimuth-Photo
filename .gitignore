@@ -38,3 +38,5 @@ CLAUDE.md
 web/*.bak
 desktop/src-tauri/target/
 desktop/src-tauri/gen/
+
+android/local.properties
