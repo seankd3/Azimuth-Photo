@@ -88,8 +88,14 @@ def _rationals(value) -> list[float]:
     return [float(x) for x in seq]
 
 
-def _tag(page, ifd0, name, default=None):
-    for holder in (page, ifd0):
+def _tag(name, *pages, default=None):
+    """Read a DNG tag from the first page that carries it.
+
+    Reduced LinearRaw pyramid levels commonly omit the full-resolution level
+    tags.  Keep the target first, then fall back through the full LinearRaw IFD
+    and IFD0 so preview-sized decodes retain the source black/white semantics.
+    """
+    for holder in pages:
         if holder is None:
             continue
         tag = holder.tags.get(name)
@@ -110,6 +116,23 @@ def is_lossy_dng(path: str) -> bool:
     except Exception:
         return False
     return False
+
+
+def is_linear_dng(path: str) -> bool:
+    """Return whether a DNG contains a full-resolution three-plane LinearRaw IFD."""
+    try:
+        import tifffile
+
+        with tifffile.TiffFile(path) as tf:
+            return any(
+                page.subfiletype == 0
+                and int(getattr(page, "photometric", 0)) == 34892
+                and len(page.shape) == 3
+                and page.shape[-1] == 3
+                for page in _walk_pages(tf)
+            )
+    except Exception:
+        return False
 
 
 def _walk_pages(tf):
@@ -176,19 +199,26 @@ def decode_lossy_dng(path: str, max_px: int | None = None):
         if data.ndim != 3 or data.shape[2] != 3:
             raise LossyDngError(f"Unexpected LinearRaw shape {data.shape} in {path}")
 
-        black = _rationals(_tag(target, ifd0, "BlackLevel", 0))
-        white = _rationals(_tag(target, ifd0, "WhiteLevel", 65535))
-        as_shot = _rationals(_tag(target, ifd0, "AsShotNeutral", (1.0, 1.0, 1.0)))
-        forward = _rationals(_tag(target, ifd0, "ForwardMatrix1")) if _tag(target, ifd0, "ForwardMatrix1") is not None else None
-        forward2 = _rationals(_tag(target, ifd0, "ForwardMatrix2")) if _tag(target, ifd0, "ForwardMatrix2") is not None else None
-        color_matrix1 = _rationals(_tag(target, ifd0, "ColorMatrix1")) if _tag(target, ifd0, "ColorMatrix1") is not None else None
-        color_matrix2 = _rationals(_tag(target, ifd0, "ColorMatrix2")) if _tag(target, ifd0, "ColorMatrix2") is not None else None
-        baseline_ev = _rationals(_tag(target, ifd0, "BaselineExposure", 0.0))[0]
-        camera_model = _tag(target, ifd0, "UniqueCameraModel") or _tag(target, ifd0, "Model")
-        camera_make = _tag(target, ifd0, "Make")
-        lens_model = _tag(target, ifd0, "LensModel") or _tag(target, ifd0, "Lens")
-        focal_length = _rationals(_tag(target, ifd0, "FocalLength"))[0] if _tag(target, ifd0, "FocalLength") is not None else None
-        aperture = _rationals(_tag(target, ifd0, "FNumber"))[0] if _tag(target, ifd0, "FNumber") is not None else None
+        tag_pages = (target, full, ifd0)
+        black = _rationals(_tag("BlackLevel", *tag_pages, default=0))
+        white = _rationals(_tag("WhiteLevel", *tag_pages, default=65535))
+        as_shot = _rationals(_tag("AsShotNeutral", *tag_pages, default=(1.0, 1.0, 1.0)))
+        forward_value = _tag("ForwardMatrix1", *tag_pages)
+        forward2_value = _tag("ForwardMatrix2", *tag_pages)
+        color_matrix1_value = _tag("ColorMatrix1", *tag_pages)
+        color_matrix2_value = _tag("ColorMatrix2", *tag_pages)
+        forward = _rationals(forward_value) if forward_value is not None else None
+        forward2 = _rationals(forward2_value) if forward2_value is not None else None
+        color_matrix1 = _rationals(color_matrix1_value) if color_matrix1_value is not None else None
+        color_matrix2 = _rationals(color_matrix2_value) if color_matrix2_value is not None else None
+        baseline_ev = _rationals(_tag("BaselineExposure", *tag_pages, default=0.0))[0]
+        camera_model = _tag("UniqueCameraModel", *tag_pages) or _tag("Model", *tag_pages)
+        camera_make = _tag("Make", *tag_pages)
+        lens_model = _tag("LensModel", *tag_pages) or _tag("Lens", *tag_pages)
+        focal_length_value = _tag("FocalLength", *tag_pages)
+        aperture_value = _tag("FNumber", *tag_pages)
+        focal_length = _rationals(focal_length_value)[0] if focal_length_value is not None else None
+        aperture = _rationals(aperture_value)[0] if aperture_value is not None else None
 
         black3 = np.array((black * 3)[:3] if len(black) < 3 else black[:3], dtype=np.float64)
         white3 = np.array((white * 3)[:3] if len(white) < 3 else white[:3], dtype=np.float64)
@@ -226,7 +256,7 @@ def decode_lossy_dng(path: str, max_px: int | None = None):
 
         # LinearRaw pixels are stored unrotated; honor the container
         # Orientation tag so the base matches the camera's framing.
-        orientation = int(_tag(target, ifd0, "Orientation", 1) or 1)
+        orientation = int(_tag("Orientation", *tag_pages, default=1) or 1)
         out = _apply_exif_orientation(out, orientation)
 
         # As-shot multipliers relative to green, for WB slider estimates.
