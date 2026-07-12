@@ -1678,14 +1678,21 @@ body.develop-active #canvas > .view:not(#view-develop) { display: none !importan
 .cull-brief-head, .cull-brief-actions { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); }
 .cull-brief-kicker { color: var(--accent); font-size: var(--fs-caption); font-weight: var(--fw-semibold); text-transform: uppercase; letter-spacing: var(--ls-label); }
 .cull-brief-head h2 { margin-top: 3px; font-size: var(--fs-lens); }
-.cull-brief-members { display: flex; gap: var(--s2); overflow-x: auto; padding: var(--s3) 0; }
-.cull-brief-member { position: relative; flex: 0 0 154px; overflow: hidden; border: 1px solid var(--line); border-radius: var(--r-ctl); background: var(--card); }
+.cull-brief-head p { margin-top: 3px; color: var(--text-3); font-size: var(--fs-caption); font-variant-numeric: tabular-nums; }
+.cull-brief-members { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: var(--s2); padding: var(--s3) 0; }
+.cull-brief-member { position: relative; min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: var(--r-ctl); background: var(--card); cursor: zoom-in; }
 .cull-brief-member.suggested { border-color: var(--accent-lin); box-shadow: inset 0 0 0 1px var(--accent-dim); }
-.cull-brief-member img { width: 100%; height: 100px; object-fit: cover; background: var(--surface-ink); }
+.cull-brief-member img { position: relative; display: block; width: 100%; height: min(42vh, 360px); object-fit: contain; background: var(--surface-ink); }
+.cull-brief-member.zoomed { height: min(52vh, 520px); cursor: zoom-out; background: #000; }
+.cull-brief-member.zoomed img { position: absolute; max-width: none; max-height: none; object-fit: initial; }
+.cull-brief-member.zoomed figcaption { position: absolute; z-index: 1; right: 0; bottom: 0; left: 0; background: rgba(9,10,12,.82); }
+.cull-brief-member.zoomed i { z-index: 1; }
 .cull-brief-member figcaption { display: grid; gap: 3px; padding: var(--s2); font-size: var(--fs-caption); }
 .cull-brief-member figcaption b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cull-brief-member figcaption span, .cull-brief-actions > span { color: var(--text-3); font-size: var(--fs-caption); }
 .cull-brief-member i { position: absolute; top: 6px; left: 6px; padding: 3px 6px; border-radius: 999px; background: var(--accent); color: var(--accent-fg); font-size: var(--fs-micro); font-style: normal; font-weight: var(--fw-bold); }
+.cull-brief-zoom-hint { position: absolute; right: 6px; bottom: 42px; padding: 3px 6px; border-radius: 999px; color: rgba(255,255,255,.88); font-size: var(--fs-micro); background: rgba(0,0,0,.55); pointer-events: none; }
+.cull-brief-member.zoomed .cull-brief-zoom-hint { display: none; }
 .cull-brief-actions { padding-top: var(--s2); border-top: 1px solid var(--line); }
 @media (max-width: 760px) { #cull-brief-banner { align-items: flex-start; } .cull-brief-actions { flex-wrap: wrap; } }
 /* Timeline */

@@ -309,7 +309,7 @@ export function initSelection() {
         const ids = [...selection];
         const sheet = openSheet(
             `<h3>${ids.length} selected</h3>`
-            + `<button class="sheet-row" data-act="unflag" data-mutating><span class="g">${icon('circle')}</span>Unflag</button>`
+            + `<button class="sheet-row" data-act="unflag"><span class="g">${icon('circle')}</span>Unflag</button>`
             + `<button class="sheet-row" data-act="csv" data-mutating><span class="g">${icon('download')}</span>Export CSV</button>`
             + `<button class="sheet-row" data-act="json" data-mutating><span class="g">${icon('download')}</span>Export JSON</button>`
             + `<button class="sheet-row" data-act="zip" data-mutating><span class="g">${icon('download')}</span>Download files (zip)</button>`

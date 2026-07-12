@@ -10,6 +10,8 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 
 from core import requests as request_helpers
 from data.repositories import images as image_repository
+from features.sync import satellite
+from features.sync.prefetch import ThumbPrefetcher, _urllib_request
 import thumbnails
 
 
@@ -59,6 +61,8 @@ def _cache_headers(signature: str) -> dict:
 async def _source_state(image) -> str:
     if image["missing_at"] is not None:
         return "missing"
+    if int(image["hub_remote"] or 0) == 1:
+        return "remote"
     filepath = str(image["filepath"] or "")
     try:
         source_stat = await asyncio.to_thread(os.stat, filepath)
@@ -111,6 +115,38 @@ async def _source_error_response(image, state: str) -> JSONResponse | None:
     return None
 
 
+async def _remote_media_response(image, tier: str) -> Response:
+    hub = satellite.hub_url().rstrip("/")
+    if not hub:
+        return JSONResponse(
+            {"error": "Hub unreachable", "reason": "hub_unreachable"},
+            status_code=503,
+        )
+    remote_id = int(image["hub_image_id"])
+    endpoint = f"/api/full/{remote_id}" if tier == thumbnails.FULL_TIER else f"/api/thumb/{tier}/{remote_id}"
+    try:
+        status_code, response_headers, data = await _urllib_request("GET", hub + endpoint)
+    except Exception:
+        return JSONResponse(
+            {"error": "Hub unreachable", "reason": "hub_unreachable"},
+            status_code=503,
+        )
+    if not 200 <= status_code < 300:
+        return JSONResponse(
+            {"error": "Hub media unavailable", "reason": "hub_media_unavailable"},
+            status_code=status_code,
+        )
+    signature = ThumbPrefetcher._signature(remote_id, data)
+    thumbnails._write_thumbnail_to_disk(tier, int(image["id"]), signature, data, hot=False)
+    if tier != thumbnails.FULL_TIER:
+        thumbnails._memory_put(tier, int(image["id"]), signature, data)
+    media_type = next(
+        (value for key, value in response_headers.items() if key.lower() == "content-type"),
+        "image/jpeg",
+    )
+    return Response(content=data, media_type=media_type, headers=_cache_headers(signature))
+
+
 @router.get("/api/thumb/{size}/{image_id}")
 async def serve_thumbnail(request: Request, size: str, image_id: int, cached: bool = False):
     return await thumbnail_response(request, size, image_id, cached=cached)
@@ -160,6 +196,9 @@ async def thumbnail_response(request: Request, size: str, image_id: int, cached:
         return Response(content=data, media_type="image/jpeg", headers=headers)
     if cached:
         return Response(status_code=204, headers={"Cache-Control": "no-store"})
+
+    if source_state == "remote":
+        return await _remote_media_response(image, size)
 
     if source_state == "offline":
         return JSONResponse(
@@ -223,6 +262,9 @@ async def serve_full_image(request: Request, image_id: int, background_tasks: Ba
         if request_etag == headers["ETag"]:
             return Response(status_code=304, headers=headers)
         return FileResponse(path, headers=headers)
+
+    if source_state == "remote":
+        return await _remote_media_response(image, thumbnails.FULL_TIER)
 
     if source_state == "offline":
         return JSONResponse(

@@ -126,6 +126,7 @@ async def get_unclassified_images(db_path: str, limit: int = 200):
             "AND s.online = 1 "
             "AND i.status IN ('kept', 'maybe') "
             "AND i.missing_at IS NULL "
+            "AND COALESCE(i.hub_remote, 0) = 0 "
             "LIMIT ?",
             (limit,),
         )
@@ -162,6 +163,7 @@ async def get_images_needing_metadata(
             "OR i.metadata_version < ?) "
             "AND i.status IN ('kept', 'maybe') "
             "AND i.missing_at IS NULL "
+            "AND COALESCE(i.hub_remote, 0) = 0 "
             "LIMIT ?",
             (metadata_version, limit),
         )

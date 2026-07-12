@@ -136,7 +136,11 @@ export function mountHistoryPanel(host, api) {
             const imageId = api.getImageId?.();
             if (!imageId) return;
             try {
-                const response = await fetch(`/api/develop/${imageId}/history`, { headers: { Accept: 'application/json' } });
+                // A just-saved edit must replace the empty initial rail rather than
+                // reusing the browser's cached pre-save history response.
+                const response = await fetch(`/api/develop/${imageId}/history`, {
+                    headers: { Accept: 'application/json' }, cache: 'no-store',
+                });
                 if (!response.ok) throw new Error('history failed');
                 controller.setHistory(await response.json());
             } catch { /* Retain the last known history if the refresh races an image switch. */ }

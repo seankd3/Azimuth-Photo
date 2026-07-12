@@ -7,7 +7,7 @@ from features.develop import export_presets
 from features.media import routes as media_routes
 from features.quality import routes as quality_routes
 from features.system import backup_routes
-from features.sync import hub_routes, satellite, satellite_routes
+from features.sync import hub_routes, oplog_routes, satellite, satellite_routes
 from features.sync.sync_worker import SyncWorker, configure_worker
 
 
@@ -28,6 +28,7 @@ watched_routes.configure(db_path=lambda: _db.DB_PATH)
 gallery_routes.configure(db_path=lambda: _db.DB_PATH, thumbnail_response=media_routes.thumbnail_response)
 export_presets.configure(db_path=lambda: _db.DB_PATH)
 hub_routes.configure(db_path=lambda: _db.DB_PATH)
+oplog_routes.configure(db_path=lambda: _db.DB_PATH)
 app.include_router(hdr_routes.router)
 app.include_router(pano_routes.router)
 app.include_router(ai_mask_routes.router)
@@ -44,6 +45,7 @@ app.include_router(backup_routes.router)
 app.include_router(quality_routes.router)
 app.include_router(watched_routes.router)
 app.include_router(hub_routes.router)
+app.include_router(oplog_routes.router)
 app.include_router(satellite_routes.router)
 
 # PATCH: satellite lane — keep the worker out of hub processes entirely.

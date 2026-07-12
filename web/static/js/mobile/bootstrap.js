@@ -12,6 +12,7 @@ import { initSearch, showSearch } from './search.js';
 import { initLibrary, showLibrary } from './library.js';
 import { initHistory, onHistoryTab, replaceTab } from './history.js';
 import { mountIconSprite } from '../icons.js';
+import { initWriteQueue } from './write_queue.js';
 import './install.js';
 
 function secureContextBanner() {
@@ -91,12 +92,7 @@ function installOfflineBanner() {
         document.body.classList.toggle('offline', offline);
         const selectors = [
             '[data-mutating]',
-            '#m-sel-actions [data-action="pick"]',
-            '#m-sel-actions [data-action="reject"]',
             '#m-sel-actions [data-action="collection"]',
-            '#mv-pick',
-            '#mv-reject',
-            '#mv-unflag',
             '#mv-coll',
             '#mr-stage .mr-card',
         ];
@@ -170,6 +166,7 @@ async function boot() {
     initHistory('photos');
     onHistoryTab(setTab);
     initToast();
+    initWriteQueue();
     installTabbar();
     installOfflineBanner();
     initSelection();

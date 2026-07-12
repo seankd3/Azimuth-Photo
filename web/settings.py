@@ -67,6 +67,7 @@ DEFAULT_SETTINGS = {
     "share_brand_name": "",
     "share_cookie_secret": "",
     "sync_bandwidth_mbps": 0,
+    "sync_thumb_budget_gb": 8,
 }
 
 PRIVATE_SETTING_KEYS = {"share_cookie_secret"}
@@ -123,6 +124,7 @@ INT_RANGES = {
     "face_detection_size": (160, 1280),
     "caption_batch_size": (1, 4),
     "sync_bandwidth_mbps": (0, 10000),
+    "sync_thumb_budget_gb": (0, 1024),
 }
 
 FLOAT_RANGES = {

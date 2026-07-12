@@ -18,7 +18,7 @@ from data import connection
 from data.repositories import images as image_repository
 from data.repositories import stacks as stack_repository
 from features.develop import rawproc, transform, virtual_copies
-from features.sync import satellite
+from features.sync import oplog
 
 
 router = APIRouter()
@@ -269,7 +269,7 @@ async def _write_synced_settings(
             (image_id, settings_json, label, now),
         )
         await conn.commit()
-        await satellite.mark_image_dirty(image_id, db_path=_configured_db_path())
+        await oplog.append_develop(_configured_db_path(), image_id)
         return {"settings": merged, "origin": origin, "updated_at": now}
     except Exception:
         await conn.rollback()
@@ -293,7 +293,7 @@ async def _image_or_error(image_id: int):
             },
             status_code=400,
         )
-    if not await asyncio.to_thread(os.path.exists, image["filepath"]):
+    if not image.get("hub_remote") and not await asyncio.to_thread(os.path.exists, image["filepath"]):
         return None, JSONResponse({"error": "Source image file is unavailable"}, status_code=404)
     return image, None
 
@@ -380,7 +380,7 @@ async def _upsert_settings(image_id: int, incoming: dict[str, Any], label: str |
             (image_id, settings_json, label, now),
         )
         await conn.commit()
-        await satellite.mark_image_dirty(image_id, db_path=_configured_db_path())
+        await oplog.append_develop(_configured_db_path(), image_id)
         return {"settings": merged, "origin": origin, "updated_at": now}
     except Exception:
         await conn.rollback()
@@ -436,7 +436,7 @@ async def _reset_settings(image_id: int) -> dict[str, Any]:
             (image_id, encoded, "Reset", now),
         )
         await conn.commit()
-        await satellite.mark_image_dirty(image_id, db_path=_configured_db_path())
+        await oplog.append_develop(_configured_db_path(), image_id)
         return {"settings": snapshot, "origin": origin, "updated_at": now}
     except Exception:
         await conn.rollback()

@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from features.sync import hub
+from features.sync import mirror_export
 
 
 router = APIRouter(tags=["sync"])
@@ -146,6 +147,34 @@ async def api_sync_base(content_hash: str):
         hub.multipart_base_stream(paths),
         media_type="multipart/mixed; boundary=photoarchive-pabase1",
         headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
+
+
+@router.get("/api/sync/catalog/export")
+async def api_sync_catalog_export(cursor: int = 0):
+    try:
+        parsed_cursor = mirror_export.parse_cursor(cursor)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return StreamingResponse(
+        mirror_export.gzip_catalog_export_stream(_configured_db_path(), parsed_cursor),
+        media_type="application/x-ndjson",
+        headers={"Content-Encoding": "gzip", "Cache-Control": "no-store"},
+    )
+
+
+@router.get("/api/sync/thumbs/pack")
+async def api_sync_thumb_pack(size: str, after_id: int = 0, limit: int = 500):
+    try:
+        size, after_id, limit = mirror_export.validate_thumb_pack_request(size, after_id, limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return StreamingResponse(
+        mirror_export.thumbnail_pack_stream(
+            _configured_db_path(), size=size, after_id=after_id, limit=limit,
+        ),
+        media_type="application/x-tar",
+        headers={"Cache-Control": "no-store"},
     )
 
 

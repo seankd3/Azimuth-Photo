@@ -17,6 +17,7 @@ let root = null;
 let stage = null;
 let img = null;
 let cap = null;
+let flagBadge = null;
 
 let openState = false;
 let list = [];
@@ -123,6 +124,21 @@ function syncFlagButtons() {
     const flag = image ? (byId.get(Number(image.id)) || image).flag || 'unflagged' : 'unflagged';
     document.getElementById('mv-pick').classList.toggle('on-pick', flag === 'picked');
     document.getElementById('mv-reject').classList.toggle('on-reject', flag === 'rejected');
+    if (flagBadge) {
+        flagBadge.hidden = flag === 'unflagged';
+        flagBadge.className = `mv-flag ${flag}`;
+        flagBadge.textContent = flag === 'picked' ? 'Picked' : 'Rejected';
+    }
+}
+
+function cullSwipe(flag) {
+    const image = current();
+    if (!image) return;
+    root.classList.remove('cull-picked', 'cull-rejected');
+    void root.offsetWidth;
+    root.classList.add(flag === 'picked' ? 'cull-picked' : 'cull-rejected');
+    setTimeout(() => root.classList.remove('cull-picked', 'cull-rejected'), 260);
+    void applyFlags([image.id], flag);
 }
 
 function nav(dir) {
@@ -386,6 +402,10 @@ function installGestures() {
                 const p = clamp(dy / 300, 0, 1);
                 img.style.transform = `translateY(${Math.max(0, dy)}px) scale(${1 - p * 0.12})`;
                 root.style.background = `rgba(0,0,0,${1 - p * 0.6})`;
+            } else if (sw.mode === 'up') {
+                const p = clamp(-dy / 300, 0, 1);
+                img.style.transform = `translateY(${Math.min(0, dy)}px) scale(${1 - p * 0.12})`;
+                root.style.background = `rgba(0,0,0,${1 - p * 0.6})`;
             } else if (sw.mode === 'h') {
                 if ((index <= 0 && dx > 0) || (index >= list.length - 1 && dx < 0)) dx *= 0.35;
                 sw.res = dx;
@@ -463,10 +483,11 @@ function installGestures() {
                 return;
             }
             if (sw.mode === 'down' && dy > 90) {
-                dismissViewer();
+                img.style.transform = '';
+                cullSwipe('rejected');
             } else if (sw.mode === 'up' && dy < -60) {
                 img.style.transform = '';
-                infoSheet();
+                cullSwipe('picked');
             } else if (sw.mode === 'h' && Math.abs(sw.res) > 70) {
                 img.style.transform = '';
                 const dir = dx < 0 ? 1 : -1;
@@ -499,6 +520,10 @@ export function initViewer() {
     stage = document.getElementById('mv-stage');
     img = document.getElementById('mv-img');
     cap = document.getElementById('mv-cap');
+    flagBadge = document.createElement('div');
+    flagBadge.id = 'mv-flag';
+    flagBadge.hidden = true;
+    stage.appendChild(flagBadge);
     const done = document.createElement('button');
     done.id = 'mv-done';
     done.type = 'button';

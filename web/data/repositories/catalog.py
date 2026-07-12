@@ -179,7 +179,7 @@ async def refresh_source_online_states_on_conn(conn) -> bool:
     now = _time.time()
     updates = []
     for row in rows:
-        online = 1 if os.path.isdir(row["path"]) else 0
+        online = 1 if str(row["path"]) == "hub://" else 1 if os.path.isdir(row["path"]) else 0
         if int(row["online"] or 0) != online:
             updates.append((online, now, row["id"]))
     if not updates:
@@ -371,7 +371,8 @@ def mark_image_missing_sync(db_path: str, image_id: int, missing_at: float | Non
     conn = connection.open_sync(db_path)
     try:
         cursor = conn.execute(
-            "UPDATE images SET missing_at = ? WHERE id = ? AND missing_at IS NULL",
+            "UPDATE images SET missing_at = ? WHERE id = ? AND missing_at IS NULL "
+            "AND COALESCE(hub_remote, 0) = 0",
             (when, int(image_id)),
         )
         if cursor.rowcount > 0:
@@ -396,7 +397,8 @@ async def mark_image_missing(db_path: str, image_id: int, missing_at: float | No
     conn = await connection.open_async(db_path)
     try:
         cursor = await conn.execute(
-            "UPDATE images SET missing_at = ? WHERE id = ? AND missing_at IS NULL",
+            "UPDATE images SET missing_at = ? WHERE id = ? AND missing_at IS NULL "
+            "AND COALESCE(hub_remote, 0) = 0",
             (when, int(image_id)),
         )
         if cursor.rowcount > 0:

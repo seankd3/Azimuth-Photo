@@ -1309,7 +1309,7 @@ async def date_histogram(
     image_source = (
         "images i INDEXED BY idx_images_active_filepath_date_taken"
         if has_absolute_folder_range(folder) and id_filter is None and not text_query
-        else "images i INDEXED BY idx_images_active_month_source"
+        else "images i"
     )
     select = (
         "SELECT substr(i.date_taken, 1, 7) AS month, COUNT(*) AS count "

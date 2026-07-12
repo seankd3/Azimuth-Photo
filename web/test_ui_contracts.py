@@ -101,6 +101,26 @@ class UiContractsTests(BackendTestCase):
         for route in ("settings", "catalog", "people", "library", "rankings", "compare"):
             self.assertNotIn(f'"/{route}"', browser_smoke)
 
+    async def test_cull_brief_uses_large_previews_and_scoped_reversible_review(self):
+        base_dir = os.path.dirname(__file__)
+        with open(os.path.join(base_dir, "static", "js", "desktop", "cull_brief.js"), encoding="utf-8") as fh:
+            cull_brief = fh.read()
+
+        self.assertIn("thumbUrl('lg', member.id)", cull_brief)
+        self.assertIn("data-cull-preview", cull_brief)
+        self.assertIn("preloadNext", cull_brief)
+        self.assertIn("writeFlags", cull_brief)
+        self.assertIn("scopeParams", cull_brief)
+        self.assertIn("getRankings", cull_brief)
+        self.assertIn("key === 'z'", cull_brief)
+
+    async def test_develop_history_refresh_bypasses_the_empty_pre_save_cache(self):
+        base_dir = os.path.dirname(__file__)
+        with open(os.path.join(base_dir, "static", "js", "desktop", "develop", "history_panel.js"), encoding="utf-8") as fh:
+            history_panel = fh.read()
+
+        self.assertIn("cache: 'no-store'", history_panel)
+
     async def test_template_context_versions_static_assets(self):
         context = app_module.app.state.photoarchive_shell.template_context(HeaderRequest())
 
