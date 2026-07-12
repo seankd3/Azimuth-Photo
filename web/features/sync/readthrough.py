@@ -67,7 +67,9 @@ def _content_hash_for_image(image_id: int, db_path: str) -> str | None:
 
 
 def _request(url: str, *, timeout: float) -> tuple[bytes, str, dict[str, str]]:
-    request = Request(url, headers={"Accept": "multipart/mixed, application/gzip, application/json"})
+    headers = {"Accept": "multipart/mixed, application/gzip, application/json"}
+    headers.update(satellite.device_auth_headers())
+    request = Request(url, headers=headers)
     try:
         with urlopen(request, timeout=timeout) as response:  # noqa: S310 - hub URL is user configuration.
             headers = {key.lower(): value for key, value in response.headers.items()}

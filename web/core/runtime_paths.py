@@ -280,4 +280,7 @@ def apply_environment_defaults(paths: RuntimePaths | None = None) -> RuntimePath
 
     selected = paths or resolve_runtime_paths()
     os.environ.setdefault("PHOTOARCHIVE_DEVELOP_CACHE_DIR", selected.develop_cache_dir)
+    # Clean installs (PHOTOARCHIVE_HOME / XDG / Docker /data) need parents on disk
+    # before SQLite opens the catalog. Legacy in-repo layouts already have them.
+    ensure_runtime_dirs(selected)
     return selected

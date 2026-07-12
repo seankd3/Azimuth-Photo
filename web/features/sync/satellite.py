@@ -24,19 +24,89 @@ CREATE INDEX IF NOT EXISTS idx_sync_state_image_id ON sync_state(image_id);
 """
 
 
+# Runtime-attached hub (standalone → satellite upgrade). Loaded from app
+# settings at boot and updated by attach_hub(); env vars always win.
+_stored_hub_url = ""
+_stored_device_token = ""
+_sync_starter = None
+
+
 def hub_url() -> str:
-    return os.environ.get("PHOTOARCHIVE_HUB_URL", "").strip().rstrip("/")
+    env = os.environ.get("PHOTOARCHIVE_HUB_URL", "").strip().rstrip("/")
+    return env or _stored_hub_url
+
+
+def device_token() -> str:
+    return os.environ.get("PHOTOARCHIVE_DEVICE_TOKEN", "").strip() or _stored_device_token
+
+
+def device_auth_headers() -> dict[str, str]:
+    token = device_token()
+    return {"X-Device-Token": token} if token else {}
 
 
 def is_satellite_mode() -> bool:
-    return (
-        os.environ.get("PHOTOARCHIVE_MODE", "").strip().lower() == "satellite"
-        and bool(hub_url())
-    )
+    """Standalone counts: satellite semantics do not require a hub."""
+
+    mode = os.environ.get("PHOTOARCHIVE_MODE", "").strip().lower()
+    if mode in ("satellite", "standalone"):
+        return True
+    if mode:
+        return False
+    return bool(hub_url())
+
+
+def has_hub() -> bool:
+    return is_satellite_mode() and bool(hub_url())
 
 
 def bootstrap_payload() -> dict:
-    return {"mode": "satellite" if is_satellite_mode() else "hub"}
+    return {
+        "mode": "satellite" if is_satellite_mode() else "hub",
+        "has_hub": has_hub(),
+    }
+
+
+def load_stored_hub() -> None:
+    global _stored_hub_url, _stored_device_token
+    try:
+        import settings as app_settings
+
+        config = app_settings.get_settings()
+    except Exception:
+        return
+    _stored_hub_url = str(config.get("hub_url") or "").strip().rstrip("/")
+    _stored_device_token = str(config.get("device_token") or "").strip()
+
+
+def register_sync_starter(starter) -> None:
+    """App wiring hands us an async callable that boots the sync worker."""
+
+    global _sync_starter
+    _sync_starter = starter
+
+
+async def attach_hub(url: str, token: str = "", hub_id: str = "") -> dict:
+    """Runtime standalone → satellite upgrade: persist and start syncing now."""
+
+    global _stored_hub_url, _stored_device_token
+    clean = (url or "").strip().rstrip("/")
+    if not clean.startswith(("http://", "https://")):
+        raise ValueError("Hub URL must start with http:// or https://")
+    import settings as app_settings
+
+    config = dict(app_settings.get_settings())
+    config["hub_url"] = clean
+    config["device_token"] = (token or "").strip()
+    if hub_id:
+        config["paired_hub_id"] = hub_id
+    app_settings.save_settings(config)
+    _stored_hub_url = clean
+    _stored_device_token = config["device_token"]
+    started = False
+    if _sync_starter is not None:
+        started = bool(await _sync_starter())
+    return {"hub": clean, "sync_started": started}
 
 
 def content_hash_for_file(filepath: str) -> str:

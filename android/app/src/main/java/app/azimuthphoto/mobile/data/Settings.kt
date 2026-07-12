@@ -1,7 +1,8 @@
-package app.photoarchive.mobile.data
+package app.azimuthphoto.mobile.data
 
 import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
@@ -19,6 +20,9 @@ data class AppSettings(
     val backupVideos: Boolean,
     /** MediaStore bucket ids selected for backup; empty = all buckets. */
     val backupBuckets: Set<String>,
+    val freeUpSpaceEnabled: Boolean,
+    /** Backed-up media older than this many days is quietly removed from the device. */
+    val keepDays: Int,
 )
 
 object SettingsStore {
@@ -29,6 +33,8 @@ object SettingsStore {
     private val WIFI_ONLY = booleanPreferencesKey("wifi_only")
     private val BACKUP_VIDEOS = booleanPreferencesKey("backup_videos")
     private val BACKUP_BUCKETS = stringSetPreferencesKey("backup_buckets")
+    private val FREE_UP_SPACE = booleanPreferencesKey("free_up_space")
+    private val KEEP_DAYS = intPreferencesKey("keep_days")
 
     fun flow(context: Context): Flow<AppSettings> =
         context.dataStore.data.map { p ->
@@ -38,6 +44,8 @@ object SettingsStore {
                 wifiOnly = p[WIFI_ONLY] ?: false,
                 backupVideos = p[BACKUP_VIDEOS] ?: true,
                 backupBuckets = p[BACKUP_BUCKETS] ?: emptySet(),
+                freeUpSpaceEnabled = p[FREE_UP_SPACE] ?: false,
+                keepDays = p[KEEP_DAYS] ?: 30,
             )
         }
 
@@ -57,4 +65,10 @@ object SettingsStore {
 
     suspend fun setBackupBuckets(context: Context, buckets: Set<String>) =
         context.dataStore.edit { it[BACKUP_BUCKETS] = buckets }
+
+    suspend fun setFreeUpSpace(context: Context, enabled: Boolean) =
+        context.dataStore.edit { it[FREE_UP_SPACE] = enabled }
+
+    suspend fun setKeepDays(context: Context, days: Int) =
+        context.dataStore.edit { it[KEEP_DAYS] = days }
 }

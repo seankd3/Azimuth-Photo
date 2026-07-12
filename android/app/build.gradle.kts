@@ -5,11 +5,11 @@ plugins {
 }
 
 android {
-    namespace = "app.photoarchive.mobile"
+    namespace = "app.azimuthphoto.mobile"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "app.photoarchive.mobile"
+        applicationId = "app.azimuthphoto.mobile"
         minSdk = 33
         targetSdk = 35
         versionCode = 2
@@ -63,4 +63,6 @@ dependencies {
     implementation("androidx.exifinterface:exifinterface:1.3.7")
     implementation("androidx.media3:media3-exoplayer:1.4.1")
     implementation("androidx.media3:media3-ui:1.4.1")
+
+    testImplementation("junit:junit:4.13.2")
 }

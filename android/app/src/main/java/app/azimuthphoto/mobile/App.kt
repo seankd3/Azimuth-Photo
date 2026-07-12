@@ -1,10 +1,10 @@
-package app.photoarchive.mobile
+package app.azimuthphoto.mobile
 
 import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import androidx.work.Configuration
-import app.photoarchive.mobile.backup.BackupScheduler
+import app.azimuthphoto.mobile.backup.BackupScheduler
 
 class App : Application(), Configuration.Provider {
 

@@ -2,6 +2,10 @@ from core.runtime_paths import apply_environment_defaults
 
 apply_environment_defaults()
 
+import asyncio
+import os
+import socket
+
 from core import wiring
 from core.app_factory import create_app
 from features.develop import ai_mask_routes, hdr_routes, import_routes, pano_routes, preset_routes, routes as develop_routes, xmp_write_routes
@@ -11,7 +15,7 @@ from features.develop import export_presets
 from features.media import routes as media_routes
 from features.quality import routes as quality_routes
 from features.system import backup_routes
-from features.sync import hub_routes, oplog_routes, satellite, satellite_routes
+from features.sync import hub_routes, mdns, oplog_routes, pair_routes, pairing, satellite, satellite_routes
 from features.sync.sync_worker import SyncWorker, configure_worker
 
 
@@ -51,17 +55,58 @@ app.include_router(watched_routes.router)
 app.include_router(hub_routes.router)
 app.include_router(oplog_routes.router)
 app.include_router(satellite_routes.router)
+app.include_router(pair_routes.router)
 
-# PATCH: satellite lane — keep the worker out of hub processes entirely.
+# Keep the worker out of hub processes entirely. Standalone (satellite with no
+# hub) runs everything except sync; attaching a hub at runtime starts it.
+satellite.load_stored_hub()
 if satellite.is_satellite_mode():
-    _sync_worker = SyncWorker(db_path=_db.DB_PATH)
-    configure_worker(_sync_worker)
+
+    _sync_worker_lock = asyncio.Lock()
+
+    async def _start_sync_worker() -> bool:
+        if not satellite.has_hub():
+            return False
+        async with _sync_worker_lock:
+            if getattr(app.state, "photoarchive_sync_worker", None) is not None:
+                return True
+            await satellite.ensure_sync_state(_db.DB_PATH)
+            worker = SyncWorker(db_path=_db.DB_PATH)
+            configure_worker(worker)
+            app.state.photoarchive_sync_worker = worker
+            app.state.photoarchive_shell.track_background_task(worker.run())
+            return True
+
+    satellite.register_sync_starter(_start_sync_worker)
 
     @app.on_event("startup")
     async def _start_satellite_sync_worker():
-        await satellite.ensure_sync_state(_db.DB_PATH)
-        app.state.photoarchive_shell.track_background_task(_sync_worker.run())
+        await _start_sync_worker()
 
     @app.on_event("shutdown")
     async def _stop_satellite_sync_worker():
-        _sync_worker.stop()
+        worker = getattr(app.state, "photoarchive_sync_worker", None)
+        if worker is not None:
+            worker.stop()
+
+
+@app.on_event("startup")
+async def _start_hub_mdns():
+    if not mdns.is_hub_mode():
+        return
+    import settings as _settings
+
+    hub_id = await pairing.get_hub_id(_db.DB_PATH)
+    name = (
+        str(_settings.get_settings().get("share_brand_name") or "").strip()
+        or os.environ.get("PHOTOARCHIVE_LIBRARY_NAME", "").strip()
+        or socket.gethostname()
+        or "photoArchive"
+    )
+    port = int(os.environ.get("PHOTOARCHIVE_PORT") or 8000)
+    await asyncio.to_thread(mdns.start_hub_announce, name=name, port=port, hub_id=hub_id)
+
+
+@app.on_event("shutdown")
+async def _stop_hub_mdns():
+    mdns.stop_hub_announce()

@@ -243,6 +243,37 @@ export async function getRemoteAccess() {
     return fetchJson('/api/remote-access', { defaultValue: null });
 }
 
+export async function getPairStatus() {
+    return fetchJson('/api/pair/status', { defaultValue: null });
+}
+
+export async function listDevices() {
+    return fetchJson('/api/devices', { defaultValue: null });
+}
+
+export async function createDeviceLink() {
+    return postJson('/api/devices/link', {});
+}
+
+export async function revokeDevice(deviceId) {
+    return postJson(`/api/devices/${deviceId}/revoke`, {});
+}
+
+export async function discoverHubs() {
+    return fetchJson('/api/discover', { defaultValue: null });
+}
+
+export async function connectToHub({ hubUrl, code, deviceName = '', platform = 'desktop' } = {}) {
+    return postJson('/api/pair/connect', {
+        hub_url: hubUrl,
+        code,
+        device_name: deviceName,
+        platform,
+    });
+export async function applyRemoteAccessServe() {
+    return postJson('/api/remote-access/serve');
+}
+
 export async function listCollections() {
     return fetchJson('/api/user-collections', { defaultValue: null });
 }

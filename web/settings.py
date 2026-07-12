@@ -74,9 +74,14 @@ DEFAULT_SETTINGS = {
     "share_cookie_secret": "",
     "sync_bandwidth_mbps": 0,
     "sync_thumb_budget_gb": 8,
+    "hub_url": "",
+    "device_token": "",
+    "paired_hub_id": "",
+    "require_device_token": False,
+    "setup_completed": False,
 }
 
-PRIVATE_SETTING_KEYS = {"share_cookie_secret"}
+PRIVATE_SETTING_KEYS = {"share_cookie_secret", "device_token"}
 
 EMBED_MODEL_PRESETS = {
     "qwen3-vl-embedding-8b": {
@@ -521,6 +526,16 @@ def normalize_settings(raw: dict | None) -> dict:
         DEFAULT_SETTINGS["ranking_taste_blend"],
     )
     normalized["share_cookie_secret"] = str(raw.get("share_cookie_secret") or "").strip()
+    normalized["hub_url"] = str(raw.get("hub_url") or "").strip().rstrip("/")
+    normalized["device_token"] = str(raw.get("device_token") or "").strip()
+    normalized["paired_hub_id"] = str(raw.get("paired_hub_id") or "").strip()
+    normalized["require_device_token"] = _normalize_bool(
+        raw.get("require_device_token", normalized["require_device_token"]),
+        DEFAULT_SETTINGS["require_device_token"],
+    )
+    normalized["setup_completed"] = _normalize_bool(
+        raw.get("setup_completed", normalized["setup_completed"]), False
+    )
     normalized.update(_derive_runtime_tuning(normalized["memory_cache_gb"]))
     normalized["prefetch_workers"] = min(
         normalized["prefetch_workers"],

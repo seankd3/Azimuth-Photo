@@ -100,6 +100,7 @@ export async function initSyncChip() {
     try {
         const bootstrap = await json('/api/settings');
         if (bootstrap?.sync?.mode !== 'satellite') return;
+        if (bootstrap?.sync?.has_hub === false) return; // standalone: nothing to sync with
     } catch (_error) {
         return;
     }

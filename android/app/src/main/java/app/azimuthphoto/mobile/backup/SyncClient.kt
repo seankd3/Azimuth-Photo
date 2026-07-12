@@ -1,4 +1,4 @@
-package app.photoarchive.mobile.backup
+package app.azimuthphoto.mobile.backup
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
