@@ -513,7 +513,7 @@ class LibraryTests(BackendTestCase):
             raw.close()
         self.assertIn("idx_images_active_orientation_count", plan)
 
-    async def test_rankings_returns_only_sm_cached_images_with_visible_total_counts(self):
+    async def test_rankings_visibility_is_mode_aware(self):
         source = await self._source()
         visible_high = await self._image(source["id"], "visible-high.jpg", elo=1500)
         hidden = await self._image(source["id"], "hidden.jpg", elo=1400)
@@ -528,6 +528,24 @@ class LibraryTests(BackendTestCase):
         self.assertEqual(result["total_images"], 3)
         self.assertEqual(result["hidden_pending_thumbnails"], 1)
         self.assertNotIn(hidden, [img["id"] for img in result["images"]])
+
+        with unittest.mock.patch.dict(
+            os.environ,
+            {"PHOTOARCHIVE_MODE": "satellite", "PHOTOARCHIVE_HUB_URL": "http://stub-hub"},
+        ):
+            library_service._rankings_response_cache.clear()
+            satellite_result = await library_routes.api_rankings(limit=10, sort="elo")
+
+        self.assertEqual(
+            [img["id"] for img in satellite_result["images"]],
+            [visible_high, hidden, visible_low],
+        )
+        self.assertEqual(satellite_result["visible_images"], 3)
+        self.assertEqual(satellite_result["total_images"], 3)
+        self.assertEqual(satellite_result["hidden_pending_thumbnails"], 0)
+        satellite_cards = {card["id"]: card for card in satellite_result["images"]}
+        self.assertIn("thumb_url", satellite_cards[visible_high])
+        self.assertNotIn("thumb_url", satellite_cards[hidden])
 
     async def test_taste_vector_scores_winner_like_embeddings_above_loser_like(self):
         source = await self._source()
