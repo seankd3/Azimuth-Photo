@@ -355,60 +355,63 @@ async def _ensure_base(image_id: int, image: dict) -> tuple[rawproc.BasePaths, d
 
 
 async def _upsert_settings(image_id: int, incoming: dict[str, Any], label: str | None) -> dict[str, Any]:
-    conn = await connection.open_async(_configured_db_path())
-    try:
-        await conn.execute("BEGIN")
-        cursor = await conn.execute(
-            "SELECT settings, origin, xmp_path, xmp_mtime FROM develop_settings WHERE image_id = ?",
-            (image_id,),
-        )
-        existing = await cursor.fetchone()
-        now = _now()
-        if existing is None:
-            merged = dict(incoming)
-            origin = "user"
-            xmp_path = None
-            xmp_mtime = None
-        else:
-            prior = _json_settings(existing["settings"])
-            # Merge rather than replace: clients can render only v1 keys while
-            # later phases and imported XMP keys survive every autosave.
-            merged = {**prior, **incoming}
-            origin = existing["origin"] or "user"
-            xmp_path = existing["xmp_path"]
-            xmp_mtime = existing["xmp_mtime"]
-            if origin == "xmp":
-                await conn.execute(
-                    "INSERT INTO develop_history (image_id, settings, label, created_at) VALUES (?, ?, ?, ?)",
-                    (image_id, json.dumps(prior, separators=(",", ":")), "Import from XMP", now),
-                )
+    async def _write() -> dict[str, Any]:
+        conn = await connection.open_async(_configured_db_path())
+        try:
+            await conn.execute("BEGIN")
+            cursor = await conn.execute(
+                "SELECT settings, origin, xmp_path, xmp_mtime FROM develop_settings WHERE image_id = ?",
+                (image_id,),
+            )
+            existing = await cursor.fetchone()
+            now = _now()
+            if existing is None:
+                merged = dict(incoming)
                 origin = "user"
-        settings_json = json.dumps(merged, separators=(",", ":"))
-        await conn.execute(
-            """
-            INSERT INTO develop_settings (image_id, settings, origin, xmp_path, xmp_mtime, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(image_id) DO UPDATE SET
-                settings = excluded.settings,
-                origin = excluded.origin,
-                xmp_path = excluded.xmp_path,
-                xmp_mtime = excluded.xmp_mtime,
-                updated_at = excluded.updated_at
-            """,
-            (image_id, settings_json, origin, xmp_path, xmp_mtime, now),
-        )
-        await conn.execute(
-            "INSERT INTO develop_history (image_id, settings, label, created_at) VALUES (?, ?, ?, ?)",
-            (image_id, settings_json, label, now),
-        )
-        await conn.commit()
-        await oplog.append_develop(_configured_db_path(), image_id)
-        return {"settings": merged, "origin": origin, "updated_at": now}
-    except Exception:
-        await conn.rollback()
-        raise
-    finally:
-        await connection.close_async(conn, db_path=_configured_db_path())
+                xmp_path = None
+                xmp_mtime = None
+            else:
+                prior = _json_settings(existing["settings"])
+                # Merge rather than replace: clients can render only v1 keys while
+                # later phases and imported XMP keys survive every autosave.
+                merged = {**prior, **incoming}
+                origin = existing["origin"] or "user"
+                xmp_path = existing["xmp_path"]
+                xmp_mtime = existing["xmp_mtime"]
+                if origin == "xmp":
+                    await conn.execute(
+                        "INSERT INTO develop_history (image_id, settings, label, created_at) VALUES (?, ?, ?, ?)",
+                        (image_id, json.dumps(prior, separators=(",", ":")), "Import from XMP", now),
+                    )
+                    origin = "user"
+            settings_json = json.dumps(merged, separators=(",", ":"))
+            await conn.execute(
+                """
+                INSERT INTO develop_settings (image_id, settings, origin, xmp_path, xmp_mtime, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(image_id) DO UPDATE SET
+                    settings = excluded.settings,
+                    origin = excluded.origin,
+                    xmp_path = excluded.xmp_path,
+                    xmp_mtime = excluded.xmp_mtime,
+                    updated_at = excluded.updated_at
+                """,
+                (image_id, settings_json, origin, xmp_path, xmp_mtime, now),
+            )
+            await conn.execute(
+                "INSERT INTO develop_history (image_id, settings, label, created_at) VALUES (?, ?, ?, ?)",
+                (image_id, settings_json, label, now),
+            )
+            await conn.commit()
+            await oplog.append_develop(_configured_db_path(), image_id)
+            return {"settings": merged, "origin": origin, "updated_at": now}
+        except Exception:
+            await conn.rollback()
+            raise
+        finally:
+            await connection.close_async(conn, db_path=_configured_db_path())
+
+    return await connection.run_with_busy_retry(_write)
 
 
 async def _reset_settings(image_id: int) -> dict[str, Any]:
