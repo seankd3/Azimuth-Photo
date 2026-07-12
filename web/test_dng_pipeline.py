@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import subprocess
+from pathlib import Path
 
 import numpy as np
+import pytest
 
 from features.develop import dng_pipeline as dng
+from features.develop import ops_constants as constants
+from features.develop import pipeline
 
 
 IDENTITY_PROFILE = {
@@ -161,3 +167,58 @@ def test_dngprof_grouped_loader_shape_normalizes_for_rendering():
     normalized = dng.normalize_adobe_profile(grouped)
     np.testing.assert_array_equal(normalized["forward_matrix1"], np.eye(3))
     assert normalized["calibration_illuminant1"] == 17
+
+
+def test_shared_prophoto_matrices_match_numpy_pipeline():
+    basis = np.eye(3, dtype=np.float32)
+    srgb_to_prophoto = dng.linear_srgb_to_prophoto(basis).T
+    np.testing.assert_allclose(constants.DNG_LINEAR_SRGB_TO_PROPHOTO, srgb_to_prophoto, atol=1e-8)
+    np.testing.assert_allclose(constants.DNG_PROPHOTO_TO_LINEAR_SRGB, dng.PROPHOTO_TO_LINEAR_SRGB, atol=1e-8)
+    assert constants.DNG_TONE_LUT_SIZE == dng.ADOBE_ACR3_DEFAULT_TONE_CURVE.size
+
+
+def test_adobe_profile_disables_legacy_fitted_tone_and_ab():
+    source = np.array([[[0.08, 0.16, 0.32], [0.7, 0.3, 0.1]]], dtype=np.float32)
+    adobe = {
+        **IDENTITY_PROFILE,
+        "tone_curve": [[0, 0], [1, 1]],
+        "hue_sat_map": _identity_table(),
+        "look_table": _identity_table(),
+    }
+    fitted = {
+        "tone_nodes": np.linspace(0, 1, 16).tolist(),
+        "tone_values": np.linspace(0, 1, 16).tolist(),
+        "chroma_edges": [0, .05, .1, .2],
+        "oklab_ab_delta": np.full((12, 3, 2), .2).tolist(),
+    }
+    plain = pipeline.apply_pipeline(source, {}, color_profile={"adobe_profile": adobe})
+    with_fitted = pipeline.apply_pipeline(source, {}, color_profile={"adobe_profile": adobe, "camera_profile": fitted})
+    np.testing.assert_allclose(with_fitted, plain, atol=1e-7)
+
+
+def test_javascript_table_pack_matches_dual_illuminant_layout():
+    module = Path(__file__).parent / "static/js/desktop/develop/dng_glsl.js"
+    script = f"""
+        import {{ packDngTable }} from {json.dumps(module.as_uri())};
+        const first = Array(8).fill([0, 1, 1]).flat();
+        const second = Array(8).fill([20, .5, 2]).flat();
+        const packed = packDngTable({{dims:[2,2,2], data1:first, data2:second}},
+            {{calibration_illuminant1:17, calibration_illuminant2:21}}, 2856);
+        console.log(JSON.stringify({{dims:packed.dims, width:packed.width, height:packed.height, first:Array.from(packed.data.slice(0,4))}}));
+    """
+    result = subprocess.run(
+        ["node", "--experimental-default-type=module", "--input-type=module", "-e", script],
+        check=True, capture_output=True, text=True,
+    )
+    payload = json.loads(result.stdout)
+    assert payload == {"dims": [2, 2, 2], "width": 2, "height": 4, "first": [0, 1, 1, 1]}
+
+
+def test_float16_profile_lut_quantization_tolerance_is_bounded():
+    # WebGL uploads HueSatMap/LookTable texels as RGBA16F (the steep tone LUT
+    # stays RGBA32F). This locks the coefficient-level half-float tolerance.
+    table = np.array([[[-12.345, 0.8123, 1.1876], [7.891, 1.2345, 0.7654]]], dtype=np.float32)
+    restored = table.astype(np.float16).astype(np.float32)
+    max_delta = float(np.max(np.abs(restored - table)))
+    assert max_delta == pytest.approx(0.001250267, abs=1e-7)
+    assert max_delta < 0.002

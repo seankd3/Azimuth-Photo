@@ -211,8 +211,11 @@ class DevelopBackendTests(unittest.TestCase):
 
     def test_base_endpoints_and_pregen_contract(self):
         self._write_cached_base()
-        binary = self.client.get(f"/api/develop/{self.raw_id}/base.bin")
-        preview = self.client.get(f"/api/develop/{self.raw_id}/base.jpg")
+        # A warm preview must be a pure disk response: the route may not enter
+        # the RAW decoder before the browser gets its first visible image.
+        with mock.patch.object(rawproc, "ensure_base_cache", side_effect=AssertionError("must not decode warm base")):
+            binary = self.client.get(f"/api/develop/{self.raw_id}/base.bin")
+            preview = self.client.get(f"/api/develop/{self.raw_id}/base.jpg")
         pregen = self.client.post("/api/develop/pregen", json={"image_ids": []})
         self.assertEqual(binary.status_code, 200)
         self.assertEqual(binary.headers["content-encoding"], "gzip")
@@ -224,6 +227,14 @@ class DevelopBackendTests(unittest.TestCase):
         self.assertEqual(preview.headers["content-type"], "image/jpeg")
         self.assertEqual(pregen.status_code, 202)
         self.assertEqual(pregen.json()["queued"], [])
+
+    def test_cold_base_artifacts_start_background_generation_and_return_202(self):
+        preview = self.client.get(f"/api/develop/{self.raw_id}/base.jpg")
+        binary = self.client.get(f"/api/develop/{self.raw_id}/base.bin")
+        self.assertEqual(preview.status_code, 202, preview.text)
+        self.assertEqual(binary.status_code, 202, binary.text)
+        self.assertEqual(preview.json()["state"], "generating")
+        self.assertEqual(binary.headers["retry-after"], "1")
 
     def test_get_meta_self_heals_camera_profile_and_lens_data(self):
         self._write_cached_base()

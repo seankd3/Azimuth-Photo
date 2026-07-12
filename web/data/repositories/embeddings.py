@@ -263,6 +263,8 @@ async def store_embeddings_batch(
         return []
     model_key = embedding_config["model_key"]
     dimension = int(embedding_config["dimension"])
+    # Keep write transactions short so interactive saves aren't lock-stormed.
+    write_chunk = 4
     conn = await connection.open_async(db_path)
     try:
         await ensure_embedding_model_tables(
@@ -273,13 +275,18 @@ async def store_embeddings_batch(
             ensured_keys=ensured_keys,
         )
         await ensure_embedding_model_row(conn, embedding_config)
-        await conn.executemany(
-            "INSERT OR REPLACE INTO embeddings_by_model "
-            "(model_key, image_id, embedding, dimension) VALUES (?, ?, ?, ?)",
-            [(model_key, image_id, blob, dimension) for image_id, blob in rows],
-        )
         await conn.commit()
-        return [int(image_id) for image_id, _blob in rows]
+        stored: list[int] = []
+        for start in range(0, len(rows), write_chunk):
+            chunk = rows[start:start + write_chunk]
+            await conn.executemany(
+                "INSERT OR REPLACE INTO embeddings_by_model "
+                "(model_key, image_id, embedding, dimension) VALUES (?, ?, ?, ?)",
+                [(model_key, image_id, blob, dimension) for image_id, blob in chunk],
+            )
+            await conn.commit()
+            stored.extend(int(image_id) for image_id, _blob in chunk)
+        return stored
     finally:
         await connection.close_async(conn, db_path=db_path)
 

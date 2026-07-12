@@ -520,6 +520,11 @@ def configure_library_service(
             size,
             cache_root,
         ),
+        get_cached_image_ids=lambda image_ids, size, cache_root: db.get_cached_image_ids(
+            image_ids,
+            size,
+            cache_root,
+        ),
         rankings_response_cache_ttl_seconds=rankings_response_cache_ttl_seconds,
     )
 

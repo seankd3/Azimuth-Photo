@@ -142,26 +142,57 @@ async function fetchBaseWithRetry(imageId, token, scale = 1) {
         if (attempt === 8) setStatus('Developing preview…', { busy: true });
         const response = await fetch(`/api/develop/${imageId}/base.bin`);
         if (response.ok) return parseBase(await response.arrayBuffer(), scale);
-        if (![404, 503].includes(response.status)) {
+        if (![202, 404, 503].includes(response.status)) {
             const payload = await response.json().catch(() => null);
             throw new Error(payload?.error || 'The image preview could not be loaded.');
         }
-        if (attempt < 20) await delay(1000);
+        if (attempt < 20) await delay(response.status === 202 ? 500 : 1000);
     }
     throw new Error('The image preview is still being prepared. Try again in a moment.');
+}
+
+function markDevelopPaint(token, phase) {
+    if (token !== loadingToken || root.dataset.developOpenPhase) return;
+    const elapsed = Math.round(performance.now() - Number(root.dataset.developOpenedAt || performance.now()));
+    root.dataset.developOpenMs = String(elapsed);
+    root.dataset.developOpenPhase = phase;
+    console.timeStamp?.(`develop-open-${phase}:${elapsed}ms`);
+}
+
+async function paintDisplayBlob(blob, token, phase) {
+    if (!renderer || token !== loadingToken) return false;
+    const bitmap = await createImageBitmap(blob);
+    if (token !== loadingToken) {
+        bitmap.close?.();
+        return false;
+    }
+    renderer.uploadDisplayPreview(bitmap);
+    bitmap.close?.();
+    applyZoomState();
+    placeholder.hidden = true;
+    canvas.classList.add('preview-ready');
+    histogram?.setLoading(true);
+    markDevelopPaint(token, phase);
+    setStatus('Loading full quality…', { busy: true });
+    return true;
 }
 
 async function paintPlaceholder(imageId, token) {
     try {
         const response = await fetch(`/api/develop/${imageId}/base.jpg`);
-        if (!response.ok || token !== loadingToken) return;
-        const url = URL.createObjectURL(await response.blob());
-        const previous = placeholder.dataset.objectUrl;
-        placeholder.dataset.objectUrl = url;
-        placeholder.src = url;
-        placeholder.hidden = false;
-        if (previous) URL.revokeObjectURL(previous);
-    } catch { /* The staged base loader remains visible. */ }
+        if (response.ok && await paintDisplayBlob(await response.blob(), token, 'base-jpg')) return;
+    } catch { /* Fall through to the already-cached Library image. */ }
+    try {
+        // Browsed photos already have this tier. cached=1 keeps a cold Develop
+        // open from doing a second RAW decode just to make a placeholder.
+        const response = await fetch(`${thumbUrl('lg', imageId)}?cached=1`);
+        if (response.ok) await paintDisplayBlob(await response.blob(), token, 'library-lg');
+    } catch { /* The explicit staged status remains the final fallback. */ }
+}
+
+function setControlsLoading(loading) {
+    panelHost.toggleAttribute('inert', loading);
+    panelHost.dataset.loading = String(loading);
 }
 
 function scheduleSave(label = 'Develop adjustment') {
@@ -390,20 +421,24 @@ async function openImage(image) {
     syncFilmstrip();
     closePopover();
     placeholder.hidden = true;
-    canvas.classList.remove('ready');
+    canvas.classList.remove('ready', 'preview-ready');
+    root.dataset.developOpenedAt = String(performance.now());
+    delete root.dataset.developOpenMs;
+    delete root.dataset.developOpenPhase;
+    console.timeStamp?.('develop-open-start');
     if (!image) {
         setStatus('Choose a photo in Grid, then open Develop.', { error: false });
-        panelHost.toggleAttribute('inert', true);
+        setControlsLoading(true);
         return;
     }
-    panelHost.toggleAttribute('inert', false);
+    setControlsLoading(true);
     pregenNeighbors(image);
     setStatus('Loading develop settings…', { busy: true });
     setTimeout(() => {
-        if (token === loadingToken && !canvas.classList.contains('ready')) setStatus('Reading source image from disk…', { busy: true });
+        if (token === loadingToken && !canvas.classList.contains('ready') && !canvas.classList.contains('preview-ready')) setStatus('Reading source image from disk…', { busy: true });
     }, 1000);
     setTimeout(() => {
-        if (token === loadingToken && !canvas.classList.contains('ready')) setStatus('Developing preview…', { busy: true });
+        if (token === loadingToken && !canvas.classList.contains('ready') && !canvas.classList.contains('preview-ready')) setStatus('Developing preview…', { busy: true });
     }, 8000);
     paintPlaceholder(image.id, token);
     try {
@@ -437,13 +472,23 @@ async function openImage(image) {
         renderer.setSettings(renderedSettings(entry), entry.meta);
         applyZoomState();
         masking?.rebuildRasters();
+        canvas.classList.remove('preview-ready');
         canvas.classList.add('ready');
         placeholder.hidden = true;
+        histogram?.setLoading(false);
+        setControlsLoading(false);
+        const elapsed = Math.round(performance.now() - Number(root.dataset.developOpenedAt || performance.now()));
+        root.dataset.developFullMs = String(elapsed);
+        console.timeStamp?.(`develop-open-full:${elapsed}ms`);
         setStatus('');
         crop.setSettings(entry.settings);
         presetsPanel?.imageReady();
     } catch (error) {
-        if (token === loadingToken) setStatus(error.message || 'Develop could not open this photo.', { error: true });
+        if (token === loadingToken) {
+            setControlsLoading(false);
+            histogram?.setLoading(false);
+            setStatus(error.message || 'Develop could not open this photo.', { error: true });
+        }
     }
 }
 

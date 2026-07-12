@@ -26,6 +26,7 @@ DbPathProvider = Callable[[], str]
 _db_path: DbPathProvider | None = None
 _pregen_tasks: set[asyncio.Task] = set()
 _batch_tasks: set[asyncio.Task] = set()
+_base_generation_tasks: dict[int, asyncio.Task] = {}
 _batch_status: dict[str, Any] = {
     "state": "idle",
     "started_at": None,
@@ -176,13 +177,35 @@ def _json_settings(raw: str | None) -> dict[str, Any]:
     return result if isinstance(result, dict) else {}
 
 
-def _pipeline_metadata(meta: dict[str, Any] | None) -> dict[str, Any] | None:
+def _profiled_meta(meta: dict[str, Any] | None, source_path: str | None) -> dict[str, Any]:
+    """Resolve Adobe styling at request time without changing the base cache."""
+    result = dict(meta or {})
+    if result.get("base_kind") == "display":
+        return result
+    from features.develop import adobe_profiles, dng_pipeline
+
+    profile = adobe_profiles.resolve_adobe_profile(
+        source_path or result.get("source_path"),
+        result.get("camera_model") or result.get("UniqueCameraModel") or "",
+    )
+    if profile is None:
+        return result
+    profile = dng_pipeline.normalize_adobe_profile(profile)
+    profile["tone_curve_lut"] = dng_pipeline.tone_curve_lut(profile.get("tone_curve")).tolist()
+    result["adobe_profile"] = profile
+    result["adobe_profile_name"] = profile.get("profile_name") or "Adobe Standard"
+    return result
+
+
+def _pipeline_metadata(meta: dict[str, Any] | None, source_path: str | None = None) -> dict[str, Any] | None:
     """Carry source-kind semantics alongside RAW color metadata to exports."""
     if not isinstance(meta, dict):
         return None
-    color = dict(meta.get("color") or {})
-    if meta.get("base_kind"):
-        color["base_kind"] = meta["base_kind"]
+    profiled = _profiled_meta(meta, source_path)
+    color = dict(profiled.get("color") or {})
+    for key in ("base_kind", "source_path", "camera_model", "adobe_profile", "adobe_profile_name"):
+        if profiled.get(key) is not None:
+            color[key] = profiled[key]
     return color or None
 
 
@@ -332,61 +355,96 @@ async def _ensure_base(image_id: int, image: dict) -> tuple[rawproc.BasePaths, d
     return await asyncio.to_thread(rawproc.ensure_base_cache, image_id, image["filepath"])
 
 
+def _cached_base(image_id: int, image: dict) -> rawproc.BasePaths | None:
+    """Cheap cache probe for progressive Develop responses; never decodes RAW."""
+    return rawproc.cached_base_paths(image_id, image["filepath"])
+
+
+def _start_base_generation(image_id: int, image: dict) -> None:
+    """Start the existing rawproc single-flight generator without holding a request open."""
+    existing = _base_generation_tasks.get(image_id)
+    if existing is not None and not existing.done():
+        return
+
+    async def generate() -> None:
+        try:
+            await _ensure_base(image_id, image)
+        except Exception:
+            # The polling request will surface the decode error if it is retried;
+            # do not leave an unobserved task exception in the server log.
+            pass
+        finally:
+            _base_generation_tasks.pop(image_id, None)
+
+    _base_generation_tasks[image_id] = asyncio.create_task(generate())
+
+
+def _base_generating_response(image_id: int) -> JSONResponse:
+    return JSONResponse(
+        {"image_id": image_id, "state": "generating"},
+        status_code=202,
+        headers={"Cache-Control": "no-store", "Retry-After": "1"},
+    )
+
+
 async def _upsert_settings(image_id: int, incoming: dict[str, Any], label: str | None) -> dict[str, Any]:
-    conn = await connection.open_async(_configured_db_path())
-    try:
-        await conn.execute("BEGIN")
-        cursor = await conn.execute(
-            "SELECT settings, origin, xmp_path, xmp_mtime FROM develop_settings WHERE image_id = ?",
-            (image_id,),
-        )
-        existing = await cursor.fetchone()
-        now = _now()
-        if existing is None:
-            merged = dict(incoming)
-            origin = "user"
-            xmp_path = None
-            xmp_mtime = None
-        else:
-            prior = _json_settings(existing["settings"])
-            # Merge rather than replace: clients can render only v1 keys while
-            # later phases and imported XMP keys survive every autosave.
-            merged = {**prior, **incoming}
-            origin = existing["origin"] or "user"
-            xmp_path = existing["xmp_path"]
-            xmp_mtime = existing["xmp_mtime"]
-            if origin == "xmp":
-                await conn.execute(
-                    "INSERT INTO develop_history (image_id, settings, label, created_at) VALUES (?, ?, ?, ?)",
-                    (image_id, json.dumps(prior, separators=(",", ":")), "Import from XMP", now),
-                )
+    async def _write() -> dict[str, Any]:
+        conn = await connection.open_async(_configured_db_path())
+        try:
+            await conn.execute("BEGIN")
+            cursor = await conn.execute(
+                "SELECT settings, origin, xmp_path, xmp_mtime FROM develop_settings WHERE image_id = ?",
+                (image_id,),
+            )
+            existing = await cursor.fetchone()
+            now = _now()
+            if existing is None:
+                merged = dict(incoming)
                 origin = "user"
-        settings_json = json.dumps(merged, separators=(",", ":"))
-        await conn.execute(
-            """
-            INSERT INTO develop_settings (image_id, settings, origin, xmp_path, xmp_mtime, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(image_id) DO UPDATE SET
-                settings = excluded.settings,
-                origin = excluded.origin,
-                xmp_path = excluded.xmp_path,
-                xmp_mtime = excluded.xmp_mtime,
-                updated_at = excluded.updated_at
-            """,
-            (image_id, settings_json, origin, xmp_path, xmp_mtime, now),
-        )
-        await conn.execute(
-            "INSERT INTO develop_history (image_id, settings, label, created_at) VALUES (?, ?, ?, ?)",
-            (image_id, settings_json, label, now),
-        )
-        await conn.commit()
-        await oplog.append_develop(_configured_db_path(), image_id)
-        return {"settings": merged, "origin": origin, "updated_at": now}
-    except Exception:
-        await conn.rollback()
-        raise
-    finally:
-        await connection.close_async(conn, db_path=_configured_db_path())
+                xmp_path = None
+                xmp_mtime = None
+            else:
+                prior = _json_settings(existing["settings"])
+                # Merge rather than replace: clients can render only v1 keys while
+                # later phases and imported XMP keys survive every autosave.
+                merged = {**prior, **incoming}
+                origin = existing["origin"] or "user"
+                xmp_path = existing["xmp_path"]
+                xmp_mtime = existing["xmp_mtime"]
+                if origin == "xmp":
+                    await conn.execute(
+                        "INSERT INTO develop_history (image_id, settings, label, created_at) VALUES (?, ?, ?, ?)",
+                        (image_id, json.dumps(prior, separators=(",", ":")), "Import from XMP", now),
+                    )
+                    origin = "user"
+            settings_json = json.dumps(merged, separators=(",", ":"))
+            await conn.execute(
+                """
+                INSERT INTO develop_settings (image_id, settings, origin, xmp_path, xmp_mtime, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(image_id) DO UPDATE SET
+                    settings = excluded.settings,
+                    origin = excluded.origin,
+                    xmp_path = excluded.xmp_path,
+                    xmp_mtime = excluded.xmp_mtime,
+                    updated_at = excluded.updated_at
+                """,
+                (image_id, settings_json, origin, xmp_path, xmp_mtime, now),
+            )
+            await conn.execute(
+                "INSERT INTO develop_history (image_id, settings, label, created_at) VALUES (?, ?, ?, ?)",
+                (image_id, settings_json, label, now),
+            )
+            await conn.commit()
+            await oplog.append_develop(_configured_db_path(), image_id)
+            return {"settings": merged, "origin": origin, "updated_at": now}
+        except Exception:
+            await conn.rollback()
+            raise
+        finally:
+            await connection.close_async(conn, db_path=_configured_db_path())
+
+    return await connection.run_with_busy_retry(_write)
 
 
 async def _reset_settings(image_id: int) -> dict[str, Any]:
@@ -450,10 +508,10 @@ async def api_develop_base_bin(image_id: int):
     image, error = await _image_or_error(image_id)
     if error:
         return error
-    try:
-        paths, _meta = await _ensure_base(image_id, image)
-    except rawproc.RawDecodeError as exc:
-        return JSONResponse({"error": str(exc)}, status_code=422)
+    paths = _cached_base(image_id, image)
+    if paths is None:
+        _start_base_generation(image_id, image)
+        return _base_generating_response(image_id)
     return FileResponse(
         paths.binary,
         media_type="application/octet-stream",
@@ -466,10 +524,10 @@ async def api_develop_base_jpg(image_id: int):
     image, error = await _image_or_error(image_id)
     if error:
         return error
-    try:
-        paths, _meta = await _ensure_base(image_id, image)
-    except rawproc.RawDecodeError as exc:
-        return JSONResponse({"error": str(exc)}, status_code=422)
+    paths = _cached_base(image_id, image)
+    if paths is None:
+        _start_base_generation(image_id, image)
+        return _base_generating_response(image_id)
     return FileResponse(paths.preview, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
 
@@ -566,7 +624,7 @@ async def api_develop_proof_tile(
             edge=edge,
             asshot_temperature=asshot.get("temperature") if isinstance(asshot, dict) else None,
             asshot_tint=asshot.get("tint") if isinstance(asshot, dict) else None,
-            color_profile=_pipeline_metadata(cached_meta),
+            color_profile=_pipeline_metadata(cached_meta, image["filepath"]),
         )
     except (RenderError, ValueError) as exc:
         return JSONResponse({"error": str(exc)}, status_code=422)
@@ -609,6 +667,7 @@ async def api_get_develop(image_id: int):
         _paths, meta = await _ensure_base(image_id, image)
     except rawproc.RawDecodeError as exc:
         return JSONResponse({"error": str(exc)}, status_code=422)
+    meta = _profiled_meta(meta, image["filepath"])
     row = await _load_settings(image_id)
     return {
         "settings": _json_settings(row["settings"]) if row else {},
@@ -805,7 +864,7 @@ async def api_export_develop(image_id: int, body: DevelopExportBody):
             image_id=image_id,
             asshot_temperature=asshot.get("temperature") if isinstance(asshot, dict) else None,
             asshot_tint=asshot.get("tint") if isinstance(asshot, dict) else None,
-            color_profile=_pipeline_metadata(cached_meta),
+            color_profile=_pipeline_metadata(cached_meta, image["filepath"]),
         )
     except (rawproc.RawDecodeError, RenderError, ValueError) as exc:
         return JSONResponse({"error": str(exc)}, status_code=422)
@@ -892,7 +951,7 @@ async def _run_batch_export(body: DevelopBatchExportBody) -> None:
                 image_id=image_id,
                 asshot_temperature=asshot.get("temperature") if isinstance(asshot, dict) else None,
                 asshot_tint=asshot.get("tint") if isinstance(asshot, dict) else None,
-                color_profile=_pipeline_metadata(cached_meta),
+                color_profile=_pipeline_metadata(cached_meta, image["filepath"]),
             )
             filename = _download_name_for(
                 output_path,

@@ -14,6 +14,7 @@ from typing import Any
 import xml.etree.ElementTree as etree
 
 import db
+from data import connection
 from features.sync import oplog
 
 
@@ -233,21 +234,25 @@ async def assign_keyword(image_ids: Iterable[int], keyword_id: int, *, origin: s
     ids = list(dict.fromkeys(int(image_id) for image_id in image_ids if int(image_id) > 0))
     if not ids:
         return 0
-    conn = await db.get_db()
-    try:
-        await ensure_schema(conn)
-        if not await _keyword_row(conn, keyword_id):
-            raise LookupError("Keyword was not found")
-        cursor = await conn.executemany(
-            "INSERT INTO image_keywords (image_id, keyword_id, origin) VALUES (?, ?, ?) "
-            "ON CONFLICT(image_id, keyword_id) DO UPDATE SET origin = excluded.origin",
-            [(image_id, keyword_id, origin) for image_id in ids],
-        )
-        await conn.commit()
-        await oplog.append_keywords(db.DB_PATH, ids)
-        return max(int(cursor.rowcount or 0), 0)
-    finally:
-        await conn.close()
+
+    async def _write() -> int:
+        conn = await db.get_db()
+        try:
+            await ensure_schema(conn)
+            if not await _keyword_row(conn, keyword_id):
+                raise LookupError("Keyword was not found")
+            cursor = await conn.executemany(
+                "INSERT INTO image_keywords (image_id, keyword_id, origin) VALUES (?, ?, ?) "
+                "ON CONFLICT(image_id, keyword_id) DO UPDATE SET origin = excluded.origin",
+                [(image_id, keyword_id, origin) for image_id in ids],
+            )
+            await conn.commit()
+            await oplog.append_keywords(db.DB_PATH, ids)
+            return max(int(cursor.rowcount or 0), 0)
+        finally:
+            await conn.close()
+
+    return await connection.run_with_busy_retry(_write)
 
 
 async def unassign_keyword(image_ids: Iterable[int], keyword_id: int) -> int:

@@ -6,6 +6,7 @@ import shutil
 
 from date_inference import infer_image_date
 from data.repositories import catalog as catalog_repository
+from core.path_groups import safe_commonpath
 
 EXPECTED_EMBEDDING_DIM = 2048  # Qwen3-VL-Embedding-2B native dimension
 SCHEMA_VERSION = 25
@@ -1795,9 +1796,8 @@ async def migrate_catalog_sources(conn) -> bool:
     rows = await cursor.fetchall()
     if rows:
         dirs = [os.path.dirname(row["filepath"]) for row in rows if row["filepath"]]
-        try:
-            root = os.path.commonpath(dirs) if dirs else os.path.expanduser("~/Pictures")
-        except ValueError:
+        root = safe_commonpath(dirs) if dirs else os.path.expanduser("~/Pictures")
+        if root is None:
             root = dirs[0] if dirs else os.path.expanduser("~/Pictures")
         source = await catalog_repository.ensure_catalog_source_on_conn(conn, root, included=True)
         await conn.execute(

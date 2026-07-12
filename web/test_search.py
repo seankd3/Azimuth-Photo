@@ -116,7 +116,7 @@ class SearchTests(BackendTestCase):
         self.assertEqual(search_calls[1], ("sm", 300, True, "sunset"))
         self.assertEqual(searched["candidate_source"], "search_diverse_universe")
 
-    async def test_search_skips_uncached_sm_results_and_fills_later_visible_matches(self):
+    async def test_search_visibility_is_mode_aware(self):
         source = await self._source()
         hidden_best = await self._image(source["id"], "hidden-best.jpg")
         visible_first = await self._image(source["id"], "visible-first.jpg")
@@ -151,6 +151,21 @@ class SearchTests(BackendTestCase):
         self.assertEqual(result["visible_images"], 2)
         self.assertEqual(result["total_images"], 4)
         self.assertEqual(result["hidden_pending_thumbnails"], 2)
+
+        with unittest.mock.patch.dict(
+            os.environ,
+            {"PHOTOARCHIVE_MODE": "satellite", "PHOTOARCHIVE_HUB_URL": "http://stub-hub"},
+        ):
+            library_service._rankings_response_cache.clear()
+            satellite_result = await search_routes.api_search(q="sunset", limit=2)
+
+        self.assertEqual([img["id"] for img in satellite_result["images"]], [hidden_best, visible_first])
+        self.assertEqual(satellite_result["visible_images"], 4)
+        self.assertEqual(satellite_result["total_images"], 4)
+        self.assertEqual(satellite_result["hidden_pending_thumbnails"], 0)
+        satellite_cards = {card["id"]: card for card in satellite_result["images"]}
+        self.assertNotIn("thumb_url", satellite_cards[hidden_best])
+        self.assertIn("thumb_url", satellite_cards[visible_first])
 
     async def test_rankings_search_uses_metadata_fallback_when_ai_is_cold(self):
         source = await self._source()
@@ -815,7 +830,7 @@ class SearchTests(BackendTestCase):
             release.set()
             await asyncio.sleep(0)
 
-    async def test_similar_skips_uncached_sm_results_and_fills_later_visible_matches(self):
+    async def test_similar_visibility_is_mode_aware(self):
         source = await self._source()
         source_image = await self._image(source["id"], "source.jpg")
         hidden_best = await self._image(source["id"], "hidden-best.jpg")
@@ -856,6 +871,20 @@ class SearchTests(BackendTestCase):
         self.assertEqual(result["visible_images"], 2)
         self.assertEqual(result["total_images"], 4)
         self.assertEqual(result["hidden_pending_thumbnails"], 2)
+
+        with unittest.mock.patch.dict(
+            os.environ,
+            {"PHOTOARCHIVE_MODE": "satellite", "PHOTOARCHIVE_HUB_URL": "http://stub-hub"},
+        ):
+            satellite_result = await search_routes.api_similar(source_image, limit=2)
+
+        self.assertEqual([img["id"] for img in satellite_result["images"]], [hidden_best, visible_first])
+        self.assertEqual(satellite_result["visible_images"], 4)
+        self.assertEqual(satellite_result["total_images"], 4)
+        self.assertEqual(satellite_result["hidden_pending_thumbnails"], 0)
+        satellite_cards = {card["id"]: card for card in satellite_result["images"]}
+        self.assertNotIn("thumb_url", satellite_cards[hidden_best])
+        self.assertIn("thumb_url", satellite_cards[visible_first])
 
     async def test_duplicates_reuses_cached_result_for_same_embedding_surface(self):
         source = await self._source()

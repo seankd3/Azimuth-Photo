@@ -14,6 +14,7 @@ import settings
 from core import responses as response_helpers
 from data.repositories import rankings as ranking_repository
 from features.library import taste as taste_service
+from features.sync import satellite
 
 
 _rankings_response_cache: dict[tuple, dict] = {}
@@ -43,6 +44,7 @@ _get_rank_quality: Callable[..., Awaitable[dict]] | None = None
 _get_date_histogram: Callable[..., Awaitable[dict]] | None = None
 _get_scope_counts: Callable[..., Awaitable[dict]] | None = None
 _get_visible_pairing_pool_counts: Callable[..., Awaitable[dict]] | None = None
+_get_cached_image_ids: Callable[..., Awaitable[set[int]]] | None = None
 _get_import_batch_image_ids: Callable[[int], Awaitable[set[int] | None]] | None = None
 _get_stack_representative_counts: Callable[[list[int]], Awaitable[dict[int, dict]]] | None = None
 
@@ -64,6 +66,7 @@ def configure(
     count_rankings: Callable[..., Awaitable[int]],
     get_rankings: Callable[..., Awaitable[list]],
     get_visible_pairing_pool_counts: Callable[..., Awaitable[dict]],
+    get_cached_image_ids: Callable[..., Awaitable[set[int]]],
     rankings_response_cache_ttl_seconds: Callable[[], float] | None = None,
     get_rank_quality: Callable[..., Awaitable[dict]] | None = None,
     get_date_histogram: Callable[..., Awaitable[dict]] | None = None,
@@ -74,7 +77,7 @@ def configure(
     global _rankings_response_cache_ttl_seconds_provider
     global _extension_search_terms, _db_signature, _get_date_groups, _get_map_markers
     global _get_filter_options, _get_stats, _count_rankings, _get_rankings
-    global _get_visible_pairing_pool_counts, _get_rank_quality
+    global _get_visible_pairing_pool_counts, _get_cached_image_ids, _get_rank_quality
     global _get_date_histogram, _get_scope_counts
     _resolve_library_constraints = resolve_library_constraints
     _cache_root = cache_root
@@ -91,6 +94,7 @@ def configure(
     _count_rankings = count_rankings
     _get_rankings = get_rankings
     _get_visible_pairing_pool_counts = get_visible_pairing_pool_counts
+    _get_cached_image_ids = get_cached_image_ids
     _get_rank_quality = get_rank_quality
     _get_date_histogram = get_date_histogram
     _get_scope_counts = get_scope_counts
@@ -416,8 +420,22 @@ async def _attach_stack_counts(cards: list[dict], stacks: str = "expanded") -> l
     return cards
 
 
+async def _satellite_thumb_placeholders(cards: list[dict]) -> list[dict]:
+    if not satellite.is_satellite_mode() or not cards:
+        return cards
+    cached_ids = await _configured(_get_cached_image_ids)(
+        [int(card["id"]) for card in cards],
+        "sm",
+        _configured_cache_root(),
+    )
+    return [
+        dict(card) if int(card["id"]) in cached_ids else {key: value for key, value in card.items() if key != "thumb_url"}
+        for card in cards
+    ]
+
+
 def _visible_thumb_size_for_scope(import_batch: int = 0) -> str:
-    return "" if _normalized_import_batch_id(import_batch) else "sm"
+    return "" if satellite.is_satellite_mode() or _normalized_import_batch_id(import_batch) else "sm"
 
 
 def copy_rankings_response(response: dict) -> dict:
@@ -496,7 +514,7 @@ async def map_markers_payload(
     search = await _configured_resolve_library_constraints(q, people=people, deep=deep)
     search_ids = await _combined_import_batch_filter(search.get("id_filter"), import_batch)
     visible_thumb_size = _visible_thumb_size_for_scope(import_batch)
-    return await _configured(_get_map_markers)(
+    payload = await _configured(_get_map_markers)(
         orientation=orientation,
         compared=compared,
         min_stars=min_stars,
@@ -512,6 +530,18 @@ async def map_markers_payload(
         id_filter=search_ids,
         text_query=search.get("text_query") or "",
     )
+    if not satellite.is_satellite_mode() or not payload.get("markers"):
+        return payload
+    markers = [dict(marker) for marker in payload["markers"]]
+    cached_ids = await _configured(_get_cached_image_ids)(
+        [int(marker["id"]) for marker in markers],
+        "sm",
+        _configured_cache_root(),
+    )
+    for marker in markers:
+        if int(marker["id"]) not in cached_ids:
+            marker.pop("thumb_url", None)
+    return {**payload, "markers": markers}
 
 
 async def date_histogram_payload(
@@ -667,6 +697,7 @@ async def api_rankings_impl(
             bool(search["ai_unavailable"]) if cacheable_search else False,
             str(search.get("fallback_reason") or ""),
             _normalized_import_batch_id(import_batch),
+            visible_thumb_size,
             stacks_mode,
             blend_context.get("cache_key"),
         )
@@ -776,6 +807,7 @@ async def api_rankings_impl(
         )
         page = all_results[offset:offset + limit]
         page = await _attach_stack_counts(page, stacks_mode)
+        page = await _satellite_thumb_placeholders(page)
         if page:
             _configured_schedule_thumbnail_prefetch(
                 [{"id": row["id"], "filepath": ""} for row in page],
@@ -834,6 +866,7 @@ async def api_rankings_impl(
         all_results.sort(key=lambda x: x["similarity"], reverse=(sort == "similarity"))
         page = all_results[offset:offset + limit]
         page = await _attach_stack_counts(page, stacks_mode)
+        page = await _satellite_thumb_placeholders(page)
         if page:
             _configured_schedule_thumbnail_prefetch(
                 [{"id": row["id"], "filepath": ""} for row in page],
@@ -966,7 +999,11 @@ async def api_rankings_impl(
         if unfiltered_rankings:
             counts = await counts_task
             total_images = int(counts.get("active_images") or 0)
-            visible_images = int(counts.get("visible_images") or 0)
+            visible_images = (
+                int(counts.get("visible_images") or 0)
+                if visible_thumb_size
+                else total_images
+            )
         else:
             if total_task is None:
                 total_task = asyncio.create_task(
@@ -1049,7 +1086,11 @@ async def api_rankings_impl(
         if unfiltered_rankings:
             counts = await counts_task
             total_images = int(counts.get("active_images") or 0)
-            visible_images = int(counts.get("visible_images") or 0)
+            visible_images = (
+                int(counts.get("visible_images") or 0)
+                if visible_thumb_size
+                else total_images
+            )
         else:
             if defer_empty_first_page_counts and not images:
                 visible_images = 0
@@ -1098,6 +1139,7 @@ async def api_rankings_impl(
             kwargs["date_group"] = app_helpers.date_group_for_image(data)
         result.append(app_helpers.image_card(data, "sm", **kwargs))
     result = await _attach_stack_counts(result, stacks_mode)
+    result = await _satellite_thumb_placeholders(result)
     response = {
         "images": result,
         **response_helpers.visibility_counts(total_images, visible_images),

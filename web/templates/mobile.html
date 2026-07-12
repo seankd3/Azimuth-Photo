@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-static-version="{{ static_version }}" data-https-port="8443">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -72,9 +72,17 @@
     <a id="m-dl" download hidden></a>
 
     <script>
-        if ('serviceWorker' in navigator) {
+        // Service workers require a secure context (HTTPS / localhost).
+        // On plain HTTP this is a no-op — the localStorage write queue still works.
+        // Version the SW URL with the same cache-bust stamp as CSS/JS so updates
+        // replace the shell cache (see docs/FIELD_HTTPS.md).
+        if ('serviceWorker' in navigator && window.isSecureContext) {
             window.addEventListener('load', function () {
-                navigator.serviceWorker.register('/sw.js').catch(function () {});
+                var version = document.documentElement.getAttribute('data-static-version') || '';
+                var url = version
+                    ? '/sw.js?v=' + encodeURIComponent(version)
+                    : '/sw.js';
+                navigator.serviceWorker.register(url).catch(function () {});
             });
         }
     </script>

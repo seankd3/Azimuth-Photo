@@ -41,12 +41,18 @@ async def visible_embedding_page(
     model_key: str | None = None,
 ) -> tuple[list[dict], int, int]:
     db_path = _configured_db_path()
-    cached_ids = await cache_entry_repository.cached_image_id_set_cached(
-        db_path,
-        size=size,
-        cache_root=_configured_cache_root(),
-    )
-    if not cached_ids:
+    candidate_ids = {int(image_id) for image_id in image_ids}
+    if exclude_id is not None:
+        candidate_ids.discard(int(exclude_id))
+    if size:
+        candidate_ids.intersection_update(
+            await cache_entry_repository.cached_image_id_set_cached(
+                db_path,
+                size=size,
+                cache_root=_configured_cache_root(),
+            )
+        )
+    if not candidate_ids:
         total = max(0, len(image_ids) - (1 if exclude_id is not None else 0))
         return [], 0, total
 
@@ -60,7 +66,7 @@ async def visible_embedding_page(
         id_to_idx = {int(image_id): idx for idx, image_id in enumerate(image_ids)}
 
     visible_pairs = []
-    for image_id in cached_ids:
+    for image_id in candidate_ids:
         image_id = int(image_id)
         if exclude_id is not None and image_id == exclude_id:
             continue

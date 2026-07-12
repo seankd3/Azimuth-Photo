@@ -361,7 +361,9 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn('src="/static/js/desktop/bootstrap.js', desktop_template)
         self.assertIn('href="/static/mobile.css', mobile_template)
         self.assertIn('src="/static/js/mobile/bootstrap.js', mobile_template)
-        self.assertIn("navigator.serviceWorker.register('/sw.js')", mobile_template)
+        self.assertIn("window.isSecureContext", mobile_template)
+        self.assertIn("navigator.serviceWorker.register(url)", mobile_template)
+        self.assertIn("/sw.js?v=", mobile_template)
         self.assertIn("from '../api.js'", desktop_api)
         self.assertIn("from '../api.js'", mobile_api)
 

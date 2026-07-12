@@ -2,15 +2,27 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import contextvars
 import os
 import sqlite3
 import tempfile
+from collections.abc import Awaitable, Callable
+from typing import TypeVar
 
 import aiosqlite
 
+from core.path_groups import safe_commonpath
+
 _sqlite_timeout_seconds = contextvars.ContextVar("photoarchive_sqlite_timeout_seconds", default=None)
+
+# User-facing writes: short busy retries so a transient embedding/thumb lock
+# never surfaces as HTTP 500. Do not blanket-wrap background workers.
+USER_WRITE_LOCK_RETRIES = 3
+USER_WRITE_LOCK_BACKOFF_SECONDS = 0.25
+
+T = TypeVar("T")
 
 
 def _effective_timeout(timeout: float | None) -> float:
@@ -34,6 +46,25 @@ def sqlite_timeout(seconds: float):
 def is_sqlite_locked_error(exc: BaseException) -> bool:
     text = str(exc).lower()
     return "database is locked" in text or "database table is locked" in text or "database schema is locked" in text
+
+
+async def run_with_busy_retry(
+    operation: Callable[[], Awaitable[T]],
+    *,
+    retries: int = USER_WRITE_LOCK_RETRIES,
+    backoff_seconds: float = USER_WRITE_LOCK_BACKOFF_SECONDS,
+) -> T:
+    """Retry a user-facing write a bounded number of times on SQLite lock storms."""
+
+    attempt = 0
+    while True:
+        try:
+            return await operation()
+        except Exception as exc:
+            if not is_sqlite_locked_error(exc) or attempt >= retries:
+                raise
+            attempt += 1
+            await asyncio.sleep(backoff_seconds)
 
 
 async def open_async(db_path: str, *, timeout: float | None = None) -> aiosqlite.Connection:
@@ -96,7 +127,8 @@ def is_ephemeral_db_path(db_path: str) -> bool:
     try:
         path = os.path.realpath(db_path)
         tmp = os.path.realpath(tempfile.gettempdir())
-        return os.path.commonpath([tmp, path]) == tmp
+        common = safe_commonpath([tmp, path])
+        return common == tmp if common is not None else False
     except Exception:
         return False
 

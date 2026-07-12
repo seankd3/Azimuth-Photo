@@ -3,7 +3,7 @@ import {
     CALIBRATION_SATURATION_SCALE, CALIBRATION_SHADOW_END, CALIBRATION_SHADOW_START,
     CALIBRATION_SHADOW_TINT_SCALE, CAMERA_PROFILE_BIN_CENTER,
     CAMERA_PROFILE_CHROMA_BINS, CAMERA_PROFILE_HUE_BINS, CAMERA_PROFILE_PI,
-    CAMERA_PROFILE_TWO_PI, CLARITY_FACTOR,
+    CAMERA_PROFILE_TWO_PI, CLARITY_FACTOR, DNG_LINEAR_SRGB_TO_PROPHOTO, DNG_PROPHOTO_TO_LINEAR_SRGB,
     CLARITY_RESIDUAL_MAX, CONTRAST_FACTOR, DEHAZE_AIRLIGHT_FACTOR, DEHAZE_SATURATION_FACTOR,
     GRAIN_CELL_SIZE_MIN, GRAIN_CELL_SIZE_RANGE, GRAIN_FACTOR, GRAIN_HASH_MULTIPLIER,
     GRAIN_HASH_SHIFT, GRAIN_OUTPUT_MASK, GRAIN_OUTPUT_SHIFT, GRAIN_SEED,
@@ -39,6 +39,7 @@ import {
 import { buildMaskRasters, localToSlider } from './mask_raster.js';
 import { RETOUCH_SETTINGS_KEY } from './heal.js';
 import { buildFilmTables, FILM_GLSL, FILM_LOGE_MAX, FILM_LOGE_MIN } from './film.js';
+import { DNG_GLSL, packDngTable, packDngTone } from './dng_glsl.js';
 import { markFrameDone } from './perf_overlay.js';
 
 const FILM_STOCK_CACHE = new Map();
@@ -66,7 +67,8 @@ const matrixColumnMajor = (matrix) => new Float32Array([
 // normalize only its two interpolated log-exposure literals at integration.
 const FILM_SHADER = FILM_GLSL
     .replaceAll(`(${FILM_LOGE_MIN})`, `(${Number(FILM_LOGE_MIN).toFixed(1)})`)
-    .replaceAll(`(${FILM_LOGE_MAX} -`, `(${Number(FILM_LOGE_MAX).toFixed(1)} -`);
+    .replaceAll(`(${FILM_LOGE_MAX} -`, `(${Number(FILM_LOGE_MAX).toFixed(1)} -`)
+    .replace(' / log(10.0) + 1;', ' / log(10.0) + 1.0;');
 
 /** Emit a GLSL float literal (JS 2.0 stringifies as "2", which GLSL treats as int). */
 const f = (value) => {
@@ -526,6 +528,19 @@ uniform vec3 u_gradeHighlight;
 uniform vec3 u_gradeGlobal;
 uniform float u_gradeBlending;
 uniform float u_gradeBalance;
+uniform bool u_dngActive;
+uniform bool u_dngHueActive;
+uniform bool u_dngLookActive;
+uniform sampler2D u_dngHueSat;
+uniform sampler2D u_dngLook;
+uniform sampler2D u_dngTone;
+uniform ivec3 u_dngHueDims;
+uniform ivec3 u_dngLookDims;
+uniform int u_dngHueEncoding;
+uniform int u_dngLookEncoding;
+uniform mat3 u_dngSrgbToProPhoto;
+uniform mat3 u_dngProPhotoToSrgb;
+uniform float u_dngBaselineExposure;
 `;
 
 const COLOR_FUNCTION = `
@@ -624,6 +639,13 @@ vec3 applyScene(vec2 uv, out vec2 imageUv) {
     vec3 rgb = texture(u_source, imageUv).rgb * lensVignetteGain(imageUv);
     if (u_applyWb) rgb = max(u_wbMatrix * rgb, vec3(0.0));
     rgb = applyCalibration(rgb);
+    if (u_dngActive) {
+        rgb = u_dngSrgbToProPhoto * rgb * exp2(u_dngBaselineExposure);
+        if (!u_filmActive) {
+            if (u_dngHueActive) rgb = dngApplyTable(rgb, u_dngHueSat, u_dngHueDims, u_dngHueEncoding);
+            if (u_dngLookActive) rgb = dngApplyTable(rgb, u_dngLook, u_dngLookDims, u_dngLookEncoding);
+        }
+    }
     rgb *= exp2(u_exposure);
     float Y = dot(rgb, LUMW);
     float ev = log2(max(Y, 1e-6));
@@ -651,14 +673,18 @@ vec3 applyColor(vec2 uv, out vec2 imageUv) {
     vec3 rgb = applyScene(uv, imageUv);
     if (any(lessThan(imageUv, vec2(0.0))) || any(greaterThan(imageUv, vec2(1.0)))) return vec3(0.0);
     float d = setting(u_dehaze);
-    vec3 c = linearToSrgb(clamp(rgb, 0.0, 1.0));
+    vec3 c = linearToSrgb(clamp(u_dngActive ? u_dngProPhotoToSrgb * rgb : rgb, 0.0, 1.0));
     if (u_filmActive) {
         float glow = texture(u_filmGlow, uv).r;
         vec3 film = filmTransform(rgb, glow, imageUv * u_sourceSize, min(u_sourceSize.x, u_sourceSize.y));
         c = mix(c, film, clamp(u_filmStrength, 0.0, 1.0));
     } else {
-        c = vec3(texture(u_baseCurve, vec2(c.r, .5)).r, texture(u_baseCurve, vec2(c.g, .5)).r, texture(u_baseCurve, vec2(c.b, .5)).r);
-        c = scaleOklabChroma(c, u_baseProfileSat, 0.0, 0.0, 0.0);
+        if (u_dngActive) {
+            c = linearToSrgb(clamp(u_dngProPhotoToSrgb * dngApplyTone(rgb), 0.0, 1.0));
+        } else {
+            c = vec3(texture(u_baseCurve, vec2(c.r, .5)).r, texture(u_baseCurve, vec2(c.g, .5)).r, texture(u_baseCurve, vec2(c.b, .5)).r);
+            c = scaleOklabChroma(c, u_baseProfileSat, 0.0, 0.0, 0.0);
+        }
         vec3 mainCurve = vec3(texture(u_curve, vec2(c.r, .5)).r, texture(u_curve, vec2(c.g, .5)).r, texture(u_curve, vec2(c.b, .5)).r);
         c = vec3(texture(u_curve, vec2(mainCurve.r, .5)).g, texture(u_curve, vec2(mainCurve.g, .5)).b, texture(u_curve, vec2(mainCurve.b, .5)).a);
     }
@@ -700,6 +726,7 @@ in vec2 v_uv;
 out vec4 outColor;
 ${COLOR_UNIFORMS}
 ${COLOR_MATH}
+${DNG_GLSL}
 ${FILM_SHADER}
 ${COLOR_FUNCTION}
 void main() {
@@ -714,6 +741,7 @@ in vec2 v_uv;
 out vec4 outColor;
 ${COLOR_UNIFORMS}
 ${COLOR_MATH}
+${DNG_GLSL}
 ${FILM_SHADER}
 ${COLOR_FUNCTION}
 void main() {
@@ -751,6 +779,16 @@ void main() {
     }
     outColor = sum / max(total, 1e-6);
 }`;
+
+// Display-referred Develop and Library previews bypass the linear RAW pipeline.
+// This tiny present pass keeps the first image inside the same canvas that the
+// full-quality renderer will take over, so the swap cannot move the workspace.
+const DISPLAY_PREVIEW_FRAGMENT = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+out vec4 outColor;
+uniform sampler2D u_preview;
+void main() { outColor = texture(u_preview, v_uv); }`;
 
 const MAIN_FRAGMENT = `#version 300 es
 precision highp float;
@@ -795,6 +833,7 @@ uniform vec4 u_localEffects[${LOCAL_RENDER_CAP}];
 uniform vec4 u_localColor[${LOCAL_RENDER_CAP}];
 uniform int u_maskOverlay;
 ${COLOR_MATH}
+${DNG_GLSL}
 ${FILM_SHADER}
 ${COLOR_FUNCTION}
 float localMask(int index, vec2 imageUv) {
@@ -1007,8 +1046,11 @@ function compile(gl, type, source) {
     gl.compileShader(shader);
     if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
         const message = gl.getShaderInfoLog(shader);
+        const line = Number(message?.match(/ERROR:\s*\d+:(\d+)/)?.[1] || 0);
+        const context = line ? source.split('\n').slice(Math.max(0, line - 3), line + 2)
+            .map((value, index) => `${Math.max(1, line - 2) + index}: ${value}`).join('\n') : '';
         gl.deleteShader(shader);
-        throw new Error(`Develop shader compile failed: ${message}`);
+        throw new Error(`Develop shader compile failed: ${message}${context ? `\n${context}` : ''}`);
     }
     return shader;
 }
@@ -1125,6 +1167,7 @@ export class DevelopRenderer {
         this.filmLumaProgram = program(this.gl, FILM_LUMA_FRAGMENT);
         this.blurProgram = program(this.gl, BLUR_FRAGMENT);
         this.retouchProgram = program(this.gl, RETOUCH_FRAGMENT);
+        this.displayPreviewProgram = program(this.gl, DISPLAY_PREVIEW_FRAGMENT);
         this.settings = {};
         this.meta = {};
         this.geometryEnabled = true;
@@ -1133,6 +1176,8 @@ export class DevelopRenderer {
         this.height = 1;
         this.dirty = false;
         this.ready = false;
+        this.displayPreview = false;
+        this.previewSource = null;
         this.frame = 0;
         this.createGeometry();
         this.source = texture(this.gl, 1, 1, {
@@ -1142,6 +1187,12 @@ export class DevelopRenderer {
         this.canvas.width = 1;
         this.canvas.height = 1;
         this.baseCurve = null;
+        this.dngHueSat = null;
+        this.dngLook = null;
+        this.dngTone = null;
+        this.dngProfileKey = '';
+        this.dngHueDims = [0, 0, 0];
+        this.dngLookDims = [0, 0, 0];
         this.filmHd = null;
         this.filmPrint = null;
         this.filmTables = null;
@@ -1157,6 +1208,7 @@ export class DevelopRenderer {
         this.baseProfileKey = '';
         this.updateBaseCurve(null);
         this.updateCurve({});
+        this.updateDngTextures(null, 5500);
         this.updateFilmTextures(null);
     }
 
@@ -1167,7 +1219,7 @@ export class DevelopRenderer {
         const buffer = gl.createBuffer();
         gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
         gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]), gl.STATIC_DRAW);
-        for (const p of [this.mainProgram, this.lumaProgram, this.filmLumaProgram, this.blurProgram, this.retouchProgram]) {
+        for (const p of [this.mainProgram, this.lumaProgram, this.filmLumaProgram, this.blurProgram, this.retouchProgram, this.displayPreviewProgram]) {
             const location = gl.getAttribLocation(p, 'a_position');
             gl.enableVertexAttribArray(location);
             gl.vertexAttribPointer(location, 2, gl.FLOAT, false, 0, 0);
@@ -1178,6 +1230,11 @@ export class DevelopRenderer {
     uploadSource(data, width, height) {
         const gl = this.gl;
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        this.displayPreview = false;
+        if (this.previewSource) {
+            gl.deleteTexture(this.previewSource);
+            this.previewSource = null;
+        }
         if (this.source) gl.deleteTexture(this.source);
         gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
         this.source = texture(gl, width, height, {
@@ -1189,6 +1246,31 @@ export class DevelopRenderer {
         this.canvas.width = width;
         this.canvas.height = height;
         this.rebuildTargets();
+        this.ready = true;
+        this.requestRender();
+    }
+
+    uploadDisplayPreview(image) {
+        // Paint an 8-bit display-referred preview without applying RAW settings.
+        const gl = this.gl;
+        const width = Number(image?.width);
+        const height = Number(image?.height);
+        if (!(width > 0 && height > 0)) throw new Error('Develop preview has invalid dimensions.');
+        if (this.previewSource) gl.deleteTexture(this.previewSource);
+        this.previewSource = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, this.previewSource);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+        this.displayPreview = true;
+        this.width = width;
+        this.height = height;
+        this.canvas.width = width;
+        this.canvas.height = height;
         this.ready = true;
         this.requestRender();
     }
@@ -1255,6 +1337,39 @@ export class DevelopRenderer {
         });
     }
 
+    updateDngTextures(profile, cct) {
+        const key = JSON.stringify([
+            profile?.source_file || profile?.library_file || '', profile?.profile_name || '',
+            Number(profile?.baseline_exposure || 0), Number(cct || 5500),
+        ]);
+        if (key === this.dngProfileKey) return;
+        this.dngProfileKey = key;
+        const gl = this.gl;
+        for (const value of [this.dngHueSat, this.dngLook, this.dngTone]) if (value) gl.deleteTexture(value);
+        const hue = packDngTable(profile?.hue_sat_map, profile, cct);
+        const look = packDngTable(profile?.look_table, profile, cct);
+        const tone = packDngTone(profile) || (() => {
+            const data = new Float32Array(1025 * 4);
+            for (let index = 0; index < 1025; index += 1) data.set([index / 1024, index / 1024, index / 1024, 1], index * 4);
+            return data;
+        })();
+        const identity = new Float32Array([0, 1, 1, 1, 0, 1, 1, 1]);
+        this.dngHueSat = texture(gl, hue?.width || 2, hue?.height || 1, {
+            data: float32ToHalf(hue?.data || identity), internalFormat: gl.RGBA16F, type: gl.HALF_FLOAT, filter: gl.NEAREST,
+        });
+        this.dngLook = texture(gl, look?.width || 2, look?.height || 1, {
+            data: float32ToHalf(look?.data || identity), internalFormat: gl.RGBA16F, type: gl.HALF_FLOAT, filter: gl.NEAREST,
+        });
+        this.dngTone = texture(gl, 1025, 1, {
+            // The ACR3 toe is steep enough that half-float tone samples amplify
+            // into visible shadow error. Keep HSV tables compact RGBA16F, but
+            // preserve the exact SDK curve in a sampled RGBA32F texture.
+            data: tone, internalFormat: gl.RGBA32F, type: gl.FLOAT, filter: gl.NEAREST,
+        });
+        this.dngHueDims = hue?.dims || [0, 0, 0];
+        this.dngLookDims = look?.dims || [0, 0, 0];
+    }
+
     updateFilmTextures(tables) {
         if (tables === this.filmTextureTables) return;
         this.filmTextureTables = tables;
@@ -1316,18 +1431,22 @@ export class DevelopRenderer {
         this.settings = effectiveLookSettings(settings || {});
         this.meta = meta || {};
         const baseKind = this.meta.base_kind || 'raw';
-        const profile = baseKind === 'display' ? null : (this.meta.camera_profile || this.meta.color?.camera_profile || null);
+        const adobeProfile = this.meta.adobe_profile || this.meta.color?.adobe_profile || null;
+        const profile = baseKind === 'display' || adobeProfile ? null : (this.meta.camera_profile || this.meta.color?.camera_profile || null);
         const profileKey = profile?.slug || profile?.model || '';
         const look = this.settings.Look;
         const lookKey = JSON.stringify([
             look?.Amount ?? null,
             look?.Parameters?.ToneCurvePV2012 ?? null,
         ]);
-        const baseProfileKey = `${baseKind}|${profileKey}|${lookKey}`;
+        const curveBaseKind = adobeProfile ? 'display' : baseKind;
+        const baseProfileKey = `${curveBaseKind}|${profileKey}|${lookKey}`;
         if (baseProfileKey !== this.baseProfileKey) {
             this.baseProfileKey = baseProfileKey;
-            this.updateBaseCurve(profile, this.settings, baseKind);
+            this.updateBaseCurve(profile, this.settings, curveBaseKind);
         }
+        const cct = Number(this.meta.as_shot_temperature || this.meta.as_shot?.temperature || 5500);
+        this.updateDngTextures(adobeProfile, cct);
         this.updateCurve(this.settings);
         this.updateFilmStock(this.settings.pa_FilmStock);
         this.requestRender();
@@ -1442,6 +1561,12 @@ export class DevelopRenderer {
         bindUnit(this.gl, this.filmGlow?.texture, 10);
     }
 
+    bindDngUnits() {
+        bindUnit(this.gl, this.dngHueSat, 11);
+        bindUnit(this.gl, this.dngLook, 12);
+        bindUnit(this.gl, this.dngTone, 13);
+    }
+
     setProgramView(program, view = null) {
         const selected = view || { scale: 1, center: { u: .5, v: .5 } };
         const scale = this.gl.getUniformLocation(program, 'u_viewScale');
@@ -1460,6 +1585,9 @@ export class DevelopRenderer {
         gl.uniform1i(uniform('u_filmHd'), 8);
         gl.uniform1i(uniform('u_filmPrint'), 9);
         gl.uniform1i(uniform('u_filmGlow'), 10);
+        gl.uniform1i(uniform('u_dngHueSat'), 11);
+        gl.uniform1i(uniform('u_dngLook'), 12);
+        gl.uniform1i(uniform('u_dngTone'), 13);
         gl.uniform2f(uniform('u_sourceSize'), this.width, this.height);
         const film = this.filmTables;
         const filmActive = this.filmActive();
@@ -1490,6 +1618,17 @@ export class DevelopRenderer {
             Number(grain.shadowBias ?? 0.35),
         );
         gl.uniform1f(uniform('u_filmStrength'), filmPercent('pa_FilmStrength'));
+        const adobe = this.meta.adobe_profile || this.meta.color?.adobe_profile || null;
+        gl.uniform1i(uniform('u_dngActive'), adobe ? 1 : 0);
+        gl.uniform1i(uniform('u_dngHueActive'), adobe && this.dngHueDims[0] ? 1 : 0);
+        gl.uniform1i(uniform('u_dngLookActive'), adobe && this.dngLookDims[0] ? 1 : 0);
+        gl.uniform3iv(uniform('u_dngHueDims'), new Int32Array(this.dngHueDims));
+        gl.uniform3iv(uniform('u_dngLookDims'), new Int32Array(this.dngLookDims));
+        gl.uniform1i(uniform('u_dngHueEncoding'), Number(adobe?.hue_sat_map_encoding || 0));
+        gl.uniform1i(uniform('u_dngLookEncoding'), Number(adobe?.look_table_encoding || 0));
+        gl.uniformMatrix3fv(uniform('u_dngSrgbToProPhoto'), false, matrixColumnMajor(DNG_LINEAR_SRGB_TO_PROPHOTO));
+        gl.uniformMatrix3fv(uniform('u_dngProPhotoToSrgb'), false, matrixColumnMajor(DNG_PROPHOTO_TO_LINEAR_SRGB));
+        gl.uniform1f(uniform('u_dngBaselineExposure'), Number(adobe?.baseline_exposure || 0));
         const displayBase = this.meta.base_kind === 'display';
         const profile = displayBase ? null : (this.meta.camera_profile || this.meta.color?.camera_profile || null);
         const profileTable = new Float32Array(CAMERA_PROFILE_HUE_BINS * CAMERA_PROFILE_CHROMA_BINS * 2);
@@ -1506,7 +1645,7 @@ export class DevelopRenderer {
         const profileEdges = Array.isArray(profile?.chroma_edges)
             && profile.chroma_edges.length === CAMERA_PROFILE_CHROMA_BINS + 1
             ? profile.chroma_edges.map(Number) : [0.02, 0.06, 0.12, 1.0];
-        gl.uniform1f(uniform('u_baseProfileSat'), displayBase || profile ? 1 : BASE_PROFILE_SAT);
+        gl.uniform1f(uniform('u_baseProfileSat'), displayBase || profile || adobe ? 1 : BASE_PROFILE_SAT);
         gl.uniform1i(uniform('u_cameraProfile'), profile ? 1 : 0);
         gl.uniform2fv(uniform('u_cameraAbDelta[0]'), profileTable);
         gl.uniform1fv(uniform('u_cameraChromaEdges[0]'), new Float32Array(profileEdges));
@@ -1654,6 +1793,7 @@ export class DevelopRenderer {
         bindUnit(gl, this.curve, 1);
         bindUnit(gl, this.baseCurve, 5);
         this.bindFilmUnits();
+        this.bindDngUnits();
         this.uniforms(this.lumaProgram);
         this.setProgramView(this.lumaProgram);
         gl.bindFramebuffer(gl.FRAMEBUFFER, this.lumaTarget.framebuffer);
@@ -1668,6 +1808,7 @@ export class DevelopRenderer {
         bindUnit(gl, this.curve, 1);
         bindUnit(gl, this.baseCurve, 5);
         this.bindFilmUnits();
+        this.bindDngUnits();
         this.uniforms(this.filmLumaProgram);
         this.setProgramView(this.filmLumaProgram);
         gl.bindFramebuffer(gl.FRAMEBUFFER, this.filmLumaTarget.framebuffer);
@@ -1694,10 +1835,22 @@ export class DevelopRenderer {
 
     render() {
         this.frame = 0;
-        if (!this.dirty || !this.ready || !this.targets?.length) return;
+        if (!this.dirty || !this.ready) return;
         this.dirty = false;
         const gl = this.gl;
         gl.bindVertexArray(this.vao);
+        if (this.displayPreview && this.previewSource) {
+            gl.useProgram(this.displayPreviewProgram);
+            bindUnit(gl, this.previewSource, 0);
+            gl.uniform1i(gl.getUniformLocation(this.displayPreviewProgram, 'u_preview'), 0);
+            this.setProgramView(this.displayPreviewProgram, this.view);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+            gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+            this.canvas.dispatchEvent(new CustomEvent('develop:rendered'));
+            return;
+        }
+        if (!this.targets?.length) return;
         const clarity = numberSetting(this.settings, 'Clarity2012');
         const textureValue = numberSetting(this.settings, 'Texture');
         const sharpness = numberSetting(this.settings, 'Sharpness');
@@ -1737,6 +1890,7 @@ export class DevelopRenderer {
         bindUnit(gl, this.maskAtlas, 6);
         bindUnit(gl, this.lumaTarget.texture, 7);
         this.bindFilmUnits();
+        this.bindDngUnits();
         this.uniforms(this.mainProgram);
         this.setProgramView(this.mainProgram, spots.length ? null : this.view);
         this.localUniforms();
@@ -1824,6 +1978,7 @@ export class DevelopRenderer {
         if (this.filmHd) gl.deleteTexture(this.filmHd);
         if (this.filmPrint) gl.deleteTexture(this.filmPrint);
         if (this.maskAtlas) gl.deleteTexture(this.maskAtlas);
+        if (this.previewSource) gl.deleteTexture(this.previewSource);
     }
 }
 

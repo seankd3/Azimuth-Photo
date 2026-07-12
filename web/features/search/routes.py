@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 import helpers as app_helpers
 import photo_metadata
 from features.search.similarity import scan_duplicate_pairs
+from features.sync import satellite
 
 
 router = APIRouter()
@@ -183,7 +184,7 @@ async def api_similar(image_id: int, limit: int = 50):
         image_ids,
         similarities,
         limit,
-        "sm",
+        "" if satellite.is_satellite_mode() else "sm",
         exclude_id=image_id,
         model_key=_active_embedding_model_key(),
     )
@@ -194,6 +195,12 @@ async def api_similar(image_id: int, limit: int = 50):
         idx = id_to_idx.get(img_id)
         score = float(similarities[idx]) if idx is not None else 0.0
         results.append(app_helpers.image_card(img, "sm", similarity=score))
+    if satellite.is_satellite_mode() and results:
+        cached_ids = await _cached_image_ids([int(result["id"]) for result in results], "sm")
+        results = [
+            result if int(result["id"]) in cached_ids else {key: value for key, value in result.items() if key != "thumb_url"}
+            for result in results
+        ]
 
     return {
         "images": results,

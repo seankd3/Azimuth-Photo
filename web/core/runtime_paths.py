@@ -215,10 +215,16 @@ def resolve_runtime_paths(
         paths.join(develop_cache_dir, "exports"),
         family=family,
     )
+    # Legacy Omarchy keeps library exports beside the develop cache; clean installs
+    # use the user Pictures folder so Windows multi-drive setups stay portable.
+    if legacy_cache:
+        library_default = paths.join(develop_cache_dir, "library-exports")
+    else:
+        library_default = paths.join(resolved_home, "Pictures", "photoArchive Exports")
     library_export_dir = _first(
         environment,
         "PHOTOARCHIVE_LIBRARY_EXPORT_DIR",
-        paths.join(resolved_home, "Pictures", "photoArchive Exports"),
+        library_default,
         family=family,
     )
     backup_dir = _first(environment, "PHOTOARCHIVE_BACKUP_DIR", backup_default, family=family)

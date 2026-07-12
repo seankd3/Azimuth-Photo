@@ -239,15 +239,18 @@ async def set_image_status(db_path: str, image_id: int, status: str):
 
 
 async def set_image_flag(db_path: str, image_id: int, flag: str):
-    conn = await connection.open_async(db_path)
-    try:
-        await conn.execute(
-            "UPDATE images SET flag = ? WHERE id = ?",
-            (flag, image_id),
-        )
-        await conn.commit()
-    finally:
-        await connection.close_async(conn, db_path=db_path)
+    async def _write() -> None:
+        conn = await connection.open_async(db_path)
+        try:
+            await conn.execute(
+                "UPDATE images SET flag = ? WHERE id = ?",
+                (flag, image_id),
+            )
+            await conn.commit()
+        finally:
+            await connection.close_async(conn, db_path=db_path)
+
+    await connection.run_with_busy_retry(_write)
 
 
 async def batch_set_image_flags(
@@ -258,18 +261,22 @@ async def batch_set_image_flags(
 ) -> int:
     if not image_ids:
         return 0
-    conn = await connection.open_async(db_path)
-    updated = 0
-    try:
-        for start in range(0, len(image_ids), chunk_size):
-            chunk = image_ids[start:start + chunk_size]
-            placeholders = ",".join("?" for _ in chunk)
-            await conn.execute(
-                f"UPDATE images SET flag = ? WHERE id IN ({placeholders})",
-                [flag] + chunk,
-            )
-            updated += len(chunk)
-        await conn.commit()
-        return updated
-    finally:
-        await connection.close_async(conn, db_path=db_path)
+
+    async def _write() -> int:
+        conn = await connection.open_async(db_path)
+        updated = 0
+        try:
+            for start in range(0, len(image_ids), chunk_size):
+                chunk = image_ids[start:start + chunk_size]
+                placeholders = ",".join("?" for _ in chunk)
+                await conn.execute(
+                    f"UPDATE images SET flag = ? WHERE id IN ({placeholders})",
+                    [flag] + chunk,
+                )
+                updated += len(chunk)
+                await conn.commit()
+            return updated
+        finally:
+            await connection.close_async(conn, db_path=db_path)
+
+    return await connection.run_with_busy_retry(_write)

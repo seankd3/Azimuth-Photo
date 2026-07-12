@@ -624,3 +624,18 @@ new GL/numpy op; PARITY_TABLE extended.
 ### 30.4 Out of scope (v1)
 DCP file import (.dcp reader), profile picker UI, non-Canon harvests beyond what the corpus
 contains, re-fitting the legacy fitted profiles.
+
+## §31 PV2012 slider parity (groundwork frozen 2026-07-12)
+
+Measured (30 edited DNGs, per-slider ablation vs embedded LR renders; full data
+/tmp/dev15e/sliderdiv_raw.json + out-sliderdiv.md): our slider math matches Lightroom at parity-noise level
+for HSL, tone-curve points, Vibrance, Saturation, Whites/Blacks, Clarity, Dehaze, ColorGrade. Exactly TWO
+ops diverge materially and are the entire scope of this section:
+1. Contrast2012 — mean attribution +0.033 L, worst-case +0.22 (R7/Pixel8Pro/R5m2/R6m2). Our contrast
+   response curve differs in shape/pivot from LR PV2012.
+2. Shadows2012 — near-zero mean but selective catastrophes (Sony A7RM4A up to +0.23 L): our shadows op
+   diverges in high-lift regimes.
+Approach when scheduled: fit both ops against the corpus of (imported settings, embedded LR render) pairs —
+thousands available — holding the §30 pipeline fixed; twins + parity goldens as always. Do NOT touch the
+other sliders. Note: Exposure2012 shows negative attribution today because LR edits partially compensate the
+§30 decode gain deficit; re-measure after DNGPIPE-6 lands before fitting.
