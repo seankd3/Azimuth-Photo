@@ -55,6 +55,10 @@ python3.12 scripts/build_server.py
 ./dist/photoarchive-server/photoarchive-server
 ```
 
+The builder uses a separate venv (default `~/.cache/photoarchive-pkg-venv`) and
+never touches `web/.venv`. Heavy build scratch can go on
+`/mnt/expansion/tmp/pkg-pyinstaller` via `PHOTOARCHIVE_BUILD_WORK`.
+
 Opens on `http://127.0.0.1:8000`. Useful env vars:
 
 | Variable | Meaning |
