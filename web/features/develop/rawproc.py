@@ -76,12 +76,20 @@ def is_display_path(path: str | os.PathLike[str]) -> bool:
 
 def is_hdr_merge_path(path: str | os.PathLike[str]) -> bool:
     candidate = Path(path)
-    return candidate.suffix.lower() == ".exr" and candidate.parent == BASE_CACHE_ROOT / "hdr"
+    if candidate.suffix.lower() != ".exr":
+        return False
+    from features.develop import hdr
+
+    return candidate.parent == hdr.HDR_CACHE_DIR
 
 
 def is_pano_merge_path(path: str | os.PathLike[str]) -> bool:
     candidate = Path(path)
-    return candidate.suffix.lower() == ".exr" and candidate.parent == BASE_CACHE_ROOT / "pano"
+    if candidate.suffix.lower() != ".exr":
+        return False
+    from features.develop import pano
+
+    return candidate.parent == pano.PANO_CACHE_DIR
 
 
 def is_develop_path(path: str | os.PathLike[str]) -> bool:
@@ -99,6 +107,10 @@ def _native_base_cache_dir() -> Path:
 
 def _uses_native_base_cache(path: str | os.PathLike[str]) -> bool:
     source = Path(path)
+    # HDR/pano merges write their bases via the merge pipeline into the
+    # default cache dir; only true camera raws move to the native v4 dir.
+    if is_hdr_merge_path(source) or is_pano_merge_path(source):
+        return False
     if not is_raw_path(source):
         return False
     if source.suffix.lower() != ".dng":
