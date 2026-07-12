@@ -43,6 +43,7 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import app.azimuthphoto.mobile.backup.BackupScheduler
 import app.azimuthphoto.mobile.backup.FreeUpSpace
+import app.azimuthphoto.mobile.data.SettingsStore
 import app.azimuthphoto.mobile.ui.ArchiveScreen
 import app.azimuthphoto.mobile.ui.PhotoArchiveTheme
 import app.azimuthphoto.mobile.ui.SettingsScreen
@@ -53,6 +54,12 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // Test hook (debug builds): adb shell am start ... --es server_url http://host:port
+        if (BuildConfig.DEBUG) {
+            intent?.getStringExtra("server_url")?.let { url ->
+                lifecycleScope.launch { SettingsStore.setServerUrl(this@MainActivity, url) }
+            }
+        }
         setContent {
             PhotoArchiveTheme {
                 Root(

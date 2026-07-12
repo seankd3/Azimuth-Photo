@@ -43,7 +43,12 @@ class ArchiveApi(private val baseUrl: String) {
 
     private val json = Json { ignoreUnknownKeys = true }
 
-    suspend fun page(offset: Int, limit: Int = 200, search: String = ""): RankingsPage =
+    suspend fun page(
+        offset: Int,
+        limit: Int = 200,
+        search: String = "",
+        folder: String = "",
+    ): RankingsPage =
         withContext(Dispatchers.IO) {
             val url = buildString {
                 append(baseUrl)
@@ -54,6 +59,10 @@ class ArchiveApi(private val baseUrl: String) {
                     append("&q=").append(java.net.URLEncoder.encode(search, "UTF-8"))
                     append("&deep=true")
                 }
+                if (folder.isNotBlank()) {
+                    // Leading slash = absolute scope, rides the hub's indexed range scan.
+                    append("&folder=").append(java.net.URLEncoder.encode("/$folder", "UTF-8"))
+                }
             }
             http.newCall(Request.Builder().url(url).build()).execute().use { resp ->
                 if (!resp.isSuccessful) throw IOException("rankings failed: HTTP ${resp.code}")
@@ -61,9 +70,47 @@ class ArchiveApi(private val baseUrl: String) {
             }
         }
 
+    /**
+     * The library's shelf folders: walk each root down single-child chains and
+     * surface the first level that actually branches (e.g. RAWS, Exported
+     * Edits, Personal Photos) — no hardcoded names.
+     */
+    suspend fun shelves(): List<ArchiveFolder> = withContext(Dispatchers.IO) {
+        val url = "$baseUrl/api/folders"
+        val all = http.newCall(Request.Builder().url(url).build()).execute().use { resp ->
+            if (!resp.isSuccessful) throw IOException("folders failed: HTTP ${resp.code}")
+            json.decodeFromString<FoldersResponse>(resp.body!!.string()).folders
+        }
+        val children = HashMap<String, MutableList<ArchiveFolder>>()
+        all.forEach { f ->
+            val parent = f.path.substringBeforeLast('/', "")
+            children.getOrPut(parent) { mutableListOf() }.add(f)
+        }
+        val shelves = mutableListOf<ArchiveFolder>()
+        fun descend(node: ArchiveFolder) {
+            val kids = children[node.path].orEmpty()
+            when {
+                kids.size == 1 && kids[0].count == node.count -> descend(kids[0])
+                kids.isEmpty() -> shelves.add(node)
+                kids.size == 1 -> shelves.add(node)
+                else -> kids.forEach { shelves.add(it) }
+            }
+        }
+        all.filter { it.depth == 0 }.forEach(::descend)
+        shelves.sortedByDescending { it.count }
+    }
+
     fun thumbUrl(image: ArchiveImage, size: String = "sm"): String =
         if (image.thumb_url.isNotEmpty()) "$baseUrl${image.thumb_url}"
         else "$baseUrl/api/thumb/$size/${image.id}"
 
     fun largeUrl(image: ArchiveImage): String = "$baseUrl/api/thumb/lg/${image.id}"
 }
+
+@Serializable
+data class ArchiveFolder(val path: String, val count: Int, val depth: Int) {
+    val name: String get() = path.substringAfterLast('/')
+}
+
+@Serializable
+private data class FoldersResponse(val folders: List<ArchiveFolder> = emptyList())

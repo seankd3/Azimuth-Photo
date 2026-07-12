@@ -16,8 +16,12 @@ import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.FilterChip
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.CircularProgressIndicator
@@ -44,6 +48,7 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import app.azimuthphoto.mobile.data.AppSettings
 import app.azimuthphoto.mobile.data.ArchiveApi
+import app.azimuthphoto.mobile.data.ArchiveFolder
 import app.azimuthphoto.mobile.data.ArchiveImage
 import app.azimuthphoto.mobile.data.SettingsStore
 
@@ -58,17 +63,23 @@ fun ArchiveScreen() {
 
     var query by remember { mutableStateOf("") }
     var activeQuery by remember { mutableStateOf("") }
+    var shelves by remember { mutableStateOf<List<ArchiveFolder>>(emptyList()) }
+    var activeShelf by remember { mutableStateOf<ArchiveFolder?>(null) }
     var images by remember { mutableStateOf<List<ArchiveImage>>(emptyList()) }
     var totalVisible by remember { mutableStateOf(0L) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var viewerIndex by remember { mutableStateOf<Int?>(null) }
 
-    LaunchedEffect(activeQuery) {
+    LaunchedEffect(api) {
+        shelves = runCatching { api.shelves() }.getOrDefault(emptyList())
+    }
+
+    LaunchedEffect(activeQuery, activeShelf) {
         loading = true
         error = null
         try {
-            val page = api.page(offset = 0, search = activeQuery)
+            val page = api.page(offset = 0, search = activeQuery, folder = activeShelf?.path ?: "")
             images = page.images
             totalVisible = page.visible_images
         } catch (e: Exception) {
@@ -102,6 +113,31 @@ fun ArchiveScreen() {
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp, vertical = 8.dp),
         )
+
+        if (shelves.isNotEmpty()) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                FilterChip(
+                    selected = activeShelf == null,
+                    onClick = { activeShelf = null },
+                    label = { Text("All") },
+                )
+                shelves.forEach { shelf ->
+                    FilterChip(
+                        selected = activeShelf?.path == shelf.path,
+                        onClick = {
+                            activeShelf = if (activeShelf?.path == shelf.path) null else shelf
+                        },
+                        label = { Text(shelf.name) },
+                    )
+                }
+            }
+        }
 
         when {
             loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -139,7 +175,11 @@ fun ArchiveScreen() {
                         if (index >= images.size - 40) {
                             LaunchedEffect(images.size) {
                                 runCatching {
-                                    val next = api.page(offset = images.size, search = activeQuery)
+                                    val next = api.page(
+                                        offset = images.size,
+                                        search = activeQuery,
+                                        folder = activeShelf?.path ?: "",
+                                    )
                                     if (next.images.isNotEmpty()) images = images + next.images
                                 }
                             }
