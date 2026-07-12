@@ -37,6 +37,9 @@ OPTIONAL_DISPLAY_EXTENSIONS = {".heic"}
 BASE_CACHE_ROOT = Path(os.environ.get("PHOTOARCHIVE_DEVELOP_CACHE_DIR", "/mnt/expansion/PhotoArchiveCache/develop"))
 # v3: lossy-DNG decode applies OpcodeList2 MapPolynomial (true linear); v2 bases are ~EVs too bright.
 BASE_CACHE_DIR = BASE_CACHE_ROOT / "base" / "v3"
+# v4: native LibRaw/legacy LinearRaw bases honor the camera/DNG saturation
+# metadata. Display and JPEG XL DNG bases retain their compatible v3 cache.
+NATIVE_BASE_CACHE_VERSION = 4
 BASE_MAGIC = b"PABASE1\0"
 BASE_HEADER = struct.Struct("<8sII")
 MAX_BASE_EDGE = 2048
@@ -73,20 +76,53 @@ def is_display_path(path: str | os.PathLike[str]) -> bool:
 
 def is_hdr_merge_path(path: str | os.PathLike[str]) -> bool:
     candidate = Path(path)
-    return candidate.suffix.lower() == ".exr" and candidate.parent == BASE_CACHE_ROOT / "hdr"
+    if candidate.suffix.lower() != ".exr":
+        return False
+    from features.develop import hdr
+
+    return candidate.parent == hdr.HDR_CACHE_DIR
 
 
 def is_pano_merge_path(path: str | os.PathLike[str]) -> bool:
     candidate = Path(path)
-    return candidate.suffix.lower() == ".exr" and candidate.parent == BASE_CACHE_ROOT / "pano"
+    if candidate.suffix.lower() != ".exr":
+        return False
+    from features.develop import pano
+
+    return candidate.parent == pano.PANO_CACHE_DIR
 
 
 def is_develop_path(path: str | os.PathLike[str]) -> bool:
     return is_raw_path(path) or is_display_path(path) or is_hdr_merge_path(path) or is_pano_merge_path(path)
 
 
-def base_paths(image_id: int) -> BasePaths:
-    stem = BASE_CACHE_DIR / str(int(image_id))
+def _native_base_cache_dir() -> Path:
+    default_v3 = BASE_CACHE_ROOT / "base" / "v3"
+    if BASE_CACHE_DIR != default_v3:
+        # Tests and isolated probes override BASE_CACHE_DIR as a complete cache
+        # seam; keep honoring that override instead of escaping to a sibling.
+        return BASE_CACHE_DIR
+    return BASE_CACHE_ROOT / "base" / f"v{NATIVE_BASE_CACHE_VERSION}"
+
+
+def _uses_native_base_cache(path: str | os.PathLike[str]) -> bool:
+    source = Path(path)
+    # HDR/pano merges write their bases via the merge pipeline into the
+    # default cache dir; only true camera raws move to the native v4 dir.
+    if is_hdr_merge_path(source) or is_pano_merge_path(source):
+        return False
+    if not is_raw_path(source):
+        return False
+    if source.suffix.lower() != ".dng":
+        return True
+    from features.develop import lossydng
+
+    return not lossydng.is_lossy_dng(str(source))
+
+
+def base_paths(image_id: int, source_path: str | os.PathLike[str] | None = None) -> BasePaths:
+    cache_dir = _native_base_cache_dir() if source_path is not None and _uses_native_base_cache(source_path) else BASE_CACHE_DIR
+    stem = cache_dir / str(int(image_id))
     return BasePaths(binary=stem.with_suffix(".bin.gz"), metadata=stem.with_suffix(".json"), preview=stem.with_suffix(".jpg"))
 
 
@@ -97,7 +133,7 @@ def cached_base_paths(image_id: int, path: str | os.PathLike[str]) -> BasePaths 
     this inexpensive probe before deciding whether to serve an artifact or kick
     off the existing single-flight base generator.
     """
-    paths = base_paths(image_id)
+    paths = base_paths(image_id, path)
     if not (paths.binary.exists() and paths.metadata.exists() and paths.preview.exists()):
         return None
     return paths if _cached_source_matches(paths, path) else None
@@ -386,38 +422,54 @@ def decode_base(path: str | os.PathLike[str]) -> tuple[np.ndarray, dict[str, Any
     color_matrix = None
     color_matrix2 = None
     forward_matrix = None
-    try:
-        with rawpy.imread(str(source)) as raw:
-            camera_wb = list(raw.camera_whitebalance or [])
-            daylight_wb = list(raw.daylight_whitebalance or [])
-            color_matrix = _rawpy_color_matrix(raw)
-            rgb = raw.postprocess(
-                use_camera_wb=True,
-                output_bps=16,
-                no_auto_bright=True,
-                gamma=(1, 1),
-                output_color=rawpy.ColorSpace.sRGB,
-                highlight_mode=rawpy.HighlightMode.Blend,
-                half_size=True,
-            )
-    except Exception as exc:
-        # LR 14+ lossy DNGs are JPEG XL inside the TIFF container; LibRaw
-        # cannot unpack them, but their LinearRaw SubIFD pyramid can be
-        # decoded directly (already demosaiced camera RGB).
-        from features.develop import lossydng
+    from features.develop import lossydng
 
-        if lossydng.is_lossy_dng(str(source)):
-            try:
-                rgb, lossy_meta = lossydng.decode_lossy_dng(str(source), max_px=MAX_BASE_EDGE)
-            except Exception as lossy_exc:
-                raise RawDecodeError(f"RAW decode failed: {lossy_exc}") from lossy_exc
-            camera_wb = list(lossy_meta.get("cam_mul") or [])
-            daylight_wb = []
-            as_shot_neutral = lossy_meta.get("as_shot_neutral")
-            color_matrix = lossy_meta.get("color_matrix1")
-            color_matrix2 = lossy_meta.get("color_matrix2")
-            forward_matrix = lossy_meta.get("forward_matrix")
-        else:
+    if source.suffix.lower() == ".dng" and lossydng.is_linear_dng(str(source)):
+        try:
+            rgb, lossy_meta = lossydng.decode_lossy_dng(str(source), max_px=MAX_BASE_EDGE)
+        except Exception as exc:
+            raise RawDecodeError(f"RAW decode failed: {exc}") from exc
+        camera_wb = list(lossy_meta.get("cam_mul") or [])
+        daylight_wb = []
+        as_shot_neutral = lossy_meta.get("as_shot_neutral")
+        color_matrix = lossy_meta.get("color_matrix1")
+        color_matrix2 = lossy_meta.get("color_matrix2")
+        forward_matrix = lossy_meta.get("forward_matrix")
+    else:
+        try:
+            with rawpy.imread(str(source)) as raw:
+                camera_wb = list(raw.camera_whitebalance or [])
+                daylight_wb = list(raw.daylight_whitebalance or [])
+                color_matrix = _rawpy_color_matrix(raw)
+                postprocess_args = {
+                    "use_camera_wb": True,
+                    "output_bps": 16,
+                    "no_auto_bright": True,
+                    "adjust_maximum_thr": 0.0,
+                    "gamma": (1, 1),
+                    "output_color": rawpy.ColorSpace.sRGB,
+                    "highlight_mode": rawpy.HighlightMode.Blend,
+                    "half_size": True,
+                }
+                camera_white = raw.camera_white_level_per_channel
+                if camera_white:
+                    valid_white = [int(value) for value in camera_white if int(value) > 0]
+                    if valid_white:
+                        postprocess_args["user_sat"] = max(valid_white)
+                rgb = raw.postprocess(**postprocess_args)
+                valid_wb = [float(value) for value in camera_wb[:4] if _finite_positive(value)]
+                if valid_wb:
+                    # LibRaw normalizes camera WB so its largest multiplier is
+                    # one. DNG reference-neutral semantics divide by the
+                    # unnormalized AsShotNeutral, so restore that discarded
+                    # common gain at the linear decode boundary.
+                    green_wb = _finite_positive(camera_wb[1]) if len(camera_wb) > 1 else None
+                    wb_scale = np.float32(max(valid_wb) / (green_wb or min(valid_wb)))
+                    rgb = np.asarray(
+                        np.clip(np.rint(np.asarray(rgb, dtype=np.float32) * wb_scale), 0, 65535),
+                        dtype=np.uint16,
+                    )
+        except Exception as exc:
             raise RawDecodeError(f"RAW decode failed: {exc}") from exc
     rgb = _resize_linear_uint16(np.asarray(rgb, dtype=np.uint16))
     meta = {
@@ -500,15 +552,25 @@ def _write_base_metadata(path: Path, meta: dict[str, Any]) -> None:
     os.replace(metadata_temp, path)
 
 
-def read_base_metadata(image_id: int) -> dict[str, Any] | None:
+def _read_base_metadata_path(path: Path) -> dict[str, Any] | None:
     try:
-        return json.loads(base_paths(image_id).metadata.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError, TypeError):
         return None
 
 
+def read_base_metadata(image_id: int) -> dict[str, Any] | None:
+    native = _native_base_cache_dir() / f"{int(image_id)}.json"
+    legacy = base_paths(image_id).metadata
+    for candidate in dict.fromkeys((native, legacy)):
+        meta = _read_base_metadata_path(candidate)
+        if meta is not None:
+            return meta
+    return None
+
+
 def _upgrade_cached_metadata(paths: BasePaths, source_path: str | os.PathLike[str]) -> dict[str, Any]:
-    meta = read_base_metadata(int(paths.metadata.stem)) or {}
+    meta = _read_base_metadata_path(paths.metadata) or {}
     before = json.dumps(meta, sort_keys=True, separators=(",", ":"))
     meta = _enrich_source_metadata(meta, source_path)
     if json.dumps(meta, sort_keys=True, separators=(",", ":")) != before:
@@ -533,7 +595,7 @@ def parse_base_payload(payload: bytes) -> tuple[np.ndarray, int, int]:
 
 def _cached_source_matches(paths: BasePaths, path: str | os.PathLike[str]) -> bool:
     """Reject a cached base generated from a different source file (id reuse)."""
-    meta = read_base_metadata(int(paths.metadata.stem)) or {}
+    meta = _read_base_metadata_path(paths.metadata) or {}
     recorded = meta.get("source_path")
     return not recorded or str(recorded) == str(path)
 
@@ -541,7 +603,7 @@ def _cached_source_matches(paths: BasePaths, path: str | os.PathLike[str]) -> bo
 def ensure_base_cache(image_id: int, path: str | os.PathLike[str]) -> tuple[BasePaths, dict[str, Any]]:
     """Generate missing base artifacts once per image, even under concurrent hits."""
 
-    paths = base_paths(image_id)
+    paths = base_paths(image_id, path)
     cached = cached_base_paths(image_id, path)
     if cached is not None:
         return cached, _upgrade_cached_metadata(cached, path)

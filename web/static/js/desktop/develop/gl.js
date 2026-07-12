@@ -568,10 +568,13 @@ vec2 lensDistortedUv(vec2 uv) {
 }
 float lensVignetteGain(vec2 sourceUv) {
     if (!u_lensVignetting && abs(u_lensManualVignette) < 1e-5) return 1.0;
-    float radius = lensRadius(sourceUv);
+    float halfMin = min(u_sourceSize.x, u_sourceSize.y) / ${f(LENS_NORMALIZED_HALF_MIN)};
+    float cornerRadius = length((u_sourceSize * ${f(LENS_IMAGE_CENTER)}) / halfMin * u_lensCropRatio);
+    float radius = lensRadius(sourceUv) / max(cornerRadius, 1e-6);
     float r2 = radius * radius;
-    float profile = clamp(1.0 + u_lensVignetteTerms.x * r2 + u_lensVignetteTerms.y * r2 * r2
-        + u_lensVignetteTerms.z * r2 * r2 * r2,
+    float polynomial = 1.0 + u_lensVignetteTerms.x * r2 + u_lensVignetteTerms.y * r2 * r2
+        + u_lensVignetteTerms.z * r2 * r2 * r2;
+    float profile = clamp(1.0 / max(polynomial, 1e-6),
         ${f(LENS_VIGNETTE_GAIN_MIN)}, ${f(LENS_VIGNETTE_GAIN_MAX)});
     float midpoint = ${f(LENS_MANUAL_VIGNETTE_MIDPOINT_MIN)}
         + clamp(u_lensManualVignetteMidpoint / 100.0, 0.0, 1.0) * ${f(LENS_MANUAL_VIGNETTE_MIDPOINT_RANGE)};
@@ -1628,7 +1631,8 @@ export class DevelopRenderer {
         gl.uniform1i(uniform('u_dngLookEncoding'), Number(adobe?.look_table_encoding || 0));
         gl.uniformMatrix3fv(uniform('u_dngSrgbToProPhoto'), false, matrixColumnMajor(DNG_LINEAR_SRGB_TO_PROPHOTO));
         gl.uniformMatrix3fv(uniform('u_dngProPhotoToSrgb'), false, matrixColumnMajor(DNG_PROPHOTO_TO_LINEAR_SRGB));
-        gl.uniform1f(uniform('u_dngBaselineExposure'), Number(adobe?.baseline_exposure || 0));
+        const baseIncludesBaselineExposure = this.meta.color?.forward_matrix != null;
+        gl.uniform1f(uniform('u_dngBaselineExposure'), baseIncludesBaselineExposure ? 0 : Number(adobe?.baseline_exposure || 0));
         const displayBase = this.meta.base_kind === 'display';
         const profile = displayBase ? null : (this.meta.camera_profile || this.meta.color?.camera_profile || null);
         const profileTable = new Float32Array(CAMERA_PROFILE_HUE_BINS * CAMERA_PROFILE_CHROMA_BINS * 2);
