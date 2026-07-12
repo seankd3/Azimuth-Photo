@@ -1,5 +1,7 @@
 # Codebase map
 
+> Machine/checkout/branch topology: [TOPOLOGY.md](TOPOLOGY.md). This file maps the inside of `web/`.
+
 Cold-start orientation for coding agents. For setup, route conventions, edit
 ownership, and the verification ladder, read [`development.md`](development.md).
 
