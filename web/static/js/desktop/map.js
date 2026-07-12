@@ -145,7 +145,9 @@ function openCluster(index, pin) {
     const rect = pin.getBoundingClientRect();
     pop.innerHTML = `<div class="mp-head">${fmt(item.markers.length)} photos here</div>`
         + item.markers.slice(0, 9).map((marker) => (
-            `<button data-id="${marker.id}"><img src="${esc(marker.thumb_url || thumbUrl('sm', marker.id))}" loading="lazy" decoding="async" alt=""><span>${esc(marker.filename || `Image ${marker.id}`)}</span></button>`
+            `<button data-id="${marker.id}">${marker.thumb_url
+                ? `<img src="${esc(marker.thumb_url)}" loading="lazy" decoding="async" alt="">`
+                : `<i class="map-thumb-neutral" aria-hidden="true">${icon('map-pin')}</i>`}<span>${esc(marker.filename || `Image ${marker.id}`)}</span></button>`
         )).join('');
     pop.style.left = `${Math.min(window.innerWidth - 220, rect.left)}px`;
     pop.style.top = `${Math.min(window.innerHeight - 260, rect.bottom + 8)}px`;

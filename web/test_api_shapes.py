@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 import zipfile
+from unittest import mock
 
 import numpy as np
 from fastapi.testclient import TestClient
@@ -307,6 +308,19 @@ class ApiShapeTests(unittest.TestCase):
         for card in data["images"]:
             self.assertCardShape(card)
 
+        with mock.patch.dict(
+            os.environ,
+            {"PHOTOARCHIVE_MODE": "satellite", "PHOTOARCHIVE_HUB_URL": "http://stub-hub"},
+        ):
+            from features.library import service as library_service
+            library_service._rankings_response_cache.clear()
+            satellite = self.client.get("/api/rankings?limit=10&sort=elo").json()
+
+        self.assertEqual(satellite["visible_images"], 4)
+        self.assertEqual(satellite["total_images"], 4)
+        self.assertEqual(satellite["hidden_pending_thumbnails"], 0)
+        self.assertEqual(len(satellite["images"]), 4)
+
     def test_date_group_rankings_include_contextual_group_only(self):
         response = self.client.get("/api/rankings?limit=10&sort=date_taken")
         self.assertEqual(response.status_code, 200)
@@ -391,6 +405,21 @@ class ApiShapeTests(unittest.TestCase):
             ],
         )
 
+        with mock.patch.dict(
+            os.environ,
+            {"PHOTOARCHIVE_MODE": "satellite", "PHOTOARCHIVE_HUB_URL": "http://stub-hub"},
+        ):
+            satellite_groups = self.client.get("/api/date-groups").json()["groups"]
+        self.assertEqual(
+            satellite_groups,
+            [
+                {"date": "2024-06", "label": "June 2024", "count": 1},
+                {"date": "2024-05", "label": "May 2024", "count": 1},
+                {"date": "2024-04", "label": "April 2024", "count": 1},
+                {"date": "", "label": "No Date", "count": 1},
+            ],
+        )
+
     def test_library_map_markers_preserve_counts_and_thumb_urls(self):
         response = self.client.get("/api/map/markers")
         self.assertEqual(response.status_code, 200)
@@ -405,6 +434,30 @@ class ApiShapeTests(unittest.TestCase):
             [marker["thumb_url"] for marker in data["markers"]],
             [f"/api/thumb/sm/{self.ids[0]}", f"/api/thumb/sm/{self.ids[1]}"],
         )
+
+        conn = sqlite3.connect(db.DB_PATH)
+        try:
+            conn.execute(
+                "UPDATE images SET latitude = 42.0, longitude = -88.0 WHERE id = ?",
+                (self.ids[3],),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        db.invalidate_stats_cache()
+        with mock.patch.dict(
+            os.environ,
+            {"PHOTOARCHIVE_MODE": "satellite", "PHOTOARCHIVE_HUB_URL": "http://stub-hub"},
+        ):
+            satellite = self.client.get("/api/map/markers").json()
+
+        self.assertEqual(satellite["visible_count"], 4)
+        self.assertEqual(satellite["gps_count"], 3)
+        self.assertEqual(satellite["gps_total_count"], 3)
+        self.assertEqual(satellite["hidden_pending_thumbnails"], 0)
+        markers = {marker["id"]: marker for marker in satellite["markers"]}
+        self.assertEqual(markers[self.ids[0]]["thumb_url"], f"/api/thumb/sm/{self.ids[0]}")
+        self.assertNotIn("thumb_url", markers[self.ids[3]])
 
     def test_library_filter_options_and_stats_shapes(self):
         filters_response = self.client.get("/api/filter-options")
