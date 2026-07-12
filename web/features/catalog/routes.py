@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 import scanner
 import settings
 import thumbnails
+from core.path_groups import safe_commonpath, safe_relpath
 from core.requests import json_object
 from data.repositories import catalog as catalog_repository
 from features.catalog import metadata as catalog_metadata
@@ -546,8 +547,9 @@ def add_folder_counts(
     elif root == os.sep and directory.startswith(root_prefix):
         rel = directory[1:]
     else:
-        rel = os.path.relpath(directory, root)
-
+        rel = safe_relpath(directory, root)
+        if rel is None:
+            rel = directory
     start = 0
     while True:
         idx = rel.find(os.sep, start)
@@ -574,17 +576,27 @@ def build_source_level_folders_payload(sources: list[tuple[int, str, int]]) -> d
     source_paths = [path for _source_id, path, _active_count in sources if path]
     if len(source_paths) < 2:
         return None
-    root = os.path.commonpath(source_paths)
+    root = safe_commonpath(source_paths)
     folders = []
     for _source_id, source_path, active_image_count in sources:
         if not source_path:
             return None
-        rel = os.path.relpath(source_path, root)
+        if root is None:
+            # Multi-drive libraries: each source is its own top-level folder.
+            folders.append({
+                "path": source_path,
+                "count": int(active_image_count or 0),
+                "depth": 0,
+            })
+            continue
+        rel = safe_relpath(source_path, root) or os.path.basename(source_path.rstrip(os.sep)) or "."
         folders.append({
             "path": rel if rel != "." else os.path.basename(source_path.rstrip(os.sep)) or ".",
             "count": int(active_image_count or 0),
             "depth": 0,
         })
+    if root is None:
+        return {"folders": sorted(folders, key=lambda item: item["path"]), "root": ""}
     return {"folders": sorted(folders, key=lambda item: item["path"]), "root": root}
 
 
@@ -617,7 +629,16 @@ def build_folders_payload(max_depth: int | None = None) -> dict:
         return {"folders": []}
 
     source_paths = [path for _source_id, path, _active_count in sources if path]
-    root = os.path.commonpath(source_paths) if source_paths else os.path.commonpath(fallback_dirs)
+    if source_paths:
+        root = safe_commonpath(source_paths)
+        if root is None:
+            # Multi-drive: fall back to source-level listing so pregen/UI never crash.
+            source_level = build_source_level_folders_payload(sources)
+            if source_level is not None:
+                return source_level
+            root = source_paths[0]
+    else:
+        root = safe_commonpath(fallback_dirs) or (fallback_dirs[0] if fallback_dirs else "")
 
     folder_counts = {}
     for directory, count in directory_counts.items():
@@ -639,7 +660,7 @@ def parts_under_source(source_path: str, directory: str) -> list[str]:
     if current.startswith(root_prefix):
         rel = current[len(root_prefix):]
     else:
-        rel = os.path.relpath(current, source_root)
+        rel = safe_relpath(current, source_root) or ""
     return [part for part in rel.split(os.sep) if part and part != "."]
 
 
