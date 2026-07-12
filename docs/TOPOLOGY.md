@@ -6,9 +6,10 @@ where code, data, or a running instance lives, start here.
 ## The one repo
 
 Everything is a single git repository: `photo-archive`. The canonical remote
-lives on the omarchy server (`sean@omarchy:Projects/photo-archive`). There is
-no GitHub remote; omarchy **is** the origin, so git is the backup — every
-machine's checkout pushes back to it.
+is **GitHub** (`Sean-Kenneth-Doherty/photo-archive`) — omarchy pushes there on
+every deploy, so it's the offsite backup. The laptop's clone points its origin
+at the omarchy checkout over ssh (fast on the tailnet); work flows
+laptop → omarchy → GitHub.
 
 ```
 photo-archive/
