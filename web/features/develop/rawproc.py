@@ -114,6 +114,19 @@ def base_paths(image_id: int, source_path: str | os.PathLike[str] | None = None)
     return BasePaths(binary=stem.with_suffix(".bin.gz"), metadata=stem.with_suffix(".json"), preview=stem.with_suffix(".jpg"))
 
 
+def cached_base_paths(image_id: int, path: str | os.PathLike[str]) -> BasePaths | None:
+    """Return a complete, source-matching base cache without decoding anything.
+
+    Develop's first paint must never wait on a cold RAW read.  Route handlers use
+    this inexpensive probe before deciding whether to serve an artifact or kick
+    off the existing single-flight base generator.
+    """
+    paths = base_paths(image_id, path)
+    if not (paths.binary.exists() and paths.metadata.exists() and paths.preview.exists()):
+        return None
+    return paths if _cached_source_matches(paths, path) else None
+
+
 def _image_lock(image_id: int) -> threading.Lock:
     with _locks_guard:
         return _image_locks.setdefault(int(image_id), threading.Lock())
@@ -579,18 +592,20 @@ def ensure_base_cache(image_id: int, path: str | os.PathLike[str]) -> tuple[Base
     """Generate missing base artifacts once per image, even under concurrent hits."""
 
     paths = base_paths(image_id, path)
+    cached = cached_base_paths(image_id, path)
+    if cached is not None:
+        return cached, _upgrade_cached_metadata(cached, path)
     if paths.binary.exists() and paths.metadata.exists() and paths.preview.exists():
-        if _cached_source_matches(paths, path):
-            return paths, _upgrade_cached_metadata(paths, path)
         for stale in (paths.binary, paths.metadata, paths.preview):
             stale.unlink(missing_ok=True)
     if is_hdr_merge_path(path):
         raise RawDecodeError("HDR merge base cache is unavailable")
     lock = _image_lock(image_id)
     with lock:
+        cached = cached_base_paths(image_id, path)
+        if cached is not None:
+            return cached, _upgrade_cached_metadata(cached, path)
         if paths.binary.exists() and paths.metadata.exists() and paths.preview.exists():
-            if _cached_source_matches(paths, path):
-                return paths, _upgrade_cached_metadata(paths, path)
             for stale in (paths.binary, paths.metadata, paths.preview):
                 stale.unlink(missing_ok=True)
         if not Path(path).is_file():

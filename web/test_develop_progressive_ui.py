@@ -1,0 +1,32 @@
+"""Static contracts for the progressive Develop canvas state machine.
+
+The frontend has no standalone Node test runner in this repository.  These
+small source-level contracts keep the two intentionally ordered paints honest:
+cached Develop JPEG first, cached Library lg thumbnail only on a cold base,
+then the display-bypassed GL preview swaps to the linear renderer.
+"""
+
+from pathlib import Path
+
+
+WEB = Path(__file__).parent
+
+
+def test_develop_progressive_loader_prefers_cached_base_then_library_fallback():
+    source = (WEB / "static/js/desktop/develop/develop.js").read_text(encoding="utf-8")
+    assert "fetch(`/api/develop/${imageId}/base.jpg`)" in source
+    assert "thumbUrl('lg', imageId)}?cached=1" in source
+    assert source.index("base.jpg") < source.index("thumbUrl('lg', imageId)}?cached=1")
+    assert "response.status === 202 ? 500 : 1000" in source
+    assert "root.dataset.developOpenMs" in source
+    assert "setControlsLoading(true)" in source
+    assert "histogram?.setLoading(true)" in source
+
+
+def test_gl_preview_is_display_referred_and_swaps_to_linear_source():
+    source = (WEB / "static/js/desktop/develop/gl.js").read_text(encoding="utf-8")
+    assert "const DISPLAY_PREVIEW_FRAGMENT" in source
+    assert "uploadDisplayPreview(image)" in source
+    assert "this.displayPreview = true" in source
+    assert "this.displayPreview = false" in source
+    assert "gl.useProgram(this.displayPreviewProgram)" in source

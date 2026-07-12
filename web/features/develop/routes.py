@@ -26,6 +26,7 @@ DbPathProvider = Callable[[], str]
 _db_path: DbPathProvider | None = None
 _pregen_tasks: set[asyncio.Task] = set()
 _batch_tasks: set[asyncio.Task] = set()
+_base_generation_tasks: dict[int, asyncio.Task] = {}
 _batch_status: dict[str, Any] = {
     "state": "idle",
     "started_at": None,
@@ -354,6 +355,38 @@ async def _ensure_base(image_id: int, image: dict) -> tuple[rawproc.BasePaths, d
     return await asyncio.to_thread(rawproc.ensure_base_cache, image_id, image["filepath"])
 
 
+def _cached_base(image_id: int, image: dict) -> rawproc.BasePaths | None:
+    """Cheap cache probe for progressive Develop responses; never decodes RAW."""
+    return rawproc.cached_base_paths(image_id, image["filepath"])
+
+
+def _start_base_generation(image_id: int, image: dict) -> None:
+    """Start the existing rawproc single-flight generator without holding a request open."""
+    existing = _base_generation_tasks.get(image_id)
+    if existing is not None and not existing.done():
+        return
+
+    async def generate() -> None:
+        try:
+            await _ensure_base(image_id, image)
+        except Exception:
+            # The polling request will surface the decode error if it is retried;
+            # do not leave an unobserved task exception in the server log.
+            pass
+        finally:
+            _base_generation_tasks.pop(image_id, None)
+
+    _base_generation_tasks[image_id] = asyncio.create_task(generate())
+
+
+def _base_generating_response(image_id: int) -> JSONResponse:
+    return JSONResponse(
+        {"image_id": image_id, "state": "generating"},
+        status_code=202,
+        headers={"Cache-Control": "no-store", "Retry-After": "1"},
+    )
+
+
 async def _upsert_settings(image_id: int, incoming: dict[str, Any], label: str | None) -> dict[str, Any]:
     async def _write() -> dict[str, Any]:
         conn = await connection.open_async(_configured_db_path())
@@ -475,10 +508,10 @@ async def api_develop_base_bin(image_id: int):
     image, error = await _image_or_error(image_id)
     if error:
         return error
-    try:
-        paths, _meta = await _ensure_base(image_id, image)
-    except rawproc.RawDecodeError as exc:
-        return JSONResponse({"error": str(exc)}, status_code=422)
+    paths = _cached_base(image_id, image)
+    if paths is None:
+        _start_base_generation(image_id, image)
+        return _base_generating_response(image_id)
     return FileResponse(
         paths.binary,
         media_type="application/octet-stream",
@@ -491,10 +524,10 @@ async def api_develop_base_jpg(image_id: int):
     image, error = await _image_or_error(image_id)
     if error:
         return error
-    try:
-        paths, _meta = await _ensure_base(image_id, image)
-    except rawproc.RawDecodeError as exc:
-        return JSONResponse({"error": str(exc)}, status_code=422)
+    paths = _cached_base(image_id, image)
+    if paths is None:
+        _start_base_generation(image_id, image)
+        return _base_generating_response(image_id)
     return FileResponse(paths.preview, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
 

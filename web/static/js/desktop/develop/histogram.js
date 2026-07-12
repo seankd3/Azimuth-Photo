@@ -34,6 +34,10 @@ export class DevelopHistogram {
         this.update(this.sampleContext.getImageData(0, 0, sampleWidth, sampleHeight).data);
     }
 
+    setLoading(loading) {
+        this.host.dataset.loading = String(Boolean(loading));
+    }
+
     update(bytes) {
         const bins = CHANNELS.map(() => new Uint32Array(256));
         for (let i = 0; i < bytes.length; i += 4) {
