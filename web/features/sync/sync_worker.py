@@ -15,7 +15,9 @@ from typing import Any
 
 import settings
 from data import connection
-from features.sync import satellite
+from features.sync.mirror import MirrorPuller
+from features.sync.prefetch import ThumbPrefetcher
+from features.sync import oplog, satellite
 
 
 log = logging.getLogger(__name__)
@@ -40,6 +42,9 @@ class SyncWorker:
         self.db_path = db_path
         self.hub = (hub or satellite.hub_url()).rstrip("/")
         self._request = request or _urllib_request
+        self.mirror = MirrorPuller(db_path=db_path, hub=self.hub, request=self._request)
+        self.prefetch = ThumbPrefetcher(db_path=db_path, hub=self.hub, request=self._request)
+        self._force_mirror_refresh = False
         self._paused = False
         self._stop = asyncio.Event()
         self._wake = asyncio.Event()
@@ -55,7 +60,12 @@ class SyncWorker:
         }
 
     def status(self) -> dict:
-        return {**self._status, "paused": self._paused}
+        return {
+            **self._status,
+            "paused": self._paused,
+            "mirror": self.mirror.status(),
+            "prefetch": self.prefetch.status(),
+        }
 
     def pause(self) -> None:
         self._paused = True
@@ -66,6 +76,7 @@ class SyncWorker:
         self._wake.set()
 
     def sync_now(self) -> None:
+        self._force_mirror_refresh = True
         self._wake.set()
 
     def stop(self) -> None:
@@ -92,27 +103,34 @@ class SyncWorker:
             raise RuntimeError("PHOTOARCHIVE_HUB_URL is required for satellite sync")
         items = await satellite.record_local_images(self.db_path)
         self._refresh_queue(items)
-        if not items or self._paused:
-            return
-        manifest = {
-            "items": [
-                {key: item[key] for key in ("content_hash", "full_hash", "bytes", "filename", "date_taken") if item.get(key) is not None}
-                for item in items
-            ]
-        }
-        response = await self._json("POST", "/api/sync/manifest", manifest)
-        missing = set(response.get("missing") or [])
-        known = {item.get("content_hash") for item in (response.get("known") or [])}
-        by_hash = {item["content_hash"]: item for item in items}
-        for content_hash in missing:
-            if self._paused:
-                return
-            item = by_hash.get(content_hash)
-            if item is not None:
-                await self._upload(item)
-        if known:
-            await self._set_uploaded(known)
-        await self._push_dirty_metadata()
+        pushed = False
+        if items and not self._paused:
+            manifest = {
+                "items": [
+                    {key: item[key] for key in ("content_hash", "full_hash", "bytes", "filename", "date_taken") if item.get(key) is not None}
+                    for item in items
+                ]
+            }
+            response = await self._json("POST", "/api/sync/manifest", manifest)
+            missing = set(response.get("missing") or [])
+            known = {item.get("content_hash") for item in (response.get("known") or [])}
+            by_hash = {item["content_hash"]: item for item in items}
+            for content_hash in missing:
+                if self._paused:
+                    return
+                item = by_hash.get(content_hash)
+                if item is not None:
+                    await self._upload(item)
+                    pushed = True
+            if known:
+                await self._set_uploaded(known)
+            pushed = await self._push_dirty_metadata() or pushed
+        oplog_result = await self._exchange_oplog()
+        pushed = bool(oplog_result["pushed"]) or pushed
+        await self._refresh_mirror(force=pushed or self._force_mirror_refresh)
+        self._force_mirror_refresh = False
+        if not self._paused:
+            await self._run_prefetch()
         self._status["last_sync_at"] = time.time()
         self._status["current_file"] = None
         self._refresh_queue(await satellite.record_local_images(self.db_path))
@@ -174,15 +192,44 @@ class SyncWorker:
         if target_seconds > elapsed:
             await asyncio.sleep(target_seconds - elapsed)
 
-    async def _push_dirty_metadata(self) -> None:
+    async def _push_dirty_metadata(self) -> bool:
         rows = await self._dirty_metadata_rows()
         if not rows:
-            return
+            return False
         snapshot = time.time()
         response = await self._json("POST", "/api/sync/metadata", {"items": [row["item"] for row in rows]})
         if response is None:
-            return
+            return False
         await self._mark_pushed([row["content_hash"] for row in rows], snapshot)
+        return True
+
+    async def _refresh_mirror(self, *, force: bool) -> None:
+        last_refresh = self.mirror.status().get("last_refresh_at") or 0
+        if not force and time.time() - float(last_refresh) < 600:
+            return
+        try:
+            await self.mirror.refresh()
+        except Exception as error:
+            # A v1 hub remains usable for field uploads while its v2 catalog route rolls out.
+            self.mirror._status["last_error"] = str(error)
+
+    async def _exchange_oplog(self) -> dict[str, int]:
+        try:
+            return await oplog.exchange_with_hub(self.db_path, self._json)
+        except RuntimeError as error:
+            if "failed (404)" not in str(error):
+                raise
+            # A v1 hub remains usable while its additive oplog routes roll out.
+            return {"pushed": 0, "pulled": 0}
+
+    async def _run_prefetch(self) -> None:
+        try:
+            await self.prefetch.prefetch_once(size="sm")
+            await self.prefetch.prefetch_once(size="md")
+            await self.prefetch.seed_predictive()
+            await self.prefetch.run_predictive_once(uploads_active=bool(self._status.get("current_file")))
+        except Exception as error:
+            self.prefetch._status["last_error"] = str(error)
 
     async def _dirty_metadata_rows(self) -> list[dict]:
         conn = await connection.open_async(self.db_path)

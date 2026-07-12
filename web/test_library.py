@@ -1135,6 +1135,25 @@ class LibraryTests(BackendTestCase):
         self.assertEqual(response["undated"], 1)
         self.assertEqual(response["total"], 5)
 
+    async def test_date_histogram_works_without_optional_month_index(self):
+        source = await self._source()
+        image_id = await self._image(source["id"], "indexed-later.jpg")
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "UPDATE images SET date_taken = ? WHERE id = ?",
+                ("2025-01-03 10:00:00", image_id),
+            )
+            await conn.execute("DROP INDEX IF EXISTS idx_images_active_month_source")
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        response = await library_routes.api_date_histogram(stacks="expanded")
+
+        self.assertEqual(response["months"], [{"month": "2025-01", "count": 1}])
+        self.assertEqual(response["total"], 1)
+
     async def test_counts_route_counts_total_picked_and_rejected(self):
         source = await self._source()
         picked = await self._image(source["id"], "picked.jpg")

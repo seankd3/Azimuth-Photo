@@ -30,6 +30,9 @@ async function json(url, options) {
 
 function render(status) {
     const depth = Number(status.queue_depth) || 0;
+    const libraryTotal = Number(status.prefetch?.library_total) || 0;
+    const libraryCached = Number(status.prefetch?.library_cached) || 0;
+    const thumbPercent = libraryTotal ? Math.round((libraryCached / libraryTotal) * 100) : 0;
     const action = status.paused ? 'Resume' : 'Pause';
     const count = `${depth} photo${depth === 1 ? '' : 's'}`;
     const errors = (status.recent_errors || []).slice(0, 3);
@@ -38,6 +41,7 @@ function render(status) {
     </button><div class="sync-chip-popover" hidden role="dialog" aria-label="Satellite sync">
         <div class="sync-chip-popover-title">Satellite sync <span>${status.paused ? 'Paused' : formatRate(status.throughput_bps)}</span></div>
         <div class="sync-chip-current">${status.current_file ? `Uploading ${status.current_file}` : depth ? 'Waiting to upload' : 'Everything is synced'}</div>
+        <div class="sync-chip-current">Library: ${libraryTotal} photos · thumbs ${thumbPercent}%</div>
         ${errors.length ? `<div class="sync-chip-errors">${errors.map((error) => `<div>${escapeHtml(error)}</div>`).join('')}</div>` : ''}
         <div class="sync-chip-actions"><button type="button" data-sync-action="now">Sync now</button><button type="button" data-sync-action="toggle">${action}</button></div>
     </div>`;

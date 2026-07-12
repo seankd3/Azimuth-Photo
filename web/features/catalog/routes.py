@@ -566,6 +566,10 @@ def parent_directory(path: str) -> str:
     return path[:split_at] if split_at >= 0 else ""
 
 
+def is_filesystem_source(path: str) -> bool:
+    return bool(path) and "://" not in path and os.path.isabs(path)
+
+
 def build_source_level_folders_payload(sources: list[tuple[int, str, int]]) -> dict | None:
     source_paths = [path for _source_id, path, _active_count in sources if path]
     if len(source_paths) < 2:
@@ -585,7 +589,11 @@ def build_source_level_folders_payload(sources: list[tuple[int, str, int]]) -> d
 
 
 def build_folders_payload(max_depth: int | None = None) -> dict:
-    sources = catalog_repository.folder_source_rows(_configured_db_path())
+    sources = [
+        source
+        for source in catalog_repository.folder_source_rows(_configured_db_path())
+        if is_filesystem_source(source[1])
+    ]
     if max_depth == 0:
         source_level = build_source_level_folders_payload(sources)
         if source_level is not None:

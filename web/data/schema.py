@@ -8,7 +8,7 @@ from date_inference import infer_image_date
 from data.repositories import catalog as catalog_repository
 
 EXPECTED_EMBEDDING_DIM = 2048  # Qwen3-VL-Embedding-2B native dimension
-SCHEMA_VERSION = 24
+SCHEMA_VERSION = 25
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS catalog_sources (
@@ -31,6 +31,9 @@ CREATE TABLE IF NOT EXISTS images (
     filename TEXT NOT NULL,
     filepath TEXT NOT NULL,
     content_hash TEXT DEFAULT NULL,
+    row_version INTEGER NOT NULL DEFAULT 0,
+    hub_image_id INTEGER DEFAULT NULL,
+    hub_remote INTEGER NOT NULL DEFAULT 0,
     elo REAL DEFAULT 1200.0,
     comparisons INTEGER DEFAULT 0,
     propagated_updates INTEGER DEFAULT 0,
@@ -49,6 +52,7 @@ CREATE TABLE IF NOT EXISTS images (
     height INTEGER DEFAULT NULL,
     latitude REAL DEFAULT NULL,
     longitude REAL DEFAULT NULL,
+    location_source TEXT DEFAULT NULL,
     metadata_scanned_at REAL DEFAULT NULL,
     metadata_version INTEGER DEFAULT NULL,
     missing_at REAL DEFAULT NULL,
@@ -79,6 +83,37 @@ CREATE TABLE IF NOT EXISTS develop_history (
 
 CREATE INDEX IF NOT EXISTS idx_develop_history_image
 ON develop_history(image_id, id DESC);
+
+CREATE TABLE IF NOT EXISTS oplog (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    origin TEXT NOT NULL,
+    origin_seq INTEGER NOT NULL,
+    content_hash TEXT NOT NULL,
+    family TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    ts REAL NOT NULL,
+    applied_from TEXT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_oplog_origin_seq
+ON oplog(origin, origin_seq);
+CREATE INDEX IF NOT EXISTS idx_oplog_content_family
+ON oplog(content_hash, family);
+CREATE TABLE IF NOT EXISTS oplog_family_state (
+    content_hash TEXT NOT NULL,
+    family TEXT NOT NULL,
+    ts REAL NOT NULL,
+    origin TEXT NOT NULL,
+    origin_seq INTEGER NOT NULL,
+    PRIMARY KEY (content_hash, family)
+);
+CREATE TABLE IF NOT EXISTS oplog_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS oplog_cursors (
+    origin TEXT PRIMARY KEY,
+    last_seen_origin_seq INTEGER NOT NULL DEFAULT 0
+);
 
 CREATE TABLE IF NOT EXISTS develop_presets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -159,6 +194,10 @@ CREATE TABLE IF NOT EXISTS comparisons (
 CREATE INDEX IF NOT EXISTS idx_images_status ON images(status);
 CREATE INDEX IF NOT EXISTS idx_images_content_hash
 ON images(content_hash) WHERE content_hash IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_images_hub_image_id
+ON images(hub_image_id) WHERE hub_image_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_images_hub_remote
+ON images(hub_remote, hub_image_id);
 CREATE INDEX IF NOT EXISTS idx_images_source_id ON images(source_id);
 CREATE INDEX IF NOT EXISTS idx_catalog_sources_path ON catalog_sources(path);
 CREATE INDEX IF NOT EXISTS idx_catalog_sources_active ON catalog_sources(included, online);
@@ -827,11 +866,15 @@ IMAGE_COMPAT_COLUMNS = (
     ("file_size", "INTEGER DEFAULT NULL"),
     ("file_modified_at", "REAL DEFAULT NULL"),
     ("content_hash", "TEXT DEFAULT NULL"),
+    ("row_version", "INTEGER NOT NULL DEFAULT 0"),
+    ("hub_image_id", "INTEGER DEFAULT NULL"),
+    ("hub_remote", "INTEGER NOT NULL DEFAULT 0"),
     ("width", "INTEGER DEFAULT NULL"),
     ("height", "INTEGER DEFAULT NULL"),
     ("metadata_scanned_at", "REAL DEFAULT NULL"),
     ("latitude", "REAL DEFAULT NULL"),
     ("longitude", "REAL DEFAULT NULL"),
+    ("location_source", "TEXT DEFAULT NULL"),
     ("metadata_version", "INTEGER DEFAULT NULL"),
     ("missing_at", "REAL DEFAULT NULL"),
     ("trashed_at", "REAL DEFAULT NULL"),
@@ -1054,6 +1097,8 @@ COMPAT_INDEX_SQL = (
         "CREATE INDEX IF NOT EXISTS idx_images_gps "
         "ON images(latitude, longitude) WHERE latitude IS NOT NULL"
     ),
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_images_hub_image_id ON images(hub_image_id) WHERE hub_image_id IS NOT NULL",
+    "CREATE INDEX IF NOT EXISTS idx_images_hub_remote ON images(hub_remote, hub_image_id)",
 )
 
 REQUIRED_TABLES = {
@@ -1062,6 +1107,10 @@ REQUIRED_TABLES = {
     "develop_settings",
     "develop_history",
     "develop_presets",
+    "oplog",
+    "oplog_family_state",
+    "oplog_settings",
+    "oplog_cursors",
     "images_metadata_fts",
     "comparisons",
     "embeddings",
@@ -1100,6 +1149,10 @@ REQUIRED_TABLES = {
 REQUIRED_COLUMNS = {
     "images": {
         "source_id",
+        "content_hash",
+        "row_version",
+        "hub_image_id",
+        "hub_remote",
         "orientation",
         "flag",
         "propagated_updates",
@@ -1119,6 +1172,7 @@ REQUIRED_COLUMNS = {
         "metadata_scanned_at",
         "latitude",
         "longitude",
+        "location_source",
         "metadata_version",
         "missing_at",
         "trashed_at",
@@ -1181,6 +1235,8 @@ REQUIRED_COLUMNS = {
 REQUIRED_INDEXES = {
     "idx_develop_history_image",
     "idx_develop_presets_folder",
+    "idx_oplog_origin_seq",
+    "idx_oplog_content_family",
     "idx_catalog_sources_active",
     "idx_images_missing_source_filepath_id",
     "idx_images_source_missing_id",
@@ -1229,6 +1285,9 @@ REQUIRED_INDEXES = {
     "idx_face_scan_images_status",
     "idx_image_checksums_checked",
     "idx_images_vc_of",
+    "idx_images_row_version",
+    "idx_images_hub_image_id",
+    "idx_images_hub_remote",
     "idx_images_original_filepath",
 }
 
@@ -1555,6 +1614,24 @@ async def ensure_compatibility_indexes(conn) -> None:
         await conn.execute(sql)
 
 
+async def ensure_catalog_export_row_versions(conn) -> None:
+    await conn.execute("UPDATE images SET row_version = id WHERE row_version = 0")
+    await conn.execute("CREATE INDEX IF NOT EXISTS idx_images_row_version ON images(row_version)")
+    await conn.executescript("""
+    CREATE TRIGGER IF NOT EXISTS images_row_version_ai AFTER INSERT ON images BEGIN
+        UPDATE images SET row_version = (
+            SELECT COALESCE(MAX(row_version), 0) + 1 FROM images WHERE id != NEW.id
+        ) WHERE id = NEW.id;
+    END;
+    CREATE TRIGGER IF NOT EXISTS images_row_version_au AFTER UPDATE ON images
+    WHEN NEW.row_version = OLD.row_version BEGIN
+        UPDATE images SET row_version = (
+            SELECT COALESCE(MAX(row_version), 0) + 1 FROM images
+        ) WHERE id = NEW.id;
+    END;
+    """)
+
+
 async def backfill_legacy_aspect_ratios(conn) -> None:
     await conn.execute(
         "UPDATE images SET aspect_ratio = 1.5 WHERE orientation = 'landscape' AND aspect_ratio IS NULL"
@@ -1660,6 +1737,7 @@ async def apply_schema_and_migrations(conn, *, db_exists: bool) -> None:
             await conn.execute(f"DROP TABLE IF EXISTS {table}")
         await ensure_compatibility_columns(conn)
         await ensure_compatibility_indexes(conn)
+        await ensure_catalog_export_row_versions(conn)
         from features.develop.presets import ensure_develop_presets
         await ensure_develop_presets(conn)
         # PATCH: quality lane — additive image_quality table (CREATE IF NOT EXISTS; no version bump)

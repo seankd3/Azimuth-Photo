@@ -3,6 +3,7 @@
 
 import { fetchJson } from '../api.js';
 import { isOffline } from './state.js';
+import { enqueueWrite } from './write_queue.js';
 
 export { fetchJson };
 
@@ -82,11 +83,15 @@ export async function getCounts(params) {
 
 // Flags: same typed payloads as the shared image flag API.
 export async function writeFlag(imageId, flag) {
-    return postJson(`/api/image/${imageId}/flag`, { flag });
+    return enqueueWrite(`/api/image/${imageId}/flag`, { flag });
 }
 
 export async function writeFlags(imageIds, flag) {
-    return postJson('/api/images/flag', { image_ids: imageIds, flag });
+    return enqueueWrite('/api/images/flag', { image_ids: imageIds, flag });
+}
+
+export async function writeRating(imageId, rating) {
+    return enqueueWrite(`/api/image/${imageId}/rating`, { rating });
 }
 
 // Refine: same typed payloads as the compare mosaic and undo API.

@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import re
 import shutil
 import tempfile
 import time
@@ -19,12 +18,12 @@ from data.repositories import catalog as catalog_repository
 from features.develop import rawproc
 from features.library import geodata, keywords
 from features.sync.hashing import compute_content_hash, compute_full_hash
+from features.sync.validation import validate_content_hash
 
 
 MAX_CHUNK_BYTES = 32 * 1024 * 1024
 BACKFILL_BATCH_SIZE = 100
 BACKFILL_THROTTLE_SECONDS = 0.05
-_HASH_RE = re.compile(r"^[0-9a-f]{32}$")
 _UPLOAD_LOCKS: dict[str, asyncio.Lock] = {}
 
 SYNC_DDL = """
@@ -61,13 +60,6 @@ def default_raws_root(intake_root: Path | None = None) -> Path:
     if intake == Path("/mnt/expansion/Photos/_intake"):
         return Path("/mnt/expansion/Photos/RAWS")
     return intake.parent / "RAWS"
-
-
-def validate_content_hash(value: str) -> str:
-    normalized = str(value or "").strip().lower()
-    if not _HASH_RE.fullmatch(normalized):
-        raise ValueError("content_hash must be a 32-character BLAKE2b-128 hex digest")
-    return normalized
 
 
 async def ensure_sync_schema(db_path: str) -> None:

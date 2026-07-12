@@ -12,7 +12,7 @@ from collections.abc import Mapping, Sequence
 
 import numpy as np
 
-from . import ops_constants as C
+from . import dng_pipeline, ops_constants as C
 from .film import apply_film
 from .lens import distortion_auto_crop_scale
 from .looks import compose_curve_luts, effective_settings, look_amount, look_curve
@@ -1038,6 +1038,31 @@ def _grain(c: np.ndarray, settings: Mapping[str, object], *, pixel_offset: tuple
     return c + noise[..., None] * amount * C.GRAIN_FACTOR
 
 
+def _scene_linear_user_ops(rgb: np.ndarray, settings: Mapping[str, object]) -> tuple[np.ndarray, float]:
+    """Apply the scene-linear Basic operations shared by generic and DNG renders.
+
+    For an Adobe-profiled render §30.2 places this block after HueSatMap and
+    LookTable, but before the profile tone curve. Film receives the same block
+    from the post-BaselineExposure tap and replaces stages 5-7 entirely.
+    """
+    result = np.asarray(rgb, dtype=np.float32) * np.float32(np.exp2(_number(settings, "Exposure2012")))
+    result = _region_tone_map(result, settings)
+    dehaze = _slider(settings, "Dehaze")
+    if dehaze != 0.0:
+        result = (result - C.DEHAZE_AIRLIGHT_FACTOR * dehaze) / (1.0 - C.DEHAZE_AIRLIGHT_FACTOR * dehaze)
+        result = np.maximum(result, 0.0)
+    return result.astype(np.float32), float(dehaze)
+
+
+def _resolved_adobe_profile(color_profile: Mapping[str, object] | None) -> Mapping[str, object] | None:
+    if not isinstance(color_profile, Mapping):
+        return None
+    embedded = color_profile.get("adobe_profile")
+    if isinstance(embedded, Mapping):
+        return dng_pipeline.normalize_adobe_profile(embedded)
+    return dng_pipeline.resolve_adobe_profile(color_profile)
+
+
 def apply_pipeline(
     linear_rgb: np.ndarray,
     settings: Mapping[str, object] | None = None,
@@ -1063,14 +1088,24 @@ def apply_pipeline(
     )
     rgb = _apply_white_balance(rgb, settings, asshot_temperature, asshot_tint, color_profile)
     rgb = _apply_calibration(rgb, settings)
-    rgb *= np.float32(np.exp2(_number(settings, "Exposure2012")))
-    rgb = _region_tone_map(rgb, settings)
-    dehaze = _slider(settings, "Dehaze")
-    if dehaze != 0.0:
-        rgb = (rgb - C.DEHAZE_AIRLIGHT_FACTOR * dehaze) / (1.0 - C.DEHAZE_AIRLIGHT_FACTOR * dehaze)
-        rgb = np.maximum(rgb, 0.0)
+    adobe_profile = _resolved_adobe_profile(color_profile)
+    cct = max(_as_shot_temperature(settings, asshot_temperature), 1.0)
+    if adobe_profile is not None:
+        # The cached PABASE1 pixels remain untouched linear-sRGB camera output.
+        # Adobe stages 2-4 are intentionally resolved at render time so profile
+        # changes never invalidate the expensive linear base cache.
+        scene_linear = dng_pipeline.prepare_scene_linear(
+            rgb,
+            adobe_profile,
+            cct=cct,
+            input_space="linear_srgb",
+            file_baseline_exposure=adobe_profile.get("baseline_exposure"),
+        )
+    else:
+        scene_linear = rgb
     film_stock = str(settings.get("pa_FilmStock") or "").strip()
     if film_stock:
+        rgb, dehaze = _scene_linear_user_ops(scene_linear, settings)
         c = apply_film(
             rgb,
             film_stock,
@@ -1080,12 +1115,27 @@ def apply_pipeline(
             grain_size_scale=np.clip(_number(settings, "pa_FilmGrainSize", 100.0), 0.0, 100.0) / 100.0,
             min_dimension=blur_min_dimension,
         )
+    elif adobe_profile is not None:
+        def apply_user_ops(value: np.ndarray) -> np.ndarray:
+            return _scene_linear_user_ops(value, settings)[0]
+
+        c = dng_pipeline.apply_adobe_style(
+            scene_linear,
+            adobe_profile,
+            cct=cct,
+            user_ops=apply_user_ops,
+        )
+        dehaze = _slider(settings, "Dehaze")
     else:
+        rgb, dehaze = _scene_linear_user_ops(scene_linear, settings)
         c = linear_to_srgb(rgb)
     base_kind = str(color_profile.get("base_kind") or "raw") if isinstance(color_profile, Mapping) else "raw"
-    fitted_profile = None if base_kind == "display" else _camera_profile(color_profile)
+    fitted_profile = None if base_kind == "display" or adobe_profile is not None else _camera_profile(color_profile)
     if not film_stock:
-        c = _apply_tone_curves(c, settings, fitted_profile, base_kind=base_kind)
+        # Adobe's profile curve replaces the generic base curve and base
+        # saturation. Imported/user curves remain relative adjustments.
+        tone_base_kind = "display" if adobe_profile is not None else base_kind
+        c = _apply_tone_curves(c, settings, fitted_profile, base_kind=tone_base_kind)
     c = _hsl_and_black_white(c, settings, dehaze)
     if not _bool(settings, "ConvertToGrayscale"):
         c = apply_camera_profile_ab(c, fitted_profile)
