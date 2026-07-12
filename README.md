@@ -113,3 +113,7 @@ Open `http://localhost:8000`, add a source folder in the system drawer, and let 
 ---
 
 *photoArchive is developed against the author's own 47,000-photo working archive — every screenshot above is that real library running on a single machine with an RTX 2060 Super. Your photos are your own; the app ships empty and hungry.*
+
+## Where everything lives
+
+One repo, many faces — hub server, desktop web UI (`/d`), mobile PWA (`/m`), laptop satellite mode, native Windows shell (`desktop/`), Android app (`android/`). The full map of checkouts, branches, data directories, and how to run or deploy each face is in [docs/TOPOLOGY.md](docs/TOPOLOGY.md).
