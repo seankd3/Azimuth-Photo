@@ -52,16 +52,31 @@ app.include_router(hub_routes.router)
 app.include_router(oplog_routes.router)
 app.include_router(satellite_routes.router)
 
-# PATCH: satellite lane — keep the worker out of hub processes entirely.
+# Keep the worker out of hub processes entirely. Standalone (satellite with no
+# hub) runs everything except sync; attaching a hub at runtime starts it.
+satellite.load_stored_hub()
 if satellite.is_satellite_mode():
-    _sync_worker = SyncWorker(db_path=_db.DB_PATH)
-    configure_worker(_sync_worker)
+
+    async def _start_sync_worker() -> bool:
+        if not satellite.has_hub():
+            return False
+        if getattr(app.state, "photoarchive_sync_worker", None) is not None:
+            return True
+        await satellite.ensure_sync_state(_db.DB_PATH)
+        worker = SyncWorker(db_path=_db.DB_PATH)
+        configure_worker(worker)
+        app.state.photoarchive_sync_worker = worker
+        app.state.photoarchive_shell.track_background_task(worker.run())
+        return True
+
+    satellite.register_sync_starter(_start_sync_worker)
 
     @app.on_event("startup")
     async def _start_satellite_sync_worker():
-        await satellite.ensure_sync_state(_db.DB_PATH)
-        app.state.photoarchive_shell.track_background_task(_sync_worker.run())
+        await _start_sync_worker()
 
     @app.on_event("shutdown")
     async def _stop_satellite_sync_worker():
-        _sync_worker.stop()
+        worker = getattr(app.state, "photoarchive_sync_worker", None)
+        if worker is not None:
+            worker.stop()
