@@ -1,6 +1,6 @@
 # Product Vision
 
-photoArchive should become the unified home for managing Sean's photo life: the
+Azimuth Photo should become the unified home for managing Sean's photo life: the
 private archive, the working library, the album maker, and the publishing hub.
 
 The north star is Lightroom Classic plus Google Photos, but local-first,
@@ -35,7 +35,7 @@ The execution order lives in [Product Roadmap](product-roadmap.md).
 
 ### The Archive Is The Source Of Truth
 
-photoArchive should become the trusted map of the whole photo collection. The
+Azimuth Photo should become the trusted map of the whole photo collection. The
 actual files can live on Omarchy, external drives, cache storage, or future NAS
 storage, but the user experience should feel like one continuous library.
 
@@ -134,7 +134,7 @@ Goals:
 - Preview how it will appear on the website.
 - Publish/update/unpublish without manual file export.
 - Generate responsive web images from the archive cache.
-- Keep website publication status visible inside photoArchive.
+- Keep website publication status visible inside Azimuth Photo.
 
 ### 6. Share To Social Platforms
 
@@ -169,7 +169,7 @@ Each photo and collection should have a clear exposure state:
 - Shared privately: visible through a controlled private link or invite.
 - Public: published to a website/gallery.
 - Exported/post-ready: prepared for another platform but not necessarily public
-  through photoArchive.
+  through Azimuth Photo.
 
 The UI should avoid ambiguous states. A user should never wonder whether a
 private photo has been accidentally published.
@@ -222,7 +222,7 @@ Shared status. Next work is polish around preview, retries, and site feedback.
 
 ## Success Criteria
 
-photoArchive is working when Sean can:
+Azimuth Photo is working when Sean can:
 
 - Open the phone app and browse his whole archive.
 - Create an album from a trip, event, person, or import batch in minutes.

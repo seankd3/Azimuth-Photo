@@ -1,6 +1,6 @@
 # FIELD_SPEC — satellite mode + hub sync (v1, frozen 2026-07-11)
 
-Goal: photoArchive works fully offline/remote on a laptop ("satellite") against the always-on
+Goal: Azimuth Photo works fully offline/remote on a laptop ("satellite") against the always-on
 "hub" (omarchy). Import/cull/edit happen locally at native speed; originals and metadata sync in
 the background; the full hub library stays browsable remotely through a read-through cache.
 

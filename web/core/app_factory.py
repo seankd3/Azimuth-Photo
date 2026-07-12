@@ -183,7 +183,7 @@ class StaticCacheHeadersMiddleware:
         await self.app(scope, receive, send_with_cache_headers)
 
 
-def create_base_app(*, base_dir: str | None = None, title: str = "photoArchive") -> FastAPI:
+def create_base_app(*, base_dir: str | None = None, title: str = "Azimuth Photo") -> FastAPI:
     """Create the bare FastAPI app with middleware and static mounting only."""
 
     root = base_dir or os.path.dirname(os.path.dirname(__file__))
@@ -195,7 +195,7 @@ def create_base_app(*, base_dir: str | None = None, title: str = "photoArchive")
     return app
 
 
-def create_app(*, base_dir: str | None = None, title: str = "photoArchive") -> FastAPI:
+def create_app(*, base_dir: str | None = None, title: str = "Azimuth Photo") -> FastAPI:
     """Create the routed app shell with runtime and lifecycle wiring."""
 
     return create_app_shell(base_dir=base_dir, title=title).app
@@ -461,7 +461,7 @@ def create_app_shell(
     *,
     base_dir: str | None = None,
     started_at: float | None = None,
-    title: str = "photoArchive",
+    title: str = "Azimuth Photo",
 ) -> AppShell:
     root = base_dir or os.path.dirname(os.path.dirname(__file__))
     app = create_base_app(base_dir=root, title=title)

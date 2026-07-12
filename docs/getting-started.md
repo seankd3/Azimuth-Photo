@@ -1,6 +1,6 @@
 # Getting Started
 
-This guide gets photoArchive from a fresh clone to a usable local catalog.
+This guide gets Azimuth Photo from a fresh clone to a usable local catalog.
 
 ## Install
 
@@ -45,9 +45,9 @@ By default it uses `127.0.0.1:8000`. Override the host or port with
 A clean install keeps the catalog and generated data outside the source tree:
 
 - Linux follows the XDG data, config, cache, and state directories.
-- Windows uses `%LOCALAPPDATA%\photoArchive` and `%APPDATA%\photoArchive`.
-- macOS uses `~/Library/Application Support/photoArchive` and
-  `~/Library/Caches/photoArchive`.
+- Windows uses `%LOCALAPPDATA%\Azimuth Photo` and `%APPDATA%\Azimuth Photo`.
+- macOS uses `~/Library/Application Support/Azimuth Photo` and
+  `~/Library/Caches/Azimuth Photo`.
 
 Existing installations continue using their current `web/photoarchive.db`,
 `.thumbcache`, `.models`, `.embedcache`, settings, logs, Develop cache, and
@@ -71,7 +71,7 @@ overrides are deployment choices and take precedence over saved settings.
 Removing a source changes catalog/cache state. It does not delete the original
 photo folder.
 
-If a removable drive is slow to wake or temporarily offline, photoArchive keeps
+If a removable drive is slow to wake or temporarily offline, Azimuth Photo keeps
 included catalog rows active for cached grid, Refine, search, and People views.
 Rescan and missing-file checks resume when the source folder is reachable.
 
@@ -99,7 +99,7 @@ browse.
 
 ## Optional AI Setup
 
-photoArchive works without AI models. Install local models from **System → AI**
+Azimuth Photo works without AI models. Install local models from **System → AI**
 or **System → Background work** when you want semantic image search, local
 captions/tags, People, and AI-assisted Refine pairing.
 

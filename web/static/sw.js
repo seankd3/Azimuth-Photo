@@ -1,4 +1,4 @@
-/* photoArchive mobile service worker.
+/* Azimuth Photo mobile service worker.
  *
  * Strategy:
  * - Precache the /m app shell (page, css, js modules, manifest, icon).

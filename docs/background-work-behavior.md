@@ -1,6 +1,6 @@
 # Background Work Behavior Anchor
 
-This document is the product anchor for photoArchive background work. Code,
+This document is the product anchor for Azimuth Photo background work. Code,
 tests, and UI should be audited against it.
 
 ## User-Facing Rows
