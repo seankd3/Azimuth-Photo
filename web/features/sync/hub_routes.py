@@ -29,6 +29,7 @@ class ManifestItem(BaseModel):
     bytes: int = Field(ge=0)
     filename: str
     date_taken: str | None = None
+    folder: str | None = None
 
 
 class ManifestRequest(BaseModel):
