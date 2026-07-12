@@ -62,17 +62,20 @@ app.include_router(pair_routes.router)
 satellite.load_stored_hub()
 if satellite.is_satellite_mode():
 
+    _sync_worker_lock = asyncio.Lock()
+
     async def _start_sync_worker() -> bool:
         if not satellite.has_hub():
             return False
-        if getattr(app.state, "photoarchive_sync_worker", None) is not None:
+        async with _sync_worker_lock:
+            if getattr(app.state, "photoarchive_sync_worker", None) is not None:
+                return True
+            await satellite.ensure_sync_state(_db.DB_PATH)
+            worker = SyncWorker(db_path=_db.DB_PATH)
+            configure_worker(worker)
+            app.state.photoarchive_sync_worker = worker
+            app.state.photoarchive_shell.track_background_task(worker.run())
             return True
-        await satellite.ensure_sync_state(_db.DB_PATH)
-        worker = SyncWorker(db_path=_db.DB_PATH)
-        configure_worker(worker)
-        app.state.photoarchive_sync_worker = worker
-        app.state.photoarchive_shell.track_background_task(worker.run())
-        return True
 
     satellite.register_sync_starter(_start_sync_worker)
 

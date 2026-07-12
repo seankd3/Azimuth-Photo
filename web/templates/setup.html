@@ -183,7 +183,8 @@
         if (e.key !== 'Enter') return;
         const active = steps.find(s => s.classList.contains('active'))?.dataset.step;
         if (active === 'welcome') { e.preventDefault(); show('folder'); browse(''); }
-        if (active === 'folder' && document.activeElement !== pathInput && !startBtn.disabled) { e.preventDefault(); startImport(); }
+        const tag = document.activeElement?.tagName;
+        if (active === 'folder' && tag !== 'INPUT' && tag !== 'BUTTON' && !startBtn.disabled) { e.preventDefault(); startImport(); }
     });
 
     // --- Step: folder ---
@@ -198,7 +199,15 @@
     function choose(path) {
         chosen = path || '';
         chosenEl.classList.toggle('muted', !chosen);
-        chosenEl.querySelector('.path').innerHTML = chosen ? `<bdi>${chosen}</bdi>` : 'No folder selected yet';
+        const pathEl = chosenEl.querySelector('.path');
+        pathEl.textContent = '';
+        if (chosen) {
+            const bdi = document.createElement('bdi');
+            bdi.textContent = chosen;
+            pathEl.appendChild(bdi);
+        } else {
+            pathEl.textContent = 'No folder selected yet';
+        }
         startBtn.disabled = !chosen;
         folderError.textContent = '';
     }
@@ -227,8 +236,8 @@
         for (const entry of entries) {
             const b = document.createElement('button');
             b.className = 'su-entry'; b.type = 'button';
-            b.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1.5 4.5A1.5 1.5 0 0 1 3 3h3l1.5 1.5H13A1.5 1.5 0 0 1 14.5 6v5A1.5 1.5 0 0 1 13 12.5H3A1.5 1.5 0 0 1 1.5 11z"/></svg>' +
-                `<span>${entry.name}</span>`;
+            b.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1.5 4.5A1.5 1.5 0 0 1 3 3h3l1.5 1.5H13A1.5 1.5 0 0 1 14.5 6v5A1.5 1.5 0 0 1 13 12.5H3A1.5 1.5 0 0 1 1.5 11z"/></svg><span></span>';
+            b.querySelector('span').textContent = entry.name;
             b.addEventListener('click', () => browse(entry.path));
             listEl.appendChild(b);
         }
