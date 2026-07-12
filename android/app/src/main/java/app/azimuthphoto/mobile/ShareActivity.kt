@@ -1,9 +1,9 @@
-package app.photoarchive.mobile
+package app.azimuthphoto.mobile
 
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
-import app.photoarchive.mobile.backup.BackupScheduler
+import app.azimuthphoto.mobile.backup.BackupScheduler
 
 /**
  * Share target: receiving media just kicks a backup pass — anything shared in

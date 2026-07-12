@@ -1,4 +1,4 @@
-package app.photoarchive.mobile.backup
+package app.azimuthphoto.mobile.backup
 
 import android.app.NotificationManager
 import android.content.Context
@@ -7,11 +7,11 @@ import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
-import app.photoarchive.mobile.App
-import app.photoarchive.mobile.R
-import app.photoarchive.mobile.data.DeviceMedia
-import app.photoarchive.mobile.data.MediaItem
-import app.photoarchive.mobile.data.SettingsStore
+import app.azimuthphoto.mobile.App
+import app.azimuthphoto.mobile.R
+import app.azimuthphoto.mobile.data.DeviceMedia
+import app.azimuthphoto.mobile.data.MediaItem
+import app.azimuthphoto.mobile.data.SettingsStore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.io.IOException

@@ -5,11 +5,11 @@ plugins {
 }
 
 android {
-    namespace = "app.photoarchive.mobile"
+    namespace = "app.azimuthphoto.mobile"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "app.photoarchive.mobile"
+        applicationId = "app.azimuthphoto.mobile"
         minSdk = 33
         targetSdk = 35
         versionCode = 2

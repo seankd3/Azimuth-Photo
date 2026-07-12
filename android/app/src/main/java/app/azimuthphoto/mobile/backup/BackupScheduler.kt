@@ -1,4 +1,4 @@
-package app.photoarchive.mobile.backup
+package app.azimuthphoto.mobile.backup
 
 import android.content.Context
 import android.net.Uri

@@ -1,4 +1,4 @@
-package app.photoarchive.mobile.backup
+package app.azimuthphoto.mobile.backup
 
 import org.junit.Assert.assertEquals
 import org.junit.Test

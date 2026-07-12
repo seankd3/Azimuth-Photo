@@ -1,4 +1,4 @@
-package app.photoarchive.mobile
+package app.azimuthphoto.mobile
 
 import android.Manifest
 import android.content.pm.PackageManager
@@ -41,12 +41,12 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
-import app.photoarchive.mobile.backup.BackupScheduler
-import app.photoarchive.mobile.backup.FreeUpSpace
-import app.photoarchive.mobile.ui.ArchiveScreen
-import app.photoarchive.mobile.ui.PhotoArchiveTheme
-import app.photoarchive.mobile.ui.SettingsScreen
-import app.photoarchive.mobile.ui.TimelineScreen
+import app.azimuthphoto.mobile.backup.BackupScheduler
+import app.azimuthphoto.mobile.backup.FreeUpSpace
+import app.azimuthphoto.mobile.ui.ArchiveScreen
+import app.azimuthphoto.mobile.ui.PhotoArchiveTheme
+import app.azimuthphoto.mobile.ui.SettingsScreen
+import app.azimuthphoto.mobile.ui.TimelineScreen
 
 class MainActivity : ComponentActivity() {
 

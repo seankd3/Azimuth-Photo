@@ -1,4 +1,4 @@
-package app.photoarchive.mobile.backup
+package app.azimuthphoto.mobile.backup
 
 import org.bouncycastle.crypto.digests.Blake2bDigest
 import java.io.InputStream

@@ -1,4 +1,4 @@
-package app.photoarchive.mobile.ui
+package app.azimuthphoto.mobile.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -38,10 +38,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
-import app.photoarchive.mobile.backup.BackupDb
-import app.photoarchive.mobile.backup.BackupWorker
-import app.photoarchive.mobile.data.DeviceMedia
-import app.photoarchive.mobile.data.MediaItem
+import app.azimuthphoto.mobile.backup.BackupDb
+import app.azimuthphoto.mobile.backup.BackupWorker
+import app.azimuthphoto.mobile.data.DeviceMedia
+import app.azimuthphoto.mobile.data.MediaItem
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 

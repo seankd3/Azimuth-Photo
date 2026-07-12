@@ -1,4 +1,4 @@
-package app.photoarchive.mobile.ui
+package app.azimuthphoto.mobile.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
@@ -42,10 +42,10 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
-import app.photoarchive.mobile.data.AppSettings
-import app.photoarchive.mobile.data.ArchiveApi
-import app.photoarchive.mobile.data.ArchiveImage
-import app.photoarchive.mobile.data.SettingsStore
+import app.azimuthphoto.mobile.data.AppSettings
+import app.azimuthphoto.mobile.data.ArchiveApi
+import app.azimuthphoto.mobile.data.ArchiveImage
+import app.azimuthphoto.mobile.data.SettingsStore
 
 /** The full hub library: every photo you own, browsable and searchable from the couch. */
 @OptIn(ExperimentalMaterial3Api::class)

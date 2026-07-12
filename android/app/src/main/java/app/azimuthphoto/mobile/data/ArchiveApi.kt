@@ -1,4 +1,4 @@
-package app.photoarchive.mobile.data
+package app.azimuthphoto.mobile.data
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
