@@ -15,9 +15,10 @@ class DevelopLensTests(unittest.TestCase):
         radius = np.array([0.0, 0.5, 1.0], dtype=np.float32)
         correction = {"model": "pa", "terms": [-0.2, 0.1, -0.05]}
         gain = pipeline.lens_vignetting_gain(radius, correction)
-        expected = 1.0 - 0.2 * radius**2 + 0.1 * radius**4 - 0.05 * radius**6
+        expected = 1.0 / (1.0 - 0.2 * radius**2 + 0.1 * radius**4 - 0.05 * radius**6)
         np.testing.assert_allclose(gain, expected, atol=1e-7)
         self.assertEqual(float(gain[0]), 1.0)
+        self.assertGreater(float(gain[-1]), 1.0)
 
     def test_uv_polynomial_is_identity_at_optical_center(self):
         for distortion in (

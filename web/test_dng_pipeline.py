@@ -196,6 +196,35 @@ def test_adobe_profile_disables_legacy_fitted_tone_and_ab():
     np.testing.assert_allclose(with_fitted, plain, atol=1e-7)
 
 
+def test_lossy_dng_base_does_not_apply_baseline_exposure_twice():
+    source = np.full((2, 2, 3), 0.1, dtype=np.float32)
+    adobe = {
+        **IDENTITY_PROFILE,
+        "baseline_exposure": 1.0,
+        "tone_curve": [[0, 0], [1, 1]],
+    }
+    already_exposed = pipeline.apply_pipeline(
+        source,
+        {"Sharpness": 0},
+        color_profile={
+            "adobe_profile": adobe,
+            "color": {"forward_matrix": np.eye(3).reshape(-1).tolist()},
+        },
+    )
+    zero_baseline = pipeline.apply_pipeline(
+        source,
+        {"Sharpness": 0},
+        color_profile={"adobe_profile": {**adobe, "baseline_exposure": 0.0}},
+    )
+    native_base = pipeline.apply_pipeline(
+        source,
+        {"Sharpness": 0},
+        color_profile={"adobe_profile": adobe},
+    )
+    np.testing.assert_allclose(already_exposed, zero_baseline, atol=1e-7)
+    assert float(np.max(native_base - already_exposed)) > 0.1
+
+
 def test_javascript_table_pack_matches_dual_illuminant_layout():
     module = Path(__file__).parent / "static/js/desktop/develop/dng_glsl.js"
     script = f"""
@@ -222,3 +251,38 @@ def test_float16_profile_lut_quantization_tolerance_is_bounded():
     max_delta = float(np.max(np.abs(restored - table)))
     assert max_delta == pytest.approx(0.001250267, abs=1e-7)
     assert max_delta < 0.002
+
+
+def test_dng_shadow_stress_golden_disables_unrelated_default_sharpening():
+    """The DNG-op stress fixture must isolate profile math from detail defaults."""
+    profile = {
+        **IDENTITY_PROFILE,
+        "profile_name": "identity",
+        "tone_curve": [[0, 0], [1, 1]],
+    }
+    source = np.array(
+        [[[0.01, 0.02, 0.04], [0.08, 0.16, 0.32], [0.7, 0.3, 0.1], [0.1, 0.7, 0.4]]],
+        dtype=np.float32,
+    )
+    rendered = pipeline.apply_pipeline(
+        source,
+        {"Sharpness": 0},
+        color_profile={"adobe_profile": profile},
+    )
+    pixels = np.asarray(np.clip(rendered * 255.0 + 0.5, 0, 255), dtype=np.uint8)
+    assert pixels.reshape(-1).tolist() == [25, 39, 56, 80, 111, 153, 218, 149, 89, 89, 218, 170]
+
+    module = Path(__file__).parent / "static/js/desktop/develop/ops_constants.js"
+    script = (
+        f"import {{ DEFAULTS }} from {json.dumps(module.as_uri())};"
+        "console.log(JSON.stringify(DEFAULTS.Sharpness));"
+    )
+    result = subprocess.run(
+        ["node", "--experimental-default-type=module", "--input-type=module", "-e", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    # WebGL deliberately has Lightroom's implicit detail default. The DNG-only
+    # stress must override it instead of attributing sharpening to LUT error.
+    assert json.loads(result.stdout) == 40

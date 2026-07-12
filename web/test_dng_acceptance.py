@@ -24,6 +24,9 @@ PROD_DB = Path("/home/sean/Projects/photo-archive/web/photoarchive.db")
 EVIDENCE_DIR = Path("/tmp/dev14e")
 SAMPLE_SIZE = 40
 PREVIEW_EDGE = 512
+MEAN_L_LIMIT = 0.035
+MEAN_AB_LIMIT = 0.025
+MODEL_L_LIMIT = 0.08
 
 
 def _stratified_dng_sample(limit: int = SAMPLE_SIZE) -> list[dict]:
@@ -198,5 +201,11 @@ def test_40_dng_adobe_preview_acceptance():
     mean_l = float(np.mean([row["l"] for row in results]))
     mean_ab = float(np.mean([row["ab"] for row in results]))
     print(f"ALL | {len(results)} | {mean_l:.5f} | {mean_ab:.5f}")
-    assert mean_l < 0.035
-    assert mean_ab < 0.025
+    model_l = {
+        model: float(np.mean([row["l"] for row in rows]))
+        for model, rows in per_model.items()
+    }
+    failed_models = {model: value for model, value in model_l.items() if value >= MODEL_L_LIMIT}
+    assert mean_l < MEAN_L_LIMIT, f"overall mean |L| {mean_l:.5f} >= {MEAN_L_LIMIT:.3f}"
+    assert mean_ab < MEAN_AB_LIMIT, f"overall mean ab {mean_ab:.5f} >= {MEAN_AB_LIMIT:.3f}"
+    assert not failed_models, f"per-model mean |L| gate failed: {failed_models}"

@@ -578,7 +578,12 @@ def lens_vignetting_gain(
     vignetting: Mapping[str, object] | None,
     profile_scale: float = 1.0,
 ) -> np.ndarray:
-    """Return Lensfun's PA linear-domain radial correction gain."""
+    """Return Lensfun's PA linear-domain *de-vignetting* gain.
+
+    ``radius`` is normalized so 1 is the image corner, matching Lensfun's PA
+    calibration space. Lensfun's normal (non-reverse) modifier divides by the
+    polynomial; multiplying by it simulates the lens and darkens the frame.
+    """
     r = np.asarray(radius, dtype=np.float32)
     if not vignetting or str(vignetting.get("model") or "").lower() != "pa":
         return np.ones_like(r)
@@ -587,7 +592,8 @@ def lens_vignetting_gain(
     except (TypeError, ValueError):
         return np.ones_like(r)
     r2 = r * r
-    gain = 1.0 + k1 * r2 + k2 * r2 * r2 + k3 * r2 * r2 * r2
+    polynomial = 1.0 + k1 * r2 + k2 * r2 * r2 + k3 * r2 * r2 * r2
+    gain = 1.0 / np.maximum(polynomial, C.TONE_EPSILON)
     amount = np.clip(profile_scale, C.LENS_PROFILE_SCALE_MIN / 100.0, C.LENS_PROFILE_SCALE_MAX / 100.0)
     gain = 1.0 + (gain - 1.0) * amount
     return np.clip(gain, C.LENS_VIGNETTE_GAIN_MIN, C.LENS_VIGNETTE_GAIN_MAX).astype(np.float32)
@@ -700,7 +706,10 @@ def _apply_lens_correction(
         result = _bilinear_sample(rgb, source_x - offset_x, source_y - offset_y)
     source_radius = radius * radial_scale
     vignette_scale = np.clip(_number(settings, "LensProfileVignettingScale", C.LENS_PROFILE_SCALE_DEFAULT) / 100.0, 0.0, 2.0)
-    gain = lens_vignetting_gain(source_radius, correction.get("vignetting"), vignette_scale)
+    # Lensfun distortion models use the Hugin short-edge radius, while its PA
+    # vignetting calibration defines r=1 at the image corner.
+    corner_radius = math.hypot(canvas_width / min(canvas_width, canvas_height), canvas_height / min(canvas_width, canvas_height)) * crop_ratio
+    gain = lens_vignetting_gain(source_radius / max(corner_radius, C.TONE_EPSILON), correction.get("vignetting"), vignette_scale)
     midpoint = C.LENS_MANUAL_VIGNETTE_MIDPOINT_MIN + np.clip(_number(settings, "LensManualVignetteMidpoint", 50.0), 0.0, 100.0) / 100.0 * C.LENS_MANUAL_VIGNETTE_MIDPOINT_RANGE
     manual_weight = _smoothstep(midpoint, 1.0, np.clip(source_radius, 0.0, 1.0))
     gain *= np.maximum(0.0, 1.0 + manual_vignette * C.LENS_MANUAL_VIGNETTE_FACTOR * manual_weight)
@@ -1063,6 +1072,19 @@ def _resolved_adobe_profile(color_profile: Mapping[str, object] | None) -> Mappi
     return dng_pipeline.resolve_adobe_profile(color_profile)
 
 
+def _base_includes_baseline_exposure(color_profile: Mapping[str, object] | None) -> bool:
+    """Whether the cached linear-sRGB base already includes DNG BaselineExposure.
+
+    The lossy-DNG decoder records its camera-space ForwardMatrix in ``color``
+    after applying BaselineExposure. Native LibRaw bases do not expose that
+    field and still require the profile stage here.
+    """
+    if not isinstance(color_profile, Mapping):
+        return False
+    color = color_profile.get("color")
+    return isinstance(color, Mapping) and color.get("forward_matrix") is not None
+
+
 def apply_pipeline(
     linear_rgb: np.ndarray,
     settings: Mapping[str, object] | None = None,
@@ -1099,7 +1121,10 @@ def apply_pipeline(
             adobe_profile,
             cct=cct,
             input_space="linear_srgb",
-            file_baseline_exposure=adobe_profile.get("baseline_exposure"),
+            file_baseline_exposure=(
+                0.0 if _base_includes_baseline_exposure(color_profile)
+                else adobe_profile.get("baseline_exposure")
+            ),
         )
     else:
         scene_linear = rgb
