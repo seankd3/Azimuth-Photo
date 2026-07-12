@@ -1,16 +1,20 @@
 // Durable, client-side write-ahead queue for field culling. It deliberately
-// uses localStorage rather than a service worker so it works on today's HTTP
-// and flaky-link deployment.
+// uses localStorage rather than IndexedDB so the queue works on today's HTTP
+// and flaky-link deployment. On secure origins, Background Sync is an optional
+// wake-up that asks this page to drain — localStorage remains the source of
+// truth (service workers cannot read it).
 
 import { emit } from './state.js';
 
 const STORAGE_KEY = 'pa-m-write-queue-v1';
 const BASE_RETRY_MS = 500;
 const MAX_RETRY_MS = 30000;
+const WRITE_SYNC_TAG = 'pa-write-queue';
 
 let queue = [];
 let retryTimer = null;
 let draining = false;
+let syncListenerBound = false;
 
 function loadQueue() {
     try {
@@ -50,6 +54,19 @@ function scheduleDrain(delay = 0) {
     }, delay);
 }
 
+async function requestBackgroundSync() {
+    if (!queue.length) return;
+    if (!window.isSecureContext || !('serviceWorker' in navigator)) return;
+    try {
+        const registration = await navigator.serviceWorker.ready;
+        if (registration && 'sync' in registration) {
+            await registration.sync.register(WRITE_SYNC_TAG);
+        }
+    } catch {
+        // Background Sync is optional — localStorage + online events remain.
+    }
+}
+
 async function send(item) {
     const response = await fetch(item.url, {
         method: 'POST',
@@ -80,6 +97,7 @@ export async function drainWrites() {
                 item.nextAttemptAt = Date.now() + retryDelay(item.attempts);
                 saveQueue();
                 updateBadge();
+                void requestBackgroundSync();
                 scheduleDrain(item.nextAttemptAt - Date.now());
                 return;
             }
@@ -99,7 +117,28 @@ export function enqueueWrite(url, body) {
     saveQueue();
     updateBadge();
     void drainWrites();
+    void requestBackgroundSync();
     return { queued: true };
+}
+
+export function queueLength() {
+    return queue.length;
+}
+
+export function peekQueue() {
+    return queue.map((item) => ({ url: item.url, body: item.body, attempts: item.attempts }));
+}
+
+function bindSyncListener() {
+    if (syncListenerBound || !('serviceWorker' in navigator)) return;
+    syncListenerBound = true;
+    navigator.serviceWorker.addEventListener('message', (event) => {
+        if (event.data && event.data.type === 'drain-write-queue') {
+            queue.forEach((item) => { item.nextAttemptAt = Date.now(); });
+            saveQueue();
+            void drainWrites();
+        }
+    });
 }
 
 export function initWriteQueue() {
@@ -111,10 +150,15 @@ export function initWriteQueue() {
     badge.setAttribute('aria-live', 'polite');
     document.body.appendChild(badge);
     updateBadge();
+    bindSyncListener();
     window.addEventListener('online', () => {
         queue.forEach((item) => { item.nextAttemptAt = Date.now(); });
         saveQueue();
         void drainWrites();
+        void requestBackgroundSync();
     });
-    if (queue.length) void drainWrites();
+    if (queue.length) {
+        void drainWrites();
+        void requestBackgroundSync();
+    }
 }

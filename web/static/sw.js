@@ -6,12 +6,27 @@
  * - Network-only for every other /api request: writes and live data
  *   must never be answered from a cache.
  * - Navigations fall back to the cached /m shell when offline.
+ * - Background Sync tag `pa-write-queue` wakes open clients so
+ *   write_queue.js can drain its localStorage queue (SW cannot read
+ *   localStorage — the page queue remains the source of truth).
+ *
+ * Versioning: register as `/sw.js?v=<static_version>` (same cache-bust
+ * idiom as `?v={{ static_version }}` on CSS/JS). The query value becomes
+ * CACHE_VERSION so shell updates drop old caches automatically.
  */
 
-const CACHE_VERSION = 'pa-mobile-v16';
+const CACHE_VERSION = (() => {
+    try {
+        const version = new URL(self.location.href).searchParams.get('v');
+        return version ? `pa-mobile-${version}` : 'pa-mobile-dev';
+    } catch {
+        return 'pa-mobile-dev';
+    }
+})();
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const THUMB_CACHE = `${CACHE_VERSION}-thumbs`;
 const THUMB_CACHE_MAX_ENTRIES = 1500;
+const WRITE_SYNC_TAG = 'pa-write-queue';
 
 const SHELL_URLS = [
     '/m',
@@ -27,6 +42,7 @@ const SHELL_URLS = [
     '/static/js/mobile/flags.js',
     '/static/js/mobile/haptics.js',
     '/static/js/mobile/history.js',
+    '/static/js/mobile/https_origin.js',
     '/static/js/mobile/install.js',
     '/static/js/mobile/library.js',
     '/static/js/mobile/refine.js',
@@ -37,6 +53,7 @@ const SHELL_URLS = [
     '/static/js/mobile/timeline.js',
     '/static/js/mobile/toast.js',
     '/static/js/mobile/viewer.js',
+    '/static/js/mobile/write_queue.js',
 ];
 
 self.addEventListener('install', (event) => {
@@ -122,6 +139,24 @@ async function staticNetworkFirst(request) {
     if (unversioned) return unversioned;
     return new Response('', { status: 504, statusText: 'Offline' });
 }
+
+async function notifyClientsToDrainQueue() {
+    const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const client of clients) {
+        client.postMessage({ type: 'drain-write-queue' });
+    }
+}
+
+self.addEventListener('sync', (event) => {
+    if (event.tag !== WRITE_SYNC_TAG) return;
+    event.waitUntil(notifyClientsToDrainQueue());
+});
+
+self.addEventListener('message', (event) => {
+    if (event.data && event.data.type === 'drain-write-queue') {
+        event.waitUntil(notifyClientsToDrainQueue());
+    }
+});
 
 self.addEventListener('fetch', (event) => {
     const request = event.request;
