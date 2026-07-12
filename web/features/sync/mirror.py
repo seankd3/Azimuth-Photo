@@ -35,7 +35,9 @@ _IMAGE_COLUMNS = {
 
 async def _urllib_request(method: str, url: str, *, body: bytes | None = None, headers: dict | None = None) -> tuple[int, dict[str, str], bytes]:
     def request() -> tuple[int, dict[str, str], bytes]:
-        req = urllib.request.Request(url, data=body, headers=dict(headers or {}), method=method)
+        request_headers = dict(headers or {})
+        request_headers.update(satellite.device_auth_headers())
+        req = urllib.request.Request(url, data=body, headers=request_headers, method=method)
         try:
             with urllib.request.urlopen(req, timeout=20) as response:  # noqa: S310 - configured tailnet hub.
                 return response.status, dict(response.headers), response.read()

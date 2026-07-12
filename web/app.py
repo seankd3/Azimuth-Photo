@@ -2,6 +2,10 @@ from core.runtime_paths import apply_environment_defaults
 
 apply_environment_defaults()
 
+import asyncio
+import os
+import socket
+
 from core import wiring
 from core.app_factory import create_app
 from features.develop import ai_mask_routes, hdr_routes, import_routes, pano_routes, preset_routes, routes as develop_routes, xmp_write_routes
@@ -11,7 +15,7 @@ from features.develop import export_presets
 from features.media import routes as media_routes
 from features.quality import routes as quality_routes
 from features.system import backup_routes
-from features.sync import hub_routes, oplog_routes, satellite, satellite_routes
+from features.sync import hub_routes, mdns, oplog_routes, pair_routes, pairing, satellite, satellite_routes
 from features.sync.sync_worker import SyncWorker, configure_worker
 
 
@@ -33,6 +37,7 @@ gallery_routes.configure(db_path=lambda: _db.DB_PATH, thumbnail_response=media_r
 export_presets.configure(db_path=lambda: _db.DB_PATH)
 hub_routes.configure(db_path=lambda: _db.DB_PATH)
 oplog_routes.configure(db_path=lambda: _db.DB_PATH)
+pair_routes.configure(db_path=lambda: _db.DB_PATH)
 app.include_router(hdr_routes.router)
 app.include_router(pano_routes.router)
 app.include_router(ai_mask_routes.router)
@@ -51,9 +56,10 @@ app.include_router(watched_routes.router)
 app.include_router(hub_routes.router)
 app.include_router(oplog_routes.router)
 app.include_router(satellite_routes.router)
+app.include_router(pair_routes.router)
 
 # PATCH: satellite lane — keep the worker out of hub processes entirely.
-if satellite.is_satellite_mode():
+if satellite.is_satellite_mode() and satellite.has_hub():
     _sync_worker = SyncWorker(db_path=_db.DB_PATH)
     configure_worker(_sync_worker)
 
@@ -65,3 +71,25 @@ if satellite.is_satellite_mode():
     @app.on_event("shutdown")
     async def _stop_satellite_sync_worker():
         _sync_worker.stop()
+
+
+@app.on_event("startup")
+async def _start_hub_mdns():
+    if not mdns.is_hub_mode():
+        return
+    import settings as _settings
+
+    hub_id = await pairing.get_hub_id(_db.DB_PATH)
+    name = (
+        str(_settings.get_settings().get("share_brand_name") or "").strip()
+        or os.environ.get("PHOTOARCHIVE_LIBRARY_NAME", "").strip()
+        or socket.gethostname()
+        or "photoArchive"
+    )
+    port = int(os.environ.get("PHOTOARCHIVE_PORT") or 8000)
+    await asyncio.to_thread(mdns.start_hub_announce, name=name, port=port, hub_id=hub_id)
+
+
+@app.on_event("shutdown")
+async def _stop_hub_mdns():
+    mdns.stop_hub_announce()

@@ -25,19 +25,52 @@ CREATE INDEX IF NOT EXISTS idx_sync_state_image_id ON sync_state(image_id);
 
 
 def hub_url() -> str:
-    return os.environ.get("PHOTOARCHIVE_HUB_URL", "").strip().rstrip("/")
+    env = os.environ.get("PHOTOARCHIVE_HUB_URL", "").strip().rstrip("/")
+    if env:
+        return env
+    try:
+        import settings
+
+        return str(settings.get_settings().get("hub_url") or "").strip().rstrip("/")
+    except Exception:
+        return ""
+
+
+def device_token() -> str:
+    try:
+        import settings
+
+        return str(settings.get_settings().get("device_token") or "").strip()
+    except Exception:
+        return ""
+
+
+def device_auth_headers() -> dict[str, str]:
+    token = device_token()
+    return {"X-Device-Token": token} if token else {}
+
+
+def has_hub() -> bool:
+    return bool(hub_url())
 
 
 def is_satellite_mode() -> bool:
-    return (
-        os.environ.get("PHOTOARCHIVE_MODE", "").strip().lower() == "satellite"
-        and bool(hub_url())
-    )
+    """Field-client face: satellite or standalone (hub URL optional).
+
+    Sync/mirror/prefetch are gated separately by ``has_hub()``.
+    """
+    mode = os.environ.get("PHOTOARCHIVE_MODE", "").strip().lower()
+    if mode == "hub":
+        return False
+    if mode in ("satellite", "standalone"):
+        return True
+    return has_hub()
 
 
 def bootstrap_payload() -> dict:
-    return {"mode": "satellite" if is_satellite_mode() else "hub"}
-
+    if is_satellite_mode():
+        return {"mode": "satellite" if has_hub() else "standalone"}
+    return {"mode": "hub"}
 
 def content_hash_for_file(filepath: str) -> str:
     """Return the FIELD_SPEC identity: BLAKE2b-128(first 8MiB + byte size)."""
