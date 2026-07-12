@@ -36,7 +36,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -59,7 +61,12 @@ fun ArchiveScreen() {
     val context = LocalContext.current
     var settings by remember { mutableStateOf<AppSettings?>(null) }
     LaunchedEffect(Unit) { settings = SettingsStore.current(context) }
-    val api = remember(settings?.serverUrl) { settings?.let { ArchiveApi(it.serverUrl) } } ?: return
+    val currentSettings = settings
+    if (currentSettings == null) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        return
+    }
+    val api = remember(currentSettings.serverUrl) { ArchiveApi(currentSettings.serverUrl) }
 
     var query by remember { mutableStateOf("") }
     var activeQuery by remember { mutableStateOf("") }
@@ -69,7 +76,10 @@ fun ArchiveScreen() {
     var totalVisible by remember { mutableStateOf(0L) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
-    var viewerIndex by remember { mutableStateOf<Int?>(null) }
+    var viewerIndex by rememberSaveable { mutableStateOf<Int?>(null) }
+    val gridState = rememberLazyGridState()
+    var pageLoadInFlight by remember(activeQuery, activeShelf) { mutableStateOf(false) }
+    var lastPageWasEmpty by remember(activeQuery, activeShelf) { mutableStateOf(false) }
 
     LaunchedEffect(api) {
         shelves = runCatching { api.shelves() }.getOrDefault(emptyList())
@@ -82,10 +92,39 @@ fun ArchiveScreen() {
             val page = api.page(offset = 0, search = activeQuery, folder = activeShelf?.path ?: "")
             images = page.images
             totalVisible = page.visible_images
+            lastPageWasEmpty = page.images.isEmpty()
         } catch (e: Exception) {
             error = e.message ?: "Couldn't reach the archive"
         }
         loading = false
+    }
+
+    LaunchedEffect(activeQuery, activeShelf) {
+        snapshotFlow { gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0 }
+            .collect { lastVisible ->
+                if (
+                    !loading && !pageLoadInFlight && !lastPageWasEmpty &&
+                    lastVisible >= images.size - 40
+                ) {
+                    pageLoadInFlight = true
+                    try {
+                        val next = api.page(
+                            offset = images.size,
+                            search = activeQuery,
+                            folder = activeShelf?.path ?: "",
+                        )
+                        if (next.images.isEmpty()) {
+                            lastPageWasEmpty = true
+                        } else {
+                            images = (images + next.images).distinctBy { it.id }
+                        }
+                    } catch (_: Exception) {
+                        // Keep the current grid visible; a later scroll can retry the page.
+                    } finally {
+                        pageLoadInFlight = false
+                    }
+                }
+            }
     }
 
     viewerIndex?.let { index ->
@@ -147,7 +186,6 @@ fun ArchiveScreen() {
                 Text(error!!, color = TextSecondary, style = MaterialTheme.typography.bodyMedium)
             }
             else -> {
-                val gridState = rememberLazyGridState()
                 LazyVerticalGrid(
                     state = gridState,
                     columns = GridCells.Fixed(4),
@@ -171,18 +209,6 @@ fun ArchiveScreen() {
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier.fillMaxSize(),
                             )
-                        }
-                        if (index >= images.size - 40) {
-                            LaunchedEffect(images.size) {
-                                runCatching {
-                                    val next = api.page(
-                                        offset = images.size,
-                                        search = activeQuery,
-                                        folder = activeShelf?.path ?: "",
-                                    )
-                                    if (next.images.isNotEmpty()) images = images + next.images
-                                }
-                            }
                         }
                     }
                 }

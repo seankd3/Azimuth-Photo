@@ -15,6 +15,7 @@ private val Context.dataStore by preferencesDataStore(name = "settings")
 
 data class AppSettings(
     val serverUrl: String,
+    val deviceToken: String = "",
     val backupEnabled: Boolean,
     val wifiOnly: Boolean,
     val backupVideos: Boolean,
@@ -29,6 +30,7 @@ object SettingsStore {
     const val DEFAULT_SERVER_URL = "http://100.102.150.104:8000"
 
     private val SERVER_URL = stringPreferencesKey("server_url")
+    private val DEVICE_TOKEN = stringPreferencesKey("device_token")
     private val BACKUP_ENABLED = booleanPreferencesKey("backup_enabled")
     private val WIFI_ONLY = booleanPreferencesKey("wifi_only")
     private val BACKUP_VIDEOS = booleanPreferencesKey("backup_videos")
@@ -40,6 +42,7 @@ object SettingsStore {
         context.dataStore.data.map { p ->
             AppSettings(
                 serverUrl = (p[SERVER_URL] ?: DEFAULT_SERVER_URL).trimEnd('/'),
+                deviceToken = p[DEVICE_TOKEN] ?: "",
                 backupEnabled = p[BACKUP_ENABLED] ?: true,
                 wifiOnly = p[WIFI_ONLY] ?: false,
                 backupVideos = p[BACKUP_VIDEOS] ?: true,
@@ -53,6 +56,9 @@ object SettingsStore {
 
     suspend fun setServerUrl(context: Context, url: String) =
         context.dataStore.edit { it[SERVER_URL] = url.trim().trimEnd('/') }
+
+    suspend fun setDeviceToken(context: Context, token: String) =
+        context.dataStore.edit { it[DEVICE_TOKEN] = token.trim() }
 
     suspend fun setBackupEnabled(context: Context, enabled: Boolean) =
         context.dataStore.edit { it[BACKUP_ENABLED] = enabled }

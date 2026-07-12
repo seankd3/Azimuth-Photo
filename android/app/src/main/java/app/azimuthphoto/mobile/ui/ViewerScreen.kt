@@ -94,7 +94,10 @@ fun ViewerScreen(items: List<MediaItem>, startIndex: Int, onClose: () -> Unit) {
                 IconButton(onClick = { infoFor = current }) {
                     Icon(Icons.Outlined.Info, "Info", tint = Color.White)
                 }
-                IconButton(onClick = { trashItem(context, current) }) {
+                IconButton(onClick = {
+                    trashItem(context, current)
+                    onClose()
+                }) {
                     Icon(Icons.Outlined.Delete, "Delete", tint = Color.White)
                 }
             }

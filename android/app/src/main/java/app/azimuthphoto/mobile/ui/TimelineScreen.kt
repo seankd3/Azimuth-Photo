@@ -28,6 +28,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,6 +45,8 @@ import app.azimuthphoto.mobile.data.DeviceMedia
 import app.azimuthphoto.mobile.data.MediaItem
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 sealed class TimelineRow {
     data class Header(val day: LocalDate) : TimelineRow()
@@ -55,12 +58,12 @@ fun TimelineScreen() {
     val context = LocalContext.current
     var items by remember { mutableStateOf<List<MediaItem>?>(null) }
     var backupStates by remember { mutableStateOf<Map<Long, String>>(emptyMap()) }
-    var viewerIndex by remember { mutableStateOf<Int?>(null) }
+    var viewerIndex by rememberSaveable { mutableStateOf<Int?>(null) }
     val progress by BackupWorker.progress.collectAsState()
 
     LaunchedEffect(progress.running) {
         items = DeviceMedia.queryAll(context)
-        backupStates = BackupDb.get(context).allStates()
+        backupStates = withContext(Dispatchers.IO) { BackupDb.get(context).allStates() }
     }
 
     val media = items

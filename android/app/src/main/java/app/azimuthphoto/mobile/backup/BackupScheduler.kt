@@ -10,6 +10,8 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import app.azimuthphoto.mobile.data.SettingsStore
+import kotlinx.coroutines.runBlocking
 import java.util.concurrent.TimeUnit
 
 object BackupScheduler {
@@ -18,8 +20,9 @@ object BackupScheduler {
 
     /** Periodic safety net + content-change trigger so new photos upload promptly. */
     fun ensureScheduled(context: Context) {
+        val wifiOnly = runBlocking { SettingsStore.current(context).wifiOnly }
         val request = PeriodicWorkRequestBuilder<BackupWorker>(1, TimeUnit.HOURS)
-            .setConstraints(constraints(wifiOnly = false))
+            .setConstraints(constraints(wifiOnly))
             .build()
         WorkManager.getInstance(context).enqueueUniquePeriodicWork(
             PERIODIC_WORK, ExistingPeriodicWorkPolicy.KEEP, request
@@ -29,10 +32,11 @@ object BackupScheduler {
 
     /** Re-armed after every run: fires shortly after anything new lands in MediaStore. */
     fun scheduleContentTrigger(context: Context) {
+        val wifiOnly = runBlocking { SettingsStore.current(context).wifiOnly }
         val request = OneTimeWorkRequestBuilder<BackupWorker>()
             .setConstraints(
                 Constraints.Builder()
-                    .setRequiredNetworkType(NetworkType.CONNECTED)
+                    .setRequiredNetworkType(if (wifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED)
                     .addContentUriTrigger(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, true)
                     .addContentUriTrigger(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true)
                     .setTriggerContentUpdateDelay(30, TimeUnit.SECONDS)
@@ -46,8 +50,9 @@ object BackupScheduler {
     }
 
     fun runNow(context: Context) {
+        val wifiOnly = runBlocking { SettingsStore.current(context).wifiOnly }
         val request = OneTimeWorkRequestBuilder<BackupWorker>()
-            .setConstraints(constraints(wifiOnly = false))
+            .setConstraints(constraints(wifiOnly))
             .build()
         WorkManager.getInstance(context).enqueueUniqueWork(
             NOW_WORK, ExistingWorkPolicy.REPLACE, request

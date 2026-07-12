@@ -85,6 +85,8 @@ class MainActivity : ComponentActivity() {
 
     private fun hasMediaPermission(): Boolean =
         ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_IMAGES) ==
+            PackageManager.PERMISSION_GRANTED &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_VIDEO) ==
             PackageManager.PERMISSION_GRANTED
 }
 
@@ -97,7 +99,8 @@ private fun Root(
     val launcher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { results ->
-        granted = results[Manifest.permission.READ_MEDIA_IMAGES] == true
+        granted = results[Manifest.permission.READ_MEDIA_IMAGES] == true &&
+            results[Manifest.permission.READ_MEDIA_VIDEO] == true
         if (granted) onPermissionGranted()
     }
 

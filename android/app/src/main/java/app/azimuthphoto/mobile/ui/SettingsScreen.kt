@@ -1,5 +1,6 @@
 package app.azimuthphoto.mobile.ui
 
+import android.app.Activity
 import android.content.Intent
 import android.provider.Settings
 import androidx.compose.foundation.layout.Column
@@ -37,6 +38,8 @@ import app.azimuthphoto.mobile.backup.BackupWorker
 import app.azimuthphoto.mobile.backup.FreeUpSpace
 import app.azimuthphoto.mobile.data.SettingsStore
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Composable
 fun SettingsScreen() {
@@ -45,10 +48,14 @@ fun SettingsScreen() {
     val settings by SettingsStore.flow(context).collectAsState(initial = null)
     val progress by BackupWorker.progress.collectAsState()
     var counts by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
-    LaunchedEffect(progress) { counts = BackupDb.get(context).countByState() }
+    var freedCount by remember { mutableStateOf<Int?>(null) }
+    LaunchedEffect(progress) {
+        counts = withContext(Dispatchers.IO) { BackupDb.get(context).countByState() }
+    }
 
     val s = settings ?: return
     var serverUrl by remember(s.serverUrl) { mutableStateOf(s.serverUrl) }
+    var deviceToken by remember(s.deviceToken) { mutableStateOf(s.deviceToken) }
 
     Column(
         Modifier
@@ -109,6 +116,10 @@ fun SettingsScreen() {
                 }
             }
         }
+        TextButton(onClick = {
+            scope.launch { freedCount = FreeUpSpace.run(context as Activity) }
+        }) { Text("Free up now") }
+        freedCount?.let { Text("Freed up $it items", style = MaterialTheme.typography.bodySmall, color = TextSecondary) }
         if (!FreeUpSpace.hasManageMedia(context)) {
             Text(
                 "Grant “Manage media” so cleanup can run silently.",
@@ -133,7 +144,19 @@ fun SettingsScreen() {
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
-        TextButton(onClick = { scope.launch { SettingsStore.setServerUrl(context, serverUrl) } }) {
+        OutlinedTextField(
+            value = deviceToken,
+            onValueChange = { deviceToken = it },
+            label = { Text("Device token (optional)") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        TextButton(onClick = {
+            scope.launch {
+                SettingsStore.setServerUrl(context, serverUrl)
+                SettingsStore.setDeviceToken(context, deviceToken)
+            }
+        }) {
             Text("Save")
         }
         Spacer(Modifier.height(40.dp))

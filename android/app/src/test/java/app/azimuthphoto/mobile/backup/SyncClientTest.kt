@@ -5,6 +5,7 @@ import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.fail
 import org.junit.Before
 import org.junit.Test
 import java.io.ByteArrayInputStream
@@ -123,6 +124,20 @@ class SyncClientTest {
         assertEquals(listOf("missing-hash"), response.missing)
         assertEquals(listOf(KnownItem("known-hash", 321)), response.known)
         assertEquals("/api/sync/manifest", server.takeRequest().path)
+    }
+
+    @Test
+    fun completedBytesWithoutImageIdThrows() {
+        val payload = ByteArray(100)
+        server.enqueue(jsonResponse("""{"offset":0}"""))
+        server.enqueue(jsonResponse("""{"offset":${payload.size}}"""))
+
+        try {
+            client.upload("unfinished", payload.size.toLong(), { ByteArrayInputStream(payload) })
+            fail("Expected upload to require hub finalization")
+        } catch (e: java.io.IOException) {
+            assertEquals("upload reached end without hub finalize", e.message)
+        }
     }
 
     private fun payload() = ByteArray(SyncClient.CHUNK_BYTES + 100) { (it % 251).toByte() }

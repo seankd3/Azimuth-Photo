@@ -67,7 +67,10 @@ object DeviceMedia {
             } else MEDIA_SELECTION
             context.contentResolver.query(
                 COLLECTION, PROJECTION, selection, null,
-                "${MediaStore.Files.FileColumns.DATE_TAKEN} DESC, ${MediaStore.Files.FileColumns._ID} DESC",
+                "CASE WHEN ${MediaStore.Files.FileColumns.DATE_TAKEN} > 0 THEN " +
+                    "${MediaStore.Files.FileColumns.DATE_TAKEN} ELSE " +
+                    "${MediaStore.Files.FileColumns.DATE_ADDED}*1000 END DESC, " +
+                    "${MediaStore.Files.FileColumns._ID} DESC",
             )?.use { c ->
                 val iId = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns._ID)
                 val iType = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MEDIA_TYPE)
