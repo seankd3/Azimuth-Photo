@@ -329,6 +329,50 @@ class SyncHubTests(unittest.TestCase):
         finally:
             conn.close()
 
+    def test_upload_routes_into_named_folder(self):
+        payload = self.image_bytes("personal.jpg", (11, 22, 33))
+        content_hash = self.digest(payload)
+        response = self.client.post(
+            "/api/sync/manifest",
+            json={"items": [{
+                "content_hash": content_hash,
+                "full_hash": self.full_digest(payload),
+                "bytes": len(payload),
+                "filename": "personal.jpg",
+                "date_taken": "2024-06-07",
+                "folder": "Personal Photos",
+            }]},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.upload(content_hash, payload)
+        destination = self.raws / "Personal Photos" / "2024" / "2024-06-07" / "personal.jpg"
+        self.assertEqual(destination.read_bytes(), payload)
+        self.assertFalse((self.raws / "2024" / "2024-06-07" / "personal.jpg").exists())
+
+    def test_manifest_rejects_invalid_folder_paths(self):
+        payload = self.image_bytes("evil.jpg", (9, 8, 7))
+        content_hash = self.digest(payload)
+        base = {
+            "content_hash": content_hash,
+            "full_hash": self.full_digest(payload),
+            "bytes": len(payload),
+            "filename": "evil.jpg",
+            "date_taken": "2024-06-07",
+        }
+        for folder in ("../evil", "a/b"):
+            response = self.client.post(
+                "/api/sync/manifest",
+                json={"items": [{**base, "folder": folder}]},
+            )
+            self.assertEqual(response.status_code, 400, response.text)
+
+    def test_legacy_manifest_without_folder_uses_date_tree(self):
+        payload = self.image_bytes("legacy.jpg", (44, 55, 66))
+        content_hash = self.declare("legacy.jpg", payload)
+        self.upload(content_hash, payload)
+        destination = self.raws / "2024" / "2024-06-07" / "legacy.jpg"
+        self.assertEqual(destination.read_bytes(), payload)
+
 
 if __name__ == "__main__":
     unittest.main()

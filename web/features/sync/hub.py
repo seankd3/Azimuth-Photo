@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import shutil
 import tempfile
 import time
@@ -25,6 +26,7 @@ MAX_CHUNK_BYTES = 32 * 1024 * 1024
 BACKFILL_BATCH_SIZE = 100
 BACKFILL_THROTTLE_SECONDS = 0.05
 _UPLOAD_LOCKS: dict[str, asyncio.Lock] = {}
+_FOLDER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _-]{0,63}$")
 
 SYNC_DDL = """
 CREATE TABLE IF NOT EXISTS sync_manifest_items (
@@ -32,7 +34,8 @@ CREATE TABLE IF NOT EXISTS sync_manifest_items (
     full_hash TEXT,
     bytes INTEGER NOT NULL,
     filename TEXT NOT NULL,
-    date_taken TEXT
+    date_taken TEXT,
+    folder TEXT
 );
 CREATE TABLE IF NOT EXISTS sync_metadata_state (
     image_id INTEGER NOT NULL REFERENCES images(id) ON DELETE CASCADE,
@@ -76,16 +79,28 @@ async def ensure_sync_schema(db_path: str) -> None:
         manifest_columns = await (await conn.execute(
             "PRAGMA table_info(sync_manifest_items)"
         )).fetchall()
-        if not any(row["name"] == "full_hash" for row in manifest_columns):
+        column_names = {row["name"] for row in manifest_columns}
+        if "full_hash" not in column_names:
             await conn.execute("ALTER TABLE sync_manifest_items ADD COLUMN full_hash TEXT")
+        if "folder" not in column_names:
+            await conn.execute("ALTER TABLE sync_manifest_items ADD COLUMN folder TEXT")
         await conn.commit()
     finally:
         await connection.close_async(conn, db_path=db_path)
 
 
+def _normalize_folder(value: Any) -> str | None:
+    if value is None:
+        return None
+    folder = str(value).strip()
+    if not _FOLDER_RE.fullmatch(folder):
+        raise ValueError("folder must match ^[A-Za-z0-9][A-Za-z0-9 _-]{0,63}$")
+    return folder
+
+
 async def manifest(db_path: str, items: Iterable[dict[str, Any]]) -> dict[str, list[Any]]:
     await ensure_sync_schema(db_path)
-    normalized: list[tuple[str, str | None, int, str, str | None]] = []
+    normalized: list[tuple[str, str | None, int, str, str | None, str | None]] = []
     for item in items:
         content_hash = validate_content_hash(item.get("content_hash", ""))
         supplied_full_hash = item.get("full_hash")
@@ -94,16 +109,18 @@ async def manifest(db_path: str, items: Iterable[dict[str, Any]]) -> dict[str, l
         filename = os.path.basename(str(item.get("filename") or ""))
         if byte_count < 0 or not filename:
             raise ValueError("manifest items require non-negative bytes and a filename")
-        normalized.append((content_hash, full_hash, byte_count, filename, item.get("date_taken")))
+        folder = _normalize_folder(item.get("folder"))
+        normalized.append((content_hash, full_hash, byte_count, filename, item.get("date_taken"), folder))
 
     conn = await connection.open_async(db_path)
     try:
         if normalized:
             await conn.executemany(
-                "INSERT INTO sync_manifest_items(content_hash, full_hash, bytes, filename, date_taken) "
-                "VALUES (?, ?, ?, ?, ?) ON CONFLICT(content_hash) DO UPDATE SET "
+                "INSERT INTO sync_manifest_items(content_hash, full_hash, bytes, filename, date_taken, folder) "
+                "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(content_hash) DO UPDATE SET "
                 "full_hash=COALESCE(excluded.full_hash, sync_manifest_items.full_hash), "
-                "bytes=excluded.bytes, filename=excluded.filename, date_taken=excluded.date_taken",
+                "bytes=excluded.bytes, filename=excluded.filename, date_taken=excluded.date_taken, "
+                "folder=excluded.folder",
                 normalized,
             )
         hashes = [row[0] for row in normalized]
@@ -211,7 +228,7 @@ async def _manifest_item(db_path: str, content_hash: str) -> dict[str, Any] | No
     conn = await connection.open_async(db_path)
     try:
         row = await (await conn.execute(
-            "SELECT content_hash, full_hash, bytes, filename, date_taken "
+            "SELECT content_hash, full_hash, bytes, filename, date_taken, folder "
             "FROM sync_manifest_items WHERE content_hash = ?",
             (content_hash,),
         )).fetchone()
@@ -332,7 +349,8 @@ async def _append_upload_chunk_locked(
     extracted = await asyncio.to_thread(geodata.extract_file_metadata, str(part))
     taken = extracted.get("date_taken") or item.get("date_taken")
     year, day = _date_parts(taken) or (str(date.today().year), date.today().isoformat())
-    destination_dir = raws_root / year / day
+    folder = str(item["folder"]).strip() if item.get("folder") else None
+    destination_dir = raws_root / folder / year / day if folder else raws_root / year / day
     destination_dir.mkdir(parents=True, exist_ok=True)
     preferred = destination_dir / os.path.basename(str(item["filename"]))
     if preferred.exists() and await asyncio.to_thread(compute_full_hash, preferred) == item["full_hash"]:
