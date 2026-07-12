@@ -1,11 +1,11 @@
-package app.photoarchive.mobile.backup
+package app.azimuthphoto.mobile.backup
 
 import android.app.Activity
 import android.content.ContentUris
 import android.content.Context
 import android.provider.MediaStore
-import app.photoarchive.mobile.data.DeviceMedia
-import app.photoarchive.mobile.data.SettingsStore
+import app.azimuthphoto.mobile.data.DeviceMedia
+import app.azimuthphoto.mobile.data.SettingsStore
 
 /**
  * Quietly removes device copies of media the hub has confirmed, once they age

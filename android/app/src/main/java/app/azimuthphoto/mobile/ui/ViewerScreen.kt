@@ -1,4 +1,4 @@
-package app.photoarchive.mobile.ui
+package app.azimuthphoto.mobile.ui
 
 import android.app.Activity
 import android.content.Intent
@@ -49,7 +49,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
-import app.photoarchive.mobile.data.MediaItem
+import app.azimuthphoto.mobile.data.MediaItem
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter

@@ -1,4 +1,4 @@
-package app.photoarchive.mobile.data
+package app.azimuthphoto.mobile.data
 
 import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey

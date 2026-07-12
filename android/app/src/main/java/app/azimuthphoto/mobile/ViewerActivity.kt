@@ -1,4 +1,4 @@
-package app.photoarchive.mobile
+package app.azimuthphoto.mobile
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -10,7 +10,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import coil.compose.AsyncImage
-import app.photoarchive.mobile.ui.PhotoArchiveTheme
+import app.azimuthphoto.mobile.ui.PhotoArchiveTheme
 
 /** Handles ACTION_VIEW so photoArchive can be the phone's default photo opener. */
 class ViewerActivity : ComponentActivity() {

@@ -1,4 +1,4 @@
-package app.photoarchive.mobile.ui
+package app.azimuthphoto.mobile.ui
 
 import android.content.Intent
 import android.provider.Settings
@@ -31,11 +31,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import app.photoarchive.mobile.backup.BackupDb
-import app.photoarchive.mobile.backup.BackupScheduler
-import app.photoarchive.mobile.backup.BackupWorker
-import app.photoarchive.mobile.backup.FreeUpSpace
-import app.photoarchive.mobile.data.SettingsStore
+import app.azimuthphoto.mobile.backup.BackupDb
+import app.azimuthphoto.mobile.backup.BackupScheduler
+import app.azimuthphoto.mobile.backup.BackupWorker
+import app.azimuthphoto.mobile.backup.FreeUpSpace
+import app.azimuthphoto.mobile.data.SettingsStore
 import kotlinx.coroutines.launch
 
 @Composable

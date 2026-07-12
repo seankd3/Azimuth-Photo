@@ -1,4 +1,4 @@
-package app.photoarchive.mobile.backup
+package app.azimuthphoto.mobile.backup
 
 import android.app.NotificationManager
 import android.content.Context
@@ -7,11 +7,11 @@ import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
-import app.photoarchive.mobile.App
-import app.photoarchive.mobile.R
-import app.photoarchive.mobile.data.DeviceMedia
-import app.photoarchive.mobile.data.MediaItem
-import app.photoarchive.mobile.data.SettingsStore
+import app.azimuthphoto.mobile.App
+import app.azimuthphoto.mobile.R
+import app.azimuthphoto.mobile.data.DeviceMedia
+import app.azimuthphoto.mobile.data.MediaItem
+import app.azimuthphoto.mobile.data.SettingsStore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.io.IOException
@@ -125,6 +125,7 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
             bytes = item.sizeBytes,
             filename = item.displayName.ifEmpty { "IMG_${item.id}" },
             date_taken = taken,
+            folder = PHONE_FOLDER,
         )
     }
 
@@ -140,7 +141,7 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
     private fun foregroundInfo(text: String): ForegroundInfo {
         val notification = NotificationCompat.Builder(applicationContext, App.BACKUP_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("photoArchive backup")
+            .setContentTitle("Azimuth Photo backup")
             .setContentText(text)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -151,6 +152,8 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
     }
 
     companion object {
+        /** Phone shots live in their own tree on the hub. */
+        const val PHONE_FOLDER = "Personal Photos"
         const val MANIFEST_BATCH = 50
         const val NOTIFICATION_ID = 100
 
