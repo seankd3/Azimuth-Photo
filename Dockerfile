@@ -18,7 +18,7 @@ RUN apt-get update \
         libglib2.0-0 \
         libgomp1 \
         libgl1 \
-        libraw23 \
+        libraw23t64 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
