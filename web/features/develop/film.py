@@ -32,6 +32,10 @@ FILM_LOGE_MAX = 3.0
 FILM_LUT_SIZE = 256
 # Middle gray in linear scene light exposes the speed point.
 FILM_MID_GRAY = 0.18
+# Published H&D curves put logE = 0 at the ISO speed point (deep shadow,
+# D ~ 0.15 above fog). Scene mid-gray exposes ~one decade above that; without
+# this offset the whole scene renders in the toe (flat, milky, desaturated).
+FILM_MIDGRAY_LOGE = 1.0
 FILM_EPSILON = 1e-6
 
 
@@ -100,7 +104,7 @@ def build_film_tables(stock: Mapping[str, Any]) -> dict[str, Any]:
     # mask and base fog by exposing each channel so the SPEED-POINT density
     # (mid gray) prints to middle gray. D_ref per channel = density of logE=0
     # through the DIR matrix, plus mask.
-    speed_idx = int(round((0.0 - FILM_LOGE_MIN) / (FILM_LOGE_MAX - FILM_LOGE_MIN) * (FILM_LUT_SIZE - 1)))
+    speed_idx = int(round((FILM_MIDGRAY_LOGE - FILM_LOGE_MIN) / (FILM_LOGE_MAX - FILM_LOGE_MIN) * (FILM_LUT_SIZE - 1)))
     d_speed = hd[speed_idx, :] @ dir_coupler.T
     # NOTE: published H&D curves are absolute density and already include
     # base+fog (and, for color negative, the orange mask under Status-M) —
@@ -232,7 +236,7 @@ def apply_film(
         layer[..., 1] += amount * hal["green_fraction"] * glow
 
     # 3. log exposure relative to the speed point, then H&D curves
-    loge = np.log10(np.maximum(layer / FILM_MID_GRAY, FILM_EPSILON))
+    loge = np.log10(np.maximum(layer / FILM_MID_GRAY, FILM_EPSILON)) + FILM_MIDGRAY_LOGE
     idx = (loge - FILM_LOGE_MIN) / (FILM_LOGE_MAX - FILM_LOGE_MIN) * (FILM_LUT_SIZE - 1)
     idx = np.clip(idx, 0.0, FILM_LUT_SIZE - 1.001)
     i0 = idx.astype(np.int32)

@@ -565,3 +565,62 @@ film active <=33ms. Known suspects to verify then fix: full film/profile LUT reb
 (cache by param hash), mask raster re-blur on unrelated slider changes (dirty-flag per mask),
 redundant texture re-uploads (only re-upload changed LUT textures). Numbers before/after per
 fix; parity goldens stay green.
+
+
+## §30 Camera color science: the DNG profile pipeline (frozen 2026-07-11)
+
+Goal: default raw renders indistinguishable from Adobe/Lightroom defaults, per camera. The data
+source is the library itself: every LR-converted DNG embeds the full Adobe profile
+(ColorMatrix1/2, ForwardMatrix1/2, CalibrationIlluminant1/2, BaselineExposure, ProfileName,
+ProfileToneCurve?, ProfileHueSatMapDims/Data1/2?, ProfileLookTableDims/Data?) with
+ProfileEmbedPolicy 0 (copyable). DNG embedded previews are Adobe-rendered — they are the
+per-pixel acceptance ground truth.
+
+### 30.1 Profile library (lane DNGPROF)
+features/develop/adobe_profiles.py + a harvest script: scan the DNG corpus (images table,
+file_ext .dng), extract per (UniqueCameraModel, ProfileName) one profile JSON into
+web/features/develop/profiles/adobe/<slug>.json: matrices (both illuminants), baseline_exposure,
+tone_curve points (if present), hue_sat_map {dims, data1, data2}, look_table {dims, data},
+illuminants, source file + count. Prefer ProfileName "Adobe Standard*"; also keep Camera
+Faithful/Portrait etc. as alternates (future profile picker). Dedup by content hash; report
+per-model coverage (models with raws but no DNG profile -> listed). Loader with an in-process
+cache; resolution order for a raw: embedded profile in ITS OWN file (DNG) -> library by
+camera_model -> none. BaselineExposure is read per-FILE when available (falls back to profile).
+
+### 30.2 Render pipeline (lane DNGPIPE) — numpy + GLSL twins, constants shared
+Stage order per DNG spec 1.7.1 + Adobe dng_sdk dng_render (verify against both; cite the
+sections in code comments; where ambiguous, LR-output parity decides):
+1. WB in camera space via AsShotNeutral/user temp-tint with dual-illuminant matrix interpolation
+   by CCT (EXISTS — keep).
+2. CameraRGB -> XYZ(D50) via interpolated ForwardMatrix (reference neutral divided out — the
+   lossydng path already does this correctly for one illuminant; generalize).
+3. XYZ(D50) -> linear ProPhoto (RIMM) primaries.
+4. BaselineExposure: multiply by 2^BE (per-file tag, else profile value, else 0).
+5. HueSatMap (if present): RGB->HSV in ProPhoto; trilinear interpolation in (h,s,v) of the
+   dims-shaped delta table (hueShift degrees, satScale, valScale); dual-illuminant weighted
+   like the matrices. Encode as textures in GL (2D when valDivisions==1, else packed 3D).
+6. LookTable (if present): same mechanism, applied after HueSatMap (dng_sdk order).
+7. Tone curve: ProfileToneCurve if present, else the Adobe default tone curve (control points
+   from dng_sdk dng_tone_curve_acr3_default — encode the exact table as a named constant).
+   Applied per-channel in linear ProPhoto with the dng_sdk RGB-ratio hue preservation
+   (dng_function_exposure_ramp/curve semantics — match dng_render, not a guess).
+8. ProPhoto -> sRGB display encode.
+This REPLACES the current generic base curve + BASE_PROFILE_SAT and the fitted tone/ab tables
+whenever an Adobe profile resolves (fitted profiles were regressions against the old dark base —
+disable them for adobe-profiled cameras; keep the fitting machinery).
+Film emulation input taps scene-linear AFTER stage 4, BEFORE 5-7 (film replaces Adobe styling).
+Develop settings semantics unchanged: user exposure/contrast etc. apply relative to this new
+default (pipeline order: stages 1-6 -> user ops -> 7 -> 8; decide exact interleave to keep
+existing sliders perceptually consistent and DOCUMENT it).
+
+### 30.3 Acceptance (hard gate, in-repo test + report)
+Stratified 40-DNG sample across camera models, files whose develop origin is not user-edited:
+render our default at preview size vs the DNG's embedded Adobe preview (largest SubIFD JPEG):
+mean |L| delta < 0.025, mean ab delta < 0.02 in OKLab, per-model outliers reported with
+side-by-side JPEGs. CR3 acceptance (no Adobe preview): brightness sanity vs camera embedded
+preview (mean L delta < 0.08) using the harvested per-model profile. Parity goldens for every
+new GL/numpy op; PARITY_TABLE extended.
+
+### 30.4 Out of scope (v1)
+DCP file import (.dcp reader), profile picker UI, non-Canon harvests beyond what the corpus
+contains, re-fitting the legacy fitted profiles.

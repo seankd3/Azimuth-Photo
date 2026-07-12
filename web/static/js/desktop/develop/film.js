@@ -7,6 +7,7 @@ export const FILM_LOGE_MIN = -3.0;
 export const FILM_LOGE_MAX = 3.0;
 export const FILM_LUT_SIZE = 256;
 export const FILM_MID_GRAY = 0.18;
+export const FILM_MIDGRAY_LOGE = 1.0; // twin of film.py (speed point -> mid-gray anchor)
 const FILM_TABLE_CACHE = new Map();
 const FILM_TABLE_CACHE_LIMIT = 16;
 
@@ -53,7 +54,7 @@ export function buildFilmTables(stock) {
     const mask = (base.orange_mask_rgb || [0, 0, 0]).map(Number);
 
     // per-channel print calibration at the speed point (twin of film.py)
-    const speedIdx = Math.round((0 - FILM_LOGE_MIN) / (FILM_LOGE_MAX - FILM_LOGE_MIN) * (FILM_LUT_SIZE - 1));
+    const speedIdx = Math.round((FILM_MIDGRAY_LOGE - FILM_LOGE_MIN) / (FILM_LOGE_MAX - FILM_LOGE_MIN) * (FILM_LUT_SIZE - 1));
     const dSpeed = matVec(dir, [hd[speedIdx * 3], hd[speedIdx * 3 + 1], hd[speedIdx * 3 + 2]]);
     const dRef = dSpeed.map((v, i) => v + (negative ? mask[i] : 0));
 
@@ -128,7 +129,7 @@ vec3 filmTransform(vec3 linearRgb, float glow, vec2 fragPx, float dimMin) {
     vec3 layer = u_filmCrosstalk * max(linearRgb, 0.0);
     layer.r += u_filmHalation.x * glow;
     layer.g += u_filmHalation.x * u_filmHalation.w * glow;
-    vec3 loge = log(max(layer / ${FILM_MID_GRAY}, 1e-6)) / log(10.0);
+    vec3 loge = log(max(layer / ${FILM_MID_GRAY}, 1e-6)) / log(10.0) + ${FILM_MIDGRAY_LOGE};
     vec3 u = clamp((loge - (${FILM_LOGE_MIN})) / (${FILM_LOGE_MAX} - (${FILM_LOGE_MIN})), 0.0, 1.0);
     vec3 density = vec3(
         texture(u_filmHd, vec2(u.r, 0.5)).r,
