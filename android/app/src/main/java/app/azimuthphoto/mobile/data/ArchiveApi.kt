@@ -87,12 +87,15 @@ class ArchiveApi(private val baseUrl: String) {
             children.getOrPut(parent) { mutableListOf() }.add(f)
         }
         val shelves = mutableListOf<ArchiveFolder>()
+        val dateLike = Regex("^\\d{4}(-\\d{2}(-\\d{2})?)?$")
         fun descend(node: ArchiveFolder) {
             val kids = children[node.path].orEmpty()
             when {
-                kids.size == 1 && kids[0].count == node.count -> descend(kids[0])
                 kids.isEmpty() -> shelves.add(node)
+                kids.size == 1 && kids[0].count == node.count -> descend(kids[0])
                 kids.size == 1 -> shelves.add(node)
+                // Date-organized folders (RAWS/2024/…) are one shelf, not many.
+                kids.all { dateLike.matches(it.name) } -> shelves.add(node)
                 else -> kids.forEach { shelves.add(it) }
             }
         }
