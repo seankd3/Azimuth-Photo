@@ -1,6 +1,8 @@
 import {
-    addCatalogSource, clearCache, connectToHub, createDeviceLink, discoverHubs, getAiStatus, getCacheStatus, getCaptionStatus, getCatalog,
-    getMetadataStatus, getPairStatus, getPeopleStatus, getRemoteAccess, getScanStatus, getSettings, installAiModel, listDevices, pauseAiEmbeddings,
+    addCatalogSource, applyRemoteAccessServe, clearCache, connectToHub, createDeviceLink, discoverHubs,
+    getAiStatus, getCacheStatus, getCaptionStatus, getCatalog, getMetadataStatus, getPairStatus,
+    getPeopleStatus, getRemoteAccess, getScanStatus, getSettings, installAiModel, listDevices,
+    pauseAiEmbeddings,
     pauseCaptionScan, pausePeopleScan, removeCatalogSource, rescanCatalogSource, resetSettings, resumeAiEmbeddings,
     resumeCaptionScan, resumePeopleScan, revokeDevice, saveSettings, startCachePregen, startMetadataScan, stopCachePregen,
     stopMetadataScan,
@@ -539,17 +541,67 @@ function renderConnectServer() {
         + '<div class="setting-actions">'
         + '<button class="btn primary" id="connect-hub-btn" type="button">Connect</button>'
         + '</div></section>';
+function remoteQrMarkup(text) {
+    if (!text || typeof window.qrcode !== 'function') return '';
+    try {
+        const qr = window.qrcode(0, 'M');
+        qr.addData(text);
+        qr.make();
+        const size = qr.getModuleCount();
+        const cell = 3;
+        let rects = '';
+        for (let row = 0; row < size; row += 1) {
+            for (let col = 0; col < size; col += 1) {
+                if (!qr.isDark(row, col)) continue;
+                rects += `<rect x="${col * cell}" y="${row * cell}" width="${cell}" height="${cell}" fill="currentColor"/>`;
+            }
+        }
+        const dim = size * cell;
+        return `<div class="remote-qr" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${dim} ${dim}" width="132" height="132" role="img">${rects}</svg></div>`;
+    } catch {
+        return '';
+    }
 }
 
 function renderRemote() {
-    const url = (remoteAccess && remoteAccess.tailscale && remoteAccess.tailscale.url)
-        || (remoteAccess && remoteAccess.current_url)
-        || '';
-    return '<section class="dr-sec"><h3>Remote access</h3>'
-        + '<div class="remote-row">'
-        + `<span class="remote-url" title="${esc(url)}">${esc(url || 'Unavailable')}</span>`
-        + `<button class="mini-btn" id="copy-remote" ${url ? '' : 'aria-disabled="true" disabled'}>Copy</button>`
-        + '</div></section>';
+    // Hub mode only — standalone/satellite hide this panel entirely.
+    if (!remoteAccess || remoteAccess.hub_mode === false) return '';
+    const ts = remoteAccess.tailscale || {};
+    const state = ts.state || (ts.available ? 'up' : 'absent');
+    const httpsUrl = ts.https_url || '';
+    const serveApplied = Boolean(ts.serve_applied && httpsUrl);
+    let body = '';
+
+    if (state === 'absent') {
+        body = '<p class="remote-copy">Install Tailscale on this machine, then come back here to publish a phone-ready HTTPS link on your tailnet.</p>'
+            + `<a class="btn" id="remote-install" href="${esc(ts.install_url || 'https://tailscale.com/download')}" target="_blank" rel="noopener">Install Tailscale</a>`;
+    } else if (state === 'logged-out') {
+        body = '<p class="remote-copy">Tailscale is installed. Sign in on this machine, then return here to enable HTTPS for your phone.</p>'
+            + `<code class="remote-cmd">${esc(ts.up_command || 'tailscale up')}</code>`
+            + '<p class="remote-hint">Run that in a terminal, complete the browser login, then reopen Settings.</p>';
+    } else {
+        const command = ts.serve_command || 'sudo tailscale serve --bg --https=8443 http://127.0.0.1:8000';
+        body = '<p class="remote-copy">Publish a tailnet-only HTTPS address so the phone can install the app and keep a service worker.</p>'
+            + `<code class="remote-cmd" title="${esc(command)}">${esc(command)}</code>`;
+        if (serveApplied) {
+            body += '<div class="remote-ready">'
+                + '<div class="remote-row">'
+                + `<span class="remote-url" title="${esc(httpsUrl)}">${esc(httpsUrl)}</span>`
+                + '<button class="mini-btn" id="copy-remote" type="button">Copy</button>'
+                + '</div>'
+                + remoteQrMarkup(httpsUrl)
+                + '<p class="remote-hint">Scan on a phone that’s on the same Tailscale network.</p>'
+                + '</div>';
+        } else {
+            body += '<button class="btn" id="remote-apply-serve" type="button">Apply HTTPS</button>'
+                + '<p class="remote-hint">Runs only when you click — nothing is changed automatically.</p>';
+        }
+        if (ts.dry_run) {
+            body += '<p class="remote-hint remote-dryrun">Dry-run mode: Apply will not change Tailscale Serve on this machine.</p>';
+        }
+    }
+
+    return `<section class="dr-sec" data-remote-state="${esc(state)}" data-remote-hub="1"><h3>Remote access</h3>${body}</section>`;
 }
 
 function renderSharedHome() {
@@ -1236,7 +1288,10 @@ function bindDrawerActions() {
     }));
     body.querySelector('#copy-remote')?.addEventListener('click', async (event) => {
         if (event.currentTarget.getAttribute('aria-disabled') === 'true') return;
-        const url = (remoteAccess && remoteAccess.tailscale && remoteAccess.tailscale.url) || remoteAccess.current_url || '';
+        const url = (remoteAccess && remoteAccess.tailscale && remoteAccess.tailscale.https_url)
+            || (remoteAccess && remoteAccess.tailscale && remoteAccess.tailscale.url)
+            || (remoteAccess && remoteAccess.current_url)
+            || '';
         try {
             await navigator.clipboard.writeText(url);
             showToast('Link copied');
@@ -1244,6 +1299,26 @@ function bindDrawerActions() {
             showToast('Couldn’t copy');
         }
     });
+    body.querySelector('#remote-apply-serve')?.addEventListener('click', (event) => withBusyAction('remote-serve', event.currentTarget, async () => {
+        const result = await applyRemoteAccessServe();
+        if (!result || !result.ok) {
+            showToast((result && result.error) || 'Couldn’t apply Tailscale Serve');
+            return;
+        }
+        remoteAccess = {
+            ...(remoteAccess || {}),
+            hub_mode: true,
+            tailscale: {
+                ...((remoteAccess && remoteAccess.tailscale) || {}),
+                ...(result.tailscale || {}),
+                https_url: result.https_url || (result.tailscale && result.tailscale.https_url) || '',
+                serve_applied: true,
+                state: 'up',
+            },
+        };
+        renderDrawer();
+        showToast(result.dry_run ? 'HTTPS ready (dry-run)' : 'HTTPS ready on your tailnet');
+    }));
     body.querySelector('#drawer-open-shared')?.addEventListener('click', () => {
         closeSystemDrawer();
         setActiveLens('shared');

@@ -52,6 +52,7 @@ PUBLIC_ROUTE_CONTRACT = {
     ("GET", "/api/discover"),
     ("POST", "/api/pair/connect"),
     ("GET", "/api/pair/status"),
+    ("POST", "/api/remote-access/serve"),
     ("GET", "/api/catalog/metadata/status"),
     ("POST", "/api/catalog/metadata/start"),
     ("POST", "/api/catalog/metadata/stop"),

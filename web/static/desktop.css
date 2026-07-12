@@ -1187,6 +1187,27 @@ body:has(#view-loupe.active):has(#sel-pill.on) #toast { transform: translateX(-5
 .discovered-hub:hover { border-color: var(--accent-lin); background: var(--accent-dim); }
 .discovered-hub b { display: block; color: var(--text); font-weight: var(--fw-medium); }
 .discovered-hub span { color: var(--text-2); font-size: var(--fs-caption); }
+.remote-copy, .remote-hint { color: var(--text-2); font-size: var(--fs-ui); line-height: var(--lh-body); margin: 0 0 var(--s3); }
+.remote-hint { color: var(--text-3); margin-top: var(--s2); margin-bottom: 0; }
+.remote-cmd {
+    display: block; margin: 0 0 var(--s3); padding: var(--s2) var(--s3);
+    border: 1px solid var(--line); border-radius: var(--r-ctl);
+    background: var(--surface-raised); color: var(--text-2);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; white-space: pre-wrap;
+}
+.remote-ready {
+    margin-top: var(--s3); padding: var(--s3);
+    border: 1px solid var(--line); border-radius: var(--r-card);
+    background: var(--accent-dim);
+}
+.remote-qr {
+    display: grid; place-items: center; margin: var(--s3) auto 0;
+    width: 148px; height: 148px; color: var(--text);
+    background: var(--surface-popover); border-radius: var(--r-card);
+}
+.remote-qr svg { display: block; }
+.remote-dryrun { color: var(--text-3); font-style: italic; }
 .drawer-action-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--s3); align-items: center; }
 .drawer-action-row span { color: var(--text-2); font-size: var(--fs-ui); line-height: var(--lh-body); }
 .health-title, .health-line { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s3); }
