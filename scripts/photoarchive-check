@@ -14,6 +14,7 @@ declare -A AREA_TARGETS=(
     [people-work]="test_people"
     [compare]="test_compare"
     [settings]="test_settings_status"
+    [imports]="test_imports test_import_staging test_modular_contracts"
     [frontend]="test_ui_contracts"
     [search]="test_search test_embedding_worker"
     [cache]="test_cache_status test_thumbnails"
@@ -27,6 +28,7 @@ declare -A AREA_DESCRIPTIONS=(
     [people-work]="People routes, worker, and status behavior"
     [compare]="Compare routes and service behavior"
     [settings]="Settings/status behavior"
+    [imports]="Legacy and staged import routes, card safety pipeline, and API contracts"
     [frontend]="Alias for background-work"
     [search]="Alias for ai-search"
     [cache]="Alias for previews"
@@ -45,14 +47,14 @@ Usage: photoarchive-check [--quick|--unit|--full] [--area AREA] [--list-areas]
             Print available focused areas and their target test modules.
 
 Focused areas:
-  background-work, ai-search, previews, people-work, compare, settings
+  background-work, ai-search, previews, people-work, compare, settings, imports
   compatibility aliases: frontend, search, cache, people
 USAGE
 }
 
 list_areas() {
     local area
-    for area in background-work ai-search previews people-work compare settings frontend search cache people; do
+    for area in background-work ai-search previews people-work compare settings imports frontend search cache people; do
         printf "%-16s %s\n    %s\n" "$area" "${AREA_TARGETS[$area]}" "${AREA_DESCRIPTIONS[$area]}"
     done
 }
