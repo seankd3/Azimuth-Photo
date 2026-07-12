@@ -292,7 +292,7 @@ async function hydrateFirstRunEmpty(request) {
     window.clearTimeout(emptyScanTimer);
     if (!sources.length) {
         flow.innerHTML = '<div class="grid-empty">'
-            + '<h3>Welcome to photoArchive</h3>'
+            + '<h3>Welcome to Azimuth Photo</h3>'
             + '<p>Add a folder of photos to start your private, local library.</p>'
             + '<div class="grid-empty-actions"><button class="btn primary" id="grid-add-source">Add a source</button>'
             + '<button class="btn" id="grid-import">Import photos</button></div></div>';

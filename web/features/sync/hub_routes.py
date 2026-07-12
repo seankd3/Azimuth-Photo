@@ -7,15 +7,14 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from features.sync import hub
-from features.sync import mirror_export
+from features.sync import device_auth, hub, mirror_export
 
 
-router = APIRouter(tags=["sync"])
+router = APIRouter(tags=["sync"], dependencies=[Depends(device_auth.enforce_device_token)])
 _db_path: Callable[[], str] | None = None
 _intake_root: Callable[[], Path] = hub.default_intake_root
 _raws_root: Callable[[], Path] | None = None
@@ -29,6 +28,7 @@ class ManifestItem(BaseModel):
     bytes: int = Field(ge=0)
     filename: str
     date_taken: str | None = None
+    folder: str | None = None
 
 
 class ManifestRequest(BaseModel):
@@ -59,6 +59,7 @@ def configure(
 ) -> None:
     global _db_path, _intake_root, _raws_root
     _db_path = db_path
+    device_auth.configure(db_path=db_path)
     if intake_root is not None:
         _intake_root = lambda: Path(intake_root())
     if raws_root is not None:

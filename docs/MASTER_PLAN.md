@@ -1,4 +1,4 @@
-# photoArchive MASTER PLAN — the best professional photo app ever shipped
+# Azimuth Photo MASTER PLAN — the best professional photo app ever shipped
 2026-07-11. The bar, by competitor: beat **Lightroom Classic** on editing depth and speed, beat
 **Aftershoot** on culling intelligence, beat **Lightroom CC** on anywhere-access simplicity, beat
 **Affinity Photo** on the retouch cases photographers actually use, beat **darktable** on power with
@@ -78,7 +78,7 @@ Legend: ✅ shipped · 🔨 in flight (lane running/scheduled) · 🎯 planned (
 
 ## Pillar 8 — Field workflow (satellite + hub sync)
 Spec: [`FIELD_SPEC.md`](FIELD_SPEC.md) (v1, frozen).
-- 🔨 Satellite mode: lightweight photoArchive in the field, hub sync contract over Tailscale
+- 🔨 Satellite mode: lightweight Azimuth Photo in the field, hub sync contract over Tailscale
   (content hashing, read-through media, sync worker) — lanes building `web/features/sync/` now
 - 🎯 Conflict-safe merge of field edits/culls back into the hub catalog
 

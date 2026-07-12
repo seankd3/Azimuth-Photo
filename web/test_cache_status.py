@@ -17,7 +17,14 @@ class CacheStatusTests(BackendTestCase):
             self.assertFalse(embedding_worker.get_worker_status()["manual_pause"])
 
             thumbnails.stop_pregeneration()
-            await people_routes.api_people_scan_resume()
+            # The resume route 409s when the optional people pack is absent —
+            # this test is about the pregen dependency, not the install state.
+            with unittest.mock.patch.object(
+                people_routes.capabilities,
+                "capability_status",
+                return_value={"available": True},
+            ):
+                await people_routes.api_people_scan_resume()
             self.assertTrue(thumbnails._pregen_manual_mode)
             self.assertFalse(thumbnails._pregen_manual_pause)
             self.assertFalse(face_worker.manual_pause_active())

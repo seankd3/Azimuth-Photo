@@ -134,7 +134,7 @@ class AttachHubTests(BackendTestCase):
             self.assertEqual(satellite.device_token(), "tok-123")
             config = app_settings.get_settings()
             self.assertEqual(config["hub_url"], "http://hub:8000")
-            self.assertEqual(config["hub_device_token"], "tok-123")
+            self.assertEqual(config["device_token"], "tok-123")
             # A fresh process would pick the same hub back up from settings.
             satellite._stored_hub_url = ""
             satellite.load_stored_hub()

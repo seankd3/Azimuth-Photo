@@ -17,7 +17,7 @@ Front it with HTTPS:
 # Discover this machine's MagicDNS name (example: omarchy.tail0eeded.ts.net)
 tailscale status --json | python -c 'import json,sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))'
 
-# Tailnet-only HTTPS on :8443 → local photoArchive :8000
+# Tailnet-only HTTPS on :8443 → local Azimuth Photo :8000
 sudo tailscale serve --bg --https=8443 http://127.0.0.1:8000
 # If the app is bound to the Tailscale IP instead of loopback:
 # sudo tailscale serve --bg --https=8443 http://$(tailscale ip -4):8000

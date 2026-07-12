@@ -1,6 +1,6 @@
 # Data And Privacy
 
-photoArchive is built for local personal archives. It does not need a hosted
+Azimuth Photo is built for local personal archives. It does not need a hosted
 account or a cloud photo service to catalog, browse, compare, flag, and export
 your library.
 
@@ -24,15 +24,15 @@ Original photo folders remain the source of truth.
 
 ## Runtime Data
 
-On a clean install, photoArchive uses platform-native application-data roots.
+On a clean install, Azimuth Photo uses platform-native application-data roots.
 The SQLite catalog and downloaded models live in the platform data directory;
 settings live in its config directory; previews, embedding snapshots, and
 Develop intermediates live in its cache directory; process files and logs live
 in its state directory. Durable library exports default to
-`~/Pictures/photoArchive Exports`.
+`~/Pictures/Azimuth Photo Exports`.
 
 Older installations are detected from their exact runtime paths and remain
-there. In particular, photoArchive does not automatically move or rebuild an
+there. In particular, Azimuth Photo does not automatically move or rebuild an
 existing catalog, preview cache, model store, settings file, Develop cache, or
 backup folder. This protects large established libraries and makes an upgrade
 behaviorally identical until the owner explicitly chooses new storage.

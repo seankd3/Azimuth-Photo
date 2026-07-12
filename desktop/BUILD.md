@@ -53,14 +53,41 @@ Outputs:
 - Installer: `src-tauri\target\release\bundle\nsis\photoArchive_0.1.0_x64-setup.exe`
   (per-user install, no admin needed — `installMode: currentUser`)
 
+## Shell config (`%APPDATA%\photoarchive\shell.json`)
+
+The desktop shell no longer hard-requires the compile-time venv paths. On startup
+it reads `%APPDATA%\photoarchive\shell.json` (created by the installer or by hand
+for dev machines). Missing keys fall back to the historical constants in
+`src-tauri/src/server.rs`.
+
+```json
+{
+  "python": "C:\\Path\\To\\photoarchive-server\\python.exe",
+  "server_cwd": "C:\\Path\\To\\photoarchive-server",
+  "env": {
+    "PHOTOARCHIVE_MODE": "standalone",
+    "PHOTOARCHIVE_HOME": "C:\\PhotoArchive",
+    "PHOTOARCHIVE_PORT": "8010"
+  }
+}
+```
+
+- `python` — interpreter that can run `python -m uvicorn app:app`
+- `server_cwd` — working directory for that process (the `web/` tree or the
+  frozen sidecar folder that contains `app`)
+- `env` — optional overrides merged onto the default satellite/standalone env
+  map (override individual keys; omit `env` to keep the built-in defaults)
+
+Installed builds point `python` / `server_cwd` at the bundled
+`dist/photoarchive-server/` sidecar. Dev machines can point them at a checkout
+venv without rebuilding the shell.
+
 ## What the shell does at runtime
 
 1. Shows a splash (`ui/index.html`), probes `http://127.0.0.1:8010/`.
-2. If nothing is serving, spawns
-   `photoarchive-field\web\.venv\Scripts\python.exe -m uvicorn app:app --host 127.0.0.1 --port 8010`
-   (cwd `photoarchive-field\web`) with the satellite env profile
-   (`PHOTOARCHIVE_MODE=satellite`, hub `http://100.102.150.104:8000`,
-   `PHOTOARCHIVE_HOME=C:\PhotoArchiveField` + cache dirs, smoke mode on).
+2. If nothing is serving, spawns the configured Python with
+   `-m uvicorn app:app --host 127.0.0.1 --port 8010` (cwd + env from
+   `shell.json`, else the fallback satellite profile in `server.rs`).
 3. Polls readiness up to 45 s, then navigates to `http://127.0.0.1:8010/d`.
 4. Tray: Open / sync status (polled every 30 s) / Pause–Resume sync / Quit.
    The spawned server is killed on app exit; an externally started server is left alone.

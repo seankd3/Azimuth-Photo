@@ -1,6 +1,11 @@
 // Local satellite server lifecycle: spawn (unless one is already serving :8010),
 // poll readiness behind the splash, navigate to the library, kill the child on exit.
+//
+// Paths + env come from %APPDATA%/photoarchive/shell.json when present
+// ({ python, server_cwd, env }) with the constants below as fallbacks — see desktop/BUILD.md.
 
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -36,6 +41,71 @@ const SERVER_ENV: &[(&str, &str)] = &[
 
 static CHILD: Mutex<Option<Child>> = Mutex::new(None);
 
+struct ShellConfig {
+    python: PathBuf,
+    server_cwd: PathBuf,
+    env: Vec<(String, String)>,
+}
+
+fn appdata_dir() -> Option<PathBuf> {
+    std::env::var_os("APPDATA").map(PathBuf::from)
+}
+
+fn shell_config_path() -> Option<PathBuf> {
+    Some(appdata_dir()?.join("photoarchive").join("shell.json"))
+}
+
+fn default_shell_config() -> ShellConfig {
+    ShellConfig {
+        python: PathBuf::from(PYTHON),
+        server_cwd: PathBuf::from(SERVER_CWD),
+        env: SERVER_ENV
+            .iter()
+            .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
+            .collect(),
+    }
+}
+
+fn load_shell_config() -> ShellConfig {
+    let mut config = default_shell_config();
+    let Some(path) = shell_config_path() else {
+        return config;
+    };
+    let Ok(raw) = fs::read_to_string(&path) else {
+        return config;
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return config;
+    };
+    if let Some(python) = value.get("python").and_then(|v| v.as_str()) {
+        if !python.trim().is_empty() {
+            config.python = PathBuf::from(python);
+        }
+    }
+    if let Some(cwd) = value
+        .get("server_cwd")
+        .or_else(|| value.get("serverCwd"))
+        .and_then(|v| v.as_str())
+    {
+        if !cwd.trim().is_empty() {
+            config.server_cwd = PathBuf::from(cwd);
+        }
+    }
+    if let Some(env_map) = value.get("env").and_then(|v| v.as_object()) {
+        for (key, raw_value) in env_map {
+            if let Some(text) = raw_value.as_str() {
+                if let Some(existing) = config.env.iter_mut().find(|(k, _)| k == key) {
+                    existing.1 = text.to_string();
+                } else {
+                    config.env.push((key.clone(), text.to_string()));
+                }
+            }
+        }
+    }
+    let _ = Path::new(&config.python);
+    config
+}
+
 pub fn agent(timeout: Duration) -> ureq::Agent {
     ureq::Agent::new_with_config(
         ureq::Agent::config_builder()
@@ -52,7 +122,8 @@ fn alive() -> bool {
 }
 
 fn spawn_server() -> std::io::Result<Child> {
-    let mut cmd = Command::new(PYTHON);
+    let config = load_shell_config();
+    let mut cmd = Command::new(&config.python);
     cmd.args([
         "-m",
         "uvicorn",
@@ -62,8 +133,8 @@ fn spawn_server() -> std::io::Result<Child> {
         "--port",
         "8010",
     ])
-    .current_dir(SERVER_CWD);
-    for (key, value) in SERVER_ENV {
+    .current_dir(&config.server_cwd);
+    for (key, value) in &config.env {
         cmd.env(key, value);
     }
     #[cfg(windows)]

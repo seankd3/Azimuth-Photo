@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 import scanner
 import settings
 import thumbnails
+from core import cache_events
 from core.path_groups import safe_commonpath, safe_relpath
 from core.requests import json_object
 from data.repositories import catalog as catalog_repository
@@ -144,6 +145,14 @@ async def scan_prefetch_on_batch(count):
 
 async def _run_scan(folder: str, source_id: int) -> None:
     await scanner.scan_folder(folder, source_id=source_id, on_batch=scan_prefetch_on_batch)
+    # Invalidate read caches at COMPLETION too — _catalog_changed at scan start
+    # is not enough: a grid query during the scan re-primes a stale empty
+    # rankings response, so the first landing after an import shows 0 photos.
+    _catalog_changed(matchups=True, cache_status=True)
+    cache_events.invalidate_rankings_cache()
+    import db as _db
+
+    _db.invalidate_stats_cache()
     error = str(scanner.scan_state.get("error") or "").strip()
     if error:
         log.error(

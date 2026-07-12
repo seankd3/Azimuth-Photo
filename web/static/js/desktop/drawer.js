@@ -1,8 +1,10 @@
 import {
-    addCatalogSource, clearCache, getAiStatus, getCacheStatus, getCaptionStatus, getCatalog,
-    getMetadataStatus, getPeopleStatus, getRemoteAccess, getScanStatus, getSettings, installAiModel, pauseAiEmbeddings,
+    addCatalogSource, applyRemoteAccessServe, clearCache, connectToHub, createDeviceLink, discoverHubs,
+    getAiStatus, getCacheStatus, getCaptionStatus, getCatalog, getMetadataStatus, getPairStatus,
+    getPeopleStatus, getRemoteAccess, getScanStatus, getSettings, installAiModel, listDevices,
+    pauseAiEmbeddings,
     pauseCaptionScan, pausePeopleScan, removeCatalogSource, rescanCatalogSource, resetSettings, resumeAiEmbeddings,
-    resumeCaptionScan, resumePeopleScan, saveSettings, startCachePregen, startMetadataScan, stopCachePregen,
+    resumeCaptionScan, resumePeopleScan, revokeDevice, saveSettings, startCachePregen, startMetadataScan, stopCachePregen,
     stopMetadataScan,
 } from './api.js';
 import {
@@ -32,6 +34,10 @@ let peopleStatus = null;
 let captionStatus = null;
 let metadataStatus = null;
 let remoteAccess = null;
+let pairStatus = null;
+let devicesPayload = null;
+let linkSession = null;
+let discoverPayload = null;
 let settingsPageData = null;
 let savedSettings = {};
 let draftSettings = {};
@@ -74,6 +80,7 @@ const SETTING_DEFS = {
     publish_hook: { type: 'text' },
     publish_site_base_url: { type: 'text' },
     share_brand_name: { type: 'text' },
+    require_device_token: { type: 'checkbox' },
 };
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
@@ -406,7 +413,7 @@ function renderSources() {
             + `<div class="remove-choice" hidden><button class="mini-btn" data-mode="keep">Keep photos</button><button class="mini-btn btn-danger" data-mode="delete">Remove from library index</button><button class="mini-btn" data-remove-cancel>Cancel</button></div>`
             + `<div class="scan-progress" ${scanning ? '' : 'hidden'}>Scanning…</div>`
             + '</div></article>';
-    }).join('') : '<div class="source-empty"><b>No photo folders yet.</b><span>Add a folder to catalog your archive. photoArchive reads originals in place; original photo files are never moved or changed.</span></div>';
+    }).join('') : '<div class="source-empty"><b>No photo folders yet.</b><span>Add a folder to catalog your archive. Azimuth Photo reads originals in place; original photo files are never moved or changed.</span></div>';
     return '<section class="dr-sec"><h3>Sources</h3>'
         + `<div id="drawer-sources">${rows}</div>`
         + renderSourceAddUi()
@@ -459,15 +466,142 @@ function renderStorage() {
         + '</section>';
 }
 
-function renderRemote() {
-    const url = (remoteAccess && remoteAccess.tailscale && remoteAccess.tailscale.url)
-        || (remoteAccess && remoteAccess.current_url)
-        || '';
-    return '<section class="dr-sec"><h3>Remote access</h3>'
-        + '<div class="remote-row">'
-        + `<span class="remote-url" title="${esc(url)}">${esc(url || 'Unavailable')}</span>`
-        + `<button class="mini-btn" id="copy-remote" ${url ? '' : 'aria-disabled="true" disabled'}>Copy</button>`
+function formatSeen(value) {
+    if (value == null) return 'Never';
+    const then = Number(value) * (Number(value) > 1e12 ? 1 : 1000);
+    if (!Number.isFinite(then)) return '—';
+    const delta = Math.max(0, Date.now() - then);
+    if (delta < 60_000) return 'Just now';
+    if (delta < 3_600_000) return `${Math.floor(delta / 60_000)}m ago`;
+    if (delta < 86_400_000) return `${Math.floor(delta / 3_600_000)}h ago`;
+    return new Date(then).toLocaleDateString();
+}
+
+function renderDevices() {
+    if (!pairStatus || pairStatus.mode !== 'hub') return '';
+    const devices = (devicesPayload && devicesPayload.devices) || [];
+    const active = devices.filter((device) => !device.revoked);
+    const rows = active.length
+        ? active.map((device) => (
+            `<div class="device-row" data-device-id="${esc(device.id)}">`
+            + `<div><b>${esc(device.name)}</b>`
+            + `<span class="device-meta">${esc(device.platform || 'unknown')} · last seen ${esc(formatSeen(device.last_seen))}</span></div>`
+            + `<button class="mini-btn btn-danger" type="button" data-revoke-device="${esc(device.id)}">Revoke</button>`
+            + `</div>`
+        )).join('')
+        : '<div class="setting-hint">No linked devices yet.</div>';
+    const link = linkSession
+        ? `<div class="pair-link-card">`
+            + `<div class="pair-code" aria-label="Pairing code">${esc(linkSession.code)}</div>`
+            + (linkSession.qr_png_base64
+                ? `<img class="pair-qr" alt="Pairing QR code" src="data:image/png;base64,${esc(linkSession.qr_png_base64)}">`
+                : '')
+            + `<div class="setting-hint">Code expires in 10 minutes. One device can use it once.</div>`
+            + `</div>`
+        : '';
+    return '<section class="dr-sec" id="devices-panel"><h3>Devices</h3>'
+        + '<div class="drawer-action-row">'
+        + '<span>Link a phone or another computer to this library.</span>'
+        + '<button class="btn primary" id="link-device-btn" type="button">Link a device</button>'
+        + '</div>'
+        + link
+        + `<div class="device-list">${rows}</div>`
+        + settingToggle('require_device_token', 'Require device token for sync')
+        + '<div class="setting-hint">Off by default. When on, only paired devices can call sync endpoints.</div>'
+        + '</section>';
+}
+
+function renderConnectServer() {
+    if (!pairStatus || pairStatus.mode === 'hub') return '';
+    const hubs = (discoverPayload && discoverPayload.hubs) || [];
+    const discovered = hubs.length
+        ? hubs.map((hub) => (
+            `<button class="discovered-hub" type="button" data-hub-url="${esc(hub.url)}">`
+            + `<b>${esc(hub.name || 'Azimuth Photo')}</b>`
+            + `<span>${esc(hub.url)}</span>`
+            + '</button>'
+        )).join('')
+        : '<div class="setting-hint">No hubs found on the network yet.</div>';
+    const connected = pairStatus && pairStatus.has_hub
+        ? `<div class="setting-status">Connected to <code>${esc(pairStatus.hub_url)}</code></div>`
+        : '';
+    return '<section class="dr-sec" id="connect-server-panel"><h3>Connect to server</h3>'
+        + connected
+        + '<div class="drawer-action-row">'
+        + '<span>Find a hub on your network, or enter its address.</span>'
+        + '<button class="mini-btn" id="discover-hubs-btn" type="button">Scan network</button>'
+        + '</div>'
+        + `<div class="discovered-hubs">${discovered}</div>`
+        + '<label class="setting-row" for="connect-hub-url"><span><b>Hub URL</b></span>'
+        + `<input class="drawer-input" id="connect-hub-url" type="text" spellcheck="false" autocomplete="off" placeholder="http://nas.local:8000" value="${esc((pairStatus && pairStatus.hub_url) || '')}">`
+        + '</label>'
+        + '<label class="setting-row" for="connect-pair-code"><span><b>Pair code</b></span>'
+        + '<input class="drawer-input" id="connect-pair-code" type="text" spellcheck="false" autocomplete="off" placeholder="8-character code">'
+        + '</label>'
+        + '<div class="setting-actions">'
+        + '<button class="btn primary" id="connect-hub-btn" type="button">Connect</button>'
         + '</div></section>';
+function remoteQrMarkup(text) {
+    if (!text || typeof window.qrcode !== 'function') return '';
+    try {
+        const qr = window.qrcode(0, 'M');
+        qr.addData(text);
+        qr.make();
+        const size = qr.getModuleCount();
+        const cell = 3;
+        let rects = '';
+        for (let row = 0; row < size; row += 1) {
+            for (let col = 0; col < size; col += 1) {
+                if (!qr.isDark(row, col)) continue;
+                rects += `<rect x="${col * cell}" y="${row * cell}" width="${cell}" height="${cell}" fill="currentColor"/>`;
+            }
+        }
+        const dim = size * cell;
+        return `<div class="remote-qr" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${dim} ${dim}" width="132" height="132" role="img">${rects}</svg></div>`;
+    } catch {
+        return '';
+    }
+}
+
+function renderRemote() {
+    // Hub mode only — standalone/satellite hide this panel entirely.
+    if (!remoteAccess || remoteAccess.hub_mode === false) return '';
+    const ts = remoteAccess.tailscale || {};
+    const state = ts.state || (ts.available ? 'up' : 'absent');
+    const httpsUrl = ts.https_url || '';
+    const serveApplied = Boolean(ts.serve_applied && httpsUrl);
+    let body = '';
+
+    if (state === 'absent') {
+        body = '<p class="remote-copy">Install Tailscale on this machine, then come back here to publish a phone-ready HTTPS link on your tailnet.</p>'
+            + `<a class="btn" id="remote-install" href="${esc(ts.install_url || 'https://tailscale.com/download')}" target="_blank" rel="noopener">Install Tailscale</a>`;
+    } else if (state === 'logged-out') {
+        body = '<p class="remote-copy">Tailscale is installed. Sign in on this machine, then return here to enable HTTPS for your phone.</p>'
+            + `<code class="remote-cmd">${esc(ts.up_command || 'tailscale up')}</code>`
+            + '<p class="remote-hint">Run that in a terminal, complete the browser login, then reopen Settings.</p>';
+    } else {
+        const command = ts.serve_command || 'sudo tailscale serve --bg --https=8443 http://127.0.0.1:8000';
+        body = '<p class="remote-copy">Publish a tailnet-only HTTPS address so the phone can install the app and keep a service worker.</p>'
+            + `<code class="remote-cmd" title="${esc(command)}">${esc(command)}</code>`;
+        if (serveApplied) {
+            body += '<div class="remote-ready">'
+                + '<div class="remote-row">'
+                + `<span class="remote-url" title="${esc(httpsUrl)}">${esc(httpsUrl)}</span>`
+                + '<button class="mini-btn" id="copy-remote" type="button">Copy</button>'
+                + '</div>'
+                + remoteQrMarkup(httpsUrl)
+                + '<p class="remote-hint">Scan on a phone that’s on the same Tailscale network.</p>'
+                + '</div>';
+        } else {
+            body += '<button class="btn" id="remote-apply-serve" type="button">Apply HTTPS</button>'
+                + '<p class="remote-hint">Runs only when you click — nothing is changed automatically.</p>';
+        }
+        if (ts.dry_run) {
+            body += '<p class="remote-hint remote-dryrun">Dry-run mode: Apply will not change Tailscale Serve on this machine.</p>';
+        }
+    }
+
+    return `<section class="dr-sec" data-remote-state="${esc(state)}" data-remote-hub="1"><h3>Remote access</h3>${body}</section>`;
 }
 
 function renderSharedHome() {
@@ -733,7 +867,7 @@ function renderDrawer() {
     openSettingSections = new Set(Array.from(body.querySelectorAll('.dr-details[open] summary span'))
         .map((el) => el.textContent || ''));
     if (publishingFocusPending || publishReturn) openSettingSections.add('Publishing');
-    body.innerHTML = renderSources() + renderLibraryHealth(catalog) + renderWork() + renderSharedHome() + renderSettingsSections() + renderStorage() + renderRemote() + renderPrefs() + renderSettingsSaveBar();
+    body.innerHTML = renderSources() + renderLibraryHealth(catalog) + renderWork() + renderSharedHome() + renderDevices() + renderConnectServer() + renderSettingsSections() + renderStorage() + renderRemote() + renderPrefs() + renderSettingsSaveBar();
     updateDrawerContext();
     bindDrawerActions();
     if (publishingFocusPending && body.querySelector('.dr-details[data-settings-section="Publishing"]')) {
@@ -743,7 +877,7 @@ function renderDrawer() {
 }
 
 async function refreshDrawer() {
-    const [nextCatalog, ai, cache, people, captions, metadata, remote, settingsData] = await Promise.all([
+    const [nextCatalog, ai, cache, people, captions, metadata, remote, settingsData, pair, devices] = await Promise.all([
         getCatalog().catch(() => null),
         getAiStatus().catch(() => null),
         getCacheStatus().catch(() => null),
@@ -752,6 +886,8 @@ async function refreshDrawer() {
         getMetadataStatus().catch(() => null),
         getRemoteAccess().catch(() => null),
         getSettings().catch(() => null),
+        getPairStatus().catch(() => null),
+        listDevices().catch(() => null),
         refreshLibraryHealth(),
     ]);
     if (settingsData) applySettingsData(settingsData, { preserveDirtyExcept: new Set() });
@@ -762,6 +898,8 @@ async function refreshDrawer() {
     captionStatus = captions || captionStatus;
     metadataStatus = metadata || metadataStatus || (settingsData && settingsData.metadata_status);
     remoteAccess = remote || remoteAccess;
+    pairStatus = pair || pairStatus;
+    devicesPayload = devices || devicesPayload;
     renderActivity();
     if (!drawerEditing()) renderDrawer();
 }
@@ -818,8 +956,8 @@ function sourceAddErrorMessage(result) {
     const bodyError = String(result?.data?.error || result?.data?.detail || '').trim();
     if (result?.status === 400) {
         return bodyError
-            ? `That folder cannot be found or read on the computer running photoArchive: ${bodyError}.`
-            : 'That folder cannot be found or read on the computer running photoArchive.';
+            ? `That folder cannot be found or read on the computer running Azimuth Photo: ${bodyError}.`
+            : 'That folder cannot be found or read on the computer running Azimuth Photo.';
     }
     if (result?.status === 409) {
         return bodyError
@@ -827,7 +965,7 @@ function sourceAddErrorMessage(result) {
             : 'Another scan is already running. Wait for it to finish, then add this folder.';
     }
     if (result?.status === 0) {
-        return 'Could not reach photoArchive. Check the connection and try again.';
+        return 'Could not reach Azimuth Photo. Check the connection and try again.';
     }
     return bodyError
         ? `Could not add that folder (${result?.status || 'unknown status'}): ${bodyError}.`
@@ -1024,6 +1162,56 @@ function bindDrawerActions() {
         },
     });
     bindSettingInputs(body);
+    body.querySelector('#link-device-btn')?.addEventListener('click', (event) => withBusyAction('link-device', event.currentTarget, async () => {
+        const result = await createDeviceLink();
+        if (result && result.code) {
+            linkSession = result;
+            renderDrawer();
+            showToast('Pairing code ready');
+        } else {
+            showToast('Couldn’t create a pairing code');
+        }
+    }));
+    for (const btn of body.querySelectorAll('[data-revoke-device]')) {
+        btn.addEventListener('click', () => withBusyAction(`revoke-${btn.dataset.revokeDevice}`, btn, async () => {
+            const result = await revokeDevice(Number(btn.dataset.revokeDevice));
+            if (result && result.ok) {
+                devicesPayload = await listDevices().catch(() => devicesPayload);
+                renderDrawer();
+                showToast('Device revoked');
+            } else {
+                showToast('Couldn’t revoke device');
+            }
+        }));
+    }
+    body.querySelector('#discover-hubs-btn')?.addEventListener('click', (event) => withBusyAction('discover-hubs', event.currentTarget, async () => {
+        discoverPayload = await discoverHubs().catch(() => null);
+        renderDrawer();
+        const count = (discoverPayload && discoverPayload.hubs && discoverPayload.hubs.length) || 0;
+        showToast(count ? `Found ${count} hub${count === 1 ? '' : 's'}` : 'No hubs found');
+    }));
+    for (const btn of body.querySelectorAll('[data-hub-url]')) {
+        btn.addEventListener('click', () => {
+            const input = document.getElementById('connect-hub-url');
+            if (input) input.value = btn.dataset.hubUrl || '';
+        });
+    }
+    body.querySelector('#connect-hub-btn')?.addEventListener('click', (event) => withBusyAction('connect-hub', event.currentTarget, async () => {
+        const hubUrl = document.getElementById('connect-hub-url')?.value?.trim() || '';
+        const code = document.getElementById('connect-pair-code')?.value?.trim() || '';
+        if (!hubUrl || !code) {
+            showToast('Enter a hub URL and pair code');
+            return;
+        }
+        const result = await connectToHub({ hubUrl, code });
+        if (result && result.ok) {
+            pairStatus = await getPairStatus().catch(() => pairStatus);
+            renderDrawer();
+            showToast('Connected to hub');
+        } else {
+            showToast((result && (result.error || result.detail)) || 'Couldn’t connect');
+        }
+    }));
     body.querySelector('#drawer-cache-defaults')?.addEventListener('click', applyCacheDefaults);
     body.querySelector('#drawer-save-settings')?.addEventListener('click', (event) => withBusyAction('settings-save', event.currentTarget, saveDrawerSettings));
     body.querySelector('#drawer-reset-settings')?.addEventListener('click', (event) => withBusyAction('settings-reset', event.currentTarget, resetDrawerSettings));
@@ -1100,7 +1288,10 @@ function bindDrawerActions() {
     }));
     body.querySelector('#copy-remote')?.addEventListener('click', async (event) => {
         if (event.currentTarget.getAttribute('aria-disabled') === 'true') return;
-        const url = (remoteAccess && remoteAccess.tailscale && remoteAccess.tailscale.url) || remoteAccess.current_url || '';
+        const url = (remoteAccess && remoteAccess.tailscale && remoteAccess.tailscale.https_url)
+            || (remoteAccess && remoteAccess.tailscale && remoteAccess.tailscale.url)
+            || (remoteAccess && remoteAccess.current_url)
+            || '';
         try {
             await navigator.clipboard.writeText(url);
             showToast('Link copied');
@@ -1108,6 +1299,26 @@ function bindDrawerActions() {
             showToast('Couldn’t copy');
         }
     });
+    body.querySelector('#remote-apply-serve')?.addEventListener('click', (event) => withBusyAction('remote-serve', event.currentTarget, async () => {
+        const result = await applyRemoteAccessServe();
+        if (!result || !result.ok) {
+            showToast((result && result.error) || 'Couldn’t apply Tailscale Serve');
+            return;
+        }
+        remoteAccess = {
+            ...(remoteAccess || {}),
+            hub_mode: true,
+            tailscale: {
+                ...((remoteAccess && remoteAccess.tailscale) || {}),
+                ...(result.tailscale || {}),
+                https_url: result.https_url || (result.tailscale && result.tailscale.https_url) || '',
+                serve_applied: true,
+                state: 'up',
+            },
+        };
+        renderDrawer();
+        showToast(result.dry_run ? 'HTTPS ready (dry-run)' : 'HTTPS ready on your tailnet');
+    }));
     body.querySelector('#drawer-open-shared')?.addEventListener('click', () => {
         closeSystemDrawer();
         setActiveLens('shared');

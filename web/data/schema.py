@@ -9,7 +9,7 @@ from data.repositories import catalog as catalog_repository
 from core.path_groups import safe_commonpath
 
 EXPECTED_EMBEDDING_DIM = 2048  # Qwen3-VL-Embedding-2B native dimension
-SCHEMA_VERSION = 25
+SCHEMA_VERSION = 26
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS catalog_sources (
@@ -115,6 +115,18 @@ CREATE TABLE IF NOT EXISTS oplog_cursors (
     origin TEXT PRIMARY KEY,
     last_seen_origin_seq INTEGER NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS devices (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    platform TEXT NOT NULL DEFAULT '',
+    token_hash TEXT NOT NULL UNIQUE,
+    created_at REAL NOT NULL,
+    last_seen REAL,
+    revoked_at REAL
+);
+CREATE INDEX IF NOT EXISTS idx_devices_token_hash ON devices(token_hash);
+CREATE INDEX IF NOT EXISTS idx_devices_revoked_at ON devices(revoked_at);
 
 CREATE TABLE IF NOT EXISTS develop_presets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1112,6 +1124,7 @@ REQUIRED_TABLES = {
     "oplog_family_state",
     "oplog_settings",
     "oplog_cursors",
+    "devices",
     "images_metadata_fts",
     "comparisons",
     "embeddings",
@@ -1148,6 +1161,15 @@ REQUIRED_TABLES = {
 }
 
 REQUIRED_COLUMNS = {
+    "devices": {
+        "id",
+        "name",
+        "platform",
+        "token_hash",
+        "created_at",
+        "last_seen",
+        "revoked_at",
+    },
     "images": {
         "source_id",
         "content_hash",
@@ -1238,6 +1260,8 @@ REQUIRED_INDEXES = {
     "idx_develop_presets_folder",
     "idx_oplog_origin_seq",
     "idx_oplog_content_family",
+    "idx_devices_token_hash",
+    "idx_devices_revoked_at",
     "idx_catalog_sources_active",
     "idx_images_missing_source_filepath_id",
     "idx_images_source_missing_id",
