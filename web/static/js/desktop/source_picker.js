@@ -89,7 +89,7 @@ export function renderSourceAddUi() {
     const expanded = state.open ? 'true' : 'false';
     return '<form class="source-add-ui" id="add-source-form">'
         + '<input type="hidden" name="path" value="' + esc(selected) + '">'
-        + '<p class="source-add-copy">Choose a photo folder on the computer running photoArchive. Originals stay where they are and are never moved or changed.</p>'
+        + '<p class="source-add-copy">Choose a photo folder on the computer running Azimuth Photo. Originals stay where they are and are never moved or changed.</p>'
         + selectedCopy
         + '<div class="source-add-actions">'
         + `<button class="btn primary" type="button" data-source-picker-toggle aria-expanded="${expanded}" aria-controls="source-picker-browser">${icon('folder-plus')} Choose photo folder</button>`
@@ -99,7 +99,7 @@ export function renderSourceAddUi() {
         + (state.addError ? `<div class="source-add-error" role="alert">${esc(state.addError)}</div>` : '')
         + `<details class="source-manual"${state.manualOpen ? ' open' : ''}><summary>Enter a path manually</summary>`
         + `<label><span>Exact server path</span><input class="drawer-input" name="manual_path" value="${esc(selected)}" placeholder="/path/to/photos" autocomplete="off"></label>`
-        + '<p>The path must exist on the computer running photoArchive.</p></details>'
+        + '<p>The path must exist on the computer running Azimuth Photo.</p></details>'
         + '</form>';
 }
 
@@ -126,7 +126,7 @@ async function loadPath(path = '') {
         state.error = '';
     } catch {
         if (token !== requestId) return;
-        state.error = 'Could not load folders from the computer running photoArchive. Check the connection and try again.';
+        state.error = 'Could not load folders from the computer running Azimuth Photo. Check the connection and try again.';
     } finally {
         if (token !== requestId) return;
         state.loading = false;

@@ -1,6 +1,6 @@
 # Feature Guide
 
-photoArchive opens into one desktop shell at `/` or `/d`. The current scope is
+Azimuth Photo opens into one desktop shell at `/` or `/d`. The current scope is
 shared across the grid, lenses, overlays, panels, exports, and background work.
 
 ## Desktop Shell

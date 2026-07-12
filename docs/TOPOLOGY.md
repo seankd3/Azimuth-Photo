@@ -60,9 +60,9 @@ The same `web/` code runs in two modes:
 | Where | What |
 |---|---|
 | omarchy `/mnt/expansion/Photos/` | The originals. The archive. |
-| omarchy `/mnt/expansion/PhotoArchiveCache/` | Thumbnails, develop base caches, exports. |
+| omarchy `/mnt/expansion/Azimuth PhotoCache/` | Thumbnails, develop base caches, exports. |
 | omarchy `~/Projects/photo-archive/web/photoarchive.db` | The master catalog (SQLite). `deploy.sh` backs it up before every deploy (keeps 5). |
-| XPS `C:\PhotoArchiveField\` | All satellite data: catalog DB, thumbs, develop cache, exports. |
+| XPS `C:\Azimuth PhotoField\` | All satellite data: catalog DB, thumbs, develop cache, exports. |
 | XPS `D:\CardOffload\` | Card-offload staging (robocopy + push scripts live there). |
 
 ## How to run each face

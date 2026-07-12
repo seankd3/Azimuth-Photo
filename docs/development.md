@@ -1,6 +1,6 @@
 # Development
 
-photoArchive is a FastAPI app with a browser-native frontend. There is no Vite,
+Azimuth Photo is a FastAPI app with a browser-native frontend. There is no Vite,
 TypeScript, or bundled build step.
 
 ## Local Setup
@@ -32,7 +32,7 @@ use the compact 2B search model without bitsandbytes; captions stay unavailable
 rather than risking an unsafe full-precision model load.
 
 Missing packs are reported in System status and do not hide stored embeddings,
-People labels, captions, or tags. photoArchive never installs Python packages
+People labels, captions, or tags. Azimuth Photo never installs Python packages
 at runtime; install a pack explicitly, then restart the app when convenient.
 
 The app runs at `http://127.0.0.1:8000` by default.

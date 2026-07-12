@@ -406,7 +406,7 @@ function renderSources() {
             + `<div class="remove-choice" hidden><button class="mini-btn" data-mode="keep">Keep photos</button><button class="mini-btn btn-danger" data-mode="delete">Remove from library index</button><button class="mini-btn" data-remove-cancel>Cancel</button></div>`
             + `<div class="scan-progress" ${scanning ? '' : 'hidden'}>Scanning…</div>`
             + '</div></article>';
-    }).join('') : '<div class="source-empty"><b>No photo folders yet.</b><span>Add a folder to catalog your archive. photoArchive reads originals in place; original photo files are never moved or changed.</span></div>';
+    }).join('') : '<div class="source-empty"><b>No photo folders yet.</b><span>Add a folder to catalog your archive. Azimuth Photo reads originals in place; original photo files are never moved or changed.</span></div>';
     return '<section class="dr-sec"><h3>Sources</h3>'
         + `<div id="drawer-sources">${rows}</div>`
         + renderSourceAddUi()
@@ -818,8 +818,8 @@ function sourceAddErrorMessage(result) {
     const bodyError = String(result?.data?.error || result?.data?.detail || '').trim();
     if (result?.status === 400) {
         return bodyError
-            ? `That folder cannot be found or read on the computer running photoArchive: ${bodyError}.`
-            : 'That folder cannot be found or read on the computer running photoArchive.';
+            ? `That folder cannot be found or read on the computer running Azimuth Photo: ${bodyError}.`
+            : 'That folder cannot be found or read on the computer running Azimuth Photo.';
     }
     if (result?.status === 409) {
         return bodyError
@@ -827,7 +827,7 @@ function sourceAddErrorMessage(result) {
             : 'Another scan is already running. Wait for it to finish, then add this folder.';
     }
     if (result?.status === 0) {
-        return 'Could not reach photoArchive. Check the connection and try again.';
+        return 'Could not reach Azimuth Photo. Check the connection and try again.';
     }
     return bodyError
         ? `Could not add that folder (${result?.status || 'unknown status'}): ${bodyError}.`

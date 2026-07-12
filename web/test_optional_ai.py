@@ -118,7 +118,7 @@ original = importlib.util.find_spec
 blocked = %r
 importlib.util.find_spec = lambda name, package=None: None if name.split('.')[0] in blocked else original(name, package)
 import app
-assert app.app.title == 'photoArchive'
+assert app.app.title == 'Azimuth Photo'
 """ % OPTIONAL_IMPORTS
         result = subprocess.run(
             [sys.executable, "-c", script],

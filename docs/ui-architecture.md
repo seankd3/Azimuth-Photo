@@ -1,6 +1,6 @@
 # UI Architecture
 
-This is the design charter for photoArchive's interface. Every UI change should
+This is the design charter for Azimuth Photo's interface. Every UI change should
 be checkable against it. The production desktop shell is the reference
 implementation of this architecture.
 
