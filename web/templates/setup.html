@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="color-scheme" content="dark">
+    <meta name="theme-color" content="#141517">
+    <title>Welcome — photoArchive</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="/static/desktop.css?v={{ static_version }}">
+    <style>
+        html, body { height: 100%; }
+        body { overflow: hidden; }
+        #setup {
+            position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+            background: var(--bg); padding: 24px;
+        }
+        .su-card {
+            width: min(520px, 100%); background: var(--panel); border: 1px solid var(--line);
+            border-radius: var(--r-card); padding: 44px 44px 36px;
+            box-shadow: 0 16px 48px rgba(0,0,0,.55);
+        }
+        .su-step { display: none; }
+        .su-step.active { display: block; animation: su-in var(--dur-panel, .28s) var(--ease-out, ease-out); }
+        @keyframes su-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+        .su-wordmark { font-size: var(--fs-display); font-weight: var(--fw-semibold); letter-spacing: -.02em; }
+        .su-wordmark em { font-style: normal; color: var(--accent); }
+        .su-lede { color: var(--text-2); font-size: var(--fs-body); line-height: var(--lh-body); margin: 14px 0 30px; }
+        .su-h { font-size: var(--fs-title); font-weight: var(--fw-semibold); margin: 0 0 6px; }
+        .su-sub { color: var(--text-3); font-size: var(--fs-ui); margin: 0 0 18px; }
+        .su-btn {
+            appearance: none; border: 1px solid var(--line); border-radius: 8px; cursor: pointer;
+            background: var(--surface-raised); color: var(--text); font-size: var(--fs-ui);
+            font-weight: var(--fw-medium); padding: 9px 16px; transition: background var(--dur-ctrl), border-color var(--dur-ctrl);
+        }
+        .su-btn:hover { border-color: var(--text-3); }
+        .su-btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg, #0b0b0c); }
+        .su-btn.primary:hover { filter: brightness(1.08); }
+        .su-btn.primary:disabled { opacity: .45; cursor: default; filter: none; }
+        .su-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 26px; align-items: center; }
+        .su-actions .spacer { flex: 1; }
+        .su-back { background: none; border: none; color: var(--text-3); cursor: pointer; font-size: var(--fs-ui); padding: 9px 4px; }
+        .su-back:hover { color: var(--text-2); }
+        .su-kbd { color: var(--text-3); font-size: var(--fs-micro); }
+        .su-kbd kbd {
+            font-family: ui-monospace, Consolas, monospace; border: 1px solid var(--line);
+            border-bottom-width: 2px; border-radius: 4px; padding: 1px 5px; font-size: 10px;
+        }
+        /* Folder browser */
+        .su-path {
+            display: flex; gap: 8px; align-items: center; margin-bottom: 10px;
+        }
+        .su-path input {
+            flex: 1; background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+            color: var(--text); font-size: var(--fs-ui); padding: 8px 11px; min-width: 0;
+        }
+        .su-path input:focus { outline: none; border-color: var(--accent-dim); }
+        .su-roots { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+        .su-root {
+            border: 1px solid var(--line); border-radius: 999px; background: none; cursor: pointer;
+            color: var(--text-2); font-size: var(--fs-caption); padding: 4px 12px;
+        }
+        .su-root:hover { color: var(--text); border-color: var(--text-3); }
+        .su-list {
+            height: 218px; overflow-y: auto; border: 1px solid var(--line); border-radius: 10px;
+            background: var(--bg); padding: 4px;
+        }
+        .su-entry {
+            display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
+            border: none; background: none; color: var(--text-2); cursor: pointer;
+            font-size: var(--fs-ui); padding: 7px 10px; border-radius: 7px;
+        }
+        .su-entry:hover { background: var(--surface-raised); color: var(--text); }
+        .su-entry svg { width: 14px; height: 14px; flex: none; opacity: .55; }
+        .su-entry.up { color: var(--text-3); }
+        .su-empty { color: var(--text-3); font-size: var(--fs-ui); padding: 18px 12px; text-align: center; }
+        .su-chosen {
+            display: flex; align-items: center; gap: 9px; margin-top: 12px; padding: 10px 12px;
+            border: 1px solid var(--accent-dim); border-radius: 10px; background: var(--surface-raised);
+            font-size: var(--fs-ui);
+        }
+        .su-chosen .path { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+        .su-chosen .path bdi { direction: ltr; }
+        .su-chosen.muted { border-color: var(--line); color: var(--text-3); }
+        /* Import progress */
+        .su-count { font-size: 42px; font-weight: var(--fw-semibold); letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+        .su-count small { font-size: var(--fs-ui); font-weight: var(--fw-medium); color: var(--text-3); margin-left: 8px; }
+        .su-bar { height: 3px; border-radius: 2px; background: var(--line); overflow: hidden; margin: 18px 0 8px; }
+        .su-bar i {
+            display: block; height: 100%; width: 40%; border-radius: 2px; background: var(--accent);
+            animation: su-sweep 1.4s ease-in-out infinite;
+        }
+        .su-bar.done i { animation: none; width: 100%; }
+        @keyframes su-sweep { 0% { margin-left: -40%; } 100% { margin-left: 100%; } }
+        .su-status { color: var(--text-3); font-size: var(--fs-caption); min-height: 18px; }
+        .su-extras {
+            margin-top: 24px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px;
+        }
+        .su-extras b { font-weight: var(--fw-semibold); font-size: var(--fs-ui); }
+        .su-extras p { color: var(--text-3); font-size: var(--fs-caption); margin: 4px 0 0; line-height: 1.45; }
+        .su-extras a { color: var(--accent); text-decoration: none; }
+        .su-extras a:hover { text-decoration: underline; }
+        .su-error { color: var(--danger); font-size: var(--fs-caption); margin-top: 10px; min-height: 16px; }
+    </style>
+</head>
+<body>
+<div id="setup">
+    <div class="su-card">
+
+        <section class="su-step active" data-step="welcome">
+            <div class="su-wordmark">photo<em>Archive</em></div>
+            <p class="su-lede">Your own photo library — browse, cull, and edit tens of thousands of
+                photos at full speed, on your own hardware. One question and you're in.</p>
+            <div class="su-actions">
+                <span class="su-kbd"><kbd>Enter</kbd> to continue</span>
+                <span class="spacer"></span>
+                <button class="su-btn primary" data-next>Choose your photos folder</button>
+            </div>
+        </section>
+
+        <section class="su-step" data-step="folder">
+            <h2 class="su-h">Where are your photos?</h2>
+            <p class="su-sub">Pick the folder that holds them. Nothing is moved or changed — photoArchive
+                reads your files where they live.</p>
+            <div class="su-roots" id="su-roots"></div>
+            <div class="su-path">
+                <input id="su-path-input" spellcheck="false" autocomplete="off" placeholder="Type or browse to a folder…">
+            </div>
+            <div class="su-list" id="su-list"></div>
+            <div class="su-chosen muted" id="su-chosen"><span class="path">No folder selected yet</span></div>
+            <div class="su-error" id="su-folder-error"></div>
+            <div class="su-actions">
+                <button class="su-back" data-back>Back</button>
+                <span class="spacer"></span>
+                <button class="su-btn" id="su-native" hidden>Browse…</button>
+                <button class="su-btn primary" id="su-start" disabled>Start importing</button>
+            </div>
+        </section>
+
+        <section class="su-step" data-step="import">
+            <h2 class="su-h">Building your library</h2>
+            <p class="su-sub" id="su-import-folder"></p>
+            <div class="su-count"><span id="su-found">0</span><small>photos found</small></div>
+            <div class="su-bar" id="su-bar"><i></i></div>
+            <div class="su-status" id="su-import-status">Scanning…</div>
+            <div class="su-extras">
+                <b>AI features</b>
+                <p>Semantic search, face groups, and auto-culling are optional extras that run entirely
+                    on your machine. Add them any time from Settings — or read the
+                    <a href="https://github.com/Sean-Kenneth-Doherty/photo-archive/blob/main/docs/INSTALL.md" target="_blank" rel="noopener">install guide</a>.</p>
+            </div>
+            <div class="su-actions">
+                <span class="su-kbd">Importing continues in the background</span>
+                <span class="spacer"></span>
+                <button class="su-btn primary" id="su-open">Open your library</button>
+            </div>
+        </section>
+
+    </div>
+</div>
+<script>
+(() => {
+    const steps = [...document.querySelectorAll('.su-step')];
+    let chosen = '';
+
+    function show(name) {
+        steps.forEach(s => s.classList.toggle('active', s.dataset.step === name));
+        const focus = { welcome: '[data-next]', folder: '#su-path-input', import: '#su-open' }[name];
+        const el = document.querySelector(`.su-step[data-step="${name}"] ${focus}`);
+        if (el) el.focus({ preventScroll: true });
+    }
+
+    async function json(url, opts) {
+        const res = await fetch(url, opts);
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);
+        return res.json();
+    }
+
+    // --- Step: welcome ---
+    document.querySelector('[data-next]').addEventListener('click', () => { show('folder'); browse(''); });
+    document.querySelector('[data-back]').addEventListener('click', () => show('welcome'));
+    document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter') return;
+        const active = steps.find(s => s.classList.contains('active'))?.dataset.step;
+        if (active === 'welcome') { e.preventDefault(); show('folder'); browse(''); }
+        if (active === 'folder' && document.activeElement !== pathInput && !startBtn.disabled) { e.preventDefault(); startImport(); }
+    });
+
+    // --- Step: folder ---
+    const pathInput = document.getElementById('su-path-input');
+    const listEl = document.getElementById('su-list');
+    const rootsEl = document.getElementById('su-roots');
+    const chosenEl = document.getElementById('su-chosen');
+    const startBtn = document.getElementById('su-start');
+    const nativeBtn = document.getElementById('su-native');
+    const folderError = document.getElementById('su-folder-error');
+
+    function choose(path) {
+        chosen = path || '';
+        chosenEl.classList.toggle('muted', !chosen);
+        chosenEl.querySelector('.path').innerHTML = chosen ? `<bdi>${chosen}</bdi>` : 'No folder selected yet';
+        startBtn.disabled = !chosen;
+        folderError.textContent = '';
+    }
+
+    async function browse(path) {
+        let data;
+        try { data = await json('/api/catalog/browse?path=' + encodeURIComponent(path || '')); }
+        catch (err) { folderError.textContent = String(err.message || err); return; }
+        pathInput.value = data.path;
+        if (data.is_dir && data.readable) choose(data.path);
+        rootsEl.innerHTML = '';
+        for (const root of data.roots || []) {
+            const b = document.createElement('button');
+            b.className = 'su-root'; b.type = 'button'; b.textContent = root.label;
+            b.addEventListener('click', () => browse(root.path));
+            rootsEl.appendChild(b);
+        }
+        listEl.innerHTML = '';
+        const up = document.createElement('button');
+        up.className = 'su-entry up'; up.type = 'button';
+        up.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 12V4M4.5 7.5 8 4l3.5 3.5"/></svg><span>..</span>';
+        up.addEventListener('click', () => browse(data.parent));
+        listEl.appendChild(up);
+        const junk = /^[.$%~]|^(node_modules|AppData|Application Data|System Volume Information)$/i;
+        const entries = (data.entries || []).filter(e => e.readable && !junk.test(e.name));
+        for (const entry of entries) {
+            const b = document.createElement('button');
+            b.className = 'su-entry'; b.type = 'button';
+            b.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1.5 4.5A1.5 1.5 0 0 1 3 3h3l1.5 1.5H13A1.5 1.5 0 0 1 14.5 6v5A1.5 1.5 0 0 1 13 12.5H3A1.5 1.5 0 0 1 1.5 11z"/></svg>' +
+                `<span>${entry.name}</span>`;
+            b.addEventListener('click', () => browse(entry.path));
+            listEl.appendChild(b);
+        }
+        if (!entries.length) {
+            const empty = document.createElement('div');
+            empty.className = 'su-empty';
+            empty.textContent = data.error || 'No subfolders — this is the one, if your photos live here.';
+            listEl.appendChild(empty);
+        }
+    }
+
+    let pathDebounce;
+    pathInput.addEventListener('input', () => {
+        clearTimeout(pathDebounce);
+        pathDebounce = setTimeout(() => browse(pathInput.value.trim()), 350);
+    });
+    pathInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); clearTimeout(pathDebounce); browse(pathInput.value.trim()); }
+    });
+
+    json('/api/catalog/folder-picker').then(info => {
+        if (!info.available) return;
+        nativeBtn.hidden = false;
+        nativeBtn.addEventListener('click', async () => {
+            try {
+                const result = await json('/api/catalog/select-folder', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path: chosen || '' }),
+                });
+                if (result.ok && result.path) browse(result.path);
+            } catch (err) { folderError.textContent = String(err.message || err); }
+        });
+    }).catch(() => {});
+
+    // --- Step: import ---
+    const foundEl = document.getElementById('su-found');
+    const importStatus = document.getElementById('su-import-status');
+    const importFolder = document.getElementById('su-import-folder');
+    const bar = document.getElementById('su-bar');
+
+    async function startImport() {
+        startBtn.disabled = true;
+        try {
+            await json('/api/scan', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ folder: chosen }),
+            });
+        } catch (err) {
+            startBtn.disabled = false;
+            folderError.textContent = String(err.message || err);
+            return;
+        }
+        importFolder.textContent = chosen;
+        show('import');
+        poll();
+    }
+    startBtn.addEventListener('click', startImport);
+
+    let pollTimer;
+    async function poll() {
+        let state;
+        try { state = await json('/api/scan/status'); } catch { state = null; }
+        if (state) {
+            foundEl.textContent = (state.total_found || 0).toLocaleString();
+            if (state.error) {
+                importStatus.textContent = state.error;
+                bar.classList.add('done');
+            } else if (state.done || !state.scanning) {
+                importStatus.textContent = 'All photos found — thumbnails keep building in the background.';
+                bar.classList.add('done');
+            } else {
+                importStatus.textContent = 'Scanning… you can open the library right away.';
+            }
+        }
+        if (!state || state.scanning) pollTimer = setTimeout(poll, 800);
+    }
+
+    document.getElementById('su-open').addEventListener('click', async () => {
+        clearTimeout(pollTimer);
+        try { await fetch('/api/setup/complete', { method: 'POST' }); } catch {}
+        // Never land on an empty grid: give the scan's final commit a moment
+        // to become visible before the library's first query.
+        for (let attempt = 0; attempt < 10; attempt++) {
+            try {
+                const peek = await json('/api/rankings?limit=1&_setup=' + attempt);
+                if (peek.images && peek.images.length) break;
+            } catch {}
+            await new Promise(r => setTimeout(r, 400));
+        }
+        window.location.href = '/d';
+    });
+})();
+</script>
+</body>
+</html>

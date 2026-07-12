@@ -1,12 +1,29 @@
 """Local controls for the satellite sync worker."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse
 
 from features.sync import satellite
 from features.sync.sync_worker import get_worker
 
 
 router = APIRouter(tags=["sync"])
+
+
+@router.post("/api/sync/hub")
+async def attach_hub(request: Request):
+    """Runtime standalone → satellite upgrade: store the hub and start syncing."""
+
+    if not satellite.is_satellite_mode():
+        return JSONResponse({"error": "A hub cannot attach to another hub"}, status_code=400)
+    body = await request.json()
+    try:
+        result = await satellite.attach_hub(
+            str(body.get("url") or ""), str(body.get("device_token") or "")
+        )
+    except ValueError as error:
+        return JSONResponse({"error": str(error)}, status_code=400)
+    return result
 
 
 @router.get("/api/sync/status")
