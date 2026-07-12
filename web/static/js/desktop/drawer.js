@@ -1,8 +1,8 @@
 import {
-    addCatalogSource, clearCache, getAiStatus, getCacheStatus, getCaptionStatus, getCatalog,
-    getMetadataStatus, getPeopleStatus, getRemoteAccess, getScanStatus, getSettings, installAiModel, pauseAiEmbeddings,
+    addCatalogSource, clearCache, connectToHub, createDeviceLink, discoverHubs, getAiStatus, getCacheStatus, getCaptionStatus, getCatalog,
+    getMetadataStatus, getPairStatus, getPeopleStatus, getRemoteAccess, getScanStatus, getSettings, installAiModel, listDevices, pauseAiEmbeddings,
     pauseCaptionScan, pausePeopleScan, removeCatalogSource, rescanCatalogSource, resetSettings, resumeAiEmbeddings,
-    resumeCaptionScan, resumePeopleScan, saveSettings, startCachePregen, startMetadataScan, stopCachePregen,
+    resumeCaptionScan, resumePeopleScan, revokeDevice, saveSettings, startCachePregen, startMetadataScan, stopCachePregen,
     stopMetadataScan,
 } from './api.js';
 import {
@@ -32,6 +32,10 @@ let peopleStatus = null;
 let captionStatus = null;
 let metadataStatus = null;
 let remoteAccess = null;
+let pairStatus = null;
+let devicesPayload = null;
+let linkSession = null;
+let discoverPayload = null;
 let settingsPageData = null;
 let savedSettings = {};
 let draftSettings = {};
@@ -74,6 +78,7 @@ const SETTING_DEFS = {
     publish_hook: { type: 'text' },
     publish_site_base_url: { type: 'text' },
     share_brand_name: { type: 'text' },
+    require_device_token: { type: 'checkbox' },
 };
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
@@ -459,14 +464,80 @@ function renderStorage() {
         + '</section>';
 }
 
-function renderRemote() {
-    const url = (remoteAccess && remoteAccess.tailscale && remoteAccess.tailscale.url)
-        || (remoteAccess && remoteAccess.current_url)
-        || '';
-    return '<section class="dr-sec"><h3>Remote access</h3>'
-        + '<div class="remote-row">'
-        + `<span class="remote-url" title="${esc(url)}">${esc(url || 'Unavailable')}</span>`
-        + `<button class="mini-btn" id="copy-remote" ${url ? '' : 'aria-disabled="true" disabled'}>Copy</button>`
+function formatSeen(value) {
+    if (value == null) return 'Never';
+    const then = Number(value) * (Number(value) > 1e12 ? 1 : 1000);
+    if (!Number.isFinite(then)) return '—';
+    const delta = Math.max(0, Date.now() - then);
+    if (delta < 60_000) return 'Just now';
+    if (delta < 3_600_000) return `${Math.floor(delta / 60_000)}m ago`;
+    if (delta < 86_400_000) return `${Math.floor(delta / 3_600_000)}h ago`;
+    return new Date(then).toLocaleDateString();
+}
+
+function renderDevices() {
+    if (!pairStatus || pairStatus.mode !== 'hub') return '';
+    const devices = (devicesPayload && devicesPayload.devices) || [];
+    const active = devices.filter((device) => !device.revoked);
+    const rows = active.length
+        ? active.map((device) => (
+            `<div class="device-row" data-device-id="${esc(device.id)}">`
+            + `<div><b>${esc(device.name)}</b>`
+            + `<span class="device-meta">${esc(device.platform || 'unknown')} · last seen ${esc(formatSeen(device.last_seen))}</span></div>`
+            + `<button class="mini-btn btn-danger" type="button" data-revoke-device="${esc(device.id)}">Revoke</button>`
+            + `</div>`
+        )).join('')
+        : '<div class="setting-hint">No linked devices yet.</div>';
+    const link = linkSession
+        ? `<div class="pair-link-card">`
+            + `<div class="pair-code" aria-label="Pairing code">${esc(linkSession.code)}</div>`
+            + (linkSession.qr_png_base64
+                ? `<img class="pair-qr" alt="Pairing QR code" src="data:image/png;base64,${esc(linkSession.qr_png_base64)}">`
+                : '')
+            + `<div class="setting-hint">Code expires in 10 minutes. One device can use it once.</div>`
+            + `</div>`
+        : '';
+    return '<section class="dr-sec" id="devices-panel"><h3>Devices</h3>'
+        + '<div class="drawer-action-row">'
+        + '<span>Link a phone or another computer to this library.</span>'
+        + '<button class="btn primary" id="link-device-btn" type="button">Link a device</button>'
+        + '</div>'
+        + link
+        + `<div class="device-list">${rows}</div>`
+        + settingToggle('require_device_token', 'Require device token for sync')
+        + '<div class="setting-hint">Off by default. When on, only paired devices can call sync endpoints.</div>'
+        + '</section>';
+}
+
+function renderConnectServer() {
+    if (!pairStatus || pairStatus.mode === 'hub') return '';
+    const hubs = (discoverPayload && discoverPayload.hubs) || [];
+    const discovered = hubs.length
+        ? hubs.map((hub) => (
+            `<button class="discovered-hub" type="button" data-hub-url="${esc(hub.url)}">`
+            + `<b>${esc(hub.name || 'photoArchive')}</b>`
+            + `<span>${esc(hub.url)}</span>`
+            + '</button>'
+        )).join('')
+        : '<div class="setting-hint">No hubs found on the network yet.</div>';
+    const connected = pairStatus && pairStatus.has_hub
+        ? `<div class="setting-status">Connected to <code>${esc(pairStatus.hub_url)}</code></div>`
+        : '';
+    return '<section class="dr-sec" id="connect-server-panel"><h3>Connect to server</h3>'
+        + connected
+        + '<div class="drawer-action-row">'
+        + '<span>Find a hub on your network, or enter its address.</span>'
+        + '<button class="mini-btn" id="discover-hubs-btn" type="button">Scan network</button>'
+        + '</div>'
+        + `<div class="discovered-hubs">${discovered}</div>`
+        + '<label class="setting-row" for="connect-hub-url"><span><b>Hub URL</b></span>'
+        + `<input class="drawer-input" id="connect-hub-url" type="text" spellcheck="false" autocomplete="off" placeholder="http://nas.local:8000" value="${esc((pairStatus && pairStatus.hub_url) || '')}">`
+        + '</label>'
+        + '<label class="setting-row" for="connect-pair-code"><span><b>Pair code</b></span>'
+        + '<input class="drawer-input" id="connect-pair-code" type="text" spellcheck="false" autocomplete="off" placeholder="8-character code">'
+        + '</label>'
+        + '<div class="setting-actions">'
+        + '<button class="btn primary" id="connect-hub-btn" type="button">Connect</button>'
         + '</div></section>';
 }
 
@@ -733,7 +804,7 @@ function renderDrawer() {
     openSettingSections = new Set(Array.from(body.querySelectorAll('.dr-details[open] summary span'))
         .map((el) => el.textContent || ''));
     if (publishingFocusPending || publishReturn) openSettingSections.add('Publishing');
-    body.innerHTML = renderSources() + renderLibraryHealth(catalog) + renderWork() + renderSharedHome() + renderSettingsSections() + renderStorage() + renderRemote() + renderPrefs() + renderSettingsSaveBar();
+    body.innerHTML = renderSources() + renderLibraryHealth(catalog) + renderWork() + renderSharedHome() + renderDevices() + renderConnectServer() + renderSettingsSections() + renderStorage() + renderRemote() + renderPrefs() + renderSettingsSaveBar();
     updateDrawerContext();
     bindDrawerActions();
     if (publishingFocusPending && body.querySelector('.dr-details[data-settings-section="Publishing"]')) {
@@ -743,7 +814,7 @@ function renderDrawer() {
 }
 
 async function refreshDrawer() {
-    const [nextCatalog, ai, cache, people, captions, metadata, remote, settingsData] = await Promise.all([
+    const [nextCatalog, ai, cache, people, captions, metadata, remote, settingsData, pair, devices] = await Promise.all([
         getCatalog().catch(() => null),
         getAiStatus().catch(() => null),
         getCacheStatus().catch(() => null),
@@ -752,6 +823,8 @@ async function refreshDrawer() {
         getMetadataStatus().catch(() => null),
         getRemoteAccess().catch(() => null),
         getSettings().catch(() => null),
+        getPairStatus().catch(() => null),
+        listDevices().catch(() => null),
         refreshLibraryHealth(),
     ]);
     if (settingsData) applySettingsData(settingsData, { preserveDirtyExcept: new Set() });
@@ -762,6 +835,8 @@ async function refreshDrawer() {
     captionStatus = captions || captionStatus;
     metadataStatus = metadata || metadataStatus || (settingsData && settingsData.metadata_status);
     remoteAccess = remote || remoteAccess;
+    pairStatus = pair || pairStatus;
+    devicesPayload = devices || devicesPayload;
     renderActivity();
     if (!drawerEditing()) renderDrawer();
 }
@@ -1024,6 +1099,56 @@ function bindDrawerActions() {
         },
     });
     bindSettingInputs(body);
+    body.querySelector('#link-device-btn')?.addEventListener('click', (event) => withBusyAction('link-device', event.currentTarget, async () => {
+        const result = await createDeviceLink();
+        if (result && result.code) {
+            linkSession = result;
+            renderDrawer();
+            showToast('Pairing code ready');
+        } else {
+            showToast('Couldn’t create a pairing code');
+        }
+    }));
+    for (const btn of body.querySelectorAll('[data-revoke-device]')) {
+        btn.addEventListener('click', () => withBusyAction(`revoke-${btn.dataset.revokeDevice}`, btn, async () => {
+            const result = await revokeDevice(Number(btn.dataset.revokeDevice));
+            if (result && result.ok) {
+                devicesPayload = await listDevices().catch(() => devicesPayload);
+                renderDrawer();
+                showToast('Device revoked');
+            } else {
+                showToast('Couldn’t revoke device');
+            }
+        }));
+    }
+    body.querySelector('#discover-hubs-btn')?.addEventListener('click', (event) => withBusyAction('discover-hubs', event.currentTarget, async () => {
+        discoverPayload = await discoverHubs().catch(() => null);
+        renderDrawer();
+        const count = (discoverPayload && discoverPayload.hubs && discoverPayload.hubs.length) || 0;
+        showToast(count ? `Found ${count} hub${count === 1 ? '' : 's'}` : 'No hubs found');
+    }));
+    for (const btn of body.querySelectorAll('[data-hub-url]')) {
+        btn.addEventListener('click', () => {
+            const input = document.getElementById('connect-hub-url');
+            if (input) input.value = btn.dataset.hubUrl || '';
+        });
+    }
+    body.querySelector('#connect-hub-btn')?.addEventListener('click', (event) => withBusyAction('connect-hub', event.currentTarget, async () => {
+        const hubUrl = document.getElementById('connect-hub-url')?.value?.trim() || '';
+        const code = document.getElementById('connect-pair-code')?.value?.trim() || '';
+        if (!hubUrl || !code) {
+            showToast('Enter a hub URL and pair code');
+            return;
+        }
+        const result = await connectToHub({ hubUrl, code });
+        if (result && result.ok) {
+            pairStatus = await getPairStatus().catch(() => pairStatus);
+            renderDrawer();
+            showToast('Connected to hub');
+        } else {
+            showToast((result && (result.error || result.detail)) || 'Couldn’t connect');
+        }
+    }));
     body.querySelector('#drawer-cache-defaults')?.addEventListener('click', applyCacheDefaults);
     body.querySelector('#drawer-save-settings')?.addEventListener('click', (event) => withBusyAction('settings-save', event.currentTarget, saveDrawerSettings));
     body.querySelector('#drawer-reset-settings')?.addEventListener('click', (event) => withBusyAction('settings-reset', event.currentTarget, resetDrawerSettings));
