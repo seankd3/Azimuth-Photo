@@ -541,6 +541,17 @@ function renderConnectServer() {
         + '</div></section>';
 }
 
+function renderRemote() {
+    const url = (remoteAccess && remoteAccess.tailscale && remoteAccess.tailscale.url)
+        || (remoteAccess && remoteAccess.current_url)
+        || '';
+    return '<section class="dr-sec"><h3>Remote access</h3>'
+        + '<div class="remote-row">'
+        + `<span class="remote-url" title="${esc(url)}">${esc(url || 'Unavailable')}</span>`
+        + `<button class="mini-btn" id="copy-remote" ${url ? '' : 'aria-disabled="true" disabled'}>Copy</button>`
+        + '</div></section>';
+}
+
 function renderSharedHome() {
     return '<section class="dr-sec"><h3>Sharing</h3>'
         + '<div class="drawer-action-row">'
