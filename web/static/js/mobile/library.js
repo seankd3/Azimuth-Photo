@@ -185,7 +185,7 @@ function render() {
     if (canInstall()) {
         html += '<div class="ms-sec" style="padding-left:0;padding-right:0">'
             + `<button class="m-lib-row ml-install" id="ml-install"><span class="g">${icon('download')}</span>`
-            + '<span class="body">Install photoArchive<span class="sub">Add it to your home screen as an app</span></span></button></div>';
+            + '<span class="body">Install Azimuth Photo<span class="sub">Add it to your home screen as an app</span></span></button></div>';
     }
 
     html += '<div class="ms-sec" style="padding-left:0;padding-right:0"><h3>Quick access</h3>'

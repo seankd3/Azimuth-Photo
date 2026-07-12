@@ -1,8 +1,8 @@
-# photoArchive
+# Azimuth Photo
 
 **Your own photo cloud — with Lightroom Classic instincts.**
 
-photoArchive is a self-hosted library for serious photo archives — and it is **fast**. Where Lightroom chugs, photoArchive flies: browse terabytes of photos at lightning speed from your own computer, NAS, or server. Cull, rank, search, and share tens of thousands of images without uploading a single byte to anyone else's cloud.
+Azimuth Photo is a self-hosted library for serious photo archives — and it is **fast**. Where Lightroom chugs, Azimuth Photo flies: browse terabytes of photos at lightning speed from your own computer, NAS, or server. Cull, rank, search, and share tens of thousands of images without uploading a single byte to anyone else's cloud.
 
 It runs on your own hardware. Your originals stay under your control: scanning,
 AI, sharing, and publishing use catalog data and generated derivatives; the one
@@ -22,7 +22,7 @@ Point it at terabytes on a sleepy USB drive and it still feels instant — the a
 
 ## Why it exists
 
-Google Photos is effortless but owns your library. Lightroom Classic is powerful but heavy, subscription-bound, and was never built to be your archive's home. photoArchive takes the best instincts of both:
+Google Photos is effortless but owns your library. Lightroom Classic is powerful but heavy, subscription-bound, and was never built to be your archive's home. Azimuth Photo takes the best instincts of both:
 
 - **From Google Photos** — instant timeline, semantic search ("sunset over water"), face grouping, an installable phone app, shareable links.
 - **From Lightroom Classic** — a real folder tree, pick/reject culling, stacks, a keyboard-first loupe, filters that compose, and density you can feel.
@@ -112,7 +112,7 @@ Open `http://localhost:8000`, add a source folder in the system drawer, and let 
 
 ---
 
-*photoArchive is developed against the author's own 47,000-photo working archive — every screenshot above is that real library running on a single machine with an RTX 2060 Super. Your photos are your own; the app ships empty and hungry.*
+*Azimuth Photo is developed against the author's own 47,000-photo working archive — every screenshot above is that real library running on a single machine with an RTX 2060 Super. Your photos are your own; the app ships empty and hungry.*
 
 ## Where everything lives
 
