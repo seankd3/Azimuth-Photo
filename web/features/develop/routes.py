@@ -176,13 +176,35 @@ def _json_settings(raw: str | None) -> dict[str, Any]:
     return result if isinstance(result, dict) else {}
 
 
-def _pipeline_metadata(meta: dict[str, Any] | None) -> dict[str, Any] | None:
+def _profiled_meta(meta: dict[str, Any] | None, source_path: str | None) -> dict[str, Any]:
+    """Resolve Adobe styling at request time without changing the base cache."""
+    result = dict(meta or {})
+    if result.get("base_kind") == "display":
+        return result
+    from features.develop import adobe_profiles, dng_pipeline
+
+    profile = adobe_profiles.resolve_adobe_profile(
+        source_path or result.get("source_path"),
+        result.get("camera_model") or result.get("UniqueCameraModel") or "",
+    )
+    if profile is None:
+        return result
+    profile = dng_pipeline.normalize_adobe_profile(profile)
+    profile["tone_curve_lut"] = dng_pipeline.tone_curve_lut(profile.get("tone_curve")).tolist()
+    result["adobe_profile"] = profile
+    result["adobe_profile_name"] = profile.get("profile_name") or "Adobe Standard"
+    return result
+
+
+def _pipeline_metadata(meta: dict[str, Any] | None, source_path: str | None = None) -> dict[str, Any] | None:
     """Carry source-kind semantics alongside RAW color metadata to exports."""
     if not isinstance(meta, dict):
         return None
-    color = dict(meta.get("color") or {})
-    if meta.get("base_kind"):
-        color["base_kind"] = meta["base_kind"]
+    profiled = _profiled_meta(meta, source_path)
+    color = dict(profiled.get("color") or {})
+    for key in ("base_kind", "source_path", "camera_model", "adobe_profile", "adobe_profile_name"):
+        if profiled.get(key) is not None:
+            color[key] = profiled[key]
     return color or None
 
 
@@ -566,7 +588,7 @@ async def api_develop_proof_tile(
             edge=edge,
             asshot_temperature=asshot.get("temperature") if isinstance(asshot, dict) else None,
             asshot_tint=asshot.get("tint") if isinstance(asshot, dict) else None,
-            color_profile=_pipeline_metadata(cached_meta),
+            color_profile=_pipeline_metadata(cached_meta, image["filepath"]),
         )
     except (RenderError, ValueError) as exc:
         return JSONResponse({"error": str(exc)}, status_code=422)
@@ -609,6 +631,7 @@ async def api_get_develop(image_id: int):
         _paths, meta = await _ensure_base(image_id, image)
     except rawproc.RawDecodeError as exc:
         return JSONResponse({"error": str(exc)}, status_code=422)
+    meta = _profiled_meta(meta, image["filepath"])
     row = await _load_settings(image_id)
     return {
         "settings": _json_settings(row["settings"]) if row else {},
@@ -805,7 +828,7 @@ async def api_export_develop(image_id: int, body: DevelopExportBody):
             image_id=image_id,
             asshot_temperature=asshot.get("temperature") if isinstance(asshot, dict) else None,
             asshot_tint=asshot.get("tint") if isinstance(asshot, dict) else None,
-            color_profile=_pipeline_metadata(cached_meta),
+            color_profile=_pipeline_metadata(cached_meta, image["filepath"]),
         )
     except (rawproc.RawDecodeError, RenderError, ValueError) as exc:
         return JSONResponse({"error": str(exc)}, status_code=422)
@@ -892,7 +915,7 @@ async def _run_batch_export(body: DevelopBatchExportBody) -> None:
                 image_id=image_id,
                 asshot_temperature=asshot.get("temperature") if isinstance(asshot, dict) else None,
                 asshot_tint=asshot.get("tint") if isinstance(asshot, dict) else None,
-                color_profile=_pipeline_metadata(cached_meta),
+                color_profile=_pipeline_metadata(cached_meta, image["filepath"]),
             )
             filename = _download_name_for(
                 output_path,
