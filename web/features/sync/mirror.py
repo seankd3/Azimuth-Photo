@@ -117,6 +117,17 @@ class MirrorPuller:
                 await self._apply_row(conn, source_id, row, available_columns)
                 applied += 1
             await self._set_state(conn, "cursor", str(new_cursor))
+            if applied:
+                # The library service short-circuits on these denormalized
+                # counts; a mirror that fills rows without them looks empty.
+                await conn.execute(
+                    "UPDATE catalog_sources SET "
+                    "image_count=(SELECT COUNT(*) FROM images WHERE source_id=catalog_sources.id), "
+                    "active_image_count=(SELECT COUNT(*) FROM images WHERE source_id=catalog_sources.id "
+                    "AND status IN ('kept','maybe') AND missing_at IS NULL) "
+                    "WHERE id = ?",
+                    (source_id,),
+                )
             await conn.commit()
         finally:
             await connection.close_async(conn, db_path=self.db_path)
