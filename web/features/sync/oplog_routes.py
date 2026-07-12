@@ -5,13 +5,13 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
-from features.sync import oplog
+from features.sync import device_auth, oplog
 
 
-router = APIRouter(tags=["sync"])
+router = APIRouter(tags=["sync"], dependencies=[Depends(device_auth.enforce_device_token)])
 _db_path: Callable[[], str] | None = None
 
 
@@ -40,6 +40,7 @@ class OplogPushRequest(BaseModel):
 def configure(*, db_path: Callable[[], str]) -> None:
     global _db_path
     _db_path = db_path
+    device_auth.configure(db_path=db_path)
 
 
 def _configured_db_path() -> str:

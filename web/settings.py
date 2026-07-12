@@ -75,11 +75,13 @@ DEFAULT_SETTINGS = {
     "sync_bandwidth_mbps": 0,
     "sync_thumb_budget_gb": 8,
     "hub_url": "",
-    "hub_device_token": "",
+    "device_token": "",
+    "paired_hub_id": "",
+    "require_device_token": False,
     "setup_completed": False,
 }
 
-PRIVATE_SETTING_KEYS = {"share_cookie_secret", "hub_device_token"}
+PRIVATE_SETTING_KEYS = {"share_cookie_secret", "device_token"}
 
 EMBED_MODEL_PRESETS = {
     "qwen3-vl-embedding-8b": {
@@ -525,7 +527,12 @@ def normalize_settings(raw: dict | None) -> dict:
     )
     normalized["share_cookie_secret"] = str(raw.get("share_cookie_secret") or "").strip()
     normalized["hub_url"] = str(raw.get("hub_url") or "").strip().rstrip("/")
-    normalized["hub_device_token"] = str(raw.get("hub_device_token") or "").strip()
+    normalized["device_token"] = str(raw.get("device_token") or "").strip()
+    normalized["paired_hub_id"] = str(raw.get("paired_hub_id") or "").strip()
+    normalized["require_device_token"] = _normalize_bool(
+        raw.get("require_device_token", normalized["require_device_token"]),
+        DEFAULT_SETTINGS["require_device_token"],
+    )
     normalized["setup_completed"] = _normalize_bool(
         raw.get("setup_completed", normalized["setup_completed"]), False
     )

@@ -28,6 +28,7 @@ RequestFn = Callable[..., Awaitable[tuple[int, dict, bytes]]]
 async def _urllib_request(method: str, url: str, *, body: bytes | None = None, headers: dict | None = None) -> tuple[int, dict, bytes]:
     def request() -> tuple[int, dict, bytes]:
         request_headers = dict(headers or {})
+        request_headers.update(satellite.device_auth_headers())
         req = urllib.request.Request(url, data=body, headers=request_headers, method=method)
         try:
             with urllib.request.urlopen(req, timeout=30) as response:
