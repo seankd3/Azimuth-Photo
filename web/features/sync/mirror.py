@@ -73,6 +73,7 @@ class MirrorPuller:
         self._status: dict[str, Any] = {
             "cursor": 0,
             "rows_applied": 0,
+            "skipped_unhashed": 0,
             "last_refresh_at": None,
             "last_error": "",
         }
@@ -95,6 +96,7 @@ class MirrorPuller:
             raise RuntimeError("hub returned an invalid catalog export") from error
 
         applied = 0
+        skipped_unhashed = 0
         new_cursor = cursor
         conn = await connection.open_async(self.db_path)
         try:
@@ -107,7 +109,10 @@ class MirrorPuller:
                 if "cursor" in row and len(row) == 1:
                     new_cursor = max(new_cursor, int(row["cursor"] or 0))
                     continue
-                if not row.get("content_hash") or row.get("hub_image_id") is None:
+                if row.get("hub_image_id") is None:
+                    continue
+                if not row.get("content_hash"):
+                    skipped_unhashed += 1
                     continue
                 await self._apply_row(conn, source_id, row, available_columns)
                 applied += 1
@@ -116,7 +121,13 @@ class MirrorPuller:
         finally:
             await connection.close_async(conn, db_path=self.db_path)
 
-        self._status.update(cursor=new_cursor, rows_applied=applied, last_refresh_at=time.time(), last_error="")
+        self._status.update(
+            cursor=new_cursor,
+            rows_applied=applied,
+            skipped_unhashed=skipped_unhashed,
+            last_refresh_at=time.time(),
+            last_error="",
+        )
         return self.status()
 
     async def _state_int(self, key: str) -> int:

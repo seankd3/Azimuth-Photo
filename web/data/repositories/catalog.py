@@ -7,6 +7,7 @@ import time as _time
 from date_inference import infer_image_date
 from data import connection
 from data.repositories.common import chunked as _chunked
+from core.path_groups import safe_commonpath
 
 
 CATALOG_CACHE_TTL_SECONDS = 10.0
@@ -784,6 +785,6 @@ async def get_scan_folder(db_path: str):
         if not rows:
             return None
         dirs = [os.path.dirname(row["filepath"]) for row in rows]
-        return os.path.commonpath(dirs)
+        return safe_commonpath(dirs) or dirs[0]
     finally:
         await connection.close_async(conn, db_path=db_path)

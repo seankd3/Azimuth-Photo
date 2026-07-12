@@ -30,14 +30,20 @@ from PIL import Image
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 
+from core.runtime_paths import resolve_runtime_paths
+
 from . import ops_constants as C, rawproc
 from .film import load_stock
 from .pipeline import apply_pipeline, gaussian_blur, luma
 from .transform import apply_transform
 
 
-EXPORT_DIRECTORY = Path("/mnt/expansion/PhotoArchiveCache/develop/exports")
-LIBRARY_EXPORT_DIRECTORY = Path("/mnt/expansion/PhotoArchiveCache/develop/library-exports")
+def _resolved_export_dirs() -> tuple[Path, Path]:
+    paths = resolve_runtime_paths()
+    return Path(paths.temporary_export_dir), Path(paths.library_export_dir)
+
+
+EXPORT_DIRECTORY, LIBRARY_EXPORT_DIRECTORY = _resolved_export_dirs()
 LIBRARY_SOURCE_NAME = "Develop Exports"
 # A native RAW render has a substantial working set; serialize exports rather
 # than allowing two 45 MP pipelines to contend for memory.
