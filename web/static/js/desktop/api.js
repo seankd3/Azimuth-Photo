@@ -243,6 +243,10 @@ export async function getRemoteAccess() {
     return fetchJson('/api/remote-access', { defaultValue: null });
 }
 
+export async function applyRemoteAccessServe() {
+    return postJson('/api/remote-access/serve');
+}
+
 export async function listCollections() {
     return fetchJson('/api/user-collections', { defaultValue: null });
 }

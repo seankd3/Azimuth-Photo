@@ -1,43 +1,15 @@
-import json
+"""Remote access API — Tailscale probe + guided Serve apply (hub mode)."""
+
+from __future__ import annotations
+
 import os
-import subprocess
 
 from fastapi import APIRouter, Request
 
+from features.access import tailscale as ts
+
 
 router = APIRouter()
-
-
-def _tailscale_status() -> dict:
-    try:
-        ip_proc = subprocess.run(
-            ["tailscale", "ip", "-4"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=2,
-            check=False,
-        )
-        status_proc = subprocess.run(
-            ["tailscale", "status", "--json"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=2,
-            check=False,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return {"available": False, "error": "Tailscale is unavailable"}
-
-    ip = ip_proc.stdout.strip().splitlines()[0] if ip_proc.returncode == 0 and ip_proc.stdout.strip() else ""
-    dns_name = ""
-    if status_proc.returncode == 0 and status_proc.stdout.strip():
-        try:
-            data = json.loads(status_proc.stdout)
-            dns_name = ((data.get("Self") or {}).get("DNSName") or "").rstrip(".")
-        except json.JSONDecodeError:
-            dns_name = ""
-    return {"available": bool(ip or dns_name), "ip": ip, "dns_name": dns_name}
 
 
 def _server_port(request: Request) -> int:
@@ -47,30 +19,70 @@ def _server_port(request: Request) -> int:
         return int(request.url.port or 8000)
 
 
-def _https_serve_url(dns_name: str) -> str:
-    """HTTPS origin for PWA/SW via Tailscale Serve (see docs/FIELD_HTTPS.md).
+def _local_serve_target(request: Request) -> str:
+    """Local origin Tailscale Serve should proxy to (loopback + app port)."""
+    port = _server_port(request)
+    return f"http://127.0.0.1:{port}"
 
-    PHOTOARCHIVE_HTTPS_PORT defaults to 8443 (tailnet-only serve). Set to 443
-    or empty to omit the port. Never points at the public Funnel on :443.
-    """
-    name = (dns_name or "").strip().rstrip(".")
-    if not name:
-        return ""
-    raw = os.getenv("PHOTOARCHIVE_HTTPS_PORT", "8443").strip()
-    if raw in ("", "443"):
-        return f"https://{name}"
-    return f"https://{name}:{raw}"
+
+def _enrich_urls(probe: dict, request: Request) -> dict:
+    port = _server_port(request)
+    host = probe.get("dns_name") or probe.get("ip") or ""
+    http_url = f"http://{host}:{port}" if host else ""
+    https = probe.get("https_url") or ""
+    if not https and probe.get("dns_name"):
+        https = ts.https_url_for(str(probe.get("dns_name") or ""))
+    return {
+        **probe,
+        "url": http_url or probe.get("url") or "",
+        "https_url": https,
+        "serve_command": ts.serve_command(local_target=_local_serve_target(request)),
+    }
 
 
 @router.get("/api/remote-access")
 async def api_remote_access(request: Request):
-    tailscale = _tailscale_status()
-    port = _server_port(request)
-    host = tailscale.get("dns_name") or tailscale.get("ip") or ""
-    url = f"http://{host}:{port}" if host else ""
-    https_url = _https_serve_url(str(tailscale.get("dns_name") or ""))
+    hub_mode = ts.is_hub_mode()
+    probe = _enrich_urls(ts.probe(), request) if hub_mode else {
+        "state": "absent",
+        "available": False,
+        "ip": "",
+        "dns_name": "",
+        "install_url": ts.INSTALL_URL,
+        "up_command": ts.UP_COMMAND,
+        "serve_command": ts.serve_command(local_target=_local_serve_target(request)),
+        "https_url": "",
+        "url": "",
+        "dry_run": ts.dry_run_enabled(),
+        "error": "Remote access is available in hub mode only",
+    }
     return {
         "access_mode": os.getenv("PHOTOARCHIVE_ACCESS", "local"),
         "current_url": str(request.base_url).rstrip("/"),
-        "tailscale": {**tailscale, "url": url, "https_url": https_url},
+        "hub_mode": hub_mode,
+        "mode": "hub" if hub_mode else (
+            "satellite" if os.environ.get("PHOTOARCHIVE_HUB_URL", "").strip() else "standalone"
+        ),
+        "tailscale": probe,
     }
+
+
+@router.post("/api/remote-access/serve")
+async def api_remote_access_serve(request: Request):
+    """Apply ``tailscale serve`` from FIELD_HTTPS.md — user-click only."""
+    if not ts.is_hub_mode():
+        return {
+            "ok": False,
+            "dry_run": ts.dry_run_enabled(),
+            "command": ts.serve_command(local_target=_local_serve_target(request)),
+            "https_url": "",
+            "error": "Remote access Serve apply is hub mode only",
+            "hub_mode": False,
+        }
+    result = ts.apply_serve(local_target=_local_serve_target(request))
+    if result.get("tailscale"):
+        result["tailscale"] = _enrich_urls(result["tailscale"], request)
+        if result.get("https_url"):
+            result["tailscale"]["https_url"] = result["https_url"]
+    result["hub_mode"] = True
+    return result
