@@ -28,6 +28,19 @@ async function json(url, options) {
     return response.json();
 }
 
+function mirrorTooltip(status) {
+    const mirror = status.mirror || {};
+    const skipped = Number(mirror.skipped_unhashed) || 0;
+    const applied = Number(mirror.rows_applied) || 0;
+    if (skipped > 0) {
+        return `${skipped} hub photo${skipped === 1 ? '' : 's'} skipped — missing content hash (mirror looks empty until hub finishes hashing)`;
+    }
+    if (applied > 0) {
+        return `Mirror applied ${applied} photo${applied === 1 ? '' : 's'}`;
+    }
+    return 'Satellite sync';
+}
+
 function render(status) {
     const depth = Number(status.queue_depth) || 0;
     const libraryTotal = Number(status.prefetch?.library_total) || 0;
@@ -36,12 +49,15 @@ function render(status) {
     const action = status.paused ? 'Resume' : 'Pause';
     const count = `${depth} photo${depth === 1 ? '' : 's'}`;
     const errors = (status.recent_errors || []).slice(0, 3);
-    root.innerHTML = `<button class="sync-chip-button" type="button" aria-expanded="false" aria-haspopup="dialog">
+    const skipped = Number(status.mirror?.skipped_unhashed) || 0;
+    const tooltip = escapeHtml(mirrorTooltip(status));
+    root.innerHTML = `<button class="sync-chip-button" type="button" title="${tooltip}" aria-expanded="false" aria-haspopup="dialog">
         <span class="sync-chip-arrow" aria-hidden="true">↑</span><span>${count}</span><span class="sync-chip-sep">·</span><span>${formatBytes(status.bytes_remaining)} left</span>
     </button><div class="sync-chip-popover" hidden role="dialog" aria-label="Satellite sync">
         <div class="sync-chip-popover-title">Satellite sync <span>${status.paused ? 'Paused' : formatRate(status.throughput_bps)}</span></div>
         <div class="sync-chip-current">${status.current_file ? `Uploading ${status.current_file}` : depth ? 'Waiting to upload' : 'Everything is synced'}</div>
         <div class="sync-chip-current">Library: ${libraryTotal} photos · thumbs ${thumbPercent}%</div>
+        ${skipped ? `<div class="sync-chip-current">Mirror skipped ${skipped} unhashed hub photo${skipped === 1 ? '' : 's'}</div>` : ''}
         ${errors.length ? `<div class="sync-chip-errors">${errors.map((error) => `<div>${escapeHtml(error)}</div>`).join('')}</div>` : ''}
         <div class="sync-chip-actions"><button type="button" data-sync-action="now">Sync now</button><button type="button" data-sync-action="toggle">${action}</button></div>
     </div>`;

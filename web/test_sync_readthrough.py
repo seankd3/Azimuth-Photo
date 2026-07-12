@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import gzip
+import asyncio
 import io
 import json
 import os
@@ -18,6 +19,8 @@ from unittest import mock
 import numpy as np
 
 from features.sync import readthrough
+from features.media import routes as media_routes
+import thumbnails
 import field_sync
 
 
@@ -126,6 +129,29 @@ class ReadthroughTests(unittest.TestCase):
                 readthrough.fetch_base_cache_for_image(1, _Paths(Path(self.tempdir.name) / "cache"), db_path=self.db_path, source_path="/offline/raw.dng")
         finally:
             readthrough._request = original
+
+    def test_sm_thumbnail_uses_the_media_readthrough_and_caches_locally(self):
+        calls = []
+
+        async def request(method, url, *, body=None, headers=None):
+            calls.append((method, url, body, headers))
+            return 200, {"content-type": "image/jpeg"}, b"remote-sm-thumb"
+
+        with mock.patch.object(media_routes, "_urllib_request", request), mock.patch.object(
+            thumbnails, "_write_thumbnail_to_disk"
+        ) as write_disk, mock.patch.object(thumbnails, "_memory_put") as memory_put:
+            response = asyncio.run(
+                media_routes._remote_media_response(
+                    {"id": 41, "hub_image_id": 9},
+                    "sm",
+                )
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.body, b"remote-sm-thumb")
+        self.assertEqual(calls[0][0:2], ("GET", f"{os.environ['PHOTOARCHIVE_HUB_URL']}/api/thumb/sm/9"))
+        write_disk.assert_called_once()
+        memory_put.assert_called_once()
 
     def test_cli_delegates_one_pass_to_the_satellite_worker(self):
         output = io.StringIO()

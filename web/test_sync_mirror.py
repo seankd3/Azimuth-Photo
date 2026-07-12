@@ -121,3 +121,42 @@ class MirrorAcceptanceTests(BackendTestCase):
         self.assertEqual(await prefetch.fetch_single("md", int(remote_image)), b"remote-md-2")
         second = await mirror.refresh()
         self.assertEqual(second["rows_applied"], 0)
+
+    async def test_mirror_reports_skipped_unhashed_rows(self):
+        self.rows = [
+            {
+                "hub_image_id": 1,
+                "content_hash": "a" * 32,
+                "filename": "hashed.jpg",
+                "filepath": "/hub/hashed.jpg",
+                "file_ext": ".jpg",
+                "status": "kept",
+            },
+            {
+                "hub_image_id": 2,
+                "content_hash": "",
+                "filename": "missing-hash.jpg",
+                "filepath": "/hub/missing-hash.jpg",
+                "file_ext": ".jpg",
+                "status": "kept",
+            },
+            {
+                "hub_image_id": 3,
+                "content_hash": None,
+                "filename": "null-hash.jpg",
+                "filepath": "/hub/null-hash.jpg",
+                "file_ext": ".jpg",
+                "status": "kept",
+            },
+        ]
+        mirror = MirrorPuller(db_path=db.DB_PATH, hub="http://hub", request=self._request)
+        result = await mirror.refresh()
+        self.assertEqual(result["rows_applied"], 1)
+        self.assertEqual(result["skipped_unhashed"], 2)
+        self.assertEqual(mirror.status()["skipped_unhashed"], 2)
+        conn = await db.get_db()
+        try:
+            count = await (await conn.execute("SELECT COUNT(*) AS c FROM images")).fetchone()
+            self.assertEqual(int(count["c"]), 1)
+        finally:
+            await conn.close()

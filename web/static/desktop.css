@@ -551,6 +551,8 @@ html[data-badges-index="0"] .cell .c-idx { display: none; }
 #map-popover button { display: grid; grid-template-columns: 36px minmax(0, 1fr); align-items: center; gap: var(--s2); padding: 5px; border-radius: var(--r-ctl); text-align: left; color: var(--text-2); }
 #map-popover button:hover { background: var(--card); color: var(--text); }
 #map-popover img { width: 36px; height: 30px; object-fit: cover; border-radius: 3px; }
+.map-thumb-neutral { width: 36px; height: 30px; display: grid; place-items: center; border-radius: 3px; background: var(--card); color: var(--text-3); }
+.map-thumb-neutral .icon { width: 14px; height: 14px; }
 #map-popover span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 
 /* suggested collections reviewer */

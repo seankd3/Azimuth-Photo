@@ -67,7 +67,7 @@ export function cellHtml(img, index) {
         ? `<button class="c-stack ${versionStack ? 'version-stack' : ''}" data-stack-id="${stackId}" data-tip="${stackTip}" aria-label="Expand ${versionStack ? 'version' : 'stack'} with ${stackCount} photos" aria-expanded="false" tabindex="-1">${icon('layers')}<span>${stackLabel}</span></button>`
         : '';
     const selected = selection.has(Number(img.id));
-    return `<figure class="cell ${selected ? 'sel' : ''}" data-id="${img.id}" data-idx="${index}" draggable="true" tabindex="-1" aria-selected="${selected ? 'true' : 'false'}" style="--ar:${aspect(img)}">`
+    return `<figure class="cell ${img.thumb_url ? '' : 'skel'} ${selected ? 'sel' : ''}" data-id="${img.id}" data-idx="${index}" draggable="true" tabindex="-1" aria-selected="${selected ? 'true' : 'false'}" style="--ar:${aspect(img)}">`
         + `<img data-src="${esc(img.thumb_url || thumbUrl('sm', img.id))}" loading="lazy" decoding="async" alt="${esc(img.filename || '')}">`
         + stackBadge
         + `<button class="c-check" aria-label="Select photo" tabindex="-1">${icon('check')}</button>`
@@ -138,7 +138,10 @@ function ensureImageObserver() {
 function observeImages(rootEl) {
     const observer = ensureImageObserver();
     for (const img of (rootEl || document).querySelectorAll('img[data-src]')) {
-        img.addEventListener('load', () => img.classList.add('ld'), { once: true });
+        img.addEventListener('load', () => {
+            img.classList.add('ld');
+            img.closest('.cell')?.classList.remove('skel');
+        }, { once: true });
         observer.observe(img);
     }
 }
