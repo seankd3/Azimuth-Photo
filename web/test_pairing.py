@@ -90,7 +90,9 @@ class PairingTests(unittest.TestCase):
         expired = self.client.post("/api/pair", json={"code": code, "device_name": "Late"})
         self.assertEqual(expired.status_code, 400, expired.text)
 
-    def test_sync_requires_live_device_token_by_default(self):
+    def test_sync_requires_live_device_token_when_enabled(self):
+        import settings
+        settings.save_settings({**settings.get_settings(), "require_device_token": True})
         code = self.client.post("/api/devices/link").json()["code"]
         paired = self.client.post(
             "/api/pair",
