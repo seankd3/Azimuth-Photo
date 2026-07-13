@@ -187,6 +187,14 @@ async def run_startup(
     if smoke_mode_enabled():
         await asyncio.to_thread(warm_templates)
         return
+    from features.system import backups
+    import db
+
+    catalog = await asyncio.to_thread(backups.catalog_quick_check, db.DB_PATH)
+    if not catalog["ok"]:
+        log.error("catalog startup blocked state=%s error=%s", catalog["state"], catalog.get("error"))
+        await asyncio.to_thread(warm_templates)
+        return
     await init_db()
     thumbnails.configure(settings.load_settings())
 

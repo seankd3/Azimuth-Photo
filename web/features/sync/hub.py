@@ -13,6 +13,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
+from core import runtime_paths
 from data import connection
 from data.repositories import catalog as catalog_repository
 from features.develop import rawproc
@@ -51,7 +52,11 @@ def default_intake_root() -> Path:
         return Path(configured).expanduser()
     if os.environ.get("PHOTOARCHIVE_SMOKE_MODE") == "1":
         return Path(tempfile.gettempdir()) / "photoarchive-sync-intake"
-    return Path("/mnt/expansion/Photos/_intake")
+    resolved = runtime_paths.resolve_runtime_paths()
+    if resolved.layout == "legacy":
+        # Historic omarchy deployment keeps originals on the expansion drive.
+        return Path("/mnt/expansion/Photos/_intake")
+    return Path(resolved.data_dir) / "photos" / "_intake"
 
 
 def default_raws_root(intake_root: Path | None = None) -> Path:
