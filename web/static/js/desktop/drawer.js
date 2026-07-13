@@ -1,7 +1,7 @@
 import {
     addCatalogSource, applyRemoteAccessServe, clearCache, connectToHub, createDeviceLink, discoverHubs,
     getAiStatus, getCacheStatus, getCaptionStatus, getCatalog, getMetadataStatus, getPairStatus,
-    getPeopleStatus, getRemoteAccess, getScanStatus, getSettings, installAiModel, listDevices,
+    getPeopleStatus, getRemoteAccess, getScanStatus, getSettings, getSyncStatus, installAiModel, listDevices,
     pauseAiEmbeddings,
     pauseCaptionScan, pausePeopleScan, removeCatalogSource, rescanCatalogSource, resetSettings, resumeAiEmbeddings,
     resumeCaptionScan, resumePeopleScan, revokeDevice, saveSettings, startCachePregen, startMetadataScan, stopCachePregen,
@@ -35,6 +35,7 @@ let captionStatus = null;
 let metadataStatus = null;
 let remoteAccess = null;
 let pairStatus = null;
+let syncStatus = null;
 let devicesPayload = null;
 let linkSession = null;
 let discoverPayload = null;
@@ -525,8 +526,12 @@ function renderConnectServer() {
     const connected = pairStatus && pairStatus.has_hub
         ? `<div class="setting-status">Connected to <code>${esc(pairStatus.hub_url)}</code></div>`
         : '';
+    const updateBanner = syncStatus && syncStatus.server_update_available && !sessionStorage.getItem('azimuth-server-update-dismissed')
+        ? '<div class="setting-status warn server-update-banner" role="status"><span>Your Azimuth Photo server needs an update</span><button class="mini-btn" id="dismiss-server-update" type="button">Dismiss</button></div>'
+        : '';
     return '<section class="dr-sec" id="connect-server-panel"><h3>Connect to server</h3>'
         + connected
+        + updateBanner
         + '<div class="drawer-action-row">'
         + '<span>Find a hub on your network, or enter its address.</span>'
         + '<button class="mini-btn" id="discover-hubs-btn" type="button">Scan network</button>'
@@ -879,7 +884,7 @@ function renderDrawer() {
 }
 
 async function refreshDrawer() {
-    const [nextCatalog, ai, cache, people, captions, metadata, remote, settingsData, pair, devices] = await Promise.all([
+    const [nextCatalog, ai, cache, people, captions, metadata, remote, settingsData, pair, sync, devices] = await Promise.all([
         getCatalog().catch(() => null),
         getAiStatus().catch(() => null),
         getCacheStatus().catch(() => null),
@@ -889,6 +894,7 @@ async function refreshDrawer() {
         getRemoteAccess().catch(() => null),
         getSettings().catch(() => null),
         getPairStatus().catch(() => null),
+        getSyncStatus().catch(() => null),
         listDevices().catch(() => null),
         refreshLibraryHealth(),
     ]);
@@ -901,6 +907,7 @@ async function refreshDrawer() {
     metadataStatus = metadata || metadataStatus || (settingsData && settingsData.metadata_status);
     remoteAccess = remote || remoteAccess;
     pairStatus = pair || pairStatus;
+    syncStatus = sync || syncStatus;
     devicesPayload = devices || devicesPayload;
     renderActivity();
     if (!drawerEditing()) renderDrawer();
@@ -1164,6 +1171,10 @@ function bindDrawerActions() {
         },
     });
     bindSettingInputs(body);
+    body.querySelector('#dismiss-server-update')?.addEventListener('click', () => {
+        sessionStorage.setItem('azimuth-server-update-dismissed', '1');
+        renderDrawer();
+    });
     body.querySelector('#link-device-btn')?.addEventListener('click', (event) => withBusyAction('link-device', event.currentTarget, async () => {
         const result = await createDeviceLink();
         if (result && result.code) {

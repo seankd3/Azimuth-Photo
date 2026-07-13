@@ -18,6 +18,7 @@ from data import connection
 from features.sync.mirror import MirrorPuller
 from features.sync.prefetch import ThumbPrefetcher
 from features.sync import oplog, satellite
+from features.sync.versioning import hub_compatibility
 
 
 log = logging.getLogger(__name__)
@@ -58,6 +59,7 @@ class SyncWorker:
             "current_file": None,
             "recent_errors": [],
             "last_sync_at": None,
+            **hub_compatibility(None),
         }
 
     def status(self) -> dict:
@@ -102,6 +104,7 @@ class SyncWorker:
     async def sync_once(self) -> None:
         if not self.hub:
             raise RuntimeError("PHOTOARCHIVE_HUB_URL is required for satellite sync")
+        await self.refresh_hub_version()
         items = await satellite.record_local_images(self.db_path)
         self._refresh_queue(items)
         pushed = False
@@ -302,6 +305,22 @@ class SyncWorker:
         if not 200 <= status_code < 300:
             raise RuntimeError(f"sync {method} {path} failed ({status_code}): {response.decode(errors='replace')[:300]}")
         return json.loads(response or b"{}")
+
+    async def refresh_hub_version(self) -> None:
+        """Refresh compatibility non-fatally; old hubs must not stop normal sync."""
+
+        try:
+            status_code, _headers, response = await self._request(
+                "GET", f"{self.hub}/api/version", headers={}
+            )
+            if not 200 <= status_code < 300:
+                self._status.update(hub_compatibility(None))
+                return
+            payload = json.loads(response or b"{}")
+            self._status.update(hub_compatibility(payload.get("version")))
+        except (OSError, ValueError, json.JSONDecodeError):
+            # A transient probe failure is not a compatibility verdict.
+            return
 
     async def _set_uploaded(self, content_hashes: set[str]) -> None:
         if not content_hashes:

@@ -20,6 +20,7 @@ PUBLIC_ROUTE_CONTRACT = {
     ("POST", "/api/setup/complete"),
     ("GET", "/sw.js"),
     ("GET", "/api/dev/status"),
+    ("GET", "/api/version"),
     ("GET", "/api/people/status"),
     ("GET", "/api/captions/status"),
     ("GET", "/api/tags"),

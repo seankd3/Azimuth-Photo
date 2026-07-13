@@ -14,7 +14,7 @@ from features.publishing import routes as gallery_routes
 from features.develop import export_presets
 from features.media import routes as media_routes
 from features.quality import routes as quality_routes
-from features.system import backup_routes
+from features.system import backup_routes, version_routes
 from features.sync import hub_routes, mdns, oplog_routes, pair_routes, pairing, satellite, satellite_routes
 from features.sync.sync_worker import SyncWorker, configure_worker
 
@@ -50,6 +50,7 @@ app.include_router(keyword_routes.router)
 app.include_router(gallery_routes.router)
 app.include_router(export_presets.router)
 app.include_router(backup_routes.router)
+app.include_router(version_routes.router)
 app.include_router(quality_routes.router)
 app.include_router(watched_routes.router)
 app.include_router(hub_routes.router)
