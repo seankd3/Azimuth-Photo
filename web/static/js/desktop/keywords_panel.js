@@ -173,8 +173,9 @@ export async function renderIptcMetadata(image) {
                 await request(`/api/images/${imageId}/iptc`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
                 showToast('IPTC saved');
             } catch (error) {
-                button.disabled = false;
                 showToast(error.message || "Couldn't save IPTC");
+            } finally {
+                if (document.contains(button)) button.disabled = false;
             }
         });
     } catch {
