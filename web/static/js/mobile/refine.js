@@ -206,6 +206,7 @@ async function pick(winnerId) {
     root.querySelector('#mr-streak').textContent = String(streak);
 
     // Advance immediately (speed covenant: the loop never waits on the write).
+    const priorSet = currentSet;
     const write = mosaicPick(winnerId, loserIds);
     await advance();
     busy = false;
@@ -217,6 +218,9 @@ async function pick(winnerId) {
         streak = 0;
         root.querySelector('#mr-picks').textContent = String(picks);
         root.querySelector('#mr-streak').textContent = String(streak);
+        currentSet = priorSet;
+        renderSet();
+        prefetchNext();
         showToast(writeFailureMessage());
         return;
     }
