@@ -154,3 +154,71 @@ async def import_batch_image_ids(db_path: str, batch_id: int) -> set[int] | None
         return {int(row["image_id"]) for row in await cursor.fetchall()}
     finally:
         await connection.close_async(conn, db_path=db_path)
+
+
+async def catalog_source_paths(db_path: str) -> list[str]:
+    """Return the roots the staged importer is allowed to browse."""
+
+    conn = await connection.open_async(db_path)
+    try:
+        cursor = await conn.execute(
+            "SELECT path FROM catalog_sources WHERE included = 1 ORDER BY path COLLATE NOCASE"
+        )
+        return [str(row["path"]) for row in await cursor.fetchall() if row["path"]]
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+
+
+async def suspect_catalog_paths(db_path: str, pairs: list[tuple[str, int]]) -> set[tuple[str, int]]:
+    """Cheap filename/size duplicate hints for a staged scan.
+
+    These hints are deliberately not identity proof.  The import worker compares
+    full file hashes before it treats a selected file as a duplicate.
+    """
+
+    unique = list(dict.fromkeys((str(name), int(size)) for name, size in pairs))
+    if not unique:
+        return set()
+    conn = await connection.open_async(db_path)
+    try:
+        found: set[tuple[str, int]] = set()
+        for chunk in _chunked(unique, 400):
+            clauses = " OR ".join("(filename = ? AND file_size = ?)" for _ in chunk)
+            params = [value for pair in chunk for value in pair]
+            cursor = await conn.execute(
+                "SELECT filename, file_size FROM images WHERE " + clauses,
+                params,
+            )
+            found.update((str(row["filename"]), int(row["file_size"] or 0)) for row in await cursor.fetchall())
+        return found
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+
+
+async def image_paths_by_content_hash(db_path: str, content_hash: str) -> list[str]:
+    conn = await connection.open_async(db_path)
+    try:
+        cursor = await conn.execute(
+            "SELECT filepath FROM images WHERE content_hash = ? AND missing_at IS NULL",
+            (str(content_hash),),
+        )
+        return [str(row["filepath"]) for row in await cursor.fetchall() if row["filepath"]]
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+
+
+async def set_image_content_hash(db_path: str, filepath: str, content_hash: str) -> int | None:
+    """Persist sync identity and return the catalog id for one verified file."""
+
+    conn = await connection.open_async(db_path)
+    try:
+        await conn.execute(
+            "UPDATE images SET content_hash = ? WHERE filepath = ?",
+            (str(content_hash), str(filepath)),
+        )
+        cursor = await conn.execute("SELECT id FROM images WHERE filepath = ?", (str(filepath),))
+        row = await cursor.fetchone()
+        await conn.commit()
+        return int(row["id"]) if row else None
+    finally:
+        await connection.close_async(conn, db_path=db_path)

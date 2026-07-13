@@ -1,5 +1,9 @@
+import asyncio
+from typing import Literal
+
 from fastapi import APIRouter, File, Form, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
+from pydantic import BaseModel, Field
 
 import db
 import settings
@@ -7,14 +11,114 @@ from core import cache_events
 from data.repositories import imports as import_repository
 from features.catalog import routes as catalog_routes
 from features.imports import service as import_service
+from features.imports import staging
 from features.quality import routes as quality_routes
 
 
 router = APIRouter()
 
 
+class ScanRequest(BaseModel):
+    path: str
+    include_subfolders: bool = False
+
+
+class CommitRequest(BaseModel):
+    scan_id: str
+    keys: list[str] | Literal["all_checked_default"]
+    mode: Literal["copy", "add"]
+    skip_suspects: bool = True
+    clear_card: bool = False
+    keywords: list[str] = Field(default_factory=list)
+    collection_id: int | None = None
+
+
+class CancelRequest(BaseModel):
+    pass
+
+
 def _import_library_url(batch_id: int) -> str:
     return f"/#import_batch={int(batch_id)}"
+
+
+@router.get("/api/import/sources")
+async def api_import_sources():
+    return {"sources": await staging.sources()}
+
+
+@router.get("/api/import/browse")
+async def api_import_browse(path: str = ""):
+    try:
+        return {"dirs": await staging.browse(path)}
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+
+
+@router.post("/api/import/scan")
+async def api_import_scan(body: ScanRequest):
+    try:
+        scan = await staging.start_scan(body.path, body.include_subfolders)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    return {"scan_id": scan.id}
+
+
+@router.get("/api/import/scan/{scan_id}")
+async def api_import_scan_status(scan_id: str, offset: int = 0):
+    scan = staging.scan_for_id(scan_id)
+    if scan is None:
+        return JSONResponse({"error": "Import scan not found"}, status_code=404)
+    return staging.scan_page(scan, offset)
+
+
+@router.get("/api/import/scan/{scan_id}/thumb/{key}")
+async def api_import_scan_thumb(scan_id: str, key: str):
+    scan = staging.scan_for_id(scan_id)
+    entry = staging.entry_for_key(scan, key) if scan else None
+    if entry is None:
+        return JSONResponse({"error": "Import preview not found"}, status_code=404)
+    try:
+        data = await asyncio.to_thread(staging.thumbnail_bytes, scan, entry)
+    except (OSError, ValueError) as exc:
+        return JSONResponse({"error": str(exc) or "Preview could not be decoded"}, status_code=422)
+    return Response(data, media_type="image/jpeg")
+
+
+@router.post("/api/import/commit")
+async def api_import_commit(body: CommitRequest):
+    scan = staging.scan_for_id(body.scan_id)
+    if scan is None:
+        return JSONResponse({"error": "Import scan not found"}, status_code=404)
+    try:
+        job = await staging.start_commit(
+            scan,
+            keys=body.keys,
+            mode=body.mode,
+            skip_suspects=body.skip_suspects,
+            clear_card=body.clear_card,
+            keyword_paths=body.keywords,
+            collection_id=body.collection_id,
+        )
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    return {"job_id": job.id, "batch_id": job.batch_id}
+
+
+@router.get("/api/import/jobs/{job_id}")
+async def api_import_job(job_id: str):
+    job = staging.job_for_id(job_id)
+    if job is None:
+        return JSONResponse({"error": "Import job not found"}, status_code=404)
+    return job.status()
+
+
+@router.post("/api/import/jobs/{job_id}/cancel")
+async def api_import_cancel(job_id: str, _body: CancelRequest | None = None):
+    job = staging.job_for_id(job_id)
+    if job is None:
+        return JSONResponse({"error": "Import job not found"}, status_code=404)
+    staging.request_cancel(job)
+    return job.status()
 
 
 def _preset_options(import_root: str, catalog: dict | None = None) -> list[dict]:
