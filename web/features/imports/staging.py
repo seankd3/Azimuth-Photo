@@ -377,9 +377,15 @@ def _destination_directory(entry: dict) -> Path:
 async def _copy_and_register(job: ImportJob, entry: dict) -> None:
     source = Path(entry["path"])
     result = await asyncio.to_thread(card.copy_verified, str(source), str(_destination_directory(entry)))
-    if result.get("duplicate_destination") or await _known_exact_duplicate(result["content_hash"], result["full_hash"]):
+    duplicate_destination = result.get("duplicate_destination")
+    if duplicate_destination or await _known_exact_duplicate(result["content_hash"], result["full_hash"]):
         if result.get("destination"):
             await asyncio.to_thread(Path(result["destination"]).unlink)
+        if duplicate_destination:
+            # A crashed earlier import can leave a verified copy at the destination
+            # that never reached the catalog; register it (idempotent) so the card
+            # original is only cleared once the catalog owns a copy.
+            await _register_file(duplicate_destination, entry, result["content_hash"])
         job.skipped_duplicates += 1
         await _clear_card_after_verified_duplicate(job, entry)
         return

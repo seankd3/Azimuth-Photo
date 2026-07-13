@@ -30,6 +30,41 @@ class StagedImportTests(BackendTestCase):
             "suspect": False, "suspect_reason": "",
         }
 
+    async def test_duplicate_at_destination_registers_before_card_clear(self):
+        root = Path(self.tempdir.name)
+        originals = root / "originals"
+        old_root = os.environ.get("PHOTOARCHIVE_ORIGINALS_DIR")
+        os.environ["PHOTOARCHIVE_ORIGINALS_DIR"] = str(originals)
+        try:
+            dcim = root / "CARD" / "DCIM"
+            camera = dcim / "100CANON"
+            camera.mkdir(parents=True)
+            shot = camera / "CANON0001.CR3"
+            shot.write_bytes(b"copied by a crashed import")
+
+            # A previous import copied and verified this file but crashed before
+            # registering it: bytes on disk, no catalog row.
+            stranded_dir = originals / "RAWS" / "2026" / "2026-07-12"
+            stranded_dir.mkdir(parents=True)
+            stranded = stranded_dir / shot.name
+            stranded.write_bytes(shot.read_bytes())
+
+            scan = await self._card_scan(dcim, [self._entry(dcim, shot)])
+            job = await staging.start_commit(scan, keys="all_checked_default", mode="copy", skip_suspects=True, clear_card=True, keyword_paths=[], collection_id=None)
+            await self._wait(job)
+
+            self.assertEqual(job.phase, "complete")
+            self.assertEqual(job.skipped_duplicates, 1)
+            self.assertFalse(shot.exists())
+            content_hash, _full, _size = await asyncio.to_thread(card.content_hash_from_stream, stranded)
+            registered = await staging.import_repository.image_paths_by_content_hash(db.DB_PATH, content_hash)
+            self.assertIn(str(stranded), registered)
+        finally:
+            if old_root is None:
+                os.environ.pop("PHOTOARCHIVE_ORIGINALS_DIR", None)
+            else:
+                os.environ["PHOTOARCHIVE_ORIGINALS_DIR"] = old_root
+
     async def test_card_copy_collisions_duplicates_clear_and_rerun(self):
         root = Path(self.tempdir.name)
         originals = root / "originals"
