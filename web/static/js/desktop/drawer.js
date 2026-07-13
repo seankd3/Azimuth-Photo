@@ -541,6 +541,8 @@ function renderConnectServer() {
         + '<div class="setting-actions">'
         + '<button class="btn primary" id="connect-hub-btn" type="button">Connect</button>'
         + '</div></section>';
+}
+
 function remoteQrMarkup(text) {
     if (!text || typeof window.qrcode !== 'function') return '';
     try {

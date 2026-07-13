@@ -71,15 +71,27 @@ fun TimelineScreen() {
         return
     }
 
+    // GPhotos-style RAW+JPEG stacking: the JPEG fronts the shot, the DNG twin
+    // stays hidden here (but still backs up). Solo DNGs remain visible.
+    val jpegShots = remember(media) {
+        media.filterNot { it.isRaw }.map { it.shotKey }.toHashSet()
+    }
+    val rawShots = remember(media) {
+        media.filter { it.isRaw }.map { it.shotKey }.toHashSet()
+    }
+    val visible = remember(media) {
+        media.filterNot { it.isRaw && it.shotKey in jpegShots }
+    }
+
     viewerIndex?.let { index ->
-        ViewerScreen(items = media, startIndex = index, onClose = { viewerIndex = null })
+        ViewerScreen(items = visible, startIndex = index, onClose = { viewerIndex = null })
         return
     }
 
-    val rows = remember(media) {
+    val rows = remember(visible) {
         buildList {
             var lastDay: LocalDate? = null
-            media.forEach { item ->
+            visible.forEach { item ->
                 if (item.day != lastDay) {
                     add(TimelineRow.Header(item.day))
                     lastDay = item.day
@@ -88,7 +100,7 @@ fun TimelineScreen() {
             }
         }
     }
-    val indexOf = remember(media) { media.withIndex().associate { it.value.id to it.index } }
+    val indexOf = remember(visible) { visible.withIndex().associate { it.value.id to it.index } }
 
     val gridState = rememberLazyGridState()
     LazyVerticalGrid(
@@ -116,6 +128,7 @@ fun TimelineScreen() {
                     item = row.item,
                     backedUp = backupStates[row.item.id] == BackupDb.STATE_UPLOADED ||
                         backupStates[row.item.id] == BackupDb.STATE_PRESENT,
+                    hasRaw = row.item.shotKey in rawShots,
                     onClick = { viewerIndex = indexOf[row.item.id] },
                 )
             }
@@ -144,7 +157,7 @@ private fun DayHeader(day: LocalDate) {
 }
 
 @Composable
-private fun MediaCell(item: MediaItem, backedUp: Boolean, onClick: () -> Unit) {
+private fun MediaCell(item: MediaItem, backedUp: Boolean, hasRaw: Boolean, onClick: () -> Unit) {
     Box(
         Modifier
             .aspectRatio(1f)
@@ -161,6 +174,19 @@ private fun MediaCell(item: MediaItem, backedUp: Boolean, onClick: () -> Unit) {
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize(),
         )
+        if (hasRaw && !item.isVideo) {
+            Text(
+                "RAW",
+                style = MaterialTheme.typography.labelSmall,
+                color = Color.White,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(4.dp)
+                    .background(Color.Black.copy(alpha = 0.45f), MaterialTheme.shapes.extraSmall)
+                    .padding(horizontal = 4.dp, vertical = 1.dp)
+                    .alpha(0.9f),
+            )
+        }
         if (item.isVideo) {
             Row(
                 Modifier

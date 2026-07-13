@@ -18,6 +18,8 @@ data class ManifestItem(
     val bytes: Long,
     val filename: String,
     val date_taken: String? = null,
+    /** Hub routes the upload under raws_root/<folder>/YYYY/date when set. */
+    val folder: String? = null,
 )
 
 @Serializable

@@ -1,4 +1,5 @@
 from fastapi.testclient import TestClient
+import json
 
 from test_support import *  # noqa: F401,F403
 from features.collections import smart as smart_collections
@@ -55,6 +56,7 @@ class CollectionTests(BackendTestCase):
                 db.DB_PATH,
                 db_signature=db.DB_PATH,
             ),
+            db_path=lambda: db.DB_PATH,
         )
 
     async def test_collection_api_creates_reads_and_updates_membership(self):
@@ -105,6 +107,56 @@ class CollectionTests(BackendTestCase):
 
         self.assertTrue(renamed["ok"])
         self.assertEqual(renamed["collection"]["name"], "Final selects")
+
+    async def test_regular_collection_mutations_emit_uuid_backed_oplog_entries(self):
+        source = await self._source()
+        first = await self._image(source["id"], "first.jpg")
+        second = await self._image(source["id"], "second.jpg")
+        conn = await db.get_db()
+        try:
+            await conn.execute("UPDATE images SET content_hash = ? WHERE id = ?", ("a" * 32, first))
+            await conn.execute("UPDATE images SET content_hash = ? WHERE id = ?", ("b" * 32, second))
+            await conn.commit()
+        finally:
+            await conn.close()
+        created = await collection_routes.api_create_collection(
+            collection_routes.CreateCollectionBody(name="Summer", image_ids=[first])
+        )
+        collection_id = created["collection"]["id"]
+        self.assertTrue(created["collection"]["uuid"])
+
+        await collection_routes.api_rename_collection(
+            collection_id, collection_routes.RenameCollectionBody(name="Summer selects")
+        )
+        await collection_routes.api_add_collection_images(
+            collection_id, collection_routes.CollectionImagesBody(image_ids=[second])
+        )
+        await collection_routes.api_remove_collection_images_post(
+            collection_id, collection_routes.CollectionImagesBody(image_ids=[first])
+        )
+        await collection_routes.api_delete_collection(collection_id)
+
+        conn = await db.get_db()
+        try:
+            rows = await (await conn.execute(
+                "SELECT family, payload FROM oplog ORDER BY seq"
+            )).fetchall()
+        finally:
+            await conn.close()
+        entries = [(row["family"], json.loads(row["payload"])) for row in rows]
+        self.assertEqual(
+            [family for family, _ in entries],
+            [
+                "collection_meta",
+                "collection_membership",
+                "collection_meta",
+                "collection_membership",
+                "collection_membership",
+                "collection_meta",
+            ],
+        )
+        self.assertEqual(entries[-1][1]["deleted"], True)
+        self.assertTrue(all(payload["collection_uuid"] == created["collection"]["uuid"] for _, payload in entries))
 
     async def test_collection_api_rename_rejects_unknown_and_bad_names(self):
         missing = await collection_routes.api_rename_collection(

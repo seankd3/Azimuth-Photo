@@ -26,6 +26,11 @@ data class MediaItem(
 ) {
     val day: LocalDate
         get() = Instant.ofEpochMilli(dateTakenMs).atZone(ZoneId.systemDefault()).toLocalDate()
+
+    val isRaw: Boolean get() = displayName.endsWith(".dng", ignoreCase = true)
+
+    /** RAW+JPEG twins share this key (same shot, same folder, different extension). */
+    val shotKey: String get() = "$bucketId/${displayName.substringBeforeLast('.').lowercase()}"
 }
 
 data class MediaBucket(val id: String, val name: String, val count: Int)

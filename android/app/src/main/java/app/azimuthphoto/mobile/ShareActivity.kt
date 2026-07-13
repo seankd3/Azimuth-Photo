@@ -13,7 +13,7 @@ class ShareActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         BackupScheduler.runNow(this)
-        Toast.makeText(this, "Backing up to photoArchive", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "Backing up to Azimuth Photo", Toast.LENGTH_SHORT).show()
         finish()
     }
 }

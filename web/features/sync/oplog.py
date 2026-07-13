@@ -17,7 +17,11 @@ from features.sync.validation import validate_content_hash
 log = logging.getLogger(__name__)
 MAX_CLOCK_SKEW_SECONDS = 24 * 60 * 60
 PAGE_SIZE = 1000
-FAMILIES = frozenset({"flag", "rating", "keywords", "iptc", "develop", "collection_membership"})
+COLLECTION_CONTENT_HASH = "0" * 32
+FAMILIES = frozenset({
+    "flag", "rating", "keywords", "iptc", "develop",
+    "collection_meta", "collection_membership",
+})
 JsonRequest = Callable[[str, str, dict[str, Any]], Awaitable[dict[str, Any]]]
 
 OPLOG_DDL = """
@@ -175,21 +179,21 @@ def _winner_key(entry: Mapping[str, Any]) -> tuple[float, str, int]:
     return float(entry["ts"]), str(entry["origin"]), int(entry["origin_seq"])
 
 
-async def _state_key(conn, content_hash: str, family: str) -> tuple[float, str, int] | None:
+async def _state_key(conn, identity: str, family: str) -> tuple[float, str, int] | None:
     row = await (await conn.execute(
         "SELECT ts, origin, origin_seq FROM oplog_family_state WHERE content_hash = ? AND family = ?",
-        (content_hash, family),
+        (identity, family),
     )).fetchone()
     return (float(row["ts"]), str(row["origin"]), int(row["origin_seq"])) if row else None
 
 
-async def _record_winner(conn, entry: Mapping[str, Any]) -> None:
+async def _record_winner(conn, entry: Mapping[str, Any], *, identity: str | None = None) -> None:
     await conn.execute(
         "INSERT INTO oplog_family_state(content_hash, family, ts, origin, origin_seq) VALUES (?, ?, ?, ?, ?) "
         "ON CONFLICT(content_hash, family) DO UPDATE SET "
         "ts=excluded.ts, origin=excluded.origin, origin_seq=excluded.origin_seq",
         (
-            entry["content_hash"], entry["family"], entry["ts"],
+            identity or str(entry["content_hash"]), entry["family"], entry["ts"],
             entry["origin"], entry["origin_seq"],
         ),
     )
@@ -281,16 +285,154 @@ async def _apply_lww_family(conn, image_id: int, entry: Mapping[str, Any]) -> No
         )
 
 
+def _collection_uuid(value: Any, *, field: str) -> str:
+    try:
+        return str(uuid.UUID(str(value)))
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise ValueError(f"{field} must be a UUID") from exc
+
+
+def _collection_meta_payload(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise ValueError("collection_meta payload must be an object")
+    collection_uuid = _collection_uuid(payload.get("collection_uuid"), field="collection_uuid")
+    parent_value = payload.get("parent_uuid")
+    parent_uuid = None if parent_value is None else _collection_uuid(parent_value, field="parent_uuid")
+    name = payload.get("name")
+    if not isinstance(name, str):
+        raise ValueError("collection_meta name must be a string")
+    deleted = payload.get("deleted")
+    if not isinstance(deleted, bool):
+        raise ValueError("collection_meta deleted must be a boolean")
+    return {
+        "collection_uuid": collection_uuid,
+        "name": name,
+        "parent_uuid": parent_uuid,
+        "deleted": deleted,
+    }
+
+
+def _collection_membership_payload(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise ValueError("collection_membership payload must be an object")
+    collection_uuid = _collection_uuid(payload.get("collection_uuid"), field="collection_uuid")
+    content_hash = validate_content_hash(str(payload.get("content_hash") or ""))
+    member = payload.get("member")
+    if not isinstance(member, bool):
+        raise ValueError("collection_membership member must be a boolean")
+    return {"collection_uuid": collection_uuid, "content_hash": content_hash, "member": member}
+
+
+async def _reconcile_collection_links(conn) -> None:
+    """Materialize the one-parent collection tree from LWW metadata winners."""
+
+    rows = await (await conn.execute(
+        "SELECT origin, origin_seq, payload, ts FROM oplog WHERE family = 'collection_meta'"
+    )).fetchall()
+    winners: dict[str, tuple[tuple[float, str, int], dict[str, Any]]] = {}
+    for row in rows:
+        payload = _collection_meta_payload(json.loads(row["payload"]))
+        key = (float(row["ts"]), str(row["origin"]), int(row["origin_seq"]))
+        current = winners.get(payload["collection_uuid"])
+        if current is None or key > current[0]:
+            winners[payload["collection_uuid"]] = (key, payload)
+
+    current_rows = await (await conn.execute("SELECT id, uuid FROM collections")).fetchall()
+    collection_ids = {str(row["uuid"]): int(row["id"]) for row in current_rows}
+    child_ids = [collection_ids[value] for value in winners if value in collection_ids]
+    if child_ids:
+        placeholders = ",".join("?" for _ in child_ids)
+        await conn.execute(
+            f"DELETE FROM collection_links WHERE child_id IN ({placeholders})",
+            child_ids,
+        )
+    for collection_uuid, (_, payload) in winners.items():
+        if payload["deleted"] or payload["parent_uuid"] is None:
+            continue
+        child_id = collection_ids.get(collection_uuid)
+        parent_id = collection_ids.get(payload["parent_uuid"])
+        if child_id is None or parent_id is None or child_id == parent_id:
+            continue
+        await conn.execute(
+            "INSERT OR IGNORE INTO collection_links(parent_id, child_id, position, added_at) VALUES (?, ?, 0, ?)",
+            (parent_id, child_id, time.time()),
+        )
+
+
+async def _apply_collection_meta(conn, entry: Mapping[str, Any]) -> str:
+    payload = _collection_meta_payload(entry["payload"])
+    identity = payload["collection_uuid"]
+    current = await _state_key(conn, identity, "collection_meta")
+    if current is not None and _winner_key(entry) <= current:
+        return "stale-or-replayed"
+    if payload["deleted"]:
+        await conn.execute("DELETE FROM collections WHERE uuid = ?", (identity,))
+    else:
+        await conn.execute(
+            "INSERT INTO collections(uuid, name, created_at, updated_at) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(uuid) DO UPDATE SET name=excluded.name, updated_at=excluded.updated_at",
+            (identity, payload["name"], float(entry["ts"]), float(entry["ts"])),
+        )
+    await _record_winner(conn, entry, identity=identity)
+    await _reconcile_collection_links(conn)
+    return "applied"
+
+
+async def _apply_collection_membership(conn, entry: Mapping[str, Any]) -> str:
+    payload = _collection_membership_payload(entry["payload"])
+    identity = f"{payload['collection_uuid']}:{payload['content_hash']}"
+    current = await _state_key(conn, identity, "collection_membership")
+    if current is not None and _winner_key(entry) <= current:
+        return "stale-or-replayed"
+    collection = await (await conn.execute(
+        "SELECT id FROM collections WHERE uuid = ?", (payload["collection_uuid"],)
+    )).fetchone()
+    if collection is None:
+        return "unknown-collection-uuid"
+    image = await (await conn.execute(
+        "SELECT id FROM images WHERE content_hash = ? ORDER BY id LIMIT 1",
+        (payload["content_hash"],),
+    )).fetchone()
+    if image is None:
+        return "unknown-content-hash"
+    collection_id = int(collection["id"])
+    image_id = int(image["id"])
+    if payload["member"]:
+        row = await (await conn.execute(
+            "SELECT COALESCE(MAX(position), -1) + 1 AS next_position FROM collection_images WHERE collection_id = ?",
+            (collection_id,),
+        )).fetchone()
+        await conn.execute(
+            "INSERT OR IGNORE INTO collection_images(collection_id, image_id, position, added_at) VALUES (?, ?, ?, ?)",
+            (collection_id, image_id, int(row["next_position"]), float(entry["ts"])),
+        )
+    else:
+        await conn.execute(
+            "DELETE FROM collection_images WHERE collection_id = ? AND image_id = ?",
+            (collection_id, image_id),
+        )
+    await conn.execute(
+        "UPDATE collections SET cover_image_id = ("
+        "SELECT image_id FROM collection_images WHERE collection_id = ? "
+        "ORDER BY position, added_at, image_id LIMIT 1), updated_at = ? WHERE id = ?",
+        (collection_id, float(entry["ts"]), collection_id),
+    )
+    await _record_winner(conn, entry, identity=identity)
+    return "applied"
+
+
 async def _apply_entry_on_conn(conn, entry: Mapping[str, Any]) -> str:
+    family = str(entry["family"])
+    if family == "collection_meta":
+        return await _apply_collection_meta(conn, entry)
+    if family == "collection_membership":
+        return await _apply_collection_membership(conn, entry)
     image = await (await conn.execute(
         "SELECT id FROM images WHERE content_hash = ? ORDER BY id LIMIT 1",
         (entry["content_hash"],),
     )).fetchone()
     if image is None:
         return "unknown-content-hash"
-    family = str(entry["family"])
-    if family == "collection_membership":
-        return "unsupported-collection-identity"
     if family == "keywords":
         await _apply_keywords(conn, int(image["id"]), entry["payload"])
         current = await _state_key(conn, str(entry["content_hash"]), family)
@@ -346,7 +488,12 @@ async def apply_entries(
         raise
     finally:
         await connection.close_async(conn, db_path=db_path)
-    return {"received": len(normalized), "inserted": inserted, "entries": results}
+    return {
+        "received": len(normalized),
+        "inserted": inserted,
+        "skipped_unhashed": sum(item["result"] == "unknown-content-hash" for item in results),
+        "entries": results,
+    }
 
 
 # Compatibility name for callers that describe the persistence side of the
@@ -411,6 +558,72 @@ async def _image_hashes(conn, image_ids: Sequence[int]) -> dict[int, str]:
         ids,
     )).fetchall()
     return {int(row["id"]): str(row["content_hash"]) for row in rows}
+
+
+async def collection_meta_payload(db_path: str, collection_id: int) -> dict[str, Any] | None:
+    """Read the regular collection state that is safe to share across devices."""
+
+    conn = await connection.open_async(db_path)
+    try:
+        row = await (await conn.execute(
+            "SELECT uuid, name, query FROM collections WHERE id = ?", (int(collection_id),)
+        )).fetchone()
+        if row is None or row["query"] is not None or not row["uuid"]:
+            return None
+        parent = await (await conn.execute(
+            "SELECT parent.uuid FROM collection_links links "
+            "JOIN collections parent ON parent.id = links.parent_id "
+            "WHERE links.child_id = ? ORDER BY links.added_at, links.parent_id LIMIT 1",
+            (int(collection_id),),
+        )).fetchone()
+        return {
+            "collection_uuid": _collection_uuid(row["uuid"], field="collection_uuid"),
+            "name": str(row["name"]),
+            "parent_uuid": _collection_uuid(parent["uuid"], field="parent_uuid") if parent else None,
+            "deleted": False,
+        }
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+
+
+async def append_collection_meta(db_path: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+    normalized = _collection_meta_payload(dict(payload))
+    return await append_entry(
+        db_path,
+        content_hash=COLLECTION_CONTENT_HASH,
+        family="collection_meta",
+        payload=normalized,
+    )
+
+
+async def append_collection_memberships(
+    db_path: str,
+    collection_id: int,
+    image_ids: Sequence[int],
+    *,
+    member: bool,
+) -> list[dict[str, Any]]:
+    metadata = await collection_meta_payload(db_path, collection_id)
+    if metadata is None:
+        return []
+    conn = await connection.open_async(db_path)
+    try:
+        hashes = await _image_hashes(conn, image_ids)
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+    return [
+        await append_entry(
+            db_path,
+            content_hash=COLLECTION_CONTENT_HASH,
+            family="collection_membership",
+            payload={
+                "collection_uuid": metadata["collection_uuid"],
+                "content_hash": content_hash,
+                "member": member,
+            },
+        )
+        for _, content_hash in sorted(hashes.items())
+    ]
 
 
 async def append_flags(db_path: str, image_ids: Sequence[int], flag: str) -> list[dict[str, Any]]:

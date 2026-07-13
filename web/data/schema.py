@@ -3,13 +3,14 @@
 import asyncio
 import os
 import shutil
+import uuid
 
 from date_inference import infer_image_date
 from data.repositories import catalog as catalog_repository
 from core.path_groups import safe_commonpath
 
 EXPECTED_EMBEDDING_DIM = 2048  # Qwen3-VL-Embedding-2B native dimension
-SCHEMA_VERSION = 26
+SCHEMA_VERSION = 27
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS catalog_sources (
@@ -622,6 +623,7 @@ ON stack_members(stack_id);
 
 CREATE TABLE IF NOT EXISTS collections (
     id INTEGER PRIMARY KEY,
+    uuid TEXT UNIQUE,
     name TEXT NOT NULL,
     description TEXT NOT NULL DEFAULT '',
     visibility TEXT NOT NULL DEFAULT 'private',
@@ -717,6 +719,8 @@ CREATE TABLE IF NOT EXISTS collection_publishes (
 
 CREATE INDEX IF NOT EXISTS idx_collections_updated
 ON collections(updated_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_collections_uuid
+ON collections(uuid);
 CREATE INDEX IF NOT EXISTS idx_collection_images_image
 ON collection_images(image_id, collection_id);
 CREATE INDEX IF NOT EXISTS idx_collection_images_position
@@ -909,6 +913,7 @@ CATALOG_SOURCE_COMPAT_COLUMNS = (
 
 COLLECTION_COMPAT_COLUMNS = (
     ("query", "TEXT DEFAULT NULL"),
+    ("uuid", "TEXT"),
 )
 
 COLLECTION_SHARE_COMPAT_COLUMNS = (
@@ -1217,7 +1222,7 @@ REQUIRED_COLUMNS = {
     "cache_metadata": {"replace_stale_thumbnails"},
     "stacks": {"kind", "representative_image_id", "auto", "created_at", "updated_at"},
     "stack_members": {"stack_id", "image_id", "score", "added_at"},
-    "collections": {"query"},
+    "collections": {"query", "uuid"},
     "collection_links": {"parent_id", "child_id", "position", "added_at"},
     "published_nodes": {
         "area",
@@ -1284,6 +1289,7 @@ REQUIRED_INDEXES = {
     "idx_stacks_kind",
     "idx_stack_members_stack_id",
     "idx_collections_updated",
+    "idx_collections_uuid",
     "idx_collection_images_image",
     "idx_collection_images_position",
     "idx_collection_links_child",
@@ -1639,6 +1645,22 @@ async def ensure_compatibility_indexes(conn) -> None:
         await conn.execute(sql)
 
 
+async def ensure_collection_uuids(conn) -> None:
+    """Give every legacy user collection a stable cross-device identity."""
+
+    rows = await (await conn.execute(
+        "SELECT id FROM collections WHERE uuid IS NULL OR trim(uuid) = ''"
+    )).fetchall()
+    for row in rows:
+        await conn.execute(
+            "UPDATE collections SET uuid = ? WHERE id = ?",
+            (str(uuid.uuid4()), int(row["id"])),
+        )
+    await conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_collections_uuid ON collections(uuid)"
+    )
+
+
 async def ensure_catalog_export_row_versions(conn) -> None:
     await conn.execute("UPDATE images SET row_version = id WHERE row_version = 0")
     await conn.execute("CREATE INDEX IF NOT EXISTS idx_images_row_version ON images(row_version)")
@@ -1762,6 +1784,7 @@ async def apply_schema_and_migrations(conn, *, db_exists: bool) -> None:
             await conn.execute(f"DROP TABLE IF EXISTS {table}")
         await ensure_compatibility_columns(conn)
         await ensure_compatibility_indexes(conn)
+        await ensure_collection_uuids(conn)
         await ensure_catalog_export_row_versions(conn)
         from features.develop.presets import ensure_develop_presets
         await ensure_develop_presets(conn)
