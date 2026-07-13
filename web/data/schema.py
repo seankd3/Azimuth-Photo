@@ -623,7 +623,7 @@ ON stack_members(stack_id);
 
 CREATE TABLE IF NOT EXISTS collections (
     id INTEGER PRIMARY KEY,
-    uuid TEXT NOT NULL UNIQUE,
+    uuid TEXT UNIQUE,
     name TEXT NOT NULL,
     description TEXT NOT NULL DEFAULT '',
     visibility TEXT NOT NULL DEFAULT 'private',
