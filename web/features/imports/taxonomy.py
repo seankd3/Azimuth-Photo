@@ -253,15 +253,27 @@ async def preview_misplaced_personal_photos(
     from data import connection
 
     prefix = misplaced_personal_under_raws_prefix(library_root)
-    conn = await connection.open_async(db_path)
+    empty = {
+        "prefix": prefix,
+        "count": 0,
+        "truncated": False,
+        "samples": [],
+    }
     try:
-        rows = await (
-            await conn.execute(
-                "SELECT id, filepath FROM images WHERE filepath LIKE ? ESCAPE '\\' "
-                "ORDER BY id LIMIT 5000",
-                (prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%",),
-            )
-        ).fetchall()
+        conn = await connection.open_async(db_path)
+    except Exception:
+        return empty
+    try:
+        try:
+            rows = await (
+                await conn.execute(
+                    "SELECT id, filepath FROM images WHERE filepath LIKE ? ESCAPE '\\' "
+                    "ORDER BY id LIMIT 5000",
+                    (prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%",),
+                )
+            ).fetchall()
+        except Exception:
+            return empty
     finally:
         await connection.close_async(conn, db_path=db_path)
     samples = [{"id": int(row["id"]), "filepath": row["filepath"]} for row in rows[:20]]
