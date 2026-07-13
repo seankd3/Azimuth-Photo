@@ -2,7 +2,7 @@
 
 **Your own photo cloud — with Lightroom Classic instincts.**
 
-[![CI](https://github.com/Sean-Kenneth-Doherty/photo-archive/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Sean-Kenneth-Doherty/photo-archive/actions/workflows/ci.yml)
+[![CI](https://github.com/Sean-Kenneth-Doherty/azimuth-photo/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Sean-Kenneth-Doherty/azimuth-photo/actions/workflows/ci.yml)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 
 Azimuth Photo is a self-hosted library for serious photo archives — and it is **fast**. Where Lightroom chugs, Azimuth Photo flies: browse terabytes of photos at lightning speed from your own computer, NAS, or server. Cull, rank, search, and share tens of thousands of images without uploading a single byte to anyone else's cloud.
@@ -96,8 +96,8 @@ An installable PWA at `/m`: fast timeline with pinch density, pull-to-refresh, o
 ## Quickstart
 
 ```bash
-git clone https://github.com/Sean-Kenneth-Doherty/photo-archive.git
-cd photo-archive
+git clone https://github.com/Sean-Kenneth-Doherty/azimuth-photo.git
+cd azimuth-photo
 cd web
 python -m venv .venv && .venv/bin/pip install -r requirements.txt
 cd ..

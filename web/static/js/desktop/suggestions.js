@@ -300,6 +300,7 @@ function foregroundLayerOpen() {
         || document.querySelector('#grid-pop-menu:not([hidden])')
         || document.querySelector('#export-pop-menu:not([hidden])')
         || document.querySelector('#folder-pop-menu:not([hidden])')
+        || document.querySelector('#source-pop-menu:not([hidden])')
         || document.querySelector('#share-overlay:not([hidden])')
         || document.querySelector('#publish-overlay:not([hidden])')
         || document.querySelector('#drawer-scrim:not([hidden])')

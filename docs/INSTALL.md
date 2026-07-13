@@ -7,7 +7,7 @@ One always-on library server. Point it at your photos, open the web page.
 ### Docker Compose
 
 ```bash
-git clone https://github.com/Sean-Kenneth-Doherty/photo-archive.git
+git clone https://github.com/Sean-Kenneth-Doherty/azimuth-photo.git
 cd photo-archive
 mkdir -p photos data
 # Put originals in ./photos (or edit docker-compose.yml to mount your real folder)

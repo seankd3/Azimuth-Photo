@@ -63,6 +63,10 @@ export async function getFolderTree() {
     return fetchJson('/api/folders/tree', { defaultValue: null });
 }
 
+export async function revealFolder(path) {
+    return postJsonWithStatus('/api/reveal', { path });
+}
+
 export async function getFilterOptions() {
     return fetchJson('/api/filter-options', { defaultValue: null });
 }
@@ -251,6 +255,10 @@ export async function getPairStatus() {
     return fetchJson('/api/pair/status', { defaultValue: null });
 }
 
+export async function getSyncStatus() {
+    return fetchJson('/api/sync/status', { defaultValue: null });
+}
+
 export async function listDevices() {
     return fetchJson('/api/devices', { defaultValue: null });
 }
@@ -274,6 +282,8 @@ export async function connectToHub({ hubUrl, code, deviceName = '', platform = '
         device_name: deviceName,
         platform,
     });
+}
+
 export async function applyRemoteAccessServe() {
     return postJson('/api/remote-access/serve');
 }

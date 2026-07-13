@@ -22,6 +22,10 @@ class SourceOfflineDuringScan(RuntimeError):
     """Raised when a source disappears before a scan can be finalized safely."""
 
 
+class SuspiciousEmptyScan(RuntimeError):
+    """Raised when an empty online scan is unsafe to apply to existing images."""
+
+
 def normalize_source_path(path: str) -> str:
     """Return the canonical local path used as a catalog source key."""
 
@@ -172,6 +176,59 @@ async def update_source_counts_on_conn(conn, source_id: int | None = None):
         f"{where}",
         params,
     )
+
+
+HUB_MIRROR_SOURCE_PATH = "hub://"
+
+
+async def repair_hub_mirror_source_counts_on_conn(conn) -> bool:
+    """Resync hub:// image_count/active_image_count with live mirrored rows.
+
+    Rankings / All Photos short-circuit on SUM(active_image_count). A hub
+    mirror that left those denormalized counters at 0 makes All Photos look
+    like only the local/recent imports even when hub_remote rows exist.
+    """
+    cursor = await conn.execute(
+        "SELECT id, image_count, active_image_count FROM catalog_sources WHERE path = ?",
+        (HUB_MIRROR_SOURCE_PATH,),
+    )
+    row = await cursor.fetchone()
+    if row is None:
+        return False
+    source_id = int(row["id"])
+    live = await (
+        await conn.execute(
+            "SELECT "
+            "COUNT(*) AS image_count, "
+            "COALESCE(SUM(CASE WHEN status IN ('kept', 'maybe') AND missing_at IS NULL "
+            "THEN 1 ELSE 0 END), 0) AS active_image_count "
+            "FROM images WHERE source_id = ?",
+            (source_id,),
+        )
+    ).fetchone()
+    image_count = int(live["image_count"] or 0)
+    active_image_count = int(live["active_image_count"] or 0)
+    if (
+        int(row["image_count"] or 0) == image_count
+        and int(row["active_image_count"] or 0) == active_image_count
+    ):
+        return False
+    await conn.execute(
+        "UPDATE catalog_sources SET image_count = ?, active_image_count = ? WHERE id = ?",
+        (image_count, active_image_count, source_id),
+    )
+    return True
+
+
+async def repair_hub_mirror_source_counts(db_path: str) -> bool:
+    conn = await connection.open_async(db_path)
+    try:
+        repaired = await repair_hub_mirror_source_counts_on_conn(conn)
+        if repaired:
+            await conn.commit()
+        return repaired
+    finally:
+        await connection.close_async(conn, db_path=db_path)
 
 
 async def refresh_source_online_states_on_conn(conn) -> bool:
@@ -343,15 +400,26 @@ async def mark_source_scan_finished(
             raise SourceOfflineDuringScan(
                 "Source drive went offline during scan; existing catalog entries were preserved"
             )
+        suspicious_empty_scan = False
+        if seen_filepaths == []:
+            cursor = await conn.execute(
+                "SELECT 1 FROM images WHERE source_id = ? AND missing_at IS NULL LIMIT 1",
+                (int(source_id),),
+            )
+            suspicious_empty_scan = await cursor.fetchone() is not None
         now = _time.time()
         await conn.execute(
             "UPDATE catalog_sources SET last_scan_at = ?, last_seen_at = ?, online = ? WHERE id = ?",
             (now, now, 1, source_id),
         )
-        if seen_filepaths is not None:
+        if seen_filepaths is not None and not suspicious_empty_scan:
             await mark_source_missing_files_on_conn(conn, source_id, seen_filepaths, now)
         await update_source_counts_on_conn(conn, source_id)
         await conn.commit()
+        if suspicious_empty_scan:
+            raise SuspiciousEmptyScan(
+                "Scan found no files; existing catalog entries were preserved and were not marked missing"
+            )
     finally:
         await connection.close_async(conn, db_path=db_path)
 

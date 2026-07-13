@@ -1,6 +1,5 @@
 import os
 import time
-from pathlib import Path
 
 from fastapi import APIRouter
 
@@ -8,7 +7,6 @@ from fastapi import APIRouter
 router = APIRouter()
 _started_at: float | None = None
 _git_commit = "unknown"
-_version_file = Path(__file__).resolve().parents[3] / "VERSION"
 
 
 def configure(*, started_at: float, git_commit: str) -> None:
@@ -29,9 +27,3 @@ async def dev_status():
         "git_commit": _git_commit,
         "cwd": os.getcwd(),
     }
-
-
-@router.get("/api/version")
-async def version():
-    """Public release version for the app’s About surface."""
-    return {"version": _version_file.read_text(encoding="utf-8").strip()}

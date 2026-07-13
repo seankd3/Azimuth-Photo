@@ -12,6 +12,16 @@
       "csp": null
     }
   },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "endpoints": [
+        "https://github.com/Sean-Kenneth-Doherty/azimuth-photo/releases/latest/download/latest.json"
+      ],
+      "dialog": false,
+      "pubkey": "REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY"
+    }
+  },
   "bundle": {
     "active": true,
     "targets": ["nsis"],
