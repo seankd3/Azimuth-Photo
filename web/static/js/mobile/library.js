@@ -152,7 +152,9 @@ function render() {
         renderFolderBrowser();
         return;
     }
-    showingCollection = false;
+    // Keep collection drill-in across tab re-entry / background refreshes.
+    // Only closeCollectionView (Back) clears showingCollection.
+    if (showingCollection) return;
     if (loadError) {
         root.innerHTML = '<div class="ms-empty">Couldn\'t load Library.</div>'
             + '<button class="sheet-btn" id="ml-retry-load" type="button">Try again</button>';
