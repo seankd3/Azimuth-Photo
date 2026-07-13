@@ -195,6 +195,10 @@ export async function getSettings() {
     return fetchJson('/api/settings', { defaultValue: null });
 }
 
+export async function getVersion() {
+    return fetchJson('/api/version', { defaultValue: null });
+}
+
 export async function saveSettings(fields) {
     return postJson('/api/settings', fields || {});
 }

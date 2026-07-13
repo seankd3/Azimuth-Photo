@@ -1,0 +1,23 @@
+name: Feature request
+description: Describe the photo workflow you want to improve.
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: workflow
+    attributes:
+      label: What workflow needs help?
+      description: Describe the moment in your photo work, not just a proposed control.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: What should happen?
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else?
+      description: Screenshots, references, or alternatives you considered.
