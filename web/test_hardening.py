@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from core.source_files import inspect_source_file, source_file_is_safe
 from features.media import routes as media_routes
+from features.develop import importer as develop_importer
 from features.publishing.routes import _attachment_name
 from features.share import auth as share_auth
 from features.share import routes as share_routes
@@ -33,6 +34,16 @@ def test_scanner_skips_symlinked_media_outside_source(tmp_path: Path):
     rows = list(scanner.walk_images(str(source)))
 
     assert [row[0] for row in rows] == ["camera.jpg"]
+
+
+def test_develop_importer_does_not_restore_skipped_raw_symlinks(tmp_path: Path):
+    source = tmp_path / "source"
+    source.mkdir()
+    outside = tmp_path / "outside.cr2"
+    outside.write_bytes(b"raw")
+    (source / "escape.cr2").symlink_to(outside)
+
+    assert list(develop_importer._iter_raw_rows(str(source))) == []
 
 
 def test_source_boundary_rejects_symlink_and_parent_escape(tmp_path: Path):
@@ -91,6 +102,28 @@ def test_hub_upload_rejects_oversized_chunk_before_buffering(monkeypatch, tmp_pa
 
     assert response.status_code == 413
     assert response.json() == {"error": "Upload chunk is too large"}
+
+
+def test_hub_manifest_filename_rejects_cross_platform_path_forms():
+    invalid = (
+        "../escape.jpg",
+        "/tmp/escape.jpg",
+        r"..\escape.jpg",
+        r"C:\escape.jpg",
+        r"\\server\share\escape.jpg",
+        "photo.jpg\0tail",
+        "photo.jpg:stream",
+        "CON.jpg",
+    )
+
+    for filename in invalid:
+        try:
+            hub._normalize_filename(filename)
+        except ValueError:
+            continue
+        raise AssertionError(f"accepted unsafe filename: {filename!r}")
+
+    assert hub._normalize_filename("summer photo-01.CR3") == "summer photo-01.CR3"
 
 
 def test_share_password_form_has_small_body_limit():

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import ntpath
 import os
 import re
 import shutil
@@ -27,6 +28,7 @@ BACKFILL_BATCH_SIZE = 100
 BACKFILL_THROTTLE_SECONDS = 0.05
 _UPLOAD_LOCKS: dict[str, asyncio.Lock] = {}
 _FOLDER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _-]{0,63}$")
+_WINDOWS_RESERVED_NAMES = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
 
 SYNC_DDL = """
 CREATE TABLE IF NOT EXISTS sync_manifest_items (
@@ -98,6 +100,24 @@ def _normalize_folder(value: Any) -> str | None:
     return folder
 
 
+def _normalize_filename(value: Any) -> str:
+    filename = str(value or "").strip()
+    stem = filename.split(".", 1)[0].upper()
+    if (
+        not filename
+        or len(filename) > 255
+        or filename.rstrip(" .") != filename
+        or any(ord(char) < 32 for char in filename)
+        or ":" in filename
+        or os.path.basename(filename) != filename
+        or ntpath.basename(filename) != filename
+        or stem in _WINDOWS_RESERVED_NAMES
+        or filename in {".", ".."}
+    ):
+        raise ValueError("filename must be a portable base filename")
+    return filename
+
+
 async def manifest(db_path: str, items: Iterable[dict[str, Any]]) -> dict[str, list[Any]]:
     await ensure_sync_schema(db_path)
     normalized: list[tuple[str, str | None, int, str, str | None, str | None]] = []
@@ -106,7 +126,7 @@ async def manifest(db_path: str, items: Iterable[dict[str, Any]]) -> dict[str, l
         supplied_full_hash = item.get("full_hash")
         full_hash = validate_content_hash(supplied_full_hash) if supplied_full_hash else None
         byte_count = int(item.get("bytes", 0))
-        filename = os.path.basename(str(item.get("filename") or ""))
+        filename = _normalize_filename(item.get("filename"))
         if byte_count < 0 or not filename:
             raise ValueError("manifest items require non-negative bytes and a filename")
         folder = _normalize_folder(item.get("folder"))
