@@ -18,6 +18,7 @@ from urllib.parse import urlencode
 
 from data import connection
 from features.sync import satellite
+from features.sync.executor import run_sync_work
 
 
 RequestFn = Callable[..., Awaitable[tuple[int, dict[str, str], bytes]]]
@@ -42,7 +43,7 @@ async def _urllib_request(method: str, url: str, *, body: bytes | None = None, h
         except urllib.error.HTTPError as error:
             return error.code, dict(error.headers or {}), error.read()
 
-    return await asyncio.to_thread(request)
+    return await run_sync_work(request)
 
 
 def _store_with_thumbnail_cache(size: str, image_id: int, signature: str, data: bytes) -> None:
@@ -247,7 +248,7 @@ class ThumbPrefetcher:
             return
         from features.develop import rawproc
 
-        await asyncio.to_thread(rawproc.ensure_base_cache, image_id, str(row["filepath"] or ""))
+        await run_sync_work(rawproc.ensure_base_cache, image_id, str(row["filepath"] or ""))
 
     async def _enqueue_neighbors(self, image_id: int, *, span: int, priority: int, kind: str) -> None:
         conn = await connection.open_async(self.db_path)

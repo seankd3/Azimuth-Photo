@@ -18,12 +18,15 @@ from data import connection
 from features.sync.mirror import MirrorPuller
 from features.sync.prefetch import ThumbPrefetcher
 from features.sync import oplog, satellite
+from features.sync.executor import run_sync_work
 from features.sync.versioning import hub_compatibility
 
 
 log = logging.getLogger(__name__)
 CHUNK_BYTES = 32 * 1024 * 1024
 RequestFn = Callable[..., Awaitable[tuple[int, dict, bytes]]]
+_BASE_IDLE_SECONDS = 15.0
+_MAX_BACKOFF_SECONDS = 300.0
 
 
 async def _urllib_request(method: str, url: str, *, body: bytes | None = None, headers: dict | None = None) -> tuple[int, dict, bytes]:
@@ -36,7 +39,7 @@ async def _urllib_request(method: str, url: str, *, body: bytes | None = None, h
                 return response.status, dict(response.headers), response.read()
         except urllib.error.HTTPError as error:
             return error.code, dict(error.headers or {}), error.read()
-    return await asyncio.to_thread(request)
+    return await run_sync_work(request)
 
 
 class SyncWorker:
@@ -50,6 +53,8 @@ class SyncWorker:
         self._paused = False
         self._stop = asyncio.Event()
         self._wake = asyncio.Event()
+        self._failure_streak = 0
+        self._next_idle_seconds = _BASE_IDLE_SECONDS
         self._status: dict[str, Any] = {
             "mode": "satellite",
             "paused": False,
@@ -59,6 +64,7 @@ class SyncWorker:
             "current_file": None,
             "recent_errors": [],
             "last_sync_at": None,
+            "backoff_seconds": 0,
             **hub_compatibility(None),
         }
 
@@ -91,15 +97,39 @@ class SyncWorker:
             if not self._paused:
                 try:
                     await self.sync_once()
+                    self._clear_backoff()
                 except asyncio.CancelledError:
                     raise
                 except Exception as error:
                     self._error(error)
+                    self._note_failure(error)
             self._wake.clear()
+            idle = self._next_idle_seconds if not self._paused else 3600.0
             try:
-                await asyncio.wait_for(self._wake.wait(), timeout=15.0 if not self._paused else 3600.0)
+                await asyncio.wait_for(self._wake.wait(), timeout=idle)
             except asyncio.TimeoutError:
                 pass
+
+    def _clear_backoff(self) -> None:
+        self._failure_streak = 0
+        self._next_idle_seconds = _BASE_IDLE_SECONDS
+        self._status["backoff_seconds"] = 0
+
+    def _note_failure(self, error: Exception) -> None:
+        message = str(error).lower()
+        # Timing-out / unreachable hubs must not hot-loop every 15s.
+        transient = any(
+            token in message
+            for token in ("timed out", "timeout", "temporarily unavailable", "connection refused", "unreachable", "name or service not known")
+        )
+        if not transient:
+            self._next_idle_seconds = _BASE_IDLE_SECONDS
+            self._status["backoff_seconds"] = 0
+            return
+        self._failure_streak += 1
+        backoff = min(_MAX_BACKOFF_SECONDS, _BASE_IDLE_SECONDS * (2 ** min(self._failure_streak, 5)))
+        self._next_idle_seconds = backoff
+        self._status["backoff_seconds"] = backoff
 
     async def sync_once(self) -> None:
         if not self.hub:
@@ -137,7 +167,7 @@ class SyncWorker:
             await self._run_prefetch()
         self._status["last_sync_at"] = time.time()
         self._status["current_file"] = None
-        self._refresh_queue(await satellite.record_local_images(self.db_path))
+        self._refresh_queue(await satellite.pending_upload_snapshot(self.db_path))
 
     async def _upload(self, item: dict) -> None:
         content_hash = item["content_hash"]

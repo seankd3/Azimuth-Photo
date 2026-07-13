@@ -16,6 +16,7 @@ from core import cache_events
 from data import connection
 from data.repositories import catalog as catalog_repository
 from features.sync import satellite
+from features.sync.executor import run_sync_work
 
 
 RequestFn = Callable[..., Awaitable[tuple[int, dict[str, str], bytes]]]
@@ -33,6 +34,9 @@ _IMAGE_COLUMNS = {
     "file_size", "width", "height", "latitude", "longitude", "location_source", "missing_at", "trashed_at",
     "hub_image_id", "hub_remote",
 }
+# Commit mirror batches so a long hub export never holds a write lock for seconds
+# while interactive reads (stats/grid) wait on busy_timeout.
+_MIRROR_COMMIT_EVERY = 250
 
 
 async def _urllib_request(method: str, url: str, *, body: bytes | None = None, headers: dict | None = None) -> tuple[int, dict[str, str], bytes]:
@@ -46,7 +50,7 @@ async def _urllib_request(method: str, url: str, *, body: bytes | None = None, h
         except urllib.error.HTTPError as error:
             return error.code, dict(error.headers or {}), error.read()
 
-    return await asyncio.to_thread(request)
+    return await run_sync_work(request)
 
 
 async def ensure_mirror_schema(db_path: str) -> None:
@@ -120,6 +124,8 @@ class MirrorPuller:
                     continue
                 await self._apply_row(conn, source_id, row, available_columns)
                 applied += 1
+                if applied % _MIRROR_COMMIT_EVERY == 0:
+                    await conn.commit()
             await self._set_state(conn, "cursor", str(new_cursor))
             # The library service short-circuits on these denormalized counts;
             # a mirror that fills rows without them makes All Photos look like
@@ -129,7 +135,8 @@ class MirrorPuller:
         finally:
             await connection.close_async(conn, db_path=self.db_path)
 
-        cache_events.invalidate_stats_cache()
+        if applied > 0:
+            cache_events.invalidate_stats_cache()
 
         self._status.update(
             cursor=new_cursor,
