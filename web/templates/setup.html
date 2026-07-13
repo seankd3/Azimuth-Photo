@@ -103,6 +103,7 @@
         .su-connect { margin-top: 12px; }
         .su-connect-list { display: grid; gap: 8px; margin-top: 12px; }
         .su-connect-list[hidden] { display: none; }
+        .su-connect-host { color: var(--text-3); font-weight: 400; font-size: var(--fs-caption); }
         .su-connect-hub { display: flex; align-items: center; gap: 10px; }
         .su-connect-hub b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .su-connect-fields { display: grid; gap: 8px; margin-top: 12px; }
@@ -382,7 +383,13 @@
         const row = document.createElement('div');
         row.className = 'su-connect-hub';
         const name = document.createElement('b');
-        name.textContent = `${hub.name || 'Azimuth Photo'} —`;
+        name.textContent = hub.name || 'Azimuth Photo';
+        if (hub.url) {
+            const host = document.createElement('span');
+            host.className = 'su-connect-host';
+            try { host.textContent = new URL(hub.url).host; } catch { host.textContent = hub.url; }
+            name.append(' ', host);
+        }
         const button = document.createElement('button');
         button.className = 'su-btn'; button.type = 'button'; button.textContent = 'Connect';
         button.addEventListener('click', () => showConnectFields({ hubUrl: hub.url || '' }));
