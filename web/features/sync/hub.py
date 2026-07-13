@@ -352,7 +352,8 @@ async def _append_upload_chunk_locked(
     year, day = _date_parts(taken) or (str(date.today().year), date.today().isoformat())
     folder = str(item["folder"]).strip() if item.get("folder") else None
     # Named folders (e.g. Android PHONE_FOLDER="Personal Photos") are siblings of
-    # RAWS under the library root — never nested inside RAWS.
+    # the configured RAWS tree under the library root — never nested inside RAWS.
+    # RAWS itself always lands in the configured raws_root (legacy date tree).
     library_root = taxonomy.library_root_from_raws(raws_root)
     source_kind = "phone" if folder == taxonomy.DEST_PERSONAL else None
     destination_name = taxonomy.route_destination(
@@ -360,7 +361,10 @@ async def _append_upload_chunk_locked(
         source_kind=source_kind,
         folder_hint=folder,
     )
-    destination_root = taxonomy.destination_source_root(library_root, destination_name)
+    if destination_name == taxonomy.DEST_RAWS:
+        destination_root = Path(raws_root)
+    else:
+        destination_root = taxonomy.destination_source_root(library_root, destination_name)
     destination_dir = destination_root / year / day
     destination_dir.mkdir(parents=True, exist_ok=True)
     preferred = destination_dir / os.path.basename(str(item["filename"]))
