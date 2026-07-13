@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 import json
+import uuid
 
 from data import connection as data_connection
 from data.repositories.common import chunked
@@ -46,9 +47,10 @@ async def create_collection(
     try:
         cursor = await conn.execute(
             "INSERT INTO collections "
-            "(name, description, visibility, status, query, cover_image_id, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "(uuid, name, description, visibility, status, query, cover_image_id, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
+                str(uuid.uuid4()),
                 clean_name,
                 clean_description,
                 _normalize_visibility(visibility),
@@ -387,6 +389,7 @@ def _collection_summary(row: dict) -> dict:
     smart = query is not None
     return {
         "id": int(row["id"]),
+        "uuid": row.get("uuid") or "",
         "name": row.get("name") or "Untitled collection",
         "description": row.get("description") or "",
         "visibility": row.get("visibility") or "private",

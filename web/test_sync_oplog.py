@@ -11,6 +11,8 @@ from features.sync import oplog
 
 HASH_A = "a" * 32
 HASH_B = "b" * 32
+COLLECTION_ROOT = "11111111-1111-4111-8111-111111111111"
+COLLECTION_CHILD = "22222222-2222-4222-8222-222222222222"
 
 
 CATALOG_DDL = """
@@ -25,6 +27,32 @@ CREATE TABLE develop_settings (
     settings TEXT NOT NULL DEFAULT '{}',
     origin TEXT NOT NULL DEFAULT 'user',
     updated_at TEXT NOT NULL
+);
+CREATE TABLE collections (
+    id INTEGER PRIMARY KEY,
+    uuid TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    visibility TEXT NOT NULL DEFAULT 'private',
+    status TEXT NOT NULL DEFAULT 'draft',
+    query TEXT DEFAULT NULL,
+    cover_image_id INTEGER REFERENCES images(id),
+    created_at REAL NOT NULL DEFAULT 0,
+    updated_at REAL NOT NULL DEFAULT 0
+);
+CREATE TABLE collection_images (
+    collection_id INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+    image_id INTEGER NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL DEFAULT 0,
+    added_at REAL NOT NULL DEFAULT 0,
+    PRIMARY KEY (collection_id, image_id)
+);
+CREATE TABLE collection_links (
+    parent_id INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+    child_id INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL DEFAULT 0,
+    added_at REAL NOT NULL DEFAULT 0,
+    PRIMARY KEY (parent_id, child_id)
 );
 INSERT INTO images(id, content_hash) VALUES (1, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
 INSERT INTO images(id, content_hash) VALUES (2, 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
@@ -71,6 +99,26 @@ class OplogConvergenceTests(unittest.IsolatedAsyncioTestCase):
                 "ORDER BY tree.path COLLATE NOCASE"
             )]
             return {"flags": flags, "iptc": iptc, "keywords": keywords}
+
+    @staticmethod
+    def _collection_snapshot(path: str) -> dict:
+        with sqlite3.connect(path) as conn:
+            collections = list(conn.execute(
+                "SELECT uuid, name FROM collections ORDER BY uuid"
+            ))
+            links = list(conn.execute(
+                "SELECT parent.uuid, child.uuid FROM collection_links links "
+                "JOIN collections parent ON parent.id = links.parent_id "
+                "JOIN collections child ON child.id = links.child_id "
+                "ORDER BY parent.uuid, child.uuid"
+            ))
+            memberships = list(conn.execute(
+                "SELECT collections.uuid, images.content_hash FROM collection_images "
+                "JOIN collections ON collections.id = collection_images.collection_id "
+                "JOIN images ON images.id = collection_images.image_id "
+                "ORDER BY collections.uuid, images.content_hash"
+            ))
+        return {"collections": collections, "links": links, "memberships": memberships}
 
     async def test_apply_is_order_and_replay_independent_for_three_families(self):
         entries = [
@@ -148,6 +196,68 @@ class OplogConvergenceTests(unittest.IsolatedAsyncioTestCase):
             stored = conn.execute("SELECT ts, payload FROM oplog").fetchone()
         self.assertEqual(stored[0], received_at)
         self.assertEqual(json.loads(stored[1]), {"value": "picked"})
+
+    async def test_collection_ops_converge_under_randomized_interleaving(self):
+        alpha = [
+            {
+                "origin": "alpha", "origin_seq": 1, "content_hash": oplog.COLLECTION_CONTENT_HASH,
+                "family": "collection_meta",
+                "payload": {"collection_uuid": COLLECTION_ROOT, "name": "Trips", "parent_uuid": None, "deleted": False},
+                "ts": 100.0,
+            },
+            {
+                "origin": "alpha", "origin_seq": 2, "content_hash": oplog.COLLECTION_CONTENT_HASH,
+                "family": "collection_membership",
+                "payload": {"collection_uuid": COLLECTION_CHILD, "content_hash": HASH_A, "member": True},
+                "ts": 120.0,
+            },
+            {
+                "origin": "alpha", "origin_seq": 3, "content_hash": oplog.COLLECTION_CONTENT_HASH,
+                "family": "collection_membership",
+                "payload": {"collection_uuid": COLLECTION_CHILD, "content_hash": HASH_B, "member": True},
+                "ts": 140.0,
+            },
+        ]
+        beta = [
+            {
+                "origin": "beta", "origin_seq": 1, "content_hash": oplog.COLLECTION_CONTENT_HASH,
+                "family": "collection_meta",
+                "payload": {"collection_uuid": COLLECTION_CHILD, "name": "Beach", "parent_uuid": COLLECTION_ROOT, "deleted": False},
+                "ts": 110.0,
+            },
+            {
+                "origin": "beta", "origin_seq": 2, "content_hash": oplog.COLLECTION_CONTENT_HASH,
+                "family": "collection_meta",
+                "payload": {"collection_uuid": COLLECTION_CHILD, "name": "Beach finalists", "parent_uuid": COLLECTION_ROOT, "deleted": False},
+                "ts": 130.0,
+            },
+            {
+                "origin": "beta", "origin_seq": 3, "content_hash": oplog.COLLECTION_CONTENT_HASH,
+                "family": "collection_membership",
+                "payload": {"collection_uuid": COLLECTION_CHILD, "content_hash": HASH_A, "member": False},
+                "ts": 150.0,
+            },
+        ]
+        node_a = self._catalog()
+        node_b = self._catalog()
+        await oplog.apply_entries(node_a, alpha, applied_from="alpha", receive_time=500.0)
+        await oplog.apply_entries(node_b, beta, applied_from="beta", receive_time=500.0)
+
+        rng = random.Random(20260712)
+        for _ in range(12):
+            shuffled = (alpha + beta) * 2
+            rng.shuffle(shuffled)
+            await oplog.apply_entries(node_a, shuffled, applied_from="relay", receive_time=500.0)
+            rng.shuffle(shuffled)
+            await oplog.apply_entries(node_b, shuffled, applied_from="relay", receive_time=500.0)
+
+        expected = {
+            "collections": [(COLLECTION_ROOT, "Trips"), (COLLECTION_CHILD, "Beach finalists")],
+            "links": [(COLLECTION_ROOT, COLLECTION_CHILD)],
+            "memberships": [(COLLECTION_CHILD, HASH_B)],
+        }
+        self.assertEqual(self._collection_snapshot(node_a), expected)
+        self.assertEqual(self._collection_snapshot(node_b), expected)
 
 
 if __name__ == "__main__":
