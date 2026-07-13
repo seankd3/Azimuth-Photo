@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 
 import db
 from features.library import keywords
-from features.sync import hub_routes, mirror_export
+from features.sync import device_auth, hub_routes, mirror_export
 
 
 class SyncMirrorExportTests(unittest.TestCase):
@@ -25,6 +25,10 @@ class SyncMirrorExportTests(unittest.TestCase):
         self.old_db_path = db.DB_PATH
         db.DB_PATH = self.db_path
         asyncio.run(db.init_db())
+        self.auth_patch = mock.patch.object(
+            device_auth, "require_device_token_enabled", return_value=False
+        )
+        self.auth_patch.start()
         hub_routes.configure(db_path=lambda: self.db_path)
         api = FastAPI()
         api.include_router(hub_routes.router)
@@ -33,6 +37,7 @@ class SyncMirrorExportTests(unittest.TestCase):
 
     def tearDown(self):
         self.client_context.__exit__(None, None, None)
+        self.auth_patch.stop()
         db.DB_PATH = self.old_db_path
         self.tempdir.cleanup()
 

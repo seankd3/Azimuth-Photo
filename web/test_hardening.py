@@ -9,6 +9,11 @@ from core.source_files import inspect_source_file, source_file_is_safe
 from features.media import routes as media_routes
 from features.publishing.routes import _attachment_name
 import scanner
+import settings
+
+
+def test_device_tokens_are_required_by_default():
+    assert settings.DEFAULT_SETTINGS["require_device_token"] is True
 
 
 def test_scanner_skips_symlinked_media_outside_source(tmp_path: Path):

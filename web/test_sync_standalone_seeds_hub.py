@@ -14,6 +14,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI
@@ -21,7 +22,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 import db
-from features.sync import hashing, hub_routes
+from features.sync import device_auth, hashing, hub_routes
 from features.sync.sync_worker import SyncWorker
 
 
@@ -40,6 +41,10 @@ class StandaloneSeedsHubTests(unittest.TestCase):
             asyncio.run(db.init_db())
         db.DB_PATH = self.hub_db
 
+        self.auth_patch = mock.patch.object(
+            device_auth, "require_device_token_enabled", return_value=False
+        )
+        self.auth_patch.start()
         hub_routes.configure(
             db_path=lambda: self.hub_db,
             intake_root=lambda: self.intake,
@@ -58,6 +63,7 @@ class StandaloneSeedsHubTests(unittest.TestCase):
 
     def tearDown(self):
         self.client_context.__exit__(None, None, None)
+        self.auth_patch.stop()
         db.DB_PATH = self.old_db_path
         if self.old_mode is None:
             os.environ.pop("PHOTOARCHIVE_MODE", None)
