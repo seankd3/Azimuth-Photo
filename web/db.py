@@ -59,6 +59,8 @@ _catalog_summary_cache = catalog_repository._catalog_summary_cache
 _catalog_light_summary_cache = catalog_repository._catalog_light_summary_cache
 _date_groups_cache = ranking_repository._date_groups_cache
 _date_groups_refreshing = ranking_repository._date_groups_refreshing
+_date_histogram_cache = ranking_repository._date_histogram_cache
+_date_histogram_refreshing = ranking_repository._date_histogram_refreshing
 _map_markers_cache = ranking_repository._map_markers_cache
 _ranking_count_cache = ranking_repository._ranking_count_cache
 _visible_pairing_pool_counts_cache = rating_repository._visible_pairing_pool_counts_cache
@@ -1146,7 +1148,14 @@ async def rank_quality(orientation: str = "", compared: str = "", min_stars: int
 
 async def date_histogram(**kwargs) -> dict:
     kwargs.setdefault("caption_model_key", active_caption_model_key())
-    return await ranking_repository.date_histogram(DB_PATH, **kwargs)
+    force_refresh = bool(kwargs.pop("_force_refresh", False))
+    return await ranking_repository.date_histogram_cached(
+        DB_PATH,
+        get_catalog_image_counts=get_catalog_image_counts,
+        force_refresh=force_refresh,
+        ttl_seconds=FACET_CACHE_TTL_SECONDS,
+        **kwargs,
+    )
 
 
 async def scope_counts(**kwargs) -> dict:
