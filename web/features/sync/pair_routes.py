@@ -8,7 +8,7 @@ import socket
 from collections.abc import Callable
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import Request as UrlRequest, urlopen
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -133,7 +133,7 @@ async def api_pair_connect(body: ConnectRequest):
     }
     import json
 
-    req = Request(
+    req = UrlRequest(
         f"{hub}/api/pair",
         data=json.dumps(payload).encode("utf-8"),
         headers={"Content-Type": "application/json", "Accept": "application/json"},

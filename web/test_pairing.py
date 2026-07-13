@@ -18,7 +18,7 @@ from PIL import Image
 
 import db
 import settings
-from features.sync import device_auth, hub_routes, mdns, pairing, pair_routes
+from features.sync import device_auth, hub_routes, mdns, pairing, pair_routes, satellite
 
 
 class PairingTests(unittest.TestCase):
@@ -145,6 +145,97 @@ class QrEncodeTests(unittest.TestCase):
         image = Image.open(io.BytesIO(png))
         self.assertEqual(image.mode, "L")
         self.assertGreaterEqual(min(image.size), 100)
+
+
+class PairConnectTests(unittest.TestCase):
+    def setUp(self):
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.root = Path(self.tempdir.name)
+        self.db_path = str(self.root / "satellite.db")
+        self.settings_path = str(self.root / "settings.json")
+        self.old_db_path = db.DB_PATH
+        self.old_settings_path = settings.SETTINGS_PATH
+        self.old_settings = settings._settings
+        self.old_env = {key: os.environ.get(key) for key in ("PHOTOARCHIVE_MODE", "PHOTOARCHIVE_HUB_URL", "PHOTOARCHIVE_DEVICE_TOKEN")}
+        self.old_stored = (satellite._stored_hub_url, satellite._stored_device_token)
+        self.old_starter = satellite._sync_starter
+        db.DB_PATH = self.db_path
+        settings.SETTINGS_PATH = self.settings_path
+        settings._settings = None
+        settings.save_settings(settings.DEFAULT_SETTINGS)
+        os.environ["PHOTOARCHIVE_MODE"] = "standalone"
+        os.environ.pop("PHOTOARCHIVE_HUB_URL", None)
+        os.environ.pop("PHOTOARCHIVE_DEVICE_TOKEN", None)
+        satellite._stored_hub_url = ""
+        satellite._stored_device_token = ""
+        asyncio.run(db.init_db())
+        pair_routes.configure(db_path=lambda: self.db_path)
+        api = FastAPI()
+        api.include_router(pair_routes.router)
+        self.client_context = TestClient(api)
+        self.client = self.client_context.__enter__()
+
+    def tearDown(self):
+        self.client_context.__exit__(None, None, None)
+        satellite.register_sync_starter(self.old_starter)
+        satellite._stored_hub_url, satellite._stored_device_token = self.old_stored
+        for key, value in self.old_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        db.DB_PATH = self.old_db_path
+        settings.SETTINGS_PATH = self.old_settings_path
+        settings._settings = self.old_settings
+        self.tempdir.cleanup()
+
+    def test_connect_redeems_a_stubbed_hub_pair_code(self):
+        started = []
+        observed = {}
+
+        async def start_sync():
+            started.append(True)
+            return True
+
+        class StubHubResponse:
+            status = 200
+
+            def read(self):
+                return b'{"device_token":"device-token","hub_id":"hub-123"}'
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+        def stub_hub(request, timeout):
+            observed["url"] = request.full_url
+            observed["payload"] = request.data.decode("utf-8")
+            observed["timeout"] = timeout
+            return StubHubResponse()
+
+        satellite.register_sync_starter(start_sync)
+        with mock.patch.object(pair_routes, "urlopen", side_effect=stub_hub):
+            response = self.client.post(
+                "/api/pair/connect",
+                json={
+                    "hub_url": "http://hub.local:8000/",
+                    "code": "ABCD1234",
+                    "device_name": "Azimuth Photo on Windows",
+                    "platform": "Win32",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["hub_url"], "http://hub.local:8000")
+        self.assertTrue(response.json()["has_hub"])
+        self.assertEqual(started, [True])
+        self.assertEqual(observed["url"], "http://hub.local:8000/api/pair")
+        self.assertEqual(observed["timeout"], 10)
+        self.assertIn('"code": "ABCD1234"', observed["payload"])
+        self.assertEqual(settings.get_settings()["hub_url"], "http://hub.local:8000")
+        self.assertEqual(settings.get_settings()["device_token"], "device-token")
 
 
 if __name__ == "__main__":

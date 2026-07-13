@@ -100,6 +100,25 @@
         .su-extras p { color: var(--text-3); font-size: var(--fs-caption); margin: 4px 0 0; line-height: 1.45; }
         .su-extras a { color: var(--accent); text-decoration: none; }
         .su-extras a:hover { text-decoration: underline; }
+        .su-connect { margin-top: 12px; }
+        .su-connect-list { display: grid; gap: 8px; margin-top: 12px; }
+        .su-connect-list[hidden] { display: none; }
+        .su-connect-hub { display: flex; align-items: center; gap: 10px; }
+        .su-connect-hub b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .su-connect-fields { display: grid; gap: 8px; margin-top: 12px; }
+        .su-connect-fields[hidden] { display: none; }
+        .su-connect-fields input {
+            width: 100%; box-sizing: border-box; background: var(--bg); border: 1px solid var(--line);
+            border-radius: 8px; color: var(--text); font-size: var(--fs-ui); padding: 8px 11px;
+        }
+        .su-connect-fields input:focus { outline: none; border-color: var(--accent-dim); }
+        .su-connect-actions { display: flex; align-items: center; gap: 8px; }
+        .su-connect-link {
+            appearance: none; background: none; border: none; color: var(--text-3); cursor: pointer;
+            font-size: var(--fs-caption); padding: 0; text-align: left;
+        }
+        .su-connect-link:hover { color: var(--text-2); text-decoration: underline; }
+        .su-connect-success { color: var(--text-2); font-size: var(--fs-caption); margin-top: 12px; }
         .su-error { color: var(--danger); font-size: var(--fs-caption); margin-top: 10px; min-height: 16px; }
     </style>
 </head>
@@ -149,6 +168,22 @@
                     on your machine. Add them any time from Settings — or read the
                     <a href="https://github.com/Sean-Kenneth-Doherty/photo-archive/blob/main/docs/INSTALL.md" target="_blank" rel="noopener">install guide</a>.</p>
             </div>
+            <div class="su-extras su-connect" id="su-connect-card" hidden>
+                <b>Have an Azimuth Photo server?</b>
+                <p>Connect this library to a server on your network, or keep using it here.</p>
+                <div class="su-connect-list" id="su-connect-hubs"></div>
+                <div class="su-connect-fields" id="su-connect-fields" hidden>
+                    <input id="su-connect-url" type="url" spellcheck="false" autocomplete="url" placeholder="Server address" hidden>
+                    <input id="su-connect-code" type="text" spellcheck="false" autocomplete="one-time-code" maxlength="8" placeholder="8-character pair code" aria-label="Pair code">
+                    <div class="su-connect-actions">
+                        <button class="su-btn primary" id="su-connect-submit" type="button">Connect</button>
+                        <button class="su-back" id="su-connect-cancel" type="button">Cancel</button>
+                    </div>
+                </div>
+                <button class="su-connect-link" id="su-connect-manual" type="button">Enter server address manually</button>
+                <div class="su-error" id="su-connect-error"></div>
+                <div class="su-connect-success" id="su-connect-success" hidden></div>
+            </div>
             <div class="su-actions">
                 <span class="su-kbd">Importing continues in the background</span>
                 <span class="spacer"></span>
@@ -168,11 +203,15 @@
         const focus = { welcome: '[data-next]', folder: '#su-path-input', import: '#su-open' }[name];
         const el = document.querySelector(`.su-step[data-step="${name}"] ${focus}`);
         if (el) el.focus({ preventScroll: true });
+        if (name === 'import') beginHubDiscovery();
     }
 
     async function json(url, opts) {
         const res = await fetch(url, opts);
-        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);
+        if (!res.ok) {
+            const error = await res.json().catch(() => ({}));
+            throw new Error(error.error || error.detail || res.statusText);
+        }
         return res.json();
     }
 
@@ -314,6 +353,100 @@
         }
         if (!state || state.scanning) pollTimer = setTimeout(poll, 800);
     }
+
+    // --- Optional: connect to a hub ---
+    const connectCard = document.getElementById('su-connect-card');
+    const connectHubs = document.getElementById('su-connect-hubs');
+    const connectFields = document.getElementById('su-connect-fields');
+    const connectUrl = document.getElementById('su-connect-url');
+    const connectCode = document.getElementById('su-connect-code');
+    const connectManual = document.getElementById('su-connect-manual');
+    const connectError = document.getElementById('su-connect-error');
+    const connectSuccess = document.getElementById('su-connect-success');
+    const connectSubmit = document.getElementById('su-connect-submit');
+    let selectedHubUrl = '';
+    let discoveryStarted = false;
+
+    function showConnectFields({ hubUrl = '', manual = false } = {}) {
+        selectedHubUrl = hubUrl;
+        connectFields.hidden = false;
+        connectUrl.hidden = !manual;
+        connectManual.hidden = true;
+        if (manual) connectUrl.focus({ preventScroll: true });
+        else connectCode.focus({ preventScroll: true });
+        connectError.textContent = '';
+        connectSuccess.hidden = true;
+    }
+
+    function addDiscoveredHub(hub) {
+        const row = document.createElement('div');
+        row.className = 'su-connect-hub';
+        const name = document.createElement('b');
+        name.textContent = `${hub.name || 'Azimuth Photo'} —`;
+        const button = document.createElement('button');
+        button.className = 'su-btn'; button.type = 'button'; button.textContent = 'Connect';
+        button.addEventListener('click', () => showConnectFields({ hubUrl: hub.url || '' }));
+        row.append(name, button);
+        connectHubs.appendChild(row);
+    }
+
+    async function beginHubDiscovery() {
+        if (discoveryStarted) return;
+        discoveryStarted = true;
+        let status;
+        try { status = await json('/api/settings'); } catch { return; }
+        if (status?.sync?.mode !== 'satellite') return;
+        connectCard.hidden = false;
+        connectHubs.textContent = 'Looking for servers on your network…';
+        try {
+            const discovery = await json('/api/discover');
+            const hubs = discovery.hubs || [];
+            connectHubs.textContent = '';
+            if (hubs.length) hubs.forEach(addDiscoveredHub);
+            else connectHubs.textContent = 'No servers found on your network.';
+        } catch {
+            connectHubs.textContent = 'Couldn’t look for servers right now.';
+        }
+    }
+
+    connectManual.addEventListener('click', () => showConnectFields({ manual: true }));
+    document.getElementById('su-connect-cancel').addEventListener('click', () => {
+        connectFields.hidden = true;
+        connectManual.hidden = false;
+        connectError.textContent = '';
+        connectSuccess.hidden = true;
+    });
+    connectSubmit.addEventListener('click', async () => {
+        const hubUrl = (connectUrl.hidden ? selectedHubUrl : connectUrl.value.trim()).replace(/\/$/, '');
+        const code = connectCode.value.trim().toUpperCase();
+        if (!hubUrl || !code) {
+            connectError.textContent = 'Enter a server address and pair code.';
+            return;
+        }
+        const platform = navigator.userAgentData?.platform || navigator.platform || 'desktop';
+        connectSubmit.disabled = true;
+        connectError.textContent = '';
+        try {
+            await json('/api/pair/connect', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    hub_url: hubUrl,
+                    code,
+                    device_name: `Azimuth Photo on ${platform}`,
+                    platform,
+                }),
+            });
+            connectFields.hidden = true;
+            connectHubs.hidden = true;
+            connectManual.hidden = true;
+            connectSuccess.textContent = 'Connected — your library will sync in the background.';
+            connectSuccess.hidden = false;
+        } catch (err) {
+            connectError.textContent = String(err.message || err);
+        } finally {
+            connectSubmit.disabled = false;
+        }
+    });
 
     document.getElementById('su-open').addEventListener('click', async () => {
         clearTimeout(pollTimer);
