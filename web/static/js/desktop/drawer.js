@@ -1,7 +1,7 @@
 import {
     addCatalogSource, applyRemoteAccessServe, clearCache, connectToHub, createDeviceLink, discoverHubs,
     getAiStatus, getCacheStatus, getCaptionStatus, getCatalog, getMetadataStatus, getPairStatus,
-    getPeopleStatus, getRemoteAccess, getScanStatus, getSettings, installAiModel, listDevices,
+    getPeopleStatus, getRemoteAccess, getScanStatus, getSettings, getVersion, installAiModel, listDevices,
     pauseAiEmbeddings,
     pauseCaptionScan, pausePeopleScan, removeCatalogSource, rescanCatalogSource, resetSettings, resumeAiEmbeddings,
     resumeCaptionScan, resumePeopleScan, revokeDevice, saveSettings, startCachePregen, startMetadataScan, stopCachePregen,
@@ -39,6 +39,7 @@ let devicesPayload = null;
 let linkSession = null;
 let discoverPayload = null;
 let settingsPageData = null;
+let versionData = null;
 let savedSettings = {};
 let draftSettings = {};
 let dirtySettings = new Set();
@@ -846,6 +847,13 @@ function renderPrefs() {
         + '</section>';
 }
 
+function renderAbout() {
+    const version = versionData?.version || 'Unknown';
+    return '<section class="dr-sec"><h3>About</h3>'
+        + '<div class="setting-status"><b>Azimuth Photo</b><span>Version ' + esc(version) + '</span></div>'
+        + '</section>';
+}
+
 function focusPublishingSection() {
     const drawer = document.getElementById('drawer');
     const section = drawer?.querySelector('.dr-details[data-settings-section="Publishing"]');
@@ -867,7 +875,7 @@ function renderDrawer() {
     openSettingSections = new Set(Array.from(body.querySelectorAll('.dr-details[open] summary span'))
         .map((el) => el.textContent || ''));
     if (publishingFocusPending || publishReturn) openSettingSections.add('Publishing');
-    body.innerHTML = renderSources() + renderLibraryHealth(catalog) + renderWork() + renderSharedHome() + renderDevices() + renderConnectServer() + renderSettingsSections() + renderStorage() + renderRemote() + renderPrefs() + renderSettingsSaveBar();
+    body.innerHTML = renderSources() + renderLibraryHealth(catalog) + renderWork() + renderSharedHome() + renderDevices() + renderConnectServer() + renderSettingsSections() + renderStorage() + renderRemote() + renderPrefs() + renderAbout() + renderSettingsSaveBar();
     updateDrawerContext();
     bindDrawerActions();
     if (publishingFocusPending && body.querySelector('.dr-details[data-settings-section="Publishing"]')) {
@@ -877,7 +885,7 @@ function renderDrawer() {
 }
 
 async function refreshDrawer() {
-    const [nextCatalog, ai, cache, people, captions, metadata, remote, settingsData, pair, devices] = await Promise.all([
+    const [nextCatalog, ai, cache, people, captions, metadata, remote, settingsData, version, pair, devices] = await Promise.all([
         getCatalog().catch(() => null),
         getAiStatus().catch(() => null),
         getCacheStatus().catch(() => null),
@@ -886,6 +894,7 @@ async function refreshDrawer() {
         getMetadataStatus().catch(() => null),
         getRemoteAccess().catch(() => null),
         getSettings().catch(() => null),
+        versionData ? Promise.resolve(versionData) : getVersion().catch(() => null),
         getPairStatus().catch(() => null),
         listDevices().catch(() => null),
         refreshLibraryHealth(),
@@ -898,6 +907,7 @@ async function refreshDrawer() {
     captionStatus = captions || captionStatus;
     metadataStatus = metadata || metadataStatus || (settingsData && settingsData.metadata_status);
     remoteAccess = remote || remoteAccess;
+    versionData = version || versionData;
     pairStatus = pair || pairStatus;
     devicesPayload = devices || devicesPayload;
     renderActivity();
