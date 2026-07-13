@@ -29,6 +29,8 @@ TONE_EV_BLACKS_CENTER = -6.0
 TONE_HIGHLIGHTS_POS_SCALE = 0.55
 
 CONTRAST_FACTOR = 0.85
+# Bounded S-curve contrast strength (max that provably never clips at |Contrast|=100).
+CONTRAST_S_STRENGTH = 1.0
 SOFT_CLAMP_FACTOR = 4.0
 TONE_EPSILON = 1e-6
 

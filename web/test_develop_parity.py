@@ -75,10 +75,11 @@ class DevelopParityTests(unittest.TestCase):
         )
         expected = np.array(
             [
-                # §22 intentional golden refresh: the torture fixture now exercises the four-wheel grade stage.
-                0.6308119297027588, 0.25340598821640015, 0.0, 1.0, 7751.4169921875, 0.0,
-                0.6497146487236023, 1.0, 0.6921233534812927,
-                0.7832361459732056, 0.6242139935493469, 0.9238397479057312,
+                # Golden refresh: Contrast2012 is now a bounded S-curve (was a clipping
+                # linear stretch); validated via §30 true acceptance (non-Pixel 0.0719->0.0694).
+                0.6497620940208435, 0.2594650685787201, 0.0, 1.0, 7984.27685546875, 0.0,
+                0.6746917366981506, 1.0, 0.7040804028511047,
+                0.8029899597167969, 0.6763283610343933, 0.9238397479057312,
                 0.9238397479057312, 0.9238397479057312,
             ],
             dtype=np.float64,

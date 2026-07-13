@@ -4,7 +4,7 @@ import {
     CALIBRATION_SHADOW_TINT_SCALE, CAMERA_PROFILE_BIN_CENTER,
     CAMERA_PROFILE_CHROMA_BINS, CAMERA_PROFILE_HUE_BINS, CAMERA_PROFILE_PI,
     CAMERA_PROFILE_TWO_PI, CLARITY_FACTOR, DNG_LINEAR_SRGB_TO_PROPHOTO, DNG_PROPHOTO_TO_LINEAR_SRGB,
-    CLARITY_RESIDUAL_MAX, CONTRAST_FACTOR, DEHAZE_AIRLIGHT_FACTOR, DEHAZE_SATURATION_FACTOR,
+    CLARITY_RESIDUAL_MAX, CONTRAST_FACTOR, CONTRAST_S_STRENGTH, DEHAZE_AIRLIGHT_FACTOR, DEHAZE_SATURATION_FACTOR,
     GRAIN_CELL_SIZE_MIN, GRAIN_CELL_SIZE_RANGE, GRAIN_FACTOR, GRAIN_HASH_MULTIPLIER,
     GRAIN_HASH_SHIFT, GRAIN_OUTPUT_MASK, GRAIN_OUTPUT_SHIFT, GRAIN_SEED,
     GRAIN_X_MULTIPLIER, GRAIN_Y_MULTIPLIER, GRAY_MIXER_FACTOR, HSL_LUMINANCE_FACTOR,
@@ -665,7 +665,9 @@ vec3 applyScene(vec2 uv, out vec2 imageUv) {
     rgb *= exp2(deltaEv);
     float Y2 = dot(rgb, LUMW);
     float t = pow(clamp(Y2, 0.0, 1.0), 1.0 / 2.2);
-    float t3 = .5 + (t - .5) * (1.0 + ${f(CONTRAST_FACTOR)} * setting(u_contrast));
+    float cC = setting(u_contrast);
+    float tS = t * t * (3.0 - 2.0 * t);  // smoothstep S twin of pipeline._region_tone_map
+    float t3 = t + sign(cC) * ${f(CONTRAST_S_STRENGTH)} * abs(cC) * (tS - t);
     t3 = t3 < 0.0 ? 0.0 : (t3 > 1.0 ? 1.0 + (t3 - 1.0) / (1.0 + 4.0 * (t3 - 1.0)) : t3);
     rgb *= pow(max(t3, 0.0), 2.2) / max(Y2, 1e-6);
     float d = setting(u_dehaze);

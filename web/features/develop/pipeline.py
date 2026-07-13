@@ -254,8 +254,9 @@ def _region_tone_map(rgb: np.ndarray, settings: Mapping[str, object]) -> np.ndar
     rgb = (rgb * np.exp2(delta_ev)[..., None]).astype(np.float32)
     y2 = luma(rgb)
     t = np.power(np.clip(y2, 0.0, 1.0), 1.0 / C.TONE_GAMMA)
-    t3 = 0.5 + (t - 0.5) * (1.0 + C.CONTRAST_FACTOR * _slider(settings, "Contrast2012"))
-    t3 = _soft_clamp(t3)
+    contrast = _slider(settings, "Contrast2012")
+    t_s = t * t * (3.0 - 2.0 * t)  # smoothstep S: steepens midtones, vanishes at 0/1
+    t3 = _soft_clamp(t + np.sign(contrast) * C.CONTRAST_S_STRENGTH * np.abs(contrast) * (t_s - t))
     gain = np.power(t3, C.TONE_GAMMA) / np.maximum(y2, C.TONE_EPSILON)
     return (rgb * gain[..., None]).astype(np.float32)
 

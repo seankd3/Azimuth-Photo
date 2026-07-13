@@ -214,7 +214,7 @@ class LocalCorrectionTests(unittest.TestCase):
         # Detail2 golden refresh: SharpenEdgeMasking now gates the shared sharpen residual before local masks.
         np.testing.assert_allclose(
             stats,
-            [0.6626867651939392, 0.257098525762558, 0.30526613891124726, 0.6816287934780121, 0.9896730780601501],
+            [0.6760845184326172, 0.2612098157405853, 0.30513950884342195, 0.7013335227966309, 0.9906456410884857],
             rtol=0.0,
             atol=2e-6,
         )
