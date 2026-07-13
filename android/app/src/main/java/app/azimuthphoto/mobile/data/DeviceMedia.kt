@@ -29,8 +29,21 @@ data class MediaItem(
 
     val isRaw: Boolean get() = displayName.endsWith(".dng", ignoreCase = true)
 
-    /** RAW+JPEG twins share this key (same shot, same folder, different extension). */
-    val shotKey: String get() = "$bucketId/${displayName.substringBeforeLast('.').lowercase()}"
+    /**
+     * RAW+JPEG twins share this key. Pixel names the pair with per-format
+     * suffixes — PXL_….RAW-01.jpg / PXL_….RAW-02.ORIGINAL.dng (Top Shot uses
+     * TS-nnn-…) — so strip those after dropping the extension.
+     */
+    val shotKey: String
+        get() {
+            val base = displayName.substringBeforeLast('.').lowercase()
+                .replace(PIXEL_PAIR_SUFFIX, "")
+            return "$bucketId/$base"
+        }
+
+    private companion object {
+        val PIXEL_PAIR_SUFFIX = Regex("\\.(raw|ts-\\d+)-\\d+(\\.original)?$")
+    }
 }
 
 data class MediaBucket(val id: String, val name: String, val count: Int)
