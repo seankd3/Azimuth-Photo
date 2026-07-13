@@ -112,27 +112,11 @@ def parse_xmp_file(xmp_path: str) -> dict[str, Any]:
 
 
 def _iter_raw_rows(root: str) -> Iterator[tuple[str, str, str, int | None, float | None]]:
-    """Use scanner enumeration, supplementing CR2 until its shared patch lands."""
+    """Use the scanner's source-boundary-safe RAW enumeration."""
 
-    seen: set[str] = set()
     for row in scanner.walk_images(root):
         if row[2].lower() in RAW_EXTENSIONS:
-            seen.add(row[1])
             yield row
-    # scanner currently omits CR2. Keep import correct before the shared scanner
-    # patch is applied, without broadening this Develop-only walk.
-    for directory, _dirs, filenames in os.walk(root):
-        for filename in filenames:
-            if os.path.splitext(filename)[1].lower() != ".cr2":
-                continue
-            filepath = os.path.join(directory, filename)
-            if filepath in seen:
-                continue
-            try:
-                stat = os.stat(filepath)
-                yield filename, filepath, ".cr2", int(stat.st_size), float(stat.st_mtime)
-            except OSError:
-                yield filename, filepath, ".cr2", None, None
 
 
 def _ensure_source(conn, root: str):

@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.requests import RequestBodyTooLarge, read_body_limited
 from features.sync import device_auth, hub, mirror_export
 
 
@@ -23,16 +24,16 @@ _backfill_task: asyncio.Task | None = None
 
 
 class ManifestItem(BaseModel):
-    content_hash: str
-    full_hash: str | None = None
+    content_hash: str = Field(min_length=32, max_length=128)
+    full_hash: str | None = Field(default=None, min_length=32, max_length=128)
     bytes: int = Field(ge=0)
-    filename: str
-    date_taken: str | None = None
-    folder: str | None = None
+    filename: str = Field(min_length=1, max_length=255)
+    date_taken: str | None = Field(default=None, max_length=64)
+    folder: str | None = Field(default=None, max_length=64)
 
 
 class ManifestRequest(BaseModel):
-    items: list[ManifestItem]
+    items: list[ManifestItem] = Field(max_length=5000)
 
 
 class MetadataItem(BaseModel):
@@ -48,7 +49,7 @@ class MetadataItem(BaseModel):
 
 
 class MetadataRequest(BaseModel):
-    items: list[MetadataItem]
+    items: list[MetadataItem] = Field(max_length=5000)
 
 
 def configure(
@@ -103,7 +104,10 @@ async def api_sync_upload(
     x_offset: int = Header(alias="X-Offset"),
     x_total_bytes: int = Header(alias="X-Total-Bytes"),
 ):
-    chunk = await request.body()
+    try:
+        chunk = await read_body_limited(request, hub.MAX_CHUNK_BYTES)
+    except RequestBodyTooLarge:
+        return JSONResponse({"error": "Upload chunk is too large"}, status_code=413)
     try:
         return await hub.append_upload_chunk(
             _configured_db_path(),

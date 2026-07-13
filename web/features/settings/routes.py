@@ -19,6 +19,11 @@ from features.sync import oplog
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+MAX_BATCH_IMAGE_IDS = 10_000
+
+
+def _batch_image_ids_too_large(image_ids) -> bool:
+    return isinstance(image_ids, list) and len(image_ids) > MAX_BATCH_IMAGE_IDS
 BuildResponse = Callable[[], Awaitable[dict]]
 CopyResponse = Callable[[dict], dict]
 TrackTask = Callable[[Awaitable], object]
@@ -202,6 +207,11 @@ async def api_batch_set_flag(request: Request):
         return JSONResponse({"error": "Invalid flag"}, status_code=400)
     if not image_ids or not isinstance(image_ids, list):
         return JSONResponse({"error": "image_ids must be a non-empty list"}, status_code=400)
+    if _batch_image_ids_too_large(image_ids):
+        return JSONResponse(
+            {"error": f"image_ids is limited to {MAX_BATCH_IMAGE_IDS} entries"},
+            status_code=413,
+        )
 
     normalized_ids = []
     seen_ids = set()

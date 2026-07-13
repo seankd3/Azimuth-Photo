@@ -77,7 +77,7 @@ DEFAULT_SETTINGS = {
     "hub_url": "",
     "device_token": "",
     "paired_hub_id": "",
-    "require_device_token": False,
+    "require_device_token": True,
     "setup_completed": False,
 }
 

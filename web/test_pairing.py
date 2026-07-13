@@ -90,7 +90,7 @@ class PairingTests(unittest.TestCase):
         expired = self.client.post("/api/pair", json={"code": code, "device_name": "Late"})
         self.assertEqual(expired.status_code, 400, expired.text)
 
-    def test_revoke_and_require_device_token(self):
+    def test_sync_requires_live_device_token_by_default(self):
         code = self.client.post("/api/devices/link").json()["code"]
         paired = self.client.post(
             "/api/pair",
@@ -99,11 +99,6 @@ class PairingTests(unittest.TestCase):
         token = paired["device_token"]
         device_id = paired["device_id"]
 
-        # Default off: sync works without token.
-        ok = self.client.post("/api/sync/manifest", json={"items": []})
-        self.assertEqual(ok.status_code, 200, ok.text)
-
-        settings.save_settings({**settings.get_settings(), "require_device_token": True})
         denied = self.client.post("/api/sync/manifest", json={"items": []})
         self.assertEqual(denied.status_code, 401, denied.text)
 

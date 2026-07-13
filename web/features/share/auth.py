@@ -7,11 +7,13 @@ import hashlib
 import hmac
 import os
 import secrets
+from urllib.parse import parse_qs
 
 from fastapi import Request
 from fastapi.responses import Response
 
 import settings
+from core.requests import RequestBodyTooLarge, read_body_limited
 
 COOKIE_NAME = "pa_s"
 VIEW_COOKIE_NAME = "pa_v"
@@ -22,6 +24,7 @@ SCRYPT_P = 1
 SCRYPT_DKLEN = 32
 UNLOCK_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
 VIEW_MAX_AGE_SECONDS = 30 * 60
+FORM_BODY_MAX_BYTES = 1024
 
 
 def _b64(value: bytes) -> str:
@@ -91,6 +94,17 @@ def cookie_value(token: str, password_hash: str) -> str:
 def request_is_secure(request: Request) -> bool:
     forwarded_proto = (request.headers.get("x-forwarded-proto") or "").split(",", 1)[0].strip().lower()
     return forwarded_proto == "https" or request.url.scheme == "https"
+
+
+async def read_form_password(request: Request) -> str | None:
+    """Return the small URL-encoded unlock password, or None when oversized."""
+
+    try:
+        body = await read_body_limited(request, FORM_BODY_MAX_BYTES)
+    except RequestBodyTooLarge:
+        return None
+    decoded = body.decode("utf-8", errors="replace")
+    return str((parse_qs(decoded).get("password") or [""])[0])
 
 
 def share_cookie_path(token: str) -> str:
