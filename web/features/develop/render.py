@@ -623,6 +623,30 @@ async def render_export_response(
     )
 
 
+def develop_default_render(
+    linear01: np.ndarray, meta: Mapping[str, object] | None, settings: Mapping[str, object] | None = None
+) -> np.ndarray:
+    """Develop a linear base (float [0,1]) through the shared pipeline.
+
+    Single source of truth for "what an image looks like": the same
+    default WB + dual-illuminant color matrices + tone the library thumbnail
+    uses, so the Develop base preview never diverges into a flat, dark,
+    desaturated render. Returns developed float RGB in [0,1] (pre-geometry).
+    """
+    settings = settings or {}
+    as_shot = meta.get("as_shot") if isinstance(meta, Mapping) else None
+    color = dict(meta.get("color") or {}) if isinstance(meta, Mapping) else {}
+    if isinstance(meta, Mapping) and meta.get("base_kind"):
+        color["base_kind"] = meta["base_kind"]
+    return apply_pipeline(
+        linear01,
+        settings,
+        asshot_temperature=(as_shot or {}).get("temperature") if isinstance(as_shot, Mapping) else None,
+        asshot_tint=(as_shot or {}).get("tint") if isinstance(as_shot, Mapping) else None,
+        color_profile=color or None,
+    )
+
+
 def render_display_preview(image_id: int, raw_path: str | Path, max_px: int | None = None) -> Image.Image | None:
     """Develop-quality sRGB preview for library full views.
 
@@ -657,17 +681,7 @@ def render_display_preview(image_id: int, raw_path: str | Path, max_px: int | No
                 settings = _json.loads(row[0]) or {}
         except Exception:
             settings = {}
-        as_shot = meta.get("as_shot") if isinstance(meta, dict) else None
-        color = dict(meta.get("color") or {}) if isinstance(meta, dict) else {}
-        if isinstance(meta, dict) and meta.get("base_kind"):
-            color["base_kind"] = meta["base_kind"]
-        developed = apply_pipeline(
-            linear,
-            settings,
-            asshot_temperature=(as_shot or {}).get("temperature") if isinstance(as_shot, dict) else None,
-            asshot_tint=(as_shot or {}).get("tint") if isinstance(as_shot, dict) else None,
-            color_profile=color or None,
-        )
+        developed = develop_default_render(linear, meta, settings)
         developed = apply_geometry(developed, settings, max_px=max_px)
         encoded = np.asarray(np.clip(developed * 255.0 + 0.5, 0, 255), dtype=np.uint8)
         return Image.fromarray(encoded, mode="RGB")
