@@ -243,9 +243,8 @@ async def public_gallery_unlock(token: str, request: Request):
         return _public_response(HTMLResponse("<h1>Gallery unavailable</h1>", status_code=404))
     if _unlock_retry_after(token) is not None:
         return _public_response(HTMLResponse(_locked_html(token, gallery), status_code=429))
-    form = await request.form()
-    password = str(form.get("password") or "")
-    if len(password) > MAX_UNLOCK_PASSWORD_LENGTH or not auth.verify_password(password, gallery.get("password_hash")):
+    password = await auth.read_form_password(request)
+    if password is None or len(password) > MAX_UNLOCK_PASSWORD_LENGTH or not auth.verify_password(password, gallery.get("password_hash")):
         count, started = _unlock_failures.get(token, (0, time.time()))
         _unlock_failures[token] = (count + 1, started)
         await asyncio.sleep(0.2)

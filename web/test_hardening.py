@@ -5,9 +5,15 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+from fastapi import FastAPI, Request
+from fastapi.testclient import TestClient
+
 from core.source_files import inspect_source_file, source_file_is_safe
 from features.media import routes as media_routes
 from features.publishing.routes import _attachment_name
+from features.share import auth as share_auth
+from features.share import routes as share_routes
+from features.sync import device_auth, hub, hub_routes
 import scanner
 import settings
 
@@ -67,3 +73,44 @@ def test_public_download_filename_cannot_inject_response_headers():
 
     assert name == "portrait__X-Injected_ yes_.jpg"
     assert "\r" not in name and "\n" not in name and '"' not in name
+
+
+def test_hub_upload_rejects_oversized_chunk_before_buffering(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(hub, "MAX_CHUNK_BYTES", 4)
+    monkeypatch.setattr(device_auth, "require_device_token_enabled", lambda: False)
+    hub_routes.configure(db_path=lambda: str(tmp_path / "unused.db"))
+    app = FastAPI()
+    app.include_router(hub_routes.router)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/sync/upload/" + "a" * 32,
+            headers={"X-Offset": "0", "X-Total-Bytes": "5"},
+            content=b"12345",
+        )
+
+    assert response.status_code == 413
+    assert response.json() == {"error": "Upload chunk is too large"}
+
+
+def test_share_password_form_has_small_body_limit():
+    app = FastAPI()
+
+    @app.post("/unlock")
+    async def unlock(request: Request):
+        password = await share_auth.read_form_password(request)
+        return {"accepted": password is not None}
+
+    with TestClient(app) as client:
+        response = client.post("/unlock", content=b"password=" + b"a" * 2048)
+
+    assert response.json() == {"accepted": False}
+
+
+def test_share_unlock_failure_tracker_is_bounded():
+    share_routes._unlock_failures.clear()
+    for index in range(share_routes.MAX_TRACKED_UNLOCK_TOKENS + 20):
+        share_routes._record_unlock_failure(f"token-{index}", now=float(index + 1))
+
+    assert 0 < len(share_routes._unlock_failures) <= share_routes.MAX_TRACKED_UNLOCK_TOKENS
+    share_routes._unlock_failures.clear()
