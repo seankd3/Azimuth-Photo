@@ -47,7 +47,7 @@ docker pull ghcr.io/<owner>/photo-archive:v0.1.0
 
 The Tauri updater is configured to read the release manifest at:
 
-`https://github.com/Sean-Kenneth-Doherty/photo-archive/releases/latest/download/latest.json`
+`https://github.com/Sean-Kenneth-Doherty/azimuth-photo/releases/latest/download/latest.json`
 
 Before enabling the `signed-windows-desktop` workflow job, generate a Tauri
 updater signing keypair outside the repository. Put its public key in

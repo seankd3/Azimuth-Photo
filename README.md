@@ -93,7 +93,7 @@ An installable PWA at `/m`: fast timeline with pinch density, pull-to-refresh, o
 ## Quickstart
 
 ```bash
-git clone https://github.com/Sean-Kenneth-Doherty/photo-archive.git
+git clone https://github.com/Sean-Kenneth-Doherty/azimuth-photo.git
 cd photo-archive
 cd web
 python -m venv .venv && .venv/bin/pip install -r requirements.txt
