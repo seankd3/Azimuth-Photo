@@ -276,15 +276,15 @@ export class DevelopPanels {
         const wb = this.host.querySelector('#develop-wb');
         wb.addEventListener('change', () => this.change('WhiteBalance', wb.value, 'White Balance'));
         this.host.querySelector('[data-wb-reset]').addEventListener('click', () => {
-        this.root.querySelector('[data-auto-tone]')?.addEventListener('click', async (event) => {
-            const button = event.currentTarget;
-            button.disabled = true;
-            try { await this.onAutoTone?.(); } finally { button.disabled = false; }
-        });
             this.change('WhiteBalance', 'As Shot', 'White Balance');
             delete this.settings.Temperature;
             delete this.settings.Tint;
             this.setSettings(this.settings);
+        });
+        this.host.querySelector('[data-auto-tone]')?.addEventListener('click', async (event) => {
+            const button = event.currentTarget;
+            button.disabled = true;
+            try { await this.onAutoTone?.(); } finally { button.disabled = false; }
         });
         const bw = this.host.querySelector('#develop-bw');
         bw.addEventListener('change', () => {
