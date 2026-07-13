@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import logging
 import math
 import os
 import struct
@@ -28,6 +29,8 @@ except ImportError:  # pragma: no cover - rawpy is an application dependency.
 
 from . import ops_constants as C
 from .camera_profile import load_camera_profile
+
+log = logging.getLogger(__name__)
 from .lens import normalized_source_metadata, read_exif, resolve_lens_correction
 
 
@@ -538,7 +541,19 @@ def _write_base_cache(paths: BasePaths, rgb: np.ndarray, meta: dict[str, Any]) -
         handle.write(payload)
     os.replace(binary_temp, paths.binary)
 
-    encoded = np.rint(_linear_to_srgb(rgb.astype(np.float32) / 65535.0) * 255.0).astype(np.uint8)
+    # The base preview must match the library thumbnail: develop the linear
+    # base through the default pipeline (WB + color matrices + tone), not a bare
+    # sRGB gamma of scene-linear data — which reads dark, flat, and desaturated
+    # ("vomit") the moment you open Develop. Falls back to the raw encode only
+    # if the pipeline is somehow unavailable.
+    try:
+        from features.develop.render import develop_default_render
+
+        developed = develop_default_render(rgb.astype(np.float32) / 65535.0, meta)
+        encoded = np.asarray(np.clip(developed * 255.0 + 0.5, 0, 255), dtype=np.uint8)
+    except Exception:
+        log.exception("base preview pipeline render failed; using raw sRGB encode")
+        encoded = np.rint(_linear_to_srgb(rgb.astype(np.float32) / 65535.0) * 255.0).astype(np.uint8)
     preview_temp = paths.preview.with_suffix(".jpg.tmp")
     Image.fromarray(encoded, mode="RGB").save(preview_temp, format="JPEG", quality=88)
     os.replace(preview_temp, paths.preview)
