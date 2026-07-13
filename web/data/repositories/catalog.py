@@ -22,6 +22,10 @@ class SourceOfflineDuringScan(RuntimeError):
     """Raised when a source disappears before a scan can be finalized safely."""
 
 
+class SuspiciousEmptyScan(RuntimeError):
+    """Raised when an empty online scan is unsafe to apply to existing images."""
+
+
 def normalize_source_path(path: str) -> str:
     """Return the canonical local path used as a catalog source key."""
 
@@ -343,15 +347,26 @@ async def mark_source_scan_finished(
             raise SourceOfflineDuringScan(
                 "Source drive went offline during scan; existing catalog entries were preserved"
             )
+        suspicious_empty_scan = False
+        if seen_filepaths == []:
+            cursor = await conn.execute(
+                "SELECT 1 FROM images WHERE source_id = ? AND missing_at IS NULL LIMIT 1",
+                (int(source_id),),
+            )
+            suspicious_empty_scan = await cursor.fetchone() is not None
         now = _time.time()
         await conn.execute(
             "UPDATE catalog_sources SET last_scan_at = ?, last_seen_at = ?, online = ? WHERE id = ?",
             (now, now, 1, source_id),
         )
-        if seen_filepaths is not None:
+        if seen_filepaths is not None and not suspicious_empty_scan:
             await mark_source_missing_files_on_conn(conn, source_id, seen_filepaths, now)
         await update_source_counts_on_conn(conn, source_id)
         await conn.commit()
+        if suspicious_empty_scan:
+            raise SuspiciousEmptyScan(
+                "Scan found no files; existing catalog entries were preserved and were not marked missing"
+            )
     finally:
         await connection.close_async(conn, db_path=db_path)
 

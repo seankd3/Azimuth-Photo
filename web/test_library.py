@@ -1463,13 +1463,16 @@ class LibraryTests(BackendTestCase):
         conn = await db.get_db()
         try:
             cursor = await conn.execute(
-                "SELECT missing_at FROM images WHERE filepath = ?",
-                (second_path,),
+                "SELECT filepath, missing_at FROM images WHERE source_id = ? ORDER BY filepath",
+                (source["id"],),
             )
-            missing = await cursor.fetchone()
+            scan_rows = await cursor.fetchall()
         finally:
             await conn.close()
-        self.assertIsNotNone(missing["missing_at"])
+        self.assertEqual(
+            [(row["filepath"], row["missing_at"] is not None) for row in scan_rows],
+            [(first_path, False), (second_path, True)],
+        )
         stats = await db.get_stats()
         self.assertEqual(stats["total_images"], 1)
         self.assertEqual(stats["total_catalog_images"], 2)
@@ -1482,6 +1485,34 @@ class LibraryTests(BackendTestCase):
         self.assertEqual([row["filename"] for row in rows], ["first.jpg", "second.jpg"])
         restored = await self._image_row(rows[1]["id"])
         self.assertIsNone(restored["missing_at"])
+
+    async def test_empty_online_source_scan_preserves_existing_images_and_warns(self):
+        source = await self._source("scan-empty-online")
+        filepaths = [
+            os.path.join(source["path"], "first.jpg"),
+            os.path.join(source["path"], "second.jpg"),
+        ]
+        for filepath in filepaths:
+            with open(filepath, "wb") as handle:
+                handle.write(b"photo")
+        await scanner.scan_folder(source["path"], source_id=source["id"])
+
+        for filepath in filepaths:
+            os.remove(filepath)
+        await scanner.scan_folder(source["path"], source_id=source["id"])
+
+        conn = await db.get_db()
+        try:
+            rows = await (await conn.execute(
+                "SELECT filepath, missing_at FROM images WHERE source_id = ? ORDER BY filepath",
+                (source["id"],),
+            )).fetchall()
+        finally:
+            await conn.close()
+
+        self.assertEqual([row["filepath"] for row in rows], filepaths)
+        self.assertTrue(all(row["missing_at"] is None for row in rows))
+        self.assertIn("scan found no files", scanner.scan_state["warning"].lower())
 
     async def test_scan_preserves_catalog_when_source_goes_offline_before_finalize(self):
         source = await self._source("scan-offline")
