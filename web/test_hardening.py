@@ -7,14 +7,21 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
+from PIL import Image
+from pydantic import ValidationError
 
 from core.source_files import inspect_source_file, source_file_is_safe
 from features.media import routes as media_routes
+from features.settings import routes as settings_routes
 from features.develop import importer as develop_importer
 from features.publishing.routes import _attachment_name
+from features.captions.routes import CaptionBody
+from features.stacks.routes import CreateStackBody
 from features.share import auth as share_auth
 from features.share import routes as share_routes
 from features.sync import device_auth, hub, hub_routes
+from features.sync.oplog_routes import OplogEntry, OplogPushRequest
+from thumbnails import generation as thumbnail_generation
 import scanner
 import settings
 
@@ -147,3 +154,78 @@ def test_share_unlock_failure_tracker_is_bounded():
 
     assert 0 < len(share_routes._unlock_failures) <= share_routes.MAX_TRACKED_UNLOCK_TOKENS
     share_routes._unlock_failures.clear()
+
+
+def test_bulk_request_models_reject_unbounded_lists():
+    oversized_cases = (
+        lambda: CreateStackBody(image_ids=list(range(10_001))),
+        lambda: CaptionBody(tags=["tag"] * 501),
+        lambda: OplogPushRequest(
+            entries=[
+                OplogEntry(
+                    origin="device",
+                    origin_seq=index + 1,
+                    content_hash="a" * 32,
+                    family="flag",
+                    payload={},
+                    ts=1.0,
+                )
+                for index in range(5001)
+            ]
+        ),
+    )
+
+    for build in oversized_cases:
+        try:
+            build()
+        except ValidationError:
+            continue
+        raise AssertionError("accepted an oversized bulk request")
+
+
+def test_media_warm_normalization_caps_ids_before_database_lookup():
+    requested, all_ids = media_routes._normalize_warm_requests(
+        {"sm": list(range(1, 10_001))}
+    )
+
+    assert len(requested["sm"]) == 96
+    assert len(all_ids) == 96
+
+
+def test_batch_flag_request_limit_is_bounded():
+    assert settings_routes._batch_image_ids_too_large(
+        [1] * (settings_routes.MAX_BATCH_IMAGE_IDS + 1)
+    )
+
+
+def test_malformed_media_failure_does_not_poison_next_thumbnail_job(tmp_path: Path):
+    broken = tmp_path / "broken.jpg"
+    broken.write_bytes(b"\xff\xd8truncated")
+    valid = tmp_path / "valid.jpg"
+    Image.new("RGB", (8, 6), (12, 34, 56)).save(valid, "JPEG")
+    retry_after = {}
+
+    def generate(path: Path, image_id: int):
+        return thumbnail_generation.generate_missing_thumbnails(
+            str(path),
+            "sm",
+            image_id,
+            include_smaller_tiers=False,
+            hot=False,
+            allow_stale_fallback=False,
+            planned_thumbnail_sizes=lambda *_args, **_kwargs: ["sm"],
+            sizes={"sm": 64},
+            load_source_image=lambda filepath, *_args, **_kwargs: Image.open(filepath).copy(),
+            queue_orientation=lambda *_args: None,
+            resize_to_long_side=lambda image, _size: image.copy(),
+            build_source_signature=lambda *_args: "signature",
+            encode_and_cache_thumbnail=lambda *_args, **_kwargs: (_args[3], b"jpeg", True),
+            mark_source_missing_from_error=lambda *_args: False,
+            thumbnail_retry_after=retry_after,
+            thumbnail_retry_seconds=60,
+            log=lambda _message: None,
+        )
+
+    assert generate(broken, 1) is None
+    assert retry_after
+    assert generate(valid, 2) == b"jpeg"
