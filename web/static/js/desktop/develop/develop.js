@@ -882,10 +882,10 @@ function bindUi() {
         viewState.focusIndex = index;
         openImage(viewState.images[index]);
     });
-    if (!toolbar.querySelector('[data-action="proof"]')) {
+    if (!toolbar.querySelector('[data-action="pixel"]')) {
         const proofButton = document.createElement('button');
         proofButton.type = 'button';
-        proofButton.dataset.action = 'proof';
+        proofButton.dataset.action = 'pixel';
         proofButton.dataset.tip = 'Hold for original-pixel proof (P)';
         proofButton.setAttribute('aria-label', 'Hold for original 1:1 proof');
         proofButton.setAttribute('aria-pressed', 'false');
@@ -983,7 +983,7 @@ function handleKey(event) {
     } else if (key === 'p') {
         event.preventDefault(); event.stopImmediatePropagation();
         if (!event.repeat) {
-            toolbar.querySelector('[data-action="proof"]')?.setAttribute('aria-pressed', 'true');
+            toolbar.querySelector('[data-action="pixel"]')?.setAttribute('aria-pressed', 'true');
             proofTile?.setHeld(true);
         }
     } else if (event.code === 'Space') {
@@ -998,7 +998,7 @@ function handleKeyUp(event) {
     if (!mounted) return;
     if (event.key === '\\') showBefore(false);
     if (event.key.toLowerCase() === 'p') {
-        toolbar.querySelector('[data-action="proof"]')?.setAttribute('aria-pressed', 'false');
+        toolbar.querySelector('[data-action="pixel"]')?.setAttribute('aria-pressed', 'false');
         proofTile?.setHeld(false);
     }
     if (event.code === 'Space' && spaceHeld) {
