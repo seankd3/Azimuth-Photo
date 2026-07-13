@@ -48,6 +48,7 @@ import app.azimuthphoto.mobile.ui.ArchiveScreen
 import app.azimuthphoto.mobile.ui.PhotoArchiveTheme
 import app.azimuthphoto.mobile.ui.SettingsScreen
 import app.azimuthphoto.mobile.ui.TimelineScreen
+import app.azimuthphoto.mobile.ui.TrashScreen
 
 class MainActivity : ComponentActivity() {
 
@@ -125,6 +126,11 @@ private fun Root(
     }
 
     var tab by rememberSaveable { mutableStateOf(0) }
+    var showTrash by rememberSaveable { mutableStateOf(false) }
+    if (showTrash) {
+        TrashScreen(onClose = { showTrash = false })
+        return
+    }
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
@@ -164,9 +170,12 @@ private fun Root(
     ) { padding ->
         Box(Modifier.padding(padding)) {
             when (tab) {
-                0 -> TimelineScreen()
+                0 -> TimelineScreen(
+                    onOpenSettings = { tab = 2 },
+                    onOpenTrash = { showTrash = true },
+                )
                 1 -> ArchiveScreen()
-                else -> SettingsScreen()
+                else -> SettingsScreen(onOpenTrash = { showTrash = true })
             }
         }
     }

@@ -2,6 +2,9 @@ package app.azimuthphoto.mobile.data
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import kotlinx.coroutines.Dispatchers
@@ -103,11 +106,37 @@ class ArchiveApi(private val baseUrl: String) {
         shelves.sortedByDescending { it.count }
     }
 
+    suspend fun stats(timeoutSeconds: Long = 3): ArchiveStats = withContext(Dispatchers.IO) {
+        val client = http.newBuilder()
+            .connectTimeout(timeoutSeconds, TimeUnit.SECONDS)
+            .readTimeout(timeoutSeconds, TimeUnit.SECONDS)
+            .callTimeout(timeoutSeconds, TimeUnit.SECONDS)
+            .build()
+        client.newCall(Request.Builder().url("$baseUrl/api/stats").build()).execute().use { response ->
+            if (!response.isSuccessful) throw IOException("stats failed: HTTP ${response.code}")
+            val root = json.parseToJsonElement(response.body?.string().orEmpty())
+            ArchiveStats(photoCount = findPhotoCount(root))
+        }
+    }
+
     fun thumbUrl(image: ArchiveImage, size: String = "sm"): String =
         if (image.thumb_url.isNotEmpty()) "$baseUrl${image.thumb_url}"
         else "$baseUrl/api/thumb/$size/${image.id}"
 
     fun largeUrl(image: ArchiveImage): String = "$baseUrl/api/thumb/lg/${image.id}"
+}
+
+data class ArchiveStats(val photoCount: Long?)
+
+private fun findPhotoCount(element: JsonElement): Long? {
+    if (element !is JsonObject) return null
+    val preferred = listOf("total_images", "photo_count", "image_count", "total", "photos")
+    preferred.forEach { key ->
+        val value = element[key]
+        if (value is JsonPrimitive && !value.isString) value.content.toLongOrNull()?.let { return it }
+    }
+    element.values.forEach { child -> findPhotoCount(child)?.let { return it } }
+    return null
 }
 
 @Serializable

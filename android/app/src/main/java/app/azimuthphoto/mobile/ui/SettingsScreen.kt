@@ -37,12 +37,13 @@ import app.azimuthphoto.mobile.backup.BackupScheduler
 import app.azimuthphoto.mobile.backup.BackupWorker
 import app.azimuthphoto.mobile.backup.FreeUpSpace
 import app.azimuthphoto.mobile.data.SettingsStore
+import app.azimuthphoto.mobile.data.ArchiveApi
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 @Composable
-fun SettingsScreen() {
+fun SettingsScreen(onOpenTrash: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val settings by SettingsStore.flow(context).collectAsState(initial = null)
@@ -56,6 +57,13 @@ fun SettingsScreen() {
     val s = settings ?: return
     var serverUrl by remember(s.serverUrl) { mutableStateOf(s.serverUrl) }
     var deviceToken by remember(s.deviceToken) { mutableStateOf(s.deviceToken) }
+    var reachability by remember(s.serverUrl) { mutableStateOf<String?>(null) }
+    LaunchedEffect(s.serverUrl) {
+        reachability = runCatching {
+            val count = ArchiveApi(s.serverUrl).stats(timeoutSeconds = 3).photoCount
+            if (count != null) "Connected — ${"%,d".format(count)} photos" else "Connected"
+        }.getOrElse { "Unreachable" }
+    }
 
     Column(
         Modifier
@@ -97,6 +105,8 @@ fun SettingsScreen() {
         }
         TextButton(onClick = { BackupScheduler.runNow(context) }) { Text("Back up now") }
 
+        TextButton(onClick = onOpenTrash) { Text("Trash") }
+
         HorizontalDivider(Modifier.padding(vertical = 14.dp), color = PanelHigh)
 
         SectionTitle("Free up space")
@@ -137,6 +147,12 @@ fun SettingsScreen() {
         HorizontalDivider(Modifier.padding(vertical = 14.dp), color = PanelHigh)
 
         SectionTitle("Server")
+        Text(
+            reachability ?: "Checking connection",
+            style = MaterialTheme.typography.bodySmall,
+            color = if (reachability?.startsWith("Connected") == true) Positive else TextSecondary,
+        )
+        Spacer(Modifier.height(8.dp))
         OutlinedTextField(
             value = serverUrl,
             onValueChange = { serverUrl = it },

@@ -25,12 +25,14 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -76,6 +78,7 @@ fun ArchiveScreen() {
     var totalVisible by remember { mutableStateOf(0L) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
+    var retryToken by remember { mutableStateOf(0) }
     var viewerIndex by rememberSaveable { mutableStateOf<Int?>(null) }
     val gridState = rememberLazyGridState()
     var pageLoadInFlight by remember(activeQuery, activeShelf) { mutableStateOf(false) }
@@ -85,7 +88,7 @@ fun ArchiveScreen() {
         shelves = runCatching { api.shelves() }.getOrDefault(emptyList())
     }
 
-    LaunchedEffect(activeQuery, activeShelf) {
+    LaunchedEffect(activeQuery, activeShelf, retryToken) {
         loading = true
         error = null
         try {
@@ -94,7 +97,7 @@ fun ArchiveScreen() {
             totalVisible = page.visible_images
             lastPageWasEmpty = page.images.isEmpty()
         } catch (e: Exception) {
-            error = e.message ?: "Couldn't reach the archive"
+            error = e.message ?: "Archive unreachable"
         }
         loading = false
     }
@@ -178,12 +181,45 @@ fun ArchiveScreen() {
             }
         }
 
+        if (error != null) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "Archive unreachable — check Tailscale",
+                        color = TextPrimary,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = { retryToken++ }) { Text("Retry") }
+                }
+            }
+        }
+
         when {
-            loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            loading && images.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
             }
-            error != null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(error!!, color = TextSecondary, style = MaterialTheme.typography.bodyMedium)
+            images.isEmpty() && activeQuery.isNotBlank() -> Box(
+                Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    "Nothing matches ‘$activeQuery’",
+                    color = TextSecondary,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+            images.isEmpty() && error == null -> Box(
+                Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("The archive is empty", color = TextSecondary)
             }
             else -> {
                 Box(Modifier.fillMaxSize()) {

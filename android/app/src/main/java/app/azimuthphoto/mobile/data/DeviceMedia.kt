@@ -1,8 +1,10 @@
 package app.azimuthphoto.mobile.data
 
 import android.content.ContentUris
+import android.content.ContentResolver
 import android.content.Context
 import android.net.Uri
+import android.os.Bundle
 import android.provider.MediaStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -82,18 +84,47 @@ object DeviceMedia {
 
     /** All device photos & videos, newest first. */
     suspend fun queryAll(context: Context, sinceAddedSec: Long = 0): List<MediaItem> =
+        query(context, sinceAddedSec, trashedOnly = false)
+
+    /** MediaStore items currently in the system trash. */
+    suspend fun queryTrashed(context: Context): List<MediaItem> =
+        query(context, sinceAddedSec = 0, trashedOnly = true)
+
+    private suspend fun query(
+        context: Context,
+        sinceAddedSec: Long,
+        trashedOnly: Boolean,
+    ): List<MediaItem> =
         withContext(Dispatchers.IO) {
             val items = ArrayList<MediaItem>(4096)
             val selection = if (sinceAddedSec > 0) {
                 "$MEDIA_SELECTION AND ${MediaStore.Files.FileColumns.DATE_ADDED} > $sinceAddedSec"
             } else MEDIA_SELECTION
-            context.contentResolver.query(
-                COLLECTION, PROJECTION, selection, null,
-                "CASE WHEN ${MediaStore.Files.FileColumns.DATE_TAKEN} > 0 THEN " +
+            val sortOrder = "CASE WHEN ${MediaStore.Files.FileColumns.DATE_TAKEN} > 0 THEN " +
                     "${MediaStore.Files.FileColumns.DATE_TAKEN} ELSE " +
                     "${MediaStore.Files.FileColumns.DATE_ADDED}*1000 END DESC, " +
-                    "${MediaStore.Files.FileColumns._ID} DESC",
-            )?.use { c ->
+                    "${MediaStore.Files.FileColumns._ID} DESC"
+            val cursor = if (trashedOnly) {
+                context.contentResolver.query(
+                    COLLECTION,
+                    PROJECTION,
+                    Bundle().apply {
+                        putString(ContentResolver.QUERY_ARG_SQL_SELECTION, selection)
+                        putString(ContentResolver.QUERY_ARG_SQL_SORT_ORDER, sortOrder)
+                        putInt(MediaStore.QUERY_ARG_MATCH_TRASHED, MediaStore.MATCH_ONLY)
+                    },
+                    null,
+                )
+            } else {
+                context.contentResolver.query(
+                    COLLECTION,
+                    PROJECTION,
+                    selection,
+                    null,
+                    sortOrder,
+                )
+            }
+            cursor?.use { c ->
                 val iId = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns._ID)
                 val iType = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MEDIA_TYPE)
                 val iTaken = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATE_TAKEN)

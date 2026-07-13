@@ -8,6 +8,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -63,6 +64,7 @@ fun MediaGrid(
     onLongPress: (MediaItem) -> Unit,
     backedUpIds: Set<Long> = emptySet(),
     showBackupState: Boolean = false,
+    contentPadding: PaddingValues = PaddingValues(0.dp),
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -110,6 +112,7 @@ fun MediaGrid(
                 },
             verticalArrangement = Arrangement.spacedBy(2.dp),
             horizontalArrangement = Arrangement.spacedBy(2.dp),
+            contentPadding = contentPadding,
         ) {
             items(
                 items = rows,
