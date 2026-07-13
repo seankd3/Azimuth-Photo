@@ -66,7 +66,7 @@ async def api_trash(limit: int = 100, offset: int = 0):
 
 
 @router.post("/api/trash/empty")
-async def api_empty_trash(_payload: EmptyTrashBody):
+async def api_empty_trash(_payload: EmptyTrashBody | None = None):
     result = await trash_service.empty_trash(_configured_db_path())
     if result["deleted_count"]:
         _invalidate_after_write()
