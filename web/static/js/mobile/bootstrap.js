@@ -91,8 +91,10 @@ function installOfflineBanner() {
         document.documentElement.style.setProperty('--top-banner-offset', `${Math.ceil(offset)}px`);
     };
 
+    let backendUnreachable = false;
+
     const syncMutationControls = () => {
-        const offline = !navigator.onLine;
+        const offline = !navigator.onLine || backendUnreachable;
         document.body.classList.toggle('offline', offline);
         const selectors = [
             '[data-mutating]',
@@ -107,7 +109,7 @@ function installOfflineBanner() {
     };
 
     const sync = () => {
-        const online = navigator.onLine;
+        const online = navigator.onLine && !backendUnreachable;
         banner.hidden = online;
         setNetworkOnline(online);
         syncMutationControls();
@@ -130,6 +132,16 @@ function installOfflineBanner() {
     }
     document.addEventListener('sheet-mutated', syncMutationControls);
     document.addEventListener('selection-actions-mutated', syncMutationControls);
+    window.addEventListener('azimuth-api-failure', (event) => {
+        if (event.detail?.kind !== 'network') return;
+        backendUnreachable = true;
+        sync();
+    });
+    window.addEventListener('azimuth-api-success', () => {
+        if (!backendUnreachable) return;
+        backendUnreachable = false;
+        sync();
+    });
     sync();
 }
 

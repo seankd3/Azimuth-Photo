@@ -327,10 +327,10 @@ async def export_rankings(
     normalized_format = (format or "json").lower()
     if normalized_format == "zip":
         if size not in ZIP_EXPORT_SIZES:
-            return JSONResponse({"detail": "size must be original, lg, or md"}, status_code=400)
+            return JSONResponse({"error": "size must be original, lg, or md"}, status_code=400)
         if ids and len(_parse_ids(ids, max_ids=ZIP_EXPORT_MAX_IMAGES)) > ZIP_EXPORT_MAX_IMAGES:
             return JSONResponse(
-                {"detail": f"Zip export is limited to {ZIP_EXPORT_MAX_IMAGES} images"},
+                {"error": f"Zip export is limited to {ZIP_EXPORT_MAX_IMAGES} images"},
                 status_code=400,
             )
     images = await _get_export_images(
@@ -355,7 +355,7 @@ async def export_rankings(
     if normalized_format == "zip":
         if len(images) > ZIP_EXPORT_MAX_IMAGES:
             return JSONResponse(
-                {"detail": f"Zip export is limited to {ZIP_EXPORT_MAX_IMAGES} images"},
+                {"error": f"Zip export is limited to {ZIP_EXPORT_MAX_IMAGES} images"},
                 status_code=400,
             )
         try:
@@ -367,7 +367,7 @@ async def export_rankings(
                 )
         except InsufficientExportStorage:
             return JSONResponse(
-                {"detail": "Not enough temporary disk space for export"},
+                {"error": "Not enough temporary disk space for export"},
                 status_code=507,
             )
         return FileResponse(

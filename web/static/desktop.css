@@ -863,7 +863,9 @@ html[data-badges-index="0"] .cell .c-idx { display: none; }
 .shortcut-sheet-keys { display: inline-flex; align-items: center; gap: 2px; }
 .shortcut-sheet-group dd { color: var(--text-2); font-size: var(--fs-caption); line-height: var(--lh-ui); }
 .shortcut-sheet-or, .shortcut-sheet-plus { color: var(--text-3); font-size: var(--fs-micro); }
-#toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); width: min(520px, calc(100vw - 32px)); display: flex; flex-direction: column-reverse; align-items: center; pointer-events: none; z-index: var(--z-toast); transition: transform var(--dur-base) var(--ease); }
+#connection-banner { position: fixed; inset: 0 0 auto; z-index: var(--z-toast); display: block; padding: 9px var(--s4); color: var(--text); font-size: var(--fs-ui); font-weight: var(--fw-semibold); text-align: center; background: var(--surface-popover); border-bottom: 1px solid var(--danger-line); box-shadow: 0 16px 48px rgba(0,0,0,.55); opacity: 0; pointer-events: none; transform: translateY(-100%); transition: opacity var(--dur-base) var(--ease), transform var(--dur-base) var(--ease); }
+#connection-banner.on { opacity: 1; transform: translateY(0); }
+#toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); width: min(520px, calc(100vw - 32px)); display: flex; flex-direction: column-reverse; gap: var(--s2); align-items: center; pointer-events: none; z-index: var(--z-toast); transition: transform var(--dur-base) var(--ease); }
 .sync-chip { position: relative; }
 .sync-chip-button { display: inline-flex; align-items: center; gap: 5px; min-height: 30px; padding: 0 9px; color: var(--text-2); font: inherit; font-size: var(--fs-caption); background: var(--surface-raised); border: 1px solid var(--line); border-radius: var(--r-ctl); cursor: pointer; }
 .sync-chip-button:hover { color: var(--text); border-color: var(--accent-lin); }
@@ -880,12 +882,16 @@ html[data-badges-index="0"] .cell .c-idx { display: none; }
 body:has(#view-loupe.active) #toast { transform: translateX(-50%) translateY(-70px); }
 body:has(#sel-pill.on) #toast { transform: translateX(-50%) translateY(-56px); }
 body:has(#view-loupe.active):has(#sel-pill.on) #toast { transform: translateX(-50%) translateY(-126px); }
-.toast-item { position: relative; width: 100%; min-width: min(260px, 100%); display: flex; align-items: center; gap: var(--s3); padding: 10px 12px 12px; border-radius: var(--r-card); background: var(--surface-ink); border: 1px solid var(--line); box-shadow: 0 10px 34px rgba(0,0,0,.55); opacity: 0; transform: translateY(12px); transition: opacity var(--dur-base) var(--ease), transform var(--dur-base) var(--ease); pointer-events: auto; }
+.toast-item { position: relative; width: 100%; min-width: min(260px, 100%); display: flex; align-items: center; gap: var(--s3); padding: 10px 12px 12px; border-radius: var(--r-card); background: var(--surface-popover); border: 1px solid var(--line); box-shadow: 0 16px 48px rgba(0,0,0,.55); opacity: 0; transform: translateY(12px); transition: opacity var(--dur-base) var(--ease), transform var(--dur-base) var(--ease); pointer-events: auto; }
 .toast-item.on { opacity: 1; transform: translateY(0); }
+.toast-item.toast-error { color: var(--text); border-color: var(--danger-line); }
 .toast-item .t-msg { flex: 1; }
 .toast-item .t-undo { display: inline-flex; align-items: center; gap: 4px; color: var(--accent); font-weight: 600; font-size: var(--fs-ui); padding: 2px 4px; border-radius: 4px; }
+.toast-item .t-undo[hidden] { display: none; }
 .toast-item .t-undo kbd { color: var(--accent); border-color: rgba(122,168,212,.3); background: rgba(122,168,212,.08); }
 .toast-item .t-undo:hover { background: var(--accent-dim); }
+.toast-item .t-dismiss { display: grid; width: 20px; height: 20px; place-items: center; color: var(--text-2); font-size: 18px; line-height: 1; border-radius: var(--r-ctl); }
+.toast-item .t-dismiss:hover { color: var(--text); background: var(--danger-dim); }
 .toast-item .t-timer { position: absolute; left: 10px; right: 10px; bottom: 0; height: 2px; overflow: hidden; }
 .toast-item .t-timer i { display: block; height: 100%; background: rgba(255,255,255,.18); width: 100%; transform-origin: left; animation: toast-drain 8s linear forwards; }
 @keyframes toast-drain { from { transform: scaleX(1); } to { transform: scaleX(0); } }

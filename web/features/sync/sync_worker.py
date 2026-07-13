@@ -337,7 +337,8 @@ class SyncWorker:
     def _error(self, error: Exception) -> None:
         message = str(error)
         log.warning("satellite sync failed: %s", message)
-        errors = [message, *self._status["recent_errors"]]
+        friendly = "Can't reach Azimuth Photo. Retrying…" if isinstance(error, (ConnectionError, OSError)) else message
+        errors = [friendly, *self._status["recent_errors"]]
         self._status["recent_errors"] = errors[:5]
 
 

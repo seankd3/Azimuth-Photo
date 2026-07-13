@@ -2,6 +2,7 @@ import { initState } from './state.js';
 import { initKeywordsPanel } from './keywords_panel.js';
 import { initMotion } from './motion.js';
 import { initToast } from './toast.js';
+import { initErrorBus } from './error_bus.js';
 import { initSelection } from './selection.js';
 import { initPanel } from './panel.js';
 import { initRightPanel } from './panel_right.js';
@@ -32,6 +33,7 @@ async function boot() {
     initMotion();
     initState();
     initToast();
+    initErrorBus();
     initSelection();
     initContextbar();
     initFilters();

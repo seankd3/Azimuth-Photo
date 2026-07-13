@@ -147,7 +147,7 @@ def _fields_set(payload) -> set[str]:
 
 
 def _invalid_query_response(exc: smart.SmartCollectionQueryError) -> JSONResponse:
-    return JSONResponse({"detail": str(exc)}, status_code=422)
+    return JSONResponse({"error": str(exc)}, status_code=422)
 
 
 def _invalidate_suggestions_cache() -> None:

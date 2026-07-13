@@ -27,6 +27,17 @@ def _render(request: Request, template_name: str):
     return _templates.TemplateResponse(request, template_name, _template_context(request))
 
 
+def not_found_response(request: Request):
+    if _templates is None or _template_context is None:
+        raise RuntimeError("Page routes are not configured")
+    return _templates.TemplateResponse(
+        request,
+        "not_found.html",
+        _template_context(request),
+        status_code=404,
+    )
+
+
 def needs_setup() -> bool:
     """True only for a genuinely fresh install: no completed setup, no sources."""
 

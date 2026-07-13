@@ -5,6 +5,7 @@
 // truth (service workers cannot read it).
 
 import { emit } from './state.js';
+import { reportApiFailure, reportApiSuccess } from '../api.js';
 
 const STORAGE_KEY = 'pa-m-write-queue-v1';
 const BASE_RETRY_MS = 500;
@@ -68,12 +69,23 @@ async function requestBackgroundSync() {
 }
 
 async function send(item) {
-    const response = await fetch(item.url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(item.body),
-    });
-    if (!response.ok) throw new Error(`write failed: ${response.status}`);
+    try {
+        const response = await fetch(item.url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(item.body),
+        });
+        if (!response.ok) {
+            const body = await response.json().catch(() => null);
+            reportApiFailure({ url: item.url, status: response.status, body, method: 'POST' });
+            throw new Error(`write failed: ${response.status}`);
+        }
+        reportApiSuccess(item.url);
+    } catch (error) {
+        if (error?.message?.startsWith('write failed:')) throw error;
+        reportApiFailure({ url: item.url, method: 'POST', cause: error });
+        throw error;
+    }
 }
 
 export async function drainWrites() {

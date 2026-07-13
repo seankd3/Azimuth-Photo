@@ -647,7 +647,7 @@ class ApiShapeTests(unittest.TestCase):
             self.assertEqual(names, [f"{self.ids[0]}-sunset-alpha.jpg"])
             self.assertEqual(archive.read(f"{self.ids[0]}-sunset-alpha.jpg"), b"cached md image")
         self.assertEqual(sm_response.status_code, 400)
-        self.assertIn("size must be original, lg, or md", sm_response.json()["detail"])
+        self.assertIn("size must be original, lg, or md", sm_response.json()["error"])
 
     def test_export_zip_manifest_names_missing_original_id(self):
         first_path = os.path.join(self.tempdir.name, "catalog", "sunset-alpha.jpg")
@@ -730,7 +730,7 @@ class ApiShapeTests(unittest.TestCase):
             export_routes.shutil.disk_usage = old_disk_usage
 
         self.assertEqual(response.status_code, 507)
-        self.assertIn("temporary disk space", response.json()["detail"])
+        self.assertIn("temporary disk space", response.json()["error"])
 
     def test_export_zip_rejects_requests_over_cap(self):
         ids = ",".join(str(image_id) for image_id in range(1, 2002))
@@ -738,7 +738,7 @@ class ApiShapeTests(unittest.TestCase):
         response = self.client.get(f"/api/export?format=zip&ids={ids}")
 
         self.assertEqual(response.status_code, 400)
-        self.assertIn("2000", response.json()["detail"])
+        self.assertIn("2000", response.json()["error"])
 
 
 if __name__ == "__main__":

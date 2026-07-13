@@ -306,7 +306,7 @@ class CollectionTests(BackendTestCase):
         response = await asyncio.to_thread(probe)
 
         self.assertEqual(response.status_code, 422)
-        self.assertIn("Unknown smart collection query key", response.json()["detail"])
+        self.assertIn("Unknown smart collection query key", response.json()["error"])
 
     async def test_smart_collection_with_no_matches_is_a_normal_empty_collection(self):
         created = await collection_routes.api_create_collection(
@@ -371,9 +371,9 @@ class CollectionTests(BackendTestCase):
         q_response, folder_response = await asyncio.to_thread(probe)
 
         self.assertEqual(q_response.status_code, 422)
-        self.assertIn("query.q must be 1000 characters or less", q_response.json()["detail"])
+        self.assertIn("query.q must be 1000 characters or less", q_response.json()["error"])
         self.assertEqual(folder_response.status_code, 422)
-        self.assertIn("query.folder must be 500 characters or less", folder_response.json()["detail"])
+        self.assertIn("query.folder must be 500 characters or less", folder_response.json()["error"])
 
     async def test_smart_collection_rejects_folder_arrays(self):
         def probe():
@@ -389,7 +389,7 @@ class CollectionTests(BackendTestCase):
         response = await asyncio.to_thread(probe)
 
         self.assertEqual(response.status_code, 422)
-        self.assertIn("query.folder must be a string", response.json()["detail"])
+        self.assertIn("query.folder must be a string", response.json()["error"])
 
     async def test_smart_collection_materialize_cap_returns_conflict(self):
         created = await collection_routes.api_create_collection(

@@ -1,4 +1,4 @@
-import { fetchJson } from '../api.js';
+import { fetchJson, reportApiFailure, reportApiSuccess } from '../api.js';
 
 export { fetchJson };
 
@@ -10,9 +10,15 @@ export async function postJson(url, body = null) {
             options.body = JSON.stringify(body);
         }
         const response = await fetch(url, options);
-        if (!response.ok) return null;
-        return await response.json();
-    } catch {
+        const data = await response.json().catch(() => null);
+        if (!response.ok) {
+            reportApiFailure({ url, status: response.status, body: data, method: 'POST' });
+            return null;
+        }
+        reportApiSuccess(url);
+        return data;
+    } catch (error) {
+        reportApiFailure({ url, method: 'POST', cause: error });
         return null;
     }
 }
@@ -26,8 +32,11 @@ export async function postJsonWithStatus(url, body = null) {
         }
         const response = await fetch(url, options);
         const data = await response.json().catch(() => null);
+        if (response.ok) reportApiSuccess(url);
+        else reportApiFailure({ url, status: response.status, body: data, method: 'POST' });
         return { ok: response.ok, status: response.status, data };
-    } catch {
+    } catch (error) {
+        reportApiFailure({ url, method: 'POST', cause: error });
         return { ok: false, status: 0, data: null };
     }
 }
@@ -36,8 +45,11 @@ export async function deleteJsonWithStatus(url) {
     try {
         const response = await fetch(url, { method: 'DELETE', headers: { Accept: 'application/json' } });
         const data = await response.json().catch(() => null);
+        if (response.ok) reportApiSuccess(url);
+        else reportApiFailure({ url, status: response.status, body: data, method: 'DELETE' });
         return { ok: response.ok, status: response.status, data };
-    } catch {
+    } catch (error) {
+        reportApiFailure({ url, method: 'DELETE', cause: error });
         return { ok: false, status: 0, data: null };
     }
 }

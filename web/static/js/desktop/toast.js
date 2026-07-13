@@ -30,13 +30,6 @@ function dismiss(item, { keepUndo = false } = {}) {
     removeElement(item);
 }
 
-function replaceVisibleToasts() {
-    for (const item of toasts) {
-        if (!item.visible) continue;
-        dismiss(item);
-    }
-}
-
 function expire(item) {
     removeFromHistory(item);
     removeElement(item);
@@ -54,31 +47,45 @@ function runUndo(item) {
     return true;
 }
 
-export function showToast(message, { undo = null, duration = 8000 } = {}) {
+export function showToast(message, { undo = null, duration = 4000, kind = 'info', key = '' } = {}) {
     const root = document.getElementById('toast');
     if (!root) return;
+    if (key) {
+        const existing = toasts.find((item) => item.key === key);
+        if (existing) {
+            existing.el?.querySelector('.t-msg')?.replaceChildren(document.createTextNode(message));
+            return;
+        }
+    }
     const item = {
         id: nextId++,
+        key,
         undo,
         timer: null,
         visible: true,
         el: document.createElement('div'),
     };
-    item.el.className = 'toast-item';
-    item.el.innerHTML = '<span class="t-msg"></span><button class="t-undo"><span>Undo</span><kbd>Ctrl</kbd><kbd>Z</kbd></button><span class="t-timer"><i></i></span>';
+    item.el.className = `toast-item toast-${kind}`;
+    item.el.innerHTML = '<span class="t-msg"></span><button class="t-undo"><span>Undo</span><kbd>Ctrl</kbd><kbd>Z</kbd></button><button class="t-dismiss" type="button" aria-label="Dismiss message">×</button><span class="t-timer"><i></i></span>';
     item.el.querySelector('.t-msg').textContent = message;
+    item.el.querySelector('.t-timer').hidden = duration <= 0;
     item.el.querySelector('.t-timer i').style.animationDuration = `${duration}ms`;
     const undoButton = item.el.querySelector('.t-undo');
     undoButton.hidden = !undo;
     undoButton.addEventListener('click', () => {
         runUndo(item);
     });
-    replaceVisibleToasts();
+    item.el.querySelector('.t-dismiss').addEventListener('click', () => dismiss(item));
     root.appendChild(item.el);
     toasts.push(item);
     requestAnimationFrame(() => item.el?.classList.add('on'));
-    item.timer = setTimeout(() => expire(item), duration);
-    while (toasts.length > 8) dismiss(toasts[0]);
+    if (duration > 0) item.timer = setTimeout(() => expire(item), duration);
+    while (toasts.length > 3) dismiss(toasts[0]);
+}
+
+export function resolveToast(key) {
+    const item = toasts.find((candidate) => candidate.key === key);
+    if (item) dismiss(item);
 }
 
 export function undoLatestToast() {

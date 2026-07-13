@@ -1,7 +1,7 @@
 // Mobile API layer. Every function talks to the real backend —
 // payload shapes mirror the desktop modules exactly.
 
-import { fetchJson } from '../api.js';
+import { fetchJson, reportApiFailure, reportApiSuccess } from '../api.js';
 import { isOffline } from './state.js';
 import { enqueueWrite } from './write_queue.js';
 
@@ -10,14 +10,13 @@ export { fetchJson };
 let lastWriteFailure = null;
 
 export function writeFailureMessage() {
-    return lastWriteFailure === 'offline' || isOffline()
-        ? 'Offline — couldn’t save'
-        : 'Couldn’t save — try again';
+    return "Couldn't save that change. It'll retry automatically.";
 }
 
 export async function postJson(url, body) {
     if (isOffline()) {
         lastWriteFailure = 'offline';
+        reportApiFailure({ url, method: 'POST' });
         return null;
     }
     try {
@@ -26,14 +25,18 @@ export async function postJson(url, body) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body),
         });
+        const data = await response.json().catch(() => null);
         if (!response.ok) {
             lastWriteFailure = 'server';
+            reportApiFailure({ url, status: response.status, body: data, method: 'POST' });
             return null;
         }
         lastWriteFailure = null;
-        return await response.json();
-    } catch {
+        reportApiSuccess(url);
+        return data;
+    } catch (error) {
         lastWriteFailure = isOffline() ? 'offline' : 'server';
+        reportApiFailure({ url, method: 'POST', cause: error });
         return null;
     }
 }
@@ -62,13 +65,19 @@ export async function getImageCaption(imageId) {
     try {
         const response = await fetch(`/api/image/${imageId}/caption`);
         if (response.status === 404) {
+            reportApiSuccess(`/api/image/${imageId}/caption`);
             return { has_caption: false, caption: '', tags: [], not_found: true };
         }
         if (!response.ok) {
+            const body = await response.clone().json().catch(() => null);
+            reportApiFailure({ url: `/api/image/${imageId}/caption`, status: response.status, body });
             return { has_caption: false, caption: '', tags: [], error: true, status: response.status };
         }
-        return await response.json();
-    } catch {
+        const data = await response.json();
+        reportApiSuccess(`/api/image/${imageId}/caption`);
+        return data;
+    } catch (error) {
+        reportApiFailure({ url: `/api/image/${imageId}/caption`, cause: error });
         return { has_caption: false, caption: '', tags: [], error: true, status: 0 };
     }
 }
@@ -110,18 +119,23 @@ export async function mosaicPick(winnerId, loserIds) {
 export async function compareUndo() {
     if (isOffline()) {
         lastWriteFailure = 'offline';
+        reportApiFailure({ url: '/api/compare/undo', method: 'POST' });
         return null;
     }
     try {
         const response = await fetch('/api/compare/undo', { method: 'POST' });
+        const data = await response.json().catch(() => null);
         if (!response.ok) {
             lastWriteFailure = 'server';
+            reportApiFailure({ url: '/api/compare/undo', status: response.status, body: data, method: 'POST' });
             return null;
         }
         lastWriteFailure = null;
-        return await response.json();
-    } catch {
+        reportApiSuccess('/api/compare/undo');
+        return data;
+    } catch (error) {
         lastWriteFailure = isOffline() ? 'offline' : 'server';
+        reportApiFailure({ url: '/api/compare/undo', method: 'POST', cause: error });
         return null;
     }
 }

@@ -494,6 +494,10 @@ def create_app_shell(
     wiring.configure_shared_routes()
     object.__setattr__(shell, "runtime_services", configure_app_runtime_services(shell))
     page_routes.configure(templates=templates, template_context=shell.template_context)
+    from core.error_responses import install_error_handlers
+
+    # Additive seam shared with the trust lane: it only owns response envelopes.
+    install_error_handlers(app, not_found_response=page_routes.not_found_response)
     app.include_router(page_routes.router)
     app.include_router(access_routes.router)
     app.include_router(people_routes.router)

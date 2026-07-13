@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="color-scheme" content="dark">
+    <meta name="theme-color" content="#141517">
+    <title>Page not found · Azimuth Photo</title>
+    <link rel="stylesheet" href="/static/desktop.css?v={{ static_version }}">
+    <style>
+        body { display: grid; min-height: 100%; place-items: center; padding: var(--s5); overflow: auto; }
+        .not-found { width: min(420px, 100%); padding: var(--s5); background: var(--surface-popover); border: 1px solid var(--line); border-radius: var(--r-card); box-shadow: 0 16px 48px rgba(0,0,0,.55); }
+        .not-found__eyebrow { margin-bottom: var(--s2); color: var(--text-3); font-size: var(--fs-caption); font-weight: var(--fw-semibold); letter-spacing: var(--ls-label); text-transform: uppercase; }
+        .not-found h1 { margin-bottom: var(--s2); font-size: var(--fs-display); }
+        .not-found p { margin-bottom: var(--s4); color: var(--text-2); }
+    </style>
+</head>
+<body>
+    <main class="not-found">
+        <div class="not-found__eyebrow">Azimuth Photo</div>
+        <h1>That page isn’t here.</h1>
+        <p>The rest of your library is right where you left it.</p>
+        <a class="btn primary" href="/">Return to your photos</a>
+    </main>
+</body>
+</html>
