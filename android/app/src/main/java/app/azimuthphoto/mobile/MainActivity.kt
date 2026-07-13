@@ -16,11 +16,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.Photo
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material.icons.rounded.Photo
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
@@ -183,17 +181,7 @@ private fun Root(
                     selected = tab == 2, onClick = { tab = 2 },
                     icon = {
                         Icon(
-                            if (tab == 2) Icons.Rounded.Cloud else Icons.Outlined.Cloud,
-                            contentDescription = "Archive",
-                        )
-                    },
-                    label = { Text("Archive") },
-                )
-                NavigationBarItem(
-                    selected = tab == 3, onClick = { tab = 3 },
-                    icon = {
-                        Icon(
-                            if (tab == 3) Icons.Rounded.Settings else Icons.Outlined.Settings,
+                            if (tab == 2) Icons.Rounded.Settings else Icons.Outlined.Settings,
                             contentDescription = "Settings",
                         )
                     },
@@ -205,11 +193,10 @@ private fun Root(
         Box(Modifier.padding(padding)) {
             when (tab) {
                 0 -> TimelineScreen(
-                    onOpenSettings = { tab = 3 },
+                    onOpenSettings = { tab = 2 },
                     onOpenTrash = { showTrash = true },
                 )
                 1 -> SearchScreen()
-                2 -> ArchiveScreen()
                 else -> SettingsScreen(onOpenTrash = { showTrash = true })
             }
         }

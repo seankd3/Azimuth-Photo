@@ -27,7 +27,16 @@ data class ArchiveImage(
     val height: Int? = null,
     val thumb_url: String = "",
     val date_group: String? = null,
-)
+) {
+    private val ext get() = (file_ext ?: filename.substringAfterLast('.', "")).lowercase().removePrefix(".")
+    val isVideo: Boolean get() = ext in VIDEO_EXTS
+    val isRaw: Boolean get() = ext in RAW_EXTS
+
+    private companion object {
+        val VIDEO_EXTS = setOf("mp4", "mov", "m4v", "avi", "mkv", "webm", "3gp")
+        val RAW_EXTS = setOf("cr2", "cr3", "arw", "nef", "raf", "rw2", "dng", "orf", "raw")
+    }
+}
 
 @Serializable
 data class RankingsPage(
