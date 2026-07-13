@@ -39,12 +39,14 @@ function galleryForm(collection, gallery, images) {
       <label>Photo download size<select data-gallery-size>${[['sm', 'Small'], ['md', 'Medium'], ['lg', 'Large'], ['original', 'Original']].map(([x, label]) => `<option value="${x}"${current.download_size === x ? ' selected' : ''}>${label}</option>`).join('')}</select></label>
       <label class="gallery-download-all"><input data-gallery-download-all type="checkbox"${current.allow_download_all ? ' checked' : ''}> Let client download all as ZIP</label>
       <label>Password (optional)<input data-gallery-password type="password" placeholder="Leave unchanged"></label>
+      ${gallery?.protected ? '<label class="gallery-download-all"><input data-gallery-clear-password type="checkbox"> Remove password</label>' : ''}
       <button class="primary" data-gallery-save>${gallery ? 'Save gallery' : 'Create gallery'}</button>`;
 }
 
 function formPayload(popover) {
     const cover = Number(popover.querySelector('[data-gallery-cover]')?.value);
     const password = popover.querySelector('[data-gallery-password]')?.value || undefined;
+    const clearPassword = Boolean(popover.querySelector('[data-gallery-clear-password]')?.checked);
     return {
         title: popover.querySelector('[data-gallery-title]')?.value.trim(),
         layout: popover.querySelector('[data-gallery-layout]')?.value,
@@ -52,7 +54,7 @@ function formPayload(popover) {
         cover_image_id: cover > 0 ? cover : null,
         download_size: popover.querySelector('[data-gallery-size]')?.value,
         allow_download_all: Boolean(popover.querySelector('[data-gallery-download-all]')?.checked),
-        ...(password ? { password } : {}),
+        ...(clearPassword ? { clear_password: true } : (password ? { password } : {})),
     };
 }
 
