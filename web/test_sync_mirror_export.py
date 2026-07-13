@@ -71,7 +71,10 @@ class SyncMirrorExportTests(unittest.TestCase):
                 "VALUES (?, 91, .8, .7, .1, .2, NULL, 'now')",
                 (image_id,),
             )
-            collection_id = conn.execute("INSERT INTO collections(name) VALUES ('Summer')").lastrowid
+            collection_id = conn.execute(
+                "INSERT INTO collections(uuid, name) VALUES (?, 'Summer')",
+                (f"collection-{content_hash}",),
+            ).lastrowid
             conn.execute("INSERT INTO collection_images(collection_id, image_id) VALUES (?, ?)", (collection_id, image_id))
             stack_id = conn.execute(
                 "INSERT INTO stacks(kind, representative_image_id, auto) VALUES ('burst', ?, 1)", (image_id,)

@@ -70,7 +70,7 @@ class SatelliteSyncTests(BackendTestCase):
         for index, payload in enumerate(payloads, start=1):
             image_id = await self._image(source["id"], f"field-{index}.raw")
             image_ids.append(image_id)
-            with open(os.path.join(self.tempdir.name, f"{source['id']}-field-{index}.raw"), "wb") as file:
+            with open(os.path.join(source["path"], f"field-{index}.raw"), "wb") as file:
                 file.write(payload)
 
         conn = await __import__("db").get_db()
