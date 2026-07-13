@@ -229,3 +229,10 @@ def test_malformed_media_failure_does_not_poison_next_thumbnail_job(tmp_path: Pa
     assert generate(broken, 1) is None
     assert retry_after
     assert generate(valid, 2) == b"jpeg"
+
+
+def test_truncated_raw_preview_is_contained(tmp_path: Path):
+    broken_raw = tmp_path / "broken.dng"
+    broken_raw.write_bytes(b"II*\x00\x08\x00\x00\x00truncated")
+
+    assert thumbnail_generation.load_raw_preview(str(broken_raw), 256) is None
