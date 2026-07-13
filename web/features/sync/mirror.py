@@ -12,7 +12,9 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 from urllib.parse import urlencode
 
+from core import cache_events
 from data import connection
+from data.repositories import catalog as catalog_repository
 from features.sync import satellite
 
 
@@ -119,20 +121,15 @@ class MirrorPuller:
                 await self._apply_row(conn, source_id, row, available_columns)
                 applied += 1
             await self._set_state(conn, "cursor", str(new_cursor))
-            if applied:
-                # The library service short-circuits on these denormalized
-                # counts; a mirror that fills rows without them looks empty.
-                await conn.execute(
-                    "UPDATE catalog_sources SET "
-                    "image_count=(SELECT COUNT(*) FROM images WHERE source_id=catalog_sources.id), "
-                    "active_image_count=(SELECT COUNT(*) FROM images WHERE source_id=catalog_sources.id "
-                    "AND status IN ('kept','maybe') AND missing_at IS NULL) "
-                    "WHERE id = ?",
-                    (source_id,),
-                )
+            # The library service short-circuits on these denormalized counts;
+            # a mirror that fills rows without them makes All Photos look like
+            # only local/recent imports. Always resync hub:// after refresh.
+            await catalog_repository.update_source_counts_on_conn(conn, source_id)
             await conn.commit()
         finally:
             await connection.close_async(conn, db_path=self.db_path)
+
+        cache_events.invalidate_stats_cache()
 
         self._status.update(
             cursor=new_cursor,

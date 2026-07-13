@@ -15,6 +15,12 @@ _ai_status_counts_cache = {"data": None, "expires": 0}
 
 
 async def catalog_image_counts(db_path: str) -> dict:
+    from data.repositories import catalog as catalog_repository
+
+    # All Photos / rankings short-circuit on these denormalized sums. Repair
+    # hub:// drift before reading so mirrored satellite libraries stay complete.
+    await catalog_repository.repair_hub_mirror_source_counts(db_path)
+
     conn = await connection.open_async(db_path)
     try:
         cursor = await conn.execute(
@@ -56,6 +62,10 @@ async def catalog_image_counts_cached(
 
 
 async def full_stats(db_path: str) -> dict:
+    from data.repositories import catalog as catalog_repository
+
+    await catalog_repository.repair_hub_mirror_source_counts(db_path)
+
     conn = await connection.open_async(db_path)
     try:
         cursor = await conn.execute(
