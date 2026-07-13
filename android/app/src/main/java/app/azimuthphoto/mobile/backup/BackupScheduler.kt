@@ -12,16 +12,22 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import app.azimuthphoto.mobile.data.SettingsStore
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
 
 object BackupScheduler {
     private const val PERIODIC_WORK = "backup-periodic"
     private const val NOW_WORK = "backup-now"
 
+    // Reading settings + enqueuing never touches the caller's thread (often the UI).
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
     /** Periodic safety net + content-change trigger so new photos upload promptly. */
-    fun ensureScheduled(context: Context) {
-        val settings = runBlocking { SettingsStore.current(context) }
+    fun ensureScheduled(context: Context) = scope.launch {
+        val settings = SettingsStore.current(context)
         val request = PeriodicWorkRequestBuilder<BackupWorker>(1, TimeUnit.HOURS)
             .setConstraints(constraints(settings.wifiOnly, settings.chargingOnly))
             .build()
@@ -32,8 +38,8 @@ object BackupScheduler {
     }
 
     /** Re-armed after every run: fires shortly after anything new lands in MediaStore. */
-    fun scheduleContentTrigger(context: Context) {
-        val settings = runBlocking { SettingsStore.current(context) }
+    fun scheduleContentTrigger(context: Context) = scope.launch {
+        val settings = SettingsStore.current(context)
         val request = OneTimeWorkRequestBuilder<BackupWorker>()
             .setConstraints(
                 Constraints.Builder()
@@ -54,8 +60,8 @@ object BackupScheduler {
         )
     }
 
-    fun runNow(context: Context) {
-        val settings = runBlocking { SettingsStore.current(context) }
+    fun runNow(context: Context) = scope.launch {
+        val settings = SettingsStore.current(context)
         val request = OneTimeWorkRequestBuilder<BackupWorker>()
             .setConstraints(constraints(settings.wifiOnly, settings.chargingOnly))
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)

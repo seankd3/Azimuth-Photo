@@ -19,6 +19,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,7 +48,17 @@ fun OnboardingScreen(
     var testResult by remember { mutableStateOf<String?>(null) }
     var testing by remember { mutableStateOf(false) }
 
-    HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
+    // Granting from the system dialog advances the flow without a second tap.
+    LaunchedEffect(hasMediaPermission) {
+        if (hasMediaPermission && pagerState.currentPage == 1) pagerState.animateScrollToPage(2)
+    }
+
+    // Pages advance only through the gated buttons — no swiping past a step.
+    HorizontalPager(
+        state = pagerState,
+        userScrollEnabled = false,
+        modifier = Modifier.fillMaxSize(),
+    ) { page ->
         Box(
             Modifier.fillMaxSize().padding(horizontal = 28.dp),
             contentAlignment = Alignment.Center,

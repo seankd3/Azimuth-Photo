@@ -43,10 +43,12 @@ class PickerActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val allowMultiple = intent.getBooleanExtra(Intent.EXTRA_ALLOW_MULTIPLE, false)
+        val accept = mimePredicate(intent)
         setContent {
             PhotoArchiveTheme {
                 PickerScreen(
                     allowMultiple = allowMultiple,
+                    accept = accept,
                     onCancel = ::finish,
                     onResult = ::returnSelection,
                 )
@@ -57,9 +59,13 @@ class PickerActivity : ComponentActivity() {
     private fun returnSelection(uris: List<Uri>) {
         if (uris.isEmpty()) return
         val result = Intent().addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        if (uris.size == 1) {
-            result.data = uris.first()
-        } else {
+        // Persistable grant so ACTION_GET_CONTENT callers can takePersistableUriPermission.
+        if (intent.action == Intent.ACTION_GET_CONTENT) {
+            result.addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+        }
+        // Always set data (first uri) too — many callers read getData() even for multi.
+        result.data = uris.first()
+        if (uris.size > 1) {
             result.clipData = ClipData.newUri(contentResolver, "Selected media", uris.first()).apply {
                 uris.drop(1).forEach { addItem(ClipData.Item(it)) }
             }
@@ -67,11 +73,24 @@ class PickerActivity : ComponentActivity() {
         setResult(RESULT_OK, result)
         finish()
     }
+
+    /** Honour the requested MIME (type + EXTRA_MIME_TYPES); default to all media. */
+    private fun mimePredicate(intent: Intent): (MediaItem) -> Boolean {
+        val types = buildList {
+            intent.type?.let { add(it) }
+            intent.getStringArrayExtra(Intent.EXTRA_MIME_TYPES)?.let { addAll(it) }
+        }
+        val wantImages = types.isEmpty() || types.any { it.startsWith("image/") || it == "*/*" }
+        val wantVideos = types.isEmpty() || types.any { it.startsWith("video/") || it == "*/*" }
+        if (wantImages == wantVideos) return { true } // both (or neither specified) → all
+        return { item -> if (item.isVideo) wantVideos else wantImages }
+    }
 }
 
 @Composable
 private fun PickerScreen(
     allowMultiple: Boolean,
+    accept: (MediaItem) -> Boolean,
     onCancel: () -> Unit,
     onResult: (List<Uri>) -> Unit,
 ) {
@@ -85,7 +104,7 @@ private fun PickerScreen(
     ) { mutableStateOf(emptySet<Long>()) }
 
     LaunchedEffect(Unit) {
-        items = DeviceMedia.collapseRawPairs(DeviceMedia.queryAll(context))
+        items = DeviceMedia.collapseRawPairs(DeviceMedia.queryAll(context)).filter(accept)
     }
 
     Column(Modifier.fillMaxSize()) {

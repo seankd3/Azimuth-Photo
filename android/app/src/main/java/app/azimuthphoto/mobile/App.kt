@@ -10,9 +10,6 @@ import coil.ImageLoaderFactory
 import coil.decode.VideoFrameDecoder
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 
 class App : Application(), Configuration.Provider, ImageLoaderFactory {
 
@@ -26,8 +23,8 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
                 NotificationManager.IMPORTANCE_LOW,
             ).apply { description = "Photo backup progress" }
         )
-        // Scheduling reads DataStore; keep it off the main thread at startup.
-        CoroutineScope(Dispatchers.Default).launch { BackupScheduler.ensureScheduled(this@App) }
+        // BackupScheduler reads DataStore + enqueues on its own IO scope.
+        BackupScheduler.ensureScheduled(this)
     }
 
     override val workManagerConfiguration: Configuration

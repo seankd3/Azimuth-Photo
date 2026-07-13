@@ -94,6 +94,7 @@ private const val HUB_PAGE = 120
 fun TimelineScreen(
     onOpenSettings: () -> Unit,
     onOpenTrash: () -> Unit,
+    onImmersive: (Boolean) -> Unit = {},
 ) {
     val context = LocalContext.current
     val settings by SettingsStore.flow(context).collectAsState(initial = null)
@@ -177,10 +178,14 @@ fun TimelineScreen(
     val hubImagesInView = remember(entries) {
         entries.mapNotNull { (it as? TimelineEntry.Hub)?.image }
     }
+    LaunchedEffect(viewer != null) { onImmersive(viewer != null) }
     viewer?.let { target ->
         when (target) {
             is ViewerTarget.Device -> ViewerScreen(
-                items = deviceItemsInView, startIndex = target.index, onClose = { viewer = null },
+                items = deviceItemsInView,
+                startIndex = target.index,
+                onClose = { viewer = null },
+                onChanged = { loadTick++ },
             )
             is ViewerTarget.Hub -> if (api != null) ArchiveViewer(
                 api = api, images = hubImagesInView, startIndex = target.index, onClose = { viewer = null },

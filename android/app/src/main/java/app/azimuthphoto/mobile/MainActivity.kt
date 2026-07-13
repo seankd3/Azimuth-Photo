@@ -44,6 +44,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import app.azimuthphoto.mobile.backup.BackupScheduler
@@ -115,6 +119,16 @@ private fun Root(
         if (granted) onPermissionGranted()
     }
 
+    // Permission may be granted (or revoked) from system Settings — re-sync on resume.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) granted = hasMediaPermission()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     val settings by SettingsStore.flow(context).collectAsState(initial = null)
     val currentSettings = settings
     if (currentSettings == null) {
@@ -148,14 +162,16 @@ private fun Root(
 
     var tab by rememberSaveable { mutableStateOf(0) }
     var showTrash by rememberSaveable { mutableStateOf(false) }
+    var immersive by remember { mutableStateOf(false) }
     if (showTrash) {
         TrashScreen(onClose = { showTrash = false })
         return
     }
-    BackHandler(enabled = tab != 0) { tab = 0 }
+    BackHandler(enabled = tab != 0 && !immersive) { tab = 0 }
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
+            if (immersive) return@Scaffold
             NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                 NavigationBarItem(
                     selected = tab == 0, onClick = { tab = 0 },
@@ -195,8 +211,9 @@ private fun Root(
                 0 -> TimelineScreen(
                     onOpenSettings = { tab = 2 },
                     onOpenTrash = { showTrash = true },
+                    onImmersive = { immersive = it },
                 )
-                1 -> SearchScreen()
+                1 -> SearchScreen(onImmersive = { immersive = it })
                 else -> SettingsScreen(onOpenTrash = { showTrash = true })
             }
         }

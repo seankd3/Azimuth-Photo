@@ -18,7 +18,6 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -29,7 +28,6 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 @Composable
@@ -41,7 +39,6 @@ fun FastScrollScrubber(
     var dragging by remember { mutableStateOf(false) }
     var heightPx by remember { mutableIntStateOf(0) }
     var dragY by remember { mutableFloatStateOf(0f) }
-    val scope = rememberCoroutineScope()
     val visibleAlpha by animateFloatAsState(
         targetValue = if (state.isScrollInProgress || dragging) 1f else 0f,
         label = "scrubberAlpha",
@@ -56,7 +53,8 @@ fun FastScrollScrubber(
         if (heightPx <= 0 || total <= 0) return
         dragY = y.coerceIn(0f, heightPx.toFloat())
         val target = ((dragY / heightPx) * (total - 1)).roundToInt().coerceIn(0, total - 1)
-        scope.launch { state.scrollToItem(target) }
+        // Immediate, single-shot positioning — no per-pixel coroutine pile-up.
+        state.requestScrollToItem(target)
     }
 
     Box(modifier.fillMaxHeight(), contentAlignment = Alignment.CenterEnd) {

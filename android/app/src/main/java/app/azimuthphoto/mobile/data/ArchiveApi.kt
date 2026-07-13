@@ -143,7 +143,8 @@ internal fun collapseShelfFolders(all: List<ArchiveFolder>): List<ArchiveFolder>
         }
     }
     all.filter { it.depth == 0 }.forEach(::descend)
-    return shelves.sortedByDescending { it.count }
+    // Year/date folders are timeline structure, not shelves — never surface them as chips.
+    return shelves.filterNot { dateLike.matches(it.name) }.sortedByDescending { it.count }
 }
 
 @Serializable

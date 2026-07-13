@@ -9,6 +9,9 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.MediaStore
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
@@ -88,12 +91,23 @@ import kotlin.math.abs
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ViewerScreen(items: List<MediaItem>, startIndex: Int, onClose: () -> Unit) {
+fun ViewerScreen(
+    items: List<MediaItem>,
+    startIndex: Int,
+    onClose: () -> Unit,
+    onChanged: () -> Unit = {},
+) {
     BackHandler(onBack = onClose)
     // A saved index can outlive its list (process death, mutation) — never seed
     // the pager past the end or it throws on init.
     val safeStart = startIndex.coerceIn(0, (items.size - 1).coerceAtLeast(0))
     val pagerState = rememberPagerState(initialPage = safeStart) { items.size }
+    val trashLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult(),
+    ) { result ->
+        // Only leave the viewer / refresh the grid when the trash actually happened.
+        if (result.resultCode == Activity.RESULT_OK) { onChanged(); onClose() }
+    }
     var chromeVisible by remember { mutableStateOf(true) }
     var infoFor by remember { mutableStateOf<MediaItem?>(null) }
     var menuVisible by remember { mutableStateOf(false) }
@@ -102,6 +116,8 @@ fun ViewerScreen(items: List<MediaItem>, startIndex: Int, onClose: () -> Unit) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val dismissFraction = (dismissY.value / 600f).coerceIn(0f, 1f)
+    // Each new page starts unzoomed, so dismiss re-arms and the pager re-enables.
+    LaunchedEffect(pagerState.currentPage) { currentZoom = 1f }
 
     Box(
         Modifier
@@ -137,6 +153,7 @@ fun ViewerScreen(items: List<MediaItem>, startIndex: Int, onClose: () -> Unit) {
             state = pagerState,
             key = { items[it].id },
             beyondViewportPageCount = 0,
+            userScrollEnabled = currentZoom <= 1.01f,
             modifier = Modifier.graphicsLayer {
                 translationY = dismissY.value
                 val dismissalScale = 1f - dismissFraction * 0.2f
@@ -202,8 +219,10 @@ fun ViewerScreen(items: List<MediaItem>, startIndex: Int, onClose: () -> Unit) {
                     }
                 }
                 IconButton(onClick = {
-                    trashItem(context, current)
-                    onClose()
+                    val pending = MediaStore.createTrashRequest(
+                        context.contentResolver, listOf(current.uri), true,
+                    )
+                    trashLauncher.launch(IntentSenderRequest.Builder(pending).build())
                 }) {
                     Icon(Icons.Outlined.Delete, "Delete", tint = Color.White)
                 }
@@ -515,10 +534,6 @@ private fun openWith(activity: Activity, item: MediaItem) {
     activity.startActivity(chooser)
 }
 
-private fun trashItem(context: Context, item: MediaItem) {
-    val pending = MediaStore.createTrashRequest(context.contentResolver, listOf(item.uri), true)
-    (context as? Activity)?.startIntentSenderForResult(pending.intentSender, 4208, null, 0, 0, 0)
-}
 
 private fun formatTimestamp(ms: Long): String =
     Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault())

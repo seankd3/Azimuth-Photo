@@ -273,7 +273,7 @@ private fun MediaCell(
                 contentDescription = if (selected) "Selected" else "Not selected",
                 tint = if (selected) Accent else Color.White,
                 modifier = Modifier
-                    .align(Alignment.TopStart)
+                    .align(Alignment.BottomStart) // clear of the RAW badge (top-start)
                     .padding(6.dp)
                     .size(22.dp),
             )

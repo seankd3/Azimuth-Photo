@@ -60,7 +60,7 @@ import coil.request.ImageRequest
 import kotlinx.coroutines.launch
 
 @Composable
-fun SearchScreen() {
+fun SearchScreen(onImmersive: (Boolean) -> Unit = {}) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val settings by SettingsStore.flow(context).collectAsState(initial = null)
@@ -158,6 +158,9 @@ fun SearchScreen() {
             }
     }
 
+    LaunchedEffect(archiveViewerIndex != null || localViewerIndex != null) {
+        onImmersive(archiveViewerIndex != null || localViewerIndex != null)
+    }
     archiveViewerIndex?.let { index ->
         ArchiveViewer(
             api = api,
