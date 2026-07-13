@@ -199,9 +199,12 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
         propagated_updates=0,
         missing_at=None,
     ):
-        filepath = os.path.join(self.tempdir.name, f"{source_id}-{filename}")
         conn = await db.get_db()
         try:
+            source = await (
+                await conn.execute("SELECT path FROM catalog_sources WHERE id = ?", (source_id,))
+            ).fetchone()
+            filepath = os.path.join(source["path"], filename)
             cursor = await conn.execute(
                 "INSERT INTO images "
                 "(source_id, filename, filepath, elo, comparisons, propagated_updates, status, missing_at) "

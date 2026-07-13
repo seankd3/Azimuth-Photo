@@ -15,7 +15,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import db
-from features.sync import hub_routes, mirror_export, oplog, oplog_routes
+from features.sync import device_auth, hub_routes, mirror_export, oplog, oplog_routes
 from features.sync.mirror import MirrorPuller
 from features.sync.prefetch import ThumbPrefetcher
 
@@ -32,6 +32,10 @@ class SyncEndToEndAcceptanceTests(unittest.TestCase):
             asyncio.run(db.init_db())
         db.DB_PATH = self.hub_db
 
+        self.auth_patch = mock.patch.object(
+            device_auth, "require_device_token_enabled", return_value=False
+        )
+        self.auth_patch.start()
         hub_routes.configure(db_path=lambda: self.hub_db)
         oplog_routes.configure(db_path=lambda: self.hub_db)
         app = FastAPI()
@@ -66,6 +70,7 @@ class SyncEndToEndAcceptanceTests(unittest.TestCase):
 
     def tearDown(self):
         self.client_context.__exit__(None, None, None)
+        self.auth_patch.stop()
         db.DB_PATH = self.old_db_path
         self.tempdir.cleanup()
 

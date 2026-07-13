@@ -77,7 +77,7 @@ DEFAULT_SETTINGS = {
     "hub_url": "",
     "device_token": "",
     "paired_hub_id": "",
-    "require_device_token": False,
+    "require_device_token": False,  # opt-in until pairing is wired into onboarding; flip to True for public release
     "setup_completed": False,
 }
 

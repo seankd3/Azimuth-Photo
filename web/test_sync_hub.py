@@ -16,7 +16,7 @@ from PIL import Image
 
 import db
 from features.develop import rawproc
-from features.sync import hashing, hub, hub_routes
+from features.sync import device_auth, hashing, hub, hub_routes
 
 
 class DefaultRootTests(unittest.TestCase):
@@ -71,6 +71,10 @@ class SyncHubTests(unittest.TestCase):
         db.DB_PATH = self.db_path
         rawproc.BASE_CACHE_DIR = self.cache
         asyncio.run(db.init_db())
+        self.auth_patch = mock.patch.object(
+            device_auth, "require_device_token_enabled", return_value=False
+        )
+        self.auth_patch.start()
         hub_routes.configure(
             db_path=lambda: self.db_path,
             intake_root=lambda: self.intake,
@@ -83,6 +87,7 @@ class SyncHubTests(unittest.TestCase):
 
     def tearDown(self):
         self.client_context.__exit__(None, None, None)
+        self.auth_patch.stop()
         db.DB_PATH = self.old_db_path
         rawproc.BASE_CACHE_DIR = self.old_base_cache_dir
         self.tempdir.cleanup()

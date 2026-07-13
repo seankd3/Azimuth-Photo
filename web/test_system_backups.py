@@ -308,6 +308,8 @@ class BackupRouteTests(unittest.TestCase):
         conflict = self.client.post("/api/system/backup/restore", json={"name": name})
         self.assertEqual(conflict.status_code, 409)
         self.assertTrue(conflict.json()["restore"]["prepared"])
+        self.assertNotIn("staging_path", conflict.json()["restore"])
+        self.assertNotIn(str(self.root), conflict.text)
 
         discarded = self.client.delete("/api/system/backup/restore-staged")
         self.assertEqual(discarded.status_code, 200)
