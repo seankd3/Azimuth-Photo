@@ -26,6 +26,9 @@ data class AppSettings(
     val keepDays: Int,
     val gridColumns: Int,
     val recentSearches: List<String>,
+    val onboarded: Boolean,
+    val serverConfigured: Boolean,
+    val chargingOnly: Boolean,
 )
 
 object SettingsStore {
@@ -41,6 +44,9 @@ object SettingsStore {
     private val KEEP_DAYS = intPreferencesKey("keep_days")
     private val GRID_COLUMNS = intPreferencesKey("grid_columns")
     private val RECENT_SEARCHES = stringPreferencesKey("recent_searches")
+    private val ONBOARDED = booleanPreferencesKey("onboarded")
+    private val SERVER_CONFIGURED = booleanPreferencesKey("server_configured")
+    private val CHARGING_ONLY = booleanPreferencesKey("charging_only")
 
     fun flow(context: Context): Flow<AppSettings> =
         context.dataStore.data.map { p ->
@@ -58,19 +64,31 @@ object SettingsStore {
                     ?.split(SEARCH_SEPARATOR)
                     ?.filter { it.isNotBlank() }
                     ?: emptyList(),
+                onboarded = p[ONBOARDED] ?: false,
+                serverConfigured = p[SERVER_CONFIGURED] ?: false,
+                chargingOnly = p[CHARGING_ONLY] ?: false,
             )
         }
 
     suspend fun current(context: Context): AppSettings = flow(context).first()
 
     suspend fun setServerUrl(context: Context, url: String) =
-        context.dataStore.edit { it[SERVER_URL] = url.trim().trimEnd('/') }
+        context.dataStore.edit {
+            it[SERVER_URL] = url.trim().trimEnd('/')
+            it[SERVER_CONFIGURED] = true
+        }
 
     suspend fun setDeviceToken(context: Context, token: String) =
         context.dataStore.edit { it[DEVICE_TOKEN] = token.trim() }
 
     suspend fun setBackupEnabled(context: Context, enabled: Boolean) =
         context.dataStore.edit { it[BACKUP_ENABLED] = enabled }
+
+    suspend fun setChargingOnly(context: Context, enabled: Boolean) =
+        context.dataStore.edit { it[CHARGING_ONLY] = enabled }
+
+    suspend fun setOnboarded(context: Context, onboarded: Boolean) =
+        context.dataStore.edit { it[ONBOARDED] = onboarded }
 
     suspend fun setWifiOnly(context: Context, wifiOnly: Boolean) =
         context.dataStore.edit { it[WIFI_ONLY] = wifiOnly }

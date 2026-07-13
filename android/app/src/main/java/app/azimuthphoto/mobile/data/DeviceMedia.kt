@@ -37,15 +37,7 @@ data class MediaItem(
      * TS-nnn-…) — so strip those after dropping the extension.
      */
     val shotKey: String
-        get() {
-            val base = displayName.substringBeforeLast('.').lowercase()
-                .replace(PIXEL_PAIR_SUFFIX, "")
-            return "$bucketId/$base"
-        }
-
-    private companion object {
-        val PIXEL_PAIR_SUFFIX = Regex("\\.(raw|ts-\\d+)-\\d+(\\.original)?$")
-    }
+        get() = rawShotKey(bucketId, displayName)
 }
 
 data class MediaBucket(val id: String, val name: String, val count: Int)
@@ -54,11 +46,7 @@ object DeviceMedia {
 
     /** Hide a RAW twin when its rendered JPEG is present; keep solo DNGs visible. */
     fun collapseRawPairs(items: List<MediaItem>): List<MediaItem> {
-        val jpegShots = items.asSequence()
-            .filterNot { it.isRaw }
-            .map { it.shotKey }
-            .toHashSet()
-        return items.filterNot { it.isRaw && it.shotKey in jpegShots }
+        return collapseRawPairsBy(items, MediaItem::isRaw, MediaItem::shotKey)
     }
 
     private val PROJECTION = arrayOf(
@@ -203,4 +191,20 @@ object DeviceMedia {
             counts.map { (id, v) -> MediaBucket(id, v.first, v.second) }
                 .sortedByDescending { it.count }
         }
+}
+
+private val PIXEL_PAIR_SUFFIX = Regex("\\.(raw|ts-\\d+)-\\d+(\\.original)?$")
+
+internal fun rawShotKey(bucketId: String, displayName: String): String {
+    val base = displayName.substringBeforeLast('.').lowercase().replace(PIXEL_PAIR_SUFFIX, "")
+    return "$bucketId/$base"
+}
+
+internal fun <T> collapseRawPairsBy(
+    items: List<T>,
+    isRaw: (T) -> Boolean,
+    shotKey: (T) -> String,
+): List<T> {
+    val renderedShots = items.asSequence().filterNot(isRaw).map(shotKey).toHashSet()
+    return items.filterNot { isRaw(it) && shotKey(it) in renderedShots }
 }

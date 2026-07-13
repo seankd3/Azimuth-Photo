@@ -101,7 +101,16 @@ fun SettingsScreen(onOpenTrash: () -> Unit) {
             scope.launch { SettingsStore.setBackupVideos(context, it) }
         }
         ToggleRow("Wi-Fi only", s.wifiOnly) {
-            scope.launch { SettingsStore.setWifiOnly(context, it) }
+            scope.launch {
+                SettingsStore.setWifiOnly(context, it)
+                BackupScheduler.ensureScheduled(context)
+            }
+        }
+        ToggleRow("Only while charging", s.chargingOnly) {
+            scope.launch {
+                SettingsStore.setChargingOnly(context, it)
+                BackupScheduler.ensureScheduled(context)
+            }
         }
         TextButton(onClick = { BackupScheduler.runNow(context) }) { Text("Back up now") }
 

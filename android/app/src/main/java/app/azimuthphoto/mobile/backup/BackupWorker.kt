@@ -86,7 +86,7 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
             val response = try {
                 client.manifest(hashed.map { it.second })
             } catch (e: IOException) {
-                if (!e.isPermanentHubFailure()) hasTransientFailure = true
+                if (classifyBackupFailure(e) == BackupFailure.TRANSIENT) hasTransientFailure = true
                 for ((item, manifest) in hashed) {
                     db.upsert(item.id, manifest.content_hash, item.sizeBytes, BackupDb.STATE_FAILED)
                     done++
@@ -121,7 +121,7 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
                         )
                     }
                 } catch (e: IOException) {
-                    if (!e.isPermanentHubFailure()) hasTransientFailure = true
+                    if (classifyBackupFailure(e) == BackupFailure.TRANSIENT) hasTransientFailure = true
                     db.upsert(item.id, manifest.content_hash, item.sizeBytes, BackupDb.STATE_FAILED)
                 }
                 done++
@@ -188,5 +188,8 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
     }
 }
 
-private fun IOException.isPermanentHubFailure(): Boolean =
-    this is HubHttpException && code in 400..499
+internal enum class BackupFailure { PERMANENT, TRANSIENT }
+
+internal fun classifyBackupFailure(error: IOException): BackupFailure =
+    if (error is HubHttpException && error.code in 400..499) BackupFailure.PERMANENT
+    else BackupFailure.TRANSIENT

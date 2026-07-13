@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.provider.MediaStore
 import androidx.work.Constraints
+import androidx.work.BackoffPolicy
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
@@ -20,29 +21,33 @@ object BackupScheduler {
 
     /** Periodic safety net + content-change trigger so new photos upload promptly. */
     fun ensureScheduled(context: Context) {
-        val wifiOnly = runBlocking { SettingsStore.current(context).wifiOnly }
+        val settings = runBlocking { SettingsStore.current(context) }
         val request = PeriodicWorkRequestBuilder<BackupWorker>(1, TimeUnit.HOURS)
-            .setConstraints(constraints(wifiOnly))
+            .setConstraints(constraints(settings.wifiOnly, settings.chargingOnly))
             .build()
         WorkManager.getInstance(context).enqueueUniquePeriodicWork(
-            PERIODIC_WORK, ExistingPeriodicWorkPolicy.KEEP, request
+            PERIODIC_WORK, ExistingPeriodicWorkPolicy.UPDATE, request
         )
         scheduleContentTrigger(context)
     }
 
     /** Re-armed after every run: fires shortly after anything new lands in MediaStore. */
     fun scheduleContentTrigger(context: Context) {
-        val wifiOnly = runBlocking { SettingsStore.current(context).wifiOnly }
+        val settings = runBlocking { SettingsStore.current(context) }
         val request = OneTimeWorkRequestBuilder<BackupWorker>()
             .setConstraints(
                 Constraints.Builder()
-                    .setRequiredNetworkType(if (wifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED)
+                    .setRequiredNetworkType(
+                        if (settings.wifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED
+                    )
+                    .setRequiresCharging(settings.chargingOnly)
                     .addContentUriTrigger(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, true)
                     .addContentUriTrigger(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true)
                     .setTriggerContentUpdateDelay(30, TimeUnit.SECONDS)
                     .setTriggerContentMaxDelay(5, TimeUnit.MINUTES)
                     .build()
             )
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
             .build()
         WorkManager.getInstance(context).enqueueUniqueWork(
             "backup-content-trigger", ExistingWorkPolicy.REPLACE, request
@@ -50,16 +55,18 @@ object BackupScheduler {
     }
 
     fun runNow(context: Context) {
-        val wifiOnly = runBlocking { SettingsStore.current(context).wifiOnly }
+        val settings = runBlocking { SettingsStore.current(context) }
         val request = OneTimeWorkRequestBuilder<BackupWorker>()
-            .setConstraints(constraints(wifiOnly))
+            .setConstraints(constraints(settings.wifiOnly, settings.chargingOnly))
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
             .build()
         WorkManager.getInstance(context).enqueueUniqueWork(
             NOW_WORK, ExistingWorkPolicy.REPLACE, request
         )
     }
 
-    private fun constraints(wifiOnly: Boolean) = Constraints.Builder()
+    private fun constraints(wifiOnly: Boolean, chargingOnly: Boolean) = Constraints.Builder()
         .setRequiredNetworkType(if (wifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED)
+        .setRequiresCharging(chargingOnly)
         .build()
 }

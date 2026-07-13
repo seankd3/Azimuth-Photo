@@ -1,5 +1,9 @@
 package app.azimuthphoto.mobile.data
 
+import java.io.IOException
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -7,10 +11,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import java.io.IOException
-import java.util.concurrent.TimeUnit
 
 @Serializable
 data class ArchiveImage(
@@ -36,14 +36,11 @@ data class RankingsPage(
     val total_images: Long = 0,
 )
 
-/** Read-only client for the hub's library API. */
 class ArchiveApi(private val baseUrl: String) {
-
     private val http = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
         .build()
-
     private val json = Json { ignoreUnknownKeys = true }
 
     suspend fun page(
@@ -51,59 +48,36 @@ class ArchiveApi(private val baseUrl: String) {
         limit: Int = 200,
         search: String = "",
         folder: String = "",
-    ): RankingsPage =
-        withContext(Dispatchers.IO) {
-            val url = buildString {
-                append(baseUrl)
-                append("/api/rankings?sort=date_taken&limit=").append(limit)
-                append("&offset=").append(offset)
-                if (search.isNotBlank()) {
-                    // q + deep=true engages the hub's semantic search.
-                    append("&q=").append(java.net.URLEncoder.encode(search, "UTF-8"))
-                    append("&deep=true")
-                }
-                if (folder.isNotBlank()) {
-                    // Leading slash = absolute scope, rides the hub's indexed range scan.
-                    append("&folder=").append(java.net.URLEncoder.encode("/$folder", "UTF-8"))
-                }
+    ): RankingsPage = withContext(Dispatchers.IO) {
+        val url = buildString {
+            append(baseUrl)
+            append("/api/rankings?sort=date_taken&limit=").append(limit)
+            append("&offset=").append(offset)
+            if (search.isNotBlank()) {
+                append("&q=").append(java.net.URLEncoder.encode(search, "UTF-8"))
+                append("&deep=true")
             }
-            http.newCall(Request.Builder().url(url).build()).execute().use { resp ->
-                if (!resp.isSuccessful) throw IOException("rankings failed: HTTP ${resp.code}")
-                json.decodeFromString<RankingsPage>(resp.body!!.string())
+            if (folder.isNotBlank()) {
+                append("&folder=").append(java.net.URLEncoder.encode("/$folder", "UTF-8"))
             }
         }
+        http.newCall(Request.Builder().url(url).build()).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw IOException("rankings failed: HTTP ${response.code}")
+            }
+            json.decodeFromString<RankingsPage>(response.body!!.string())
+        }
+    }
 
-    /**
-     * The library's shelf folders: walk each root down single-child chains and
-     * surface the first level that actually branches (e.g. RAWS, Exported
-     * Edits, Personal Photos) — no hardcoded names.
-     */
     suspend fun shelves(): List<ArchiveFolder> = withContext(Dispatchers.IO) {
-        val url = "$baseUrl/api/folders"
-        val all = http.newCall(Request.Builder().url(url).build()).execute().use { resp ->
-            if (!resp.isSuccessful) throw IOException("folders failed: HTTP ${resp.code}")
-            json.decodeFromString<FoldersResponse>(resp.body!!.string()).folders
-        }
-        val children = HashMap<String, MutableList<ArchiveFolder>>()
-        all.forEach { f ->
-            val parent = f.path.substringBeforeLast('/', "")
-            children.getOrPut(parent) { mutableListOf() }.add(f)
-        }
-        val shelves = mutableListOf<ArchiveFolder>()
-        val dateLike = Regex("^\\d{4}(-\\d{2}(-\\d{2})?)?$")
-        fun descend(node: ArchiveFolder) {
-            val kids = children[node.path].orEmpty()
-            when {
-                kids.isEmpty() -> shelves.add(node)
-                kids.size == 1 && kids[0].count == node.count -> descend(kids[0])
-                kids.size == 1 -> shelves.add(node)
-                // Date-organized folders (RAWS/2024/…) are one shelf, not many.
-                kids.all { dateLike.matches(it.name) } -> shelves.add(node)
-                else -> kids.forEach { shelves.add(it) }
+        val all = http.newCall(Request.Builder().url("$baseUrl/api/folders").build())
+            .execute().use { response ->
+                if (!response.isSuccessful) {
+                    throw IOException("folders failed: HTTP ${response.code}")
+                }
+                json.decodeFromString<FoldersResponse>(response.body!!.string()).folders
             }
-        }
-        all.filter { it.depth == 0 }.forEach(::descend)
-        shelves.sortedByDescending { it.count }
+        collapseShelfFolders(all)
     }
 
     suspend fun stats(timeoutSeconds: Long = 3): ArchiveStats = withContext(Dispatchers.IO) {
@@ -133,10 +107,34 @@ private fun findPhotoCount(element: JsonElement): Long? {
     val preferred = listOf("total_images", "photo_count", "image_count", "total", "photos")
     preferred.forEach { key ->
         val value = element[key]
-        if (value is JsonPrimitive && !value.isString) value.content.toLongOrNull()?.let { return it }
+        if (value is JsonPrimitive && !value.isString) {
+            value.content.toLongOrNull()?.let { return it }
+        }
     }
     element.values.forEach { child -> findPhotoCount(child)?.let { return it } }
     return null
+}
+
+internal fun collapseShelfFolders(all: List<ArchiveFolder>): List<ArchiveFolder> {
+    val children = HashMap<String, MutableList<ArchiveFolder>>()
+    all.forEach { folder ->
+        val parent = folder.path.substringBeforeLast('/', "")
+        children.getOrPut(parent) { mutableListOf() }.add(folder)
+    }
+    val shelves = mutableListOf<ArchiveFolder>()
+    val dateLike = Regex("^\\d{4}(-\\d{2}(-\\d{2})?)?$")
+    fun descend(node: ArchiveFolder) {
+        val kids = children[node.path].orEmpty()
+        when {
+            kids.isEmpty() -> shelves.add(node)
+            kids.size == 1 && kids[0].count == node.count -> descend(kids[0])
+            kids.size == 1 -> shelves.add(node)
+            kids.all { dateLike.matches(it.name) } -> shelves.add(node)
+            else -> kids.forEach { shelves.add(it) }
+        }
+    }
+    all.filter { it.depth == 0 }.forEach(::descend)
+    return shelves.sortedByDescending { it.count }
 }
 
 @Serializable

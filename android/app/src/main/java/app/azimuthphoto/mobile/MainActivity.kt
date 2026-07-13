@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -24,6 +25,7 @@ import androidx.compose.material.icons.rounded.Photo
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -31,16 +33,19 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import app.azimuthphoto.mobile.backup.BackupScheduler
@@ -48,6 +53,7 @@ import app.azimuthphoto.mobile.backup.FreeUpSpace
 import app.azimuthphoto.mobile.data.SettingsStore
 import app.azimuthphoto.mobile.ui.ArchiveScreen
 import app.azimuthphoto.mobile.ui.PhotoArchiveTheme
+import app.azimuthphoto.mobile.ui.OnboardingScreen
 import app.azimuthphoto.mobile.ui.SettingsScreen
 import app.azimuthphoto.mobile.ui.SearchScreen
 import app.azimuthphoto.mobile.ui.TimelineScreen
@@ -56,6 +62,7 @@ import app.azimuthphoto.mobile.ui.TrashScreen
 class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        installSplashScreen()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         // Test hook (debug builds): adb shell am start ... --es server_url http://host:port
@@ -99,6 +106,8 @@ private fun Root(
     hasMediaPermission: () -> Boolean,
     onPermissionGranted: () -> Unit,
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var granted by remember { mutableStateOf(hasMediaPermission()) }
     val launcher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -108,23 +117,34 @@ private fun Root(
         if (granted) onPermissionGranted()
     }
 
-    LaunchedEffect(Unit) {
-        if (!granted) {
-            launcher.launch(
-                arrayOf(
-                    Manifest.permission.READ_MEDIA_IMAGES,
-                    Manifest.permission.READ_MEDIA_VIDEO,
-                    Manifest.permission.ACCESS_MEDIA_LOCATION,
-                    Manifest.permission.POST_NOTIFICATIONS,
-                )
-            )
-        } else {
-            onPermissionGranted()
-        }
+    val settings by SettingsStore.flow(context).collectAsState(initial = null)
+    val currentSettings = settings
+    if (currentSettings == null) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        return
     }
-
-    if (!granted) {
-        PermissionGate { launcher.launch(arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO)) }
+    if (!currentSettings.onboarded || !currentSettings.serverConfigured || !granted) {
+        OnboardingScreen(
+            hasMediaPermission = granted,
+            onRequestPermissions = {
+                launcher.launch(
+                    arrayOf(
+                        Manifest.permission.READ_MEDIA_IMAGES,
+                        Manifest.permission.READ_MEDIA_VIDEO,
+                        Manifest.permission.ACCESS_MEDIA_LOCATION,
+                        Manifest.permission.POST_NOTIFICATIONS,
+                    )
+                )
+            },
+            onDone = { serverUrl, backupEnabled ->
+                scope.launch {
+                    SettingsStore.setServerUrl(context, serverUrl)
+                    SettingsStore.setBackupEnabled(context, backupEnabled)
+                    SettingsStore.setOnboarded(context, true)
+                    onPermissionGranted()
+                }
+            },
+        )
         return
     }
 
@@ -134,6 +154,7 @@ private fun Root(
         TrashScreen(onClose = { showTrash = false })
         return
     }
+    BackHandler(enabled = tab != 0) { tab = 0 }
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
