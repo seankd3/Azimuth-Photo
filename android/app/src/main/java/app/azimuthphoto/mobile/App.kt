@@ -7,8 +7,12 @@ import androidx.work.Configuration
 import app.azimuthphoto.mobile.backup.BackupScheduler
 import coil.ImageLoader
 import coil.ImageLoaderFactory
+import coil.decode.VideoFrameDecoder
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class App : Application(), Configuration.Provider, ImageLoaderFactory {
 
@@ -22,13 +26,15 @@ class App : Application(), Configuration.Provider, ImageLoaderFactory {
                 NotificationManager.IMPORTANCE_LOW,
             ).apply { description = "Photo backup progress" }
         )
-        BackupScheduler.ensureScheduled(this)
+        // Scheduling reads DataStore; keep it off the main thread at startup.
+        CoroutineScope(Dispatchers.Default).launch { BackupScheduler.ensureScheduled(this@App) }
     }
 
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder().build()
 
     override fun newImageLoader(): ImageLoader = ImageLoader.Builder(this)
+        .components { add(VideoFrameDecoder.Factory()) }
         .memoryCache {
             MemoryCache.Builder(this)
                 .maxSizePercent(0.25)

@@ -20,7 +20,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.media3.common.MediaItem as ExoMediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
@@ -41,7 +44,14 @@ class ViewerActivity : ComponentActivity() {
             return
         }
         val mimeType = intent.type ?: contentResolver.getType(uri)
-        val review = intent.action in REVIEW_ACTIONS
+        val secure = intent.action == ACTION_REVIEW_SECURE
+        // Only the secure review flow may appear over the lock screen — and then
+        // only the single shot the camera handed us, never the whole library.
+        if (secure) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
+        }
+        val review = !secure && intent.action in REVIEW_ACTIONS
         setContent {
             PhotoArchiveTheme {
                 if (review) {
@@ -54,10 +64,11 @@ class ViewerActivity : ComponentActivity() {
     }
 
     private companion object {
+        const val ACTION_REVIEW_SECURE = "android.provider.action.REVIEW_SECURE"
         val REVIEW_ACTIONS = setOf(
             "com.android.camera.action.REVIEW",
             "android.provider.action.REVIEW",
-            "android.provider.action.REVIEW_SECURE",
+            ACTION_REVIEW_SECURE,
         )
     }
 }
@@ -117,7 +128,17 @@ private fun VideoViewer(uri: Uri) {
             playWhenReady = true
         }
     }
-    DisposableEffect(player) { onDispose { player.release() } }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, player) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) player.pause()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            player.release()
+        }
+    }
     AndroidView(
         factory = { PlayerView(it).apply { this.player = player } },
         modifier = Modifier

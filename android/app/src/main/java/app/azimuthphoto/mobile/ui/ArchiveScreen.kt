@@ -246,7 +246,8 @@ fun ArchiveViewer(
     onClose: () -> Unit,
 ) {
     BackHandler(onBack = onClose)
-    val pagerState = rememberPagerState(initialPage = startIndex) { images.size }
+    val safeStart = startIndex.coerceIn(0, (images.size - 1).coerceAtLeast(0))
+    val pagerState = rememberPagerState(initialPage = safeStart) { images.size }
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         HorizontalPager(state = pagerState, key = { images[it].id }) { page ->
             val image = images[page]

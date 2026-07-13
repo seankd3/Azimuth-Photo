@@ -90,7 +90,10 @@ import kotlin.math.abs
 @Composable
 fun ViewerScreen(items: List<MediaItem>, startIndex: Int, onClose: () -> Unit) {
     BackHandler(onBack = onClose)
-    val pagerState = rememberPagerState(initialPage = startIndex) { items.size }
+    // A saved index can outlive its list (process death, mutation) — never seed
+    // the pager past the end or it throws on init.
+    val safeStart = startIndex.coerceIn(0, (items.size - 1).coerceAtLeast(0))
+    val pagerState = rememberPagerState(initialPage = safeStart) { items.size }
     var chromeVisible by remember { mutableStateOf(true) }
     var infoFor by remember { mutableStateOf<MediaItem?>(null) }
     var menuVisible by remember { mutableStateOf(false) }

@@ -38,9 +38,7 @@
         <activity
             android:name=".ViewerActivity"
             android:exported="true"
-            android:showWhenLocked="true"
-            android:theme="@style/Theme.PhotoArchive"
-            android:turnScreenOn="true">
+            android:theme="@style/Theme.PhotoArchive">
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
