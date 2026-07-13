@@ -208,9 +208,9 @@ export async function openCollectionSheet(rawIds, { onDone = null } = {}) {
         if (!name) return;
         button.disabled = true;
         try {
-            finish();
             const result = await createCollection(name, ids);
             if (result && result.ok) {
+                finish();
                 const coll = result.collection || {};
                 showToast(`Created “${name}” · ${ids.length} photos`, {
                     undo: async () => {
@@ -253,9 +253,9 @@ export async function openCollectionSheet(rawIds, { onDone = null } = {}) {
         row.addEventListener('click', async () => {
             const coll = collections[Number(row.dataset.ci)];
             if (!coll) return;
-            finish();
             const result = await addToCollection(coll.id, ids);
             if (result && result.ok) {
+                finish();
                 showToast(`Added ${ids.length} to “${coll.name}”`, {
                     undo: async () => {
                         await removeFromCollection(coll.id, ids);
