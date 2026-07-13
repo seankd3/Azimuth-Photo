@@ -183,7 +183,14 @@ async def update_gallery(db_path: str, gallery_id: int, *, options: dict[str, An
         if current is None:
             return None
         member_ids = {image["id"] for image in await _gallery_images(conn, int(gallery_id))}
-        cover_image_id = clean["cover_image_id"] if clean["cover_image_id"] in member_ids else current["cover_image_id"]
+        # PATCH always sends cover_image_id; null means "First photo", not "unchanged".
+        requested_cover = clean["cover_image_id"]
+        if requested_cover is None:
+            cover_image_id = None
+        elif requested_cover in member_ids:
+            cover_image_id = requested_cover
+        else:
+            cover_image_id = current["cover_image_id"]
         fields = ["layout = ?", "theme = ?", "cover_image_id = ?", "allow_download_all = ?", "download_size = ?", "updated_at = ?"]
         values: list[Any] = [clean["layout"], clean["theme"], cover_image_id, int(clean["allow_download_all"]), clean["download_size"], time.time()]
         if password_hash is not ...:
