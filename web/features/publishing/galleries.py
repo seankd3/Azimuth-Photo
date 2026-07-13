@@ -174,7 +174,7 @@ async def list_galleries(db_path: str, collection_id: int) -> list[dict[str, Any
         await connection.close_async(conn, db_path=db_path)
 
 
-async def update_gallery(db_path: str, gallery_id: int, *, options: dict[str, Any], password_hash: str | None | object = ...):
+async def update_gallery(db_path: str, gallery_id: int, *, options: dict[str, Any], password_hash: str | None | object = ..., title: str | None = None):
     clean = normalize_options(options)
     conn = await connection.open_async(db_path)
     try:
@@ -189,6 +189,9 @@ async def update_gallery(db_path: str, gallery_id: int, *, options: dict[str, An
         if password_hash is not ...:
             fields.append("password_hash = ?")
             values.append(password_hash)
+        if title:
+            fields.append("title = ?")
+            values.append(title)
         values.append(int(gallery_id))
         await conn.execute(f"UPDATE client_galleries SET {', '.join(fields)} WHERE id = ?", values)
         await conn.commit()
