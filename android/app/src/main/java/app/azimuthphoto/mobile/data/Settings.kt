@@ -25,6 +25,7 @@ data class AppSettings(
     /** Backed-up media older than this many days is quietly removed from the device. */
     val keepDays: Int,
     val gridColumns: Int,
+    val recentSearches: List<String>,
 )
 
 object SettingsStore {
@@ -39,6 +40,7 @@ object SettingsStore {
     private val FREE_UP_SPACE = booleanPreferencesKey("free_up_space")
     private val KEEP_DAYS = intPreferencesKey("keep_days")
     private val GRID_COLUMNS = intPreferencesKey("grid_columns")
+    private val RECENT_SEARCHES = stringPreferencesKey("recent_searches")
 
     fun flow(context: Context): Flow<AppSettings> =
         context.dataStore.data.map { p ->
@@ -52,6 +54,10 @@ object SettingsStore {
                 freeUpSpaceEnabled = p[FREE_UP_SPACE] ?: false,
                 keepDays = p[KEEP_DAYS] ?: 30,
                 gridColumns = (p[GRID_COLUMNS] ?: 4).coerceIn(3, 5),
+                recentSearches = p[RECENT_SEARCHES]
+                    ?.split(SEARCH_SEPARATOR)
+                    ?.filter { it.isNotBlank() }
+                    ?: emptyList(),
             )
         }
 
@@ -83,4 +89,20 @@ object SettingsStore {
 
     suspend fun setGridColumns(context: Context, columns: Int) =
         context.dataStore.edit { it[GRID_COLUMNS] = columns.coerceIn(3, 5) }
+
+    suspend fun addRecentSearch(context: Context, query: String) {
+        val clean = query.trim()
+        if (clean.isEmpty()) return
+        context.dataStore.edit { preferences ->
+            val existing = preferences[RECENT_SEARCHES]
+                ?.split(SEARCH_SEPARATOR)
+                ?.filter { it.isNotBlank() }
+                .orEmpty()
+            preferences[RECENT_SEARCHES] = (listOf(clean) + existing.filterNot {
+                it.equals(clean, ignoreCase = true)
+            }).take(8).joinToString(SEARCH_SEPARATOR)
+        }
+    }
+
+    private const val SEARCH_SEPARATOR = "\u001F"
 }

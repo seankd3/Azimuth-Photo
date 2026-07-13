@@ -70,8 +70,6 @@ fun ArchiveScreen() {
     }
     val api = remember(currentSettings.serverUrl) { ArchiveApi(currentSettings.serverUrl) }
 
-    var query by remember { mutableStateOf("") }
-    var activeQuery by remember { mutableStateOf("") }
     var shelves by remember { mutableStateOf<List<ArchiveFolder>>(emptyList()) }
     var activeShelf by remember { mutableStateOf<ArchiveFolder?>(null) }
     var images by remember { mutableStateOf<List<ArchiveImage>>(emptyList()) }
@@ -81,18 +79,18 @@ fun ArchiveScreen() {
     var retryToken by remember { mutableStateOf(0) }
     var viewerIndex by rememberSaveable { mutableStateOf<Int?>(null) }
     val gridState = rememberLazyGridState()
-    var pageLoadInFlight by remember(activeQuery, activeShelf) { mutableStateOf(false) }
-    var lastPageWasEmpty by remember(activeQuery, activeShelf) { mutableStateOf(false) }
+    var pageLoadInFlight by remember(activeShelf) { mutableStateOf(false) }
+    var lastPageWasEmpty by remember(activeShelf) { mutableStateOf(false) }
 
     LaunchedEffect(api) {
         shelves = runCatching { api.shelves() }.getOrDefault(emptyList())
     }
 
-    LaunchedEffect(activeQuery, activeShelf, retryToken) {
+    LaunchedEffect(activeShelf, retryToken) {
         loading = true
         error = null
         try {
-            val page = api.page(offset = 0, search = activeQuery, folder = activeShelf?.path ?: "")
+            val page = api.page(offset = 0, folder = activeShelf?.path ?: "")
             images = page.images
             totalVisible = page.visible_images
             lastPageWasEmpty = page.images.isEmpty()
@@ -102,7 +100,7 @@ fun ArchiveScreen() {
         loading = false
     }
 
-    LaunchedEffect(activeQuery, activeShelf) {
+    LaunchedEffect(activeShelf) {
         snapshotFlow { gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0 }
             .collect { lastVisible ->
                 if (
@@ -113,7 +111,6 @@ fun ArchiveScreen() {
                     try {
                         val next = api.page(
                             offset = images.size,
-                            search = activeQuery,
                             folder = activeShelf?.path ?: "",
                         )
                         if (next.images.isEmpty()) {
@@ -136,26 +133,6 @@ fun ArchiveScreen() {
     }
 
     Column(Modifier.fillMaxSize()) {
-        OutlinedTextField(
-            value = query,
-            onValueChange = { query = it },
-            placeholder = { Text("Search the archive", color = TextSecondary) },
-            leadingIcon = { Icon(Icons.Outlined.Search, null, tint = TextSecondary) },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(onSearch = { activeQuery = query }),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = Panel,
-                unfocusedContainerColor = Panel,
-                focusedBorderColor = PanelHigh,
-                unfocusedBorderColor = Panel,
-            ),
-            shape = MaterialTheme.shapes.extraLarge,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-        )
-
         if (shelves.isNotEmpty()) {
             Row(
                 Modifier
@@ -204,16 +181,6 @@ fun ArchiveScreen() {
         when {
             loading && images.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
-            }
-            images.isEmpty() && activeQuery.isNotBlank() -> Box(
-                Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    "Nothing matches ‘$activeQuery’",
-                    color = TextSecondary,
-                    style = MaterialTheme.typography.bodyMedium,
-                )
             }
             images.isEmpty() && error == null -> Box(
                 Modifier.fillMaxSize(),
@@ -272,7 +239,7 @@ fun ArchiveScreen() {
 }
 
 @Composable
-private fun ArchiveViewer(
+fun ArchiveViewer(
     api: ArchiveApi,
     images: List<ArchiveImage>,
     startIndex: Int,
