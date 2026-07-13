@@ -8,6 +8,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.util.concurrent.TimeUnit
+import android.content.Context
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.File
 
 @Serializable
 data class ArchiveImage(
@@ -66,4 +70,25 @@ class ArchiveApi(private val baseUrl: String) {
         else "$baseUrl/api/thumb/$size/${image.id}"
 
     fun largeUrl(image: ArchiveImage): String = "$baseUrl/api/thumb/lg/${image.id}"
+
+    suspend fun trashImage(id: Long): Boolean = postJson("/api/images/trash", "{\"ids\":[$id]}")
+
+    suspend fun setFlag(id: Long, flag: String): Boolean = postJson("/api/image/$id/flag", "{\"flag\":\"$flag\"}")
+
+    private suspend fun postJson(path: String, body: String): Boolean = withContext(Dispatchers.IO) {
+        val req = Request.Builder().url("$baseUrl$path")
+            .post(body.toRequestBody("application/json".toMediaType())).build()
+        http.newCall(req).execute().use { it.isSuccessful }
+    }
+
+    /** Downloads the large JPEG preview to the cache dir for sharing to other apps. */
+    suspend fun downloadToCache(context: Context, image: ArchiveImage): File = withContext(Dispatchers.IO) {
+        val req = Request.Builder().url(largeUrl(image)).build()
+        http.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) throw IOException("download failed: HTTP ${resp.code}")
+            val file = File(context.cacheDir, "share_${image.id}.jpg")
+            file.outputStream().use { out -> resp.body!!.byteStream().copyTo(out) }
+            file
+        }
+    }
 }
