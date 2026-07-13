@@ -2,6 +2,9 @@
 
 **Your own photo cloud — with Lightroom Classic instincts.**
 
+[![CI](https://github.com/Sean-Kenneth-Doherty/photo-archive/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Sean-Kenneth-Doherty/photo-archive/actions/workflows/ci.yml)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
+
 Azimuth Photo is a self-hosted library for serious photo archives — and it is **fast**. Where Lightroom chugs, Azimuth Photo flies: browse terabytes of photos at lightning speed from your own computer, NAS, or server. Cull, rank, search, and share tens of thousands of images without uploading a single byte to anyone else's cloud.
 
 It runs on your own hardware. Your originals stay under your control: scanning,
@@ -102,6 +105,10 @@ cd ..
 ```
 
 Open `http://localhost:8000`, add a source folder in the system drawer, and let the scanners run. AI features (semantic search, captions, faces) activate when you install the local models from Background Work — everything works without them, and gets smarter with them.
+
+## Get it
+
+Choose the install path that fits your library in [Install Azimuth Photo](docs/INSTALL.md), then use [Getting started](docs/getting-started.md) to build your first catalog.
 
 ## Docs
 
