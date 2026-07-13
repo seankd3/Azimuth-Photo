@@ -110,6 +110,19 @@ class SetupGateTests(BackendTestCase):
         self.assertFalse(pages_routes.needs_setup())
 
 
+class WizardHubCardContracts(unittest.TestCase):
+    def test_hub_card_stays_hidden_until_satellite_settings_arrive(self):
+        template_path = os.path.join(os.path.dirname(__file__), "templates", "setup.html")
+        with open(template_path, encoding="utf-8") as handle:
+            template = handle.read()
+
+        self.assertIn('id="su-connect-card" hidden', template)
+        self.assertIn("status?.sync?.mode !== 'satellite'", template)
+        self.assertIn("json('/api/settings')", template)
+        self.assertIn("json('/api/discover')", template)
+        self.assertIn("Connected — your library will sync in the background.", template)
+
+
 class AttachHubTests(BackendTestCase):
     async def test_attach_persists_and_starts_sync(self):
         with ModeEnv():
