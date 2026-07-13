@@ -1270,6 +1270,32 @@ class LibraryTests(BackendTestCase):
         self.assertEqual(response["months"], [{"month": "2025-01", "count": 1}])
         self.assertEqual(response["total"], 1)
 
+    async def test_date_histogram_caches_and_clears_with_facet_invalidation(self):
+        source = await self._source()
+        image_id = await self._image(source["id"], "cached-hist.jpg")
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "UPDATE images SET date_taken = ? WHERE id = ?",
+                ("2025-04-03 10:00:00", image_id),
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+        db.invalidate_stats_cache()
+        db._date_histogram_cache.clear()
+
+        first = await library_routes.api_date_histogram()
+        cache_key = db._facet_cache_key()
+        self.assertIn(cache_key, db._date_histogram_cache)
+        self.assertEqual(db._date_histogram_cache[cache_key]["data"], first)
+
+        second = await library_routes.api_date_histogram()
+        self.assertEqual(second, first)
+
+        cache_events.invalidate_facet_caches()
+        self.assertNotIn(cache_key, db._date_histogram_cache)
+
     async def test_counts_route_counts_total_picked_and_rejected(self):
         source = await self._source()
         picked = await self._image(source["id"], "picked.jpg")

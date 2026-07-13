@@ -116,9 +116,12 @@ IMAGE_ROW_SELECT = (
 
 _date_groups_cache: dict[tuple, dict] = {}
 _date_groups_refreshing: set[tuple] = set()
+_date_histogram_cache: dict[tuple, dict] = {}
+_date_histogram_refreshing: set[tuple] = set()
 _map_markers_cache: dict[tuple, dict] = {}
 _ranking_count_cache: dict[tuple, dict] = {}
 _rankable_image_ids_cache = {"ids": frozenset(), "expires": 0}
+_MONTH_SOURCE_INDEX = "idx_images_active_month_source"
 
 
 def escape_like(value: str) -> str:
@@ -274,6 +277,8 @@ def invalidate_ranking_count_cache() -> None:
 def invalidate_facet_caches() -> None:
     _date_groups_cache.clear()
     _date_groups_refreshing.clear()
+    _date_histogram_cache.clear()
+    _date_histogram_refreshing.clear()
     _map_markers_cache.clear()
 
 
@@ -290,22 +295,32 @@ def invalidate_visible_facet_caches(cache_root: str | None = None, size: str | N
         invalidate_facet_caches()
         return
 
-    for cache in (_date_groups_cache, _map_markers_cache):
+    for cache, refreshing in (
+        (_date_groups_cache, _date_groups_refreshing),
+        (_date_histogram_cache, _date_histogram_refreshing),
+        (_map_markers_cache, None),
+    ):
         for key in list(cache.keys()):
             key_size = key[11]
             key_root = key[12]
             if key_size and key_root and cache_scope_matches(key_root, key_size, cache_root, size):
                 cache.pop(key, None)
-                _date_groups_refreshing.discard(key)
+                if refreshing is not None:
+                    refreshing.discard(key)
 
 
 def invalidate_rating_facet_caches() -> None:
-    for cache in (_date_groups_cache, _map_markers_cache):
+    for cache, refreshing in (
+        (_date_groups_cache, _date_groups_refreshing),
+        (_date_histogram_cache, _date_histogram_refreshing),
+        (_map_markers_cache, None),
+    ):
         for key in list(cache.keys()):
             _orientation, compared, min_stars, *_rest = key
             if compared or int(min_stars or 0) > 0:
                 cache.pop(key, None)
-                _date_groups_refreshing.discard(key)
+                if refreshing is not None:
+                    refreshing.discard(key)
 
 
 def invalidate_visible_cache_dependent_counts(cache_root: str | None = None, size: str | None = None) -> None:
@@ -538,6 +553,36 @@ def ranking_count_image_source(
         return "images i INDEXED BY idx_images_active_filepath_elo"
     if file_type and id_filter is None and not text_query:
         return "images i INDEXED BY idx_images_missing_lower_file_ext_source"
+    return "images i"
+
+
+async def _month_source_index_available(conn) -> bool:
+    cursor = await conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ? LIMIT 1",
+        (_MONTH_SOURCE_INDEX,),
+    )
+    return await cursor.fetchone() is not None
+
+
+def date_histogram_image_source(
+    *,
+    folder: str = "",
+    id_filter: set | None,
+    text_query: str,
+    month_index_available: bool,
+) -> str:
+    """Pick a forced index for month histograms when the planner path is safe.
+
+    Absolute folder scopes keep the filepath+date index. Unscoped / all-photos
+    histograms use the month index when present. Filtered text/id search scopes
+    fall back to the planner — INDEXED BY would be wrong there.
+    """
+    if id_filter is not None or text_query:
+        return "images i"
+    if has_absolute_folder_range(folder):
+        return "images i INDEXED BY idx_images_active_filepath_date_taken"
+    if month_index_available:
+        return f"images i INDEXED BY {_MONTH_SOURCE_INDEX}"
     return "images i"
 
 
@@ -1306,18 +1351,20 @@ async def date_histogram(
         text_query=text_query,
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
     )
-    image_source = (
-        "images i INDEXED BY idx_images_active_filepath_date_taken"
-        if has_absolute_folder_range(folder) and id_filter is None and not text_query
-        else "images i"
-    )
-    select = (
-        "SELECT substr(i.date_taken, 1, 7) AS month, COUNT(*) AS count "
-        f"FROM {image_source} "
-        "JOIN catalog_sources s ON s.id = i.source_id WHERE "
-    )
     conn = await connection.open_async(db_path)
     try:
+        month_index_available = await _month_source_index_available(conn)
+        image_source = date_histogram_image_source(
+            folder=folder,
+            id_filter=id_filter,
+            text_query=text_query,
+            month_index_available=month_index_available,
+        )
+        select = (
+            "SELECT substr(i.date_taken, 1, 7) AS month, COUNT(*) AS count "
+            f"FROM {image_source} "
+            "JOIN catalog_sources s ON s.id = i.source_id WHERE "
+        )
         buckets: dict[str, int] = {}
         undated = 0
 
@@ -1354,6 +1401,105 @@ async def date_histogram(
         }
     finally:
         await connection.close_async(conn, db_path=db_path)
+
+
+async def date_histogram_cached(
+    db_path: str,
+    *,
+    get_catalog_image_counts,
+    orientation: str = "",
+    compared: str = "",
+    min_stars: int = 0,
+    folder: str = "",
+    flag: str = "",
+    date_taken: str = "",
+    file_type: str = "",
+    camera: str = "",
+    lens: str = "",
+    tag: str = "",
+    caption_model_key: str = "",
+    id_filter: set | None = None,
+    text_query: str = "",
+    force_refresh: bool = False,
+    ttl_seconds: float = FACET_CACHE_TTL_SECONDS,
+    exclude_collapsed_stack_members: bool = False,
+) -> dict:
+    cache_key = facet_cache_key(
+        orientation=orientation,
+        compared=compared,
+        min_stars=min_stars,
+        folder=folder,
+        flag=flag,
+        date_taken=date_taken,
+        file_type=file_type,
+        camera=camera,
+        lens=lens,
+        tag=tag,
+        caption_model_key=caption_model_key,
+        id_filter=id_filter,
+        text_query=text_query,
+        exclude_collapsed_stack_members=exclude_collapsed_stack_members,
+    )
+    now = _time.time()
+    cached = _date_histogram_cache.get(cache_key) if cache_key is not None else None
+    if cached and not force_refresh:
+        if cached["expires"] > now:
+            return cached["data"]
+        if cache_key not in _date_histogram_refreshing:
+            _date_histogram_refreshing.add(cache_key)
+
+            async def _refresh_date_histogram():
+                try:
+                    await date_histogram_cached(
+                        db_path,
+                        get_catalog_image_counts=get_catalog_image_counts,
+                        orientation=orientation,
+                        compared=compared,
+                        min_stars=min_stars,
+                        folder=folder,
+                        flag=flag,
+                        date_taken=date_taken,
+                        file_type=file_type,
+                        camera=camera,
+                        lens=lens,
+                        tag=tag,
+                        caption_model_key=caption_model_key,
+                        id_filter=id_filter,
+                        text_query=text_query,
+                        force_refresh=True,
+                        ttl_seconds=ttl_seconds,
+                        exclude_collapsed_stack_members=exclude_collapsed_stack_members,
+                    )
+                finally:
+                    _date_histogram_refreshing.discard(cache_key)
+
+            asyncio.create_task(_refresh_date_histogram())
+        return cached["data"]
+
+    catalog_counts = await get_catalog_image_counts()
+    histogram = await date_histogram(
+        db_path,
+        orientation=orientation,
+        compared=compared,
+        min_stars=min_stars,
+        folder=folder,
+        flag=flag,
+        date_taken=date_taken,
+        file_type=file_type,
+        camera=camera,
+        lens=lens,
+        tag=tag,
+        caption_model_key=caption_model_key,
+        id_filter=id_filter,
+        text_query=text_query,
+        exclude_collapsed_stack_members=exclude_collapsed_stack_members,
+    )
+    if cache_key is not None and int(catalog_counts.get("active_images") or 0) > 0:
+        _date_histogram_cache[cache_key] = {
+            "data": histogram,
+            "expires": _time.time() + ttl_seconds,
+        }
+    return histogram
 
 
 async def scope_counts(
