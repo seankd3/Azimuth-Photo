@@ -2,9 +2,9 @@ import {
     getFilterOptions, getFolders, getPeople, getRankings, getTags, listCollections, thumbUrl,
 } from './api.js';
 import {
-    emit, folderLabel, folderValues, on, patchScope, scope, scopeActive, setScope, setSort, smartQueryActive, smartQuerySummary, toggleBestOf,
+    emit, folderLabel, folderValues, on, patchScope, scope, scopeActive, scopeParams, setScope, setSort, smartQueryActive, smartQuerySummary, toggleBestOf,
 } from './state.js';
-import { currentFocusedImage } from './grid.js';
+import { currentFocusedImage, loadFirstPage } from './grid.js';
 import { openLoupe, toggleLoupeLights } from './loupe.js';
 import { scopeTokenHtml } from './contextbar.js';
 import {
@@ -22,6 +22,7 @@ const LIVE_MIN_CHARS = 2;
 const LIVE_LIMIT = 6;
 const MAX_SECTION_ROWS = 6;
 const DEEP_SEARCH_TIP = 'Slower, more thorough visual search';
+let pendingLoupePhotoId = null;
 const FLAG_VALUES = [
     { value: 'picked', label: 'Picked', icon: 'star' },
     { value: 'rejected', label: 'Rejected', icon: 'x' },
@@ -344,7 +345,7 @@ function buildPhotoRows(term) {
         section.push(...images.map((photo) => ({
             photo,
             navRow: 2,
-            run: () => openPhotoResult(term, photo, images),
+            run: () => openPhotoResult(term, photo),
         })));
         const contextTags = [...new Set(images.flatMap((img) => img.caption_tags || []))].slice(0, 5);
         if (contextTags.length) {
@@ -396,11 +397,14 @@ function buildPeopleRows(term) {
             labelHtml: named ? highlight(label, term) : esc(label),
             meta: named ? fmt(personCount(person)) : `Unnamed · ${fmt(personCount(person))} photos`,
             navRow: 10 + i,
-            run: () => applyScope({
-                people: person.id,
-                personLabel: named ? label : '',
-                personThumb: personThumb(person),
-            }),
+            run: () => {
+                applyScope({
+                    people: person.id,
+                    personLabel: named ? label : '',
+                    personThumb: personThumb(person),
+                });
+                switchLens('grid');
+            },
         })),
     ];
 }
@@ -824,7 +828,7 @@ function toggleDeepSearch() {
     open();
 }
 
-function openPhotoResult(term, photo, images) {
+function openPhotoResult(term, photo) {
     const deep = pendingDeep == null ? scope.deep : pendingDeep;
     const next = { ...scope, q: term, deep, sort: 'similarity' };
     remember(next);
@@ -832,13 +836,11 @@ function openPhotoResult(term, photo, images) {
     switchLens('grid');
     document.getElementById('scope-input').value = '';
     close();
-    requestAnimationFrame(() => {
-        emit('loupe:open', {
-            id: Number(photo.id),
-            index: images.findIndex((img) => Number(img.id) === Number(photo.id)),
-            images,
-        });
-    });
+    // Live strip is only LIVE_LIMIT photos; open Loupe on the grid session so
+    // ←/→ can page the rest. Force a fresh grid load in case we remounted with
+    // a stale image list from another lens.
+    pendingLoupePhotoId = Number(photo.id);
+    loadFirstPage();
 }
 
 function applyFacet({ key, value, remove, closeAfter = false }) {
@@ -925,12 +927,14 @@ function scheduleLiveSearch() {
         render();
         const controller = new AbortController();
         liveAbort = controller;
-        const params = new URLSearchParams({ q: term, limit: String(LIVE_LIMIT), offset: '0', sort: 'similarity' });
+        const params = scopeParams({
+            q: term,
+            limit: LIVE_LIMIT,
+            offset: 0,
+            sort: 'similarity',
+        });
+        params.delete('deep');
         if (pendingDeep == null ? scope.deep : pendingDeep) params.set('deep', '1');
-        if (scope.people) params.set('people', scope.people);
-        if (scope.tag) params.set('tag', scope.tag);
-        if (scope.camera) params.set('camera', scope.camera);
-        for (const folder of folderValues()) params.append('folder', folder);
         try {
             const data = await getRankings(params, { fetchOptions: { signal: controller.signal } });
             if (seq !== liveSeq || controller.signal.aborted) return;
@@ -1061,6 +1065,16 @@ export function initOmnibox() {
     on('scope', () => {
         tokenSelected = false;
         renderToken();
+    });
+    on('images', (images) => {
+        const id = pendingLoupePhotoId;
+        if (id == null) return;
+        const list = images || [];
+        if (!list.length) return;
+        const index = list.findIndex((img) => Number(img?.id) === id);
+        pendingLoupePhotoId = null;
+        if (index < 0) return;
+        emit('loupe:open', { id, index });
     });
     on('meta', renderToken);
     on('collections:changed', invalidateSuggestionData);
