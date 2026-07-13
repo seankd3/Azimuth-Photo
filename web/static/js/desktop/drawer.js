@@ -526,7 +526,7 @@ function renderConnectServer() {
     const connected = pairStatus && pairStatus.has_hub
         ? `<div class="setting-status">Connected to <code>${esc(pairStatus.hub_url)}</code></div>`
         : '';
-    const updateBanner = syncStatus && syncStatus.server_update_available && !sessionStorage.getItem('azimuth-server-update-dismissed')
+    const updateBanner = syncStatus && (syncStatus.server_update_available || syncStatus.server_incompatible) && !sessionStorage.getItem('azimuth-server-update-dismissed')
         ? '<div class="setting-status warn server-update-banner" role="status"><span>Your Azimuth Photo server needs an update</span><button class="mini-btn" id="dismiss-server-update" type="button">Dismiss</button></div>'
         : '';
     return '<section class="dr-sec" id="connect-server-panel"><h3>Connect to server</h3>'

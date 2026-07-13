@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import unittest
+from unittest import mock
 
 from fastapi.testclient import TestClient
 
@@ -13,6 +15,7 @@ from core.version import app_version
 from data.schema import SCHEMA_VERSION
 from features.sync.sync_worker import SyncWorker
 from features.sync.versioning import compare_semver, hub_compatibility, parse_semver
+from features.system import version_routes
 
 
 class SemVerTests(unittest.TestCase):
@@ -68,3 +71,7 @@ class VersionEndpointTests(unittest.TestCase):
             response.json(),
             {"version": app_version(), "schema_version": SCHEMA_VERSION, "mode": "hub"},
         )
+
+    def test_version_endpoint_names_an_unpaired_satellite_standalone(self):
+        with mock.patch.dict(os.environ, {"PHOTOARCHIVE_MODE": "standalone"}, clear=False):
+            self.assertEqual(version_routes._mode(), "standalone")

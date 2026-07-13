@@ -317,7 +317,8 @@ class SyncWorker:
                 self._status.update(hub_compatibility(None))
                 return
             payload = json.loads(response or b"{}")
-            self._status.update(hub_compatibility(payload.get("version")))
+            version = payload.get("version") if isinstance(payload, dict) else None
+            self._status.update(hub_compatibility(version))
         except (OSError, ValueError, json.JSONDecodeError):
             # A transient probe failure is not a compatibility verdict.
             return
