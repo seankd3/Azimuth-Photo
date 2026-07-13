@@ -2,13 +2,13 @@ import asyncio
 import logging
 import os
 import sqlite3
-import stat
 from collections.abc import Awaitable, Callable
 
 from fastapi import APIRouter, BackgroundTasks, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 
 from core import requests as request_helpers
+from core.source_files import inspect_source_file
 from data.repositories import images as image_repository
 from features.sync import satellite
 from features.sync.prefetch import ThumbPrefetcher, _urllib_request
@@ -64,19 +64,24 @@ async def _source_state(image) -> str:
     if int(image["hub_remote"] or 0) == 1:
         return "remote"
     filepath = str(image["filepath"] or "")
-    try:
-        source_stat = await asyncio.to_thread(os.stat, filepath)
-    except FileNotFoundError:
-        source_path = str(image["source_path"] or "")
+    source_path = str(image["source_path"] or "")
+    file_state, _source_stat = await asyncio.to_thread(
+        inspect_source_file,
+        filepath,
+        source_path,
+    )
+    if file_state == "missing":
         source_online = bool(
             image["source_online"]
             and source_path
             and await asyncio.to_thread(os.path.isdir, source_path)
         )
         return "missing" if source_online else "offline"
-    except OSError:
+    if file_state == "unavailable":
         return "unavailable"
-    if not stat.S_ISREG(source_stat.st_mode) or int(source_stat.st_size or 0) <= 0:
+    if file_state == "unsafe":
+        return "unsafe"
+    if file_state in {"not_regular", "empty"}:
         return "corrupt"
     return "available"
 
@@ -111,6 +116,15 @@ async def _source_error_response(image, state: str) -> JSONResponse | None:
                 "detail": "Check the source drive and file permissions, then try again.",
             },
             status_code=503,
+        )
+    if state == "unsafe":
+        return JSONResponse(
+            {
+                "error": "Photo unavailable",
+                "reason": "source_invalid",
+                "detail": "The catalog entry does not resolve to a regular file inside its source.",
+            },
+            status_code=404,
         )
     return None
 

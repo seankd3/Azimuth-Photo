@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 
 from data import connection
+from core.source_files import source_file_is_safe
 from features.publishing import galleries
 from features.share import auth
 
@@ -171,6 +172,25 @@ def _public_response(response: Response) -> Response:
     return response
 
 
+def _attachment_name(image_id: int, filename: str, *, suffix: str = "") -> str:
+    basename = os.path.basename(str(filename or ""))
+    stem, extension = os.path.splitext(basename)
+    safe_stem = "".join(char if char.isalnum() or char in "._- " else "_" for char in stem)
+    safe_stem = safe_stem.strip(" .")[:180] or f"photo-{image_id}"
+    extension_text = (suffix or extension).lower().lstrip(".")
+    safe_extension = "".join(char for char in extension_text if char.isalnum())[:12]
+    safe_extension = f".{safe_extension}" if safe_extension else ""
+    return f"{safe_stem}{safe_extension}"
+
+
+async def _safe_original(image: dict) -> bool:
+    return await asyncio.to_thread(
+        source_file_is_safe,
+        str(image.get("filepath") or ""),
+        str(image.get("source_path") or ""),
+    )
+
+
 def _gallery_html(data: dict) -> str:
     title = html.escape(str(data["title"]))
     state = _safe_json(data)
@@ -261,9 +281,15 @@ async def public_gallery_download(token: str, size: str, image_id: int, request:
         return _public_response(JSONResponse({"error": "Not found"}, status_code=404))
     if size != "original":
         response = await _configured_thumbnail_response()(request, size, image_id)
-        response.headers["Content-Disposition"] = f'attachment; filename="{Path(image["filename"]).stem}.jpg"'
+        response.headers["Content-Disposition"] = (
+            f'attachment; filename="{_attachment_name(image_id, image["filename"], suffix=".jpg")}"'
+        )
         return _public_response(response)
-    return _public_response(FileResponse(image["filepath"], filename=image["filename"]))
+    if not await _safe_original(image):
+        return _public_response(JSONResponse({"error": "Not found"}, status_code=404))
+    return _public_response(
+        FileResponse(image["filepath"], filename=_attachment_name(image_id, image["filename"]))
+    )
 
 
 def _zip_gallery(gallery: dict, destination: str) -> str:
@@ -275,7 +301,15 @@ def _zip_gallery(gallery: dict, destination: str) -> str:
         for image in gallery["images"]:
             filename = Path(image["filename"])
             if size == "original":
-                archive.write(image["filepath"], arcname=filename.name)
+                if not source_file_is_safe(
+                    str(image.get("filepath") or ""),
+                    str(image.get("source_path") or ""),
+                ):
+                    continue
+                archive.write(
+                    image["filepath"],
+                    arcname=_attachment_name(int(image["id"]), filename.name),
+                )
             else:
                 data = asyncio.run(thumbnails.get_thumbnail(image["filepath"], size, int(image["id"])))
                 archive.writestr(f"{filename.stem}.jpg", data)
