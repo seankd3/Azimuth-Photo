@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import io
 import json
+import os
 import tarfile
 import time
 import urllib.error
@@ -58,7 +59,15 @@ class _QueuedItem:
 
 
 class ThumbPrefetcher:
-    """Resumable newest-first thumb pack fetcher plus a tiny predictive queue."""
+    """Resumable newest-first thumb pack fetcher plus a tiny predictive queue.
+
+    Browse tier (`sm`) always fills before loupe tier (`md`). The All Photos
+    grid renders `sm`; burning the 8GB budget on `md` first leaves the grid
+    cold and hammering the hub for every cell.
+    """
+
+    BROWSE_SIZE = "sm"
+    LOUPE_SIZE = "md"
 
     def __init__(self, *, db_path: str, hub: str | None = None, request: RequestFn | None = None, store: StoreFn | None = None, cache_root: str | None = None, budget_bytes: int | None = None):
         self.db_path = db_path
@@ -69,7 +78,8 @@ class ThumbPrefetcher:
         self.budget_bytes = budget_bytes if budget_bytes is not None else self._settings_budget()
         self._queue: asyncio.PriorityQueue[_QueuedItem] = asyncio.PriorityQueue()
         self._last_predictive_seed_at = 0.0
-        self._status: dict[str, Any] = {"state": "idle", "size": "sm", "after_id": 0, "cached": 0, "total": 0, "library_cached": 0, "library_total": 0, "budget_bytes": self.budget_bytes, "last_error": ""}
+        self._sm_gap_retry_at = 0.0
+        self._status: dict[str, Any] = {"state": "idle", "size": "sm", "after_id": 0, "cached": 0, "total": 0, "library_cached": 0, "library_total": 0, "budget_bytes": self.budget_bytes, "last_error": "", "tier": "browse"}
 
     @staticmethod
     def _settings_budget() -> int:
@@ -90,12 +100,22 @@ class ThumbPrefetcher:
             raise ValueError("thumbnail prefetch supports sm or md")
         await self._ensure_state()
         if await self._at_budget():
-            cached, total = await self._library_progress(size)
-            self._status.update(library_cached=cached, library_total=total)
-            self._status.update(state="budget", size=size)
-            return self.status()
+            if size == self.BROWSE_SIZE:
+                # Prefer reclaiming loupe thumbs over leaving the grid cold.
+                reclaimed = await self._reclaim_loupe_bytes(target_bytes=64 * 1024 * 1024)
+                if reclaimed <= 0 or await self._at_budget():
+                    cached, total = await self._library_progress(size)
+                    self._status.update(library_cached=cached, library_total=total)
+                    self._status.update(state="budget", size=size, tier="browse")
+                    return self.status()
+            else:
+                cached, total = await self._library_progress(size)
+                self._status.update(library_cached=cached, library_total=total)
+                self._status.update(state="budget", size=size, tier="loupe")
+                return self.status()
         after_id = await self._state_int(f"after:{size}")
-        self._status.update(state="fetching", size=size, after_id=after_id)
+        tier = "browse" if size == self.BROWSE_SIZE else "loupe"
+        self._status.update(state="fetching", size=size, after_id=after_id, tier=tier)
         query = urlencode({"size": size, "after_id": after_id, "limit": min(500, max(1, limit))})
         code, _headers, body = await self._request("GET", f"{self.hub}/api/sync/thumbs/pack?{query}")
         if not 200 <= code < 300:
@@ -103,9 +123,41 @@ class ThumbPrefetcher:
         stored, last_hub_id, skipped = await self._store_pack(size, body)
         if last_hub_id > after_id:
             await self._set_state(f"after:{size}", str(last_hub_id))
+        elif size == self.BROWSE_SIZE and stored == 0 and last_hub_id == after_id:
+            # Cursor reached the hub end while some sm cells are still missing
+            # (hub skipped them). Periodically rewind so later hub generation
+            # can fill browse gaps without waiting for a manual reset.
+            cached, total = await self._library_progress(size)
+            if total > 0 and cached < total and time.monotonic() - self._sm_gap_retry_at > 3600:
+                self._sm_gap_retry_at = time.monotonic()
+                await self._set_state(f"after:{size}", "0")
+                after_id = 0
         cached, total = await self._library_progress(size)
-        self._status.update(state="idle", after_id=max(after_id, last_hub_id), cached=int(self._status["cached"]) + stored, total=int(self._status["total"]) + stored + skipped, library_cached=cached, library_total=total, last_error="")
+        self._status.update(
+            state="idle",
+            after_id=max(after_id, last_hub_id),
+            cached=int(self._status["cached"]) + stored,
+            total=int(self._status["total"]) + stored + skipped,
+            library_cached=cached,
+            library_total=total,
+            last_error="",
+            tier=tier,
+        )
         return self.status()
+
+    async def browse_tier_complete(self) -> bool:
+        """True when every hub-remote row has a local `sm` thumb (or none exist)."""
+
+        cached, total = await self._library_progress(self.BROWSE_SIZE)
+        self._status.update(library_cached=cached, library_total=total, size=self.BROWSE_SIZE, tier="browse")
+        return total <= 0 or cached >= total
+
+    async def prefetch_browse_first(self, *, limit: int = 500) -> dict[str, Any]:
+        """Fill `sm` exclusively until the browse tier is complete, then `md`."""
+
+        if not await self.browse_tier_complete():
+            return await self.prefetch_once(size=self.BROWSE_SIZE, limit=limit)
+        return await self.prefetch_once(size=self.LOUPE_SIZE, limit=limit)
 
     async def enqueue_loupe_neighbors(self, image_id: int) -> None:
         await self._enqueue_neighbors(image_id, span=5, priority=0, kind="thumb")
@@ -153,8 +205,12 @@ class ThumbPrefetcher:
         item = await self._queue.get()
         try:
             if item.kind == "thumb":
-                await self.fetch_single("md", item.image_id)
-                await self.fetch_single("lg", item.image_id)
+                # Grid first, then loupe. Never spend predictive bandwidth on
+                # md/lg while the browse tier is still incomplete.
+                await self.fetch_single(self.BROWSE_SIZE, item.image_id)
+                if await self.browse_tier_complete():
+                    await self.fetch_single(self.LOUPE_SIZE, item.image_id)
+                    await self.fetch_single("lg", item.image_id)
             else:
                 await self.fetch_base(item.image_id)
             return 1
@@ -274,18 +330,61 @@ class ThumbPrefetcher:
         finally:
             await connection.close_async(conn, db_path=self.db_path)
 
-    async def _at_budget(self) -> bool:
-        if self.budget_bytes <= 0:
-            return True
+    async def _cache_bytes(self) -> int:
         if self.cache_root is None:
             import thumbnails
             self.cache_root = thumbnails.SSD_CACHE_DIR
         conn = await connection.open_async(self.db_path)
         try:
-            row = await (await conn.execute("SELECT COALESCE(SUM(size_bytes), 0) AS bytes FROM cache_entries WHERE cache_root = ?", (self.cache_root,))).fetchone()
-            return int(row["bytes"] or 0) >= self.budget_bytes
+            row = await (await conn.execute(
+                "SELECT COALESCE(SUM(size_bytes), 0) AS bytes FROM cache_entries WHERE cache_root = ?",
+                (self.cache_root,),
+            )).fetchone()
+            return int(row["bytes"] or 0)
         finally:
             await connection.close_async(conn, db_path=self.db_path)
+
+    async def _at_budget(self) -> bool:
+        if self.budget_bytes <= 0:
+            return True
+        return await self._cache_bytes() >= self.budget_bytes
+
+    async def _reclaim_loupe_bytes(self, *, target_bytes: int) -> int:
+        """Delete oldest `md` cache rows so `sm` can keep filling within budget."""
+
+        if target_bytes <= 0:
+            return 0
+        if self.cache_root is None:
+            import thumbnails
+            self.cache_root = thumbnails.SSD_CACHE_DIR
+        conn = await connection.open_async(self.db_path)
+        reclaimed = 0
+        try:
+            rows = await (await conn.execute(
+                """SELECT image_id, path, size_bytes FROM cache_entries
+                   WHERE cache_root = ? AND size = ?
+                   ORDER BY last_accessed ASC, image_id ASC LIMIT 200""",
+                (self.cache_root, self.LOUPE_SIZE),
+            )).fetchall()
+            for row in rows:
+                if reclaimed >= target_bytes:
+                    break
+                path = str(row["path"] or "")
+                await conn.execute(
+                    "DELETE FROM cache_entries WHERE cache_root = ? AND size = ? AND image_id = ?",
+                    (self.cache_root, self.LOUPE_SIZE, int(row["image_id"])),
+                )
+                reclaimed += int(row["size_bytes"] or 0)
+                if path:
+                    try:
+                        os.remove(path)
+                    except OSError:
+                        pass
+            if reclaimed:
+                await conn.commit()
+        finally:
+            await connection.close_async(conn, db_path=self.db_path)
+        return reclaimed
 
     async def _library_progress(self, size: str) -> tuple[int, int]:
         if self.cache_root is None:

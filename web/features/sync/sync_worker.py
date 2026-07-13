@@ -228,8 +228,8 @@ class SyncWorker:
 
     async def _run_prefetch(self) -> None:
         try:
-            await self.prefetch.prefetch_once(size="sm")
-            await self.prefetch.prefetch_once(size="md")
+            # Browse (`sm`) exclusively until complete; only then fill loupe (`md`).
+            await self.prefetch.prefetch_browse_first()
             await self.prefetch.seed_predictive()
             await self.prefetch.run_predictive_once(uploads_active=bool(self._status.get("current_file")))
         except Exception as error:
