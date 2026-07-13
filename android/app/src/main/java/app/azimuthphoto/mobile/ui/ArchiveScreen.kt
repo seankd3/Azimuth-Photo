@@ -186,31 +186,49 @@ fun ArchiveScreen() {
                 Text(error!!, color = TextSecondary, style = MaterialTheme.typography.bodyMedium)
             }
             else -> {
-                LazyVerticalGrid(
-                    state = gridState,
-                    columns = GridCells.Fixed(4),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
-                    modifier = Modifier.fillMaxSize(),
-                ) {
-                    itemsIndexed(images, key = { _, img -> img.id }) { index, image ->
-                        Box(
-                            Modifier
-                                .aspectRatio(1f)
-                                .background(Panel)
-                                .clickable { viewerIndex = index }
-                        ) {
-                            AsyncImage(
-                                model = ImageRequest.Builder(context)
-                                    .data(api.thumbUrl(image))
-                                    .crossfade(false)
-                                    .build(),
-                                contentDescription = image.filename,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize(),
-                            )
+                Box(Modifier.fillMaxSize()) {
+                    LazyVerticalGrid(
+                        state = gridState,
+                        columns = GridCells.Fixed(4),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        modifier = Modifier.fillMaxSize(),
+                    ) {
+                        itemsIndexed(images, key = { _, img -> img.id }) { index, image ->
+                            Box(
+                                Modifier
+                                    .aspectRatio(1f)
+                                    .background(Panel)
+                                    .clickable { viewerIndex = index }
+                            ) {
+                                AsyncImage(
+                                    model = ImageRequest.Builder(context)
+                                        .data(api.thumbUrl(image))
+                                        .crossfade(false)
+                                        .build(),
+                                    contentDescription = image.filename,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                            }
                         }
                     }
+                    FastScrollScrubber(
+                        state = gridState,
+                        labelForIndex = { index ->
+                            images.getOrNull(index)?.date_group
+                                ?.take(7)
+                                ?.let { month ->
+                                    runCatching {
+                                        java.time.YearMonth.parse(month).format(
+                                            java.time.format.DateTimeFormatter.ofPattern("MMM yyyy")
+                                        )
+                                    }.getOrDefault(month)
+                                }
+                                .orEmpty()
+                        },
+                        modifier = Modifier.align(Alignment.CenterEnd),
+                    )
                 }
             }
         }

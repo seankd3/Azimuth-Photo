@@ -94,19 +94,31 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
                 publish(BackupProgress(true, candidates.size, done, lastError = e.message))
                 continue
             }
-            val knownHashes = response.known.map { it.content_hash }.toSet()
+            val knownHashes = response.known.associate { it.content_hash to it.image_id }
 
             for ((item, manifest) in hashed) {
                 try {
                     if (manifest.content_hash in knownHashes) {
-                        db.upsert(item.id, manifest.content_hash, item.sizeBytes, BackupDb.STATE_PRESENT)
+                        db.upsert(
+                            item.id,
+                            manifest.content_hash,
+                            item.sizeBytes,
+                            BackupDb.STATE_PRESENT,
+                            knownHashes[manifest.content_hash],
+                        )
                     } else {
                         publish(BackupProgress(true, candidates.size, done, item.displayName))
-                        client.upload(manifest.content_hash, item.sizeBytes, {
+                        val hubImageId = client.upload(manifest.content_hash, item.sizeBytes, {
                             context.contentResolver.openInputStream(item.uri)
                                 ?: throw IOException("cannot open ${item.uri}")
                         })
-                        db.upsert(item.id, manifest.content_hash, item.sizeBytes, BackupDb.STATE_UPLOADED)
+                        db.upsert(
+                            item.id,
+                            manifest.content_hash,
+                            item.sizeBytes,
+                            BackupDb.STATE_UPLOADED,
+                            hubImageId,
+                        )
                     }
                 } catch (e: IOException) {
                     if (!e.isPermanentHubFailure()) hasTransientFailure = true

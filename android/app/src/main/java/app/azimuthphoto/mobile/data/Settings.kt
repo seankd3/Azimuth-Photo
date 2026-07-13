@@ -24,6 +24,7 @@ data class AppSettings(
     val freeUpSpaceEnabled: Boolean,
     /** Backed-up media older than this many days is quietly removed from the device. */
     val keepDays: Int,
+    val gridColumns: Int,
 )
 
 object SettingsStore {
@@ -37,6 +38,7 @@ object SettingsStore {
     private val BACKUP_BUCKETS = stringSetPreferencesKey("backup_buckets")
     private val FREE_UP_SPACE = booleanPreferencesKey("free_up_space")
     private val KEEP_DAYS = intPreferencesKey("keep_days")
+    private val GRID_COLUMNS = intPreferencesKey("grid_columns")
 
     fun flow(context: Context): Flow<AppSettings> =
         context.dataStore.data.map { p ->
@@ -49,6 +51,7 @@ object SettingsStore {
                 backupBuckets = p[BACKUP_BUCKETS] ?: emptySet(),
                 freeUpSpaceEnabled = p[FREE_UP_SPACE] ?: false,
                 keepDays = p[KEEP_DAYS] ?: 30,
+                gridColumns = (p[GRID_COLUMNS] ?: 4).coerceIn(3, 5),
             )
         }
 
@@ -77,4 +80,7 @@ object SettingsStore {
 
     suspend fun setKeepDays(context: Context, days: Int) =
         context.dataStore.edit { it[KEEP_DAYS] = days }
+
+    suspend fun setGridColumns(context: Context, columns: Int) =
+        context.dataStore.edit { it[GRID_COLUMNS] = columns.coerceIn(3, 5) }
 }

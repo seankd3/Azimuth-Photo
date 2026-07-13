@@ -7,7 +7,7 @@ import android.database.sqlite.SQLiteOpenHelper
 
 /** Local record of which MediaStore items have been backed up to the hub. */
 class BackupDb private constructor(context: Context) :
-    SQLiteOpenHelper(context.applicationContext, "backup.db", null, 1) {
+    SQLiteOpenHelper(context.applicationContext, "backup.db", null, 2) {
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
@@ -16,19 +16,34 @@ class BackupDb private constructor(context: Context) :
                 content_hash TEXT NOT NULL,
                 size_bytes INTEGER NOT NULL,
                 state TEXT NOT NULL,
-                updated_at INTEGER NOT NULL
+                updated_at INTEGER NOT NULL,
+                hub_image_id INTEGER
             )"""
         )
         db.execSQL("CREATE INDEX idx_items_state ON items(state)")
         db.execSQL("CREATE INDEX idx_items_hash ON items(content_hash)")
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 2) db.execSQL("ALTER TABLE items ADD COLUMN hub_image_id INTEGER")
+    }
 
     fun stateFor(mediaId: Long): String? =
         readableDatabase.rawQuery(
             "SELECT state FROM items WHERE media_id = ?", arrayOf(mediaId.toString())
         ).use { if (it.moveToFirst()) it.getString(0) else null }
+
+    fun recordFor(mediaId: Long): BackupRecord? =
+        readableDatabase.rawQuery(
+            "SELECT state, hub_image_id FROM items WHERE media_id = ?",
+            arrayOf(mediaId.toString()),
+        ).use { cursor ->
+            if (!cursor.moveToFirst()) return@use null
+            BackupRecord(
+                state = cursor.getString(0),
+                hubImageId = if (cursor.isNull(1)) null else cursor.getLong(1),
+            )
+        }
 
     /** media_id → state, for badging the timeline in one query. */
     fun allStates(): Map<Long, String> {
@@ -39,13 +54,20 @@ class BackupDb private constructor(context: Context) :
         return map
     }
 
-    fun upsert(mediaId: Long, contentHash: String, sizeBytes: Long, state: String) {
+    fun upsert(
+        mediaId: Long,
+        contentHash: String,
+        sizeBytes: Long,
+        state: String,
+        hubImageId: Long? = null,
+    ) {
         val values = ContentValues().apply {
             put("media_id", mediaId)
             put("content_hash", contentHash)
             put("size_bytes", sizeBytes)
             put("state", state)
             put("updated_at", System.currentTimeMillis())
+            put("hub_image_id", hubImageId)
         }
         writableDatabase.insertWithOnConflict("items", null, values, SQLiteDatabase.CONFLICT_REPLACE)
     }
@@ -70,3 +92,5 @@ class BackupDb private constructor(context: Context) :
             }
     }
 }
+
+data class BackupRecord(val state: String, val hubImageId: Long?)
