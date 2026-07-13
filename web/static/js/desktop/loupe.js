@@ -747,6 +747,7 @@ function ensureLoupeChrome() {
         zoom.className = 'num';
         zoom.dataset.tip = 'Fit / 100% · Space';
         zoom.textContent = 'Fit';
+        zoom.addEventListener('click', () => toggleFitOneToOne());
         bar.insertBefore(zoom, actions);
     } else {
         document.getElementById('loupe-zoom').dataset.tip = 'Fit / 100% · Space';
