@@ -270,6 +270,8 @@ export async function connectToHub({ hubUrl, code, deviceName = '', platform = '
         device_name: deviceName,
         platform,
     });
+}
+
 export async function applyRemoteAccessServe() {
     return postJson('/api/remote-access/serve');
 }
