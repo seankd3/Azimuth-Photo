@@ -15,6 +15,7 @@ from features.stacks import builders as stack_builders
 
 
 Error = dict[str, int | str]
+DEFAULT_RETENTION_SECONDS = 30 * 24 * 60 * 60
 
 
 def _clean_ids(values) -> list[int]:
@@ -523,9 +524,17 @@ async def list_trash(db_path: str, *, limit: int = 100, offset: int = 0) -> dict
         await data_connection.close_async(conn, db_path=db_path)
 
 
-def _remove_trash_file(path: str | None) -> tuple[int, str]:
+def _remove_trash_file(path: str | None, source_root: str | None) -> tuple[int, str]:
     if not path:
         return 0, ""
+    if not source_root:
+        return 0, "source root is unavailable"
+    try:
+        trash_root = (Path(source_root) / ".trash").resolve()
+        candidate = Path(path).resolve(strict=False)
+        candidate.relative_to(trash_root)
+    except (OSError, ValueError):
+        return 0, "trash path is outside source trash"
     try:
         lstat_result = os.lstat(path)
     except FileNotFoundError:
@@ -572,22 +581,40 @@ def _prune_empty_trash_dirs(paths: list[str]) -> None:
             current = os.path.dirname(current)
 
 
-async def empty_trash(db_path: str) -> dict:
+async def _trash_rows(db_path: str, *, older_than: float | None = None) -> list[dict]:
     conn = await data_connection.open_async(db_path)
     try:
-        cursor = await conn.execute("SELECT id, trash_path FROM images WHERE status = 'trashed'")
-        rows = [dict(row) for row in await cursor.fetchall()]
+        query = """
+            SELECT i.id, i.trash_path, COALESCE(s.path, '') AS source_path,
+                   COALESCE(s.online, 1) AS source_online
+            FROM images i
+            LEFT JOIN catalog_sources s ON s.id = i.source_id
+            WHERE i.status = 'trashed'
+        """
+        params: tuple = ()
+        if older_than is not None:
+            query += " AND i.trashed_at IS NOT NULL AND i.trashed_at <= ?"
+            params = (float(older_than),)
+        cursor = await conn.execute(query, params)
+        return [dict(row) for row in await cursor.fetchall()]
     finally:
         await data_connection.close_async(conn, db_path=db_path)
 
+
+async def _purge_trash_rows(db_path: str, *, older_than: float | None = None) -> dict:
+    rows = await _trash_rows(db_path, older_than=older_than)
     deletable_ids: list[int] = []
     paths_to_prune: list[str] = []
     errors: list[Error] = []
+    skipped_offline = 0
     freed_bytes = 0
     for row in rows:
         image_id = int(row["id"])
+        if not int(row["source_online"]):
+            skipped_offline += 1
+            continue
         trash_path = row.get("trash_path")
-        freed, reason = await __to_thread_remove_trash_file(trash_path)
+        freed, reason = await __to_thread_remove_trash_file(trash_path, row.get("source_path"))
         if reason:
             errors.append(_error(image_id, reason))
             continue
@@ -605,7 +632,24 @@ async def empty_trash(db_path: str) -> dict:
         "deleted_count": len(deleted_ids),
         "freed_bytes": int(freed_bytes),
         "errors": errors,
+        "skipped_offline": skipped_offline,
     }
+
+
+async def empty_trash(db_path: str) -> dict:
+    """Permanently remove all reachable source-local trash entries."""
+    return await _purge_trash_rows(db_path)
+
+
+async def purge_expired_trash(
+    db_path: str,
+    *,
+    retention_seconds: float = DEFAULT_RETENTION_SECONDS,
+    now: float | None = None,
+) -> dict:
+    """Permanently remove only online trash entries past the retention window."""
+    cutoff = (time.time() if now is None else float(now)) - max(0.0, float(retention_seconds))
+    return await _purge_trash_rows(db_path, older_than=cutoff)
 
 
 async def _delete_emptied_catalog_rows(db_path: str, image_ids: list[int]) -> tuple[list[int], list[Error]]:
@@ -636,10 +680,10 @@ async def _delete_emptied_catalog_rows(db_path: str, image_ids: list[int]) -> tu
     return deleted, errors
 
 
-async def __to_thread_remove_trash_file(path: str | None) -> tuple[int, str]:
+async def __to_thread_remove_trash_file(path: str | None, source_root: str | None) -> tuple[int, str]:
     import asyncio
 
-    return await asyncio.to_thread(_remove_trash_file, path)
+    return await asyncio.to_thread(_remove_trash_file, path, source_root)
 
 
 async def __to_thread_prune_empty_trash_dirs(paths: list[str]) -> None:

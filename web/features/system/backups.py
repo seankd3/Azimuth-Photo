@@ -78,6 +78,8 @@ _integrity_state: dict[str, Any] = {
     "last_error": None,
 }
 _scheduler_started = False
+_catalog_health_lock = threading.Lock()
+_catalog_health: dict[str, dict[str, Any]] = {}
 
 
 def backup_root() -> Path:
@@ -117,6 +119,43 @@ def _sqlite_backup_to_path(source_db: str, dest_db: str) -> None:
             dst.close()
     finally:
         src.close()
+
+
+def catalog_quick_check(db_path: str) -> dict[str, Any]:
+    """Read-only SQLite health check used before catalog startup work begins."""
+    path = os.path.abspath(db_path)
+    checked_at = time.time()
+    if not os.path.exists(path):
+        result = {"ok": True, "state": "missing", "checked_at": checked_at}
+    else:
+        try:
+            conn = sqlite3.connect(f"{Path(path).as_uri()}?mode=ro", uri=True, timeout=30.0)
+            try:
+                row = conn.execute("PRAGMA quick_check").fetchone()
+            finally:
+                conn.close()
+            if not row or str(row[0]).lower() != "ok":
+                result = {
+                    "ok": False,
+                    "state": "corrupt",
+                    "checked_at": checked_at,
+                    "error": str(row[0]) if row else "SQLite quick_check returned no result",
+                }
+            else:
+                result = {"ok": True, "state": "ok", "checked_at": checked_at}
+        except sqlite3.Error as exc:
+            result = {"ok": False, "state": "corrupt", "checked_at": checked_at, "error": str(exc)}
+    with _catalog_health_lock:
+        _catalog_health[path] = result
+    return dict(result)
+
+
+def catalog_health(db_path: str) -> dict[str, Any]:
+    """Return the startup check result, checking lazily for status-only callers."""
+    path = os.path.abspath(db_path)
+    with _catalog_health_lock:
+        result = _catalog_health.get(path)
+    return dict(result) if result is not None else catalog_quick_check(path)
 
 
 def create_snapshot(
@@ -668,6 +707,7 @@ def integrity_summary(db_path: str) -> dict[str, Any]:
     """Combine live scan status with stored mismatch-capable counts."""
     status = integrity_status()
     summary: dict[str, Any] = {
+        "catalog": catalog_health(db_path),
         "scan": status,
         "checksummed": 0,
         "mismatch_count": len(status.get("mismatch_ids") or []),

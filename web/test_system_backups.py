@@ -15,6 +15,8 @@ from unittest import mock
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+import db
+from core import background
 from features.system import backup_routes, backups
 
 
@@ -38,6 +40,14 @@ def _make_catalog(path: Path, *, files: list[tuple[str, bytes]] | None = None) -
                 status TEXT DEFAULT 'kept',
                 missing_at REAL DEFAULT NULL
             );
+            CREATE TABLE develop_settings (
+                image_id INTEGER PRIMARY KEY,
+                settings_json TEXT NOT NULL
+            );
+            CREATE TABLE cache_entries (
+                image_id INTEGER PRIMARY KEY,
+                path TEXT NOT NULL
+            );
             """
         )
         conn.execute(
@@ -60,6 +70,14 @@ def _make_catalog(path: Path, *, files: list[tuple[str, bytes]] | None = None) -
     finally:
         conn.close()
     return path
+
+
+def _catalog_dump(path: Path) -> str:
+    conn = sqlite3.connect(path)
+    try:
+        return "\n".join(conn.iterdump())
+    finally:
+        conn.close()
 
 
 class BackupUnitTests(unittest.TestCase):
@@ -297,6 +315,27 @@ class BackupRouteTests(unittest.TestCase):
         self.assertFalse(discarded.json()["prepared"])
         self.assertEqual(self.db_path.read_bytes(), live_before)
 
+    def test_restore_drill_recovers_catalog_content_after_live_db_corruption(self):
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute("INSERT INTO develop_settings (image_id, settings_json) VALUES (1, '{\"crop\": 0.4}')")
+            conn.execute("INSERT INTO cache_entries (image_id, path) VALUES (1, '/previews/1.jpg')")
+            conn.commit()
+        finally:
+            conn.close()
+        expected = _catalog_dump(self.db_path)
+
+        snapshot = self.client.post("/api/system/backup/now")
+        self.assertEqual(snapshot.status_code, 200, snapshot.text)
+        self.db_path.write_bytes(b"not a sqlite catalog")
+
+        restored = self.client.post("/api/system/backup/restore", json={"name": snapshot.json()["name"]})
+        self.assertEqual(restored.status_code, 200, restored.text)
+        staged = Path(restored.json()["staging_path"])
+
+        self.assertEqual(_catalog_dump(staged), expected)
+        self.assertEqual(self.db_path.read_bytes(), b"not a sqlite catalog")
+
     def test_restore_endpoint_reports_validation_and_storage_failures(self):
         missing = self.client.post(
             "/api/system/backup/restore",
@@ -339,6 +378,56 @@ class BackupRouteTests(unittest.TestCase):
         self.assertIsNotNone(status)
         self.assertEqual(status.json()["scan"]["state"], "idle")
         self.assertGreaterEqual(status.json()["checksummed"], 1)
+
+
+class CatalogRecoveryTests(unittest.TestCase):
+    def test_corrupt_catalog_at_boot_is_reported_without_reinitializing_it(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            corrupt = Path(tempdir) / "photoarchive.db"
+            corrupt.write_bytes(b"not a sqlite catalog")
+            original_path = db.DB_PATH
+            db.DB_PATH = str(corrupt)
+            init_called = False
+
+            async def init_db():
+                nonlocal init_called
+                init_called = True
+
+            unused = lambda *_args, **_kwargs: None
+            server = FastAPI()
+            backup_routes.configure(db_path=lambda: db.DB_PATH)
+            server.include_router(backup_routes.router)
+
+            @server.on_event("startup")
+            async def startup():
+                await background.run_startup(
+                    smoke_mode_enabled=lambda: False,
+                    warm_templates=lambda: None,
+                    thumbnails=mock.Mock(), settings=mock.Mock(), face_worker=mock.Mock(), caption_worker=mock.Mock(),
+                    track_background_task=unused, init_db=init_db,
+                    get_filter_options=unused, get_date_groups=unused, get_catalog_image_counts=unused,
+                    get_stats=unused, get_ai_status_counts=unused, get_visible_orientation_pairing_pool_counts=unused,
+                    get_catalog_summary=unused, cache_root=unused, build_ai_status=unused, build_cache_status=unused,
+                    api_rankings=unused, api_folders=unused, api_map_markers=unused, api_date_groups=unused,
+                    api_settings=unused, mosaic_next=unused, compare_next=unused,
+                    default_visible_pairing_candidates=unused, warm_filtered_visible_ranked_candidates=unused,
+                    get_visible_past_matchups=unused, classify_orientations_background=unused,
+                    scan_metadata_background=unused, swiss_pair_window=1, filtered_swiss_pair_window=1,
+                    filtered_mosaic_window=1, mosaic_explore_window=1, mosaic_diverse_window=1,
+                    interaction_cache_warmup_delay_seconds=0,
+                )
+
+            try:
+                with TestClient(server) as client:
+                    status = client.get("/api/system/integrity/status")
+                    self.assertEqual(status.status_code, 200, status.text)
+                    catalog = status.json()["catalog"]
+                    self.assertFalse(catalog["ok"])
+                    self.assertEqual(catalog["state"], "corrupt")
+                self.assertFalse(init_called)
+                self.assertEqual(corrupt.read_bytes(), b"not a sqlite catalog")
+            finally:
+                db.DB_PATH = original_path
 
 
 if __name__ == "__main__":
