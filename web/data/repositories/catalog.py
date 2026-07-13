@@ -187,6 +187,10 @@ async def repair_hub_mirror_source_counts_on_conn(conn) -> bool:
     Rankings / All Photos short-circuit on SUM(active_image_count). A hub
     mirror that left those denormalized counters at 0 makes All Photos look
     like only the local/recent imports even when hub_remote rows exist.
+
+    Full COUNT(*) over 100k+ hub rows is too expensive to run on every
+    /api/stats cold miss. Only recount when the denormalized counters look
+    empty (the known drift failure) while hub rows exist.
     """
     cursor = await conn.execute(
         "SELECT id, image_count, active_image_count FROM catalog_sources WHERE path = ?",
@@ -196,6 +200,19 @@ async def repair_hub_mirror_source_counts_on_conn(conn) -> bool:
     if row is None:
         return False
     source_id = int(row["id"])
+    image_count = int(row["image_count"] or 0)
+    active_image_count = int(row["active_image_count"] or 0)
+    if image_count > 0:
+        # Trust denormalized counters; mirror refresh keeps them honest.
+        return False
+    probe = await (
+        await conn.execute(
+            "SELECT 1 AS present FROM images WHERE source_id = ? LIMIT 1",
+            (source_id,),
+        )
+    ).fetchone()
+    if probe is None:
+        return False
     live = await (
         await conn.execute(
             "SELECT "
@@ -206,16 +223,13 @@ async def repair_hub_mirror_source_counts_on_conn(conn) -> bool:
             (source_id,),
         )
     ).fetchone()
-    image_count = int(live["image_count"] or 0)
-    active_image_count = int(live["active_image_count"] or 0)
-    if (
-        int(row["image_count"] or 0) == image_count
-        and int(row["active_image_count"] or 0) == active_image_count
-    ):
+    live_image_count = int(live["image_count"] or 0)
+    live_active_image_count = int(live["active_image_count"] or 0)
+    if image_count == live_image_count and active_image_count == live_active_image_count:
         return False
     await conn.execute(
         "UPDATE catalog_sources SET image_count = ?, active_image_count = ? WHERE id = ?",
-        (image_count, active_image_count, source_id),
+        (live_image_count, live_active_image_count, source_id),
     )
     return True
 
