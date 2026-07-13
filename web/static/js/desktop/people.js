@@ -185,7 +185,19 @@ async function load() {
     loadError = false;
     const seq = ++generation;
     render();
-    const [data, status] = await Promise.all([getPeople(500), getPeopleStatus()]);
+    let data = null;
+    let status = null;
+    try {
+        [data, status] = await Promise.all([getPeople(500), getPeopleStatus()]);
+    } catch {
+        if (seq !== generation || !mounted) return;
+        loading = false;
+        peopleData = null;
+        loadError = true;
+        setRankingsMeta({ visibleImages: 0, sortQuality: null });
+        render();
+        return;
+    }
     if (seq !== generation) return;
     loading = false;
     peopleStatus = status;
