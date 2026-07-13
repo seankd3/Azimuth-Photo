@@ -1,5 +1,5 @@
 import { createCollection, removeFromCollection, thumbUrl } from './api.js';
-import { emit, on, selection, selectionChanged, setImages, setRankingsMeta, viewState } from './state.js';
+import { emit, on, selection, selectionChanged, setImages, setRankingsMeta, setScope, viewState } from './state.js';
 import { loadScopePage } from './scope_data.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
 import { showToast } from './toast.js';
@@ -235,6 +235,10 @@ function openMenu(button, groupIndex) {
                 });
             } else showToast("Couldn't create collection");
         } else if (action === 'refine') {
+            setScope({
+                similarIds: ids,
+                similarLabel: titleFor(group),
+            });
             showToast('Opening Refine for this event.');
             emit('refine:open');
         } else if (action === 'select') {
