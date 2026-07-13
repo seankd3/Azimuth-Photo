@@ -293,7 +293,6 @@ export function initKeyboard() {
                 return;
             }
             if (key === 'k') {
-                if (activeLens() !== 'grid') return;
                 event.preventDefault();
                 openCommandPalette();
                 return;
