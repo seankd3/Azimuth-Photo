@@ -155,6 +155,8 @@ def _add_data_arg(src: Path, dest: str) -> str:
 
 def data_files() -> list[tuple[Path, str]]:
     return [
+        # /api/version must report the same release version from a frozen binary.
+        (ROOT / "VERSION", "."),
         (WEB / "static", "static"),
         (WEB / "templates", "templates"),
         (WEB / "features" / "develop" / "film_stocks", str(Path("features") / "develop" / "film_stocks")),
