@@ -35,9 +35,17 @@ async def api_list_shared_surfaces(request: Request):
     shares = await _list_shares()
     publishes = await _list_publishes()
     by_collection: dict[int, dict] = {}
+    # Published-node shares store collection_id=NULL; keep them ungrouped so pick_count stays visible.
+    node_items: list[dict] = []
 
     for share in shares:
-        collection_id = int(share["collection_id"])
+        raw_collection_id = share.get("collection_id")
+        if raw_collection_id is None:
+            item = _base_item(share)
+            item["private_link"] = _private_link_payload(request, share)
+            node_items.append(item)
+            continue
+        collection_id = int(raw_collection_id)
         item = by_collection.setdefault(collection_id, _base_item(share))
         item["private_link"] = _private_link_payload(request, share)
 
@@ -48,7 +56,7 @@ async def api_list_shared_surfaces(request: Request):
         if not item.get("photo_count"):
             item["photo_count"] = int(publish.get("image_count") or 0)
 
-    items = list(by_collection.values())
+    items = list(by_collection.values()) + node_items
     items.sort(
         key=lambda item: max(
             float((item.get("private_link") or {}).get("created_at") or 0),
@@ -61,8 +69,9 @@ async def api_list_shared_surfaces(request: Request):
 
 def _base_item(row: dict) -> dict:
     cover_image_id = row.get("cover_image_id")
+    raw_collection_id = row.get("collection_id")
     return {
-        "collection_id": int(row["collection_id"]),
+        "collection_id": int(raw_collection_id) if raw_collection_id is not None else None,
         "name": row.get("collection_name") or row.get("title") or "Collection",
         "photo_count": int(row.get("photo_count") or row.get("image_count") or 0),
         "cover_image_id": int(cover_image_id) if cover_image_id is not None else None,
