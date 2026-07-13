@@ -247,6 +247,10 @@ export async function getPairStatus() {
     return fetchJson('/api/pair/status', { defaultValue: null });
 }
 
+export async function getSyncStatus() {
+    return fetchJson('/api/sync/status', { defaultValue: null });
+}
+
 export async function listDevices() {
     return fetchJson('/api/devices', { defaultValue: null });
 }
