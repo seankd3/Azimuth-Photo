@@ -63,6 +63,10 @@ export async function getFolderTree() {
     return fetchJson('/api/folders/tree', { defaultValue: null });
 }
 
+export async function revealFolder(path) {
+    return postJsonWithStatus('/api/reveal', { path });
+}
+
 export async function getFilterOptions() {
     return fetchJson('/api/filter-options', { defaultValue: null });
 }

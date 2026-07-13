@@ -60,6 +60,7 @@ PUBLIC_ROUTE_CONTRACT = {
     ("POST", "/api/catalog/sources"),
     ("POST", "/api/catalog/sources/{source_id}/rescan"),
     ("POST", "/api/catalog/sources/{source_id}/remove"),
+    ("POST", "/api/reveal"),
     ("GET", "/api/thumb/{size}/{image_id}"),
     ("GET", "/api/full/{image_id}"),
     ("GET", "/api/image/{image_id}/media-status"),

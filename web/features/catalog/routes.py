@@ -9,6 +9,7 @@ from collections.abc import Awaitable, Callable
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
 import scanner
 import settings
@@ -17,11 +18,19 @@ from core import cache_events
 from core.path_groups import safe_commonpath, safe_relpath
 from core.requests import json_object
 from data.repositories import catalog as catalog_repository
+from data.repositories import imports as import_repository
 from features.catalog import metadata as catalog_metadata
+from features.catalog import reveal as catalog_reveal
 
 
 router = APIRouter()
 log = logging.getLogger(__name__)
+
+
+class RevealBody(BaseModel):
+    path: str = Field(min_length=1, max_length=4096)
+
+
 InvalidatePairing = Callable[..., None]
 InvalidateCacheStatus = Callable[[], None]
 DbPathProvider = Callable[[], str]
@@ -835,3 +844,21 @@ async def api_folders_tree():
     _folder_tree_cache["data"] = result
     _folder_tree_cache["expires"] = _time.time() + _folder_tree_cache_ttl_seconds
     return result
+
+
+@router.post("/api/reveal")
+async def api_reveal(body: RevealBody):
+    """Open a catalog folder in the host OS file manager."""
+
+    roots = await import_repository.catalog_source_paths(_configured_db_path())
+    result = await asyncio.to_thread(catalog_reveal.reveal_folder, body.path, roots)
+    if result.get("ok"):
+        return {"ok": True}
+    error = str(result.get("error") or "Could not open folder")
+    lowered = error.lower()
+    if "outside" in lowered:
+        return JSONResponse({"ok": False, "error": error}, status_code=403)
+    if "required" in lowered or "not a folder" in lowered:
+        return JSONResponse({"ok": False, "error": error}, status_code=400)
+    # Headless hosts / missing opener: soft failure so the UI can toast.
+    return {"ok": False, "error": error}

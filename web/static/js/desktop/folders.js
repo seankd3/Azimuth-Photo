@@ -1,4 +1,4 @@
-import { getFolderTree } from './api.js';
+import { getFolderTree, revealFolder } from './api.js';
 import { downloadExport, openExportMenu } from './export_menu.js';
 import { emit, folderActive, folderValues, on, scopeParams, setScope } from './state.js';
 import { showToast } from './toast.js';
@@ -138,6 +138,23 @@ function exportFolderScope(node, anchor) {
     });
 }
 
+function revealMenuLabel() {
+    const platform = navigator.platform || '';
+    if (/Win/i.test(platform)) return 'Reveal in Explorer';
+    if (/Mac/i.test(platform)) return 'Reveal in Finder';
+    return 'Open in file manager';
+}
+
+async function revealFolderPath(path) {
+    if (!path) return;
+    const result = await revealFolder(path);
+    if (result?.ok && result?.data?.ok) {
+        showToast('Opened in file manager');
+        return;
+    }
+    showToast(result?.data?.error || 'Couldn’t open folder');
+}
+
 function ensureMenu() {
     if (menu) return menu;
     menu = document.createElement('div');
@@ -173,11 +190,13 @@ function openFolderMenu(node, anchor) {
     menu.innerHTML = '<div class="pm-group">'
         + `<button data-act="scope">${icon('folder-tree')} Show in scope with subfolders</button>`
         + `<button data-act="refine">${icon('zap')} Open in Refine</button>`
+        + `<button data-act="reveal">${icon('folder-open')} ${esc(revealMenuLabel())}</button>`
         + `<button data-act="export">${icon('download')} Export view…</button>`
         + '</div>';
     menu.hidden = false;
     positionMenu(anchor);
     for (const button of menu.querySelectorAll('[data-act]')) {
+        button.setAttribute('role', 'menuitem');
         button.addEventListener('click', () => {
             const action = button.dataset.act;
             closeFolderMenu();
@@ -186,6 +205,7 @@ function openFolderMenu(node, anchor) {
                 applyFolderScope(node.path);
                 emit('refine:open');
             }
+            if (action === 'reveal') revealFolderPath(node.path);
             if (action === 'export') exportFolderScope(node, anchor);
         });
     }
