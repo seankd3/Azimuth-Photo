@@ -78,15 +78,26 @@ FILM_SCAN_EXTENSIONS = frozenset({
 # for the known set; unknown hints still become top-level siblings).
 KNOWN_FOLDER_HINTS = frozenset(DESTINATIONS)
 
-_PHONE_PATH_MARKERS = (
+# Strong signals uniquely identify a phone/personal source; they win over file
+# extension. Weak signals are generic folder names ("Camera", "DCIM/Camera") that
+# ALSO appear on cameras/card dumps — they must never override an unambiguous
+# camera-RAW extension, or a CR3 off a card lands in Personal Photos.
+_STRONG_PHONE_PATH_MARKERS = (
     "personal photos",
     "camera roll",
     "google photos",
     "facebook photos",
-    "/dcim/camera",
-    "/camera/",
     "pxl_",
 )
+_WEAK_PHONE_PATH_MARKERS = (
+    "/dcim/camera",
+    "/camera/",
+)
+_PHONE_PATH_MARKERS = _STRONG_PHONE_PATH_MARKERS + _WEAK_PHONE_PATH_MARKERS
+
+# Camera-RAW formats that are never produced by phones. .dng is deliberately
+# excluded: Pixel and other phones shoot DNG, so its routing stays marker-driven.
+UNAMBIGUOUS_RAW_EXTENSIONS = frozenset(RAW_CAMERA_EXTENSIONS - {".dng"})
 
 _FILM_PATH_MARKERS = (
     "film scans",
@@ -157,9 +168,15 @@ def infer_source_kind(
         return "export"
     if any(marker in haystack for marker in _FILM_PATH_MARKERS):
         return "film_scan"
-    if any(marker in haystack for marker in _PHONE_PATH_MARKERS):
-        return "phone"
     ext = extension_of(filename)
+    if any(marker in haystack for marker in _STRONG_PHONE_PATH_MARKERS):
+        return "phone"
+    # An unambiguous camera-RAW file is a camera file no matter what folder it
+    # sits in — this beats the weak "/camera/" markers and the card flag.
+    if ext in UNAMBIGUOUS_RAW_EXTENSIONS:
+        return "camera_card"
+    if any(marker in haystack for marker in _WEAK_PHONE_PATH_MARKERS):
+        return "phone"
     if ext in {".heic", ".heif"}:
         return "phone"
     if card_source:
@@ -198,6 +215,7 @@ def route_destination(
         return hint
 
     kind = (source_kind or "unknown").strip().lower() or "unknown"
+    ext = extension_of(filename)
     if kind == "video":
         return DEST_VIDEO
     if kind == "export":
@@ -205,9 +223,9 @@ def route_destination(
     if kind == "film_scan":
         return DEST_FILM
     if kind == "phone":
-        return DEST_PERSONAL
+        # A camera RAW is never a phone still, regardless of inferred kind.
+        return DEST_RAWS if ext in UNAMBIGUOUS_RAW_EXTENSIONS else DEST_PERSONAL
 
-    ext = extension_of(filename)
     if ext in RAW_CAMERA_EXTENSIONS:
         return DEST_RAWS
     if ext in FILM_SCAN_EXTENSIONS:
