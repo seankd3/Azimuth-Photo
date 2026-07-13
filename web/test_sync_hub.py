@@ -345,8 +345,9 @@ class SyncHubTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200, response.text)
         self.upload(content_hash, payload)
-        destination = self.raws / "Personal Photos" / "2024" / "2024-06-07" / "personal.jpg"
+        destination = self.root / "Personal Photos" / "2024" / "2024-06-07" / "personal.jpg"
         self.assertEqual(destination.read_bytes(), payload)
+        self.assertFalse((self.raws / "Personal Photos" / "2024" / "2024-06-07" / "personal.jpg").exists())
         self.assertFalse((self.raws / "2024" / "2024-06-07" / "personal.jpg").exists())
 
     def test_manifest_rejects_invalid_folder_paths(self):

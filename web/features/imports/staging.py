@@ -20,6 +20,7 @@ from data.repositories import collections as collection_repository
 from data.repositories import imports as import_repository
 from features.catalog import routes as catalog_routes
 from features.imports import card
+from features.imports import taxonomy
 from features.library import geodata, keywords
 from features.quality import routes as quality_routes
 from features.sync import satellite
@@ -364,19 +365,55 @@ async def _import_entry(job: ImportJob, entry: dict) -> None:
         job.bytes_done += int(entry["size"])
 
 
-def _destination_directory(entry: dict) -> Path:
+def _source_kind_for_entry(job: ImportJob, entry: dict) -> taxonomy.SourceKind:
+    return taxonomy.infer_source_kind(
+        filename=entry["name"],
+        path=entry.get("path", ""),
+        rel_path=entry.get("rel_path", ""),
+        card_source=bool(job.scan.card_source),
+        kind=str(entry.get("kind") or "image"),
+    )
+
+
+def _destination_directory(job: ImportJob, entry: dict) -> Path:
     taken = str(entry.get("taken_at") or "")[:10]
     try:
         parsed = datetime.strptime(taken, "%Y-%m-%d")
     except ValueError:
         parsed = datetime.fromtimestamp(float(entry["mtime"]))
-    tree = "Video" if entry["kind"] == "video" else "RAWS"
-    return originals_root() / tree / parsed.strftime("%Y") / parsed.strftime("%Y-%m-%d")
+    library_root = originals_root()
+    # If import_root was pointed at the RAWS tree itself, climb to the library root
+    # so destinations stay siblings (Personal Photos must not nest under RAWS).
+    if library_root.name == taxonomy.DEST_RAWS:
+        library_root = library_root.parent
+    return taxonomy.destination_directory(
+        library_root,
+        filename=entry["name"],
+        year=parsed.strftime("%Y"),
+        day=parsed.strftime("%Y-%m-%d"),
+        source_kind=_source_kind_for_entry(job, entry),
+    )
+
+
+def _catalog_source_root_for_destination(destination: str | Path) -> str:
+    path = Path(destination)
+    library_root = originals_root()
+    if library_root.name == taxonomy.DEST_RAWS:
+        library_root = library_root.parent
+    try:
+        top = path.relative_to(library_root).parts[0]
+    except (ValueError, IndexError):
+        return str(library_root)
+    if top in taxonomy.DESTINATION_SET:
+        return str(taxonomy.destination_source_root(library_root, top))
+    return str(library_root)
 
 
 async def _copy_and_register(job: ImportJob, entry: dict) -> None:
     source = Path(entry["path"])
-    result = await asyncio.to_thread(card.copy_verified, str(source), str(_destination_directory(entry)))
+    result = await asyncio.to_thread(
+        card.copy_verified, str(source), str(_destination_directory(job, entry))
+    )
     duplicate_destination = result.get("duplicate_destination")
     if duplicate_destination or await _known_exact_duplicate(result["content_hash"], result["full_hash"]):
         if result.get("destination"):
@@ -385,12 +422,22 @@ async def _copy_and_register(job: ImportJob, entry: dict) -> None:
             # A crashed earlier import can leave a verified copy at the destination
             # that never reached the catalog; register it (idempotent) so the card
             # original is only cleared once the catalog owns a copy.
-            await _register_file(duplicate_destination, entry, result["content_hash"])
+            await _register_file(
+                duplicate_destination,
+                entry,
+                result["content_hash"],
+                source_root=_catalog_source_root_for_destination(duplicate_destination),
+            )
         job.skipped_duplicates += 1
         await _clear_card_after_verified_duplicate(job, entry)
         return
     destination = result["destination"]
-    image_id = await _register_file(destination, entry, result["content_hash"])
+    image_id = await _register_file(
+        destination,
+        entry,
+        result["content_hash"],
+        source_root=_catalog_source_root_for_destination(destination),
+    )
     job.image_rows.append({"image_id": image_id, "filepath": destination, "original_name": entry["name"]})
     if job.clear_card:
         await asyncio.to_thread(card.remove_verified_card_file, entry["path"])

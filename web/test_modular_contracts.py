@@ -126,6 +126,8 @@ PUBLIC_ROUTE_CONTRACT = {
     ("POST", "/api/import/commit"),
     ("GET", "/api/import/jobs/{job_id}"),
     ("POST", "/api/import/jobs/{job_id}/cancel"),
+    ("GET", "/api/import/taxonomy"),
+    ("POST", "/api/import/taxonomy/reclassify-personal"),
     ("GET", "/api/user-collections"),
     ("POST", "/api/user-collections"),
     ("GET", "/api/user-collections/{collection_id}"),
