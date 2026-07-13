@@ -9,6 +9,7 @@ from collections.abc import Iterable
 
 from data import connection
 from features.sync.hashing import HASH_PREFIX_BYTES, compute_content_hash, compute_full_hash
+from features.sync.executor import run_sync_work
 
 
 HASH_BYTES = HASH_PREFIX_BYTES
@@ -135,19 +136,24 @@ async def record_local_images(db_path: str) -> list[dict]:
     await ensure_sync_state(db_path)
     conn = await connection.open_async(db_path)
     try:
+        image_columns = {row["name"] for row in await (await conn.execute("PRAGMA table_info(images)")).fetchall()}
+        # Hub-mirrored rows have no local original; hashing them wastes the
+        # dedicated sync pool and holds a write lock across 100k+ no-ops.
+        hub_filter = "AND COALESCE(hub_remote, 0) = 0" if "hub_remote" in image_columns else ""
         cursor = await conn.execute(
             "SELECT id, filename, filepath, file_size, date_taken FROM images "
-            "WHERE COALESCE(missing_at, 0) = 0 OR missing_at IS NULL"
+            f"WHERE (COALESCE(missing_at, 0) = 0 OR missing_at IS NULL) {hub_filter}"
         )
         images = [dict(row) for row in await cursor.fetchall()]
         items: list[dict] = []
+        pending = 0
         for image in images:
             filepath = str(image.get("filepath") or "")
             if not filepath or not os.path.isfile(filepath):
                 continue
             try:
                 stat = os.stat(filepath)
-                content_hash = await asyncio.to_thread(content_hash_for_file, filepath)
+                content_hash = await run_sync_work(content_hash_for_file, filepath)
             except OSError:
                 continue
             cursor = await conn.execute(
@@ -184,12 +190,35 @@ async def record_local_images(db_path: str) -> list[dict]:
                     "full_hash": (
                         None
                         if uploaded
-                        else await asyncio.to_thread(compute_full_hash, filepath)
+                        else await run_sync_work(compute_full_hash, filepath)
                     ),
                 }
             )
+            pending += 1
+            if pending % 50 == 0:
+                await conn.commit()
         await conn.commit()
         return items
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+
+
+async def pending_upload_snapshot(db_path: str) -> list[dict]:
+    """Cheap queue depth read — no hashing, no write lock."""
+
+    await ensure_sync_state(db_path)
+    conn = await connection.open_async(db_path)
+    try:
+        cursor = await conn.execute(
+            """
+            SELECT s.content_hash, s.image_id, i.filename, i.filepath, i.file_size AS bytes, i.date_taken,
+                   s.uploaded
+            FROM sync_state s
+            JOIN images i ON i.id = s.image_id
+            WHERE COALESCE(s.uploaded, 0) = 0
+            """
+        )
+        return [dict(row) for row in await cursor.fetchall()]
     finally:
         await connection.close_async(conn, db_path=db_path)
 
