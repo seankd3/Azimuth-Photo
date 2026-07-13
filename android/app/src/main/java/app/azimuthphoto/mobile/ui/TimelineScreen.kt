@@ -1,25 +1,27 @@
 package app.azimuthphoto.mobile.ui
 
+import android.app.Activity
+import android.content.Intent
+import android.provider.MediaStore
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.GridItemSpan
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CloudUpload
-import androidx.compose.material.icons.rounded.PlayCircle
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -28,30 +30,19 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
-import coil.compose.AsyncImage
-import coil.request.ImageRequest
 import app.azimuthphoto.mobile.backup.BackupDb
+import app.azimuthphoto.mobile.backup.BackupScheduler
 import app.azimuthphoto.mobile.backup.BackupWorker
 import app.azimuthphoto.mobile.data.DeviceMedia
 import app.azimuthphoto.mobile.data.MediaItem
-import java.time.LocalDate
-import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-
-sealed class TimelineRow {
-    data class Header(val day: LocalDate) : TimelineRow()
-    data class Cell(val item: MediaItem) : TimelineRow()
-}
 
 @Composable
 fun TimelineScreen() {
@@ -59,6 +50,12 @@ fun TimelineScreen() {
     var items by remember { mutableStateOf<List<MediaItem>?>(null) }
     var backupStates by remember { mutableStateOf<Map<Long, String>>(emptyMap()) }
     var viewerIndex by rememberSaveable { mutableStateOf<Int?>(null) }
+    var selectedIds by rememberSaveable(
+        stateSaver = listSaver(
+            save = { it.toList() },
+            restore = { it.toSet() },
+        ),
+    ) { mutableStateOf(emptySet<Long>()) }
     val progress by BackupWorker.progress.collectAsState()
 
     LaunchedEffect(progress.running) {
@@ -74,16 +71,12 @@ fun TimelineScreen() {
         return
     }
 
-    // GPhotos-style RAW+JPEG stacking: the JPEG fronts the shot, the DNG twin
-    // stays hidden here (but still backs up). Solo DNGs remain visible.
-    val jpegShots = remember(media) {
-        media.filterNot { it.isRaw }.map { it.shotKey }.toHashSet()
-    }
-    val rawShots = remember(media) {
-        media.filter { it.isRaw }.map { it.shotKey }.toHashSet()
-    }
-    val visible = remember(media) {
-        media.filterNot { it.isRaw && it.shotKey in jpegShots }
+    val visible = remember(media) { DeviceMedia.collapseRawPairs(media) }
+    val indexOf = remember(visible) { visible.withIndex().associate { it.value.id to it.index } }
+    val backedUpIds = remember(backupStates) {
+        backupStates.filterValues {
+            it == BackupDb.STATE_UPLOADED || it == BackupDb.STATE_PRESENT
+        }.keys
     }
 
     viewerIndex?.let { index ->
@@ -91,142 +84,99 @@ fun TimelineScreen() {
         return
     }
 
-    val rows = remember(visible) {
-        buildList {
-            var lastDay: LocalDate? = null
-            visible.forEach { item ->
-                if (item.day != lastDay) {
-                    add(TimelineRow.Header(item.day))
-                    lastDay = item.day
-                }
-                add(TimelineRow.Cell(item))
-            }
+    BackHandler(enabled = selectedIds.isNotEmpty()) { selectedIds = emptySet() }
+    val trashLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { selectedIds = emptySet() }
+
+    Column(Modifier.fillMaxSize()) {
+        if (selectedIds.isNotEmpty()) {
+            SelectionBar(
+                count = selectedIds.size,
+                onClose = { selectedIds = emptySet() },
+                onShare = {
+                    shareItems(context as Activity, visible.filter { it.id in selectedIds })
+                    selectedIds = emptySet()
+                },
+                onTrash = {
+                    val uris = visible.filter { it.id in selectedIds }.map { it.uri }
+                    val pending = MediaStore.createTrashRequest(context.contentResolver, uris, true)
+                    trashLauncher.launch(IntentSenderRequest.Builder(pending).build())
+                },
+                onBackup = {
+                    BackupScheduler.runNow(context)
+                    selectedIds = emptySet()
+                },
+            )
         }
-    }
-    val indexOf = remember(visible) { visible.withIndex().associate { it.value.id to it.index } }
-
-    val gridState = rememberLazyGridState()
-    LazyVerticalGrid(
-        state = gridState,
-        columns = GridCells.Fixed(4),
-        modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
-    ) {
-        items(
-            items = rows,
-            span = { row ->
-                if (row is TimelineRow.Header) GridItemSpan(maxLineSpan) else GridItemSpan(1)
-            },
-            key = { row ->
-                when (row) {
-                    is TimelineRow.Header -> "h${row.day}"
-                    is TimelineRow.Cell -> row.item.id
+        MediaGrid(
+            items = visible,
+            selectedIds = selectedIds,
+            onTap = { item ->
+                if (selectedIds.isNotEmpty()) {
+                    selectedIds = selectedIds.toggle(item.id)
+                } else {
+                    viewerIndex = indexOf[item.id]
                 }
             },
-        ) { row ->
-            when (row) {
-                is TimelineRow.Header -> DayHeader(row.day)
-                is TimelineRow.Cell -> MediaCell(
-                    item = row.item,
-                    backedUp = backupStates[row.item.id] == BackupDb.STATE_UPLOADED ||
-                        backupStates[row.item.id] == BackupDb.STATE_PRESENT,
-                    hasRaw = row.item.shotKey in rawShots,
-                    onClick = { viewerIndex = indexOf[row.item.id] },
-                )
-            }
-        }
-    }
-}
-
-private val HEADER_FORMAT = DateTimeFormatter.ofPattern("EEE, MMM d, yyyy")
-private val HEADER_FORMAT_THIS_YEAR = DateTimeFormatter.ofPattern("EEE, MMM d")
-
-@Composable
-private fun DayHeader(day: LocalDate) {
-    val label = when (day) {
-        LocalDate.now() -> "Today"
-        LocalDate.now().minusDays(1) -> "Yesterday"
-        else -> day.format(
-            if (day.year == LocalDate.now().year) HEADER_FORMAT_THIS_YEAR else HEADER_FORMAT
+            onLongPress = { item -> selectedIds = selectedIds + item.id },
+            backedUpIds = backedUpIds,
+            showBackupState = true,
+            modifier = Modifier.weight(1f),
         )
     }
-    Text(
-        text = label,
-        style = MaterialTheme.typography.titleSmall,
-        color = TextPrimary,
-        modifier = Modifier.padding(start = 14.dp, top = 22.dp, bottom = 8.dp),
-    )
 }
 
 @Composable
-private fun MediaCell(item: MediaItem, backedUp: Boolean, hasRaw: Boolean, onClick: () -> Unit) {
-    Box(
+private fun SelectionBar(
+    count: Int,
+    onClose: () -> Unit,
+    onShare: () -> Unit,
+    onTrash: () -> Unit,
+    onBackup: () -> Unit,
+) {
+    Row(
         Modifier
-            .aspectRatio(1f)
+            .fillMaxWidth()
             .background(Panel)
-            .clickable(onClick = onClick)
+            .statusBarsPadding(),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        AsyncImage(
-            model = ImageRequest.Builder(LocalContext.current)
-                .data(item.uri)
-                .crossfade(false)
-                .size(256)
-                .build(),
-            contentDescription = item.displayName,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize(),
+        IconButton(onClick = onClose) {
+            Icon(Icons.Outlined.Close, contentDescription = "Clear selection")
+        }
+        Text(
+            "$count selected",
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.weight(1f),
         )
-        if (hasRaw && !item.isVideo) {
-            Text(
-                "RAW",
-                style = MaterialTheme.typography.labelSmall,
-                color = Color.White,
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(4.dp)
-                    .background(Color.Black.copy(alpha = 0.45f), MaterialTheme.shapes.extraSmall)
-                    .padding(horizontal = 4.dp, vertical = 1.dp)
-                    .alpha(0.9f),
-            )
+        IconButton(onClick = onShare) {
+            Icon(Icons.Outlined.Share, contentDescription = "Share")
         }
-        if (item.isVideo) {
-            Row(
-                Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (item.durationMs > 0) {
-                    Text(
-                        formatDuration(item.durationMs),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color.White,
-                        modifier = Modifier.padding(end = 3.dp),
-                    )
-                }
-                Icon(
-                    Icons.Rounded.PlayCircle,
-                    contentDescription = "Video",
-                    tint = Color.White,
-                    modifier = Modifier.size(16.dp),
-                )
-            }
+        IconButton(onClick = onTrash) {
+            Icon(Icons.Outlined.Delete, contentDescription = "Move to trash")
         }
-        if (!backedUp) {
-            // GPhotos-style: only the *not yet safe* items carry a mark.
-            Icon(
-                Icons.Outlined.CloudUpload,
-                contentDescription = "Not backed up",
-                tint = Color.White,
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(4.dp)
-                    .size(14.dp)
-                    .alpha(0.85f),
-            )
+        IconButton(onClick = onBackup) {
+            Icon(Icons.Outlined.CloudUpload, contentDescription = "Back up now")
         }
     }
+}
+
+private fun Set<Long>.toggle(id: Long): Set<Long> =
+    if (id in this) this - id else this + id
+
+private fun shareItems(activity: Activity, items: List<MediaItem>) {
+    val type = when {
+        items.all { it.isVideo } -> "video/*"
+        items.all { !it.isVideo } -> "image/*"
+        else -> "*/*"
+    }
+    val intent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+        this.type = type
+        putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(items.map { it.uri }))
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    activity.startActivity(Intent.createChooser(intent, null))
 }
 
 fun formatDuration(ms: Long): String {

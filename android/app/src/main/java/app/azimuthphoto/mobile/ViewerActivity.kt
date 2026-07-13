@@ -1,51 +1,118 @@
 package app.azimuthphoto.mobile
 
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.remember
-import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaItem as ExoMediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
-import coil.compose.AsyncImage
+import app.azimuthphoto.mobile.data.DeviceMedia
+import app.azimuthphoto.mobile.data.MediaItem
 import app.azimuthphoto.mobile.ui.PhotoArchiveTheme
+import app.azimuthphoto.mobile.ui.ViewerScreen
+import coil.compose.AsyncImage
 
-/** Handles ACTION_VIEW so Azimuth can be the phone's default photo opener. */
+/** Handles system viewing and the camera's swipe-through review flow. */
 class ViewerActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val uri = intent?.data
-        if (uri == null) { finish(); return }
-        val isVideo = (intent.type ?: contentResolver.getType(uri))?.startsWith("video/") == true
+        if (uri == null) {
+            finish()
+            return
+        }
+        val mimeType = intent.type ?: contentResolver.getType(uri)
+        val review = intent.action in REVIEW_ACTIONS
         setContent {
             PhotoArchiveTheme {
-                if (isVideo) VideoViewer(uri) else AsyncImage(
-                    model = uri,
-                    contentDescription = null,
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier.fillMaxSize().background(Color.Black),
-                )
+                if (review) {
+                    ReviewViewer(uri = uri, mimeType = mimeType, onClose = ::finish)
+                } else {
+                    SingleUriViewer(uri = uri, mimeType = mimeType)
+                }
             }
         }
     }
+
+    private companion object {
+        val REVIEW_ACTIONS = setOf(
+            "com.android.camera.action.REVIEW",
+            "android.provider.action.REVIEW",
+            "android.provider.action.REVIEW_SECURE",
+        )
+    }
 }
 
-@androidx.compose.runtime.Composable
-private fun VideoViewer(uri: android.net.Uri) {
+private sealed interface ReviewState {
+    data object Loading : ReviewState
+    data object Fallback : ReviewState
+    data class Timeline(val items: List<MediaItem>, val index: Int) : ReviewState
+}
+
+@Composable
+private fun ReviewViewer(uri: Uri, mimeType: String?, onClose: () -> Unit) {
+    val context = LocalContext.current
+    val state by produceState<ReviewState>(ReviewState.Loading, uri) {
+        val id = DeviceMedia.resolveId(context, uri)
+        val items = DeviceMedia.collapseRawPairs(DeviceMedia.queryAll(context))
+        val index = id?.let { target -> items.indexOfFirst { it.id == target } } ?: -1
+        value = if (index >= 0) ReviewState.Timeline(items, index) else ReviewState.Fallback
+    }
+    when (val current = state) {
+        ReviewState.Loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator()
+        }
+        ReviewState.Fallback -> SingleUriViewer(uri = uri, mimeType = mimeType)
+        is ReviewState.Timeline -> ViewerScreen(
+            items = current.items,
+            startIndex = current.index,
+            onClose = onClose,
+        )
+    }
+}
+
+@Composable
+private fun SingleUriViewer(uri: Uri, mimeType: String?) {
+    val isVideo = mimeType?.startsWith("video/") == true
+    if (isVideo) {
+        VideoViewer(uri)
+    } else {
+        AsyncImage(
+            model = uri,
+            contentDescription = null,
+            contentScale = ContentScale.Fit,
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black),
+        )
+    }
+}
+
+@Composable
+private fun VideoViewer(uri: Uri) {
     val context = LocalContext.current
     val player = remember(uri) {
         ExoPlayer.Builder(context).build().apply {
-            setMediaItem(MediaItem.fromUri(uri))
+            setMediaItem(ExoMediaItem.fromUri(uri))
             prepare()
             playWhenReady = true
         }
@@ -53,6 +120,8 @@ private fun VideoViewer(uri: android.net.Uri) {
     DisposableEffect(player) { onDispose { player.release() } }
     AndroidView(
         factory = { PlayerView(it).apply { this.player = player } },
-        modifier = Modifier.fillMaxSize().background(Color.Black),
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black),
     )
 }

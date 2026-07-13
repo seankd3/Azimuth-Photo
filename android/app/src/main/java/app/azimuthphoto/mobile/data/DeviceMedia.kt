@@ -50,6 +50,15 @@ data class MediaBucket(val id: String, val name: String, val count: Int)
 
 object DeviceMedia {
 
+    /** Hide a RAW twin when its rendered JPEG is present; keep solo DNGs visible. */
+    fun collapseRawPairs(items: List<MediaItem>): List<MediaItem> {
+        val jpegShots = items.asSequence()
+            .filterNot { it.isRaw }
+            .map { it.shotKey }
+            .toHashSet()
+        return items.filterNot { it.isRaw && it.shotKey in jpegShots }
+    }
+
     private val PROJECTION = arrayOf(
         MediaStore.Files.FileColumns._ID,
         MediaStore.Files.FileColumns.MEDIA_TYPE,
@@ -126,6 +135,20 @@ object DeviceMedia {
             }
             items
         }
+
+    suspend fun resolveId(context: Context, uri: Uri): Long? = withContext(Dispatchers.IO) {
+        runCatching {
+            context.contentResolver.query(
+                uri,
+                arrayOf(MediaStore.MediaColumns._ID),
+                null,
+                null,
+                null,
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getLong(0) else null
+            }
+        }.getOrNull()
+    }
 
     /** Distinct buckets (folders) with counts, for the backup-folder picker. */
     suspend fun queryBuckets(context: Context): List<MediaBucket> =

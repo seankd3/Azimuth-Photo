@@ -1,6 +1,7 @@
 package app.azimuthphoto.mobile.ui
 
 import android.app.Activity
+import android.content.ComponentName
 import android.content.Intent
 import android.provider.MediaStore
 import androidx.activity.compose.BackHandler
@@ -23,7 +24,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -49,6 +53,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import app.azimuthphoto.mobile.ViewerActivity
 import app.azimuthphoto.mobile.data.MediaItem
 import java.time.Instant
 import java.time.ZoneId
@@ -62,6 +67,7 @@ fun ViewerScreen(items: List<MediaItem>, startIndex: Int, onClose: () -> Unit) {
     val pagerState = rememberPagerState(initialPage = startIndex) { items.size }
     var chromeVisible by remember { mutableStateOf(true) }
     var infoFor by remember { mutableStateOf<MediaItem?>(null) }
+    var menuVisible by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
@@ -93,6 +99,30 @@ fun ViewerScreen(items: List<MediaItem>, startIndex: Int, onClose: () -> Unit) {
                 }
                 IconButton(onClick = { infoFor = current }) {
                     Icon(Icons.Outlined.Info, "Info", tint = Color.White)
+                }
+                Box {
+                    IconButton(onClick = { menuVisible = true }) {
+                        Icon(Icons.Outlined.MoreVert, "More", tint = Color.White)
+                    }
+                    DropdownMenu(
+                        expanded = menuVisible,
+                        onDismissRequest = { menuVisible = false },
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Use as") },
+                            onClick = {
+                                menuVisible = false
+                                useAs(context as Activity, current)
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Open with") },
+                            onClick = {
+                                menuVisible = false
+                                openWith(context as Activity, current)
+                            },
+                        )
+                    }
                 }
                 IconButton(onClick = {
                     trashItem(context, current)
@@ -206,6 +236,33 @@ private fun shareItem(activity: Activity, item: MediaItem) {
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
     activity.startActivity(Intent.createChooser(intent, null))
+}
+
+private fun useAs(activity: Activity, item: MediaItem) {
+    val mimeType = activity.contentResolver.getType(item.uri)
+        ?: if (item.isVideo) "video/*" else "image/*"
+    val intent = Intent(Intent.ACTION_ATTACH_DATA).apply {
+        setDataAndType(item.uri, mimeType)
+        putExtra("mimeType", mimeType)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    activity.startActivity(Intent.createChooser(intent, null))
+}
+
+private fun openWith(activity: Activity, item: MediaItem) {
+    val mimeType = activity.contentResolver.getType(item.uri)
+        ?: if (item.isVideo) "video/*" else "image/*"
+    val intent = Intent(Intent.ACTION_VIEW).apply {
+        setDataAndType(item.uri, mimeType)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    val chooser = Intent.createChooser(intent, null).apply {
+        putExtra(
+            Intent.EXTRA_EXCLUDE_COMPONENTS,
+            arrayOf(ComponentName(activity, ViewerActivity::class.java)),
+        )
+    }
+    activity.startActivity(chooser)
 }
 
 private fun trashItem(context: android.content.Context, item: MediaItem) {
