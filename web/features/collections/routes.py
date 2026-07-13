@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from features.collections import graph
 from features.collections import smart
 from features.collections import suggestions as collection_suggestions
+from features.sync import oplog
 
 
 router = APIRouter()
@@ -153,6 +154,27 @@ def _invalidate_suggestions_cache() -> None:
     collection_suggestions.invalidate_cache()
 
 
+async def _collection_oplog_payload(collection_id: int) -> dict | None:
+    if _db_path is None:
+        return None
+    return await oplog.collection_meta_payload(_db_path(), collection_id)
+
+
+async def _append_collection_meta(collection_id: int, *, deleted: bool = False, payload: dict | None = None) -> None:
+    if _db_path is None:
+        return
+    payload = payload or await _collection_oplog_payload(collection_id)
+    if payload is None:
+        return
+    await oplog.append_collection_meta(_db_path(), {**payload, "deleted": deleted})
+
+
+async def _append_collection_memberships(collection_id: int, image_ids: list[int], *, member: bool) -> None:
+    if _db_path is None:
+        return
+    await oplog.append_collection_memberships(_db_path(), collection_id, image_ids, member=member)
+
+
 async def _smart_collection_conflict(collection_id: int) -> JSONResponse | None:
     if _collection_is_smart is None:
         return None
@@ -225,6 +247,8 @@ async def _collection_update(
     )
     if collection is None:
         return JSONResponse({"error": "Collection not found"}, status_code=404)
+    if materialize_ids is None:
+        await _append_collection_meta(collection_id)
     if materialize_ids is not None:
         _invalidate_suggestions_cache()
     return {"ok": True, "collection": await _with_smart_summary(collection)}
@@ -254,6 +278,9 @@ async def api_create_collection(payload: CreateCollectionBody):
         status=payload.status,
         query=query_json,
     )
+    await _append_collection_meta(collection["id"])
+    if not collection.get("smart"):
+        await _append_collection_memberships(collection["id"], payload.image_ids, member=True)
     _invalidate_suggestions_cache()
     return {"ok": True, "collection": await _with_smart_summary(collection)}
 
@@ -280,6 +307,7 @@ async def api_add_collection_link(collection_id: int, payload: CollectionLinkBod
         return JSONResponse({"error": str(exc)}, status_code=409)
     if link is None:
         return JSONResponse({"error": "Collection not found"}, status_code=404)
+    await _append_collection_meta(payload.child_id)
     return {"ok": True, "link": link}
 
 
@@ -298,6 +326,7 @@ async def api_delete_collection_link(
         return JSONResponse({"error": "Collection not found"}, status_code=404)
     if not deleted:
         return JSONResponse({"error": "Collection link not found"}, status_code=404)
+    await _append_collection_meta(target_child_id)
     return {"ok": True}
 
 
@@ -359,9 +388,11 @@ async def api_update_collection(collection_id: int, payload: UpdateCollectionBod
 @router.post("/api/user-collections/{collection_id}/delete")
 async def api_delete_collection(collection_id: int):
     _configured()
+    oplog_payload = await _collection_oplog_payload(collection_id)
     deleted = await _delete_collection(collection_id)
     if not deleted:
         return JSONResponse({"error": "Collection not found"}, status_code=404)
+    await _append_collection_meta(collection_id, deleted=True, payload=oplog_payload)
     _invalidate_suggestions_cache()
     return {"ok": True}
 
@@ -377,6 +408,7 @@ async def api_add_collection_images(collection_id: int, payload: CollectionImage
     collection = await _add_collection_images(collection_id, payload.image_ids)
     if collection is None:
         return JSONResponse({"error": "Collection not found"}, status_code=404)
+    await _append_collection_memberships(collection_id, payload.image_ids, member=True)
     _invalidate_suggestions_cache()
     return {"ok": True, "collection": collection}
 
@@ -392,6 +424,7 @@ async def api_remove_collection_images_post(collection_id: int, payload: Collect
     collection = await _remove_collection_images(collection_id, payload.image_ids)
     if collection is None:
         return JSONResponse({"error": "Collection not found"}, status_code=404)
+    await _append_collection_memberships(collection_id, payload.image_ids, member=False)
     _invalidate_suggestions_cache()
     return {"ok": True, "collection": collection}
 
@@ -409,5 +442,6 @@ async def api_remove_collection_images(collection_id: int, payload: CollectionIm
     collection = await _remove_collection_images(collection_id, payload.image_ids)
     if collection is None:
         return JSONResponse({"error": "Collection not found"}, status_code=404)
+    await _append_collection_memberships(collection_id, payload.image_ids, member=False)
     _invalidate_suggestions_cache()
     return {"ok": True, "collection": collection}
