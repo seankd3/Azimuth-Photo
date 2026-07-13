@@ -1,0 +1,91 @@
+"""Pre-migration catalog backups: labeled snapshots, retention protection, hook."""
+
+import os
+import sqlite3
+import tempfile
+import unittest
+from datetime import datetime, timedelta
+from pathlib import Path
+from unittest import mock
+
+from features.system import backups
+
+
+def _make_db(path: str, user_version: int) -> None:
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute("CREATE TABLE images (id INTEGER PRIMARY KEY)")
+        conn.execute(f"PRAGMA user_version = {user_version}")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+class MigrationBackupTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name) / "backups"
+        self.root.mkdir()
+        self.db = os.path.join(self.tmp.name, "photoarchive.db")
+        _make_db(self.db, 20)
+        self._patch = mock.patch.object(backups, "backup_root", return_value=self.root)
+        self._patch.start()
+
+    def tearDown(self):
+        self._patch.stop()
+        self.tmp.cleanup()
+
+    def _fake(self, when: datetime, label: str | None = None) -> str:
+        name = backups._timestamp_name(when, label)
+        (self.root / name).write_bytes(b"stub")
+        return name
+
+    def test_labeled_snapshot_roundtrips_and_lists(self):
+        result = backups.create_snapshot(self.db, label=backups.PREMIGRATE_LABEL)
+        self.assertTrue(result["ok"])
+        self.assertIn(backups.PREMIGRATE_LABEL, result["name"])
+        self.assertEqual(result["label"], backups.PREMIGRATE_LABEL)
+        # Still discoverable by the time-machine listing (restorable).
+        self.assertIn(result["name"], [b["name"] for b in backups.list_backups()])
+
+    def test_backup_before_migration_creates_snapshot(self):
+        result = backups.backup_before_migration(self.db, 20, backups.PREMIGRATE_KEEP + 20)
+        self.assertIsNotNone(result)
+        self.assertTrue(Path(result["path"]).exists())
+        self.assertIn(backups.PREMIGRATE_LABEL, result["name"])
+
+    def test_backup_before_migration_never_raises(self):
+        # A missing DB must not crash startup — the hook swallows and returns None.
+        self.assertIsNone(
+            backups.backup_before_migration(self.db + ".nope", 20, 27)
+        )
+
+    def test_retention_protects_premigrate_snapshots(self):
+        old = datetime.now() - timedelta(days=120)  # far outside daily/weekly windows
+        premig = self._fake(old, backups.PREMIGRATE_LABEL)
+        plain = self._fake(old - timedelta(minutes=1))
+        recent = self._fake(datetime.now())
+
+        pruned = backups.apply_retention(self.root)
+
+        self.assertIn(plain, pruned)
+        self.assertNotIn(premig, pruned)
+        self.assertNotIn(recent, pruned)
+        self.assertTrue((self.root / premig).exists())
+        self.assertFalse((self.root / plain).exists())
+
+    def test_retention_caps_premigrate_backlog(self):
+        base = datetime.now() - timedelta(days=200)
+        names = [
+            self._fake(base + timedelta(hours=i), backups.PREMIGRATE_LABEL)
+            for i in range(backups.PREMIGRATE_KEEP + 3)
+        ]
+        backups.apply_retention(self.root)
+        survivors = [n for n in names if (self.root / n).exists()]
+        # Only the newest PREMIGRATE_KEEP are protected; older ones age out.
+        self.assertEqual(len(survivors), backups.PREMIGRATE_KEEP)
+        self.assertEqual(set(survivors), set(names[-backups.PREMIGRATE_KEEP:]))
+
+
+if __name__ == "__main__":
+    unittest.main()

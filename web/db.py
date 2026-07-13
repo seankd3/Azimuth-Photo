@@ -5,6 +5,7 @@ this module as a stable delegate for older callers during the migration.
 """
 
 import aiosqlite
+import asyncio
 import logging
 import os
 import time as _time  # noqa: F401  (tests set cache expiries via db._time.time())
@@ -283,6 +284,29 @@ _apply_schema_and_migrations = data_schema.apply_schema_and_migrations
 _backfill_image_date_sources = data_schema.backfill_image_date_sources
 
 
+async def _backup_before_migration(conn) -> None:
+    """Take a protected pre-migration snapshot when an existing catalog is
+    about to be upgraded to a newer schema. Best-effort; never blocks startup."""
+    try:
+        cursor = await conn.execute("PRAGMA user_version")
+        row = await cursor.fetchone()
+        current = int(row[0]) if row else 0
+    except Exception:
+        return
+    # user_version 0 = a brand-new/pre-versioning DB about to get its tables;
+    # only guard a genuine forward upgrade of an existing versioned catalog.
+    if not (0 < current < SCHEMA_VERSION):
+        return
+    try:
+        from features.system import backups
+
+        await asyncio.to_thread(
+            backups.backup_before_migration, DB_PATH, current, SCHEMA_VERSION
+        )
+    except Exception:
+        log.exception("pre-migration backup hook failed db=%s", DB_PATH)
+
+
 async def init_db():
     db_exists = os.path.exists(DB_PATH)
     db = await get_db()
@@ -302,6 +326,8 @@ async def init_db():
             await _ensure_metadata_fts(db)
             await db.commit()
             return
+        if db_exists:
+            await _backup_before_migration(db)
         await _apply_schema_and_migrations(db, db_exists=db_exists)
         await _migrate_catalog_sources(db)
         if await _backfill_image_date_sources(db):
