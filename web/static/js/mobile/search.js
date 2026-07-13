@@ -22,6 +22,25 @@ const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c
 }[c]));
 const fmtInt = (n) => (n == null ? '' : Number(n).toLocaleString('en-US'));
 
+/** Match desktop flattenPeople: /api/people returns sections, not a top-level people array. */
+function flattenPeople(peopleData) {
+    const sections = (peopleData && peopleData.sections) || {};
+    const seen = new Map();
+    for (const list of [
+        peopleData?.people,
+        peopleData?.persons,
+        peopleData?.results,
+        sections.most_seen,
+        sections.named_people,
+        sections.other_faces,
+    ]) {
+        for (const person of list || []) {
+            if (person?.id != null && !seen.has(String(person.id))) seen.set(String(person.id), person);
+        }
+    }
+    return [...seen.values()];
+}
+
 function recentSearches() {
     try {
         return JSON.parse(localStorage.getItem(RECENT_KEY) || '[]');
@@ -324,7 +343,7 @@ export function showSearch() {
         built = true;
         render();
         Promise.all([
-            getPeople(24).then((data) => { people = data || { people: [] }; }),
+            getPeople(24).then((data) => { people = { people: flattenPeople(data) }; }),
             getFilterOptions().then((data) => { filterOptions = data; }),
             getTags(24).then((data) => { tagOptions = data || { tags: [] }; }),
         ]).then(render);
