@@ -9,7 +9,9 @@ import shutil
 import time
 from pathlib import Path
 
+import numpy as np
 from PIL import Image, ImageDraw
+from tifffile import imwrite
 
 from qa.config import (
     ACTIVE_IMAGE_COUNT,
@@ -27,6 +29,8 @@ PRIMARY_COUNT = 2_200
 SECONDARY_COUNT = 1_300
 HUB_COUNT = 500
 DEVELOP_IMAGE_COUNT = 6
+RAW_IMAGE_ID = 1
+DEVELOP_PRESET_NAME = "Clean Color"
 
 
 def _jpeg(path: Path, index: int, *, size: tuple[int, int] = (160, 106)) -> None:
@@ -43,6 +47,38 @@ def _jpeg(path: Path, index: int, *, size: tuple[int, int] = (160, 106)) -> None
     image.save(path, "JPEG", quality=88)
 
 
+def _dng(path: Path, index: int, *, size: tuple[int, int] = (160, 108)) -> None:
+    """Write a tiny standards-readable Bayer DNG for real RAW QA."""
+
+    width, height = size
+    y, x = np.mgrid[:height, :width]
+    mosaic = ((x / width * 0.7 + y / height * 0.3) * 12_000 + 512).astype(np.uint16)
+    mosaic += (((x // 8 + y // 8 + index) % 2) * 1_800).astype(np.uint16)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    imwrite(
+        path,
+        mosaic,
+        photometric=32803,
+        metadata=None,
+        extratags=[
+            (50706, "B", 4, (1, 4, 0, 0), False),
+            (50707, "B", 4, (1, 3, 0, 0), False),
+            (50708, "s", 0, "Azimuth QA Camera", False),
+            (33421, "H", 2, (2, 2), False),
+            (33422, "B", 4, (0, 1, 1, 2), False),
+            (50713, "H", 2, (1, 1), False),
+            (50714, "I", 1, 512, False),
+            (50717, "I", 1, 16_383, False),
+            (50718, "2I", 2, ((1, 1), (1, 1)), False),
+            (50719, "I", 2, (0, 0), False),
+            (50720, "I", 2, (width, height), False),
+            (50721, "2i", 9, tuple((value, 10_000) for value in (10_000, 0, 0, 0, 10_000, 0, 0, 0, 10_000)), False),
+            (50728, "2I", 3, ((1, 2), (1, 1), (2, 3)), False),
+            (50778, "H", 1, 21, False),
+        ],
+    )
+
+
 def _month_for(index: int) -> tuple[int, int]:
     ordinal = index % (9 * 12)
     return 2018 + ordinal // 12, ordinal % 12 + 1
@@ -54,8 +90,12 @@ def _active_rows(primary: Path, secondary: Path) -> list[tuple]:
     _jpeg(shared_source, 777)
     real_paths = []
     for image_id in range(1, DEVELOP_IMAGE_COUNT + 1):
-        path = primary / "Develop" / f"000-qa-develop-{image_id}.jpg"
-        _jpeg(path, image_id)
+        suffix = ".dng" if image_id == RAW_IMAGE_ID else ".jpg"
+        path = primary / "Develop" / f"000-qa-develop-{image_id}{suffix}"
+        if image_id == RAW_IMAGE_ID:
+            _dng(path, image_id)
+        else:
+            _jpeg(path, image_id)
         real_paths.append(path)
 
     primary_folders = ("Travel/2022", "Family/2023", "Studio/2024", "Inbox")
@@ -97,7 +137,7 @@ def _active_rows(primary: Path, secondary: Path) -> list[tuple]:
                 source_id,
                 filename,
                 str(filepath),
-                f"qa-content-{image_id:08d}",
+                f"{image_id:032x}",
                 image_id if source_id == 3 else None,
                 1 if source_id == 3 else 0,
                 elo,
@@ -108,10 +148,11 @@ def _active_rows(primary: Path, secondary: Path) -> list[tuple]:
                 "QA Camera Co",
                 f"QA-Cam {image_id % 3 + 1}",
                 f"QA Lens {image_id % 4 + 1}",
-                ".jpg",
+                filepath.suffix.lower(),
                 8_192 + image_id,
                 width,
                 height,
+                "landscape" if landscape else "portrait",
             )
         )
     return rows
@@ -132,7 +173,7 @@ def _trash_rows(primary: Path) -> list[tuple]:
                 1,
                 filename,
                 str(original),
-                f"qa-trash-content-{offset + 1}",
+                f"{image_id:032x}",
                 900 + offset,
                 "trashed",
                 "unflagged",
@@ -176,8 +217,8 @@ async def _seed() -> None:
     await conn.executemany(
         "INSERT INTO images "
         "(id, source_id, filename, filepath, content_hash, hub_image_id, hub_remote, elo, comparisons, "
-        "status, flag, date_taken, camera_make, camera_model, lens, file_ext, file_size, width, height) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "status, flag, date_taken, camera_make, camera_model, lens, file_ext, file_size, width, height, orientation) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         _active_rows(primary, secondary),
     )
     await conn.executemany(
@@ -200,6 +241,15 @@ async def _seed() -> None:
     await conn.execute(
         "INSERT INTO develop_settings (image_id, settings, origin, updated_at) "
         "VALUES (1, '{}', 'user', '2026-07-15T00:00:00+00:00')"
+    )
+    await conn.execute(
+        "INSERT INTO develop_presets (name, folder, settings, created_at) VALUES (?, ?, ?, ?)",
+        (
+            DEVELOP_PRESET_NAME,
+            "QA",
+            json.dumps({"Exposure2012": 0.65, "Contrast2012": 18, "Vibrance": 22}),
+            "2026-07-15T00:00:00+00:00",
+        ),
     )
 
     shared_preview = FIXTURE_HOME / "cache" / "previews" / "qa-shared-preview.jpg"
@@ -239,6 +289,8 @@ async def _seed() -> None:
         "secondary_source": str(secondary),
         "hub_source": "hub://",
         "database": str(CATALOG_DB),
+        "raw_image_id": RAW_IMAGE_ID,
+        "develop_preset": DEVELOP_PRESET_NAME,
     }
     MANIFEST_PATH.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
