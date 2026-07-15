@@ -111,6 +111,49 @@ export function confirmTypedCount({
     });
 }
 
+/** A lightweight, keyboard-safe confirmation for actions that do not need typed proof. */
+export function confirmAction({
+    title = 'Confirm action',
+    message = 'Are you sure you want to continue?',
+    confirmLabel = 'Confirm',
+    danger = true,
+} = {}) {
+    return new Promise((resolve) => {
+        let done = false;
+        const overlay = document.createElement('div');
+        overlay.className = 'typed-confirm';
+        overlay.innerHTML = '<div class="typed-confirm-card" role="dialog" aria-modal="true" aria-labelledby="action-confirm-title">'
+            + `<h2 id="action-confirm-title">${esc(title)}</h2>`
+            + `<p>${esc(message)}</p>`
+            + '<div class="typed-confirm-actions">'
+            + '<button class="btn" data-cancel>Cancel</button>'
+            + `<button class="btn ${danger ? 'btn-danger' : 'primary'}" data-confirm>${esc(confirmLabel)}</button>`
+            + '</div></div>';
+        const finish = (ok) => {
+            if (done) return;
+            done = true;
+            releaseFocus(overlay);
+            overlay.remove();
+            resolve(ok);
+        };
+        document.body.appendChild(overlay);
+        const confirm = overlay.querySelector('[data-confirm]');
+        trapFocus(overlay, confirm);
+        overlay.querySelector('[data-cancel]').addEventListener('click', () => finish(false));
+        confirm.addEventListener('click', () => finish(true));
+        overlay.addEventListener('click', (event) => {
+            if (event.target === overlay) finish(false);
+        });
+        overlay.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                event.stopPropagation();
+                finish(false);
+            }
+        });
+    });
+}
+
 function aspect(img) {
     const ar = Number(img?.aspect_ratio) || (Number(img?.width) && Number(img?.height) ? Number(img.width) / Number(img.height) : 1.5);
     return Math.max(.45, Math.min(3.8, ar));
