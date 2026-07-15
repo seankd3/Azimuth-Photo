@@ -15,10 +15,13 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -163,30 +166,30 @@ fun ViewerScreen(
         Modifier
             .fillMaxSize()
             .background(Color.Black.copy(alpha = 1f - dismissFraction))
-            .pointerInput(currentZoom) {
-                if (currentZoom <= 1.01f) {
-                    detectVerticalDragGestures(
-                        onVerticalDrag = { change, dragAmount ->
-                            change.consume()
-                            scope.launch {
-                                dismissY.snapTo((dismissY.value + dragAmount).coerceAtLeast(0f))
+            .pointerInput(Unit) {
+                // Zoomed pages consume their touches, so this only ever sees
+                // unzoomed vertical drags — no need to re-key on zoom level.
+                detectVerticalDragGestures(
+                    onVerticalDrag = { change, dragAmount ->
+                        change.consume()
+                        scope.launch {
+                            dismissY.snapTo((dismissY.value + dragAmount).coerceAtLeast(0f))
+                        }
+                    },
+                    onDragEnd = {
+                        scope.launch {
+                            if (dismissY.value > 180f) {
+                                dismissY.animateTo(900f)
+                                onClose()
+                            } else {
+                                dismissY.animateTo(0f, spring())
                             }
-                        },
-                        onDragEnd = {
-                            scope.launch {
-                                if (dismissY.value > 180f) {
-                                    dismissY.animateTo(900f)
-                                    onClose()
-                                } else {
-                                    dismissY.animateTo(0f, spring())
-                                }
-                            }
-                        },
-                        onDragCancel = {
-                            scope.launch { dismissY.animateTo(0f, spring()) }
-                        },
-                    )
-                }
+                        }
+                    },
+                    onDragCancel = {
+                        scope.launch { dismissY.animateTo(0f, spring()) }
+                    },
+                )
             },
     ) {
         HorizontalPager(
@@ -516,24 +519,32 @@ private fun ZoomableImage(
                 )
             }
             .pointerInput(key) {
-                detectTransformGestures { _, pan, zoom, _ ->
-                    scale = (scale * zoom).coerceIn(1f, 8f)
-                    if (scale > 1f) {
-                        offsetX += pan.x
-                        offsetY += pan.y
-                    } else {
-                        offsetX = 0f
-                        offsetY = 0f
-                    }
-                    onZoomChanged(scale)
-                }
-            }
-            .pointerInput(key, scale) {
-                detectDragGestures { change, amount ->
-                    if (scale > 1f) {
-                        change.consume()
-                        offsetX += amount.x
-                        offsetY += amount.y
+                // Custom transform detector: claims touches ONLY for two-finger
+                // gestures or one-finger pans while zoomed. A single finger at 1x
+                // stays unconsumed so the pager's swipe and the dismiss drag work.
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val pressed = event.changes.count { it.pressed }
+                        if (pressed == 0) break
+                        val transforming = pressed >= 2 || scale > 1f
+                        if (transforming) {
+                            val zoom = event.calculateZoom()
+                            val pan = event.calculatePan()
+                            scale = (scale * zoom).coerceIn(1f, 8f)
+                            if (scale > 1f) {
+                                val maxX = width * (scale - 1f) / 2f
+                                val maxY = height * (scale - 1f) / 2f
+                                offsetX = (offsetX + pan.x).coerceIn(-maxX, maxX)
+                                offsetY = (offsetY + pan.y).coerceIn(-maxY, maxY)
+                            } else {
+                                offsetX = 0f
+                                offsetY = 0f
+                            }
+                            onZoomChanged(scale)
+                            event.changes.forEach { if (it.positionChanged()) it.consume() }
+                        }
                     }
                 }
             },
