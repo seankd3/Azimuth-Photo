@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import math
-from datetime import datetime
+
+from core.dates import parse_taken_timestamp
 
 
 RRF_K = 60
@@ -42,16 +43,7 @@ def normalize_scores(scores: dict[int, float]) -> dict[int, float]:
 
 
 def _date_value(row: dict) -> float:
-    text = str(row.get("date_taken") or "").strip()
-    if not text:
-        return 0.0
-    try:
-        return datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
-    except Exception:
-        try:
-            return datetime.strptime(text[:10], "%Y-%m-%d").timestamp()
-        except Exception:
-            return 0.0
+    return parse_taken_timestamp(row.get("date_taken")) or 0.0
 
 
 def recency_priors(rows_by_id: dict[int, dict]) -> dict[int, float]:

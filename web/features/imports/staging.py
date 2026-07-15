@@ -11,6 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from core.dates import safe_datetime_fromtimestamp
 import db
 import scanner
 import settings
@@ -205,7 +206,8 @@ def _enumerate_scan(scan: Scan) -> None:
                 continue
             stat = path.stat()
             metadata = geodata.extract_file_metadata(str(path)) if path.suffix.lower() not in card.VIDEO_EXTENSIONS else {}
-            taken_at = metadata.get("date_taken") or datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+            modified = safe_datetime_fromtimestamp(stat.st_mtime)
+            taken_at = metadata.get("date_taken") or (modified.strftime("%Y-%m-%d %H:%M:%S") if modified else "")
             scan.entries.append({
                 "key": uuid.uuid4().hex,
                 "name": path.name,
@@ -380,7 +382,7 @@ def _destination_directory(job: ImportJob, entry: dict) -> Path:
     try:
         parsed = datetime.strptime(taken, "%Y-%m-%d")
     except ValueError:
-        parsed = datetime.fromtimestamp(float(entry["mtime"]))
+        parsed = safe_datetime_fromtimestamp(entry.get("mtime")) or datetime.now()
     library_root = originals_root()
     # If import_root was pointed at the RAWS tree itself, climb to the library root
     # so destinations stay siblings (Personal Photos must not nest under RAWS).
