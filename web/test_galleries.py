@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import io
+import json
+import sqlite3
 import unittest
+import zipfile
+from pathlib import Path
+from unittest import mock
 
 from fastapi.responses import Response
 from fastapi.testclient import TestClient
@@ -129,6 +135,60 @@ class GalleryTests(BackendTestCase):
         self.assertEqual(renamed.json()["gallery"]["title"], "Summer favorites")
         self.assertIn("<h1>Summer favorites</h1>", public.text)
         self.assertNotIn("Old gallery title", public.text)
+
+    async def test_hub_mirror_original_and_zip_are_streamed_or_manifested(self):
+        collection, local_id, remote_id = await self._collection()
+        local = await self._image_row(local_id)
+        Path(local["filepath"]).parent.mkdir(parents=True, exist_ok=True)
+        Path(local["filepath"]).write_bytes(b"local original")
+        with sqlite3.connect(db.DB_PATH) as conn:
+            conn.execute(
+                "UPDATE images SET hub_remote = 1, hub_image_id = 90210 WHERE id = ?",
+                (remote_id,),
+            )
+        gallery = await galleries.create_gallery(
+            db.DB_PATH,
+            collection_id=collection["id"],
+            title="Mirror delivery",
+            image_ids=[local_id, remote_id],
+            options={"download_size": "original"},
+        )
+
+        def available_probe():
+            with mock.patch.object(
+                gallery_routes.readthrough,
+                "open_hub_original",
+                side_effect=lambda _image_id: io.BytesIO(b"hub original"),
+            ):
+                with TestClient(app_module.app) as client:
+                    original = client.get(
+                        f"/s/gallery/{gallery['token']}/download/original/{remote_id}"
+                    )
+                    archive = client.get(f"/s/gallery/{gallery['token']}/download-all")
+                    return original, archive
+
+        original, archive = await asyncio.to_thread(available_probe)
+        self.assertEqual(original.status_code, 200, original.text)
+        self.assertEqual(original.content, b"hub original")
+        self.assertEqual(archive.headers["x-azimuth-skipped-count"], "0")
+        with zipfile.ZipFile(io.BytesIO(archive.content)) as payload:
+            self.assertEqual(payload.read("first.jpg"), b"local original")
+            self.assertEqual(payload.read("second.jpg"), b"hub original")
+
+        def unavailable_probe():
+            with mock.patch.object(gallery_routes.readthrough, "open_hub_original", return_value=None):
+                with TestClient(app_module.app) as client:
+                    return client.get(f"/s/gallery/{gallery['token']}/download-all")
+
+        short_archive = await asyncio.to_thread(unavailable_probe)
+        self.assertEqual(short_archive.status_code, 200, short_archive.text)
+        self.assertEqual(short_archive.headers["x-azimuth-skipped-count"], "1")
+        with zipfile.ZipFile(io.BytesIO(short_archive.content)) as payload:
+            self.assertEqual(payload.read("first.jpg"), b"local original")
+            manifest = json.loads(payload.read("azimuth-download-manifest.json"))
+        self.assertEqual(manifest["included_count"], 1)
+        self.assertEqual(manifest["skipped_count"], 1)
+        self.assertEqual(manifest["skipped"][0]["image_id"], remote_id)
 
     async def test_export_preset_round_trip_and_print_recipe(self):
         print_options = export_presets.print_ready_options(color_space="adobe_rgb", border_px=48)

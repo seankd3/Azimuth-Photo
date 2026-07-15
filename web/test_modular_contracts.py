@@ -228,6 +228,7 @@ PUBLIC_ROUTE_CONTRACT = {
     ("GET", "/api/sync/upload/{content_hash}/status"),
     ("POST", "/api/sync/metadata"),
     ("GET", "/api/sync/base/{content_hash}"),
+    ("GET", "/api/sync/original/{image_id}"),
     ("POST", "/api/sync/hash-backfill"),
     ("POST", "/api/sync/oplog/pull"),
     ("POST", "/api/sync/oplog/push"),
