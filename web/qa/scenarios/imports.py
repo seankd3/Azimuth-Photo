@@ -21,6 +21,18 @@ def import_folder_preflight(qa) -> None:
     )
     assert modal.locator("#import-folder-input").evaluate("input => input.files.length") == expected
 
+    qa.mark("verify selected photos before importing")
+    previews = modal.locator("#import-preview-grid .import-preview-item")
+    qa.poll("a thumbnail for every selected photo", lambda: previews.count() == expected)
+    assert previews.locator("img").count() == expected
+    qa.page.wait_for_function(
+        """() => [...document.querySelectorAll('#import-preview-grid .import-preview-item img')]
+            .every(image => image.complete && image.naturalWidth > 0)"""
+    )
+    assert previews.locator(".import-preview-name").all_inner_texts() == [
+        f"qa-import-{index}.jpg" for index in range(1, expected + 1)
+    ]
+
     qa.mark("verify the populated pre-import options grid")
     preflight = modal.locator(".import-grid")
     preflight.wait_for(state="visible")
