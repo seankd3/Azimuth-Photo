@@ -278,7 +278,7 @@ export function exportImages(ids, format = 'csv', size = '') {
     }
     const anchor = document.getElementById('m-dl');
     anchor.href = exportUrl(ids, format, size);
-    anchor.download = format === 'zip' ? 'photoarchive-export.zip' : `photoarchive-export.${format}`;
+    anchor.download = format === 'zip' ? 'azimuth-photo-export.zip' : `azimuth-photo-export.${format}`;
     anchor.click();
     showToast(format === 'zip' ? `Preparing ${ids.length} files…` : `Exporting ${ids.length} photos…`);
 }

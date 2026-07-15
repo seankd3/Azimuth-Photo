@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the frozen photoArchive server (PyInstaller onedir).
+"""Build the frozen Azimuth Photo server (PyInstaller onedir).
 
 Output: dist/photoarchive-server/
 
@@ -155,6 +155,8 @@ def _add_data_arg(src: Path, dest: str) -> str:
 
 def data_files() -> list[tuple[Path, str]]:
     return [
+        # /api/version must report the same release version from a frozen binary.
+        (ROOT / "VERSION", "."),
         (WEB / "static", "static"),
         (WEB / "templates", "templates"),
         (WEB / "features" / "develop" / "film_stocks", str(Path("features") / "develop" / "film_stocks")),
@@ -218,7 +220,7 @@ def run_pyinstaller(vpy: Path) -> Path:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Build frozen photoArchive server (onedir)")
+    parser = argparse.ArgumentParser(description="Build frozen Azimuth Photo server (onedir)")
     parser.add_argument(
         "--venv",
         type=Path,

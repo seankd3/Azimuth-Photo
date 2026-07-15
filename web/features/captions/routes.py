@@ -3,7 +3,7 @@ import logging
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 import caption_worker
 import settings
@@ -25,8 +25,8 @@ _invalidate_settings_response_cache: InvalidateStatus | None = None
 
 
 class CaptionBody(BaseModel):
-    caption: str | None = None
-    tags: list[str] | None = None
+    caption: str | None = Field(default=None, max_length=100_000)
+    tags: list[str] | None = Field(default=None, max_length=500)
 
 
 def configure(

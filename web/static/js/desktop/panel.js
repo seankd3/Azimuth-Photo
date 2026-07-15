@@ -8,15 +8,16 @@ import {
 } from './api.js';
 import { loadCollectionImageIds } from './scope_data.js';
 import {
-    byId, emit, folderActive, on, patchPrefs, scope, scopeActive, scopeParams, scopePatchFromSmartQuery, selection, selectionChanged, setActiveLens,
+    byId, emit, folderActive, navigateToScope, on, patchPrefs, scope, scopeActive, scopeParams, scopePatchFromSmartQuery, selection, selectionChanged, setActiveLens,
     setLeftCollapsed, setScope, smartQueryActive, smartQueryFromScope, smartQueryName, smartQuerySummary, sortBase, viewState,
 } from './state.js';
 import { applyFlags, selectedIds, setCollectionPicker } from './selection.js';
 import { showToast } from './toast.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
-import { confirmTypedCount } from './trash.js';
+import { confirmAction, confirmTypedCount } from './trash.js';
 import { downloadExport, openExportMenu } from './export_menu.js';
 import { initFoldersPanel } from './folders.js';
+import { openSourceRevealMenu } from './source_reveal_menu.js';
 import { icon } from '../icons.js';
 import {
     initSuggestions, loadSuggestionsOnce, openSuggestionsReview, suggestionsAreLoading, visibleSuggestions,
@@ -88,7 +89,7 @@ function renderCollections() {
     for (const row of host.querySelectorAll('.coll-row')) {
         const mainButton = row.querySelector('.coll-main');
         mainButton?.addEventListener('click', () => {
-            setScope({
+            navigateToScope({
                 collectionId: row.dataset.collId,
                 collectionName: row.dataset.collName || 'Collection',
                 collectionSmart: row.dataset.collSmart === '1',
@@ -888,11 +889,11 @@ function renderLibrary() {
     for (const row of document.querySelectorAll('[data-lib]')) {
         row.addEventListener('click', () => {
             const key = row.dataset.lib;
-            if (key === 'all') setScope({});
-            if (key === 'picked') setScope({ flag: 'picked' });
-            if (key === 'rejected') setScope({ flag: 'rejected' });
+            if (key === 'all') navigateToScope({});
+            if (key === 'picked') navigateToScope({ flag: 'picked' });
+            if (key === 'rejected') navigateToScope({ flag: 'rejected' });
             if (key === 'trash') setActiveLens('trash');
-            if (key === 'recent') setScope({ sort: 'date_taken' });
+            if (key === 'recent') navigateToScope({ sort: 'date_taken' });
             closeLeftDrawer();
         });
     }
@@ -928,8 +929,14 @@ function renderSources() {
     host.querySelector('[data-add-source]')?.addEventListener('click', () => document.getElementById('system-btn')?.click());
     for (const row of host.querySelectorAll('[data-source]')) {
         row.addEventListener('click', () => {
-            setScope({ folder: [row.dataset.source] });
+            navigateToScope({ folder: [row.dataset.source] });
             closeLeftDrawer();
+        });
+        row.addEventListener('contextmenu', (event) => {
+            event.preventDefault();
+            const source = sources.find((item) => item.path === row.dataset.source);
+            const count = source?.active_image_count != null ? source.active_image_count : source?.image_count;
+            openSourceRevealMenu(row.dataset.source, row, count);
         });
     }
 }
@@ -961,9 +968,8 @@ function savedViewSnapshot() {
 function restoreSavedView(view) {
     try {
         const saved = JSON.parse(view.query);
-        setScope(saved.scope && typeof saved.scope === 'object' ? saved.scope : saved);
+        navigateToScope(saved.scope && typeof saved.scope === 'object' ? saved.scope : saved);
         if (saved.layout) patchPrefs(saved.layout);
-        setActiveLens('grid');
         closeLeftDrawer();
         showToast(`Opened “${view.name}”`);
     } catch {
@@ -982,10 +988,18 @@ function renderSavedViews() {
         const view = savedViews.find((item) => Number(item.id) === Number(row.dataset.savedView));
         row.querySelector('button')?.addEventListener('click', () => restoreSavedView(view));
         row.querySelector('.saved-view-delete')?.addEventListener('click', async () => {
-            if (!window.confirm(`Delete “${view.name}”?`)) return;
+            const confirmed = await confirmAction({
+                title: 'Delete saved view?',
+                message: `“${view.name}” will no longer appear in your Library.`,
+                confirmLabel: 'Delete view',
+            });
+            if (!confirmed) return;
             if (await deleteSavedView(view.id)) {
                 savedViews = savedViews.filter((item) => item.id !== view.id);
                 renderSavedViews();
+                showToast('Saved view deleted');
+            } else {
+                showToast('Couldn’t delete saved view');
             }
         });
     }
@@ -1029,12 +1043,26 @@ function scheduleChromeRefresh() {
     }, 300);
 }
 
+function patchCollectionCount(collectionId, delta) {
+    const collection = collections.find((item) => Number(item.id) === Number(collectionId));
+    if (!collection) return () => {};
+    const previous = Number(collection.image_count) || 0;
+    collection.image_count = Math.max(0, previous + delta);
+    renderCollections();
+    return () => {
+        if (!collections.includes(collection)) return;
+        collection.image_count = previous;
+        renderCollections();
+    };
+}
+
 async function addImagesToCollection(collectionId, imageIds) {
     const coll = collections.find((c) => Number(c.id) === Number(collectionId));
     if (coll?.smart) {
         showToast('Smart collections update from their filters');
-        return;
+        return false;
     }
+    const restoreCount = patchCollectionCount(collectionId, imageIds.length);
     const result = await addToCollection(collectionId, imageIds);
     if (result && result.ok) {
         showToast(`Added ${imageIds.length} to “${coll ? coll.name : 'collection'}”`, {
@@ -1045,9 +1073,38 @@ async function addImagesToCollection(collectionId, imageIds) {
             },
         });
         await loadCollections();
+        return true;
     } else {
+        restoreCount();
         showToast("Couldn't add to collection");
+        return false;
     }
+}
+
+export async function removeImagesFromCollection(collectionId, imageIds, name = '') {
+    const ids = [...new Set(imageIds.map(Number))].filter((id) => id > 0);
+    if (!collectionId || !ids.length) return false;
+    const restoreCount = patchCollectionCount(collectionId, -ids.length);
+    const result = await removeFromCollection(collectionId, ids);
+    if (!result?.ok) {
+        restoreCount();
+        showToast("Couldn't remove photos from this collection");
+        return false;
+    }
+    const label = name || collections.find((collection) => Number(collection.id) === Number(collectionId))?.name || 'collection';
+    await loadCollections();
+    emit('scope', scope);
+    showToast(`Removed ${ids.length} photo${ids.length === 1 ? '' : 's'} from “${label}”`, {
+        undo: async () => {
+            const restored = await addToCollection(collectionId, ids);
+            if (restored?.ok) {
+                await loadCollections();
+                emit('scope', scope);
+                showToast(`Restored to “${label}”`);
+            } else showToast("Couldn't restore photos to this collection");
+        },
+    });
+    return true;
 }
 
 export async function openCollectionPicker(imageIds, { onDone = null } = {}) {
@@ -1079,27 +1136,30 @@ export async function openCollectionPicker(imageIds, { onDone = null } = {}) {
             close();
         }
     });
+    const setBusy = (busy) => {
+        for (const control of picker.querySelectorAll('input, button')) control.disabled = busy;
+    };
     let creating = false;
     picker.querySelector('form').addEventListener('submit', async (event) => {
         event.preventDefault();
         const name = picker.querySelector('input').value.trim();
         if (!name || creating) return;
         creating = true;
-        const submit = event.currentTarget.querySelector('button');
-        if (submit) submit.disabled = true;
-        close();
-        if (onDone) onDone();
+        setBusy(true);
         try {
             const result = await createCollection(name, ids);
             if (result && result.ok) {
                 const coll = result.collection || {};
                 await loadCollections();
+                close();
+                if (onDone) onDone();
                 showToast(`Created “${name}”`, {
                     undo: async () => coll.id && removeFromCollection(coll.id, ids),
                 });
             } else showToast("Couldn't create collection");
         } finally {
             creating = false;
+            if (picker.isConnected) setBusy(false);
         }
     });
     const list = picker.querySelector('.picker-list');
@@ -1109,9 +1169,12 @@ export async function openCollectionPicker(imageIds, { onDone = null } = {}) {
     )).join('') : '<div class="muted">No regular collections yet.</div>';
     for (const row of list.querySelectorAll('[data-coll-id]')) {
         row.addEventListener('click', async () => {
-            close();
-            if (onDone) onDone();
-            await addImagesToCollection(Number(row.dataset.collId), ids);
+            setBusy(true);
+            const added = await addImagesToCollection(Number(row.dataset.collId), ids);
+            if (added) {
+                close();
+                if (onDone) onDone();
+            } else if (picker.isConnected) setBusy(false);
         });
     }
     picker.querySelector('input').focus();
@@ -1332,12 +1395,13 @@ export async function initPanel() {
     document.getElementById('saved-view-cancel').addEventListener('click', () => { document.getElementById('saved-view-form').hidden = true; });
     document.getElementById('saved-view-form').addEventListener('submit', async (event) => {
         event.preventDefault();
+        const form = event.currentTarget;
         const input = document.getElementById('saved-view-name');
         const result = await createSavedView(input.value.trim() || 'Current view', savedViewSnapshot());
         if (!result?.view) return showToast("Couldn't save this view");
         savedViews.unshift(result.view);
         renderSavedViews();
-        event.currentTarget.hidden = true;
+        form.hidden = true;
         showToast(`Saved “${result.view.name}”`);
     });
     document.getElementById('new-coll-smart')?.addEventListener('click', saveSmartCollectionFromForm);
@@ -1351,13 +1415,18 @@ export async function initPanel() {
         const input = document.getElementById('new-coll-name');
         const name = input.value.trim();
         if (!name) return;
-        input.value = '';
-        event.currentTarget.hidden = true;
+        const submit = event.submitter || document.getElementById('new-coll-create');
+        if (submit) submit.disabled = true;
         const result = await createCollection(name, []);
         if (result && result.ok) {
+            input.value = '';
+            event.currentTarget.hidden = true;
             showToast(`Created “${name}”`);
             await loadCollections();
-        } else showToast("Couldn't create collection");
+        } else {
+            showToast("Couldn't create collection");
+            if (submit) submit.disabled = false;
+        }
     });
     on('panel', (collapsed) => {
         document.getElementById('shell').classList.toggle('left-collapsed', collapsed);

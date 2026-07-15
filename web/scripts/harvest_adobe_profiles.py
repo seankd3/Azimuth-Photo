@@ -1,4 +1,4 @@
-"""Harvest embedded Adobe DNG profiles from a Photo Archive SQLite catalog.
+"""Harvest embedded Adobe DNG profiles from an Azimuth Photo SQLite catalog.
 
 The database is opened read-only and used only as a DNG path index.  Every DNG
 is identity-scanned, then at most three files per (UniqueCameraModel,
@@ -247,7 +247,7 @@ def _print_report(report: dict[str, Any]) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--database", type=Path, default=DEFAULT_DB, help="Photo Archive SQLite DB (opened read-only).")
+    parser.add_argument("--database", type=Path, default=DEFAULT_DB, help="Azimuth Photo SQLite DB (opened read-only).")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT, help="Directory for harvested JSON profiles.")
     parser.add_argument("--report-json", type=Path, help="Optional machine-readable report path.")
     parser.add_argument("--workers", type=int, default=8, help="Concurrent scalar identity reads (default: 8).")

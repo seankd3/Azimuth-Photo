@@ -15,6 +15,9 @@ from features.stacks import builders as stack_builders
 
 
 Error = dict[str, int | str]
+DEFAULT_RETENTION_SECONDS = 30 * 24 * 60 * 60
+TRASH_WRITE_BUSY_TIMEOUT_SECONDS = 0.1
+TRASH_WRITE_RETRY_BACKOFF_SECONDS = 0.1
 
 
 def _clean_ids(values) -> list[int]:
@@ -300,7 +303,7 @@ async def trash_images(db_path: str, image_ids: list[int]) -> dict:
         if plans:
             await conn.execute("BEGIN")
             await conn.executemany(
-                "UPDATE images SET status = 'trashed', trashed_at = ?, trash_path = ? WHERE id = ?",
+                "UPDATE images SET status = 'trashed', trashed_at = ?, trash_path = ?, trash_pending_hub = 0 WHERE id = ?",
                 [(now, plan["trash_path"], plan["id"]) for plan in plans],
             )
             source_ids = sorted({
@@ -422,7 +425,7 @@ async def restore_images(db_path: str, image_ids: list[int]) -> dict:
             for chunk in catalog_repository._chunked(update_ids):
                 placeholders = ",".join("?" for _ in chunk)
                 await conn.execute(
-                    f"UPDATE images SET status = 'kept', trashed_at = NULL, trash_path = NULL "
+                    f"UPDATE images SET status = 'kept', trashed_at = NULL, trash_path = NULL, trash_pending_hub = 0 "
                     f"WHERE id IN ({placeholders})",
                     chunk,
                 )
@@ -499,7 +502,8 @@ async def list_trash(db_path: str, *, limit: int = 100, offset: int = 0) -> dict
     conn = await data_connection.open_async(db_path)
     try:
         total_cursor = await conn.execute(
-            "SELECT COUNT(*) AS total, COALESCE(SUM(COALESCE(file_size, 0)), 0) AS total_bytes "
+            "SELECT COUNT(*) AS total, COALESCE(SUM(COALESCE(file_size, 0)), 0) AS total_bytes, "
+            "COALESCE(SUM(CASE WHEN COALESCE(trash_pending_hub, 0) = 1 THEN 1 ELSE 0 END), 0) AS pending_hub_count "
             "FROM images WHERE status = 'trashed'"
         )
         total_row = await total_cursor.fetchone()
@@ -513,19 +517,29 @@ async def list_trash(db_path: str, *, limit: int = 100, offset: int = 0) -> dict
             card = app_helpers.image_card(dict(row), "sm")
             card["trashed_at"] = row["trashed_at"]
             card["file_size"] = row["file_size"]
+            card["pending_hub"] = bool(row["trash_pending_hub"])
             images.append(card)
         return {
             "images": images,
             "total": int(total_row["total"] or 0),
             "total_bytes": int(total_row["total_bytes"] or 0),
+            "pending_hub_count": int(total_row["pending_hub_count"] or 0),
         }
     finally:
         await data_connection.close_async(conn, db_path=db_path)
 
 
-def _remove_trash_file(path: str | None) -> tuple[int, str]:
+def _remove_trash_file(path: str | None, source_root: str | None) -> tuple[int, str]:
     if not path:
         return 0, ""
+    if not source_root:
+        return 0, "source root is unavailable"
+    try:
+        trash_root = (Path(source_root) / ".trash").resolve()
+        candidate = Path(path).resolve(strict=False)
+        candidate.relative_to(trash_root)
+    except (OSError, ValueError):
+        return 0, "trash path is outside source trash"
     try:
         lstat_result = os.lstat(path)
     except FileNotFoundError:
@@ -572,22 +586,65 @@ def _prune_empty_trash_dirs(paths: list[str]) -> None:
             current = os.path.dirname(current)
 
 
-async def empty_trash(db_path: str) -> dict:
+async def _trash_rows(
+    db_path: str,
+    *,
+    older_than: float | None = None,
+    image_ids: list[int] | None = None,
+) -> list[dict]:
     conn = await data_connection.open_async(db_path)
     try:
-        cursor = await conn.execute("SELECT id, trash_path FROM images WHERE status = 'trashed'")
-        rows = [dict(row) for row in await cursor.fetchall()]
+        base_query = """
+            SELECT i.id, i.trash_path, COALESCE(s.path, '') AS source_path,
+                   COALESCE(s.online, 1) AS source_online
+            FROM images i
+            LEFT JOIN catalog_sources s ON s.id = i.source_id
+            WHERE i.status = 'trashed'
+        """
+        age_clause = ""
+        age_params: tuple = ()
+        if older_than is not None:
+            age_clause = " AND i.trashed_at IS NOT NULL AND i.trashed_at <= ?"
+            age_params = (float(older_than),)
+        if image_ids is None:
+            cursor = await conn.execute(base_query + age_clause, age_params)
+            return [dict(row) for row in await cursor.fetchall()]
+        ids = _clean_ids(image_ids)
+        rows: list[dict] = []
+        for chunk in catalog_repository._chunked(ids):
+            placeholders = ",".join("?" for _ in chunk)
+            cursor = await conn.execute(
+                base_query + age_clause + f" AND i.id IN ({placeholders})",
+                (*age_params, *chunk),
+            )
+            rows.extend(dict(row) for row in await cursor.fetchall())
+        return rows
     finally:
         await data_connection.close_async(conn, db_path=db_path)
 
+
+async def _purge_trash_rows(
+    db_path: str,
+    *,
+    older_than: float | None = None,
+    image_ids: list[int] | None = None,
+) -> dict:
+    rows = await _trash_rows(db_path, older_than=older_than, image_ids=image_ids)
     deletable_ids: list[int] = []
     paths_to_prune: list[str] = []
     errors: list[Error] = []
+    skipped_offline = 0
     freed_bytes = 0
     for row in rows:
         image_id = int(row["id"])
         trash_path = row.get("trash_path")
-        freed, reason = await __to_thread_remove_trash_file(trash_path)
+        # Offline protects source-local trash files that cannot be inspected.
+        # Catalog-only entries (including hub mirrors) have no local file to
+        # protect and must not remain stuck in Trash because of source state.
+        if not int(row["source_online"]) and trash_path:
+            skipped_offline += 1
+            continue
+        freed, reason = await __to_thread_remove_trash_file(trash_path, row.get("source_path"))
         if reason:
             errors.append(_error(image_id, reason))
             continue
@@ -605,41 +662,138 @@ async def empty_trash(db_path: str) -> dict:
         "deleted_count": len(deleted_ids),
         "freed_bytes": int(freed_bytes),
         "errors": errors,
+        "skipped_offline": skipped_offline,
     }
 
 
-async def _delete_emptied_catalog_rows(db_path: str, image_ids: list[int]) -> tuple[list[int], list[Error]]:
-    deleted: list[int] = []
-    errors: list[Error] = []
+async def empty_trash(db_path: str, *, image_ids: list[int] | None = None) -> dict:
+    """Permanently remove local files plus catalog-only trash entries."""
+    return await _purge_trash_rows(db_path, image_ids=image_ids)
+
+
+async def hub_mirror_trash_refs(db_path: str) -> dict:
+    """Return local mirror count and the corresponding hub catalog IDs."""
     conn = await data_connection.open_async(db_path)
     try:
-        try:
-            await conn.execute("BEGIN")
-            await catalog_repository.delete_image_catalog_rows_on_conn(conn, image_ids)
-            await catalog_repository.update_source_counts_on_conn(conn)
-            await conn.commit()
-            return list(image_ids), []
-        except Exception:
-            await conn.rollback()
-        for image_id in image_ids:
-            try:
-                await conn.execute("BEGIN")
-                await catalog_repository.delete_image_catalog_rows_on_conn(conn, [image_id])
-                await catalog_repository.update_source_counts_on_conn(conn)
-                await conn.commit()
-                deleted.append(image_id)
-            except Exception as exc:
-                await conn.rollback()
-                errors.append(_error(image_id, f"catalog row deletion failed: {exc}"))
+        cursor = await conn.execute(
+            "SELECT id, hub_image_id FROM images "
+            "WHERE status = 'trashed' AND COALESCE(hub_remote, 0) = 1"
+        )
+        rows = await cursor.fetchall()
+        hub_image_ids = _clean_ids(row["hub_image_id"] for row in rows)
+        return {
+            "count": len(rows),
+            "image_ids": [int(row["id"]) for row in rows],
+            "hub_image_ids": hub_image_ids,
+        }
     finally:
         await data_connection.close_async(conn, db_path=db_path)
+
+
+async def local_trash_ids(db_path: str) -> list[int]:
+    conn = await data_connection.open_async(db_path)
+    try:
+        cursor = await conn.execute(
+            "SELECT id FROM images WHERE status = 'trashed' AND COALESCE(hub_remote, 0) = 0"
+        )
+        return [int(row["id"]) for row in await cursor.fetchall()]
+    finally:
+        await data_connection.close_async(conn, db_path=db_path)
+
+
+async def mark_hub_trash_pending(db_path: str, image_ids: list[int]) -> None:
+    ids = _clean_ids(image_ids)
+    if not ids:
+        return
+    conn = await data_connection.open_async(db_path)
+    try:
+        for chunk in catalog_repository._chunked(ids):
+            placeholders = ",".join("?" for _ in chunk)
+            await conn.execute(
+                f"UPDATE images SET trash_pending_hub = 1 WHERE status = 'trashed' "
+                f"AND COALESCE(hub_remote, 0) = 1 AND id IN ({placeholders})",
+                chunk,
+            )
+        await conn.commit()
+    finally:
+        await data_connection.close_async(conn, db_path=db_path)
+
+
+async def pending_hub_trash_refs(db_path: str) -> dict:
+    conn = await data_connection.open_async(db_path)
+    try:
+        cursor = await conn.execute(
+            "SELECT id, hub_image_id FROM images WHERE status = 'trashed' "
+            "AND COALESCE(hub_remote, 0) = 1 AND COALESCE(trash_pending_hub, 0) = 1"
+        )
+        rows = await cursor.fetchall()
+        return {
+            "count": len(rows),
+            "image_ids": [int(row["id"]) for row in rows],
+            "hub_image_ids": _clean_ids(row["hub_image_id"] for row in rows),
+        }
+    finally:
+        await data_connection.close_async(conn, db_path=db_path)
+
+
+async def purge_expired_trash(
+    db_path: str,
+    *,
+    retention_seconds: float = DEFAULT_RETENTION_SECONDS,
+    now: float | None = None,
+) -> dict:
+    """Purge expired entries when any source-local trash file is reachable."""
+    cutoff = (time.time() if now is None else float(now)) - max(0.0, float(retention_seconds))
+    return await _purge_trash_rows(db_path, older_than=cutoff)
+
+
+async def _delete_emptied_catalog_rows(db_path: str, image_ids: list[int]) -> tuple[list[int], list[Error]]:
+    async def delete_ids(ids: list[int]) -> None:
+        async def write() -> None:
+            conn = await data_connection.open_async(db_path)
+            try:
+                await conn.execute("BEGIN IMMEDIATE")
+                await catalog_repository.delete_image_catalog_rows_on_conn(conn, ids)
+                await catalog_repository.update_source_counts_on_conn(conn)
+                await conn.commit()
+            except Exception:
+                await conn.rollback()
+                raise
+            finally:
+                await data_connection.close_async(conn, db_path=db_path)
+
+        with data_connection.sqlite_timeout(TRASH_WRITE_BUSY_TIMEOUT_SECONDS):
+            await data_connection.run_with_busy_retry(
+                write,
+                backoff_seconds=TRASH_WRITE_RETRY_BACKOFF_SECONDS,
+            )
+
+    deleted: list[int] = []
+    errors: list[Error] = []
+    try:
+        await delete_ids(image_ids)
+        return list(image_ids), []
+    except Exception as exc:
+        if data_connection.is_sqlite_locked_error(exc):
+            reason = f"catalog row deletion deferred: {exc}"
+            return [], [_error(image_id, reason) for image_id in image_ids]
+    for index, image_id in enumerate(image_ids):
+        try:
+            await delete_ids([image_id])
+            deleted.append(image_id)
+        except Exception as exc:
+            reason = f"catalog row deletion failed: {exc}"
+            errors.append(_error(image_id, reason))
+            if data_connection.is_sqlite_locked_error(exc):
+                errors.extend(_error(item, reason) for item in image_ids[index + 1:])
+                break
     return deleted, errors
 
 
-async def __to_thread_remove_trash_file(path: str | None) -> tuple[int, str]:
+async def __to_thread_remove_trash_file(path: str | None, source_root: str | None) -> tuple[int, str]:
     import asyncio
 
-    return await asyncio.to_thread(_remove_trash_file, path)
+    return await asyncio.to_thread(_remove_trash_file, path, source_root)
 
 
 async def __to_thread_prune_empty_trash_dirs(paths: list[str]) -> None:

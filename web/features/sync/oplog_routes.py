@@ -18,23 +18,23 @@ _db_path: Callable[[], str] | None = None
 class OplogEntry(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    origin: str
+    origin: str = Field(min_length=1, max_length=128)
     origin_seq: int = Field(gt=0)
-    content_hash: str
-    family: str
+    content_hash: str = Field(min_length=32, max_length=128)
+    family: str = Field(min_length=1, max_length=64)
     payload: dict[str, Any] | list[Any]
     ts: float = Field(gt=0)
-    applied_from: str | None = None
+    applied_from: str | None = Field(default=None, max_length=128)
 
 
 class OplogPullRequest(BaseModel):
-    device_id: str
-    cursors: dict[str, int] = Field(default_factory=dict)
+    device_id: str = Field(min_length=1, max_length=128)
+    cursors: dict[str, int] = Field(default_factory=dict, max_length=256)
 
 
 class OplogPushRequest(BaseModel):
-    device_id: str | None = None
-    entries: list[OplogEntry]
+    device_id: str | None = Field(default=None, max_length=128)
+    entries: list[OplogEntry] = Field(max_length=5000)
 
 
 def configure(*, db_path: Callable[[], str]) -> None:

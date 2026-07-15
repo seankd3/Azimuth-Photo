@@ -9,6 +9,7 @@ import {
 import { showToast } from './toast.js';
 import { icon } from '../icons.js';
 import { keepCoverRejectRest } from './stack_cull.js';
+import { escapeHtml as esc, formatCount as fmt } from './dom.js';
 
 const DEFAULT_THRESHOLD = 0.95;
 const LIMIT = 100;
@@ -43,10 +44,6 @@ let stackRescanning = false;
 let bulkNonCoverIds = null;
 let bulkCountGeneration = 0;
 
-const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[c]));
-const fmt = (n) => Number(n || 0).toLocaleString('en-US');
 const RAW_EXTS = new Set(['arw', 'cr2', 'cr3', 'dng', 'nef', 'orf', 'raf', 'rw2']);
 
 function flagGlyph(flag) {
@@ -650,21 +647,25 @@ async function loadStackPage({ reset = false } = {}) {
     }
     stackLoading = true;
     const requestOffset = stackOffset;
-    const data = await listStacks({ kind: requestKind, limit: STACK_LIMIT, offset: requestOffset });
-    if (seq !== stackGeneration || !root?.isConnected || !open || requestMode !== mode || mode !== 'stacks' || requestKind !== stackKind) return;
-    stackLoading = false;
-    if (!data) {
+    try {
+        const data = await listStacks({ kind: requestKind, limit: STACK_LIMIT, offset: requestOffset });
+        if (seq !== stackGeneration || !root?.isConnected || !open || requestMode !== mode || mode !== 'stacks' || requestKind !== stackKind) return;
+        if (!data) throw new Error('Stacks response was empty');
+        const incoming = data.stacks || [];
+        stackTotal = Number(data.total) || incoming.length;
+        for (const stack of incoming) rememberImages(stackMembers(stack));
+        stacks = reset ? incoming : stacks.concat(incoming);
+        stackOffset += incoming.length;
+        stackDone = incoming.length < STACK_LIMIT || stackOffset >= stackTotal;
+        stackLoading = false;
+        renderStacks({ append: !reset });
+    } catch {
+        if (seq !== stackGeneration || !root?.isConnected || !open || requestMode !== mode || mode !== 'stacks' || requestKind !== stackKind) return;
         root.querySelector('#duplicates-body').innerHTML = '<div class="load-error dupe-error"><h4>Couldn\'t load stacks</h4><p>The archive did not respond. Try again.</p><button class="btn" id="stacks-retry">Try again</button></div>';
         root.querySelector('#stacks-retry')?.addEventListener('click', () => loadStackPage({ reset: true }));
-        return;
+    } finally {
+        if (seq === stackGeneration) stackLoading = false;
     }
-    const incoming = data.stacks || [];
-    stackTotal = Number(data.total) || incoming.length;
-    for (const stack of incoming) rememberImages(stackMembers(stack));
-    stacks = reset ? incoming : stacks.concat(incoming);
-    stackOffset += incoming.length;
-    stackDone = incoming.length < STACK_LIMIT || stackOffset >= stackTotal;
-    renderStacks({ append: !reset });
 }
 
 function bindStackSentinel() {
@@ -761,7 +762,7 @@ async function keepCoverForStack(stackId) {
     const imageIds = stackMembers(stack).map((image) => Number(image.id)).filter((id) => id && id !== repId);
     if (!imageIds.length) return;
     const result = await trashImages(imageIds);
-    if (!result) {
+    if (!result.ok) {
         showToast('Couldn’t move photos to Trash');
         return;
     }
@@ -772,7 +773,7 @@ async function keepCoverForStack(stackId) {
             const restored = await restoreImages(imageIds);
             emit('trash:changed', { imageIds });
             if (open && mode === 'stacks') await reloadStacks();
-            showToast(restored ? 'Restored' : 'Couldn’t restore');
+            showToast(restored.ok ? 'Restored' : 'Couldn’t restore');
         },
     });
 }
@@ -808,7 +809,7 @@ async function keepCoversEverywhere() {
         return;
     }
     const result = await trashImages(imageIds);
-    if (!result) {
+    if (!result.ok) {
         showToast('Couldn’t move photos to Trash');
         return;
     }
@@ -820,7 +821,7 @@ async function keepCoversEverywhere() {
             const restored = await restoreImages(imageIds);
             emit('trash:changed', { imageIds });
             if (open && mode === 'stacks') await reloadStacks();
-            showToast(restored ? 'Restored' : 'Couldn’t restore');
+            showToast(restored.ok ? 'Restored' : 'Couldn’t restore');
         },
     });
 }

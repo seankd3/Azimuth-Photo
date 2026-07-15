@@ -70,7 +70,7 @@ class SatelliteSyncTests(BackendTestCase):
         for index, payload in enumerate(payloads, start=1):
             image_id = await self._image(source["id"], f"field-{index}.raw")
             image_ids.append(image_id)
-            with open(os.path.join(self.tempdir.name, f"{source['id']}-field-{index}.raw"), "wb") as file:
+            with open(os.path.join(source["path"], f"field-{index}.raw"), "wb") as file:
                 file.write(payload)
 
         conn = await __import__("db").get_db()
@@ -105,3 +105,17 @@ class SatelliteSyncTests(BackendTestCase):
         await worker.sync_once()
         self.assertEqual(self.hub_files, uploads)
         self.assertEqual(len(self.hub_metadata), metadata_count)
+
+    async def test_timeout_failures_backoff_instead_of_hot_loop(self):
+        async def request(method, url, *, body=None, headers=None):
+            raise TimeoutError("satellite sync failed: timed out")
+
+        worker = SyncWorker(db_path=__import__("db").DB_PATH, hub="http://hub", request=request)
+        self.assertEqual(worker._next_idle_seconds, 15.0)
+        worker._note_failure(TimeoutError("timed out"))
+        self.assertEqual(worker.status()["backoff_seconds"], 30.0)
+        worker._note_failure(TimeoutError("timed out"))
+        self.assertEqual(worker.status()["backoff_seconds"], 60.0)
+        worker._clear_backoff()
+        self.assertEqual(worker.status()["backoff_seconds"], 0)
+        self.assertEqual(worker._next_idle_seconds, 15.0)

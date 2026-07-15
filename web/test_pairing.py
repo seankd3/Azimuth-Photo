@@ -7,6 +7,7 @@ import base64
 import io
 import os
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -90,7 +91,9 @@ class PairingTests(unittest.TestCase):
         expired = self.client.post("/api/pair", json={"code": code, "device_name": "Late"})
         self.assertEqual(expired.status_code, 400, expired.text)
 
-    def test_revoke_and_require_device_token(self):
+    def test_sync_requires_live_device_token_when_enabled(self):
+        import settings
+        settings.save_settings({**settings.get_settings(), "require_device_token": True})
         code = self.client.post("/api/devices/link").json()["code"]
         paired = self.client.post(
             "/api/pair",
@@ -99,11 +102,6 @@ class PairingTests(unittest.TestCase):
         token = paired["device_token"]
         device_id = paired["device_id"]
 
-        # Default off: sync works without token.
-        ok = self.client.post("/api/sync/manifest", json={"items": []})
-        self.assertEqual(ok.status_code, 200, ok.text)
-
-        settings.save_settings({**settings.get_settings(), "require_device_token": True})
         denied = self.client.post("/api/sync/manifest", json={"items": []})
         self.assertEqual(denied.status_code, 401, denied.text)
 
@@ -232,10 +230,40 @@ class PairConnectTests(unittest.TestCase):
         self.assertTrue(response.json()["has_hub"])
         self.assertEqual(started, [True])
         self.assertEqual(observed["url"], "http://hub.local:8000/api/pair")
-        self.assertEqual(observed["timeout"], 10)
+        self.assertEqual(observed["timeout"], 5)
         self.assertIn('"code": "ABCD1234"', observed["payload"])
         self.assertEqual(settings.get_settings()["hub_url"], "http://hub.local:8000")
         self.assertEqual(settings.get_settings()["device_token"], "device-token")
+
+    def test_connect_to_black_hole_does_not_block_other_requests(self):
+        connect_started = threading.Event()
+        connect_result = {}
+
+        def black_hole(_request, timeout):
+            self.assertEqual(timeout, 5)
+            connect_started.set()
+            time.sleep(1.25)
+            raise pair_routes.URLError("timed out")
+
+        def connect():
+            connect_result["response"] = self.client.post(
+                "/api/pair/connect",
+                json={"hub_url": "http://black-hole.invalid", "code": "ABCD1234"},
+            )
+
+        with mock.patch.object(pair_routes, "urlopen", side_effect=black_hole):
+            thread = threading.Thread(target=connect)
+            thread.start()
+            self.assertTrue(connect_started.wait(timeout=1))
+            started = time.perf_counter()
+            status = self.client.get("/api/pair/status")
+            elapsed = time.perf_counter() - started
+            thread.join(timeout=2)
+
+        self.assertEqual(status.status_code, 200, status.text)
+        self.assertLess(elapsed, 1.0)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(connect_result["response"].status_code, 400)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Repeatable, production-scale performance probes for photoArchive.
+"""Repeatable, production-scale performance probes for Azimuth Photo.
 
 The benchmark never opens the production catalog. Point ``--db`` at a copied
 catalog and it will run an isolated smoke server, SQL plans, RAW-stage timing,

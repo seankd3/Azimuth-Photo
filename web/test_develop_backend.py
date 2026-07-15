@@ -5,6 +5,8 @@ import json
 import os
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -29,7 +31,8 @@ except ImportError:  # Keep the repository's unittest fallback runnable in minim
 sys.path.insert(0, os.path.dirname(__file__))
 import app as app_module  # noqa: E402
 import db  # noqa: E402
-from features.develop import rawproc  # noqa: E402
+from features.develop import rawproc, routes as develop_routes  # noqa: E402
+from features.sync import readthrough  # noqa: E402
 
 
 RAW_ROOT = Path("/mnt/expansion/Photos/RAWS")
@@ -45,6 +48,7 @@ class DevelopBackendTests(unittest.TestCase):
         rawproc.BASE_CACHE_ROOT = Path(self.tempdir.name) / "develop-cache"
         rawproc.BASE_CACHE_DIR = rawproc.BASE_CACHE_ROOT / "base" / "v2"
         rawproc._recent_decodes.clear()
+        develop_routes._base_generation_failures.clear()
         asyncio.run(db.init_db())
         source = asyncio.run(db.add_or_restore_source(os.path.join(self.tempdir.name, "raws")))
         self.raw_path = Path(self.tempdir.name) / "raws" / "sample.dng"
@@ -63,6 +67,7 @@ class DevelopBackendTests(unittest.TestCase):
         rawproc.BASE_CACHE_DIR = self.old_cache_dir
         rawproc.BASE_CACHE_ROOT = self.old_cache_root
         rawproc._recent_decodes.clear()
+        develop_routes._base_generation_failures.clear()
         self.tempdir.cleanup()
 
     def _image(self, source_id, path):
@@ -229,12 +234,93 @@ class DevelopBackendTests(unittest.TestCase):
         self.assertEqual(pregen.json()["queued"], [])
 
     def test_cold_base_artifacts_start_background_generation_and_return_202(self):
-        preview = self.client.get(f"/api/develop/{self.raw_id}/base.jpg")
-        binary = self.client.get(f"/api/develop/{self.raw_id}/base.bin")
+        with mock.patch.object(develop_routes, "_start_base_generation") as start_generation:
+            preview = self.client.get(f"/api/develop/{self.raw_id}/base.jpg")
+            binary = self.client.get(f"/api/develop/{self.raw_id}/base.bin")
         self.assertEqual(preview.status_code, 202, preview.text)
         self.assertEqual(binary.status_code, 202, binary.text)
         self.assertEqual(preview.json()["state"], "generating")
         self.assertEqual(binary.headers["retry-after"], "1")
+        self.assertEqual(start_generation.call_count, 2)
+
+    def test_remote_settings_get_does_not_wait_for_hub_base(self):
+        async def mark_remote():
+            conn = await db.get_db()
+            try:
+                await conn.execute("UPDATE images SET hub_remote = 1 WHERE id = ?", (self.raw_id,))
+                await conn.commit()
+            finally:
+                await conn.close()
+
+        asyncio.run(mark_remote())
+        self.raw_path.unlink()
+        with mock.patch.object(rawproc, "ensure_base_cache", side_effect=AssertionError("must not contact hub")):
+            response = self.client.get(f"/api/develop/{self.raw_id}")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["meta"], {"canvas_color_profile": {}})
+
+    def test_base_poll_surfaces_recent_hub_failure_as_503(self):
+        cause = readthrough.BaseReadthroughError("Could not reach the hub for this Develop base")
+        failure = rawproc.RawDecodeError(str(cause))
+        failure.__cause__ = cause
+        develop_routes._base_generation_failures[self.raw_id] = (develop_routes.time.monotonic(), failure)
+
+        response = self.client.get(f"/api/develop/{self.raw_id}/base.bin")
+
+        self.assertEqual(response.status_code, 503, response.text)
+        self.assertEqual(response.json()["reason"], "hub_unreachable")
+
+    def test_transform_auto_with_cold_base_returns_pending(self):
+        with mock.patch.object(develop_routes, "_start_base_generation") as start_generation:
+            response = self.client.post(f"/api/develop/{self.raw_id}/transform/auto")
+
+        self.assertEqual(response.status_code, 202, response.text)
+        self.assertEqual(response.json()["status"], "pending")
+        start_generation.assert_called_once()
+
+    def test_remote_auto_with_uncached_base_returns_202_without_waiting_for_hub(self):
+        async def mark_remote():
+            conn = await db.get_db()
+            try:
+                await conn.execute("UPDATE images SET hub_remote = 1 WHERE id = ?", (self.raw_id,))
+                await conn.commit()
+            finally:
+                await conn.close()
+
+        asyncio.run(mark_remote())
+        self.raw_path.unlink()
+        ensure_started = threading.Event()
+        release_ensure = threading.Event()
+        ensure_finished = threading.Event()
+
+        def slow_hub_ensure(*_args, **_kwargs):
+            ensure_started.set()
+            release_ensure.wait(timeout=2)
+            ensure_finished.set()
+
+        release_timer = threading.Timer(1.25, release_ensure.set)
+        release_timer.start()
+        try:
+            with mock.patch.object(rawproc, "ensure_base_cache", side_effect=slow_hub_ensure):
+                async def exercise_route():
+                    started = time.perf_counter()
+                    response = await develop_routes.api_develop_auto_tone(self.raw_id)
+                    elapsed = time.perf_counter() - started
+                    self.assertTrue(await asyncio.to_thread(ensure_started.wait, 1))
+                    release_ensure.set()
+                    self.assertTrue(await asyncio.to_thread(ensure_finished.wait, 1))
+                    await asyncio.sleep(0)
+                    return response, elapsed
+
+                response, elapsed = asyncio.run(exercise_route())
+        finally:
+            release_timer.cancel()
+            release_ensure.set()
+
+        self.assertEqual(response.status_code, 202, response.body)
+        self.assertEqual(json.loads(response.body)["status"], "pending")
+        self.assertLess(elapsed, 1.0)
 
     def test_get_meta_self_heals_camera_profile_and_lens_data(self):
         self._write_cached_base()
@@ -401,6 +487,7 @@ class DevelopBackendTests(unittest.TestCase):
     def test_export_honors_resize_quality_and_sharpen_byte_sizes(self):
         from features.develop import render as develop_render
 
+        self._write_cached_base()
         export_root = Path(self.tempdir.name) / "exports"
         library_root = Path(self.tempdir.name) / "library-exports"
         old_export = develop_render.EXPORT_DIRECTORY

@@ -31,7 +31,7 @@ from features.sync import satellite
 _HASH_LENGTH = 32  # BLAKE2b-128, hex encoded.
 _BASE_MAGIC = b"PABASE1\0"
 _BASE_HEADER_BYTES = 16
-_DEFAULT_TIMEOUT_SECONDS = 20.0
+_DEFAULT_TIMEOUT_SECONDS = 5.0
 
 
 class BaseReadthroughError(RuntimeError):
@@ -68,7 +68,7 @@ def _content_hash_for_image(image_id: int, db_path: str) -> str | None:
 
 def _request(url: str, *, timeout: float) -> tuple[bytes, str, dict[str, str]]:
     headers = {"Accept": "multipart/mixed, application/gzip, application/json"}
-    headers.update(satellite.device_auth_headers())
+    headers.update(satellite.hub_request_headers())
     request = Request(url, headers=headers)
     try:
         with urlopen(request, timeout=timeout) as response:  # noqa: S310 - hub URL is user configuration.

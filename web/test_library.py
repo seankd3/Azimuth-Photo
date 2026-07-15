@@ -547,6 +547,145 @@ class LibraryTests(BackendTestCase):
         self.assertIn("thumb_url", satellite_cards[visible_high])
         self.assertNotIn("thumb_url", satellite_cards[hidden])
 
+    async def test_all_photos_includes_stale_hub_mirror_rows_across_dates(self):
+        """All Photos must surface hub:// mirror rows even when denormalized counts drifted to 0.
+
+        Taste blend caps the fetch at visible_images from SUM(active_image_count). A
+        satellite with stale hub:// counters would otherwise show only local/recent imports.
+        """
+        import time as _time
+
+        from data.repositories import catalog as catalog_repository
+
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "INSERT INTO catalog_sources "
+                "(path, display_name, included, online, image_count, active_image_count, "
+                "created_at, last_seen_at) VALUES (?, ?, 1, 1, 3, 3, ?, ?)",
+                ("/tmp/allphotos-local", "Local imports", _time.time(), _time.time()),
+            )
+            local_id = int((await (await conn.execute("SELECT last_insert_rowid()")).fetchone())[0])
+            await conn.execute(
+                "INSERT INTO catalog_sources "
+                "(path, display_name, included, online, image_count, active_image_count, "
+                "created_at, last_seen_at) VALUES (?, ?, 1, 1, 0, 0, ?, ?)",
+                (catalog_repository.HUB_MIRROR_SOURCE_PATH, "Hub library", _time.time(), _time.time()),
+            )
+            hub_id = int((await (await conn.execute("SELECT last_insert_rowid()")).fetchone())[0])
+            for index in range(3):
+                await conn.execute(
+                    "INSERT INTO images "
+                    "(source_id, filename, filepath, status, file_ext, elo, date_taken, "
+                    "hub_remote, comparisons) "
+                    "VALUES (?, ?, ?, 'kept', '.jpg', ?, ?, 0, 0)",
+                    (
+                        local_id,
+                        f"local-{index}.jpg",
+                        f"/tmp/allphotos-local/local-{index}.jpg",
+                        1500 + index,
+                        f"2026-07-12T1{index}:00:00",
+                    ),
+                )
+            for index in range(24):
+                year = 2020 + (index // 12)
+                month = (index % 12) + 1
+                await conn.execute(
+                    "INSERT INTO images "
+                    "(source_id, filename, filepath, status, file_ext, elo, date_taken, "
+                    "hub_remote, hub_image_id, comparisons) "
+                    "VALUES (?, ?, ?, 'kept', '.jpg', ?, ?, 1, ?, 0)",
+                    (
+                        hub_id,
+                        f"hub-{index}.jpg",
+                        f"/hub/archive/hub-{index}.jpg",
+                        1100 + index,
+                        f"{year}-{month:02d}-15T12:00:00",
+                        9000 + index,
+                    ),
+                )
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        db.invalidate_stats_cache()
+        library_service._rankings_response_cache.clear()
+        library_service._blended_rankings_order_cache.clear()
+        self._set_taste_blend(enabled=True, min_signal=1)
+
+        async def forced_blend(_db_sort):
+            return {
+                "active": True,
+                "cache_key": ("allphotos", "forced-blend"),
+                "scores": {image_id: float(image_id) for image_id in range(1, 200)},
+            }
+
+        with unittest.mock.patch.dict(
+            os.environ,
+            {"PHOTOARCHIVE_MODE": "satellite", "PHOTOARCHIVE_HUB_URL": "http://stub-hub"},
+        ), unittest.mock.patch.object(
+            library_service,
+            "_ranking_taste_blend_context",
+            new=forced_blend,
+        ):
+            result = await library_routes.api_rankings(limit=100, offset=0, sort="elo")
+
+        self.assertEqual(result["visible_images"], 27)
+        self.assertEqual(result["total_images"], 27)
+        self.assertEqual(len(result["images"]), 27)
+        months = {
+            str(card.get("date_taken") or "")[:7]
+            for card in result["images"]
+            if card.get("date_taken")
+        }
+        self.assertIn("2020-01", months)
+        self.assertIn("2021-12", months)
+        self.assertIn("2026-07", months)
+        counts = await db.get_catalog_image_counts()
+        self.assertEqual(counts["active_images"], 27)
+        self.assertEqual(counts["total_catalog_images"], 27)
+
+    async def test_hub_source_scope_filters_by_source_instead_of_remote_filepath(self):
+        import time as _time
+
+        from data.repositories import catalog as catalog_repository
+
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "INSERT INTO catalog_sources "
+                "(path, display_name, included, online, image_count, active_image_count, "
+                "created_at, last_seen_at) VALUES (?, 'Hub library', 1, 1, 2, 2, ?, ?)",
+                (catalog_repository.HUB_MIRROR_SOURCE_PATH, _time.time(), _time.time()),
+            )
+            hub_id = int((await (await conn.execute("SELECT last_insert_rowid()")).fetchone())[0])
+            await conn.executemany(
+                "INSERT INTO images "
+                "(source_id, filename, filepath, status, elo, hub_remote, hub_image_id) "
+                "VALUES (?, ?, ?, 'kept', 1200, 1, ?)",
+                [
+                    (hub_id, "one.jpg", "/remote/library/one.jpg", 101),
+                    (hub_id, "two.jpg", "/another/root/two.jpg", 102),
+                ],
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        db.invalidate_stats_cache()
+        library_service._rankings_response_cache.clear()
+        with unittest.mock.patch.dict(
+            os.environ,
+            {"PHOTOARCHIVE_MODE": "satellite", "PHOTOARCHIVE_HUB_URL": "http://stub-hub"},
+        ):
+            result = await library_routes.api_rankings(
+                limit=10,
+                folder=catalog_repository.HUB_MIRROR_SOURCE_PATH,
+            )
+
+        self.assertEqual(result["visible_images"], 2)
+        self.assertEqual({card["filename"] for card in result["images"]}, {"one.jpg", "two.jpg"})
+
     async def test_taste_vector_scores_winner_like_embeddings_above_loser_like(self):
         source = await self._source()
         winners = [await self._image(source["id"], f"winner-{idx}.jpg", comparisons=1) for idx in range(3)]
@@ -1172,6 +1311,32 @@ class LibraryTests(BackendTestCase):
         self.assertEqual(response["months"], [{"month": "2025-01", "count": 1}])
         self.assertEqual(response["total"], 1)
 
+    async def test_date_histogram_caches_and_clears_with_facet_invalidation(self):
+        source = await self._source()
+        image_id = await self._image(source["id"], "cached-hist.jpg")
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "UPDATE images SET date_taken = ? WHERE id = ?",
+                ("2025-04-03 10:00:00", image_id),
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+        db.invalidate_stats_cache()
+        db._date_histogram_cache.clear()
+
+        first = await library_routes.api_date_histogram()
+        cache_key = db._facet_cache_key()
+        self.assertIn(cache_key, db._date_histogram_cache)
+        self.assertEqual(db._date_histogram_cache[cache_key]["data"], first)
+
+        second = await library_routes.api_date_histogram()
+        self.assertEqual(second, first)
+
+        cache_events.invalidate_facet_caches()
+        self.assertNotIn(cache_key, db._date_histogram_cache)
+
     async def test_counts_route_counts_total_picked_and_rejected(self):
         source = await self._source()
         picked = await self._image(source["id"], "picked.jpg")
@@ -1463,13 +1628,16 @@ class LibraryTests(BackendTestCase):
         conn = await db.get_db()
         try:
             cursor = await conn.execute(
-                "SELECT missing_at FROM images WHERE filepath = ?",
-                (second_path,),
+                "SELECT filepath, missing_at FROM images WHERE source_id = ? ORDER BY filepath",
+                (source["id"],),
             )
-            missing = await cursor.fetchone()
+            scan_rows = await cursor.fetchall()
         finally:
             await conn.close()
-        self.assertIsNotNone(missing["missing_at"])
+        self.assertEqual(
+            [(row["filepath"], row["missing_at"] is not None) for row in scan_rows],
+            [(first_path, False), (second_path, True)],
+        )
         stats = await db.get_stats()
         self.assertEqual(stats["total_images"], 1)
         self.assertEqual(stats["total_catalog_images"], 2)
@@ -1482,6 +1650,34 @@ class LibraryTests(BackendTestCase):
         self.assertEqual([row["filename"] for row in rows], ["first.jpg", "second.jpg"])
         restored = await self._image_row(rows[1]["id"])
         self.assertIsNone(restored["missing_at"])
+
+    async def test_empty_online_source_scan_preserves_existing_images_and_warns(self):
+        source = await self._source("scan-empty-online")
+        filepaths = [
+            os.path.join(source["path"], "first.jpg"),
+            os.path.join(source["path"], "second.jpg"),
+        ]
+        for filepath in filepaths:
+            with open(filepath, "wb") as handle:
+                handle.write(b"photo")
+        await scanner.scan_folder(source["path"], source_id=source["id"])
+
+        for filepath in filepaths:
+            os.remove(filepath)
+        await scanner.scan_folder(source["path"], source_id=source["id"])
+
+        conn = await db.get_db()
+        try:
+            rows = await (await conn.execute(
+                "SELECT filepath, missing_at FROM images WHERE source_id = ? ORDER BY filepath",
+                (source["id"],),
+            )).fetchall()
+        finally:
+            await conn.close()
+
+        self.assertEqual([row["filepath"] for row in rows], filepaths)
+        self.assertTrue(all(row["missing_at"] is None for row in rows))
+        self.assertIn("scan found no files", scanner.scan_state["warning"].lower())
 
     async def test_scan_preserves_catalog_when_source_goes_offline_before_finalize(self):
         source = await self._source("scan-offline")

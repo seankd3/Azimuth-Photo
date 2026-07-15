@@ -19,6 +19,7 @@ import { icon } from '../icons.js';
 import { personLabel } from '../people_labels.js';
 
 const PAGE = 120;
+const MAX_WINDOW = PAGE * 3;
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const FULL_MONTHS = [
     'January', 'February', 'March', 'April', 'May', 'June',
@@ -55,6 +56,7 @@ let zoomIdx = 0;                 // 0 = 3-col · 1 = 5-col dense · 2 = month li
 let generation = 0;
 let loadingNext = false;
 let loadingPrev = false;
+let initialLoading = false;
 let endReached = false;
 let flatIds = [];
 let suppressClickUntil = 0;
@@ -159,6 +161,14 @@ function mkDaySection(dk, d) {
         toggleDay(sec);
     });
     return sec;
+}
+
+function mkMonthHeader(key) {
+    const header = document.createElement('div');
+    header.className = 'm-month-head';
+    header.dataset.month = key;
+    header.textContent = monthLabel(key);
+    return header;
 }
 
 const dayIds = (sec) => [...sec.querySelectorAll('.mcell[data-id]:not([data-stack-member])')]
@@ -301,6 +311,9 @@ function appendImages(batch) {
     for (const img of batch) {
         const d = parseDate(img.date_taken);
         const dk = d ? dayKey(d) : 'undated';
+        const month = d ? monthKeyOf(d) : 'undated';
+        const previousMonth = lastDay?.dataset.month;
+        if (!lastDay || previousMonth !== month) frag.appendChild(mkMonthHeader(month));
         if (!lastDay || lastDay.dataset.day !== dk) {
             lastDay = mkDaySection(dk, d);
             frag.appendChild(lastDay);
@@ -311,6 +324,25 @@ function appendImages(batch) {
     timeline.appendChild(frag);
     timeline.classList.toggle('selmode', selState.mode);
     updateDayChecks();
+}
+
+function firstVisibleCell() {
+    const paneTop = pane.getBoundingClientRect().top;
+    return [...timeline.querySelectorAll('.mcell[data-id]:not([data-stack-member])')]
+        .find((cell) => cell.getBoundingClientRect().bottom >= paneTop) || null;
+}
+
+function trimWindowFromStart() {
+    if (images.length <= MAX_WINDOW) return;
+    const anchor = firstVisibleCell();
+    const anchorId = anchor?.dataset.id;
+    const oldTop = anchor?.getBoundingClientRect().top || 0;
+    const dropped = images.length - MAX_WINDOW;
+    images = images.slice(dropped);
+    startOffset += dropped;
+    rebuildLoaded();
+    const nextAnchor = anchorId && timeline.querySelector(`.mcell[data-id="${anchorId}"]`);
+    if (nextAnchor) pane.scrollTop += nextAnchor.getBoundingClientRect().top - oldTop;
 }
 
 function renderFixedImages(batch) {
@@ -401,7 +433,25 @@ function renderMonths() {
 }
 
 /* ---------- zoom levels ---------- */
-export function setZoom(i) {
+function zoomAnchorAt(clientX, clientY) {
+    const cell = document.elementFromPoint(clientX, clientY)?.closest('.mcell[data-id]');
+    if (!cell || !timeline.contains(cell)) return null;
+    return {
+        id: cell.dataset.id,
+        top: cell.getBoundingClientRect().top - pane.getBoundingClientRect().top,
+    };
+}
+
+function restoreZoomAnchor(anchor) {
+    if (!anchor) return;
+    requestAnimationFrame(() => {
+        const cell = timeline.querySelector(`.mcell[data-id="${anchor.id}"]`);
+        if (!cell) return;
+        pane.scrollTop += cell.getBoundingClientRect().top - pane.getBoundingClientRect().top - anchor.top;
+    });
+}
+
+export function setZoom(i, { anchor = null } = {}) {
     const next = clamp(i, 0, 2);
     if (next === zoomIdx) return;
     const was = zoomIdx;
@@ -419,6 +469,7 @@ export function setZoom(i) {
     if (ctl) ctl.innerHTML = icon(zoomIdx === 2 ? 'rows-3' : zoomIdx === 1 ? 'grid-3x3' : 'layout-grid', 'icon icon-lg');
     updateMonthPill(false);
     endEl.hidden = zoomIdx === 2 || !endReached;
+    restoreZoomAnchor(anchor);
 }
 
 export function stepZoom(dir) {
@@ -427,6 +478,54 @@ export function stepZoom(dir) {
 
 export function zoomLevel() {
     return zoomIdx;
+}
+
+// Semantic zoom stays deliberately discrete (day grid → dense grid → months),
+// but the pinch itself is continuous: each threshold can be crossed in either
+// direction during one gesture. Keeping the touched photo anchored means the
+// switch feels like a zoom instead of a navigation jump.
+function installPinchZoom() {
+    let pinch = null;
+
+    const distance = (touches) => Math.hypot(
+        touches[0].clientX - touches[1].clientX,
+        touches[0].clientY - touches[1].clientY,
+    );
+    const midpoint = (touches) => ({
+        x: (touches[0].clientX + touches[1].clientX) / 2,
+        y: (touches[0].clientY + touches[1].clientY) / 2,
+    });
+    const reset = () => {
+        pinch = null;
+        timeline.classList.remove('m-pinching');
+    };
+
+    pane.addEventListener('touchstart', (event) => {
+        if (event.touches.length !== 2 || selection.size || initialLoading) return;
+        const startDistance = distance(event.touches);
+        if (startDistance < 24) return;
+        pinch = { startDistance, startZoom: zoomIdx };
+        timeline.classList.add('m-pinching');
+    }, { passive: true });
+
+    pane.addEventListener('touchmove', (event) => {
+        if (!pinch || event.touches.length !== 2) return;
+        event.preventDefault();
+        const currentDistance = distance(event.touches);
+        const point = midpoint(event.touches);
+        // A doubling/halving spans the full semantic zoom range. Round only
+        // after measuring the continuous pinch so one gesture can cross both
+        // levels naturally instead of being capped at a single step.
+        const delta = Math.log2(pinch.startDistance / Math.max(currentDistance, 1)) * 2;
+        const target = clamp(Math.round(pinch.startZoom + delta), 0, 2);
+        if (target === zoomIdx) return;
+        setZoom(target, { anchor: zoomAnchorAt(point.x, point.y) });
+    }, { passive: false });
+
+    pane.addEventListener('touchend', (event) => {
+        if (event.touches.length < 2) reset();
+    }, { passive: true });
+    pane.addEventListener('touchcancel', reset, { passive: true });
 }
 
 function rebuildLoaded() {
@@ -492,6 +591,7 @@ async function loadHistogram() {
 
 export async function reload() {
     const gen = ++generation;
+    initialLoading = true;
     stackRequest += 1;
     closeExpandedStack();
     images = [];
@@ -514,6 +614,7 @@ export async function reload() {
         renderScopeBar();
         updateMonthPill(false);
         pane.scrollTop = 0;
+        initialLoading = false;
         return;
     }
     let page = null;
@@ -545,10 +646,11 @@ export async function reload() {
     renderScopeBar();
     updateMonthPill(false);
     pane.scrollTop = 0;
+    initialLoading = false;
 }
 
 export async function loadMore() {
-    if (loadingNext || endReached || zoomIdx === 2) return;
+    if (initialLoading || loadingNext || endReached || zoomIdx === 2) return;
     loadingNext = true;
     const gen = generation;
     let page = null;
@@ -569,6 +671,7 @@ export async function loadMore() {
     images = images.concat(page.images);
     rememberImages(page.images);
     appendImages(page.images);
+    trimWindowFromStart();
     if (page.images.length < PAGE) {
         endReached = true;
         endEl.hidden = false;
@@ -1021,6 +1124,7 @@ export function initTimeline() {
 
     installSelectionGestures();
     installPullToRefresh();
+    installPinchZoom();
     on('selection', syncSelectionCells);
     on('flags', syncFlagCells);
     on('scope', () => {

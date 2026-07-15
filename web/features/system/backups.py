@@ -26,9 +26,13 @@ from core.runtime_paths import resolve_runtime_paths
 
 log = logging.getLogger(__name__)
 
-BACKUP_NAME_RE = re.compile(r"^photoarchive-(\d{8})-(\d{6})\.db\.gz$")
+BACKUP_NAME_RE = re.compile(r"^photoarchive-(\d{8})-(\d{6})(?:-([a-z0-9]+))?\.db\.gz$")
 DAILY_KEEP = 7
 WEEKLY_KEEP = 4
+# Pre-migration snapshots are the rollback safety net for a schema upgrade; they
+# are always retained (newest PREMIGRATE_KEEP) regardless of the daily/weekly window.
+PREMIGRATE_LABEL = "premigrate"
+PREMIGRATE_KEEP = 5
 INTEGRITY_SLEEP_SECONDS = 0.05
 CHECKSUM_CHUNK = 1024 * 1024
 RESTORE_REQUIRED_TABLES = frozenset({"images", "catalog_sources"})
@@ -39,7 +43,7 @@ class RestoreStageExistsError(RuntimeError):
 
 
 class RestoreValidationError(RuntimeError):
-    """The selected backup is not a valid photoArchive catalog."""
+    """The selected backup is not a valid Azimuth Photo catalog."""
 
 
 class RestoreStorageError(RuntimeError):
@@ -74,6 +78,8 @@ _integrity_state: dict[str, Any] = {
     "last_error": None,
 }
 _scheduler_started = False
+_catalog_health_lock = threading.Lock()
+_catalog_health: dict[str, dict[str, Any]] = {}
 
 
 def backup_root() -> Path:
@@ -83,9 +89,12 @@ def backup_root() -> Path:
     return root
 
 
-def _timestamp_name(when: datetime | None = None) -> str:
+def _timestamp_name(when: datetime | None = None, label: str | None = None) -> str:
     moment = when or datetime.now().astimezone()
-    return f"photoarchive-{moment.strftime('%Y%m%d-%H%M%S')}.db.gz"
+    stamp = moment.strftime("%Y%m%d-%H%M%S")
+    if label:
+        return f"photoarchive-{stamp}-{label}.db.gz"
+    return f"photoarchive-{stamp}.db.gz"
 
 
 def _parse_backup_name(name: str) -> datetime | None:
@@ -112,13 +121,56 @@ def _sqlite_backup_to_path(source_db: str, dest_db: str) -> None:
         src.close()
 
 
-def create_snapshot(db_path: str, *, when: datetime | None = None) -> dict[str, Any]:
-    """Snapshot ``db_path`` to a gzipped backup and apply retention."""
+def catalog_quick_check(db_path: str) -> dict[str, Any]:
+    """Read-only SQLite health check used before catalog startup work begins."""
+    path = os.path.abspath(db_path)
+    checked_at = time.time()
+    if not os.path.exists(path):
+        result = {"ok": True, "state": "missing", "checked_at": checked_at}
+    else:
+        try:
+            conn = sqlite3.connect(f"{Path(path).as_uri()}?mode=ro", uri=True, timeout=30.0)
+            try:
+                row = conn.execute("PRAGMA quick_check").fetchone()
+            finally:
+                conn.close()
+            if not row or str(row[0]).lower() != "ok":
+                result = {
+                    "ok": False,
+                    "state": "corrupt",
+                    "checked_at": checked_at,
+                    "error": str(row[0]) if row else "SQLite quick_check returned no result",
+                }
+            else:
+                result = {"ok": True, "state": "ok", "checked_at": checked_at}
+        except sqlite3.Error as exc:
+            result = {"ok": False, "state": "corrupt", "checked_at": checked_at, "error": str(exc)}
+    with _catalog_health_lock:
+        _catalog_health[path] = result
+    return dict(result)
+
+
+def catalog_health(db_path: str) -> dict[str, Any]:
+    """Return the startup check result, checking lazily for status-only callers."""
+    path = os.path.abspath(db_path)
+    with _catalog_health_lock:
+        result = _catalog_health.get(path)
+    return dict(result) if result is not None else catalog_quick_check(path)
+
+
+def create_snapshot(
+    db_path: str, *, when: datetime | None = None, label: str | None = None
+) -> dict[str, Any]:
+    """Snapshot ``db_path`` to a gzipped backup and apply retention.
+
+    ``label`` tags the snapshot (e.g. ``premigrate``); labeled pre-migration
+    snapshots are protected from routine pruning by :func:`apply_retention`.
+    """
     if not os.path.isfile(db_path):
         raise FileNotFoundError(f"Catalog database not found: {db_path}")
 
     root = backup_root()
-    name = _timestamp_name(when)
+    name = _timestamp_name(when, label)
     final_path = root / name
     tmp_db = root / f".{name}.tmp.db"
     tmp_gz = root / f".{name}.tmp.gz"
@@ -151,6 +203,7 @@ def create_snapshot(db_path: str, *, when: datetime | None = None) -> dict[str, 
                 "path": str(final_path),
                 "bytes": size,
                 "created_at": (when or datetime.now().astimezone()).isoformat(),
+                "label": label,
                 "pruned": pruned,
             }
         finally:
@@ -160,6 +213,35 @@ def create_snapshot(db_path: str, *, when: datetime | None = None) -> dict[str, 
                         leftover.unlink()
                 except OSError:
                     pass
+
+
+def backup_before_migration(
+    db_path: str, from_version: int, to_version: int
+) -> dict[str, Any] | None:
+    """Snapshot an existing catalog immediately before a schema migration.
+
+    Reuses the time-machine snapshot engine with a protected ``premigrate``
+    label so the pre-upgrade catalog is always restorable if the new schema
+    misbehaves. Best-effort: a backup failure is logged loudly but does not
+    block startup, because migrations are forward-only and tested.
+    """
+    try:
+        result = create_snapshot(db_path, label=PREMIGRATE_LABEL)
+        log.warning(
+            "catalog_backup premigration from=v%s to=v%s -> %s",
+            from_version,
+            to_version,
+            result["name"],
+        )
+        return result
+    except Exception:
+        log.exception(
+            "catalog_backup premigration FAILED from=v%s to=v%s db=%s — proceeding with migration",
+            from_version,
+            to_version,
+            db_path,
+        )
+        return None
 
 
 def list_backups() -> list[dict[str, Any]]:
@@ -184,7 +266,7 @@ def list_backups() -> list[dict[str, Any]]:
     return items
 
 
-def apply_retention(root: Path | None = None) -> list[str]:
+def apply_retention(root: Path | None = None, *, now: date | None = None) -> list[str]:
     """Keep 7 daily + 4 weekly snapshots; delete the rest. Returns pruned names."""
     root = root or backup_root()
     backups: list[tuple[datetime, Path]] = []
@@ -196,8 +278,18 @@ def apply_retention(root: Path | None = None) -> list[str]:
     if not backups:
         return []
 
-    today = date.today()
+    today = now or date.today()
     keep: set[Path] = set()
+
+    # Always retain the most recent pre-migration snapshots. They are the
+    # rollback safety net for a schema upgrade and must survive routine pruning.
+    premigrate = [
+        (when, path)
+        for when, path in backups
+        if (match := BACKUP_NAME_RE.match(path.name)) and match.group(3) == PREMIGRATE_LABEL
+    ]
+    for _when, path in premigrate[:PREMIGRATE_KEEP]:
+        keep.add(path)
 
     # Newest backup per calendar day for the last 7 days.
     daily_seen: set[date] = set()
@@ -615,6 +707,7 @@ def integrity_summary(db_path: str) -> dict[str, Any]:
     """Combine live scan status with stored mismatch-capable counts."""
     status = integrity_status()
     summary: dict[str, Any] = {
+        "catalog": catalog_health(db_path),
         "scan": status,
         "checksummed": 0,
         "mismatch_count": len(status.get("mismatch_ids") or []),

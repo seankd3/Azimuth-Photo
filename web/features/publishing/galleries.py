@@ -242,9 +242,10 @@ async def image_file(db_path: str, token: str, image_id: int) -> dict[str, Any] 
     try:
         await ensure_tables(conn)
         cursor = await conn.execute(
-            """SELECT i.id, i.filename, i.filepath FROM client_galleries g
+            """SELECT i.id, i.filename, i.filepath, source.path AS source_path FROM client_galleries g
                JOIN client_gallery_images gi ON gi.gallery_id = g.id
                JOIN images i ON i.id = gi.image_id
+               LEFT JOIN catalog_sources source ON source.id = i.source_id
                WHERE g.token = ? AND i.id = ? AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL""",
             (str(token), int(image_id)),
         )
@@ -261,8 +262,10 @@ async def _gallery_row(conn, gallery_id: int):
 
 async def _gallery_images(conn, gallery_id: int) -> list[dict[str, Any]]:
     cursor = await conn.execute(
-        """SELECT i.id, i.filename, i.filepath, i.width, i.height, i.date_taken, gi.position
+        """SELECT i.id, i.filename, i.filepath, i.width, i.height, i.date_taken,
+                  source.path AS source_path, gi.position
            FROM client_gallery_images gi JOIN images i ON i.id = gi.image_id
+           LEFT JOIN catalog_sources source ON source.id = i.source_id
            WHERE gi.gallery_id = ? AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL
            ORDER BY gi.position, gi.image_id""",
         (int(gallery_id),),

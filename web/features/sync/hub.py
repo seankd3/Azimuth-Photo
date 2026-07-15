@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import ntpath
 import os
 import re
 import shutil
@@ -18,6 +19,7 @@ from core import runtime_paths
 from data import connection
 from data.repositories import catalog as catalog_repository
 from features.develop import rawproc
+from features.imports import taxonomy
 from features.library import geodata, keywords
 from features.sync.hashing import compute_content_hash, compute_full_hash
 from features.sync.validation import validate_content_hash
@@ -28,6 +30,7 @@ BACKFILL_BATCH_SIZE = 100
 BACKFILL_THROTTLE_SECONDS = 0.05
 _UPLOAD_LOCKS: dict[str, asyncio.Lock] = {}
 _FOLDER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _-]{0,63}$")
+_WINDOWS_RESERVED_NAMES = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
 
 SYNC_DDL = """
 CREATE TABLE IF NOT EXISTS sync_manifest_items (
@@ -70,6 +73,13 @@ def default_raws_root(intake_root: Path | None = None) -> Path:
     return intake.parent / "RAWS"
 
 
+def default_library_root(intake_root: Path | None = None, raws_root: Path | None = None) -> Path:
+    return taxonomy.default_library_root(
+        intake_root=intake_root or default_intake_root(),
+        raws_root=raws_root or default_raws_root(intake_root),
+    )
+
+
 async def ensure_sync_schema(db_path: str) -> None:
     conn = await connection.open_async(db_path)
     try:
@@ -95,12 +105,25 @@ async def ensure_sync_schema(db_path: str) -> None:
 
 
 def _normalize_folder(value: Any) -> str | None:
-    if value is None:
-        return None
-    folder = str(value).strip()
-    if not _FOLDER_RE.fullmatch(folder):
-        raise ValueError("folder must match ^[A-Za-z0-9][A-Za-z0-9 _-]{0,63}$")
-    return folder
+    return taxonomy.normalize_folder_hint(value)
+
+
+def _normalize_filename(value: Any) -> str:
+    filename = str(value or "").strip()
+    stem = filename.split(".", 1)[0].upper()
+    if (
+        not filename
+        or len(filename) > 255
+        or filename.rstrip(" .") != filename
+        or any(ord(char) < 32 for char in filename)
+        or ":" in filename
+        or os.path.basename(filename) != filename
+        or ntpath.basename(filename) != filename
+        or stem in _WINDOWS_RESERVED_NAMES
+        or filename in {".", ".."}
+    ):
+        raise ValueError("filename must be a portable base filename")
+    return filename
 
 
 async def manifest(db_path: str, items: Iterable[dict[str, Any]]) -> dict[str, list[Any]]:
@@ -111,7 +134,7 @@ async def manifest(db_path: str, items: Iterable[dict[str, Any]]) -> dict[str, l
         supplied_full_hash = item.get("full_hash")
         full_hash = validate_content_hash(supplied_full_hash) if supplied_full_hash else None
         byte_count = int(item.get("bytes", 0))
-        filename = os.path.basename(str(item.get("filename") or ""))
+        filename = _normalize_filename(item.get("filename"))
         if byte_count < 0 or not filename:
             raise ValueError("manifest items require non-negative bytes and a filename")
         folder = _normalize_folder(item.get("folder"))
@@ -253,12 +276,12 @@ async def _known_image_id(db_path: str, content_hash: str) -> int | None:
         await connection.close_async(conn, db_path=db_path)
 
 
-async def _register_original(db_path: str, raws_root: Path, path: Path, content_hash: str) -> int:
+async def _register_original(db_path: str, source_root: Path, path: Path, content_hash: str) -> int:
     stat = await asyncio.to_thread(path.stat)
     row = (path.name, str(path), path.suffix.lower(), int(stat.st_size), float(stat.st_mtime))
     # These are the catalog source + batch insert primitives used by the normal
     # importer and scanner, with an explicit DB path for isolated hub tests.
-    source = await catalog_repository.add_or_restore_source(db_path, str(raws_root))
+    source = await catalog_repository.add_or_restore_source(db_path, str(source_root))
     await catalog_repository.insert_images_batch(db_path, [row], int(source["id"]))
     conn = await connection.open_async(db_path)
     try:
@@ -355,7 +378,21 @@ async def _append_upload_chunk_locked(
     taken = extracted.get("date_taken") or item.get("date_taken")
     year, day = _date_parts(taken) or (str(date.today().year), date.today().isoformat())
     folder = str(item["folder"]).strip() if item.get("folder") else None
-    destination_dir = raws_root / folder / year / day if folder else raws_root / year / day
+    # Named folders (e.g. Android PHONE_FOLDER="Personal Photos") are siblings of
+    # the configured RAWS tree under the library root — never nested inside RAWS.
+    # RAWS itself always lands in the configured raws_root (legacy date tree).
+    library_root = taxonomy.library_root_from_raws(raws_root)
+    source_kind = "phone" if folder == taxonomy.DEST_PERSONAL else None
+    destination_name = taxonomy.route_destination(
+        filename=str(item["filename"]),
+        source_kind=source_kind,
+        folder_hint=folder,
+    )
+    if destination_name == taxonomy.DEST_RAWS:
+        destination_root = Path(raws_root)
+    else:
+        destination_root = taxonomy.destination_source_root(library_root, destination_name)
+    destination_dir = destination_root / year / day
     destination_dir.mkdir(parents=True, exist_ok=True)
     preferred = destination_dir / os.path.basename(str(item["filename"]))
     if preferred.exists() and await asyncio.to_thread(compute_full_hash, preferred) == item["full_hash"]:
@@ -371,7 +408,7 @@ async def _append_upload_chunk_locked(
                 os.fsync(handle.fileno())
         created_destination = True
     try:
-        image_id = await _register_original(db_path, raws_root, destination, content_hash)
+        image_id = await _register_original(db_path, destination_root, destination, content_hash)
     except Exception:
         if created_destination:
             destination.unlink(missing_ok=True)

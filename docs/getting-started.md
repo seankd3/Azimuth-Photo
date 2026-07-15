@@ -5,7 +5,7 @@ This guide gets Azimuth Photo from a fresh clone to a usable local catalog.
 ## Install
 
 ```bash
-git clone https://github.com/Sean-Kenneth-Doherty/photo-archive.git
+git clone https://github.com/Sean-Kenneth-Doherty/azimuth-photo.git
 cd photo-archive
 cd web
 python -m venv .venv

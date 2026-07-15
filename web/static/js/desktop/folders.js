@@ -1,8 +1,9 @@
-import { getFolderTree } from './api.js';
+import { getFolderTree, revealFolder } from './api.js';
 import { downloadExport, openExportMenu } from './export_menu.js';
-import { emit, folderActive, folderValues, on, scopeParams, setScope } from './state.js';
+import { emit, folderActive, folderValues, navigateToScope, on, scopeParams } from './state.js';
 import { showToast } from './toast.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
+import { fileManagerMenuLabel } from './file_manager.js';
 import { icon } from '../icons.js';
 
 const EXPANDED_KEY = 'pa_d_folder_expanded';
@@ -69,7 +70,7 @@ function nodeMatches(node, query) {
 
 function applyFolderScope(path, options = {}) {
     if (!path) return;
-    setScope({ folder: [path] }, options);
+    navigateToScope({ folder: [path] }, options);
     if (!options.keepOpen) closeDrawer();
 }
 
@@ -78,7 +79,7 @@ function toggleFolderScope(path) {
     const next = current.includes(path)
         ? current.filter((item) => item !== path)
         : [...current, path];
-    setScope({ folder: next }, { merge: true });
+    navigateToScope({ folder: next }, { merge: true });
 }
 
 function rowScopePath(row) {
@@ -114,7 +115,7 @@ function selectFolderPath(path, row, event) {
         const range = rangeWithinParent(lastSelectedFolderPath, row);
         if (range.length) {
             const next = event.ctrlKey || event.metaKey ? [...new Set([...folderValues(), ...range])] : range;
-            setScope({ folder: next }, { merge: true });
+            navigateToScope({ folder: next }, { merge: true });
             return;
         }
     }
@@ -136,6 +137,16 @@ function exportFolderScope(node, anchor) {
             message: format === 'zip' ? 'Preparing folder zip' : `Exporting folder as ${format.toUpperCase()}`,
         });
     });
+}
+
+async function revealFolderPath(path) {
+    if (!path) return;
+    const result = await revealFolder(path);
+    if (result?.ok && result?.data?.ok) {
+        showToast('Opened in file manager');
+        return;
+    }
+    showToast(result?.data?.error || 'Couldn’t open folder');
 }
 
 function ensureMenu() {
@@ -173,11 +184,13 @@ function openFolderMenu(node, anchor) {
     menu.innerHTML = '<div class="pm-group">'
         + `<button data-act="scope">${icon('folder-tree')} Show in scope with subfolders</button>`
         + `<button data-act="refine">${icon('zap')} Open in Refine</button>`
+        + `<button data-act="reveal">${icon('folder-open')} ${esc(fileManagerMenuLabel())}</button>`
         + `<button data-act="export">${icon('download')} Export view…</button>`
         + '</div>';
     menu.hidden = false;
     positionMenu(anchor);
     for (const button of menu.querySelectorAll('[data-act]')) {
+        button.setAttribute('role', 'menuitem');
         button.addEventListener('click', () => {
             const action = button.dataset.act;
             closeFolderMenu();
@@ -186,6 +199,7 @@ function openFolderMenu(node, anchor) {
                 applyFolderScope(node.path);
                 emit('refine:open');
             }
+            if (action === 'reveal') revealFolderPath(node.path);
             if (action === 'export') exportFolderScope(node, anchor);
         });
     }

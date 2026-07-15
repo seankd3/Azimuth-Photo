@@ -1,6 +1,10 @@
 import os
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
+
+from core.source_files import inspect_source_file
+from data.repositories.catalog import SuspiciousEmptyScan
 
 SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".dng", ".cr2", ".cr3", ".tif", ".tiff", ".webp"}
 
@@ -10,6 +14,7 @@ MarkSourceScanFinished = Callable[..., Awaitable[None]]
 _mark_source_scan_started: MarkSourceScanStarted | None = None
 _insert_images_batch: InsertImagesBatch | None = None
 _mark_source_scan_finished: MarkSourceScanFinished | None = None
+log = logging.getLogger(__name__)
 
 # Global scan state
 scan_state = {
@@ -20,6 +25,7 @@ scan_state = {
     "source_id": None,
     "done": False,
     "error": "",
+    "warning": "",
 }
 
 
@@ -51,14 +57,11 @@ def walk_images(folder: str):
             file_ext = os.path.splitext(f)[1].lower()
             if file_ext in SUPPORTED_EXTENSIONS:
                 filepath = os.path.join(root, f)
-                file_size = None
-                file_modified_at = None
-                try:
-                    stat = os.stat(filepath)
-                    file_size = int(stat.st_size)
-                    file_modified_at = float(stat.st_mtime)
-                except Exception:
-                    pass
+                state, file_stat = inspect_source_file(filepath, folder)
+                if state not in {"available", "empty"} or file_stat is None:
+                    continue
+                file_size = int(file_stat.st_size)
+                file_modified_at = float(file_stat.st_mtime)
                 yield f, filepath, file_ext, file_size, file_modified_at
 
 
@@ -89,6 +92,7 @@ async def scan_folder(folder: str, source_id: int | None = None, on_batch=None):
     scan_state["source_id"] = source_id
     scan_state["done"] = False
     scan_state["error"] = ""
+    scan_state["warning"] = ""
 
     batch = []
     batch_size = 100
@@ -123,6 +127,14 @@ async def scan_folder(folder: str, source_id: int | None = None, on_batch=None):
                 source_id,
                 seen_filepaths=seen_filepaths,
             )
+    except SuspiciousEmptyScan as exc:
+        scan_state["warning"] = str(exc)
+        log.warning(
+            "worker=catalog_scan source_id=%s folder=%r warning: %s",
+            source_id,
+            folder,
+            exc,
+        )
     except Exception as exc:
         scan_state["error"] = str(exc)
     finally:

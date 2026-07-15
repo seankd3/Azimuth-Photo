@@ -346,6 +346,14 @@ export function wbGains(asShotTemperature, asShotTint, temperature, tint) {
     return [0, 1, 2].map((i) => Math.min(Math.max((wa[i] / wa[1]) / (wu[i] / wu[1]), 0.125), 8));
 }
 
+// Production Develop responses carry the exact color payload used by
+// render_display_preview().  Fall back to the historical metadata shape for
+// standalone parity/debug callers that do not come through the API.
+function canvasColorProfile(meta = {}) {
+    const explicit = meta?.canvas_color_profile;
+    return explicit && typeof explicit === 'object' && !Array.isArray(explicit) ? explicit : meta;
+}
+
 const XYZD50_TO_SRGB = [
     [3.1338561, -1.6168667, -0.4906146],
     [-0.9787684, 1.9161415, 0.0334540],
@@ -1433,9 +1441,10 @@ export class DevelopRenderer {
     setSettings(settings, meta = this.meta, _opts = {}) {
         this.settings = effectiveLookSettings(settings || {});
         this.meta = meta || {};
-        const baseKind = this.meta.base_kind || 'raw';
-        const adobeProfile = this.meta.adobe_profile || this.meta.color?.adobe_profile || null;
-        const profile = baseKind === 'display' || adobeProfile ? null : (this.meta.camera_profile || this.meta.color?.camera_profile || null);
+        this.colorProfile = canvasColorProfile(this.meta);
+        const baseKind = this.colorProfile.base_kind || this.meta.base_kind || 'raw';
+        const adobeProfile = this.colorProfile.adobe_profile || this.colorProfile.color?.adobe_profile || null;
+        const profile = baseKind === 'display' || adobeProfile ? null : (this.colorProfile.camera_profile || this.colorProfile.color?.camera_profile || null);
         const profileKey = profile?.slug || profile?.model || '';
         const look = this.settings.Look;
         const lookKey = JSON.stringify([
@@ -1621,7 +1630,9 @@ export class DevelopRenderer {
             Number(grain.shadowBias ?? 0.35),
         );
         gl.uniform1f(uniform('u_filmStrength'), filmPercent('pa_FilmStrength'));
-        const adobe = this.meta.adobe_profile || this.meta.color?.adobe_profile || null;
+        const colorProfile = this.colorProfile || canvasColorProfile(this.meta);
+        const color = colorProfile.color || colorProfile;
+        const adobe = colorProfile.adobe_profile || colorProfile.color?.adobe_profile || null;
         gl.uniform1i(uniform('u_dngActive'), adobe ? 1 : 0);
         gl.uniform1i(uniform('u_dngHueActive'), adobe && this.dngHueDims[0] ? 1 : 0);
         gl.uniform1i(uniform('u_dngLookActive'), adobe && this.dngLookDims[0] ? 1 : 0);
@@ -1631,10 +1642,10 @@ export class DevelopRenderer {
         gl.uniform1i(uniform('u_dngLookEncoding'), Number(adobe?.look_table_encoding || 0));
         gl.uniformMatrix3fv(uniform('u_dngSrgbToProPhoto'), false, matrixColumnMajor(DNG_LINEAR_SRGB_TO_PROPHOTO));
         gl.uniformMatrix3fv(uniform('u_dngProPhotoToSrgb'), false, matrixColumnMajor(DNG_PROPHOTO_TO_LINEAR_SRGB));
-        const baseIncludesBaselineExposure = this.meta.color?.forward_matrix != null;
+        const baseIncludesBaselineExposure = color.forward_matrix != null;
         gl.uniform1f(uniform('u_dngBaselineExposure'), baseIncludesBaselineExposure ? 0 : Number(adobe?.baseline_exposure || 0));
-        const displayBase = this.meta.base_kind === 'display';
-        const profile = displayBase ? null : (this.meta.camera_profile || this.meta.color?.camera_profile || null);
+        const displayBase = (colorProfile.base_kind || this.meta.base_kind) === 'display';
+        const profile = displayBase ? null : (colorProfile.camera_profile || colorProfile.color?.camera_profile || null);
         const profileTable = new Float32Array(CAMERA_PROFILE_HUE_BINS * CAMERA_PROFILE_CHROMA_BINS * 2);
         if (Array.isArray(profile?.oklab_ab_delta)) {
             let cursor = 0;
@@ -1682,7 +1693,7 @@ export class DevelopRenderer {
         const asShotTint = Number(this.meta.as_shot_tint || 0);
         const userT = numberSetting(s, 'Temperature', asShotT);
         const userTint = numberSetting(s, 'Tint');
-        let wb = wbMatrix(this.meta.color, asShotT, asShotTint, userT, userTint);
+        let wb = wbMatrix(color, asShotT, asShotTint, userT, userTint);
         if (!wb) {
             const gains = wbGains(asShotT, asShotTint, userT, userTint);
             wb = [[gains[0], 0, 0], [0, gains[1], 0], [0, 0, gains[2]]];

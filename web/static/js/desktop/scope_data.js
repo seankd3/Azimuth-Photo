@@ -9,7 +9,7 @@ export function similarScopeActive() {
     return scope.similarIds.length > 0;
 }
 
-export async function loadScopePage({ limit = 100, offset = 0, sort = null } = {}) {
+export async function loadScopePage({ limit = 100, offset = 0, sort = null, signal = null } = {}) {
     if (similarScopeActive()) {
         const ids = scope.similarIds.map(Number).filter((id) => id > 0);
         const images = ids.map((id) => byId.get(id)).filter(Boolean);
@@ -24,7 +24,7 @@ export async function loadScopePage({ limit = 100, offset = 0, sort = null } = {
         };
     }
     if (collectionScopeActive()) {
-        const data = await getCollection(scope.collectionId, { limit, offset });
+        const data = await getCollection(scope.collectionId, { limit, offset, signal });
         const collection = data && data.collection;
         if (!collection) return null;
         const images = collection.images || [];
@@ -40,10 +40,11 @@ export async function loadScopePage({ limit = 100, offset = 0, sort = null } = {
     }
     const params = scopeParams({ limit, offset });
     if (sort) params.set('sort', sort);
-    const data = await getRankings(params);
+    const options = signal ? { fetchOptions: { signal } } : {};
+    const data = await getRankings(params, options);
     if (data || !viewState.prefs.collapseStacks) return data;
     params.set('stacks', 'expanded');
-    return getRankings(params);
+    return getRankings(params, options);
 }
 
 export async function loadCollectionImages(collectionId = scope.collectionId) {

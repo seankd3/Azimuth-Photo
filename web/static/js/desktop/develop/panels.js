@@ -21,7 +21,7 @@ const PRESENCE = [
     slider('Saturation', 'Saturation', -100, 100),
 ];
 const DETAIL = [
-    slider('Sharpness', 'Amount', 0, 150, 1, 40), slider('SharpenRadius', 'Radius', .5, 3, .1, 1),
+    slider('Sharpness', 'Amount', 0, 150), slider('SharpenRadius', 'Radius', .5, 3, .1, 1),
     slider('SharpenDetail', 'Detail', 0, 100, 1, 25), slider('SharpenEdgeMasking', 'Masking', 0, 100),
     slider('LuminanceSmoothing', 'Luminance NR', 0, 100), slider('LuminanceDetail', 'NR Detail', 0, 100, 1, 50),
     slider('LuminanceContrast', 'NR Contrast', 0, 100), slider('ColorNoiseReduction', 'Color NR', 0, 100),

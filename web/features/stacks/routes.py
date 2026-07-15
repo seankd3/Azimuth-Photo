@@ -33,7 +33,7 @@ _rebuild_status: dict = {
 
 
 class CreateStackBody(BaseModel):
-    image_ids: list[int] = Field(default_factory=list)
+    image_ids: list[int] = Field(default_factory=list, max_length=10_000)
     representative_id: int | None = None
 
 
@@ -42,7 +42,7 @@ class RepresentativeBody(BaseModel):
 
 
 class RebuildBody(BaseModel):
-    kinds: list[str] | None = None
+    kinds: list[str] | None = Field(default=None, max_length=16)
 
 
 def configure(*, db_path: DbPath, invalidate_rankings_cache: Invalidate | None = None) -> None:

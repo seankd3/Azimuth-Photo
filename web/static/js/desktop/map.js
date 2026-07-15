@@ -1,17 +1,14 @@
 import { getCollection, getMapMarkers, thumbUrl } from './api.js';
-import { emit, on, scope, scopeParams, setImages, setRankingsMeta } from './state.js';
+import { emit, navigateToScope, on, scope, scopeParams, setImages, setRankingsMeta } from './state.js';
 import { icon } from '../icons.js';
 import { LAND_PATHS } from './world_land.js';
+import { escapeHtml as esc, formatCount as fmt } from './dom.js';
 
 let mounted = false;
 let initialized = false;
 let generation = 0;
 let markers = [];
-
-const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[c]));
-const fmt = (n) => Number(n || 0).toLocaleString('en-US');
+const COLLECTION_MARKER_LIMIT = 1000;
 
 function latOf(marker) {
     return Number(marker.lat ?? marker.latitude);
@@ -77,7 +74,7 @@ function renderMap(data = {}) {
         + '</svg><div id="map-pins">'
         + clusters.map((item, index) => {
             const count = item.markers.length;
-            return `<button class="map-pin" data-cluster="${index}" style="left:${(item.x / 10).toFixed(2)}%;top:${(item.y / 5).toFixed(2)}%" aria-label="${fmt(count)} located photos">`
+            return `<button class="map-pin" data-cluster="${index}" style="left:${(item.x / 10).toFixed(2)}%;top:${(item.y / 5).toFixed(2)}%" aria-label="Preview ${fmt(count)} located photo${count === 1 ? '' : 's'}">`
                 + `<span>${count > 1 ? fmt(count) : ''}</span></button>`;
         }).join('')
         + '</div>'
@@ -86,28 +83,20 @@ function renderMap(data = {}) {
 }
 
 async function loadCollectionMarkers() {
-    let offset = 0;
-    let total = 0;
-    let all = [];
-    do {
-        const data = await getCollection(scope.collectionId, { limit: 1000, offset });
-        const collection = data && data.collection;
-        if (!collection) break;
-        total = Number(collection.image_count) || 0;
-        const incoming = collection.images || [];
-        all = all.concat(incoming);
-        offset += incoming.length;
-        if (!incoming.length) break;
-    } while (offset < total);
+    const data = await getCollection(scope.collectionId, { limit: COLLECTION_MARKER_LIMIT, offset: 0 });
+    const collection = data && data.collection;
+    const total = Number(collection?.image_count) || 0;
+    const all = collection?.images || [];
+    const located = all.filter((img) => Number.isFinite(Number(img.latitude)) && Number.isFinite(Number(img.longitude)));
     return {
-        markers: all.filter((img) => Number.isFinite(Number(img.latitude)) && Number.isFinite(Number(img.longitude))).map((img) => ({
+        markers: located.map((img) => ({
             ...img,
             lat: img.latitude,
             lng: img.longitude,
             thumb_url: img.thumb_url || thumbUrl('sm', img.id),
         })),
         total_count: total,
-        gps_count: all.filter((img) => Number.isFinite(Number(img.latitude)) && Number.isFinite(Number(img.longitude))).length,
+        gps_count: located.length,
     };
 }
 
@@ -133,48 +122,71 @@ async function load() {
     }
 }
 
-function openCluster(index, pin) {
-    const item = cluster(markers)[index];
+function clusterAt(index) {
+    return cluster(markers)[index];
+}
+
+function closePopover() {
+    document.getElementById('map-popover')?.classList.remove('on');
+}
+
+function openClusterInGrid(index) {
+    const item = clusterAt(index);
     if (!item) return;
-    const first = item.markers[0];
-    if (item.markers.length === 1) {
-        emit('loupe:open', { id: Number(first.id), index: markers.findIndex((marker) => Number(marker.id) === Number(first.id)) });
-        return;
-    }
+    const ids = item.markers.map((marker) => Number(marker.id)).filter((id) => id > 0);
+    if (!ids.length) return;
+    navigateToScope({
+        similarIds: ids,
+        similarLabel: `Map · ${fmt(ids.length)} photo${ids.length === 1 ? '' : 's'}`,
+        sort: scope.sort || 'elo',
+    });
+}
+
+function openCluster(index, pin) {
+    const item = clusterAt(index);
+    if (!item) return;
     const pop = document.getElementById('map-popover');
     const rect = pin.getBoundingClientRect();
-    pop.innerHTML = `<div class="mp-head">${fmt(item.markers.length)} photos here</div>`
+    pop.dataset.cluster = String(index);
+    pop.innerHTML = `<div class="mp-head">${fmt(item.markers.length)} photo${item.markers.length === 1 ? '' : 's'} here</div>`
+        + '<div class="mp-previews">'
         + item.markers.slice(0, 9).map((marker) => (
-            `<button data-id="${marker.id}">${marker.thumb_url
+            `<button class="mp-preview" data-id="${marker.id}">${marker.thumb_url
                 ? `<img src="${esc(marker.thumb_url)}" loading="lazy" decoding="async" alt="">`
                 : `<i class="map-thumb-neutral" aria-hidden="true">${icon('map-pin')}</i>`}<span>${esc(marker.filename || `Image ${marker.id}`)}</span></button>`
-        )).join('');
+        )).join('')
+        + '</div><button class="mp-open-grid" data-open-grid type="button">Open in Grid</button>';
     pop.style.left = `${Math.min(window.innerWidth - 220, rect.left)}px`;
     pop.style.top = `${Math.min(window.innerHeight - 260, rect.bottom + 8)}px`;
     pop.classList.add('on');
-    pop.querySelector('button')?.focus({ preventScroll: true });
+    pop.querySelector('.mp-preview')?.focus({ preventScroll: true });
 }
 
 export function initMap() {
     if (initialized) return;
     initialized = true;
     document.getElementById('map-stage').addEventListener('click', (event) => {
-        const popItem = event.target.closest('#map-popover button[data-id]');
+        const openGrid = event.target.closest('#map-popover [data-open-grid]');
+        if (openGrid) {
+            openClusterInGrid(Number(document.getElementById('map-popover').dataset.cluster));
+            return;
+        }
+        const popItem = event.target.closest('#map-popover .mp-preview[data-id]');
         if (popItem) {
             emit('loupe:open', { id: Number(popItem.dataset.id), index: markers.findIndex((marker) => Number(marker.id) === Number(popItem.dataset.id)) });
-            document.getElementById('map-popover').classList.remove('on');
+            closePopover();
             return;
         }
         const pin = event.target.closest('.map-pin[data-cluster]');
         if (pin) openCluster(Number(pin.dataset.cluster), pin);
-        else document.getElementById('map-popover')?.classList.remove('on');
+        else closePopover();
     });
     document.getElementById('map-stage').addEventListener('keydown', (event) => {
         if (event.key !== 'Escape') return;
         const pop = document.getElementById('map-popover');
         if (!pop?.classList.contains('on')) return;
         event.preventDefault();
-        pop.classList.remove('on');
+        closePopover();
     });
     on('scope', load);
 }
@@ -190,5 +202,5 @@ export function unmountMap() {
     generation += 1;
     markers = [];
     document.getElementById('view-map').classList.remove('active');
-    document.getElementById('map-popover')?.classList.remove('on');
+    closePopover();
 }

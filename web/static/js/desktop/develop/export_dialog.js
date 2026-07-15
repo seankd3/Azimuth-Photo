@@ -6,6 +6,11 @@
  * the Sync… checkbox popover, and grid batch-export queue helpers.
  */
 
+import { fetchOptionsWithTimeout } from '../../api.js';
+
+const READ_TIMEOUT_MS = 10_000;
+const MUTATION_TIMEOUT_MS = 20_000;
+
 const SHARPEN_OPTIONS = [
     ['none', 'None'],
     ['screen_low', 'Screen · Low'],
@@ -94,11 +99,11 @@ async function downloadExportBlob(image, options, { showToast }) {
     if (options.max_px) body.max_px = options.max_px;
     if (options.filename_pattern) body.filename_pattern = options.filename_pattern;
     showToast?.('Rendering full-resolution export…');
-    const response = await fetch(`/api/develop/${image.id}/export`, {
+    const response = await fetch(`/api/develop/${image.id}/export`, fetchOptionsWithTimeout({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
-    });
+    }, MUTATION_TIMEOUT_MS));
     if (!response.ok) throw new Error('export failed');
     const blob = await response.blob();
     const url = URL.createObjectURL(blob);
@@ -117,7 +122,7 @@ async function downloadExportBlob(image, options, { showToast }) {
 
 async function loadPresetsInto(popover) {
     try {
-        const response = await fetch('/api/develop/export-presets');
+        const response = await fetch('/api/develop/export-presets', fetchOptionsWithTimeout({}, READ_TIMEOUT_MS));
         const payload = await response.json();
         const select = popover.querySelector('[data-export-preset]');
         if (!select) return;
@@ -147,19 +152,43 @@ async function loadPresetsInto(popover) {
 
 function bindPresetSave(popover, { showToast }) {
     popover.querySelector('[data-export-save-preset]')?.addEventListener('click', async () => {
-        const name = prompt('Preset name');
-        if (!name?.trim()) return;
-        try {
-            const response = await fetch('/api/develop/export-presets', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: name.trim(), options: readExportOptions(popover) }),
-            });
-            if (!response.ok) throw new Error();
-            showToast?.(`Preset “${name.trim()}” saved`);
-        } catch {
-            showToast?.("Couldn't save the preset");
-        }
+        const form = document.createElement('form');
+        form.className = 'develop-preset-name';
+        form.innerHTML = '<label>Preset name<input data-export-preset-name type="text" maxlength="120" autocomplete="off" required></label>'
+            + '<button type="submit" class="primary">Save preset</button>'
+            + '<button type="button" data-export-preset-cancel>Cancel</button>';
+        const opener = popover.querySelector('[data-export-save-preset]');
+        opener.replaceWith(form);
+        const input = form.querySelector('[data-export-preset-name]');
+        input.focus({ preventScroll: true });
+        form.querySelector('[data-export-preset-cancel]').addEventListener('click', () => form.replaceWith(opener));
+        form.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const name = input.value.trim();
+            if (!name) {
+                input.focus({ preventScroll: true });
+                return;
+            }
+            const save = form.querySelector('[type="submit"]');
+            save.disabled = true;
+            input.disabled = true;
+            try {
+                const response = await fetch('/api/develop/export-presets', fetchOptionsWithTimeout({
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, options: readExportOptions(popover) }),
+                }, MUTATION_TIMEOUT_MS));
+                if (!response.ok) throw new Error();
+                showToast?.(`Preset “${name}” saved`);
+                form.replaceWith(opener);
+                opener.focus({ preventScroll: true });
+            } catch {
+                showToast?.("Couldn't save the preset");
+                save.disabled = false;
+                input.disabled = false;
+                input.focus({ preventScroll: true });
+            }
+        });
     });
 }
 
@@ -206,11 +235,11 @@ export function openSyncDialog({
         }
         showToast?.(`Syncing ${groups.length} group${groups.length === 1 ? '' : 's'} to ${ids.length} photo${ids.length === 1 ? '' : 's'}…`);
         try {
-            const response = await fetch('/api/develop/sync', {
+            const response = await fetch('/api/develop/sync', fetchOptionsWithTimeout({
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ source_id: Number(sourceId), target_ids: ids, groups }),
-            });
+            }, MUTATION_TIMEOUT_MS));
             if (!response.ok) throw new Error('sync failed');
             const payload = await response.json();
             const count = payload.synced?.length || 0;
@@ -238,11 +267,11 @@ export async function queueBatchExport(imageIds, options = {}, { showToast } = {
     if (options.max_px) body.max_px = options.max_px;
     if (options.filename_pattern) body.filename_pattern = options.filename_pattern;
     showToast?.(`Queuing develop export for ${ids.length} photo${ids.length === 1 ? '' : 's'}…`);
-    const response = await fetch('/api/develop/export/batch', {
+    const response = await fetch('/api/develop/export/batch', fetchOptionsWithTimeout({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
-    });
+    }, MUTATION_TIMEOUT_MS));
     if (!response.ok) {
         const payload = await response.json().catch(() => null);
         throw new Error(payload?.error || 'batch export failed');
@@ -257,7 +286,7 @@ async function pollBatchStatus(showToast) {
     for (let attempt = 0; attempt < 600; attempt += 1) {
         await new Promise((resolve) => setTimeout(resolve, 1000));
         try {
-            const response = await fetch('/api/develop/export/batch/status', { headers: { Accept: 'application/json' } });
+            const response = await fetch('/api/develop/export/batch/status', fetchOptionsWithTimeout({ headers: { Accept: 'application/json' } }, READ_TIMEOUT_MS));
             if (!response.ok) return;
             const status = await response.json();
             if (status.state === 'running') {

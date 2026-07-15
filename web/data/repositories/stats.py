@@ -15,6 +15,12 @@ _ai_status_counts_cache = {"data": None, "expires": 0}
 
 
 async def catalog_image_counts(db_path: str) -> dict:
+    from data.repositories import catalog as catalog_repository
+
+    # All Photos / rankings short-circuit on these denormalized sums. Repair
+    # hub:// drift before reading so mirrored satellite libraries stay complete.
+    await catalog_repository.repair_hub_mirror_source_counts(db_path)
+
     conn = await connection.open_async(db_path)
     try:
         cursor = await conn.execute(
@@ -56,6 +62,10 @@ async def catalog_image_counts_cached(
 
 
 async def full_stats(db_path: str) -> dict:
+    from data.repositories import catalog as catalog_repository
+
+    await catalog_repository.repair_hub_mirror_source_counts(db_path)
+
     conn = await connection.open_async(db_path)
     try:
         cursor = await conn.execute(
@@ -148,7 +158,7 @@ async def full_stats(db_path: str) -> dict:
                 "      OR COALESCE(propagated_updates, 0) > 0 "
                 "      OR ABS(COALESCE(elo, 1200.0) - 1200.0) > 0.0001 "
                 "    THEN 1 ELSE 0 END) AS rated_images "
-                "FROM images "
+                "FROM images INDEXED BY idx_images_status "
                 "WHERE status IN ('kept', 'maybe') AND missing_at IS NULL"
             )
             ranking_counts = await cursor.fetchone()
@@ -563,7 +573,7 @@ async def ai_status_counts(
                 "      OR COALESCE(propagated_updates, 0) > 0 "
                 "      OR ABS(COALESCE(elo, 1200.0) - 1200.0) > 0.0001 "
                 "    THEN 1 ELSE 0 END) AS rated_images "
-                "FROM images "
+                "FROM images INDEXED BY idx_images_status "
                 "WHERE status IN ('kept', 'maybe') AND missing_at IS NULL"
             )
             ranking_counts = await cursor.fetchone()

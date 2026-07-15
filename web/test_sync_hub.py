@@ -16,7 +16,46 @@ from PIL import Image
 
 import db
 from features.develop import rawproc
-from features.sync import hashing, hub, hub_routes
+from features.sync import device_auth, hashing, hub, hub_routes
+
+
+class DefaultRootTests(unittest.TestCase):
+    """default_intake_root/default_raws_root must follow the resolved runtime
+    layout instead of leaking uploads into /mnt/expansion on isolated or
+    standalone installs (regression for PHOTOARCHIVE_HOME scratch instances)."""
+
+    CLEARED = ("PHOTOARCHIVE_SYNC_INTAKE_DIR", "PHOTOARCHIVE_SYNC_RAWS_DIR", "PHOTOARCHIVE_SMOKE_MODE")
+
+    def _env(self, **extra):
+        env = {key: value for key, value in os.environ.items() if key not in self.CLEARED}
+        env.update(extra)
+        return mock.patch.dict(os.environ, env, clear=True)
+
+    def test_photoarchive_home_scopes_intake_and_raws(self):
+        with tempfile.TemporaryDirectory() as home:
+            with self._env(PHOTOARCHIVE_HOME=home):
+                intake = hub.default_intake_root()
+                raws = hub.default_raws_root()
+        self.assertEqual(intake, Path(home) / "data" / "photos" / "_intake")
+        self.assertEqual(raws, Path(home) / "data" / "photos" / "RAWS")
+
+    def test_legacy_layout_keeps_expansion_fallback(self):
+        legacy = mock.Mock(layout="legacy", data_dir="/home/sean/Projects/photo-archive/web")
+        with self._env(), mock.patch.object(hub.runtime_paths, "resolve_runtime_paths", return_value=legacy):
+            intake = hub.default_intake_root()
+            raws = hub.default_raws_root()
+        self.assertEqual(intake, Path("/mnt/expansion/Photos/_intake"))
+        self.assertEqual(raws, Path("/mnt/expansion/Photos/RAWS"))
+
+    def test_env_overrides_beat_layout(self):
+        with tempfile.TemporaryDirectory() as home:
+            with self._env(
+                PHOTOARCHIVE_HOME=home,
+                PHOTOARCHIVE_SYNC_INTAKE_DIR=f"{home}/custom-intake",
+                PHOTOARCHIVE_SYNC_RAWS_DIR=f"{home}/custom-raws",
+            ):
+                self.assertEqual(hub.default_intake_root(), Path(home) / "custom-intake")
+                self.assertEqual(hub.default_raws_root(), Path(home) / "custom-raws")
 
 
 class DefaultRootTests(unittest.TestCase):
@@ -71,6 +110,10 @@ class SyncHubTests(unittest.TestCase):
         db.DB_PATH = self.db_path
         rawproc.BASE_CACHE_DIR = self.cache
         asyncio.run(db.init_db())
+        self.auth_patch = mock.patch.object(
+            device_auth, "require_device_token_enabled", return_value=False
+        )
+        self.auth_patch.start()
         hub_routes.configure(
             db_path=lambda: self.db_path,
             intake_root=lambda: self.intake,
@@ -83,6 +126,7 @@ class SyncHubTests(unittest.TestCase):
 
     def tearDown(self):
         self.client_context.__exit__(None, None, None)
+        self.auth_patch.stop()
         db.DB_PATH = self.old_db_path
         rawproc.BASE_CACHE_DIR = self.old_base_cache_dir
         self.tempdir.cleanup()
@@ -384,8 +428,9 @@ class SyncHubTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200, response.text)
         self.upload(content_hash, payload)
-        destination = self.raws / "Personal Photos" / "2024" / "2024-06-07" / "personal.jpg"
+        destination = self.root / "Personal Photos" / "2024" / "2024-06-07" / "personal.jpg"
         self.assertEqual(destination.read_bytes(), payload)
+        self.assertFalse((self.raws / "Personal Photos" / "2024" / "2024-06-07" / "personal.jpg").exists())
         self.assertFalse((self.raws / "2024" / "2024-06-07" / "personal.jpg").exists())
 
     def test_manifest_rejects_invalid_folder_paths(self):

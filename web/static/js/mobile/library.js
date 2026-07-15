@@ -5,8 +5,8 @@
 
 import {
     createCollection, fetchJson, getAiStatus, getCacheStatus, getCatalog, getCollection, getCounts,
-    createCollectionShare, deleteCollection, getCollectionShare, getCollectionShareFavorites, getFoldersTree, getPeopleStatus, listCollections,
-    renameCollection, revokeCollectionShare, setBackgroundWork, thumbUrl, writeFailureMessage,
+    deleteCollection, getFoldersTree, getPeopleStatus, listCollections,
+    renameCollection, setBackgroundWork, thumbUrl, writeFailureMessage,
 } from './api.js';
 import { nav, on, rememberImages, setScope, clearScope } from './state.js';
 import { canInstall, promptInstall } from './install.js';
@@ -16,6 +16,9 @@ import { openViewer } from './viewer.js';
 import { applyFlags } from './flags.js';
 import { dismissLayer, pushLayer, registerLayer, syncLayerClosed } from './history.js';
 import { icon } from '../icons.js';
+import { openCollectionShareSheet, renderSharedView } from './sharing.js';
+import { offlineSummary, openOfflineStatusSheet } from './offline.js';
+import { renderBackupView, stopBackupView } from './backup.js';
 
 // Matches RANK_QUALITY_MIN_SIGNALS in data/repositories/rankings.py.
 const SORT_QUALITY_MIN_SIGNALS = 3;
@@ -191,8 +194,11 @@ function render() {
     }
 
     html += '<div class="ms-sec" style="padding-left:0;padding-right:0"><h3>Quick access</h3>'
-        + `<button class="m-lib-row" data-q="picked"><span class="g">${icon('star')}</span><span class="body">Picked</span><span class="n num">${fmtInt(counts && counts.picked)}</span></button>`
+        + `<button class="m-lib-row" data-q="picked"><span class="g">${icon('heart')}</span><span class="body">Favorites<span class="sub">Picked photos</span></span><span class="n num">${fmtInt(counts && counts.picked)}</span></button>`
         + `<button class="m-lib-row" data-q="rejected"><span class="g">${icon('x')}</span><span class="body">Rejected</span><span class="n num">${fmtInt(counts && counts.rejected)}</span></button>`
+        + `<button class="m-lib-row" id="ml-offline"><span class="g">${icon('download')}</span><span class="body">Available offline<span class="sub">Saved on this phone</span></span><span class="n num">${fmtInt(offlineSummary().count)}</span></button>`
+        + `<button class="m-lib-row" id="ml-backup"><span class="g">${icon('upload')}</span><span class="body">Backup<span class="sub">Uploads and phone storage</span></span></button>`
+        + `<button class="m-lib-row" id="ml-shared"><span class="g">${icon('share-2')}</span><span class="body">Shared with me</span></button>`
         + `<button class="m-lib-row" data-q="all"><span class="g">${icon('house')}</span><span class="body">All photos</span><span class="n num">${fmtInt(counts && counts.total)}</span></button></div>`;
 
     html += '<div class="ms-sec" style="padding-left:0;padding-right:0"><h3>Sources</h3>';
@@ -232,11 +238,28 @@ function render() {
         });
     }
     root.querySelector('#ml-new').addEventListener('click', newCollectionSheet);
+    root.querySelector('#ml-shared')?.addEventListener('click', () => {
+        showingCollection = true;
+        renderSharedView(root, () => {
+            showingCollection = false;
+            render();
+        });
+    });
+    root.querySelector('#ml-offline')?.addEventListener('click', openOfflineStatusSheet);
+    root.querySelector('#ml-backup')?.addEventListener('click', () => {
+        showingCollection = true;
+        stopWorkPolling();
+        renderBackupView(root, () => {
+            showingCollection = false;
+            render();
+            startWorkPolling();
+        });
+    });
     for (const el of root.querySelectorAll('.m-lib-row[data-q]')) {
         el.addEventListener('click', () => {
             const q = el.dataset.q;
             if (q === 'all') clearScope();
-            else setScope({ flag: q, label: q === 'picked' ? 'Picked' : 'Rejected' });
+            else setScope({ flag: q, label: q === 'picked' ? 'Favorites' : 'Rejected' });
             nav.setTab('photos');
         });
     }
@@ -766,231 +789,6 @@ function openCollectionActionsSheet(coll) {
     input.select();
 }
 
-function formatShareDate(value) {
-    if (value == null) return 'Never';
-    const date = new Date(Number(value) * 1000);
-    if (Number.isNaN(date.getTime())) return '—';
-    return date.toLocaleString([], {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: 'numeric',
-        minute: '2-digit',
-    });
-}
-
-function formatRelativeShareDate(value) {
-    if (value == null) return 'never';
-    const date = new Date(Number(value) * 1000);
-    if (Number.isNaN(date.getTime())) return 'unknown';
-    const diffSeconds = Math.round((date.getTime() - Date.now()) / 1000);
-    const ranges = [
-        ['year', 31536000],
-        ['month', 2592000],
-        ['week', 604800],
-        ['day', 86400],
-        ['hour', 3600],
-        ['minute', 60],
-    ];
-    const formatter = new Intl.RelativeTimeFormat([], { numeric: 'auto' });
-    for (const [unit, seconds] of ranges) {
-        if (Math.abs(diffSeconds) >= seconds) {
-            return formatter.format(Math.round(diffSeconds / seconds), unit);
-        }
-    }
-    return formatter.format(diffSeconds, 'second');
-}
-
-function shareStatsLine(share) {
-    const count = Number(share?.view_count || 0);
-    if (!count) return 'Never opened';
-    return `Opened ${fmtInt(count)} ${count === 1 ? 'time' : 'times'} · last ${formatRelativeShareDate(share.last_viewed_at)}`;
-}
-
-function clientPickIds(pickData) {
-    return ((pickData && pickData.favorites) || [])
-        .map((row) => Number(row && row.image_id))
-        .filter((id) => id > 0);
-}
-
-function sharePicksRow(pickData) {
-    const ids = clientPickIds(pickData);
-    const count = Number(pickData?.count ?? ids.length);
-    return `<button class="sheet-row" id="ml-share-apply-picks" data-mutating ${ids.length ? '' : 'disabled'}>`
-        + `<span class="g">${icon('heart')}</span>`
-        + '<span class="body">Client picks</span>'
-        + `<span class="n num">${fmtInt(count)}</span></button>`;
-}
-
-async function applyShareFavoritesAsPicks(coll, ids) {
-    if (!ids.length) {
-        showToast('No client picks yet');
-        return;
-    }
-    const data = await getCollection(coll.id, 1000);
-    rememberImages((data && data.collection && data.collection.images) || []);
-    dismissSheetThen(() => applyFlags(ids, 'picked'));
-}
-
-function shareExpiryControl() {
-    return '<label class="share-expiry">Expires <select class="sheet-input" id="ml-share-expiry">'
-        + '<option value="">Never</option>'
-        + '<option value="7">7 days</option>'
-        + '<option value="30">30 days</option>'
-        + '</select></label>';
-}
-
-function sharePasswordControl(share) {
-    const isProtected = Boolean(share?.protected);
-    return '<div class="share-password-mobile">'
-        + '<div class="share-password-mobile-head"><span>Password</span>'
-        + (isProtected ? '<b>Protected</b>' : '')
-        + '</div>'
-        + `<input class="sheet-input" id="ml-share-password" type="password" autocomplete="new-password" placeholder="${isProtected ? 'Protected' : 'No password'}">`
-        + (share ? `<button class="sheet-row" id="ml-share-password-save" data-mutating><span class="g">${icon('lock')}</span>${isProtected ? 'Change password' : 'Set password'}</button>` : '')
-        + (isProtected ? `<button class="sheet-row" id="ml-share-password-clear" data-mutating><span class="g">${icon('x')}</span>Remove password</button>` : '')
-        + '</div>';
-}
-
-async function copyOrShareLink(url, title) {
-    if (navigator.share) {
-        try {
-            await navigator.share({ title, url });
-            return;
-        } catch (error) {
-            if (error && error.name === 'AbortError') return;
-        }
-    }
-    try {
-        await navigator.clipboard.writeText(url);
-        showToast('Link copied');
-    } catch {
-        showToast("Couldn't copy link");
-    }
-}
-
-async function openCollectionShareSheet(coll) {
-    let sheet = openSheet(`<h3>Share ${esc(coll.name)}</h3><div class="ms-empty">Loading…</div>`);
-    const data = await getCollectionShare(coll.id);
-    await renderCollectionShareSheet(coll, data && data.share);
-    sheet = document.getElementById('m-sheet');
-    return sheet;
-}
-
-async function renderCollectionShareSheet(coll, share) {
-    const pickData = share ? await getCollectionShareFavorites(coll.id) : null;
-    const sheet = openSheet(
-        `<h3>Share ${esc(coll.name)}</h3>`
-        + (share
-            ? '<div class="sheet-meta">'
-                + `<div><span>Link</span><b>${esc(share.url)}</b></div>`
-                + `<div><span>Created</span><b>${esc(formatShareDate(share.created_at))}</b></div>`
-                + `<div><span>Expires</span><b>${esc(formatShareDate(share.expires_at))}</b></div>`
-                + `<div><span>Stats</span><b>${esc(shareStatsLine(share))}</b></div></div>`
-                + sharePicksRow(pickData)
-                + sharePasswordControl(share)
-                + '<button class="sheet-btn" id="ml-share-copy">Share…</button>'
-                + `<button class="sheet-row" id="ml-share-rotate" data-mutating><span class="g">${icon('refresh-cw')}</span>Rotate link</button>`
-                + '<div class="sheet-confirm" id="ml-share-rotate-confirm" hidden>Invalidate old link? <button data-yes="1">Yes</button><button data-no="1">No</button></div>'
-                + `<button class="sheet-row" id="ml-share-revoke" data-mutating><span class="g">${icon('x')}</span>Revoke</button>`
-                + '<div class="sheet-confirm" id="ml-share-revoke-confirm" hidden>Revoke link? <button data-yes="1">Yes</button><button data-no="1">No</button></div>'
-            : '<div class="ms-empty">Create a private gallery link for this collection.</div>'
-                + shareExpiryControl()
-                + sharePasswordControl(null)
-                + '<button class="sheet-btn" id="ml-share-create" data-mutating>Create share link</button>')
-    );
-    const pickIds = clientPickIds(pickData);
-    sheet.querySelector('#ml-share-copy')?.addEventListener('click', () => copyOrShareLink(share.url, coll.name));
-    sheet.querySelector('#ml-share-apply-picks')?.addEventListener('click', () => applyShareFavoritesAsPicks(coll, pickIds));
-    sheet.querySelector('#ml-share-create')?.addEventListener('click', async (event) => {
-        const button = event.currentTarget;
-        if (!button || button.disabled) return;
-        button.disabled = true;
-        try {
-            const value = sheet.querySelector('#ml-share-expiry')?.value || '';
-            const password = sheet.querySelector('#ml-share-password')?.value || '';
-            const result = await createCollectionShare(coll.id, {
-                expiresInDays: value ? Number(value) : null,
-                ...(password ? { password } : {}),
-            });
-            if (result && result.ok) {
-                showToast('Share link created');
-                renderCollectionShareSheet(coll, result.share);
-            } else {
-                showToast(writeFailureMessage());
-            }
-        } finally {
-            if (document.contains(button)) button.disabled = false;
-        }
-    });
-    sheet.querySelector('#ml-share-password-save')?.addEventListener('click', async () => {
-        const password = sheet.querySelector('#ml-share-password')?.value || '';
-        if (!password) {
-            showToast('Enter a password');
-            return;
-        }
-        const result = await createCollectionShare(coll.id, { password });
-        if (result && result.ok) {
-            showToast(share.protected ? 'Password changed' : 'Password set');
-            renderCollectionShareSheet(coll, result.share);
-        } else {
-            showToast(writeFailureMessage());
-        }
-    });
-    sheet.querySelector('#ml-share-password-clear')?.addEventListener('click', async () => {
-        const result = await createCollectionShare(coll.id, { clearPassword: true });
-        if (result && result.ok) {
-            showToast('Password removed');
-            renderCollectionShareSheet(coll, result.share);
-        } else {
-            showToast(writeFailureMessage());
-        }
-    });
-    bindSheetConfirm(sheet, '#ml-share-rotate', '#ml-share-rotate-confirm', async () => {
-        const result = await createCollectionShare(coll.id, { rotate: true });
-        if (result && result.ok) {
-            showToast('New share link created');
-            renderCollectionShareSheet(coll, result.share);
-        } else {
-            showToast(writeFailureMessage());
-        }
-    });
-    bindSheetConfirm(sheet, '#ml-share-revoke', '#ml-share-revoke-confirm', async () => {
-        const result = await revokeCollectionShare(coll.id);
-        if (result && result.ok) {
-            showToast('Share link revoked');
-            renderCollectionShareSheet(coll, null);
-        } else {
-            showToast(writeFailureMessage());
-        }
-    });
-}
-
-function bindSheetConfirm(sheet, buttonSelector, confirmSelector, action) {
-    const button = sheet.querySelector(buttonSelector);
-    const confirm = sheet.querySelector(confirmSelector);
-    if (!button || !confirm) return;
-    button.addEventListener('click', () => {
-        button.hidden = true;
-        confirm.hidden = false;
-        confirm.querySelector('[data-yes]')?.focus();
-    });
-    confirm.querySelector('[data-no]')?.addEventListener('click', () => {
-        confirm.hidden = true;
-        button.hidden = false;
-    });
-    const yes = confirm.querySelector('[data-yes]');
-    yes?.addEventListener('click', async () => {
-        if (!yes || yes.disabled) return;
-        yes.disabled = true;
-        try {
-            await action();
-        } finally {
-            if (document.contains(yes)) yes.disabled = false;
-        }
-    });
-}
-
 export function initLibrary() {
     registerLayer('collection', { close: closeCollectionView });
     on('installable', () => {
@@ -1000,9 +798,19 @@ export function initLibrary() {
     on('flags', () => {
         counts = null;   // flag writes change picked/rejected counts
     });
+    on('offline-availability', () => {
+        if (built && !showingCollection) render();
+    });
+    document.addEventListener('collections-changed', () => {
+        collections = null;
+        if (built && !showingCollection) loadAll();
+    });
     on('tab', (tab) => {
         if (tab === 'library') startWorkPolling();
-        else stopWorkPolling();
+        else {
+            stopWorkPolling();
+            stopBackupView();
+        }
     });
 }
 

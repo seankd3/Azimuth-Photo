@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-    <!-- photoArchive mark: photo stack behind an aperture iris -->
+    <!-- Azimuth Photo mark: photo stack behind an aperture iris -->
     <rect width="512" height="512" rx="112" fill="#141517"/>
     <!-- back card of the stack -->
     <rect x="140" y="112" width="232" height="232" rx="26"

@@ -22,14 +22,15 @@ const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c
 }[c]));
 const fmtInt = (n) => (n == null ? '' : Number(n).toLocaleString('en-US'));
 
-/** Match desktop flattenPeople: /api/people returns sections, not a top-level people array. */
-function flattenPeople(peopleData) {
-    const sections = (peopleData && peopleData.sections) || {};
+// /api/people groups faces into sections; the mobile carousel is one concise
+// list, so normalize both the grouped response and older flat shapes here.
+function flattenPeople(data) {
+    const sections = data?.sections || {};
     const seen = new Map();
     for (const list of [
-        peopleData?.people,
-        peopleData?.persons,
-        peopleData?.results,
+        data?.people,
+        data?.persons,
+        data?.results,
         sections.most_seen,
         sections.named_people,
         sections.other_faces,

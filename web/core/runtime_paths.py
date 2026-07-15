@@ -1,4 +1,4 @@
-"""Resolve photoArchive runtime storage without moving existing data.
+"""Resolve Azimuth Photo runtime storage without moving existing data.
 
 Path discovery is intentionally read-only.  A legacy checkout keeps using its
 historic in-repo data, while a clean install receives platform-native roots.

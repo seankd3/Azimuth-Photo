@@ -192,6 +192,18 @@ export async function revokeCollectionShare(collectionId) {
     return postJson(`/api/user-collections/${collectionId}/share/revoke`, {});
 }
 
+export async function listSharedSurfaces() {
+    return fetchJson('/api/shares', { defaultValue: null });
+}
+
+export async function getSyncStatus() {
+    return fetchJson('/api/sync/status', { defaultValue: null });
+}
+
+export async function setSyncPaused(paused) {
+    return postJson(`/api/sync/${paused ? 'pause' : 'resume'}`, {});
+}
+
 export async function getPeople(limit = 24) {
     return fetchJson(`/api/people?limit=${limit}`, { defaultValue: null });
 }

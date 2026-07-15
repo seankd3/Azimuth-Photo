@@ -418,7 +418,7 @@ async def _persist_collections(db_path: str, pending: dict[str, list[int]], *, d
 def import_lrcat(catalog_path: str, db_path: str, dry_run: bool = False) -> dict[str, Any]:
     """Import one catalog, returning truthful match and write counts.
 
-    Lightroom source files are copied before SQLite reads; photoArchive writes
+    Lightroom source files are copied before SQLite reads; Azimuth Photo writes
     are entirely skipped for ``dry_run``.
     """
 

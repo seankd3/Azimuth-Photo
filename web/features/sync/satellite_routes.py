@@ -1,13 +1,40 @@
 """Local controls for the satellite sync worker."""
 
+import asyncio
+
+import db
+
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from features.sync import satellite
+from core.version import API_REV, app_version
+from features.sync import contract, satellite
 from features.sync.sync_worker import get_worker
+from features.trash import service as trash_service
 
 
 router = APIRouter(tags=["sync"])
+_manual_sync_tasks: set[asyncio.Task] = set()
+
+
+def _start_manual_sync_task(coro) -> None:
+    task = asyncio.create_task(coro)
+    _manual_sync_tasks.add(task)
+    task.add_done_callback(_manual_sync_tasks.discard)
+
+
+async def _refresh_mirror(worker) -> None:
+    try:
+        await worker.mirror.refresh()
+    except Exception as error:
+        worker.mirror._status["last_error"] = str(error)
+
+
+async def _prefetch_browse_tier(worker) -> None:
+    try:
+        await worker.prefetch.prefetch_once(size="sm")
+    except Exception as error:
+        worker.prefetch._status["last_error"] = str(error)
 
 
 @router.post("/api/sync/hub")
@@ -30,8 +57,21 @@ async def attach_hub(request: Request):
 async def sync_status():
     worker = get_worker()
     if not satellite.is_satellite_mode() or worker is None:
-        return {"mode": "hub", "paused": False, "queue_depth": 0, "bytes_remaining": 0, "throughput_bps": 0, "current_file": None, "recent_errors": [], "mirror": {"cursor": 0, "rows_applied": 0, "skipped_unhashed": 0, "last_refresh_at": None}, "prefetch": {"state": "idle", "cached": 0, "total": 0}}
-    return worker.status()
+        hub_state = (
+            contract.hub_status(satellite.hub_url())
+            if satellite.has_hub()
+            else {"hub_health": "ok", "api_rev": API_REV, "app_version": app_version()}
+        )
+        status = {"mode": "satellite" if satellite.is_satellite_mode() else "hub", "paused": False, "queue_depth": 0, "bytes_remaining": 0, "throughput_bps": 0, "current_file": None, "recent_errors": [], "mirror": {"cursor": 0, "rows_applied": 0, "skipped_unhashed": 0, "last_refresh_at": None}, "prefetch": {"state": "idle", "cached": 0, "total": 0}, **hub_state}
+    else:
+        status = worker.status()
+    pending = (
+        await trash_service.pending_hub_trash_refs(db.DB_PATH)
+        if satellite.is_satellite_mode()
+        else {"count": 0}
+    )
+    status["pending_hub_trash"] = int(pending["count"])
+    return status
 
 
 @router.post("/api/sync/pause")
@@ -62,22 +102,24 @@ async def sync_now():
 async def sync_mirror_refresh():
     worker = get_worker()
     if worker is not None:
-        try:
-            await worker.mirror.refresh()
-        except Exception as error:
-            worker.mirror._status["last_error"] = str(error)
-    return await sync_status()
+        _start_manual_sync_task(_refresh_mirror(worker))
+    return JSONResponse(
+        {"status": "pending", "job": "mirror_refresh"},
+        status_code=202,
+        headers={"Retry-After": "1"},
+    )
 
 
 @router.post("/api/sync/prefetch")
 async def sync_prefetch():
     worker = get_worker()
     if worker is not None:
-        try:
-            await worker.prefetch.prefetch_once(size="sm")
-        except Exception as error:
-            worker.prefetch._status["last_error"] = str(error)
-    return await sync_status()
+        _start_manual_sync_task(_prefetch_browse_tier(worker))
+    return JSONResponse(
+        {"status": "pending", "job": "thumb_prefetch"},
+        status_code=202,
+        headers={"Retry-After": "1"},
+    )
 
 
 @router.post("/api/sync/prefetch/loupe/{image_id}")

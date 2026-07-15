@@ -1,4 +1,4 @@
-# photoArchive — example compose for a home NAS or always-on host.
+# Azimuth Photo — example compose for a home NAS or always-on host.
 #
 # 1. Point ./photos (or a host path) at your originals folder.
 # 2. ./data keeps the catalog, previews, and settings.

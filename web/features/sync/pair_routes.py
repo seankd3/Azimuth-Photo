@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import platform as py_platform
 import socket
@@ -62,6 +63,16 @@ def _default_device_name() -> str:
         return socket.gethostname() or "Device"
     except OSError:
         return "Device"
+
+
+def _redeem_pair_request(req: UrlRequest) -> tuple[int, bytes]:
+    """Complete the blocking urllib exchange entirely outside the event loop."""
+
+    try:
+        with urlopen(req, timeout=5) as response:  # noqa: S310 - user-supplied hub URL
+            return response.status, response.read()
+    except HTTPError as exc:
+        return exc.code, exc.read()
 
 
 @router.post("/api/devices/link")
@@ -136,20 +147,20 @@ async def api_pair_connect(body: ConnectRequest):
     req = UrlRequest(
         f"{hub}/api/pair",
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json", "Accept": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            **satellite.hub_request_headers(),
+        },
         method="POST",
     )
     try:
-        with urlopen(req, timeout=10) as response:  # noqa: S310 - user-supplied hub URL
-            raw = response.read()
-            status = response.status
-    except HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")[:300]
-        raise HTTPException(status_code=400, detail=f"hub pair failed ({exc.code}): {detail}") from exc
+        status, raw = await asyncio.to_thread(_redeem_pair_request, req)
     except URLError as exc:
         raise HTTPException(status_code=400, detail=f"could not reach hub: {exc.reason}") from exc
     if not 200 <= status < 300:
-        raise HTTPException(status_code=400, detail=f"hub pair failed ({status})")
+        detail = raw.decode("utf-8", errors="replace")[:300]
+        raise HTTPException(status_code=400, detail=f"hub pair failed ({status}): {detail}")
     result = json.loads(raw.decode("utf-8"))
     token = str(result.get("device_token") or "").strip()
     hub_id = str(result.get("hub_id") or "").strip()

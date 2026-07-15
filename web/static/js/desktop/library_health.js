@@ -3,6 +3,7 @@ import {
     getIntegrityStatus, prepareCatalogRestore, startIntegrityScan,
 } from './api.js';
 import { showToast } from './toast.js';
+import { escapeHtml as esc, formatCount } from './dom.js';
 
 const CACHE_MS = 30000;
 let backups = null;
@@ -14,10 +15,6 @@ let busy = '';
 let confirmName = '';
 let pollTimer = null;
 let backupsOpen = false;
-
-const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[c]));
 
 function dateValue(value) {
     if (!value) return null;
@@ -131,7 +128,7 @@ function renderOffline(catalog) {
     const rows = sources.map((source) => {
         const name = source.display_name || source.path || `Source ${source.id}`;
         const count = Number(source.active_image_count ?? source.image_count) || 0;
-        return `<li><b>${esc(name)}</b><span>Disconnected · ${count.toLocaleString('en-US')} photos remain indexed</span></li>`;
+        return `<li><b>${esc(name)}</b><span>Disconnected · ${formatCount(count)} photos remain indexed</span></li>`;
     }).join('');
     return '<div class="health-block offline"><div class="health-line"><span><b>Disconnected sources</b>'
         + '<small>Cached previews remain available. Reconnect the drive when convenient.</small></span>'

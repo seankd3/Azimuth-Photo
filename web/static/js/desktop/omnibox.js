@@ -2,9 +2,9 @@ import {
     getFilterOptions, getFolders, getPeople, getRankings, getTags, listCollections, thumbUrl,
 } from './api.js';
 import {
-    emit, folderLabel, folderValues, on, patchScope, scope, scopeActive, scopeParams, setScope, setSort, smartQueryActive, smartQuerySummary, toggleBestOf,
+    emit, folderLabel, folderValues, navigateToScope, on, patchScope, scope, scopeActive, setSort, smartQueryActive, smartQuerySummary, toggleBestOf,
 } from './state.js';
-import { currentFocusedImage, loadFirstPage } from './grid.js';
+import { currentFocusedImage } from './grid.js';
 import { openLoupe, toggleLoupeLights } from './loupe.js';
 import { scopeTokenHtml } from './contextbar.js';
 import {
@@ -22,7 +22,6 @@ const LIVE_MIN_CHARS = 2;
 const LIVE_LIMIT = 6;
 const MAX_SECTION_ROWS = 6;
 const DEEP_SEARCH_TIP = 'Slower, more thorough visual search';
-let pendingLoupePhotoId = null;
 const FLAG_VALUES = [
     { value: 'picked', label: 'Picked', icon: 'star' },
     { value: 'rejected', label: 'Rejected', icon: 'x' },
@@ -78,7 +77,7 @@ const COMMANDS = [
     { icon: 'map-pin', label: 'Switch lens: map', kbd: 'M', run: () => switchLens('map') },
     { icon: 'panel-left', label: 'Toggle left panel', kbd: '[', run: toggleLeftPanel },
     { icon: 'keyboard', label: 'Keyboard shortcuts', kbd: '?', run: () => emit('help:open') },
-    { icon: 'house', label: 'Clear view / All photos', run: () => setScope({}) },
+    { icon: 'house', label: 'Clear view / All photos', run: () => navigateToScope({}) },
     { icon: 'arrow-down-wide-narrow', label: 'Sort by rating', run: () => setSort('elo') },
     { icon: 'calendar', label: 'Sort by date', run: () => setSort('date_taken') },
     { icon: 'file-type', label: 'Sort by filename', run: () => setSort('filename') },
@@ -90,6 +89,7 @@ let folders = [];
 let tags = [];
 let filterOptions = null;
 let dataPromise = null;
+let dataSeq = 0;
 let rows = [];
 let hot = -1;
 let liveTimer = null;
@@ -201,24 +201,30 @@ function remember(value) {
 
 async function ensureSuggestionData() {
     if (dataPromise) return dataPromise;
-    dataPromise = Promise.all([
-        getPeople(500),
-        listCollections(),
-        getFolders(null),
-        getFilterOptions(),
-        getTags({ limit: 100 }),
-    ]).then(([peopleData, collectionData, folderData, optionsData, tagData]) => {
-        people = flattenPeople(peopleData);
-        collections = (collectionData && collectionData.collections) || [];
-        folders = (folderData && folderData.folders) || [];
-        filterOptions = optionsData || {};
-        tags = (tagData && tagData.tags) || [];
+    const seq = ++dataSeq;
+    const apply = (promise, update) => promise.then((data) => {
+        if (seq !== dataSeq) return;
+        update(data);
         render();
-    }).catch(() => {});
+    });
+    const loads = [
+        apply(getFilterOptions(), (data) => {
+            filterOptions = data || {};
+            people = flattenPeople(data);
+        }),
+        apply(listCollections(), (data) => { collections = (data && data.collections) || []; }),
+        apply(getFolders(null), (data) => { folders = (data && data.folders) || []; }),
+        apply(getTags({ limit: 100 }), (data) => { tags = (data && data.tags) || []; }),
+        apply(getPeople(500), (data) => { people = flattenPeople(data); }),
+    ];
+    dataPromise = Promise.allSettled(loads).then((results) => {
+        if (seq === dataSeq && results.some((result) => result.status === 'rejected')) dataPromise = null;
+    });
     return dataPromise;
 }
 
 function invalidateSuggestionData() {
+    dataSeq += 1;
     dataPromise = null;
     if (document.getElementById('scopebox')?.classList.contains('open')) ensureSuggestionData();
 }
@@ -226,6 +232,7 @@ function invalidateSuggestionData() {
 function open() {
     document.getElementById('scopebox').classList.add('open');
     document.getElementById('scope-input')?.setAttribute('aria-expanded', 'true');
+    render();
 }
 
 function close() {
@@ -345,7 +352,7 @@ function buildPhotoRows(term) {
         section.push(...images.map((photo) => ({
             photo,
             navRow: 2,
-            run: () => openPhotoResult(term, photo),
+            run: () => openPhotoResult(term, photo, images),
         })));
         const contextTags = [...new Set(images.flatMap((img) => img.caption_tags || []))].slice(0, 5);
         if (contextTags.length) {
@@ -397,14 +404,11 @@ function buildPeopleRows(term) {
             labelHtml: named ? highlight(label, term) : esc(label),
             meta: named ? fmt(personCount(person)) : `Unnamed · ${fmt(personCount(person))} photos`,
             navRow: 10 + i,
-            run: () => {
-                applyScope({
-                    people: person.id,
-                    personLabel: named ? label : '',
-                    personThumb: personThumb(person),
-                });
-                switchLens('grid');
-            },
+            run: () => applyScope({
+                people: person.id,
+                personLabel: named ? label : '',
+                personThumb: personThumb(person),
+            }),
         })),
     ];
 }
@@ -804,7 +808,7 @@ function applyScope(patch, { keepFocus = false, merge = true } = {}) {
     const clean = { ...patch };
     const next = merge ? { ...scope, ...clean } : clean;
     remember(next);
-    setScope(clean, { merge });
+    navigateToScope(clean, { merge });
     const input = document.getElementById('scope-input');
     input.value = '';
     if (keepFocus) {
@@ -819,7 +823,6 @@ function applyScope(patch, { keepFocus = false, merge = true } = {}) {
 
 function applySearch(term) {
     applyScope({ q: term, deep: pendingDeep == null ? scope.deep : pendingDeep, sort: 'similarity' });
-    switchLens('grid');
 }
 
 function toggleDeepSearch() {
@@ -828,19 +831,20 @@ function toggleDeepSearch() {
     open();
 }
 
-function openPhotoResult(term, photo) {
+function openPhotoResult(term, photo, images) {
     const deep = pendingDeep == null ? scope.deep : pendingDeep;
     const next = { ...scope, q: term, deep, sort: 'similarity' };
     remember(next);
-    setScope({ q: term, deep, sort: 'similarity' }, { merge: true });
-    switchLens('grid');
+    navigateToScope({ q: term, deep, sort: 'similarity' }, { merge: true });
     document.getElementById('scope-input').value = '';
     close();
-    // Live strip is only LIVE_LIMIT photos; open Loupe on the grid session so
-    // ←/→ can page the rest. Force a fresh grid load in case we remounted with
-    // a stale image list from another lens.
-    pendingLoupePhotoId = Number(photo.id);
-    loadFirstPage();
+    requestAnimationFrame(() => {
+        emit('loupe:open', {
+            id: Number(photo.id),
+            index: images.findIndex((img) => Number(img.id) === Number(photo.id)),
+            images,
+        });
+    });
 }
 
 function applyFacet({ key, value, remove, closeAfter = false }) {
@@ -862,7 +866,7 @@ function applyFacet({ key, value, remove, closeAfter = false }) {
         patch.personThumb = '';
     }
     remember({ ...scope, ...patch });
-    setScope(patch, { merge: true });
+    navigateToScope(patch, { merge: true });
     input.value = '';
     input.focus();
     if (closeAfter) close();
@@ -927,14 +931,12 @@ function scheduleLiveSearch() {
         render();
         const controller = new AbortController();
         liveAbort = controller;
-        const params = scopeParams({
-            q: term,
-            limit: LIVE_LIMIT,
-            offset: 0,
-            sort: 'similarity',
-        });
-        params.delete('deep');
+        const params = new URLSearchParams({ q: term, limit: String(LIVE_LIMIT), offset: '0', sort: 'similarity' });
         if (pendingDeep == null ? scope.deep : pendingDeep) params.set('deep', '1');
+        if (scope.people) params.set('people', scope.people);
+        if (scope.tag) params.set('tag', scope.tag);
+        if (scope.camera) params.set('camera', scope.camera);
+        for (const folder of folderValues()) params.append('folder', folder);
         try {
             const data = await getRankings(params, { fetchOptions: { signal: controller.signal } });
             if (seq !== liveSeq || controller.signal.aborted) return;
@@ -1033,7 +1035,7 @@ export function initOmnibox() {
         } else if (event.key === 'Backspace' && scopeActive() && inputAtTokenBoundary(input)) {
             event.preventDefault();
             if (tokenSelected) {
-                setScope({});
+                navigateToScope({});
                 setTokenSelected(false);
                 input.focus();
                 hot = -1;
@@ -1066,21 +1068,10 @@ export function initOmnibox() {
         tokenSelected = false;
         renderToken();
     });
-    on('images', (images) => {
-        const id = pendingLoupePhotoId;
-        if (id == null) return;
-        const list = images || [];
-        if (!list.length) return;
-        const index = list.findIndex((img) => Number(img?.id) === id);
-        pendingLoupePhotoId = null;
-        if (index < 0) return;
-        emit('loupe:open', { id, index });
-    });
     on('meta', renderToken);
     on('collections:changed', invalidateSuggestionData);
     on('import:changed', invalidateSuggestionData);
     on('trash:changed', invalidateSuggestionData);
     on('flags', invalidateSuggestionData);
     renderToken();
-    ensureSuggestionData();
 }

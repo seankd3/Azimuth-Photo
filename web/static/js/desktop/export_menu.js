@@ -90,8 +90,15 @@ export function downloadExport(params, { count = 0, message = '' } = {}) {
         showToast(`Zip export tops out at ${ZIP_EXPORT_MAX.toLocaleString('en-US')} photos`);
         return false;
     }
+<<<<<<< HEAD
     const url = `/api/export?${params.toString()}`;
     const fallbackName = format === 'zip' ? 'photoarchive-export.zip' : `photoarchive-export.${format}`;
+=======
+    const link = document.getElementById('download-link');
+    link.href = `/api/export?${params.toString()}`;
+    link.download = format === 'zip' ? 'azimuth-photo-export.zip' : `azimuth-photo-export.${format}`;
+    link.click();
+>>>>>>> origin/develop
     showToast(message || (format === 'zip' ? 'Preparing zip download' : `Exporting as ${format.toUpperCase()}`));
     void (async () => {
         try {

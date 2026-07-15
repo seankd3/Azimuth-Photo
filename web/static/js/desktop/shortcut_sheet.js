@@ -54,8 +54,9 @@ export const SHORTCUTS = [
 
 let root = null;
 
+// Keep the shortcut catalog independently loadable for the binding contract check.
 function escapeHtml(value) {
-    return String(value).replace(/[&<>"']/g, (character) => ({
+    return String(value == null ? '' : value).replace(/[&<>"']/g, (character) => ({
         '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
     }[character]));
 }

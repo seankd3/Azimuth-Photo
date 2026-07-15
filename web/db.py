@@ -5,6 +5,7 @@ this module as a stable delegate for older callers during the migration.
 """
 
 import aiosqlite
+import asyncio
 import logging
 import os
 import time as _time  # noqa: F401  (tests set cache expiries via db._time.time())
@@ -58,6 +59,8 @@ _catalog_summary_cache = catalog_repository._catalog_summary_cache
 _catalog_light_summary_cache = catalog_repository._catalog_light_summary_cache
 _date_groups_cache = ranking_repository._date_groups_cache
 _date_groups_refreshing = ranking_repository._date_groups_refreshing
+_date_histogram_cache = ranking_repository._date_histogram_cache
+_date_histogram_refreshing = ranking_repository._date_histogram_refreshing
 _map_markers_cache = ranking_repository._map_markers_cache
 _ranking_count_cache = ranking_repository._ranking_count_cache
 _visible_pairing_pool_counts_cache = rating_repository._visible_pairing_pool_counts_cache
@@ -283,6 +286,29 @@ _apply_schema_and_migrations = data_schema.apply_schema_and_migrations
 _backfill_image_date_sources = data_schema.backfill_image_date_sources
 
 
+async def _backup_before_migration(conn) -> None:
+    """Take a protected pre-migration snapshot when an existing catalog is
+    about to be upgraded to a newer schema. Best-effort; never blocks startup."""
+    try:
+        cursor = await conn.execute("PRAGMA user_version")
+        row = await cursor.fetchone()
+        current = int(row[0]) if row else 0
+    except Exception:
+        return
+    # user_version 0 = a brand-new/pre-versioning DB about to get its tables;
+    # only guard a genuine forward upgrade of an existing versioned catalog.
+    if not (0 < current < SCHEMA_VERSION):
+        return
+    try:
+        from features.system import backups
+
+        await asyncio.to_thread(
+            backups.backup_before_migration, DB_PATH, current, SCHEMA_VERSION
+        )
+    except Exception:
+        log.exception("pre-migration backup hook failed db=%s", DB_PATH)
+
+
 async def init_db():
     db_exists = os.path.exists(DB_PATH)
     db = await get_db()
@@ -302,6 +328,8 @@ async def init_db():
             await _ensure_metadata_fts(db)
             await db.commit()
             return
+        if db_exists:
+            await _backup_before_migration(db)
         await _apply_schema_and_migrations(db, db_exists=db_exists)
         await _migrate_catalog_sources(db)
         if await _backfill_image_date_sources(db):
@@ -1120,7 +1148,14 @@ async def rank_quality(orientation: str = "", compared: str = "", min_stars: int
 
 async def date_histogram(**kwargs) -> dict:
     kwargs.setdefault("caption_model_key", active_caption_model_key())
-    return await ranking_repository.date_histogram(DB_PATH, **kwargs)
+    force_refresh = bool(kwargs.pop("_force_refresh", False))
+    return await ranking_repository.date_histogram_cached(
+        DB_PATH,
+        get_catalog_image_counts=get_catalog_image_counts,
+        force_refresh=force_refresh,
+        ttl_seconds=FACET_CACHE_TTL_SECONDS,
+        **kwargs,
+    )
 
 
 async def scope_counts(**kwargs) -> dict:

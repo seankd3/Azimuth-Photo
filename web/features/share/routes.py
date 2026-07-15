@@ -2,7 +2,7 @@ import asyncio
 import os
 import time
 from collections.abc import Awaitable, Callable
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -17,6 +17,7 @@ router = APIRouter()
 UNLOCK_FAILURE_LIMIT = 5
 UNLOCK_FAILURE_WINDOW_SECONDS = 15 * 60
 MAX_UNLOCK_PASSWORD_LENGTH = 256
+MAX_TRACKED_UNLOCK_TOKENS = 2048
 
 CreateOrRotateShare = Callable[..., Awaitable[dict | None]]
 GetShare = Callable[[int], Awaitable[dict | None]]
@@ -52,7 +53,7 @@ _unlock_failures: dict[str, dict[str, float | int]] = {}
 class ShareBody(BaseModel):
     rotate: bool = False
     expires_in_days: int | None = Field(default=None, ge=1, le=3660)
-    password: str | None = None
+    password: str | None = Field(default=None, max_length=MAX_UNLOCK_PASSWORD_LENGTH)
     clear_password: bool = False
 
 
@@ -242,15 +243,6 @@ def _is_password_only_update(payload: ShareBody) -> bool:
     )
 
 
-async def _form_password(request: Request) -> str:
-    try:
-        form = await request.form()
-        return str(form.get("password") or "")
-    except Exception:
-        body = (await request.body()).decode("utf-8", errors="replace")
-        return str((parse_qs(body).get("password") or [""])[0])
-
-
 def _unlock_retry_after(token: str, now: float | None = None) -> int | None:
     now = time.time() if now is None else now
     failure = _unlock_failures.get(token)
@@ -269,6 +261,16 @@ def _unlock_retry_after(token: str, now: float | None = None) -> int | None:
 
 def _record_unlock_failure(token: str, now: float | None = None) -> None:
     now = time.time() if now is None else now
+    expired = [
+        key
+        for key, value in _unlock_failures.items()
+        if now >= float(value.get("first_at") or now) + UNLOCK_FAILURE_WINDOW_SECONDS
+    ]
+    for key in expired:
+        _unlock_failures.pop(key, None)
+    if token not in _unlock_failures and len(_unlock_failures) >= MAX_TRACKED_UNLOCK_TOKENS:
+        oldest = min(_unlock_failures, key=lambda key: float(_unlock_failures[key].get("first_at") or 0))
+        _unlock_failures.pop(oldest, None)
     failure = _unlock_failures.get(token)
     if not failure or now >= float(failure.get("first_at") or now) + UNLOCK_FAILURE_WINDOW_SECONDS:
         _unlock_failures[token] = {"count": 1, "first_at": now}
@@ -450,8 +452,8 @@ async def public_share_unlock(token: str, request: Request):
         response = JSONResponse({"error": "Too many unlock attempts"}, status_code=429)
         response.headers["Retry-After"] = str(retry_after)
         return _public_response(response)
-    password = await _form_password(request)
-    if len(password) > MAX_UNLOCK_PASSWORD_LENGTH:
+    password = await auth.read_form_password(request)
+    if password is None or len(password) > MAX_UNLOCK_PASSWORD_LENGTH:
         if collection is not None:
             return _locked_share_response(
                 request,

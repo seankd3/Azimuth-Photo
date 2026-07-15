@@ -37,6 +37,14 @@ def _configured_db_path() -> str:
     return _db_path()
 
 
+def _restore_error_status(status: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in status.items()
+        if key not in {"staging_path", "live_path", "instructions"}
+    }
+
+
 @router.post("/api/system/backup/now")
 async def api_backup_now():
     try:
@@ -60,7 +68,13 @@ async def api_backup_restore(body: RestoreBody):
     except ValueError as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
     except backups.RestoreStageExistsError as exc:
-        return JSONResponse({"error": str(exc), "restore": backups.restore_status(_configured_db_path())}, status_code=409)
+        return JSONResponse(
+            {
+                "error": str(exc),
+                "restore": _restore_error_status(backups.restore_status(_configured_db_path())),
+            },
+            status_code=409,
+        )
     except backups.RestoreValidationError as exc:
         return JSONResponse({"error": str(exc)}, status_code=422)
     except backups.RestoreStorageError as exc:

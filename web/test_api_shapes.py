@@ -619,7 +619,7 @@ class ApiShapeTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             response.headers["content-disposition"],
-            'attachment; filename="photoarchive-export-2.zip"',
+            'attachment; filename="azimuth-photo-export-2.zip"',
         )
         with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
             names = sorted(archive.namelist())

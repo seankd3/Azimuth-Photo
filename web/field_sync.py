@@ -33,7 +33,7 @@ async def _run_sync_pass(hub_url: str, *, dry_run: bool) -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Run one PhotoArchive satellite sync pass")
+    parser = argparse.ArgumentParser(description="Run one Azimuth Photo satellite sync pass")
     parser.add_argument("--hub", required=True, help="Hub base URL, e.g. http://100.102.150.104:8000")
     parser.add_argument("--dry-run", action="store_true", help="Calculate local sync candidates without contacting the hub")
     args = parser.parse_args(argv)
