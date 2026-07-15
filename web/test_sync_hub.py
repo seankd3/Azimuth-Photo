@@ -161,6 +161,9 @@ class SyncHubTests(unittest.TestCase):
         image_id = self.upload(content_hash, payload, split=len(payload) // 2)
         destination = self.raws / "2024" / "2024-06-07" / "field.jpg"
         self.assertEqual(destination.read_bytes(), payload)
+        original = self.client.get(f"/api/sync/original/{image_id}")
+        self.assertEqual(original.status_code, 200, original.text)
+        self.assertEqual(original.content, payload)
 
         manifest = self.client.post(
             "/api/sync/manifest",

@@ -111,6 +111,10 @@ def share_cookie_path(token: str) -> str:
     return f"/s/{token}"
 
 
+def gallery_cookie_path(token: str) -> str:
+    return f"/s/gallery/{token}"
+
+
 def set_unlock_cookie(response: Response, token: str, value: str, *, request: Request | None = None) -> None:
     response.set_cookie(
         COOKIE_NAME,
@@ -123,12 +127,18 @@ def set_unlock_cookie(response: Response, token: str, value: str, *, request: Re
     )
 
 
-def set_view_cookie(response: Response, token: str, *, request: Request | None = None) -> None:
+def set_view_cookie(
+    response: Response,
+    token: str,
+    *,
+    request: Request | None = None,
+    path: str | None = None,
+) -> None:
     response.set_cookie(
         VIEW_COOKIE_NAME,
         "1",
         max_age=VIEW_MAX_AGE_SECONDS,
-        path=share_cookie_path(token),
+        path=path or share_cookie_path(token),
         httponly=True,
         samesite="lax",
         secure=request_is_secure(request) if request is not None else False,

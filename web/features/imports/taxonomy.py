@@ -162,7 +162,9 @@ def infer_source_kind(
     if kind == "video":
         return "video"
     haystack = " ".join(
-        part.lower() for part in (path, rel_path, filename) if part
+        part.replace("\\", "/").lower()
+        for part in (path, rel_path, filename)
+        if part
     )
     if any(marker in haystack for marker in _EXPORT_PATH_MARKERS):
         return "export"

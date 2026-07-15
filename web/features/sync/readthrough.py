@@ -50,6 +50,49 @@ def can_read_through() -> bool:
     return is_satellite_mode() and hub_url() is not None
 
 
+def _open_hub_stream(endpoint: str, *, accept: str, timeout: float = _DEFAULT_TIMEOUT_SECONDS):
+    if not can_read_through():
+        return None
+    headers = {"Accept": accept}
+    headers.update(satellite.hub_request_headers())
+    request = Request(f"{hub_url()}{endpoint}", headers=headers)
+    try:
+        return urlopen(request, timeout=timeout)  # noqa: S310 - configured private hub URL.
+    except (HTTPError, URLError, TimeoutError, OSError):
+        return None
+
+
+def open_hub_original(hub_image_id: int, *, timeout: float = _DEFAULT_TIMEOUT_SECONDS):
+    """Open an authenticated streaming response for one hub-owned original."""
+
+    remote_id = int(hub_image_id or 0)
+    if remote_id <= 0:
+        return None
+    return _open_hub_stream(
+        f"/api/sync/original/{remote_id}",
+        accept="application/octet-stream",
+        timeout=timeout,
+    )
+
+
+def open_hub_preview(
+    hub_image_id: int,
+    size: str,
+    *,
+    timeout: float = _DEFAULT_TIMEOUT_SECONDS,
+):
+    """Open a hub preview stream for ZIP delivery of a mirrored gallery row."""
+
+    remote_id = int(hub_image_id or 0)
+    if remote_id <= 0 or size not in {"sm", "md", "lg"}:
+        return None
+    return _open_hub_stream(
+        f"/api/thumb/{size}/{remote_id}",
+        accept="image/jpeg",
+        timeout=timeout,
+    )
+
+
 def _content_hash_for_image(image_id: int, db_path: str) -> str | None:
     try:
         with sqlite3.connect(db_path) as conn:

@@ -11,6 +11,7 @@ from data import connection as data_connection
 
 
 def _share_summary(row) -> dict:
+    expires_at = float(row["expires_at"]) if row["expires_at"] is not None else None
     return {
         "id": int(row["id"]),
         "collection_id": int(row["collection_id"]) if row["collection_id"] is not None else None,
@@ -19,7 +20,8 @@ def _share_summary(row) -> dict:
         ),
         "token": row["token"],
         "created_at": float(row["created_at"]),
-        "expires_at": float(row["expires_at"]) if row["expires_at"] is not None else None,
+        "expires_at": expires_at,
+        "expired": expires_at is not None and expires_at <= time.time(),
         "revoked_at": float(row["revoked_at"]) if row["revoked_at"] is not None else None,
         "password_hash": row["password_hash"],
         "view_count": int(row["view_count"] or 0),
@@ -41,6 +43,7 @@ def _favorite_summary(row) -> dict:
 
 
 def _shared_collection_summary(row) -> dict:
+    expires_at = float(row["expires_at"]) if row["expires_at"] is not None else None
     return {
         "collection_id": int(row["collection_id"]) if row["collection_id"] is not None else None,
         "published_node_id": (
@@ -52,7 +55,8 @@ def _shared_collection_summary(row) -> dict:
         "id": int(row["share_id"]),
         "token": row["token"],
         "created_at": float(row["created_at"]),
-        "expires_at": float(row["expires_at"]) if row["expires_at"] is not None else None,
+        "expires_at": expires_at,
+        "expired": expires_at is not None and expires_at <= time.time(),
         "password_hash": row["password_hash"],
         "view_count": int(row["view_count"] or 0),
         "first_viewed_at": (
@@ -214,7 +218,6 @@ async def create_published_node_share(
 
 
 async def list_active_shares(db_path: str) -> list[dict]:
-    now = time.time()
     conn = await data_connection.open_async(db_path)
     try:
         cursor = await conn.execute(
@@ -248,12 +251,11 @@ async def list_active_shares(db_path: str) -> list[dict]:
             LEFT JOIN published_nodes node ON node.id = s.published_node_id
             LEFT JOIN share_images si ON si.share_id = s.id
             LEFT JOIN share_favorites sf ON sf.share_id = s.id
-            WHERE {_active_unexpired_clause("s")}
+            WHERE s.revoked_at IS NULL
               AND (c.id IS NOT NULL OR node.id IS NOT NULL)
             GROUP BY s.id, c.id, node.id
             ORDER BY s.created_at DESC, s.id DESC
             """,
-            (now,),
         )
         summaries = []
         for row in await cursor.fetchall():

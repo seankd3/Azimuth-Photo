@@ -96,6 +96,7 @@ def _private_link_payload(request: Request, share: dict) -> dict:
         "last_viewed_at": share.get("last_viewed_at"),
         "created_at": share.get("created_at"),
         "expires_at": share.get("expires_at"),
+        "expired": bool(share.get("expired")),
         "pick_count": int(share.get("pick_count") or 0),
     }
 

@@ -10,14 +10,16 @@ import asyncio
 import html
 import json
 import os
+import shutil
 import tempfile
 import time
 import zipfile
 from collections.abc import Awaitable, Callable
+from http.client import IncompleteRead
 from pathlib import Path
 
 from fastapi import APIRouter, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 
@@ -25,6 +27,7 @@ from data import connection
 from core.source_files import source_file_is_safe
 from features.publishing import galleries
 from features.share import auth
+from features.sync import readthrough
 
 
 router = APIRouter()
@@ -137,7 +140,8 @@ async def api_update_gallery(collection_id: int, gallery_id: int, body: GalleryB
     elif body.password is not None:
         password_hash = auth.hash_password(body.password) if body.password else None
     updated = await galleries.update_gallery(
-        _configured_db_path(), gallery_id, options=_options(body), password_hash=password_hash
+        _configured_db_path(), gallery_id, title=body.title,
+        options=_options(body), password_hash=password_hash,
     )
     return {"ok": True, "gallery": _owner_payload(request, updated)}
 
@@ -191,6 +195,24 @@ async def _safe_original(image: dict) -> bool:
     )
 
 
+def _stream_hub_response(response):
+    try:
+        while chunk := response.read(1024 * 1024):
+            yield chunk
+    finally:
+        response.close()
+
+
+def _hub_media_type(response, default: str) -> str:
+    headers = getattr(response, "headers", None)
+    if headers is None:
+        return default
+    get_content_type = getattr(headers, "get_content_type", None)
+    if callable(get_content_type):
+        return get_content_type()
+    return headers.get("Content-Type", default)
+
+
 def _gallery_html(data: dict) -> str:
     title = html.escape(str(data["title"]))
     state = _safe_json(data)
@@ -221,7 +243,12 @@ async def public_gallery(token: str, request: Request):
     if not request.cookies.get(auth.VIEW_COOKIE_NAME):
         await galleries.record_view(_configured_db_path(), token)
     response = HTMLResponse(_gallery_html(_public_page_payload(gallery)))
-    auth.set_view_cookie(response, token, request=request)
+    auth.set_view_cookie(
+        response,
+        token,
+        request=request,
+        path=auth.gallery_cookie_path(token),
+    )
     return _public_response(response)
 
 
@@ -284,6 +311,22 @@ async def public_gallery_download(token: str, size: str, image_id: int, request:
             f'attachment; filename="{_attachment_name(image_id, image["filename"], suffix=".jpg")}"'
         )
         return _public_response(response)
+    if int(image.get("hub_remote") or 0) == 1:
+        remote = await asyncio.to_thread(
+            readthrough.open_hub_original,
+            int(image.get("hub_image_id") or 0),
+        )
+        if remote is None:
+            return _public_response(JSONResponse(
+                {"error": "Original unavailable", "reason": "hub_original_unavailable"},
+                status_code=404,
+            ))
+        filename = _attachment_name(image_id, image["filename"])
+        return _public_response(StreamingResponse(
+            _stream_hub_response(remote),
+            media_type=_hub_media_type(remote, "application/octet-stream"),
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        ))
     if not await _safe_original(image):
         return _public_response(JSONResponse({"error": "Not found"}, status_code=404))
     return _public_response(
@@ -291,28 +334,73 @@ async def public_gallery_download(token: str, size: str, image_id: int, request:
     )
 
 
-def _zip_gallery(gallery: dict, destination: str) -> str:
+def _zip_gallery(gallery: dict, destination: str) -> dict:
     """Build a local zip from frozen members. Preview sizes remain JPEG-only."""
     import thumbnails
 
     size = gallery["download_size"]
+    skipped = []
+    included = 0
     with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for image in gallery["images"]:
             filename = Path(image["filename"])
-            if size == "original":
-                if not source_file_is_safe(
-                    str(image.get("filepath") or ""),
-                    str(image.get("source_path") or ""),
-                ):
-                    continue
-                archive.write(
-                    image["filepath"],
-                    arcname=_attachment_name(int(image["id"]), filename.name),
-                )
-            else:
-                data = asyncio.run(thumbnails.get_thumbnail(image["filepath"], size, int(image["id"])))
-                archive.writestr(f"{filename.stem}.jpg", data)
-    return destination
+            image_id = int(image["id"])
+            remote = int(image.get("hub_remote") or 0) == 1
+            try:
+                if remote:
+                    response = (
+                        readthrough.open_hub_original(int(image.get("hub_image_id") or 0))
+                        if size == "original"
+                        else readthrough.open_hub_preview(int(image.get("hub_image_id") or 0), size)
+                    )
+                    if response is None:
+                        raise FileNotFoundError("Hub media unavailable")
+                    arcname = (
+                        _attachment_name(image_id, filename.name)
+                        if size == "original"
+                        else f"{filename.stem}.jpg"
+                    )
+                    try:
+                        with tempfile.SpooledTemporaryFile(max_size=8 * 1024 * 1024) as staged:
+                            shutil.copyfileobj(response, staged, length=1024 * 1024)
+                            staged.seek(0)
+                            with archive.open(arcname, "w") as target:
+                                shutil.copyfileobj(staged, target, length=1024 * 1024)
+                    finally:
+                        response.close()
+                elif size == "original":
+                    if not source_file_is_safe(
+                        str(image.get("filepath") or ""),
+                        str(image.get("source_path") or ""),
+                    ):
+                        raise FileNotFoundError("Local original unavailable")
+                    archive.write(
+                        image["filepath"],
+                        arcname=_attachment_name(image_id, filename.name),
+                    )
+                else:
+                    data = asyncio.run(thumbnails.get_thumbnail(image["filepath"], size, image_id))
+                    if not data:
+                        raise FileNotFoundError("Preview unavailable")
+                    archive.writestr(f"{filename.stem}.jpg", data)
+                included += 1
+            except (IncompleteRead, OSError, ValueError):
+                skipped.append({
+                    "image_id": image_id,
+                    "filename": filename.name,
+                    "reason": "hub unavailable" if remote else "source unavailable",
+                })
+        if skipped:
+            archive.writestr(
+                "azimuth-download-manifest.json",
+                json.dumps({
+                    "requested_count": len(gallery["images"]),
+                    "included_count": included,
+                    "skipped_count": len(skipped),
+                    "skipped": skipped,
+                }, indent=2),
+            )
+    return {"path": destination, "included": included, "skipped": skipped}
 
 
 @router.get("/s/gallery/{token}/download-all")
@@ -323,7 +411,7 @@ async def public_gallery_download_all(token: str, request: Request):
     handle = tempfile.NamedTemporaryFile(prefix="photoarchive-gallery-", suffix=".zip", delete=False)
     handle.close()
     try:
-        await asyncio.to_thread(_zip_gallery, gallery, handle.name)
+        result = await asyncio.to_thread(_zip_gallery, gallery, handle.name)
     except Exception:
         Path(handle.name).unlink(missing_ok=True)
         return _public_response(JSONResponse({"error": "Could not prepare gallery download"}, status_code=422))
@@ -331,6 +419,7 @@ async def public_gallery_download_all(token: str, request: Request):
         FileResponse(
             handle.name,
             filename=f"{gallery['title']}.zip",
+            headers={"X-Azimuth-Skipped-Count": str(len(result["skipped"]))},
             background=BackgroundTask(lambda: Path(handle.name).unlink(missing_ok=True)),
         )
     )
