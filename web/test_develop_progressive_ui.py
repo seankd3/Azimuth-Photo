@@ -14,10 +14,12 @@ WEB = Path(__file__).parent
 
 def test_develop_progressive_loader_prefers_cached_base_then_library_fallback():
     source = (WEB / "static/js/desktop/develop/develop.js").read_text(encoding="utf-8")
-    assert "fetch(`/api/develop/${imageId}/base.jpg`)" in source
+    assert "fetch(`/api/develop/${imageId}/base.jpg`, fetchOptionsWithTimeout" in source
     assert "thumbUrl('lg', imageId)}?cached=1" in source
     assert source.index("base.jpg") < source.index("thumbUrl('lg', imageId)}?cached=1")
-    assert "response.status === 202 ? 500 : 1000" in source
+    assert "DEVELOP_BASE_BUDGET_MS = 12_000" in source
+    assert "throw new PendingOriginalError()" in source
+    assert "Original is still on the hub — retrying in background" in source
     assert "root.dataset.developOpenMs" in source
     assert "setControlsLoading(true)" in source
     assert "histogram?.setLoading(true)" in source

@@ -77,7 +77,8 @@ class UiContractsTests(BackendTestCase):
 
         self.assertIn("function reportApiFailure", desktop_api)
         self.assertIn("if (!response.ok) reportApiFailure({ status: response.status });", desktop_api)
-        self.assertIn("const result = await requestWithStatus(url, jsonRequestOptions('POST', body));", desktop_api)
+        self.assertIn("const result = await requestWithStatus(url, jsonRequestOptions('POST', body, options));", desktop_api)
+        self.assertIn('showToast("The library isn\'t responding.");', desktop_api)
         self.assertIn("return result.ok ? result.data : null;", desktop_api)
 
     async def test_service_worker_precaches_mobile_shell_only(self):

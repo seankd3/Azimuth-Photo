@@ -35,6 +35,7 @@ let zoomed = false;
 let panMomentum = null;
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const LARGE_IMAGE_TIMEOUT_MS = 8000;
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 }[c]));
@@ -89,10 +90,35 @@ function loadLg() {
     const token = loadToken;
     const lg = new Image();
     lg.decoding = 'async';
-    lg.onload = () => {
-        if (token === loadToken) img.src = lg.src;
+    let settled = false;
+    const finish = ({ offline = false } = {}) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timeout);
+        if (offline && token === loadToken) setViewerOffline(true);
     };
+    const timeout = window.setTimeout(() => finish({ offline: true }), LARGE_IMAGE_TIMEOUT_MS);
+    lg.onload = () => {
+        if (token === loadToken) {
+            img.src = lg.src;
+            setViewerOffline(false);
+        }
+        finish();
+    };
+    lg.onerror = () => finish({ offline: true });
     lg.src = thumbUrl('lg', image.id);
+}
+
+function setViewerOffline(offline) {
+    let chip = stage?.querySelector('.viewer-offline-chip');
+    if (!chip && stage) {
+        chip = document.createElement('span');
+        chip.className = 'viewer-offline-chip';
+        chip.textContent = 'Original offline';
+        chip.hidden = true;
+        stage.append(chip);
+    }
+    if (chip) chip.hidden = !offline;
 }
 
 function preload(offset) {
@@ -108,6 +134,7 @@ function showCurrent() {
     if (!image) return;
     loadToken += 1;
     const token = loadToken;
+    setViewerOffline(false);
     resetZoom();
     img.src = thumbUrl('md', image.id);
     loadLg();

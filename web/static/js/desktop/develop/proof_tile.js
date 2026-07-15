@@ -1,3 +1,5 @@
+import { fetchOptionsWithTimeout } from '../../api.js';
+
 const TILE_EDGE = 1024;
 const PAN_DEBOUNCE_MS = 250;
 const SETTINGS_DEBOUNCE_MS = 700;
@@ -54,6 +56,12 @@ export class ProofTileController {
         this.badge.style.cssText = 'position:absolute;right:18px;top:18px;padding:4px 7px;border:1px solid rgba(255,255,255,.2);border-radius:3px;color:#fff;font:650 9px/1.2 system-ui;background:rgba(0,0,0,.68);letter-spacing:.06em';
         this.layer.append(this.image, this.badge);
         this.stage.append(this.layer);
+        this.offlineBadge = document.createElement('span');
+        this.offlineBadge.className = 'develop-proof-badge';
+        this.offlineBadge.textContent = 'ORIGINAL OFFLINE';
+        this.offlineBadge.hidden = true;
+        this.offlineBadge.style.cssText = this.badge.style.cssText;
+        this.stage.append(this.offlineBadge);
     }
 
     setHeld(held) {
@@ -95,7 +103,7 @@ export class ProofTileController {
         const token = ++this.token;
         this.timer = setTimeout(() => {
             this.load(token).catch((error) => {
-                if (error?.name !== 'AbortError' && token === this.token) this.hide(false);
+                if (error?.name !== 'AbortError' && token === this.token) this.showOffline();
             });
         }, delay);
     }
@@ -110,9 +118,9 @@ export class ProofTileController {
         let tile = this.cache.get(key);
         if (!tile) {
             this.abort = new AbortController();
-            const response = await fetch(`/api/develop/${Number(context.imageId)}/proof-tile?u=${u.toFixed(6)}&v=${v.toFixed(6)}&edge=${TILE_EDGE}`, {
+            const response = await fetch(`/api/develop/${Number(context.imageId)}/proof-tile?u=${u.toFixed(6)}&v=${v.toFixed(6)}&edge=${TILE_EDGE}`, fetchOptionsWithTimeout({
                 headers: { Accept: 'image/png' }, signal: this.abort.signal,
-            });
+            }, 8_000));
             if (!response.ok) throw new Error('Original proof is unavailable');
             const blob = await response.blob();
             tile = {
@@ -135,6 +143,7 @@ export class ProofTileController {
             this.cache.set(key, tile);
         }
         if (!this.held || token !== this.token) return;
+        this.offlineBadge.hidden = true;
         this.show(tile);
     }
 
@@ -169,7 +178,15 @@ export class ProofTileController {
             this.abort?.abort();
         }
         this.layer.hidden = true;
+        this.offlineBadge.hidden = true;
         this.stage.classList.remove('proof-active');
+        this.onDisplayChange?.(false);
+    }
+
+    showOffline() {
+        this.layer.hidden = true;
+        this.stage.classList.remove('proof-active');
+        this.offlineBadge.hidden = false;
         this.onDisplayChange?.(false);
     }
 

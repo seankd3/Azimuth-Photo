@@ -1,4 +1,5 @@
 import { thumbUrl } from '../api.js';
+import { fetchOptionsWithTimeout } from '../../api.js';
 import { on, selection, viewState } from '../state.js';
 import { showToast } from '../toast.js';
 import { releaseFocus, trapFocus } from '../focusTrap.js';
@@ -38,6 +39,20 @@ let proofTile = null;
 let panGesture = null;
 let presetsPanel = null;
 let transientSettingsOverride = null;
+let backgroundBaseRetryTimer = 0;
+
+const DEVELOP_READ_TIMEOUT_MS = 10_000;
+const DEVELOP_MUTATION_TIMEOUT_MS = 20_000;
+const DEVELOP_BASE_BUDGET_MS = 12_000;
+const DEVELOP_BACKGROUND_RETRY_MS = 10_000;
+const HUB_ORIGINAL_PENDING = 'Original is still on the hub — retrying in background';
+
+class PendingOriginalError extends Error {
+    constructor() {
+        super(HUB_ORIGINAL_PENDING);
+        this.name = 'PendingOriginalError';
+    }
+}
 
 const zoomState = {
     mode: 'fit',
@@ -105,7 +120,8 @@ function originSettings(payload) {
 }
 
 async function fetchDevelop(imageId) {
-    const response = await fetch(`/api/develop/${imageId}`, { headers: { Accept: 'application/json' } });
+    const response = await fetch(`/api/develop/${imageId}`, fetchOptionsWithTimeout({ headers: { Accept: 'application/json' } }, DEVELOP_READ_TIMEOUT_MS));
+    if (response.status === 202) throw new PendingOriginalError();
     if (!response.ok) {
         const payload = await response.json().catch(() => null);
         throw new Error(payload?.error || (response.status === 404 ? 'Develop settings are not ready for this photo.' : 'Could not load develop settings.'));
@@ -136,20 +152,29 @@ function parseBase(buffer, scale = 1) {
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function fetchBaseWithRetry(imageId, token, scale = 1) {
-    for (let attempt = 0; attempt <= 20; attempt += 1) {
+async function fetchBaseWithRetry(imageId, token, scale = 1, { quiet = false } = {}) {
+    const deadline = performance.now() + DEVELOP_BASE_BUDGET_MS;
+    for (let attempt = 0; performance.now() < deadline; attempt += 1) {
         if (token !== loadingToken) return null;
-        if (attempt === 2) setStatus('Reading source image from disk…', { busy: true });
-        if (attempt === 8) setStatus('Developing preview…', { busy: true });
-        const response = await fetch(`/api/develop/${imageId}/base.bin`);
+        if (!quiet && attempt === 2) setStatus('Reading source image from disk…', { busy: true });
+        if (!quiet && attempt === 8) setStatus('Developing preview…', { busy: true });
+        let response = null;
+        try {
+            response = await fetch(`/api/develop/${imageId}/base.bin`, fetchOptionsWithTimeout({}, Math.max(1_000, Math.min(4_000, deadline - performance.now()))));
+        } catch {
+            if (performance.now() >= deadline) break;
+            await delay(750);
+            continue;
+        }
         if (response.ok) return parseBase(await response.arrayBuffer(), scale);
         if (![202, 404, 503].includes(response.status)) {
             const payload = await response.json().catch(() => null);
             throw new Error(payload?.error || 'The image preview could not be loaded.');
         }
-        if (attempt < 20) await delay(response.status === 202 ? 500 : 1000);
+        const waitMs = response.status === 202 ? 500 : 1_000;
+        if (performance.now() + waitMs < deadline) await delay(waitMs);
     }
-    throw new Error('The image preview is still being prepared. Try again in a moment.');
+    throw new PendingOriginalError();
 }
 
 function markDevelopPaint(token, phase) {
@@ -180,13 +205,13 @@ async function paintDisplayBlob(blob, token, phase) {
 
 async function paintPlaceholder(imageId, token) {
     try {
-        const response = await fetch(`/api/develop/${imageId}/base.jpg`);
+        const response = await fetch(`/api/develop/${imageId}/base.jpg`, fetchOptionsWithTimeout({}, 5_000));
         if (response.ok && await paintDisplayBlob(await response.blob(), token, 'base-jpg')) return;
     } catch { /* Fall through to the already-cached Library image. */ }
     try {
         // Browsed photos already have this tier. cached=1 keeps a cold Develop
         // open from doing a second RAW decode just to make a placeholder.
-        const response = await fetch(`${thumbUrl('lg', imageId)}?cached=1`);
+        const response = await fetch(`${thumbUrl('lg', imageId)}?cached=1`, fetchOptionsWithTimeout({}, 5_000));
         if (response.ok) await paintDisplayBlob(await response.blob(), token, 'library-lg');
     } catch { /* The explicit staged status remains the final fallback. */ }
 }
@@ -203,10 +228,10 @@ function scheduleSave(label = 'Develop adjustment') {
     saveTimers.set(imageId, setTimeout(() => {
         const entry = stateCache.get(imageId);
         if (!entry) return;
-        fetch(`/api/develop/${imageId}`, {
+        fetch(`/api/develop/${imageId}`, fetchOptionsWithTimeout({
             method: 'PUT', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ settings: entry.settings, label }),
-        }).then((response) => {
+        }, DEVELOP_MUTATION_TIMEOUT_MS)).then((response) => {
             if (!response.ok) throw new Error('save failed');
             settingsClipboard.markSaved(imageId);
             historyPanel?.reload();
@@ -325,7 +350,7 @@ function restoreHistoricalSettings(settings, label) {
 export async function createVirtualCopy() {
     if (!currentImage || !isRaw(currentImage)) return;
     try {
-        const response = await fetch(`/api/develop/${currentImage.id}/virtual-copy`, { method: 'POST' });
+        const response = await fetch(`/api/develop/${currentImage.id}/virtual-copy`, fetchOptionsWithTimeout({ method: 'POST' }, DEVELOP_MUTATION_TIMEOUT_MS));
         if (!response.ok) throw new Error('copy failed');
         const copy = await response.json();
         showToast('Virtual copy created');
@@ -355,7 +380,7 @@ function applySettingsPatch(patch, label) {
 async function requestAutoTone() {
     if (!currentImage) return;
     try {
-        const response = await fetch(`/api/develop/${currentImage.id}/auto`, { method: 'POST' });
+        const response = await fetch(`/api/develop/${currentImage.id}/auto`, fetchOptionsWithTimeout({ method: 'POST' }, DEVELOP_MUTATION_TIMEOUT_MS));
         if (!response.ok) throw new Error();
         const payload = await response.json();
         applySettingsPatch(payload.patch || {}, 'Auto tone');
@@ -417,7 +442,48 @@ function pregenNeighbors(image) {
     const index = viewState.images.findIndex((item) => Number(item.id) === Number(image.id));
     const imageIds = viewState.images.slice(Math.max(0, index - 2), index + 3).map((item) => Number(item.id));
     if (!imageIds.length) return;
-    fetch('/api/develop/pregen', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image_ids: imageIds }) }).catch(() => {});
+    fetch('/api/develop/pregen', fetchOptionsWithTimeout({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image_ids: imageIds }) }, DEVELOP_MUTATION_TIMEOUT_MS)).catch(() => {});
+}
+
+function applyDevelopBase(entry, base, token) {
+    if (!base || token !== loadingToken || !renderer) return false;
+    renderer.uploadSource(base.rgba, base.width, base.height);
+    entry.base = base;
+    renderer.setSettings(renderedSettings(entry), entry.meta);
+    applyZoomState();
+    masking?.rebuildRasters();
+    canvas.classList.remove('preview-ready');
+    canvas.classList.add('ready');
+    placeholder.hidden = true;
+    histogram?.setLoading(false);
+    setControlsLoading(false);
+    const elapsed = Math.round(performance.now() - Number(root.dataset.developOpenedAt || performance.now()));
+    root.dataset.developFullMs = String(elapsed);
+    console.timeStamp?.(`develop-open-full:${elapsed}ms`);
+    setStatus('');
+    crop.setSettings(entry.settings);
+    presetsPanel?.imageReady();
+    return true;
+}
+
+function scheduleBackgroundBaseRetry(image, entry, token) {
+    window.clearTimeout(backgroundBaseRetryTimer);
+    backgroundBaseRetryTimer = window.setTimeout(async () => {
+        if (token !== loadingToken || Number(currentImage?.id) !== Number(image.id)) return;
+        try {
+            const base = await fetchBaseWithRetry(image.id, token, Number(entry.meta?.hdr?.scale) || 1, { quiet: true });
+            if (!applyDevelopBase(entry, base, token)) scheduleBackgroundBaseRetry(image, entry, token);
+        } catch (error) {
+            if (error instanceof PendingOriginalError && token === loadingToken) scheduleBackgroundBaseRetry(image, entry, token);
+        }
+    }, DEVELOP_BACKGROUND_RETRY_MS);
+}
+
+function scheduleBackgroundDevelopRetry(image, token) {
+    window.clearTimeout(backgroundBaseRetryTimer);
+    backgroundBaseRetryTimer = window.setTimeout(() => {
+        if (token === loadingToken && Number(currentImage?.id) === Number(image.id)) openImage(image);
+    }, DEVELOP_BACKGROUND_RETRY_MS);
 }
 
 async function openImage(image) {
@@ -476,27 +542,19 @@ async function openImage(image) {
         setStatus('Reading source image from disk…', { busy: true });
         const base = await fetchBaseWithRetry(image.id, token, Number(entry.meta?.hdr?.scale) || 1);
         if (!base || token !== loadingToken) return;
-        renderer.uploadSource(base.rgba, base.width, base.height);
-        entry.base = base;
-        renderer.setSettings(renderedSettings(entry), entry.meta);
-        applyZoomState();
-        masking?.rebuildRasters();
-        canvas.classList.remove('preview-ready');
-        canvas.classList.add('ready');
-        placeholder.hidden = true;
-        histogram?.setLoading(false);
-        setControlsLoading(false);
-        const elapsed = Math.round(performance.now() - Number(root.dataset.developOpenedAt || performance.now()));
-        root.dataset.developFullMs = String(elapsed);
-        console.timeStamp?.(`develop-open-full:${elapsed}ms`);
-        setStatus('');
-        crop.setSettings(entry.settings);
-        presetsPanel?.imageReady();
+        applyDevelopBase(entry, base, token);
     } catch (error) {
         if (token === loadingToken) {
             setControlsLoading(false);
             histogram?.setLoading(false);
-            setStatus(error.message || 'Develop could not open this photo.', { error: true });
+            if (error instanceof PendingOriginalError) {
+                setStatus(HUB_ORIGINAL_PENDING, { error: true });
+                const entry = stateCache.get(Number(image.id));
+                if (entry) scheduleBackgroundBaseRetry(image, entry, token);
+                else scheduleBackgroundDevelopRetry(image, token);
+            } else {
+                setStatus(error.message || 'Develop could not open this photo.', { error: true });
+            }
         }
     }
 }
@@ -642,7 +700,7 @@ async function comparisonPreview(image) {
         stateCache.set(Number(image.id), entry);
     }
     if (!entry.base) {
-        const response = await fetch(`/api/develop/${image.id}/base.bin`);
+        const response = await fetch(`/api/develop/${image.id}/base.bin`, fetchOptionsWithTimeout({}, DEVELOP_READ_TIMEOUT_MS));
         if (!response.ok) throw new Error('Reference preview is still being prepared.');
         entry.base = parseBase(await response.arrayBuffer(), Number(entry.meta?.hdr?.scale) || 1);
     }
@@ -823,7 +881,7 @@ function openSyncPopover(button) {
 async function resetCurrent() {
     if (!isDevelopImage(currentImage)) return;
     try {
-        const response = await fetch(`/api/develop/${currentImage.id}/reset`, { method: 'POST' });
+        const response = await fetch(`/api/develop/${currentImage.id}/reset`, fetchOptionsWithTimeout({ method: 'POST' }, DEVELOP_MUTATION_TIMEOUT_MS));
         if (!response.ok) throw new Error();
         const payload = await response.json().catch(() => null);
         const entry = stateCache.get(Number(currentImage.id));
@@ -1053,7 +1111,7 @@ function init() {
             stage, canvas,
             onAutoLevel: async () => {
                 if (!currentImage) return null;
-                const response = await fetch(`/api/develop/${currentImage.id}/transform/auto`, { method: 'POST' });
+                const response = await fetch(`/api/develop/${currentImage.id}/transform/auto`, fetchOptionsWithTimeout({ method: 'POST' }, DEVELOP_MUTATION_TIMEOUT_MS));
                 return response.ok ? response.json() : null;
             },
         },

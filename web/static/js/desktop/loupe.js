@@ -12,6 +12,7 @@ const ZOOM_STEP = 1.15;
 const MAX_SCALE = 4;
 const PREFETCH_AHEAD = 50;
 const LOAD_WAIT_MS = 5000;
+const FULL_IMAGE_TIMEOUT_MS = 8000;
 const KEYBOARD_PAN_STEP = 48;
 const STRIP_ITEM_PITCH = 68;
 const STRIP_OVERSCAN = 12;
@@ -321,17 +322,33 @@ function requestFullImage() {
     fullImageLoadingId = img.id;
     const token = renderToken;
     const large = new Image();
+    let settled = false;
+    const finish = ({ offline = false } = {}) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timeout);
+        if (Number(fullImageLoadingId) === Number(img.id)) fullImageLoadingId = null;
+        if (offline && open && token === renderToken) setLoupeOffline(true);
+    };
+    const timeout = window.setTimeout(() => finish({ offline: true }), FULL_IMAGE_TIMEOUT_MS);
     large.onload = async () => {
         if (large.decode) await large.decode().catch(() => {});
-        if (!open || token !== renderToken || !current() || Number(current().id) !== Number(img.id)) return;
+        if (!open || token !== renderToken || !current() || Number(current().id) !== Number(img.id)) {
+            finish();
+            return;
+        }
         image.dataset.tier = 'lg';
         image.src = large.src;
-        fullImageLoadingId = null;
+        setLoupeOffline(false);
+        finish();
     };
-    large.onerror = () => {
-        if (Number(fullImageLoadingId) === Number(img.id)) fullImageLoadingId = null;
-    };
+    large.onerror = () => finish({ offline: true });
     large.src = thumbUrl('lg', img.id);
+}
+
+function setLoupeOffline(offline) {
+    const chip = document.getElementById('loupe-offline-chip');
+    if (chip) chip.hidden = !offline;
 }
 
 function updateFlagControls() {
@@ -477,6 +494,7 @@ function render() {
     fullImageLoadingId = null;
     const token = renderToken;
     const image = document.getElementById('loupe-img');
+    setLoupeOffline(false);
     image.dataset.imageId = String(img.id);
     image.dataset.tier = 'md';
     image.onload = () => {
@@ -798,6 +816,14 @@ function ensureLoupeChrome() {
     const strip = document.getElementById('loupe-strip');
 
     if (captionEl.parentElement !== bar) bar.prepend(captionEl);
+    if (!document.getElementById('loupe-offline-chip')) {
+        const offline = document.createElement('span');
+        offline.id = 'loupe-offline-chip';
+        offline.className = 'loupe-offline-chip';
+        offline.textContent = 'Original offline';
+        offline.hidden = true;
+        stage.append(offline);
+    }
     if (!document.getElementById('loupe-zoom')) {
         const zoom = document.createElement('div');
         zoom.id = 'loupe-zoom';

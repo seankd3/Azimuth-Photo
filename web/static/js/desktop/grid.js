@@ -44,6 +44,7 @@ let loadToken = 0;
 let loadController = null;
 let activeJumpToken = 0;
 let reloadPending = false;
+let thumbRetryFocusBound = false;
 const stackCache = new Map();
 const stackKindCache = new Map();
 
@@ -77,6 +78,7 @@ export function cellHtml(img, index) {
     const selected = selection.has(Number(img.id));
     return `<figure class="cell ${img.thumb_url ? '' : 'skel'} ${selected ? 'sel' : ''}" data-id="${img.id}" data-idx="${index}" draggable="true" tabindex="-1" aria-selected="${selected ? 'true' : 'false'}" style="--ar:${aspect(img)}">`
         + `<img data-src="${esc(img.thumb_url || thumbUrl('sm', img.id))}" loading="lazy" decoding="async" alt="${esc(img.filename || '')}">`
+        + `<span class="c-thumb-offline" aria-live="polite">${icon('image')}<span>${esc(img.filename || 'Original offline')}</span></span>`
         + stackBadge
         + `<button class="c-check" aria-label="Select photo" tabindex="-1">${icon('check')}</button>`
         + `<span class="c-idx">${index + 1}</span>`
@@ -143,13 +145,49 @@ function ensureImageObserver() {
     return imageObserver;
 }
 
+function retryOfflineThumb(img) {
+    if (!img?.isConnected || img.dataset.thumbRetried === '1') return;
+    img.dataset.thumbRetried = '1';
+    img.closest('.cell')?.classList.add('thumb-retrying');
+    const joiner = img.dataset.src.includes('?') ? '&' : '?';
+    img.src = `${img.dataset.src}${joiner}retry=${Date.now()}`;
+}
+
+function markThumbOffline(img) {
+    const cell = img.closest('.cell');
+    if (!cell) return;
+    img.classList.remove('ld');
+    cell.classList.remove('skel', 'thumb-retrying');
+    cell.classList.add('thumb-offline');
+    cell.setAttribute('aria-label', `${img.alt || 'Photo'} — original offline`);
+    if (img.dataset.thumbRetryScheduled !== '1' && img.dataset.thumbRetried !== '1') {
+        img.dataset.thumbRetryScheduled = '1';
+        window.setTimeout(() => retryOfflineThumb(img), 30_000);
+    }
+}
+
+function ensureThumbRetryFocusHandler() {
+    if (thumbRetryFocusBound) return;
+    thumbRetryFocusBound = true;
+    window.addEventListener('focus', () => {
+        document.querySelectorAll('.cell.thumb-offline img[data-src]').forEach(retryOfflineThumb);
+    });
+}
+
 function observeImages(rootEl) {
+    ensureThumbRetryFocusHandler();
     const observer = ensureImageObserver();
     for (const img of (rootEl || document).querySelectorAll('img[data-src]')) {
+        if (img.dataset.thumbObserved === '1') {
+            observer.observe(img);
+            continue;
+        }
+        img.dataset.thumbObserved = '1';
         img.addEventListener('load', () => {
             img.classList.add('ld');
-            img.closest('.cell')?.classList.remove('skel');
-        }, { once: true });
+            img.closest('.cell')?.classList.remove('skel', 'thumb-offline', 'thumb-retrying');
+        });
+        img.addEventListener('error', () => markThumbOffline(img));
         observer.observe(img);
     }
 }
