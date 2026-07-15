@@ -3,6 +3,10 @@ import { requestJson } from './api.js';
 import { showToast } from './toast.js';
 
 const RECENT_KEY = 'pa_d_recent_keywords';
+const loadingRows = (label, count = 3) => `<div aria-label="${label}" aria-busy="true">${Array.from(
+    { length: count },
+    () => '<div class="chrome-skel nav-row skel"></div>',
+).join('')}</div>`;
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (char) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 }[char]));
@@ -199,7 +203,7 @@ export async function render() {
         host.innerHTML = panelHtml(null, []);
         return;
     }
-    host.innerHTML = '<div class="panel-empty">Loading keywords…</div>';
+    host.innerHTML = loadingRows('Loading keywords');
     try {
         const payload = await request(`/api/images/${image.id}/keywords`);
         if (renderedImageId !== Number(image.id)) return;
@@ -218,7 +222,7 @@ export async function renderIptcMetadata(image) {
         return;
     }
     const imageId = Number(image.id);
-    host.innerHTML = '<div class="panel-empty">Loading IPTC…</div>';
+    host.innerHTML = loadingRows('Loading IPTC fields', 2);
     try {
         const payload = await request(`/api/images/${imageId}/iptc`);
         if (Number(activeImage()?.id) !== imageId) return;
