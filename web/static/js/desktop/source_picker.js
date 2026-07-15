@@ -1,9 +1,6 @@
 import { browseCatalogFolders } from './api.js';
 import { icon } from '../icons.js';
-
-const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[c]));
+import { escapeHtml as esc } from './dom.js';
 
 const state = {
     open: false,

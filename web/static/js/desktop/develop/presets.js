@@ -339,10 +339,12 @@ export function mountPresetsPanel(host, api) {
         nameInput?.focus();
         activePopover.querySelector('[data-save-cancel]').addEventListener('click', closePopover);
         activePopover.querySelector('[data-save-confirm]').addEventListener('click', async () => {
+            const popover = activePopover;
+            const confirm = popover.querySelector('[data-save-confirm]');
             const name = String(nameInput.value || '').trim() || 'Untitled';
-            const folder = String(activePopover.querySelector('[data-save-folder]').value || '').trim() || 'User';
+            const folder = String(popover.querySelector('[data-save-folder]').value || '').trim() || 'User';
             const settings = api.saveCurrentSettings?.() || clone(entry.settings);
-            closePopover();
+            confirm.disabled = true;
             try {
                 const response = await fetch(API, {
                     method: 'POST',
@@ -351,7 +353,11 @@ export function mountPresetsPanel(host, api) {
                 });
                 if (!response.ok) throw new Error('save failed');
                 await load();
-            } catch { /* toast owned by host if desired */ }
+                if (activePopover === popover) closePopover();
+            } catch {
+                confirm.disabled = false;
+                api.notify?.('Couldn’t save preset');
+            }
         });
     }
 

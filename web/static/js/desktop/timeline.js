@@ -4,12 +4,9 @@
 
 import { getDateGroups, getDateHistogram, getRankings, thumbUrl } from './api.js';
 import { on, scopeParams, setActiveLens, setScope } from './state.js';
+import { escapeHtml as esc, formatCount as fmt, MONTH_NAMES } from './dom.js';
 
 const MONTH_SAMPLE_LIMIT = 5000;
-const MONTHS = [
-    'January', 'February', 'March', 'April', 'May', 'June',
-    'July', 'August', 'September', 'October', 'November', 'December',
-];
 
 let mounted = false;
 let initialized = false;
@@ -19,15 +16,10 @@ let monthSamples = new Map();
 let monthObserver = null;
 let scrubDragging = false;
 
-const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (char) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[char]));
-const fmt = (value) => Number(value || 0).toLocaleString('en-US');
-
 function monthLabel(key) {
     if (key === 'undated') return 'Undated';
     const [year, month] = String(key).split('-');
-    return `${MONTHS[Number(month) - 1] || month} ${year}`;
+    return `${MONTH_NAMES.long[Number(month) - 1] || month} ${year}`;
 }
 
 function dayKey(image) {

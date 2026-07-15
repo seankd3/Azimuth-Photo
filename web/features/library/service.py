@@ -364,22 +364,7 @@ def _normalized_import_batch_id(value) -> int:
 
 
 def _folder_cache_value(folder):
-    if not folder:
-        return ""
-    if isinstance(folder, (list, tuple)):
-        values = []
-        seen = set()
-        for value in folder:
-            clean = str(value or "").strip().rstrip("/")
-            if clean and clean not in seen:
-                seen.add(clean)
-                values.append(clean)
-        if not values:
-            return ""
-        if len(values) == 1:
-            return values[0]
-        return tuple(values)
-    return str(folder or "")
+    return ranking_repository.folder_cache_value(folder)
 
 
 async def _combined_import_batch_filter(current_ids, import_batch: int = 0):

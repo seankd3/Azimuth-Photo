@@ -8,7 +8,7 @@ import sqlite3
 import tempfile
 import time
 import unittest
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from unittest import mock
 
@@ -156,7 +156,8 @@ class BackupUnitTests(unittest.TestCase):
             backups.restore_backup(str(self.db_path), name)
 
     def test_retention_keeps_daily_and_weekly(self):
-        now = datetime.now().replace(hour=4, minute=0, second=0, microsecond=0)
+        reference_date = date(2026, 7, 10)
+        now = datetime.combine(reference_date, datetime.min.time()).replace(hour=4)
         # 20 daily-ish backups spanning > 4 weeks.
         for days_ago in range(0, 40):
             when = now - timedelta(days=days_ago)
@@ -164,7 +165,7 @@ class BackupUnitTests(unittest.TestCase):
             path = self.root / name
             with gzip.open(path, "wb") as gz:
                 gz.write(b"sqlite-fake")
-        pruned = backups.apply_retention(self.root)
+        pruned = backups.apply_retention(self.root, now=reference_date)
         remaining = backups.list_backups()
         self.assertGreaterEqual(len(remaining), 7)
         self.assertLessEqual(len(remaining), 7 + 4)

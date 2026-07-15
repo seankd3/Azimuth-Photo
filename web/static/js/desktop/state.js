@@ -1,3 +1,5 @@
+import { MONTH_NAMES } from './dom.js';
+
 const listeners = new Map();
 const PANEL_KEY = 'pa_d_left_collapsed';
 const RIGHT_PANEL_KEY = 'pa_d_right_collapsed';
@@ -23,7 +25,6 @@ const SMART_QUERY_KEYS = [
     'tag', 'orientation', 'compared', 'min_stars', 'sort',
 ];
 const SMART_ACTIVE_KEYS = SMART_QUERY_KEYS.filter((key) => key !== 'sort');
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const SORT_VARIANTS = {
     similarity: { desc: 'similarity', asc: 'similarity' },
     elo: { desc: 'elo', asc: 'elo_asc' },
@@ -558,7 +559,7 @@ function smartDateLabel(value) {
     if (value === 'undated') return 'Undated';
     const match = String(value || '').match(/^(\d{4})-(\d{2})$/);
     if (!match) return value;
-    return `${MONTHS[Number(match[2]) - 1] || match[2]} ${match[1]}`;
+    return `${MONTH_NAMES.short[Number(match[2]) - 1] || match[2]} ${match[1]}`;
 }
 
 export function smartQueryFromScope() {

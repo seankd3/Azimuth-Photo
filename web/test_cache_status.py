@@ -576,6 +576,32 @@ class CacheStatusTests(BackendTestCase):
         self.assertEqual(full.status_code, 410)
         self.assertIsNotNone(row["missing_at"])
 
+    async def test_trashed_image_serves_cached_thumbnail_without_marking_original_missing(self):
+        source = await self._source("trashed-media")
+        image_id = await self._image(source["id"], "trashed.jpg")
+        cached_path = os.path.join(self.tempdir.name, "trashed-cache.jpg")
+        with open(cached_path, "wb") as handle:
+            handle.write(b"cached trash thumbnail")
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "UPDATE images SET status = 'trashed', trashed_at = 1, trash_path = ? WHERE id = ?",
+                (os.path.join(source["path"], ".trash", "trashed.jpg"), image_id),
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        old_path_entry = thumbnails.fast_disk_path_entry
+        thumbnails.fast_disk_path_entry = lambda _size, _image_id: ("trash-sig", cached_path)
+        try:
+            response = await media_routes.serve_thumbnail(HeaderRequest(), "sm", image_id)
+        finally:
+            thumbnails.fast_disk_path_entry = old_path_entry
+
+        self.assertIsInstance(response, FileResponse)
+        self.assertIsNone((await self._image_row(image_id))["missing_at"])
+
     async def test_offline_source_uses_cached_preview_without_marking_image_missing(self):
         source = await self._source("offline-media")
         image_id = await self._image(source["id"], "offline.jpg")

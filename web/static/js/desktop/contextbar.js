@@ -7,12 +7,8 @@ import { showToast } from './toast.js';
 import { icon } from '../icons.js';
 import { personLabel as cleanPersonLabel } from '../people_labels.js';
 import { getRankings } from './api.js';
+import { escapeHtml as esc, formatCount as fmt, MONTH_NAMES } from './dom.js';
 
-const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[c]));
-const fmt = (n) => Number(n || 0).toLocaleString('en-US');
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 let thumbInputTimer = 0;
 let tasteAvailable = false;
 
@@ -57,7 +53,7 @@ function dateLabel(value) {
     if (value === 'undated') return 'Undated';
     const match = String(value || '').match(/^(\d{4})-(\d{2})$/);
     if (!match) return value;
-    return `${MONTHS[Number(match[2]) - 1] || match[2]} ${match[1]}`;
+    return `${MONTH_NAMES.short[Number(match[2]) - 1] || match[2]} ${match[1]}`;
 }
 
 function chipHtml(key, label, extra = '', className = '', title = label) {

@@ -1,7 +1,7 @@
 // GP-class photo viewer on a pure-black canvas.
 // Gesture grammar (from the One prototype):
 //   2 fingers  → live pinch zoom + pan (midpoint-anchored)
-//   1 finger   → pan when zoomed · swipe down/left/right at 1x
+//   1 finger   → pan when zoomed · swipe up/down to cull · swipe left/right to browse at 1x
 //   double-tap → 1x ↔ 2.5x at the tap point
 // Flags are real writes with undo.
 
@@ -12,6 +12,7 @@ import { dismissSheetThen, openCollectionSheet, openSheet } from './selection.js
 import { showToast } from './toast.js';
 import { dismissLayer, dismissLayerThen, pushLayer, registerLayer, syncLayerClosed } from './history.js';
 import { icon } from '../icons.js';
+import { createMomentum } from './viewer_momentum.js';
 
 let root = null;
 let stage = null;
@@ -29,6 +30,7 @@ let zScale = 1;
 let tx = 0;
 let ty = 0;
 let zoomed = false;
+let panMomentum = null;
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
@@ -56,6 +58,7 @@ function clampPan() {
 }
 
 function resetZoom() {
+    panMomentum?.stop();
     zScale = 1;
     tx = 0;
     ty = 0;
@@ -137,7 +140,7 @@ function cullSwipe(flag) {
     root.classList.remove('cull-picked', 'cull-rejected');
     void root.offsetWidth;
     root.classList.add(flag === 'picked' ? 'cull-picked' : 'cull-rejected');
-    setTimeout(() => root.classList.remove('cull-picked', 'cull-rejected'), 260);
+    window.setTimeout(() => root.classList.remove('cull-picked', 'cull-rejected'), 260);
     void applyFlags([image.id], flag);
 }
 
@@ -146,6 +149,20 @@ function nav(dir) {
     if (next < 0 || next >= list.length) return;
     index = next;
     showCurrent();
+}
+
+function settlePhotoSwipe(direction) {
+    const next = index + direction;
+    if (next < 0 || next >= list.length) {
+        img.style.transform = '';
+        return;
+    }
+    img.style.transition = 'transform .16s cubic-bezier(.2,.7,.2,1)';
+    img.style.transform = `translateX(${direction > 0 ? -window.innerWidth : window.innerWidth}px)`;
+    window.setTimeout(() => {
+        img.style.transition = '';
+        nav(direction);
+    }, 150);
 }
 
 export function openViewer(imageList, startIndex, { loadMore = null } = {}) {
@@ -162,6 +179,7 @@ export function openViewer(imageList, startIndex, { loadMore = null } = {}) {
 
 export function closeViewer({ fromHistory = false } = {}) {
     if (!openState) return;
+    resetZoom();
     openState = false;
     root.hidden = true;
     root.style.background = '';
@@ -354,10 +372,12 @@ function installGestures() {
         if (zoomed) {
             gest = 'pan';
             sw = { x: t.clientX, y: t.clientY, tx0: tx, ty0: ty, moved: 0 };
+            panMomentum?.stop();
+            panMomentum?.record(t.clientX, t.clientY);
             root.classList.add('dragging');
         } else {
             gest = 'swipe';
-            sw = { x: t.clientX, y: t.clientY, mode: null, res: 0 };
+            sw = { x: t.clientX, y: t.clientY, mode: null, res: 0, startedAt: performance.now() };
         }
     }, { passive: true });
 
@@ -387,6 +407,7 @@ function installGestures() {
             ty = sw.ty0 + (t.clientY - sw.y);
             clampPan();
             applyT();
+            panMomentum?.record(t.clientX, t.clientY);
             return;
         }
         if (gest === 'swipe' && sw && e.touches.length === 1) {
@@ -456,6 +477,7 @@ function installGestures() {
                     }
                 }
                 gest = null;
+                panMomentum?.release();
                 sw = null;
                 root.classList.remove('dragging');
             }
@@ -482,16 +504,18 @@ function installGestures() {
                 sw = null;
                 return;
             }
-            if (sw.mode === 'down' && dy > 90) {
+            const elapsed = Math.max(1, performance.now() - (sw.startedAt || performance.now()));
+            const vx = dx / elapsed;
+            const vy = dy / elapsed;
+            if (sw.mode === 'down' && (dy > 90 || vy > 0.75)) {
                 img.style.transform = '';
                 cullSwipe('rejected');
-            } else if (sw.mode === 'up' && dy < -60) {
+            } else if (sw.mode === 'up' && (dy < -60 || vy < -0.75)) {
                 img.style.transform = '';
                 cullSwipe('picked');
-            } else if (sw.mode === 'h' && Math.abs(sw.res) > 70) {
-                img.style.transform = '';
+            } else if (sw.mode === 'h' && (Math.abs(sw.res) > 70 || Math.abs(vx) > 0.65)) {
                 const dir = dx < 0 ? 1 : -1;
-                nav(dir);
+                settlePhotoSwipe(dir);
             } else {
                 img.style.transform = '';
             }
@@ -501,6 +525,7 @@ function installGestures() {
     }, { passive: true });
 
     stage.addEventListener('touchcancel', () => {
+        panMomentum?.stop();
         gest = null;
         sw = null;
         pin = null;
@@ -520,6 +545,20 @@ export function initViewer() {
     stage = document.getElementById('mv-stage');
     img = document.getElementById('mv-img');
     cap = document.getElementById('mv-cap');
+    panMomentum = createMomentum({
+        read: () => ({ x: tx, y: ty }),
+        write: (x, y) => {
+            tx = x;
+            ty = y;
+            applyT();
+        },
+        constrain: (x, y) => {
+            const rect = stage.getBoundingClientRect();
+            const maxX = (rect.width * (zScale - 1)) / 2;
+            const maxY = (rect.height * (zScale - 1)) / 2;
+            return { x: clamp(x, -maxX, maxX), y: clamp(y, -maxY, maxY) };
+        },
+    });
     flagBadge = document.createElement('div');
     flagBadge.id = 'mv-flag';
     flagBadge.hidden = true;

@@ -37,6 +37,7 @@ gallery_routes.configure(db_path=lambda: _db.DB_PATH, thumbnail_response=media_r
 export_presets.configure(db_path=lambda: _db.DB_PATH)
 hub_routes.configure(db_path=lambda: _db.DB_PATH)
 oplog_routes.configure(db_path=lambda: _db.DB_PATH)
+pair_routes.configure(db_path=lambda: _db.DB_PATH)
 app.include_router(hdr_routes.router)
 app.include_router(pano_routes.router)
 app.include_router(ai_mask_routes.router)
