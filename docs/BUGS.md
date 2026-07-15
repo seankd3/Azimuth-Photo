@@ -73,6 +73,8 @@ Immersive Dialog (no tab-bar leak), metadata header (back·date/time·favorite·
 - Archive Share often failed on modern Android — ClipData grant added.
 - trashImage treated HTTP 200 as success even when the hub trashed nothing — now parses the trashed[] array.
 
+**Note (2026-07-15):** the Pixel runs the `android-app` branch (versionCode 3, installed 17:42 — unified viewer, Library parity, own QA). Main's android line is superseded; wave-5 android fixes NOT ported to `android-app` — verify there: share intents set ClipData, and hub-trash calls parse the `trashed[]` response instead of trusting HTTP 200. The sync data-loss fix was hub-side and protects every client already.
+
 **Wave 5 — deferred (product calls)**
 8. **ShareActivity doesn't ingest** — sharing a non-gallery file into Azimuth just kicks backup (which only scans MediaStore) → nothing uploads. Real fix = an ingestion path for shared content:// URIs.
 9. **No device-token support in the app** — if the hub enables require_device_token, backup 401s. Needs the pairing flow in the app (pa-harden owns hub auth).
