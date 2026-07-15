@@ -288,6 +288,11 @@ export function setScope(patch = {}, { merge = false, pushHash = true } = {}) {
     if (pushHash) writeHash();
 }
 
+export function navigateToScope(patch = {}, options = {}) {
+    setActiveLens('grid');
+    setScope(patch, options);
+}
+
 export function patchScope(patch, { pushHash = true } = {}) {
     if (patch.similarIds && !Array.isArray(patch.similarIds)) patch.similarIds = [];
     if (Object.prototype.hasOwnProperty.call(patch, 'similarLimit')) {

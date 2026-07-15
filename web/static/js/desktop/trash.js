@@ -8,6 +8,8 @@ import {
 import { releaseFocus, trapFocus } from './focusTrap.js';
 import { showToast } from './toast.js';
 import { icon } from '../icons.js';
+import { emptyStateHtml } from './empty_state.js';
+import { gridLoadingHtml } from './loading_state.js';
 
 let root = null;
 let open = false;
@@ -17,7 +19,14 @@ let totalBytes = 0;
 let loading = false;
 let loadGeneration = 0;
 let loadError = false;
+let loadController = null;
 const busyActions = new Set();
+
+function cancelTrashLoad() {
+    if (!loadController) return;
+    loadController.abort();
+    loadController = null;
+}
 
 async function withBusyAction(key, button, action) {
     if (busyActions.has(key) || button?.disabled) return;
@@ -182,7 +191,7 @@ function render() {
     root.querySelector('#trash-empty').disabled = !total || loading;
     const body = root.querySelector('#trash-body');
     if (loading) {
-        body.innerHTML = '<div class="trash-grid">' + Array.from({ length: 18 }, () => '<div class="cell skel-cell" style="--ar:1.4"></div>').join('') + '</div>';
+        body.innerHTML = gridLoadingHtml({ className: 'trash-grid' });
         return;
     }
     if (loadError) {
@@ -191,7 +200,11 @@ function render() {
         return;
     }
     if (!images.length) {
-        body.innerHTML = '<div class="grid-empty"><h3>Trash is empty</h3><p>Deleted photos will appear here until restored or emptied.</p></div>';
+        body.innerHTML = emptyStateHtml({
+            title: 'Trash is empty',
+            detail: 'Photos moved to Trash stay here until you restore or permanently empty them.',
+            iconName: 'trash-2',
+        });
         return;
     }
     body.innerHTML = `<div class="trash-grid ${selection.size ? 'selmode' : ''}">${images.map(cellHtml).join('')}</div>`;
@@ -210,15 +223,20 @@ function patchSelection() {
 
 async function loadTrash() {
     ensureView();
+    cancelTrashLoad();
     const seq = ++loadGeneration;
+    const controller = new AbortController();
+    loadController = controller;
     loading = true;
     loadError = false;
     render();
     let data = null;
     try {
-        data = await getTrash({ limit: 500, offset: 0 });
+        data = await getTrash({ limit: 500, offset: 0, signal: controller.signal });
     } catch {
+        if (controller.signal.aborted) return;
         if (seq !== loadGeneration || !root?.isConnected || !open) return;
+        if (loadController === controller) loadController = null;
         images = [];
         total = 0;
         totalBytes = 0;
@@ -227,6 +245,7 @@ async function loadTrash() {
         render();
         return;
     }
+    if (loadController === controller) loadController = null;
     if (seq !== loadGeneration || !root?.isConnected || !open) return;
     if (!data) {
         images = [];
@@ -300,14 +319,14 @@ async function emptyTrashWithConfirm() {
         confirmLabel: 'Empty trash',
     });
     if (!ok) return;
-    const freed = totalBytes;
-    const result = await emptyTrash();
-    if (!result) {
-        showToast("Trash couldn't be emptied");
+    const response = await emptyTrash();
+    if (!response?.ok || !response.data) {
+        const detail = response?.data?.detail;
+        showToast(typeof detail === 'string' ? detail : "Trash couldn't be emptied");
         return;
     }
     emit('trash:changed', {});
-    showToast(`Trash emptied · ${bytesLabel(freed)} freed`);
+    showToast(`Trash emptied · ${bytesLabel(response.data.freed_bytes)} freed`);
 }
 
 export function openTrash() {
@@ -335,6 +354,8 @@ export function unmountTrash() {
     if (!root) return;
     open = false;
     loadGeneration += 1;
+    cancelTrashLoad();
+    loading = false;
     root.hidden = true;
     document.getElementById('view-trash').classList.remove('active');
 }

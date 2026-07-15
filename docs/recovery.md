@@ -1,6 +1,6 @@
 # Catalog recovery
 
-Use this runbook when Photo Archive starts but the catalog cannot be opened, or
+Use this runbook when Azimuth Photo starts but the catalog cannot be opened, or
 when the Library Health view reports a corrupt catalog.
 
 ## What the app detects
@@ -18,7 +18,7 @@ This check does not repair or replace anything automatically.
 1. In Library Health, choose a catalog snapshot and select **Prepare restore**.
    This validates the gzip archive and writes `photoarchive.restored.db` beside
    the live catalog. It never overwrites the live catalog.
-2. Stop the Photo Archive server.
+2. Stop the Azimuth Photo server.
 3. In the catalog directory, retain the failed catalog with a dated name, then
    put the prepared catalog in its place:
 

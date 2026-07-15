@@ -14,6 +14,8 @@ import {
 import { afterMotion } from './motion.js';
 import { showToast } from './toast.js';
 import { keepCoverRejectRest } from './stack_cull.js';
+import { emptyStateHtml } from './empty_state.js';
+import { gridLoadingHtml } from './loading_state.js';
 
 let offset = 0;
 let loading = false;
@@ -38,8 +40,16 @@ let windowStart = 0;
 let windowEnd = 0;
 let beforeDone = true;
 let loadToken = 0;
+let loadController = null;
+let reloadPending = false;
 const stackCache = new Map();
 const stackKindCache = new Map();
+
+function cancelPendingLoad() {
+    if (!loadController) return;
+    loadController.abort();
+    loadController = null;
+}
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -266,16 +276,15 @@ function renderSkeletons() {
     closeExpandedStack();
     resetImageObserver();
     resetGridWindow();
-    document.getElementById('grid-flow').innerHTML = '<div class="grid-chunk">'
-        + Array.from({ length: 18 }, (_, i) => (
-            `<div class="cell skel-cell" style="--ar:${[1.5, .75, 1.2, 1.8][i % 4]}"></div>`
-        )).join('')
-        + '</div>';
+    document.getElementById('grid-flow').innerHTML = gridLoadingHtml();
 }
 
-function bindEmptyActions() {
-    document.getElementById('grid-add-source')?.addEventListener('click', () => document.getElementById('system-btn')?.click());
-    document.getElementById('grid-import')?.addEventListener('click', () => emit('import:open'));
+function bindScopeEmptyActions(flow) {
+    flow.querySelector('[data-empty-action="clear-query"]')?.addEventListener('click', () => clearFacet('q'));
+    flow.querySelector('[data-empty-action="clear-filters"]')?.addEventListener('click', () => {
+        setScope({ q: scope.q, sort: scope.sort || 'elo' });
+    });
+    flow.querySelector('[data-empty-action="clear-view"]')?.addEventListener('click', () => setScope({}));
 }
 
 async function hydrateFirstRunEmpty(request) {
@@ -291,17 +300,22 @@ async function hydrateFirstRunEmpty(request) {
     const found = Number(scan && (scan.total_found || scan.total_inserted)) || 0;
     window.clearTimeout(emptyScanTimer);
     if (!sources.length) {
-        flow.innerHTML = '<div class="grid-empty">'
-            + '<h3>Welcome to Azimuth Photo</h3>'
-            + '<p>Add a folder of photos to start your private, local library.</p>'
-            + '<div class="grid-empty-actions"><button class="btn primary" id="grid-add-source">Add a source</button>'
-            + '<button class="btn" id="grid-import">Import photos</button></div></div>';
+        flow.innerHTML = emptyStateHtml({
+            title: 'Welcome to Azimuth Photo',
+            detail: 'No source folders are connected yet. Add a folder or import photos to start your private library.',
+            actions: [
+                { label: 'Add a source', action: 'add-source', primary: true },
+                { label: 'Import photos', action: 'import' },
+            ],
+            iconName: 'folder-plus',
+        });
     } else if (scanning) {
-        flow.innerHTML = '<div class="grid-empty">'
-            + '<h3>Source added</h3>'
-            + `<p>Scanning${found ? ` · ${found.toLocaleString('en-US')} photos found` : ' for photos'}.</p>`
-            + '<p>Your first thumbnails will appear here when they’re ready.</p>'
-            + '<div class="grid-empty-actions"><button class="btn primary" id="grid-add-source">View scan progress</button></div></div>';
+        flow.innerHTML = emptyStateHtml({
+            title: 'Scanning this source',
+            detail: `This source is being indexed${found ? ` · ${found.toLocaleString('en-US')} photos found so far` : ''}. Photos will appear here as they are ready.`,
+            actions: [{ label: 'View scan progress', action: 'add-source', primary: true }],
+            iconName: 'loader',
+        });
         emptyScanTimer = window.setTimeout(async () => {
             if (request !== emptyStateRequest || !mounted || viewState.images.length) return;
             const page = await loadScopePage({ limit: 1, offset: 0 });
@@ -309,13 +323,18 @@ async function hydrateFirstRunEmpty(request) {
             else hydrateFirstRunEmpty(request);
         }, 1500);
     } else {
-        flow.innerHTML = '<div class="grid-empty">'
-            + '<h3>No photos yet</h3>'
-            + '<p>Your source is ready, but no photos have appeared. Check the source or start a rescan in System.</p>'
-            + '<div class="grid-empty-actions"><button class="btn primary" id="grid-add-source">Open Sources</button>'
-            + '<button class="btn" id="grid-import">Import photos</button></div></div>';
+        flow.innerHTML = emptyStateHtml({
+            title: 'No photos found',
+            detail: 'Your source is connected, but it has no available photos. Check the source or start a rescan in System.',
+            actions: [
+                { label: 'Open Sources', action: 'add-source', primary: true },
+                { label: 'Import photos', action: 'import' },
+            ],
+            iconName: 'folder',
+        });
     }
-    bindEmptyActions();
+    flow.querySelector('[data-empty-action="add-source"]')?.addEventListener('click', () => document.getElementById('system-btn')?.click());
+    flow.querySelector('[data-empty-action="import"]')?.addEventListener('click', () => emit('import:open'));
 }
 
 function renderEmptyState() {
@@ -328,25 +347,35 @@ function renderEmptyState() {
     const showClearScope = scopeActive() || viewState.bestOf;
     const request = ++emptyStateRequest;
     if (scope.q) {
-        const deepNudge = scope.deep ? '' : '<p>Try Deep search for a more thorough visual search.</p>';
-        flow.innerHTML = '<div class="grid-empty">'
-            + `<h3>No matches for “${esc(scope.q)}”</h3>`
-            + deepNudge
-            + '<div class="grid-empty-actions"><button class="btn primary" id="grid-clear-query">Clear search</button></div></div>';
-        document.getElementById('grid-clear-query')?.addEventListener('click', () => clearFacet('q'));
+        flow.innerHTML = emptyStateHtml({
+            title: `No matches for “${scope.q}”`,
+            detail: scope.deep ? 'Nothing in this library matches that search.' : 'Try another phrase, or use Deep search for a broader visual match.',
+            actions: [{ label: 'Clear search', action: 'clear-query', primary: true }],
+            iconName: 'search',
+        });
         return;
     }
-    flow.innerHTML = '<div class="grid-empty">'
-        + '<h3>No photos in this view.</h3>'
-        + '<p>Try widening this view or clearing filters.</p>'
-        + '<div class="grid-empty-actions">'
-        + (showClearFilters ? '<button class="btn" id="grid-clear-filters">Clear filters</button>' : '')
-        + (showClearScope ? '<button class="btn primary" id="grid-clear-scope">Clear view</button>' : '')
-        + '</div></div>';
-    document.getElementById('grid-clear-filters')?.addEventListener('click', () => {
-        setScope({ q: scope.q, sort: scope.sort || 'elo' });
+    const scopeDetail = scope.collectionId
+        ? `“${scope.collectionName || 'This collection'}” has no photos yet. Add photos to this collection to see them here.`
+        : scope.people
+            ? `No photos are currently linked to ${scope.personLabel || 'this person'}. Clear the person view or keep naming faces.`
+            : scope.date_taken
+                ? `No photos were taken in ${scope.date_taken}. Choose another date or clear this date filter.`
+                : scope.folder?.length
+                    ? 'This folder has no matching photos. Choose another folder or clear the folder filter.'
+                    : showClearFilters
+                        ? 'Your filters exclude every photo. Clear them to widen this view.'
+                        : 'There are no photos in this view yet. Widen the view to continue.';
+    flow.innerHTML = emptyStateHtml({
+        title: scope.collectionId ? 'Collection is empty' : 'No photos in this view',
+        detail: scopeDetail,
+        actions: [
+            ...(showClearFilters ? [{ label: 'Clear filters', action: 'clear-filters' }] : []),
+            ...(showClearScope ? [{ label: 'Clear view', action: 'clear-view', primary: true }] : []),
+        ],
+        iconName: scope.collectionId ? 'folder' : 'image',
     });
-    document.getElementById('grid-clear-scope')?.addEventListener('click', () => setScope({}));
+    bindScopeEmptyActions(flow);
     hydrateFirstRunEmpty(request);
 }
 
@@ -380,7 +409,20 @@ async function loadPage({ direction = 'after', start = null, jump = false } = {}
         }
         limit = Math.min(pageSize, remaining);
     }
-    const data = await loadScopePage({ limit, offset: requestStart });
+    const controller = new AbortController();
+    loadController = controller;
+    let data = null;
+    try {
+        data = await loadScopePage({ limit, offset: requestStart, signal: controller.signal });
+    } catch {
+        if (controller.signal.aborted || seq !== generation || token !== loadToken) return false;
+        loading = false;
+        loadController = null;
+        renderError('Retry when the local service is ready.', jump ? () => jumpToOffset(requestStart) : loadFirstPage);
+        if (jump) emit('grid:jump-loading', { loading: false });
+        return false;
+    }
+    if (loadController === controller) loadController = null;
     if (seq !== generation || token !== loadToken) {
         return false;
     }
@@ -461,6 +503,7 @@ export async function requestMorePhotos() {
 
 export function loadFirstPage() {
     if (!mounted) return;
+    cancelPendingLoad();
     window.clearTimeout(emptyScanTimer);
     prependObserver?.disconnect();
     generation += 1;
@@ -495,6 +538,7 @@ export function jumpToOffset(nextOffset = 0) {
         watchWindowStart(existing);
         return;
     }
+    cancelPendingLoad();
     generation += 1;
     viewState.generation = generation;
     loadToken += 1;
@@ -669,6 +713,7 @@ export function initGrid() {
     });
     on('selection', ({ imageIds } = {}) => patchCells(imageIds));
     on('trash:changed', () => {
+        reloadPending = !mounted;
         if (mounted) loadFirstPage();
     });
     on('scan', ({ scanning } = {}) => {
@@ -750,7 +795,10 @@ export function mountGrid() {
         if (entries.some((entry) => entry.isIntersecting)) loadPage();
     }, { root: document.getElementById('canvas'), rootMargin: '900px 0px' });
     sentinelObserver.observe(document.getElementById('grid-sentinel'));
-    if (viewState.images.length || offset > 0) {
+    if (reloadPending) {
+        reloadPending = false;
+        loadFirstPage();
+    } else if (viewState.images.length || offset > 0) {
         observeImages(document.getElementById('grid-flow'));
         watchWindowStart(ensureChunkLive(windowStart));
         requestAnimationFrame(() => {
@@ -766,6 +814,7 @@ export function unmountGrid() {
     mounted = false;
     savedScrollTop = document.getElementById('canvas').scrollTop;
     generation += 1;
+    cancelPendingLoad();
     stackExpansionRequest += 1;
     loading = false;
     closeExpandedStack();

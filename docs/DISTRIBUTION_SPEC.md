@@ -25,7 +25,7 @@ Rules:
   upload path already does this (everything is "not on hub yet"). No new code,
   but it must be proven by test.
 
-## Artifact 1 — photoArchive Server
+## Artifact 1 — Azimuth Photo Server
 
 ### Frozen binary
 - PyInstaller **onedir** build (onefile startup cost is unacceptable) of
@@ -50,7 +50,7 @@ Rules:
   Container Manager and TrueNAS.
 - mDNS caveat documented: host networking mode recommended so discovery works.
 
-## Artifact 2 — photoArchive (the app)
+## Artifact 2 — Azimuth Photo (the app)
 
 - Tauri shell (`desktop/`) switches from the hardcoded dev venv to a bundled
   sidecar: `dist/photoarchive-server/` shipped inside the app resources.

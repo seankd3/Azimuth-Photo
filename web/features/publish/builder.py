@@ -1,4 +1,4 @@
-"""Build static public gallery bundles from photoArchive collections."""
+"""Build static public gallery bundles from Azimuth Photo collections."""
 
 from __future__ import annotations
 

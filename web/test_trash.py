@@ -1,5 +1,6 @@
 import os
 import sqlite3
+from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from test_support import *  # noqa: F401,F403
@@ -188,6 +189,76 @@ class TrashTests(BackendTestCase):
             self.assertFalse(os.path.exists(path))
         self.assertFalse(await self._image_exists(first_id))
         self.assertFalse(await self._image_exists(second_id))
+
+    async def test_empty_trash_deletes_offline_catalog_only_hub_mirror_rows(self):
+        conn = await db.get_db()
+        try:
+            source = await conn.execute(
+                "INSERT INTO catalog_sources(path, display_name, included, online) "
+                "VALUES ('hub://', 'Hub library', 1, 0)"
+            )
+            image = await conn.execute(
+                "INSERT INTO images "
+                "(source_id, filename, filepath, content_hash, status, trashed_at, "
+                "trash_path, file_ext, file_size, hub_image_id, hub_remote) "
+                "VALUES (?, 'remote.jpg', '/hub/remote.jpg', ?, 'trashed', 1000, "
+                "NULL, 'jpg', 1234, 91, 1)",
+                (int(source.lastrowid), "a" * 32),
+            )
+            image_id = int(image.lastrowid)
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        result = await trash_service.empty_trash(db.DB_PATH)
+
+        self.assertEqual(result["deleted_count"], 1)
+        self.assertEqual(result["skipped_offline"], 0)
+        self.assertEqual(result["freed_bytes"], 0)
+        self.assertFalse(await self._image_exists(image_id))
+
+    async def test_satellite_empty_trash_empties_hub_before_local_mirror(self):
+        conn = await db.get_db()
+        try:
+            source = await conn.execute(
+                "INSERT INTO catalog_sources(path, display_name, included, online) "
+                "VALUES ('hub://', 'Hub library', 1, 1)"
+            )
+            image = await conn.execute(
+                "INSERT INTO images "
+                "(source_id, filename, filepath, content_hash, status, trashed_at, "
+                "trash_path, file_ext, file_size, hub_image_id, hub_remote) "
+                "VALUES (?, 'mirrored.jpg', '/hub/mirrored.jpg', ?, 'trashed', 1000, "
+                "NULL, 'jpg', 4321, 92, 1)",
+                (int(source.lastrowid), "b" * 32),
+            )
+            image_id = int(image.lastrowid)
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        observed_calls = []
+
+        async def fake_empty_hub(hub_url, hub_image_ids):
+            observed_calls.append((hub_url, hub_image_ids))
+            return {"deleted_count": 1, "freed_bytes": 4321, "errors": [], "skipped_offline": 0}
+
+        env = {"PHOTOARCHIVE_MODE": "satellite", "PHOTOARCHIVE_HUB_URL": "http://probe-hub"}
+        with patch.dict(os.environ, env, clear=False), patch(
+            "features.trash.routes.empty_hub_trash", side_effect=fake_empty_hub
+        ):
+            def probe():
+                with TestClient(app_module.app) as client:
+                    return client.post("/api/trash/empty")
+
+            response = await asyncio.to_thread(probe)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(observed_calls, [("http://probe-hub", [92])])
+        self.assertEqual(response.json()["deleted_count"], 1)
+        self.assertEqual(response.json()["hub_deleted_count"], 1)
+        self.assertEqual(response.json()["freed_bytes"], 4321)
+        self.assertFalse(await self._image_exists(image_id))
 
     async def test_retention_purges_only_expired_online_trash_and_never_originals(self):
         source, root = await self._source_root()

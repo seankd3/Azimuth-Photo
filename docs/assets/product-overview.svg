@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" role="img" aria-labelledby="title desc">
-  <title id="title">Synthetic photoArchive product preview</title>
+  <title id="title">Synthetic Azimuth Photo product preview</title>
   <desc id="desc">A synthetic interface mockup showing Catalog, Library, Compare, and People surfaces with placeholder image tiles.</desc>
   <defs>
     <linearGradient id="page" x1="0" y1="0" x2="1" y2="1">
@@ -33,7 +33,7 @@
   </defs>
 
   <rect width="1200" height="720" rx="0" fill="url(#page)"/>
-  <text x="74" y="74" class="label">photoArchive</text>
+  <text x="74" y="74" class="label">Azimuth Photo</text>
   <text x="74" y="102" class="small">Local-first catalog, culling, ranking, search, and people grouping</text>
   <text x="1010" y="84" text-anchor="end" class="tiny">SYNTHETIC DEMO CONTENT</text>
 

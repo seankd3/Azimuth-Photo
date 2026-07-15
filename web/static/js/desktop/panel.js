@@ -8,7 +8,7 @@ import {
 } from './api.js';
 import { loadCollectionImageIds } from './scope_data.js';
 import {
-    byId, emit, folderActive, on, patchPrefs, scope, scopeActive, scopeParams, scopePatchFromSmartQuery, selection, selectionChanged, setActiveLens,
+    byId, emit, folderActive, navigateToScope, on, patchPrefs, scope, scopeActive, scopeParams, scopePatchFromSmartQuery, selection, selectionChanged, setActiveLens,
     setLeftCollapsed, setScope, smartQueryActive, smartQueryFromScope, smartQueryName, smartQuerySummary, sortBase, viewState,
 } from './state.js';
 import { applyFlags, selectedIds, setCollectionPicker } from './selection.js';
@@ -17,6 +17,7 @@ import { releaseFocus, trapFocus } from './focusTrap.js';
 import { confirmTypedCount } from './trash.js';
 import { downloadExport, openExportMenu } from './export_menu.js';
 import { initFoldersPanel } from './folders.js';
+import { openSourceRevealMenu } from './source_reveal_menu.js';
 import { icon } from '../icons.js';
 import {
     initSuggestions, loadSuggestionsOnce, openSuggestionsReview, suggestionsAreLoading, visibleSuggestions,
@@ -88,7 +89,7 @@ function renderCollections() {
     for (const row of host.querySelectorAll('.coll-row')) {
         const mainButton = row.querySelector('.coll-main');
         mainButton?.addEventListener('click', () => {
-            setScope({
+            navigateToScope({
                 collectionId: row.dataset.collId,
                 collectionName: row.dataset.collName || 'Collection',
                 collectionSmart: row.dataset.collSmart === '1',
@@ -888,11 +889,11 @@ function renderLibrary() {
     for (const row of document.querySelectorAll('[data-lib]')) {
         row.addEventListener('click', () => {
             const key = row.dataset.lib;
-            if (key === 'all') setScope({});
-            if (key === 'picked') setScope({ flag: 'picked' });
-            if (key === 'rejected') setScope({ flag: 'rejected' });
+            if (key === 'all') navigateToScope({});
+            if (key === 'picked') navigateToScope({ flag: 'picked' });
+            if (key === 'rejected') navigateToScope({ flag: 'rejected' });
             if (key === 'trash') setActiveLens('trash');
-            if (key === 'recent') setScope({ sort: 'date_taken' });
+            if (key === 'recent') navigateToScope({ sort: 'date_taken' });
             closeLeftDrawer();
         });
     }
@@ -928,8 +929,12 @@ function renderSources() {
     host.querySelector('[data-add-source]')?.addEventListener('click', () => document.getElementById('system-btn')?.click());
     for (const row of host.querySelectorAll('[data-source]')) {
         row.addEventListener('click', () => {
-            setScope({ folder: [row.dataset.source] });
+            navigateToScope({ folder: [row.dataset.source] });
             closeLeftDrawer();
+        });
+        row.addEventListener('contextmenu', (event) => {
+            event.preventDefault();
+            openSourceRevealMenu(row.dataset.source, row);
         });
     }
 }
@@ -961,9 +966,8 @@ function savedViewSnapshot() {
 function restoreSavedView(view) {
     try {
         const saved = JSON.parse(view.query);
-        setScope(saved.scope && typeof saved.scope === 'object' ? saved.scope : saved);
+        navigateToScope(saved.scope && typeof saved.scope === 'object' ? saved.scope : saved);
         if (saved.layout) patchPrefs(saved.layout);
-        setActiveLens('grid');
         closeLeftDrawer();
         showToast(`Opened “${view.name}”`);
     } catch {
@@ -1048,6 +1052,30 @@ async function addImagesToCollection(collectionId, imageIds) {
     } else {
         showToast("Couldn't add to collection");
     }
+}
+
+export async function removeImagesFromCollection(collectionId, imageIds, name = '') {
+    const ids = [...new Set(imageIds.map(Number))].filter((id) => id > 0);
+    if (!collectionId || !ids.length) return false;
+    const result = await removeFromCollection(collectionId, ids);
+    if (!result?.ok) {
+        showToast("Couldn't remove photos from this collection");
+        return false;
+    }
+    const label = name || collections.find((collection) => Number(collection.id) === Number(collectionId))?.name || 'collection';
+    await loadCollections();
+    emit('scope', scope);
+    showToast(`Removed ${ids.length} photo${ids.length === 1 ? '' : 's'} from “${label}”`, {
+        undo: async () => {
+            const restored = await addToCollection(collectionId, ids);
+            if (restored?.ok) {
+                await loadCollections();
+                emit('scope', scope);
+                showToast(`Restored to “${label}”`);
+            } else showToast("Couldn't restore photos to this collection");
+        },
+    });
+    return true;
 }
 
 export async function openCollectionPicker(imageIds, { onDone = null } = {}) {

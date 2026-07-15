@@ -102,7 +102,7 @@ async def _start_hub_mdns():
         str(_settings.get_settings().get("share_brand_name") or "").strip()
         or os.environ.get("PHOTOARCHIVE_LIBRARY_NAME", "").strip()
         or socket.gethostname()
-        or "photoArchive"
+        or "Azimuth Photo"
     )
     port = int(os.environ.get("PHOTOARCHIVE_PORT") or 8000)
     await asyncio.to_thread(mdns.start_hub_announce, name=name, port=port, hub_id=hub_id)

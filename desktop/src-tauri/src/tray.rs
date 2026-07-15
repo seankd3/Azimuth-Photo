@@ -23,7 +23,7 @@ struct SyncStatus {
 }
 
 pub fn setup(app: &App) -> tauri::Result<()> {
-    let open_item = MenuItem::with_id(app, "open", "Open photoArchive", true, None::<&str>)?;
+    let open_item = MenuItem::with_id(app, "open", "Open Azimuth Photo", true, None::<&str>)?;
     let status_item =
         MenuItem::with_id(app, "sync-status", "Sync: starting…", false, None::<&str>)?;
     let toggle_item = MenuItem::with_id(app, "sync-toggle", "Pause sync", true, None::<&str>)?;
@@ -47,7 +47,7 @@ pub fn setup(app: &App) -> tauri::Result<()> {
                 .expect("bundled window icon")
                 .clone(),
         )
-        .tooltip("photoArchive")
+        .tooltip("Azimuth Photo")
         .menu(&menu)
         .on_menu_event(move |app, event| match event.id.as_ref() {
             "open" => show_main_window(app),
@@ -97,7 +97,7 @@ fn fetch_status() -> Option<SyncStatus> {
 fn refresh(status_item: &MenuItem<Wry>, toggle_item: &MenuItem<Wry>, tray: &TrayIcon<Wry>) {
     let Some(status) = fetch_status() else {
         let _ = status_item.set_text("Sync: server offline");
-        let _ = tray.set_tooltip(Some("photoArchive — server offline"));
+        let _ = tray.set_tooltip(Some("Azimuth Photo — server offline"));
         return;
     };
     PAUSED.store(status.paused, Ordering::Relaxed);
@@ -114,7 +114,7 @@ fn refresh(status_item: &MenuItem<Wry>, toggle_item: &MenuItem<Wry>, tray: &Tray
     } else {
         "Pause sync"
     });
-    let _ = tray.set_tooltip(Some(format!("photoArchive — {label}")));
+    let _ = tray.set_tooltip(Some(format!("Azimuth Photo — {label}")));
 }
 
 fn show_main_window(app: &AppHandle) {

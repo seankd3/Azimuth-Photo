@@ -1,4 +1,4 @@
-# Ignore build context noise for the photoArchive server image.
+# Ignore build context noise for the Azimuth Photo server image.
 .git
 .gitattributes
 .codex

@@ -70,6 +70,16 @@ class UiContractsTests(BackendTestCase):
         self.assertIn("from '../api.js'", mobile_api)
         self.assertIn("export async function fetchJson", shared_api)
 
+    async def test_desktop_api_notifies_when_post_helpers_fail(self):
+        base_dir = os.path.dirname(__file__)
+        with open(os.path.join(base_dir, "static", "js", "desktop", "api.js"), encoding="utf-8") as fh:
+            desktop_api = fh.read()
+
+        self.assertIn("function reportApiFailure", desktop_api)
+        self.assertIn("if (!response.ok) reportApiFailure({ status: response.status });", desktop_api)
+        self.assertIn("const result = await requestWithStatus(url, jsonRequestOptions('POST', body));", desktop_api)
+        self.assertIn("return result.ok ? result.data : null;", desktop_api)
+
     async def test_service_worker_precaches_mobile_shell_only(self):
         base_dir = os.path.dirname(__file__)
         with open(os.path.join(base_dir, "static", "sw.js"), encoding="utf-8") as fh:
@@ -130,6 +140,20 @@ class UiContractsTests(BackendTestCase):
             history_panel = fh.read()
 
         self.assertIn("cache: 'no-store'", history_panel)
+
+    async def test_left_rail_source_rows_offer_the_shared_reveal_menu(self):
+        base_dir = os.path.dirname(__file__)
+        with open(os.path.join(base_dir, "static", "js", "desktop", "panel.js"), encoding="utf-8") as fh:
+            panel = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "desktop", "source_reveal_menu.js"), encoding="utf-8") as fh:
+            source_reveal_menu = fh.read()
+
+        self.assertIn("openSourceRevealMenu", panel)
+        self.assertIn("row.addEventListener('contextmenu'", panel)
+        self.assertIn("openSourceRevealMenu(row.dataset.source, row)", panel)
+        self.assertIn("revealFolder(path)", source_reveal_menu)
+        self.assertIn('data-act="reveal"', source_reveal_menu)
+        self.assertIn("revealMenuLabel()", source_reveal_menu)
 
     async def test_template_context_versions_static_assets(self):
         context = app_module.app.state.photoarchive_shell.template_context(HeaderRequest())

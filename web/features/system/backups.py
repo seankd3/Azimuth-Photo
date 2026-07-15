@@ -43,7 +43,7 @@ class RestoreStageExistsError(RuntimeError):
 
 
 class RestoreValidationError(RuntimeError):
-    """The selected backup is not a valid photoArchive catalog."""
+    """The selected backup is not a valid Azimuth Photo catalog."""
 
 
 class RestoreStorageError(RuntimeError):
