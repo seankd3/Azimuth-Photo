@@ -4,7 +4,7 @@ import {
     getPeopleStatus, getRemoteAccess, getScanStatus, getSettings, getSyncStatus, getVersion, installAiModel, listDevices,
     pauseAiEmbeddings,
     pauseCaptionScan, pausePeopleScan, removeCatalogSource, rescanCatalogSource, resetSettings, resumeAiEmbeddings,
-    resumeCaptionScan, resumePeopleScan, revokeDevice, revealFolder, saveSettings, startCachePregen, startMetadataScan, stopCachePregen,
+    resumeCaptionScan, resumePeopleScan, revokeDevice, saveSettings, startCachePregen, startMetadataScan, stopCachePregen,
     stopMetadataScan,
 } from './api.js';
 import {
@@ -20,7 +20,7 @@ import {
 import {
     bindLibraryHealth, refreshLibraryHealth, renderLibraryHealth, stopLibraryHealthPolling,
 } from './library_health.js';
-import { icon } from '../icons.js';
+import { openSourceRevealMenu } from './source_reveal_menu.js';
 
 let open = false;
 let drawerTimer = null;
@@ -398,77 +398,6 @@ function dateTime(value) {
     const date = new Date(raw * 1000);
     if (Number.isNaN(date.getTime())) return 'not published';
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-}
-
-function revealMenuLabel() {
-    const platform = navigator.platform || '';
-    if (/Win/i.test(platform)) return 'Reveal in Explorer';
-    if (/Mac/i.test(platform)) return 'Reveal in Finder';
-    return 'Open in file manager';
-}
-
-let sourceMenu = null;
-let sourceMenuReturn = null;
-
-function ensureSourceMenu() {
-    if (sourceMenu) return sourceMenu;
-    sourceMenu = document.createElement('div');
-    sourceMenu.id = 'source-pop-menu';
-    sourceMenu.className = 'pop-menu grid-pop-menu folder-pop-menu';
-    sourceMenu.setAttribute('role', 'menu');
-    sourceMenu.hidden = true;
-    document.body.appendChild(sourceMenu);
-    sourceMenu.addEventListener('keydown', (event) => {
-        if (event.key === 'Escape') {
-            event.preventDefault();
-            event.stopPropagation();
-            closeSourceMenu();
-        }
-    });
-    document.addEventListener('pointerdown', (event) => {
-        if (!sourceMenu || sourceMenu.hidden || sourceMenu.contains(event.target)) return;
-        closeSourceMenu();
-    });
-    return sourceMenu;
-}
-
-function closeSourceMenu() {
-    if (!sourceMenu || sourceMenu.hidden) return;
-    sourceMenu.hidden = true;
-    releaseFocus(sourceMenu);
-    if (sourceMenuReturn && document.contains(sourceMenuReturn) && sourceMenuReturn.focus) {
-        sourceMenuReturn.focus({ preventScroll: true });
-    }
-}
-
-async function revealSourcePath(path) {
-    if (!path) return;
-    const result = await revealFolder(path);
-    if (result?.ok && result?.data?.ok) {
-        showToast('Opened in file manager');
-        return;
-    }
-    showToast(result?.data?.error || 'Couldn’t open folder');
-}
-
-function openSourceMenu(path, anchor) {
-    if (!path || !anchor) return;
-    ensureSourceMenu();
-    releaseFocus(sourceMenu);
-    sourceMenuReturn = anchor;
-    sourceMenu.innerHTML = '<div class="pm-group">'
-        + `<button data-act="reveal" role="menuitem">${icon('folder-open')} ${esc(revealMenuLabel())}</button>`
-        + '</div>';
-    sourceMenu.hidden = false;
-    const rect = anchor.getBoundingClientRect();
-    const menuRect = sourceMenu.getBoundingClientRect();
-    sourceMenu.style.left = `${Math.max(8, Math.min(window.innerWidth - menuRect.width - 8, rect.left + 18))}px`;
-    sourceMenu.style.top = `${Math.max(8, Math.min(window.innerHeight - menuRect.height - 8, rect.top + 18))}px`;
-    sourceMenu.querySelector('[data-act="reveal"]')?.addEventListener('click', () => {
-        closeSourceMenu();
-        revealSourcePath(path);
-    });
-    trapFocus(sourceMenu, sourceMenu.querySelector('button'));
 }
 
 function renderSources() {
@@ -1341,7 +1270,7 @@ function bindDrawerActions() {
     for (const card of body.querySelectorAll('.src-card[data-source-path]')) {
         card.addEventListener('contextmenu', (event) => {
             event.preventDefault();
-            openSourceMenu(card.dataset.sourcePath || '', card);
+            openSourceRevealMenu(card.dataset.sourcePath || '', card);
         });
     }
     for (const btn of body.querySelectorAll('[data-mode]')) {
