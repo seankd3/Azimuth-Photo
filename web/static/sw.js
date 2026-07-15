@@ -53,6 +53,7 @@ const SHELL_URLS = [
     '/static/js/mobile/timeline.js',
     '/static/js/mobile/toast.js',
     '/static/js/mobile/viewer.js',
+    '/static/js/mobile/viewer_momentum.js',
     '/static/js/mobile/write_queue.js',
 ];
 
