@@ -78,12 +78,7 @@ SCENARIOS = [
     # Existing empty-Trash coverage needs the untouched seeded Trash rows.
     Scenario("empty_trash_and_leave", "Trash", empty_trash_and_leave),
     Scenario("import_commit", "Import commit", import_commit),
-    Scenario(
-        "import_cancel",
-        "Import cancel",
-        import_cancel,
-        expected_failure="p0fix has not landed on develop: cancelled staged jobs still finalize their import batch as complete.",
-    ),
+    Scenario("import_cancel", "Import cancel", import_cancel),
     # Destructive by design; keep after every scenario that opens active originals.
     Scenario("duplicates_review", "Stacks", duplicates_review),
     Scenario("trash_selected_restore", "Trash and restore", trash_selected_restore),
