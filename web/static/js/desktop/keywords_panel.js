@@ -192,6 +192,7 @@ export async function render() {
     const host = document.getElementById('keywords-panel');
     if (!host) return;
     const image = activeImage();
+    void renderIptcMetadata(image);
     renderedImageId = Number(image?.id) || null;
     attachedKeywords = [];
     if (!image) {
