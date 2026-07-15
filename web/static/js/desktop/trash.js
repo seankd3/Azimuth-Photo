@@ -306,14 +306,14 @@ async function emptyTrashWithConfirm() {
         confirmLabel: 'Empty trash',
     });
     if (!ok) return;
-    const freed = totalBytes;
-    const result = await emptyTrash();
-    if (!result) {
-        showToast("Trash couldn't be emptied");
+    const response = await emptyTrash();
+    if (!response?.ok || !response.data) {
+        const detail = response?.data?.detail;
+        showToast(typeof detail === 'string' ? detail : "Trash couldn't be emptied");
         return;
     }
     emit('trash:changed', {});
-    showToast(`Trash emptied · ${bytesLabel(freed)} freed`);
+    showToast(`Trash emptied · ${bytesLabel(response.data.freed_bytes)} freed`);
 }
 
 export function openTrash() {

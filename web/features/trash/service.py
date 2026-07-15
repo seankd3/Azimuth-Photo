@@ -581,28 +581,50 @@ def _prune_empty_trash_dirs(paths: list[str]) -> None:
             current = os.path.dirname(current)
 
 
-async def _trash_rows(db_path: str, *, older_than: float | None = None) -> list[dict]:
+async def _trash_rows(
+    db_path: str,
+    *,
+    older_than: float | None = None,
+    image_ids: list[int] | None = None,
+) -> list[dict]:
     conn = await data_connection.open_async(db_path)
     try:
-        query = """
+        base_query = """
             SELECT i.id, i.trash_path, COALESCE(s.path, '') AS source_path,
                    COALESCE(s.online, 1) AS source_online
             FROM images i
             LEFT JOIN catalog_sources s ON s.id = i.source_id
             WHERE i.status = 'trashed'
         """
-        params: tuple = ()
+        age_clause = ""
+        age_params: tuple = ()
         if older_than is not None:
-            query += " AND i.trashed_at IS NOT NULL AND i.trashed_at <= ?"
-            params = (float(older_than),)
-        cursor = await conn.execute(query, params)
-        return [dict(row) for row in await cursor.fetchall()]
+            age_clause = " AND i.trashed_at IS NOT NULL AND i.trashed_at <= ?"
+            age_params = (float(older_than),)
+        if image_ids is None:
+            cursor = await conn.execute(base_query + age_clause, age_params)
+            return [dict(row) for row in await cursor.fetchall()]
+        ids = _clean_ids(image_ids)
+        rows: list[dict] = []
+        for chunk in catalog_repository._chunked(ids):
+            placeholders = ",".join("?" for _ in chunk)
+            cursor = await conn.execute(
+                base_query + age_clause + f" AND i.id IN ({placeholders})",
+                (*age_params, *chunk),
+            )
+            rows.extend(dict(row) for row in await cursor.fetchall())
+        return rows
     finally:
         await data_connection.close_async(conn, db_path=db_path)
 
 
-async def _purge_trash_rows(db_path: str, *, older_than: float | None = None) -> dict:
-    rows = await _trash_rows(db_path, older_than=older_than)
+async def _purge_trash_rows(
+    db_path: str,
+    *,
+    older_than: float | None = None,
+    image_ids: list[int] | None = None,
+) -> dict:
+    rows = await _trash_rows(db_path, older_than=older_than, image_ids=image_ids)
     deletable_ids: list[int] = []
     paths_to_prune: list[str] = []
     errors: list[Error] = []
@@ -610,10 +632,13 @@ async def _purge_trash_rows(db_path: str, *, older_than: float | None = None) ->
     freed_bytes = 0
     for row in rows:
         image_id = int(row["id"])
-        if not int(row["source_online"]):
+        trash_path = row.get("trash_path")
+        # Offline protects source-local trash files that cannot be inspected.
+        # Catalog-only entries (including hub mirrors) have no local file to
+        # protect and must not remain stuck in Trash because of source state.
+        if not int(row["source_online"]) and trash_path:
             skipped_offline += 1
             continue
-        trash_path = row.get("trash_path")
         freed, reason = await __to_thread_remove_trash_file(trash_path, row.get("source_path"))
         if reason:
             errors.append(_error(image_id, reason))
@@ -636,9 +661,24 @@ async def _purge_trash_rows(db_path: str, *, older_than: float | None = None) ->
     }
 
 
-async def empty_trash(db_path: str) -> dict:
-    """Permanently remove all reachable source-local trash entries."""
-    return await _purge_trash_rows(db_path)
+async def empty_trash(db_path: str, *, image_ids: list[int] | None = None) -> dict:
+    """Permanently remove local files plus catalog-only trash entries."""
+    return await _purge_trash_rows(db_path, image_ids=image_ids)
+
+
+async def hub_mirror_trash_refs(db_path: str) -> dict:
+    """Return local mirror count and the corresponding hub catalog IDs."""
+    conn = await data_connection.open_async(db_path)
+    try:
+        cursor = await conn.execute(
+            "SELECT hub_image_id FROM images "
+            "WHERE status = 'trashed' AND COALESCE(hub_remote, 0) = 1"
+        )
+        rows = await cursor.fetchall()
+        hub_image_ids = _clean_ids(row["hub_image_id"] for row in rows)
+        return {"count": len(rows), "hub_image_ids": hub_image_ids}
+    finally:
+        await data_connection.close_async(conn, db_path=db_path)
 
 
 async def purge_expired_trash(
@@ -647,7 +687,7 @@ async def purge_expired_trash(
     retention_seconds: float = DEFAULT_RETENTION_SECONDS,
     now: float | None = None,
 ) -> dict:
-    """Permanently remove only online trash entries past the retention window."""
+    """Purge expired entries when any source-local trash file is reachable."""
     cutoff = (time.time() if now is None else float(now)) - max(0.0, float(retention_seconds))
     return await _purge_trash_rows(db_path, older_than=cutoff)
 
