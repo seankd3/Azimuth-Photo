@@ -9,6 +9,7 @@ import {
 import { showToast } from './toast.js';
 import { icon } from '../icons.js';
 import { keepCoverRejectRest } from './stack_cull.js';
+import { escapeHtml as esc, formatCount as fmt } from './dom.js';
 
 const DEFAULT_THRESHOLD = 0.95;
 const LIMIT = 100;
@@ -43,10 +44,6 @@ let stackRescanning = false;
 let bulkNonCoverIds = null;
 let bulkCountGeneration = 0;
 
-const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[c]));
-const fmt = (n) => Number(n || 0).toLocaleString('en-US');
 const RAW_EXTS = new Set(['arw', 'cr2', 'cr3', 'dng', 'nef', 'orf', 'raf', 'rw2']);
 
 function flagGlyph(flag) {

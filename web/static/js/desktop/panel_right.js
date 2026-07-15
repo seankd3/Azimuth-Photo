@@ -3,6 +3,7 @@ import {
 } from './state.js';
 import { getCaptionStatus, getImageCaption, getImageExif, saveImageCaption } from './api.js';
 import { showToast } from './toast.js';
+import { escapeHtml as esc, formatCount as fmt } from './dom.js';
 
 const exifCache = new Map();
 const exifPromises = new Map();
@@ -15,11 +16,6 @@ let imageVersion = 0;
 let captionStatus = null;
 let captionEditId = null;
 let captionToken = 0;
-
-const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[c]));
-const fmt = (n) => Number(n || 0).toLocaleString('en-US');
 
 function bytes(value) {
     const n = Number(value) || 0;

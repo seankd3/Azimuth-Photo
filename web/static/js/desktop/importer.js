@@ -3,6 +3,7 @@ import { emit, on, setScope } from './state.js';
 import { showToast } from './toast.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
 import { icon } from '../icons.js';
+import { escapeHtml as esc, formatCount as fmt } from './dom.js';
 
 let modal = null;
 let selectedFiles = [];
@@ -10,11 +11,6 @@ let optionsLoaded = false;
 let importOptions = null;
 let recentImports = null;
 let currentUpload = null;
-
-const fmt = (n) => Number(n || 0).toLocaleString('en-US');
-const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[c]));
 
 function entryFile(entry) {
     return new Promise((resolve, reject) => entry.file(resolve, reject));

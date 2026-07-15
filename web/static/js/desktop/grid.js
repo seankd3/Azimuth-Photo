@@ -16,6 +16,7 @@ import { showToast } from './toast.js';
 import { keepCoverRejectRest } from './stack_cull.js';
 import { emptyStateHtml } from './empty_state.js';
 import { gridLoadingHtml } from './loading_state.js';
+import { escapeHtml as esc } from './dom.js';
 
 let offset = 0;
 let loading = false;
@@ -50,10 +51,6 @@ function cancelPendingLoad() {
     loadController.abort();
     loadController = null;
 }
-
-const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[c]));
 
 function aspect(img) {
     const ar = Number(img.aspect_ratio) || (Number(img.width) && Number(img.height) ? Number(img.width) / Number(img.height) : 1.5);

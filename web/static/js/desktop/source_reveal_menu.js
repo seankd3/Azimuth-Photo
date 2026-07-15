@@ -6,7 +6,7 @@ import { showToast } from './toast.js';
 let menu = null;
 let menuReturn = null;
 
-function revealMenuLabel() {
+export function revealMenuLabel() {
     const platform = navigator.platform || '';
     if (/Win/i.test(platform)) return 'Reveal in Explorer';
     if (/Mac/i.test(platform)) return 'Reveal in Finder';

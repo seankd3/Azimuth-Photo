@@ -1,3 +1,5 @@
+import { escapeHtml } from './dom.js';
+
 export const SHORTCUTS = [
     { area: 'Library', key: '/', label: 'Focus search' },
     { area: 'Library', key: 'Ctrl/Cmd K', label: 'Open commands' },
@@ -53,12 +55,6 @@ export const SHORTCUTS = [
 ];
 
 let root = null;
-
-function escapeHtml(value) {
-    return String(value).replace(/[&<>"']/g, (character) => ({
-        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-    }[character]));
-}
 
 function keycapMarkup(shortcut) {
     return shortcut.split(' / ').map((option) => `<span class="shortcut-sheet-keys">${option.split(' ').map((part) => `<kbd>${escapeHtml(part)}</kbd>`).join('<span class="shortcut-sheet-plus">+</span>')}</span>`).join('<span class="shortcut-sheet-or">or</span>');

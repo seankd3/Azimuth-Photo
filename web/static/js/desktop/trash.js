@@ -10,6 +10,7 @@ import { showToast } from './toast.js';
 import { icon } from '../icons.js';
 import { emptyStateHtml } from './empty_state.js';
 import { gridLoadingHtml } from './loading_state.js';
+import { escapeHtml as esc, formatCount as fmt } from './dom.js';
 
 let root = null;
 let open = false;
@@ -42,11 +43,6 @@ async function withBusyAction(key, button, action) {
         else button.disabled = false;
     }
 }
-
-const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[c]));
-const fmt = (n) => Number(n || 0).toLocaleString('en-US');
 
 export function bytesLabel(value) {
     const n = Number(value) || 0;

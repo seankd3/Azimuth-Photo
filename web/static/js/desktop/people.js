@@ -6,6 +6,7 @@ import { releaseFocus, trapFocus } from './focusTrap.js';
 import { showToast } from './toast.js';
 import { icon } from '../icons.js';
 import { personLabel as cleanPersonLabel, isUnnamedPersonLabel } from '../people_labels.js';
+import { escapeHtml as esc, formatCount as fmt } from './dom.js';
 
 let mounted = false;
 let initialized = false;
@@ -21,10 +22,6 @@ let reviewFocusIndex = 0;
 
 const hiddenPeople = new Set();
 const ignoreTimers = new Map();
-const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[c]));
-const fmt = (n) => Number(n || 0).toLocaleString('en-US');
 const countFor = (person) => Number(person?.image_count || person?.photo_count || person?.face_count || 0);
 const thumbFor = (person = {}) => person.face_thumb_url || person.thumb_url || person.image_thumb_url || '';
 const displayLabel = (person, fallback = '') => cleanPersonLabel(person, fallback);

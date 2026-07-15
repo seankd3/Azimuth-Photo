@@ -1,8 +1,5 @@
 import { icon } from '../icons.js';
-
-const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (char) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[char]));
+import { escapeHtml as esc } from './dom.js';
 
 export function emptyStateHtml({ title, detail, actions = [], iconName = 'image' } = {}) {
     const buttons = actions.map(({ label, action = '', primary = false }) => (

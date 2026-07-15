@@ -1,26 +1,16 @@
-import { fetchJson } from './api.js';
+import { fetchJson, requestJson } from './api.js';
 import { emit, patchScope } from './state.js';
 import { showToast } from './toast.js';
+import { escapeHtml as esc } from './dom.js';
 
 const endpoint = '/api/watched-folders';
 let mountedHost = null;
-
-const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (char) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[char]));
 
 function timestamp(value) {
     const seconds = Number(value || 0);
     if (!seconds) return 'Not scanned yet';
     const date = new Date(seconds * 1000);
     return Number.isNaN(date.getTime()) ? 'Not scanned yet' : `Last scan ${date.toLocaleString()}`;
-}
-
-async function request(url, options = {}) {
-    const response = await fetch(url, options);
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.error || 'Couldn’t update watched folders');
-    return data;
 }
 
 function rowHtml(folder) {
@@ -61,7 +51,7 @@ function bind(host) {
             return;
         }
         try {
-            await request(endpoint, {
+            await requestJson(endpoint, {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ path, recursive: Boolean(host.querySelector('#watched-folder-recursive')?.checked) }),
             });
@@ -75,7 +65,7 @@ function bind(host) {
     for (const toggle of host.querySelectorAll('[data-watched-enabled]')) {
         toggle.addEventListener('change', async () => {
             try {
-                await request(`${endpoint}/${folderId(toggle)}`, {
+                await requestJson(`${endpoint}/${folderId(toggle)}`, {
                     method: 'PATCH', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ enabled: toggle.checked }),
                 });
@@ -92,7 +82,7 @@ function bind(host) {
             button.disabled = true;
             button.textContent = 'Scanning…';
             try {
-                const result = await request(`${endpoint}/${folderId(button)}/scan`, { method: 'POST' });
+                const result = await requestJson(`${endpoint}/${folderId(button)}/scan`, { method: 'POST' });
                 showToast(`${Number(result.registered || 0)} photo${Number(result.registered || 0) === 1 ? '' : 's'} found`);
                 if (Number(result.registered || 0)) {
                     emit('import:changed', result);
@@ -108,7 +98,7 @@ function bind(host) {
     for (const button of host.querySelectorAll('[data-watched-remove]')) {
         button.addEventListener('click', async () => {
             try {
-                await request(`${endpoint}/${folderId(button)}`, { method: 'DELETE' });
+                await requestJson(`${endpoint}/${folderId(button)}`, { method: 'DELETE' });
                 showToast('Watched folder removed');
                 await refresh(host);
             } catch (error) {

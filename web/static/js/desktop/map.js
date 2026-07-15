@@ -2,16 +2,12 @@ import { getCollection, getMapMarkers, thumbUrl } from './api.js';
 import { emit, on, scope, scopeParams, setImages, setRankingsMeta } from './state.js';
 import { icon } from '../icons.js';
 import { LAND_PATHS } from './world_land.js';
+import { escapeHtml as esc, formatCount as fmt } from './dom.js';
 
 let mounted = false;
 let initialized = false;
 let generation = 0;
 let markers = [];
-
-const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[c]));
-const fmt = (n) => Number(n || 0).toLocaleString('en-US');
 
 function latOf(marker) {
     return Number(marker.lat ?? marker.latitude);
