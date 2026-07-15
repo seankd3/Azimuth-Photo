@@ -53,6 +53,7 @@ import app.azimuthphoto.mobile.data.ArchiveFolder
 import app.azimuthphoto.mobile.data.ArchiveImage
 import app.azimuthphoto.mobile.data.DeviceMedia
 import app.azimuthphoto.mobile.data.MediaBucket
+import app.azimuthphoto.mobile.data.ViewerMedia
 import app.azimuthphoto.mobile.data.MediaItem
 import app.azimuthphoto.mobile.data.SettingsStore
 import coil.compose.AsyncImage
@@ -162,11 +163,11 @@ fun SearchScreen(onImmersive: (Boolean) -> Unit = {}) {
         onImmersive(archiveViewerIndex != null || localViewerIndex != null)
     }
     archiveViewerIndex?.let { index ->
-        ArchiveViewer(
-            api = api,
-            images = archiveImages,
+        ViewerScreen(
+            items = archiveImages.map { ViewerMedia.Remote(it) },
             startIndex = index,
             onClose = { archiveViewerIndex = null },
+            api = api,
         )
         return
     }

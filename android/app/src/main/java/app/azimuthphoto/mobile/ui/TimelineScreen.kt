@@ -69,6 +69,7 @@ import app.azimuthphoto.mobile.data.MediaItem
 import app.azimuthphoto.mobile.data.SettingsStore
 import app.azimuthphoto.mobile.data.TimelineEntry
 import app.azimuthphoto.mobile.data.UnifiedTimeline
+import app.azimuthphoto.mobile.data.ViewerMedia
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -76,11 +77,6 @@ private sealed class Scope {
     data object All : Scope()
     data object NotBackedUp : Scope()
     data class Shelf(val folder: ArchiveFolder) : Scope()
-}
-
-private sealed class ViewerTarget {
-    data class Device(val index: Int) : ViewerTarget()
-    data class Hub(val index: Int) : ViewerTarget()
 }
 
 private const val HUB_PAGE = 120
@@ -102,6 +98,7 @@ fun TimelineScreen(
     val api = remember(settings?.serverUrl) { settings?.serverUrl?.let { ArchiveApi(it) } }
 
     var device by remember { mutableStateOf<List<MediaItem>?>(null) }
+    var rawTwins by remember { mutableStateOf<Map<String, MediaItem>>(emptyMap()) }
     var backupStates by remember { mutableStateOf<Map<Long, String>>(emptyMap()) }
     var shelves by remember { mutableStateOf<List<ArchiveFolder>>(emptyList()) }
     var scope by rememberSaveable { mutableStateOf(0) } // 0 All, 1 NotBackedUp, 2+ shelf index
@@ -111,13 +108,15 @@ fun TimelineScreen(
     var hubOffline by remember { mutableStateOf(false) }
     var wantMore by remember { mutableStateOf(false) }
     var loadTick by remember { mutableStateOf(0) }
-    var viewer by remember { mutableStateOf<ViewerTarget?>(null) }
+    var viewer by remember { mutableStateOf<Int?>(null) }
     var selectedIds by rememberSaveable(
         stateSaver = listSaver(save = { it.toList() }, restore = { it.toSet() }),
     ) { mutableStateOf(emptySet<Long>()) }
 
     LaunchedEffect(progress.running) {
-        device = DeviceMedia.collapseRawPairs(DeviceMedia.queryAll(context))
+        val all = DeviceMedia.queryAll(context)
+        rawTwins = rawTwinsByShotKey(all)
+        device = DeviceMedia.collapseRawPairs(all)
         backupStates = withContext(Dispatchers.IO) { BackupDb.get(context).allStates() }
     }
     LaunchedEffect(api) {
@@ -171,26 +170,35 @@ fun TimelineScreen(
         return
     }
 
-    // Viewer routing: device entries page the device viewer, hub entries the archive viewer.
-    val deviceItemsInView = remember(entries) {
-        entries.mapNotNull { (it as? TimelineEntry.Device)?.item }
+    // One viewer over the whole merged stream — a phone shot and an archive
+    // original sit in the same pager, swipe seamlessly, share the same chrome.
+    val viewerMedia = remember(entries, rawTwins) {
+        entries.map { entry ->
+            when (entry) {
+                is TimelineEntry.Device -> ViewerMedia.Local(
+                    entry.item,
+                    rawTwins[entry.item.shotKey]?.takeIf { it.id != entry.item.id },
+                )
+                is TimelineEntry.Hub -> ViewerMedia.Remote(entry.image)
+            }
+        }
     }
-    val hubImagesInView = remember(entries) {
-        entries.mapNotNull { (it as? TimelineEntry.Hub)?.image }
+    val entryIndex = remember(entries) {
+        entries.withIndex().associate { it.value.gridKey to it.index }
+    }
+    // Selection acts on device items only (you can't multi-trash a server photo from here).
+    val selectedItems = remember(entries, selectedIds) {
+        entries.mapNotNull { (it as? TimelineEntry.Device)?.item }.filter { it.id in selectedIds }
     }
     LaunchedEffect(viewer != null) { onImmersive(viewer != null) }
-    viewer?.let { target ->
-        when (target) {
-            is ViewerTarget.Device -> ViewerScreen(
-                items = deviceItemsInView,
-                startIndex = target.index,
-                onClose = { viewer = null },
-                onChanged = { loadTick++ },
-            )
-            is ViewerTarget.Hub -> if (api != null) ArchiveViewer(
-                api = api, images = hubImagesInView, startIndex = target.index, onClose = { viewer = null },
-            )
-        }
+    viewer?.let { index ->
+        ViewerScreen(
+            items = viewerMedia,
+            startIndex = index,
+            onClose = { viewer = null },
+            api = api,
+            onChanged = { loadTick++ },
+        )
         return
     }
 
@@ -221,14 +229,10 @@ fun TimelineScreen(
                 deviceRawShotKeys = deviceRawShotKeys,
                 selectedIds = selectedIds,
                 onTapEntry = { entry ->
-                    when (entry) {
-                        is TimelineEntry.Device -> if (selectedIds.isNotEmpty()) {
-                            selectedIds = selectedIds.toggle(entry.item.id)
-                        } else {
-                            viewer = ViewerTarget.Device(deviceItemsInView.indexOfFirst { it.id == entry.item.id })
-                        }
-                        is TimelineEntry.Hub ->
-                            viewer = ViewerTarget.Hub(hubImagesInView.indexOfFirst { it.id == entry.image.id })
+                    if (entry is TimelineEntry.Device && selectedIds.isNotEmpty()) {
+                        selectedIds = selectedIds.toggle(entry.item.id)
+                    } else {
+                        viewer = entryIndex[entry.gridKey]
                     }
                 },
                 onLongPressDevice = { item -> selectedIds = selectedIds + item.id },
@@ -257,11 +261,11 @@ fun TimelineScreen(
                     count = selectedIds.size,
                     onClose = { selectedIds = emptySet() },
                     onShare = {
-                        shareItems(context as Activity, deviceItemsInView.filter { it.id in selectedIds })
+                        shareItems(context as Activity, selectedItems)
                         selectedIds = emptySet()
                     },
                     onTrash = {
-                        val uris = deviceItemsInView.filter { it.id in selectedIds }.map { it.uri }
+                        val uris = selectedItems.map { it.uri }
                         if (uris.isNotEmpty()) {
                             val pending = MediaStore.createTrashRequest(context.contentResolver, uris, true)
                             trashLauncher.launch(IntentSenderRequest.Builder(pending).build())

@@ -35,11 +35,14 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.rounded.VolumeOff
 import androidx.compose.material.icons.rounded.VolumeUp
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -70,6 +73,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.exifinterface.media.ExifInterface
 import androidx.media3.common.Player
 import androidx.media3.common.MediaItem as ExoMediaItem
@@ -78,23 +82,35 @@ import androidx.media3.ui.PlayerView
 import app.azimuthphoto.mobile.ViewerActivity
 import app.azimuthphoto.mobile.backup.BackupDb
 import app.azimuthphoto.mobile.backup.BackupRecord
+import app.azimuthphoto.mobile.data.ArchiveApi
+import app.azimuthphoto.mobile.data.ArchiveImage
 import app.azimuthphoto.mobile.data.MediaItem
+import app.azimuthphoto.mobile.data.UnifiedTimeline
+import app.azimuthphoto.mobile.data.ViewerMedia
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import java.io.File
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlin.math.abs
 
+/**
+ * The one viewer. Every photo — on this phone or only in the archive — gets
+ * identical gestures (pinch/double-tap zoom, one-finger pan, swipe-down
+ * dismiss, swipe-between) and identical actions (share, edit, info, use as,
+ * open with, delete). Local actions ride content URIs; remote actions ride the
+ * hub API and a cached full-resolution render.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ViewerScreen(
-    items: List<MediaItem>,
+    items: List<ViewerMedia>,
     startIndex: Int,
     onClose: () -> Unit,
+    api: ArchiveApi? = null,
     onChanged: () -> Unit = {},
 ) {
     BackHandler(onBack = onClose)
@@ -109,8 +125,10 @@ fun ViewerScreen(
         if (result.resultCode == Activity.RESULT_OK) { onChanged(); onClose() }
     }
     var chromeVisible by remember { mutableStateOf(true) }
-    var infoFor by remember { mutableStateOf<MediaItem?>(null) }
+    var infoFor by remember { mutableStateOf<ViewerMedia?>(null) }
     var menuVisible by remember { mutableStateOf(false) }
+    var confirmHubTrash by remember { mutableStateOf<ArchiveImage?>(null) }
+    var busy by remember { mutableStateOf(false) }
     var currentZoom by remember { mutableFloatStateOf(1f) }
     val dismissY = remember { Animatable(0f) }
     val scope = rememberCoroutineScope()
@@ -118,6 +136,28 @@ fun ViewerScreen(
     val dismissFraction = (dismissY.value / 600f).coerceIn(0f, 1f)
     // Each new page starts unzoomed, so dismiss re-arms and the pager re-enables.
     LaunchedEffect(pagerState.currentPage) { currentZoom = 1f }
+
+    /** Resolve a shareable content URI — local media directly, remote via cached render. */
+    suspend fun shareableUri(media: ViewerMedia): Pair<Uri, String>? = when (media) {
+        is ViewerMedia.Local -> media.item.uri to
+            (context.contentResolver.getType(media.item.uri)
+                ?: if (media.isVideo) "video/*" else "image/*")
+        is ViewerMedia.Remote -> api?.let {
+            runCatching {
+                val file = it.downloadToCache(context, media.image)
+                FileProvider.getUriForFile(context, "${context.packageName}.files", file) to
+                    (if (media.isVideo) "video/*" else "image/jpeg")
+            }.getOrNull()
+        }
+    }
+
+    fun withShareable(media: ViewerMedia, action: (Uri, String) -> Unit) {
+        scope.launch {
+            busy = true
+            shareableUri(media)?.let { (uri, mime) -> action(uri, mime) }
+            busy = false
+        }
+    }
 
     Box(
         Modifier
@@ -151,7 +191,7 @@ fun ViewerScreen(
     ) {
         HorizontalPager(
             state = pagerState,
-            key = { items[it].id },
+            key = { items[it].key },
             beyondViewportPageCount = 0,
             userScrollEnabled = currentZoom <= 1.01f,
             modifier = Modifier.graphicsLayer {
@@ -161,15 +201,32 @@ fun ViewerScreen(
                 scaleY = dismissalScale
             },
         ) { page ->
-            val item = items[page]
-            if (item.isVideo) {
-                LaunchedEffect(page) { if (pagerState.currentPage == page) currentZoom = 1f }
-                VideoPage(item, isActive = pagerState.currentPage == page)
-            } else {
-                ZoomableImage(
-                    item = item,
+            val media = items[page]
+            val isActive = pagerState.currentPage == page
+            when {
+                media is ViewerMedia.Local && media.isVideo -> {
+                    LaunchedEffect(page) { if (isActive) currentZoom = 1f }
+                    VideoPage(source = media.item.uri, key = media.key, isActive = isActive)
+                }
+                media is ViewerMedia.Remote && media.isVideo -> {
+                    LaunchedEffect(page) { if (isActive) currentZoom = 1f }
+                    // Streams straight off the hub; ExoPlayer speaks http natively.
+                    VideoPage(
+                        source = Uri.parse(api?.fullUrl(media.image.id).orEmpty()),
+                        key = media.key,
+                        isActive = isActive,
+                    )
+                }
+                else -> ZoomableImage(
+                    key = media.key,
+                    model = when (media) {
+                        is ViewerMedia.Local -> media.item.uri
+                        is ViewerMedia.Remote -> api?.largeUrl(media.image) ?: media.image.thumb_url
+                    },
+                    // Remote zoom quietly upgrades to the full-resolution render.
+                    fullModel = (media as? ViewerMedia.Remote)?.let { api?.fullUrl(it.image.id) },
                     onTap = { chromeVisible = !chromeVisible },
-                    onZoomChanged = { if (pagerState.currentPage == page) currentZoom = it },
+                    onZoomChanged = { if (isActive) currentZoom = it },
                 )
             }
         }
@@ -188,8 +245,29 @@ fun ViewerScreen(
                     Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back", tint = Color.White)
                 }
                 Spacer(Modifier.weight(1f))
-                IconButton(onClick = { shareItem(context as Activity, current) }) {
+                if (busy) {
+                    CircularProgressIndicator(
+                        color = Color.White,
+                        strokeWidth = 2.dp,
+                        modifier = Modifier.padding(horizontal = 12.dp).size(18.dp),
+                    )
+                }
+                IconButton(enabled = !busy, onClick = {
+                    withShareable(current) { uri, mime -> share(context, uri, mime) }
+                }) {
                     Icon(Icons.Outlined.Share, "Share", tint = Color.White)
+                }
+                if (!current.isVideo) {
+                    IconButton(enabled = !busy, onClick = {
+                        val local = current as? ViewerMedia.Local
+                        if (local?.rawTwin != null) {
+                            menuVisible = true // RAW pair: choose in the menu below
+                        } else {
+                            withShareable(current) { uri, mime -> edit(context, uri, mime) }
+                        }
+                    }) {
+                        Icon(Icons.Outlined.Edit, "Edit", tint = Color.White)
+                    }
                 }
                 IconButton(onClick = { infoFor = current }) {
                     Icon(Icons.Outlined.Info, "Info", tint = Color.White)
@@ -202,27 +280,51 @@ fun ViewerScreen(
                         expanded = menuVisible,
                         onDismissRequest = { menuVisible = false },
                     ) {
+                        (current as? ViewerMedia.Local)?.rawTwin?.let { twin ->
+                            DropdownMenuItem(
+                                text = { Text("Edit RAW (.dng)") },
+                                onClick = {
+                                    menuVisible = false
+                                    edit(
+                                        context, twin.uri,
+                                        context.contentResolver.getType(twin.uri) ?: "image/x-adobe-dng",
+                                    )
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Edit JPEG") },
+                                onClick = {
+                                    menuVisible = false
+                                    withShareable(current) { uri, mime -> edit(context, uri, mime) }
+                                },
+                            )
+                        }
                         DropdownMenuItem(
                             text = { Text("Use as") },
                             onClick = {
                                 menuVisible = false
-                                useAs(context as Activity, current)
+                                withShareable(current) { uri, mime -> useAs(context, uri, mime) }
                             },
                         )
                         DropdownMenuItem(
                             text = { Text("Open with") },
                             onClick = {
                                 menuVisible = false
-                                openWith(context as Activity, current)
+                                withShareable(current) { uri, mime -> openWith(context, uri, mime) }
                             },
                         )
                     }
                 }
-                IconButton(onClick = {
-                    val pending = MediaStore.createTrashRequest(
-                        context.contentResolver, listOf(current.uri), true,
-                    )
-                    trashLauncher.launch(IntentSenderRequest.Builder(pending).build())
+                IconButton(enabled = !busy, onClick = {
+                    when (current) {
+                        is ViewerMedia.Local -> {
+                            val pending = MediaStore.createTrashRequest(
+                                context.contentResolver, listOf(current.item.uri), true,
+                            )
+                            trashLauncher.launch(IntentSenderRequest.Builder(pending).build())
+                        }
+                        is ViewerMedia.Remote -> confirmHubTrash = current.image
+                    }
                 }) {
                     Icon(Icons.Outlined.Delete, "Delete", tint = Color.White)
                 }
@@ -230,55 +332,129 @@ fun ViewerScreen(
         }
     }
 
-    infoFor?.let { item ->
-        InfoSheet(item = item, onDismiss = { infoFor = null })
+    confirmHubTrash?.let { image ->
+        AlertDialog(
+            onDismissRequest = { confirmHubTrash = null },
+            containerColor = Panel,
+            title = { Text("Move to archive trash?") },
+            text = { Text("${image.filename} moves to your server's trash. You can restore it from the desktop app.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmHubTrash = null
+                    scope.launch {
+                        busy = true
+                        val ok = api?.trash(listOf(image.id)) == true
+                        busy = false
+                        if (ok) { onChanged(); onClose() }
+                    }
+                }) { Text("Move to trash") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmHubTrash = null }) { Text("Cancel") }
+            },
+        )
+    }
+
+    infoFor?.let { media ->
+        InfoSheet(media = media, api = api, onDismiss = { infoFor = null })
     }
 }
 
+/** Compatibility entry for device-only flows (camera review, picker preview). */
+@Composable
+fun ViewerScreen(
+    items: List<MediaItem>,
+    startIndex: Int,
+    onClose: () -> Unit,
+    onChanged: () -> Unit = {},
+) {
+    val rawTwins = remember(items) { rawTwinsByShotKey(items) }
+    ViewerScreen(
+        items = items.map { ViewerMedia.Local(it, rawTwins[it.shotKey]?.takeIf { twin -> twin.id != it.id }) },
+        startIndex = startIndex,
+        onClose = onClose,
+        api = null,
+        onChanged = onChanged,
+    )
+}
+
+/** DNG twins keyed by shot, so Edit can offer the RAW even though the grid hides it. */
+fun rawTwinsByShotKey(items: List<MediaItem>): Map<String, MediaItem> =
+    items.asSequence().filter { it.isRaw }.associateBy { it.shotKey }
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun InfoSheet(item: MediaItem, onDismiss: () -> Unit) {
+private fun InfoSheet(media: ViewerMedia, api: ArchiveApi?, onDismiss: () -> Unit) {
     val context = LocalContext.current
-    var details by remember(item.id) { mutableStateOf<MediaDetails?>(null) }
-    LaunchedEffect(item.id) { details = loadMediaDetails(context, item) }
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Panel) {
         Column(Modifier.padding(horizontal = 20.dp).navigationBarsPadding()) {
-            Text(item.displayName, style = MaterialTheme.typography.titleMedium, color = TextPrimary)
+            Text(media.displayName, style = MaterialTheme.typography.titleMedium, color = TextPrimary)
             Spacer(Modifier.height(10.dp))
-            InfoLine("Taken", formatTimestamp(item.dateTakenMs))
-            InfoLine("Folder", item.relativePath.ifEmpty { item.bucketName })
-            InfoLine("Size", formatBytes(item.sizeBytes))
-            if (item.width > 0) InfoLine("Dimensions", "${item.width} × ${item.height}")
-            if (item.isVideo) InfoLine("Duration", formatDuration(item.durationMs))
-            details?.cameraModel?.let { InfoLine("Camera", it) }
-            details?.aperture?.let { InfoLine("Aperture", it) }
-            details?.shutter?.let { InfoLine("Shutter", it) }
-            details?.iso?.let { InfoLine("ISO", it) }
-            details?.focalLength?.let { InfoLine("Focal length", it) }
-            details?.location?.let { (lat, lon) ->
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        "Located at %.5f, %.5f".format(lat, lon),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = TextPrimary,
-                        modifier = Modifier.weight(1f),
-                    )
-                    TextButton(onClick = { openMap(context, lat, lon) }) { Text("Open in Maps") }
-                }
+            when (media) {
+                is ViewerMedia.Local -> LocalInfo(context, media.item)
+                is ViewerMedia.Remote -> RemoteInfo(media.image, api)
             }
-            val record = details?.backupRecord
-            InfoLine(
-                "Backup",
-                if (record?.isBackedUp == true) {
-                    "Backed up to archive" + (record.hubImageId?.let { " · #$it" } ?: "")
-                } else {
-                    "Not backed up yet"
-                },
-            )
             Spacer(Modifier.height(24.dp))
         }
     }
 }
+
+@Composable
+private fun LocalInfo(context: Context, item: MediaItem) {
+    var details by remember(item.id) { mutableStateOf<MediaDetails?>(null) }
+    LaunchedEffect(item.id) { details = loadMediaDetails(context, item) }
+    InfoLine("Taken", formatTimestamp(item.dateTakenMs))
+    InfoLine("Folder", item.relativePath.ifEmpty { item.bucketName })
+    InfoLine("Size", formatBytes(item.sizeBytes))
+    if (item.width > 0) InfoLine("Dimensions", "${item.width} × ${item.height}")
+    if (item.isVideo) InfoLine("Duration", formatDuration(item.durationMs))
+    details?.cameraModel?.let { InfoLine("Camera", it) }
+    details?.aperture?.let { InfoLine("Aperture", it) }
+    details?.shutter?.let { InfoLine("Shutter", it) }
+    details?.iso?.let { InfoLine("ISO", it) }
+    details?.focalLength?.let { InfoLine("Focal length", it) }
+    details?.location?.let { (lat, lon) ->
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "Located at %.5f, %.5f".format(lat, lon),
+                style = MaterialTheme.typography.bodyMedium,
+                color = TextPrimary,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = { openMap(context, lat, lon) }) { Text("Open in Maps") }
+        }
+    }
+    val record = details?.backupRecord
+    InfoLine(
+        "Backup",
+        if (record?.isBackedUp == true) {
+            "Backed up to archive" + (record.hubImageId?.let { " · #$it" } ?: "")
+        } else {
+            "Not backed up yet"
+        },
+    )
+}
+
+@Composable
+private fun RemoteInfo(image: ArchiveImage, api: ArchiveApi?) {
+    var exif by remember(image.id) { mutableStateOf<Map<String, String>>(emptyMap()) }
+    LaunchedEffect(image.id) { exif = api?.exif(image.id) ?: emptyMap() }
+    image.date_taken?.let {
+        InfoLine("Taken", formatTimestamp(UnifiedTimeline.hubMillis(it)))
+    }
+    image.file_size?.let { InfoLine("Size", formatBytes(it)) }
+    if ((image.width ?: 0) > 0) InfoLine("Dimensions", "${image.width} × ${image.height}")
+    (image.camera_model ?: exif.firstValue("camera", "model"))?.let { InfoLine("Camera", it) }
+    (image.lens ?: exif.firstValue("lens"))?.let { InfoLine("Lens", it) }
+    exif.firstValue("aperture", "f_number", "fnumber")?.let { InfoLine("Aperture", it) }
+    exif.firstValue("shutter", "exposure")?.let { InfoLine("Shutter", it) }
+    exif.firstValue("iso")?.let { InfoLine("ISO", it) }
+    exif.firstValue("focal")?.let { InfoLine("Focal length", it) }
+    InfoLine("Archive", "In your archive · #${image.id}")
+}
+
+private fun Map<String, String>.firstValue(vararg keyParts: String): String? =
+    entries.firstOrNull { (k, _) -> keyParts.any { k.contains(it, ignoreCase = true) } }?.value
 
 private val BackupRecord.isBackedUp: Boolean
     get() = state == BackupDb.STATE_UPLOADED || state == BackupDb.STATE_PRESENT
@@ -303,21 +479,25 @@ private fun InfoLine(label: String, value: String) {
 
 @Composable
 private fun ZoomableImage(
-    item: MediaItem,
+    key: String,
+    model: Any,
+    fullModel: Any?,
     onTap: () -> Unit,
     onZoomChanged: (Float) -> Unit,
 ) {
-    var scale by remember(item.id) { mutableFloatStateOf(1f) }
-    var offsetX by remember(item.id) { mutableFloatStateOf(0f) }
-    var offsetY by remember(item.id) { mutableFloatStateOf(0f) }
-    var width by remember(item.id) { mutableFloatStateOf(0f) }
-    var height by remember(item.id) { mutableFloatStateOf(0f) }
+    var scale by remember(key) { mutableFloatStateOf(1f) }
+    var offsetX by remember(key) { mutableFloatStateOf(0f) }
+    var offsetY by remember(key) { mutableFloatStateOf(0f) }
+    var width by remember(key) { mutableFloatStateOf(0f) }
+    var height by remember(key) { mutableFloatStateOf(0f) }
+    var wantFull by remember(key) { mutableStateOf(false) }
+    if (scale > 1.2f && fullModel != null) wantFull = true
 
     Box(
         Modifier
             .fillMaxSize()
             .onSizeChanged { size -> width = size.width.toFloat(); height = size.height.toFloat() }
-            .pointerInput(item.id) {
+            .pointerInput(key) {
                 detectTapGestures(
                     onTap = { onTap() },
                     onDoubleTap = { tap ->
@@ -335,7 +515,7 @@ private fun ZoomableImage(
                     },
                 )
             }
-            .pointerInput(item.id) {
+            .pointerInput(key) {
                 detectTransformGestures { _, pan, zoom, _ ->
                     scale = (scale * zoom).coerceIn(1f, 8f)
                     if (scale > 1f) {
@@ -348,7 +528,7 @@ private fun ZoomableImage(
                     onZoomChanged(scale)
                 }
             }
-            .pointerInput(item.id, scale) {
+            .pointerInput(key, scale) {
                 detectDragGestures { change, amount ->
                     if (scale > 1f) {
                         change.consume()
@@ -361,10 +541,12 @@ private fun ZoomableImage(
     ) {
         AsyncImage(
             model = ImageRequest.Builder(LocalContext.current)
-                .data(item.uri)
-                .crossfade(true)
+                .data(if (wantFull) fullModel else model)
+                // Keep showing the preview while the full render streams in.
+                .placeholderMemoryCacheKey(model.toString())
+                .crossfade(false)
                 .build(),
-            contentDescription = item.displayName,
+            contentDescription = null,
             contentScale = ContentScale.Fit,
             modifier = Modifier
                 .fillMaxSize()
@@ -379,14 +561,14 @@ private fun ZoomableImage(
 }
 
 @Composable
-private fun VideoPage(item: MediaItem, isActive: Boolean) {
+private fun VideoPage(source: Uri, key: String, isActive: Boolean) {
     val context = LocalContext.current
     val hostView = LocalView.current
-    var muted by remember(item.id) { mutableStateOf(false) }
-    var isPlaying by remember(item.id) { mutableStateOf(false) }
-    val player = remember(item.id) {
+    var muted by remember(key) { mutableStateOf(false) }
+    var isPlaying by remember(key) { mutableStateOf(false) }
+    val player = remember(key) {
         ExoPlayer.Builder(context).build().apply {
-            setMediaItem(ExoMediaItem.fromUri(item.uri))
+            setMediaItem(ExoMediaItem.fromUri(source))
             prepare()
         }
     }
@@ -405,7 +587,7 @@ private fun VideoPage(item: MediaItem, isActive: Boolean) {
     LaunchedEffect(isActive) {
         if (isActive) {
             if (player.playbackState == Player.STATE_IDLE) {
-                player.setMediaItem(ExoMediaItem.fromUri(item.uri))
+                player.setMediaItem(ExoMediaItem.fromUri(source))
                 player.prepare()
             }
         } else {
@@ -498,42 +680,45 @@ private fun openMap(context: Context, latitude: Double, longitude: Double) {
     runCatching { context.startActivity(intent) }
 }
 
-private fun shareItem(activity: Activity, item: MediaItem) {
+private fun share(context: Context, uri: Uri, mimeType: String) {
     val intent = Intent(Intent.ACTION_SEND).apply {
-        type = if (item.isVideo) "video/*" else "image/*"
-        putExtra(Intent.EXTRA_STREAM, item.uri)
+        type = mimeType
+        putExtra(Intent.EXTRA_STREAM, uri)
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
-    activity.startActivity(Intent.createChooser(intent, null))
+    context.startActivity(Intent.createChooser(intent, null))
 }
 
-private fun useAs(activity: Activity, item: MediaItem) {
-    val mimeType = activity.contentResolver.getType(item.uri)
-        ?: if (item.isVideo) "video/*" else "image/*"
+private fun edit(context: Context, uri: Uri, mimeType: String) {
+    val intent = Intent(Intent.ACTION_EDIT).apply {
+        setDataAndType(uri, mimeType)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+    }
+    runCatching { context.startActivity(Intent.createChooser(intent, "Edit with")) }
+}
+
+private fun useAs(context: Context, uri: Uri, mimeType: String) {
     val intent = Intent(Intent.ACTION_ATTACH_DATA).apply {
-        setDataAndType(item.uri, mimeType)
+        setDataAndType(uri, mimeType)
         putExtra("mimeType", mimeType)
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
-    activity.startActivity(Intent.createChooser(intent, null))
+    context.startActivity(Intent.createChooser(intent, null))
 }
 
-private fun openWith(activity: Activity, item: MediaItem) {
-    val mimeType = activity.contentResolver.getType(item.uri)
-        ?: if (item.isVideo) "video/*" else "image/*"
+private fun openWith(context: Context, uri: Uri, mimeType: String) {
     val intent = Intent(Intent.ACTION_VIEW).apply {
-        setDataAndType(item.uri, mimeType)
+        setDataAndType(uri, mimeType)
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
     val chooser = Intent.createChooser(intent, null).apply {
         putExtra(
             Intent.EXTRA_EXCLUDE_COMPONENTS,
-            arrayOf(ComponentName(activity, ViewerActivity::class.java)),
+            arrayOf(ComponentName(context, ViewerActivity::class.java)),
         )
     }
-    activity.startActivity(chooser)
+    context.startActivity(chooser)
 }
-
 
 private fun formatTimestamp(ms: Long): String =
     Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault())

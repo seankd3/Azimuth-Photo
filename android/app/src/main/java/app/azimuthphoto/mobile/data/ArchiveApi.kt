@@ -1,16 +1,23 @@
 package app.azimuthphoto.mobile.data
 
+import android.content.Context
+import java.io.File
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+
+private val JSON_TYPE = "application/json".toMediaType()
 
 @Serializable
 data class ArchiveImage(
@@ -107,7 +114,54 @@ class ArchiveApi(private val baseUrl: String) {
         else "$baseUrl/api/thumb/$size/${image.id}"
 
     fun largeUrl(image: ArchiveImage): String = "$baseUrl/api/thumb/lg/${image.id}"
+
+    /** Full-resolution render — what deep zoom and sharing deserve. */
+    fun fullUrl(imageId: Long): String = "$baseUrl/api/full/$imageId"
+
+    /** Move hub images to the archive's restorable trash. */
+    suspend fun trash(ids: List<Long>): Boolean = withContext(Dispatchers.IO) {
+        val body = json.encodeToString(ImageIdsBody(ids)).toRequestBody(JSON_TYPE)
+        http.newCall(Request.Builder().url("$baseUrl/api/images/trash").post(body).build())
+            .execute().use { it.isSuccessful }
+    }
+
+    /** EXIF fields for the info sheet; shapes vary, so everything renders defensively. */
+    suspend fun exif(imageId: Long): Map<String, String> = withContext(Dispatchers.IO) {
+        runCatching {
+            http.newCall(Request.Builder().url("$baseUrl/api/image/$imageId/exif").build())
+                .execute().use { response ->
+                    if (!response.isSuccessful) return@use emptyMap()
+                    val root = json.parseToJsonElement(response.body?.string().orEmpty())
+                    if (root !is JsonObject) return@use emptyMap()
+                    root.entries.mapNotNull { (k, v) ->
+                        (v as? JsonPrimitive)?.content?.takeIf { it.isNotBlank() && it != "null" }
+                            ?.let { k to it }
+                    }.toMap()
+                }
+        }.getOrDefault(emptyMap())
+    }
+
+    /**
+     * Download the full render into the app cache so a hub photo can ride the
+     * exact same share / edit / open-with intents as a local file.
+     */
+    suspend fun downloadToCache(context: Context, image: ArchiveImage): File =
+        withContext(Dispatchers.IO) {
+            val dir = File(context.cacheDir, "shared").apply { mkdirs() }
+            val ext = (image.file_ext ?: ".jpg").removePrefix(".").ifEmpty { "jpg" }
+            val name = image.filename.substringBeforeLast('.').ifEmpty { "azimuth-${image.id}" }
+            val target = File(dir, "$name-${image.id}.${if (image.isVideo) ext else "jpg"}")
+            if (target.length() > 0) return@withContext target
+            http.newCall(Request.Builder().url(fullUrl(image.id)).build()).execute().use { response ->
+                if (!response.isSuccessful) throw IOException("full download failed: HTTP ${response.code}")
+                target.outputStream().use { out -> response.body!!.byteStream().copyTo(out) }
+            }
+            target
+        }
 }
+
+@Serializable
+private data class ImageIdsBody(val ids: List<Long>)
 
 data class ArchiveStats(val photoCount: Long?)
 
