@@ -1033,12 +1033,26 @@ function scheduleChromeRefresh() {
     }, 300);
 }
 
+function patchCollectionCount(collectionId, delta) {
+    const collection = collections.find((item) => Number(item.id) === Number(collectionId));
+    if (!collection) return () => {};
+    const previous = Number(collection.image_count) || 0;
+    collection.image_count = Math.max(0, previous + delta);
+    renderCollections();
+    return () => {
+        if (!collections.includes(collection)) return;
+        collection.image_count = previous;
+        renderCollections();
+    };
+}
+
 async function addImagesToCollection(collectionId, imageIds) {
     const coll = collections.find((c) => Number(c.id) === Number(collectionId));
     if (coll?.smart) {
         showToast('Smart collections update from their filters');
-        return;
+        return false;
     }
+    const restoreCount = patchCollectionCount(collectionId, imageIds.length);
     const result = await addToCollection(collectionId, imageIds);
     if (result && result.ok) {
         showToast(`Added ${imageIds.length} to “${coll ? coll.name : 'collection'}”`, {
@@ -1049,16 +1063,21 @@ async function addImagesToCollection(collectionId, imageIds) {
             },
         });
         await loadCollections();
+        return true;
     } else {
+        restoreCount();
         showToast("Couldn't add to collection");
+        return false;
     }
 }
 
 export async function removeImagesFromCollection(collectionId, imageIds, name = '') {
     const ids = [...new Set(imageIds.map(Number))].filter((id) => id > 0);
     if (!collectionId || !ids.length) return false;
+    const restoreCount = patchCollectionCount(collectionId, -ids.length);
     const result = await removeFromCollection(collectionId, ids);
     if (!result?.ok) {
+        restoreCount();
         showToast("Couldn't remove photos from this collection");
         return false;
     }
@@ -1107,27 +1126,30 @@ export async function openCollectionPicker(imageIds, { onDone = null } = {}) {
             close();
         }
     });
+    const setBusy = (busy) => {
+        for (const control of picker.querySelectorAll('input, button')) control.disabled = busy;
+    };
     let creating = false;
     picker.querySelector('form').addEventListener('submit', async (event) => {
         event.preventDefault();
         const name = picker.querySelector('input').value.trim();
         if (!name || creating) return;
         creating = true;
-        const submit = event.currentTarget.querySelector('button');
-        if (submit) submit.disabled = true;
-        close();
-        if (onDone) onDone();
+        setBusy(true);
         try {
             const result = await createCollection(name, ids);
             if (result && result.ok) {
                 const coll = result.collection || {};
                 await loadCollections();
+                close();
+                if (onDone) onDone();
                 showToast(`Created “${name}”`, {
                     undo: async () => coll.id && removeFromCollection(coll.id, ids),
                 });
             } else showToast("Couldn't create collection");
         } finally {
             creating = false;
+            if (picker.isConnected) setBusy(false);
         }
     });
     const list = picker.querySelector('.picker-list');
@@ -1137,9 +1159,12 @@ export async function openCollectionPicker(imageIds, { onDone = null } = {}) {
     )).join('') : '<div class="muted">No regular collections yet.</div>';
     for (const row of list.querySelectorAll('[data-coll-id]')) {
         row.addEventListener('click', async () => {
-            close();
-            if (onDone) onDone();
-            await addImagesToCollection(Number(row.dataset.collId), ids);
+            setBusy(true);
+            const added = await addImagesToCollection(Number(row.dataset.collId), ids);
+            if (added) {
+                close();
+                if (onDone) onDone();
+            } else if (picker.isConnected) setBusy(false);
         });
     }
     picker.querySelector('input').focus();
@@ -1379,13 +1404,18 @@ export async function initPanel() {
         const input = document.getElementById('new-coll-name');
         const name = input.value.trim();
         if (!name) return;
-        input.value = '';
-        event.currentTarget.hidden = true;
+        const submit = event.submitter || document.getElementById('new-coll-create');
+        if (submit) submit.disabled = true;
         const result = await createCollection(name, []);
         if (result && result.ok) {
+            input.value = '';
+            event.currentTarget.hidden = true;
             showToast(`Created “${name}”`);
             await loadCollections();
-        } else showToast("Couldn't create collection");
+        } else {
+            showToast("Couldn't create collection");
+            if (submit) submit.disabled = false;
+        }
     });
     on('panel', (collapsed) => {
         document.getElementById('shell').classList.toggle('left-collapsed', collapsed);

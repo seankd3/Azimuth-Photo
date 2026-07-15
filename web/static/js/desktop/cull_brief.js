@@ -135,6 +135,7 @@ async function undoAccept(receipt = state.lastAccept) {
     if (!receipt || receipt.undone || state.busy) return false;
     state.busy = true;
     try {
+        if (!await receipt.commit) return false;
         const results = await Promise.all([...restoreGroups(receipt.suggestion)].map(([flag, ids]) => writeFlags(ids, flag)));
         if (results.some((result) => !result?.ok)) throw new Error('restore failed');
         receipt.undone = true;
@@ -160,17 +161,8 @@ async function undoAccept(receipt = state.lastAccept) {
 async function acceptCurrent() {
     const suggestion = current();
     if (!suggestion || state.busy) return;
-    state.busy = true;
-    renderReview();
-    const result = await postJson('/api/quality/autocull/apply', { stack_ids: [suggestion.stack_id] });
-    state.busy = false;
-    if (!result?.ok) {
-        renderReview();
-        showToast(result?.error || 'Couldn’t apply this suggestion');
-        return;
-    }
     const picked = suggestion.members.find((member) => member.suggested_pick);
-    const receipt = { suggestion, index: state.index, undone: false };
+    const receipt = { suggestion, index: state.index, undone: false, commit: null, finished: state.suggestions.length === 1 };
     state.lastAccept = receipt;
     state.picked += 1;
     state.rejected += Math.max(0, suggestion.member_count - 1);
@@ -186,7 +178,27 @@ async function acceptCurrent() {
             { undo: () => undoAccept(receipt) },
         );
     }
-    document.dispatchEvent(new CustomEvent('photoarchive:cull-applied', { detail: result }));
+    receipt.commit = postJson('/api/quality/autocull/apply', { stack_ids: [suggestion.stack_id] })
+        .then((result) => {
+            if (!result?.ok) throw new Error(result?.error || 'Couldn’t apply this suggestion');
+            document.dispatchEvent(new CustomEvent('photoarchive:cull-applied', { detail: result }));
+            return true;
+        })
+        .catch((error) => {
+            if (!receipt.undone) {
+                state.picked = Math.max(0, state.picked - 1);
+                state.rejected = Math.max(0, state.rejected - Math.max(0, suggestion.member_count - 1));
+                const restoreIndex = Math.min(receipt.index, state.suggestions.length);
+                state.suggestions.splice(restoreIndex, 0, suggestion);
+                state.index = state.suggestions.length === 1
+                    ? 0
+                    : Math.min(state.suggestions.length - 1, state.index + (restoreIndex <= state.index ? 1 : 0));
+                updateBanner();
+                if (receipt.finished || !host()?.hidden) renderReview();
+            }
+            showToast(error.message || 'Couldn’t apply this suggestion');
+            return false;
+        });
 }
 
 function skipCurrent() {
@@ -196,6 +208,7 @@ function skipCurrent() {
     if (state.index >= state.suggestions.length) state.index = Math.max(0, state.suggestions.length - 1);
     updateBanner();
     advance();
+    showToast('Skipped');
 }
 
 function togglePreviewZoom(preview) {

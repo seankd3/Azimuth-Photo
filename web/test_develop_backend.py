@@ -29,7 +29,8 @@ except ImportError:  # Keep the repository's unittest fallback runnable in minim
 sys.path.insert(0, os.path.dirname(__file__))
 import app as app_module  # noqa: E402
 import db  # noqa: E402
-from features.develop import rawproc  # noqa: E402
+from features.develop import rawproc, routes as develop_routes  # noqa: E402
+from features.sync import readthrough  # noqa: E402
 
 
 RAW_ROOT = Path("/mnt/expansion/Photos/RAWS")
@@ -45,6 +46,7 @@ class DevelopBackendTests(unittest.TestCase):
         rawproc.BASE_CACHE_ROOT = Path(self.tempdir.name) / "develop-cache"
         rawproc.BASE_CACHE_DIR = rawproc.BASE_CACHE_ROOT / "base" / "v2"
         rawproc._recent_decodes.clear()
+        develop_routes._base_generation_failures.clear()
         asyncio.run(db.init_db())
         source = asyncio.run(db.add_or_restore_source(os.path.join(self.tempdir.name, "raws")))
         self.raw_path = Path(self.tempdir.name) / "raws" / "sample.dng"
@@ -63,6 +65,7 @@ class DevelopBackendTests(unittest.TestCase):
         rawproc.BASE_CACHE_DIR = self.old_cache_dir
         rawproc.BASE_CACHE_ROOT = self.old_cache_root
         rawproc._recent_decodes.clear()
+        develop_routes._base_generation_failures.clear()
         self.tempdir.cleanup()
 
     def _image(self, source_id, path):
@@ -235,6 +238,41 @@ class DevelopBackendTests(unittest.TestCase):
         self.assertEqual(binary.status_code, 202, binary.text)
         self.assertEqual(preview.json()["state"], "generating")
         self.assertEqual(binary.headers["retry-after"], "1")
+
+    def test_remote_settings_get_does_not_wait_for_hub_base(self):
+        async def mark_remote():
+            conn = await db.get_db()
+            try:
+                await conn.execute("UPDATE images SET hub_remote = 1 WHERE id = ?", (self.raw_id,))
+                await conn.commit()
+            finally:
+                await conn.close()
+
+        asyncio.run(mark_remote())
+        self.raw_path.unlink()
+        with mock.patch.object(rawproc, "ensure_base_cache", side_effect=AssertionError("must not contact hub")):
+            response = self.client.get(f"/api/develop/{self.raw_id}")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["meta"], {"canvas_color_profile": {}})
+
+    def test_base_poll_surfaces_recent_hub_failure_as_503(self):
+        cause = readthrough.BaseReadthroughError("Could not reach the hub for this Develop base")
+        failure = rawproc.RawDecodeError(str(cause))
+        failure.__cause__ = cause
+        develop_routes._base_generation_failures[self.raw_id] = (develop_routes.time.monotonic(), failure)
+
+        response = self.client.get(f"/api/develop/{self.raw_id}/base.bin")
+
+        self.assertEqual(response.status_code, 503, response.text)
+        self.assertEqual(response.json()["reason"], "hub_unreachable")
+
+    def test_transform_auto_maps_decode_failure_to_client_error(self):
+        with mock.patch.object(rawproc, "ensure_base_cache", side_effect=rawproc.RawDecodeError("decode failed")):
+            response = self.client.post(f"/api/develop/{self.raw_id}/transform/auto")
+
+        self.assertEqual(response.status_code, 422, response.text)
+        self.assertEqual(response.json()["error"], "decode failed")
 
     def test_get_meta_self_heals_camera_profile_and_lens_data(self):
         self._write_cached_base()

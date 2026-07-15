@@ -30,13 +30,6 @@ function dismiss(item, { keepUndo = false } = {}) {
     removeElement(item);
 }
 
-function replaceVisibleToasts() {
-    for (const item of toasts) {
-        if (!item.visible) continue;
-        dismiss(item);
-    }
-}
-
 function expire(item) {
     removeFromHistory(item);
     removeElement(item);
@@ -73,7 +66,6 @@ export function showToast(message, { undo = null, duration = 8000 } = {}) {
     undoButton.addEventListener('click', () => {
         runUndo(item);
     });
-    replaceVisibleToasts();
     root.appendChild(item.el);
     toasts.push(item);
     requestAnimationFrame(() => item.el?.classList.add('on'));

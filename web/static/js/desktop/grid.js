@@ -42,6 +42,7 @@ let windowEnd = 0;
 let beforeDone = true;
 let loadToken = 0;
 let loadController = null;
+let activeJumpToken = 0;
 let reloadPending = false;
 const stackCache = new Map();
 const stackKindCache = new Map();
@@ -392,6 +393,7 @@ async function loadPage({ direction = 'after', start = null, jump = false } = {}
     if (loading || (direction === 'after' && done)) return false;
     loading = true;
     const token = ++loadToken;
+    if (jump) activeJumpToken = token;
     const seq = generation;
     const pageSize = 100;
     const requestStart = start == null ? offset : Math.max(0, Number(start) || 0);
@@ -401,6 +403,10 @@ async function loadPage({ direction = 'after', start = null, jump = false } = {}
         if (remaining <= 0) {
             done = true;
             loading = false;
+            if (activeJumpToken === token) {
+                activeJumpToken = 0;
+                emit('grid:jump-loading', { loading: false });
+            }
             document.getElementById('grid-end').hidden = viewState.images.length === 0;
             return false;
         }
@@ -413,20 +419,21 @@ async function loadPage({ direction = 'after', start = null, jump = false } = {}
         data = await loadScopePage({ limit, offset: requestStart, signal: controller.signal });
     } catch {
         if (controller.signal.aborted || seq !== generation || token !== loadToken) return false;
-        loading = false;
-        loadController = null;
         renderError('Retry when the local service is ready.', jump ? () => jumpToOffset(requestStart) : loadFirstPage);
-        if (jump) emit('grid:jump-loading', { loading: false });
         return false;
+    } finally {
+        if (loadController === controller) loadController = null;
+        if (token === loadToken) loading = false;
+        if (activeJumpToken === token) {
+            activeJumpToken = 0;
+            emit('grid:jump-loading', { loading: false });
+        }
     }
-    if (loadController === controller) loadController = null;
     if (seq !== generation || token !== loadToken) {
         return false;
     }
-    loading = false;
     if (!data) {
         renderError('Retry when the local service is ready.', jump ? () => jumpToOffset(requestStart) : loadFirstPage);
-        if (jump) emit('grid:jump-loading', { loading: false });
         return false;
     }
     const rawIncoming = data.images || [];
@@ -436,7 +443,7 @@ async function loadPage({ direction = 'after', start = null, jump = false } = {}
     const incoming = cap == null ? rawIncoming : rawIncoming.slice(0, remaining);
     const wasEmpty = viewState.images.length === 0;
     const next = viewState.images.slice();
-    next.length = Math.max(next.length, requestStart);
+    while (next.length < requestStart) next.push(null);
     incoming.forEach((img, i) => {
         next[requestStart + i] = img;
     });
@@ -471,11 +478,7 @@ async function loadPage({ direction = 'after', start = null, jump = false } = {}
             chunkEl.scrollIntoView({ block: 'start', behavior: 'auto' });
             setFocus(requestStart);
             watchWindowStart(chunkEl);
-            emit('grid:jump-loading', { loading: false });
         }
-    }
-    if (jump && !incoming.length) {
-        emit('grid:jump-loading', { loading: false });
     }
     return incoming.length > 0;
 }

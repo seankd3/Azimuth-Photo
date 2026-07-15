@@ -1,7 +1,7 @@
 import {
     byId, on, selection, setRightCollapsed, setScope, viewState,
 } from './state.js';
-import { getCaptionStatus, getImageCaption, getImageExif, saveImageCaption } from './api.js';
+import { getImageCaption, getImageExif, saveImageCaption } from './api.js';
 import { showToast } from './toast.js';
 import { escapeHtml as esc, formatCount as fmt } from './dom.js';
 
@@ -13,7 +13,6 @@ let focusedImage = null;
 let histogramCache = { signature: '', bins: [], min: 0, max: 0, empty: true };
 let rankCache = { signature: '', byId: new Map(), total: 0 };
 let imageVersion = 0;
-let captionStatus = null;
 let captionEditId = null;
 let captionToken = 0;
 
@@ -249,18 +248,6 @@ function renderMetadata(img) {
     }
 }
 
-function captionProgressHint() {
-    const counts = (captionStatus && captionStatus.counts) || {};
-    const captioned = Number(counts.captioned || 0);
-    const pending = Number(counts.pending_cached_images || 0);
-    const active = Boolean(captionStatus && captionStatus.active);
-    const worker = (captionStatus && captionStatus.worker) || {};
-    if (active && pending > 0) return `Captions running · ${fmt(captioned)} done, ${fmt(pending)} queued`;
-    if (active) return `Captions running · ${fmt(captioned)} done`;
-    if (worker.last_error) return `Captions paused · ${fmt(captioned)} done`;
-    return captioned > 0 ? `Captions idle · ${fmt(captioned)} done` : '';
-}
-
 function tagChips(tags) {
     return (tags || []).map((tag) => (
         `<button class="cap-tag" data-caption-tag="${esc(tag)}" title="tag:${esc(tag)}">#${esc(tag)}</button>`
@@ -274,9 +261,7 @@ function renderCaptionView(img, caption) {
         return;
     }
     if (!caption || !caption.has_caption) {
-        const hint = captionProgressHint();
         host.innerHTML = '<div class="panel-empty">Not yet captioned'
-            + (hint ? `<span class="cap-progress">${esc(hint)}</span>` : '')
             + '<button class="mini-btn" id="caption-edit">Write caption</button></div>';
         bindCaptionPanel(host, img, { has_caption: false, caption: '', tags: [] });
         return;
@@ -362,11 +347,6 @@ async function renderCaption(img) {
     const imageId = Number(img.id);
     if (captionEditId === imageId) return;
     const token = ++captionToken;
-    try {
-        captionStatus = await getCaptionStatus();
-    } catch {
-        captionStatus = null;
-    }
     let caption = captionCache.get(imageId);
     if (!caption) {
         host.innerHTML = '<div class="panel-empty">Loading caption…</div>';

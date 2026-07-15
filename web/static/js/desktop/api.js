@@ -524,11 +524,11 @@ export async function getTrash({ limit = 200, offset = 0, signal = null } = {}) 
 }
 
 export async function trashImages(imageIds) {
-    return postJson('/api/images/trash', { ids: imageIds });
+    return postJsonWithStatus('/api/images/trash', { ids: imageIds });
 }
 
 export async function restoreImages(imageIds) {
-    return postJson('/api/images/restore', { ids: imageIds });
+    return postJsonWithStatus('/api/images/restore', { ids: imageIds });
 }
 
 export async function emptyTrash() {
@@ -540,11 +540,11 @@ export async function getMapMarkers(params) {
 }
 
 export async function writeFlag(imageId, flag) {
-    return postJson(`/api/image/${imageId}/flag`, { flag });
+    return postJsonWithStatus(`/api/image/${imageId}/flag`, { flag });
 }
 
 export async function writeFlags(imageIds, flag) {
-    return postJson('/api/images/flag', { image_ids: imageIds, flag });
+    return postJsonWithStatus('/api/images/flag', { image_ids: imageIds, flag });
 }
 
 export async function mosaicNext(n, params, exclude = '', strategy = 'explore', gridElo = 0) {

@@ -31,7 +31,7 @@ from features.sync import satellite
 _HASH_LENGTH = 32  # BLAKE2b-128, hex encoded.
 _BASE_MAGIC = b"PABASE1\0"
 _BASE_HEADER_BYTES = 16
-_DEFAULT_TIMEOUT_SECONDS = 20.0
+_DEFAULT_TIMEOUT_SECONDS = 5.0
 
 
 class BaseReadthroughError(RuntimeError):

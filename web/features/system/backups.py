@@ -266,7 +266,7 @@ def list_backups() -> list[dict[str, Any]]:
     return items
 
 
-def apply_retention(root: Path | None = None) -> list[str]:
+def apply_retention(root: Path | None = None, *, now: date | None = None) -> list[str]:
     """Keep 7 daily + 4 weekly snapshots; delete the rest. Returns pruned names."""
     root = root or backup_root()
     backups: list[tuple[datetime, Path]] = []
@@ -278,7 +278,7 @@ def apply_retention(root: Path | None = None) -> list[str]:
     if not backups:
         return []
 
-    today = date.today()
+    today = now or date.today()
     keep: set[Path] = set()
 
     # Always retain the most recent pre-migration snapshots. They are the
