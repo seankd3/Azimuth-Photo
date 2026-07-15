@@ -54,6 +54,13 @@ class MobileOfflineContractsTests(unittest.TestCase):
         self.assertIn("const dir = dx < 0 ? 1 : -1", viewer)
         self.assertIn("flagBadge.textContent = flag === 'picked' ? 'Picked' : 'Rejected'", viewer)
 
+    def test_search_flattens_grouped_people_before_rendering(self):
+        search = self.read("static", "js", "mobile", "search.js")
+
+        self.assertIn("function flattenPeople(data)", search)
+        self.assertIn("sections.named_people", search)
+        self.assertIn("people = { people: flattenPeople(data) }", search)
+
 
 if __name__ == "__main__":
     unittest.main()

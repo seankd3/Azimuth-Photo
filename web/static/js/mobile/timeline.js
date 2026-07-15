@@ -433,7 +433,25 @@ function renderMonths() {
 }
 
 /* ---------- zoom levels ---------- */
-export function setZoom(i) {
+function zoomAnchorAt(clientX, clientY) {
+    const cell = document.elementFromPoint(clientX, clientY)?.closest('.mcell[data-id]');
+    if (!cell || !timeline.contains(cell)) return null;
+    return {
+        id: cell.dataset.id,
+        top: cell.getBoundingClientRect().top - pane.getBoundingClientRect().top,
+    };
+}
+
+function restoreZoomAnchor(anchor) {
+    if (!anchor) return;
+    requestAnimationFrame(() => {
+        const cell = timeline.querySelector(`.mcell[data-id="${anchor.id}"]`);
+        if (!cell) return;
+        pane.scrollTop += cell.getBoundingClientRect().top - pane.getBoundingClientRect().top - anchor.top;
+    });
+}
+
+export function setZoom(i, { anchor = null } = {}) {
     const next = clamp(i, 0, 2);
     if (next === zoomIdx) return;
     const was = zoomIdx;
@@ -451,6 +469,7 @@ export function setZoom(i) {
     if (ctl) ctl.innerHTML = icon(zoomIdx === 2 ? 'rows-3' : zoomIdx === 1 ? 'grid-3x3' : 'layout-grid', 'icon icon-lg');
     updateMonthPill(false);
     endEl.hidden = zoomIdx === 2 || !endReached;
+    restoreZoomAnchor(anchor);
 }
 
 export function stepZoom(dir) {
@@ -459,6 +478,54 @@ export function stepZoom(dir) {
 
 export function zoomLevel() {
     return zoomIdx;
+}
+
+// Semantic zoom stays deliberately discrete (day grid → dense grid → months),
+// but the pinch itself is continuous: each threshold can be crossed in either
+// direction during one gesture. Keeping the touched photo anchored means the
+// switch feels like a zoom instead of a navigation jump.
+function installPinchZoom() {
+    let pinch = null;
+
+    const distance = (touches) => Math.hypot(
+        touches[0].clientX - touches[1].clientX,
+        touches[0].clientY - touches[1].clientY,
+    );
+    const midpoint = (touches) => ({
+        x: (touches[0].clientX + touches[1].clientX) / 2,
+        y: (touches[0].clientY + touches[1].clientY) / 2,
+    });
+    const reset = () => {
+        pinch = null;
+        timeline.classList.remove('m-pinching');
+    };
+
+    pane.addEventListener('touchstart', (event) => {
+        if (event.touches.length !== 2 || selection.size || initialLoading) return;
+        const startDistance = distance(event.touches);
+        if (startDistance < 24) return;
+        pinch = { startDistance, startZoom: zoomIdx };
+        timeline.classList.add('m-pinching');
+    }, { passive: true });
+
+    pane.addEventListener('touchmove', (event) => {
+        if (!pinch || event.touches.length !== 2) return;
+        event.preventDefault();
+        const currentDistance = distance(event.touches);
+        const point = midpoint(event.touches);
+        // A doubling/halving spans the full semantic zoom range. Round only
+        // after measuring the continuous pinch so one gesture can cross both
+        // levels naturally instead of being capped at a single step.
+        const delta = Math.log2(pinch.startDistance / Math.max(currentDistance, 1)) * 2;
+        const target = clamp(Math.round(pinch.startZoom + delta), 0, 2);
+        if (target === zoomIdx) return;
+        setZoom(target, { anchor: zoomAnchorAt(point.x, point.y) });
+    }, { passive: false });
+
+    pane.addEventListener('touchend', (event) => {
+        if (event.touches.length < 2) reset();
+    }, { passive: true });
+    pane.addEventListener('touchcancel', reset, { passive: true });
 }
 
 function rebuildLoaded() {
@@ -1057,6 +1124,7 @@ export function initTimeline() {
 
     installSelectionGestures();
     installPullToRefresh();
+    installPinchZoom();
     on('selection', syncSelectionCells);
     on('flags', syncFlagCells);
     on('scope', () => {

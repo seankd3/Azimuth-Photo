@@ -386,6 +386,7 @@ body.m-scoped .m-day-head { top: calc(var(--scopebar-h) + 30px); }
 .mcell .c-flag.rejected { background: var(--danger); }
 .mcell .c-flag .icon { width: 11px; height: 11px; }
 #m-timeline.m-anim { animation: mzoom .2s var(--ease); }
+#m-timeline.m-pinching { touch-action: none; }
 @keyframes mzoom { from { opacity: .3; transform: scale(.965); } to { opacity: 1; transform: none; } }
 
 /* month (zoomed-out) list */
