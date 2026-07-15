@@ -11,6 +11,7 @@ import time
 from datetime import datetime
 from pathlib import PurePath
 
+from core.dates import safe_datetime_fromtimestamp, safe_timestamp
 from data import connection as data_connection
 from data.repositories import stacks as stack_repository
 from features.search.similarity import scan_duplicate_pairs
@@ -66,7 +67,7 @@ def _capture_ts(value) -> float | None:
         ("%Y-%m-%d", 10),
     ):
         try:
-            return datetime.strptime(text[:length], fmt).timestamp()
+            return safe_timestamp(datetime.strptime(text[:length], fmt))
         except ValueError:
             continue
     return None
@@ -127,7 +128,10 @@ def _version_capture_key(row: dict) -> tuple[str, str] | None:
     model = " ".join(str(row.get("camera_model") or "").split()).casefold()
     if timestamp is None or not model:
         return None
-    return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S"), model
+    captured_at = safe_datetime_fromtimestamp(timestamp)
+    if captured_at is None:
+        return None
+    return captured_at.strftime("%Y-%m-%d %H:%M:%S"), model
 
 
 def _exiftool_version_metadata(rows: list[dict]) -> dict[str, tuple[str, str]]:
@@ -159,9 +163,10 @@ def _exiftool_version_metadata(rows: list[dict]) -> dict[str, tuple[str, str]]:
             path = str(item.get("SourceFile") or "")
             timestamp = _capture_ts(item.get("DateTimeOriginal"))
             model = " ".join(str(item.get("Model") or "").split()).casefold()
-            if path and timestamp is not None and model:
+            captured_at = safe_datetime_fromtimestamp(timestamp) if timestamp is not None else None
+            if path and captured_at is not None and model:
                 metadata[os.path.normcase(os.path.abspath(path))] = (
-                    datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S"),
+                    captured_at.strftime("%Y-%m-%d %H:%M:%S"),
                     model,
                 )
     return metadata
