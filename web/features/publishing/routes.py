@@ -15,6 +15,7 @@ import tempfile
 import time
 import zipfile
 from collections.abc import Awaitable, Callable
+from http.client import IncompleteRead
 from pathlib import Path
 
 from fastapi import APIRouter, Request
@@ -360,8 +361,11 @@ def _zip_gallery(gallery: dict, destination: str) -> dict:
                         else f"{filename.stem}.jpg"
                     )
                     try:
-                        with archive.open(arcname, "w") as target:
-                            shutil.copyfileobj(response, target, length=1024 * 1024)
+                        with tempfile.SpooledTemporaryFile(max_size=8 * 1024 * 1024) as staged:
+                            shutil.copyfileobj(response, staged, length=1024 * 1024)
+                            staged.seek(0)
+                            with archive.open(arcname, "w") as target:
+                                shutil.copyfileobj(staged, target, length=1024 * 1024)
                     finally:
                         response.close()
                 elif size == "original":
@@ -380,7 +384,7 @@ def _zip_gallery(gallery: dict, destination: str) -> dict:
                         raise FileNotFoundError("Preview unavailable")
                     archive.writestr(f"{filename.stem}.jpg", data)
                 included += 1
-            except (OSError, ValueError):
+            except (IncompleteRead, OSError, ValueError):
                 skipped.append({
                     "image_id": image_id,
                     "filename": filename.name,
