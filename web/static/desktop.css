@@ -798,6 +798,7 @@ html[data-badges-index="0"] .cell .c-idx { display: none; }
 #trash-body { min-height: 0; overflow-y: auto; overflow-x: hidden; padding: var(--s3); }
 .trash-grid { display: flex; flex-wrap: wrap; gap: var(--cell-gap); align-items: stretch; }
 .trash-grid::after { content: ""; flex-grow: 10000; min-width: 10%; }
+.grid-chunk[aria-busy="true"], .trash-grid[aria-busy="true"] { min-height: 180px; }
 .trash-cell { opacity: .62; filter: saturate(.76); }
 .trash-cell:hover, .trash-cell.sel { opacity: .92; filter: saturate(.92); }
 .trash-cell .c-check { opacity: 1; pointer-events: auto; }

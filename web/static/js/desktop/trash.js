@@ -9,6 +9,7 @@ import { releaseFocus, trapFocus } from './focusTrap.js';
 import { showToast } from './toast.js';
 import { icon } from '../icons.js';
 import { emptyStateHtml } from './empty_state.js';
+import { gridLoadingHtml } from './loading_state.js';
 
 let root = null;
 let open = false;
@@ -183,7 +184,7 @@ function render() {
     root.querySelector('#trash-empty').disabled = !total || loading;
     const body = root.querySelector('#trash-body');
     if (loading) {
-        body.innerHTML = '<div class="trash-grid">' + Array.from({ length: 18 }, () => '<div class="cell skel-cell" style="--ar:1.4"></div>').join('') + '</div>';
+        body.innerHTML = gridLoadingHtml({ className: 'trash-grid' });
         return;
     }
     if (loadError) {

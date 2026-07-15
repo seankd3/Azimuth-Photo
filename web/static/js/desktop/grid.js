@@ -15,6 +15,7 @@ import { afterMotion } from './motion.js';
 import { showToast } from './toast.js';
 import { keepCoverRejectRest } from './stack_cull.js';
 import { emptyStateHtml } from './empty_state.js';
+import { gridLoadingHtml } from './loading_state.js';
 
 let offset = 0;
 let loading = false;
@@ -267,11 +268,7 @@ function renderSkeletons() {
     closeExpandedStack();
     resetImageObserver();
     resetGridWindow();
-    document.getElementById('grid-flow').innerHTML = '<div class="grid-chunk">'
-        + Array.from({ length: 18 }, (_, i) => (
-            `<div class="cell skel-cell" style="--ar:${[1.5, .75, 1.2, 1.8][i % 4]}"></div>`
-        )).join('')
-        + '</div>';
+    document.getElementById('grid-flow').innerHTML = gridLoadingHtml();
 }
 
 function bindScopeEmptyActions(flow) {
