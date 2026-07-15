@@ -1261,6 +1261,7 @@ body:has(#view-loupe.active):has(#sel-pill.on) #toast { transform: translateX(-5
 .server-update-banner { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); margin-top: var(--s3); }
 .server-update-banner .mini-btn { flex: none; }
 .setting-hint { color: var(--text-3); font-size: var(--fs-caption); line-height: 1.45; }
+.setting-section-description { margin: 0 0 var(--s3); color: var(--text-3); font-size: var(--fs-caption); line-height: 1.45; }
 .publish-return { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--s3); align-items: center; padding: 9px 10px; border: 1px solid rgba(225,190,120,.35); border-radius: var(--r-ctl); background: rgba(225,190,120,.08); }
 .publish-return span { color: var(--text-2); font-size: var(--fs-ui); line-height: var(--lh-body); }
 .publish-return b { color: var(--text); font-weight: 600; }
@@ -1271,6 +1272,9 @@ body:has(#view-loupe.active):has(#sel-pill.on) #toast { transform: translateX(-5
 .setting-row b { color: var(--text-2); font-weight: 500; }
 .setting-row em { color: var(--text-3); font-style: normal; font-size: var(--fs-micro); text-transform: uppercase; }
 .setting-row small { color: var(--text-3); font-size: 11px; }
+.setting-row .setting-validation { color: var(--danger); }
+.setting-row.invalid input, .setting-row.invalid select { border-color: var(--danger); }
+.setting-row.invalid input:focus-visible, .setting-row.invalid select:focus-visible { box-shadow: 0 0 0 2px rgba(225,147,147,.16); }
 .setting-row.dirty b::after { content: " •"; color: var(--accent); }
 .setting-row select { min-width: 0; height: 30px; padding: 0 var(--s2); border: 1px solid var(--line); border-radius: var(--r-ctl); background: var(--bg); color: var(--text); outline: 0; }
 .setting-row select:focus-visible { border-color: var(--accent-lin); }
@@ -1577,6 +1581,8 @@ body.develop-active #canvas > .view:not(#view-develop) { display: none !importan
 .develop-sync-hint { margin: 0; color: var(--text-3); font-size: 10px; line-height: 1.4; }
 .develop-sync-groups { display: grid; gap: 4px; max-height: 220px; overflow: auto; padding: 2px 0; scrollbar-width: thin; }
 .develop-popover button.primary { border-color: var(--accent-lin); color: var(--accent); background: var(--accent-dim); }
+.develop-preset-name { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: end; gap: 5px; }
+.develop-preset-name label { grid-template-columns: 1fr; gap: 3px; }
 
 /* Presets — slim, searchable left rail. */
 #develop-presets { display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; border-right: 1px solid var(--line); background: var(--surface-chrome); }

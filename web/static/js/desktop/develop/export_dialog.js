@@ -147,19 +147,43 @@ async function loadPresetsInto(popover) {
 
 function bindPresetSave(popover, { showToast }) {
     popover.querySelector('[data-export-save-preset]')?.addEventListener('click', async () => {
-        const name = prompt('Preset name');
-        if (!name?.trim()) return;
-        try {
-            const response = await fetch('/api/develop/export-presets', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: name.trim(), options: readExportOptions(popover) }),
-            });
-            if (!response.ok) throw new Error();
-            showToast?.(`Preset “${name.trim()}” saved`);
-        } catch {
-            showToast?.("Couldn't save the preset");
-        }
+        const form = document.createElement('form');
+        form.className = 'develop-preset-name';
+        form.innerHTML = '<label>Preset name<input data-export-preset-name type="text" maxlength="120" autocomplete="off" required></label>'
+            + '<button type="submit" class="primary">Save preset</button>'
+            + '<button type="button" data-export-preset-cancel>Cancel</button>';
+        const opener = popover.querySelector('[data-export-save-preset]');
+        opener.replaceWith(form);
+        const input = form.querySelector('[data-export-preset-name]');
+        input.focus({ preventScroll: true });
+        form.querySelector('[data-export-preset-cancel]').addEventListener('click', () => form.replaceWith(opener));
+        form.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const name = input.value.trim();
+            if (!name) {
+                input.focus({ preventScroll: true });
+                return;
+            }
+            const save = form.querySelector('[type="submit"]');
+            save.disabled = true;
+            input.disabled = true;
+            try {
+                const response = await fetch('/api/develop/export-presets', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, options: readExportOptions(popover) }),
+                });
+                if (!response.ok) throw new Error();
+                showToast?.(`Preset “${name}” saved`);
+                form.replaceWith(opener);
+                opener.focus({ preventScroll: true });
+            } catch {
+                showToast?.("Couldn't save the preset");
+                save.disabled = false;
+                input.disabled = false;
+                input.focus({ preventScroll: true });
+            }
+        });
     });
 }
 

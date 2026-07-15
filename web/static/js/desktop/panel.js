@@ -14,7 +14,7 @@ import {
 import { applyFlags, selectedIds, setCollectionPicker } from './selection.js';
 import { showToast } from './toast.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
-import { confirmTypedCount } from './trash.js';
+import { confirmAction, confirmTypedCount } from './trash.js';
 import { downloadExport, openExportMenu } from './export_menu.js';
 import { initFoldersPanel } from './folders.js';
 import { openSourceRevealMenu } from './source_reveal_menu.js';
@@ -988,10 +988,18 @@ function renderSavedViews() {
         const view = savedViews.find((item) => Number(item.id) === Number(row.dataset.savedView));
         row.querySelector('button')?.addEventListener('click', () => restoreSavedView(view));
         row.querySelector('.saved-view-delete')?.addEventListener('click', async () => {
-            if (!window.confirm(`Delete “${view.name}”?`)) return;
+            const confirmed = await confirmAction({
+                title: 'Delete saved view?',
+                message: `“${view.name}” will no longer appear in your Library.`,
+                confirmLabel: 'Delete view',
+            });
+            if (!confirmed) return;
             if (await deleteSavedView(view.id)) {
                 savedViews = savedViews.filter((item) => item.id !== view.id);
                 renderSavedViews();
+                showToast('Saved view deleted');
+            } else {
+                showToast('Couldn’t delete saved view');
             }
         });
     }

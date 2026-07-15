@@ -140,6 +140,8 @@ function applySettingsData(data, { preserveDirtyExcept = null } = {}) {
 function settingValue(field) {
     if (Object.prototype.hasOwnProperty.call(draftSettings, field)) return draftSettings[field];
     if (Object.prototype.hasOwnProperty.call(savedSettings, field)) return savedSettings[field];
+    const defaults = settingsPageData?.defaults || {};
+    if (Object.prototype.hasOwnProperty.call(defaults, field)) return defaults[field];
     return '';
 }
 
@@ -622,10 +624,10 @@ function renderSharedHome() {
         + '</div></section>';
 }
 
-function detailsSection(title, body) {
+function detailsSection(title, description, body) {
     return `<details class="dr-sec dr-details" data-settings-section="${esc(title)}"${openSettingSections.has(title) ? ' open' : ''}>`
         + `<summary><span>${esc(title)}</span></summary>`
-        + `<div class="dr-details-body">${body}</div></details>`;
+        + `<div class="dr-details-body">${description ? `<p class="setting-section-description">${esc(description)}</p>` : ''}${body}</div></details>`;
 }
 
 function settingInput(field, label, { hint = '' } = {}) {
@@ -644,8 +646,9 @@ function settingInput(field, label, { hint = '' } = {}) {
     ].filter(Boolean).join(' ');
     return `<label class="setting-row${dirty}" for="drawer-setting-${field}">`
         + `<span><b>${esc(label)}</b>${unit}</span>`
-        + `<input class="drawer-input" ${attrs} value="${esc(value)}">`
-        + `${hint ? `<small>${esc(hint)}</small>` : ''}</label>`;
+        + `<input class="drawer-input" ${attrs} aria-describedby="drawer-setting-${field}-validation" value="${esc(value)}">`
+        + `${hint ? `<small>${esc(hint)}</small>` : ''}`
+        + `<small id="drawer-setting-${field}-validation" class="setting-validation" aria-live="polite" hidden></small></label>`;
 }
 
 function settingSelect(field, label, options) {
@@ -653,9 +656,9 @@ function settingSelect(field, label, options) {
     const dirty = dirtySettings.has(field) ? ' dirty' : '';
     return `<label class="setting-row${dirty}" for="drawer-setting-${field}">`
         + `<span><b>${esc(label)}</b></span>`
-        + `<select id="drawer-setting-${field}" data-setting-field="${field}">`
+        + `<select id="drawer-setting-${field}" data-setting-field="${field}" aria-describedby="drawer-setting-${field}-validation">`
         + options.map((option) => `<option value="${esc(option.value)}"${String(option.value) === value ? ' selected' : ''}>${esc(option.label)}</option>`).join('')
-        + '</select></label>';
+        + `</select><small id="drawer-setting-${field}-validation" class="setting-validation" aria-live="polite" hidden></small></label>`;
 }
 
 function settingToggle(field, label) {
@@ -675,7 +678,7 @@ function renderAiSettings() {
     const presetSelect = settingSelect('embed_model_preset', 'Model preset', presets.length ? presets : [
         { value: settingValue('embed_model_preset'), label: settingValue('embed_model_preset') || 'Current preset' },
     ]);
-    return detailsSection('AI model',
+    return detailsSection('AI model', 'Choose how Azimuth understands visual and text search.',
         `<div class="setting-status">${esc(modelLine())}</div>`
         + '<div class="setting-status warn">Changing model preset rebuilds the search index and can take a while.</div>'
         + presetSelect
@@ -688,7 +691,7 @@ function renderAiSettings() {
 }
 
 function renderImageCacheSettings() {
-    return detailsSection('Image cache',
+    return detailsSection('Image cache', 'Balance instant browsing against the memory and disk this computer can spare.',
         `<div class="setting-status">${esc(cacheUsageLine())}</div>`
         + '<div class="settings-two">'
         + settingInput('memory_cache_gb', 'RAM budget')
@@ -708,14 +711,14 @@ function renderImageCacheSettings() {
 }
 
 function renderImportSettings() {
-    return detailsSection('Imports',
+    return detailsSection('Imports', 'Set where new photos land and which folders Azimuth watches.',
         settingInput('import_root', 'Import inbox')
         + '<div id="watched-folders-settings"></div>'
     );
 }
 
 function renderThumbnailSettings() {
-    return detailsSection('Thumbnail output',
+    return detailsSection('Thumbnail output', 'Tune generated previews. Existing previews stay put unless you choose to replace them.',
         '<div class="settings-two">'
         + settingInput('thumb_size_sm', 'Small long side')
         + settingInput('thumb_size_md', 'Medium long side')
@@ -732,7 +735,7 @@ function renderThumbnailSettings() {
 }
 
 function renderPeopleSettings() {
-    return detailsSection('People recognition',
+    return detailsSection('People recognition', 'Keep face grouping useful without changing your original photos.',
         `<div class="setting-status">${esc(peopleLine())}</div>`
         + settingToggle('people_scan_enabled', 'Scan for people automatically')
         + settingToggle('people_auto_install', 'Install people model automatically')
@@ -749,7 +752,7 @@ function renderCaptionSettings() {
     const rawPresets = settingsPageData && settingsPageData.caption_model_presets || [];
     const presets = rawPresets.map((preset) => ({ value: preset.key, label: preset.label || preset.key }));
     const selectedPreset = rawPresets.find((preset) => preset.key === settingValue('caption_model_preset'));
-    return detailsSection('Captions',
+    return detailsSection('Captions', 'Generate searchable photo descriptions in the background.',
         `<div class="setting-status">${esc(captionLine())}</div>`
         + settingToggle('caption_scan_enabled', 'Caption cached photos automatically')
         + settingSelect('caption_model_preset', 'Caption model', presets.length ? presets : [
@@ -760,7 +763,7 @@ function renderCaptionSettings() {
 }
 
 function renderMetadataSettings() {
-    return detailsSection('Metadata',
+    return detailsSection('Metadata', 'Keep camera, lens, and file details ready for search and filtering.',
         `<div class="setting-status">${esc(metadataLine())}</div>`
         + '<div class="setting-hint">Metadata indexing keeps searchable file details current in the background.</div>');
 }
@@ -795,7 +798,7 @@ function publishReturnBar() {
 }
 
 function renderPublishingSettings() {
-    return detailsSection('Publishing',
+    return detailsSection('Publishing', 'Choose where gallery files live and how links present your work.',
         publishReturnBar()
         + publishingStatusNote()
         + settingInput('publish_dir', 'Gallery folder', {
@@ -1007,8 +1010,29 @@ function updateSaveBar() {
             : 'No unsaved settings';
     }
     for (const input of document.querySelectorAll('[data-setting-field]')) {
+        const message = settingValidationMessage(input);
+        const row = input.closest('.setting-row');
+        const validation = row?.querySelector('.setting-validation');
+        if (message) input.setAttribute('aria-invalid', 'true');
+        else input.removeAttribute('aria-invalid');
+        row?.classList.toggle('invalid', Boolean(message));
+        if (validation) {
+            validation.hidden = !message;
+            validation.textContent = message;
+        }
         input.closest('.setting-row')?.classList.toggle('dirty', dirtySettings.has(input.dataset.settingField));
     }
+}
+
+function settingValidationMessage(input) {
+    if (input.validity.valid) return '';
+    const label = input.closest('.setting-row')?.querySelector('b')?.textContent || 'This value';
+    if (input.validity.rangeUnderflow || input.validity.rangeOverflow) {
+        return `${label} must be between ${input.min} and ${input.max}.`;
+    }
+    if (input.validity.stepMismatch) return `${label} must use increments of ${input.step || 'the listed value'}.`;
+    if (input.validity.badInput) return `${label} needs a number.`;
+    return input.validationMessage || `${label} is not valid.`;
 }
 
 function bindSettingInputs(body) {

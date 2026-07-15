@@ -1,6 +1,7 @@
 import { thumbUrl } from '../api.js';
 import { on, selection, viewState } from '../state.js';
 import { showToast } from '../toast.js';
+import { releaseFocus, trapFocus } from '../focusTrap.js';
 import { CropController } from './crop.js';
 import { DevelopRenderer } from './gl.js';
 import { DevelopHistogram } from './histogram.js';
@@ -657,20 +658,33 @@ export function holdDevelopReference(held) {
 }
 
 function closePopover() {
+    const trigger = activePopover?.trigger;
+    releaseFocus(activePopover);
     activePopover?.remove();
     activePopover = null;
+    trigger?.focus?.({ preventScroll: true });
 }
 
 function anchoredPopover(button, html) {
     closePopover();
     activePopover = document.createElement('div');
     activePopover.className = 'develop-popover';
+    activePopover.setAttribute('role', 'dialog');
+    activePopover.setAttribute('aria-modal', 'true');
+    activePopover.trigger = button;
     activePopover.innerHTML = html;
     root.appendChild(activePopover);
     const buttonRect = button.getBoundingClientRect();
     const rootRect = root.getBoundingClientRect();
     activePopover.style.left = `${Math.max(8, Math.min(rootRect.width - 250, buttonRect.left - rootRect.left))}px`;
     activePopover.style.top = `${buttonRect.bottom - rootRect.top + 6}px`;
+    activePopover.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') return;
+        event.preventDefault();
+        event.stopPropagation();
+        closePopover();
+    });
+    trapFocus(activePopover, activePopover.querySelector('input, select, button'));
     return activePopover;
 }
 
@@ -678,12 +692,22 @@ function gridAnchoredPopover(button, html) {
     closePopover();
     activePopover = document.createElement('div');
     activePopover.className = 'develop-popover';
+    activePopover.setAttribute('role', 'dialog');
+    activePopover.setAttribute('aria-modal', 'true');
+    activePopover.trigger = button;
     activePopover.innerHTML = html;
     activePopover.style.position = 'fixed';
     document.body.appendChild(activePopover);
     const rect = button?.getBoundingClientRect?.() || { left: window.innerWidth * .5, bottom: 40 };
     activePopover.style.left = `${Math.max(8, Math.min(window.innerWidth - 250, rect.left))}px`;
     activePopover.style.top = `${Math.max(8, Math.min(window.innerHeight - 360, rect.bottom + 6))}px`;
+    activePopover.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') return;
+        event.preventDefault();
+        event.stopPropagation();
+        closePopover();
+    });
+    trapFocus(activePopover, activePopover.querySelector('input, select, button'));
     return activePopover;
 }
 
