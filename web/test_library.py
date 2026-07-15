@@ -1898,6 +1898,7 @@ class LibraryTests(BackendTestCase):
         main = result["sources"][0]
         self.assertEqual(main["display_name"], "Main Archive")
         self.assertTrue(main["online"])
+        self.assertTrue(main["reveal_available"])
         self.assertEqual(main["count"], 1)
         self.assertEqual(main["total_count"], 6)
         family = main["folders"][0]
@@ -1913,6 +1914,18 @@ class LibraryTests(BackendTestCase):
         offline = result["sources"][1]
         self.assertFalse(offline["online"])
         self.assertEqual(offline["folders"][0]["name"], "Scans")
+
+    async def test_folder_tree_marks_hub_mirrors_non_revealable(self):
+        result = catalog_routes.build_folder_tree_payload_from_rows(
+            [{"id": 7, "path": "hub://", "display_name": "Hub library", "online": 1}],
+            {7: {"hub://Family": 2}},
+        )
+
+        source = result["sources"][0]
+        self.assertEqual(source["path"], "hub://")
+        self.assertFalse(source["reveal_available"])
+        self.assertFalse(source["folders"][0]["reveal_available"])
+        self.assertEqual(source["folders"][0]["source_id"], 7)
 
     async def test_absolute_nested_folder_scope_matches_subtree(self):
         source = await self._source("scope-source")

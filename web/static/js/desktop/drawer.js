@@ -1384,7 +1384,10 @@ function bindDrawerActions() {
     for (const card of body.querySelectorAll('.src-card[data-source-path]')) {
         card.addEventListener('contextmenu', (event) => {
             event.preventDefault();
-            openSourceRevealMenu(card.dataset.sourcePath || '', card, card.dataset.sourceCount);
+            openSourceRevealMenu(card.dataset.sourcePath || '', card, card.dataset.sourceCount, {
+                sourceId: card.dataset.sourceId,
+                revealAvailable: !String(card.dataset.sourcePath || '').toLowerCase().startsWith('hub:'),
+            });
         });
     }
     for (const btn of body.querySelectorAll('[data-mode]')) {

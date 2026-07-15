@@ -57,6 +57,20 @@ class RevealPathValidationTests(unittest.TestCase):
         self.assertTrue(allowed["ok"])
         self.assertEqual(calls, [["xdg-open", reveal.normalize_path(self.nested)]])
 
+    def test_hub_source_never_reaches_file_manager(self):
+        result = reveal.reveal_folder(
+            "hub://Family/Trip",
+            ["hub://"],
+            runner=lambda _argv: self.fail("hub mirrors must not launch a file manager"),
+        )
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error"], "Reveal is only available for local folders")
+
+    def test_hub_source_is_not_a_local_folder(self):
+        self.assertFalse(reveal.source_has_local_folders("hub://"))
+        self.assertFalse(reveal.source_has_local_folders("HUB://Family"))
+        self.assertTrue(reveal.source_has_local_folders(self.root))
+
 
 class RevealArgvTests(unittest.TestCase):
     def test_argv_per_platform(self):
