@@ -17,7 +17,14 @@ let totalBytes = 0;
 let loading = false;
 let loadGeneration = 0;
 let loadError = false;
+let loadController = null;
 const busyActions = new Set();
+
+function cancelTrashLoad() {
+    if (!loadController) return;
+    loadController.abort();
+    loadController = null;
+}
 
 async function withBusyAction(key, button, action) {
     if (busyActions.has(key) || button?.disabled) return;
@@ -210,15 +217,20 @@ function patchSelection() {
 
 async function loadTrash() {
     ensureView();
+    cancelTrashLoad();
     const seq = ++loadGeneration;
+    const controller = new AbortController();
+    loadController = controller;
     loading = true;
     loadError = false;
     render();
     let data = null;
     try {
-        data = await getTrash({ limit: 500, offset: 0 });
+        data = await getTrash({ limit: 500, offset: 0, signal: controller.signal });
     } catch {
+        if (controller.signal.aborted) return;
         if (seq !== loadGeneration || !root?.isConnected || !open) return;
+        if (loadController === controller) loadController = null;
         images = [];
         total = 0;
         totalBytes = 0;
@@ -227,6 +239,7 @@ async function loadTrash() {
         render();
         return;
     }
+    if (loadController === controller) loadController = null;
     if (seq !== loadGeneration || !root?.isConnected || !open) return;
     if (!data) {
         images = [];
@@ -335,6 +348,8 @@ export function unmountTrash() {
     if (!root) return;
     open = false;
     loadGeneration += 1;
+    cancelTrashLoad();
+    loading = false;
     root.hidden = true;
     document.getElementById('view-trash').classList.remove('active');
 }

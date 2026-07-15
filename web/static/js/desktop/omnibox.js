@@ -2,7 +2,7 @@ import {
     getFilterOptions, getFolders, getPeople, getRankings, getTags, listCollections, thumbUrl,
 } from './api.js';
 import {
-    emit, folderLabel, folderValues, on, patchScope, scope, scopeActive, setScope, setSort, smartQueryActive, smartQuerySummary, toggleBestOf,
+    emit, folderLabel, folderValues, navigateToScope, on, patchScope, scope, scopeActive, setSort, smartQueryActive, smartQuerySummary, toggleBestOf,
 } from './state.js';
 import { currentFocusedImage } from './grid.js';
 import { openLoupe, toggleLoupeLights } from './loupe.js';
@@ -77,7 +77,7 @@ const COMMANDS = [
     { icon: 'map-pin', label: 'Switch lens: map', kbd: 'M', run: () => switchLens('map') },
     { icon: 'panel-left', label: 'Toggle left panel', kbd: '[', run: toggleLeftPanel },
     { icon: 'keyboard', label: 'Keyboard shortcuts', kbd: '?', run: () => emit('help:open') },
-    { icon: 'house', label: 'Clear view / All photos', run: () => setScope({}) },
+    { icon: 'house', label: 'Clear view / All photos', run: () => navigateToScope({}) },
     { icon: 'arrow-down-wide-narrow', label: 'Sort by rating', run: () => setSort('elo') },
     { icon: 'calendar', label: 'Sort by date', run: () => setSort('date_taken') },
     { icon: 'file-type', label: 'Sort by filename', run: () => setSort('filename') },
@@ -800,7 +800,7 @@ function applyScope(patch, { keepFocus = false, merge = true } = {}) {
     const clean = { ...patch };
     const next = merge ? { ...scope, ...clean } : clean;
     remember(next);
-    setScope(clean, { merge });
+    navigateToScope(clean, { merge });
     const input = document.getElementById('scope-input');
     input.value = '';
     if (keepFocus) {
@@ -815,7 +815,6 @@ function applyScope(patch, { keepFocus = false, merge = true } = {}) {
 
 function applySearch(term) {
     applyScope({ q: term, deep: pendingDeep == null ? scope.deep : pendingDeep, sort: 'similarity' });
-    switchLens('grid');
 }
 
 function toggleDeepSearch() {
@@ -828,8 +827,7 @@ function openPhotoResult(term, photo, images) {
     const deep = pendingDeep == null ? scope.deep : pendingDeep;
     const next = { ...scope, q: term, deep, sort: 'similarity' };
     remember(next);
-    setScope({ q: term, deep, sort: 'similarity' }, { merge: true });
-    switchLens('grid');
+    navigateToScope({ q: term, deep, sort: 'similarity' }, { merge: true });
     document.getElementById('scope-input').value = '';
     close();
     requestAnimationFrame(() => {
@@ -860,7 +858,7 @@ function applyFacet({ key, value, remove, closeAfter = false }) {
         patch.personThumb = '';
     }
     remember({ ...scope, ...patch });
-    setScope(patch, { merge: true });
+    navigateToScope(patch, { merge: true });
     input.value = '';
     input.focus();
     if (closeAfter) close();
@@ -1029,7 +1027,7 @@ export function initOmnibox() {
         } else if (event.key === 'Backspace' && scopeActive() && inputAtTokenBoundary(input)) {
             event.preventDefault();
             if (tokenSelected) {
-                setScope({});
+                navigateToScope({});
                 setTokenSelected(false);
                 input.focus();
                 hot = -1;

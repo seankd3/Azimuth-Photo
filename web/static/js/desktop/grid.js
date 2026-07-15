@@ -38,8 +38,16 @@ let windowStart = 0;
 let windowEnd = 0;
 let beforeDone = true;
 let loadToken = 0;
+let loadController = null;
+let reloadPending = false;
 const stackCache = new Map();
 const stackKindCache = new Map();
+
+function cancelPendingLoad() {
+    if (!loadController) return;
+    loadController.abort();
+    loadController = null;
+}
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -380,7 +388,20 @@ async function loadPage({ direction = 'after', start = null, jump = false } = {}
         }
         limit = Math.min(pageSize, remaining);
     }
-    const data = await loadScopePage({ limit, offset: requestStart });
+    const controller = new AbortController();
+    loadController = controller;
+    let data = null;
+    try {
+        data = await loadScopePage({ limit, offset: requestStart, signal: controller.signal });
+    } catch {
+        if (controller.signal.aborted || seq !== generation || token !== loadToken) return false;
+        loading = false;
+        loadController = null;
+        renderError('Retry when the local service is ready.', jump ? () => jumpToOffset(requestStart) : loadFirstPage);
+        if (jump) emit('grid:jump-loading', { loading: false });
+        return false;
+    }
+    if (loadController === controller) loadController = null;
     if (seq !== generation || token !== loadToken) {
         return false;
     }
@@ -461,6 +482,7 @@ export async function requestMorePhotos() {
 
 export function loadFirstPage() {
     if (!mounted) return;
+    cancelPendingLoad();
     window.clearTimeout(emptyScanTimer);
     prependObserver?.disconnect();
     generation += 1;
@@ -495,6 +517,7 @@ export function jumpToOffset(nextOffset = 0) {
         watchWindowStart(existing);
         return;
     }
+    cancelPendingLoad();
     generation += 1;
     viewState.generation = generation;
     loadToken += 1;
@@ -669,6 +692,7 @@ export function initGrid() {
     });
     on('selection', ({ imageIds } = {}) => patchCells(imageIds));
     on('trash:changed', () => {
+        reloadPending = !mounted;
         if (mounted) loadFirstPage();
     });
     on('scan', ({ scanning } = {}) => {
@@ -750,7 +774,10 @@ export function mountGrid() {
         if (entries.some((entry) => entry.isIntersecting)) loadPage();
     }, { root: document.getElementById('canvas'), rootMargin: '900px 0px' });
     sentinelObserver.observe(document.getElementById('grid-sentinel'));
-    if (viewState.images.length || offset > 0) {
+    if (reloadPending) {
+        reloadPending = false;
+        loadFirstPage();
+    } else if (viewState.images.length || offset > 0) {
         observeImages(document.getElementById('grid-flow'));
         watchWindowStart(ensureChunkLive(windowStart));
         requestAnimationFrame(() => {
@@ -766,6 +793,7 @@ export function unmountGrid() {
     mounted = false;
     savedScrollTop = document.getElementById('canvas').scrollTop;
     generation += 1;
+    cancelPendingLoad();
     stackExpansionRequest += 1;
     loading = false;
     closeExpandedStack();

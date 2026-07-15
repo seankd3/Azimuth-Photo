@@ -292,8 +292,9 @@ export async function listCollections() {
     return fetchJson('/api/user-collections', { defaultValue: null });
 }
 
-export async function getCollection(collectionId, { limit = 500, offset = 0 } = {}) {
-    return fetchJson(`/api/user-collections/${collectionId}?limit=${limit}&offset=${offset}`, { defaultValue: null });
+export async function getCollection(collectionId, { limit = 500, offset = 0, signal = null } = {}) {
+    const fetchOptions = signal ? { signal } : undefined;
+    return fetchJson(`/api/user-collections/${collectionId}?limit=${limit}&offset=${offset}`, { defaultValue: null, fetchOptions });
 }
 
 export async function createCollection(name, imageIds = [], description = '', query = null) {
@@ -519,9 +520,10 @@ export async function getStackRebuildStatus() {
     return fetchJson('/api/stacks/rebuild/status', { defaultValue: null });
 }
 
-export async function getTrash({ limit = 200, offset = 0 } = {}) {
+export async function getTrash({ limit = 200, offset = 0, signal = null } = {}) {
     const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
-    return fetchJson(`/api/trash?${params.toString()}`, { defaultValue: null });
+    const fetchOptions = signal ? { signal } : undefined;
+    return fetchJson(`/api/trash?${params.toString()}`, { defaultValue: null, fetchOptions });
 }
 
 export async function trashImages(imageIds) {
