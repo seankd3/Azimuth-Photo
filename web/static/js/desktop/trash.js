@@ -8,6 +8,7 @@ import {
 import { releaseFocus, trapFocus } from './focusTrap.js';
 import { showToast } from './toast.js';
 import { icon } from '../icons.js';
+import { emptyStateHtml } from './empty_state.js';
 
 let root = null;
 let open = false;
@@ -191,7 +192,11 @@ function render() {
         return;
     }
     if (!images.length) {
-        body.innerHTML = '<div class="grid-empty"><h3>Trash is empty</h3><p>Deleted photos will appear here until restored or emptied.</p></div>';
+        body.innerHTML = emptyStateHtml({
+            title: 'Trash is empty',
+            detail: 'Photos moved to Trash stay here until you restore or permanently empty them.',
+            iconName: 'trash-2',
+        });
         return;
     }
     body.innerHTML = `<div class="trash-grid ${selection.size ? 'selmode' : ''}">${images.map(cellHtml).join('')}</div>`;

@@ -404,11 +404,13 @@ html[data-badges-index="0"] .cell .c-idx { display: none; }
 .load-error { margin: var(--s5) auto; max-width: 460px; padding: var(--s4) var(--s5); border: 1px solid var(--line); border-left: 2px solid var(--warn); border-radius: var(--r-card); background: var(--panel); }
 .load-error h4 { font-size: var(--fs-body); margin-bottom: 4px; }
 .load-error p { color: var(--text-2); font-size: var(--fs-ui); margin-bottom: var(--s3); }
-.grid-empty { min-height: min(520px, calc(100dvh - var(--topbar-h) - var(--ctxbar-h) - 48px)); display: grid; place-content: center; justify-items: center; gap: var(--s2); text-align: center; color: var(--text-2); }
-.grid-empty h3 { color: var(--text); font-size: var(--fs-lens); font-weight: var(--fw-semibold); }
-.grid-empty p { max-width: 320px; color: var(--text-3); font-size: var(--fs-ui); line-height: var(--lh-loose); }
+.grid-empty, .empty-state { min-height: min(520px, calc(100dvh - var(--topbar-h) - var(--ctxbar-h) - 48px)); display: grid; place-content: center; justify-items: center; gap: var(--s2); text-align: center; color: var(--text-2); }
+.grid-empty h3, .empty-state h3 { color: var(--text); font-size: var(--fs-lens); font-weight: var(--fw-semibold); }
+.grid-empty p, .empty-state p { max-width: 360px; color: var(--text-3); font-size: var(--fs-ui); line-height: var(--lh-loose); }
+.empty-state-icon { width: 32px; height: 32px; display: grid; place-items: center; margin-bottom: var(--s1); border: 1px solid var(--line); border-radius: 50%; color: var(--text-3); background: var(--surface-raised); }
+.empty-state-icon .icon { width: 15px; height: 15px; }
 .load-error.view-empty { border-left-color: var(--line); }
-.grid-empty-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--s2); margin-top: var(--s2); }
+.grid-empty-actions, .empty-state-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--s2); margin-top: var(--s2); }
 .chrome-empty {
     display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: var(--s2);
     min-height: 30px; padding: 6px 8px; color: var(--text-3); font-size: 12px;
