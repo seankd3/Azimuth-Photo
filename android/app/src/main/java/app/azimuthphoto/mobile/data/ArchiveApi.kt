@@ -37,6 +37,9 @@ data class RankingsPage(
     val total_images: Long = 0,
 )
 
+@Serializable
+private data class TrashResult(val trashed: List<Long> = emptyList())
+
 /** Read-only client for the hub's library API. */
 class ArchiveApi(private val baseUrl: String) {
 
@@ -71,7 +74,15 @@ class ArchiveApi(private val baseUrl: String) {
 
     fun largeUrl(image: ArchiveImage): String = "$baseUrl/api/thumb/lg/${image.id}"
 
-    suspend fun trashImage(id: Long): Boolean = postJson("/api/images/trash", "{\"ids\":[$id]}")
+    suspend fun trashImage(id: Long): Boolean = withContext(Dispatchers.IO) {
+        val req = Request.Builder().url("$baseUrl/api/images/trash")
+            .post("{\"ids\":[$id]}".toRequestBody("application/json".toMediaType())).build()
+        http.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) return@use false
+            val result = json.decodeFromString<TrashResult>(resp.body!!.string())
+            id in result.trashed
+        }
+    }
 
     suspend fun setFlag(id: Long, flag: String): Boolean = postJson("/api/image/$id/flag", "{\"flag\":\"$flag\"}")
 

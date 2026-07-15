@@ -46,6 +46,7 @@ import app.azimuthphoto.mobile.data.AppSettings
 import app.azimuthphoto.mobile.data.ArchiveApi
 import app.azimuthphoto.mobile.data.ArchiveImage
 import app.azimuthphoto.mobile.data.SettingsStore
+import android.content.ClipData
 import android.content.Intent
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
@@ -104,12 +105,16 @@ fun ArchiveScreen() {
     var images by remember { mutableStateOf<List<ArchiveImage>>(emptyList()) }
     var totalVisible by remember { mutableStateOf(0L) }
     var loading by remember { mutableStateOf(true) }
+    var loadingMore by remember { mutableStateOf(false) }
+    var lastRequestedOffset by remember { mutableStateOf(-1) }
     var error by remember { mutableStateOf<String?>(null) }
     var viewerIndex by remember { mutableStateOf<Int?>(null) }
 
     LaunchedEffect(activeQuery) {
         loading = true
         error = null
+        loadingMore = false
+        lastRequestedOffset = -1
         try {
             val page = api.page(offset = 0, search = activeQuery)
             images = page.images
@@ -192,10 +197,17 @@ fun ArchiveScreen() {
                         }
                         if (index >= images.size - 40) {
                             LaunchedEffect(images.size) {
+                                val offset = images.size
+                                if (loadingMore || offset <= lastRequestedOffset) return@LaunchedEffect
+                                loadingMore = true
+                                lastRequestedOffset = offset
                                 runCatching {
-                                    val next = api.page(offset = images.size, search = activeQuery)
+                                    val next = api.page(offset = offset, search = activeQuery)
                                     if (next.images.isNotEmpty()) images = images + next.images
+                                }.onFailure {
+                                    lastRequestedOffset = -1
                                 }
+                                loadingMore = false
                             }
                         }
                     }
@@ -232,17 +244,26 @@ private fun ArchiveViewer(
 
         BackHandler(onBack = onClose)
 
+        LaunchedEffect(images.size) {
+            if (images.isEmpty()) return@LaunchedEffect
+            val last = images.lastIndex
+            if (pagerState.currentPage > last) {
+                pagerState.animateScrollToPage(last)
+            }
+        }
+
         val page = pagerState.currentPage.coerceIn(0, images.lastIndex)
-        val current = images[page]
+        val current = images.getOrNull(page) ?: return@Dialog
         val isFav = (flagOverrides[current.id] ?: current.flag) == "picked"
 
         Box(Modifier.fillMaxSize().background(Color.Black)) {
             HorizontalPager(
                 state = pagerState,
-                key = { images[it].id },
+                key = { images.getOrNull(it)?.id ?: it },
                 modifier = Modifier.fillMaxSize(),
             ) { p ->
-                ZoomableArchiveImage(api, images[p], onTap = { chromeVisible = !chromeVisible })
+                val img = images.getOrNull(p) ?: return@HorizontalPager
+                ZoomableArchiveImage(api, img, onTap = { chromeVisible = !chromeVisible })
             }
 
             rawLabel(current.file_ext)?.let { label ->
@@ -304,6 +325,7 @@ private fun ArchiveViewer(
                                     val send = Intent(Intent.ACTION_SEND).apply {
                                         type = "image/*"
                                         putExtra(Intent.EXTRA_STREAM, uri)
+                                        clipData = ClipData.newRawUri(null, uri)
                                         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                                     }
                                     context.startActivity(
