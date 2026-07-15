@@ -1,45 +1,61 @@
-import { fetchJson } from '../api.js';
+import { FetchJsonError, fetchJson as sharedFetchJson } from '../api.js';
+import { showToast } from './toast.js';
 
-export { fetchJson };
+function reportApiFailure({ status = 0 } = {}) {
+    showToast(status ? `Request failed (${status})` : 'The archive did not respond');
+}
+
+async function requestWithStatus(url, options = {}) {
+    let response = null;
+    try {
+        response = await fetch(url, options);
+    } catch {
+        reportApiFailure();
+        return { ok: false, status: 0, data: null };
+    }
+    const data = response.status === 204 ? null : await response.json().catch(() => null);
+    if (!response.ok) reportApiFailure({ status: response.status });
+    return { ok: response.ok, status: response.status, data };
+}
+
+export async function fetchJson(url, options = {}) {
+    try {
+        return await sharedFetchJson(url, options);
+    } catch (error) {
+        reportApiFailure({ status: error?.status });
+        throw error;
+    }
+}
+
+export async function requestJson(url, options = {}) {
+    const result = await requestWithStatus(url, options);
+    if (result.ok) return result.data;
+    throw new FetchJsonError(result.data?.detail || result.data?.error || 'Request failed', {
+        url,
+        status: result.status,
+    });
+}
+
+function jsonRequestOptions(method, body = null) {
+    const options = { method, headers: { Accept: 'application/json' } };
+    if (body != null) {
+        options.headers['Content-Type'] = 'application/json';
+        options.body = JSON.stringify(body);
+    }
+    return options;
+}
 
 export async function postJson(url, body = null) {
-    try {
-        const options = { method: 'POST' };
-        if (body != null) {
-            options.headers = { 'Content-Type': 'application/json' };
-            options.body = JSON.stringify(body);
-        }
-        const response = await fetch(url, options);
-        if (!response.ok) return null;
-        return await response.json();
-    } catch {
-        return null;
-    }
+    const result = await requestWithStatus(url, jsonRequestOptions('POST', body));
+    return result.ok ? result.data : null;
 }
 
 export async function postJsonWithStatus(url, body = null) {
-    try {
-        const options = { method: 'POST', headers: { Accept: 'application/json' } };
-        if (body != null) {
-            options.headers['Content-Type'] = 'application/json';
-            options.body = JSON.stringify(body);
-        }
-        const response = await fetch(url, options);
-        const data = await response.json().catch(() => null);
-        return { ok: response.ok, status: response.status, data };
-    } catch {
-        return { ok: false, status: 0, data: null };
-    }
+    return requestWithStatus(url, jsonRequestOptions('POST', body));
 }
 
 export async function deleteJsonWithStatus(url) {
-    try {
-        const response = await fetch(url, { method: 'DELETE', headers: { Accept: 'application/json' } });
-        const data = await response.json().catch(() => null);
-        return { ok: response.ok, status: response.status, data };
-    } catch {
-        return { ok: false, status: 0, data: null };
-    }
+    return requestWithStatus(url, jsonRequestOptions('DELETE'));
 }
 
 export function thumbUrl(size, imageId) {
@@ -370,22 +386,11 @@ export async function listSharedSurfaces() {
 }
 
 async function publishingMutation(method, url, body = null) {
-    const options = { method, headers: { Accept: 'application/json' } };
-    if (body != null) {
-        options.headers['Content-Type'] = 'application/json';
-        options.body = JSON.stringify(body);
+    const result = await requestWithStatus(url, jsonRequestOptions(method, body));
+    if (!result.ok) {
+        throw new Error(result.data?.error || result.data?.detail || `Request failed (${result.status})`);
     }
-    let response = null;
-    try {
-        response = await fetch(url, options);
-    } catch {
-        throw new Error('The archive did not respond');
-    }
-    const data = await response.json().catch(() => null);
-    if (!response.ok) {
-        throw new Error(data?.error || data?.detail || `Request failed (${response.status})`);
-    }
-    return data;
+    return result.data;
 }
 
 export async function getCollectionTree() {
@@ -465,16 +470,8 @@ export async function listSavedViews() {
 }
 
 async function savedViewMutation(method, url, body = null) {
-    try {
-        const response = await fetch(url, {
-            method,
-            headers: body ? { 'Content-Type': 'application/json' } : undefined,
-            body: body ? JSON.stringify(body) : undefined,
-        });
-        return response.ok ? await response.json() : null;
-    } catch {
-        return null;
-    }
+    const result = await requestWithStatus(url, jsonRequestOptions(method, body));
+    return result.ok ? result.data : null;
 }
 
 export const createSavedView = (name, query) =>

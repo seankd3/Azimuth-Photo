@@ -1,4 +1,5 @@
 import { byId, on, selection, viewState } from './state.js';
+import { requestJson } from './api.js';
 import { showToast } from './toast.js';
 
 const RECENT_KEY = 'pa_d_recent_keywords';
@@ -12,9 +13,7 @@ let painterActive = false;
 let renderedImageId = null;
 
 async function request(url, options = {}) {
-    const response = await fetch(url, options);
-    if (!response.ok) throw new Error((await response.json().catch(() => ({}))).detail || 'Request failed');
-    return response.status === 204 ? null : response.json();
+    return requestJson(url, options);
 }
 
 const post = (url, body) => request(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
