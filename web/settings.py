@@ -72,6 +72,8 @@ DEFAULT_SETTINGS = {
     "publish_site_base_url": "",
     "share_brand_name": "",
     "share_cookie_secret": "",
+    "owner_key_hash": "",
+    "owner_session_epoch": 0,
     "sync_bandwidth_mbps": 0,
     "sync_thumb_budget_gb": 8,
     "hub_url": "",
@@ -81,7 +83,12 @@ DEFAULT_SETTINGS = {
     "setup_completed": False,
 }
 
-PRIVATE_SETTING_KEYS = {"share_cookie_secret", "device_token"}
+PRIVATE_SETTING_KEYS = {
+    "share_cookie_secret",
+    "device_token",
+    "owner_key_hash",
+    "owner_session_epoch",
+}
 
 EMBED_MODEL_PRESETS = {
     "qwen3-vl-embedding-8b": {
@@ -526,6 +533,11 @@ def normalize_settings(raw: dict | None) -> dict:
         DEFAULT_SETTINGS["ranking_taste_blend"],
     )
     normalized["share_cookie_secret"] = str(raw.get("share_cookie_secret") or "").strip()
+    normalized["owner_key_hash"] = str(raw.get("owner_key_hash") or "").strip()
+    try:
+        normalized["owner_session_epoch"] = max(0, int(raw.get("owner_session_epoch") or 0))
+    except (TypeError, ValueError):
+        normalized["owner_session_epoch"] = 0
     normalized["hub_url"] = str(raw.get("hub_url") or "").strip().rstrip("/")
     normalized["device_token"] = str(raw.get("device_token") or "").strip()
     normalized["paired_hub_id"] = str(raw.get("paired_hub_id") or "").strip()
