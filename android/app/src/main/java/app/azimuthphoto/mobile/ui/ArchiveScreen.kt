@@ -80,7 +80,7 @@ fun ArchiveScreen() {
     }
 
     viewerIndex?.let { index ->
-        ArchiveViewer(api = api, images = images, startIndex = index, onClose = { viewerIndex = null })
+        HubViewer(api = api, images = images, startIndex = index, onClose = { viewerIndex = null })
         return
     }
 
@@ -156,7 +156,7 @@ fun ArchiveScreen() {
 }
 
 @Composable
-private fun ArchiveViewer(
+fun HubViewer(
     api: ArchiveApi,
     images: List<ArchiveImage>,
     startIndex: Int,

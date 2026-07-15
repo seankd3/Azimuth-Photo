@@ -16,9 +16,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Cloud
+import androidx.compose.material.icons.outlined.Collections
 import androidx.compose.material.icons.outlined.Photo
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.rounded.Cloud
+import androidx.compose.material.icons.rounded.Collections
 import androidx.compose.material.icons.rounded.Photo
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.Button
@@ -44,6 +46,7 @@ import kotlinx.coroutines.launch
 import app.azimuthphoto.mobile.backup.BackupScheduler
 import app.azimuthphoto.mobile.backup.FreeUpSpace
 import app.azimuthphoto.mobile.ui.ArchiveScreen
+import app.azimuthphoto.mobile.ui.CollectionsScreen
 import app.azimuthphoto.mobile.ui.PhotoArchiveTheme
 import app.azimuthphoto.mobile.ui.SettingsScreen
 import app.azimuthphoto.mobile.ui.TimelineScreen
@@ -143,7 +146,17 @@ private fun Root(
                     selected = tab == 2, onClick = { tab = 2 },
                     icon = {
                         Icon(
-                            if (tab == 2) Icons.Rounded.Settings else Icons.Outlined.Settings,
+                            if (tab == 2) Icons.Rounded.Collections else Icons.Outlined.Collections,
+                            contentDescription = "Collections",
+                        )
+                    },
+                    label = { Text("Collections") },
+                )
+                NavigationBarItem(
+                    selected = tab == 3, onClick = { tab = 3 },
+                    icon = {
+                        Icon(
+                            if (tab == 3) Icons.Rounded.Settings else Icons.Outlined.Settings,
                             contentDescription = "Settings",
                         )
                     },
@@ -156,6 +169,7 @@ private fun Root(
             when (tab) {
                 0 -> TimelineScreen()
                 1 -> ArchiveScreen()
+                2 -> CollectionsScreen()
                 else -> SettingsScreen()
             }
         }

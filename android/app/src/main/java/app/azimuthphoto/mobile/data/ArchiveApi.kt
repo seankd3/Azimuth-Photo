@@ -33,6 +33,27 @@ data class RankingsPage(
     val total_images: Long = 0,
 )
 
+@Serializable
+data class ArchiveCollection(
+    val id: Long,
+    val name: String = "",
+    val description: String = "",
+    val image_count: Int = 0,
+    val active_cover_image_id: Long? = null,
+    val smart: Boolean = false,
+    val images: List<ArchiveImage> = emptyList(),
+)
+
+@Serializable
+data class CollectionsResponse(
+    val collections: List<ArchiveCollection> = emptyList(),
+)
+
+@Serializable
+data class CollectionDetail(
+    val collection: ArchiveCollection,
+)
+
 /** Read-only client for the hub's library API. */
 class ArchiveApi(private val baseUrl: String) {
 
@@ -61,9 +82,26 @@ class ArchiveApi(private val baseUrl: String) {
             }
         }
 
+    suspend fun collections(): List<ArchiveCollection> = withContext(Dispatchers.IO) {
+        http.newCall(Request.Builder().url("$baseUrl/api/user-collections").build()).execute().use { resp ->
+            if (!resp.isSuccessful) throw IOException("collections failed: HTTP ${resp.code}")
+            json.decodeFromString<CollectionsResponse>(resp.body!!.string()).collections
+        }
+    }
+
+    suspend fun collection(id: Long): CollectionDetail = withContext(Dispatchers.IO) {
+        http.newCall(
+            Request.Builder().url("$baseUrl/api/user-collections/$id?limit=500").build(),
+        ).execute().use { resp ->
+            if (!resp.isSuccessful) throw IOException("collection failed: HTTP ${resp.code}")
+            json.decodeFromString<CollectionDetail>(resp.body!!.string())
+        }
+    }
+
     fun thumbUrl(image: ArchiveImage, size: String = "sm"): String =
-        if (image.thumb_url.isNotEmpty()) "$baseUrl${image.thumb_url}"
-        else "$baseUrl/api/thumb/$size/${image.id}"
+        if (image.thumb_url.isNotEmpty()) "$baseUrl${image.thumb_url}" else thumbUrl(image.id, size)
+
+    fun thumbUrl(imageId: Long, size: String = "sm"): String = "$baseUrl/api/thumb/$size/$imageId"
 
     fun largeUrl(image: ArchiveImage): String = "$baseUrl/api/thumb/lg/${image.id}"
 }

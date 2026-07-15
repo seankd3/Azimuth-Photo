@@ -203,7 +203,7 @@ private fun ZoomableImage(
                     },
                 )
             }
-            .pointerInput(item.id) {
+            .pointerInput(item.id, viewport) {
                 awaitEachGesture {
                     while (true) {
                         val event = awaitPointerEvent()
