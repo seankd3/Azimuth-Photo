@@ -103,7 +103,7 @@ class ProbeServer:
             start_new_session=True,
         )
         self._wait_ready()
-        if self.offline_hub:
+        if self.offline_hub or self.old_hub is not None:
             self._wait_for_initial_sync_scan()
         return self
 
@@ -123,7 +123,7 @@ class ProbeServer:
         raise RuntimeError(f"QA server did not become ready on {self.base_url}: {last_error}; see {self.log_path}")
 
     def _wait_for_initial_sync_scan(self, timeout: float = 90.0) -> None:
-        """Keep the offline scenario out of the fixture's startup write batch."""
+        """Keep satellite scenarios out of the fixture's startup write batch."""
 
         deadline = time.monotonic() + scaled_seconds(timeout)
         while time.monotonic() < deadline:
