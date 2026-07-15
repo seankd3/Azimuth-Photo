@@ -98,7 +98,11 @@ class XmpWriteTests(unittest.TestCase):
         with sqlite3.connect(self.db_path) as conn:
             conn.executescript(
                 """
-                CREATE TABLE images (id INTEGER PRIMARY KEY, filepath TEXT NOT NULL);
+                CREATE TABLE images (
+                    id INTEGER PRIMARY KEY,
+                    filepath TEXT NOT NULL,
+                    vc_of INTEGER REFERENCES images(id)
+                );
                 CREATE TABLE develop_settings (
                     image_id INTEGER PRIMARY KEY, settings TEXT, origin TEXT,
                     xmp_path TEXT, xmp_mtime REAL, updated_at TEXT
@@ -139,6 +143,30 @@ class XmpWriteTests(unittest.TestCase):
         self.assertEqual(result["status"], "skipped")
         self.assertIn("imported-unmodified", result["note"])
         self.assertFalse(raw.with_suffix(".xmp").exists())
+
+    def test_virtual_copy_write_leaves_master_sidecar_untouched(self):
+        raw = self._image(9, ".cr3", settings={"Exposure2012": 0.25})
+        sidecar = raw.with_suffix(".xmp")
+        sidecar.write_bytes(b"master sidecar")
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "INSERT INTO images (id, filepath, vc_of) VALUES (?, ?, ?)",
+                (10, str(raw), 9),
+            )
+            conn.execute(
+                "INSERT INTO develop_settings (image_id, settings, origin, updated_at) "
+                "VALUES (?, ?, 'user', 'now')",
+                (10, json.dumps({"Exposure2012": -1.5})),
+            )
+
+        result = xmp_write.write_image_xmp(self.db_path, 10)
+
+        self.assertEqual(result["status"], "skipped")
+        self.assertEqual(
+            result["note"],
+            "Virtual copies do not own the sidecar - write from the master.",
+        )
+        self.assertEqual(sidecar.read_bytes(), b"master sidecar")
 
     def test_embedded_dng_splice_preserves_size_and_backs_up_original_packet(self):
         settings = {"Exposure2012": 0.5, "ConvertToGrayscale": False}

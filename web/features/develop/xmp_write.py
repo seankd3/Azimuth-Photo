@@ -402,7 +402,7 @@ def _settings_row(db_path: str, image_id: int) -> sqlite3.Row | None:
     conn = connection.open_sync(db_path)
     try:
         return conn.execute(
-            "SELECT i.id, i.filepath, ds.settings, ds.origin "
+            "SELECT i.id, i.filepath, i.vc_of, ds.settings, ds.origin "
             "FROM images i LEFT JOIN develop_settings ds ON ds.image_id = i.id WHERE i.id = ?",
             (image_id,),
         ).fetchone()
@@ -416,6 +416,13 @@ def write_image_xmp(db_path: str, image_id: int, *, mode: str = "sidecar") -> di
     row = _settings_row(db_path, image_id)
     if row is None:
         return {"image_id": image_id, "status": "not_found", "note": "Image not found."}
+    if row["vc_of"] is not None:
+        return {
+            "image_id": image_id,
+            "status": "skipped",
+            "origin": str(row["origin"] or "none"),
+            "note": "Virtual copies do not own the sidecar - write from the master.",
+        }
     if row["origin"] != "user":
         origin = str(row["origin"] or "none")
         return {
