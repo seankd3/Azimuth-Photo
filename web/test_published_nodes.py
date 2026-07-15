@@ -293,6 +293,30 @@ class PublishedNodeTests(BackendTestCase):
         self.assertTrue(await db.share_token_allows_image(share["token"], first))
         self.assertFalse(await db.share_token_allows_image(share["token"], later))
 
+    async def test_published_private_link_is_in_shared_aggregation(self):
+        collection = await db.create_collection(name="Client delivery")
+        node = await published_nodes.create_snapshot_tree(
+            db.DB_PATH,
+            area="private",
+            parent_id=None,
+            source_collection_id=collection["id"],
+            slug=None,
+            title=None,
+            resolve_smart_image_ids=self._resolve_smart,
+        )
+        share = await db.create_published_node_share(node["id"])
+
+        def probe():
+            with TestClient(app_module.app) as client:
+                return client.get("/api/shares")
+
+        response = await asyncio.to_thread(probe)
+        self.assertEqual(response.status_code, 200, response.text)
+        item = response.json()["items"][0]
+        self.assertIsNone(item["collection_id"])
+        self.assertEqual(item["published_node_id"], node["id"])
+        self.assertEqual(item["private_link"]["token"], share["token"])
+
     async def test_root_share_serves_entire_subtree_once_in_document_order(self):
         source = await self._source()
         root_image = await self._image(source["id"], "root.jpg")
