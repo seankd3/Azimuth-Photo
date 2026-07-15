@@ -8,7 +8,7 @@ Deploy notes:
 
 ---
 
-## FIXED — 2026-07-13 (23 bugs)
+## FIXED — 2026-07-13 (30 bugs)
 
 **Trash / Develop / Gallery (round 1)**
 - Empty-trash button 422 (no body → send `{}`).
@@ -41,6 +41,15 @@ Deploy notes:
 - Client-gallery password could not be removed once set.
 - Export toast claimed success even on 400/507 (now surfaces real error).
 
+**Wave 4 — Workers/Settings/Stacks (Grok, reviewed) — 2026-07-13**
+- Stacks "Rescan" read `status.state` instead of `rebuild_status.state` → instant fake "done"; error states now terminal with a toast.
+- Captions two-gate deadlock: Resume never enabled `caption_scan_enabled`, enabling the setting never cleared `manual_pause` — no UI path could start captions. Both explicit actions now clear both gates.
+- People row said Resume but called Pause when auto-scan was disabled (label/action used different predicates).
+- Right-panel caption cached "not yet captioned" for the whole session; negatives are no longer cached.
+- "Replace existing previews" never enabled Save (`thumbnail_cache_policy` never dirtied the settings).
+- "Restart quick guide" was wiped from Help by the shortcut sheet's innerHTML replace; restored + delegated binding.
+- Source-scan polling treated one failed status fetch as "scan finished"; now retries through blips.
+
 ## DONE — Android Archive viewer → full Google-Photos-style
 Immersive Dialog (no tab-bar leak), metadata header (back·date/time·favorite·⋮), RAW chip, highlighted filmstrip, Share/Info/Trash bar, pinch-zoom, info sheet; `ArchiveApi` trash/setFlag/download-for-share; FileProvider. Built on omarchy, emulator-verified, installed to the Pixel 10a over Tailscale adb.
 
@@ -51,6 +60,10 @@ Immersive Dialog (no tab-bar leak), metadata header (back·date/time·favorite·
 2. **People list caps at 100/section** — UI asks for 500 but the backend returns ≤100 named/≤100 unnamed/≤100 other, silently dropping people past the cap (omnibox, Filter→People, People lens). Raise the cap (perf?) or paginate?
 3. **Public client-gallery page ignores a custom cover** — cover now persists in the DB but `/s/gallery/{token}` still leads by first-photo order. Want the public page to lead with the chosen cover?
 4. **Classic `/s/{token}` "Download all"** fires one browser download per photo (blocked after the first). Needs a new `GET /s/{token}/download-all` zip endpoint on the classic share surface (client galleries already have one). Build it?
+
+5. **Cull-brief zoom always centers** — FE reads `subject_box`/`focus_box` but autocull never returns them; needs backend face/subject boxes. Build?
+6. **`/api/quality/scan` has no UI entry** — old archive bursts never get cull scores; endpoint exists, desktop never calls it. Add a "Score stacks" action?
+7. **`show_loupe_cache_status` is a dead setting** — persists but nothing reads it. Wire it into the loupe or delete the toggle?
 
 ## OPEN (latent)
 - mobile `writeRating()` → `/api/image/{id}/rating` has no backend route; never called from UI.
