@@ -137,7 +137,8 @@ async def api_update_gallery(collection_id: int, gallery_id: int, body: GalleryB
     elif body.password is not None:
         password_hash = auth.hash_password(body.password) if body.password else None
     updated = await galleries.update_gallery(
-        _configured_db_path(), gallery_id, options=_options(body), password_hash=password_hash
+        _configured_db_path(), gallery_id, title=body.title,
+        options=_options(body), password_hash=password_hash,
     )
     return {"ok": True, "gallery": _owner_payload(request, updated)}
 

@@ -106,6 +106,30 @@ class GalleryTests(BackendTestCase):
         self.assertEqual(blocked_download.status_code, 404)
         self.assertEqual(zip_blocked.status_code, 404)
 
+    async def test_gallery_patch_renames_owner_payload_and_public_page(self):
+        collection, _first, _second = await self._collection()
+
+        def probe():
+            with TestClient(app_module.app) as client:
+                created = client.post(
+                    f"/api/user-collections/{collection['id']}/galleries",
+                    json={"title": "Old gallery title"},
+                )
+                gallery = created.json()["gallery"]
+                renamed = client.patch(
+                    f"/api/user-collections/{collection['id']}/galleries/{gallery['id']}",
+                    json={"title": "Summer favorites"},
+                )
+                public = client.get(f"/s/gallery/{gallery['token']}")
+                return renamed, public
+
+        renamed, public = await asyncio.to_thread(probe)
+
+        self.assertEqual(renamed.status_code, 200, renamed.text)
+        self.assertEqual(renamed.json()["gallery"]["title"], "Summer favorites")
+        self.assertIn("<h1>Summer favorites</h1>", public.text)
+        self.assertNotIn("Old gallery title", public.text)
+
     async def test_export_preset_round_trip_and_print_recipe(self):
         print_options = export_presets.print_ready_options(color_space="adobe_rgb", border_px=48)
         self.assertEqual(print_options["format"], "tiff16")

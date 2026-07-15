@@ -174,7 +174,14 @@ async def list_galleries(db_path: str, collection_id: int) -> list[dict[str, Any
         await connection.close_async(conn, db_path=db_path)
 
 
-async def update_gallery(db_path: str, gallery_id: int, *, options: dict[str, Any], password_hash: str | None | object = ...):
+async def update_gallery(
+    db_path: str,
+    gallery_id: int,
+    *,
+    title: str | None = None,
+    options: dict[str, Any],
+    password_hash: str | None | object = ...,
+):
     clean = normalize_options(options)
     conn = await connection.open_async(db_path)
     try:
@@ -184,8 +191,9 @@ async def update_gallery(db_path: str, gallery_id: int, *, options: dict[str, An
             return None
         member_ids = {image["id"] for image in await _gallery_images(conn, int(gallery_id))}
         cover_image_id = clean["cover_image_id"] if clean["cover_image_id"] in member_ids else current["cover_image_id"]
-        fields = ["layout = ?", "theme = ?", "cover_image_id = ?", "allow_download_all = ?", "download_size = ?", "updated_at = ?"]
-        values: list[Any] = [clean["layout"], clean["theme"], cover_image_id, int(clean["allow_download_all"]), clean["download_size"], time.time()]
+        clean_title = (title or current["title"] or "Client gallery").strip() or current["title"]
+        fields = ["title = ?", "layout = ?", "theme = ?", "cover_image_id = ?", "allow_download_all = ?", "download_size = ?", "updated_at = ?"]
+        values: list[Any] = [clean_title, clean["layout"], clean["theme"], cover_image_id, int(clean["allow_download_all"]), clean["download_size"], time.time()]
         if password_hash is not ...:
             fields.append("password_hash = ?")
             values.append(password_hash)
