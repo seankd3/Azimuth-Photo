@@ -104,6 +104,15 @@ function originSettings(payload) {
     catch { return {}; }
 }
 
+function developMeta(payload) {
+    return {
+        ...(payload?.meta || {}),
+        as_shot_temperature: payload?.meta?.as_shot?.temperature ?? payload?.meta?.as_shot_temperature,
+        as_shot_tint: payload?.meta?.as_shot?.tint ?? payload?.meta?.as_shot_tint,
+        color: payload?.meta?.color ?? null,
+    };
+}
+
 async function fetchDevelop(imageId) {
     const response = await fetch(`/api/develop/${imageId}`, {
         headers: { Accept: 'application/json' },
@@ -466,12 +475,7 @@ async function openImage(image) {
         if (!entry) {
             const payload = await fetchDevelop(image.id);
             entry = {
-                settings: clone(payload.settings), origin: originSettings(payload), meta: {
-                    ...(payload.meta || {}),
-                    as_shot_temperature: payload.meta?.as_shot?.temperature ?? payload.meta?.as_shot_temperature,
-                    as_shot_tint: payload.meta?.as_shot?.tint ?? payload.meta?.as_shot_tint,
-                    color: payload.meta?.color ?? null,
-                },
+                settings: clone(payload.settings), origin: originSettings(payload), meta: developMeta(payload),
                 undo: [], redo: [], serverHistory: payload.history || [],
             };
             stateCache.set(Number(image.id), entry);
@@ -488,6 +492,18 @@ async function openImage(image) {
         setStatus('Reading source image from disk…', { busy: true });
         const base = await fetchBaseWithRetry(image.id, token, Number(entry.meta?.hdr?.scale) || 1);
         if (!base || token !== loadingToken) return;
+        if (!entry.meta?.base_kind) {
+            try {
+                const refreshed = await fetchDevelop(image.id);
+                if (token !== loadingToken) return;
+                entry.meta = developMeta(refreshed);
+                entry.serverHistory = refreshed.history || entry.serverHistory;
+                historyPanel?.setHistory(entry.serverHistory || []);
+                applySettings(entry);
+            } catch {
+                if (token === loadingToken) showToast('Develop color metadata could not be refreshed');
+            }
+        }
         renderer.uploadSource(base.rgba, base.width, base.height);
         entry.base = base;
         renderer.setSettings(renderedSettings(entry), entry.meta);
