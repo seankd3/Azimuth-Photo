@@ -67,6 +67,7 @@ import app.azimuthphoto.mobile.data.ArchiveImage
 import app.azimuthphoto.mobile.data.DeviceMedia
 import app.azimuthphoto.mobile.data.MediaItem
 import app.azimuthphoto.mobile.data.SettingsStore
+import app.azimuthphoto.mobile.data.Shelf
 import app.azimuthphoto.mobile.data.TimelineEntry
 import app.azimuthphoto.mobile.data.UnifiedTimeline
 import app.azimuthphoto.mobile.data.ViewerMedia
@@ -76,7 +77,7 @@ import kotlinx.coroutines.withContext
 private sealed class Scope {
     data object All : Scope()
     data object NotBackedUp : Scope()
-    data class Shelf(val folder: ArchiveFolder) : Scope()
+    data class Shelf(val shelf: app.azimuthphoto.mobile.data.Shelf) : Scope()
 }
 
 private const val HUB_PAGE = 120
@@ -100,7 +101,7 @@ fun TimelineScreen(
     var device by remember { mutableStateOf<List<MediaItem>?>(null) }
     var rawTwins by remember { mutableStateOf<Map<String, MediaItem>>(emptyMap()) }
     var backupStates by remember { mutableStateOf<Map<Long, String>>(emptyMap()) }
-    var shelves by remember { mutableStateOf<List<ArchiveFolder>>(emptyList()) }
+    var shelves by remember { mutableStateOf<List<Shelf>>(emptyList()) }
     var scope by rememberSaveable { mutableStateOf(0) } // 0 All, 1 NotBackedUp, 2+ shelf index
     var hub by remember { mutableStateOf<List<ArchiveImage>>(emptyList()) }
     var hubOffset by remember { mutableStateOf(0) }
@@ -128,14 +129,15 @@ fun TimelineScreen(
         scope == 1 -> Scope.NotBackedUp
         else -> shelves.getOrNull(scope - 2)?.let { Scope.Shelf(it) } ?: Scope.All
     }
-    val folderPath = (activeScope as? Scope.Shelf)?.folder?.path.orEmpty()
+    val folderPaths = (activeScope as? Scope.Shelf)?.shelf?.paths.orEmpty()
+    val folderKey = folderPaths.joinToString("|")
     val usesHub = api != null && activeScope !is Scope.NotBackedUp
 
     // (Re)load the hub source whenever the scope, server, or a manual retry changes.
-    LaunchedEffect(folderPath, usesHub, api, loadTick) {
+    LaunchedEffect(folderKey, usesHub, api, loadTick) {
         hub = emptyList(); hubOffset = 0; hubExhausted = false; hubOffline = false; wantMore = false
         if (usesHub && api != null) {
-            runCatching { api.page(offset = 0, limit = HUB_PAGE, folder = folderPath) }
+            runCatching { api.page(offset = 0, limit = HUB_PAGE, folders = folderPaths) }
                 .onSuccess { hub = it.images; hubOffset = it.images.size; hubExhausted = it.images.isEmpty() }
                 .onFailure { hubOffline = true }
         }
@@ -243,10 +245,10 @@ fun TimelineScreen(
         }
 
         // One in-flight page at a time: load the next when the grid asks, then disarm.
-        LaunchedEffect(wantMore, hubOffset, folderPath) {
+        LaunchedEffect(wantMore, hubOffset, folderKey) {
             if (wantMore) {
                 if (usesHub && api != null && !hubExhausted && !hubOffline) {
-                    val next = runCatching { api.page(offset = hubOffset, limit = HUB_PAGE, folder = folderPath) }.getOrNull()
+                    val next = runCatching { api.page(offset = hubOffset, limit = HUB_PAGE, folders = folderPaths) }.getOrNull()
                     if (next == null) hubOffline = true
                     else if (next.images.isEmpty()) hubExhausted = true
                     else { hub = hub + next.images; hubOffset += next.images.size }
@@ -296,7 +298,7 @@ fun TimelineScreen(
 
 @Composable
 private fun ScopeChips(
-    shelves: List<ArchiveFolder>,
+    shelves: List<Shelf>,
     selected: Int,
     onSelect: (Int) -> Unit,
     offline: Boolean,
@@ -346,7 +348,7 @@ private fun ScopeChip(label: String, selected: Boolean, onClick: () -> Unit) {
 private fun emptyMessage(scope: Scope, offline: Boolean): String = when {
     scope is Scope.NotBackedUp -> "Everything on this device is backed up."
     offline -> "Archive offline — no photos on this device yet."
-    scope is Scope.Shelf -> "Nothing in ${scope.folder.name} yet."
+    scope is Scope.Shelf -> "Nothing in ${scope.shelf.name} yet."
     else -> "No photos yet — take one and it'll land here (and in your archive)."
 }
 

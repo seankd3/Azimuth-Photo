@@ -63,7 +63,7 @@ class ArchiveApi(private val baseUrl: String) {
         offset: Int,
         limit: Int = 200,
         search: String = "",
-        folder: String = "",
+        folders: List<String> = emptyList(),
     ): RankingsPage = withContext(Dispatchers.IO) {
         val url = buildString {
             append(baseUrl)
@@ -73,7 +73,7 @@ class ArchiveApi(private val baseUrl: String) {
                 append("&q=").append(java.net.URLEncoder.encode(search, "UTF-8"))
                 append("&deep=true")
             }
-            if (folder.isNotBlank()) {
+            folders.filter { it.isNotBlank() }.forEach { folder ->
                 append("&folder=").append(java.net.URLEncoder.encode("/$folder", "UTF-8"))
             }
         }
@@ -85,7 +85,7 @@ class ArchiveApi(private val baseUrl: String) {
         }
     }
 
-    suspend fun shelves(): List<ArchiveFolder> = withContext(Dispatchers.IO) {
+    suspend fun shelves(): List<Shelf> = withContext(Dispatchers.IO) {
         val all = http.newCall(Request.Builder().url("$baseUrl/api/folders").build())
             .execute().use { response ->
                 if (!response.isSuccessful) {
@@ -93,7 +93,12 @@ class ArchiveApi(private val baseUrl: String) {
                 }
                 json.decodeFromString<FoldersResponse>(response.body!!.string()).folders
             }
+        // Same-named folders in different roots (e.g. Personal Photos in the old
+        // tree and under RAWS) are one shelf to the user — merge, scope to all paths.
         collapseShelfFolders(all)
+            .groupBy { it.name }
+            .map { (name, group) -> Shelf(name, group.sumOf { it.count }, group.map { it.path }) }
+            .sortedByDescending { it.count }
     }
 
     suspend fun stats(timeoutSeconds: Long = 3): ArchiveStats = withContext(Dispatchers.IO) {
@@ -205,6 +210,9 @@ internal fun collapseShelfFolders(all: List<ArchiveFolder>): List<ArchiveFolder>
 data class ArchiveFolder(val path: String, val count: Int, val depth: Int) {
     val name: String get() = path.substringAfterLast('/')
 }
+
+/** A user-facing library shelf; may span several same-named folders. */
+data class Shelf(val name: String, val count: Int, val paths: List<String>)
 
 @Serializable
 private data class FoldersResponse(val folders: List<ArchiveFolder> = emptyList())

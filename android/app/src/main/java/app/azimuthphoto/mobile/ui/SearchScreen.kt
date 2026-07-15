@@ -53,6 +53,7 @@ import app.azimuthphoto.mobile.data.ArchiveFolder
 import app.azimuthphoto.mobile.data.ArchiveImage
 import app.azimuthphoto.mobile.data.DeviceMedia
 import app.azimuthphoto.mobile.data.MediaBucket
+import app.azimuthphoto.mobile.data.Shelf
 import app.azimuthphoto.mobile.data.ViewerMedia
 import app.azimuthphoto.mobile.data.MediaItem
 import app.azimuthphoto.mobile.data.SettingsStore
@@ -73,11 +74,11 @@ fun SearchScreen(onImmersive: (Boolean) -> Unit = {}) {
     val api = remember(currentSettings.serverUrl) { ArchiveApi(currentSettings.serverUrl) }
     var query by rememberSaveable { mutableStateOf("") }
     var activeQuery by rememberSaveable { mutableStateOf("") }
-    var activeShelf by remember { mutableStateOf<ArchiveFolder?>(null) }
+    var activeShelf by remember { mutableStateOf<Shelf?>(null) }
     var activeBucket by remember { mutableStateOf<MediaBucket?>(null) }
     var hasResults by rememberSaveable { mutableStateOf(false) }
     var requestGeneration by remember { mutableIntStateOf(0) }
-    var shelves by remember { mutableStateOf<List<ArchiveFolder>>(emptyList()) }
+    var shelves by remember { mutableStateOf<List<Shelf>>(emptyList()) }
     var buckets by remember { mutableStateOf<List<MediaBucket>>(emptyList()) }
     var archiveImages by remember { mutableStateOf<List<ArchiveImage>>(emptyList()) }
     var localItems by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
@@ -117,7 +118,7 @@ fun SearchScreen(onImmersive: (Boolean) -> Unit = {}) {
                 api.page(
                     offset = 0,
                     search = activeQuery,
-                    folder = activeShelf?.path.orEmpty(),
+                    folders = activeShelf?.paths.orEmpty(),
                 )
             }.onSuccess { page ->
                 archiveImages = page.images
@@ -148,7 +149,7 @@ fun SearchScreen(onImmersive: (Boolean) -> Unit = {}) {
                         api.page(
                             offset = archiveImages.size,
                             search = activeQuery,
-                            folder = activeShelf?.path.orEmpty(),
+                            folders = activeShelf?.paths.orEmpty(),
                         )
                     }.onSuccess { page ->
                         if (page.images.isEmpty()) archiveDone = true
@@ -284,10 +285,10 @@ fun SearchScreen(onImmersive: (Boolean) -> Unit = {}) {
 @Composable
 private fun SearchHome(
     recentSearches: List<String>,
-    shelves: List<ArchiveFolder>,
+    shelves: List<Shelf>,
     buckets: List<MediaBucket>,
     onRecent: (String) -> Unit,
-    onShelf: (ArchiveFolder) -> Unit,
+    onShelf: (Shelf) -> Unit,
     onBucket: (MediaBucket) -> Unit,
 ) {
     Column(Modifier.fillMaxSize()) {
