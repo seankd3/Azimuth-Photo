@@ -128,6 +128,16 @@ class GalleryTests(BackendTestCase):
         self.assertEqual(listed.status_code, 200)
         self.assertEqual(listed.json()["presets"][0]["name"], "Fine art print")
 
+    async def test_production_router_resolves_export_presets_before_image_route(self):
+        def probe():
+            with TestClient(app_module.app) as client:
+                return client.get("/api/develop/export-presets")
+
+        response = await asyncio.to_thread(probe)
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json(), {"presets": []})
+
 
 if __name__ == "__main__":
     unittest.main()
