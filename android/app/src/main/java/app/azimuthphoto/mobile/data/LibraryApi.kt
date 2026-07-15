@@ -151,39 +151,53 @@ class LibraryApi(private val baseUrl: String, private val deviceToken: String? =
         json.decodeFromString<CollectionsResponse>(get("/api/user-collections")).collections
     }
 
-    /** Collection detail JSON (parse images defensively — shape verified per builder). */
-    suspend fun collectionDetail(id: Long): JsonObject = withContext(Dispatchers.IO) {
-        json.parseToJsonElement(get("/api/user-collections/$id")).jsonObject
+    /** A collection's photos — the dedicated route returns full image objects. */
+    suspend fun collectionPhotos(id: Long): List<ArchiveImage> = withContext(Dispatchers.IO) {
+        runCatching {
+            val obj = json.parseToJsonElement(get("/api/collections/$id/images")).jsonObject
+            (obj["images"] as? JsonArray)?.let {
+                json.decodeFromString<List<ArchiveImage>>(it.toString())
+            } ?: emptyList()
+        }.getOrDefault(emptyList())
     }
 
     suspend fun createCollection(name: String): Long? = withContext(Dispatchers.IO) {
         runCatching {
             val out = postJson("/api/user-collections", """{"name":${json.encodeToString(name)}}""")
-            json.parseToJsonElement(out).jsonObject["id"]?.toString()?.trim('"')?.toLongOrNull()
+            // Verified live: the new id is nested under "collection".
+            json.parseToJsonElement(out).jsonObject["collection"]?.jsonObject
+                ?.get("id")?.toString()?.trim('"')?.toLongOrNull()
         }.getOrNull()
     }
 
     suspend fun addToCollection(collectionId: Long, imageIds: List<Long>): Boolean =
         withContext(Dispatchers.IO) {
+            // Verified live: the payload key is "image_ids".
             runCatching {
-                postJson("/api/user-collections/$collectionId/images", """{"ids":${imageIds}}""")
+                postJson("/api/user-collections/$collectionId/images", """{"image_ids":${imageIds}}""")
             }.isSuccess
         }
 
-    /** Returns the public share URL/slug when publishing succeeds. */
+    /** Returns the public URL when publishing succeeds (null when the hub has no publish dir set). */
     suspend fun publish(collectionId: Long): String? = withContext(Dispatchers.IO) {
         runCatching {
-            val out = postJson("/api/user-collections/$collectionId/publish", "{}")
-            val obj = json.parseToJsonElement(out).jsonObject
-            (obj["url"] ?: obj["publish_slug"] ?: obj["slug"])?.toString()?.trim('"')
+            val obj = json.parseToJsonElement(
+                postJson("/api/user-collections/$collectionId/publish", "{}"),
+            ).jsonObject
+            (obj["url"]?.toString()?.trim('"')?.takeIf { it != "null" })
+                ?: obj["publish"]?.jsonObject?.let {
+                    (it["url"] ?: it["publish_slug"])?.toString()?.trim('"')?.takeIf { s -> s != "null" }
+                }
         }.getOrNull()
     }
 
     suspend fun share(collectionId: Long): String? = withContext(Dispatchers.IO) {
         runCatching {
-            val out = postJson("/api/user-collections/$collectionId/share", "{}")
-            val obj = json.parseToJsonElement(out).jsonObject
-            (obj["url"] ?: obj["share_url"] ?: obj["token"])?.toString()?.trim('"')
+            // Verified live: the share URL is nested under "share".
+            val obj = json.parseToJsonElement(
+                postJson("/api/user-collections/$collectionId/share", "{}"),
+            ).jsonObject
+            obj["share"]?.jsonObject?.get("url")?.toString()?.trim('"')
         }.getOrNull()
     }
 

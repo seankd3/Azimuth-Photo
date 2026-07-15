@@ -59,6 +59,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -89,6 +90,7 @@ import app.azimuthphoto.mobile.backup.BackupRecord
 import app.azimuthphoto.mobile.data.ArchiveApi
 import app.azimuthphoto.mobile.data.ArchiveImage
 import app.azimuthphoto.mobile.data.MediaItem
+import app.azimuthphoto.mobile.data.SettingsStore
 import app.azimuthphoto.mobile.data.UnifiedTimeline
 import app.azimuthphoto.mobile.data.ViewerMedia
 import coil.compose.AsyncImage
@@ -116,6 +118,8 @@ fun ViewerScreen(
     onClose: () -> Unit,
     api: ArchiveApi? = null,
     onChanged: () -> Unit = {},
+    onAddToCollection: ((Long) -> Unit)? = null,
+    onFindSimilar: ((ArchiveImage) -> Unit)? = null,
 ) {
     BackHandler(onBack = onClose)
     if (items.isEmpty()) {
@@ -325,6 +329,16 @@ fun ViewerScreen(
                                 withShareable(current) { uri, mime -> openWith(context, uri, mime) }
                             },
                         )
+                        (current as? ViewerMedia.Remote)?.let { remote ->
+                            if (onAddToCollection != null) DropdownMenuItem(
+                                text = { Text("Add to collection") },
+                                onClick = { menuVisible = false; onAddToCollection(remote.image.id) },
+                            )
+                            if (onFindSimilar != null) DropdownMenuItem(
+                                text = { Text("Find similar") },
+                                onClick = { menuVisible = false; onFindSimilar(remote.image) },
+                            )
+                        }
                     }
                 }
                 IconButton(enabled = !busy, onClick = {
@@ -445,8 +459,18 @@ private fun LocalInfo(context: Context, item: MediaItem) {
 
 @Composable
 private fun RemoteInfo(image: ArchiveImage, api: ArchiveApi?) {
+    val context = LocalContext.current
+    val settings by SettingsStore.flow(context).collectAsState(initial = null)
     var exif by remember(image.id) { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var caption by remember(image.id) { mutableStateOf<app.azimuthphoto.mobile.data.Caption?>(null) }
     LaunchedEffect(image.id) { exif = api?.exif(image.id) ?: emptyMap() }
+    LaunchedEffect(image.id, settings?.serverUrl) {
+        settings?.serverUrl?.let { url ->
+            caption = app.azimuthphoto.mobile.data.LibraryApi(url).caption(image.id)
+        }
+    }
+    caption?.takeIf { it.caption.isNotBlank() }?.let { InfoLine("Caption", it.caption) }
+    caption?.tags?.takeIf { it.isNotEmpty() }?.let { InfoLine("Tags", it.joinToString(", ")) }
     image.date_taken?.let {
         InfoLine("Taken", formatTimestamp(UnifiedTimeline.hubMillis(it)))
     }

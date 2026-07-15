@@ -56,7 +56,7 @@ import app.azimuthphoto.mobile.data.SettingsStore
 import app.azimuthphoto.mobile.ui.PhotoArchiveTheme
 import app.azimuthphoto.mobile.ui.OnboardingScreen
 import app.azimuthphoto.mobile.ui.SettingsScreen
-import app.azimuthphoto.mobile.ui.SearchScreen
+import app.azimuthphoto.mobile.ui.library.LibraryScreen
 import app.azimuthphoto.mobile.ui.TimelineScreen
 import app.azimuthphoto.mobile.ui.TrashScreen
 
@@ -190,7 +190,7 @@ private fun Root(
                             contentDescription = "Search",
                         )
                     },
-                    label = { Text("Search") },
+                    label = { Text("Library") },
                 )
                 NavigationBarItem(
                     selected = tab == 2, onClick = { tab = 2 },
@@ -212,7 +212,7 @@ private fun Root(
                     onOpenTrash = { showTrash = true },
                     onImmersive = { immersive = it },
                 )
-                1 -> SearchScreen(onImmersive = { immersive = it })
+                1 -> LibraryScreen(onImmersive = { immersive = it })
                 else -> SettingsScreen(onOpenTrash = { showTrash = true })
             }
         }
