@@ -67,8 +67,9 @@ def main(argv: list[str] | None = None) -> int:
     started = time.monotonic()
     results = []
     base_url = ""
-    offline = [scenario for scenario in selected if scenario.name == "trash_empty_offline_hub"]
-    standard = [scenario for scenario in selected if scenario.name != "trash_empty_offline_hub"]
+    offline_names = {"trash_empty_offline_hub", "grid_offline_thumbs"}
+    offline = [scenario for scenario in selected if scenario.name in offline_names]
+    standard = [scenario for scenario in selected if scenario.name not in offline_names]
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(
             headless=True,
@@ -79,16 +80,24 @@ def main(argv: list[str] | None = None) -> int:
                 if not scenarios:
                     continue
                 if offline_hub:
-                    manifest = reset_fixture()
-                with ProbeServer(offline_hub=offline_hub) as server:
-                    base_url = server.base_url
-                    label = "offline satellite" if offline_hub else "direct owner"
-                    print(f"Probe server: {base_url} ({label}, isolated PHOTOARCHIVE_HOME)", flush=True)
-                    harness = BrowserHarness(browser, server.base_url, manifest)
-                    for scenario in scenarios:
-                        result = harness.run(scenario)
-                        results.append(result)
-                        _print_result(result)
+                    # Satellite scenarios start a worker that may be retrying a dead
+                    # hub. Give each destructive/offline proof a fresh fixture so that
+                    # retry work from one cannot lock the next scenario's catalog.
+                    scenario_groups = [[scenario] for scenario in scenarios]
+                else:
+                    scenario_groups = [scenarios]
+                for scenario_group in scenario_groups:
+                    if offline_hub:
+                        manifest = reset_fixture()
+                    with ProbeServer(offline_hub=offline_hub) as server:
+                        base_url = server.base_url
+                        label = "offline satellite" if offline_hub else "direct owner"
+                        print(f"Probe server: {base_url} ({label}, isolated PHOTOARCHIVE_HOME)", flush=True)
+                        harness = BrowserHarness(browser, server.base_url, manifest)
+                        for scenario in scenario_group:
+                            result = harness.run(scenario)
+                            results.append(result)
+                            _print_result(result)
         finally:
             browser.close()
 

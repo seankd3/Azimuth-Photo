@@ -1,5 +1,7 @@
 "use strict";
 
+import { fetchOptionsWithTimeout } from '../api.js';
+
 const POLL_MS = 3000;
 let timer = null;
 let root = null;
@@ -24,7 +26,7 @@ function formatRate(bytesPerSecond) {
 }
 
 async function json(url, options) {
-    const response = await fetch(url, options);
+    const response = await fetch(url, fetchOptionsWithTimeout(options, 5_000));
     if (!response.ok) throw new Error(`Sync request failed (${response.status})`);
     return response.json();
 }
@@ -100,6 +102,7 @@ function patch(status) {
     const skipped = Number(status.mirror?.skipped_unhashed) || 0;
     const pendingHubTrash = Number(status.pending_hub_trash) || 0;
     const button = root.querySelector('.sync-chip-button');
+    button.classList.remove('offline');
     button.title = mirrorTooltip(status);
     patchText('.sync-chip-arrow', status.paused ? 'Ⅱ' : depth ? '↑' : '✓');
     patchText('[data-sync-count]', count);
@@ -120,7 +123,7 @@ async function refresh() {
     try {
         patch(await json('/api/sync/status'));
     } catch (error) {
-        console.warn('sync status unavailable', error);
+        patchOffline();
     }
 }
 
@@ -128,8 +131,18 @@ async function control(url) {
     try {
         patch(await json(url, { method: 'POST' }));
     } catch (error) {
-        console.warn('sync control unavailable', error);
+        patchOffline();
     }
+}
+
+function patchOffline() {
+    if (!root) return;
+    root.querySelector('.sync-chip-button')?.classList.add('offline');
+    patchText('.sync-chip-arrow', '•');
+    patchText('[data-sync-count]', 'Hub offline');
+    patchText('[data-sync-bytes]', 'retrying');
+    patchText('[data-sync-rate]', 'Offline');
+    patchText('[data-sync-current]', 'Hub unavailable — changes will retry');
 }
 
 export async function initSyncChip() {

@@ -51,6 +51,10 @@ class ProbeServer:
             start_new_session=True,
         )
         self._wait_ready()
+        if self.offline_hub:
+            # Let the satellite worker finish its first refused connection before
+            # a scenario opens a write transaction against the fixture catalog.
+            time.sleep(3.0)
         return self
 
     def _wait_ready(self, timeout: float = 30.0) -> None:

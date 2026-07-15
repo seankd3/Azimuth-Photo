@@ -1,16 +1,23 @@
-import { FetchJsonError, fetchJson as sharedFetchJson } from '../api.js';
+import { FetchJsonError, fetchJson as sharedFetchJson, fetchOptionsWithTimeout } from '../api.js';
 import { showToast } from './toast.js';
 
-function reportApiFailure({ status = 0 } = {}) {
-    showToast(status ? `Request failed (${status})` : 'The archive did not respond');
+function reportApiFailure({ status = 0, error = null } = {}) {
+    const cause = error?.cause || error;
+    if (!status || cause?.name === 'AbortError' || cause?.name === 'TimeoutError') {
+        showToast("The library isn't responding.");
+        return;
+    }
+    showToast(`Request failed (${status})`);
 }
 
 async function requestWithStatus(url, options = {}) {
+    const { timeoutMs, ...fetchOptions } = options;
+    const defaultTimeoutMs = /^(POST|PUT|PATCH|DELETE)$/i.test(fetchOptions.method || 'GET') ? 20_000 : 10_000;
     let response = null;
     try {
-        response = await fetch(url, options);
-    } catch {
-        reportApiFailure();
+        response = await fetch(url, fetchOptionsWithTimeout(fetchOptions, timeoutMs ?? defaultTimeoutMs));
+    } catch (error) {
+        reportApiFailure({ error });
         return { ok: false, status: 0, data: null };
     }
     const data = response.status === 204 ? null : await response.json().catch(() => null);
@@ -20,9 +27,9 @@ async function requestWithStatus(url, options = {}) {
 
 export async function fetchJson(url, options = {}) {
     try {
-        return await sharedFetchJson(url, options);
+        return await sharedFetchJson(url, { timeoutMs: 10_000, ...options });
     } catch (error) {
-        reportApiFailure({ status: error?.status });
+        reportApiFailure({ status: error?.status, error });
         throw error;
     }
 }
@@ -36,22 +43,22 @@ export async function requestJson(url, options = {}) {
     });
 }
 
-function jsonRequestOptions(method, body = null) {
-    const options = { method, headers: { Accept: 'application/json' } };
+function jsonRequestOptions(method, body = null, options = {}) {
+    const requestOptions = { ...options, method, headers: { Accept: 'application/json', ...(options.headers || {}) } };
     if (body != null) {
-        options.headers['Content-Type'] = 'application/json';
-        options.body = JSON.stringify(body);
+        requestOptions.headers['Content-Type'] = 'application/json';
+        requestOptions.body = JSON.stringify(body);
     }
-    return options;
+    return requestOptions;
 }
 
-export async function postJson(url, body = null) {
-    const result = await requestWithStatus(url, jsonRequestOptions('POST', body));
+export async function postJson(url, body = null, options = {}) {
+    const result = await requestWithStatus(url, jsonRequestOptions('POST', body, options));
     return result.ok ? result.data : null;
 }
 
-export async function postJsonWithStatus(url, body = null) {
-    return requestWithStatus(url, jsonRequestOptions('POST', body));
+export async function postJsonWithStatus(url, body = null, options = {}) {
+    return requestWithStatus(url, jsonRequestOptions('POST', body, options));
 }
 
 export async function deleteJsonWithStatus(url) {

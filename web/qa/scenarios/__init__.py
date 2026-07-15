@@ -27,6 +27,7 @@ from qa.scenarios.library import (
 )
 from qa.scenarios.photo import loupe_and_develop
 from qa.scenarios.trash import empty_trash_and_leave, trash_empty_offline_hub
+from qa.scenarios.offline import grid_offline_thumbs
 
 
 @dataclass(frozen=True)
@@ -59,5 +60,6 @@ SCENARIOS = [
     Scenario("stack_promote_cover", "Stacks cover", stack_promote_cover),
     # Destructive by design; keep last so read-only scenarios never depend on its state.
     Scenario("empty_trash_and_leave", "Trash", empty_trash_and_leave),
+    Scenario("grid_offline_thumbs", "Offline media", grid_offline_thumbs),
     Scenario("trash_empty_offline_hub", "Trash", trash_empty_offline_hub),
 ]
