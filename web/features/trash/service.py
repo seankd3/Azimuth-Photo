@@ -16,6 +16,8 @@ from features.stacks import builders as stack_builders
 
 Error = dict[str, int | str]
 DEFAULT_RETENTION_SECONDS = 30 * 24 * 60 * 60
+TRASH_WRITE_BUSY_TIMEOUT_SECONDS = 0.1
+TRASH_WRITE_RETRY_BACKOFF_SECONDS = 0.1
 
 
 def _clean_ids(values) -> list[int]:
@@ -693,30 +695,45 @@ async def purge_expired_trash(
 
 
 async def _delete_emptied_catalog_rows(db_path: str, image_ids: list[int]) -> tuple[list[int], list[Error]]:
-    deleted: list[int] = []
-    errors: list[Error] = []
-    conn = await data_connection.open_async(db_path)
-    try:
-        try:
-            await conn.execute("BEGIN")
-            await catalog_repository.delete_image_catalog_rows_on_conn(conn, image_ids)
-            await catalog_repository.update_source_counts_on_conn(conn)
-            await conn.commit()
-            return list(image_ids), []
-        except Exception:
-            await conn.rollback()
-        for image_id in image_ids:
+    async def delete_ids(ids: list[int]) -> None:
+        async def write() -> None:
+            conn = await data_connection.open_async(db_path)
             try:
-                await conn.execute("BEGIN")
-                await catalog_repository.delete_image_catalog_rows_on_conn(conn, [image_id])
+                await conn.execute("BEGIN IMMEDIATE")
+                await catalog_repository.delete_image_catalog_rows_on_conn(conn, ids)
                 await catalog_repository.update_source_counts_on_conn(conn)
                 await conn.commit()
-                deleted.append(image_id)
-            except Exception as exc:
+            except Exception:
                 await conn.rollback()
-                errors.append(_error(image_id, f"catalog row deletion failed: {exc}"))
-    finally:
-        await data_connection.close_async(conn, db_path=db_path)
+                raise
+            finally:
+                await data_connection.close_async(conn, db_path=db_path)
+
+        with data_connection.sqlite_timeout(TRASH_WRITE_BUSY_TIMEOUT_SECONDS):
+            await data_connection.run_with_busy_retry(
+                write,
+                backoff_seconds=TRASH_WRITE_RETRY_BACKOFF_SECONDS,
+            )
+
+    deleted: list[int] = []
+    errors: list[Error] = []
+    try:
+        await delete_ids(image_ids)
+        return list(image_ids), []
+    except Exception as exc:
+        if data_connection.is_sqlite_locked_error(exc):
+            reason = f"catalog row deletion deferred: {exc}"
+            return [], [_error(image_id, reason) for image_id in image_ids]
+    for index, image_id in enumerate(image_ids):
+        try:
+            await delete_ids([image_id])
+            deleted.append(image_id)
+        except Exception as exc:
+            reason = f"catalog row deletion failed: {exc}"
+            errors.append(_error(image_id, reason))
+            if data_connection.is_sqlite_locked_error(exc):
+                errors.extend(_error(item, reason) for item in image_ids[index + 1:])
+                break
     return deleted, errors
 
 
