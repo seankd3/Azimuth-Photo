@@ -113,7 +113,7 @@ class ProbeServer:
             time.sleep(0.1)
         raise RuntimeError(f"QA server did not become ready on {self.base_url}: {last_error}; see {SERVER_LOG}")
 
-    def _wait_for_initial_sync_scan(self, timeout: float = 30.0) -> None:
+    def _wait_for_initial_sync_scan(self, timeout: float = 90.0) -> None:
         """Keep the offline scenario out of the fixture's startup write batch."""
 
         deadline = time.monotonic() + timeout
