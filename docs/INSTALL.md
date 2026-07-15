@@ -1,4 +1,4 @@
-# Install photoArchive
+# Install Azimuth Photo
 
 One always-on library server. Point it at your photos, open the web page.
 
@@ -42,7 +42,7 @@ Use a custom app / Compose with the same two mounts (`/photos`, `/data`) and por
 
 ### Phone discovery on the LAN
 
-photoArchive can announce itself on the local network. That needs **host networking** (not bridge). In Compose, set `network_mode: host` and drop the `ports:` section — see comments in `docker-compose.yml`. On Synology/Unraid/TrueNAS, pick host network if you want “Found on your network” from other devices. Tailscale still works either way.
+Azimuth Photo can announce itself on the local network. That needs **host networking** (not bridge). In Compose, set `network_mode: host` and drop the `ports:` section — see comments in `docker-compose.yml`. On Synology/Unraid/TrueNAS, pick host network if you want “Found on your network” from other devices. Tailscale still works either way.
 
 ---
 

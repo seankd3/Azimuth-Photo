@@ -92,7 +92,7 @@ export function downloadExport(params, { count = 0, message = '' } = {}) {
     }
     const link = document.getElementById('download-link');
     link.href = `/api/export?${params.toString()}`;
-    link.download = format === 'zip' ? 'photoarchive-export.zip' : `photoarchive-export.${format}`;
+    link.download = format === 'zip' ? 'azimuth-photo-export.zip' : `azimuth-photo-export.${format}`;
     link.click();
     showToast(message || (format === 'zip' ? 'Preparing zip download' : `Exporting as ${format.toUpperCase()}`));
     return true;

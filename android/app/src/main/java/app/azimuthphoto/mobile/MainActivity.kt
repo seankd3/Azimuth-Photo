@@ -166,7 +166,7 @@ private fun Root(
 private fun PermissionGate(onRequest: () -> Unit) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("photoArchive needs access to your photos", style = MaterialTheme.typography.titleMedium)
+            Text("Azimuth Photo needs access to your photos", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(12.dp))
             Button(onClick = onRequest) { Text("Grant access") }
         }

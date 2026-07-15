@@ -1,4 +1,4 @@
-// photoArchive desktop shell — wraps the LOCAL satellite server (photoarchive-field)
+// Azimuth Photo desktop shell — wraps the local satellite server.
 // in a native window: spawns it on launch, shows a splash until it's ready, tray for sync.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -20,7 +20,7 @@ fn main() {
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .setup(|app| {
             let win = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-                .title("photoArchive")
+                .title("Azimuth Photo")
                 .inner_size(1500.0, 950.0)
                 .min_inner_size(900.0, 600.0)
                 .disable_drag_drop_handler() // let the web app own drag & drop (publishing, masks)
@@ -51,7 +51,7 @@ fn main() {
             Ok(())
         })
         .build(tauri::generate_context!())
-        .expect("error while building photoArchive desktop")
+        .expect("error while building Azimuth Photo desktop")
         .run(|_app, event| {
             if let RunEvent::ExitRequested { .. } = event {
                 server::shutdown();

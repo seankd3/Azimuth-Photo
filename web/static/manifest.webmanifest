@@ -1,7 +1,7 @@
 {
     "name": "Azimuth Photo",
     "short_name": "Azimuth",
-    "description": "Your photo archive: instant timeline, search, refine, collections.",
+    "description": "Your Azimuth Photo library: instant timeline, search, refine, collections.",
     "id": "/m",
     "start_url": "/m",
     "scope": "/",

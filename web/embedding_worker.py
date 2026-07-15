@@ -1,5 +1,5 @@
 """
-Embedding worker for photoArchive.
+Embedding worker for Azimuth Photo.
 
 Background worker that embeds images using Qwen3-VL-Embedding-2B (int4).
 Embeddings power: text search, find similar, Elo propagation, duplicate

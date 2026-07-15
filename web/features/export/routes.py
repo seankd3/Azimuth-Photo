@@ -373,7 +373,7 @@ async def export_rankings(
         return FileResponse(
             zip_path,
             media_type="application/zip",
-            filename=f"photoarchive-export-{written_count}.zip",
+            filename=f"azimuth-photo-export-{written_count}.zip",
             background=BackgroundTask(os.remove, zip_path),
         )
 

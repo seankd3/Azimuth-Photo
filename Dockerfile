@@ -1,4 +1,4 @@
-# photoArchive server — always-on library hub for NAS / Docker hosts.
+# Azimuth Photo server — always-on library hub for NAS / Docker hosts.
 # Base deps only (no torch / AI models). See docs/INSTALL.md.
 
 FROM python:3.12-slim

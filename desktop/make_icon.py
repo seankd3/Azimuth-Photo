@@ -1,4 +1,4 @@
-"""Generate the photoArchive app icon: dark rounded square, aperture-inspired mark."""
+"""Generate the Azimuth Photo app icon: dark rounded square, aperture-inspired mark."""
 import math
 from PIL import Image, ImageDraw
 
@@ -15,7 +15,7 @@ cx, cy = S / 2, S / 2
 R_outer = 330
 R_inner = 128
 blades = 6
-accent = (255, 149, 43, 255)   # photoArchive orange
+accent = (255, 149, 43, 255)   # Azimuth orange
 steel = (208, 214, 224, 255)
 
 for i in range(blades):

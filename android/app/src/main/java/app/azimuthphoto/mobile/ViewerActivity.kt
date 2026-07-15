@@ -12,7 +12,7 @@ import androidx.compose.ui.layout.ContentScale
 import coil.compose.AsyncImage
 import app.azimuthphoto.mobile.ui.PhotoArchiveTheme
 
-/** Handles ACTION_VIEW so photoArchive can be the phone's default photo opener. */
+/** Handles ACTION_VIEW so Azimuth Photo can be the phone's default photo opener. */
 class ViewerActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

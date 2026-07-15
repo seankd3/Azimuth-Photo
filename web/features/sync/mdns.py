@@ -1,4 +1,4 @@
-"""mDNS announce (hub) and browse (satellite/standalone) for photoArchive hubs."""
+"""mDNS announce (hub) and browse (satellite/standalone) for Azimuth Photo hubs."""
 
 from __future__ import annotations
 
@@ -49,7 +49,7 @@ def _local_ipv4() -> str:
 
 
 def _service_name(display_name: str) -> str:
-    safe = "".join(ch if ch.isalnum() or ch in "-_ " else "-" for ch in display_name).strip() or "photoArchive"
+    safe = "".join(ch if ch.isalnum() or ch in "-_ " else "-" for ch in display_name).strip() or "Azimuth Photo"
     return f"{safe}._photoarchive._tcp.local."
 
 

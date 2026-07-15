@@ -1,5 +1,5 @@
 """
-Local performance smoke benchmarks for photoArchive.
+Local performance smoke benchmarks for Azimuth Photo.
 
 Run from the repo root:
     web/.venv/bin/python web/bench_perf.py
@@ -895,7 +895,7 @@ def bench_thumbnails(iterations: int):
 
 
 async def main():
-    parser = argparse.ArgumentParser(description="Run local photoArchive performance smoke benchmarks.")
+    parser = argparse.ArgumentParser(description="Run local Azimuth Photo performance smoke benchmarks.")
     parser.add_argument("--iterations", type=int, default=25)
     parser.add_argument("--quick", action="store_true",
                         help="Run a short app-endpoint smoke benchmark only.")

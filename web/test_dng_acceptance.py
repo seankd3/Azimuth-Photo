@@ -148,7 +148,7 @@ def _side_by_side(path: Path, ours: Image.Image, adobe: Image.Image, label: str)
     canvas.paste(ours, (0, header))
     canvas.paste(adobe, (ours.width, header))
     draw = ImageDraw.Draw(canvas)
-    draw.text((8, 9), f"Photo Archive | {label}", fill="white")
+    draw.text((8, 9), f"Azimuth Photo | {label}", fill="white")
     draw.text((ours.width + 8, 9), "Embedded Adobe preview", fill="white")
     canvas.save(path, quality=92)
 

@@ -1,6 +1,6 @@
-# Building photoArchive desktop
+# Building Azimuth Photo desktop
 
-Tauri v2 shell that spawns the local satellite server (`photoarchive-field`) and wraps
+Tauri v2 shell that spawns the local satellite server and wraps
 `http://127.0.0.1:8010/d` in a native window with a sync tray.
 
 ## Prerequisites

@@ -11,7 +11,7 @@ hope. Lightroom Classic's import is the opposite — **you see everything before
 library**: a source-first, grid-preview, pick-what-you-want, duplicates-dimmed, one-commit
 flow. Desktop's bar is "Lightroom Classic replacement"; import is the front door and must
 clear that bar. Where LR makes you decide (destination pickers, rename templates, previews),
-we keep photoArchive's opinion: **no decisions that have a right answer** — destination is
+we keep Azimuth Photo's opinion: **no decisions that have a right answer** — destination is
 always the originals tree, organized by date. The destination panel shows you the truth
 instead of asking you questions.
 

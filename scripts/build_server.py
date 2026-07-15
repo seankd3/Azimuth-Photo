@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the frozen photoArchive server (PyInstaller onedir).
+"""Build the frozen Azimuth Photo server (PyInstaller onedir).
 
 Output: dist/photoarchive-server/
 
@@ -220,7 +220,7 @@ def run_pyinstaller(vpy: Path) -> Path:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Build frozen photoArchive server (onedir)")
+    parser = argparse.ArgumentParser(description="Build frozen Azimuth Photo server (onedir)")
     parser.add_argument(
         "--venv",
         type=Path,
