@@ -668,6 +668,13 @@ async def api_get_develop(image_id: int):
     except rawproc.RawDecodeError as exc:
         return JSONResponse({"error": str(exc)}, status_code=422)
     meta = _profiled_meta(meta, image["filepath"])
+    # Keep the interactive canvas on the same cache-native color contract as
+    # render_display_preview().  _profiled_meta() also carries the resolved
+    # Adobe profile for UI/profile workflows; without this explicit payload,
+    # WebGL enabled that extra pipeline for an otherwise unedited RAW.
+    from features.develop.render import default_render_color_profile
+
+    meta["canvas_color_profile"] = default_render_color_profile(meta)
     row = await _load_settings(image_id)
     return {
         "settings": _json_settings(row["settings"]) if row else {},

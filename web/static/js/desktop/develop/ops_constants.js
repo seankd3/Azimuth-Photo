@@ -257,7 +257,7 @@ export const DEFAULTS = Object.freeze({
     Exposure2012: 0, Contrast2012: 0, Highlights2012: 0, Shadows2012: 0,
     Whites2012: 0, Blacks2012: 0, Texture: 0, Clarity2012: 0, Dehaze: 0,
     Vibrance: 0, Saturation: 0, ConvertToGrayscale: false,
-    Sharpness: 40, SharpenRadius: 1, SharpenDetail: 25, SharpenEdgeMasking: 0,
+    Sharpness: 0, SharpenRadius: 1, SharpenDetail: 25, SharpenEdgeMasking: 0,
     LuminanceSmoothing: 0, ColorNoiseReduction: 0,
     DefringePurpleAmount: 0, DefringePurpleHueLo: 30, DefringePurpleHueHi: 70,
     DefringeGreenAmount: 0, DefringeGreenHueLo: 40, DefringeGreenHueHi: 60,
