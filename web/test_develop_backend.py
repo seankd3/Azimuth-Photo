@@ -214,6 +214,28 @@ class DevelopBackendTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.json()["history"]), 40)
 
+    def test_named_snapshots_are_not_truncated_by_edit_history(self):
+        for label in ("Print", "Web"):
+            saved = self.client.post(
+                f"/api/develop/{self.raw_id}/snapshots",
+                json={"label": label, "settings": {"Exposure2012": 0.5}},
+            )
+            self.assertEqual(saved.status_code, 200, saved.text)
+        for index in range(45):
+            response = self.client.put(
+                f"/api/develop/{self.raw_id}",
+                json={"settings": {"Exposure2012": index / 10}, "label": f"Step {index}"},
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+
+        snapshots = self.client.get(f"/api/develop/{self.raw_id}/snapshots")
+
+        self.assertEqual(snapshots.status_code, 200, snapshots.text)
+        self.assertEqual(
+            [row["label"] for row in snapshots.json()["snapshots"]],
+            ["Snapshot: Web", "Snapshot: Print"],
+        )
+
     def test_base_endpoints_and_pregen_contract(self):
         self._write_cached_base()
         # A warm preview must be a pure disk response: the route may not enter

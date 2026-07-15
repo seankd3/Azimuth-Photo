@@ -86,8 +86,10 @@ export async function getFolderTree() {
     return fetchJson('/api/folders/tree', { defaultValue: null });
 }
 
-export async function revealFolder(path) {
-    return postJsonWithStatus('/api/reveal', { path });
+export async function revealFolder(path, sourceId = null) {
+    const body = { path };
+    if (Number(sourceId) > 0) body.source_id = Number(sourceId);
+    return postJsonWithStatus('/api/reveal', body);
 }
 
 export async function getFilterOptions() {

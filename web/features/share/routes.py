@@ -143,6 +143,7 @@ def _share_payload(request: Request, share: dict | None) -> dict | None:
         "url": _share_url(request, share["token"]),
         "created_at": share["created_at"],
         "expires_at": share["expires_at"],
+        "expired": bool(share.get("expired")),
         "protected": bool(share.get("password_hash")),
         "view_count": int(share.get("view_count") or 0),
         "first_viewed_at": share.get("first_viewed_at"),

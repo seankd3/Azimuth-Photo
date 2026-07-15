@@ -370,7 +370,8 @@ async function renderShareOverlay(collectionId, name, share = null, token = shar
     const pickData = share ? await getCollectionShareFavorites(collectionId) : null;
     if (!shareOverlayIsCurrent(token)) return;
     const body = share
-        ? '<div class="share-link-row"><input id="share-url" readonly value="' + esc(share.url || '') + '"><button id="share-copy" type="button">Copy</button></div>'
+        ? (share.expired ? '<div class="share-expired">Expired - rotate to renew</div>' : '')
+            + '<div class="share-link-row"><input id="share-url" readonly value="' + esc(share.url || '') + '"><button id="share-copy" type="button">Copy</button></div>'
             + '<div class="share-meta">'
             + `<div><span>Created</span><b>${esc(formatShareDate(share.created_at))}</b></div>`
             + `<div><span>Expires</span><b>${esc(formatShareDate(share.expires_at))}</b></div></div>`
@@ -922,7 +923,7 @@ function renderSources() {
         const online = Number(s.online) === 1;
         const count = s.active_image_count != null ? s.active_image_count : s.image_count;
         const label = s.display_name || s.path;
-        return `<button class="nav-row" data-source="${esc(s.path)}" title="${esc(label)}">`
+        return `<button class="nav-row" data-source="${esc(s.path)}" data-source-id="${Number(s.id) || 0}" title="${esc(label)}">`
             + `<span class="nr-dot ${online ? 'on' : 'off'}"></span><span class="nr-label" title="${esc(label)}">${esc(label)}</span>`
             + `<span class="nr-count">${fmt(count)}</span>${online ? '' : '<span class="nr-tag">offline</span>'}</button>`;
     }).join('') : emptyState('hard-drive', 'No sources yet.', '<button type="button" data-add-source>Add a source</button>');
@@ -936,7 +937,10 @@ function renderSources() {
             event.preventDefault();
             const source = sources.find((item) => item.path === row.dataset.source);
             const count = source?.active_image_count != null ? source.active_image_count : source?.image_count;
-            openSourceRevealMenu(row.dataset.source, row, count);
+            openSourceRevealMenu(row.dataset.source, row, count, {
+                sourceId: source?.id,
+                revealAvailable: source ? !String(source.path || '').toLowerCase().startsWith('hub:') : true,
+            });
         });
     }
 }

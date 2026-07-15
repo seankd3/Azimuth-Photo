@@ -41,6 +41,51 @@ async def complete_import_batch(
     skipped_files: int,
     collision_count: int,
 ) -> None:
+    await _finish_import_batch(
+        db_path,
+        batch_id,
+        status="complete",
+        source_id=source_id,
+        image_rows=image_rows,
+        imported_files=imported_files,
+        skipped_files=skipped_files,
+        collision_count=collision_count,
+    )
+
+
+async def cancel_import_batch(
+    db_path: str,
+    batch_id: int,
+    *,
+    source_id: int | None,
+    image_rows: list[dict],
+    imported_files: int,
+    skipped_files: int,
+    collision_count: int,
+) -> None:
+    await _finish_import_batch(
+        db_path,
+        batch_id,
+        status="cancelled",
+        source_id=source_id,
+        image_rows=image_rows,
+        imported_files=imported_files,
+        skipped_files=skipped_files,
+        collision_count=collision_count,
+    )
+
+
+async def _finish_import_batch(
+    db_path: str,
+    batch_id: int,
+    *,
+    status: str,
+    source_id: int | None,
+    image_rows: list[dict],
+    imported_files: int,
+    skipped_files: int,
+    collision_count: int,
+) -> None:
     now = _time.time()
     conn = await connection.open_async(db_path)
     try:
@@ -61,10 +106,18 @@ async def complete_import_batch(
                 ],
             )
         await conn.execute(
-            "UPDATE import_batches SET status = 'complete', source_id = ?, "
+            "UPDATE import_batches SET status = ?, source_id = ?, "
             "imported_files = ?, skipped_files = ?, collision_count = ?, completed_at = ? "
             "WHERE id = ?",
-            (source_id, int(imported_files), int(skipped_files), int(collision_count), now, int(batch_id)),
+            (
+                status,
+                source_id,
+                int(imported_files),
+                int(skipped_files),
+                int(collision_count),
+                now,
+                int(batch_id),
+            ),
         )
         await conn.commit()
     finally:

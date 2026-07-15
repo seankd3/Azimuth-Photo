@@ -8,10 +8,12 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from core.requests import RequestBodyTooLarge, read_body_limited
+from core.source_files import source_file_is_safe
+from data.repositories import images as image_repository
 from features.sync import device_auth, hub, mirror_export
 
 
@@ -153,6 +155,23 @@ async def api_sync_base(content_hash: str):
         media_type="multipart/mixed; boundary=photoarchive-pabase1",
         headers={"Cache-Control": "public, max-age=31536000, immutable"},
     )
+
+
+@router.get("/api/sync/original/{image_id}")
+async def api_sync_original(image_id: int):
+    image = await image_repository.get_media_image_by_id(_configured_db_path(), image_id)
+    if (
+        image is None
+        or int(image["hub_remote"] or 0) == 1
+        or image["missing_at"] is not None
+        or not await asyncio.to_thread(
+            source_file_is_safe,
+            str(image["filepath"] or ""),
+            str(image["source_path"] or ""),
+        )
+    ):
+        raise HTTPException(status_code=404, detail="Original unavailable")
+    return FileResponse(str(image["filepath"]), filename=str(image["filename"] or f"photo-{image_id}"))
 
 
 @router.get("/api/sync/catalog/export")

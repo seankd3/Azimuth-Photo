@@ -900,7 +900,7 @@ def _noise_reduction(c: np.ndarray, settings: Mapping[str, object]) -> np.ndarra
     result = c.astype(np.float32, copy=True)
     if luminance_amount:
         full_luma = luma(result)
-        detail = np.clip(_number(settings, "LuminanceDetail"), 0.0, 100.0) / 100.0
+        detail = np.clip(_number(settings, "LuminanceDetail", 50.0), 0.0, 100.0) / 100.0
         contrast = np.clip(_number(settings, "LuminanceContrast"), 0.0, 100.0) / 100.0
         edge = _smoothstep(
             C.NR_DETAIL_EDGE_LOW, C.NR_DETAIL_EDGE_HIGH,
@@ -1039,10 +1039,11 @@ def _grain(c: np.ndarray, settings: Mapping[str, object], *, pixel_offset: tuple
     if amount == 0.0:
         return c
     cell_size = C.GRAIN_CELL_SIZE_MIN + np.clip(_number(settings, "GrainSize", 25.0), 0.0, 100.0) / 100.0 * C.GRAIN_CELL_SIZE_RANGE
+    frequency = C.GRAIN_FREQUENCY_MIN + np.clip(_number(settings, "GrainFrequency", 50.0), 0.0, 100.0) / 100.0 * C.GRAIN_FREQUENCY_RANGE
     height, width = c.shape[:2]
     offset_x, offset_y = pixel_offset
-    x = ((np.arange(width) + offset_x) / cell_size).astype(np.int64)
-    y = ((np.arange(height) + offset_y) / cell_size).astype(np.int64)
+    x = (((np.arange(width) + offset_x) / cell_size) * frequency).astype(np.int64)
+    y = (((np.arange(height) + offset_y) / cell_size) * frequency).astype(np.int64)
     noise = grain_hash(x[None, :], y[:, None]) - 0.5
     return c + noise[..., None] * amount * C.GRAIN_FACTOR
 

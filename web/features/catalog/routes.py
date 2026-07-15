@@ -29,6 +29,7 @@ log = logging.getLogger(__name__)
 
 class RevealBody(BaseModel):
     path: str = Field(min_length=1, max_length=4096)
+    source_id: int | None = Field(default=None, ge=1)
 
 
 InvalidatePairing = Callable[..., None]
@@ -688,11 +689,19 @@ def folder_path_for_parts(source_path: str, parts: list[str]) -> str:
     return os.path.join(catalog_repository.normalize_source_path(source_path), *parts)
 
 
-def make_folder_node(source_path: str, parts: list[str]) -> dict:
+def make_folder_node(
+    source_path: str,
+    parts: list[str],
+    *,
+    source_id: int = 0,
+    reveal_available: bool = True,
+) -> dict:
     path = folder_path_for_parts(source_path, parts)
     return {
         "path": path,
         "name": os.path.basename(path.rstrip(os.sep)) or path,
+        "source_id": source_id,
+        "reveal_available": reveal_available,
         "count": 0,
         "total_count": 0,
         "children": [],
@@ -714,6 +723,8 @@ def serialize_folder_node(node: dict) -> dict | None:
     return {
         "path": node["path"],
         "name": node["name"],
+        "source_id": int(node.get("source_id") or 0),
+        "reveal_available": bool(node.get("reveal_available", True)),
         "count": int(node.get("count") or 0),
         "total_count": int(node.get("total_count") or 0),
         "children": children,
@@ -731,7 +742,13 @@ def build_folder_tree_payload_from_rows(
     for source in sources:
         source_id = int(source.get("id") or 0)
         source_path = source.get("path") or ""
-        root = make_folder_node(source_path, [])
+        reveal_available = catalog_reveal.source_has_local_folders(source_path)
+        root = make_folder_node(
+            source_path,
+            [],
+            source_id=source_id,
+            reveal_available=reveal_available,
+        )
         for directory, raw_count in directory_counts_by_source.get(source_id, {}).items():
             count = int(raw_count or 0)
             if count <= 0:
@@ -748,7 +765,12 @@ def build_folder_tree_payload_from_rows(
                 name = capped_parts[depth]
                 child = node["_children_by_name"].get(name)
                 if child is None:
-                    child = make_folder_node(source_path, capped_parts[:depth + 1])
+                    child = make_folder_node(
+                        source_path,
+                        capped_parts[:depth + 1],
+                        source_id=source_id,
+                        reveal_available=reveal_available,
+                    )
                     node["_children_by_name"][name] = child
                 child["total_count"] += count
                 node = child
@@ -757,9 +779,10 @@ def build_folder_tree_payload_from_rows(
 
         payload_sources.append({
             "id": source_id,
-            "path": catalog_repository.normalize_source_path(source_path),
+            "path": source_path if not reveal_available else catalog_repository.normalize_source_path(source_path),
             "display_name": source.get("display_name") or catalog_repository.source_display_name(source_path),
             "online": bool(source.get("online")),
+            "reveal_available": reveal_available,
             "count": int(root["count"] or 0),
             "total_count": int(root["total_count"] or 0),
             "folders": [
@@ -850,6 +873,18 @@ async def api_folders_tree():
 async def api_reveal(body: RevealBody):
     """Open a catalog folder in the host OS file manager."""
 
+    if not catalog_reveal.source_has_local_folders(body.path):
+        return JSONResponse(
+            {"ok": False, "error": "Reveal is only available for local folders"},
+            status_code=400,
+        )
+    if body.source_id is not None:
+        source = await catalog_repository.get_source(_configured_db_path(), body.source_id)
+        if source is not None and not catalog_reveal.source_has_local_folders(source["path"]):
+            return JSONResponse(
+                {"ok": False, "error": "Reveal is only available for local folders"},
+                status_code=400,
+            )
     roots = await import_repository.catalog_source_paths(_configured_db_path())
     result = await asyncio.to_thread(catalog_reveal.reveal_folder, body.path, roots)
     if result.get("ok"):

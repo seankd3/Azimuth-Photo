@@ -1,37 +1,40 @@
 """Navigation chrome, context menus, settings, import, and search."""
 
 from __future__ import annotations
-
 from urllib.parse import parse_qs, urlparse
+
+from qa.config import scaled_timeout_ms
 
 
 EXPECTED_SCOPE_MENU_ITEMS = (
     "Show in scope with subfolders",
     "Open in Refine",
-    "Open in Explorer",
     "Export view",
 )
 
 
-def _assert_scope_menu(qa, anchor) -> None:
+def _assert_scope_menu(qa, anchor, *, reveal_available: bool) -> None:
     anchor.click(button="right")
     menu = qa.page.locator("[role='menu']:visible").last
-    menu.wait_for(state="visible", timeout=5_000)
+    menu.wait_for(state="visible", timeout=scaled_timeout_ms(5_000))
     text = menu.inner_text()
     missing = [item for item in EXPECTED_SCOPE_MENU_ITEMS if item not in text]
     assert not missing, f"context menu missing {missing}; rendered items were: {text!r}"
+    assert ("Open in Explorer" in text) is reveal_available, f"unexpected reveal action: {text!r}"
 
 
 def source_context_menu(qa) -> None:
     qa.goto_desktop()
-    qa.mark("right-click a source and assert the complete Windows menu")
-    _assert_scope_menu(qa, qa.page.locator("#source-list [data-source]").first)
+    qa.mark("right-click local and hub sources; only local folders offer Explorer")
+    _assert_scope_menu(qa, qa.page.locator("#source-list [data-source='hub://']"), reveal_available=False)
+    _assert_scope_menu(qa, qa.page.locator("#source-list [data-source]").filter(has_text="QA Primary"), reveal_available=True)
 
 
 def folder_context_menu(qa) -> None:
     qa.goto_desktop()
-    qa.mark("right-click a folder and assert the complete Windows menu")
-    _assert_scope_menu(qa, qa.page.locator("#folder-tree [data-folder-path]").first)
+    qa.mark("right-click local and hub folder roots; only local folders offer Explorer")
+    _assert_scope_menu(qa, qa.page.locator("#folder-tree [data-folder-source-path='hub://']"), reveal_available=False)
+    _assert_scope_menu(qa, qa.page.locator("#folder-tree [data-folder-source-path]").filter(has_text="QA Primary"), reveal_available=True)
 
 
 def settings_panel(qa) -> None:
@@ -62,4 +65,4 @@ def search(qa) -> None:
     qa.poll("the search result count in the open omnibox", lambda: "1 results" in qa.page.locator("#scope-drop").inner_text())
 
 
-DEFAULT_SEARCH_TIMEOUT_MS = 30_000
+DEFAULT_SEARCH_TIMEOUT_MS = scaled_timeout_ms(30_000)

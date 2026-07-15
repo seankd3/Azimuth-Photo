@@ -9,6 +9,7 @@ from pathlib import Path
     os.environ.get("PHOTOARCHIVE_BROWSER_SMOKE") == "1",
     "set PHOTOARCHIVE_BROWSER_SMOKE=1 to run the opt-in browser smoke test",
 )
+@unittest.skipIf(os.name == "nt", "uses the Linux google-chrome-stable binary")
 class BrowserSmokeTests(unittest.TestCase):
     def test_browser_smoke_harness(self):
         node = shutil.which("node")

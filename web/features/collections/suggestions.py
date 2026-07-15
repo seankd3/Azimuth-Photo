@@ -8,7 +8,6 @@ structure first, then ranked with size, recency, people, and embedding coherence
 from __future__ import annotations
 
 import asyncio
-import hashlib
 from functools import lru_cache
 import math
 import re
@@ -45,6 +44,11 @@ _CAMERA_STEM_RE = re.compile(
 )
 _TRAILING_TOKEN_RE = re.compile(
     r"[-_ ]*(?:\d+\s*of\s*\d+|N?\d{1,6}|IMG[_-]?\d+|DSC[_-]?\d+|R5_*\d+|7N4A\d+|DJI[_-]?\d+|LRT[_-]?\d+|edit|edited|copy|from dng|collage|fulljpg|png|jpg|jpeg)\s*$",
+    re.IGNORECASE,
+)
+_FAST_TRAILING_COUNTER_RE = re.compile(r"[-_ ]+N?\d{1,6}$", re.IGNORECASE)
+_NAMED_TRAILING_COUNTER_RE = re.compile(
+    r"(?:IMG|DSC|R5_*|7N4A|DJI|LRT)[_-]?\d+$",
     re.IGNORECASE,
 )
 _GENERIC_FOLDERS = {
@@ -212,16 +216,8 @@ def _folder_hint(folder: str) -> dict | None:
 
 
 @lru_cache(maxsize=16384)
-def _filename_hint(filename: str) -> dict | None:
-    stem = re.sub(r"\.[A-Za-z0-9]{2,5}$", "", filename or "")
-    if not stem or _CAMERA_STEM_RE.match(stem):
-        return None
-    date_match = _DATE_RE.search(stem)
-    date_ts = _parse_path_date(stem) if date_match else None
-    prefix = stem[:date_match.start()] if date_match else stem
+def _filename_hint_from_prefix(prefix: str, date_ts: float | None) -> dict | None:
     prefix = _strip_trailing_noise(prefix)
-    if not prefix and date_match:
-        prefix = stem[:date_match.start()].strip(" -_.,")
     if not prefix:
         return None
     words = _clean_words(prefix)
@@ -243,14 +239,36 @@ def _filename_hint(filename: str) -> dict | None:
     }
 
 
+@lru_cache(maxsize=16384)
+def _filename_hint(filename: str) -> dict | None:
+    stem = re.sub(r"\.[A-Za-z0-9]{2,5}$", "", filename or "")
+    if not stem or _CAMERA_STEM_RE.match(stem):
+        return None
+    date_match = _DATE_RE.search(stem)
+    date_ts = _parse_path_date(stem) if date_match else None
+    prefix = stem[:date_match.start()] if date_match else stem
+    if (
+        not date_match
+        and not re.search(r"\d+\s*of\s*\d+$", stem, re.IGNORECASE)
+        and not _NAMED_TRAILING_COUNTER_RE.search(stem)
+    ):
+        prefix = _FAST_TRAILING_COUNTER_RE.sub("", prefix)
+    return _filename_hint_from_prefix(prefix.strip(" -_. ,"), date_ts)
+
+
+@lru_cache(maxsize=8192)
+def _parent_folder_hint(parent: str) -> dict | None:
+    folder_hints = [_folder_hint(part) for part in PurePosixPath(parent).parts]
+    return next((hint for hint in reversed(folder_hints) if hint), None)
+
+
 def shoot_hint_from_path(filepath: str, filename: str = "") -> dict | None:
     """Return the strongest Lightroom-style shoot hint for a path."""
-    path = PurePosixPath(filepath or filename or "")
-    name = filename or path.name
+    path_text = filepath or filename or ""
+    parent, separator, path_name = path_text.rpartition("/")
+    name = filename or (path_name if separator else path_text)
     file_hint = _filename_hint(name)
-    folder_hints = [_folder_hint(part) for part in path.parts[:-1]]
-    folder_hints = [hint for hint in folder_hints if hint]
-    folder_hint = folder_hints[-1] if folder_hints else None
+    folder_hint = _parent_folder_hint(parent) if separator else None
     if file_hint and (file_hint.get("date") is not None or folder_hint is None):
         return file_hint
     if folder_hint and file_hint:
@@ -695,22 +713,26 @@ async def _theme_suggestions(db_path: str) -> list[dict]:
         if not tag_rows:
             return []
 
+        top_tags = [str(row["tag"]) for row in tag_rows]
+        placeholders = ",".join("?" for _ in top_tags)
+        cursor = await conn.execute(
+            "SELECT it.tag, i.id, i.date_taken, i.elo "
+            "FROM image_tags it "
+            "JOIN images i ON i.id = it.image_id "
+            "JOIN catalog_sources s ON s.id = i.source_id "
+            f"WHERE it.model_key = ? AND it.tag IN ({placeholders}) AND s.included = 1 "
+            "AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL",
+            (model_key, *top_tags),
+        )
+        members_by_tag: dict[str, list[dict]] = {tag: [] for tag in top_tags}
+        for item in await cursor.fetchall():
+            members_by_tag[str(item["tag"])].append(dict(item))
+
         candidates: list[dict] = []
-        for row in tag_rows:
-            tag = str(row["tag"])
-            cursor = await conn.execute(
-                "SELECT i.id, i.date_taken, i.elo "
-                "FROM image_tags it "
-                "JOIN images i ON i.id = it.image_id "
-                "JOIN catalog_sources s ON s.id = i.source_id "
-                "WHERE it.model_key = ? AND it.tag = ? AND s.included = 1 "
-                "AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL "
-                "ORDER BY i.elo DESC, i.id ASC",
-                (model_key, tag),
-            )
+        for tag in top_tags:
             candidate = _theme_candidate_from_rows(
                 tags=(tag,),
-                rows=[dict(item) for item in await cursor.fetchall()],
+                rows=members_by_tag[tag],
                 captioned_count=stats["captioned"],
                 total_count=stats["total"],
                 query={"tag": tag},
@@ -718,9 +740,7 @@ async def _theme_suggestions(db_path: str) -> list[dict]:
             if candidate:
                 candidates.append(candidate)
 
-        top_tags = [str(row["tag"]) for row in tag_rows]
         if len(top_tags) > 1:
-            placeholders = ",".join("?" for _ in top_tags)
             cursor = await conn.execute(
                 "SELECT a.tag AS tag_a, b.tag AS tag_b, COUNT(DISTINCT a.image_id) AS count "
                 "FROM image_tags a "
@@ -739,21 +759,10 @@ async def _theme_suggestions(db_path: str) -> list[dict]:
             for row in pair_rows:
                 tag_a = str(row["tag_a"])
                 tag_b = str(row["tag_b"])
-                cursor = await conn.execute(
-                    "SELECT i.id, i.date_taken, i.elo "
-                    "FROM image_tags a "
-                    "JOIN image_tags b ON b.model_key = a.model_key "
-                    "AND b.image_id = a.image_id AND b.tag = ? "
-                    "JOIN images i ON i.id = a.image_id "
-                    "JOIN catalog_sources s ON s.id = i.source_id "
-                    "WHERE a.model_key = ? AND a.tag = ? AND s.included = 1 "
-                    "AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL "
-                    "ORDER BY i.elo DESC, i.id ASC",
-                    (tag_b, model_key, tag_a),
-                )
+                tag_b_ids = {int(item["id"]) for item in members_by_tag[tag_b]}
                 candidate = _theme_candidate_from_rows(
                     tags=(tag_a, tag_b),
-                    rows=[dict(item) for item in await cursor.fetchall()],
+                    rows=[item for item in members_by_tag[tag_a] if int(item["id"]) in tag_b_ids],
                     captioned_count=stats["captioned"],
                     total_count=stats["total"],
                 )
@@ -932,8 +941,8 @@ async def _existing_member_ids(db_path: str) -> set[int]:
 async def collection_suggestions(db_path: str, *, db_signature: str = "") -> dict:
     now = time.monotonic()
     model_key = settings.active_caption_config()["model_key"]
-    caption_signature = await _caption_tag_signature(db_path, model_key)
-    cache_key = (db_signature or db_path, model_key, caption_signature)
+    catalog_cursor, tag_cursor = await _suggestion_cursor(db_path, model_key)
+    cache_key = (db_signature or db_path, catalog_cursor, model_key, tag_cursor)
     if _cache["key"] == cache_key and _cache["data"] is not None and now < _cache["expires"]:
         return _cache["data"]
 
@@ -976,21 +985,31 @@ def invalidate_cache() -> None:
     _cache.update({"key": None, "data": None, "expires": 0.0})
 
 
-async def _caption_tag_signature(db_path: str, model_key: str) -> str:
+async def _suggestion_cursor(db_path: str, model_key: str) -> tuple[int, tuple[int, float]]:
+    """Return cheap monotonic-ish cursors for every input to suggestions.
+
+    Image mutations advance ``row_version``. Caption writes refresh
+    ``created_at``, so caption count plus the newest write catches additions,
+    replacements, and removals without fetching and hashing every tag.
+    """
     conn = await connection.open_async(db_path)
     try:
         cursor = await conn.execute(
-            "SELECT image_id, tag FROM image_tags WHERE model_key = ? ORDER BY tag, image_id",
+            "SELECT COALESCE(MAX(row_version), 0) AS cursor FROM images"
+        )
+        image_row = await cursor.fetchone()
+        cursor = await conn.execute(
+            "SELECT COUNT(*) AS count, COALESCE(MAX(created_at), 0) AS cursor "
+            "FROM image_captions WHERE model_key = ?",
             (model_key,),
         )
-        digest = hashlib.blake2b(digest_size=16)
-        count = 0
-        for row in await cursor.fetchall():
-            count += 1
-            digest.update(str(row["tag"]).encode("utf-8"))
-            digest.update(b"\0")
-            digest.update(str(int(row["image_id"])).encode("ascii"))
-            digest.update(b"\0")
-        return f"{count}:{digest.hexdigest()}"
+        tag_row = await cursor.fetchone()
+        return (
+            int(image_row["cursor"] if image_row else 0),
+            (
+                int(tag_row["count"] if tag_row else 0),
+                float(tag_row["cursor"] if tag_row else 0),
+            ),
+        )
     finally:
         await connection.close_async(conn, db_path=db_path)

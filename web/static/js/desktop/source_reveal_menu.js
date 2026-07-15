@@ -40,8 +40,8 @@ function closeSourceRevealMenu() {
     }
 }
 
-async function revealSourcePath(path) {
-    const result = await revealFolder(path);
+async function revealSourcePath(path, sourceId) {
+    const result = await revealFolder(path, sourceId);
     if (result?.ok && result?.data?.ok) {
         showToast('Opened in file manager');
         return;
@@ -65,15 +65,17 @@ function exportSourceScope(path, count, anchor) {
     });
 }
 
-export function openSourceRevealMenu(path, anchor, count = 0) {
+export function openSourceRevealMenu(path, anchor, count = 0, options = {}) {
     if (!path || !anchor) return;
+    const revealAvailable = options.revealAvailable !== false && !String(path).toLowerCase().startsWith('hub:');
+    const sourceId = Number(options.sourceId) || null;
     ensureMenu();
     releaseFocus(menu);
     menuReturn = anchor;
     menu.innerHTML = '<div class="pm-group">'
         + `<button data-act="scope">${icon('folder-tree')} Show in scope with subfolders</button>`
         + `<button data-act="refine">${icon('zap')} Open in Refine</button>`
-        + `<button data-act="reveal">${icon('folder-open')} ${fileManagerMenuLabel()}</button>`
+        + (revealAvailable ? `<button data-act="reveal">${icon('folder-open')} ${fileManagerMenuLabel()}</button>` : '')
         + `<button data-act="export">${icon('download')} Export view…</button>`
         + '</div>';
     menu.hidden = false;
@@ -91,7 +93,7 @@ export function openSourceRevealMenu(path, anchor, count = 0) {
                 applySourceScope(path);
                 emit('refine:open');
             }
-            if (action === 'reveal') revealSourcePath(path);
+            if (action === 'reveal') revealSourcePath(path, sourceId);
             if (action === 'export') exportSourceScope(path, count, anchor);
         });
     }

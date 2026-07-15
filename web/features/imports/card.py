@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import os
+import shutil
 import sys
 import time
 import uuid
@@ -17,6 +19,15 @@ VIDEO_EXTENSIONS = {".mp4", ".mov"}
 COPY_CHUNK_BYTES = 1024 * 1024
 CARD_POLL_SECONDS = 5.0
 _cached_cards: dict[str, object] = {"expires": 0.0, "rows": []}
+WINDOWS_DRIVE_REMOVABLE = 2
+WINDOWS_DRIVE_FIXED = 3
+_HARDLINK_FALLBACK_ERRNOS = {
+    errno.EPERM,
+    errno.EXDEV,
+    errno.EINVAL,
+    getattr(errno, "ENOTSUP", errno.EPERM),
+    getattr(errno, "EOPNOTSUPP", errno.EPERM),
+}
 
 
 def _linux_volumes() -> Iterable[Path]:
@@ -33,11 +44,20 @@ def _linux_volumes() -> Iterable[Path]:
 def _windows_volumes() -> Iterable[Path]:
     import ctypes
 
-    removable = 2
     for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
         root = f"{letter}:\\"
-        if ctypes.windll.kernel32.GetDriveTypeW(root) == removable:
+        drive_type = ctypes.windll.kernel32.GetDriveTypeW(root)
+        has_dcim = drive_type in {WINDOWS_DRIVE_REMOVABLE, WINDOWS_DRIVE_FIXED} and os.path.isdir(
+            f"{root}DCIM"
+        )
+        if _is_windows_card_drive(drive_type, has_dcim=has_dcim):
             yield Path(root)
+
+
+def _is_windows_card_drive(drive_type: int, *, has_dcim: bool) -> bool:
+    return drive_type == WINDOWS_DRIVE_REMOVABLE or (
+        drive_type == WINDOWS_DRIVE_FIXED and has_dcim
+    )
 
 
 def removable_volumes() -> list[Path]:
@@ -143,6 +163,29 @@ def _destination_candidates(directory: Path, filename: str) -> Iterable[Path]:
         yield preferred.with_name(f"{preferred.stem}-{index}{preferred.suffix}")
 
 
+def _finalize_partial(partial: Path, candidate: Path) -> None:
+    """Claim a collision-safe destination even when hardlinks are unavailable."""
+
+    try:
+        os.link(partial, candidate)
+    except FileExistsError:
+        raise
+    except OSError as exc:
+        if exc.errno not in _HARDLINK_FALLBACK_ERRNOS:
+            raise
+        try:
+            with partial.open("rb") as incoming, candidate.open("xb") as outgoing:
+                shutil.copyfileobj(incoming, outgoing, length=COPY_CHUNK_BYTES)
+                outgoing.flush()
+                os.fsync(outgoing.fileno())
+        except FileExistsError:
+            raise
+        except Exception:
+            candidate.unlink(missing_ok=True)
+            raise
+    partial.unlink(missing_ok=True)
+
+
 def copy_verified(source: str, directory: str, *, retry_count: int = 1) -> dict:
     """Copy one file without overwriting, then verify the final destination.
 
@@ -169,8 +212,7 @@ def copy_verified(source: str, directory: str, *, retry_count: int = 1) -> dict:
                                 "full_hash": source_full_hash, "bytes": byte_count}
                     continue
                 try:
-                    os.link(partial, candidate)  # atomic create: never overwrite a late collision
-                    partial.unlink(missing_ok=True)
+                    _finalize_partial(partial, candidate)
                     destination = candidate
                     break
                 except FileExistsError:

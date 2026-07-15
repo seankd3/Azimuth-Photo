@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import re
 import time
+import traceback
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from qa.config import DEFAULT_ACTION_TIMEOUT_MS, SCREENSHOT_DIR
+from qa.config import DEFAULT_ACTION_TIMEOUT_MS, SCREENSHOT_DIR, scaled_seconds
 
 
 def number_from_text(value: str) -> int:
@@ -20,6 +21,7 @@ def number_from_text(value: str) -> int:
 
 @dataclass
 class BrowserEvidence:
+    console_messages: list[str] = field(default_factory=list)
     console_errors: list[str] = field(default_factory=list)
     page_errors: list[str] = field(default_factory=list)
     failed_requests: list[str] = field(default_factory=list)
@@ -32,14 +34,18 @@ class BrowserEvidence:
         page.on("response", self._response)
 
     def _console(self, message) -> None:
+        line = f"console.{message.type}: {message.text}"
+        self.console_messages.append(line)
         if message.type == "error":
-            self.console_errors.append(f"console.error: {message.text}")
+            self.console_errors.append(line)
 
     def _request_failed(self, request) -> None:
         failure = request.failure or "unknown failure"
-        # Grid virtualization deliberately clears offscreen <img> sources. Chromium
-        # reports those cancelled thumbnail transfers as ERR_ABORTED, not a failed app request.
-        if "/api/thumb/" in request.url and "ERR_ABORTED" in failure:
+        # Grid virtualization clears offscreen thumbnail sources, and a lens or
+        # scope transition cancels the previous rankings fetch. Chromium reports
+        # both deliberate client-side cancellations as ERR_ABORTED rather than an
+        # application/network failure.
+        if ("/api/thumb/" in request.url or "/api/rankings?" in request.url) and "ERR_ABORTED" in failure:
             return
         self.failed_requests.append(f"{request.method} {request.url} — {failure}")
 
@@ -108,7 +114,7 @@ class ScenarioContext:
         self.wait_count(int(self.manifest["visible_images"]))
 
     def poll(self, description: str, predicate: Callable[[], object], *, timeout: float = 20.0):
-        deadline = time.monotonic() + timeout
+        deadline = time.monotonic() + scaled_seconds(timeout)
         last_error: Exception | None = None
         while time.monotonic() < deadline:
             try:
@@ -129,10 +135,12 @@ class BrowserHarness:
         self.manifest = manifest
         self.old_hub = old_hub
 
-    def run(self, scenario) -> ScenarioResult:
+    def run(self, scenario, *, failure_dir: Path | None = None) -> ScenarioResult:
         started = time.monotonic()
         context = self.browser.new_context(
-            viewport={"width": 1600, "height": 1000},
+            viewport={"width": 390, "height": 844} if scenario.mobile_viewport else {"width": 1600, "height": 1000},
+            is_mobile=scenario.mobile_viewport,
+            has_touch=scenario.mobile_viewport,
             reduced_motion="reduce",
             service_workers="block",
         )
@@ -154,9 +162,10 @@ class BrowserHarness:
                 raise AssertionError("browser emitted forbidden errors:\n" + "\n".join(problems))
         except Exception as exc:
             status = "FAIL"
-            error = f"{type(exc).__name__}: {exc}"
-            SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
-            target = SCREENSHOT_DIR / f"{scenario.name}.png"
+            error = _error_text(exc)
+            target_dir = failure_dir or SCREENSHOT_DIR
+            target_dir.mkdir(parents=True, exist_ok=True)
+            target = target_dir / "screenshot.png"
             try:
                 page.screenshot(path=str(target), full_page=True)
                 screenshot = str(target)
@@ -174,3 +183,14 @@ class BrowserHarness:
             screenshot=screenshot,
             evidence=evidence,
         )
+
+
+def _error_text(exc: Exception) -> str:
+    """Keep bare scenario assertions actionable in the terminal and report."""
+
+    detail = str(exc)
+    if not detail and isinstance(exc, AssertionError):
+        frames = traceback.extract_tb(exc.__traceback__)
+        if frames:
+            detail = frames[-1].line or f"assertion at {frames[-1].filename}:{frames[-1].lineno}"
+    return f"{type(exc).__name__}: {detail}"

@@ -214,6 +214,9 @@ GRAIN_OUTPUT_MASK = 0xFFFF
 GRAIN_OUTPUT_DIVISOR = 65535.0
 GRAIN_CELL_SIZE_MIN = 1.0
 GRAIN_CELL_SIZE_RANGE = 7.0
+# Roughness scales the hash grid while preserving the established look at 50.
+GRAIN_FREQUENCY_MIN = 0.5
+GRAIN_FREQUENCY_RANGE = 1.0
 
 # Soft proof (§28): RGB matrices are linear RGB -> XYZ D65. Proofing clips in
 # the selected target RGB space, converts back to sRGB for the display, and
@@ -277,6 +280,57 @@ RETOUCH_RENDER_CAP = 32
 RETOUCH_RING_TAPS = 8
 RETOUCH_RING_SCALE = 1.5
 RETOUCH_MIN_RADIUS = 1e-4
+
+# Numeric Develop controls exercised by the invariant sweep. Each entry is
+# (settings key, minimum, maximum, default). Geometry is intentionally excluded:
+# it is post-pipeline and has its own renderer contracts.
+PIPELINE_SLIDER_SPECS = (
+    ("Temperature", 2000.0, 50000.0, 5500.0),
+    ("Tint", -150.0, 150.0, 0.0),
+    ("Exposure2012", -5.0, 5.0, 0.0),
+    *((key, -100.0, 100.0, 0.0) for key in (
+        "Contrast2012", "Highlights2012", "Shadows2012", "Whites2012", "Blacks2012",
+        "Texture", "Clarity2012", "Dehaze", "Vibrance", "Saturation",
+    )),
+    ("Sharpness", 0.0, 150.0, 0.0),
+    ("SharpenRadius", 0.5, 3.0, 1.0),
+    ("SharpenEdgeMasking", 0.0, 100.0, 0.0),
+    ("LuminanceSmoothing", 0.0, 100.0, 0.0),
+    ("LuminanceDetail", 0.0, 100.0, 50.0),
+    ("LuminanceContrast", 0.0, 100.0, 0.0),
+    ("ColorNoiseReduction", 0.0, 100.0, 0.0),
+    ("DefringePurpleAmount", 0.0, 100.0, 0.0),
+    ("DefringePurpleHueLo", 0.0, 100.0, 30.0),
+    ("DefringePurpleHueHi", 0.0, 100.0, 70.0),
+    ("DefringeGreenAmount", 0.0, 100.0, 0.0),
+    ("DefringeGreenHueLo", 0.0, 100.0, 40.0),
+    ("DefringeGreenHueHi", 0.0, 100.0, 60.0),
+    ("ColorGradeBlending", 0.0, 100.0, 50.0),
+    ("ColorGradeBalance", -100.0, 100.0, 0.0),
+    *((f"ColorGrade{name}{part}", 0.0 if part != "Lum" else -100.0, 360.0 if part == "Hue" else 100.0, 0.0)
+      for name in ("Shadow", "Midtone", "Highlight", "Global") for part in ("Hue", "Sat", "Lum")),
+    *((f"{prefix}{band}", -100.0, 100.0, 0.0)
+      for prefix in ("HueAdjustment", "SaturationAdjustment", "LuminanceAdjustment", "GrayMixer") for band in BAND_NAMES),
+    ("PostCropVignetteAmount", -100.0, 100.0, 0.0),
+    ("PostCropVignetteMidpoint", 0.0, 100.0, 50.0),
+    ("PostCropVignetteFeather", 0.0, 100.0, 50.0),
+    ("PostCropVignetteRoundness", -100.0, 100.0, 0.0),
+    ("GrainAmount", 0.0, 100.0, 0.0),
+    ("GrainSize", 0.0, 100.0, 25.0),
+    ("GrainFrequency", 0.0, 100.0, 50.0),
+    ("CalibrationShadowTint", -100.0, 100.0, 0.0),
+    *((f"Calibration{name}Primary{part}", -100.0, 100.0, 0.0)
+      for name in ("Red", "Green", "Blue") for part in ("Hue", "Saturation")),
+    ("LensProfileDistortionScale", 0.0, 200.0, 100.0),
+    ("LensProfileVignettingScale", 0.0, 200.0, 100.0),
+    ("LensManualDistortionAmount", -100.0, 100.0, 0.0),
+    ("LensManualVignetteAmount", -100.0, 100.0, 0.0),
+    ("LensManualVignetteMidpoint", 0.0, 100.0, 50.0),
+    ("pa_FilmStrength", 0.0, 100.0, 100.0),
+    ("pa_FilmHalation", 0.0, 100.0, 100.0),
+    ("pa_FilmGrain", 0.0, 100.0, 100.0),
+    ("pa_FilmGrainSize", 0.0, 100.0, 100.0),
+)
 
 PARITY_TABLE = {
     name: value

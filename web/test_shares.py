@@ -1,5 +1,6 @@
 import asyncio
 import time
+from pathlib import Path
 
 from fastapi.responses import Response
 from fastapi.testclient import TestClient
@@ -144,6 +145,21 @@ class ShareTests(BackendTestCase):
 
         self.assertIsNone(resolved)
         self.assertEqual(active["token"], share["token"])
+        self.assertTrue(active["expired"])
+
+        def probe():
+            with TestClient(app_module.app) as client:
+                owner = client.get(f"/api/user-collections/{collection['id']}/share")
+                shared = client.get("/api/shares")
+                return owner, shared
+
+        owner, shared = await asyncio.to_thread(probe)
+        self.assertTrue(owner.json()["share"]["expired"])
+        item = next(row for row in shared.json()["items"] if row["collection_id"] == collection["id"])
+        self.assertTrue(item["private_link"]["expired"])
+
+        with (Path(__file__).parent / "static/js/desktop/panel.js").open(encoding="utf-8") as handle:
+            self.assertIn("Expired - rotate to renew", handle.read())
 
     async def test_token_allows_only_member_images(self):
         collection, first, _second, third = await self._collection_with_images()

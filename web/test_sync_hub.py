@@ -200,6 +200,9 @@ class SyncHubTests(unittest.TestCase):
         image_id = self.upload(content_hash, payload, split=len(payload) // 2)
         destination = self.raws / "2024" / "2024-06-07" / "field.jpg"
         self.assertEqual(destination.read_bytes(), payload)
+        original = self.client.get(f"/api/sync/original/{image_id}")
+        self.assertEqual(original.status_code, 200, original.text)
+        self.assertEqual(original.content, payload)
 
         manifest = self.client.post(
             "/api/sync/manifest",
@@ -215,6 +218,41 @@ class SyncHubTests(unittest.TestCase):
             content=payload,
         )
         self.assertEqual(repeat.json(), {"image_id": image_id})
+
+    def test_manifest_known_requires_live_original(self):
+        """Trashed, missing, or mirror rows must not count as backed up —
+        Free-up-space on the phone deletes local copies of "known" hashes."""
+        payload = self.image_bytes("liveness.jpg", (9, 8, 7))
+        content_hash = self.declare("liveness.jpg", payload)
+        self.upload(content_hash, payload)
+
+        def manifest_known():
+            response = self.client.post(
+                "/api/sync/manifest",
+                json={"items": [{"content_hash": content_hash, "bytes": len(payload), "filename": "liveness.jpg"}]},
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            return {row["content_hash"] for row in response.json()["known"]}
+
+        def set_row(sql: str):
+            conn = sqlite3.connect(self.db_path)
+            conn.execute(sql, (content_hash,))
+            conn.commit()
+            conn.close()
+
+        self.assertEqual(manifest_known(), {content_hash})
+
+        set_row("UPDATE images SET status = 'trashed' WHERE content_hash = ?")
+        self.assertEqual(manifest_known(), set(), "trashed row must not count as backed up")
+
+        set_row("UPDATE images SET status = 'kept', missing_at = 123.0 WHERE content_hash = ?")
+        self.assertEqual(manifest_known(), set(), "missing file must not count as backed up")
+
+        set_row("UPDATE images SET missing_at = NULL, hub_remote = 1 WHERE content_hash = ?")
+        self.assertEqual(manifest_known(), set(), "satellite mirror row must not count as backed up")
+
+        set_row("UPDATE images SET hub_remote = 0 WHERE content_hash = ?")
+        self.assertEqual(manifest_known(), {content_hash})
 
     def test_upload_rejects_wrong_hash_and_resets_resume_offset(self):
         payload = self.image_bytes("bad.jpg", (1, 2, 3))

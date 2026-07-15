@@ -664,6 +664,7 @@ class ApiShapeTests(unittest.TestCase):
             manifest = archive.read("manifest.txt").decode("utf-8")
             self.assertIn(f"{self.ids[1]}: source file unavailable", manifest)
 
+    @unittest.skipIf(os.name == "nt", "creating symlinks requires Windows developer privileges")
     def test_export_zip_skips_symlinks_and_paths_outside_library(self):
         first_path = os.path.join(self.tempdir.name, "catalog", "sunset-alpha.jpg")
         symlink_path = os.path.join(self.tempdir.name, "catalog", "portrait-beta.jpg")
@@ -691,6 +692,15 @@ class ApiShapeTests(unittest.TestCase):
             manifest = archive.read("manifest.txt").decode("utf-8")
             self.assertIn(f"{self.ids[1]}: source path is a symlink", manifest)
             self.assertIn(f"{self.ids[2]}: outside library", manifest)
+
+    def test_reveal_rejects_hub_paths_as_nonlocal(self):
+        response = self.client.post("/api/reveal", json={"path": "hub://Family/Trip"})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json(),
+            {"ok": False, "error": "Reveal is only available for local folders"},
+        )
 
     def test_export_zip_stops_when_original_byte_cap_is_reached(self):
         first_path = os.path.join(self.tempdir.name, "catalog", "sunset-alpha.jpg")

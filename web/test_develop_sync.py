@@ -87,6 +87,20 @@ class DevelopSyncTests(unittest.TestCase):
         self.assertNotIn("CropLeft", slice_)
         self.assertNotIn("FutureCrsKey", slice_)
 
+    def test_detail_sync_copies_rendered_nr_detail_keys(self):
+        settings = {
+            "LuminanceSmoothing": 64,
+            "LuminanceDetail": 73,
+            "LuminanceContrast": 28,
+            "LuminanceNoiseReductionDetail": 9,
+        }
+
+        slice_ = develop_routes.extract_sync_slice(settings, ["detail"])
+
+        self.assertEqual(slice_["LuminanceDetail"], 73)
+        self.assertEqual(slice_["LuminanceContrast"], 28)
+        self.assertNotIn("LuminanceNoiseReductionDetail", slice_)
+
     def test_sync_writes_settings_and_history_label(self):
         put = self.client.put(
             f"/api/develop/{self.raw_a}",

@@ -12,6 +12,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
+from core.path_groups import safe_commonpath
 from core.requests import clamp_int, repeated_query_values
 from data.repositories import catalog as catalog_repository
 from data.repositories import images as image_repository
@@ -216,11 +217,8 @@ def _active_source_roots() -> list[str]:
 
 def _path_is_under_root(path: str, roots: list[str]) -> bool:
     for root in roots:
-        try:
-            if os.path.commonpath([root, path]) == root:
-                return True
-        except ValueError:
-            continue
+        if safe_commonpath([root, path]) == root:
+            return True
     return False
 
 

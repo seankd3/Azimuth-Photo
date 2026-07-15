@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from PIL import Image
@@ -93,6 +95,40 @@ class TaxonomyRoutingTableTests(unittest.TestCase):
             ),
             "film_scan",
         )
+
+    def test_windows_phone_camera_path_routes_to_personal_photos(self):
+        kind = taxonomy.infer_source_kind(
+            filename="PXL_20260715.jpg",
+            path=r"D:\DCIM\Camera\PXL_20260715.jpg",
+        )
+
+        self.assertEqual(kind, "phone")
+        self.assertEqual(
+            taxonomy.route_destination(filename="PXL_20260715.jpg", source_kind=kind),
+            taxonomy.DEST_PERSONAL,
+        )
+
+
+class CardPlatformTests(unittest.TestCase):
+    def test_windows_fixed_drive_is_eligible_only_when_it_exposes_dcim(self):
+        self.assertTrue(card._is_windows_card_drive(card.WINDOWS_DRIVE_REMOVABLE, has_dcim=False))
+        self.assertTrue(card._is_windows_card_drive(card.WINDOWS_DRIVE_FIXED, has_dcim=True))
+        self.assertFalse(card._is_windows_card_drive(card.WINDOWS_DRIVE_FIXED, has_dcim=False))
+
+    def test_copy_verified_falls_back_when_hardlinks_are_unsupported(self):
+        with tempfile.TemporaryDirectory() as root:
+            source = Path(root) / "card" / "IMAGE.CR3"
+            destination = Path(root) / "library"
+            source.parent.mkdir()
+            source.write_bytes(b"verified exfat payload")
+
+            with patch.object(os, "link", side_effect=OSError(errno.EPERM, "hardlinks unsupported")):
+                result = card.copy_verified(str(source), str(destination), retry_count=0)
+
+            landed = Path(result["destination"])
+            self.assertEqual(landed.read_bytes(), source.read_bytes())
+            self.assertEqual(card.compute_full_hash(landed), result["full_hash"])
+            self.assertFalse(any(destination.glob("*.importing")))
 
 
 class StagedImportTaxonomyTests(BackendTestCase):

@@ -156,8 +156,14 @@ async def manifest(db_path: str, items: Iterable[dict[str, Any]]) -> dict[str, l
         if hashes:
             placeholders = ",".join("?" for _ in hashes)
             rows = await (await conn.execute(
+                # "Known" must mean a recoverable original: not trashed, not
+                # missing on disk, and not a satellite mirror of a remote hub.
+                # Trashed rows keep their content_hash, so without this filter
+                # Free-up-space could delete the phone's last copy.
                 f"SELECT content_hash, MIN(id) AS image_id FROM images "
-                f"WHERE content_hash IN ({placeholders}) GROUP BY content_hash",
+                f"WHERE content_hash IN ({placeholders}) "
+                f"AND status IN ('kept', 'maybe') AND missing_at IS NULL "
+                f"AND COALESCE(hub_remote, 0) = 0 GROUP BY content_hash",
                 hashes,
             )).fetchall()
             known_by_hash = {str(row["content_hash"]): int(row["image_id"]) for row in rows}

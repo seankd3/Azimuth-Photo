@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from qa.config import SCREENSHOT_DIR
+from qa.config import SCREENSHOT_DIR, scaled_timeout_ms
 
 
 def empty_trash_and_leave(qa) -> None:
@@ -45,9 +45,9 @@ def empty_trash_and_leave(qa) -> None:
     qa.mark("navigate from emptied Trash back to All Photos promptly")
     started = __import__("time").monotonic()
     qa.page.locator("#library-list [data-lib='all']").click()
-    qa.page.locator("#view-grid.active").wait_for(state="visible", timeout=10_000)
-    qa.wait_count(int(qa.manifest["visible_images"]), timeout_ms=10_000)
-    qa.page.locator("#grid-flow .cell[data-id]").first.wait_for(state="visible", timeout=10_000)
+    qa.page.locator("#view-grid.active").wait_for(state="visible", timeout=scaled_timeout_ms(10_000))
+    qa.wait_count(int(qa.manifest["visible_images"]), timeout_ms=scaled_timeout_ms(10_000))
+    qa.page.locator("#grid-flow .cell[data-id]").first.wait_for(state="visible", timeout=scaled_timeout_ms(10_000))
     elapsed = __import__("time").monotonic() - started
     assert elapsed < 10, f"All Photos took {elapsed:.2f}s after emptying Trash"
 

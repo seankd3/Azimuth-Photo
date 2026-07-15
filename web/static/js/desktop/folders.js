@@ -139,9 +139,9 @@ function exportFolderScope(node, anchor) {
     });
 }
 
-async function revealFolderPath(path) {
+async function revealFolderPath(path, sourceId) {
     if (!path) return;
-    const result = await revealFolder(path);
+    const result = await revealFolder(path, sourceId);
     if (result?.ok && result?.data?.ok) {
         showToast('Opened in file manager');
         return;
@@ -184,7 +184,7 @@ function openFolderMenu(node, anchor) {
     menu.innerHTML = '<div class="pm-group">'
         + `<button data-act="scope">${icon('folder-tree')} Show in scope with subfolders</button>`
         + `<button data-act="refine">${icon('zap')} Open in Refine</button>`
-        + `<button data-act="reveal">${icon('folder-open')} ${esc(fileManagerMenuLabel())}</button>`
+        + (node.reveal_available !== false ? `<button data-act="reveal">${icon('folder-open')} ${esc(fileManagerMenuLabel())}</button>` : '')
         + `<button data-act="export">${icon('download')} Export view…</button>`
         + '</div>';
     menu.hidden = false;
@@ -199,7 +199,7 @@ function openFolderMenu(node, anchor) {
                 applyFolderScope(node.path);
                 emit('refine:open');
             }
-            if (action === 'reveal') revealFolderPath(node.path);
+            if (action === 'reveal') revealFolderPath(node.path, node.source_id);
             if (action === 'export') exportFolderScope(node, anchor);
         });
     }
@@ -312,7 +312,7 @@ function findNode(path) {
 
 function findScopeNode(path) {
     const source = sources.find((item) => item.path === path);
-    if (source) return { path: source.path, name: source.display_name, total_count: source.total_count };
+    if (source) return source;
     return findNode(path);
 }
 
