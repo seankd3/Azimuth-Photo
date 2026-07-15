@@ -17,6 +17,7 @@ let generation = 0;
 let gapHours = Number(localStorage.getItem(GAP_KEY) || 6);
 let images = [];
 let groups = [];
+const imageIndexes = new Map();
 let observer = null;
 let imageObserver = null;
 let menu = null;
@@ -51,17 +52,17 @@ function signals(img) {
     return (Number(img.comparisons) || 0) + (Number(img.propagated_updates) || 0);
 }
 
-function buildGroups() {
-    const dated = images
+function groupImages(sourceImages) {
+    const dated = sourceImages
         .map((img, index) => ({ img, index, ms: captureMs(img) }))
         .filter((item) => item.ms != null)
         .sort((a, b) => b.ms - a.ms);
     const gapMs = gapHours * 3600 * 1000;
-    groups = [];
+    const result = [];
     for (const item of dated) {
-        const last = groups[groups.length - 1];
+        const last = result[result.length - 1];
         if (!last || Math.abs(last.lastMs - item.ms) > gapMs) {
-            groups.push({
+            result.push({
                 id: `ev-${item.ms}`,
                 start: item.ms,
                 end: item.ms,
@@ -75,6 +76,29 @@ function buildGroups() {
             last.lastMs = item.ms;
         }
     }
+    return result;
+}
+
+function buildGroups() {
+    groups = groupImages(images);
+}
+
+function appendGroups(incoming) {
+    const additions = groupImages(incoming);
+    if (!additions.length) return groups.length;
+    let changedFrom = groups.length;
+    const last = groups[groups.length - 1];
+    const first = additions[0];
+    if (last && Math.abs(last.lastMs - first.start) <= gapHours * 3600 * 1000) {
+        changedFrom -= 1;
+        last.images.push(...first.images);
+        last.start = Math.max(last.start, first.start);
+        last.end = Math.min(last.end, first.end);
+        last.lastMs = first.lastMs;
+        additions.shift();
+    }
+    groups.push(...additions);
+    return changedFrom;
 }
 
 function cellHtml(img, index) {
@@ -99,6 +123,22 @@ function renderSkeleton() {
         + '</div></div></div>';
 }
 
+function groupHtml(group, groupIndex) {
+    const title = titleFor(group);
+    const hero = [...group.images].sort((a, b) => (Number(b.elo) || 0) - (Number(a.elo) || 0))[0];
+    const expanded = expandedEvents.has(group.id) || group.images.length <= 18;
+    const visibleTiles = (expanded ? group.images : group.images.slice(0, 18)).filter((img) => Number(img.id) !== Number(hero.id));
+    const hidden = Math.max(0, group.images.length - visibleTiles.length - 1);
+    return `<article class="event-block" data-group="${groupIndex}">`
+        + `<header class="event-head"><h2>${esc(title)}</h2><span class="ev-count">${fmt(group.images.length)} photos</span>`
+        + `<span class="ev-dots" data-tip="Ranking coverage">${coverageDots(group)}</span><span class="ev-spacer"></span>`
+        + `<button class="ev-menu-btn" data-menu="${groupIndex}" data-tip="Event actions" aria-label="Event actions">${icon('ellipsis')}</button></header>`
+        + '<div class="event-body">'
+        + `<figure class="event-hero" data-id="${hero.id}"><img data-src="${esc(thumbUrl('md', hero.id))}" alt="${esc(hero.filename || '')}"><figcaption class="hero-cap"><span>${esc(hero.filename || '')}</span><span>${Math.round(Number(hero.elo) || 0)}</span></figcaption></figure>`
+        + `<div class="event-tiles">${visibleTiles.map((img) => cellHtml(img, imageIndexes.get(Number(img.id)) ?? 0)).join('')}`
+        + `${hidden > 0 ? `<button class="ev-more" data-expand="${groupIndex}">+${fmt(hidden)} more</button>` : ''}</div></div></article>`;
+}
+
 function render() {
     if (!mounted) return;
     buildGroups();
@@ -109,38 +149,48 @@ function render() {
         document.getElementById('events-end').hidden = !done || images.length === 0;
         return;
     }
-    const imageIndexes = new Map(images.map((img, idx) => [Number(img.id), idx]));
-    flow.innerHTML = groups.map((group, groupIndex) => {
-        const title = titleFor(group);
-        const hero = [...group.images].sort((a, b) => (Number(b.elo) || 0) - (Number(a.elo) || 0))[0];
-        const expanded = expandedEvents.has(group.id) || group.images.length <= 18;
-        const visibleTiles = (expanded ? group.images : group.images.slice(0, 18)).filter((img) => Number(img.id) !== Number(hero.id));
-        const hidden = Math.max(0, group.images.length - visibleTiles.length - 1);
-        return `<article class="event-block" data-group="${groupIndex}">`
-            + `<header class="event-head"><h2>${esc(title)}</h2><span class="ev-count">${fmt(group.images.length)} photos</span>`
-            + `<span class="ev-dots" data-tip="Ranking coverage">${coverageDots(group)}</span><span class="ev-spacer"></span>`
-            + `<button class="ev-menu-btn" data-menu="${groupIndex}" data-tip="Event actions" aria-label="Event actions">${icon('ellipsis')}</button></header>`
-            + '<div class="event-body">'
-            + `<figure class="event-hero" data-id="${hero.id}"><img data-src="${esc(thumbUrl('md', hero.id))}" alt="${esc(hero.filename || '')}"><figcaption class="hero-cap"><span>${esc(hero.filename || '')}</span><span>${Math.round(Number(hero.elo) || 0)}</span></figcaption></figure>`
-            + `<div class="event-tiles">${visibleTiles.map((img) => cellHtml(img, imageIndexes.get(Number(img.id)) ?? 0)).join('')}`
-            + `${hidden > 0 ? `<button class="ev-more" data-expand="${groupIndex}">+${fmt(hidden)} more</button>` : ''}</div></div></article>`;
-    }).join('') + '<div id="events-sentinel"></div><div class="grid-end" id="events-end" hidden>End of view</div>';
+    flow.innerHTML = groups.map(groupHtml).join('')
+        + '<div id="events-sentinel"></div><div class="grid-end" id="events-end" hidden>End of view</div>';
     document.getElementById('events-end').hidden = !done || images.length === 0;
-    observeImages();
+    observeImages(flow, { reset: true });
 }
 
-function observeImages() {
-    if (imageObserver) imageObserver.disconnect();
-    imageObserver = new IntersectionObserver((entries) => {
-        for (const entry of entries) {
-            const img = entry.target;
-            if (entry.isIntersecting && !img.src) img.src = img.dataset.src;
-        }
-    }, { root: document.getElementById('canvas'), rootMargin: '700px 0px' });
-    for (const img of document.querySelectorAll('#events-flow img[data-src]')) {
+function observeImages(root, { reset = false } = {}) {
+    if (reset && imageObserver) imageObserver.disconnect();
+    if (!imageObserver || reset) {
+        imageObserver = new IntersectionObserver((entries) => {
+            for (const entry of entries) {
+                const img = entry.target;
+                if (entry.isIntersecting && !img.src) img.src = img.dataset.src;
+            }
+        }, { root: document.getElementById('canvas'), rootMargin: '700px 0px' });
+    }
+    for (const img of root.querySelectorAll('img[data-src]')) {
         img.addEventListener('load', () => img.classList.add('ld'), { once: true });
         imageObserver.observe(img);
     }
+}
+
+function renderAppendedGroups(changedFrom) {
+    if (!mounted) return;
+    const flow = document.getElementById('events-flow');
+    const sentinel = document.getElementById('events-sentinel');
+    if (!sentinel) {
+        render();
+        return;
+    }
+    for (const article of flow.querySelectorAll('.event-block[data-group]')) {
+        if (Number(article.dataset.group) < changedFrom) continue;
+        for (const img of article.querySelectorAll('img[data-src]')) imageObserver?.unobserve(img);
+        article.remove();
+    }
+    const fragment = document.createRange().createContextualFragment(
+        groups.slice(changedFrom).map((group, index) => groupHtml(group, changedFrom + index)).join(''),
+    );
+    const added = [...fragment.querySelectorAll('.event-block')];
+    sentinel.before(fragment);
+    for (const article of added) observeImages(article);
+    document.getElementById('events-end').hidden = !done || images.length === 0;
 }
 
 async function loadPage() {
@@ -156,13 +206,20 @@ async function loadPage() {
             return;
         }
         const incoming = data.images || [];
+        const firstPage = images.length === 0;
+        incoming.forEach((img, index) => imageIndexes.set(Number(img.id), images.length + index));
         offset += incoming.length;
         done = incoming.length < PAGE_SIZE;
         images = images.concat(incoming);
         setImages(images);
         if (offset === incoming.length) setRankingsMeta({ visibleImages: data.visible_images, sortQuality: data.sort_quality });
-        render();
-        setupSentinel();
+        if (firstPage) {
+            render();
+            setupSentinel();
+        } else {
+            renderAppendedGroups(appendGroups(incoming));
+            setupSentinel();
+        }
     } catch {
         if (seq !== generation) return;
         document.getElementById('events-flow').innerHTML = '<div class="load-error"><h4>Couldn\'t load events</h4><p>The archive did not respond.</p><button class="btn" id="events-retry">Try again</button></div>';
@@ -253,6 +310,7 @@ function reload() {
     loading = false;
     images = [];
     groups = [];
+    imageIndexes.clear();
     expandedEvents.clear();
     setImages([]);
     setRankingsMeta({ visibleImages: 0, sortQuality: null });

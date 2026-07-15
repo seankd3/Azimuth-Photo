@@ -1,4 +1,4 @@
-import { getDateHistogram, getFilterOptions, getFolders, getPeople, getTags } from './api.js';
+import { getDateHistogram, getFilterOptions, getFolders, getTags } from './api.js';
 import { byId, folderValues, on, scope, scopeParams, setScope } from './state.js';
 import { loadCollectionImages } from './scope_data.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
@@ -8,6 +8,9 @@ import { personLabel } from '../people_labels.js';
 let popover = null;
 let loaded = false;
 let loading = false;
+let foldersLoading = false;
+let tagsLoading = false;
+let loadSeq = 0;
 let lastOptionsLoadedAt = 0;
 let expandedYear = '';
 let monthsLoadingKey = '';
@@ -40,24 +43,6 @@ function countLabel(item, fallback = '') {
 
 function personThumb(person) {
     return person?.face_thumb_url || person?.thumb_url || person?.image_thumb_url || '';
-}
-
-function flattenPeople(peopleData) {
-    const sections = (peopleData && peopleData.sections) || {};
-    const seen = new Map();
-    for (const list of [
-        peopleData?.people,
-        peopleData?.persons,
-        peopleData?.results,
-        sections.most_seen,
-        sections.named_people,
-        sections.other_faces,
-    ]) {
-        for (const person of list || []) {
-            if (person?.id != null && !seen.has(String(person.id))) seen.set(String(person.id), person);
-        }
-    }
-    return [...seen.values()];
 }
 
 function selectValue(key, value, extra = {}) {
@@ -97,6 +82,10 @@ function emptyOption(copy, glyph = 'search') {
         + `<span>${esc(copy)}</span></div>`;
 }
 
+function loadingOption(copy) {
+    return `<div class="filter-empty">${esc(copy)}</div>`;
+}
+
 function selectBlock(title, body, attrs = '') {
     return `<section class="filter-sec" ${attrs}><h3>${esc(title)}</h3><div class="filter-list">${body}</div></section>`;
 }
@@ -121,9 +110,10 @@ function renderPeople() {
         (person) => person.id,
         personLabel,
     );
+    const body = rows || (loading ? loadingOption('Loading people…') : emptyOption('No people found.', 'users'));
     return `<section class="filter-sec" data-filter-section="people"><h3>People</h3>`
         + '<input class="filter-search" id="filter-people-search" placeholder="Search people" autocomplete="off">'
-        + `<div class="filter-list">${rows || emptyOption('No people found.', 'users')}</div></section>`;
+        + `<div class="filter-list">${body}</div></section>`;
 }
 
 function renderDate() {
@@ -290,15 +280,20 @@ function render() {
     const keepPeopleFocus = document.activeElement?.id === 'filter-people-search';
     const peopleSearch = popover.querySelector('#filter-people-search')?.value || '';
     popover.innerHTML = `<div class="filter-pop-head"><b>Filter</b><button class="icon-btn" id="filter-close" data-tip="Close (Esc)" aria-label="Close">${icon('x')}</button></div>`
-        + (loading ? '<div class="filter-loading skel"></div>' : [
+        + [
             renderFlag(),
             renderPeople(),
-            selectBlock('Folder', optionRows(options.folders, 'folder', (item) => item.path, (item) => item.path) || emptyOption('No folders found.', 'folder'), 'data-filter-section="folder"'),
+            selectBlock('Folder', optionRows(options.folders, 'folder', (item) => item.path, (item) => item.path)
+                || (foldersLoading ? loadingOption('Loading folders…') : emptyOption('No folders found.', 'folder')), 'data-filter-section="folder"'),
             renderDate(),
-            selectBlock('File type', optionRows(options.fileTypes, 'file_type', (item) => item.ext || item.value, (item) => String(item.ext || item.value).replace('.', '').toUpperCase()) || emptyOption('No file types found.', 'file-type'), 'data-filter-section="filetype"'),
-            selectBlock('Camera', optionRows(options.cameras, 'camera', (item) => item.camera || item.value, (item) => item.camera || item.value) || emptyOption('No cameras found.', 'camera'), 'data-filter-section="camera"'),
-            selectBlock('Lens', optionRows(options.lenses, 'lens', (item) => item.lens || item.value, (item) => item.lens || item.value) || emptyOption('No lenses found.', 'aperture'), 'data-filter-section="lens"'),
-            selectBlock('Tags', optionRows(options.tags, 'tag', (item) => item.tag || item.value, (item) => item.tag || item.value) || emptyOption('No caption tags yet.', 'tag'), 'data-filter-section="tags"'),
+            selectBlock('File type', optionRows(options.fileTypes, 'file_type', (item) => item.ext || item.value, (item) => String(item.ext || item.value).replace('.', '').toUpperCase())
+                || (loading ? loadingOption('Loading file types…') : emptyOption('No file types found.', 'file-type')), 'data-filter-section="filetype"'),
+            selectBlock('Camera', optionRows(options.cameras, 'camera', (item) => item.camera || item.value, (item) => item.camera || item.value)
+                || (loading ? loadingOption('Loading cameras…') : emptyOption('No cameras found.', 'camera')), 'data-filter-section="camera"'),
+            selectBlock('Lens', optionRows(options.lenses, 'lens', (item) => item.lens || item.value, (item) => item.lens || item.value)
+                || (loading ? loadingOption('Loading lenses…') : emptyOption('No lenses found.', 'aperture')), 'data-filter-section="lens"'),
+            selectBlock('Tags', optionRows(options.tags, 'tag', (item) => item.tag || item.value, (item) => item.tag || item.value)
+                || (tagsLoading ? loadingOption('Loading tags…') : emptyOption('No caption tags yet.', 'tag')), 'data-filter-section="tags"'),
             selectBlock('Orientation', [
                 ['landscape', 'Landscape'],
                 ['portrait', 'Portrait'],
@@ -307,7 +302,7 @@ function render() {
             )).join(''), 'data-filter-section="orientation"'),
             renderRanked(),
             renderStars(),
-        ].join(''));
+        ].join('');
     const search = popover.querySelector('#filter-people-search');
     if (search) {
         search.value = peopleSearch;
@@ -363,32 +358,56 @@ function optionsAreFresh() {
 
 async function loadOptions({ force = false } = {}) {
     if ((optionsAreFresh() && !force) || loading) return;
+    const seq = ++loadSeq;
     loading = true;
+    foldersLoading = true;
+    tagsLoading = true;
     render();
-    const [peopleData, folderData, filterData, tagData] = await Promise.all([
-        getPeople(500),
-        getFolders(),
-        getFilterOptions(),
-        getTags({ limit: 100 }),
-    ]);
-    options = {
-        people: flattenPeople(peopleData),
-        folders: (folderData && folderData.folders) || [],
-        years: (filterData && filterData.years) || [],
-        fileTypes: (filterData && filterData.file_types) || [],
-        cameras: (filterData && filterData.cameras) || [],
-        lenses: (filterData && filterData.lenses) || [],
-        tags: (tagData && tagData.tags) || [],
-        undated: Number(filterData && filterData.undated) || 0,
-    };
-    loaded = true;
-    lastOptionsLoadedAt = Date.now();
-    loading = false;
-    render();
+    const core = getFilterOptions().then((filterData) => {
+        if (seq !== loadSeq) return;
+        options = {
+            ...options,
+            people: (filterData && filterData.people) || [],
+            years: (filterData && filterData.years) || [],
+            fileTypes: (filterData && filterData.file_types) || [],
+            cameras: (filterData && filterData.cameras) || [],
+            lenses: (filterData && filterData.lenses) || [],
+            undated: Number(filterData && filterData.undated) || 0,
+        };
+        loaded = true;
+        lastOptionsLoadedAt = Date.now();
+        loading = false;
+        render();
+    }).catch(() => {
+        if (seq !== loadSeq) return;
+        loading = false;
+        render();
+    });
+    const folders = getFolders().then((folderData) => {
+        if (seq !== loadSeq) return;
+        options.folders = (folderData && folderData.folders) || [];
+    }).catch(() => {}).finally(() => {
+        if (seq !== loadSeq) return;
+        foldersLoading = false;
+        render();
+    });
+    const tags = getTags({ limit: 100 }).then((tagData) => {
+        if (seq !== loadSeq) return;
+        options.tags = (tagData && tagData.tags) || [];
+    }).catch(() => {}).finally(() => {
+        if (seq !== loadSeq) return;
+        tagsLoading = false;
+        render();
+    });
+    await Promise.allSettled([core, folders, tags]);
 }
 
 function invalidateOptions() {
+    loadSeq += 1;
     loaded = false;
+    loading = false;
+    foldersLoading = false;
+    tagsLoading = false;
     lastOptionsLoadedAt = 0;
     resetMonthCacheIfScopeChanged();
     if (filtersOpen()) loadOptions({ force: true });

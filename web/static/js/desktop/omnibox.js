@@ -89,6 +89,7 @@ let folders = [];
 let tags = [];
 let filterOptions = null;
 let dataPromise = null;
+let dataSeq = 0;
 let rows = [];
 let hot = -1;
 let liveTimer = null;
@@ -200,24 +201,30 @@ function remember(value) {
 
 async function ensureSuggestionData() {
     if (dataPromise) return dataPromise;
-    dataPromise = Promise.all([
-        getPeople(500),
-        listCollections(),
-        getFolders(null),
-        getFilterOptions(),
-        getTags({ limit: 100 }),
-    ]).then(([peopleData, collectionData, folderData, optionsData, tagData]) => {
-        people = flattenPeople(peopleData);
-        collections = (collectionData && collectionData.collections) || [];
-        folders = (folderData && folderData.folders) || [];
-        filterOptions = optionsData || {};
-        tags = (tagData && tagData.tags) || [];
+    const seq = ++dataSeq;
+    const apply = (promise, update) => promise.then((data) => {
+        if (seq !== dataSeq) return;
+        update(data);
         render();
-    }).catch(() => {});
+    });
+    const loads = [
+        apply(getFilterOptions(), (data) => {
+            filterOptions = data || {};
+            people = flattenPeople(data);
+        }),
+        apply(listCollections(), (data) => { collections = (data && data.collections) || []; }),
+        apply(getFolders(null), (data) => { folders = (data && data.folders) || []; }),
+        apply(getTags({ limit: 100 }), (data) => { tags = (data && data.tags) || []; }),
+        apply(getPeople(500), (data) => { people = flattenPeople(data); }),
+    ];
+    dataPromise = Promise.allSettled(loads).then((results) => {
+        if (seq === dataSeq && results.some((result) => result.status === 'rejected')) dataPromise = null;
+    });
     return dataPromise;
 }
 
 function invalidateSuggestionData() {
+    dataSeq += 1;
     dataPromise = null;
     if (document.getElementById('scopebox')?.classList.contains('open')) ensureSuggestionData();
 }
@@ -225,6 +232,7 @@ function invalidateSuggestionData() {
 function open() {
     document.getElementById('scopebox').classList.add('open');
     document.getElementById('scope-input')?.setAttribute('aria-expanded', 'true');
+    render();
 }
 
 function close() {
@@ -1066,5 +1074,4 @@ export function initOmnibox() {
     on('trash:changed', invalidateSuggestionData);
     on('flags', invalidateSuggestionData);
     renderToken();
-    ensureSuggestionData();
 }
