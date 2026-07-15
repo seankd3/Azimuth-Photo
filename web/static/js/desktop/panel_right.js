@@ -58,10 +58,14 @@ function imagesSignature() {
     return String(imageVersion);
 }
 
+function rankedImages() {
+    return viewState.images.filter((img) => img && Number.isFinite(Number(img.elo)));
+}
+
 function histogramData() {
     const signature = imagesSignature();
     if (histogramCache.signature === signature) return histogramCache;
-    const images = viewState.images.filter((img) => Number.isFinite(Number(img.elo)));
+    const images = rankedImages();
     if (!images.length) {
         histogramCache = { signature, bins: [], min: 0, max: 0, empty: true };
         return histogramCache;
@@ -113,8 +117,7 @@ function confidence(comparisons) {
 function topPercent(img) {
     const signature = imagesSignature();
     if (rankCache.signature !== signature) {
-        const ranked = viewState.images
-            .filter((item) => Number.isFinite(Number(item.elo)))
+        const ranked = rankedImages()
             .slice()
             .sort((a, b) => Number(b.elo) - Number(a.elo));
         rankCache = {
