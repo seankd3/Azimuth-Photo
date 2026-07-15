@@ -1395,12 +1395,13 @@ export async function initPanel() {
     document.getElementById('saved-view-cancel').addEventListener('click', () => { document.getElementById('saved-view-form').hidden = true; });
     document.getElementById('saved-view-form').addEventListener('submit', async (event) => {
         event.preventDefault();
+        const form = event.currentTarget;
         const input = document.getElementById('saved-view-name');
         const result = await createSavedView(input.value.trim() || 'Current view', savedViewSnapshot());
         if (!result?.view) return showToast("Couldn't save this view");
         savedViews.unshift(result.view);
         renderSavedViews();
-        event.currentTarget.hidden = true;
+        form.hidden = true;
         showToast(`Saved “${result.view.name}”`);
     });
     document.getElementById('new-coll-smart')?.addEventListener('click', saveSmartCollectionFromForm);

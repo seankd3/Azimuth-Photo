@@ -27,3 +27,13 @@ def saved_view_workspace(qa) -> None:
         lambda: 0 < qa.current_count() < int(qa.manifest["visible_images"]),
     )
     assert qa.page.locator("#sort-select").input_value() == "date_taken"
+
+    qa.mark("create the current workspace without a post-save error")
+    created_name = "QA Created workspace"
+    qa.page.locator("#save-view-btn").click()
+    form = qa.page.locator("#saved-view-form")
+    form.wait_for(state="visible")
+    form.locator("#saved-view-name").fill(created_name)
+    form.locator("button[type='submit']").click()
+    form.wait_for(state="hidden")
+    qa.page.locator("#saved-view-list .saved-view-row", has_text=created_name).wait_for(state="visible")
