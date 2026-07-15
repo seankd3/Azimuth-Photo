@@ -2,6 +2,8 @@
 
 import os
 
+from core.runtime_paths import resolve_runtime_paths
+
 THUMB_TIERS = ("sm", "md", "lg")
 FULL_TIER = "full"
 ALL_TIERS = THUMB_TIERS + (FULL_TIER,)
@@ -16,7 +18,7 @@ CACHE_MARKER = ".photoarchive-cache"
 CACHE_PROFILE = "original_heavy"
 SSD_CACHE_DIR = os.getenv(
     "PHOTOARCHIVE_THUMB_CACHE_DIR",
-    os.path.join(os.path.dirname(os.path.dirname(__file__)), ".thumbcache"),
+    resolve_runtime_paths().thumb_cache_dir,
 )
 SSD_CACHE_BYTES = 10 * 1024 * 1024 * 1024
 MEMORY_CACHE_BYTES = 512 * 1024 * 1024
