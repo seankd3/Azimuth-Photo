@@ -539,11 +539,7 @@ export async function restoreImages(imageIds) {
 }
 
 export async function emptyTrash() {
-<<<<<<< HEAD
-    return postJson('/api/trash/empty', {});
-=======
     return postJsonWithStatus('/api/trash/empty');
->>>>>>> origin/develop
 }
 
 export async function getMapMarkers(params) {

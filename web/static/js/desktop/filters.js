@@ -363,44 +363,19 @@ async function loadOptions({ force = false } = {}) {
     foldersLoading = true;
     tagsLoading = true;
     render();
-<<<<<<< HEAD
-    try {
-        const [peopleData, folderData, filterData, tagData] = await Promise.all([
-            getPeople(500),
-            getFolders(),
-            getFilterOptions(),
-            getTags({ limit: 100 }),
-        ]);
-        options = {
-            people: flattenPeople(peopleData),
-            folders: (folderData && folderData.folders) || [],
-=======
     const core = getFilterOptions().then((filterData) => {
         if (seq !== loadSeq) return;
         options = {
             ...options,
             people: (filterData && filterData.people) || [],
->>>>>>> origin/develop
             years: (filterData && filterData.years) || [],
             fileTypes: (filterData && filterData.file_types) || [],
             cameras: (filterData && filterData.cameras) || [],
             lenses: (filterData && filterData.lenses) || [],
-<<<<<<< HEAD
-            tags: (tagData && tagData.tags) || [],
-=======
->>>>>>> origin/develop
             undated: Number(filterData && filterData.undated) || 0,
         };
         loaded = true;
         lastOptionsLoadedAt = Date.now();
-<<<<<<< HEAD
-    } catch {
-        // Leave loaded/options unchanged so empty state shows and reopen (F) can retry.
-    } finally {
-        loading = false;
-        render();
-    }
-=======
         loading = false;
         render();
     }).catch(() => {
@@ -425,7 +400,6 @@ async function loadOptions({ force = false } = {}) {
         render();
     });
     await Promise.allSettled([core, folders, tags]);
->>>>>>> origin/develop
 }
 
 function invalidateOptions() {

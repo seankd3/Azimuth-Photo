@@ -90,39 +90,11 @@ export function downloadExport(params, { count = 0, message = '' } = {}) {
         showToast(`Zip export tops out at ${ZIP_EXPORT_MAX.toLocaleString('en-US')} photos`);
         return false;
     }
-<<<<<<< HEAD
-    const url = `/api/export?${params.toString()}`;
-    const fallbackName = format === 'zip' ? 'photoarchive-export.zip' : `photoarchive-export.${format}`;
-=======
     const link = document.getElementById('download-link');
     link.href = `/api/export?${params.toString()}`;
     link.download = format === 'zip' ? 'azimuth-photo-export.zip' : `azimuth-photo-export.${format}`;
     link.click();
->>>>>>> origin/develop
     showToast(message || (format === 'zip' ? 'Preparing zip download' : `Exporting as ${format.toUpperCase()}`));
-    void (async () => {
-        try {
-            const response = await fetch(url);
-            if (!response.ok) {
-                const payload = (response.headers.get('content-type') || '').includes('application/json')
-                    ? await response.json().catch(() => null)
-                    : null;
-                showToast(payload?.detail || `Export failed (${response.status})`);
-                return;
-            }
-            const blob = await response.blob();
-            const objectUrl = URL.createObjectURL(blob);
-            const link = document.getElementById('download-link');
-            const disposition = response.headers.get('Content-Disposition') || '';
-            const match = /filename="?([^";]+)"?/i.exec(disposition);
-            link.href = objectUrl;
-            link.download = match?.[1] || fallbackName;
-            link.click();
-            setTimeout(() => URL.revokeObjectURL(objectUrl), 30000);
-        } catch {
-            showToast('Export failed');
-        }
-    })();
     return true;
 }
 

@@ -34,27 +34,11 @@ async def api_list_shared_surfaces(request: Request):
     _configured()
     shares = await _list_shares()
     publishes = await _list_publishes()
-<<<<<<< HEAD
-    by_collection: dict[int, dict] = {}
-    # Published-node shares store collection_id=NULL; keep them ungrouped so pick_count stays visible.
-    node_items: list[dict] = []
-
-    for share in shares:
-        raw_collection_id = share.get("collection_id")
-        if raw_collection_id is None:
-            item = _base_item(share)
-            item["private_link"] = _private_link_payload(request, share)
-            node_items.append(item)
-            continue
-        collection_id = int(raw_collection_id)
-        item = by_collection.setdefault(collection_id, _base_item(share))
-=======
     by_owner: dict[tuple[str, int], dict] = {}
 
     for share in shares:
         owner = _share_owner(share)
         item = by_owner.setdefault(owner, _base_item(share))
->>>>>>> origin/develop
         item["private_link"] = _private_link_payload(request, share)
 
     for publish in publishes:
@@ -65,11 +49,7 @@ async def api_list_shared_surfaces(request: Request):
         if not item.get("photo_count"):
             item["photo_count"] = int(publish.get("image_count") or 0)
 
-<<<<<<< HEAD
-    items = list(by_collection.values()) + node_items
-=======
     items = list(by_owner.values())
->>>>>>> origin/develop
     items.sort(
         key=lambda item: max(
             float((item.get("private_link") or {}).get("created_at") or 0),
@@ -91,16 +71,11 @@ def _base_item(row: dict) -> dict:
     collection_id = row.get("collection_id")
     published_node_id = row.get("published_node_id")
     cover_image_id = row.get("cover_image_id")
-    raw_collection_id = row.get("collection_id")
     return {
-<<<<<<< HEAD
-        "collection_id": int(raw_collection_id) if raw_collection_id is not None else None,
-=======
         "collection_id": int(collection_id) if collection_id is not None else None,
         "published_node_id": (
             int(published_node_id) if published_node_id is not None else None
         ),
->>>>>>> origin/develop
         "name": row.get("collection_name") or row.get("title") or "Collection",
         "photo_count": int(row.get("photo_count") or row.get("image_count") or 0),
         "cover_image_id": int(cover_image_id) if cover_image_id is not None else None,
