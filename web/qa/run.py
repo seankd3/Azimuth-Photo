@@ -67,22 +67,30 @@ def main(argv: list[str] | None = None) -> int:
     started = time.monotonic()
     results = []
     base_url = ""
-    with ProbeServer() as server:
-        base_url = server.base_url
-        print(f"Probe server: {base_url} (isolated PHOTOARCHIVE_HOME)", flush=True)
-        with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(
-                headless=True,
-                args=["--no-sandbox", "--disable-dev-shm-usage"],
-            )
-            try:
-                harness = BrowserHarness(browser, server.base_url, manifest)
-                for scenario in selected:
-                    result = harness.run(scenario)
-                    results.append(result)
-                    _print_result(result)
-            finally:
-                browser.close()
+    offline = [scenario for scenario in selected if scenario.name == "trash_empty_offline_hub"]
+    standard = [scenario for scenario in selected if scenario.name != "trash_empty_offline_hub"]
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-dev-shm-usage"],
+        )
+        try:
+            for scenarios, offline_hub in ((standard, False), (offline, True)):
+                if not scenarios:
+                    continue
+                if offline_hub:
+                    manifest = reset_fixture()
+                with ProbeServer(offline_hub=offline_hub) as server:
+                    base_url = server.base_url
+                    label = "offline satellite" if offline_hub else "direct owner"
+                    print(f"Probe server: {base_url} ({label}, isolated PHOTOARCHIVE_HOME)", flush=True)
+                    harness = BrowserHarness(browser, server.base_url, manifest)
+                    for scenario in scenarios:
+                        result = harness.run(scenario)
+                        results.append(result)
+                        _print_result(result)
+        finally:
+            browser.close()
 
     elapsed = round(time.monotonic() - started, 3)
     failed = [result for result in results if result.status == "FAIL"]

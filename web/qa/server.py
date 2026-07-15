@@ -22,15 +22,23 @@ def _free_port() -> int:
 
 
 class ProbeServer:
-    def __init__(self) -> None:
+    def __init__(self, *, offline_hub: bool = False) -> None:
         self.port = _free_port()
         self.base_url = f"http://127.0.0.1:{self.port}"
         self.process: subprocess.Popen | None = None
         self._log_file = None
+        self.offline_hub = offline_hub
 
     def __enter__(self) -> "ProbeServer":
         env = os.environ.copy()
         env.update(fixture_environment())
+        if self.offline_hub:
+            # This is intentionally a dead local port, never a real paired hub.
+            env.update({"PHOTOARCHIVE_MODE": "satellite", "PHOTOARCHIVE_HUB_URL": "http://127.0.0.1:1"})
+        else:
+            # The general desktop matrix exercises direct-owner behavior. The
+            # offline satellite flow below gets its own isolated process.
+            env.update({"PHOTOARCHIVE_MODE": "hub"})
         env.update({"PHOTOARCHIVE_HOST": "127.0.0.1", "PHOTOARCHIVE_PORT": str(self.port)})
         SERVER_LOG.parent.mkdir(parents=True, exist_ok=True)
         self._log_file = SERVER_LOG.open("w", encoding="utf-8")

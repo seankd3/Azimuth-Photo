@@ -20,6 +20,8 @@ from features.sync.prefetch import ThumbPrefetcher
 from features.sync import oplog, satellite
 from features.sync.executor import run_sync_work
 from features.sync.versioning import hub_compatibility
+from features.trash import remote as trash_remote
+from features.trash import service as trash_service
 
 
 log = logging.getLogger(__name__)
@@ -54,6 +56,8 @@ class SyncWorker:
         self._stop = asyncio.Event()
         self._wake = asyncio.Event()
         self._failure_streak = 0
+        self._pending_trash_failure_streak = 0
+        self._pending_trash_next_attempt = 0.0
         self._next_idle_seconds = _BASE_IDLE_SECONDS
         self._status: dict[str, Any] = {
             "mode": "satellite",
@@ -65,6 +69,7 @@ class SyncWorker:
             "recent_errors": [],
             "last_sync_at": None,
             "backoff_seconds": 0,
+            "pending_hub_trash": 0,
             **hub_compatibility(None),
         }
 
@@ -135,6 +140,7 @@ class SyncWorker:
         if not self.hub:
             raise RuntimeError("PHOTOARCHIVE_HUB_URL is required for satellite sync")
         await self.refresh_hub_version()
+        await self._retry_pending_hub_trash()
         items = await satellite.record_local_images(self.db_path)
         self._refresh_queue(items)
         pushed = False
@@ -168,6 +174,35 @@ class SyncWorker:
         self._status["last_sync_at"] = time.time()
         self._status["current_file"] = None
         self._refresh_queue(await satellite.pending_upload_snapshot(self.db_path))
+
+    async def _retry_pending_hub_trash(self) -> None:
+        """Drain durable satellite Trash work without turning it into a hot loop."""
+
+        refs = await trash_service.pending_hub_trash_refs(self.db_path)
+        self._status["pending_hub_trash"] = int(refs["count"])
+        if not refs["count"] or time.time() < self._pending_trash_next_attempt:
+            return
+        if len(refs["hub_image_ids"]) != refs["count"]:
+            self._schedule_pending_trash_retry("Some synced photos are missing their hub identity.")
+            return
+        try:
+            result = await trash_remote.empty_hub_trash(self.hub, refs["hub_image_ids"])
+            if result.get("errors") or int(result.get("skipped_offline") or 0):
+                raise trash_remote.HubTrashRequestError("The hub could not permanently remove every synced photo.")
+            await trash_service.empty_trash(self.db_path, image_ids=refs["image_ids"])
+        except trash_remote.HubTrashRequestError as error:
+            self._schedule_pending_trash_retry(str(error))
+            return
+        self._pending_trash_failure_streak = 0
+        self._pending_trash_next_attempt = 0.0
+        self._status["pending_hub_trash"] = int((await trash_service.pending_hub_trash_refs(self.db_path))["count"])
+
+    def _schedule_pending_trash_retry(self, message: str) -> None:
+        self._pending_trash_failure_streak += 1
+        delay = min(_MAX_BACKOFF_SECONDS, _BASE_IDLE_SECONDS * (2 ** min(self._pending_trash_failure_streak, 5)))
+        self._pending_trash_next_attempt = time.time() + delay
+        self._status["pending_hub_retry_at"] = self._pending_trash_next_attempt
+        self._error(RuntimeError(message))
 
     async def _upload(self, item: dict) -> None:
         content_hash = item["content_hash"]

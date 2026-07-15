@@ -217,6 +217,8 @@ class MirrorPuller:
             values["status"] = "trashed"
             if "trashed_at" in available_columns:
                 values["trashed_at"] = float(remote.get("trashed_at") or time.time())
+        elif "trash_pending_hub" in available_columns:
+            values["trash_pending_hub"] = 0
         return values
 
     @staticmethod
