@@ -69,6 +69,8 @@ async def api_trash(limit: int = 100, offset: int = 0):
 
 @router.post("/api/trash/empty")
 async def api_empty_trash(request: Request, _payload: EmptyTrashBody | None = None):
+    if _payload is not None and not _payload.hub_image_ids:
+        return {"deleted_count": 0, "freed_bytes": 0, "errors": [], "skipped_offline": 0}
     remote_result = None
     mirror_refs = await trash_service.hub_mirror_trash_refs(_configured_db_path())
     mirror_count = int(mirror_refs["count"])

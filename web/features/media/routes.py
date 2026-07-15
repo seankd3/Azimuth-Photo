@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 
 from core import requests as request_helpers
 from core.source_files import inspect_source_file
+from data import connection as data_connection
 from data.repositories import images as image_repository
 from features.sync import satellite
 from features.sync.prefetch import ThumbPrefetcher, _urllib_request
@@ -91,7 +92,11 @@ async def _source_error_response(image, state: str) -> JSONResponse | None:
     if state in {"missing", "corrupt"}:
         changed = False
         if _mark_image_missing is not None:
-            changed = await _mark_image_missing(image_id)
+            try:
+                changed = await _mark_image_missing(image_id)
+            except Exception as exc:
+                if not data_connection.is_sqlite_locked_error(exc):
+                    raise
         if changed:
             log.warning(
                 "worker=media_request image_id=%s marked unavailable reason=%s path=%r",

@@ -16,6 +16,10 @@ _catalog_summary_cache = {"data": None, "expires": 0}
 _catalog_light_summary_cache = {"data": None, "expires": 0}
 _active_source_ids_cache = {"ids": frozenset(), "expires": 0}
 ACTIVE_SOURCE_IDS_TTL_SECONDS = 5.0
+MISSING_MARK_BATCH_SIZE = 128
+MISSING_MARK_BUSY_TIMEOUT_SECONDS = 0.1
+MISSING_MARK_RETRY_BACKOFF_SECONDS = 0.1
+_missing_mark_states: dict[tuple[int, str], dict] = {}
 
 
 class SourceOfflineDuringScan(RuntimeError):
@@ -475,28 +479,92 @@ def mark_image_missing_sync(db_path: str, image_id: int, missing_at: float | Non
         connection.close_sync(conn, db_path=db_path)
 
 
-async def mark_image_missing(db_path: str, image_id: int, missing_at: float | None = None) -> bool:
-    when = _time.time() if missing_at is None else float(missing_at)
-    conn = await connection.open_async(db_path)
-    try:
-        cursor = await conn.execute(
-            "UPDATE images SET missing_at = ? WHERE id = ? AND missing_at IS NULL "
-            "AND COALESCE(hub_remote, 0) = 0",
-            (when, int(image_id)),
-        )
-        if cursor.rowcount > 0:
-            source_cursor = await conn.execute(
-                "SELECT source_id FROM images WHERE id = ?",
-                (int(image_id),),
+async def _write_missing_mark_batch(db_path: str, requests: list[tuple[int, float]]) -> set[int]:
+    timestamps: dict[int, float] = {}
+    for image_id, missing_at in requests:
+        timestamps.setdefault(int(image_id), float(missing_at))
+    ids = list(timestamps)
+
+    async def _write() -> set[int]:
+        conn = await connection.open_async(db_path)
+        try:
+            await conn.execute("BEGIN IMMEDIATE")
+            placeholders = ",".join("?" for _ in ids)
+            cursor = await conn.execute(
+                "SELECT id, source_id FROM images "
+                f"WHERE id IN ({placeholders}) AND missing_at IS NULL "
+                "AND COALESCE(hub_remote, 0) = 0",
+                ids,
             )
-            source = await source_cursor.fetchone()
-            await conn.execute(_REPAIR_COLLECTION_COVER_SQL, (int(image_id),))
-            if source is not None and source["source_id"] is not None:
-                await update_source_counts_on_conn(conn, int(source["source_id"]))
-        await conn.commit()
-        return cursor.rowcount > 0
+            rows = await cursor.fetchall()
+            changed_ids = {int(row["id"]) for row in rows}
+            if changed_ids:
+                await conn.executemany(
+                    "UPDATE images SET missing_at = ? WHERE id = ? AND missing_at IS NULL",
+                    [(timestamps[image_id], image_id) for image_id in changed_ids],
+                )
+                await conn.executemany(
+                    _REPAIR_COLLECTION_COVER_SQL,
+                    [(image_id,) for image_id in changed_ids],
+                )
+                source_ids = {
+                    int(row["source_id"])
+                    for row in rows
+                    if row["source_id"] is not None
+                }
+                for source_id in source_ids:
+                    await update_source_counts_on_conn(conn, source_id)
+            await conn.commit()
+            return changed_ids
+        except Exception:
+            await conn.rollback()
+            raise
+        finally:
+            await connection.close_async(conn, db_path=db_path)
+
+    with connection.sqlite_timeout(MISSING_MARK_BUSY_TIMEOUT_SECONDS):
+        return await connection.run_with_busy_retry(
+            _write,
+            backoff_seconds=MISSING_MARK_RETRY_BACKOFF_SECONDS,
+        )
+
+
+async def _flush_missing_marks(key: tuple[int, str], state: dict) -> None:
+    await asyncio.sleep(0)
+    try:
+        while state["requests"]:
+            requests = state["requests"][:MISSING_MARK_BATCH_SIZE]
+            del state["requests"][:MISSING_MARK_BATCH_SIZE]
+            try:
+                changed_ids = await _write_missing_mark_batch(key[1], [item[:2] for item in requests])
+            except Exception as exc:
+                for _image_id, _missing_at, future in requests:
+                    if not future.done():
+                        future.set_exception(exc)
+            else:
+                for image_id, _missing_at, future in requests:
+                    if not future.done():
+                        future.set_result(image_id in changed_ids)
     finally:
-        await connection.close_async(conn, db_path=db_path)
+        if _missing_mark_states.get(key) is state:
+            _missing_mark_states.pop(key, None)
+
+
+async def mark_image_missing(db_path: str, image_id: int, missing_at: float | None = None) -> bool:
+    """Coalesce concurrent media misses into one short, bounded write transaction."""
+
+    loop = asyncio.get_running_loop()
+    key = (id(loop), db_path)
+    state = _missing_mark_states.get(key)
+    if state is None:
+        state = {"requests": [], "task": None}
+        _missing_mark_states[key] = state
+    future = loop.create_future()
+    when = _time.time() if missing_at is None else float(missing_at)
+    state["requests"].append((int(image_id), when, future))
+    if state["task"] is None:
+        state["task"] = loop.create_task(_flush_missing_marks(key, state))
+    return bool(await future)
 
 
 async def mark_zero_byte_images_missing(db_path: str, filepaths: list[str]) -> list[dict]:

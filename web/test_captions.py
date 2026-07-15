@@ -1,14 +1,117 @@
 from test_support import *  # noqa: F401,F403
 
 import caption_worker
+import contextlib
 import unittest.mock
 from fastapi.testclient import TestClient
 from data.repositories import captions
 from features.captions import routes as caption_routes
 from features.search.fusion import reciprocal_rank_fusion
+from workers.caption_health import CaptionOomCircuit
 
 
 class CaptionTests(BackendTestCase):
+    def test_caption_oom_circuit_opens_after_repeated_minimum_batch_failures(self):
+        circuit = CaptionOomCircuit(threshold=3)
+
+        self.assertFalse(circuit.record_failure())
+        self.assertFalse(circuit.record_failure())
+        self.assertTrue(circuit.record_failure())
+        circuit.reset()
+        self.assertEqual(circuit.consecutive_failures, 0)
+
+    async def test_caption_worker_pauses_after_repeated_minimum_batch_ooms(self):
+        old_dependencies = (
+            caption_worker._count_images_needing_captions,
+            caption_worker._get_images_needing_captions,
+            caption_worker._store_caption_result,
+        )
+        old_pause = caption_worker._caption_manual_pause
+        old_pause_message = caption_worker._caption_manual_pause_message
+        old_status = dict(caption_worker._status)
+        stored_errors = 0
+        third_error = asyncio.Event()
+
+        async def count_pending(**_kwargs):
+            return 1
+
+        async def next_image(**_kwargs):
+            return [{"id": 7, "cache_path": "/tmp/caption-oom.jpg"}]
+
+        async def store_error(**kwargs):
+            nonlocal stored_errors
+            self.assertEqual(kwargs["status"], "error")
+            stored_errors += 1
+            if stored_errors == 3:
+                third_error.set()
+
+        async def ready_for_work(*_args, **_kwargs):
+            return None
+
+        def raise_oom(*_args, **_kwargs):
+            raise RuntimeError("CUDA out of memory")
+
+        config = {
+            "model_id": "test-caption-model",
+            "model_key": "test-caption-model@main",
+            "model_dir": "/tmp/test-caption-model",
+            "quantization": "none",
+            "prompt_version": "test-v1",
+            "batch_size": 1,
+        }
+        caption_worker.configure(
+            count_images_needing_captions=count_pending,
+            get_images_needing_captions=next_image,
+            store_caption_result=store_error,
+        )
+        caption_worker._caption_manual_pause = False
+        caption_worker._caption_manual_pause_message = ""
+        caption_worker._oom_circuit.reset()
+        task = None
+        try:
+            with (
+                unittest.mock.patch.object(settings, "get_settings", return_value={
+                    "caption_scan_enabled": True,
+                    "ssd_cache_dir": "/tmp",
+                }),
+                unittest.mock.patch.object(settings, "active_caption_config", return_value=config),
+                unittest.mock.patch.object(ai_models, "model_files_present", return_value=True),
+                unittest.mock.patch.object(caption_worker, "_load_model", return_value=None),
+                unittest.mock.patch.object(caption_worker, "_caption_cached_preview", side_effect=raise_oom),
+                unittest.mock.patch.object(caption_worker, "_clear_cuda_cache", return_value=None),
+                unittest.mock.patch.object(caption_worker, "_unload_model", return_value=None),
+                unittest.mock.patch.object(
+                    work_coordination,
+                    "wait_for_gpu_turn",
+                    side_effect=ready_for_work,
+                ),
+                unittest.mock.patch.object(
+                    work_coordination,
+                    "wait_for_manual_turn",
+                    side_effect=ready_for_work,
+                ),
+            ):
+                task = asyncio.create_task(caption_worker.run_caption_worker())
+                await asyncio.wait_for(third_error.wait(), timeout=2)
+                await asyncio.sleep(0)
+                self.assertTrue(caption_worker.manual_pause_active())
+                self.assertIn("out-of-memory", caption_worker.get_worker_status()["message"])
+        finally:
+            if task is not None:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+            (
+                caption_worker._count_images_needing_captions,
+                caption_worker._get_images_needing_captions,
+                caption_worker._store_caption_result,
+            ) = old_dependencies
+            caption_worker._caption_manual_pause = old_pause
+            caption_worker._caption_manual_pause_message = old_pause_message
+            caption_worker._status.clear()
+            caption_worker._status.update(old_status)
+            caption_worker._oom_circuit.reset()
+
     async def test_caption_control_failure_returns_actionable_error_without_internal_detail(self):
         secret = "/home/sean/private/model.bin"
         with unittest.mock.patch.object(

@@ -14,6 +14,7 @@ from typing import Any
 import ai_models
 import settings
 from core import work_coordination
+from workers.caption_health import CaptionOomCircuit
 
 
 log = logging.getLogger("caption_worker")
@@ -33,6 +34,7 @@ CAPTION_PROMPT = (
 )
 
 _caption_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="caption-gpu")
+_oom_circuit = CaptionOomCircuit(threshold=3)
 _model = None
 _processor = None
 _loaded_key: tuple[str, str, str, str] | None = None
@@ -148,6 +150,7 @@ def resume_caption_worker() -> dict[str, Any]:
     _caption_manual_pause = False
     _caption_manual_pause_message = ""
     _model_load_failure_count = 0
+    _oom_circuit.reset()
     work_coordination.claim_manual_owner("captions")
     _set_status(state="idle", message="Captions will scan cached previews.", model_load_failures=0)
     return get_worker_status()
@@ -449,11 +452,18 @@ async def run_caption_worker() -> None:
                             status="done",
                         )
                         captioned += 1
+                        _oom_circuit.reset()
                     except Exception as exc:
-                        if _is_cuda_oom_error(exc):
+                        is_oom = _is_cuda_oom_error(exc)
+                        pause_after_error = False
+                        if is_oom:
                             batch_size = max(1, batch_size // 2)
                             _set_status(oom_backoffs=int(_status.get("oom_backoffs") or 0) + 1)
                             _clear_cuda_cache()
+                            if batch_size == 1:
+                                pause_after_error = _oom_circuit.record_failure()
+                        else:
+                            _oom_circuit.reset()
                         await _configured(_store_caption_result, "store_caption_result")(
                             image_id=image_id,
                             caption_config=caption_config,
@@ -463,6 +473,14 @@ async def run_caption_worker() -> None:
                             error=str(exc),
                         )
                         _set_status(last_error=str(exc))
+                        if pause_after_error:
+                            pause_caption_worker(
+                                "Captions paused after repeated GPU out-of-memory failures. "
+                                "Free GPU memory, then start Captions again."
+                            )
+                            break
+                if _caption_manual_pause:
+                    continue
             elapsed = round(time.perf_counter() - started, 3)
             _set_status(
                 state="ready",

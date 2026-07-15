@@ -3,6 +3,50 @@ import unittest.mock
 
 
 class CacheStatusTests(BackendTestCase):
+    async def test_concurrent_media_missing_marks_share_one_source_count_update(self):
+        source = await self._source("missing-burst")
+        image_ids = [
+            await self._image(source["id"], f"missing-{index}.jpg")
+            for index in range(24)
+        ]
+        original_update = catalog_repository.update_source_counts_on_conn
+        update_calls = 0
+
+        async def counted_update(conn, source_id=None):
+            nonlocal update_calls
+            update_calls += 1
+            return await original_update(conn, source_id)
+
+        with unittest.mock.patch.object(
+            catalog_repository,
+            "update_source_counts_on_conn",
+            side_effect=counted_update,
+        ):
+            changed = await asyncio.gather(*(
+                catalog_repository.mark_image_missing(db.DB_PATH, image_id)
+                for image_id in image_ids
+            ))
+
+        self.assertTrue(all(changed))
+        self.assertEqual(update_calls, 1)
+
+    async def test_missing_media_response_stays_prompt_when_catalog_writer_is_busy(self):
+        source = await self._source("missing-under-lock")
+        image_id = await self._image(source["id"], "gone.jpg")
+        writer = sqlite3.connect(db.DB_PATH, timeout=0.1)
+        try:
+            writer.execute("BEGIN IMMEDIATE")
+            started = time.perf_counter()
+            response = await media_routes.serve_thumbnail(HeaderRequest(), "sm", image_id)
+            elapsed = time.perf_counter() - started
+        finally:
+            writer.rollback()
+            writer.close()
+
+        self.assertEqual(response.status_code, 410)
+        self.assertLess(elapsed, 2.0)
+        self.assertIsNone((await self._image_row(image_id))["missing_at"])
+
     async def test_search_and_people_start_previews_dependency(self):
         old_manual_mode = thumbnails._pregen_manual_mode
         old_manual_pause = thumbnails._pregen_manual_pause

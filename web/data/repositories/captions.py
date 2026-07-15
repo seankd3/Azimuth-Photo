@@ -90,44 +90,51 @@ async def store_caption_result(
 ) -> None:
     now = time.time()
     tags_text = tags_json(tags)
-    conn = await connection.open_async(db_path)
-    try:
-        await conn.execute("BEGIN")
-        if status != "done":
-            cursor = await conn.execute(
-                "SELECT user_edited FROM image_captions WHERE image_id = ? AND model_key = ?",
-                (int(image_id), model_key),
-            )
-            existing = await cursor.fetchone()
-            if existing and int(existing["user_edited"] or 0):
-                status = "done"
-                error = ""
-        if status == "done":
+
+    async def _write() -> None:
+        write_status = status
+        write_error = error
+        conn = await connection.open_async(db_path)
+        try:
+            await conn.execute("BEGIN IMMEDIATE")
+            if write_status != "done":
+                cursor = await conn.execute(
+                    "SELECT user_edited FROM image_captions WHERE image_id = ? AND model_key = ?",
+                    (int(image_id), model_key),
+                )
+                existing = await cursor.fetchone()
+                if existing and int(existing["user_edited"] or 0):
+                    write_status = "done"
+                    write_error = ""
+            if write_status == "done":
+                await conn.execute(
+                    "INSERT INTO image_captions "
+                    "(image_id, model_key, caption, tags, quality, user_edited, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, 0, ?) "
+                    "ON CONFLICT(model_key, image_id) DO UPDATE SET "
+                    "caption = excluded.caption, tags = excluded.tags, "
+                    "quality = excluded.quality, created_at = excluded.created_at "
+                    "WHERE COALESCE(image_captions.user_edited, 0) = 0",
+                    (int(image_id), model_key, str(caption or ""), tags_text, quality, now),
+                )
             await conn.execute(
-                "INSERT INTO image_captions "
-                "(image_id, model_key, caption, tags, quality, user_edited, created_at) "
-                "VALUES (?, ?, ?, ?, ?, 0, ?) "
-                "ON CONFLICT(model_key, image_id) DO UPDATE SET "
-                "caption = excluded.caption, tags = excluded.tags, "
-                "quality = excluded.quality, created_at = excluded.created_at "
-                "WHERE COALESCE(image_captions.user_edited, 0) = 0",
-                (int(image_id), model_key, str(caption or ""), tags_text, quality, now),
+                "INSERT INTO caption_scan_images "
+                "(image_id, model_key, status, last_error, scanned_at) "
+                "VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(image_id, model_key) DO UPDATE SET "
+                "status = excluded.status, last_error = excluded.last_error, "
+                "scanned_at = excluded.scanned_at",
+                (int(image_id), model_key, write_status, str(write_error or ""), now),
             )
-        await conn.execute(
-            "INSERT INTO caption_scan_images "
-            "(image_id, model_key, status, last_error, scanned_at) "
-            "VALUES (?, ?, ?, ?, ?) "
-            "ON CONFLICT(image_id, model_key) DO UPDATE SET "
-            "status = excluded.status, last_error = excluded.last_error, "
-            "scanned_at = excluded.scanned_at",
-            (int(image_id), model_key, status, str(error or ""), now),
-        )
-        await conn.commit()
-    except Exception:
-        await conn.rollback()
-        raise
-    finally:
-        await connection.close_async(conn, db_path=db_path)
+            await conn.commit()
+        except Exception:
+            await conn.rollback()
+            raise
+        finally:
+            await connection.close_async(conn, db_path=db_path)
+
+    with connection.sqlite_timeout(0.25):
+        await connection.run_with_busy_retry(_write)
 
 
 async def owner_update_caption(

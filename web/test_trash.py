@@ -1,5 +1,6 @@
 import os
 import sqlite3
+import time
 from unittest.mock import patch
 from fastapi.testclient import TestClient
 
@@ -9,6 +10,52 @@ from features.trash import service as trash_service
 
 
 class TrashTests(BackendTestCase):
+    async def test_explicit_empty_hub_purge_is_immediate_with_busy_writer(self):
+        def probe():
+            with TestClient(app_module.app) as client:
+                writer = sqlite3.connect(db.DB_PATH, timeout=0.1)
+                try:
+                    writer.execute("BEGIN IMMEDIATE")
+                    started = time.perf_counter()
+                    response = client.post(
+                        "/api/trash/empty",
+                        json={"hub_image_ids": []},
+                        headers={"X-PhotoArchive-Trash-Forwarded": "1"},
+                    )
+                    elapsed = time.perf_counter() - started
+                finally:
+                    writer.rollback()
+                    writer.close()
+            return response, elapsed
+
+        response, elapsed = await asyncio.to_thread(probe)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {"deleted_count": 0, "freed_bytes": 0, "errors": [], "skipped_offline": 0},
+        )
+        self.assertLess(elapsed, 2.0)
+
+    async def test_nonempty_purge_bounds_catalog_lock_wait(self):
+        source, _root = await self._source_root()
+        image_id, _filepath = await self._file_image(source, "locked-delete.jpg", data=b"locked")
+        await trash_service.trash_images(db.DB_PATH, [image_id])
+        writer = sqlite3.connect(db.DB_PATH, timeout=0.1)
+        try:
+            writer.execute("BEGIN IMMEDIATE")
+            started = time.perf_counter()
+            result = await trash_service.empty_trash(db.DB_PATH, image_ids=[image_id])
+            elapsed = time.perf_counter() - started
+        finally:
+            writer.rollback()
+            writer.close()
+
+        self.assertEqual(result["deleted_count"], 0)
+        self.assertIn("deferred", result["errors"][0]["reason"])
+        self.assertLess(elapsed, 2.0)
+        self.assertTrue(await self._image_exists(image_id))
+
     async def _source_root(self):
         source = await self._source("catalog")
         return source, source["path"]
