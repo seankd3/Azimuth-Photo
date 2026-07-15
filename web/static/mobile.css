@@ -1198,6 +1198,8 @@ body.sheet-keyboard #m-sel-actions.on { opacity: 0; transform: translateY(16px);
 #mv-bar button:active { transform: scale(.9); }
 #mv-bar button.on-pick { color: var(--accent); }
 #mv-bar button.on-reject { color: var(--danger); }
+#mv-bar button.on-offline { color: var(--ok); }
+#mv-bar button:disabled { opacity: .45; }
 
 /* ============================================================
    bottom sheet

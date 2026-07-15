@@ -14,6 +14,7 @@ import { dismissLayer, dismissLayerThen, pushLayer, registerLayer, syncLayerClos
 import { icon } from '../icons.js';
 import { createMomentum } from './viewer_momentum.js';
 import { openPhotoShareSheet } from './sharing.js';
+import { isAvailableOffline, toggleOfflineAvailability } from './offline.js';
 
 let root = null;
 let stage = null;
@@ -118,6 +119,7 @@ function showCurrent() {
         cap.textContent = [caption || image.filename, date].filter(Boolean).join('  —  ');
     });
     syncFlagButtons();
+    syncOfflineButton();
     preload(1);
     preload(-1);
     if (needMore && index >= list.length - 5) needMore();
@@ -126,13 +128,26 @@ function showCurrent() {
 function syncFlagButtons() {
     const image = current();
     const flag = image ? (byId.get(Number(image.id)) || image).flag || 'unflagged' : 'unflagged';
-    document.getElementById('mv-pick').classList.toggle('on-pick', flag === 'picked');
-    document.getElementById('mv-reject').classList.toggle('on-reject', flag === 'rejected');
+    const favorite = document.getElementById('mv-pick');
+    const reject = document.getElementById('mv-reject');
+    favorite.classList.toggle('on-pick', flag === 'picked');
+    favorite.setAttribute('aria-pressed', String(flag === 'picked'));
+    reject.classList.toggle('on-reject', flag === 'rejected');
+    reject.setAttribute('aria-pressed', String(flag === 'rejected'));
     if (flagBadge) {
         flagBadge.hidden = flag === 'unflagged';
         flagBadge.className = `mv-flag ${flag}`;
         flagBadge.textContent = flag === 'picked' ? 'Picked' : 'Rejected';
     }
+}
+
+function syncOfflineButton() {
+    const image = current();
+    const button = document.getElementById('mv-offline');
+    const available = Boolean(image && isAvailableOffline(image.id));
+    button.classList.toggle('on-offline', available);
+    button.setAttribute('aria-pressed', String(available));
+    button.setAttribute('aria-label', available ? 'Remove offline availability' : 'Make available offline');
 }
 
 function cullSwipe(flag) {
@@ -576,15 +591,13 @@ export function initViewer() {
     done.addEventListener('click', dismissViewer);
     document.getElementById('mv-pick').addEventListener('click', () => {
         const image = current();
-        if (image) applyFlags([image.id], 'picked');
+        const flag = image ? (byId.get(Number(image.id)) || image).flag || 'unflagged' : '';
+        if (image) applyFlags([image.id], flag === 'picked' ? 'unflagged' : 'picked');
     });
     document.getElementById('mv-reject').addEventListener('click', () => {
         const image = current();
-        if (image) applyFlags([image.id], 'rejected');
-    });
-    document.getElementById('mv-unflag').addEventListener('click', () => {
-        const image = current();
-        if (image) applyFlags([image.id], 'unflagged');
+        const flag = image ? (byId.get(Number(image.id)) || image).flag || 'unflagged' : '';
+        if (image) applyFlags([image.id], flag === 'rejected' ? 'unflagged' : 'rejected');
     });
     document.getElementById('mv-coll').addEventListener('click', () => {
         const image = current();
@@ -593,6 +606,18 @@ export function initViewer() {
     document.getElementById('mv-share').addEventListener('click', () => {
         const image = current();
         if (image) openPhotoShareSheet(image);
+    });
+    document.getElementById('mv-offline').addEventListener('click', async () => {
+        const image = current();
+        if (!image) return;
+        const button = document.getElementById('mv-offline');
+        button.disabled = true;
+        try {
+            await toggleOfflineAvailability(image);
+            syncOfflineButton();
+        } finally {
+            button.disabled = false;
+        }
     });
     document.getElementById('mv-info').addEventListener('click', infoSheet);
 
@@ -614,5 +639,6 @@ export function initViewer() {
     }
 
     on('flags', syncFlagButtons);
+    on('offline-availability', syncOfflineButton);
     installGestures();
 }
