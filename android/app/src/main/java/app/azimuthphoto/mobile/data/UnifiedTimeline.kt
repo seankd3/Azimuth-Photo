@@ -42,6 +42,9 @@ object UnifiedTimeline {
     fun dedupKey(filename: String, sizeBytes: Long): String =
         "${filename.substringAfterLast('/').lowercase()}|$sizeBytes"
 
+    /** Fallback identity when the hub row carries no byte size. */
+    fun nameKey(filename: String): String = filename.substringAfterLast('/').lowercase()
+
     private val HUB_FORMATS = listOf(
         DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"),
         DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss"),
@@ -82,11 +85,25 @@ object UnifiedTimeline {
     /** Hub images not already present on the device, as Hub entries. */
     fun hubEntries(images: List<ArchiveImage>, deviceKeys: Set<String>): List<TimelineEntry.Hub> =
         images.asSequence()
-            .filter { dedupKey(it.filename, it.file_size ?: -1) !in deviceKeys }
+            .filter { image ->
+                val key = image.file_size?.let { dedupKey(image.filename, it) }
+                    ?: nameKey(image.filename)
+                key !in deviceKeys
+            }
             .map { TimelineEntry.Hub(it, hubMillis(it.date_taken)) }
             .toList()
 
-    /** Dedup keys for every device item, so hub twins collapse away. */
-    fun deviceKeys(items: List<MediaItem>): Set<String> =
-        items.mapTo(HashSet(items.size)) { dedupKey(it.displayName, it.sizeBytes) }
+    /**
+     * Dedup keys for every device item — pass the PRE-collapse list so hidden
+     * DNG twins also suppress their hub copies once backed up. Includes a
+     * name-only fallback for hub rows that carry no byte size.
+     */
+    fun deviceKeys(items: List<MediaItem>): Set<String> {
+        val keys = HashSet<String>(items.size * 2)
+        items.forEach {
+            keys.add(dedupKey(it.displayName, it.sizeBytes))
+            keys.add(nameKey(it.displayName))
+        }
+        return keys
+    }
 }

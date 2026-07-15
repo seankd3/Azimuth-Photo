@@ -45,6 +45,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -100,6 +101,7 @@ fun TimelineScreen(
 
     var device by remember { mutableStateOf<List<MediaItem>?>(null) }
     var rawTwins by remember { mutableStateOf<Map<String, MediaItem>>(emptyMap()) }
+    var deviceKeys by remember { mutableStateOf<Set<String>>(emptySet()) }
     var backupStates by remember { mutableStateOf<Map<Long, String>>(emptyMap()) }
     var shelves by remember { mutableStateOf<List<Shelf>>(emptyList()) }
     var scope by rememberSaveable { mutableStateOf(0) } // 0 All, 1 NotBackedUp, 2+ shelf index
@@ -109,14 +111,15 @@ fun TimelineScreen(
     var hubOffline by remember { mutableStateOf(false) }
     var wantMore by remember { mutableStateOf(false) }
     var loadTick by remember { mutableStateOf(0) }
-    var viewer by remember { mutableStateOf<Int?>(null) }
+    var viewerSession by remember { mutableStateOf<Pair<List<ViewerMedia>, Int>?>(null) }
     var selectedIds by rememberSaveable(
         stateSaver = listSaver(save = { it.toList() }, restore = { it.toSet() }),
     ) { mutableStateOf(emptySet<Long>()) }
 
-    LaunchedEffect(progress.running) {
+    LaunchedEffect(progress.running, loadTick) {
         val all = DeviceMedia.queryAll(context)
         rawTwins = rawTwinsByShotKey(all)
+        deviceKeys = UnifiedTimeline.deviceKeys(all) // pre-collapse: DNG twins count
         device = DeviceMedia.collapseRawPairs(all)
         backupStates = withContext(Dispatchers.IO) { BackupDb.get(context).allStates() }
     }
@@ -143,27 +146,22 @@ fun TimelineScreen(
         }
     }
 
-    val deviceEntries = remember(device, backupStates) {
+    val deviceEntries = remember(device, backupStates, rawTwins) {
         val states = backupStates
         (device ?: emptyList()).map {
             TimelineEntry.Device(
                 item = it,
                 backedUp = states[it.id] == BackupDb.STATE_UPLOADED || states[it.id] == BackupDb.STATE_PRESENT,
-                hasRaw = false,
+                hasRaw = rawTwins.containsKey(it.shotKey),
             )
         }
-    }
-    val deviceRawShotKeys = remember(device) {
-        (device ?: emptyList()).asSequence().filter { it.isRaw }.map { it.shotKey }.toHashSet()
     }
     val entries: List<TimelineEntry> = remember(activeScope, deviceEntries, hub) {
         when (activeScope) {
             is Scope.NotBackedUp -> deviceEntries.filter { !it.backedUp }
             is Scope.Shelf -> hub.map { TimelineEntry.Hub(it, UnifiedTimeline.hubMillis(it.date_taken)) }
-            is Scope.All -> {
-                val keys = UnifiedTimeline.deviceKeys(device ?: emptyList())
-                UnifiedTimeline.merge(deviceEntries, UnifiedTimeline.hubEntries(hub, keys))
-            }
+            is Scope.All ->
+                UnifiedTimeline.merge(deviceEntries, UnifiedTimeline.hubEntries(hub, deviceKeys))
         }
     }
 
@@ -192,12 +190,13 @@ fun TimelineScreen(
     val selectedItems = remember(entries, selectedIds) {
         entries.mapNotNull { (it as? TimelineEntry.Device)?.item }.filter { it.id in selectedIds }
     }
-    LaunchedEffect(viewer != null) { onImmersive(viewer != null) }
-    viewer?.let { index ->
+    LaunchedEffect(viewerSession != null) { onImmersive(viewerSession != null) }
+    DisposableEffect(Unit) { onDispose { onImmersive(false) } }
+    viewerSession?.let { (items, index) ->
         ViewerScreen(
-            items = viewerMedia,
+            items = items,
             startIndex = index,
-            onClose = { viewer = null },
+            onClose = { viewerSession = null },
             api = api,
             onChanged = { loadTick++ },
         )
@@ -228,13 +227,12 @@ fun TimelineScreen(
             UnifiedGrid(
                 entries = entries,
                 api = api ?: ArchiveApi(SettingsStore.DEFAULT_SERVER_URL),
-                deviceRawShotKeys = deviceRawShotKeys,
                 selectedIds = selectedIds,
                 onTapEntry = { entry ->
                     if (entry is TimelineEntry.Device && selectedIds.isNotEmpty()) {
                         selectedIds = selectedIds.toggle(entry.item.id)
                     } else {
-                        viewer = entryIndex[entry.gridKey]
+                        entryIndex[entry.gridKey]?.let { viewerSession = viewerMedia to it }
                     }
                 },
                 onLongPressDevice = { item -> selectedIds = selectedIds + item.id },
@@ -246,12 +244,16 @@ fun TimelineScreen(
 
         // One in-flight page at a time: load the next when the grid asks, then disarm.
         LaunchedEffect(wantMore, hubOffset, folderKey) {
+            // Only page once the first load has landed (offset>0), one request at a time.
             if (wantMore) {
-                if (usesHub && api != null && !hubExhausted && !hubOffline) {
+                if (usesHub && api != null && hubOffset > 0 && !hubExhausted && !hubOffline) {
                     val next = runCatching { api.page(offset = hubOffset, limit = HUB_PAGE, folders = folderPaths) }.getOrNull()
                     if (next == null) hubOffline = true
                     else if (next.images.isEmpty()) hubExhausted = true
-                    else { hub = hub + next.images; hubOffset += next.images.size }
+                    else {
+                        hub = (hub + next.images).distinctBy { it.id }
+                        hubOffset += next.images.size
+                    }
                 }
                 wantMore = false
             }

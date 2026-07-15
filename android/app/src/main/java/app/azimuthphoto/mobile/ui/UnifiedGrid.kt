@@ -66,7 +66,6 @@ private sealed class Row {
 fun UnifiedGrid(
     entries: List<TimelineEntry>,
     api: ArchiveApi,
-    deviceRawShotKeys: Set<String>,
     selectedIds: Set<Long>,
     onTapEntry: (TimelineEntry) -> Unit,
     onLongPressDevice: (MediaItem) -> Unit,
@@ -98,7 +97,7 @@ fun UnifiedGrid(
     LaunchedEffect(gridState, rows.size) {
         snapshotFlow { gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0 }
             .distinctUntilChanged()
-            .collect { last -> if (last >= rows.size - 40) onNearEnd() }
+            .collect { last -> if (rows.isNotEmpty() && last >= rows.size - 40) onNearEnd() }
     }
 
     Box(modifier) {
@@ -140,7 +139,6 @@ fun UnifiedGrid(
                     is Row.Cell -> UnifiedCell(
                         entry = row.entry,
                         api = api,
-                        deviceRawShotKeys = deviceRawShotKeys,
                         selectionMode = selectionMode,
                         selected = (row.entry as? TimelineEntry.Device)?.item?.id in selectedIds,
                         onClick = { onTapEntry(row.entry) },
@@ -171,7 +169,6 @@ fun UnifiedGrid(
 private fun UnifiedCell(
     entry: TimelineEntry,
     api: ArchiveApi,
-    deviceRawShotKeys: Set<String>,
     selectionMode: Boolean,
     selected: Boolean,
     onClick: () -> Unit,
@@ -188,7 +185,7 @@ private fun UnifiedCell(
             model = entry.item.uri
             isVideo = entry.item.isVideo
             durationMs = entry.item.durationMs
-            hasRaw = entry.item.shotKey in deviceRawShotKeys
+            hasRaw = entry.hasRaw
             notBackedUp = !entry.backedUp
             selectable = true
         }

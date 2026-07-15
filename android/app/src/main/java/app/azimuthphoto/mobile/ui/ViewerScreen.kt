@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.MediaStore
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
@@ -117,6 +118,10 @@ fun ViewerScreen(
     onChanged: () -> Unit = {},
 ) {
     BackHandler(onBack = onClose)
+    if (items.isEmpty()) {
+        LaunchedEffect(Unit) { onClose() }
+        return
+    }
     // A saved index can outlive its list (process death, mutation) — never seed
     // the pager past the end or it throws on init.
     val safeStart = startIndex.coerceIn(0, (items.size - 1).coerceAtLeast(0))
@@ -157,8 +162,16 @@ fun ViewerScreen(
     fun withShareable(media: ViewerMedia, action: (Uri, String) -> Unit) {
         scope.launch {
             busy = true
-            shareableUri(media)?.let { (uri, mime) -> action(uri, mime) }
-            busy = false
+            try {
+                val prepared = shareableUri(media)
+                if (prepared == null) {
+                    Toast.makeText(context, "Couldn't reach the archive", Toast.LENGTH_SHORT).show()
+                } else {
+                    action(prepared.first, prepared.second)
+                }
+            } finally {
+                busy = false
+            }
         }
     }
 
@@ -195,7 +208,7 @@ fun ViewerScreen(
         HorizontalPager(
             state = pagerState,
             key = { items[it].key },
-            beyondViewportPageCount = 0,
+            beyondViewportPageCount = 1,
             userScrollEnabled = currentZoom <= 1.01f,
             modifier = Modifier.graphicsLayer {
                 translationY = dismissY.value
@@ -346,9 +359,10 @@ fun ViewerScreen(
                     confirmHubTrash = null
                     scope.launch {
                         busy = true
-                        val ok = api?.trash(listOf(image.id)) == true
+                        val ok = runCatching { api?.trash(listOf(image.id)) == true }.getOrDefault(false)
                         busy = false
                         if (ok) { onChanged(); onClose() }
+                        else Toast.makeText(context, "Couldn't move to archive trash", Toast.LENGTH_SHORT).show()
                     }
                 }) { Text("Move to trash") }
             },
@@ -494,7 +508,9 @@ private fun ZoomableImage(
     var width by remember(key) { mutableFloatStateOf(0f) }
     var height by remember(key) { mutableFloatStateOf(0f) }
     var wantFull by remember(key) { mutableStateOf(false) }
-    if (scale > 1.2f && fullModel != null) wantFull = true
+    LaunchedEffect(key, scale > 1.2f) {
+        if (scale > 1.2f && fullModel != null) wantFull = true
+    }
 
     Box(
         Modifier
@@ -555,6 +571,8 @@ private fun ZoomableImage(
                 .data(if (wantFull) fullModel else model)
                 // Keep showing the preview while the full render streams in.
                 .placeholderMemoryCacheKey(model.toString())
+                // Cap the decode so an 8x zoom of a full render can't OOM.
+                .size(4096)
                 .crossfade(false)
                 .build(),
             contentDescription = null,

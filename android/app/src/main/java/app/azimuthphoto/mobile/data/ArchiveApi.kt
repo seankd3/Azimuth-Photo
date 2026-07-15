@@ -157,12 +157,31 @@ class ArchiveApi(private val baseUrl: String) {
             val name = image.filename.substringBeforeLast('.').ifEmpty { "azimuth-${image.id}" }
             val target = File(dir, "$name-${image.id}.${if (image.isVideo) ext else "jpg"}")
             if (target.length() > 0) return@withContext target
-            http.newCall(Request.Builder().url(fullUrl(image.id)).build()).execute().use { response ->
-                if (!response.isSuccessful) throw IOException("full download failed: HTTP ${response.code}")
-                target.outputStream().use { out -> response.body!!.byteStream().copyTo(out) }
+            // Stream to a temp file and rename, so a failed download is never
+            // mistaken for a complete one on the next attempt.
+            val tmp = File(dir, "${target.name}.part")
+            try {
+                http.newCall(Request.Builder().url(fullUrl(image.id)).build()).execute().use { response ->
+                    if (!response.isSuccessful) throw IOException("full download failed: HTTP ${response.code}")
+                    tmp.outputStream().use { out -> response.body!!.byteStream().copyTo(out) }
+                }
+                if (!tmp.renameTo(target)) throw IOException("could not finalize download")
+            } finally {
+                tmp.delete()
             }
+            trimSharedCache(dir)
             target
         }
+
+    /** Keep the share cache bounded: newest first, drop past 256 MB. */
+    private fun trimSharedCache(dir: File, maxBytes: Long = 256L * 1024 * 1024) {
+        val files = dir.listFiles()?.sortedByDescending { it.lastModified() } ?: return
+        var total = 0L
+        files.forEach { file ->
+            total += file.length()
+            if (total > maxBytes) file.delete()
+        }
+    }
 }
 
 @Serializable

@@ -32,6 +32,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -140,9 +141,10 @@ fun SearchScreen(onImmersive: (Boolean) -> Unit = {}) {
         snapshotFlow { gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0 }
             .collect { lastVisible ->
                 val resultCount = archiveImages.size + localItems.size + 2
+                val viewerOpen = archiveViewerIndex != null || localViewerIndex != null
                 if (
-                    hasResults && activeBucket == null && !archiveLoading && !archiveDone &&
-                    lastVisible >= resultCount - 40
+                    hasResults && !viewerOpen && activeBucket == null && !archiveLoading && !archiveDone &&
+                    archiveImages.isNotEmpty() && lastVisible >= resultCount - 40
                 ) {
                     archiveLoading = true
                     runCatching {
@@ -163,6 +165,7 @@ fun SearchScreen(onImmersive: (Boolean) -> Unit = {}) {
     LaunchedEffect(archiveViewerIndex != null || localViewerIndex != null) {
         onImmersive(archiveViewerIndex != null || localViewerIndex != null)
     }
+    DisposableEffect(Unit) { onDispose { onImmersive(false) } }
     archiveViewerIndex?.let { index ->
         ViewerScreen(
             items = archiveImages.map { ViewerMedia.Remote(it) },
@@ -177,6 +180,7 @@ fun SearchScreen(onImmersive: (Boolean) -> Unit = {}) {
             items = localItems,
             startIndex = index,
             onClose = { localViewerIndex = null },
+            onChanged = { requestGeneration++ },
         )
         return
     }
