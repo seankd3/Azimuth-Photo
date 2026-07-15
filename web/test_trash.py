@@ -1,12 +1,15 @@
 import os
 import sqlite3
+import threading
 import time
-from unittest.mock import patch
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 
 from test_support import *  # noqa: F401,F403
 from data.repositories import stacks as stack_repository
 from features.media import routes as media_routes
+from features.sync import contract
 from features.sync.sync_worker import SyncWorker
 from features.trash import service as trash_service
 from features.trash import remote as trash_remote
@@ -314,7 +317,7 @@ class TrashTests(BackendTestCase):
         env = {"PHOTOARCHIVE_MODE": "satellite", "PHOTOARCHIVE_HUB_URL": "http://probe-hub"}
         with patch.dict(os.environ, env, clear=False), patch(
             "features.trash.routes.empty_hub_trash", side_effect=fake_empty_hub
-        ):
+        ), patch("features.trash.routes.contract.hub_supports", new_callable=AsyncMock, return_value=True):
             def probe():
                 with TestClient(app_module.app) as client:
                     return client.post("/api/trash/empty")
@@ -338,6 +341,8 @@ class TrashTests(BackendTestCase):
         with patch.dict(os.environ, env, clear=False), patch(
             "features.trash.routes.empty_hub_trash",
             side_effect=trash_remote.HubTrashRequestError("The hub could not be reached: connection refused"),
+        ), patch(
+            "features.trash.routes.contract.hub_supports", new_callable=AsyncMock, return_value=True
         ):
             response = await asyncio.to_thread(lambda: TestClient(app_module.app).post("/api/trash/empty"))
 
@@ -353,16 +358,51 @@ class TrashTests(BackendTestCase):
 
     async def test_legacy_hub_version_failure_never_forwards_empty_post(self):
         calls = []
+        owner = calls
 
-        def old_hub(request, timeout):
-            calls.append((request.full_url, request.method, timeout))
-            raise trash_remote.urllib.error.HTTPError(request.full_url, 404, "not found", None, None)
+        class LegacyHubHandler(BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802
+                owner.append(("GET", self.path))
+                self.send_response(404)
+                self.end_headers()
 
-        with patch("features.trash.remote.urllib.request.urlopen", side_effect=old_hub):
-            with self.assertRaisesRegex(trash_remote.HubTrashRequestError, "needs an update"):
-                await trash_remote.empty_hub_trash("http://legacy-hub", [91])
+            def do_POST(self):  # noqa: N802
+                owner.append(("POST", self.path))
+                self.send_response(404)
+                self.end_headers()
 
-        self.assertEqual(calls, [("http://legacy-hub/api/version", "GET", 2)])
+            def log_message(self, _format, *_args):
+                return
+
+        mirror_id = await self._mirrored_trash(hub_image_id=91)
+        server = ThreadingHTTPServer(("127.0.0.1", 0), LegacyHubHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        hub_url = f"http://127.0.0.1:{server.server_port}"
+        contract.reset_hub_contract_cache()
+        try:
+            env = {"PHOTOARCHIVE_MODE": "satellite", "PHOTOARCHIVE_HUB_URL": hub_url}
+            with patch.dict(os.environ, env, clear=False):
+                response = await asyncio.to_thread(
+                    lambda: TestClient(app_module.app).post("/api/trash/empty")
+                )
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=1)
+            contract.reset_hub_contract_cache()
+
+        payload = response.json()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            payload["hub_error"],
+            "The hub is running an older version. Synced photos stay queued until it updates.",
+        )
+        self.assertEqual(payload["hub_pending"], 1)
+        self.assertIn(("GET", "/api/version"), calls)
+        self.assertNotIn(("POST", "/api/trash/empty"), calls)
+        pending = await self._image_row(mirror_id)
+        self.assertEqual(pending["trash_pending_hub"], 1)
 
     async def test_pending_hub_trash_retry_deletes_recovered_mirror(self):
         mirror_id = await self._mirrored_trash(hub_image_id=777)
@@ -373,11 +413,27 @@ class TrashTests(BackendTestCase):
             self.assertEqual(image_ids, [777])
             return {"deleted_count": 1, "freed_bytes": 4321, "errors": [], "skipped_offline": 0}
 
-        with patch("features.sync.sync_worker.trash_remote.empty_hub_trash", side_effect=recovered_hub):
+        with patch(
+            "features.sync.sync_worker.contract.hub_supports", new_callable=AsyncMock, return_value=True
+        ), patch("features.sync.sync_worker.trash_remote.empty_hub_trash", side_effect=recovered_hub):
             await worker._retry_pending_hub_trash()
 
         self.assertFalse(await self._image_exists(mirror_id))
         self.assertEqual(worker.status()["pending_hub_trash"], 0)
+
+    async def test_pending_hub_trash_retry_skips_old_hub(self):
+        mirror_id = await self._mirrored_trash(hub_image_id=778)
+        await trash_service.mark_hub_trash_pending(db.DB_PATH, [mirror_id])
+        worker = SyncWorker(db_path=db.DB_PATH, hub="http://old-hub")
+
+        with patch(
+            "features.sync.sync_worker.contract.hub_supports", new_callable=AsyncMock, return_value=False
+        ), patch("features.sync.sync_worker.trash_remote.empty_hub_trash", new_callable=AsyncMock) as forward:
+            await worker._retry_pending_hub_trash()
+
+        forward.assert_not_awaited()
+        self.assertTrue(await self._image_exists(mirror_id))
+        self.assertEqual(worker.status()["pending_hub_trash"], 1)
 
     async def test_trashed_mirror_thumbnail_reads_through_from_hub(self):
         mirror_id = await self._mirrored_trash(hub_image_id=888)
@@ -393,6 +449,42 @@ class TrashTests(BackendTestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.body, b"hub-thumb")
+
+    async def test_satellite_scoped_empty_queues_hub_without_capability(self):
+        conn = await db.get_db()
+        try:
+            source = await conn.execute(
+                "INSERT INTO catalog_sources(path, display_name, included, online) "
+                "VALUES ('hub://', 'Hub library', 1, 1)"
+            )
+            image = await conn.execute(
+                "INSERT INTO images "
+                "(source_id, filename, filepath, content_hash, status, trashed_at, "
+                "trash_path, file_ext, file_size, hub_image_id, hub_remote) "
+                "VALUES (?, 'mirrored.jpg', '/hub/mirrored.jpg', ?, 'trashed', 1000, "
+                "NULL, 'jpg', 4321, 92, 1)",
+                (int(source.lastrowid), "b" * 32),
+            )
+            image_id = int(image.lastrowid)
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        env = {"PHOTOARCHIVE_MODE": "satellite", "PHOTOARCHIVE_HUB_URL": "http://old-hub"}
+        with patch.dict(os.environ, env, clear=False), patch(
+            "features.trash.routes.contract.hub_supports", new_callable=AsyncMock, return_value=False
+        ), patch("features.trash.routes.empty_hub_trash") as forward:
+            def probe():
+                with TestClient(app_module.app) as client:
+                    return client.post("/api/trash/empty")
+
+            response = await asyncio.to_thread(probe)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("older version", response.json()["hub_error"])
+        self.assertEqual(response.json()["hub_pending"], 1)
+        forward.assert_not_called()
+        self.assertTrue(await self._image_exists(image_id))
 
     async def test_retention_purges_only_expired_online_trash_and_never_originals(self):
         source, root = await self._source_root()

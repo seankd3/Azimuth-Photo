@@ -27,6 +27,7 @@ from qa.scenarios.library import (
 )
 from qa.scenarios.photo import loupe_and_develop
 from qa.scenarios.trash import empty_trash_and_leave, trash_empty_offline_hub
+from qa.scenarios.handshake import handshake_skew
 
 
 @dataclass(frozen=True)
@@ -60,4 +61,5 @@ SCENARIOS = [
     # Destructive by design; keep last so read-only scenarios never depend on its state.
     Scenario("empty_trash_and_leave", "Trash", empty_trash_and_leave),
     Scenario("trash_empty_offline_hub", "Trash", trash_empty_offline_hub),
+    Scenario("handshake_skew", "Satellite contract", handshake_skew),
 ]

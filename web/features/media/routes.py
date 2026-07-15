@@ -144,7 +144,9 @@ async def _remote_media_response(image, tier: str) -> Response:
     remote_id = int(image["hub_image_id"])
     endpoint = f"/api/full/{remote_id}" if tier == thumbnails.FULL_TIER else f"/api/thumb/{tier}/{remote_id}"
     try:
-        status_code, response_headers, data = await _urllib_request("GET", hub + endpoint)
+        status_code, response_headers, data = await _urllib_request(
+            "GET", hub + endpoint, headers=satellite.hub_request_headers()
+        )
     except Exception:
         return JSONResponse(
             {"error": "Hub unreachable", "reason": "hub_unreachable"},

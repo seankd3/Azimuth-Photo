@@ -48,6 +48,7 @@ function mount() {
     </button><div class="sync-chip-popover" hidden role="dialog" aria-label="Satellite sync">
         <div class="sync-chip-popover-title">Satellite sync <span data-sync-rate>waiting</span></div>
         <div class="sync-chip-current" data-sync-current>Everything is synced</div>
+        <div class="sync-chip-contract" data-sync-contract hidden></div>
         <div class="sync-chip-current" data-sync-library>Library: 0 photos · thumbs 0%</div>
         <div class="sync-chip-current" data-sync-mirror hidden></div>
         <div class="sync-chip-errors" data-sync-errors hidden></div>
@@ -100,12 +101,23 @@ function patch(status) {
     const skipped = Number(status.mirror?.skipped_unhashed) || 0;
     const pendingHubTrash = Number(status.pending_hub_trash) || 0;
     const button = root.querySelector('.sync-chip-button');
-    button.title = mirrorTooltip(status);
-    patchText('.sync-chip-arrow', status.paused ? 'Ⅱ' : depth ? '↑' : '✓');
+    const hubHealth = status.hub_health || 'ok';
+    const needsUpdate = hubHealth === 'needs_update';
+    const unreachable = hubHealth === 'unreachable';
+    const contractMessage = 'The hub is running an older version — some actions are paused until it updates.';
+    root.classList.toggle('needs-update', needsUpdate);
+    root.classList.toggle('hub-unreachable', unreachable);
+    button.title = needsUpdate ? contractMessage : unreachable ? 'Hub unavailable — sync will retry.' : mirrorTooltip(status);
+    patchText('.sync-chip-arrow', needsUpdate ? '!' : status.paused ? 'Ⅱ' : depth ? '↑' : '✓');
     patchText('[data-sync-count]', count);
     patchText('[data-sync-bytes]', `${formatBytes(status.bytes_remaining)} left`);
     patchText('[data-sync-rate]', status.paused ? 'Paused' : formatRate(status.throughput_bps));
-    patchText('[data-sync-current]', status.current_file ? `Uploading ${status.current_file}` : depth ? 'Waiting to upload' : pendingHubTrash ? `${pendingHubTrash} photo${pendingHubTrash === 1 ? '' : 's'} waiting to be removed from hub` : 'Everything is synced');
+    patchText('[data-sync-current]', needsUpdate ? 'Some actions are paused until the hub updates.' : status.current_file ? `Uploading ${status.current_file}` : depth ? 'Waiting to upload' : pendingHubTrash ? `${pendingHubTrash} photo${pendingHubTrash === 1 ? '' : 's'} waiting to be removed from hub` : 'Everything is synced');
+    const contract = root.querySelector('[data-sync-contract]');
+    if (contract) {
+        patchText('[data-sync-contract]', contractMessage);
+        contract.hidden = !needsUpdate;
+    }
     patchText('[data-sync-library]', `Library: ${libraryTotal} photos · thumbs ${thumbPercent}%`);
     const mirror = root.querySelector('[data-sync-mirror]');
     if (mirror) {

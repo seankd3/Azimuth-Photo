@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import json
 import os
 import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from qa.config import SERVER_LOG, WEB_ROOT, fixture_environment
 
@@ -21,18 +24,58 @@ def _free_port() -> int:
         return int(sock.getsockname()[1])
 
 
+class OldHubStub:
+    """A deliberately pre-handshake hub; records requests without serving APIs."""
+
+    def __init__(self) -> None:
+        self.requests: list[tuple[str, str]] = []
+        owner = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                owner.requests.append(("GET", self.path))
+                self.send_response(404)
+                self.end_headers()
+
+            def do_POST(self):
+                owner.requests.append(("POST", self.path))
+                self.send_response(404)
+                self.end_headers()
+
+            def log_message(self, _format, *_args):
+                return
+
+        self._server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.base_url = f"http://127.0.0.1:{self._server.server_port}"
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._server.shutdown()
+        self._server.server_close()
+        self._thread.join(timeout=3)
+
+
 class ProbeServer:
-    def __init__(self, *, offline_hub: bool = False) -> None:
+    def __init__(self, *, offline_hub: bool = False, old_hub: bool = False) -> None:
+        if offline_hub and old_hub:
+            raise ValueError("ProbeServer hub modes are mutually exclusive")
         self.port = _free_port()
         self.base_url = f"http://127.0.0.1:{self.port}"
         self.process: subprocess.Popen | None = None
         self._log_file = None
         self.offline_hub = offline_hub
+        self.old_hub = OldHubStub() if old_hub else None
 
     def __enter__(self) -> "ProbeServer":
         env = os.environ.copy()
         env.update(fixture_environment())
-        if self.offline_hub:
+        if self.old_hub is not None:
+            self.old_hub.start()
+            env.update({"PHOTOARCHIVE_MODE": "satellite", "PHOTOARCHIVE_HUB_URL": self.old_hub.base_url})
+        elif self.offline_hub:
             # This is intentionally a dead local port, never a real paired hub.
             env.update({"PHOTOARCHIVE_MODE": "satellite", "PHOTOARCHIVE_HUB_URL": "http://127.0.0.1:1"})
         else:
@@ -51,6 +94,8 @@ class ProbeServer:
             start_new_session=True,
         )
         self._wait_ready()
+        if self.offline_hub:
+            self._wait_for_initial_sync_scan()
         return self
 
     def _wait_ready(self, timeout: float = 30.0) -> None:
@@ -67,6 +112,21 @@ class ProbeServer:
                 last_error = str(exc)
             time.sleep(0.1)
         raise RuntimeError(f"QA server did not become ready on {self.base_url}: {last_error}; see {SERVER_LOG}")
+
+    def _wait_for_initial_sync_scan(self, timeout: float = 30.0) -> None:
+        """Keep the offline scenario out of the fixture's startup write batch."""
+
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                with urllib.request.urlopen(f"{self.base_url}/api/sync/status", timeout=1) as response:
+                    payload = json.loads(response.read() or b"{}")
+                if int(payload.get("queue_depth") or 0) or payload.get("recent_errors"):
+                    return
+            except (json.JSONDecodeError, urllib.error.URLError, TimeoutError, OSError):
+                pass
+            time.sleep(0.1)
+        raise RuntimeError(f"QA satellite did not finish its initial sync scan; see {SERVER_LOG}")
 
     def __exit__(self, _exc_type, _exc, _tb) -> None:
         process = self.process
@@ -85,3 +145,5 @@ class ProbeServer:
                 process.wait(timeout=5)
         if self._log_file is not None:
             self._log_file.close()
+        if self.old_hub is not None:
+            self.old_hub.stop()
