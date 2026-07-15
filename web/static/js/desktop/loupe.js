@@ -10,9 +10,11 @@ import { icon } from '../icons.js';
 
 const ZOOM_STEP = 1.15;
 const MAX_SCALE = 4;
-const PREFETCH_AHEAD = 10;
+const PREFETCH_AHEAD = 50;
 const LOAD_WAIT_MS = 5000;
 const KEYBOARD_PAN_STEP = 48;
+const STRIP_ITEM_PITCH = 68;
+const STRIP_OVERSCAN = 12;
 
 let index = 0;
 let open = false;
@@ -32,6 +34,9 @@ let lightMode = 'normal';
 let infoMode = 'off';
 let returnLens = 'grid';
 let stripSignature = '';
+let stripStart = 0;
+let stripEnd = 0;
+let stripScrollFrame = 0;
 let previousStripIndex = -1;
 const exifCache = new Map();
 const INFO_MODES = ['off', 'basic', 'full'];
@@ -337,26 +342,70 @@ function updateFlagControls() {
     }
 }
 
-function stripMarkup() {
-    return images().map((img, i) => {
-        if (!img) return '';
+function stripMarkup(start, end) {
+    let markup = '';
+    const list = images();
+    for (let i = start; i < end; i += 1) {
+        const img = list[i];
+        if (!img) {
+            markup += '<span aria-hidden="true" style="flex:0 0 62px"></span>';
+            continue;
+        }
         const glyph = flagGlyph(img.flag || 'unflagged');
-        return `<button class="loupe-thumb ${i === index ? 'cur' : ''}" data-index="${i}" data-id="${esc(img.id)}" aria-label="Photo ${i + 1}"${i === index ? ' aria-current="true"' : ''}>`
+        markup += `<button class="loupe-thumb ${i === index ? 'cur' : ''}" data-index="${i}" data-id="${esc(img.id)}" aria-label="Photo ${i + 1}"${i === index ? ' aria-current="true"' : ''}>`
             + `<img loading="lazy" decoding="async" src="${esc(img.thumb_url || thumbUrl('sm', img.id))}" alt="">`
             + `<span class="loupe-thumb-flag" aria-hidden="true">${glyph}</span>`
             + '</button>';
-    }).join('');
+    }
+    return markup;
+}
+
+function stripWindow(host, targetIndex) {
+    const visible = Math.max(1, Math.ceil(host.clientWidth / STRIP_ITEM_PITCH));
+    const size = visible + STRIP_OVERSCAN * 2;
+    const start = Math.max(0, Math.min(images().length - size, targetIndex - Math.floor(size / 2)));
+    return { start, end: Math.min(images().length, start + size) };
+}
+
+function paintStrip(start, end, scrollLeft) {
+    const host = document.getElementById('loupe-strip');
+    const before = start * STRIP_ITEM_PITCH;
+    const after = Math.max(0, images().length - end) * STRIP_ITEM_PITCH;
+    host.innerHTML = (before ? `<span aria-hidden="true" style="flex:0 0 ${before}px"></span>` : '')
+        + stripMarkup(start, end)
+        + (after ? `<span aria-hidden="true" style="flex:0 0 ${after}px"></span>` : '');
+    stripStart = start;
+    stripEnd = end;
+    host.scrollLeft = scrollLeft;
 }
 
 function renderStrip() {
     const host = document.getElementById('loupe-strip');
-    const signature = images().map((img) => Number(img?.id) || 0).join(',');
-    if (signature !== stripSignature) {
-        host.innerHTML = stripMarkup();
+    const list = images();
+    const nearStart = Math.max(0, index - STRIP_OVERSCAN);
+    const nearEnd = Math.min(list.length, index + STRIP_OVERSCAN + 1);
+    const signature = `${list.length}:${list.slice(nearStart, nearEnd).map((img) => Number(img?.id) || 0).join(',')}`;
+    if (signature !== stripSignature || index < stripStart || index >= stripEnd) {
+        const { start, end } = stripWindow(host, index);
+        const centered = Math.max(0, index * STRIP_ITEM_PITCH - (host.clientWidth - STRIP_ITEM_PITCH) / 2);
+        paintStrip(start, end, centered);
         stripSignature = signature;
-        previousStripIndex = index;
+        previousStripIndex = -1;
     }
     updateStrip();
+}
+
+function virtualizeStripScroll() {
+    if (!open) return;
+    const host = document.getElementById('loupe-strip');
+    const visibleStart = Math.max(0, Math.floor(host.scrollLeft / STRIP_ITEM_PITCH));
+    const visibleEnd = visibleStart + Math.max(1, Math.ceil(host.clientWidth / STRIP_ITEM_PITCH));
+    if (visibleStart >= stripStart + STRIP_OVERSCAN / 2
+        && visibleEnd <= stripEnd - STRIP_OVERSCAN / 2) return;
+    const { start, end } = stripWindow(host, Math.floor((visibleStart + visibleEnd) / 2));
+    if (start === stripStart && end === stripEnd) return;
+    paintStrip(start, end, host.scrollLeft);
+    previousStripIndex = index;
 }
 
 function updateStripFlag(imageId) {
@@ -481,8 +530,9 @@ function waitForImage(targetIndex) {
 async function ensureImageAvailable(targetIndex) {
     if (!isGridScope()) return Boolean(images()[targetIndex]);
     if (images()[targetIndex]) return true;
-    await requestMorePhotos();
-    return waitForImage(targetIndex);
+    const waiting = waitForImage(targetIndex);
+    requestMorePhotos();
+    return waiting;
 }
 
 function maybeRequestMore() {
@@ -536,6 +586,8 @@ export function unmountLoupe() {
     document.getElementById('view-loupe').classList.remove('active');
     setLightMode('normal');
     stripSignature = '';
+    stripStart = 0;
+    stripEnd = 0;
     previousStripIndex = -1;
     requestAnimationFrame(() => {
         const target = document.querySelector(`.cell[data-id="${endedImageId}"]`)
@@ -555,8 +607,13 @@ export async function navLoupe(delta) {
     const targetIndex = index + delta;
     if (targetIndex < 0) return;
     if (scopeTotal() && targetIndex >= scopeTotal()) return;
+    const pending = !images()[targetIndex];
+    if (pending) document.getElementById('loupe-cap').textContent = 'Loading next photo…';
     const available = await ensureImageAvailable(targetIndex);
-    if (!available) return;
+    if (!available) {
+        if (pending) updateChrome();
+        return;
+    }
     index = targetIndex;
     render();
 }
@@ -834,12 +891,17 @@ export function initLoupe() {
     ensureLoupeChrome();
     bindPointer();
     bindKeyboard();
-    document.getElementById('loupe-strip').addEventListener('click', (event) => {
+    const strip = document.getElementById('loupe-strip');
+    strip.addEventListener('click', (event) => {
         const item = event.target.closest('.loupe-thumb[data-index]');
         if (!item) return;
         index = Number(item.dataset.index);
         render();
     });
+    strip.addEventListener('scroll', () => {
+        window.cancelAnimationFrame(stripScrollFrame);
+        stripScrollFrame = window.requestAnimationFrame(virtualizeStripScroll);
+    }, { passive: true });
     on('loupe:open', ({
         id, index: startIndex, images: sourceImages, returnLens: sourceLens,
     }) => openLoupe({
