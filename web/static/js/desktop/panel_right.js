@@ -361,7 +361,9 @@ async function renderCaption(img) {
             return;
         }
         if (token !== captionToken || Number(currentImageId) !== imageId) return;
-        captionCache.set(imageId, caption || { has_caption: false, tags: [] });
+        // Only cache positive hits — a negative would stick for the session
+        // after the worker captions the photo later.
+        if (caption && caption.has_caption) captionCache.set(imageId, caption);
     }
     renderCaptionView(img, caption);
 }
