@@ -8,7 +8,7 @@ Deploy notes:
 
 ---
 
-## FIXED — 2026-07-13 (30 bugs)
+## FIXED — 30 bugs (2026-07-13) + 6 (2026-07-15)
 
 **Trash / Develop / Gallery (round 1)**
 - Empty-trash button 422 (no body → send `{}`).
@@ -64,6 +64,19 @@ Immersive Dialog (no tab-bar leak), metadata header (back·date/time·favorite·
 5. **Cull-brief zoom always centers** — FE reads `subject_box`/`focus_box` but autocull never returns them; needs backend face/subject boxes. Build?
 6. **`/api/quality/scan` has no UI entry** — old archive bursts never get cull scores; endpoint exists, desktop never calls it. Add a "Score stacks" action?
 7. **`show_loupe_cache_status` is a dead setting** — persists but nothing reads it. Wire it into the loupe or delete the toggle?
+
+**Wave 5 — Android + sync (2026-07-15)**
+- **[DATA LOSS — Fable-authored + regression-tested]** Sync manifest counted trashed/missing/satellite-mirror hub rows as "backed up" — Free-up-space could delete the phone's last copy of a photo whose hub twin sat in Trash. `known` now requires status kept/maybe + missing_at NULL + non-mirror. (features/sync/hub.py + test_sync_hub.py; live on prod)
+- Archive infinite scroll appended duplicate pages (per-cell LaunchedEffect race) — single-flight guard with failure retry.
+- Trashing the last photo in the Archive viewer could crash the pager (index out of range after list shrink) — getOrNull + snap-back.
+- ViewerActivity rendered videos as a static AsyncImage — ExoPlayer path added for video/*.
+- Archive Share often failed on modern Android — ClipData grant added.
+- trashImage treated HTTP 200 as success even when the hub trashed nothing — now parses the trashed[] array.
+
+**Wave 5 — deferred (product calls)**
+8. **ShareActivity doesn't ingest** — sharing a non-gallery file into Azimuth just kicks backup (which only scans MediaStore) → nothing uploads. Real fix = an ingestion path for shared content:// URIs.
+9. **No device-token support in the app** — if the hub enables require_device_token, backup 401s. Needs the pairing flow in the app (pa-harden owns hub auth).
+10. **BackupWorker retries forever on permanent per-item failures** — needs a terminal-failure policy + surfacing in UI.
 
 ## OPEN (latent)
 - mobile `writeRating()` → `/api/image/{id}/rating` has no backend route; never called from UI.
