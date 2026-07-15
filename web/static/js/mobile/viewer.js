@@ -13,6 +13,7 @@ import { showToast } from './toast.js';
 import { dismissLayer, dismissLayerThen, pushLayer, registerLayer, syncLayerClosed } from './history.js';
 import { icon } from '../icons.js';
 import { createMomentum } from './viewer_momentum.js';
+import { openPhotoShareSheet } from './sharing.js';
 
 let root = null;
 let stage = null;
@@ -588,6 +589,10 @@ export function initViewer() {
     document.getElementById('mv-coll').addEventListener('click', () => {
         const image = current();
         if (image) openCollectionSheet([Number(image.id)]);
+    });
+    document.getElementById('mv-share').addEventListener('click', () => {
+        const image = current();
+        if (image) openPhotoShareSheet(image);
     });
     document.getElementById('mv-info').addEventListener('click', infoSheet);
 
