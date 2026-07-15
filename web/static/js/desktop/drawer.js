@@ -226,13 +226,6 @@ function recommendedMemoryGb(settings = {}) {
     return 0.5;
 }
 
-function drawerEditing() {
-    const body = document.getElementById('drawer-body');
-    const active = document.activeElement;
-    if (!body || !active || !body.contains(active)) return false;
-    return ['INPUT', 'SELECT', 'TEXTAREA'].includes(active.tagName);
-}
-
 function hasInvalidSetting() {
     const body = document.getElementById('drawer-body');
     return Boolean(body && body.querySelector('[data-setting-field]:invalid'));
@@ -374,7 +367,7 @@ async function refreshActivity() {
     captionStatus = captions || captionStatus;
     metadataStatus = metadata || metadataStatus;
     renderActivity();
-    if (open && !drawerEditing()) renderDrawer();
+    if (open) patchDrawerStatus();
 }
 
 function sourceName(source) {
@@ -383,6 +376,11 @@ function sourceName(source) {
 
 function sourceCount(source) {
     return source.active_image_count != null ? source.active_image_count : source.image_count;
+}
+
+function sourceStatusLine(source) {
+    const online = Number(source.online) === 1 || source.online === true;
+    return `${fmt(sourceCount(source))} photos · ${lastScan(source)}${online ? '' : ' · offline'}`;
 }
 
 function lastScan(source) {
@@ -412,7 +410,7 @@ function renderSources() {
         return `<article class="src-card" data-source-id="${id}" data-source-path="${esc(path)}" data-source-count="${Number(sourceCount(source)) || 0}">`
             + `<span class="sc-dot ${online ? 'on' : ''}"></span><div>`
             + `<div class="sc-name" title="${esc(sourceName(source))}">${esc(sourceName(source))}</div>`
-            + `<div class="sc-sub">${fmt(sourceCount(source))} photos · ${esc(lastScan(source))}${online ? '' : ' · offline'}</div>`
+            + `<div class="sc-sub">${esc(sourceStatusLine(source))}</div>`
             + '<div class="src-actions">'
             + `<button class="mini-btn" data-act="rescan" ${online ? '' : 'aria-disabled="true" disabled'}>Rescan</button>`
             + '<button class="mini-btn btn-danger" data-act="remove">Remove</button></div>'
@@ -436,7 +434,7 @@ function workerRow(key, label, value, detail, paused, actionLabel, note = '') {
         + `<button class="mini-btn" data-worker-action="${key}">${esc(actionLabel || (paused ? 'Resume' : 'Pause'))}</button></div>`;
 }
 
-function renderWork() {
+function workItems() {
     const pregen = (cacheStatus && cacheStatus.pregen) || {};
     const preview = pregen.preview || {};
     const worker = (peopleStatus && peopleStatus.worker) || {};
@@ -450,12 +448,22 @@ function renderWork() {
         ? pct(captionWorker.progress_pct)
         : progress(captionCounts.captioned || 0, (captionCounts.captioned || 0) + (captionCounts.pending_cached_images || 0));
     const metadataPaused = metadataStatus && metadataStatus.manual_pause;
+    return [
+        ['ai', 'Visual search index', aiStatus ? aiStatus.progress_pct : 0, aiStatus ? statusText('AI', aiStatus) : 'Status unknown', aiStatus && aiStatus.embedding_manual_pause, null, 'Resume also wakes the preview cache.'],
+        ['cache', 'Preview cache', (preview.progress_pct || pregen.progress_pct || 0), cacheStatus ? statusText('Cache', cacheStatus) : 'Status unknown', pregen.manual_pause || pregen.state === 'paused', pregen.manual_pause || pregen.state === 'paused' ? 'Resume' : 'Pause', 'Pause also pauses the visual search index and People scan.'],
+        ['people', 'People scan', peoplePct, peopleStatus ? statusText('People', peopleStatus) : 'Status unknown', worker.manual_pause || !settingValue('people_scan_enabled'), null, 'Resume also wakes the preview cache.'],
+        ['captions', 'Captions', captionPct, captionStatus ? statusText('Captions', captionStatus) : 'Status unknown', captionStatus && !captionStatus.active],
+        ['metadata', 'Metadata', metadataPaused ? 0 : 50, metadataLine(), metadataPaused],
+    ].map(([key, label, value, detail, paused, actionLabel, note = '']) => ({
+        key, label, value, detail, paused: Boolean(paused), actionLabel, note,
+    }));
+}
+
+function renderWork() {
     return '<section class="dr-sec"><h3>Background work</h3>'
-        + workerRow('ai', 'Visual search index', aiStatus ? aiStatus.progress_pct : 0, aiStatus ? statusText('AI', aiStatus) : 'Status unknown', aiStatus && aiStatus.embedding_manual_pause, null, 'Resume also wakes the preview cache.')
-        + workerRow('cache', 'Preview cache', (preview.progress_pct || pregen.progress_pct || 0), cacheStatus ? statusText('Cache', cacheStatus) : 'Status unknown', pregen.manual_pause || pregen.state === 'paused', pregen.manual_pause || pregen.state === 'paused' ? 'Resume' : 'Pause', 'Pause also pauses the visual search index and People scan.')
-        + workerRow('people', 'People scan', peoplePct, peopleStatus ? statusText('People', peopleStatus) : 'Status unknown', worker.manual_pause || !settingValue('people_scan_enabled'), null, 'Resume also wakes the preview cache.')
-        + workerRow('captions', 'Captions', captionPct, captionStatus ? statusText('Captions', captionStatus) : 'Status unknown', captionStatus && !captionStatus.active)
-        + workerRow('metadata', 'Metadata', metadataPaused ? 0 : 50, metadataLine(), metadataPaused)
+        + workItems().map((item) => workerRow(
+            item.key, item.label, item.value, item.detail, item.paused, item.actionLabel, item.note,
+        )).join('')
         + '</section>';
 }
 
@@ -463,7 +471,7 @@ function renderStorage() {
     const tiers = (cacheStatus && cacheStatus.disk && cacheStatus.disk.tiers) || {};
     const chips = ['sm', 'md', 'lg'].map((size) => {
         const tier = tiers[size] || {};
-        return `<span class="tier-chip"><b>${size.toUpperCase()}</b><span>${fmt(tier.count)} files</span><span>${bytes(tier.bytes)}</span></span>`;
+        return `<span class="tier-chip" data-tier-size="${size}"><b>${size.toUpperCase()}</b><span data-tier-count>${fmt(tier.count)} files</span><span data-tier-bytes>${bytes(tier.bytes)}</span></span>`;
     }).join('');
     const totalFiles = Object.values(tiers).reduce((sum, tier) => sum + Number(tier?.count || 0), 0);
     return '<section class="dr-sec"><h3>Storage</h3>'
@@ -491,7 +499,7 @@ function renderDevices() {
         ? active.map((device) => (
             `<div class="device-row" data-device-id="${esc(device.id)}">`
             + `<div><b>${esc(device.name)}</b>`
-            + `<span class="device-meta">${esc(device.platform || 'unknown')} · last seen ${esc(formatSeen(device.last_seen))}</span></div>`
+            + `<span class="device-meta" data-device-status>${esc(device.platform || 'unknown')} · last seen ${esc(formatSeen(device.last_seen))}</span></div>`
             + `<button class="mini-btn btn-danger" type="button" data-revoke-device="${esc(device.id)}">Revoke</button>`
             + `</div>`
         )).join('')
@@ -529,7 +537,7 @@ function renderConnectServer() {
         )).join('')
         : '<div class="setting-hint">No hubs found on the network yet.</div>';
     const connected = pairStatus && pairStatus.has_hub
-        ? `<div class="setting-status">Connected to <code>${esc(pairStatus.hub_url)}</code></div>`
+        ? `<div class="setting-status" data-setting-status="connection">Connected to <code>${esc(pairStatus.hub_url)}</code></div>`
         : '';
     const updateBanner = syncStatus && (syncStatus.server_update_available || syncStatus.server_incompatible) && !sessionStorage.getItem('azimuth-server-update-dismissed')
         ? '<div class="setting-status warn server-update-banner" role="status"><span>Your Azimuth Photo server needs an update</span><button class="mini-btn" id="dismiss-server-update" type="button">Dismiss</button></div>'
@@ -679,7 +687,7 @@ function renderAiSettings() {
         { value: settingValue('embed_model_preset'), label: settingValue('embed_model_preset') || 'Current preset' },
     ]);
     return detailsSection('AI model', 'Choose how Azimuth understands visual and text search.',
-        `<div class="setting-status">${esc(modelLine())}</div>`
+        `<div class="setting-status" data-setting-status="ai">${esc(modelLine())}</div>`
         + '<div class="setting-status warn">Changing model preset rebuilds the search index and can take a while.</div>'
         + presetSelect
         + (selectedPreset?.description ? `<div class="setting-hint">${esc(selectedPreset.description)}</div>` : '')
@@ -692,7 +700,7 @@ function renderAiSettings() {
 
 function renderImageCacheSettings() {
     return detailsSection('Image cache', 'Balance instant browsing against the memory and disk this computer can spare.',
-        `<div class="setting-status">${esc(cacheUsageLine())}</div>`
+        `<div class="setting-status" data-setting-status="cache">${esc(cacheUsageLine())}</div>`
         + '<div class="settings-two">'
         + settingInput('memory_cache_gb', 'RAM budget')
         + settingInput('ssd_cache_gb', 'SSD budget')
@@ -736,7 +744,7 @@ function renderThumbnailSettings() {
 
 function renderPeopleSettings() {
     return detailsSection('People recognition', 'Keep face grouping useful without changing your original photos.',
-        `<div class="setting-status">${esc(peopleLine())}</div>`
+        `<div class="setting-status" data-setting-status="people">${esc(peopleLine())}</div>`
         + settingToggle('people_scan_enabled', 'Scan for people automatically')
         + settingToggle('people_auto_install', 'Install people model automatically')
         + settingInput('face_model_id', 'Face model')
@@ -753,7 +761,7 @@ function renderCaptionSettings() {
     const presets = rawPresets.map((preset) => ({ value: preset.key, label: preset.label || preset.key }));
     const selectedPreset = rawPresets.find((preset) => preset.key === settingValue('caption_model_preset'));
     return detailsSection('Captions', 'Generate searchable photo descriptions in the background.',
-        `<div class="setting-status">${esc(captionLine())}</div>`
+        `<div class="setting-status" data-setting-status="captions">${esc(captionLine())}</div>`
         + settingToggle('caption_scan_enabled', 'Caption cached photos automatically')
         + settingSelect('caption_model_preset', 'Caption model', presets.length ? presets : [
             { value: settingValue('caption_model_preset'), label: settingValue('caption_model_preset') || 'Current model' },
@@ -764,7 +772,7 @@ function renderCaptionSettings() {
 
 function renderMetadataSettings() {
     return detailsSection('Metadata', 'Keep camera, lens, and file details ready for search and filtering.',
-        `<div class="setting-status">${esc(metadataLine())}</div>`
+        `<div class="setting-status" data-setting-status="metadata">${esc(metadataLine())}</div>`
         + '<div class="setting-hint">Metadata indexing keeps searchable file details current in the background.</div>');
 }
 
@@ -896,7 +904,72 @@ function renderDrawer() {
     }
 }
 
-async function refreshDrawer() {
+function patchNodeText(root, selector, value) {
+    const node = root.querySelector(selector);
+    const text = String(value);
+    if (node && node.textContent !== text) node.textContent = text;
+}
+
+function patchDrawerStatus() {
+    const body = document.getElementById('drawer-body');
+    if (!body) return;
+
+    for (const source of (catalog && catalog.sources) || []) {
+        const card = body.querySelector(`.src-card[data-source-id="${Number(source.id)}"]`);
+        if (!card) continue;
+        const online = Number(source.online) === 1 || source.online === true;
+        card.querySelector('.sc-dot')?.classList.toggle('on', online);
+        patchNodeText(card, '.sc-sub', sourceStatusLine(source));
+        const scanning = scanSourceId === Number(source.id);
+        const progressEl = card.querySelector('.scan-progress');
+        if (progressEl) progressEl.hidden = !scanning;
+    }
+
+    for (const item of workItems()) {
+        const row = body.querySelector(`[data-worker-row="${item.key}"]`);
+        if (!row) continue;
+        patchNodeText(row, '.wr-top .v', item.detail);
+        const progressBar = row.querySelector('.wr-track i');
+        if (progressBar) progressBar.style.width = `${pct(item.value)}%`;
+        patchNodeText(row, '[data-worker-action]', item.actionLabel || (item.paused ? 'Resume' : 'Pause'));
+    }
+
+    const settingLines = {
+        ai: modelLine(),
+        cache: cacheUsageLine(),
+        people: peopleLine(),
+        captions: captionLine(),
+        metadata: metadataLine(),
+    };
+    for (const [key, value] of Object.entries(settingLines)) {
+        patchNodeText(body, `[data-setting-status="${key}"]`, value);
+    }
+
+    const tiers = (cacheStatus && cacheStatus.disk && cacheStatus.disk.tiers) || {};
+    for (const size of ['sm', 'md', 'lg']) {
+        const chip = body.querySelector(`[data-tier-size="${size}"]`);
+        const tier = tiers[size] || {};
+        if (!chip) continue;
+        patchNodeText(chip, '[data-tier-count]', `${fmt(tier.count)} files`);
+        patchNodeText(chip, '[data-tier-bytes]', bytes(tier.bytes));
+    }
+    const clearCache = body.querySelector('#clear-cache-btn');
+    if (clearCache) {
+        clearCache.dataset.cacheFiles = String(Object.values(tiers).reduce(
+            (sum, tier) => sum + Number(tier?.count || 0), 0,
+        ));
+    }
+
+    const devices = new Map(((devicesPayload && devicesPayload.devices) || []).map((device) => [String(device.id), device]));
+    for (const row of body.querySelectorAll('.device-row[data-device-id]')) {
+        const device = devices.get(row.dataset.deviceId);
+        if (!device) continue;
+        patchNodeText(row, '[data-device-status]', `${device.platform || 'unknown'} · last seen ${formatSeen(device.last_seen)}`);
+    }
+    if (pairStatus?.hub_url) patchNodeText(body, '[data-setting-status="connection"] code', pairStatus.hub_url);
+}
+
+async function refreshDrawer({ initial = false } = {}) {
     const [nextCatalog, ai, cache, people, captions, metadata, remote, settingsData, version, pair, sync, devices] = await Promise.all([
         getCatalog().catch(() => null),
         getAiStatus().catch(() => null),
@@ -925,7 +998,9 @@ async function refreshDrawer() {
     syncStatus = sync || syncStatus;
     devicesPayload = devices || devicesPayload;
     renderActivity();
-    if (!drawerEditing()) renderDrawer();
+    const body = document.getElementById('drawer-body');
+    if (initial || !body?.children.length) renderDrawer();
+    else patchDrawerStatus();
 }
 
 async function pollScanUntilDone(sourceId) {
@@ -1161,7 +1236,7 @@ function pollModelInstall() {
         const status = await getAiStatus();
         if (status) aiStatus = status;
         renderActivity();
-        if (open && !drawerEditing()) renderDrawer();
+        if (open) patchDrawerStatus();
         if (!aiInstallActive(status)) {
             clearInterval(installTimer);
             installTimer = null;
@@ -1194,18 +1269,33 @@ async function saveAndInstallModel() {
     renderDrawer();
 }
 
-function bindDrawerActions() {
+function renderLibraryHealthSection() {
     const body = document.getElementById('drawer-body');
+    const current = body?.querySelector('.library-health');
+    if (!body || !current) return;
+    const template = document.createElement('template');
+    template.innerHTML = renderLibraryHealth(catalog);
+    const next = template.content.firstElementChild;
+    if (!next) return;
+    current.replaceWith(next);
+    bindLibraryHealthActions(body);
+}
+
+function bindLibraryHealthActions(body) {
     bindLibraryHealth(body, {
-        rerender: () => {
-            if (!drawerEditing()) renderDrawer();
-        },
+        rerender: renderLibraryHealthSection,
         refreshCatalog: async () => {
             catalog = await getCatalog().catch(() => catalog);
-            if (!drawerEditing()) renderDrawer();
+            patchDrawerStatus();
+            renderLibraryHealthSection();
             showToast('Sources checked');
         },
     });
+}
+
+function bindDrawerActions() {
+    const body = document.getElementById('drawer-body');
+    bindLibraryHealthActions(body);
     bindSettingInputs(body);
     body.querySelector('#dismiss-server-update')?.addEventListener('click', () => {
         sessionStorage.setItem('azimuth-server-update-dismissed', '1');
@@ -1387,7 +1477,7 @@ function bindDrawerActions() {
 
 function startDrawerPolling() {
     clearInterval(drawerTimer);
-    refreshDrawer();
+    refreshDrawer({ initial: true });
     drawerTimer = setInterval(refreshDrawer, 5000);
 }
 

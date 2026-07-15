@@ -1,13 +1,14 @@
 import { getCollection, getMapMarkers, thumbUrl } from './api.js';
-import { emit, on, scope, scopeParams, setImages, setRankingsMeta } from './state.js';
+import { navigateToScope, on, scope, scopeParams, setImages, setRankingsMeta } from './state.js';
 import { icon } from '../icons.js';
 import { LAND_PATHS } from './world_land.js';
-import { escapeHtml as esc, formatCount as fmt } from './dom.js';
+import { formatCount as fmt } from './dom.js';
 
 let mounted = false;
 let initialized = false;
 let generation = 0;
 let markers = [];
+const COLLECTION_MARKER_LIMIT = 1000;
 
 function latOf(marker) {
     return Number(marker.lat ?? marker.latitude);
@@ -73,37 +74,28 @@ function renderMap(data = {}) {
         + '</svg><div id="map-pins">'
         + clusters.map((item, index) => {
             const count = item.markers.length;
-            return `<button class="map-pin" data-cluster="${index}" style="left:${(item.x / 10).toFixed(2)}%;top:${(item.y / 5).toFixed(2)}%" aria-label="${fmt(count)} located photos">`
+            return `<button class="map-pin" data-cluster="${index}" style="left:${(item.x / 10).toFixed(2)}%;top:${(item.y / 5).toFixed(2)}%" aria-label="Open ${fmt(count)} located photo${count === 1 ? '' : 's'} in grid">`
                 + `<span>${count > 1 ? fmt(count) : ''}</span></button>`;
         }).join('')
         + '</div>'
-        + `<div id="map-info">${fmt(data.gps_count ?? markers.length)} located photos shown · ${fmt(data.total_count ?? data.gps_total_count ?? markers.length)} photos in pool</div>`
-        + '<div id="map-popover"></div>';
+        + `<div id="map-info">${fmt(data.gps_count ?? markers.length)} located photos shown · ${fmt(data.total_count ?? data.gps_total_count ?? markers.length)} photos in pool</div>`;
 }
 
 async function loadCollectionMarkers() {
-    let offset = 0;
-    let total = 0;
-    let all = [];
-    do {
-        const data = await getCollection(scope.collectionId, { limit: 1000, offset });
-        const collection = data && data.collection;
-        if (!collection) break;
-        total = Number(collection.image_count) || 0;
-        const incoming = collection.images || [];
-        all = all.concat(incoming);
-        offset += incoming.length;
-        if (!incoming.length) break;
-    } while (offset < total);
+    const data = await getCollection(scope.collectionId, { limit: COLLECTION_MARKER_LIMIT, offset: 0 });
+    const collection = data && data.collection;
+    const total = Number(collection?.image_count) || 0;
+    const all = collection?.images || [];
+    const located = all.filter((img) => Number.isFinite(Number(img.latitude)) && Number.isFinite(Number(img.longitude)));
     return {
-        markers: all.filter((img) => Number.isFinite(Number(img.latitude)) && Number.isFinite(Number(img.longitude))).map((img) => ({
+        markers: located.map((img) => ({
             ...img,
             lat: img.latitude,
             lng: img.longitude,
             thumb_url: img.thumb_url || thumbUrl('sm', img.id),
         })),
         total_count: total,
-        gps_count: all.filter((img) => Number.isFinite(Number(img.latitude)) && Number.isFinite(Number(img.longitude))).length,
+        gps_count: located.length,
     };
 }
 
@@ -129,48 +121,24 @@ async function load() {
     }
 }
 
-function openCluster(index, pin) {
+function openCluster(index) {
     const item = cluster(markers)[index];
     if (!item) return;
-    const first = item.markers[0];
-    if (item.markers.length === 1) {
-        emit('loupe:open', { id: Number(first.id), index: markers.findIndex((marker) => Number(marker.id) === Number(first.id)) });
-        return;
-    }
-    const pop = document.getElementById('map-popover');
-    const rect = pin.getBoundingClientRect();
-    pop.innerHTML = `<div class="mp-head">${fmt(item.markers.length)} photos here</div>`
-        + item.markers.slice(0, 9).map((marker) => (
-            `<button data-id="${marker.id}">${marker.thumb_url
-                ? `<img src="${esc(marker.thumb_url)}" loading="lazy" decoding="async" alt="">`
-                : `<i class="map-thumb-neutral" aria-hidden="true">${icon('map-pin')}</i>`}<span>${esc(marker.filename || `Image ${marker.id}`)}</span></button>`
-        )).join('');
-    pop.style.left = `${Math.min(window.innerWidth - 220, rect.left)}px`;
-    pop.style.top = `${Math.min(window.innerHeight - 260, rect.bottom + 8)}px`;
-    pop.classList.add('on');
-    pop.querySelector('button')?.focus({ preventScroll: true });
+    const ids = item.markers.map((marker) => Number(marker.id)).filter((id) => id > 0);
+    if (!ids.length) return;
+    navigateToScope({
+        similarIds: ids,
+        similarLabel: `Map · ${fmt(ids.length)} photo${ids.length === 1 ? '' : 's'}`,
+        sort: scope.sort || 'elo',
+    });
 }
 
 export function initMap() {
     if (initialized) return;
     initialized = true;
     document.getElementById('map-stage').addEventListener('click', (event) => {
-        const popItem = event.target.closest('#map-popover button[data-id]');
-        if (popItem) {
-            emit('loupe:open', { id: Number(popItem.dataset.id), index: markers.findIndex((marker) => Number(marker.id) === Number(popItem.dataset.id)) });
-            document.getElementById('map-popover').classList.remove('on');
-            return;
-        }
         const pin = event.target.closest('.map-pin[data-cluster]');
-        if (pin) openCluster(Number(pin.dataset.cluster), pin);
-        else document.getElementById('map-popover')?.classList.remove('on');
-    });
-    document.getElementById('map-stage').addEventListener('keydown', (event) => {
-        if (event.key !== 'Escape') return;
-        const pop = document.getElementById('map-popover');
-        if (!pop?.classList.contains('on')) return;
-        event.preventDefault();
-        pop.classList.remove('on');
+        if (pin) openCluster(Number(pin.dataset.cluster));
     });
     on('scope', load);
 }
@@ -186,5 +154,4 @@ export function unmountMap() {
     generation += 1;
     markers = [];
     document.getElementById('view-map').classList.remove('active');
-    document.getElementById('map-popover')?.classList.remove('on');
 }
