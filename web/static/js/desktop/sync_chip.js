@@ -98,13 +98,14 @@ function patch(status) {
     const count = `${depth} photo${depth === 1 ? '' : 's'}`;
     const errors = (status.recent_errors || []).slice(0, 3);
     const skipped = Number(status.mirror?.skipped_unhashed) || 0;
+    const pendingHubTrash = Number(status.pending_hub_trash) || 0;
     const button = root.querySelector('.sync-chip-button');
     button.title = mirrorTooltip(status);
     patchText('.sync-chip-arrow', status.paused ? 'Ⅱ' : depth ? '↑' : '✓');
     patchText('[data-sync-count]', count);
     patchText('[data-sync-bytes]', `${formatBytes(status.bytes_remaining)} left`);
     patchText('[data-sync-rate]', status.paused ? 'Paused' : formatRate(status.throughput_bps));
-    patchText('[data-sync-current]', status.current_file ? `Uploading ${status.current_file}` : depth ? 'Waiting to upload' : 'Everything is synced');
+    patchText('[data-sync-current]', status.current_file ? `Uploading ${status.current_file}` : depth ? 'Waiting to upload' : pendingHubTrash ? `${pendingHubTrash} photo${pendingHubTrash === 1 ? '' : 's'} waiting to be removed from hub` : 'Everything is synced');
     patchText('[data-sync-library]', `Library: ${libraryTotal} photos · thumbs ${thumbPercent}%`);
     const mirror = root.querySelector('[data-sync-mirror]');
     if (mirror) {

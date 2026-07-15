@@ -183,7 +183,10 @@ async def thumbnail_response(request: Request, size: str, image_id: int, cached:
         if not image:
             return JSONResponse({"error": "Image not found"}, status_code=404)
         if image["status"] == "trashed":
-            cache_only = True
+            # Local originals were intentionally moved, but a mirrored Trash row
+            # can still be read through from its hub when no cached preview exists.
+            source_state = await _source_state(image)
+            cache_only = source_state != "remote"
         else:
             source_state = await _source_state(image)
             source_error = await _source_error_response(image, source_state)

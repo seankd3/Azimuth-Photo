@@ -6,7 +6,10 @@ from fastapi.testclient import TestClient
 
 from test_support import *  # noqa: F401,F403
 from data.repositories import stacks as stack_repository
+from features.media import routes as media_routes
+from features.sync.sync_worker import SyncWorker
 from features.trash import service as trash_service
+from features.trash import remote as trash_remote
 
 
 class TrashTests(BackendTestCase):
@@ -55,6 +58,24 @@ class TrashTests(BackendTestCase):
         self.assertIn("deferred", result["errors"][0]["reason"])
         self.assertLess(elapsed, 2.0)
         self.assertTrue(await self._image_exists(image_id))
+    async def _mirrored_trash(self, *, name="mirrored.jpg", hub_image_id=92):
+        conn = await db.get_db()
+        try:
+            source = await conn.execute(
+                "INSERT INTO catalog_sources(path, display_name, included, online) "
+                "VALUES ('hub://', 'Hub library', 1, 1)"
+            )
+            image = await conn.execute(
+                "INSERT INTO images "
+                "(source_id, filename, filepath, content_hash, status, trashed_at, "
+                "trash_path, file_ext, file_size, hub_image_id, hub_remote) "
+                "VALUES (?, ?, ?, ?, 'trashed', 1000, NULL, 'jpg', 4321, ?, 1)",
+                (int(source.lastrowid), name, f'/hub/{name}', "b" * 32, hub_image_id),
+            )
+            await conn.commit()
+            return int(image.lastrowid)
+        finally:
+            await conn.close()
 
     async def _source_root(self):
         source = await self._source("catalog")
@@ -306,6 +327,72 @@ class TrashTests(BackendTestCase):
         self.assertEqual(response.json()["hub_deleted_count"], 1)
         self.assertEqual(response.json()["freed_bytes"], 4321)
         self.assertFalse(await self._image_exists(image_id))
+
+    async def test_satellite_empty_trash_keeps_unreachable_mirrors_pending_but_purges_local(self):
+        source, _root = await self._source_root()
+        local_id, _ = await self._file_image(source, "local.jpg", data=b"local")
+        await trash_service.trash_images(db.DB_PATH, [local_id])
+        mirror_id = await self._mirrored_trash(hub_image_id=501)
+
+        env = {"PHOTOARCHIVE_MODE": "satellite", "PHOTOARCHIVE_HUB_URL": "http://127.0.0.1:1"}
+        with patch.dict(os.environ, env, clear=False), patch(
+            "features.trash.routes.empty_hub_trash",
+            side_effect=trash_remote.HubTrashRequestError("The hub could not be reached: connection refused"),
+        ):
+            response = await asyncio.to_thread(lambda: TestClient(app_module.app).post("/api/trash/empty"))
+
+        payload = response.json()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["deleted_count"], 1)
+        self.assertEqual(payload["hub_pending"], 1)
+        self.assertIn("hub_error", payload)
+        self.assertFalse(await self._image_exists(local_id))
+        pending = await self._image_row(mirror_id)
+        self.assertEqual(pending["status"], "trashed")
+        self.assertEqual(pending["trash_pending_hub"], 1)
+
+    async def test_legacy_hub_version_failure_never_forwards_empty_post(self):
+        calls = []
+
+        def old_hub(request, timeout):
+            calls.append((request.full_url, request.method, timeout))
+            raise trash_remote.urllib.error.HTTPError(request.full_url, 404, "not found", None, None)
+
+        with patch("features.trash.remote.urllib.request.urlopen", side_effect=old_hub):
+            with self.assertRaisesRegex(trash_remote.HubTrashRequestError, "needs an update"):
+                await trash_remote.empty_hub_trash("http://legacy-hub", [91])
+
+        self.assertEqual(calls, [("http://legacy-hub/api/version", "GET", 2)])
+
+    async def test_pending_hub_trash_retry_deletes_recovered_mirror(self):
+        mirror_id = await self._mirrored_trash(hub_image_id=777)
+        await trash_service.mark_hub_trash_pending(db.DB_PATH, [mirror_id])
+        worker = SyncWorker(db_path=db.DB_PATH, hub="http://stub-hub")
+
+        async def recovered_hub(_hub, image_ids):
+            self.assertEqual(image_ids, [777])
+            return {"deleted_count": 1, "freed_bytes": 4321, "errors": [], "skipped_offline": 0}
+
+        with patch("features.sync.sync_worker.trash_remote.empty_hub_trash", side_effect=recovered_hub):
+            await worker._retry_pending_hub_trash()
+
+        self.assertFalse(await self._image_exists(mirror_id))
+        self.assertEqual(worker.status()["pending_hub_trash"], 0)
+
+    async def test_trashed_mirror_thumbnail_reads_through_from_hub(self):
+        mirror_id = await self._mirrored_trash(hub_image_id=888)
+
+        async def hub_thumb(_method, url, **_kwargs):
+            self.assertTrue(url.endswith("/api/thumb/sm/888"))
+            return 200, {"Content-Type": "image/jpeg"}, b"hub-thumb"
+
+        with patch.dict(os.environ, {"PHOTOARCHIVE_HUB_URL": "http://stub-hub"}, clear=False), patch(
+            "features.media.routes._urllib_request", side_effect=hub_thumb
+        ):
+            response = await media_routes.serve_thumbnail(HeaderRequest(), "sm", mirror_id)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.body, b"hub-thumb")
 
     async def test_retention_purges_only_expired_online_trash_and_never_originals(self):
         source, root = await self._source_root()

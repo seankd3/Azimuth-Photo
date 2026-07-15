@@ -22,6 +22,7 @@ from qa.config import (
     MANIFEST_PATH,
     PRISTINE_DB,
     TRASH_IMAGE_COUNT,
+    TRASH_MIRROR_IMAGE_COUNT,
     VISIBLE_IMAGE_COUNT,
 )
 
@@ -291,6 +292,15 @@ async def _seed() -> None:
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         _trash_rows(primary),
     )
+    for offset in range(TRASH_MIRROR_IMAGE_COUNT):
+        image_id = ACTIVE_IMAGE_COUNT + TRASH_IMAGE_COUNT + offset + 1
+        await conn.execute(
+            "INSERT INTO images "
+            "(id, source_id, filename, filepath, content_hash, hub_image_id, hub_remote, elo, comparisons, "
+            "status, flag, file_ext, file_size, width, height, trashed_at) "
+            "VALUES (?, 3, ?, ?, ?, ?, 1, 1200, 0, 'trashed', 'unflagged', '.jpg', 8192, 96, 64, ?)",
+            (image_id, "qa-hub-trash.jpg", "hub://archive/qa-hub-trash.jpg", f"{image_id:032x}", 90_000 + offset, now),
+        )
 
     await conn.execute(
         "INSERT INTO collections (id, uuid, name, description, cover_image_id, created_at, updated_at) "
@@ -331,7 +341,7 @@ async def _seed() -> None:
     await _seed_discovery_surfaces(conn, shared_preview, now)
     cache_root = str(Path(thumbnails.SSD_CACHE_DIR).resolve())
     cache_rows = []
-    for image_id in range(1, ACTIVE_IMAGE_COUNT + TRASH_IMAGE_COUNT + 1):
+    for image_id in range(1, ACTIVE_IMAGE_COUNT + TRASH_IMAGE_COUNT + TRASH_MIRROR_IMAGE_COUNT + 1):
         for size in ("sm", "md", "lg"):
             cache_rows.append(
                 (cache_root, size, image_id, str(shared_preview), f"qa-{size}-{image_id}", shared_preview.stat().st_size, now, now)
@@ -365,6 +375,8 @@ async def _seed() -> None:
         "active_images": ACTIVE_IMAGE_COUNT,
         "visible_images": VISIBLE_IMAGE_COUNT,
         "trash_images": TRASH_IMAGE_COUNT,
+        "trash_mirror_images": TRASH_MIRROR_IMAGE_COUNT,
+        "trash_total": TRASH_IMAGE_COUNT + TRASH_MIRROR_IMAGE_COUNT,
         "collection_images": COLLECTION_IMAGE_COUNT,
         "primary_source": str(primary),
         "secondary_source": str(secondary),

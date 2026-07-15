@@ -303,7 +303,7 @@ async def trash_images(db_path: str, image_ids: list[int]) -> dict:
         if plans:
             await conn.execute("BEGIN")
             await conn.executemany(
-                "UPDATE images SET status = 'trashed', trashed_at = ?, trash_path = ? WHERE id = ?",
+                "UPDATE images SET status = 'trashed', trashed_at = ?, trash_path = ?, trash_pending_hub = 0 WHERE id = ?",
                 [(now, plan["trash_path"], plan["id"]) for plan in plans],
             )
             source_ids = sorted({
@@ -425,7 +425,7 @@ async def restore_images(db_path: str, image_ids: list[int]) -> dict:
             for chunk in catalog_repository._chunked(update_ids):
                 placeholders = ",".join("?" for _ in chunk)
                 await conn.execute(
-                    f"UPDATE images SET status = 'kept', trashed_at = NULL, trash_path = NULL "
+                    f"UPDATE images SET status = 'kept', trashed_at = NULL, trash_path = NULL, trash_pending_hub = 0 "
                     f"WHERE id IN ({placeholders})",
                     chunk,
                 )
@@ -502,7 +502,8 @@ async def list_trash(db_path: str, *, limit: int = 100, offset: int = 0) -> dict
     conn = await data_connection.open_async(db_path)
     try:
         total_cursor = await conn.execute(
-            "SELECT COUNT(*) AS total, COALESCE(SUM(COALESCE(file_size, 0)), 0) AS total_bytes "
+            "SELECT COUNT(*) AS total, COALESCE(SUM(COALESCE(file_size, 0)), 0) AS total_bytes, "
+            "COALESCE(SUM(CASE WHEN COALESCE(trash_pending_hub, 0) = 1 THEN 1 ELSE 0 END), 0) AS pending_hub_count "
             "FROM images WHERE status = 'trashed'"
         )
         total_row = await total_cursor.fetchone()
@@ -516,11 +517,13 @@ async def list_trash(db_path: str, *, limit: int = 100, offset: int = 0) -> dict
             card = app_helpers.image_card(dict(row), "sm")
             card["trashed_at"] = row["trashed_at"]
             card["file_size"] = row["file_size"]
+            card["pending_hub"] = bool(row["trash_pending_hub"])
             images.append(card)
         return {
             "images": images,
             "total": int(total_row["total"] or 0),
             "total_bytes": int(total_row["total_bytes"] or 0),
+            "pending_hub_count": int(total_row["pending_hub_count"] or 0),
         }
     finally:
         await data_connection.close_async(conn, db_path=db_path)
@@ -673,12 +676,62 @@ async def hub_mirror_trash_refs(db_path: str) -> dict:
     conn = await data_connection.open_async(db_path)
     try:
         cursor = await conn.execute(
-            "SELECT hub_image_id FROM images "
+            "SELECT id, hub_image_id FROM images "
             "WHERE status = 'trashed' AND COALESCE(hub_remote, 0) = 1"
         )
         rows = await cursor.fetchall()
         hub_image_ids = _clean_ids(row["hub_image_id"] for row in rows)
-        return {"count": len(rows), "hub_image_ids": hub_image_ids}
+        return {
+            "count": len(rows),
+            "image_ids": [int(row["id"]) for row in rows],
+            "hub_image_ids": hub_image_ids,
+        }
+    finally:
+        await data_connection.close_async(conn, db_path=db_path)
+
+
+async def local_trash_ids(db_path: str) -> list[int]:
+    conn = await data_connection.open_async(db_path)
+    try:
+        cursor = await conn.execute(
+            "SELECT id FROM images WHERE status = 'trashed' AND COALESCE(hub_remote, 0) = 0"
+        )
+        return [int(row["id"]) for row in await cursor.fetchall()]
+    finally:
+        await data_connection.close_async(conn, db_path=db_path)
+
+
+async def mark_hub_trash_pending(db_path: str, image_ids: list[int]) -> None:
+    ids = _clean_ids(image_ids)
+    if not ids:
+        return
+    conn = await data_connection.open_async(db_path)
+    try:
+        for chunk in catalog_repository._chunked(ids):
+            placeholders = ",".join("?" for _ in chunk)
+            await conn.execute(
+                f"UPDATE images SET trash_pending_hub = 1 WHERE status = 'trashed' "
+                f"AND COALESCE(hub_remote, 0) = 1 AND id IN ({placeholders})",
+                chunk,
+            )
+        await conn.commit()
+    finally:
+        await data_connection.close_async(conn, db_path=db_path)
+
+
+async def pending_hub_trash_refs(db_path: str) -> dict:
+    conn = await data_connection.open_async(db_path)
+    try:
+        cursor = await conn.execute(
+            "SELECT id, hub_image_id FROM images WHERE status = 'trashed' "
+            "AND COALESCE(hub_remote, 0) = 1 AND COALESCE(trash_pending_hub, 0) = 1"
+        )
+        rows = await cursor.fetchall()
+        return {
+            "count": len(rows),
+            "image_ids": [int(row["id"]) for row in rows],
+            "hub_image_ids": _clean_ids(row["hub_image_id"] for row in rows),
+        }
     finally:
         await data_connection.close_async(conn, db_path=db_path)
 

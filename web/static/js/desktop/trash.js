@@ -17,6 +17,7 @@ let open = false;
 let images = [];
 let total = 0;
 let totalBytes = 0;
+let pendingHub = 0;
 let loading = false;
 let loadGeneration = 0;
 let loadError = false;
@@ -168,18 +169,21 @@ function flagGlyph(flag) {
 function cellHtml(img, index) {
     const id = Number(img.id);
     const flag = img.flag || 'unflagged';
-    return `<figure class="cell trash-cell ${selection.has(id) ? 'sel' : ''}" data-id="${id}" data-idx="${index}" tabindex="-1" style="--ar:${aspect(img)}">`
+    const pending = Boolean(img.pending_hub);
+    return `<figure class="cell trash-cell ${pending ? 'pending-hub' : ''} ${selection.has(id) ? 'sel' : ''}" data-id="${id}" data-idx="${index}" tabindex="-1" style="--ar:${aspect(img)}">`
         + `<img src="${esc(img.thumb_url || thumbUrl('sm', id))}" loading="lazy" decoding="async" alt="${esc(img.filename || '')}">`
+        + `<span class="trash-thumb-fallback" hidden>${icon('image')}<span>${esc(img.filename || 'Photo preview unavailable')}</span></span>`
         + `<button class="c-check" aria-label="Select photo">${icon('check')}</button>`
         + `<span class="c-flag ${flag}">${flagGlyph(flag)}</span>`
         + `<span class="c-elo"><span class="elo-chip">${Math.round(Number(img.elo) || 0)}</span></span>`
+        + (pending ? '<span class="trash-pending-badge">Removing from hub…</span>' : '')
         + '</figure>';
 }
 
 function viewHtml() {
     return '<div id="trash" hidden>'
         + '<header id="trash-head">'
-        + '<div><b>Trash</b><span id="trash-count" class="num"></span></div>'
+        + '<div><b>Trash</b><span id="trash-count" class="num"></span><span id="trash-pending-count" class="chip" hidden></span></div>'
         + '<button class="btn" id="trash-select-all" disabled>Select all</button>'
         + '<button class="btn" id="trash-restore" disabled>Restore selected</button>'
         + '<button class="btn btn-danger" id="trash-empty" disabled>Empty trash</button>'
@@ -216,8 +220,8 @@ function ensureView() {
         emit('loupe:open', { id, index, images });
     });
     on('selection', patchSelection);
-    on('trash:changed', () => {
-        if (open) loadTrash();
+    on('trash:changed', ({ loaded = false } = {}) => {
+        if (open && !loaded) loadTrash();
     });
     return root;
 }
@@ -225,6 +229,9 @@ function ensureView() {
 function render() {
     ensureView();
     root.querySelector('#trash-count').textContent = `${fmt(total)} photos · ${bytesLabel(totalBytes)}`;
+    const pendingChip = root.querySelector('#trash-pending-count');
+    pendingChip.textContent = `${fmt(pendingHub)} waiting for hub`;
+    pendingChip.hidden = pendingHub === 0;
     root.querySelector('#trash-select-all').disabled = !images.length || loading;
     root.querySelector('#trash-restore').disabled = !selection.size || loading;
     root.querySelector('#trash-empty').disabled = !total || loading;
@@ -247,6 +254,12 @@ function render() {
         return;
     }
     body.innerHTML = `<div class="trash-grid ${selection.size ? 'selmode' : ''}">${images.map(cellHtml).join('')}</div>`;
+    for (const image of body.querySelectorAll('.trash-cell img')) {
+        image.addEventListener('error', () => {
+            image.hidden = true;
+            image.closest('.trash-cell')?.querySelector('.trash-thumb-fallback')?.removeAttribute('hidden');
+        }, { once: true });
+    }
 }
 
 function patchSelection() {
@@ -279,6 +292,7 @@ async function loadTrash() {
         images = [];
         total = 0;
         totalBytes = 0;
+        pendingHub = 0;
         loading = false;
         loadError = true;
         render();
@@ -290,6 +304,7 @@ async function loadTrash() {
         images = [];
         total = 0;
         totalBytes = 0;
+        pendingHub = 0;
         loading = false;
         loadError = true;
         render();
@@ -298,6 +313,7 @@ async function loadTrash() {
     images = (data && data.images || []).map((img) => ({ ...img, id: Number(img.id) })).filter((img) => img.id);
     total = Number(data?.total) || images.length;
     totalBytes = Number(data?.total_bytes) || 0;
+    pendingHub = Number(data?.pending_hub_count) || images.filter((image) => image.pending_hub).length;
     for (const img of images) byId.set(Number(img.id), img);
     loading = false;
     render();
@@ -364,8 +380,12 @@ async function emptyTrashWithConfirm() {
         showToast(typeof detail === 'string' ? detail : "Trash couldn't be emptied");
         return;
     }
-    emit('trash:changed', {});
-    showToast(`Trash emptied · ${bytesLabel(response.data.freed_bytes)} freed`);
+    await loadTrash();
+    emit('trash:changed', { loaded: true });
+    const deleted = Number(response.data.deleted_count) || 0;
+    const waiting = Number(response.data.hub_pending) || 0;
+    const summary = `Emptied ${fmt(deleted)} photo${deleted === 1 ? '' : 's'}`;
+    showToast(waiting ? `${summary} · ${fmt(waiting)} waiting for hub` : `${summary} · ${bytesLabel(response.data.freed_bytes)} freed`);
 }
 
 export function openTrash() {
