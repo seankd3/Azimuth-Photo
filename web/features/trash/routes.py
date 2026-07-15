@@ -9,7 +9,8 @@ from pydantic import BaseModel, Field
 
 from features.trash import service as trash_service
 from features.trash.remote import FORWARDED_HEADER, HubTrashRequestError, empty_hub_trash
-from features.sync import satellite
+from features.sync import contract, satellite
+from features.sync.contract import require_compatible_api_revision
 
 
 router = APIRouter()
@@ -73,6 +74,7 @@ async def api_empty_trash(request: Request, _payload: EmptyTrashBody | None = No
     # fall through to a full purge, and never touch the DB for it.
     if _payload is not None and not _payload.hub_image_ids:
         return {"deleted_count": 0, "freed_bytes": 0, "errors": [], "skipped_offline": 0}
+    await require_compatible_api_revision(request)
     forwarded = request.headers.get(FORWARDED_HEADER) == "1"
     target_ids = _payload.hub_image_ids if _payload is not None else None
     if not (satellite.is_satellite_mode() and not forwarded):
@@ -95,6 +97,8 @@ async def api_empty_trash(request: Request, _payload: EmptyTrashBody | None = No
             hub_error = "Connect to the hub before synced photos can be permanently deleted from here."
         elif len(mirror_refs["hub_image_ids"]) != mirror_refs["count"]:
             hub_error = "Some synced photos are missing their hub identity. They will remain queued until the catalog sync repairs them."
+        elif not await contract.hub_supports("trash.scoped_empty", hub=hub, force=True):
+            hub_error = "The hub is running an older version. Synced photos stay queued until it updates."
         else:
             try:
                 remote_result = await empty_hub_trash(hub, mirror_refs["hub_image_ids"])

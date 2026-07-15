@@ -68,23 +68,29 @@ def main(argv: list[str] | None = None) -> int:
     results = []
     base_url = ""
     offline = [scenario for scenario in selected if scenario.name == "trash_empty_offline_hub"]
-    standard = [scenario for scenario in selected if scenario.name != "trash_empty_offline_hub"]
+    old_hub = [scenario for scenario in selected if scenario.name == "handshake_skew"]
+    special = {"trash_empty_offline_hub", "handshake_skew"}
+    standard = [scenario for scenario in selected if scenario.name not in special]
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(
             headless=True,
             args=["--no-sandbox", "--disable-dev-shm-usage"],
         )
         try:
-            for scenarios, offline_hub in ((standard, False), (offline, True)):
+            groups = (
+                (standard, {}, "direct owner"),
+                (offline, {"offline_hub": True}, "offline satellite"),
+                (old_hub, {"old_hub": True}, "old-hub satellite"),
+            )
+            for scenarios, server_options, label in groups:
                 if not scenarios:
                     continue
-                if offline_hub:
+                if server_options:
                     manifest = reset_fixture()
-                with ProbeServer(offline_hub=offline_hub) as server:
+                with ProbeServer(**server_options) as server:
                     base_url = server.base_url
-                    label = "offline satellite" if offline_hub else "direct owner"
                     print(f"Probe server: {base_url} ({label}, isolated PHOTOARCHIVE_HOME)", flush=True)
-                    harness = BrowserHarness(browser, server.base_url, manifest)
+                    harness = BrowserHarness(browser, server.base_url, manifest, server.old_hub)
                     for scenario in scenarios:
                         result = harness.run(scenario)
                         results.append(result)

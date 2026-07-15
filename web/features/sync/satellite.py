@@ -46,6 +46,14 @@ def device_auth_headers() -> dict[str, str]:
     return {"X-Device-Token": token} if token else {}
 
 
+def hub_request_headers() -> dict[str, str]:
+    """Shared headers for every request a satellite sends to its hub."""
+
+    from features.sync.contract import request_headers
+
+    return {**device_auth_headers(), **request_headers()}
+
+
 def is_satellite_mode() -> bool:
     """Standalone counts: satellite semantics do not require a hub."""
 

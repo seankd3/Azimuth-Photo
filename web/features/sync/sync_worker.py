@@ -17,9 +17,8 @@ import settings
 from data import connection
 from features.sync.mirror import MirrorPuller
 from features.sync.prefetch import ThumbPrefetcher
-from features.sync import oplog, satellite
+from features.sync import contract, oplog, satellite
 from features.sync.executor import run_sync_work
-from features.sync.versioning import hub_compatibility
 from features.trash import remote as trash_remote
 from features.trash import service as trash_service
 
@@ -34,7 +33,7 @@ _MAX_BACKOFF_SECONDS = 300.0
 async def _urllib_request(method: str, url: str, *, body: bytes | None = None, headers: dict | None = None) -> tuple[int, dict, bytes]:
     def request() -> tuple[int, dict, bytes]:
         request_headers = dict(headers or {})
-        request_headers.update(satellite.device_auth_headers())
+        request_headers.update(satellite.hub_request_headers())
         req = urllib.request.Request(url, data=body, headers=request_headers, method=method)
         try:
             with urllib.request.urlopen(req, timeout=30) as response:
@@ -49,9 +48,10 @@ class SyncWorker:
         self.db_path = db_path
         self.hub = (hub or satellite.hub_url()).rstrip("/")
         self._request = request or _urllib_request
-        self.mirror = MirrorPuller(db_path=db_path, hub=self.hub, request=self._request)
-        self.prefetch = ThumbPrefetcher(db_path=db_path, hub=self.hub, request=self._request)
+        self.mirror = MirrorPuller(db_path=db_path, hub=self.hub, request=self._hub_request)
+        self.prefetch = ThumbPrefetcher(db_path=db_path, hub=self.hub, request=self._hub_request)
         self._force_mirror_refresh = False
+        self._force_contract_refresh = False
         self._paused = False
         self._stop = asyncio.Event()
         self._wake = asyncio.Event()
@@ -70,7 +70,6 @@ class SyncWorker:
             "last_sync_at": None,
             "backoff_seconds": 0,
             "pending_hub_trash": 0,
-            **hub_compatibility(None),
         }
 
     def status(self) -> dict:
@@ -79,6 +78,7 @@ class SyncWorker:
             "paused": self._paused,
             "mirror": self.mirror.status(),
             "prefetch": self.prefetch.status(),
+            **contract.hub_status(self.hub),
         }
 
     def pause(self) -> None:
@@ -91,6 +91,7 @@ class SyncWorker:
 
     def sync_now(self) -> None:
         self._force_mirror_refresh = True
+        self._force_contract_refresh = True
         self._wake.set()
 
     def stop(self) -> None:
@@ -139,7 +140,8 @@ class SyncWorker:
     async def sync_once(self) -> None:
         if not self.hub:
             raise RuntimeError("PHOTOARCHIVE_HUB_URL is required for satellite sync")
-        await self.refresh_hub_version()
+        await self.refresh_hub_contract(force=self._force_contract_refresh)
+        self._force_contract_refresh = False
         await self._retry_pending_hub_trash()
         items = await satellite.record_local_images(self.db_path)
         self._refresh_queue(items)
@@ -182,6 +184,10 @@ class SyncWorker:
         self._status["pending_hub_trash"] = int(refs["count"])
         if not refs["count"] or time.time() < self._pending_trash_next_attempt:
             return
+        if not await contract.hub_supports(
+            "trash.scoped_empty", hub=self.hub, request=self._hub_request
+        ):
+            return
         if len(refs["hub_image_ids"]) != refs["count"]:
             self._schedule_pending_trash_retry("Some synced photos are missing their hub identity.")
             return
@@ -218,7 +224,7 @@ class SyncWorker:
                 if not chunk:
                     raise RuntimeError(f"Original changed during sync: {item['filename']}")
                 started = time.monotonic()
-                status_code, _headers, body = await self._request(
+                status_code, _headers, body = await self._hub_request(
                     "POST",
                     self.hub + f"/api/sync/upload/{content_hash}",
                     body=chunk,
@@ -236,7 +242,7 @@ class SyncWorker:
                 offset += len(chunk)
                 self._status["bytes_remaining"] = max(0, int(self._status["bytes_remaining"]) - len(chunk))
                 await self._cap_bandwidth(len(chunk), elapsed)
-        status_code, _headers, body = await self._request(
+        status_code, _headers, body = await self._hub_request(
             "POST",
             self.hub + f"/api/sync/upload/{content_hash}",
             body=b"",
@@ -366,27 +372,21 @@ class SyncWorker:
     async def _json(self, method: str, path: str, payload: dict | None = None) -> dict:
         body = json.dumps(payload, separators=(",", ":")).encode() if payload is not None else None
         headers = {"Content-Type": "application/json"} if body is not None else {}
-        status_code, _headers, response = await self._request(method, self.hub + path, body=body, headers=headers)
+        status_code, _headers, response = await self._hub_request(method, self.hub + path, body=body, headers=headers)
         if not 200 <= status_code < 300:
             raise RuntimeError(f"sync {method} {path} failed ({status_code}): {response.decode(errors='replace')[:300]}")
         return json.loads(response or b"{}")
 
-    async def refresh_hub_version(self) -> None:
-        """Refresh compatibility non-fatally; old hubs must not stop normal sync."""
+    async def _hub_request(self, method: str, url: str, *, body: bytes | None = None, headers: dict | None = None):
+        """Attach the revision header to every request made by this satellite."""
 
-        try:
-            status_code, _headers, response = await self._request(
-                "GET", f"{self.hub}/api/version", headers={}
-            )
-            if not 200 <= status_code < 300:
-                self._status.update(hub_compatibility(None))
-                return
-            payload = json.loads(response or b"{}")
-            version = payload.get("version") if isinstance(payload, dict) else None
-            self._status.update(hub_compatibility(version))
-        except (OSError, ValueError, json.JSONDecodeError):
-            # A transient probe failure is not a compatibility verdict.
-            return
+        outbound_headers = {**dict(headers or {}), **contract.request_headers()}
+        return await self._request(method, url, body=body, headers=outbound_headers)
+
+    async def refresh_hub_contract(self, *, force: bool = False) -> None:
+        """Refresh once at startup, then use the ten-minute shared cache."""
+
+        await contract.refresh_hub_contract(self.hub, request=self._hub_request, force=force)
 
     async def _set_uploaded(self, content_hashes: set[str]) -> None:
         if not content_hashes:
