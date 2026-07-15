@@ -208,11 +208,12 @@ function collectCaptionSettings() {
 function collectDirtySettings() {
     const payload = {};
     for (const field of dirtySettings) {
+        if (field === 'thumbnail_cache_policy') continue;
         payload[field] = draftSettings[field];
     }
     if (dirtySettings.has('embed_model_preset')) Object.assign(payload, collectModelSettings());
     if (dirtySettings.has('caption_model_preset')) Object.assign(payload, collectCaptionSettings());
-    if (THUMB_FIELDS.some((field) => dirtySettings.has(field))) {
+    if (THUMB_FIELDS.some((field) => dirtySettings.has(field)) || dirtySettings.has('thumbnail_cache_policy')) {
         payload.thumbnail_cache_policy = thumbnailCachePolicy;
     }
     return payload;
@@ -1008,7 +1009,9 @@ async function pollScanUntilDone(sourceId) {
     clearInterval(scanTimer);
     const tick = async () => {
         const status = await getScanStatus().catch(() => null);
-        if (!status || !status.scanning) {
+        // Null/5xx is a transient fetch failure — keep progress UI and retry.
+        if (!status) return;
+        if (!status.scanning) {
             clearInterval(scanTimer);
             scanTimer = null;
             scanSourceId = null;
@@ -1135,6 +1138,8 @@ function bindSettingInputs(body) {
     for (const input of body.querySelectorAll('input[name="drawer_thumbnail_cache_policy"]')) {
         input.addEventListener('change', () => {
             thumbnailCachePolicy = input.value || 'keep';
+            if (thumbnailCachePolicy === 'keep') dirtySettings.delete('thumbnail_cache_policy');
+            else dirtySettings.add('thumbnail_cache_policy');
             updateSaveBar();
         });
     }
@@ -1188,9 +1193,16 @@ async function saveDrawerSettings() {
         updateSaveBar();
         return;
     }
+    const enablingCaptions = dirtySettings.has('caption_scan_enabled')
+        && Boolean(draftSettings.caption_scan_enabled)
+        && !Boolean(savedSettings.caption_scan_enabled);
     const result = await saveSettings(collectDirtySettings());
     if (result && result.ok) {
         applySettingsData(result);
+        if (enablingCaptions) {
+            const resumed = await resumeCaptionScan();
+            if (resumed?.captions_status) captionStatus = resumed.captions_status;
+        }
         renderActivity();
         renderDrawer();
         const folderReady = Boolean(String(settingValue('publish_dir') || '').trim());
@@ -1407,9 +1419,31 @@ function bindDrawerActions() {
             }
             if (key === 'people') {
                 const worker = (peopleStatus && peopleStatus.worker) || {};
-                result = worker.manual_pause ? await resumePeopleScan() : await pausePeopleScan();
+                const peoplePaused = Boolean(worker.manual_pause || !settingValue('people_scan_enabled'));
+                if (peoplePaused) {
+                    if (!settingValue('people_scan_enabled')) {
+                        const saveData = await saveSettings({ people_scan_enabled: true });
+                        if (saveData && saveData.ok) applySettingsData(saveData);
+                    }
+                    result = await resumePeopleScan();
+                } else {
+                    result = await pausePeopleScan();
+                }
             }
-            if (key === 'captions') result = captionStatus && captionStatus.active ? await pauseCaptionScan() : await resumeCaptionScan();
+            if (key === 'captions') {
+                const captionsPaused = Boolean(captionStatus && !captionStatus.active);
+                if (captionsPaused) {
+                    if (!settingValue('caption_scan_enabled')) {
+                        const saveData = await saveSettings({ caption_scan_enabled: true });
+                        if (saveData && saveData.ok) applySettingsData(saveData);
+                    }
+                    result = await resumeCaptionScan();
+                    if (result?.captions_status) captionStatus = result.captions_status;
+                } else {
+                    result = await pauseCaptionScan();
+                    if (result?.captions_status) captionStatus = result.captions_status;
+                }
+            }
             if (key === 'metadata') result = metadataStatus && metadataStatus.manual_pause ? await startMetadataScan() : await stopMetadataScan();
             if (!result) showToast('Couldn’t update background work');
             await refreshDrawer();
