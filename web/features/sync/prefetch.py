@@ -18,7 +18,7 @@ from urllib.parse import urlencode
 
 from data import connection
 from features.sync import satellite
-from features.sync.executor import run_sync_work
+from features.sync.executor import run_foreground_sync_work, run_sync_work
 
 
 RequestFn = Callable[..., Awaitable[tuple[int, dict[str, str], bytes]]]
@@ -32,18 +32,48 @@ CREATE TABLE IF NOT EXISTS sync_prefetch_state (
 """
 
 
-async def _urllib_request(method: str, url: str, *, body: bytes | None = None, headers: dict | None = None) -> tuple[int, dict[str, str], bytes]:
+async def _request_with_runner(
+    runner,
+    method: str,
+    url: str,
+    *,
+    body: bytes | None = None,
+    headers: dict | None = None,
+    timeout: float,
+) -> tuple[int, dict[str, str], bytes]:
     def request() -> tuple[int, dict[str, str], bytes]:
         request_headers = dict(headers or {})
         request_headers.update(satellite.device_auth_headers())
         req = urllib.request.Request(url, data=body, headers=request_headers, method=method)
         try:
-            with urllib.request.urlopen(req, timeout=10) as response:  # noqa: S310 - configured tailnet hub.
+            with urllib.request.urlopen(req, timeout=timeout) as response:  # noqa: S310 - configured tailnet hub.
                 return response.status, dict(response.headers), response.read()
         except urllib.error.HTTPError as error:
             return error.code, dict(error.headers or {}), error.read()
 
-    return await run_sync_work(request)
+    return await runner(request)
+
+
+async def _urllib_request(method: str, url: str, *, body: bytes | None = None, headers: dict | None = None) -> tuple[int, dict[str, str], bytes]:
+    return await _request_with_runner(
+        run_sync_work,
+        method,
+        url,
+        body=body,
+        headers=headers,
+        timeout=10,
+    )
+
+
+async def _foreground_urllib_request(method: str, url: str, *, body: bytes | None = None, headers: dict | None = None) -> tuple[int, dict[str, str], bytes]:
+    return await _request_with_runner(
+        run_foreground_sync_work,
+        method,
+        url,
+        body=body,
+        headers=headers,
+        timeout=2,
+    )
 
 
 def _store_with_thumbnail_cache(size: str, image_id: int, signature: str, data: bytes) -> None:

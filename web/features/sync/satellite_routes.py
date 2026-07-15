@@ -1,5 +1,7 @@
 """Local controls for the satellite sync worker."""
 
+import asyncio
+
 import db
 
 from fastapi import APIRouter, Request
@@ -12,6 +14,27 @@ from features.trash import service as trash_service
 
 
 router = APIRouter(tags=["sync"])
+_manual_sync_tasks: set[asyncio.Task] = set()
+
+
+def _start_manual_sync_task(coro) -> None:
+    task = asyncio.create_task(coro)
+    _manual_sync_tasks.add(task)
+    task.add_done_callback(_manual_sync_tasks.discard)
+
+
+async def _refresh_mirror(worker) -> None:
+    try:
+        await worker.mirror.refresh()
+    except Exception as error:
+        worker.mirror._status["last_error"] = str(error)
+
+
+async def _prefetch_browse_tier(worker) -> None:
+    try:
+        await worker.prefetch.prefetch_once(size="sm")
+    except Exception as error:
+        worker.prefetch._status["last_error"] = str(error)
 
 
 @router.post("/api/sync/hub")
@@ -69,22 +92,24 @@ async def sync_now():
 async def sync_mirror_refresh():
     worker = get_worker()
     if worker is not None:
-        try:
-            await worker.mirror.refresh()
-        except Exception as error:
-            worker.mirror._status["last_error"] = str(error)
-    return await sync_status()
+        _start_manual_sync_task(_refresh_mirror(worker))
+    return JSONResponse(
+        {"status": "pending", "job": "mirror_refresh"},
+        status_code=202,
+        headers={"Retry-After": "1"},
+    )
 
 
 @router.post("/api/sync/prefetch")
 async def sync_prefetch():
     worker = get_worker()
     if worker is not None:
-        try:
-            await worker.prefetch.prefetch_once(size="sm")
-        except Exception as error:
-            worker.prefetch._status["last_error"] = str(error)
-    return await sync_status()
+        _start_manual_sync_task(_prefetch_browse_tier(worker))
+    return JSONResponse(
+        {"status": "pending", "job": "thumb_prefetch"},
+        status_code=202,
+        headers={"Retry-After": "1"},
+    )
 
 
 @router.post("/api/sync/prefetch/loupe/{image_id}")

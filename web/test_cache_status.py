@@ -671,6 +671,39 @@ class CacheStatusTests(BackendTestCase):
         self.assertEqual(json.loads(uncached_response.body)["reason"], "source_offline")
         self.assertIsNone((await self._image_row(image_id))["missing_at"])
 
+    async def test_dead_hub_thumb_returns_204_and_enqueues_background_fill(self):
+        source = await self._source("hub-media")
+        image_id = await self._image(source["id"], "remote.jpg")
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "UPDATE images SET hub_remote = 1, hub_image_id = 901 WHERE id = ?",
+                (image_id,),
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        async def dead_hub(*_args, **_kwargs):
+            await asyncio.sleep(30)
+
+        with (
+            unittest.mock.patch.object(media_routes.satellite, "hub_url", return_value="http://dead-hub"),
+            unittest.mock.patch.object(media_routes, "_urllib_request", side_effect=dead_hub),
+            unittest.mock.patch.object(media_routes, "_schedule_remote_media_prefetch") as enqueue,
+            unittest.mock.patch.object(thumbnails, "_memory_get_entry_fast", return_value=None),
+            unittest.mock.patch.object(thumbnails, "fast_disk_path_entry", return_value=None),
+            unittest.mock.patch.object(thumbnails, "fast_disk_read_entry", return_value=None),
+        ):
+            started = time.perf_counter()
+            response = await media_routes.serve_thumbnail(HeaderRequest(), "sm", image_id)
+            elapsed = time.perf_counter() - started
+
+        self.assertEqual(response.status_code, 204)
+        self.assertLessEqual(elapsed, 3.0)
+        enqueue.assert_called_once()
+        self.assertEqual(enqueue.call_args.args[1], "sm")
+
     async def test_zero_byte_image_is_quarantined_and_logged_once(self):
         source = await self._source("zero-media")
         image_id = await self._image(source["id"], "empty.jpg")
