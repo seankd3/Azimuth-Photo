@@ -400,8 +400,16 @@ function redo() {
 }
 
 function syncFilmstrip() {
-    filmstrip.innerHTML = viewState.images.map((image, index) => `<button class="develop-thumb ${Number(image.id) === Number(currentImage?.id) ? 'cur' : ''}" data-index="${index}" data-tip="${developTip(image)}" aria-label="${String(image.filename || `Photo ${index + 1}`).replaceAll('"', '&quot;')}"><img src="${image.thumb_url || thumbUrl('sm', image.id)}" loading="lazy" decoding="async" alt=""></button>`).join('');
-    filmstrip.querySelector('.cur')?.scrollIntoView({ block: 'nearest', inline: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+    const imageIds = viewState.images.map((image) => Number(image.id)).join(',');
+    const currentId = Number(currentImage?.id);
+    if (filmstrip.dataset.imageIds !== imageIds) {
+        filmstrip.dataset.imageIds = imageIds;
+        filmstrip.innerHTML = viewState.images.map((image, index) => `<button class="develop-thumb ${Number(image.id) === currentId ? 'cur' : ''}" data-index="${index}" data-image-id="${image.id}" data-tip="${developTip(image)}" aria-label="${String(image.filename || `Photo ${index + 1}`).replaceAll('"', '&quot;')}"><img src="${image.thumb_url || thumbUrl('sm', image.id)}" loading="lazy" decoding="async" alt=""></button>`).join('');
+    } else {
+        filmstrip.querySelector('.develop-thumb.cur')?.classList.remove('cur');
+        filmstrip.querySelector(`[data-image-id="${currentId}"]`)?.classList.add('cur');
+    }
+    filmstrip.querySelector(`[data-image-id="${currentId}"]`)?.scrollIntoView({ block: 'nearest', inline: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
 }
 
 function pregenNeighbors(image) {
@@ -1079,6 +1087,7 @@ function init() {
             const entry = currentImage && stateCache.get(Number(currentImage.id));
             return clone(entry?.settings || {});
         },
+        notify: showToast,
     });
     historyPanel = mountHistoryPanel(presetsPanel?.root, {
         getEntry: () => currentImage && stateCache.get(Number(currentImage.id)),
