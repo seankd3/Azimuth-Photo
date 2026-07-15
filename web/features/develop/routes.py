@@ -353,6 +353,22 @@ async def _history(image_id: int) -> list[dict[str, Any]]:
         await connection.close_async(conn, db_path=_configured_db_path())
 
 
+async def _snapshots(image_id: int) -> list[dict[str, Any]]:
+    conn = await connection.open_async(_configured_db_path())
+    try:
+        cursor = await conn.execute(
+            "SELECT id, settings, label, created_at FROM develop_history "
+            "WHERE image_id = ? AND label LIKE 'Snapshot:%' ORDER BY id DESC",
+            (image_id,),
+        )
+        return [
+            {**dict(row), "settings": _json_settings(row["settings"])}
+            for row in await cursor.fetchall()
+        ]
+    finally:
+        await connection.close_async(conn, db_path=_configured_db_path())
+
+
 async def _ensure_base(image_id: int, image: dict) -> tuple[rawproc.BasePaths, dict[str, Any]]:
     return await asyncio.to_thread(rawproc.ensure_base_cache, image_id, image["filepath"])
 
@@ -807,8 +823,7 @@ async def api_list_snapshots(image_id: int):
     _image, error = await _image_or_error(image_id)
     if error:
         return error
-    history = await _history(image_id)
-    return {"snapshots": [entry for entry in history if str(entry["label"] or "").lower().startswith("snapshot:")]}
+    return {"snapshots": await _snapshots(image_id)}
 
 
 @router.post("/api/develop/{image_id}/snapshots")
