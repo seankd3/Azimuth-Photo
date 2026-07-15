@@ -119,7 +119,7 @@ def _parse_path_date(value: str) -> float | None:
             0,
             0,
         ).timestamp()
-    except ValueError:
+    except (ValueError, OSError, OverflowError):
         return None
 
 
