@@ -211,11 +211,11 @@ async def run_startup(
         await _gather_logged(
             "common_filter_cache_warmup",
             *(
-                api_rankings(limit=60, file_type=file_type)
+                api_rankings(limit=100, file_type=file_type, stacks="collapsed")
                 for file_type in file_types
             ),
             *(
-                api_rankings(limit=60, q=file_type)
+                api_rankings(limit=100, q=file_type, stacks="collapsed")
                 for file_type in file_types
             ),
             *(
@@ -238,7 +238,7 @@ async def run_startup(
             get_filter_options(),
             build_ai_status(),
             get_date_groups(visible_thumb_size="sm", cache_root=cache_root()),
-            api_rankings(limit=60),
+            api_rankings(limit=100, stacks="collapsed"),
             mosaic_next(n=12, strategy="explore"),
             api_folders(max_depth=0),
             api_folders(max_depth=1),
@@ -302,7 +302,7 @@ async def run_startup(
             ),
             get_visible_past_matchups("md"),
             api_folders(max_depth=1),
-            api_rankings(limit=50),
+            api_rankings(limit=100, stacks="collapsed"),
             api_rankings(limit=50, sort="resolution"),
             api_settings(),
         )
