@@ -6,6 +6,7 @@ import time as _time
 
 from date_inference import infer_image_date
 from data import connection
+from data.repositories import image_deletion
 from data.repositories.common import chunked as _chunked
 from core.path_groups import safe_commonpath
 
@@ -830,56 +831,33 @@ async def delete_image_catalog_rows_on_conn(conn, image_ids: list[int]) -> dict:
     if not image_ids:
         return {"images_deleted": 0, "comparisons_deleted": 0}
 
+    expanded_image_ids = await image_deletion.expand_image_deletion_ids(conn, image_ids)
     comparison_count = 0
     comparison_decrements: dict[int, int] = {}
-    image_id_set = set(image_ids)
-    for chunk in _chunked(image_ids):
+    image_id_set = set(expanded_image_ids)
+    seen_comparison_ids: set[int] = set()
+    for chunk in _chunked(expanded_image_ids):
         placeholders = ",".join("?" for _ in chunk)
-        await conn.execute(f"DELETE FROM embeddings WHERE image_id IN ({placeholders})", chunk)
-        await conn.execute(f"DELETE FROM embeddings_by_model WHERE image_id IN ({placeholders})", chunk)
-        await conn.execute(f"DELETE FROM image_captions WHERE image_id IN ({placeholders})", chunk)
-        await conn.execute(f"DELETE FROM caption_scan_images WHERE image_id IN ({placeholders})", chunk)
         cursor = await conn.execute(
-            f"SELECT winner_id, loser_id FROM comparisons "
+            f"SELECT id, winner_id, loser_id FROM comparisons "
             f"WHERE winner_id IN ({placeholders}) OR loser_id IN ({placeholders})",
             chunk + chunk,
         )
         for row in await cursor.fetchall():
+            comparison_id = int(row["id"])
+            if comparison_id in seen_comparison_ids:
+                continue
+            seen_comparison_ids.add(comparison_id)
             winner_id = int(row["winner_id"])
             loser_id = int(row["loser_id"])
             if winner_id in image_id_set and loser_id not in image_id_set:
                 comparison_decrements[loser_id] = comparison_decrements.get(loser_id, 0) + 1
             elif loser_id in image_id_set and winner_id not in image_id_set:
                 comparison_decrements[winner_id] = comparison_decrements.get(winner_id, 0) + 1
-        cursor = await conn.execute(
-            f"DELETE FROM comparisons "
-            f"WHERE winner_id IN ({placeholders}) OR loser_id IN ({placeholders})",
-            chunk + chunk,
-        )
-        comparison_count += max(0, cursor.rowcount or 0)
-        await conn.execute(f"DELETE FROM cache_entries WHERE image_id IN ({placeholders})", chunk)
-        await conn.execute(f"DELETE FROM propagation_updates WHERE image_id IN ({placeholders})", chunk)
-        await conn.execute(f"DELETE FROM collection_images WHERE image_id IN ({placeholders})", chunk)
-        await conn.execute(f"DELETE FROM import_batch_images WHERE image_id IN ({placeholders})", chunk)
-        await conn.execute(f"DELETE FROM stack_members WHERE image_id IN ({placeholders})", chunk)
-        await conn.execute(
-            f"DELETE FROM stacks WHERE representative_image_id IN ({placeholders}) "
-            "AND id NOT IN (SELECT stack_id FROM stack_members)",
-            chunk,
-        )
-        await conn.execute(
-            f"DELETE FROM face_assignments WHERE face_id IN ("
-            f"SELECT id FROM face_detections WHERE image_id IN ({placeholders}))",
-            chunk,
-        )
-        await conn.execute(f"DELETE FROM face_detections WHERE image_id IN ({placeholders})", chunk)
-        await conn.execute(f"DELETE FROM person_image_membership WHERE image_id IN ({placeholders})", chunk)
-        await conn.execute(f"DELETE FROM face_scan_images WHERE image_id IN ({placeholders})", chunk)
-        await conn.execute(
-            f"UPDATE collections SET cover_image_id = NULL "
-            f"WHERE cover_image_id IN ({placeholders})",
-            chunk,
-        )
+    comparison_count = len(seen_comparison_ids)
+    await image_deletion.prepare_image_deletion(conn, expanded_image_ids)
+    for chunk in _chunked(expanded_image_ids):
+        placeholders = ",".join("?" for _ in chunk)
         await conn.execute(f"DELETE FROM images WHERE id IN ({placeholders})", chunk)
     if comparison_decrements:
         await conn.executemany(
