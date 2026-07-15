@@ -47,7 +47,9 @@ def _windows_volumes() -> Iterable[Path]:
     for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
         root = f"{letter}:\\"
         drive_type = ctypes.windll.kernel32.GetDriveTypeW(root)
-        has_dcim = os.path.isdir(f"{root}DCIM")
+        has_dcim = drive_type in {WINDOWS_DRIVE_REMOVABLE, WINDOWS_DRIVE_FIXED} and os.path.isdir(
+            f"{root}DCIM"
+        )
         if _is_windows_card_drive(drive_type, has_dcim=has_dcim):
             yield Path(root)
 
