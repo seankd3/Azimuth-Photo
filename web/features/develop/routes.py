@@ -85,11 +85,11 @@ SYNC_GROUP_KEYS: dict[str, tuple[str, ...]] = {
     "detail": (
         "Sharpness",
         "SharpenRadius",
-        "SharpenDetail",
         "SharpenEdgeMasking",
         "LuminanceSmoothing",
         "ColorNoiseReduction",
-        "LuminanceNoiseReductionDetail",
+        "LuminanceDetail",
+        "LuminanceContrast",
         "ColorNoiseReductionDetail",
         "ColorNoiseReductionSmoothness",
     ),

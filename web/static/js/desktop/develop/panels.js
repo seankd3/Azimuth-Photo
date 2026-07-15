@@ -22,7 +22,7 @@ const PRESENCE = [
 ];
 const DETAIL = [
     slider('Sharpness', 'Amount', 0, 150), slider('SharpenRadius', 'Radius', .5, 3, .1, 1),
-    slider('SharpenDetail', 'Detail', 0, 100, 1, 25), slider('SharpenEdgeMasking', 'Masking', 0, 100),
+    slider('SharpenEdgeMasking', 'Masking', 0, 100),
     slider('LuminanceSmoothing', 'Luminance NR', 0, 100), slider('LuminanceDetail', 'NR Detail', 0, 100, 1, 50),
     slider('LuminanceContrast', 'NR Contrast', 0, 100), slider('ColorNoiseReduction', 'Color NR', 0, 100),
     slider('DefringePurpleAmount', 'Purple Defringe', 0, 100), slider('DefringePurpleHueLo', 'Purple Hue Low', 0, 100), slider('DefringePurpleHueHi', 'Purple Hue High', 0, 100),
