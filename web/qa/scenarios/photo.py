@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from qa.config import scaled_timeout_ms
+
 
 def loupe_and_develop(qa) -> None:
     qa.goto_desktop()
@@ -28,7 +30,7 @@ def loupe_and_develop(qa) -> None:
             const canvas = document.querySelector('#develop-canvas');
             return canvas?.classList.contains('ready') && canvas.width > 0 && canvas.height > 0;
         }""",
-        timeout=30_000,
+        timeout=scaled_timeout_ms(30_000),
     )
     status = qa.page.locator("#develop-status")
     assert "error" not in (status.get_attribute("class") or ""), status.inner_text()

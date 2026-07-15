@@ -3,21 +3,21 @@
 from __future__ import annotations
 
 import os
+import tempfile
 from pathlib import Path
 
 
 WEB_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = WEB_ROOT.parent
 
-SCRATCH_ROOT = Path(
-    os.environ.get("PHOTOARCHIVE_QA_SCRATCH", "/mnt/expansion/tmp/az1/qa-harness")
-).resolve()
+DEFAULT_SCRATCH_ROOT = Path(tempfile.gettempdir()) / "azimuth-photo" / "qa-harness"
+SCRATCH_ROOT = Path(os.environ.get("PHOTOARCHIVE_QA_SCRATCH", DEFAULT_SCRATCH_ROOT)).resolve()
 FIXTURE_HOME = SCRATCH_ROOT / "fixture-home"
 CATALOG_DB = FIXTURE_HOME / "data" / "catalog" / "photoarchive.db"
 PRISTINE_DB = SCRATCH_ROOT / "photoarchive.pristine.db"
 MANIFEST_PATH = SCRATCH_ROOT / "fixture-manifest.json"
-SERVER_LOG = SCRATCH_ROOT / "server.log"
 REPORT_PATH = SCRATCH_ROOT / "report.json"
+RUNS_ROOT = SCRATCH_ROOT / "runs"
 SCREENSHOT_DIR = SCRATCH_ROOT / "screenshots"
 
 FIXTURE_VERSION = "desktop-qa-v9"
@@ -26,7 +26,28 @@ VISIBLE_IMAGE_COUNT = 4_000
 TRASH_IMAGE_COUNT = 6
 TRASH_MIRROR_IMAGE_COUNT = 1
 COLLECTION_IMAGE_COUNT = 30
-DEFAULT_ACTION_TIMEOUT_MS = int(os.environ.get("PHOTOARCHIVE_QA_ACTION_TIMEOUT_MS", "30000"))
+
+def _wait_multiplier() -> float:
+    value = float(os.environ.get("QA_WAIT_MULTIPLIER", "1"))
+    if value <= 0:
+        raise ValueError("QA_WAIT_MULTIPLIER must be greater than zero")
+    return value
+
+
+WAIT_MULTIPLIER = _wait_multiplier()
+
+
+def scaled_seconds(seconds: float) -> float:
+    """Apply the one QA load-tolerance knob to condition deadlines."""
+
+    return seconds * WAIT_MULTIPLIER
+
+
+def scaled_timeout_ms(milliseconds: int) -> int:
+    return int(milliseconds * WAIT_MULTIPLIER)
+
+
+DEFAULT_ACTION_TIMEOUT_MS = scaled_timeout_ms(int(os.environ.get("PHOTOARCHIVE_QA_ACTION_TIMEOUT_MS", "30000")))
 
 
 def fixture_environment() -> dict[str, str]:
@@ -39,6 +60,9 @@ def fixture_environment() -> dict[str, str]:
         "PHOTOARCHIVE_SMOKE_MODE": "1",
         "PHOTOARCHIVE_MODE": "standalone",
         "PHOTOARCHIVE_ACCESS": "local",
+        # The seeding subprocess may have a different TMPDIR. Keep all fixture
+        # paths on this invocation's chosen QA scratch root.
+        "PHOTOARCHIVE_QA_SCRATCH": str(SCRATCH_ROOT),
         "TMPDIR": os.environ.get("TMPDIR", "/mnt/expansion/tmp"),
         "PYTHONPATH": str(WEB_ROOT),
     }

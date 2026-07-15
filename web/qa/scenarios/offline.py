@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from qa.config import SCREENSHOT_DIR
+from qa.config import SCREENSHOT_DIR, scaled_timeout_ms
 
 
 def grid_offline_thumbs(qa) -> None:
@@ -31,7 +31,7 @@ def grid_offline_thumbs(qa) -> None:
             return cells.length === 12 && cells.every(cell => !cell.classList.contains('skel'))
                 && cells.every(cell => cell.classList.contains('thumb-offline'));
         }""",
-        timeout=10_000,
+        timeout=scaled_timeout_ms(10_000),
     )
     assert qa.page.locator("#grid-flow .grid-chunk:not(.ghost) .cell.skel").count() == 0
     assert qa.page.locator("#grid-flow .grid-chunk:not(.ghost) .cell.thumb-offline").count() >= 12

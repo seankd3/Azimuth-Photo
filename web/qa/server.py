@@ -15,7 +15,7 @@ import urllib.request
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from qa.config import SERVER_LOG, WEB_ROOT, fixture_environment
+from qa.config import WEB_ROOT, fixture_environment, scaled_seconds
 
 
 def _free_port() -> int:
@@ -59,7 +59,13 @@ class OldHubStub:
 
 
 class ProbeServer:
-    def __init__(self, *, offline_hub: bool = False, old_hub: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        offline_hub: bool = False,
+        old_hub: bool = False,
+        log_path: Path,
+    ) -> None:
         if offline_hub and old_hub:
             raise ValueError("ProbeServer hub modes are mutually exclusive")
         self.port = _free_port()
@@ -68,6 +74,7 @@ class ProbeServer:
         self._log_file = None
         self.offline_hub = offline_hub
         self.old_hub = OldHubStub() if old_hub else None
+        self.log_path = log_path
 
     def __enter__(self) -> "ProbeServer":
         env = os.environ.copy()
@@ -83,8 +90,10 @@ class ProbeServer:
             # offline satellite flow below gets its own isolated process.
             env.update({"PHOTOARCHIVE_MODE": "hub"})
         env.update({"PHOTOARCHIVE_HOST": "127.0.0.1", "PHOTOARCHIVE_PORT": str(self.port)})
-        SERVER_LOG.parent.mkdir(parents=True, exist_ok=True)
-        self._log_file = SERVER_LOG.open("w", encoding="utf-8")
+        self.log_path.parent.mkdir(parents=True, exist_ok=True)
+        self._log_file = self.log_path.open("a", encoding="utf-8")
+        self._log_file.write(f"\n--- ProbeServer {self.base_url} starting ---\n")
+        self._log_file.flush()
         self.process = subprocess.Popen(
             [sys.executable, "-m", "uvicorn", "app:app", "--host", "127.0.0.1", "--port", str(self.port)],
             cwd=str(WEB_ROOT),
@@ -99,51 +108,61 @@ class ProbeServer:
         return self
 
     def _wait_ready(self, timeout: float = 30.0) -> None:
-        deadline = time.monotonic() + timeout
+        deadline = time.monotonic() + scaled_seconds(timeout)
         last_error = ""
         while time.monotonic() < deadline:
             if self.process and self.process.poll() is not None:
-                raise RuntimeError(f"QA server exited early with code {self.process.returncode}; see {SERVER_LOG}")
+                raise RuntimeError(f"QA server exited early with code {self.process.returncode}; see {self.log_path}")
             try:
-                with urllib.request.urlopen(f"{self.base_url}/api/dev/status", timeout=1) as response:
+                with urllib.request.urlopen(f"{self.base_url}/api/dev/status", timeout=scaled_seconds(1)) as response:
                     if response.status == 200:
                         return
             except (urllib.error.URLError, TimeoutError, OSError) as exc:
                 last_error = str(exc)
             time.sleep(0.1)
-        raise RuntimeError(f"QA server did not become ready on {self.base_url}: {last_error}; see {SERVER_LOG}")
+        raise RuntimeError(f"QA server did not become ready on {self.base_url}: {last_error}; see {self.log_path}")
 
     def _wait_for_initial_sync_scan(self, timeout: float = 90.0) -> None:
         """Keep the offline scenario out of the fixture's startup write batch."""
 
-        deadline = time.monotonic() + timeout
+        deadline = time.monotonic() + scaled_seconds(timeout)
         while time.monotonic() < deadline:
             try:
-                with urllib.request.urlopen(f"{self.base_url}/api/sync/status", timeout=1) as response:
+                with urllib.request.urlopen(f"{self.base_url}/api/sync/status", timeout=scaled_seconds(1)) as response:
                     payload = json.loads(response.read() or b"{}")
                 if int(payload.get("queue_depth") or 0) or payload.get("recent_errors"):
                     return
             except (json.JSONDecodeError, urllib.error.URLError, TimeoutError, OSError):
                 pass
             time.sleep(0.1)
-        raise RuntimeError(f"QA satellite did not finish its initial sync scan; see {SERVER_LOG}")
+        raise RuntimeError(f"QA satellite did not finish its initial sync scan; see {self.log_path}")
 
     def __exit__(self, _exc_type, _exc, _tb) -> None:
         process = self.process
         if process is not None and process.poll() is None:
-            try:
-                os.killpg(process.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
+            self._stop_process(signal.SIGTERM)
             try:
                 process.wait(timeout=8)
             except subprocess.TimeoutExpired:
-                try:
-                    os.killpg(process.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
+                self._stop_process(signal.SIGKILL)
                 process.wait(timeout=5)
         if self._log_file is not None:
             self._log_file.close()
         if self.old_hub is not None:
             self.old_hub.stop()
+
+    def _stop_process(self, sig: signal.Signals) -> None:
+        """Use process groups on POSIX and native process termination on Windows."""
+
+        if self.process is None:
+            return
+        try:
+            if os.name == "nt":
+                if sig == signal.SIGKILL:
+                    self.process.kill()
+                else:
+                    self.process.terminate()
+            else:
+                os.killpg(self.process.pid, sig)
+        except ProcessLookupError:
+            pass

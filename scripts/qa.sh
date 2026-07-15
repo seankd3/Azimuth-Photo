@@ -2,10 +2,16 @@
 # Deterministic desktop end-to-end gate. Never targets a long-lived server or catalog.
 set -euo pipefail
 
-ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-export TMPDIR="${TMPDIR:-/mnt/expansion/tmp}"
-export PHOTOARCHIVE_QA_SCRATCH="${PHOTOARCHIVE_QA_SCRATCH:-/mnt/expansion/tmp/az1/qa-harness}"
-mkdir -p "$TMPDIR" "$PHOTOARCHIVE_QA_SCRATCH"
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+PYTHON="$ROOT/web/.venv/bin/python"
+if [ -x "$ROOT/web/.venv/Scripts/python.exe" ]; then
+  PYTHON="$ROOT/web/.venv/Scripts/python.exe"
+fi
+
+if [ ! -x "$PYTHON" ]; then
+  echo "QA requires a virtualenv at web/.venv" >&2
+  exit 2
+fi
 
 cd "$ROOT/web"
-exec .venv/bin/python -m qa.run "$@"
+exec "$PYTHON" -m qa.run "$@"

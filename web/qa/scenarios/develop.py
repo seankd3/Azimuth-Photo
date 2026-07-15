@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from qa.config import scaled_timeout_ms
+
 
 def _settings(qa, image_id: int) -> dict:
     response = qa.page.request.get(f"{qa.base_url}/api/develop/{image_id}")
@@ -76,7 +78,7 @@ def develop_raw_workflow(qa) -> None:
             const canvas = document.querySelector('#develop-canvas');
             return canvas?.classList.contains('ready') && canvas.width > 0 && canvas.height > 0;
         }""",
-        timeout=30_000,
+        timeout=scaled_timeout_ms(30_000),
     )
     _assert_canvas(qa)
 
@@ -151,7 +153,7 @@ def develop_raw_workflow(qa) -> None:
     qa.page.locator("#develop-toolbar [data-action='export']").click()
     dialog = qa.page.locator(".develop-export-dialog")
     dialog.wait_for(state="visible")
-    with qa.page.expect_download(timeout=30_000) as download_info:
+    with qa.page.expect_download(timeout=scaled_timeout_ms(30_000)) as download_info:
         dialog.locator("[data-export-confirm]").click()
     download = download_info.value
     output = download.path()
