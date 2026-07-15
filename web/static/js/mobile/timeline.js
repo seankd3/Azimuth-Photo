@@ -19,6 +19,7 @@ import { icon } from '../icons.js';
 import { personLabel } from '../people_labels.js';
 
 const PAGE = 120;
+const MAX_WINDOW = PAGE * 3;
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const FULL_MONTHS = [
     'January', 'February', 'March', 'April', 'May', 'June',
@@ -55,6 +56,7 @@ let zoomIdx = 0;                 // 0 = 3-col · 1 = 5-col dense · 2 = month li
 let generation = 0;
 let loadingNext = false;
 let loadingPrev = false;
+let initialLoading = false;
 let endReached = false;
 let flatIds = [];
 let suppressClickUntil = 0;
@@ -159,6 +161,14 @@ function mkDaySection(dk, d) {
         toggleDay(sec);
     });
     return sec;
+}
+
+function mkMonthHeader(key) {
+    const header = document.createElement('div');
+    header.className = 'm-month-head';
+    header.dataset.month = key;
+    header.textContent = monthLabel(key);
+    return header;
 }
 
 const dayIds = (sec) => [...sec.querySelectorAll('.mcell[data-id]:not([data-stack-member])')]
@@ -301,6 +311,9 @@ function appendImages(batch) {
     for (const img of batch) {
         const d = parseDate(img.date_taken);
         const dk = d ? dayKey(d) : 'undated';
+        const month = d ? monthKeyOf(d) : 'undated';
+        const previousMonth = lastDay?.dataset.month;
+        if (!lastDay || previousMonth !== month) frag.appendChild(mkMonthHeader(month));
         if (!lastDay || lastDay.dataset.day !== dk) {
             lastDay = mkDaySection(dk, d);
             frag.appendChild(lastDay);
@@ -311,6 +324,25 @@ function appendImages(batch) {
     timeline.appendChild(frag);
     timeline.classList.toggle('selmode', selState.mode);
     updateDayChecks();
+}
+
+function firstVisibleCell() {
+    const paneTop = pane.getBoundingClientRect().top;
+    return [...timeline.querySelectorAll('.mcell[data-id]:not([data-stack-member])')]
+        .find((cell) => cell.getBoundingClientRect().bottom >= paneTop) || null;
+}
+
+function trimWindowFromStart() {
+    if (images.length <= MAX_WINDOW) return;
+    const anchor = firstVisibleCell();
+    const anchorId = anchor?.dataset.id;
+    const oldTop = anchor?.getBoundingClientRect().top || 0;
+    const dropped = images.length - MAX_WINDOW;
+    images = images.slice(dropped);
+    startOffset += dropped;
+    rebuildLoaded();
+    const nextAnchor = anchorId && timeline.querySelector(`.mcell[data-id="${anchorId}"]`);
+    if (nextAnchor) pane.scrollTop += nextAnchor.getBoundingClientRect().top - oldTop;
 }
 
 function renderFixedImages(batch) {
@@ -492,6 +524,7 @@ async function loadHistogram() {
 
 export async function reload() {
     const gen = ++generation;
+    initialLoading = true;
     stackRequest += 1;
     closeExpandedStack();
     images = [];
@@ -514,6 +547,7 @@ export async function reload() {
         renderScopeBar();
         updateMonthPill(false);
         pane.scrollTop = 0;
+        initialLoading = false;
         return;
     }
     let page = null;
@@ -545,10 +579,11 @@ export async function reload() {
     renderScopeBar();
     updateMonthPill(false);
     pane.scrollTop = 0;
+    initialLoading = false;
 }
 
 export async function loadMore() {
-    if (loadingNext || endReached || zoomIdx === 2) return;
+    if (initialLoading || loadingNext || endReached || zoomIdx === 2) return;
     loadingNext = true;
     const gen = generation;
     let page = null;
@@ -569,6 +604,7 @@ export async function loadMore() {
     images = images.concat(page.images);
     rememberImages(page.images);
     appendImages(page.images);
+    trimWindowFromStart();
     if (page.images.length < PAGE) {
         endReached = true;
         endEl.hidden = false;

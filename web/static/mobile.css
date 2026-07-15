@@ -222,7 +222,30 @@ body.m-scoped #m-timeline { padding-top: var(--scopebar-h); }
 #m-end { padding: 20px 0 32px; text-align: center; font-size: 12px; color: var(--text-3); }
 
 .m-day { margin-bottom: 10px; }
-.m-day-head { display: flex; align-items: center; gap: 10px; padding: 14px 12px 8px; }
+.m-month-head {
+    position: sticky;
+    top: 0;
+    z-index: 7;
+    padding: 10px 12px 4px;
+    background: linear-gradient(var(--bg) 75%, transparent);
+    color: var(--text);
+    font-size: 17px;
+    font-weight: 720;
+    letter-spacing: -.01em;
+}
+.m-day-head {
+    position: sticky;
+    top: 30px;
+    z-index: 6;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    background: rgba(20, 21, 23, .94);
+    backdrop-filter: blur(10px);
+}
+body.m-scoped .m-month-head { top: var(--scopebar-h); }
+body.m-scoped .m-day-head { top: calc(var(--scopebar-h) + 30px); }
 .m-day-head h3 { font-size: 14px; font-weight: 600; letter-spacing: 0; }
 .m-day-check {
     position: relative;
@@ -1020,6 +1043,8 @@ body.sheet-keyboard #m-sel-actions.on { opacity: 0; transform: translateY(16px);
     will-change: transform;
 }
 #m-viewer.dragging #mv-img { transition: none; }
+#m-viewer.dismissing { animation: mv-dismiss .16s ease-in forwards; }
+@keyframes mv-dismiss { to { opacity: 0; transform: translateY(42px); } }
 #mv-flag {
     position: absolute;
     top: calc(38px + var(--sat));
