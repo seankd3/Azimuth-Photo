@@ -8,7 +8,7 @@ import {
 } from './api.js';
 import { loadCollectionImageIds } from './scope_data.js';
 import {
-    byId, emit, folderActive, on, patchPrefs, scope, scopeActive, scopeParams, scopePatchFromSmartQuery, selection, selectionChanged, setActiveLens,
+    byId, emit, folderActive, navigateToScope, on, patchPrefs, scope, scopeActive, scopeParams, scopePatchFromSmartQuery, selection, selectionChanged, setActiveLens,
     setLeftCollapsed, setScope, smartQueryActive, smartQueryFromScope, smartQueryName, smartQuerySummary, sortBase, viewState,
 } from './state.js';
 import { applyFlags, selectedIds, setCollectionPicker } from './selection.js';
@@ -88,7 +88,7 @@ function renderCollections() {
     for (const row of host.querySelectorAll('.coll-row')) {
         const mainButton = row.querySelector('.coll-main');
         mainButton?.addEventListener('click', () => {
-            setScope({
+            navigateToScope({
                 collectionId: row.dataset.collId,
                 collectionName: row.dataset.collName || 'Collection',
                 collectionSmart: row.dataset.collSmart === '1',
@@ -888,11 +888,11 @@ function renderLibrary() {
     for (const row of document.querySelectorAll('[data-lib]')) {
         row.addEventListener('click', () => {
             const key = row.dataset.lib;
-            if (key === 'all') setScope({});
-            if (key === 'picked') setScope({ flag: 'picked' });
-            if (key === 'rejected') setScope({ flag: 'rejected' });
+            if (key === 'all') navigateToScope({});
+            if (key === 'picked') navigateToScope({ flag: 'picked' });
+            if (key === 'rejected') navigateToScope({ flag: 'rejected' });
             if (key === 'trash') setActiveLens('trash');
-            if (key === 'recent') setScope({ sort: 'date_taken' });
+            if (key === 'recent') navigateToScope({ sort: 'date_taken' });
             closeLeftDrawer();
         });
     }
@@ -928,7 +928,7 @@ function renderSources() {
     host.querySelector('[data-add-source]')?.addEventListener('click', () => document.getElementById('system-btn')?.click());
     for (const row of host.querySelectorAll('[data-source]')) {
         row.addEventListener('click', () => {
-            setScope({ folder: [row.dataset.source] });
+            navigateToScope({ folder: [row.dataset.source] });
             closeLeftDrawer();
         });
     }
@@ -961,9 +961,8 @@ function savedViewSnapshot() {
 function restoreSavedView(view) {
     try {
         const saved = JSON.parse(view.query);
-        setScope(saved.scope && typeof saved.scope === 'object' ? saved.scope : saved);
+        navigateToScope(saved.scope && typeof saved.scope === 'object' ? saved.scope : saved);
         if (saved.layout) patchPrefs(saved.layout);
-        setActiveLens('grid');
         closeLeftDrawer();
         showToast(`Opened “${view.name}”`);
     } catch {

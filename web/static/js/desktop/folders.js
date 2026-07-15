@@ -1,6 +1,6 @@
 import { getFolderTree, revealFolder } from './api.js';
 import { downloadExport, openExportMenu } from './export_menu.js';
-import { emit, folderActive, folderValues, on, scopeParams, setScope } from './state.js';
+import { emit, folderActive, folderValues, navigateToScope, on, scopeParams } from './state.js';
 import { showToast } from './toast.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
 import { icon } from '../icons.js';
@@ -69,7 +69,7 @@ function nodeMatches(node, query) {
 
 function applyFolderScope(path, options = {}) {
     if (!path) return;
-    setScope({ folder: [path] }, options);
+    navigateToScope({ folder: [path] }, options);
     if (!options.keepOpen) closeDrawer();
 }
 
@@ -78,7 +78,7 @@ function toggleFolderScope(path) {
     const next = current.includes(path)
         ? current.filter((item) => item !== path)
         : [...current, path];
-    setScope({ folder: next }, { merge: true });
+    navigateToScope({ folder: next }, { merge: true });
 }
 
 function rowScopePath(row) {
@@ -114,7 +114,7 @@ function selectFolderPath(path, row, event) {
         const range = rangeWithinParent(lastSelectedFolderPath, row);
         if (range.length) {
             const next = event.ctrlKey || event.metaKey ? [...new Set([...folderValues(), ...range])] : range;
-            setScope({ folder: next }, { merge: true });
+            navigateToScope({ folder: next }, { merge: true });
             return;
         }
     }
