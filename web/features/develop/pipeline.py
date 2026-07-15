@@ -233,7 +233,7 @@ def _soft_clamp(value: np.ndarray) -> np.ndarray:
     ).astype(np.float32)
 
 
-def _region_tone_map(rgb: np.ndarray, settings: Mapping[str, object]) -> np.ndarray:
+def _region_tone_map(rgb: np.ndarray, settings: Mapping[str, object], *, preserve_headroom: bool = False) -> np.ndarray:
     y = luma(rgb)
     ev = np.log2(np.maximum(y, C.TONE_EPSILON))
     highlights = _slider(settings, "Highlights2012")
@@ -257,7 +257,10 @@ def _region_tone_map(rgb: np.ndarray, settings: Mapping[str, object]) -> np.ndar
     contrast = _slider(settings, "Contrast2012")
     t_s = t * t * (3.0 - 2.0 * t)  # smoothstep S: steepens midtones, vanishes at 0/1
     t3 = _soft_clamp(t + np.sign(contrast) * C.CONTRAST_S_STRENGTH * np.abs(contrast) * (t_s - t))
-    gain = np.power(t3, C.TONE_GAMMA) / np.maximum(y2, C.TONE_EPSILON)
+    # HDR bases keep luma above 1.0 untouched (the sigmoid view transform
+    # owns the rolloff); SDR keeps the historical normalize-to-1 behavior.
+    reference = np.minimum(y2, 1.0) if preserve_headroom else y2
+    gain = np.power(t3, C.TONE_GAMMA) / np.maximum(reference, C.TONE_EPSILON)
     return (rgb * gain[..., None]).astype(np.float32)
 
 
@@ -1048,7 +1051,7 @@ def _grain(c: np.ndarray, settings: Mapping[str, object], *, pixel_offset: tuple
     return c + noise[..., None] * amount * C.GRAIN_FACTOR
 
 
-def _scene_linear_user_ops(rgb: np.ndarray, settings: Mapping[str, object]) -> tuple[np.ndarray, float]:
+def _scene_linear_user_ops(rgb: np.ndarray, settings: Mapping[str, object], *, preserve_headroom: bool = False) -> tuple[np.ndarray, float]:
     """Apply the scene-linear Basic operations shared by generic and DNG renders.
 
     For an Adobe-profiled render §30.2 places this block after HueSatMap and
@@ -1056,7 +1059,7 @@ def _scene_linear_user_ops(rgb: np.ndarray, settings: Mapping[str, object]) -> t
     from the post-BaselineExposure tap and replaces stages 5-7 entirely.
     """
     result = np.asarray(rgb, dtype=np.float32) * np.float32(np.exp2(_number(settings, "Exposure2012")))
-    result = _region_tone_map(result, settings)
+    result = _region_tone_map(result, settings, preserve_headroom=preserve_headroom)
     dehaze = _slider(settings, "Dehaze")
     if dehaze != 0.0:
         result = (result - C.DEHAZE_AIRLIGHT_FACTOR * dehaze) / (1.0 - C.DEHAZE_AIRLIGHT_FACTOR * dehaze)
@@ -1141,6 +1144,21 @@ def apply_pipeline(
             grain_size_scale=np.clip(_number(settings, "pa_FilmGrainSize", 100.0), 0.0, 100.0) / 100.0,
             min_dimension=blur_min_dimension,
         )
+    elif isinstance(color_profile, Mapping) and color_profile.get("hdr"):
+        # HDR-merged bases carry scene values above 1.0; the Adobe SDR curve
+        # would hard-clip that headroom to white. Route through the sigmoid
+        # view transform (darktable port) for an asymptotic highlight rolloff.
+        from features.develop import sigmoid_view
+
+        if adobe_profile is not None:
+            # prepare_scene_linear left us in linear ProPhoto; return to sRGB
+            # primaries (scene-linear) before user ops + view transform.
+            shape = scene_linear.shape
+            scene_linear = np.maximum(
+                (scene_linear.reshape(-1, 3) @ dng_pipeline.PROPHOTO_TO_LINEAR_SRGB.T).reshape(shape), 0.0
+            ).astype(np.float32)
+        rgb, dehaze = _scene_linear_user_ops(scene_linear, settings, preserve_headroom=True)
+        c = linear_to_srgb(sigmoid_view.sigmoid_view(rgb))
     elif adobe_profile is not None:
         def apply_user_ops(value: np.ndarray) -> np.ndarray:
             return _scene_linear_user_ops(value, settings)[0]
@@ -1156,11 +1174,13 @@ def apply_pipeline(
         rgb, dehaze = _scene_linear_user_ops(scene_linear, settings)
         c = linear_to_srgb(rgb)
     base_kind = str(color_profile.get("base_kind") or "raw") if isinstance(color_profile, Mapping) else "raw"
-    fitted_profile = None if base_kind == "display" or adobe_profile is not None else _camera_profile(color_profile)
+    is_hdr_base = isinstance(color_profile, Mapping) and bool(color_profile.get("hdr"))
+    fitted_profile = None if base_kind == "display" or adobe_profile is not None or is_hdr_base else _camera_profile(color_profile)
     if not film_stock:
         # Adobe's profile curve replaces the generic base curve and base
-        # saturation. Imported/user curves remain relative adjustments.
-        tone_base_kind = "display" if adobe_profile is not None else base_kind
+        # saturation; the HDR sigmoid view transform owns tone the same way.
+        # Imported/user curves remain relative adjustments.
+        tone_base_kind = "display" if adobe_profile is not None or is_hdr_base else base_kind
         c = _apply_tone_curves(c, settings, fitted_profile, base_kind=tone_base_kind)
     c = _hsl_and_black_white(c, settings, dehaze)
     if not _bool(settings, "ConvertToGrayscale"):

@@ -29,6 +29,13 @@ TONE_EV_BLACKS_CENTER = -6.0
 TONE_HIGHLIGHTS_POS_SCALE = 0.55
 
 CONTRAST_FACTOR = 0.85
+# Scene-referred sigmoid view transform for HDR-merged bases (darktable sigmoid.c
+# port; constants = derive_params(contrast=1.5, skew=0) so f(0.1845)=0.1845 and
+# f(inf)->1 asymptotically instead of the SDR clip).
+SIGMOID_FILM_POWER = 1.5
+SIGMOID_PAPER_POWER = 1.0
+SIGMOID_PAPER_EXP = 0.354355
+SIGMOID_FILM_FOG = 0.001426
 # Bounded S-curve contrast strength (max that provably never clips at |Contrast|=100).
 CONTRAST_S_STRENGTH = 1.0
 SOFT_CLAMP_FACTOR = 4.0
