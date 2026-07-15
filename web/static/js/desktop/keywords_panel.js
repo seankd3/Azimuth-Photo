@@ -116,9 +116,20 @@ function bindPanel(host, image, attached) {
     }
     for (const button of host.querySelectorAll('[data-keyword-remove]')) {
         button.addEventListener('click', async () => {
+            const keyword = keywordById(button.dataset.keywordRemove);
+            if (!keyword) return;
             try {
                 await post('/api/keywords/unassign', { keyword_id: Number(button.dataset.keywordRemove), image_ids: [Number(image.id)] });
                 await render();
+                showToast(`Removed ${keyword.path}`, {
+                    undo: async () => {
+                        try {
+                            await post('/api/keywords/assign', { keyword_id: Number(keyword.id), image_ids: [Number(image.id)] });
+                            await render();
+                            showToast(`Restored ${keyword.path}`);
+                        } catch (error) { showToast(error.message || "Couldn't restore keyword"); }
+                    },
+                });
             } catch (error) { showToast(error.message || "Couldn't remove keyword"); }
         });
     }
@@ -214,14 +225,23 @@ export function handleKeywordPainterKey(event) {
 
 export async function paintImage(imageId) {
     if (!painterActive || !armedKeyword) return false;
+    const keyword = armedKeyword;
     try {
         const payload = await request(`/api/images/${imageId}/keywords`);
-        const direct = (payload.keywords || []).some((keyword) => Number(keyword.id) === Number(armedKeyword.id) && Number(keyword.direct));
+        const direct = (payload.keywords || []).some((item) => Number(item.id) === Number(keyword.id) && Number(item.direct));
         await post(direct ? '/api/keywords/unassign' : '/api/keywords/assign', {
-            keyword_id: Number(armedKeyword.id), image_ids: [Number(imageId)],
+            keyword_id: Number(keyword.id), image_ids: [Number(imageId)],
         });
-        showToast(`${direct ? 'Removed' : 'Added'} · ${armedKeyword.path}`);
         if (Number(imageId) === renderedImageId) await render();
+        showToast(`${direct ? 'Removed' : 'Added'} · ${keyword.path}`, direct ? {
+            undo: async () => {
+                try {
+                    await post('/api/keywords/assign', { keyword_id: Number(keyword.id), image_ids: [Number(imageId)] });
+                    if (Number(imageId) === renderedImageId) await render();
+                    showToast(`Restored ${keyword.path}`);
+                } catch (error) { showToast(error.message || "Couldn't restore keyword"); }
+            },
+        } : {});
         return true;
     } catch (error) {
         showToast(error.message || "Couldn't paint keyword");
