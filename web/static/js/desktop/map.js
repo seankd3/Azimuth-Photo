@@ -1,8 +1,8 @@
 import { getCollection, getMapMarkers, thumbUrl } from './api.js';
-import { navigateToScope, on, scope, scopeParams, setImages, setRankingsMeta } from './state.js';
+import { emit, navigateToScope, on, scope, scopeParams, setImages, setRankingsMeta } from './state.js';
 import { icon } from '../icons.js';
 import { LAND_PATHS } from './world_land.js';
-import { formatCount as fmt } from './dom.js';
+import { escapeHtml as esc, formatCount as fmt } from './dom.js';
 
 let mounted = false;
 let initialized = false;
@@ -74,11 +74,12 @@ function renderMap(data = {}) {
         + '</svg><div id="map-pins">'
         + clusters.map((item, index) => {
             const count = item.markers.length;
-            return `<button class="map-pin" data-cluster="${index}" style="left:${(item.x / 10).toFixed(2)}%;top:${(item.y / 5).toFixed(2)}%" aria-label="Open ${fmt(count)} located photo${count === 1 ? '' : 's'} in grid">`
+            return `<button class="map-pin" data-cluster="${index}" style="left:${(item.x / 10).toFixed(2)}%;top:${(item.y / 5).toFixed(2)}%" aria-label="Preview ${fmt(count)} located photo${count === 1 ? '' : 's'}">`
                 + `<span>${count > 1 ? fmt(count) : ''}</span></button>`;
         }).join('')
         + '</div>'
-        + `<div id="map-info">${fmt(data.gps_count ?? markers.length)} located photos shown · ${fmt(data.total_count ?? data.gps_total_count ?? markers.length)} photos in pool</div>`;
+        + `<div id="map-info">${fmt(data.gps_count ?? markers.length)} located photos shown · ${fmt(data.total_count ?? data.gps_total_count ?? markers.length)} photos in pool</div>`
+        + '<div id="map-popover"></div>';
 }
 
 async function loadCollectionMarkers() {
@@ -121,8 +122,16 @@ async function load() {
     }
 }
 
-function openCluster(index) {
-    const item = cluster(markers)[index];
+function clusterAt(index) {
+    return cluster(markers)[index];
+}
+
+function closePopover() {
+    document.getElementById('map-popover')?.classList.remove('on');
+}
+
+function openClusterInGrid(index) {
+    const item = clusterAt(index);
     if (!item) return;
     const ids = item.markers.map((marker) => Number(marker.id)).filter((id) => id > 0);
     if (!ids.length) return;
@@ -133,12 +142,51 @@ function openCluster(index) {
     });
 }
 
+function openCluster(index, pin) {
+    const item = clusterAt(index);
+    if (!item) return;
+    const pop = document.getElementById('map-popover');
+    const rect = pin.getBoundingClientRect();
+    pop.dataset.cluster = String(index);
+    pop.innerHTML = `<div class="mp-head">${fmt(item.markers.length)} photo${item.markers.length === 1 ? '' : 's'} here</div>`
+        + '<div class="mp-previews">'
+        + item.markers.slice(0, 9).map((marker) => (
+            `<button class="mp-preview" data-id="${marker.id}">${marker.thumb_url
+                ? `<img src="${esc(marker.thumb_url)}" loading="lazy" decoding="async" alt="">`
+                : `<i class="map-thumb-neutral" aria-hidden="true">${icon('map-pin')}</i>`}<span>${esc(marker.filename || `Image ${marker.id}`)}</span></button>`
+        )).join('')
+        + '</div><button class="mp-open-grid" data-open-grid type="button">Open in Grid</button>';
+    pop.style.left = `${Math.min(window.innerWidth - 220, rect.left)}px`;
+    pop.style.top = `${Math.min(window.innerHeight - 260, rect.bottom + 8)}px`;
+    pop.classList.add('on');
+    pop.querySelector('.mp-preview')?.focus({ preventScroll: true });
+}
+
 export function initMap() {
     if (initialized) return;
     initialized = true;
     document.getElementById('map-stage').addEventListener('click', (event) => {
+        const openGrid = event.target.closest('#map-popover [data-open-grid]');
+        if (openGrid) {
+            openClusterInGrid(Number(document.getElementById('map-popover').dataset.cluster));
+            return;
+        }
+        const popItem = event.target.closest('#map-popover .mp-preview[data-id]');
+        if (popItem) {
+            emit('loupe:open', { id: Number(popItem.dataset.id), index: markers.findIndex((marker) => Number(marker.id) === Number(popItem.dataset.id)) });
+            closePopover();
+            return;
+        }
         const pin = event.target.closest('.map-pin[data-cluster]');
-        if (pin) openCluster(Number(pin.dataset.cluster));
+        if (pin) openCluster(Number(pin.dataset.cluster), pin);
+        else closePopover();
+    });
+    document.getElementById('map-stage').addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') return;
+        const pop = document.getElementById('map-popover');
+        if (!pop?.classList.contains('on')) return;
+        event.preventDefault();
+        closePopover();
     });
     on('scope', load);
 }
@@ -154,4 +202,5 @@ export function unmountMap() {
     generation += 1;
     markers = [];
     document.getElementById('view-map').classList.remove('active');
+    closePopover();
 }

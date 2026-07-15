@@ -549,11 +549,14 @@ html[data-badges-index="0"] .cell .c-idx { display: none; }
 #map-empty h3 { margin-bottom: 6px; font-size: 15px; font-weight: 600; }
 #map-empty p { color: var(--text-2); font-size: var(--fs-ui); line-height: var(--lh-loose); }
 .map-loading { position: absolute; left: 50%; top: 50%; width: 180px; height: 12px; transform: translate(-50%, -50%); }
-#map-popover { position: fixed; z-index: var(--z-popover); display: none; width: 220px; max-height: 260px; overflow-y: auto; overflow-x: hidden; padding: 6px; border: 1px solid var(--line); border-radius: var(--r-card); background: var(--surface-popover); box-shadow: 0 16px 48px rgba(0,0,0,.55); }
-#map-popover.on { display: grid; gap: 4px; }
+#map-popover { position: fixed; z-index: var(--z-popover); display: none; width: 220px; max-height: 260px; overflow: hidden; padding: 6px; border: 1px solid var(--line); border-radius: var(--r-card); background: var(--surface-popover); box-shadow: 0 16px 48px rgba(0,0,0,.55); }
+#map-popover.on { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 4px; }
 #map-popover .mp-head { padding: 4px 5px 6px; color: var(--text-3); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
-#map-popover button { display: grid; grid-template-columns: 36px minmax(0, 1fr); align-items: center; gap: var(--s2); padding: 5px; border-radius: var(--r-ctl); text-align: left; color: var(--text-2); }
-#map-popover button:hover { background: var(--card); color: var(--text); }
+#map-popover .mp-previews { min-height: 0; overflow-y: auto; display: grid; gap: 4px; }
+#map-popover .mp-preview { display: grid; grid-template-columns: 36px minmax(0, 1fr); align-items: center; gap: var(--s2); padding: 5px; border-radius: var(--r-ctl); text-align: left; color: var(--text-2); }
+#map-popover .mp-preview:hover { background: var(--card); color: var(--text); }
+#map-popover .mp-open-grid { margin-top: 2px; padding: 8px 5px 5px; border-top: 1px solid var(--line); color: var(--text); font-size: 12px; font-weight: 600; text-align: center; }
+#map-popover .mp-open-grid:hover { color: var(--accent); }
 #map-popover img { width: 36px; height: 30px; object-fit: cover; border-radius: 3px; }
 .map-thumb-neutral { width: 36px; height: 30px; display: grid; place-items: center; border-radius: 3px; background: var(--card); color: var(--text-3); }
 .map-thumb-neutral .icon { width: 14px; height: 14px; }
