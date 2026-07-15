@@ -18,7 +18,7 @@ from data import connection
 from data.repositories import images as image_repository
 from data.repositories import stacks as stack_repository
 from features.develop import rawproc, transform, virtual_copies
-from features.sync import oplog
+from features.sync import oplog, readthrough
 
 
 router = APIRouter()
@@ -27,6 +27,8 @@ _db_path: DbPathProvider | None = None
 _pregen_tasks: set[asyncio.Task] = set()
 _batch_tasks: set[asyncio.Task] = set()
 _base_generation_tasks: dict[int, asyncio.Task] = {}
+_base_generation_failures: dict[int, tuple[float, rawproc.RawDecodeError]] = {}
+_BASE_FAILURE_TTL_SECONDS = 5.0
 _batch_status: dict[str, Any] = {
     "state": "idle",
     "started_at": None,
@@ -360,8 +362,31 @@ def _cached_base(image_id: int, image: dict) -> rawproc.BasePaths | None:
     return rawproc.cached_base_paths(image_id, image["filepath"])
 
 
+def _recent_base_failure(image_id: int) -> rawproc.RawDecodeError | None:
+    failure = _base_generation_failures.get(image_id)
+    if failure is None:
+        return None
+    failed_at, error = failure
+    if time.monotonic() - failed_at < _BASE_FAILURE_TTL_SECONDS:
+        return error
+    _base_generation_failures.pop(image_id, None)
+    return None
+
+
+def _base_error_response(error: rawproc.RawDecodeError) -> JSONResponse:
+    if isinstance(error.__cause__, readthrough.BaseReadthroughError):
+        return JSONResponse(
+            {"error": str(error), "reason": "hub_unreachable"},
+            status_code=503,
+            headers={"Cache-Control": "no-store", "Retry-After": "5"},
+        )
+    return JSONResponse({"error": str(error)}, status_code=422)
+
+
 def _start_base_generation(image_id: int, image: dict) -> None:
     """Start the existing rawproc single-flight generator without holding a request open."""
+    if _recent_base_failure(image_id) is not None:
+        return
     existing = _base_generation_tasks.get(image_id)
     if existing is not None and not existing.done():
         return
@@ -369,10 +394,13 @@ def _start_base_generation(image_id: int, image: dict) -> None:
     async def generate() -> None:
         try:
             await _ensure_base(image_id, image)
-        except Exception:
-            # The polling request will surface the decode error if it is retried;
-            # do not leave an unobserved task exception in the server log.
-            pass
+            _base_generation_failures.pop(image_id, None)
+        except rawproc.RawDecodeError as exc:
+            _base_generation_failures[image_id] = (time.monotonic(), exc)
+        except Exception as exc:
+            failure = rawproc.RawDecodeError(str(exc) or "Develop base generation failed")
+            failure.__cause__ = exc
+            _base_generation_failures[image_id] = (time.monotonic(), failure)
         finally:
             _base_generation_tasks.pop(image_id, None)
 
@@ -510,6 +538,8 @@ async def api_develop_base_bin(image_id: int):
         return error
     paths = _cached_base(image_id, image)
     if paths is None:
+        if failure := _recent_base_failure(image_id):
+            return _base_error_response(failure)
         _start_base_generation(image_id, image)
         return _base_generating_response(image_id)
     return FileResponse(
@@ -526,6 +556,8 @@ async def api_develop_base_jpg(image_id: int):
         return error
     paths = _cached_base(image_id, image)
     if paths is None:
+        if failure := _recent_base_failure(image_id):
+            return _base_error_response(failure)
         _start_base_generation(image_id, image)
         return _base_generating_response(image_id)
     return FileResponse(paths.preview, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=31536000, immutable"})
@@ -547,7 +579,7 @@ async def api_develop_auto_tone(image_id: int):
     try:
         paths, cached_meta = await _ensure_base(image_id, image)
     except rawproc.RawDecodeError as exc:
-        return JSONResponse({"error": str(exc)}, status_code=422)
+        return _base_error_response(exc)
     row = await _load_settings(image_id)
     settings = _json_settings(row["settings"]) if row else {}
     asshot = cached_meta.get("as_shot") if isinstance(cached_meta, dict) else {}
@@ -648,10 +680,15 @@ async def api_develop_transform_auto(image_id: int):
     image, error = await _image_or_error(image_id)
     if error:
         return error
-    paths, _meta = await _ensure_base(image_id, image)
-    import gzip
-    payload = await asyncio.to_thread(paths.binary.read_bytes)
-    linear_u16, _width, _height = rawproc.parse_base_payload(gzip.decompress(payload))
+    try:
+        paths, _meta = await _ensure_base(image_id, image)
+        import gzip
+        payload = await asyncio.to_thread(paths.binary.read_bytes)
+        linear_u16, _width, _height = rawproc.parse_base_payload(gzip.decompress(payload))
+    except rawproc.RawDecodeError as exc:
+        return _base_error_response(exc)
+    except (OSError, ValueError) as exc:
+        return JSONResponse({"error": str(exc)}, status_code=422)
     result = await asyncio.to_thread(transform.auto_level_settings, linear_u16.astype("float32") / 65535.0)
     if result is None:
         return JSONResponse({"error": "No reliable horizon found"}, status_code=422)
@@ -663,10 +700,13 @@ async def api_get_develop(image_id: int):
     image, error = await _image_or_error(image_id)
     if error:
         return error
-    try:
-        _paths, meta = await _ensure_base(image_id, image)
-    except rawproc.RawDecodeError as exc:
-        return JSONResponse({"error": str(exc)}, status_code=422)
+    if image.get("hub_remote") and _cached_base(image_id, image) is None:
+        meta = rawproc.read_base_metadata(image_id) or {}
+    else:
+        try:
+            _paths, meta = await _ensure_base(image_id, image)
+        except rawproc.RawDecodeError as exc:
+            return _base_error_response(exc)
     meta = _profiled_meta(meta, image["filepath"])
     # Keep the interactive canvas on the same cache-native color contract as
     # render_display_preview().  _profiled_meta() also carries the resolved

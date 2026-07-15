@@ -185,21 +185,24 @@ async function load() {
     loadError = false;
     const seq = ++generation;
     render();
-    const [data, status] = await Promise.all([getPeople(500), getPeopleStatus()]);
-    if (seq !== generation) return;
-    loading = false;
-    peopleStatus = status;
-    if (!data) {
+    try {
+        const [data, status] = await Promise.all([getPeople(500), getPeopleStatus()]);
+        if (seq !== generation) return;
+        peopleStatus = status;
+        if (!data) throw new Error('People response was empty');
+        peopleData = data;
+        const total = allPeople().length;
+        setRankingsMeta({ visibleImages: total, sortQuality: null });
+    } catch {
+        if (seq !== generation) return;
         peopleData = null;
         loadError = true;
         setRankingsMeta({ visibleImages: 0, sortQuality: null });
+    } finally {
+        if (seq !== generation) return;
+        loading = false;
         render();
-        return;
     }
-    peopleData = data;
-    const total = allPeople().length;
-    setRankingsMeta({ visibleImages: total, sortQuality: null });
-    render();
 }
 
 function findPerson(id) {
