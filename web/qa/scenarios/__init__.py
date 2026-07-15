@@ -5,6 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
+from qa.scenarios.develop import develop_raw_workflow
+from qa.scenarios.metadata import keyword_and_iptc_persistence
+from qa.scenarios.publishing import collections_and_publishing
 from qa.scenarios.chrome import (
     folder_context_menu,
     import_entry,
@@ -39,6 +42,9 @@ SCENARIOS = [
     Scenario("source_context_menu", "Source context menu", source_context_menu),
     Scenario("folder_context_menu", "Folder context menu", folder_context_menu),
     Scenario("loupe_and_develop", "Loupe and Develop", loupe_and_develop),
+    Scenario("develop_raw_workflow", "Develop RAW workflow", develop_raw_workflow),
+    Scenario("collections_and_publishing", "Collections and Publishing", collections_and_publishing),
+    Scenario("keyword_and_iptc_persistence", "Keywording and metadata", keyword_and_iptc_persistence),
     Scenario("settings_panel", "Settings panel", settings_panel),
     Scenario("import_entry", "Import entry", import_entry),
     Scenario("search", "Search", search),

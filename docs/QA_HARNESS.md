@@ -51,6 +51,13 @@ Each scenario gets a fresh browser context and is independently named:
 - Trash load, typed Empty Trash confirmation, response payload, database
   result, empty-state repaint, and prompt return to All Photos.
 - Photo click into Loupe, then a full Develop canvas render.
+- A real RAW workflow: tone and presence sliders, crop and rotate, preset,
+  Before/After, reset, and a non-empty rendered export without NaN or canvas
+  failures.
+- A three-photo collection created from Grid selection, then carried through a
+  private link, website publishing node, and verified link revocation.
+- Hierarchical keyword assignment plus all editable IPTC fields, reloaded in
+  the photo panel to prove persistence.
 - Settings, Import, and live metadata search entry points.
 
 Every scenario rejects `console.error`, uncaught page errors, failed requests,
@@ -66,7 +73,8 @@ all other request failures still fail the scenario.
 - 4,000 active images across primary, removable, and `hub://` mirror sources;
 - nested folders, nine years of dates, flags, metadata, and a 30-photo
   collection;
-- six valid small JPEG originals for Loupe and Develop;
+- one tiny standards-readable DNG plus five valid small JPEG originals for
+  Loupe and Develop, and a deterministic Develop preset;
 - cached previews for every catalog row; and
 - six source-local Trash files that Empty Trash can really delete.
 
