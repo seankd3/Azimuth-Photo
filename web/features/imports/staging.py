@@ -329,15 +329,25 @@ async def _commit_worker(job: ImportJob) -> None:
     job.started_at = time.monotonic()
     try:
         for entry in job.entries:
+            if job.cancel_requested:
+                break
             await _import_entry(job, entry)
             if job.cancel_requested:
-                job.phase = "cancelled"
                 break
         else:
             job.phase = "applying"
             await _apply_during_import(job)
             job.phase = "complete"
-        await import_repository.complete_import_batch(
+        if job.cancel_requested:
+            job.phase = "applying"
+            await _apply_during_import(job)
+            job.phase = "cancelled"
+        finish_batch = (
+            import_repository.cancel_import_batch
+            if job.phase == "cancelled"
+            else import_repository.complete_import_batch
+        )
+        await finish_batch(
             db.DB_PATH, job.batch_id,
             source_id=None,
             image_rows=job.image_rows,

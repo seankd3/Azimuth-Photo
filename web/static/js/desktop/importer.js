@@ -160,10 +160,13 @@ function renderImportHistory() {
         const total = Number(batch.total_files || 0);
         const skipped = Number(batch.skipped_files || 0);
         const collisions = Number(batch.collision_count || 0);
-        const counts = `${fmt(imported)} imported${total ? ` / ${fmt(total)} files` : ''}${skipped ? ` · ${fmt(skipped)} skipped` : ''}${collisions ? ` · ${fmt(collisions)} renamed` : ''}`;
+        const cancelled = batch.status === 'cancelled';
+        const counts = cancelled
+            ? `Cancelled - ${fmt(imported)} of ${fmt(total)} imported${skipped ? ` · ${fmt(skipped)} skipped` : ''}`
+            : `${fmt(imported)} imported${total ? ` / ${fmt(total)} files` : ''}${skipped ? ` · ${fmt(skipped)} skipped` : ''}${collisions ? ` · ${fmt(collisions)} renamed` : ''}`;
         const label = batch.name || `Import ${id}`;
         return `<button class="import-history-row" data-import-batch="${id}" data-tip="Scope the grid to this import batch">`
-            + `<span><b>${esc(label)}</b><small>${esc(timeLabel(batch.started_at || batch.created_at))} · ${esc(batch.status || 'complete')}</small></span>`
+            + `<span><b>${esc(label)}</b><small>${esc(timeLabel(batch.started_at || batch.created_at))}${cancelled ? '' : ` · ${esc(batch.status || 'complete')}`}</small></span>`
             + `<em>${esc(counts)}</em></button>`;
     }).join('');
     for (const row of host.querySelectorAll('[data-import-batch]')) {

@@ -1,6 +1,7 @@
 import asyncio
 import os
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -132,6 +133,57 @@ class StagedImportTests(BackendTestCase):
             await self._wait(no_op)
             self.assertEqual(no_op.status()["files_done"], 0)
             self.assertEqual(no_op.status()["skipped_duplicates"], 0)
+        finally:
+            if old_root is None:
+                os.environ.pop("PHOTOARCHIVE_ORIGINALS_DIR", None)
+            else:
+                os.environ["PHOTOARCHIVE_ORIGINALS_DIR"] = old_root
+
+    async def test_cancel_mid_job_persists_partial_batch_without_clearing_uncopied_card_file(self):
+        root = Path(self.tempdir.name)
+        originals = root / "originals"
+        old_root = os.environ.get("PHOTOARCHIVE_ORIGINALS_DIR")
+        os.environ["PHOTOARCHIVE_ORIGINALS_DIR"] = str(originals)
+        try:
+            camera = root / "CARD" / "DCIM" / "100CANON"
+            camera.mkdir(parents=True)
+            first = camera / "FIRST.CR3"
+            second = camera / "SECOND.CR3"
+            first.write_bytes(b"first safely copied file")
+            second.write_bytes(b"second must remain on card")
+            scan = await self._card_scan(
+                root / "CARD" / "DCIM",
+                [self._entry(root / "CARD" / "DCIM", first), self._entry(root / "CARD" / "DCIM", second)],
+            )
+
+            original_import_entry = staging._import_entry
+
+            async def cancel_after_first(job, entry):
+                await original_import_entry(job, entry)
+                if entry["name"] == first.name:
+                    staging.request_cancel(job)
+
+            with patch.object(staging, "_import_entry", side_effect=cancel_after_first):
+                job = await staging.start_commit(
+                    scan,
+                    keys="all_checked_default",
+                    mode="copy",
+                    skip_suspects=True,
+                    clear_card=True,
+                    keyword_paths=[],
+                    collection_id=None,
+                )
+                await self._wait(job)
+
+            batch = await staging.import_repository.import_batch(db.DB_PATH, job.batch_id)
+            self.assertEqual(job.phase, "cancelled")
+            self.assertEqual(batch["status"], "cancelled")
+            self.assertEqual(batch["imported_files"], 1)
+            self.assertEqual(batch["total_files"], 2)
+            self.assertEqual(len(batch["images"]), 1)
+            self.assertTrue(Path(batch["images"][0]["filepath"]).is_file())
+            self.assertFalse(first.exists(), "a verified and registered copy may be cleared from the card")
+            self.assertTrue(second.exists(), "an uncopied card original must never be cleared")
         finally:
             if old_root is None:
                 os.environ.pop("PHOTOARCHIVE_ORIGINALS_DIR", None)
