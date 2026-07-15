@@ -141,6 +141,16 @@ def test_paired_device_token_unlocks_protected_route(clean_auth):
     assert client.get(PROTECTED_API, headers={"X-Device-Token": "bogus"}).status_code == 401
 
 
+def test_first_key_set_revokes_devices_paired_during_setup_window(clean_auth):
+    # Pre-key setup window: a LAN client pairs a device (trusted-first-client).
+    token = _pair_device("Snuck in during setup")
+    client = _client()
+    assert client.get(PROTECTED_API, headers={"X-Device-Token": token}).status_code == 200
+    # The owner then secures the install; the window slams shut on that device.
+    _set_owner_key()
+    assert client.get(PROTECTED_API, headers={"X-Device-Token": token}).status_code == 401
+
+
 def test_loopback_client_is_exempt_but_forwarded_remote_is_not(clean_auth):
     _set_owner_key()
     assert _client(LOOPBACK).get(PROTECTED_API).status_code == 200

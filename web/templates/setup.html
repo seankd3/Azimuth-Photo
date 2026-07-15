@@ -495,11 +495,11 @@
                 body: JSON.stringify({ generate: true }),
             });
             keyEl.textContent = result.key || '';
+            finishBtn.disabled = false;
         } catch (err) {
             keyError.textContent = 'Could not create an owner key: ' + String(err.message || err)
                 + '. You can set one later from the server machine.';
         }
-        finishBtn.disabled = false;
     });
 
     keyCopy.addEventListener('click', async () => {

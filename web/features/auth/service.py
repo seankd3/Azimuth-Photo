@@ -46,12 +46,20 @@ def session_epoch() -> int:
 
 async def set_owner_key(key: str) -> None:
     """Store the scrypt hash; rotating an existing key bumps the session epoch,
-    which invalidates every previously issued browser session (not device tokens)."""
+    which invalidates every previously issued browser session (not device tokens).
+    The FIRST key set also revokes every paired device: the pre-key setup window
+    trusts any LAN client, so slam it shut once the owner secures the install."""
     hashed = await asyncio.to_thread(share_auth.hash_password, key)
     current = settings.get_settings()
-    epoch = session_epoch() + (1 if str(current.get("owner_key_hash") or "").strip() else 0)
+    first_key = not str(current.get("owner_key_hash") or "").strip()
+    epoch = session_epoch() + (0 if first_key else 1)
     settings.save_settings({**current, "owner_key_hash": hashed, "owner_session_epoch": epoch})
     _verified_bearer_cache.clear()
+    if first_key:
+        import db
+        from features.sync import pairing
+
+        await pairing.revoke_all_devices(db.DB_PATH)
 
 
 async def verify_owner_key(key: str) -> bool:
