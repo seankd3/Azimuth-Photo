@@ -32,6 +32,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -63,6 +64,7 @@ fun ArchiveScreen() {
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var viewerIndex by remember { mutableStateOf<Int?>(null) }
+    var columns by rememberSaveable { mutableStateOf(4) }
 
     LaunchedEffect(activeQuery) {
         loading = true
@@ -114,10 +116,12 @@ fun ArchiveScreen() {
                 val gridState = rememberLazyGridState()
                 LazyVerticalGrid(
                     state = gridState,
-                    columns = GridCells.Fixed(4),
+                    columns = GridCells.Fixed(columns),
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                     horizontalArrangement = Arrangement.spacedBy(2.dp),
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pinchToChangeGridDensity(columns) { columns = it },
                 ) {
                     itemsIndexed(images, key = { _, img -> img.id }) { index, image ->
                         Box(

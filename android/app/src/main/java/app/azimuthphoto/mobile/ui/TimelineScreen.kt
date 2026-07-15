@@ -28,6 +28,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -56,6 +57,7 @@ fun TimelineScreen() {
     var items by remember { mutableStateOf<List<MediaItem>?>(null) }
     var backupStates by remember { mutableStateOf<Map<Long, String>>(emptyMap()) }
     var viewerIndex by remember { mutableStateOf<Int?>(null) }
+    var columns by rememberSaveable { mutableStateOf(4) }
     val progress by BackupWorker.progress.collectAsState()
 
     LaunchedEffect(progress.running) {
@@ -105,8 +107,10 @@ fun TimelineScreen() {
     val gridState = rememberLazyGridState()
     LazyVerticalGrid(
         state = gridState,
-        columns = GridCells.Fixed(4),
-        modifier = Modifier.fillMaxSize(),
+        columns = GridCells.Fixed(columns),
+        modifier = Modifier
+            .fillMaxSize()
+            .pinchToChangeGridDensity(columns) { columns = it },
         verticalArrangement = Arrangement.spacedBy(2.dp),
         horizontalArrangement = Arrangement.spacedBy(2.dp),
     ) {
