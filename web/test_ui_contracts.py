@@ -70,6 +70,16 @@ class UiContractsTests(BackendTestCase):
         self.assertIn("from '../api.js'", mobile_api)
         self.assertIn("export async function fetchJson", shared_api)
 
+    async def test_desktop_api_notifies_when_post_helpers_fail(self):
+        base_dir = os.path.dirname(__file__)
+        with open(os.path.join(base_dir, "static", "js", "desktop", "api.js"), encoding="utf-8") as fh:
+            desktop_api = fh.read()
+
+        self.assertIn("function reportApiFailure", desktop_api)
+        self.assertIn("if (!response.ok) reportApiFailure({ status: response.status });", desktop_api)
+        self.assertIn("const result = await requestWithStatus(url, jsonRequestOptions('POST', body));", desktop_api)
+        self.assertIn("return result.ok ? result.data : null;", desktop_api)
+
     async def test_service_worker_precaches_mobile_shell_only(self):
         base_dir = os.path.dirname(__file__)
         with open(os.path.join(base_dir, "static", "sw.js"), encoding="utf-8") as fh:

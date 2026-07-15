@@ -1,6 +1,6 @@
-import { emit, on, selection } from './state.js';
+import { emit, on, scope, selection } from './state.js';
 import { applyFlags } from './selection.js';
-import { openCollectionPicker } from './panel.js';
+import { openCollectionPicker, removeImagesFromCollection } from './panel.js';
 import { downloadExport } from './export_menu.js';
 import { queueBatchExport } from './develop/export_dialog.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
@@ -88,6 +88,7 @@ function render() {
         + `<button data-act="unflag">${icon('circle')} Clear flag</button>`
         + '</div><div class="pm-group">'
         + `<button data-act="collection">${icon('plus')} Add ${count > 1 ? `${count} to collection` : 'to collection'}</button>`
+        + (scope.collectionId && !scope.collectionSmart ? `<button data-act="remove-from-collection">${icon('minus')} Remove from this collection</button>` : '')
         + `<button data-act="loupe">${icon('image')} Open in Loupe</button>`
         + `<button data-act="similar">${icon('scan-search')} Find similar</button>`
         + (count >= 3 ? `<button data-act="hdr-merge">${icon('layers')} Merge ${count} to HDR</button>` : '')
@@ -113,6 +114,7 @@ function run(action) {
     else if (action === 'reject') applyFlags(ids, 'rejected');
     else if (action === 'unflag') applyFlags(ids, 'unflagged');
     else if (action === 'collection') openCollectionPicker(ids);
+    else if (action === 'remove-from-collection') removeImagesFromCollection(scope.collectionId, ids, scope.collectionName);
     else if (action === 'loupe') emit('loupe:open', { id: target.id, index: target.index });
     else if (action === 'similar') emit('similar:find', { imageId: target.id });
     else if (action === 'hdr-merge') mergeHdr(ids);

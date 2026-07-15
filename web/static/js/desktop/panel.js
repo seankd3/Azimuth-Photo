@@ -1050,6 +1050,30 @@ async function addImagesToCollection(collectionId, imageIds) {
     }
 }
 
+export async function removeImagesFromCollection(collectionId, imageIds, name = '') {
+    const ids = [...new Set(imageIds.map(Number))].filter((id) => id > 0);
+    if (!collectionId || !ids.length) return false;
+    const result = await removeFromCollection(collectionId, ids);
+    if (!result?.ok) {
+        showToast("Couldn't remove photos from this collection");
+        return false;
+    }
+    const label = name || collections.find((collection) => Number(collection.id) === Number(collectionId))?.name || 'collection';
+    await loadCollections();
+    emit('scope', scope);
+    showToast(`Removed ${ids.length} photo${ids.length === 1 ? '' : 's'} from “${label}”`, {
+        undo: async () => {
+            const restored = await addToCollection(collectionId, ids);
+            if (restored?.ok) {
+                await loadCollections();
+                emit('scope', scope);
+                showToast(`Restored to “${label}”`);
+            } else showToast("Couldn't restore photos to this collection");
+        },
+    });
+    return true;
+}
+
 export async function openCollectionPicker(imageIds, { onDone = null } = {}) {
     const ids = [...new Set(imageIds.map(Number))].filter((id) => id > 0);
     if (!ids.length) return;
