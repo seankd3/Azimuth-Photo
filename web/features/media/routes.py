@@ -12,7 +12,11 @@ from core.source_files import inspect_source_file
 from data import connection as data_connection
 from data.repositories import images as image_repository
 from features.sync import satellite
-from features.sync.prefetch import ThumbPrefetcher, _urllib_request
+from features.sync.prefetch import (
+    ThumbPrefetcher,
+    _foreground_urllib_request as _urllib_request,
+    _urllib_request as _background_urllib_request,
+)
 import thumbnails
 
 
@@ -27,6 +31,8 @@ _db_path: DbPathProvider | None = None
 _mark_image_missing: MarkImageMissing | None = None
 _browser_image_extensions = thumbnails.BROWSER_ORIGINAL_EXTENSIONS
 log = logging.getLogger(__name__)
+_REMOTE_MEDIA_FOREGROUND_TIMEOUT_SECONDS = 2.0
+_remote_prefetch_tasks: dict[tuple[int, str], asyncio.Task] = {}
 
 
 def configure(
@@ -134,33 +140,93 @@ async def _source_error_response(image, state: str) -> JSONResponse | None:
     return None
 
 
+def _remote_media_endpoint(remote_id: int, tier: str) -> str:
+    if tier == thumbnails.FULL_TIER:
+        return f"/api/full/{remote_id}"
+    return f"/api/thumb/{tier}/{remote_id}"
+
+
+def _remote_media_pending_response(tier: str) -> Response:
+    if tier != thumbnails.FULL_TIER:
+        return Response(status_code=204, headers={"Cache-Control": "no-store"})
+    return JSONResponse(
+        {
+            "error": "Hub media is still loading",
+            "reason": "hub_media_pending",
+        },
+        status_code=503,
+        headers={"Cache-Control": "no-store", "Retry-After": "2"},
+    )
+
+
+def _cache_remote_media(image, tier: str, data: bytes) -> str:
+    remote_id = int(image["hub_image_id"])
+    image_id = int(image["id"])
+    signature = ThumbPrefetcher._signature(remote_id, data)
+    thumbnails._write_thumbnail_to_disk(tier, image_id, signature, data, hot=False)
+    if tier != thumbnails.FULL_TIER:
+        thumbnails._memory_put(tier, image_id, signature, data)
+    return signature
+
+
+async def _prefetch_remote_media(image: dict, tier: str) -> None:
+    hub = satellite.hub_url().rstrip("/")
+    if not hub:
+        return
+    remote_id = int(image["hub_image_id"])
+    try:
+        status_code, _headers, data = await _background_urllib_request(
+            "GET",
+            hub + _remote_media_endpoint(remote_id, tier),
+        )
+        if 200 <= status_code < 300 and data:
+            await asyncio.to_thread(_cache_remote_media, image, tier, data)
+    except Exception as exc:
+        log.debug(
+            "worker=hub_media_prefetch image_id=%s tier=%s error=%s",
+            image.get("id"),
+            tier,
+            exc,
+        )
+
+
+def _schedule_remote_media_prefetch(image, tier: str) -> None:
+    image_data = dict(image)
+    key = (int(image_data["id"]), tier)
+    existing = _remote_prefetch_tasks.get(key)
+    if existing is not None and not existing.done():
+        return
+    task = asyncio.create_task(_prefetch_remote_media(image_data, tier))
+    _remote_prefetch_tasks[key] = task
+    task.add_done_callback(lambda _done, task_key=key: _remote_prefetch_tasks.pop(task_key, None))
+
+
 async def _remote_media_response(image, tier: str) -> Response:
     hub = satellite.hub_url().rstrip("/")
     if not hub:
-        return JSONResponse(
-            {"error": "Hub unreachable", "reason": "hub_unreachable"},
-            status_code=503,
-        )
+        return _remote_media_pending_response(tier)
     remote_id = int(image["hub_image_id"])
-    endpoint = f"/api/full/{remote_id}" if tier == thumbnails.FULL_TIER else f"/api/thumb/{tier}/{remote_id}"
+    endpoint = _remote_media_endpoint(remote_id, tier)
     try:
-        status_code, response_headers, data = await _urllib_request(
-            "GET", hub + endpoint, headers=satellite.hub_request_headers()
+        status_code, response_headers, data = await asyncio.wait_for(
+            _urllib_request("GET", hub + endpoint, headers=satellite.hub_request_headers()),
+            timeout=_REMOTE_MEDIA_FOREGROUND_TIMEOUT_SECONDS,
         )
     except Exception:
-        return JSONResponse(
-            {"error": "Hub unreachable", "reason": "hub_unreachable"},
-            status_code=503,
-        )
+        _schedule_remote_media_prefetch(image, tier)
+        return _remote_media_pending_response(tier)
     if not 200 <= status_code < 300:
+        if status_code >= 500:
+            _schedule_remote_media_prefetch(image, tier)
+            return _remote_media_pending_response(tier)
         return JSONResponse(
             {"error": "Hub media unavailable", "reason": "hub_media_unavailable"},
             status_code=status_code,
         )
-    signature = ThumbPrefetcher._signature(remote_id, data)
-    thumbnails._write_thumbnail_to_disk(tier, int(image["id"]), signature, data, hot=False)
-    if tier != thumbnails.FULL_TIER:
-        thumbnails._memory_put(tier, int(image["id"]), signature, data)
+    if not data:
+        _schedule_remote_media_prefetch(image, tier)
+        return _remote_media_pending_response(tier)
+    signature = _cache_remote_media(image, tier, data)
     media_type = next(
         (value for key, value in response_headers.items() if key.lower() == "content-type"),
         "image/jpeg",

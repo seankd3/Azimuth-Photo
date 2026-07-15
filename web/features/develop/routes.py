@@ -409,10 +409,25 @@ def _start_base_generation(image_id: int, image: dict) -> None:
 
 def _base_generating_response(image_id: int) -> JSONResponse:
     return JSONResponse(
-        {"image_id": image_id, "state": "generating"},
+        {"image_id": image_id, "state": "generating", "status": "pending"},
         status_code=202,
         headers={"Cache-Control": "no-store", "Retry-After": "1"},
     )
+
+
+def _cached_base_or_pending(
+    image_id: int,
+    image: dict,
+) -> tuple[rawproc.BasePaths | None, JSONResponse | None]:
+    """Keep request-path Develop verbs cache-only while a base fills behind them."""
+
+    paths = _cached_base(image_id, image)
+    if paths is not None:
+        return paths, None
+    if failure := _recent_base_failure(image_id):
+        return None, _base_error_response(failure)
+    _start_base_generation(image_id, image)
+    return None, _base_generating_response(image_id)
 
 
 async def _upsert_settings(image_id: int, incoming: dict[str, Any], label: str | None) -> dict[str, Any]:
@@ -576,10 +591,10 @@ async def api_develop_auto_tone(image_id: int):
     image, error = await _image_or_error(image_id)
     if error:
         return error
-    try:
-        paths, cached_meta = await _ensure_base(image_id, image)
-    except rawproc.RawDecodeError as exc:
-        return _base_error_response(exc)
+    paths, pending = _cached_base_or_pending(image_id, image)
+    if pending is not None:
+        return pending
+    cached_meta = rawproc.read_base_metadata(image_id) or {}
     row = await _load_settings(image_id)
     settings = _json_settings(row["settings"]) if row else {}
     asshot = cached_meta.get("as_shot") if isinstance(cached_meta, dict) else {}
@@ -639,13 +654,11 @@ async def api_develop_proof_tile(
         return error
     from features.develop.render import RenderError, render_proof_tile_async
 
+    _paths, pending = _cached_base_or_pending(image_id, image)
+    if pending is not None:
+        return pending
     row = await _load_settings(image_id)
     cached_meta = rawproc.read_base_metadata(image_id) or {}
-    if not cached_meta.get("color"):
-        try:
-            _paths, cached_meta = await _ensure_base(image_id, image)
-        except rawproc.RawDecodeError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=422)
     asshot = cached_meta.get("as_shot") if isinstance(cached_meta, dict) else {}
     try:
         tile = await render_proof_tile_async(
@@ -680,8 +693,10 @@ async def api_develop_transform_auto(image_id: int):
     image, error = await _image_or_error(image_id)
     if error:
         return error
+    paths, pending = _cached_base_or_pending(image_id, image)
+    if pending is not None:
+        return pending
     try:
-        paths, _meta = await _ensure_base(image_id, image)
         import gzip
         payload = await asyncio.to_thread(paths.binary.read_bytes)
         linear_u16, _width, _height = rawproc.parse_base_payload(gzip.decompress(payload))
@@ -878,6 +893,9 @@ async def api_export_develop(image_id: int, body: DevelopExportBody):
         return error
     if body.format not in {"jpeg", "tiff16"}:
         return JSONResponse({"error": "format must be jpeg or tiff16"}, status_code=400)
+    _paths, pending = _cached_base_or_pending(image_id, image)
+    if pending is not None:
+        return pending
     # The RENDER lane owns the shared full-resolution pipeline. Keep this
     # endpoint's contract ready without duplicating color math in RAWPROC.
     try:
@@ -892,11 +910,6 @@ async def api_export_develop(image_id: int, body: DevelopExportBody):
         return JSONResponse({"error": "Develop export renderer is not installed yet"}, status_code=503)
     row = await _load_settings(image_id)
     cached_meta = rawproc.read_base_metadata(image_id) or {}
-    if not cached_meta.get("color"):
-        try:
-            _paths, cached_meta = await _ensure_base(image_id, image)
-        except Exception:
-            pass
     asshot = cached_meta.get("as_shot") if isinstance(cached_meta, dict) else {}
     settings = _json_settings(row["settings"]) if row else {}
     try:
