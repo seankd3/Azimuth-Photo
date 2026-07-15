@@ -18,6 +18,7 @@ import { dismissLayer, pushLayer, registerLayer, syncLayerClosed } from './histo
 import { icon } from '../icons.js';
 import { openCollectionShareSheet, renderSharedView } from './sharing.js';
 import { offlineSummary, openOfflineStatusSheet } from './offline.js';
+import { renderBackupView, stopBackupView } from './backup.js';
 
 // Matches RANK_QUALITY_MIN_SIGNALS in data/repositories/rankings.py.
 const SORT_QUALITY_MIN_SIGNALS = 3;
@@ -194,6 +195,7 @@ function render() {
         + `<button class="m-lib-row" data-q="picked"><span class="g">${icon('heart')}</span><span class="body">Favorites<span class="sub">Picked photos</span></span><span class="n num">${fmtInt(counts && counts.picked)}</span></button>`
         + `<button class="m-lib-row" data-q="rejected"><span class="g">${icon('x')}</span><span class="body">Rejected</span><span class="n num">${fmtInt(counts && counts.rejected)}</span></button>`
         + `<button class="m-lib-row" id="ml-offline"><span class="g">${icon('download')}</span><span class="body">Available offline<span class="sub">Saved on this phone</span></span><span class="n num">${fmtInt(offlineSummary().count)}</span></button>`
+        + `<button class="m-lib-row" id="ml-backup"><span class="g">${icon('upload')}</span><span class="body">Backup<span class="sub">Uploads and phone storage</span></span></button>`
         + `<button class="m-lib-row" id="ml-shared"><span class="g">${icon('share-2')}</span><span class="body">Shared with me</span></button>`
         + `<button class="m-lib-row" data-q="all"><span class="g">${icon('house')}</span><span class="body">All photos</span><span class="n num">${fmtInt(counts && counts.total)}</span></button></div>`;
 
@@ -242,6 +244,15 @@ function render() {
         });
     });
     root.querySelector('#ml-offline')?.addEventListener('click', openOfflineStatusSheet);
+    root.querySelector('#ml-backup')?.addEventListener('click', () => {
+        showingCollection = true;
+        stopWorkPolling();
+        renderBackupView(root, () => {
+            showingCollection = false;
+            render();
+            startWorkPolling();
+        });
+    });
     for (const el of root.querySelectorAll('.m-lib-row[data-q]')) {
         el.addEventListener('click', () => {
             const q = el.dataset.q;
@@ -794,7 +805,10 @@ export function initLibrary() {
     });
     on('tab', (tab) => {
         if (tab === 'library') startWorkPolling();
-        else stopWorkPolling();
+        else {
+            stopWorkPolling();
+            stopBackupView();
+        }
     });
 }
 
