@@ -17,6 +17,7 @@ import { releaseFocus, trapFocus } from './focusTrap.js';
 import { confirmTypedCount } from './trash.js';
 import { downloadExport, openExportMenu } from './export_menu.js';
 import { initFoldersPanel } from './folders.js';
+import { openSourceRevealMenu } from './source_reveal_menu.js';
 import { icon } from '../icons.js';
 import {
     initSuggestions, loadSuggestionsOnce, openSuggestionsReview, suggestionsAreLoading, visibleSuggestions,
@@ -930,6 +931,10 @@ function renderSources() {
         row.addEventListener('click', () => {
             navigateToScope({ folder: [row.dataset.source] });
             closeLeftDrawer();
+        });
+        row.addEventListener('contextmenu', (event) => {
+            event.preventDefault();
+            openSourceRevealMenu(row.dataset.source, row);
         });
     }
 }

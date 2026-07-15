@@ -141,6 +141,20 @@ class UiContractsTests(BackendTestCase):
 
         self.assertIn("cache: 'no-store'", history_panel)
 
+    async def test_left_rail_source_rows_offer_the_shared_reveal_menu(self):
+        base_dir = os.path.dirname(__file__)
+        with open(os.path.join(base_dir, "static", "js", "desktop", "panel.js"), encoding="utf-8") as fh:
+            panel = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "desktop", "source_reveal_menu.js"), encoding="utf-8") as fh:
+            source_reveal_menu = fh.read()
+
+        self.assertIn("openSourceRevealMenu", panel)
+        self.assertIn("row.addEventListener('contextmenu'", panel)
+        self.assertIn("openSourceRevealMenu(row.dataset.source, row)", panel)
+        self.assertIn("revealFolder(path)", source_reveal_menu)
+        self.assertIn('data-act="reveal"', source_reveal_menu)
+        self.assertIn("revealMenuLabel()", source_reveal_menu)
+
     async def test_template_context_versions_static_assets(self):
         context = app_module.app.state.photoarchive_shell.template_context(HeaderRequest())
 
