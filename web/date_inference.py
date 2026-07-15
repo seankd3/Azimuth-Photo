@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 
+from core.dates import safe_datetime_fromtimestamp
 
 DATE_RE = re.compile(r"(?<!\d)(?P<year>20\d{2}|19\d{2})[-_ ]?(?P<month>\d{2})[-_ ]?(?P<day>\d{2})(?!\d)")
 _YEAR_RE = re.compile(r"^(?:19|20)\d{2}$")
@@ -73,7 +74,10 @@ def infer_from_file_modified(file_modified_at) -> InferredDate | None:
         return None
     if timestamp <= 0:
         return None
-    return InferredDate(datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S"), "file")
+    parsed = safe_datetime_fromtimestamp(timestamp)
+    if parsed is None:
+        return None
+    return InferredDate(parsed.strftime("%Y-%m-%d %H:%M:%S"), "file")
 
 
 def infer_image_date(

@@ -17,7 +17,6 @@ import sqlite3
 import subprocess
 import threading
 import time
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
@@ -25,6 +24,7 @@ import imagecodecs
 import numpy as np
 from PIL import Image
 
+from core.dates import parse_taken_timestamp
 from core.runtime_paths import apply_environment_defaults, resolve_runtime_paths
 
 apply_environment_defaults()
@@ -69,17 +69,11 @@ def _number(value: Any) -> float | None:
 
 def _timestamp(value: Any) -> float | None:
     if isinstance(value, (int, float)):
-        return float(value)
+        return parse_taken_timestamp(value)
     text = str(value or "").strip()
     if not text:
         return None
-    text = text.replace(":", "-", 2).replace("Z", "+00:00")
-    for candidate in (text, text.replace(" ", "T", 1)):
-        try:
-            return datetime.fromisoformat(candidate).timestamp()
-        except ValueError:
-            pass
-    return None
+    return parse_taken_timestamp(text.replace(":", "-", 2))
 
 
 def _shutter_seconds(row: dict[str, Any]) -> float | None:

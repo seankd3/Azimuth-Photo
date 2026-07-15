@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
 
+from core.dates import parse_taken_timestamp
 from features.library.geodata import validate_coordinates
 
 
@@ -18,10 +18,7 @@ def _timestamp(value: Any) -> float | None:
         return numeric / 1000 if numeric > 10_000_000_000 else numeric
     except (TypeError, ValueError):
         pass
-    try:
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
-    except ValueError:
-        return None
+    return parse_taken_timestamp(value)
 
 
 def _geo_point(value: Any) -> tuple[float, float] | None:

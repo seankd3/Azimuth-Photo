@@ -16,6 +16,7 @@ import time
 from datetime import datetime
 from pathlib import PurePosixPath
 
+from core.dates import parse_taken_timestamp, safe_datetime_fromtimestamp, safe_timestamp
 from date_inference import DATE_RE
 from data import connection
 import settings
@@ -93,17 +94,7 @@ _cache: dict = {"key": None, "data": None, "expires": 0.0}
 
 
 def _parse_taken(value) -> float | None:
-    if not value:
-        return None
-    # OSError/OverflowError: Windows rejects .timestamp() for pre-1970 dates,
-    # which corrupt EXIF (e.g. "0000-…" or camera-default 1904 dates) produces.
-    try:
-        return datetime.strptime(str(value)[:19], "%Y-%m-%d %H:%M:%S").timestamp()
-    except (ValueError, OSError, OverflowError):
-        try:
-            return datetime.strptime(str(value)[:10], "%Y-%m-%d").timestamp()
-        except (ValueError, OSError, OverflowError):
-            return None
+    return parse_taken_timestamp(value)
 
 
 def _parse_path_date(value: str) -> float | None:
@@ -111,21 +102,23 @@ def _parse_path_date(value: str) -> float | None:
     if not match:
         return None
     try:
-        return datetime(
+        return safe_timestamp(datetime(
             int(match.group("year")),
             int(match.group("month")),
             int(match.group("day")),
             12,
             0,
             0,
-        ).timestamp()
-    except (ValueError, OSError, OverflowError):
+        ))
+    except ValueError:
         return None
 
 
 def _event_title(start_ts: float, end_ts: float, *, short: bool = False) -> str:
-    start = datetime.fromtimestamp(start_ts)
-    end = datetime.fromtimestamp(end_ts)
+    start = safe_datetime_fromtimestamp(start_ts)
+    end = safe_datetime_fromtimestamp(end_ts)
+    if start is None or end is None:
+        return "Undated"
     if start.date() == end.date():
         fmt = "%b %d, %Y" if short else "%B %d, %Y"
         return start.strftime(fmt).replace(" 0", " ")
@@ -188,9 +181,10 @@ def _strip_trailing_noise(value: str) -> str:
 def _format_shoot_title(base_title: str, date_ts: float | None = None) -> str:
     title = base_title.strip()
     if date_ts is not None:
-        taken = datetime.fromtimestamp(date_ts)
-        # %-d is glibc-only; format the day portably for Windows.
-        return f"{title} - {taken.strftime('%b')} {taken.day}, {taken.year}"
+        date = safe_datetime_fromtimestamp(date_ts)
+        if date is not None:
+            # %-d is glibc-only; format the day portably for Windows.
+            return f"{title} - {date.strftime('%b')} {date.day}, {date.year}"
     return title
 
 
@@ -238,7 +232,9 @@ def _filename_hint(filename: str) -> dict | None:
         return None
     key = _normalize_key(title)
     if date_ts is not None:
-        key = f"{key}-{datetime.fromtimestamp(date_ts).strftime('%Y-%m-%d')}"
+        date = safe_datetime_fromtimestamp(date_ts)
+        if date is not None:
+            key = f"{key}-{date.strftime('%Y-%m-%d')}"
     return {
         "title": title,
         "key": key,
@@ -422,9 +418,12 @@ def _build_shoot_candidates(rows: list[dict]) -> tuple[list[dict], list[dict]]:
                 title = _format_shoot_title(hint["title"], start)
             reason = "Same shoot folder" if hint.get("source") == "folder" else "Same filename pattern"
             if start is not None and end is not None:
-                days = max(1, (datetime.fromtimestamp(end).date() - datetime.fromtimestamp(start).date()).days + 1)
-                if days > 1:
-                    reason = f"{reason} - {days} days"
+                start_date = safe_datetime_fromtimestamp(start)
+                end_date = safe_datetime_fromtimestamp(end)
+                if start_date is not None and end_date is not None:
+                    days = max(1, (end_date.date() - start_date.date()).days + 1)
+                    if days > 1:
+                        reason = f"{reason} - {days} days"
             suffix = f"-{index}" if len(parts) > 1 else ""
             candidate = _candidate_from_rows(
                 kind="shoot",
@@ -564,12 +563,16 @@ async def _cluster_suggestions(db_path: str) -> list[dict]:
             if ts is not None
         )
         if taken:
-            start_year = datetime.fromtimestamp(taken[0]).year
-            end_year = datetime.fromtimestamp(taken[-1]).year
-            span = (
-                f"spanning {start_year}–{end_year}" if end_year > start_year
-                else f"from {start_year}"
-            )
+            start_date = safe_datetime_fromtimestamp(taken[0])
+            end_date = safe_datetime_fromtimestamp(taken[-1])
+            if start_date is not None and end_date is not None:
+                start_year, end_year = start_date.year, end_date.year
+                span = (
+                    f"spanning {start_year}–{end_year}" if end_year > start_year
+                    else f"from {start_year}"
+                )
+            else:
+                span = "undated"
         else:
             span = "undated"
         cover = max(members, key=lambda m: float(meta[m].get("elo") or 0))
@@ -811,8 +814,11 @@ def _people_title(names: list[str], start_ts: float | None, end_ts: float | None
     if start_ts is None and end_ts is None:
         return label
     ts = start_ts or end_ts
-    start = datetime.fromtimestamp(ts)
-    if end_ts and start_ts and datetime.fromtimestamp(end_ts).date() != start.date():
+    start = safe_datetime_fromtimestamp(ts)
+    if start is None:
+        return label
+    end = safe_datetime_fromtimestamp(end_ts) if end_ts and start_ts else None
+    if end is not None and end.date() != start.date():
         return f"{label} - {_event_title(start_ts, end_ts, short=True)}"
     return f"{label} - {start.strftime('%B %Y')}"
 

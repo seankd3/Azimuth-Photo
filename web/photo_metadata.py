@@ -6,6 +6,7 @@ from fractions import Fraction
 from PIL import Image as PILImage
 from PIL.ExifTags import GPSTAGS, IFD, TAGS
 
+from core.dates import safe_datetime_fromtimestamp
 METADATA_EXTRACTOR_VERSION = 3
 PILLOW_METADATA_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp", ".bmp", ".gif"}
 
@@ -74,7 +75,8 @@ def _parse_unix_timestamp(value) -> str:
         timestamp = int(value)
         if timestamp <= 0:
             return ""
-        return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S")
+        parsed = safe_datetime_fromtimestamp(timestamp)
+        return parsed.strftime("%Y-%m-%d %H:%M:%S") if parsed else ""
     except Exception:
         return ""
 
@@ -206,7 +208,9 @@ def extract_image_metadata(filepath: str) -> dict:
         metadata["file_size"] = int(stat.st_size)
         metadata["filesize"] = f"{stat.st_size / (1024 * 1024):.1f} MB"
         metadata["file_modified_at"] = float(stat.st_mtime)
-        metadata["file_modified"] = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+        modified = safe_datetime_fromtimestamp(stat.st_mtime)
+        if modified is not None:
+            metadata["file_modified"] = modified.strftime("%Y-%m-%d %H:%M:%S")
     except Exception:
         pass
 
