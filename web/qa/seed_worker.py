@@ -34,7 +34,10 @@ DEVELOP_IMAGE_COUNT = 6
 RAW_IMAGE_ID = 1
 DEVELOP_PRESET_NAME = "Clean Color"
 STACK_MEMBER_IDS = (1, 7, 8, 9)
+EXACT_DUPLICATE_STACK_ID = 2
+EXACT_DUPLICATE_IDS = (30, 31)
 LOCATED_IMAGE_IDS = (101, 102, 103, 104, 105, 106)
+PEOPLE_IDS = {"named": 1, "merge_source": 2, "merge_target": 3, "hide": 4}
 
 
 def _jpeg(path: Path, index: int, *, size: tuple[int, int] = (160, 106)) -> None:
@@ -205,6 +208,15 @@ async def _seed_discovery_surfaces(conn, preview_path: Path, now: float) -> None
         "INSERT INTO stack_members (stack_id, image_id, score, added_at) VALUES (1, ?, ?, ?)",
         [(image_id, 1.0 - position / 10, now) for position, image_id in enumerate(STACK_MEMBER_IDS)],
     )
+    await conn.execute(
+        "INSERT INTO stacks (id, kind, representative_image_id, auto, created_at, updated_at) "
+        "VALUES (?, 'crosssource', ?, 0, ?, ?)",
+        (EXACT_DUPLICATE_STACK_ID, EXACT_DUPLICATE_IDS[0], now, now),
+    )
+    await conn.executemany(
+        "INSERT INTO stack_members (stack_id, image_id, score, added_at) VALUES (?, ?, ?, ?)",
+        [(EXACT_DUPLICATE_STACK_ID, image_id, 1.0 - position / 10, now) for position, image_id in enumerate(EXACT_DUPLICATE_IDS)],
+    )
 
     await conn.executemany(
         "UPDATE images SET latitude = ?, longitude = ?, location_source = 'exif' WHERE id = ?",
@@ -220,8 +232,10 @@ async def _seed_discovery_surfaces(conn, preview_path: Path, now: float) -> None
         "INSERT INTO people (id, name, status, representative_face_id, created_at, updated_at) "
         "VALUES (?, ?, ?, ?, ?, ?)",
         [
-            (1, "Ada QA", "named", 1, now, now),
-            (2, "", "unknown", 2, now, now),
+            (PEOPLE_IDS["named"], "Ada QA", "named", 1, now, now),
+            (PEOPLE_IDS["merge_source"], "", "unknown", 2, now, now),
+            (PEOPLE_IDS["merge_target"], "", "unknown", 3, now, now),
+            (PEOPLE_IDS["hide"], "Hide QA", "named", 4, now, now),
         ],
     )
     await conn.executemany(
@@ -231,13 +245,15 @@ async def _seed_discovery_surfaces(conn, preview_path: Path, now: float) -> None
         "VALUES (?, ?, ?, 36, 20, 88, 68, .98, .95, 'buffalo_l', ?, ?, ?)",
         [
             (1, 10, "qa-face-ada", str(preview_path), now, now),
-            (2, 20, "qa-face-unnamed", str(preview_path), now, now),
+            (2, 20, "qa-face-merge-source", str(preview_path), now, now),
+            (3, 30, "qa-face-merge-target", str(preview_path), now, now),
+            (4, 40, "qa-face-hide", str(preview_path), now, now),
         ],
     )
     await conn.executemany(
         "INSERT INTO face_assignments (face_id, person_id, source, active, assigned_at) "
         "VALUES (?, ?, 'worker', 1, ?)",
-        [(1, 1, now), (2, 2, now)],
+        [(1, 1, now), (2, 2, now), (3, 3, now), (4, 4, now)],
     )
     await conn.executemany(
         "INSERT INTO person_image_membership "
@@ -248,6 +264,9 @@ async def _seed_discovery_surfaces(conn, preview_path: Path, now: float) -> None
             (1, 12, now - 2),
             (2, 20, now),
             (2, 21, now - 1),
+            (3, 30, now),
+            (3, 31, now - 1),
+            (4, 40, now),
         ],
     )
 
@@ -268,6 +287,7 @@ async def _seed() -> None:
     secondary.mkdir(parents=True, exist_ok=True)
 
     now = time.time()
+    active_rows = _active_rows(primary, secondary)
     await conn.executemany(
         "INSERT INTO catalog_sources "
         "(id, path, display_name, included, online, image_count, active_image_count, created_at, last_seen_at) "
@@ -283,7 +303,7 @@ async def _seed() -> None:
         "(id, source_id, filename, filepath, content_hash, hub_image_id, hub_remote, elo, comparisons, "
         "status, flag, date_taken, camera_make, camera_model, lens, file_ext, file_size, width, height, orientation) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        _active_rows(primary, secondary),
+        active_rows,
     )
     await conn.executemany(
         "INSERT INTO images "
@@ -304,7 +324,7 @@ async def _seed() -> None:
 
     await conn.execute(
         "INSERT INTO collections (id, uuid, name, description, cover_image_id, created_at, updated_at) "
-        "VALUES (1, 'qa-favorites', 'QA Favorites', 'Deterministic browser QA collection', 1, ?, ?)",
+        "VALUES (1, '00000000-0000-4000-8000-000000000001', 'QA Favorites', 'Deterministic browser QA collection', 1, ?, ?)",
         (now, now),
     )
     await conn.executemany(
@@ -328,6 +348,10 @@ async def _seed() -> None:
         "VALUES (1, '{}', 'user', '2026-07-15T00:00:00+00:00')"
     )
     await conn.execute(
+        "UPDATE images SET content_hash = ? WHERE id IN (?, ?)",
+        ("qa-exact-duplicate-pair", *EXACT_DUPLICATE_IDS),
+    )
+    await conn.execute(
         "INSERT INTO develop_presets (name, folder, settings, created_at) VALUES (?, ?, ?, ?)",
         (
             DEVELOP_PRESET_NAME,
@@ -340,11 +364,17 @@ async def _seed() -> None:
     shared_preview = FIXTURE_HOME / "cache" / "previews" / "qa-shared-preview.jpg"
     await _seed_discovery_surfaces(conn, shared_preview, now)
     cache_root = str(Path(thumbnails.SSD_CACHE_DIR).resolve())
+    filepaths = {int(row[0]): str(row[3]) for row in active_rows}
     cache_rows = []
     for image_id in range(1, ACTIVE_IMAGE_COUNT + TRASH_IMAGE_COUNT + TRASH_MIRROR_IMAGE_COUNT + 1):
         for size in ("sm", "md", "lg"):
+            filepath = filepaths.get(image_id, "")
+            try:
+                signature = thumbnails._build_source_signature(filepath, size, image_id)
+            except OSError:
+                signature = f"qa-{size}-{image_id}"
             cache_rows.append(
-                (cache_root, size, image_id, str(shared_preview), f"qa-{size}-{image_id}", shared_preview.stat().st_size, now, now)
+                (cache_root, size, image_id, str(shared_preview), signature, shared_preview.stat().st_size, now, now)
             )
     await conn.executemany(
         "INSERT INTO cache_entries "
@@ -368,6 +398,9 @@ async def _seed() -> None:
     import_source = FIXTURE_HOME / "import-source" / "QA Card"
     for index in range(1, 4):
         _jpeg(import_source / f"qa-import-{index}.jpg", 800 + index)
+    cancellable_import_source = primary / "Import candidates" / "QA Cancellable Card"
+    for index in range(1, 65):
+        _jpeg(cancellable_import_source / f"qa-cancel-{index:03d}.jpg", 900 + index)
 
     shutil.copy2(CATALOG_DB, PRISTINE_DB)
     manifest = {
@@ -386,9 +419,13 @@ async def _seed() -> None:
         "develop_preset": DEVELOP_PRESET_NAME,
         "import_source": str(import_source),
         "import_source_images": 3,
+        "cancellable_import_source": str(cancellable_import_source),
+        "cancellable_import_source_images": 64,
         "stack_id": 1,
         "stack_members": list(STACK_MEMBER_IDS),
-        "people": {"named": 1, "unnamed": 2},
+        "exact_duplicate_stack_id": EXACT_DUPLICATE_STACK_ID,
+        "exact_duplicate_ids": list(EXACT_DUPLICATE_IDS),
+        "people": PEOPLE_IDS,
         "located_images": len(LOCATED_IMAGE_IDS),
     }
     MANIFEST_PATH.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")

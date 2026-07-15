@@ -24,8 +24,8 @@ ACTIVE_IMAGE_COUNT = int(os.environ.get("PHOTOARCHIVE_QA_ACTIVE_IMAGE_COUNT", "4
 if ACTIVE_IMAGE_COUNT < 4_003:
     raise ValueError("PHOTOARCHIVE_QA_ACTIVE_IMAGE_COUNT must be at least 4003")
 
-VISIBLE_IMAGE_COUNT = ACTIVE_IMAGE_COUNT - 3
-FIXTURE_VERSION = f"desktop-qa-v9-{ACTIVE_IMAGE_COUNT}"
+VISIBLE_IMAGE_COUNT = ACTIVE_IMAGE_COUNT - 4
+FIXTURE_VERSION = f"desktop-qa-v21-{ACTIVE_IMAGE_COUNT}"
 TRASH_IMAGE_COUNT = 6
 TRASH_MIRROR_IMAGE_COUNT = 1
 COLLECTION_IMAGE_COUNT = 30
@@ -58,8 +58,13 @@ def fixture_environment() -> dict[str, str]:
 
     thumb_root = FIXTURE_HOME / "cache" / "previews"
     return {
+        # The legacy import route derives its default destination from HOME.
+        # Keep that path inside the disposable fixture too.
+        "HOME": str(FIXTURE_HOME),
         "PHOTOARCHIVE_HOME": str(FIXTURE_HOME),
         "PHOTOARCHIVE_THUMB_CACHE_DIR": str(thumb_root),
+        # Staged-import tests must never resolve the operator's real library.
+        "PHOTOARCHIVE_ORIGINALS_DIR": str(FIXTURE_HOME / "import-library"),
         "PHOTOARCHIVE_SMOKE_MODE": "1",
         "PHOTOARCHIVE_MODE": "standalone",
         "PHOTOARCHIVE_ACCESS": "local",

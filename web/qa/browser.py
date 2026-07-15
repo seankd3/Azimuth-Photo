@@ -41,9 +41,11 @@ class BrowserEvidence:
 
     def _request_failed(self, request) -> None:
         failure = request.failure or "unknown failure"
-        # Grid virtualization deliberately clears offscreen <img> sources. Chromium
-        # reports those cancelled thumbnail transfers as ERR_ABORTED, not a failed app request.
-        if "/api/thumb/" in request.url and "ERR_ABORTED" in failure:
+        # Grid virtualization clears offscreen thumbnail sources, and a lens or
+        # scope transition cancels the previous rankings fetch. Chromium reports
+        # both deliberate client-side cancellations as ERR_ABORTED rather than an
+        # application/network failure.
+        if ("/api/thumb/" in request.url or "/api/rankings?" in request.url) and "ERR_ABORTED" in failure:
             return
         self.failed_requests.append(f"{request.method} {request.url} — {failure}")
 
@@ -136,7 +138,9 @@ class BrowserHarness:
     def run(self, scenario, *, failure_dir: Path | None = None) -> ScenarioResult:
         started = time.monotonic()
         context = self.browser.new_context(
-            viewport={"width": 1600, "height": 1000},
+            viewport={"width": 390, "height": 844} if scenario.mobile_viewport else {"width": 1600, "height": 1000},
+            is_mobile=scenario.mobile_viewport,
+            has_touch=scenario.mobile_viewport,
             reduced_motion="reduce",
             service_workers="block",
         )

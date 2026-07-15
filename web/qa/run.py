@@ -44,6 +44,7 @@ def _record(scenario, status: str, attempts: list, artifacts: list[str]) -> dict
         "status": status,
         "attempts": [result.as_dict() for result in attempts],
         "artifacts": artifacts,
+        "expected_failure": scenario.expected_failure,
     }
 
 
@@ -110,8 +111,16 @@ def main(argv: list[str] | None = None) -> int:
                             start = _log_offset(archive.server_log)
                             primary = harness.run(scenario, failure_dir=archive.failure_dir(scenario.name, 1))
                             _print_result(primary)
-                            if primary.status == "PASS":
+                            if primary.status == "PASS" and not scenario.expected_failure:
                                 records.append(_record(scenario, "PASS", [primary], []))
+                                continue
+                            if primary.status == "FAIL" and scenario.expected_failure:
+                                print(f"XFAIL {scenario.name}: {scenario.expected_failure}", flush=True)
+                                records.append(_record(scenario, "XFAIL", [primary], []))
+                                continue
+                            if primary.status == "PASS" and scenario.expected_failure:
+                                primary.status = "XPASS"
+                                records.append(_record(scenario, "XPASS", [primary], []))
                                 continue
                             artifact = str(archive.capture_failure(primary, attempt=1, server_log_start=start))
                             retry_queue.append((scenario, server_options, label, primary, [artifact]))
@@ -136,17 +145,19 @@ def main(argv: list[str] | None = None) -> int:
             browser.close()
 
     elapsed = round(time.monotonic() - started, 3)
-    failed = [record for record in records if record["status"] == "FAIL"]
+    failed = [record for record in records if record["status"] in {"FAIL", "XPASS"}]
     flaky = [record for record in records if record["status"] == "FLAKY"]
+    expected = [record for record in records if record["status"] == "XFAIL"]
     report = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "duration_seconds": elapsed,
         "wait_multiplier": WAIT_MULTIPLIER,
         "fixture": manifest,
         "summary": {
-            "passed": len(records) - len(failed),
+            "passed": len(records) - len(failed) - len(expected),
             "failed": len(failed),
             "flaky": len(flaky),
+            "expected_failures": len(expected),
             "total": len(records),
         },
         "server_log": str(archive.server_log),
@@ -155,7 +166,8 @@ def main(argv: list[str] | None = None) -> int:
     report_path = archive.write_report(report)
     verdict = "FAIL" if failed else "PASS"
     print(
-        f"\n{verdict}: {len(records) - len(failed)} passed, {len(failed)} failed, {len(flaky)} flaky, "
+        f"\n{verdict}: {len(records) - len(failed) - len(expected)} passed, {len(expected)} expected-fail, "
+        f"{len(failed)} failed, {len(flaky)} flaky, "
         f"{elapsed:.2f}s total · report {report_path}",
         flush=True,
     )

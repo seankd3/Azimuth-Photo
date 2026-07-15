@@ -10,7 +10,9 @@ def people_browse(qa) -> None:
     qa.page.locator("#view-switch [data-view='people']").click()
     flow = qa.page.locator("#view-people.active #people-flow")
     named = flow.locator(".person-card.is-named", has_text="Ada QA")
-    unnamed = flow.locator(".person-card.is-unnamed")
+    # The cull merge gate seeds a second unnamed person; this browse path only
+    # needs one representative unnamed card.
+    unnamed = flow.locator(".person-card.is-unnamed").first
     named.wait_for(state="visible")
     unnamed.wait_for(state="visible")
     assert "3 photos" in named.locator(".person-count").inner_text()

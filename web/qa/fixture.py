@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -56,7 +57,7 @@ def ensure_fixture() -> tuple[dict, bool]:
 
 
 def reset_fixture() -> dict:
-    """Restore the active catalog and destructive trash files before a run."""
+    """Restore the catalog and QA-owned files before each run."""
 
     manifest, _ = ensure_fixture()
     CATALOG_DB.parent.mkdir(parents=True, exist_ok=True)
@@ -72,4 +73,24 @@ def reset_fixture() -> dict:
     trash_root.mkdir(parents=True, exist_ok=True)
     for index in range(1, int(manifest["trash_images"]) + 1):
         shutil.copy2(shared, trash_root / f"qa-trash-{index}.jpg")
+
+    # Trash gates move active originals. The database reset brings their rows
+    # back, so restore only any missing local QA files rather than rebuilding
+    # the whole 4k-photo source tree for every scenario run.
+    with sqlite3.connect(CATALOG_DB) as conn:
+        local_paths = conn.execute(
+            "SELECT filepath FROM images WHERE trashed_at IS NULL AND source_id IN (1, 2)"
+        ).fetchall()
+    for (raw_path,) in local_paths:
+        path = Path(raw_path)
+        if not path.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(shared, path)
+
+    # Import gates own both destinations, including the legacy chooser path.
+    # Clearing them prevents one QA run from affecting another's collision or
+    # cancellation result.
+    for path in (FIXTURE_HOME / "Pictures" / "photoArchive Imports", FIXTURE_HOME / "import-library"):
+        if path.exists():
+            shutil.rmtree(path)
     return manifest
