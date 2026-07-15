@@ -126,12 +126,8 @@ fun ViewerScreen(
     // the pager past the end or it throws on init.
     val safeStart = startIndex.coerceIn(0, (items.size - 1).coerceAtLeast(0))
     val pagerState = rememberPagerState(initialPage = safeStart) { items.size }
-    val trashLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartIntentSenderForResult(),
-    ) { result ->
-        // Only leave the viewer / refresh the grid when the trash actually happened.
-        if (result.resultCode == Activity.RESULT_OK) { onChanged(); onClose() }
-    }
+    // Silent once "Manage media" is granted; offers to enable it on first delete.
+    val trashLocal = rememberMediaTrash(onTrashed = { onChanged(); onClose() })
     var chromeVisible by remember { mutableStateOf(true) }
     var infoFor by remember { mutableStateOf<ViewerMedia?>(null) }
     var menuVisible by remember { mutableStateOf(false) }
@@ -333,12 +329,7 @@ fun ViewerScreen(
                 }
                 IconButton(enabled = !busy, onClick = {
                     when (current) {
-                        is ViewerMedia.Local -> {
-                            val pending = MediaStore.createTrashRequest(
-                                context.contentResolver, listOf(current.item.uri), true,
-                            )
-                            trashLauncher.launch(IntentSenderRequest.Builder(pending).build())
-                        }
+                        is ViewerMedia.Local -> trashLocal(listOf(current.item.uri))
                         is ViewerMedia.Remote -> confirmHubTrash = current.image
                     }
                 }) {

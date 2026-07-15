@@ -204,12 +204,7 @@ fun TimelineScreen(
     }
 
     BackHandler(enabled = selectedIds.isNotEmpty()) { selectedIds = emptySet() }
-    val trashLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartIntentSenderForResult(),
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) loadTick++ // re-query after a real trash
-        selectedIds = emptySet()
-    }
+    val trashLocal = rememberMediaTrash(onTrashed = { loadTick++; selectedIds = emptySet() })
 
     val backedUpIds = remember(backupStates) {
         backupStates.filterValues { it == BackupDb.STATE_UPLOADED || it == BackupDb.STATE_PRESENT }.keys
@@ -268,13 +263,7 @@ fun TimelineScreen(
                         shareItems(context as Activity, selectedItems)
                         selectedIds = emptySet()
                     },
-                    onTrash = {
-                        val uris = selectedItems.map { it.uri }
-                        if (uris.isNotEmpty()) {
-                            val pending = MediaStore.createTrashRequest(context.contentResolver, uris, true)
-                            trashLauncher.launch(IntentSenderRequest.Builder(pending).build())
-                        }
-                    },
+                    onTrash = { trashLocal(selectedItems.map { it.uri }) },
                     onBackup = { BackupScheduler.runNow(context); selectedIds = emptySet() },
                 )
             } else {
