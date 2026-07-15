@@ -89,6 +89,8 @@ PRIVATE_SETTING_KEYS = {
     "owner_key_hash",
     "owner_session_epoch",
 }
+# Server-side-only configuration: readable (masked) but never writable via the API.
+SERVER_ONLY_SETTING_KEYS = {"publish_hook"}
 
 EMBED_MODEL_PRESETS = {
     "qwen3-vl-embedding-8b": {
@@ -584,6 +586,9 @@ def public_settings(raw: dict | None = None) -> dict:
     values = _copy_settings(raw if isinstance(raw, dict) else get_settings())
     for key in PRIVATE_SETTING_KEYS:
         values.pop(key, None)
+    for key in SERVER_ONLY_SETTING_KEYS:
+        if key in values:
+            values[key] = ""  # masked: configured server-side (env or settings file)
     return values
 
 
