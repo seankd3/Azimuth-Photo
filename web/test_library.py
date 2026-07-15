@@ -645,6 +645,47 @@ class LibraryTests(BackendTestCase):
         self.assertEqual(counts["active_images"], 27)
         self.assertEqual(counts["total_catalog_images"], 27)
 
+    async def test_hub_source_scope_filters_by_source_instead_of_remote_filepath(self):
+        import time as _time
+
+        from data.repositories import catalog as catalog_repository
+
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "INSERT INTO catalog_sources "
+                "(path, display_name, included, online, image_count, active_image_count, "
+                "created_at, last_seen_at) VALUES (?, 'Hub library', 1, 1, 2, 2, ?, ?)",
+                (catalog_repository.HUB_MIRROR_SOURCE_PATH, _time.time(), _time.time()),
+            )
+            hub_id = int((await (await conn.execute("SELECT last_insert_rowid()")).fetchone())[0])
+            await conn.executemany(
+                "INSERT INTO images "
+                "(source_id, filename, filepath, status, elo, hub_remote, hub_image_id) "
+                "VALUES (?, ?, ?, 'kept', 1200, 1, ?)",
+                [
+                    (hub_id, "one.jpg", "/remote/library/one.jpg", 101),
+                    (hub_id, "two.jpg", "/another/root/two.jpg", 102),
+                ],
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        db.invalidate_stats_cache()
+        library_service._rankings_response_cache.clear()
+        with unittest.mock.patch.dict(
+            os.environ,
+            {"PHOTOARCHIVE_MODE": "satellite", "PHOTOARCHIVE_HUB_URL": "http://stub-hub"},
+        ):
+            result = await library_routes.api_rankings(
+                limit=10,
+                folder=catalog_repository.HUB_MIRROR_SOURCE_PATH,
+            )
+
+        self.assertEqual(result["visible_images"], 2)
+        self.assertEqual({card["filename"] for card in result["images"]}, {"one.jpg", "two.jpg"})
+
     async def test_taste_vector_scores_winner_like_embeddings_above_loser_like(self):
         source = await self._source()
         winners = [await self._image(source["id"], f"winner-{idx}.jpg", comparisons=1) for idx in range(3)]

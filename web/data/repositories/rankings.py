@@ -5,6 +5,7 @@ from datetime import datetime
 import time as _time
 
 from data import connection
+from data.repositories.catalog import HUB_MIRROR_SOURCE_PATH
 from data.repositories.common import chunked as _chunked
 
 RANKING_SORTS = {
@@ -143,7 +144,8 @@ def normalized_folder_values(folder) -> list[str]:
     normalized = []
     seen = set()
     for value in values:
-        clean = str(value or "").strip().rstrip("/")
+        raw = str(value or "").strip()
+        clean = raw if raw == HUB_MIRROR_SOURCE_PATH else raw.rstrip("/")
         if not clean or clean in seen:
             continue
         seen.add(clean)
@@ -172,7 +174,10 @@ def folder_filter_sql(folder) -> tuple[str, list] | None:
     parts = []
     params = []
     for value in values:
-        if value.startswith("/"):
+        if value == HUB_MIRROR_SOURCE_PATH:
+            parts.append("i.source_id IN (SELECT id FROM catalog_sources WHERE path = ?)")
+            params.append(value)
+        elif value.startswith("/"):
             # Absolute folder scopes are hot (grid browse): a range predicate
             # rides idx_images_active_filepath instead of a LIKE full scan
             # (folder-scoped rankings on 141k rows: seconds -> milliseconds).
