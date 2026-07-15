@@ -123,6 +123,32 @@ class MirrorAcceptanceTests(BackendTestCase):
         second = await mirror.refresh()
         self.assertEqual(second["rows_applied"], 0)
 
+    async def test_mirror_follows_hub_filepath_moves(self):
+        """Hub paths can move (mount migrations, re-filed folders); the mirror must follow."""
+        mirror = MirrorPuller(db_path=db.DB_PATH, hub="http://hub", request=self._request)
+        first = await mirror.refresh()
+        self.assertEqual(first["rows_applied"], 200)
+
+        moved = "/hub-moved/2026/hub-1.jpg"
+        self.rows[0]["filepath"] = moved
+        conn = await db.get_db()
+        try:
+            await conn.execute("DELETE FROM sync_mirror_state WHERE key = 'cursor'")
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        await mirror.refresh()
+        conn = await db.get_db()
+        try:
+            row = await (await conn.execute(
+                "SELECT filepath, hub_remote FROM images WHERE hub_image_id = 1"
+            )).fetchone()
+            self.assertEqual(int(row["hub_remote"]), 1)
+            self.assertEqual(row["filepath"], moved)
+        finally:
+            await conn.close()
+
     async def test_mirror_reports_skipped_unhashed_rows(self):
         self.rows = [
             {

@@ -197,6 +197,10 @@ class MirrorPuller:
                 values.pop("filepath", None)
                 values.pop("source_id", None)
                 values["hub_remote"] = 0
+            else:
+                # Hub paths can move (mount migrations, re-filed folders) — the
+                # mirror must follow, or the folder tree shows the old layout forever.
+                values["filepath"] = str(remote.get("filepath") or "")
             values["hub_image_id"] = hub_image_id
             assignments = ", ".join(f"{column} = ?" for column in values)
             await conn.execute(f"UPDATE images SET {assignments} WHERE id = ?", (*values.values(), image_id))
