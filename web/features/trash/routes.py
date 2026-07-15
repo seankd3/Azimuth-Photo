@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from features.trash import service as trash_service
 from features.trash.remote import FORWARDED_HEADER, HubTrashRequestError, empty_hub_trash
-from features.sync import satellite
+from features.sync import contract, satellite
+from features.sync.contract import require_compatible_api_revision
 
 
 router = APIRouter()
@@ -67,7 +68,7 @@ async def api_trash(limit: int = 100, offset: int = 0):
     return await trash_service.list_trash(_configured_db_path(), limit=limit, offset=offset)
 
 
-@router.post("/api/trash/empty")
+@router.post("/api/trash/empty", dependencies=[Depends(require_compatible_api_revision)])
 async def api_empty_trash(request: Request, _payload: EmptyTrashBody | None = None):
     remote_result = None
     mirror_refs = await trash_service.hub_mirror_trash_refs(_configured_db_path())
@@ -79,6 +80,17 @@ async def api_empty_trash(request: Request, _payload: EmptyTrashBody | None = No
             raise HTTPException(
                 status_code=503,
                 detail="Connect to the hub before permanently emptying mirrored Trash.",
+            )
+        if not await contract.hub_supports("trash.scoped_empty", hub=hub, force=True):
+            state = contract.hub_status(hub)
+            if state["hub_health"] == "unreachable":
+                raise HTTPException(
+                    status_code=503,
+                    detail="Connect to the hub before permanently emptying mirrored Trash.",
+                )
+            raise HTTPException(
+                status_code=409,
+                detail="The hub is running an older version. Empty Trash is paused until it updates.",
             )
         hub_image_ids = mirror_refs["hub_image_ids"]
         if len(hub_image_ids) != mirror_count:

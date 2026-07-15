@@ -27,7 +27,7 @@ async def empty_hub_trash(hub_url: str, hub_image_ids: list[int]) -> dict:
             "Accept": "application/json",
             "Content-Type": "application/json",
             FORWARDED_HEADER: "1",
-            **satellite.device_auth_headers(),
+            **satellite.hub_request_headers(),
         }
         body = json.dumps({"hub_image_ids": chunk}, separators=(",", ":")).encode()
         req = urllib.request.Request(url, data=body, headers=headers, method="POST")

@@ -67,10 +67,11 @@ class ScenarioResult:
 
 
 class ScenarioContext:
-    def __init__(self, page, base_url: str, manifest: dict) -> None:
+    def __init__(self, page, base_url: str, manifest: dict, old_hub=None) -> None:
         self.page = page
         self.base_url = base_url
         self.manifest = manifest
+        self.old_hub = old_hub
         self.current_step = "starting"
 
     def mark(self, step: str) -> None:
@@ -122,10 +123,11 @@ class ScenarioContext:
 
 
 class BrowserHarness:
-    def __init__(self, browser, base_url: str, manifest: dict) -> None:
+    def __init__(self, browser, base_url: str, manifest: dict, old_hub=None) -> None:
         self.browser = browser
         self.base_url = base_url
         self.manifest = manifest
+        self.old_hub = old_hub
 
     def run(self, scenario) -> ScenarioResult:
         started = time.monotonic()
@@ -141,7 +143,7 @@ class BrowserHarness:
         page.set_default_timeout(DEFAULT_ACTION_TIMEOUT_MS)
         evidence = BrowserEvidence()
         evidence.attach(page)
-        qa = ScenarioContext(page, self.base_url, self.manifest)
+        qa = ScenarioContext(page, self.base_url, self.manifest, self.old_hub)
         error = ""
         screenshot = ""
         status = "PASS"

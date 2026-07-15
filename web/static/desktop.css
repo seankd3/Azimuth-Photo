@@ -878,11 +878,14 @@ html[data-badges-index="0"] .cell .c-idx { display: none; }
 .sync-chip-button { display: inline-flex; align-items: center; gap: 5px; min-height: 30px; padding: 0 9px; color: var(--text-2); font: inherit; font-size: var(--fs-caption); background: var(--surface-raised); border: 1px solid var(--line); border-radius: var(--r-ctl); cursor: pointer; }
 .sync-chip-button:hover { color: var(--text); border-color: var(--accent-lin); }
 .sync-chip-arrow { color: var(--accent); font-size: 15px; font-weight: 700; }
+.sync-chip.needs-update .sync-chip-button { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 48%, var(--line)); }
+.sync-chip.needs-update .sync-chip-arrow { color: var(--warn); }
 .sync-chip-sep { color: var(--text-3); }
 .sync-chip-popover { position: absolute; top: calc(100% + var(--s2)); right: 0; z-index: var(--z-popover); width: min(300px, calc(100vw - 24px)); padding: var(--s3); color: var(--text-2); background: var(--surface-popover); border: 1px solid var(--line); border-radius: var(--r-card); box-shadow: 0 16px 48px rgba(0,0,0,.45); }
 .sync-chip-popover-title { display: flex; justify-content: space-between; gap: var(--s3); color: var(--text); font-size: var(--fs-caption); font-weight: 650; }
 .sync-chip-popover-title span { color: var(--text-3); font-weight: 500; }
 .sync-chip-current { margin-top: var(--s2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-caption); }
+.sync-chip-contract { margin-top: var(--s2); color: var(--warn); font-size: var(--fs-caption); line-height: var(--lh-body); }
 .sync-chip-errors { display: grid; gap: 3px; margin-top: var(--s2); padding: var(--s2); color: var(--danger); font-size: var(--fs-micro); background: rgba(220, 84, 84, .1); border-radius: var(--r-ctl); }
 .sync-chip-actions { display: flex; justify-content: flex-end; gap: var(--s2); margin-top: var(--s3); }
 .sync-chip-actions button { padding: 4px 7px; color: var(--text-2); font: inherit; font-size: var(--fs-caption); background: transparent; border: 1px solid var(--line); border-radius: var(--r-ctl); cursor: pointer; }

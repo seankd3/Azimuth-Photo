@@ -1,6 +1,6 @@
 import os
 import sqlite3
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 
 from test_support import *  # noqa: F401,F403
@@ -246,7 +246,7 @@ class TrashTests(BackendTestCase):
         env = {"PHOTOARCHIVE_MODE": "satellite", "PHOTOARCHIVE_HUB_URL": "http://probe-hub"}
         with patch.dict(os.environ, env, clear=False), patch(
             "features.trash.routes.empty_hub_trash", side_effect=fake_empty_hub
-        ):
+        ), patch("features.trash.routes.contract.hub_supports", new_callable=AsyncMock, return_value=True):
             def probe():
                 with TestClient(app_module.app) as client:
                     return client.post("/api/trash/empty")
@@ -259,6 +259,44 @@ class TrashTests(BackendTestCase):
         self.assertEqual(response.json()["hub_deleted_count"], 1)
         self.assertEqual(response.json()["freed_bytes"], 4321)
         self.assertFalse(await self._image_exists(image_id))
+
+    async def test_satellite_scoped_empty_refuses_hub_without_capability(self):
+        conn = await db.get_db()
+        try:
+            source = await conn.execute(
+                "INSERT INTO catalog_sources(path, display_name, included, online) "
+                "VALUES ('hub://', 'Hub library', 1, 1)"
+            )
+            image = await conn.execute(
+                "INSERT INTO images "
+                "(source_id, filename, filepath, content_hash, status, trashed_at, "
+                "trash_path, file_ext, file_size, hub_image_id, hub_remote) "
+                "VALUES (?, 'mirrored.jpg', '/hub/mirrored.jpg', ?, 'trashed', 1000, "
+                "NULL, 'jpg', 4321, 92, 1)",
+                (int(source.lastrowid), "b" * 32),
+            )
+            image_id = int(image.lastrowid)
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        env = {"PHOTOARCHIVE_MODE": "satellite", "PHOTOARCHIVE_HUB_URL": "http://old-hub"}
+        with patch.dict(os.environ, env, clear=False), patch(
+            "features.trash.routes.contract.hub_supports", new_callable=AsyncMock, return_value=False
+        ), patch(
+            "features.trash.routes.contract.hub_status",
+            return_value={"hub_health": "needs_update", "api_rev": None, "app_version": None},
+        ), patch("features.trash.routes.empty_hub_trash") as forward:
+            def probe():
+                with TestClient(app_module.app) as client:
+                    return client.post("/api/trash/empty")
+
+            response = await asyncio.to_thread(probe)
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("older version", response.json()["detail"])
+        forward.assert_not_called()
+        self.assertTrue(await self._image_exists(image_id))
 
     async def test_retention_purges_only_expired_online_trash_and_never_originals(self):
         source, root = await self._source_root()

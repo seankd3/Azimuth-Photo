@@ -42,7 +42,7 @@ _MIRROR_COMMIT_EVERY = 250
 async def _urllib_request(method: str, url: str, *, body: bytes | None = None, headers: dict | None = None) -> tuple[int, dict[str, str], bytes]:
     def request() -> tuple[int, dict[str, str], bytes]:
         request_headers = dict(headers or {})
-        request_headers.update(satellite.device_auth_headers())
+        request_headers.update(satellite.hub_request_headers())
         req = urllib.request.Request(url, data=body, headers=request_headers, method=method)
         try:
             with urllib.request.urlopen(req, timeout=20) as response:  # noqa: S310 - configured tailnet hub.

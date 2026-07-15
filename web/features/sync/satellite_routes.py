@@ -4,8 +4,9 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from features.sync import satellite
+from features.sync import contract
 from features.sync.sync_worker import get_worker
-from features.sync.versioning import hub_compatibility
+from core.version import API_REV, app_version
 
 
 router = APIRouter(tags=["sync"])
@@ -31,7 +32,12 @@ async def attach_hub(request: Request):
 async def sync_status():
     worker = get_worker()
     if not satellite.is_satellite_mode() or worker is None:
-        return {"mode": "satellite" if satellite.is_satellite_mode() else "hub", "paused": False, "queue_depth": 0, "bytes_remaining": 0, "throughput_bps": 0, "current_file": None, "recent_errors": [], "mirror": {"cursor": 0, "rows_applied": 0, "skipped_unhashed": 0, "last_refresh_at": None}, "prefetch": {"state": "idle", "cached": 0, "total": 0}, **hub_compatibility(None)}
+        hub_state = (
+            contract.hub_status(satellite.hub_url())
+            if satellite.has_hub()
+            else {"hub_health": "ok", "api_rev": API_REV, "app_version": app_version()}
+        )
+        return {"mode": "satellite" if satellite.is_satellite_mode() else "hub", "paused": False, "queue_depth": 0, "bytes_remaining": 0, "throughput_bps": 0, "current_file": None, "recent_errors": [], "mirror": {"cursor": 0, "rows_applied": 0, "skipped_unhashed": 0, "last_refresh_at": None}, "prefetch": {"state": "idle", "cached": 0, "total": 0}, **hub_state}
     return worker.status()
 
 

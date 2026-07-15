@@ -136,7 +136,11 @@ async def api_pair_connect(body: ConnectRequest):
     req = UrlRequest(
         f"{hub}/api/pair",
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json", "Accept": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            **satellite.hub_request_headers(),
+        },
         method="POST",
     )
     try:

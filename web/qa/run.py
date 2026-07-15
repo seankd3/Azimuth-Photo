@@ -67,7 +67,7 @@ def main(argv: list[str] | None = None) -> int:
     started = time.monotonic()
     results = []
     base_url = ""
-    with ProbeServer() as server:
+    with ProbeServer(old_hub=any(scenario.name == "handshake_skew" for scenario in selected)) as server:
         base_url = server.base_url
         print(f"Probe server: {base_url} (isolated PHOTOARCHIVE_HOME)", flush=True)
         with sync_playwright() as playwright:
@@ -76,7 +76,7 @@ def main(argv: list[str] | None = None) -> int:
                 args=["--no-sandbox", "--disable-dev-shm-usage"],
             )
             try:
-                harness = BrowserHarness(browser, server.base_url, manifest)
+                harness = BrowserHarness(browser, server.base_url, manifest, server.old_hub)
                 for scenario in selected:
                     result = harness.run(scenario)
                     results.append(result)

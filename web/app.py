@@ -6,6 +6,9 @@ import asyncio
 import os
 import socket
 
+from fastapi import Request
+from fastapi.responses import JSONResponse
+
 from core import wiring
 from core.app_factory import create_app
 from features.develop import ai_mask_routes, hdr_routes, import_routes, pano_routes, preset_routes, routes as develop_routes, xmp_write_routes
@@ -16,10 +19,22 @@ from features.media import routes as media_routes
 from features.quality import routes as quality_routes
 from features.system import backup_routes, version_routes
 from features.sync import hub_routes, mdns, oplog_routes, pair_routes, pairing, satellite, satellite_routes
+from features.sync.contract import ApiRevisionMismatch
 from features.sync.sync_worker import SyncWorker, configure_worker
 
 
 app = create_app()
+
+
+@app.exception_handler(ApiRevisionMismatch)
+async def api_revision_mismatch(_request: Request, _error: ApiRevisionMismatch):
+    return JSONResponse(
+        status_code=409,
+        content={
+            "detail": "This hub needs an update before it can safely perform that action.",
+            "code": "api_rev_mismatch",
+        },
+    )
 wiring.configure_develop_routes()
 wiring.configure_develop_import_routes()
 wiring.configure_develop_preset_routes()
