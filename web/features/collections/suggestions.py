@@ -95,12 +95,14 @@ _cache: dict = {"key": None, "data": None, "expires": 0.0}
 def _parse_taken(value) -> float | None:
     if not value:
         return None
+    # OSError/OverflowError: Windows rejects .timestamp() for pre-1970 dates,
+    # which corrupt EXIF (e.g. "0000-…" or camera-default 1904 dates) produces.
     try:
         return datetime.strptime(str(value)[:19], "%Y-%m-%d %H:%M:%S").timestamp()
-    except ValueError:
+    except (ValueError, OSError, OverflowError):
         try:
             return datetime.strptime(str(value)[:10], "%Y-%m-%d").timestamp()
-        except ValueError:
+        except (ValueError, OSError, OverflowError):
             return None
 
 
