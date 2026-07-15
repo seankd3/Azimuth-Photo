@@ -188,7 +188,9 @@ def _strip_trailing_noise(value: str) -> str:
 def _format_shoot_title(base_title: str, date_ts: float | None = None) -> str:
     title = base_title.strip()
     if date_ts is not None:
-        return f"{title} - {datetime.fromtimestamp(date_ts).strftime('%b %-d, %Y')}"
+        taken = datetime.fromtimestamp(date_ts)
+        # %-d is glibc-only; format the day portably for Windows.
+        return f"{title} - {taken.strftime('%b')} {taken.day}, {taken.year}"
     return title
 
 
