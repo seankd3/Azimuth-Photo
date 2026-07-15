@@ -180,7 +180,10 @@ export function initQuickGuide() {
     });
     on('refine:open', () => completeAction('try-refine'));
 
-    document.getElementById('help-restart-guide')?.addEventListener('click', replayGuide);
+    // Delegate: shortcut_sheet.js replaces #help innerHTML at boot (before us).
+    document.getElementById('help')?.addEventListener('click', (event) => {
+        if (event.target.closest('#help-restart-guide')) replayGuide();
+    });
 
     if (!hasStoredState) {
         const token = ++classificationToken;
