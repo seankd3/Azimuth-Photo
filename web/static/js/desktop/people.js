@@ -1,7 +1,7 @@
 import {
     getPeople, getPeopleStatus, ignorePerson, labelPerson, mergePeople, rejectMergeSuggestion,
 } from './api.js';
-import { on, setActiveLens, setRankingsMeta, setScope } from './state.js';
+import { navigateToScope, on, setRankingsMeta } from './state.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
 import { showToast } from './toast.js';
 import { icon } from '../icons.js';
@@ -237,12 +237,11 @@ function focusReviewCard(index = reviewFocusIndex) {
 
 function openPerson(person) {
     if (!person || !person.id) return;
-    setScope({
+    navigateToScope({
         people: person.id,
         personLabel: isNamed(person) ? displayLabel(person) : '',
         personThumb: thumbFor(person),
     });
-    setActiveLens('grid');
 }
 
 function closeMenus() {

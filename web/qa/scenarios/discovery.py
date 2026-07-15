@@ -31,6 +31,18 @@ def people_browse(qa) -> None:
     qa.page.keyboard.press("Escape")
     qa.poll("the person actions to close", lambda: menu.is_hidden())
 
+    qa.mark("open the named person as a three-photo Grid scope")
+    named.locator(".person-face").click()
+    qa.page.locator("#view-grid.active #grid-flow").wait_for(state="visible")
+    qa.page.locator(
+        "#ctx-crumbs .chip[data-facet='people']", has_text="Ada QA"
+    ).wait_for(state="visible")
+    qa.wait_count(3)
+    qa.poll(
+        "Ada's three scoped grid photos",
+        lambda: qa.page.locator("#grid-flow .cell[data-id]").count() == 3,
+    )
+
 
 def map_geo_browse(qa) -> None:
     qa.goto_desktop()
