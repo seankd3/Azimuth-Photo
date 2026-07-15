@@ -66,7 +66,7 @@ def _assert_budget(label: str, measured_ms: float) -> None:
 @pytest.fixture(scope="module")
 def perf_catalog():
     """One realistic, fully cached catalog shared by every perf-budget case."""
-    tempdir = tempfile.TemporaryDirectory(prefix="azimuth-perf-", dir="/mnt/expansion/tmp")
+    tempdir = tempfile.TemporaryDirectory(prefix="azimuth-perf-")
     old_db_path = db.DB_PATH
     old_settings_path = settings.SETTINGS_PATH
     old_settings_state = settings._settings

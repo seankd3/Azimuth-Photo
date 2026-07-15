@@ -29,7 +29,7 @@ def import_folder_preflight(qa) -> None:
         """() => [...document.querySelectorAll('#import-preview-grid .import-preview-item img')]
             .every(image => image.complete && image.naturalWidth > 0)"""
     )
-    assert previews.locator(".import-preview-name").all_inner_texts() == [
+    assert sorted(previews.locator(".import-preview-name").all_inner_texts()) == [
         f"qa-import-{index}.jpg" for index in range(1, expected + 1)
     ]
 

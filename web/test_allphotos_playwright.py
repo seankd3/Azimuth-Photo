@@ -13,6 +13,11 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.skipif(
+    os.name == "nt",
+    reason="uses POSIX process groups for its isolated Playwright server",
+)
+
 WEB_ROOT = Path(__file__).resolve().parent
 REPO_ROOT = WEB_ROOT.parent
 SCRATCH = Path("/mnt/expansion/tmp/bugs1/allphotos-playwright")

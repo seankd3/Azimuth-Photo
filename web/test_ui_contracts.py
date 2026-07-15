@@ -153,13 +153,16 @@ class UiContractsTests(BackendTestCase):
 
         self.assertIn("openSourceRevealMenu", panel)
         self.assertIn("row.addEventListener('contextmenu'", panel)
-        self.assertIn("openSourceRevealMenu(row.dataset.source, row, count)", panel)
-        self.assertIn("revealFolder(path)", source_reveal_menu)
+        self.assertIn("openSourceRevealMenu(row.dataset.source, row, count, {", panel)
+        self.assertIn("revealFolder(path, sourceId)", source_reveal_menu)
         self.assertIn('data-act="scope"', source_reveal_menu)
         self.assertIn('data-act="refine"', source_reveal_menu)
         self.assertIn('data-act="reveal"', source_reveal_menu)
         self.assertIn('data-act="export"', source_reveal_menu)
         self.assertIn("fileManagerMenuLabel()", source_reveal_menu)
+        self.assertIn("revealAvailable", source_reveal_menu)
+        self.assertIn("revealAvailable ?", source_reveal_menu)
+        self.assertIn("node.reveal_available !== false", (open(os.path.join(base_dir, "static", "js", "desktop", "folders.js"), encoding="utf-8")).read())
         self.assertIn("'Open in Explorer'", file_manager)
         self.assertNotIn("Reveal in Explorer", file_manager)
 

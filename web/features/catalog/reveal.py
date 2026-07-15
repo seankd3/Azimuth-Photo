@@ -12,8 +12,22 @@ import sys
 from collections.abc import Callable, Sequence
 from typing import Any
 
+from core.path_groups import safe_commonpath
+
 
 Runner = Callable[[Sequence[str]], None]
+_NONLOCAL_SOURCE_PREFIXES = ("hub:",)
+
+
+def source_has_local_folders(path: str) -> bool:
+    """Whether this source denotes folders on this machine.
+
+    Hub-mirrored catalog rows deliberately have no original file on a satellite.
+    Their ``hub://`` source is a library namespace, not a path an OS file manager
+    can open.
+    """
+
+    return not str(path or "").strip().lower().startswith(_NONLOCAL_SOURCE_PREFIXES)
 
 
 def normalize_path(path: str) -> str:
@@ -30,11 +44,8 @@ def path_is_under_roots(path: str, roots: Sequence[str]) -> bool:
         root_norm = normalize_path(root)
         if not root_norm:
             continue
-        try:
-            if os.path.commonpath([root_norm, candidate]) == root_norm:
-                return True
-        except ValueError:
-            continue
+        if safe_commonpath([root_norm, candidate]) == root_norm:
+            return True
     return False
 
 
@@ -89,6 +100,9 @@ def reveal_folder(
 
     if not str(path or "").strip():
         return {"ok": False, "error": "Path is required"}
+
+    if not source_has_local_folders(path):
+        return {"ok": False, "error": "Reveal is only available for local folders"}
 
     candidate = normalize_path(path)
     if not path_is_under_roots(candidate, roots):

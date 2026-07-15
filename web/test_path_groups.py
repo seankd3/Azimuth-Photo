@@ -114,6 +114,22 @@ class DevelopExportPathTests(unittest.TestCase):
         self.assertEqual(develop_render.EXPORT_DIRECTORY, export)
         self.assertEqual(develop_render.LIBRARY_EXPORT_DIRECTORY, library)
 
+    def test_render_export_dirs_honor_runtime_env_override(self):
+        paths = resolve_runtime_paths(
+            environ={
+                "USERPROFILE": r"C:\Users\Alex",
+                "PHOTOARCHIVE_EXPORT_DIR": r"D:\Azimuth\Exports",
+                "PHOTOARCHIVE_LIBRARY_EXPORT_DIR": r"E:\Photos\Develop Exports",
+            },
+            platform_name="win32",
+            home=r"C:\Users\Alex",
+        )
+        with mock.patch.object(develop_render, "resolve_runtime_paths", return_value=paths):
+            export, library = develop_render._resolved_export_dirs()
+
+        self.assertEqual(export, Path(r"D:\Azimuth\Exports"))
+        self.assertEqual(library, Path(r"E:\Photos\Develop Exports"))
+
 
 if __name__ == "__main__":
     unittest.main()
