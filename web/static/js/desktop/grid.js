@@ -712,7 +712,8 @@ export function initGrid() {
         if (mounted) loadFirstPage();
     });
     on('selection', ({ imageIds } = {}) => patchCells(imageIds));
-    on('trash:changed', () => {
+    on('trash:changed', ({ imageIds } = {}) => {
+        if (!imageIds?.length) return;
         reloadPending = !mounted;
         if (mounted) loadFirstPage();
     });
