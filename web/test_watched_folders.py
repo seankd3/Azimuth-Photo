@@ -80,6 +80,34 @@ class WatchedFolderTests(BackendTestCase):
         self.assertTrue(result['ok'])
         self.assertEqual(result['registered'], 1)
 
+    async def test_incremental_scan_finds_new_file_with_preserved_old_mtime(self):
+        inbox = os.path.join(self.tempdir.name, 'preserved-mtime')
+        os.makedirs(inbox)
+        old_mtime = time.time() - 86400
+        first = os.path.join(inbox, 'first.jpg')
+        with open(first, 'wb') as handle:
+            handle.write(b'first image')
+        os.utime(first, (old_mtime, old_mtime))
+
+        folder = await watched_folders.add_folder(db.DB_PATH, inbox)
+        initial = await watched_folders.scan_folder(db.DB_PATH, folder['id'])
+        self.assertEqual(initial['registered'], 1)
+
+        preserved = os.path.join(inbox, 'copied-with-old-time.jpg')
+        with open(preserved, 'wb') as handle:
+            handle.write(b'preserved image')
+        os.utime(preserved, (old_mtime, old_mtime))
+
+        incremental = await watched_folders.scan_folder(db.DB_PATH, folder['id'])
+
+        self.assertEqual(incremental['registered'], 1)
+        conn = sqlite3.connect(db.DB_PATH)
+        try:
+            paths = {row[0] for row in conn.execute('SELECT filepath FROM images')}
+        finally:
+            conn.close()
+        self.assertIn(preserved, paths)
+
     async def test_watched_folder_ui_contract(self):
         base_dir = os.path.dirname(__file__)
         with open(os.path.join(base_dir, 'static', 'js', 'desktop', 'watched_folders.js'), encoding='utf-8') as handle:

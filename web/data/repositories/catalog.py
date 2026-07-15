@@ -339,6 +339,24 @@ async def insert_images_batch(db_path: str, rows: list[tuple], source_id: int | 
         await connection.close_async(conn, db_path=db_path)
 
 
+async def image_signatures_for_source(db_path: str, source_id: int) -> set[tuple[str, str, int]]:
+    """Known live listing entries for an incremental watched-folder scan."""
+
+    conn = await connection.open_async(db_path)
+    try:
+        cursor = await conn.execute(
+            "SELECT filename, filepath, file_size FROM images "
+            "WHERE source_id = ? AND missing_at IS NULL",
+            (int(source_id),),
+        )
+        return {
+            (str(row["filename"]), str(row["filepath"]), int(row["file_size"] or 0))
+            for row in await cursor.fetchall()
+        }
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+
+
 async def mark_source_missing_files_on_conn(
     conn,
     source_id: int,
