@@ -275,7 +275,7 @@ export async function trashSelectedImages() {
     const imageIds = selectedIds();
     if (!imageIds.length) return false;
     const result = await trashImages(imageIds);
-    if (!result) {
+    if (!result.ok) {
         showToast("Selection couldn't be trashed");
         return false;
     }
@@ -285,7 +285,7 @@ export async function trashSelectedImages() {
         undo: async () => {
             const restored = await restoreImages(imageIds);
             emit('trash:changed', { imageIds });
-            showToast(restored ? 'Restored' : 'Couldn’t restore');
+            showToast(restored.ok ? 'Restored' : 'Couldn’t restore');
         },
     });
     return true;
@@ -295,7 +295,7 @@ async function restoreSelectedTrash() {
     const imageIds = selectedIds();
     if (!imageIds.length) return;
     const result = await restoreImages(imageIds);
-    if (!result) {
+    if (!result.ok) {
         showToast('Couldn’t restore');
         return;
     }
@@ -305,7 +305,7 @@ async function restoreSelectedTrash() {
         undo: async () => {
             const trashed = await trashImages(imageIds);
             emit('trash:changed', { imageIds });
-            showToast(trashed ? 'Moved back to Trash' : 'Couldn’t undo');
+            showToast(trashed.ok ? 'Moved back to Trash' : 'Couldn’t undo');
         },
     });
 }

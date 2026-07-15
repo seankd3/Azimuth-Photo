@@ -15,6 +15,7 @@ import { markSettingsChange } from './perf_overlay.js';
 
 const DIRECT_DEVELOP_EXTENSIONS = new Set(['dng', 'cr3', 'cr2', 'exr', 'jpg', 'jpeg', 'png', 'tif', 'tiff', 'webp']);
 const RAW_DEVELOP_EXTENSIONS = new Set(['dng', 'cr3', 'cr2', 'exr']);
+const REQUEST_TIMEOUT_MS = 8000;
 const stateCache = new Map();
 const saveTimers = new Map();
 const settingsClipboard = new DevelopSettingsClipboard();
@@ -80,10 +81,10 @@ function isRaw(image) {
 function chosenImage() {
     const selectedId = selection.values().next().value;
     if (selectedId != null) {
-        const selected = viewState.images.find((image) => Number(image.id) === Number(selectedId));
+        const selected = viewState.images.find((image) => Number(image?.id) === Number(selectedId));
         if (selected) return selected;
     }
-    return viewState.images[viewState.focusIndex] || viewState.images[0] || null;
+    return viewState.images[viewState.focusIndex] || viewState.images.find(Boolean) || null;
 }
 
 function setStatus(message = '', { busy = false, error = false } = {}) {
@@ -104,7 +105,10 @@ function originSettings(payload) {
 }
 
 async function fetchDevelop(imageId) {
-    const response = await fetch(`/api/develop/${imageId}`, { headers: { Accept: 'application/json' } });
+    const response = await fetch(`/api/develop/${imageId}`, {
+        headers: { Accept: 'application/json' },
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
     if (!response.ok) {
         const payload = await response.json().catch(() => null);
         throw new Error(payload?.error || (response.status === 404 ? 'Develop settings are not ready for this photo.' : 'Could not load develop settings.'));
@@ -142,7 +146,7 @@ async function fetchBaseWithRetry(imageId, token, scale = 1) {
         if (attempt === 8) setStatus('Developing preview…', { busy: true });
         const response = await fetch(`/api/develop/${imageId}/base.bin`);
         if (response.ok) return parseBase(await response.arrayBuffer(), scale);
-        if (![202, 404, 503].includes(response.status)) {
+        if (![202, 404].includes(response.status)) {
             const payload = await response.json().catch(() => null);
             throw new Error(payload?.error || 'The image preview could not be loaded.');
         }
@@ -198,18 +202,30 @@ function setControlsLoading(loading) {
 function scheduleSave(label = 'Develop adjustment') {
     if (!currentImage) return;
     const imageId = Number(currentImage.id);
+    const entry = stateCache.get(imageId);
+    if (!entry) return;
+    const saveVersion = (entry.saveVersion || 0) + 1;
+    entry.saveVersion = saveVersion;
+    entry.unsaved = true;
+    if (Number(currentImage?.id) === imageId) root.dataset.saveState = 'unsaved';
     clearTimeout(saveTimers.get(imageId));
     saveTimers.set(imageId, setTimeout(() => {
-        const entry = stateCache.get(imageId);
-        if (!entry) return;
         fetch(`/api/develop/${imageId}`, {
             method: 'PUT', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ settings: entry.settings, label }),
         }).then((response) => {
             if (!response.ok) throw new Error('save failed');
+            if (entry.saveVersion !== saveVersion) return;
+            entry.unsaved = false;
+            if (Number(currentImage?.id) === imageId) root.dataset.saveState = 'saved';
             settingsClipboard.markSaved(imageId);
             historyPanel?.reload();
-        }).catch(() => {});
+        }).catch(() => {
+            if (entry.saveVersion !== saveVersion) return;
+            entry.unsaved = true;
+            if (Number(currentImage?.id) === imageId) root.dataset.saveState = 'unsaved';
+            showToast('Couldn’t save Develop adjustments');
+        });
     }, 400));
 }
 
@@ -354,7 +370,9 @@ function applySettingsPatch(patch, label) {
 async function requestAutoTone() {
     if (!currentImage) return;
     try {
-        const response = await fetch(`/api/develop/${currentImage.id}/auto`, { method: 'POST' });
+        const response = await fetch(`/api/develop/${currentImage.id}/auto`, {
+            method: 'POST', signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        });
         if (!response.ok) throw new Error();
         const payload = await response.json();
         applySettingsPatch(payload.patch || {}, 'Auto tone');
@@ -400,13 +418,15 @@ function redo() {
 }
 
 function syncFilmstrip() {
-    filmstrip.innerHTML = viewState.images.map((image, index) => `<button class="develop-thumb ${Number(image.id) === Number(currentImage?.id) ? 'cur' : ''}" data-index="${index}" data-tip="${developTip(image)}" aria-label="${String(image.filename || `Photo ${index + 1}`).replaceAll('"', '&quot;')}"><img src="${image.thumb_url || thumbUrl('sm', image.id)}" loading="lazy" decoding="async" alt=""></button>`).join('');
+    filmstrip.innerHTML = viewState.images.map((image, index) => image
+        ? `<button class="develop-thumb ${Number(image.id) === Number(currentImage?.id) ? 'cur' : ''}" data-index="${index}" data-tip="${developTip(image)}" aria-label="${String(image.filename || `Photo ${index + 1}`).replaceAll('"', '&quot;')}"><img src="${image.thumb_url || thumbUrl('sm', image.id)}" loading="lazy" decoding="async" alt=""></button>`
+        : '').join('');
     filmstrip.querySelector('.cur')?.scrollIntoView({ block: 'nearest', inline: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
 }
 
 function pregenNeighbors(image) {
-    const index = viewState.images.findIndex((item) => Number(item.id) === Number(image.id));
-    const imageIds = viewState.images.slice(Math.max(0, index - 2), index + 3).map((item) => Number(item.id));
+    const index = viewState.images.findIndex((item) => Number(item?.id) === Number(image.id));
+    const imageIds = viewState.images.slice(Math.max(0, index - 2), index + 3).map((item) => Number(item?.id)).filter((id) => id > 0);
     if (!imageIds.length) return;
     fetch('/api/develop/pregen', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image_ids: imageIds }) }).catch(() => {});
 }
@@ -458,6 +478,7 @@ async function openImage(image) {
         }
         if (token !== loadingToken) return;
         entry.imageId = Number(image.id);
+        root.dataset.saveState = entry.unsaved ? 'unsaved' : 'saved';
         historyPanel?.setHistory(entry.serverHistory || []);
         applySettings(entry);
         if (!renderer) {
@@ -487,15 +508,19 @@ async function openImage(image) {
         if (token === loadingToken) {
             setControlsLoading(false);
             histogram?.setLoading(false);
-            setStatus(error.message || 'Develop could not open this photo.', { error: true });
+            const message = error.message || 'Develop could not open this photo.';
+            setStatus(message, { error: true });
+            showToast(message);
         }
     }
 }
 
 function nav(delta) {
     if (!viewState.images.length) return;
-    const index = currentImage ? viewState.images.findIndex((image) => Number(image.id) === Number(currentImage.id)) : viewState.focusIndex;
-    const next = Math.max(0, Math.min(viewState.images.length - 1, index + delta));
+    const index = currentImage ? viewState.images.findIndex((image) => Number(image?.id) === Number(currentImage.id)) : viewState.focusIndex;
+    let next = index + Math.sign(delta);
+    while (next >= 0 && next < viewState.images.length && !viewState.images[next]) next += Math.sign(delta);
+    if (next < 0 || next >= viewState.images.length || !viewState.images[next]) return;
     viewState.focusIndex = next;
     openImage(viewState.images[next]);
 }
@@ -1021,7 +1046,9 @@ function init() {
             stage, canvas,
             onAutoLevel: async () => {
                 if (!currentImage) return null;
-                const response = await fetch(`/api/develop/${currentImage.id}/transform/auto`, { method: 'POST' });
+                const response = await fetch(`/api/develop/${currentImage.id}/transform/auto`, {
+                    method: 'POST', signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+                });
                 return response.ok ? response.json() : null;
             },
         },
@@ -1038,7 +1065,7 @@ function init() {
         const point = renderer?.canvasToImage(event.clientX, event.clientY) || { u: .5, v: .5 };
         return { x: Math.max(0, Math.min(1, point.u)), y: Math.max(0, Math.min(1, point.v)) };
     };
-    compare = new DevelopCompareView({ stage, canvas, loadPreview: comparisonPreview, getCurrent: () => currentImage, getImages: () => viewState.images });
+    compare = new DevelopCompareView({ stage, canvas, loadPreview: comparisonPreview, getCurrent: () => currentImage, getImages: () => viewState.images.filter(Boolean) });
     softProof = new SoftProofPopover({ toolbar, onChange: (proof) => {
         renderer?.setSoftProof(proof);
         compare?.setProof(proof);

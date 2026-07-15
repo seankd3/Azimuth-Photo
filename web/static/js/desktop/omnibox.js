@@ -213,7 +213,9 @@ async function ensureSuggestionData() {
         filterOptions = optionsData || {};
         tags = (tagData && tagData.tags) || [];
         render();
-    }).catch(() => {});
+    }).catch(() => {
+        dataPromise = null;
+    });
     return dataPromise;
 }
 

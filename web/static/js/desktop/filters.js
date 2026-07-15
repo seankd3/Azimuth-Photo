@@ -365,26 +365,32 @@ async function loadOptions({ force = false } = {}) {
     if ((optionsAreFresh() && !force) || loading) return;
     loading = true;
     render();
-    const [peopleData, folderData, filterData, tagData] = await Promise.all([
-        getPeople(500),
-        getFolders(),
-        getFilterOptions(),
-        getTags({ limit: 100 }),
-    ]);
-    options = {
-        people: flattenPeople(peopleData),
-        folders: (folderData && folderData.folders) || [],
-        years: (filterData && filterData.years) || [],
-        fileTypes: (filterData && filterData.file_types) || [],
-        cameras: (filterData && filterData.cameras) || [],
-        lenses: (filterData && filterData.lenses) || [],
-        tags: (tagData && tagData.tags) || [],
-        undated: Number(filterData && filterData.undated) || 0,
-    };
-    loaded = true;
-    lastOptionsLoadedAt = Date.now();
-    loading = false;
-    render();
+    try {
+        const [peopleData, folderData, filterData, tagData] = await Promise.all([
+            getPeople(500),
+            getFolders(),
+            getFilterOptions(),
+            getTags({ limit: 100 }),
+        ]);
+        options = {
+            people: flattenPeople(peopleData),
+            folders: (folderData && folderData.folders) || [],
+            years: (filterData && filterData.years) || [],
+            fileTypes: (filterData && filterData.file_types) || [],
+            cameras: (filterData && filterData.cameras) || [],
+            lenses: (filterData && filterData.lenses) || [],
+            tags: (tagData && tagData.tags) || [],
+            undated: Number(filterData && filterData.undated) || 0,
+        };
+        loaded = true;
+        lastOptionsLoadedAt = Date.now();
+    } catch {
+        loaded = false;
+        lastOptionsLoadedAt = 0;
+    } finally {
+        loading = false;
+        render();
+    }
 }
 
 function invalidateOptions() {
