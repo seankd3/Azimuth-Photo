@@ -1043,8 +1043,6 @@ body.sheet-keyboard #m-sel-actions.on { opacity: 0; transform: translateY(16px);
     will-change: transform;
 }
 #m-viewer.dragging #mv-img { transition: none; }
-#m-viewer.dismissing { animation: mv-dismiss .16s ease-in forwards; }
-@keyframes mv-dismiss { to { opacity: 0; transform: translateY(42px); } }
 #mv-flag {
     position: absolute;
     top: calc(38px + var(--sat));

@@ -1,7 +1,7 @@
 // GP-class photo viewer on a pure-black canvas.
 // Gesture grammar (from the One prototype):
 //   2 fingers  → live pinch zoom + pan (midpoint-anchored)
-//   1 finger   → pan when zoomed · swipe down/left/right at 1x
+//   1 finger   → pan when zoomed · swipe up/down to cull · swipe left/right to browse at 1x
 //   double-tap → 1x ↔ 2.5x at the tap point
 // Flags are real writes with undo.
 
@@ -134,6 +134,16 @@ function syncFlagButtons() {
     }
 }
 
+function cullSwipe(flag) {
+    const image = current();
+    if (!image) return;
+    root.classList.remove('cull-picked', 'cull-rejected');
+    void root.offsetWidth;
+    root.classList.add(flag === 'picked' ? 'cull-picked' : 'cull-rejected');
+    window.setTimeout(() => root.classList.remove('cull-picked', 'cull-rejected'), 260);
+    void applyFlags([image.id], flag);
+}
+
 function nav(dir) {
     const next = index + dir;
     if (next < 0 || next >= list.length) return;
@@ -152,14 +162,6 @@ function settlePhotoSwipe(direction) {
     window.setTimeout(() => {
         img.style.transition = '';
         nav(direction);
-    }, 150);
-}
-
-function dismissWithSwipe() {
-    root.classList.add('dismissing');
-    window.setTimeout(() => {
-        root.classList.remove('dismissing');
-        dismissViewer();
     }, 150);
 }
 
@@ -506,9 +508,14 @@ function installGestures() {
             const vx = dx / elapsed;
             const vy = dy / elapsed;
             if (sw.mode === 'down' && (dy > 90 || vy > 0.75)) {
-                dismissWithSwipe();
+                img.style.transform = '';
+                cullSwipe('rejected');
+            } else if (sw.mode === 'up' && (dy < -60 || vy < -0.75)) {
+                img.style.transform = '';
+                cullSwipe('picked');
             } else if (sw.mode === 'h' && (Math.abs(sw.res) > 70 || Math.abs(vx) > 0.65)) {
-                settlePhotoSwipe(dx < 0 ? 1 : -1);
+                const dir = dx < 0 ? 1 : -1;
+                settlePhotoSwipe(dir);
             } else {
                 img.style.transform = '';
             }

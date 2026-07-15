@@ -156,7 +156,7 @@ class BackupUnitTests(unittest.TestCase):
             backups.restore_backup(str(self.db_path), name)
 
     def test_retention_keeps_daily_and_weekly(self):
-        now = datetime(2026, 7, 10, 4, 0, 0)
+        now = datetime.now().replace(hour=4, minute=0, second=0, microsecond=0)
         # 20 daily-ish backups spanning > 4 weeks.
         for days_ago in range(0, 40):
             when = now - timedelta(days=days_ago)
