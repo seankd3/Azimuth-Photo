@@ -3,6 +3,7 @@ import { downloadExport, openExportMenu } from './export_menu.js';
 import { emit, folderActive, folderValues, navigateToScope, on, scopeParams } from './state.js';
 import { showToast } from './toast.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
+import { fileManagerMenuLabel } from './file_manager.js';
 import { icon } from '../icons.js';
 
 const EXPANDED_KEY = 'pa_d_folder_expanded';
@@ -138,13 +139,6 @@ function exportFolderScope(node, anchor) {
     });
 }
 
-function revealMenuLabel() {
-    const platform = navigator.platform || '';
-    if (/Win/i.test(platform)) return 'Reveal in Explorer';
-    if (/Mac/i.test(platform)) return 'Reveal in Finder';
-    return 'Open in file manager';
-}
-
 async function revealFolderPath(path) {
     if (!path) return;
     const result = await revealFolder(path);
@@ -190,7 +184,7 @@ function openFolderMenu(node, anchor) {
     menu.innerHTML = '<div class="pm-group">'
         + `<button data-act="scope">${icon('folder-tree')} Show in scope with subfolders</button>`
         + `<button data-act="refine">${icon('zap')} Open in Refine</button>`
-        + `<button data-act="reveal">${icon('folder-open')} ${esc(revealMenuLabel())}</button>`
+        + `<button data-act="reveal">${icon('folder-open')} ${esc(fileManagerMenuLabel())}</button>`
         + `<button data-act="export">${icon('download')} Export view…</button>`
         + '</div>';
     menu.hidden = false;
