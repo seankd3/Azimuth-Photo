@@ -402,7 +402,7 @@ def _settings_row(db_path: str, image_id: int) -> sqlite3.Row | None:
     conn = connection.open_sync(db_path)
     try:
         return conn.execute(
-            "SELECT i.id, i.filepath, i.vc_of, ds.settings, ds.origin "
+            "SELECT i.id, i.filepath, i.vc_of, i.hub_remote, ds.settings, ds.origin "
             "FROM images i LEFT JOIN develop_settings ds ON ds.image_id = i.id WHERE i.id = ?",
             (image_id,),
         ).fetchone()
@@ -422,6 +422,13 @@ def write_image_xmp(db_path: str, image_id: int, *, mode: str = "sidecar") -> di
             "status": "skipped",
             "origin": str(row["origin"] or "none"),
             "note": "Virtual copies do not own the sidecar - write from the master.",
+        }
+    if int(row["hub_remote"] or 0) == 1:
+        return {
+            "image_id": image_id,
+            "status": "hub_remote",
+            "origin": str(row["origin"] or "none"),
+            "note": "This photo is mirrored from the hub; write XMP on the hub.",
         }
     if row["origin"] != "user":
         origin = str(row["origin"] or "none")
@@ -476,12 +483,14 @@ def write_image_xmp(db_path: str, image_id: int, *, mode: str = "sidecar") -> di
 def write_batch_xmp(db_path: str, image_ids: Sequence[int]) -> dict[str, Any]:
     unique_ids = list(dict.fromkeys(int(image_id) for image_id in image_ids))
     results = [write_image_xmp(db_path, image_id, mode="sidecar") for image_id in unique_ids]
+    counted = [result for result in results if result["status"] != "hub_remote"]
     return {
         "mode": "sidecar",
         "requested": len(image_ids),
-        "processed": len(results),
-        "written": sum(result["status"] == "written" for result in results),
-        "unchanged": sum(result["status"] == "unchanged" for result in results),
-        "skipped": sum(result["status"] not in {"written", "unchanged"} for result in results),
+        "processed": len(counted),
+        "excluded_hub_remote": len(results) - len(counted),
+        "written": sum(result["status"] == "written" for result in counted),
+        "unchanged": sum(result["status"] == "unchanged" for result in counted),
+        "skipped": sum(result["status"] not in {"written", "unchanged"} for result in counted),
         "results": results,
     }

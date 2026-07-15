@@ -101,7 +101,8 @@ class XmpWriteTests(unittest.TestCase):
                 CREATE TABLE images (
                     id INTEGER PRIMARY KEY,
                     filepath TEXT NOT NULL,
-                    vc_of INTEGER REFERENCES images(id)
+                    vc_of INTEGER REFERENCES images(id),
+                    hub_remote INTEGER NOT NULL DEFAULT 0
                 );
                 CREATE TABLE develop_settings (
                     image_id INTEGER PRIMARY KEY, settings TEXT, origin TEXT,
@@ -219,6 +220,27 @@ class XmpWriteTests(unittest.TestCase):
         self.assertEqual(result["processed"], 3)
         self.assertEqual(result["written"], 1)
         self.assertEqual(result["skipped"], 2)
+
+    def test_hub_remote_write_is_explicit_and_excluded_from_bulk_counts(self):
+        remote = self._image(11, ".cr3", settings={"Exposure2012": 1.0})
+        self._image(12, ".cr3", settings={"Exposure2012": -1.0})
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("UPDATE images SET hub_remote = 1 WHERE id = 11")
+        remote.unlink()
+
+        individual = xmp_write.write_image_xmp(self.db_path, 11)
+        batch = xmp_write.write_batch_xmp(self.db_path, [11, 12])
+
+        self.assertEqual(individual["status"], "hub_remote")
+        self.assertEqual(
+            individual["note"],
+            "This photo is mirrored from the hub; write XMP on the hub.",
+        )
+        self.assertEqual(batch["requested"], 2)
+        self.assertEqual(batch["processed"], 1)
+        self.assertEqual(batch["excluded_hub_remote"], 1)
+        self.assertEqual(batch["written"], 1)
+        self.assertEqual(batch["skipped"], 0)
 
     def test_api_contract_exposes_individual_mode_and_sidecar_batch(self):
         self._image(7, ".dng", settings={"Exposure2012": 0.5})
