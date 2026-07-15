@@ -843,8 +843,18 @@ async function rescanStacks() {
     }
     const poll = async () => {
         const status = await getStackRebuildStatus();
-        const state = String(status?.state || status?.status || '').toLowerCase();
-        if (state && !['done', 'idle', 'complete', 'completed'].includes(state)) {
+        const rebuild = status?.rebuild_status || {};
+        const state = String(rebuild.state || '').toLowerCase();
+        if (state === 'error') {
+            stackRescanning = false;
+            button.disabled = false;
+            button.textContent = 'Rescan stacks';
+            renderStacks();
+            showToast(rebuild.error || 'Stack rescan failed');
+            return;
+        }
+        // Keep polling while running, or while status is missing/unknown (transient fetch failure).
+        if (!['done', 'idle', 'complete', 'completed'].includes(state)) {
             setTimeout(poll, 1200);
             return;
         }
