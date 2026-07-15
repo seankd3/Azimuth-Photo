@@ -370,7 +370,8 @@ async function renderShareOverlay(collectionId, name, share = null, token = shar
     const pickData = share ? await getCollectionShareFavorites(collectionId) : null;
     if (!shareOverlayIsCurrent(token)) return;
     const body = share
-        ? '<div class="share-link-row"><input id="share-url" readonly value="' + esc(share.url || '') + '"><button id="share-copy" type="button">Copy</button></div>'
+        ? (share.expired ? '<div class="share-expired">Expired - rotate to renew</div>' : '')
+            + '<div class="share-link-row"><input id="share-url" readonly value="' + esc(share.url || '') + '"><button id="share-copy" type="button">Copy</button></div>'
             + '<div class="share-meta">'
             + `<div><span>Created</span><b>${esc(formatShareDate(share.created_at))}</b></div>`
             + `<div><span>Expires</span><b>${esc(formatShareDate(share.expires_at))}</b></div></div>`
