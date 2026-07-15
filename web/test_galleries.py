@@ -190,6 +190,30 @@ class GalleryTests(BackendTestCase):
         self.assertEqual(manifest["skipped_count"], 1)
         self.assertEqual(manifest["skipped"][0]["image_id"], remote_id)
 
+    async def test_gallery_view_cookie_covers_gallery_path_and_prevents_recount(self):
+        collection, first, _second = await self._collection()
+        gallery = await galleries.create_gallery(
+            db.DB_PATH,
+            collection_id=collection["id"],
+            title="Count once",
+            image_ids=[first],
+            options={},
+        )
+
+        def probe():
+            with TestClient(app_module.app) as client:
+                first_view = client.get(f"/s/gallery/{gallery['token']}")
+                second_view = client.get(f"/s/gallery/{gallery['token']}")
+                return first_view, second_view
+
+        first_view, second_view = await asyncio.to_thread(probe)
+        refreshed = await galleries.get_gallery(db.DB_PATH, gallery["id"])
+
+        self.assertEqual(first_view.status_code, 200, first_view.text)
+        self.assertEqual(second_view.status_code, 200, second_view.text)
+        self.assertIn(f"Path=/s/gallery/{gallery['token']}", first_view.headers["set-cookie"])
+        self.assertEqual(refreshed["view_count"], 1)
+
     async def test_export_preset_round_trip_and_print_recipe(self):
         print_options = export_presets.print_ready_options(color_space="adobe_rgb", border_px=48)
         self.assertEqual(print_options["format"], "tiff16")

@@ -242,7 +242,12 @@ async def public_gallery(token: str, request: Request):
     if not request.cookies.get(auth.VIEW_COOKIE_NAME):
         await galleries.record_view(_configured_db_path(), token)
     response = HTMLResponse(_gallery_html(_public_page_payload(gallery)))
-    auth.set_view_cookie(response, token, request=request)
+    auth.set_view_cookie(
+        response,
+        token,
+        request=request,
+        path=auth.gallery_cookie_path(token),
+    )
     return _public_response(response)
 
 
