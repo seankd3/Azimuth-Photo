@@ -6,7 +6,7 @@ import android.provider.MediaStore
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -31,17 +31,24 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.awaitPointerEvent
+import androidx.compose.ui.input.pointer.consume
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem as ExoMediaItem
@@ -53,6 +60,7 @@ import app.azimuthphoto.mobile.data.MediaItem
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlin.math.hypot
 
 /** Full-screen media viewer: swipe between items, pinch to zoom, share/info/trash. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -62,15 +70,28 @@ fun ViewerScreen(items: List<MediaItem>, startIndex: Int, onClose: () -> Unit) {
     val pagerState = rememberPagerState(initialPage = startIndex) { items.size }
     var chromeVisible by remember { mutableStateOf(true) }
     var infoFor by remember { mutableStateOf<MediaItem?>(null) }
+    var zoomedPage by remember { mutableStateOf<Int?>(null) }
     val context = LocalContext.current
 
+    LaunchedEffect(pagerState.currentPage) {
+        if (zoomedPage != pagerState.currentPage) zoomedPage = null
+    }
+
     Box(Modifier.fillMaxSize().background(Color.Black)) {
-        HorizontalPager(state = pagerState, key = { items[it].id }) { page ->
+        HorizontalPager(
+            state = pagerState,
+            key = { items[it].id },
+            userScrollEnabled = zoomedPage != pagerState.currentPage,
+        ) { page ->
             val item = items[page]
             if (item.isVideo) {
                 VideoPage(item, isActive = pagerState.currentPage == page)
             } else {
-                ZoomableImage(item, onTap = { chromeVisible = !chromeVisible })
+                ZoomableImage(
+                    item = item,
+                    onTap = { chromeVisible = !chromeVisible },
+                    onZoomChanged = { zoomed -> zoomedPage = page.takeIf { zoomed } },
+                )
             }
         }
 
@@ -129,29 +150,98 @@ private fun InfoLine(label: String, value: String) {
 }
 
 @Composable
-private fun ZoomableImage(item: MediaItem, onTap: () -> Unit) {
-    var scale by remember { mutableStateOf(1f) }
-    var offsetX by remember { mutableStateOf(0f) }
-    var offsetY by remember { mutableStateOf(0f) }
+private fun ZoomableImage(
+    item: MediaItem,
+    onTap: () -> Unit,
+    onZoomChanged: (Boolean) -> Unit,
+) {
+    var scale by remember(item.id) { mutableStateOf(1f) }
+    var offsetX by remember(item.id) { mutableStateOf(0f) }
+    var offsetY by remember(item.id) { mutableStateOf(0f) }
+    var viewport by remember { mutableStateOf(IntSize.Zero) }
+    val currentScale by rememberUpdatedState(scale)
+
+    fun resetZoom() {
+        scale = 1f
+        offsetX = 0f
+        offsetY = 0f
+        onZoomChanged(false)
+    }
+
+    fun applyTransform(pan: Offset, zoom: Float) {
+        val nextScale = (scale * zoom).coerceIn(1f, 8f)
+        if (nextScale <= 1.01f) {
+            resetZoom()
+            return
+        }
+        scale = nextScale
+        val bounds = panBounds(item, viewport, nextScale)
+        offsetX = (offsetX + pan.x).coerceIn(-bounds.x, bounds.x)
+        offsetY = (offsetY + pan.y).coerceIn(-bounds.y, bounds.y)
+        onZoomChanged(true)
+    }
 
     Box(
         Modifier
             .fillMaxSize()
-            .pointerInput(item.id) {
+            .onSizeChanged { viewport = it }
+            .pointerInput(item.id, viewport) {
                 detectTapGestures(
                     onTap = { onTap() },
-                    onDoubleTap = {
-                        if (scale > 1f) { scale = 1f; offsetX = 0f; offsetY = 0f } else scale = 2.5f
+                    onDoubleTap = { tap ->
+                        if (scale > 1.01f) {
+                            resetZoom()
+                        } else {
+                            scale = 2.5f
+                            val bounds = panBounds(item, viewport, scale)
+                            offsetX = ((viewport.width / 2f - tap.x) * (scale - 1f))
+                                .coerceIn(-bounds.x, bounds.x)
+                            offsetY = ((viewport.height / 2f - tap.y) * (scale - 1f))
+                                .coerceIn(-bounds.y, bounds.y)
+                            onZoomChanged(true)
+                        }
                     },
                 )
             }
             .pointerInput(item.id) {
-                detectTransformGestures { _, pan, zoom, _ ->
-                    scale = (scale * zoom).coerceIn(1f, 8f)
-                    if (scale > 1f) {
-                        offsetX += pan.x
-                        offsetY += pan.y
-                    } else { offsetX = 0f; offsetY = 0f }
+                awaitEachGesture {
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val pointers = event.changes.filter { it.pressed }
+                        when {
+                            pointers.size >= 2 -> {
+                                val first = pointers[0]
+                                val second = pointers[1]
+                                val before = hypot(
+                                    first.previousPosition.x - second.previousPosition.x,
+                                    first.previousPosition.y - second.previousPosition.y,
+                                )
+                                val after = hypot(
+                                    first.position.x - second.position.x,
+                                    first.position.y - second.position.y,
+                                )
+                                if (before > 0f) {
+                                    val pan = Offset(
+                                        ((first.position.x + second.position.x) -
+                                            (first.previousPosition.x + second.previousPosition.x)) / 2f,
+                                        ((first.position.y + second.position.y) -
+                                            (first.previousPosition.y + second.previousPosition.y)) / 2f,
+                                    )
+                                    applyTransform(pan, after / before)
+                                    event.changes.forEach { it.consume() }
+                                }
+                            }
+                            pointers.size == 1 && currentScale > 1.01f -> {
+                                val pointer = pointers.single()
+                                val pan = pointer.position - pointer.previousPosition
+                                if (pan != Offset.Zero) {
+                                    applyTransform(pan, 1f)
+                                    pointer.consume()
+                                }
+                            }
+                        }
+                        if (event.changes.none { it.pressed }) break
+                    }
                 }
             },
         contentAlignment = Alignment.Center,
@@ -173,6 +263,26 @@ private fun ZoomableImage(item: MediaItem, onTap: () -> Unit) {
                 },
         )
     }
+}
+
+private fun panBounds(item: MediaItem, viewport: IntSize, scale: Float): Offset {
+    if (viewport == IntSize.Zero) return Offset.Zero
+    val sourceRatio = item.width.toFloat().takeIf { item.width > 0 && item.height > 0 }
+        ?.div(item.height) ?: 1f
+    val viewportRatio = viewport.width.toFloat() / viewport.height
+    val baseWidth: Float
+    val baseHeight: Float
+    if (sourceRatio > viewportRatio) {
+        baseWidth = viewport.width.toFloat()
+        baseHeight = baseWidth / sourceRatio
+    } else {
+        baseHeight = viewport.height.toFloat()
+        baseWidth = baseHeight * sourceRatio
+    }
+    return Offset(
+        x = ((baseWidth * scale) - viewport.width).coerceAtLeast(0f) / 2f,
+        y = ((baseHeight * scale) - viewport.height).coerceAtLeast(0f) / 2f,
+    )
 }
 
 @Composable
