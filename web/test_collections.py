@@ -470,6 +470,36 @@ class CollectionTests(BackendTestCase):
         await collection_routes.api_delete_collection(created["collection"]["id"])
         self.assertTrue(cache_empty())
 
+    async def test_suggestion_cursor_tracks_catalog_and_caption_changes(self):
+        source = await self._source()
+        image_id = await self._image(source["id"], "cursor.jpg")
+        model_key = settings.active_caption_config()["model_key"]
+
+        initial = await collection_suggestions._suggestion_cursor(db.DB_PATH, model_key)
+        await db.set_image_flag(image_id, "picked")
+        catalog_changed = await collection_suggestions._suggestion_cursor(db.DB_PATH, model_key)
+        await db.store_caption_result(
+            image_id=image_id,
+            caption_config=settings.active_caption_config(),
+            caption="First caption.",
+            tags=["first"],
+            status="done",
+        )
+        caption_added = await collection_suggestions._suggestion_cursor(db.DB_PATH, model_key)
+        await asyncio.sleep(0.001)
+        await db.store_caption_result(
+            image_id=image_id,
+            caption_config=settings.active_caption_config(),
+            caption="Replacement caption.",
+            tags=["second"],
+            status="done",
+        )
+        caption_replaced = await collection_suggestions._suggestion_cursor(db.DB_PATH, model_key)
+
+        self.assertGreater(catalog_changed[0], initial[0])
+        self.assertNotEqual(caption_added[1], catalog_changed[1])
+        self.assertNotEqual(caption_replaced[1], caption_added[1])
+
     async def test_smart_collection_share_snapshots_membership(self):
         source = await self._source()
         first = await self._image(source["id"], "share-picked-a.jpg", elo=1400)
