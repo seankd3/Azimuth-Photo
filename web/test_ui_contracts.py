@@ -147,13 +147,17 @@ class UiContractsTests(BackendTestCase):
             panel = fh.read()
         with open(os.path.join(base_dir, "static", "js", "desktop", "source_reveal_menu.js"), encoding="utf-8") as fh:
             source_reveal_menu = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "desktop", "file_manager.js"), encoding="utf-8") as fh:
+            file_manager = fh.read()
 
         self.assertIn("openSourceRevealMenu", panel)
         self.assertIn("row.addEventListener('contextmenu'", panel)
         self.assertIn("openSourceRevealMenu(row.dataset.source, row)", panel)
         self.assertIn("revealFolder(path)", source_reveal_menu)
         self.assertIn('data-act="reveal"', source_reveal_menu)
-        self.assertIn("revealMenuLabel()", source_reveal_menu)
+        self.assertIn("fileManagerMenuLabel()", source_reveal_menu)
+        self.assertIn("'Open in Explorer'", file_manager)
+        self.assertNotIn("Reveal in Explorer", file_manager)
 
     async def test_template_context_versions_static_assets(self):
         context = app_module.app.state.photoarchive_shell.template_context(HeaderRequest())

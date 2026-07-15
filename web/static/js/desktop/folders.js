@@ -1,11 +1,10 @@
-import { getFolderTree } from './api.js';
+import { getFolderTree, revealFolder } from './api.js';
 import { downloadExport, openExportMenu } from './export_menu.js';
 import { emit, folderActive, folderValues, navigateToScope, on, scopeParams } from './state.js';
 import { showToast } from './toast.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
+import { fileManagerMenuLabel } from './file_manager.js';
 import { icon } from '../icons.js';
-import { escapeHtml as esc, formatCount as fmt } from './dom.js';
-import { openSourceRevealMenu, revealMenuLabel } from './source_reveal_menu.js';
 
 const EXPANDED_KEY = 'pa_d_folder_expanded';
 
@@ -21,6 +20,10 @@ let refreshGeneration = 0;
 let filterTimer = 0;
 let lastSelectedFolderPath = '';
 
+const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+}[c]));
+const fmt = (n) => Number(n || 0).toLocaleString('en-US');
 const leafName = (path) => String(path || '').split('/').filter(Boolean).pop() || path || 'Folder';
 
 function readExpanded() {
@@ -136,6 +139,16 @@ function exportFolderScope(node, anchor) {
     });
 }
 
+async function revealFolderPath(path) {
+    if (!path) return;
+    const result = await revealFolder(path);
+    if (result?.ok && result?.data?.ok) {
+        showToast('Opened in file manager');
+        return;
+    }
+    showToast(result?.data?.error || 'Couldn’t open folder');
+}
+
 function ensureMenu() {
     if (menu) return menu;
     menu = document.createElement('div');
@@ -171,7 +184,7 @@ function openFolderMenu(node, anchor) {
     menu.innerHTML = '<div class="pm-group">'
         + `<button data-act="scope">${icon('folder-tree')} Show in scope with subfolders</button>`
         + `<button data-act="refine">${icon('zap')} Open in Refine</button>`
-        + `<button data-act="reveal">${icon('folder-open')} ${esc(revealMenuLabel())}</button>`
+        + `<button data-act="reveal">${icon('folder-open')} ${esc(fileManagerMenuLabel())}</button>`
         + `<button data-act="export">${icon('download')} Export view…</button>`
         + '</div>';
     menu.hidden = false;
@@ -186,7 +199,7 @@ function openFolderMenu(node, anchor) {
                 applyFolderScope(node.path);
                 emit('refine:open');
             }
-            if (action === 'reveal') openSourceRevealMenu(node.path, anchor);
+            if (action === 'reveal') revealFolderPath(node.path);
             if (action === 'export') exportFolderScope(node, anchor);
         });
     }

@@ -1,17 +1,11 @@
 import { revealFolder } from './api.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
+import { fileManagerMenuLabel } from './file_manager.js';
 import { icon } from '../icons.js';
 import { showToast } from './toast.js';
 
 let menu = null;
 let menuReturn = null;
-
-export function revealMenuLabel() {
-    const platform = navigator.platform || '';
-    if (/Win/i.test(platform)) return 'Reveal in Explorer';
-    if (/Mac/i.test(platform)) return 'Reveal in Finder';
-    return 'Open in file manager';
-}
 
 function ensureMenu() {
     if (menu) return menu;
@@ -59,7 +53,7 @@ export function openSourceRevealMenu(path, anchor) {
     releaseFocus(menu);
     menuReturn = anchor;
     menu.innerHTML = '<div class="pm-group">'
-        + `<button data-act="reveal" role="menuitem">${icon('folder-open')} ${revealMenuLabel()}</button>`
+        + `<button data-act="reveal" role="menuitem">${icon('folder-open')} ${fileManagerMenuLabel()}</button>`
         + '</div>';
     menu.hidden = false;
     const rect = anchor.getBoundingClientRect();

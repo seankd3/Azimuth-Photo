@@ -172,16 +172,21 @@ async def thumbnail_response(request: Request, size: str, image_id: int, cached:
 
     image = None
     source_state = "available"
+    cache_only = cached
     if not cached:
         image = await image_repository.get_media_image_by_id(_configured_db_path(), image_id)
         if not image:
             return JSONResponse({"error": "Image not found"}, status_code=404)
-        source_state = await _source_state(image)
-        source_error = await _source_error_response(image, source_state)
-        if source_error is not None:
-            return source_error
+        if image["status"] == "trashed":
+            cache_only = True
+        else:
+            source_state = await _source_state(image)
+            source_error = await _source_error_response(image, source_state)
+            if source_error is not None:
+                return source_error
 
-    # Cached probes remain DB-free; normal requests validate the original first.
+    # Cached probes remain DB-free. Active images validate the original first;
+    # trashed rows are cache-only because their original path was intentionally moved.
     request_etag = request.headers.get("if-none-match")
     entry = thumbnails._memory_get_entry_fast(size, image_id)
     if entry is None:
@@ -208,7 +213,7 @@ async def thumbnail_response(request: Request, size: str, image_id: int, cached:
         if request_etag == headers["ETag"]:
             return Response(status_code=304, headers=headers)
         return Response(content=data, media_type="image/jpeg", headers=headers)
-    if cached:
+    if cache_only:
         return Response(status_code=204, headers={"Cache-Control": "no-store"})
 
     if source_state == "remote":
