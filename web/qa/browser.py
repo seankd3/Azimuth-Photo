@@ -104,7 +104,7 @@ class ScenarioContext:
 
     def all_photos(self) -> None:
         self.page.locator("#library-list [data-lib='all']").click()
-        self.wait_count(int(self.manifest["active_images"]))
+        self.wait_count(int(self.manifest["visible_images"]))
 
     def poll(self, description: str, predicate: Callable[[], object], *, timeout: float = 20.0):
         deadline = time.monotonic() + timeout

@@ -44,15 +44,6 @@ def settings_panel(qa) -> None:
     qa.page.locator("#drawer[aria-hidden='true']").wait_for(state="attached")
 
 
-def import_entry(qa) -> None:
-    qa.goto_desktop()
-    qa.mark("open the Import entry point")
-    qa.page.locator("#import-view").click()
-    qa.page.locator("#import-modal[role='dialog']").wait_for(state="visible")
-    qa.page.locator("#import-drop-zone").get_by_text("Drop photos or folders").wait_for(state="visible")
-    qa.page.locator("#import-close").click()
-
-
 def search(qa) -> None:
     qa.goto_desktop()
     qa.mark("run a live metadata search")

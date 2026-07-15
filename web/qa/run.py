@@ -59,7 +59,8 @@ def main(argv: list[str] | None = None) -> int:
     manifest = reset_fixture()
     print(
         f"QA fixture: {'built' if built else 'reused'} · "
-        f"{manifest['active_images']:,} active + {manifest['trash_images']} trash rows",
+        f"{manifest['active_images']:,} active / {manifest['visible_images']:,} collapsed-grid + "
+        f"{manifest['trash_images']} trash rows",
         flush=True,
     )
 

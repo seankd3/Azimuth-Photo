@@ -44,7 +44,7 @@ def empty_trash_and_leave(qa) -> None:
     started = __import__("time").monotonic()
     qa.page.locator("#library-list [data-lib='all']").click()
     qa.page.locator("#view-grid.active").wait_for(state="visible", timeout=10_000)
-    qa.wait_count(int(qa.manifest["active_images"]), timeout_ms=10_000)
+    qa.wait_count(int(qa.manifest["visible_images"]), timeout_ms=10_000)
     qa.page.locator("#grid-flow .cell[data-id]").first.wait_for(state="visible", timeout=10_000)
     elapsed = __import__("time").monotonic() - started
     assert elapsed < 10, f"All Photos took {elapsed:.2f}s after emptying Trash"

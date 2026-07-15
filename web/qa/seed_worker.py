@@ -22,15 +22,18 @@ from qa.config import (
     MANIFEST_PATH,
     PRISTINE_DB,
     TRASH_IMAGE_COUNT,
+    VISIBLE_IMAGE_COUNT,
 )
 
 
-PRIMARY_COUNT = 2_200
+PRIMARY_COUNT = 2_203
 SECONDARY_COUNT = 1_300
 HUB_COUNT = 500
 DEVELOP_IMAGE_COUNT = 6
 RAW_IMAGE_ID = 1
 DEVELOP_PRESET_NAME = "Clean Color"
+STACK_MEMBER_IDS = (1, 7, 8, 9)
+LOCATED_IMAGE_IDS = (101, 102, 103, 104, 105, 106)
 
 
 def _jpeg(path: Path, index: int, *, size: tuple[int, int] = (160, 106)) -> None:
@@ -189,11 +192,71 @@ def _trash_rows(primary: Path) -> list[tuple]:
     return rows
 
 
+async def _seed_discovery_surfaces(conn, preview_path: Path, now: float) -> None:
+    """Seed the smallest real state needed by Stacks, People, and Map QA."""
+
+    await conn.execute(
+        "INSERT INTO stacks (id, kind, representative_image_id, auto, created_at, updated_at) "
+        "VALUES (1, 'manual', ?, 0, ?, ?)",
+        (STACK_MEMBER_IDS[0], now, now),
+    )
+    await conn.executemany(
+        "INSERT INTO stack_members (stack_id, image_id, score, added_at) VALUES (1, ?, ?, ?)",
+        [(image_id, 1.0 - position / 10, now) for position, image_id in enumerate(STACK_MEMBER_IDS)],
+    )
+
+    await conn.executemany(
+        "UPDATE images SET latitude = ?, longitude = ?, location_source = 'exif' WHERE id = ?",
+        [
+            (30.2672, -97.7431, image_id)
+            if image_id <= 104
+            else (48.8566, 2.3522, image_id)
+            for image_id in LOCATED_IMAGE_IDS
+        ],
+    )
+
+    await conn.executemany(
+        "INSERT INTO people (id, name, status, representative_face_id, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        [
+            (1, "Ada QA", "named", 1, now, now),
+            (2, "", "unknown", 2, now, now),
+        ],
+    )
+    await conn.executemany(
+        "INSERT INTO face_detections "
+        "(id, image_id, detection_key, bbox_x, bbox_y, bbox_w, bbox_h, confidence, quality, "
+        "embedding_model, cache_path, created_at, updated_at) "
+        "VALUES (?, ?, ?, 36, 20, 88, 68, .98, .95, 'buffalo_l', ?, ?, ?)",
+        [
+            (1, 10, "qa-face-ada", str(preview_path), now, now),
+            (2, 20, "qa-face-unnamed", str(preview_path), now, now),
+        ],
+    )
+    await conn.executemany(
+        "INSERT INTO face_assignments (face_id, person_id, source, active, assigned_at) "
+        "VALUES (?, ?, 'worker', 1, ?)",
+        [(1, 1, now), (2, 2, now)],
+    )
+    await conn.executemany(
+        "INSERT INTO person_image_membership "
+        "(person_id, image_id, face_count, best_quality, latest_face_at) VALUES (?, ?, 1, .95, ?)",
+        [
+            (1, 10, now),
+            (1, 11, now - 1),
+            (1, 12, now - 2),
+            (2, 20, now),
+            (2, 21, now - 1),
+        ],
+    )
+
+
 async def _seed() -> None:
     # Imports must happen after PHOTOARCHIVE_HOME is present in the worker env.
     import db
     import thumbnails
     from core.runtime_paths import ensure_runtime_dirs, resolve_runtime_paths
+    from features.library.saved_views import SAVED_VIEWS_DDL
 
     ensure_runtime_dirs(resolve_runtime_paths())
     await db.init_db()
@@ -238,6 +301,18 @@ async def _seed() -> None:
         "INSERT INTO collection_images (collection_id, image_id, position, added_at) VALUES (1, ?, ?, ?)",
         [(image_id, image_id - 1, now) for image_id in range(1, COLLECTION_IMAGE_COUNT + 1)],
     )
+    await conn.executescript(SAVED_VIEWS_DDL)
+    await conn.execute(
+        "INSERT INTO saved_views (id, name, query, created_at) VALUES (1, ?, ?, ?)",
+        (
+            "QA Landscape workspace",
+            json.dumps({
+                "scope": {"orientation": "landscape", "sort": "date_taken"},
+                "layout": {"density": "comfortable", "collapseStacks": True},
+            }),
+            "2026-07-15T00:00:00+00:00",
+        ),
+    )
     await conn.execute(
         "INSERT INTO develop_settings (image_id, settings, origin, updated_at) "
         "VALUES (1, '{}', 'user', '2026-07-15T00:00:00+00:00')"
@@ -253,6 +328,7 @@ async def _seed() -> None:
     )
 
     shared_preview = FIXTURE_HOME / "cache" / "previews" / "qa-shared-preview.jpg"
+    await _seed_discovery_surfaces(conn, shared_preview, now)
     cache_root = str(Path(thumbnails.SSD_CACHE_DIR).resolve())
     cache_rows = []
     for image_id in range(1, ACTIVE_IMAGE_COUNT + TRASH_IMAGE_COUNT + 1):
@@ -279,10 +355,15 @@ async def _seed() -> None:
     await conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
     await conn.close()
 
+    import_source = FIXTURE_HOME / "import-source" / "QA Card"
+    for index in range(1, 4):
+        _jpeg(import_source / f"qa-import-{index}.jpg", 800 + index)
+
     shutil.copy2(CATALOG_DB, PRISTINE_DB)
     manifest = {
         "version": FIXTURE_VERSION,
         "active_images": ACTIVE_IMAGE_COUNT,
+        "visible_images": VISIBLE_IMAGE_COUNT,
         "trash_images": TRASH_IMAGE_COUNT,
         "collection_images": COLLECTION_IMAGE_COUNT,
         "primary_source": str(primary),
@@ -291,6 +372,12 @@ async def _seed() -> None:
         "database": str(CATALOG_DB),
         "raw_image_id": RAW_IMAGE_ID,
         "develop_preset": DEVELOP_PRESET_NAME,
+        "import_source": str(import_source),
+        "import_source_images": 3,
+        "stack_id": 1,
+        "stack_members": list(STACK_MEMBER_IDS),
+        "people": {"named": 1, "unnamed": 2},
+        "located_images": len(LOCATED_IMAGE_IDS),
     }
     MANIFEST_PATH.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 

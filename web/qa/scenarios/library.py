@@ -7,7 +7,7 @@ from qa.browser import number_from_text
 
 def library_grid_virtualization(qa) -> None:
     qa.goto_desktop()
-    assert qa.current_count() == int(qa.manifest["active_images"])
+    assert qa.current_count() == int(qa.manifest["visible_images"])
 
     qa.mark("scroll through multiple virtualized grid chunks")
     canvas = qa.page.locator("#canvas")
@@ -40,7 +40,7 @@ def scope_source_switch(qa) -> None:
     assert qa.current_count() == source_count, (
         f"source advertised {source_count} photos but rendered {qa.current_count()}"
     )
-    assert 0 < source_count < int(qa.manifest["active_images"])
+    assert 0 < source_count < int(qa.manifest["visible_images"])
 
 
 def scope_folder_switch(qa) -> None:
@@ -86,7 +86,7 @@ def sort_filter_date_jump(qa) -> None:
     landscape.click()
     qa.poll(
         "a non-empty filtered landscape count",
-        lambda: 0 < qa.current_count() < int(qa.manifest["active_images"]),
+        lambda: 0 < qa.current_count() < int(qa.manifest["visible_images"]),
     )
 
     qa.mark("clear the landscape filter")
@@ -96,7 +96,7 @@ def sort_filter_date_jump(qa) -> None:
         "#filter-popover [data-filter-section='orientation'] [data-toggle-key='orientation'][data-value='landscape']"
     )
     landscape.click()
-    qa.wait_count(int(qa.manifest["active_images"]))
+    qa.wait_count(int(qa.manifest["visible_images"]))
 
     qa.mark("jump to January 2018 with the date scrubber")
     target = qa.page.locator("#date-scrubber .ds-tick[data-month='2018-01']")

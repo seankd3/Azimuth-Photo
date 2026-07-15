@@ -58,7 +58,13 @@ Each scenario gets a fresh browser context and is independently named:
   private link, website publishing node, and verified link revocation.
 - Hierarchical keyword assignment plus all editable IPTC fields, reloaded in
   the photo panel to prove persistence.
-- Settings, Import, and live metadata search entry points.
+- Import folder selection through the native picker into a populated preflight.
+- Stack expansion and collapse in Grid, plus independently gated cover
+  promotion in Stacks.
+- Named and unnamed face browsing with real face crops and person actions.
+- Map rendering, geo clustering, location popover, and Loupe entry.
+- Saved-workspace browse, scope departure, and full restoration.
+- Settings and live metadata search entry points.
 
 Every scenario rejects `console.error`, uncaught page errors, failed requests,
 and HTTP 500+ responses. Chromium cancellations caused specifically by the grid
@@ -70,11 +76,14 @@ all other request failures still fail the scenario.
 `web/qa/` owns the harness. It builds a versioned fixture under a temporary
 `PHOTOARCHIVE_HOME` with:
 
-- 4,000 active images across primary, removable, and `hub://` mirror sources;
+- 4,003 active images across primary, removable, and `hub://` mirror sources,
+  exposed as 4,000 Grid entries by the seeded four-photo collapsed stack;
 - nested folders, nine years of dates, flags, metadata, and a 30-photo
   collection;
 - one tiny standards-readable DNG plus five valid small JPEG originals for
   Loupe and Develop, and a deterministic Develop preset;
+- a four-photo manual stack, two people with real face crops, six geotagged
+  photos, one saved workspace, and a three-file import source;
 - cached previews for every catalog row; and
 - six source-local Trash files that Empty Trash can really delete.
 
