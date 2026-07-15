@@ -7,7 +7,16 @@ from typing import Callable
 
 from qa.scenarios.develop import develop_raw_workflow
 from qa.scenarios.discovery import map_geo_browse, people_browse
-from qa.scenarios.imports import import_folder_preflight
+from qa.scenarios.imports import import_cancel, import_commit, import_folder_preflight
+from qa.scenarios.gate_cull import (
+    collection_dnd,
+    duplicates_review,
+    flag_pick_reject,
+    people_merge_rename,
+    trash_selected_restore,
+)
+from qa.scenarios.gate_develop import develop_batch_export_sync
+from qa.scenarios.mobile import mobile_smoke
 from qa.scenarios.metadata import keyword_and_iptc_persistence
 from qa.scenarios.publishing import collections_and_publishing
 from qa.scenarios.saved_views import saved_view_workspace
@@ -36,6 +45,8 @@ class Scenario:
     name: str
     surface: str
     run: Callable
+    expected_failure: str = ""
+    mobile_viewport: bool = False
 
 
 SCENARIOS = [
@@ -56,11 +67,26 @@ SCENARIOS = [
     Scenario("keyword_and_iptc_persistence", "Keywording and metadata", keyword_and_iptc_persistence),
     Scenario("settings_panel", "Settings panel", settings_panel),
     Scenario("import_folder_preflight", "Import preflight", import_folder_preflight),
+    Scenario("flag_pick_reject", "Cull flags", flag_pick_reject),
+    Scenario("collection_dnd", "Collections", collection_dnd),
+    Scenario("people_merge_rename", "People", people_merge_rename),
+    Scenario("develop_batch_export_sync", "Develop batch", develop_batch_export_sync),
+    Scenario("mobile_smoke", "Mobile", mobile_smoke, mobile_viewport=True),
     Scenario("search", "Search", search),
     # Changes the seeded stack representative; keep after RAW workflows that expect image 1 first.
     Scenario("stack_promote_cover", "Stacks cover", stack_promote_cover),
-    # Destructive by design; keep last so read-only scenarios never depend on its state.
+    # Existing empty-Trash coverage needs the untouched seeded Trash rows.
     Scenario("empty_trash_and_leave", "Trash", empty_trash_and_leave),
+    Scenario("import_commit", "Import commit", import_commit),
+    Scenario(
+        "import_cancel",
+        "Import cancel",
+        import_cancel,
+        expected_failure="p0fix has not landed on develop: cancelled staged jobs still finalize their import batch as complete.",
+    ),
+    # Destructive by design; keep after every scenario that opens active originals.
+    Scenario("duplicates_review", "Stacks", duplicates_review),
+    Scenario("trash_selected_restore", "Trash and restore", trash_selected_restore),
     Scenario("grid_offline_thumbs", "Offline media", grid_offline_thumbs),
     Scenario("trash_empty_offline_hub", "Trash", trash_empty_offline_hub),
     Scenario("handshake_skew", "Satellite contract", handshake_skew),

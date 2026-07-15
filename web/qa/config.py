@@ -20,9 +20,9 @@ REPORT_PATH = SCRATCH_ROOT / "report.json"
 RUNS_ROOT = SCRATCH_ROOT / "runs"
 SCREENSHOT_DIR = SCRATCH_ROOT / "screenshots"
 
-FIXTURE_VERSION = "desktop-qa-v9"
+FIXTURE_VERSION = "desktop-qa-v21"
 ACTIVE_IMAGE_COUNT = 4_003
-VISIBLE_IMAGE_COUNT = 4_000
+VISIBLE_IMAGE_COUNT = 3_999
 TRASH_IMAGE_COUNT = 6
 TRASH_MIRROR_IMAGE_COUNT = 1
 COLLECTION_IMAGE_COUNT = 30
@@ -55,8 +55,13 @@ def fixture_environment() -> dict[str, str]:
 
     thumb_root = FIXTURE_HOME / "cache" / "previews"
     return {
+        # The legacy import route derives its default destination from HOME.
+        # Keep that path inside the disposable fixture too.
+        "HOME": str(FIXTURE_HOME),
         "PHOTOARCHIVE_HOME": str(FIXTURE_HOME),
         "PHOTOARCHIVE_THUMB_CACHE_DIR": str(thumb_root),
+        # Staged-import tests must never resolve the operator's real library.
+        "PHOTOARCHIVE_ORIGINALS_DIR": str(FIXTURE_HOME / "import-library"),
         "PHOTOARCHIVE_SMOKE_MODE": "1",
         "PHOTOARCHIVE_MODE": "standalone",
         "PHOTOARCHIVE_ACCESS": "local",
