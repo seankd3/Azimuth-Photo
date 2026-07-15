@@ -121,6 +121,14 @@
         .su-connect-link:hover { color: var(--text-2); text-decoration: underline; }
         .su-connect-success { color: var(--text-2); font-size: var(--fs-caption); margin-top: 12px; }
         .su-error { color: var(--danger); font-size: var(--fs-caption); margin-top: 10px; min-height: 16px; }
+        /* Owner key */
+        .su-key { display: flex; gap: 8px; align-items: stretch; margin-top: 6px; }
+        .su-key code {
+            flex: 1; min-width: 0; display: flex; align-items: center; padding: 10px 12px;
+            border: 1px solid var(--accent-dim); border-radius: 8px; background: var(--bg);
+            font-family: ui-monospace, Consolas, monospace; font-size: var(--fs-ui);
+            letter-spacing: .02em; overflow-wrap: anywhere; user-select: all;
+        }
     </style>
 </head>
 <body>
@@ -192,6 +200,23 @@
             </div>
         </section>
 
+        <section class="su-step" data-step="secure">
+            <h2 class="su-h">Your owner key</h2>
+            <p class="su-sub">This key protects your library from anyone else on your network.
+                Azimuth Photo keeps only a fingerprint of it, so store this somewhere safe —
+                it is shown once.</p>
+            <div class="su-key">
+                <code id="su-key" aria-live="polite"></code>
+                <button class="su-btn" id="su-key-copy" type="button">Copy</button>
+            </div>
+            <div class="su-error" id="su-key-error"></div>
+            <div class="su-actions">
+                <span class="su-kbd">You stay signed in on this browser</span>
+                <span class="spacer"></span>
+                <button class="su-btn primary" id="su-finish" disabled>Open your library</button>
+            </div>
+        </section>
+
     </div>
 </div>
 <script>
@@ -201,7 +226,7 @@
 
     function show(name) {
         steps.forEach(s => s.classList.toggle('active', s.dataset.step === name));
-        const focus = { welcome: '[data-next]', folder: '#su-path-input', import: '#su-open' }[name];
+        const focus = { welcome: '[data-next]', folder: '#su-path-input', import: '#su-open', secure: '#su-finish' }[name];
         const el = document.querySelector(`.su-step[data-step="${name}"] ${focus}`);
         if (el) el.focus({ preventScroll: true });
         if (name === 'import') beginHubDiscovery();
@@ -455,8 +480,39 @@
         }
     });
 
+    // --- Step: secure (owner key) ---
+    const keyEl = document.getElementById('su-key');
+    const keyError = document.getElementById('su-key-error');
+    const keyCopy = document.getElementById('su-key-copy');
+    const finishBtn = document.getElementById('su-finish');
+
     document.getElementById('su-open').addEventListener('click', async () => {
         clearTimeout(pollTimer);
+        show('secure');
+        try {
+            const result = await json('/api/auth/key', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ generate: true }),
+            });
+            keyEl.textContent = result.key || '';
+            finishBtn.disabled = false;
+        } catch (err) {
+            keyError.textContent = 'Could not create an owner key: ' + String(err.message || err)
+                + '. You can set one later from the server machine.';
+        }
+    });
+
+    keyCopy.addEventListener('click', async () => {
+        try {
+            await navigator.clipboard.writeText(keyEl.textContent);
+            keyCopy.textContent = 'Copied';
+            setTimeout(() => { keyCopy.textContent = 'Copy'; }, 1600);
+        } catch {
+            keyError.textContent = 'Copy failed — select the key and copy it manually.';
+        }
+    });
+
+    finishBtn.addEventListener('click', async () => {
         try { await fetch('/api/setup/complete', { method: 'POST' }); } catch {}
         // Never land on an empty grid: give the scan's final commit a moment
         // to become visible before the library's first query.

@@ -22,6 +22,16 @@ from features.publish.builder import BundleSummary
 
 HOOK_TIMEOUT_SECONDS = 15 * 60
 HOOK_OUTPUT_LINES = 40
+HOOK_ENV = "PHOTOARCHIVE_PUBLISH_HOOK"
+
+
+def configured_publish_hook() -> str:
+    """Server-side-only: env var wins, then the on-disk settings file. The
+    hook executes shell after publish, so it is never writable via the API."""
+    return (
+        (os.environ.get(HOOK_ENV) or "").strip()
+        or str(settings.get_settings().get("publish_hook") or "").strip()
+    )
 
 _deploy_lock = asyncio.Lock()
 
@@ -37,7 +47,7 @@ class PublishConfig:
         config = settings.get_settings()
         return cls(
             publish_dir=str(config.get("publish_dir") or "").strip(),
-            publish_hook=str(config.get("publish_hook") or "").strip(),
+            publish_hook=configured_publish_hook(),
         )
 
     @property

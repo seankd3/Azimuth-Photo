@@ -243,6 +243,16 @@ async def api_save_settings(request: Request):
     if error:
         return error
     body = {key: value for key, value in body.items() if key not in settings.PRIVATE_SETTING_KEYS}
+    if str(body.pop("publish_hook", "") or "").strip():
+        # The hook executes shell on publish; it is never API-writable (AUTH_SPEC).
+        return JSONResponse(
+            {
+                "error": "publish_hook is server-side configuration. Set the "
+                "PHOTOARCHIVE_PUBLISH_HOOK environment variable or edit the "
+                "settings file on the server."
+            },
+            status_code=400,
+        )
     current = settings.get_settings()
     saved = settings.save_settings({**current, **body})
     model_changed = any(

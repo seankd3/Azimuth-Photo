@@ -16,7 +16,14 @@ from pydantic import BaseModel, Field
 import settings
 from data.repositories import shares as share_repository
 from features.publish.builder import build_public_gallery_bundle, export_website_tree
-from features.publish.deployer import GalleryDeployer, HookStatus, PublishConflict, PublishDeployError, PublishSetupError
+from features.publish.deployer import (
+    GalleryDeployer,
+    HookStatus,
+    PublishConflict,
+    PublishDeployError,
+    PublishSetupError,
+    configured_publish_hook,
+)
 from features.publish import nodes as published_nodes
 from features.share import auth as share_auth
 
@@ -560,7 +567,7 @@ def _publishing_config_payload() -> dict:
     return {
         "enabled": bool(publish_dir),
         "publish_dir": publish_dir,
-        "hook_configured": bool(str(config.get("publish_hook") or "").strip()),
+        "hook_configured": bool(configured_publish_hook()),
         "site_base_url": str(config.get("publish_site_base_url") or "").strip(),
         "setup_prompt": "" if publish_dir else "Choose a folder for published galleries before publishing.",
     }

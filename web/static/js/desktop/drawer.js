@@ -80,7 +80,6 @@ const SETTING_DEFS = {
     caption_model_preset: { type: 'select' },
     caption_batch_size: { type: 'number', min: 1, max: 4, step: 1 },
     publish_dir: { type: 'text' },
-    publish_hook: { type: 'text' },
     publish_site_base_url: { type: 'text' },
     share_brand_name: { type: 'text' },
     require_device_token: { type: 'checkbox' },
@@ -811,9 +810,6 @@ function renderPublishingSettings() {
         + publishingStatusNote()
         + settingInput('publish_dir', 'Gallery folder', {
             hint: 'Required. Public gallery files are written here. Leave empty to disable publishing.',
-        })
-        + settingInput('publish_hook', 'After-publish script', {
-            hint: 'Optional. Runs after publish or unpublish. Gallery files are still saved if the script does not finish.',
         })
         + settingInput('publish_site_base_url', 'Site base URL', {
             hint: 'Display-only for in-app links (e.g. https://photos.example.com). Does not serve files.',
