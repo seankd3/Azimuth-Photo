@@ -9,6 +9,9 @@ PHOTOARCHIVE_SMOKE_MODE=1 .venv/bin/python -m pytest -q > /tmp/deploy-suite.log 
 code=$?
 tail -1 /tmp/deploy-suite.log
 [ $code -ne 0 ] && { echo "SUITE RED — aborting deploy"; exit 1; }
+cd ..
+./scripts/qa.sh
+cd web
 cp photoarchive.db "photoarchive.db.pre-$(date +%m%d-%H%M).bak"
 ls -t photoarchive.db.pre-*.bak | tail -n +6 | xargs -r rm -f
 cd ..
