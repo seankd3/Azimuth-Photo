@@ -934,7 +934,9 @@ function renderSources() {
         });
         row.addEventListener('contextmenu', (event) => {
             event.preventDefault();
-            openSourceRevealMenu(row.dataset.source, row);
+            const source = sources.find((item) => item.path === row.dataset.source);
+            const count = source?.active_image_count != null ? source.active_image_count : source?.image_count;
+            openSourceRevealMenu(row.dataset.source, row, count);
         });
     }
 }

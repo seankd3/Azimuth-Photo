@@ -1,7 +1,9 @@
 import { revealFolder } from './api.js';
+import { downloadExport, openExportMenu } from './export_menu.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
 import { fileManagerMenuLabel } from './file_manager.js';
 import { icon } from '../icons.js';
+import { emit, navigateToScope, scopeParams } from './state.js';
 import { showToast } from './toast.js';
 
 let menu = null;
@@ -47,22 +49,51 @@ async function revealSourcePath(path) {
     showToast(result?.data?.error || 'Couldn’t open folder');
 }
 
-export function openSourceRevealMenu(path, anchor) {
+function applySourceScope(path) {
+    navigateToScope({ folder: [path] });
+}
+
+function exportSourceScope(path, count, anchor) {
+    applySourceScope(path);
+    openExportMenu(anchor, ({ format, size }) => {
+        const params = scopeParams({ format });
+        if (size) params.set('size', size);
+        downloadExport(params, {
+            count: Number(count) || 0,
+            message: format === 'zip' ? 'Preparing source zip' : `Exporting source as ${format.toUpperCase()}`,
+        });
+    });
+}
+
+export function openSourceRevealMenu(path, anchor, count = 0) {
     if (!path || !anchor) return;
     ensureMenu();
     releaseFocus(menu);
     menuReturn = anchor;
     menu.innerHTML = '<div class="pm-group">'
-        + `<button data-act="reveal" role="menuitem">${icon('folder-open')} ${fileManagerMenuLabel()}</button>`
+        + `<button data-act="scope">${icon('folder-tree')} Show in scope with subfolders</button>`
+        + `<button data-act="refine">${icon('zap')} Open in Refine</button>`
+        + `<button data-act="reveal">${icon('folder-open')} ${fileManagerMenuLabel()}</button>`
+        + `<button data-act="export">${icon('download')} Export view…</button>`
         + '</div>';
     menu.hidden = false;
     const rect = anchor.getBoundingClientRect();
     const menuRect = menu.getBoundingClientRect();
     menu.style.left = `${Math.max(8, Math.min(window.innerWidth - menuRect.width - 8, rect.left + 18))}px`;
     menu.style.top = `${Math.max(8, Math.min(window.innerHeight - menuRect.height - 8, rect.top + 18))}px`;
-    menu.querySelector('[data-act="reveal"]')?.addEventListener('click', () => {
-        closeSourceRevealMenu();
-        revealSourcePath(path);
-    });
+    for (const button of menu.querySelectorAll('[data-act]')) {
+        button.setAttribute('role', 'menuitem');
+        button.addEventListener('click', () => {
+            const action = button.dataset.act;
+            closeSourceRevealMenu();
+            if (action === 'scope') applySourceScope(path);
+            if (action === 'refine') {
+                applySourceScope(path);
+                emit('refine:open');
+            }
+            if (action === 'reveal') revealSourcePath(path);
+            if (action === 'export') exportSourceScope(path, count, anchor);
+        });
+    }
     trapFocus(menu, menu.querySelector('button'));
 }

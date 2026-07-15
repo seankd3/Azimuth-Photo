@@ -407,7 +407,7 @@ function renderSources() {
         const id = Number(source.id);
         const scanning = scanSourceId === id;
         const path = source.path || '';
-        return `<article class="src-card" data-source-id="${id}" data-source-path="${esc(path)}">`
+        return `<article class="src-card" data-source-id="${id}" data-source-path="${esc(path)}" data-source-count="${Number(sourceCount(source)) || 0}">`
             + `<span class="sc-dot ${online ? 'on' : ''}"></span><div>`
             + `<div class="sc-name" title="${esc(sourceName(source))}">${esc(sourceName(source))}</div>`
             + `<div class="sc-sub">${fmt(sourceCount(source))} photos · ${esc(lastScan(source))}${online ? '' : ' · offline'}</div>`
@@ -1270,7 +1270,7 @@ function bindDrawerActions() {
     for (const card of body.querySelectorAll('.src-card[data-source-path]')) {
         card.addEventListener('contextmenu', (event) => {
             event.preventDefault();
-            openSourceRevealMenu(card.dataset.sourcePath || '', card);
+            openSourceRevealMenu(card.dataset.sourcePath || '', card, card.dataset.sourceCount);
         });
     }
     for (const btn of body.querySelectorAll('[data-mode]')) {

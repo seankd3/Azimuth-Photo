@@ -141,7 +141,7 @@ class UiContractsTests(BackendTestCase):
 
         self.assertIn("cache: 'no-store'", history_panel)
 
-    async def test_left_rail_source_rows_offer_the_shared_reveal_menu(self):
+    async def test_source_rows_offer_the_complete_scope_menu(self):
         base_dir = os.path.dirname(__file__)
         with open(os.path.join(base_dir, "static", "js", "desktop", "panel.js"), encoding="utf-8") as fh:
             panel = fh.read()
@@ -152,9 +152,12 @@ class UiContractsTests(BackendTestCase):
 
         self.assertIn("openSourceRevealMenu", panel)
         self.assertIn("row.addEventListener('contextmenu'", panel)
-        self.assertIn("openSourceRevealMenu(row.dataset.source, row)", panel)
+        self.assertIn("openSourceRevealMenu(row.dataset.source, row, count)", panel)
         self.assertIn("revealFolder(path)", source_reveal_menu)
+        self.assertIn('data-act="scope"', source_reveal_menu)
+        self.assertIn('data-act="refine"', source_reveal_menu)
         self.assertIn('data-act="reveal"', source_reveal_menu)
+        self.assertIn('data-act="export"', source_reveal_menu)
         self.assertIn("fileManagerMenuLabel()", source_reveal_menu)
         self.assertIn("'Open in Explorer'", file_manager)
         self.assertNotIn("Reveal in Explorer", file_manager)
