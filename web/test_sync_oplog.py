@@ -311,6 +311,76 @@ class OplogConvergenceTests(unittest.IsolatedAsyncioTestCase):
                     ).fetchone()[0])
                 self.assertEqual(settings["Exposure2012"], 2.0)
 
+    async def test_imported_develop_row_without_family_clock_beats_older_oplog(self):
+        path = self._catalog()
+        newer_updated_at = oplog._iso_timestamp(200.0)
+        with sqlite3.connect(path) as conn:
+            conn.execute(
+                "INSERT INTO develop_settings(image_id, settings, origin, updated_at) "
+                "VALUES (1, ?, 'lrcat', ?)",
+                (json.dumps({"Exposure2012": 2.0}), newer_updated_at),
+            )
+            conn.commit()
+
+        await oplog.apply_entries(path, [{
+            "origin": "satellite",
+            "origin_seq": 1,
+            "content_hash": HASH_A,
+            "family": "develop",
+            "payload": {
+                "settings": {"Exposure2012": -2.0},
+                "updated_at": oplog._iso_timestamp(100.0),
+                "origin": "sync",
+            },
+            "ts": 100.0,
+        }], applied_from="satellite", receive_time=500.0)
+
+        with sqlite3.connect(path) as conn:
+            settings, origin, updated_at = conn.execute(
+                "SELECT settings, origin, updated_at FROM develop_settings WHERE image_id = 1"
+            ).fetchone()
+            family_state = conn.execute(
+                "SELECT 1 FROM oplog_family_state "
+                "WHERE content_hash = ? AND family = 'develop'",
+                (HASH_A,),
+            ).fetchone()
+        self.assertEqual(json.loads(settings), {"Exposure2012": 2.0})
+        self.assertEqual(origin, "lrcat")
+        self.assertEqual(updated_at, newer_updated_at)
+        self.assertIsNone(family_state)
+
+    async def test_imported_iptc_row_without_family_clock_beats_older_oplog(self):
+        path = self._catalog()
+        await oplog.ensure_schema(path)
+        newer_updated_at = oplog._iso_timestamp(200.0)
+        with sqlite3.connect(path) as conn:
+            conn.executescript(oplog.KEYWORD_IPTC_DDL)
+            conn.execute(
+                "INSERT INTO iptc_fields(image_id, title, caption, copyright, creator, updated_at) "
+                "VALUES (1, 'Imported title', '', '', '', ?)",
+                (newer_updated_at,),
+            )
+            conn.commit()
+
+        await oplog.apply_entries(path, [{
+            "origin": "satellite",
+            "origin_seq": 1,
+            "content_hash": HASH_A,
+            "family": "iptc",
+            "payload": {
+                "title": "Older title",
+                "updated_at": oplog._iso_timestamp(100.0),
+            },
+            "ts": 100.0,
+        }], applied_from="satellite", receive_time=500.0)
+
+        with sqlite3.connect(path) as conn:
+            title, updated_at = conn.execute(
+                "SELECT title, updated_at FROM iptc_fields WHERE image_id = 1"
+            ).fetchone()
+        self.assertEqual(title, "Imported title")
+        self.assertEqual(updated_at, newer_updated_at)
+
     async def test_pre_unification_legacy_clock_is_migrated_before_oplog_apply(self):
         path = self._catalog()
         with sqlite3.connect(path) as conn:

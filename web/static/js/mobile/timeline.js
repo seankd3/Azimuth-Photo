@@ -745,14 +745,14 @@ async function refreshFirstPagePreviews() {
     renderEndMarker();
 }
 
-async function loadHistogram() {
+async function loadHistogram(requestGeneration = generation) {
     let data = null;
     try {
         data = await getDateHistogram(scopeParams());
     } catch {
         return;
     }
-    if (!data) return;
+    if (!data || requestGeneration !== generation) return;
     histogram = data;
     monthOffsets = [];
     let offset = 0;
@@ -811,7 +811,7 @@ export async function reload() {
     let scanStatus = null;
     try {
         [, page, scanStatus] = await Promise.all([
-            loadHistogram(),
+            loadHistogram(gen),
             getRankings(rankingParams(0)),
             getScanStatus().catch(() => null),
         ]);

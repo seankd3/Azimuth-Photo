@@ -251,3 +251,42 @@ class MirrorDevelopGuardTests(BackendTestCase):
             self.assertIn(chr(34) + "Exposure2012" + chr(34) + ":2.5", row["settings"])
         finally:
             await conn.close()
+
+    async def test_mirror_develop_consults_newer_family_clock(self):
+        from features.sync import family_clock
+
+        source = await self._source()
+        image_id = await self._image(source["id"], "family-clock-guarded.jpg")
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "UPDATE images SET content_hash = ? WHERE id = ?",
+                ("f" * 32, image_id),
+            )
+            content_hash = str((await (await conn.execute(
+                "SELECT content_hash FROM images WHERE id = ?", (image_id,)
+            )).fetchone())["content_hash"])
+            await conn.execute(
+                "INSERT INTO develop_settings(image_id, settings, origin, updated_at) "
+                "VALUES (?, '{\"Exposure2012\":1.0}', 'sync', '2026-07-16T02:00:00Z')",
+                (image_id,),
+            )
+            await family_clock.record_state(
+                conn,
+                content_hash,
+                "develop",
+                family_clock.legacy_key("2026-07-16T05:00:00Z"),
+            )
+            await MirrorPuller._apply_develop(conn, image_id, {
+                "develop_settings": {"Exposure2012": -2.0},
+                "develop_updated_at": "2026-07-16T04:00:00Z",
+                "develop_origin": "hub",
+            })
+            row = await (await conn.execute(
+                "SELECT settings, updated_at FROM develop_settings WHERE image_id = ?", (image_id,)
+            )).fetchone()
+        finally:
+            await conn.close()
+
+        self.assertEqual(json.loads(row["settings"]), {"Exposure2012": 1.0})
+        self.assertEqual(row["updated_at"], "2026-07-16T02:00:00Z")

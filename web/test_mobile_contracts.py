@@ -110,6 +110,20 @@ class MobileOfflineContractsTests(unittest.TestCase):
         self.assertIn("m-share-photo-placeholder", photo_share)
         self.assertNotIn("thumbUrl('sm', image.id)", photo_share)
 
+    def test_histogram_rejects_a_stale_scope_before_mutating_timeline_state(self):
+        timeline = self.read("static", "js", "mobile", "timeline.js")
+        loader = timeline[
+            timeline.index("async function loadHistogram"):
+            timeline.index("export async function reload()")
+        ]
+
+        self.assertIn("async function loadHistogram(requestGeneration = generation)", loader)
+        guard = "if (!data || requestGeneration !== generation) return;"
+        self.assertIn(guard, loader)
+        self.assertLess(loader.index(guard), loader.index("histogram = data;"))
+        self.assertLess(loader.index(guard), loader.index("monthOffsets = [];"))
+        self.assertIn("loadHistogram(gen)", timeline)
+
     def test_info_sheet_rating_stays_bound_to_its_displayed_photo(self):
         viewer = self.read("static", "js", "mobile", "viewer.js")
         info_sheet = viewer[viewer.index("function infoSheet()") :]

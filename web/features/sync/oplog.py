@@ -486,7 +486,11 @@ async def _apply_entry_on_conn(conn, entry: Mapping[str, Any]) -> str:
         if current is None or _winner_key(entry) > current:
             await _record_winner(conn, entry)
         return "applied"
-    current = await _state_key(conn, str(entry["content_hash"]), family)
+    if family == "iptc":
+        await conn.executescript(KEYWORD_IPTC_DDL)
+    state_key = await _state_key(conn, str(entry["content_hash"]), family)
+    row_key = await family_clock.row_key(conn, int(image["id"]), family)
+    current = family_clock.newest_key(state_key, row_key)
     if current is not None and _winner_key(entry) <= current:
         return "stale-or-replayed"
     await _apply_lww_family(conn, int(image["id"]), entry)
