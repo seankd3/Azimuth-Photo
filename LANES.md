@@ -256,3 +256,66 @@ Supersedes the table above — that table is from 07-12 and every row is stale.
 - [Azimuth Architecture lane] ux13-storage claimed (pa-ux-system worktree): STORAGE_UX slices A (archive overview card + /api/storage/overview), B (Storage→Cache rename), C (inline add-flow CTAs) — running (tmux ux13-storage). Slice D (vocabulary Source→Folder) parked under DECISIONS for Sean per docs/STORAGE_UX.md charter note.
 - CLAIM import-lane (Fable/Import): taxonomy move journal (crash-safe rename+repoint), import_canvas scan-survival + stage peek, placeholder/aspect integration verify. Worktree pa-import.
 - CLAIM develop-lane (Fable/Develop, 07-16 ~16:20): (1) CR3 develop-open perf campaign — LibRaw decode 9.4s / default render 5.76s / EXIF 2.3s / gzip 1.2s per qfix-perf2 attribution, worktree pa-devperf; (2) color-science reconcile+merge to develop (7 known conflicts vs ux6, Fable hand-resolves in pa-color); (3) darktable P1s: highlight-reconstruct wiring (pa-hlrecon) + per-camera noise profiles (pa-noise).
+- 07-16 release lane: Windows fresh-install drill PASSED — frozen exe builds,
+  boots to first-run wizard, clean data layout, clean shutdown (winrel merged,
+  83cd9271). VERSION aligned to 1.0.0-rc.1 (was 0.1.1 in artifacts/handshake);
+  CHANGELOG Unreleased documents all waves since rc.1 (f01c5df1). Remaining in
+  workstream A: Docker image drill (can run on omarchy), Tauri sidecar bundle;
+  CI/release automation BLOCKED on the account-level Actions ban (DECISIONS).
+- 07-16 release lane: Docker fresh-install drill PASSED (build -> /setup wizard
+  -> honest /api/version -> clean teardown). Found+fixed: image never shipped
+  VERSION and /api/version 500ed on missing file — satellites would have read a
+  Docker hub as broken (6d8bbbfb). Workstream A remaining: Tauri sidecar bundle
+  drill (needs the desktop app repo/context — next), release automation still
+  blocked on the Actions account ban.
+- CLAIM release-lane 07-16: CTO tasking — (1) product-decision sign-off package, (2) data-safety drill re-run vs current develop, (3) RC cut checklist.
+| (done) pa-ux-deliver / ux14-deliver | Deliver grammar cleanup | Fable UX-Architecture | MERGED 13f7cdfbd, pushed; grep proofs (no openPublishOverlay/publish-retry, one esc); Deliver overlay + Shared rename Playwright-verified; doctrine at ui-architecture.md (1ed207cc) |
+
+### DECISIONS — UX Architecture (07-16, Deliver grammar recon)
+- Delivery data-model fracture (Sean + backend owners): Deliver private tab creates collection_shares while the Shared lens Private pane creates published-node shares — two objects, two revoke/password/URL semantics for the same intent (panel.js:560 vs shared.js:477). Same split for website: publish job vs snapshot nodes. Recommendation: converge on the published-node tree as the one delivery primitive; Deliver overlay becomes a per-collection view over it; collection_shares becomes a legacy read path. Multi-lane program touching shares/publish backends — needs Sean sign-off + coordination with owning sessions before any lane fires.
+- import-lane: freeup MERGED to develop (cc482252 + f36b177a, cherry-picked onto 6d8bbbfb; drawer.js conflict resolved — freeup panel now in system Connectivity section; 36 sync/contract tests green, drawer render verified). Satellite free-up-space verb is live on develop.
+
+## DECISIONS CLOSED (Sean, 07-16 evening — release lane packaged)
+- Share favorites: PER-VISITOR (cookie-scoped picks, owner sees merged sets).
+- Publish hook-fail: RETRY-TILL-CONFIRMED (Sean said idk -> release lane applied
+  its recommendation; honest status + background backoff; override welcome).
+- Elo on permanent delete: SACRED — duels are earned evidence, never rewritten.
+  Doctrine only, no code change.
+- Empty-trash VC cascade: WARN FIRST — Empty Trash must surface "also destroys
+  N edited copies" and require confirm when a master in scope has copies with
+  real edits.
+- CLAIM release-lane: pa-favscope (per-visitor favorites backend, Codex),
+  pa-hookretry (hook retry-till-confirmed, Codex), VC-warning (Fable direct:
+  backend count + trash UI confirm).
+| (done) pa-ux-placeholder / ux15-placeholder | Placeholder-cards polish | Fable UX-Architecture | MERGED 62ef5ba35, pushed; gates green; mobile empty-state Playwright-verified |
+- 07-16 release lane, CTO tasking status: (1) DECISIONS 4/4 closed with Sean —
+  favorites=per-visitor (lane running), hook-fail=retry-till-confirmed (lane
+  running; Sean said idk, release lane applied its recommendation), Elo=sacred
+  (doctrine, no code), VC-cascade=warn-first (SHIPPED 3db39d79). (2) Data-safety
+  drills re-run vs current tree: 109 passed / 0 failed. (3) RC cut checklist at
+  docs/RC_CHECKLIST.md (c2709eec) — blockers named: Actions account ban,
+  main/develop reconciliation, Tauri drill.
+- DONE fixspeed-lane 07-16: freeup-recover MERGED to develop (3dc2ba1b + 3b291b2d, ff): CTO-routed MED confirmed+fixed — legacy delete_ready lines now resolve source root from catalog, refuse recover when root unknown/offline/remapped; fails-without regression + catalog-lookup pin + remap test; 51 sync tests green. Grok cross-review applied (remap hole closed).
+| (done) pa-ux-system / ux13-storage | STORAGE_UX slices A-C | Fable UX-Architecture | MERGED 625d43aa + route-contract fix 5ee0d6a6, pushed; Playwright-verified (archive card lens+peek, Cache rename, inline add-flow); slices D/E still parked in DECISIONS |
+- import-lane: import-journal MERGED to develop (9ec22077) — crash-safe move journal for taxonomy reclassify (per-file intent->move->apply txn unit, 4-branch recovery), Codex-built, Fable-reviewed, 103 tests green post-rebase incl. fail-before/pass-after crash proof. Closes the parked taxonomy-move-journal decision.
+- 07-16 release lane: ALL FOUR Sean decisions now IMPLEMENTED and merged —
+  per-visitor favorites (5c01fb28d), hook retry-till-confirmed (latest push),
+  VC-cascade warning (3db39d79), Elo-sacred (doctrine). Gate after both merges:
+  1199 passed / 0 failed. Decision worktrees removed. UI wiring for the new
+  payload fields (visitors sets on owner review, retrying badge) = Fable/UI
+  when surfaces are touched next; payloads are backward compatible meanwhile.
+- 07-16 release lane, CEO directive ack: XPS execution wound down — zero release-
+  lane processes local (drill server stopped, builds/suites complete). All future
+  drills/builds/suites run on omarchy. STRUCTURAL EXCEPTION for CTO awareness:
+  Windows-platform verification (pa-winqa suite, frozen Windows server builds/
+  drills) cannot execute on omarchy — proposal: batch them, run scheduled/on-
+  request on the XPS rather than continuously. photoarchive-field uvicorn on the
+  XPS is Sean prod-satellite, not a lane process — left untouched.
+- CLAIM fixspeed-lane 07-16: pa-boot-defer / boot-defer — boot campaign step 2 (Codex): defer numpy/rawpy/PIL/imagecodecs off import app; no route/wiring restructure. Owner: Fable Fix-Campaigns-and-Speed.
+- CLAIM fixspeed-lane 07-16: pa-profile-index / profile-index — CTO item 2 (Codex): indexed on-demand Adobe profile store; kills 557ms cold load on first develop-open per boot. Owner: Fable Fix-Campaigns-and-Speed.
+| (done) grok-rev-ux | Grok cross-review of ux13/14/15 merges | Fable UX-Architecture | CLOSED de051207a: 5 real findings fixed same round (unpublish-undo after close, source-add Esc leak + focus trap + layer registry, paused-hint one-shot); 12 areas verified clean |
+| (done) deliver-hookretry-seam | CTO-routed HIGH: hook_retrying states in Deliver | Fable UX-Architecture | FIXED 88825de54 + doctrine: publishJobSettling() drives busy/poll/copy; fails-without contract test added |
+- CLAIM fixspeed-lane 07-16: pa-errhonesty / errhonesty — CTO item 3 hunt: 10 confirmed error-path honesty fixes on desktop (export ok-check, preset delete/rename, auto-level distinction, settings rollback, sync-chip mislabel, develop save retry, deliver copy, IPTC button); 2 Grok findings refuted (floating applyFlags/stacks — requestWithStatus never rejects). Owner: Fable Fix-Campaigns-and-Speed.
+- develop-lane: color-science MERGED to develop (70c3153b3) — controls waves reconciled vs ux6, S-curve+sigmoid GL twins, WB picker/presets, clip overlays, histogram drag; GPU-parity-proven on XPS + 1187-green Linux suite. Prod deploy still gated on Sean's visual verdict.
+- develop-lane FINDINGS routed out: (1) PRE-EXISTING develop reds: test_desktop_correctness publish/export poll trio fails on pure origin/develop (Deliver-grammar wave landed contracts without matching JS?) — belongs to ux13-15/deliver lane; (2) PRE-EXISTING Windows red: test_catalog aspect-at-scan stores no orientation on Windows (1cc58bc POSIX assumption) — spawn-task chip filed on XPS.
+- develop-lane: dev-perf-cr3 DONE+reviewed (real-CR3 open 9.6->7.4s, byte-identical, debunked 9.4s decode myth as host contention) — merging next; dev-hlrecon DONE+reviewed (engagement probe-proven on real files; cache v5 bump, old v4 dir = ops cleanup note); dev-noise follow-up lane running (ISO-from-metadata blocker fix).
