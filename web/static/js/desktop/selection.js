@@ -173,7 +173,6 @@ export function initSelection() {
     on('images', render);
     document.getElementById('sel-pick').addEventListener('click', () => {
         const imageIds = ids();
-        clearSelection();
         applyFlags(imageIds, 'picked');
     });
     document.getElementById('sel-reject').addEventListener('click', () => {

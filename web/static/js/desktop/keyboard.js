@@ -77,7 +77,6 @@ function flagTarget(flag) {
     }
     if (selection.size) {
         const ids = [...selection];
-        clearSelection();
         applyFlags(ids, flag);
         return;
     }
