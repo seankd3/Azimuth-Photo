@@ -102,7 +102,7 @@ export function scopeParams(extra = {}) {
     if (scope.minStars) params.set('min_stars', scope.minStars);
     if (scope.dateTaken) params.set('date_taken', scope.dateTaken);
     if (scope.collectionId) params.set('collection_id', scope.collectionId);
-    params.set('stacks', viewPrefs.collapseStacks ? 'collapsed' : 'expanded');
+    params.set('stacks', (scope.smartName || !viewPrefs.collapseStacks) ? 'expanded' : 'collapsed');
     for (const [key, value] of Object.entries(extra)) {
         if (value !== undefined && value !== null && value !== '') params.set(key, String(value));
     }
