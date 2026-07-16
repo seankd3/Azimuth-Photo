@@ -315,6 +315,7 @@
     }
 
     let pathDebounce;
+    pathInput.addEventListener('focus', () => pathInput.select());
     pathInput.addEventListener('input', () => {
         clearTimeout(pathDebounce);
         pathDebounce = setTimeout(() => browse(pathInput.value.trim()), 350);
@@ -344,18 +345,20 @@
     const bar = document.getElementById('su-bar');
 
     async function startImport() {
+        const folder = pathInput.value.trim() || chosen.trim();
+        if (!folder) return;
         startBtn.disabled = true;
         try {
             await json('/api/scan', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ folder: chosen }),
+                body: JSON.stringify({ folder }),
             });
         } catch (err) {
             startBtn.disabled = false;
             folderError.textContent = String(err.message || err);
             return;
         }
-        importFolder.textContent = chosen;
+        importFolder.textContent = folder;
         show('import');
         poll();
     }
