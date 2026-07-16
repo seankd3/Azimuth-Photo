@@ -188,14 +188,14 @@ function markDevelopPaint(token, phase) {
     console.timeStamp?.(`develop-open-${phase}:${elapsed}ms`);
 }
 
-async function paintDisplayBlob(blob, token, phase) {
+async function paintDisplayBlob(blob, token, phase, orientation = 1) {
     if (!renderer || token !== loadingToken) return false;
     const bitmap = await createImageBitmap(blob);
     if (token !== loadingToken) {
         bitmap.close?.();
         return false;
     }
-    renderer.uploadDisplayPreview(bitmap);
+    renderer.uploadDisplayPreview(bitmap, orientation);
     bitmap.close?.();
     applyZoomState();
     placeholder.hidden = true;
@@ -209,7 +209,8 @@ async function paintDisplayBlob(blob, token, phase) {
 async function paintPlaceholder(imageId, token) {
     try {
         const response = await fetch(`/api/develop/${imageId}/base.jpg`, fetchOptionsWithTimeout({}, 5_000));
-        if (response.ok && await paintDisplayBlob(await response.blob(), token, 'base-jpg')) return;
+        const orientation = Number(response.headers.get('X-Develop-Orientation')) || 1;
+        if (response.ok && await paintDisplayBlob(await response.blob(), token, 'base-jpg', orientation)) return;
     } catch { /* Fall through to the already-cached Library image. */ }
     try {
         // Browsed photos already have this tier. cached=1 keeps a cold Develop
