@@ -92,7 +92,6 @@ function finish(item, outcome) {
     const result = { id: item.id, url: item.url, body: item.body, ...outcome };
     pendingOutcomes.get(item.id)?.(result);
     pendingOutcomes.delete(item.id);
-    emit('write-outcome', result);
 }
 
 function isTerminalFailure(error) {
