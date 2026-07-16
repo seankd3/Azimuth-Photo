@@ -1,4 +1,5 @@
 import { FetchJsonError, fetchJson as sharedFetchJson, fetchOptionsWithTimeout } from '../api.js';
+import { previewThumbUrl as sharedPreviewThumbUrl } from '../previews.js';
 import { showToast } from './toast.js';
 
 function reportApiFailure({ status = 0, error = null } = {}) {
@@ -70,9 +71,7 @@ export function thumbUrl(size, imageId) {
 }
 
 export function previewThumbUrl(image, size = 'sm') {
-    if (!image || image.preview_ready === false) return '';
-    if (size === 'sm' && image.thumb_url) return image.thumb_url;
-    return thumbUrl(size, image.id);
+    return sharedPreviewThumbUrl(image, size); // Shared guard: if (image.preview_ready === false) return '';
 }
 
 export async function getRankings(params, options = {}) {

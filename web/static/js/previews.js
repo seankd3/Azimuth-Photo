@@ -30,3 +30,4 @@ export function createPendingPreviewPoll({ active, pending, refresh, delay = 300
 export const pendingCount = (data) => Number(data?.pending_thumbnails ?? data?.hidden_pending_thumbnails) || 0;
 
 export const pendingPreviewCount = (images) => (images || []).filter((image) => image?.preview_ready === false).length;
+export const previewThumbUrl = (image, size = 'sm') => (!image || image.preview_ready === false ? '' : (size === 'sm' && image.thumb_url) || `/api/thumb/${size}/${image.id}`);
