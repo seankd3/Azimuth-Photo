@@ -157,6 +157,37 @@ class FreeUpSpaceTests(BackendTestCase):
         self.assertTrue(path.exists())
         _ = content_hash
 
+    async def test_recovery_refuses_legacy_journal_line_when_source_is_offline(self):
+        # Journal lines written before source_path journaling carry no root, so the
+        # offline-root guard must resolve it from the catalog. A legacy line whose
+        # source is unplugged must never be marked remote off the file's absence.
+        image_id, path, content_hash = await self._synced_original(
+            "legacy.raw", b"journalled before source_path existed, card unplugged"
+        )
+        offline_root = str(Path(self.tempdir.name) / "unplugged-card")
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "UPDATE catalog_sources SET path = ? WHERE id = ?",
+                (offline_root, self.source["id"]),
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+        freeup._append_log(
+            self.log_path,
+            {
+                "event": "delete_ready",
+                "image_id": image_id,
+                "path": str(Path(offline_root) / "legacy.raw"),
+                "content_hash": content_hash,
+            },
+        )
+        recovered = await freeup.recover_incomplete_deletions(db.DB_PATH, log_path=self.log_path)
+        self.assertEqual(recovered, 0)
+        self.assertEqual((await self._image_row(image_id))["hub_remote"], 0)
+        _ = path
+
     async def test_locally_modified_file_is_skipped_by_final_rehash_guard(self):
         image_id, path, _content_hash = await self._synced_original(
             "edited.raw", b"bytes that reached the hub"
