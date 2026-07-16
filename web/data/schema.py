@@ -11,7 +11,7 @@ from data.people_schema import PEOPLE_QUERY_SCHEMA
 from core.path_groups import safe_commonpath
 
 EXPECTED_EMBEDDING_DIM = 2048  # Qwen3-VL-Embedding-2B native dimension
-SCHEMA_VERSION = 29
+SCHEMA_VERSION = 30
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS catalog_sources (
@@ -1900,7 +1900,7 @@ async def apply_schema_and_migrations(conn, *, db_exists: bool) -> None:
         await backfill_share_images(conn)
         await backfill_image_tags(conn)
         await backfill_legacy_aspect_ratios(conn)
-        if previous_schema_version < 29:
+        if previous_schema_version < 30:
             await backfill_people_query_aggregates(conn)
             await backfill_cache_image_presence(conn)
         await conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
