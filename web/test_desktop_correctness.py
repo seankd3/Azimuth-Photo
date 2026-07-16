@@ -372,7 +372,7 @@ class DesktopCorrectnessTests(unittest.TestCase):
             ("desktop/panel.js", "const detail = await getCollection(collectionId, { limit: 1000, offset });"),
             ("mobile/api.js", "export async function getCollection(collectionId, limit = 500) {"),
             ("mobile/library.js", "data = await getCollection(coll.id, 500);"),
-            ("mobile/sharing.js", "const data = await getCollection(collection.id, 1000);"),
+            ("mobile/sharing.js", "data = await getCollection(collection.id, 1000);"),
         }
         allowed_id_loader_sites = set()
 
