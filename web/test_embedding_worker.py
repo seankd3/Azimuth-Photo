@@ -2,8 +2,10 @@ import asyncio
 import os
 import sqlite3
 import sys
+import threading
 import time
 import unittest
+import unittest.mock
 
 import numpy as np
 
@@ -636,6 +638,44 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
         status = embedding_worker.get_worker_status()
         self.assertEqual(status["state"], "error")
         self.assertIn("torch", status["last_error"])
+
+    async def test_search_model_loader_waits_for_fresh_caption_lease(self):
+        load_started = threading.Event()
+
+        def fake_load(_model_dir, _model_id):
+            load_started.set()
+            return object()
+
+        embedding_worker._load_model = fake_load
+        current_manual_owner = work_coordination.manual_owner()
+        if current_manual_owner:
+            work_coordination.release_manual_owner(current_manual_owner)
+        current_gpu_owner = work_coordination.gpu_owner()
+        if current_gpu_owner:
+            work_coordination.release_gpu_owner(current_gpu_owner)
+        work_coordination.claim_manual_owner("captions")
+        work_coordination.claim_gpu_owner("captions")
+        task = asyncio.create_task(embedding_worker.ensure_model_loaded_for_search())
+        try:
+            await asyncio.sleep(0.05)
+
+            self.assertFalse(load_started.is_set())
+            self.assertFalse(task.done())
+            self.assertEqual(work_coordination.manual_owner(), "captions")
+            self.assertEqual(work_coordination.gpu_owner(), "captions")
+
+            work_coordination.release_manual_owner("captions")
+            work_coordination.release_gpu_owner("captions")
+            self.assertTrue(await asyncio.wait_for(task, timeout=2))
+            self.assertTrue(load_started.is_set())
+        finally:
+            if not task.done():
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+            work_coordination.release_manual_owner("captions")
+            work_coordination.release_gpu_owner("captions")
+            work_coordination.release_manual_owner("embeddings")
+            work_coordination.release_gpu_owner("embeddings")
 
     async def test_start_search_model_load_warms_model_in_background_once(self):
         calls = []
