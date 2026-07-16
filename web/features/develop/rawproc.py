@@ -358,6 +358,15 @@ def _resize_linear_uint16(rgb: np.ndarray, max_edge: int | None = MAX_BASE_EDGE)
     return np.ascontiguousarray(np.clip(np.rint(resized), 0, np.iinfo(np.uint16).max), dtype=np.uint16)
 
 
+def _scale_linear_uint16(rgb: np.ndarray, scale: np.float32) -> np.ndarray:
+    """Scale and round a LibRaw frame without chaining full-frame temporaries."""
+    scaled = np.asarray(rgb, dtype=np.float32)
+    np.multiply(scaled, scale, out=scaled)
+    np.rint(scaled, out=scaled)
+    np.clip(scaled, 0, np.iinfo(np.uint16).max, out=scaled)
+    return scaled.astype(np.uint16)
+
+
 def _rawpy_color_matrix(raw: Any) -> list[float] | None:
     for attr in ("color_matrix", "rgb_xyz_matrix"):
         matrix = _matrix_3x3(getattr(raw, attr, None))
@@ -470,10 +479,7 @@ def decode_base(path: str | os.PathLike[str]) -> tuple[np.ndarray, dict[str, Any
                     # common gain at the linear decode boundary.
                     green_wb = _finite_positive(camera_wb[1]) if len(camera_wb) > 1 else None
                     wb_scale = np.float32(max(valid_wb) / (green_wb or min(valid_wb)))
-                    rgb = np.asarray(
-                        np.clip(np.rint(np.asarray(rgb, dtype=np.float32) * wb_scale), 0, 65535),
-                        dtype=np.uint16,
-                    )
+                    rgb = _scale_linear_uint16(rgb, wb_scale)
         except Exception as exc:
             raise RawDecodeError(f"RAW decode failed: {exc}") from exc
     rgb = _resize_linear_uint16(np.asarray(rgb, dtype=np.uint16))
