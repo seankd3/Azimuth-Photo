@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from .highlights_recon import reconstruct_highlights
+
 # XYZ (D50) -> linear sRGB (D65 primaries), Bradford chromatic adaptation.
 XYZD50_TO_SRGB = np.array(
     [
@@ -238,12 +240,16 @@ def decode_lossy_dng(path: str, max_px: int | None = None):
         np.clip(v, 0.0, None, out=v)
 
         polynomials = _map_polynomials(full) or _map_polynomials(target)
+        linear_white = np.ones(3, dtype=np.float32)
         if polynomials:
             for channel in range(3):
                 v[..., channel] = _poly_eval(polynomials[channel], v[..., channel])
+                linear_white[channel] = np.float32(_poly_eval(polynomials[channel], 1.0))
             np.clip(v, 0.0, None, out=v)
 
         v /= asn.astype(np.float32)
+        clips = linear_white / asn.astype(np.float32)
+        v = reconstruct_highlights(v, clips)
 
         fm = forward2 or forward
         if fm is not None and len(fm) == 9:
