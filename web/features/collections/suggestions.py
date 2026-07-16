@@ -39,6 +39,7 @@ THEME_FULL_STRENGTH_COVERAGE = 0.25
 _CACHE_TTL_SECONDS = 600.0
 _DEFAULT_COHERENCE = 0.72
 SHOOT_HINT_PARSER_VERSION = 1
+_SHOOT_HINT_BACKFILL_CHUNK = 2000
 _DATE_RE = DATE_RE
 _CAMERA_STEM_RE = re.compile(
     r"^(?:IMG|DSC|PXL|DJI|LRT|R5|R5_|7N4A|_MG|MG|PHOTO|VID)[-_]?\d+",
@@ -529,15 +530,23 @@ async def _backfill_shoot_hints(conn) -> int:
     if not missing:
         return 0
     derived = await asyncio.to_thread(_derive_shoot_hint_rows, missing)
-    await conn.executemany(
-        "INSERT INTO image_shoot_hints "
-        "(image_id, key, title, source, path_date, parser_version) "
-        "VALUES (?, ?, ?, ?, ?, ?) "
-        "ON CONFLICT(image_id) DO UPDATE SET "
-        "key = excluded.key, title = excluded.title, source = excluded.source, "
-        "path_date = excluded.path_date, parser_version = excluded.parser_version",
-        derived,
-    )
+    # Commit in bounded chunks so a first-time / version-bump backfill over the
+    # whole catalog never holds the single SQLite writer lock long enough to
+    # starve concurrent interactive writes (flags, ratings, trash). A single
+    # executemany over a 139k-row catalog held the writer lock ~2.6s; chunked
+    # commits release it between batches (systems-factor #2: keep bulk writers
+    # from monopolizing the single writer).
+    for start in range(0, len(derived), _SHOOT_HINT_BACKFILL_CHUNK):
+        await conn.executemany(
+            "INSERT INTO image_shoot_hints "
+            "(image_id, key, title, source, path_date, parser_version) "
+            "VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(image_id) DO UPDATE SET "
+            "key = excluded.key, title = excluded.title, source = excluded.source, "
+            "path_date = excluded.path_date, parser_version = excluded.parser_version",
+            derived[start:start + _SHOOT_HINT_BACKFILL_CHUNK],
+        )
+        await conn.commit()
     return len(derived)
 
 
