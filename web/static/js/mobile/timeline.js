@@ -341,7 +341,23 @@ function trimWindowFromStart() {
     const dropped = images.length - MAX_WINDOW;
     images = images.slice(dropped);
     startOffset += dropped;
-    rebuildLoaded();
+    let remaining = dropped;
+    for (const sec of [...timeline.querySelectorAll('.m-day')]) {
+        const grid = sec.querySelector('.m-day-grid');
+        const cells = [...grid.querySelectorAll('.mcell[data-id]:not([data-stack-member])')];
+        const removeCount = Math.min(remaining, cells.length);
+        cells.slice(0, removeCount).forEach((cell) => cell.remove());
+        remaining -= removeCount;
+        if (!grid.querySelector('.mcell[data-id]:not([data-stack-member])')) {
+            const monthHead = sec.previousElementSibling?.classList.contains('m-month-head')
+                ? sec.previousElementSibling
+                : null;
+            sec.remove();
+            if (monthHead && monthHead.nextElementSibling?.dataset.month !== monthHead.dataset.month) monthHead.remove();
+        }
+        if (!remaining) break;
+    }
+    reindexCells();
     const nextAnchor = anchorId && timeline.querySelector(`.mcell[data-id="${anchorId}"]`);
     if (nextAnchor) pane.scrollTop += nextAnchor.getBoundingClientRect().top - oldTop;
 }
