@@ -281,22 +281,16 @@ async def set_image_rating(db_path: str, image_id: int, rating: int):
     async def _write() -> None:
         conn = await connection.open_async(db_path)
         try:
-            row = await (await conn.execute(
-                "SELECT settings FROM develop_settings WHERE image_id = ?", (image_id,)
-            )).fetchone()
-            try:
-                settings = json.loads(row["settings"]) if row else {}
-            except (TypeError, ValueError, json.JSONDecodeError):
-                settings = {}
-            settings["_lr_rating"] = rating
-            payload = json.dumps(settings, separators=(",", ":"), ensure_ascii=True)
             now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-            if row:
-                await conn.execute(
-                    "UPDATE develop_settings SET settings = ?, updated_at = ? WHERE image_id = ?",
-                    (payload, now, image_id),
-                )
-            else:
+            cursor = await conn.execute(
+                "UPDATE develop_settings SET settings = json_set("
+                "CASE WHEN json_valid(settings) THEN "
+                "  CASE WHEN json_type(settings) = 'object' THEN settings ELSE '{}' END "
+                "ELSE '{}' END, '$._lr_rating', ?), updated_at = ? WHERE image_id = ?",
+                (rating, now, image_id),
+            )
+            if cursor.rowcount == 0:
+                payload = json.dumps({"_lr_rating": rating}, separators=(",", ":"))
                 await conn.execute(
                     "INSERT INTO develop_settings (image_id, settings, origin, updated_at) VALUES (?, ?, 'user', ?)",
                     (image_id, payload, now),

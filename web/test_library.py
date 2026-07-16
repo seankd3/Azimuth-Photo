@@ -1674,6 +1674,37 @@ class LibraryTests(BackendTestCase):
         restored = await self._image_row(rows[1]["id"])
         self.assertIsNone(restored["missing_at"])
 
+    async def test_rescan_preserves_photos_in_real_and_fenced_directories(self):
+        source = await self._source("scan-junk-fence")
+        visible_path = os.path.join(source["path"], "visible.jpg")
+        fenced_dir = os.path.join(source["path"], "PreviewCache")
+        os.makedirs(fenced_dir)
+        fenced_path = os.path.join(fenced_dir, "previously-indexed.jpg")
+        real_directory_names = ("Backups", "Presets", "Luminar", ".favorites")
+        real_paths = []
+        for directory_name in real_directory_names:
+            directory = os.path.join(source["path"], directory_name)
+            os.makedirs(directory)
+            real_paths.append(os.path.join(directory, "keeper.jpg"))
+        for filepath in (visible_path, fenced_path, *real_paths):
+            with open(filepath, "wb") as handle:
+                handle.write(b"photo")
+
+        real_image_ids = [
+            await self._image(source["id"], os.path.join(directory_name, "keeper.jpg"))
+            for directory_name in real_directory_names
+        ]
+        fenced_id = await self._image(
+            source["id"],
+            os.path.join("PreviewCache", "previously-indexed.jpg"),
+        )
+
+        await scanner.scan_folder(source["path"], source_id=source["id"])
+
+        for image_id in real_image_ids:
+            self.assertIsNone((await self._image_row(image_id))["missing_at"])
+        self.assertIsNone((await self._image_row(fenced_id))["missing_at"])
+
     async def test_empty_online_source_scan_preserves_existing_images_and_warns(self):
         source = await self._source("scan-empty-online")
         filepaths = [
