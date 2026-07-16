@@ -10,6 +10,7 @@
 
 import { fetchOptionsWithTimeout } from '../../api.js';
 import { pollJob } from '../jobs.js';
+import { esc as escapeHtml } from '../dom.js';
 
 const READ_TIMEOUT_MS = 10_000;
 const MUTATION_TIMEOUT_MS = 20_000;
@@ -38,14 +39,6 @@ export const SYNC_GROUPS = [
     ['effects', 'Effects'],
     ['masks', 'Masks'],
 ];
-
-function escapeHtml(text) {
-    return String(text ?? '')
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;');
-}
 
 function defaultFilenamePattern(image) {
     const stem = String(image?.filename || image?.filepath || 'developed').replace(/\.[^.]+$/, '');

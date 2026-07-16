@@ -20,6 +20,7 @@ import { initFoldersPanel } from './folders.js';
 import { openSourceAddFlow } from './drawer.js';
 import { openSourceRevealMenu } from './source_reveal_menu.js';
 import { icon } from '../icons.js';
+import { esc, slugifyName } from './dom.js';
 import {
     initSuggestions, loadSuggestionsOnce, openSuggestionsReview, suggestionsAreLoading, visibleSuggestions,
 } from './suggestions.js';
@@ -46,9 +47,6 @@ let savedViews = [];
 
 const SHARED_CHANGED_EVENT = 'shares/publishes-changed';
 const DELIVER_TAB_STORAGE_KEY = 'pa_d_deliver_tab';
-const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[c]));
 const fmt = (n) => Number(n || 0).toLocaleString('en-US');
 const narrowPanel = () => window.matchMedia('(max-width: 880px)').matches;
 const emptyState = (glyph, copy, action = '') => (
@@ -287,7 +285,7 @@ function deliverDraftStorageKey(collectionId) {
 }
 
 function defaultDeliverDraft(name) {
-    return { title: name, password: '', expiry: '', slug: slugifyName(name) };
+    return { title: name, password: '', expiry: '', slug: slugifyName(name, 'gallery') };
 }
 
 function loadDeliverDraft(collectionId, name) {
@@ -529,10 +527,6 @@ function bindDeliverConfirmButton(selector, label, action) {
     });
 }
 
-function slugifyName(value) {
-    return String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 96) || 'gallery';
-}
-
 function configuredGalleryUrl(slug, publishing = {}) {
     const base = String(publishing.site_base_url || '').replace(/\/+$/, '');
     return base && slug ? `${base}/g/${slug}/` : '';
@@ -695,7 +689,7 @@ function renderWebsiteDeliver(session, token) {
     const setupNeeded = publishing.enabled === false;
     const busy = Boolean(data?.in_progress || (job && ['publishing', 'revoking'].includes(job.state)));
     const count = Number(collectionById(session.collectionId)?.image_count || publish?.image_count || 0);
-    const slug = session.draft.slug || job?.slug || publish?.slug || slugifyName(session.name);
+    const slug = session.draft.slug || job?.slug || publish?.slug || slugifyName(session.name, 'gallery');
     const title = session.draft.title || job?.title || publish?.title || session.name;
     const url = data?.url || publish?.url || job?.url || '';
     const body = (setupNeeded ? '<div class="publish-setup"><b>Choose a publishing folder first.</b><p>Choose a folder for public galleries in System, then come back here to publish.</p><button class="btn primary" data-deliver-open-settings type="button">Open Publishing settings</button></div>' : '')
@@ -713,11 +707,11 @@ function renderWebsiteDeliver(session, token) {
     const slugInput = deliverOverlay.querySelector('[data-deliver-slug]');
     slugInput?.addEventListener('input', () => {
         saveDeliverDraft(session);
-        deliverOverlay.querySelector('.publish-confirm-copy').textContent = publishLeadText(count, slugifyName(slugInput.value), publish, publishing);
+        deliverOverlay.querySelector('.publish-confirm-copy').textContent = publishLeadText(count, slugifyName(slugInput.value, 'gallery'), publish, publishing);
     });
     const startPublish = async () => {
         saveDeliverDraft(session);
-        const result = await publishCollection(session.collectionId, { slug: slugifyName(session.draft.slug || slug), title: session.draft.title.trim() || title });
+        const result = await publishCollection(session.collectionId, { slug: slugifyName(session.draft.slug || slug, 'gallery'), title: session.draft.title.trim() || title });
         if (!deliverOverlayIsCurrent(token)) return;
         if (result.ok) {
             clearDeliverDraft(session);
