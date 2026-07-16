@@ -53,16 +53,16 @@ let thumbnailCachePolicy = 'keep';
 const busyActions = new Set();
 const workerActionGenerations = new Map();
 const workerActionsInFlight = new Set();
-const ACTIVE_WORKER_STATES = new Set([
-    'embedding',
-    'loading_model',
-    'waiting_for_model',
-    'waiting_for_gpu',
-    'waiting_for_turn',
-    'waiting_retry',
+const INACTIVE_WORKER_STATES = new Set([
+    'idle',
+    'paused',
+    'complete',
+    'caught_up',
+    'error',
+    'disabled',
+    'unavailable',
+    'stale',
 ]);
-const CACHE_ACTIVE_PREGEN_STATES = new Set(['running', 'waiting']);
-const METADATA_ACTIVE_WORKER_STATES = new Set(['running', 'waiting', 'waiting_retry']);
 
 const MODEL_SAVE_FIELDS = ['embed_model_preset', 'embed_model_id', 'embed_model_revision', 'embed_model_dir', 'embed_model_dim'];
 const CAPTION_MODEL_FIELDS = ['caption_model_preset', 'caption_model_id', 'caption_model_revision', 'caption_model_dir', 'caption_model_quantization', 'caption_prompt_version'];
@@ -128,19 +128,17 @@ function progress(done, total) {
 function workerStateIsActive(status) {
     const worker = (status && status.worker) || {};
     const index = (status && status.embedding_index) || {};
-    const state = index.worker_state || (status && status.worker_state) || worker.state || '';
-    return ACTIVE_WORKER_STATES.has(state);
+    const state = String(index.worker_state || (status && status.worker_state) || worker.state || '').toLowerCase();
+    return Boolean(state) && !INACTIVE_WORKER_STATES.has(state);
 }
 
 function cachePregenStateIsActive(status) {
     const pregen = (status && status.pregen) || {};
-    return !pregen.manual_pause && CACHE_ACTIVE_PREGEN_STATES.has(pregen.state);
+    return !pregen.manual_pause && workerStateIsActive({ worker: pregen });
 }
 
 function metadataStateIsActive(status) {
-    const state = status?.worker?.state || '';
-    return !status?.manual_pause
-        && (METADATA_ACTIVE_WORKER_STATES.has(state) || Boolean(status?.active));
+    return !status?.manual_pause && workerStateIsActive(status);
 }
 
 function applySettingsData(data, { preserveDirtyExcept = null } = {}) {
@@ -260,13 +258,23 @@ function hasInvalidSetting() {
     return Boolean(body && body.querySelector('[data-setting-field]:invalid'));
 }
 
+function peopleProgress(status) {
+    const worker = (status && status.worker) || {};
+    if (worker.progress_pct != null) return pct(worker.progress_pct);
+    const counts = (status && status.counts) || {};
+    const scanned = Object.values(counts.scan || {})
+        .reduce((total, count) => total + (Number(count) || 0), 0);
+    const pending = Number(counts.pending_cached_images) || 0;
+    const countProgress = progress(scanned, scanned + pending);
+    return workerStateIsActive(status) ? Math.max(5, countProgress) : countProgress;
+}
+
 function activeProgress() {
     const ai = pct(aiStatus && aiStatus.progress_pct);
     const pregen = cacheStatus && cacheStatus.pregen ? cacheStatus.pregen : {};
     const cacheProgress = pct((pregen.preview && pregen.preview.progress_pct) || pregen.progress_pct);
     const cache = cachePregenStateIsActive(cacheStatus) && cacheProgress <= 0 ? 50 : cacheProgress;
-    const peopleWorker = (peopleStatus && peopleStatus.worker) || {};
-    const people = peopleWorker.progress_pct != null ? pct(peopleWorker.progress_pct) : 0;
+    const people = peopleProgress(peopleStatus);
     const captionWorker = (captionStatus && captionStatus.worker) || {};
     const captionCounts = (captionStatus && captionStatus.counts) || {};
     const caption = captionWorker.progress_pct != null
@@ -474,10 +482,7 @@ function workItems() {
     const pregen = (cacheStatus && cacheStatus.pregen) || {};
     const preview = pregen.preview || {};
     const worker = (peopleStatus && peopleStatus.worker) || {};
-    const counts = (peopleStatus && peopleStatus.counts) || {};
-    const peoplePct = worker.progress_pct != null
-        ? pct(worker.progress_pct)
-        : 0;
+    const peoplePct = peopleProgress(peopleStatus);
     const captionWorker = (captionStatus && captionStatus.worker) || {};
     const captionCounts = (captionStatus && captionStatus.counts) || {};
     const captionPct = captionWorker.progress_pct != null

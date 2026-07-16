@@ -372,6 +372,15 @@ async def _apply_missing_image_rematch_on_conn(
     return True
 
 
+_CASCADE_SOURCE_VIRTUAL_COPY_MISSING_SQL = (
+    "UPDATE images SET missing_at = ("
+    "  SELECT master.missing_at FROM images AS master WHERE master.id = images.vc_of"
+    ") WHERE vc_of IN ("
+    "  SELECT id FROM images WHERE source_id = ? AND vc_of IS NULL"
+    ")"
+)
+
+
 async def insert_images_batch(db_path: str, rows: list[tuple], source_id: int | None = None):
     if not rows:
         return
@@ -453,6 +462,7 @@ async def insert_images_batch(db_path: str, rows: list[tuple], source_id: int | 
                     for row in normalized_rows
                 ],
             )
+            await conn.execute(_CASCADE_SOURCE_VIRTUAL_COPY_MISSING_SQL, (source_id,))
             await update_source_counts_on_conn(conn, source_id)
         else:
             await conn.executemany(
@@ -528,14 +538,7 @@ async def mark_source_missing_files_on_conn(
         ")",
         (missing_at, source_id),
     )
-    await conn.execute(
-        "UPDATE images SET missing_at = ("
-        "  SELECT master.missing_at FROM images AS master WHERE master.id = images.vc_of"
-        ") WHERE vc_of IN ("
-        "  SELECT id FROM images WHERE source_id = ? AND vc_of IS NULL"
-        ")",
-        (source_id,),
-    )
+    await conn.execute(_CASCADE_SOURCE_VIRTUAL_COPY_MISSING_SQL, (source_id,))
     await conn.execute("DELETE FROM source_scan_seen")
     await conn.execute("DELETE FROM source_scan_excluded")
 
@@ -631,6 +634,28 @@ _REPAIR_COLLECTION_COVER_SQL = (
 )
 
 
+def _virtual_copy_missing_cascade(
+    master_ids: set[int] | list[int] | tuple[int, ...],
+) -> tuple[str, list[int]]:
+    ids = list(dict.fromkeys(int(image_id) for image_id in master_ids))
+    placeholders = ",".join("?" for _ in ids)
+    return (
+        "UPDATE images SET missing_at = ("
+        "  SELECT master.missing_at FROM images AS master WHERE master.id = images.vc_of"
+        f") WHERE vc_of IN ({placeholders})",
+        ids,
+    )
+
+
+def cascade_virtual_copy_missing_sync_on_conn(
+    conn,
+    master_ids: set[int] | list[int] | tuple[int, ...],
+) -> None:
+    cascade_sql, cascade_ids = _virtual_copy_missing_cascade(master_ids)
+    if cascade_ids:
+        conn.execute(cascade_sql, cascade_ids)
+
+
 def mark_image_missing_sync(db_path: str, image_id: int, missing_at: float | None = None) -> bool:
     when = _time.time() if missing_at is None else float(missing_at)
     conn = connection.open_sync(db_path)
@@ -641,6 +666,7 @@ def mark_image_missing_sync(db_path: str, image_id: int, missing_at: float | Non
             (when, int(image_id)),
         )
         if cursor.rowcount > 0:
+            cascade_virtual_copy_missing_sync_on_conn(conn, [int(image_id)])
             source = conn.execute("SELECT source_id FROM images WHERE id = ?", (int(image_id),)).fetchone()
             conn.execute(_REPAIR_COLLECTION_COVER_SQL, (int(image_id),))
             if source is not None and source["source_id"] is not None:
@@ -681,6 +707,8 @@ async def _write_missing_mark_batch(db_path: str, requests: list[tuple[int, floa
                     "UPDATE images SET missing_at = ? WHERE id = ? AND missing_at IS NULL",
                     [(timestamps[image_id], image_id) for image_id in changed_ids],
                 )
+                cascade_sql, cascade_ids = _virtual_copy_missing_cascade(changed_ids)
+                await conn.execute(cascade_sql, cascade_ids)
                 await conn.executemany(
                     _REPAIR_COLLECTION_COVER_SQL,
                     [(image_id,) for image_id in changed_ids],
@@ -769,6 +797,10 @@ async def mark_zero_byte_images_missing(db_path: str, filepaths: list[str]) -> l
                     "UPDATE images SET missing_at = ? WHERE id = ? AND missing_at IS NULL",
                     [(now, int(row["id"])) for row in rows],
                 )
+                cascade_sql, cascade_ids = _virtual_copy_missing_cascade(
+                    [int(row["id"]) for row in rows]
+                )
+                await conn.execute(cascade_sql, cascade_ids)
                 for row in rows:
                     await conn.execute(_REPAIR_COLLECTION_COVER_SQL, (int(row["id"]),))
                 changed.extend(rows)

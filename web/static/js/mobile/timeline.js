@@ -304,7 +304,19 @@ function renderOfflineEmpty() {
     timeline.querySelector('.m-offline-empty')?.addEventListener('click', reload);
 }
 
+function renderPreparingState(pending) {
+    pending = Math.max(0, Number(pending) || 0);
+    timeline.innerHTML = '<div class="ms-empty" style="padding:48px 24px;text-align:center">'
+        + '<b>Preparing your photos</b><br>'
+        + `<span>Building previews for ${pending.toLocaleString('en-US')} photo${pending === 1 ? '' : 's'} — they’ll appear here as they’re ready.</span></div>`;
+    updateThumbnailPoll(pending);
+}
+
 function renderEmpty() {
+    if (hiddenPendingThumbnails > 0) {
+        renderPreparingState(hiddenPendingThumbnails);
+        return;
+    }
     timeline.innerHTML = '<div class="ms-empty" style="padding:48px 24px;text-align:center">'
         + '<b>No photos yet</b><br><span>Add a source in the desktop app. Photos will appear here as they’re scanned.</span></div>';
 }
@@ -433,6 +445,11 @@ function cacheDaySectionOffsets() {
 function renderMonths() {
     closeExpandedStack();
     timeline.classList.remove('m-z5');
+    if (hiddenPendingThumbnails > 0) {
+        renderPreparingState(hiddenPendingThumbnails);
+        daySectionOffsets = [];
+        return;
+    }
     timeline.innerHTML = '';
     const wrap = document.createElement('div');
     wrap.id = 'm-months';

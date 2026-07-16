@@ -106,7 +106,7 @@ class DevelopImporterTests(unittest.TestCase):
         self.assertEqual(changed["status"]["sidecars"], 1)
         self.assertEqual(json.loads(self._setting_row(raw_path)["settings"])["Exposure2012"], 1.25)
 
-    def test_rescan_leaves_virtual_copy_file_metadata_untouched(self):
+    def test_rescan_restores_virtual_copy_availability_without_changing_file_metadata(self):
         raw_path, _ = self._raw_with_xmp()
         importer.scan_raws(self.root, self.db_path)
         with sqlite3.connect(self.db_path) as conn:
@@ -129,7 +129,7 @@ class DevelopImporterTests(unittest.TestCase):
                 "FROM images WHERE id = ?",
                 (copy_id,),
             ).fetchone()
-        self.assertEqual(copy, ("copy-name.dng", ".copy", 999, 1.0, 42.0))
+        self.assertEqual(copy, ("copy-name.dng", ".copy", 999, 1.0, None))
 
     def test_user_origin_is_never_clobbered(self):
         raw_path, xmp_path = self._raw_with_xmp()
