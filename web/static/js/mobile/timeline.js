@@ -1160,9 +1160,40 @@ function syncSelectionCells() {
 
 function syncFlagCells({ ids, flagOf }) {
     const wanted = new Set(ids);
+    const excluded = new Set(
+        scope.flag ? ids.filter((id) => flagOf(id) !== scope.flag) : [],
+    );
+    if (excluded.size) {
+        images = images.filter((image) => !excluded.has(Number(image.id)));
+        let selectionChangedByEviction = false;
+        for (const id of excluded) {
+            selectionChangedByEviction = selection.delete(id) || selectionChangedByEviction;
+        }
+        if (zoomIdx === 2) {
+            void reload();
+            return;
+        }
+        closeExpandedStack();
+        for (const cell of timeline.querySelectorAll('.mcell[data-id]')) {
+            if (excluded.has(Number(cell.dataset.id))) cell.remove();
+        }
+        for (const section of [...timeline.querySelectorAll('.m-day')]) {
+            if (section.querySelector('.mcell[data-id]:not([data-stack-member])')) continue;
+            const monthHead = section.previousElementSibling?.classList.contains('m-month-head')
+                ? section.previousElementSibling
+                : null;
+            section.remove();
+            if (monthHead && monthHead.nextElementSibling?.dataset.month !== monthHead.dataset.month) monthHead.remove();
+        }
+        reindexCells();
+        updateDayChecks();
+        cacheDaySectionOffsets();
+        if (selectionChangedByEviction) selectionChanged();
+        if (!images.length && endReached) renderEmpty();
+    }
     for (const cell of timeline.querySelectorAll('.mcell[data-id]')) {
         const id = Number(cell.dataset.id);
-        if (!wanted.has(id)) continue;
+        if (!wanted.has(id) || excluded.has(id)) continue;
         const old = cell.querySelector('.c-flag');
         if (old) old.remove();
         cell.insertAdjacentHTML('beforeend', flagBadge(flagOf(id)));
