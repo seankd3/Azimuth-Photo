@@ -213,8 +213,10 @@ class CatalogSourceRouteTests(BackendTestCase):
 
             images = await db.get_recent_active_images(limit=1)
             image_id = int(images[0]["id"])
-            empty_payload = await library_service.api_rankings_impl(limit=10)
-            self.assertEqual(empty_payload["visible_images"], 0)
+            pending_payload = await library_service.api_rankings_impl(limit=10)
+            self.assertEqual(pending_payload["visible_images"], 1, pending_payload)
+            self.assertEqual(pending_payload["pending_thumbnails"], 1, pending_payload)
+            self.assertFalse(pending_payload["images"][0]["preview_ready"], pending_payload)
             worker = asyncio.create_task(thumbnails.run_prefetch_worker())
             for _attempt in range(100):
                 if thumbnails.fast_disk_has("sm", image_id):
@@ -225,8 +227,10 @@ class CatalogSourceRouteTests(BackendTestCase):
             await asyncio.to_thread(thumbnails._flush_write_queue)
             payload = await library_service.api_rankings_impl(limit=10)
             self.assertEqual(payload["visible_images"], 1, payload)
+            self.assertEqual(payload["pending_thumbnails"], 0, payload)
             self.assertEqual(payload["hidden_pending_thumbnails"], 0, payload)
             self.assertEqual(payload["images"][0]["id"], image_id)
+            self.assertTrue(payload["images"][0]["preview_ready"], payload)
         finally:
             thumbnails.stop_prefetch()
             if worker is not None:
