@@ -9,6 +9,7 @@ const COMMON_FOREGROUND_LAYERS = [
     '#folder-pop-menu:not([hidden])',
     '#source-pop-menu:not([hidden])',
     '#deliver-overlay:not([hidden])',
+    '#source-add-flow',
     '#people-merge-pop',
 ];
 

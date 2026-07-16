@@ -727,11 +727,19 @@ function renderWebsiteDeliver(session, token) {
     if (publish) bindDeliverConfirmButton('[data-deliver-publish]', 'Confirm republish', startPublish);
     else deliverOverlay.querySelector('[data-deliver-publish]')?.addEventListener('click', startPublish);
     deliverOverlay.querySelector('[data-deliver-retry]')?.addEventListener('click', startPublish);
+    const undoUnpublish = async () => {
+        const result = await publishCollection(session.collectionId, { slug: slugifyName(slug, 'gallery'), title });
+        if (result.ok) {
+            showDeliveryToast('Republishing website gallery for', session);
+            emitSharedSurfacesChanged(session.collectionId);
+            if (deliverOverlayIsCurrent(token)) pollDeliverPublish(session, token, true);
+        } else showDeliveryToast("Couldn't republish website gallery for", session, { error: result.data });
+    };
     deliverOverlay.querySelector('[data-deliver-unpublish]')?.addEventListener('click', async () => {
         const result = await revokeCollectionPublish(session.collectionId);
         if (deliverOverlayIsCurrent(token) && result.ok) {
             clearDeliverDraft(session);
-            showDeliveryToast('Unpublishing website gallery for', session, { undo: startPublish });
+            showDeliveryToast('Unpublishing website gallery for', session, { undo: undoUnpublish });
             emitSharedSurfacesChanged(session.collectionId);
             pollDeliverPublish(session, token, true);
         } else if (deliverOverlayIsCurrent(token)) showDeliveryToast("Couldn't unpublish website gallery for", session, { error: result.data });

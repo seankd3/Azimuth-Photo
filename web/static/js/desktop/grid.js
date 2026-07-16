@@ -241,8 +241,9 @@ function appendPausedPreviewHint(target) {
 function loadPausedPreviewHint(target) {
     const request = ++pendingNoticeRequest;
     getCacheStatus().then((status) => {
-        if (request !== pendingNoticeRequest || !target.isConnected || !cachePregenPaused(status)) return;
-        appendPausedPreviewHint(target);
+        if (request !== pendingNoticeRequest || !target.isConnected) return;
+        if (cachePregenPaused(status)) appendPausedPreviewHint(target);
+        else target.querySelector('.grid-pending-paused')?.remove();
     }).catch(() => {});
 }
 
@@ -254,7 +255,10 @@ function renderPendingThumbnailNotice() {
         existing?.remove();
         return;
     }
-    if (existing) return;
+    if (existing) {
+        loadPausedPreviewHint(existing);
+        return;
+    }
     const notice = document.createElement('div');
     notice.id = 'grid-pending-notice';
     notice.className = 'grid-pending-notice';

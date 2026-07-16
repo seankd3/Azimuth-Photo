@@ -1310,6 +1310,7 @@ async function submitSourceAdd({ path, form }, { onSuccess } = {}) {
 function closeSourceAddFlow() {
     if (!sourceAddFlow) return;
     clearSourcePickerSelection();
+    releaseFocus(sourceAddFlow);
     sourceAddFlow.remove();
     sourceAddFlow = null;
     if (sourceAddFlowReturn && document.contains(sourceAddFlowReturn)) {
@@ -1348,10 +1349,11 @@ export function openSourceAddFlow({ onSuccess } = {}) {
     sourceAddFlow.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') {
             event.preventDefault();
+            event.stopPropagation();
             closeSourceAddFlow();
         }
     });
-    sourceAddFlow.querySelector('[data-source-picker-toggle]')?.focus();
+    trapFocus(sourceAddFlow, sourceAddFlow.querySelector('[data-source-picker-toggle]'));
     return true;
 }
 
