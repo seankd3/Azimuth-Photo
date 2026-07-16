@@ -644,8 +644,11 @@ class VirtualCopyTrashTests(BackendTestCase):
         source, _root = await self._source_root()
         image_id, filepath = await self._file_image(source, "vc-master.jpg", data=b"vc bytes")
         conn = await db.get_db()
-        copy = await virtual_copies.create_virtual_copy(conn, image_id)
-        await conn.commit()
+        try:
+            copy = await virtual_copies.create_virtual_copy(conn, image_id)
+            await conn.commit()
+        finally:
+            await conn.close()
         return image_id, int(copy["id"]), filepath
 
     async def test_trashing_master_takes_virtual_copies_catalog_only(self):
@@ -687,6 +690,58 @@ class VirtualCopyTrashTests(BackendTestCase):
         self.assertIn(master_id, result["restored"])
         self.assertEqual(result["warnings"], [])
         self.assertTrue(os.path.exists(filepath))
+
+    async def test_restoring_master_restores_its_virtual_copies(self):
+        master_id, copy_id, filepath = await self._master_with_copy()
+        await trash_service.trash_images(db.DB_PATH, [master_id])
+
+        result = await trash_service.restore_images(db.DB_PATH, [master_id])
+
+        self.assertEqual(set(result["restored"]), {master_id, copy_id})
+        self.assertEqual(result["errors"], [])
+        self.assertTrue(os.path.exists(filepath))
+        conn = await db.get_db()
+        try:
+            rows = await (await conn.execute(
+                "SELECT id, status FROM images WHERE id IN (?, ?)",
+                (master_id, copy_id),
+            )).fetchall()
+        finally:
+            await conn.close()
+        self.assertEqual({int(row["id"]): row["status"] for row in rows}, {
+            master_id: "kept",
+            copy_id: "kept",
+        })
+
+    async def test_master_restore_failure_reverts_entire_virtual_copy_family(self):
+        master_id, copy_id, _filepath = await self._master_with_copy()
+        await trash_service.trash_images(db.DB_PATH, [master_id])
+        trashed_master = await self._image_row(master_id)
+        observed_statuses = []
+
+        def fail_after_family_commit(_trash_path, _filepath):
+            conn = sqlite3.connect(db.DB_PATH)
+            try:
+                observed_statuses.append(dict(conn.execute(
+                    "SELECT id, status FROM images WHERE id IN (?, ?)",
+                    (master_id, copy_id),
+                ).fetchall()))
+            finally:
+                conn.close()
+            return None, "injected restore failure"
+
+        with patch.object(trash_service, "_restore_from_trash", fail_after_family_commit):
+            result = await trash_service.restore_images(db.DB_PATH, [master_id])
+
+        self.assertEqual(observed_statuses, [{master_id: "kept", copy_id: "kept"}])
+        self.assertEqual(result["restored"], [])
+        self.assertEqual(result["errors"], [{"id": master_id, "reason": "injected restore failure"}])
+        master = await self._image_row(master_id)
+        copy = await self._image_row(copy_id)
+        self.assertEqual(master["status"], "trashed")
+        self.assertEqual(copy["status"], "trashed")
+        self.assertEqual(master["trash_path"], trashed_master["trash_path"])
+        self.assertIsNone(copy["trash_path"])
 
     async def test_empty_trash_purges_family_without_double_delete(self):
         master_id, copy_id, filepath = await self._master_with_copy()

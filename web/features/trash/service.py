@@ -278,21 +278,30 @@ async def _expand_trash_family_ids(conn, ids: list[int]) -> list[int]:
 
 
 async def _expand_restore_family_ids(conn, ids: list[int]) -> list[int]:
-    """Restoring a virtual copy brings back the trashed master that owns its file."""
+    """Restore every trashed row sharing the requested image family's file."""
     expanded = list(ids)
     seen = set(ids)
+    master_ids: set[int] = set()
     for chunk in catalog_repository._chunked(ids):
         placeholders = ",".join("?" for _ in chunk)
         cursor = await conn.execute(
-            "SELECT DISTINCT m.id FROM images c JOIN images m ON m.id = c.vc_of "
-            f"WHERE c.id IN ({placeholders}) AND m.status = 'trashed'",
+            f"SELECT id, vc_of FROM images WHERE id IN ({placeholders})",
             chunk,
         )
         for row in await cursor.fetchall():
-            master_id = int(row["id"])
-            if master_id not in seen:
-                seen.add(master_id)
-                expanded.append(master_id)
+            master_ids.add(int(row["vc_of"] if row["vc_of"] is not None else row["id"]))
+    for chunk in catalog_repository._chunked(sorted(master_ids)):
+        placeholders = ",".join("?" for _ in chunk)
+        cursor = await conn.execute(
+            "SELECT id FROM images WHERE status = 'trashed' "
+            f"AND (id IN ({placeholders}) OR vc_of IN ({placeholders})) ORDER BY id",
+            (*chunk, *chunk),
+        )
+        for row in await cursor.fetchall():
+            image_id = int(row["id"])
+            if image_id not in seen:
+                seen.add(image_id)
+                expanded.append(image_id)
     return expanded
 
 
@@ -465,6 +474,7 @@ async def restore_images(db_path: str, image_ids: list[int]) -> dict:
                 continue
             updates.append({
                 "id": image_id,
+                "family_id": int(row["vc_of"] if row.get("vc_of") is not None else image_id),
                 "filepath": row.get("filepath") or "",
                 "trash_path": row.get("trash_path"),
                 "catalog_only": row.get("vc_of") is not None and not row.get("trash_path"),
@@ -492,26 +502,28 @@ async def restore_images(db_path: str, image_ids: list[int]) -> dict:
                 await catalog_repository.update_source_counts_on_conn(conn, source_id)
             await conn.commit()
 
-            failed: list[dict] = []
+            failed_family_ids: set[int] = set()
             for plan in updates:
                 if plan.get("catalog_only"):
                     # Virtual copy: the master row owns the file (and its restore).
-                    restored.append(plan["id"])
                     continue
                 warning, reason = await __to_thread_restore_from_trash(plan["trash_path"], plan["filepath"])
                 if reason:
                     errors.append(_error(plan["id"], reason))
-                    failed.append(plan)
+                    failed_family_ids.add(int(plan["family_id"]))
                     continue
                 if warning:
                     warnings.append(_error(plan["id"], warning))
-                restored.append(plan["id"])
+            failed = [
+                plan for plan in updates if int(plan["family_id"]) in failed_family_ids
+            ]
             if failed:
                 await _revert_failed_restores(conn, failed, rows)
             failed_ids = {int(plan["id"]) for plan in failed}
             restored_update_ids = [
                 int(plan["id"]) for plan in updates if int(plan["id"]) not in failed_ids
             ]
+            restored.extend(restored_update_ids)
             if restored_update_ids:
                 await conn.execute("BEGIN")
                 await _repair_collection_covers(conn, restored_update_ids)
