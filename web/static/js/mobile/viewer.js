@@ -1,11 +1,11 @@
 // GP-class photo viewer on a pure-black canvas.
 // Gesture grammar (from the One prototype):
 //   2 fingers  → live pinch zoom + pan (midpoint-anchored)
-//   1 finger   → pan when zoomed · swipe up/down to cull · swipe left/right to browse at 1x
+//   1 finger   → pan when zoomed · swipe up to favorite · swipe down to close · swipe left/right to browse at 1x
 //   double-tap → 1x ↔ 2.5x at the tap point
 // Flags are real writes with undo.
 
-import { getExif, getImageCaption, getSimilar, thumbUrl } from './api.js';
+import { getExif, getImageCaption, getSimilar, thumbUrl, writeRating } from './api.js';
 import { applyFlags } from './flags.js';
 import { byId, nav as appNav, on, rememberImages, setScope } from './state.js';
 import { dismissSheetThen, openCollectionSheet, openSheet } from './selection.js';
@@ -164,7 +164,7 @@ function syncFlagButtons() {
     if (flagBadge) {
         flagBadge.hidden = flag === 'unflagged';
         flagBadge.className = `mv-flag ${flag}`;
-        flagBadge.textContent = flag === 'picked' ? 'Picked' : 'Rejected';
+        flagBadge.textContent = flag === 'picked' ? 'Favorited' : 'Rejected';
     }
 }
 
@@ -177,14 +177,26 @@ function syncOfflineButton() {
     button.setAttribute('aria-label', available ? 'Remove offline availability' : 'Make available offline');
 }
 
-function cullSwipe(flag) {
+function favoriteSwipe() {
     const image = current();
     if (!image) return;
-    root.classList.remove('cull-picked', 'cull-rejected');
+    root.classList.remove('cull-picked');
     void root.offsetWidth;
-    root.classList.add(flag === 'picked' ? 'cull-picked' : 'cull-rejected');
-    window.setTimeout(() => root.classList.remove('cull-picked', 'cull-rejected'), 260);
-    void applyFlags([image.id], flag);
+    root.classList.add('cull-picked');
+    window.setTimeout(() => root.classList.remove('cull-picked'), 260);
+    void applyFlags([image.id], 'picked');
+}
+
+function settleDismissSwipe() {
+    img.style.transition = 'transform .16s cubic-bezier(.2,.7,.2,1)';
+    root.style.transition = 'background .16s cubic-bezier(.2,.7,.2,1)';
+    img.style.transform = `translateY(${window.innerHeight * .22}px) scale(.78)`;
+    root.style.background = 'rgba(0,0,0,0)';
+    window.setTimeout(() => {
+        img.style.transition = '';
+        root.style.transition = '';
+        dismissViewer();
+    }, 150);
 }
 
 function nav(dir) {
@@ -240,6 +252,20 @@ function dismissViewerThen(afterClose = null) {
     dismissLayerThen('viewer', closeViewer, afterClose);
 }
 
+function imageRating(image) {
+    const value = Number(image?.rating ?? image?.stars ?? image?._lr_rating ?? 0);
+    return Number.isFinite(value) ? clamp(Math.round(value), 0, 5) : 0;
+}
+
+function syncRatingButtons(sheet, rating) {
+    for (const button of sheet.querySelectorAll('[data-rating]')) {
+        const value = Number(button.dataset.rating);
+        const active = value <= rating;
+        button.classList.toggle('on', active);
+        button.setAttribute('aria-pressed', String(active));
+    }
+}
+
 function infoSheet() {
     const image = current();
     if (!image) return;
@@ -265,6 +291,11 @@ function infoSheet() {
     const sheet = openSheet(
         '<h3>Info</h3>'
         + `<button class="sheet-row" id="mv-similar"><span class="g">${icon('scan-search')}</span>Find similar</button>`
+        + '<div class="sheet-rating"><span>Rating</span><div class="sheet-stars" role="group" aria-label="Star rating">'
+        + [1, 2, 3, 4, 5].map((rating) =>
+            `<button type="button" data-rating="${rating}" aria-label="Set ${rating} star rating">${icon('star')}</button>`
+        ).join('')
+        + '</div></div>'
         + '<div class="sheet-caption" id="mv-caption">'
         + '<div class="sheet-caption-label">Caption</div>'
         + '<div class="sheet-caption-text sheet-caption-muted">Loading…</div>'
@@ -275,6 +306,18 @@ function infoSheet() {
         + '<details class="sheet-details"><summary>More details</summary>'
         + '<div class="sheet-meta" id="mv-exif"><div><span>Loading</span><b>…</b></div></div></details>'
     );
+    syncRatingButtons(sheet, imageRating(image));
+    for (const button of sheet.querySelectorAll('[data-rating]')) {
+        button.addEventListener('click', () => {
+            const value = Number(button.dataset.rating);
+            const rating = imageRating(image) === value ? 0 : value;
+            image.rating = rating;
+            const known = byId.get(Number(image.id));
+            if (known) known.rating = rating;
+            syncRatingButtons(sheet, rating);
+            void writeRating(image.id, rating);
+        });
+    }
     sheet.querySelector('#mv-similar').addEventListener('click', async () => {
         let data = null;
         try {
@@ -551,11 +594,10 @@ function installGestures() {
             const vx = dx / elapsed;
             const vy = dy / elapsed;
             if (sw.mode === 'down' && (dy > 90 || vy > 0.75)) {
-                img.style.transform = '';
-                cullSwipe('rejected');
+                settleDismissSwipe();
             } else if (sw.mode === 'up' && (dy < -60 || vy < -0.75)) {
                 img.style.transform = '';
-                cullSwipe('picked');
+                favoriteSwipe();
             } else if (sw.mode === 'h' && (Math.abs(sw.res) > 70 || Math.abs(vx) > 0.65)) {
                 const dir = dx < 0 ? 1 : -1;
                 settlePhotoSwipe(dir);
@@ -606,16 +648,9 @@ export function initViewer() {
     flagBadge.id = 'mv-flag';
     flagBadge.hidden = true;
     stage.appendChild(flagBadge);
-    const done = document.createElement('button');
-    done.id = 'mv-done';
-    done.type = 'button';
-    done.textContent = 'Done';
-    root.appendChild(done);
-
     registerLayer('viewer', { close: closeViewer });
 
     document.getElementById('mv-close').addEventListener('click', dismissViewer);
-    done.addEventListener('click', dismissViewer);
     document.getElementById('mv-pick').addEventListener('click', () => {
         const image = current();
         const flag = image ? (byId.get(Number(image.id)) || image).flag || 'unflagged' : '';

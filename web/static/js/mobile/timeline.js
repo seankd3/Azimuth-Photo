@@ -17,6 +17,7 @@ import { openViewer } from './viewer.js';
 import { tick } from './haptics.js';
 import { icon } from '../icons.js';
 import { personLabel } from '../people_labels.js';
+import { openPersonSheet } from './search.js';
 
 const PAGE = 120;
 const MAX_WINDOW = PAGE * 3;
@@ -113,7 +114,7 @@ const imgObserver = new IntersectionObserver((entries) => {
 /* ---------- cells & day sections ---------- */
 function flagBadge(flag) {
     if (flag !== 'picked' && flag !== 'rejected') return '';
-    return `<span class="c-flag ${flag}">${flag === 'picked' ? icon('star') : icon('x')}</span>`;
+    return `<span class="c-flag ${flag}">${flag === 'picked' ? icon('heart') : icon('x')}</span>`;
 }
 
 function stackBadge(img) {
@@ -599,6 +600,7 @@ export async function reload() {
     startOffset = 0;
     endReached = false;
     currentSortQuality = null;
+    endEl.textContent = scopeActive() ? "That's all for this filter." : "That's everything.";
     endEl.hidden = true;
     renderSkeleton();
     renderScopeBar();
@@ -776,7 +778,7 @@ function renderScopeBar() {
         chips.push(chip('person', personLabel({ label: scope.peopleLabel }), 'people', face));
     }
     if (scope.q) chips.push(chip('search', scope.q, 'q'));
-    if (scope.flag) chips.push(chip('flag', scope.flag === 'picked' ? 'Picked' : 'Rejected', 'flag'));
+    if (scope.flag) chips.push(chip('flag', scope.flag === 'picked' ? 'Favorited' : 'Rejected', 'flag'));
     if (scope.fileType) chips.push(chip('type', scope.fileType.toUpperCase(), 'fileType'));
     if (scope.camera) chips.push(chip('camera', scope.camera, 'camera'));
     if (scope.lens) chips.push(chip('lens', scope.lens, 'lens'));
@@ -793,6 +795,22 @@ function renderScopeBar() {
         html += `<span class="m-scope-quality num">${fmtInt(currentSortQuality.percent)}% sorted</span>`;
     }
     bar.innerHTML = html;
+    const personChip = bar.querySelector('.chip-x[data-clear="people"]')?.closest('.chip');
+    if (personChip) {
+        personChip.setAttribute('role', 'button');
+        personChip.tabIndex = 0;
+        const openPersonActions = (event) => {
+            if (event.target.closest('.chip-x')) return;
+            openPersonSheet({ id: scope.people, label: scope.peopleLabel });
+        };
+        personChip.addEventListener('click', openPersonActions);
+        personChip.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                openPersonActions(event);
+            }
+        });
+    }
     for (const x of bar.querySelectorAll('.chip-x')) {
         x.addEventListener('click', () => {
             const field = x.dataset.clear;

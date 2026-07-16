@@ -5,7 +5,7 @@
 // from /api/rankings offset=0 — no fake ticking.
 
 import { getRankings, mosaicNext, mosaicPick, compareUndo, thumbUrl, writeFailureMessage } from './api.js';
-import { on, rememberImages, scope, scopeActive, scopeParams } from './state.js';
+import { clearScope, on, rememberImages, scope, scopeActive, scopeParams } from './state.js';
 import { showToast } from './toast.js';
 
 const RING_CIRCUMFERENCE = 62.83;
@@ -113,11 +113,13 @@ function renderSet() {
     stage.className = `mr-stage ${mode}`;
     if (currentSet.length < need()) {
         stage.className = 'mr-stage';
-        stage.innerHTML = '<div class="mr-empty">Not enough photos to refine here.<br>Add a source on desktop, or try another view.</div>';
+        stage.innerHTML = '<div class="mr-empty">Not enough photos to refine here.<br>Add a source on desktop, or try another view.'
+            + '<button class="sheet-btn" id="mr-refine-all" type="button">Refine all photos instead</button></div>';
+        stage.querySelector('#mr-refine-all')?.addEventListener('click', clearScope);
         return;
     }
     stage.innerHTML = currentSet.map((img) =>
-        `<button class="mr-card" data-id="${img.id}" data-mutating aria-label="Pick ${esc(img.filename || img.id)}">`
+        `<button class="mr-card" data-id="${img.id}" data-mutating aria-label="Favorite ${esc(img.filename || img.id)}">`
         + `<img src="${esc(thumbUrl('md', img.id))}" decoding="async" alt=""></button>`
     ).join('');
     document.dispatchEvent(new CustomEvent('sheet-mutated'));
@@ -242,7 +244,7 @@ async function undo() {
     renderSet();
     prefetchNext();
     scheduleQualityRefresh();
-    showToast('Pick undone');
+    showToast('Favorite undone');
 }
 
 export function initRefine() {

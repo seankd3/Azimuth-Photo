@@ -290,8 +290,8 @@ export function initSelection() {
     bottomBar.innerHTML =
         `<button type="button" data-action="clear" aria-label="Clear selection">${icon('x')}</button>`
         + '<span class="msa-count">0 selected</span>'
-        + `<button type="button" data-action="pick">${icon('star')}<span>Pick</span></button>`
-        + `<button type="button" data-action="reject">${icon('x')}<span>Reject</span></button>`
+        + `<button type="button" data-action="pick">${icon('heart')}<span>Favorite</span></button>`
+        + `<button type="button" data-action="reject">${icon('ban')}<span>Reject</span></button>`
         + `<button type="button" data-action="collection" data-mutating aria-label="Add to collection">${icon('plus')}</button>`
         + `<button type="button" data-action="more" aria-label="More selection actions">${icon('ellipsis')}</button>`;
     document.body.appendChild(bottomBar);

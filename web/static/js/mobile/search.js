@@ -3,7 +3,7 @@
 // raw|jpg|tif file_type group aliases and flag scopes.
 
 import { getFilterOptions, getPeople, getTags, ignorePerson, labelPerson, writeFailureMessage } from './api.js';
-import { nav, patchScope, setScope } from './state.js';
+import { clearScope, nav, patchScope, scope, setScope } from './state.js';
 import { dismissSheetThen, openSheet } from './selection.js';
 import { showToast } from './toast.js';
 import { icon } from '../icons.js';
@@ -79,13 +79,13 @@ function commitSearch(raw) {
     nav.setTab('photos');
 }
 
-function openPersonSheet(person) {
+export function openPersonSheet(person) {
     const name = personLabel(person);
     const sheet = openSheet(
         `<h3>${esc(name)}</h3>`
         + '<input class="sheet-input" id="mp-name" type="text" autocomplete="off" placeholder="Name">'
         + '<button class="sheet-btn" id="mp-save" data-mutating>Rename</button>'
-        + `<button class="sheet-row" id="mp-ignore" data-mutating><span class="g">${icon('x')}</span>Ignore this person</button>`
+        + `<button class="sheet-row" id="mp-ignore" data-mutating><span class="g">${icon('x')}</span>Hide person</button>`
     );
     const input = sheet.querySelector('#mp-name');
     input.value = name === 'Unnamed' ? '' : name;
@@ -96,6 +96,7 @@ function openPersonSheet(person) {
             const result = await labelPerson(person.id, next);
             if (result && result.ok) {
                 showToast(`Renamed to “${next}”`);
+                if (String(scope.people) === String(person.id)) patchScope({ peopleLabel: next });
                 people = null;
                 built = false;
                 showSearch();
@@ -109,6 +110,7 @@ function openPersonSheet(person) {
             const result = await ignorePerson(person.id);
             if (result && result.ok) {
                 showToast('Person hidden');
+                if (String(scope.people) === String(person.id)) clearScope();
                 people = null;
                 built = false;
                 showSearch();
@@ -140,7 +142,7 @@ function render() {
         + '<input id="ms-input" type="search" enterkeyhint="search" placeholder="Search your photos"'
         + ' autocomplete="off" spellcheck="false" aria-label="Search photos">'
         + `<button id="ms-clear" aria-label="Clear search" style="display:none">${icon('x')}</button></div>`
-        + '<div class="ms-hints">'
+        + '<div class="ms-hints"><span>Try:</span>'
         + '<button type="button" data-hint="camera:Sony">camera:Sony</button>'
         + '<button type="button" data-hint="lens:35mm">lens:35mm</button>'
         + '<button type="button" data-hint="tag:wedding">tag:wedding</button>'
@@ -183,7 +185,7 @@ function render() {
         + chip('data-type="raw"', icon('image'), 'RAW files', countFor('raw'))
         + chip('data-type="jpg"', icon('image'), 'JPGs', countFor('jpg'))
         + chip('data-type="tif"', icon('image'), 'TIFFs', countFor('tif'))
-        + chip('data-flag="picked"', icon('star'), 'Picked', null)
+        + chip('data-flag="picked"', icon('heart'), 'Favorited', null)
         + chip('data-flag="rejected"', icon('x'), 'Rejected', null)
         + chip('data-stars="4"', icon('star'), '4+ stars', null)
         + cams.map((c, i) => chip(`data-cam="${i}"`, icon('camera'), c.camera, c.count)).join('')
