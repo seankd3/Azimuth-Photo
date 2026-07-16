@@ -84,7 +84,7 @@ async def api_date_groups(
     orientation: str = "", compared: str = "", min_stars: int = 0,
     folder: str = "", flag: str = "", date_taken: str = "", file_type: str = "",
     camera: str = "", lens: str = "", tag: str = "", people: str = "", q: str = "", deep: bool = False,
-    import_batch: int = 0, stacks: str = "expanded", request: Request = None,
+    import_batch: int = 0, stacks: str = "expanded", collection_id: int = 0, request: Request = None,
 ):
     """Return date groups with counts for the scrubber, respecting active filters."""
     return await library_service.date_groups_payload(
@@ -103,6 +103,7 @@ async def api_date_groups(
         import_batch=import_batch,
         deep=deep,
         stacks=stacks,
+        collection_id=collection_id,
     )
 
 

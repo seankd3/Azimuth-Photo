@@ -253,6 +253,7 @@ export function scopeParams(extra = {}) {
     if (scope.compared) params.set('compared', scope.compared);
     if (scope.min_stars) params.set('min_stars', scope.min_stars);
     if (scope.import_batch) params.set('import_batch', scope.import_batch);
+    if (scope.collectionId && !scope.collectionSmart) params.set('collection_id', scope.collectionId);
     if (scope.sort) params.set('sort', scope.sort);
     params.set('stacks', viewState.prefs.collapseStacks ? 'collapsed' : 'expanded');
     for (const [key, value] of Object.entries(extra)) {
