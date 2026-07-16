@@ -1,5 +1,5 @@
 import { getFolderTree, revealFolder } from './api.js';
-import { downloadExport, openExportMenu } from './export_menu.js';
+import { exportScope, openExportMenu } from './export_menu.js';
 import { emit, folderActive, folderValues, navigateToScope, on, scopeParams } from './state.js';
 import { showToast } from './toast.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
@@ -131,12 +131,7 @@ function selectFolderPath(path, row, event) {
 function exportFolderScope(node, anchor) {
     applyFolderScope(node.path, { keepOpen: true });
     openExportMenu(anchor, ({ format, size }) => {
-        const params = scopeParams({ format });
-        if (size) params.set('size', size);
-        downloadExport(params, {
-            count: Number(node.total_count || 0),
-            message: format === 'zip' ? 'Preparing folder zip' : `Exporting folder as ${format.toUpperCase()}`,
-        });
+        exportScope({ format, size, count: Number(node.total_count || 0), query: scopeParams() });
     });
 }
 

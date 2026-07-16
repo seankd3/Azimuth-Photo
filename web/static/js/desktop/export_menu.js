@@ -2,7 +2,9 @@ import { releaseFocus, trapFocus } from './focusTrap.js';
 import { showToast } from './toast.js';
 import { getRankings } from './api.js';
 import { scope, scopeParams, viewState } from './state.js';
-import { cancelBatchExportPoll, openExportDialog } from './develop/export_dialog.js';
+import { cancelBatchExportPoll, openExportDialog, savedOriginalsExportSize } from './develop/export_dialog.js';
+
+export { savedOriginalsExportSize };
 
 export const ZIP_EXPORT_MAX = 2000;
 const SCOPE_EXPORT_PAGE_SIZE = 1000;
@@ -119,6 +121,20 @@ export function downloadExport(params, { count = 0, message = '' } = {}) {
     link.click();
     showToast(message || (format === 'zip' ? 'Preparing zip download' : `Exporting as ${format.toUpperCase()}`));
     return true;
+}
+
+export function exportScope(params = {}, { toast = '' } = {}) {
+    const { format = 'csv', size = '', ids = [], count = null, query = {} } = params;
+    const search = new URLSearchParams(query);
+    const imageIds = (ids || []).map(Number).filter((id) => id > 0);
+    const exportCount = count == null ? imageIds.length : Number(count) || 0;
+    search.set('format', format);
+    if (imageIds.length) search.set('ids', imageIds.join(','));
+    if (size) search.set('size', size);
+    const standardToast = format === 'zip'
+        ? (exportCount ? `Preparing ${exportCount} file${exportCount === 1 ? '' : 's'} for download` : 'Preparing zip download')
+        : `Exporting${exportCount ? ` ${exportCount} photo${exportCount === 1 ? '' : 's'}` : ''} as ${format.toUpperCase()}`;
+    return downloadExport(search, { count: format === 'zip' ? exportCount : 0, message: toast || standardToast });
 }
 
 function outsideClose(event) {

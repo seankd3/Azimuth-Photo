@@ -14,7 +14,7 @@ import { applyFlags, selectedIds, setCollectionPicker } from './selection.js';
 import { showToast } from './toast.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
 import { confirmAction, confirmTypedCount } from './trash.js';
-import { downloadExport, openExportMenu } from './export_menu.js';
+import { exportScope, openExportMenu, savedOriginalsExportSize } from './export_menu.js';
 import { pollJob } from './jobs.js';
 import { initFoldersPanel } from './folders.js';
 import { openSourceAddFlow } from './drawer.js';
@@ -1326,7 +1326,7 @@ export async function openCollectionPicker(imageIds, { onDone = null } = {}) {
 
 export async function exportCurrentScope(format = 'csv', size = '') {
     const params = scopeParams({ format });
-    if (size) params.set('size', size);
+    const exportSize = format === 'zip' ? (size || savedOriginalsExportSize()) : size;
     if (viewState.bestOf && viewState.bestOfLimit != null) {
         params.set('sort', 'elo');
         params.set('limit', String(viewState.bestOfLimit));
@@ -1337,12 +1337,7 @@ export async function exportCurrentScope(format = 'csv', size = '') {
         count = ids.length;
         params.set('ids', ids.join(','));
     }
-    downloadExport(params, {
-        count: format === 'zip' ? count : 0,
-        message: format === 'zip'
-            ? `Preparing ${count} file${count === 1 ? '' : 's'}`
-            : `Exporting ${count} photo${count === 1 ? '' : 's'} as ${format.toUpperCase()}`,
-    });
+    exportScope({ format, size: exportSize, count, query: params });
 }
 
 export function openScopeExportMenu(anchor) {

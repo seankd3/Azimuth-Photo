@@ -75,6 +75,10 @@ function readStoredExportOptions() {
     }
 }
 
+export function savedOriginalsExportSize() {
+    return readStoredExportOptions().originals_size || 'original';
+}
+
 function applyExportOptions(root, options) {
     const assign = (selector, value) => {
         const field = root.querySelector(selector);
