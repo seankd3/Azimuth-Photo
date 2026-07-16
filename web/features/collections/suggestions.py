@@ -97,6 +97,7 @@ _GENERIC_FOLDERS = {
 }
 
 _cache: dict = {"key": None, "data": None, "expires": 0.0}
+_suggestion_rebuild = {"inflight": False}
 
 
 def _parse_taken(value) -> float | None:
@@ -1013,14 +1014,7 @@ async def _existing_member_ids(db_path: str) -> set[int]:
         await connection.close_async(conn, db_path=db_path)
 
 
-async def collection_suggestions(db_path: str, *, db_signature: str = "") -> dict:
-    now = time.monotonic()
-    model_key = settings.active_caption_config()["model_key"]
-    catalog_cursor, tag_cursor = await _suggestion_cursor(db_path, model_key)
-    cache_key = (db_signature or db_path, catalog_cursor, model_key, tag_cursor)
-    if _cache["key"] == cache_key and _cache["data"] is not None and now < _cache["expires"]:
-        return _cache["data"]
-
+async def _build_suggestions(db_path: str, cache_key) -> dict:
     shoots, themes, existing = await asyncio.gather(
         _shoot_suggestions(db_path),
         _theme_suggestions(db_path),
@@ -1053,8 +1047,37 @@ async def collection_suggestions(db_path: str, *, db_signature: str = "") -> dic
     suggestions = [_public_suggestion(candidate) for candidate in candidates]
 
     response = {"suggestions": suggestions}
-    _cache.update({"key": cache_key, "data": response, "expires": now + _CACHE_TTL_SECONDS})
+    _cache.update({"key": cache_key, "data": response, "expires": time.monotonic() + _CACHE_TTL_SECONDS})
     return response
+
+
+async def collection_suggestions(db_path: str, *, db_signature: str = "") -> dict:
+    now = time.monotonic()
+    model_key = settings.active_caption_config()["model_key"]
+    catalog_cursor, tag_cursor = await _suggestion_cursor(db_path, model_key)
+    cache_key = (db_signature or db_path, catalog_cursor, model_key, tag_cursor)
+    if _cache["key"] == cache_key and _cache["data"] is not None and now < _cache["expires"]:
+        return _cache["data"]
+    # Stale-while-revalidate: a browsing user must never wait for the multi-second
+    # rebuild. If we have ANY prior result, serve it and refresh once in the
+    # background. (Explicit changes call invalidate_cache(), which clears data so
+    # the next call rebuilds synchronously for correctness.)
+    if _cache["data"] is not None:
+        if not _suggestion_rebuild["inflight"]:
+            _suggestion_rebuild["inflight"] = True
+
+            async def _revalidate():
+                try:
+                    await _build_suggestions(db_path, cache_key)
+                except Exception:
+                    pass
+                finally:
+                    _suggestion_rebuild["inflight"] = False
+
+            asyncio.create_task(_revalidate())
+        return _cache["data"]
+    # Cold: nothing cached yet (first call since boot) — build synchronously.
+    return await _build_suggestions(db_path, cache_key)
 
 
 def invalidate_cache() -> None:
