@@ -186,7 +186,40 @@ class FreeUpSpaceTests(BackendTestCase):
         recovered = await freeup.recover_incomplete_deletions(db.DB_PATH, log_path=self.log_path)
         self.assertEqual(recovered, 0)
         self.assertEqual((await self._image_row(image_id))["hub_remote"], 0)
-        _ = path
+        self.assertNotIn('"event":"recovered"', self.log_path.read_text())
+        self.assertTrue(path.exists())
+
+        # Positive control pinning the catalog lookup: once that same root comes
+        # online (file genuinely absent), the line must recover -- proving the
+        # refusal above came from resolving THIS root, not from a lookup that
+        # returns nothing and refuses everything.
+        Path(offline_root).mkdir()
+        recovered = await freeup.recover_incomplete_deletions(db.DB_PATH, log_path=self.log_path)
+        self.assertEqual(recovered, 1)
+        self.assertEqual((await self._image_row(image_id))["hub_remote"], 1)
+        self.assertIn('"event":"recovered"', self.log_path.read_text())
+
+    async def test_recovery_refuses_journal_path_outside_the_resolved_root(self):
+        # If the source was remapped to a different (online) root after the journal
+        # line was written, the old path's absence proves nothing -- the root can
+        # only vouch for paths inside it.
+        image_id, path, content_hash = await self._synced_original(
+            "remapped.raw", b"source root remapped after journalling"
+        )
+        old_root = str(Path(self.tempdir.name) / "old-card")
+        freeup._append_log(
+            self.log_path,
+            {
+                "event": "delete_ready",
+                "image_id": image_id,
+                "path": str(Path(old_root) / "remapped.raw"),
+                "content_hash": content_hash,
+            },
+        )
+        recovered = await freeup.recover_incomplete_deletions(db.DB_PATH, log_path=self.log_path)
+        self.assertEqual(recovered, 0)
+        self.assertEqual((await self._image_row(image_id))["hub_remote"], 0)
+        self.assertTrue(path.exists())
 
     async def test_locally_modified_file_is_skipped_by_final_rehash_guard(self):
         image_id, path, _content_hash = await self._synced_original(
