@@ -5,6 +5,7 @@ import { releaseFocus, trapFocus } from './focusTrap.js';
 import { showToast } from './toast.js';
 import { icon } from '../icons.js';
 import { toggleSelection } from './selection.js';
+import { createPendingPreviewPoll, pendingPreviewCount } from '../previews.js';
 
 const GAP_KEY = 'pa_d_event_gap';
 const PAGE_SIZE = 100;
@@ -21,10 +22,15 @@ let groups = [];
 const imageIndexes = new Map();
 let observer = null;
 let imageObserver = null;
-let thumbnailPollTimer = 0;
 let menu = null;
 let savedScrollTop = 0;
 const expandedEvents = new Set();
+const thumbnailPoll = createPendingPreviewPoll({
+    active: () => mounted,
+    pending: () => pendingPreviewCount(images),
+    refresh: refreshPendingPreviews,
+});
+const { schedule: scheduleThumbnailPoll, stop: stopThumbnailPoll } = thumbnailPoll;
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -203,25 +209,11 @@ function observeImages(root, { reset = false } = {}) {
     }
 }
 
-function stopThumbnailPoll() {
-    window.clearTimeout(thumbnailPollTimer);
-    thumbnailPollTimer = 0;
-}
-
 function pendingPreviewIds() {
     return images
         .filter((image) => image && image.preview_ready === false)
         .map((image) => Number(image.id))
         .filter((id) => id > 0);
-}
-
-function scheduleThumbnailPoll() {
-    if (!mounted || thumbnailPollTimer || !pendingPreviewIds().length) return;
-    thumbnailPollTimer = window.setTimeout(async () => {
-        thumbnailPollTimer = 0;
-        await refreshPendingPreviews();
-        scheduleThumbnailPoll();
-    }, 3000);
 }
 
 function loadSharpenedPreview(img, src) {

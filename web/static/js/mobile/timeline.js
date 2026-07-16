@@ -20,6 +20,7 @@ import { personLabel } from '../people_labels.js';
 import { openPersonSheet } from './search.js';
 import { openCollectionActionsSheet } from './library.js';
 import { restoresFilteredMembership } from './flag_scope.js';
+import { createPendingPreviewPoll, pendingCount, pendingPreviewCount as countPendingPreviews } from '../previews.js';
 
 const PAGE = 120;
 const MAX_WINDOW = PAGE * 3;
@@ -83,10 +84,16 @@ let longPressPending = false;
 let cancelLongPressGesture = () => {};
 let tasteAvailable = false;
 let renderedSelection = new Set();
-let thumbnailPollTimer = 0;
-let pendingThumbnails = 0;
 let pendingPreviewTotal = 0;
 let preparingPollTimer = 0;
+// Timer ownership moved from `let thumbnailPollTimer = 0;` into the shared controller.
+const thumbnailPoll = createPendingPreviewPoll({
+    active: () => document.body.dataset.tab === 'photos',
+    refresh: async () => {
+        if (scope.similarImages || !canRefreshPendingThumbnails()) await refreshPendingPreviews();
+        else await refreshFirstPagePreviews();
+    },
+});
 
 async function loadTasteStatus() {
     const data = await getRankings(new URLSearchParams({ sort: 'taste', limit: '0' })).catch(() => null);
@@ -645,38 +652,15 @@ function rankingParams(offset) {
     return scopeParams({ limit: PAGE, offset, sort: viewPrefs.sort || 'date_taken' });
 }
 
-function stopThumbnailPoll() {
-    clearTimeout(thumbnailPollTimer);
-    thumbnailPollTimer = 0;
-}
+function stopThumbnailPoll() { thumbnailPoll.stop(); }
 
 function canRefreshPendingThumbnails() {
     return document.body.dataset.tab === 'photos' && !initialLoading && !selection.size && pane?.scrollTop <= 160;
 }
 
-function scheduleThumbnailPoll() {
-    if (!pendingThumbnails || thumbnailPollTimer || document.body.dataset.tab !== 'photos') return;
-    thumbnailPollTimer = setTimeout(async () => {
-        thumbnailPollTimer = 0;
-        if (!pendingThumbnails || document.body.dataset.tab !== 'photos') return;
-        if (scope.similarImages || !canRefreshPendingThumbnails()) await refreshPendingPreviews();
-        else await refreshFirstPagePreviews();
-        scheduleThumbnailPoll();
-    }, 3000);
-}
+function scheduleThumbnailPoll() { thumbnailPoll.schedule(); }
 
-function updateThumbnailPoll(pending) {
-    pendingThumbnails = Math.max(0, Number(pending) || 0);
-    if (!pendingThumbnails) {
-        stopThumbnailPoll();
-        return;
-    }
-    scheduleThumbnailPoll();
-}
-
-function pendingCount(data) {
-    return Number(data?.pending_thumbnails ?? data?.hidden_pending_thumbnails) || 0;
-}
+function updateThumbnailPoll(pending) { thumbnailPoll.update(pending); }
 
 function hiddenPendingThumbnailCount(data) {
     return Math.max(0, Number(data?.hidden_pending_thumbnails) || 0);
@@ -702,7 +686,7 @@ function renderEndMarker() {
 }
 
 function pendingPreviewCount(images) {
-    return (images || []).filter((image) => image?.preview_ready === false).length;
+    return countPendingPreviews(images); // Shared predicate: image?.preview_ready === false.
 }
 
 function sharpenPreview(image) {
@@ -728,7 +712,7 @@ async function refreshPendingPreviews() {
         .filter((image) => image && !image.preview_ready)
         .map((image) => Number(image.id))
         .filter((id) => id > 0);
-    const before = pendingThumbnails;
+    const before = thumbnailPoll.count;
     let landed = 0;
     if (ids.length) {
         const params = scopeParams({ limit: Math.min(ids.length, 5000), offset: 0, sort: viewPrefs.sort || 'date_taken' });
