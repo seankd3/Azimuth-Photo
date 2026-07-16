@@ -405,10 +405,18 @@ async def insert_images_batch(db_path: str, rows: list[tuple], source_id: int | 
                 await _missing_image_rematch_id_on_conn(conn, source_id, row)
                 for row in unseen_rows
             ] if has_missing_candidates else [None] * len(unseen_rows)
+            rematch_claim_counts: dict[int, int] = {}
+            for image_id in rematch_ids:
+                if image_id is not None:
+                    rematch_claim_counts[image_id] = rematch_claim_counts.get(image_id, 0) + 1
             new_rows = []
             for row, image_id in zip(unseen_rows, rematch_ids):
-                if image_id is None or not await _apply_missing_image_rematch_on_conn(
-                    conn, source_id, row, image_id
+                if (
+                    image_id is None
+                    or rematch_claim_counts[image_id] != 1
+                    or not await _apply_missing_image_rematch_on_conn(
+                        conn, source_id, row, image_id
+                    )
                 ):
                     new_rows.append(row)
             await conn.executemany(

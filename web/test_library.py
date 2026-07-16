@@ -1800,6 +1800,60 @@ class LibraryTests(BackendTestCase):
 
         self.assertEqual(lock_probes, 2)
 
+    async def test_rescan_does_not_rematch_when_new_paths_claim_same_missing_image(self):
+        source = await self._source("scan-rematch-collision-source")
+        old_path = os.path.join(source["path"], "old.jpg")
+        new_paths = [
+            os.path.join(source["path"], "new-first.jpg"),
+            os.path.join(source["path"], "new-second.jpg"),
+        ]
+        for path in new_paths:
+            with open(path, "wb") as handle:
+                handle.write(b"shared identity")
+
+        conn = await db.get_db()
+        try:
+            cursor = await conn.execute(
+                "INSERT INTO images "
+                "(source_id, filename, filepath, status, file_size, file_modified_at, "
+                "content_hash, missing_at) VALUES (?, 'old.jpg', ?, 'kept', ?, 1, ?, 100)",
+                (
+                    source["id"],
+                    old_path,
+                    len(b"shared identity"),
+                    sync_hashing.compute_content_hash(new_paths[0]),
+                ),
+            )
+            missing_id = int(cursor.lastrowid)
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        await catalog_repository.insert_images_batch(
+            db.DB_PATH,
+            [
+                (os.path.basename(path), path, ".jpg", len(b"shared identity"), 1)
+                for path in new_paths
+            ],
+            source_id=source["id"],
+        )
+
+        conn = await db.get_db()
+        try:
+            rows = await (await conn.execute(
+                "SELECT id, filepath, missing_at FROM images WHERE source_id = ? ORDER BY id",
+                (source["id"],),
+            )).fetchall()
+        finally:
+            await conn.close()
+
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(rows[0]["id"], missing_id)
+        self.assertEqual(rows[0]["filepath"], old_path)
+        self.assertEqual(rows[0]["missing_at"], 100.0)
+        self.assertEqual({row["filepath"] for row in rows[1:]}, set(new_paths))
+        self.assertTrue(all(row["missing_at"] is None for row in rows[1:]))
+
     async def test_rescan_rematches_renamed_file_by_content_identity(self):
         source = await self._source("scan-rename-source")
         old_path = os.path.join(source["path"], "old-name.jpg")
