@@ -231,9 +231,18 @@ class MirrorPuller:
         updated_at = remote.get("develop_updated_at")
         if not isinstance(settings, dict) or not updated_at:
             return
-        current = await (await conn.execute("SELECT updated_at, origin FROM develop_settings WHERE image_id = ?", (image_id,))).fetchone()
+        current = await (await conn.execute(
+            "SELECT settings, updated_at FROM develop_settings WHERE image_id = ?", (image_id,)
+        )).fetchone()
         if current and str(current["updated_at"] or "") > str(updated_at):
             return
+        settings = dict(settings)
+        try:
+            current_settings = json.loads(current["settings"]) if current else {}
+        except (TypeError, ValueError, json.JSONDecodeError):
+            current_settings = {}
+        if isinstance(current_settings, dict) and "_lr_rating" in current_settings:
+            settings["_lr_rating"] = current_settings["_lr_rating"]
         await conn.execute(
             """INSERT INTO develop_settings(image_id, settings, origin, updated_at)
                VALUES (?, ?, ?, ?)
