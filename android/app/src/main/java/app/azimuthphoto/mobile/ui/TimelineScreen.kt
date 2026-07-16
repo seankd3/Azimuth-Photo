@@ -22,7 +22,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -32,6 +34,7 @@ import androidx.compose.material.icons.outlined.CloudUpload
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.PhotoLibrary
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.rounded.CloudDone
 import androidx.compose.material3.CircularProgressIndicator
@@ -58,6 +61,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import app.azimuthphoto.mobile.backup.BackupDb
 import app.azimuthphoto.mobile.backup.BackupScheduler
@@ -212,12 +216,24 @@ fun TimelineScreen(
 
     Box(Modifier.fillMaxSize()) {
         if (entries.isEmpty()) {
-            Text(
-                emptyMessage(activeScope, hubOffline),
-                color = TextSecondary,
-                style = MaterialTheme.typography.bodyLarge,
+            Column(
                 modifier = Modifier.align(Alignment.Center).padding(horizontal = 40.dp),
-            )
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Icon(
+                    Icons.Outlined.PhotoLibrary,
+                    contentDescription = null,
+                    tint = TextSecondary.copy(alpha = 0.5f),
+                    modifier = Modifier.size(56.dp),
+                )
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    emptyMessage(activeScope, hubOffline),
+                    color = TextSecondary,
+                    style = MaterialTheme.typography.bodyLarge,
+                    textAlign = TextAlign.Center,
+                )
+            }
         } else {
             UnifiedGrid(
                 entries = entries,

@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
@@ -50,6 +51,7 @@ fun SettingsScreen(onOpenTrash: () -> Unit) {
     val progress by BackupWorker.progress.collectAsState()
     var counts by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
     var freedCount by remember { mutableStateOf<Int?>(null) }
+    var freePreview by remember { mutableStateOf<FreeUpSpace.Preview?>(null) }
     LaunchedEffect(progress) {
         counts = withContext(Dispatchers.IO) { BackupDb.get(context).countByState() }
     }
@@ -120,25 +122,37 @@ fun SettingsScreen(onOpenTrash: () -> Unit) {
 
         SectionTitle("Free up space")
         ToggleRow(
-            "Remove backed-up media after ${s.keepDays} days",
+            "Remove backed-up photos once they're old enough",
             s.freeUpSpaceEnabled,
         ) { enabled ->
             scope.launch { SettingsStore.setFreeUpSpace(context, enabled) }
         }
+        Text(
+            "Keep recent photos on device for:",
+            style = MaterialTheme.typography.bodySmall, color = TextSecondary,
+        )
         Row(verticalAlignment = Alignment.CenterVertically) {
-            listOf(30, 90, 365).forEach { days ->
+            listOf(30 to "1 month", 90 to "3 months", 365 to "1 year").forEach { (days, label) ->
                 TextButton(onClick = { scope.launch { SettingsStore.setKeepDays(context, days) } }) {
                     Text(
-                        "$days d",
+                        label,
                         color = if (s.keepDays == days) Accent else TextSecondary,
                     )
                 }
             }
         }
         TextButton(onClick = {
-            scope.launch { freedCount = FreeUpSpace.run(context as Activity) }
+            scope.launch {
+                val preview = FreeUpSpace.preview(context as Activity)
+                if (preview.count == 0) freedCount = 0 else freePreview = preview
+            }
         }) { Text("Free up now") }
-        freedCount?.let { Text("Freed up $it items", style = MaterialTheme.typography.bodySmall, color = TextSecondary) }
+        freedCount?.let {
+            Text(
+                if (it == 0) "Nothing to free up yet" else "Freed up $it items",
+                style = MaterialTheme.typography.bodySmall, color = TextSecondary,
+            )
+        }
         if (!FreeUpSpace.hasManageMedia(context)) {
             Text(
                 "Grant “Manage media” so cleanup can run silently.",
@@ -186,6 +200,41 @@ fun SettingsScreen(onOpenTrash: () -> Unit) {
         }
         Spacer(Modifier.height(40.dp))
     }
+
+    freePreview?.let { preview ->
+        AlertDialog(
+            onDismissRequest = { freePreview = null },
+            containerColor = Panel,
+            title = { Text("Free up ${formatBytes(preview.bytes)}?") },
+            text = {
+                Text(
+                    "Removes ${preview.count} backed-up ${if (preview.count == 1) "item" else "items"} " +
+                        "from this device. They stay safe on your archive and can be downloaded again anytime.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    freePreview = null
+                    scope.launch { freedCount = FreeUpSpace.run(context as Activity) }
+                }) { Text("Free up", color = Accent) }
+            },
+            dismissButton = {
+                TextButton(onClick = { freePreview = null }) { Text("Cancel") }
+            },
+        )
+    }
+}
+
+private fun formatBytes(bytes: Long): String {
+    if (bytes < 1024) return "$bytes B"
+    val units = listOf("KB", "MB", "GB", "TB")
+    var value = bytes.toDouble() / 1024
+    var unit = 0
+    while (value >= 1024 && unit < units.size - 1) {
+        value /= 1024
+        unit++
+    }
+    return if (value >= 10) "${value.toInt()} ${units[unit]}" else "${"%.1f".format(value)} ${units[unit]}"
 }
 
 @Composable
