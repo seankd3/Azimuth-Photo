@@ -431,12 +431,16 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertIn("Import status lost — this import may still be running", import_stage)
         self.assertIn("setScope({ import_batch: '', importBatchLabel: '' });", import_stage)
 
-    def test_publish_poll_patches_status_without_rebuilding_inputs_while_busy(self):
+    def test_publish_poll_cannot_clobber_active_input(self):
+        # The ux7 Deliver rewrite re-renders the website tab on each poll tick.
+        # That is safe only while the protection invariant holds: polls run
+        # solely while a publish is in_progress, and the slug input is disabled
+        # for that whole window — so a rebuild can never clobber live typing.
         panel = read("panel.js")
-        poll_start = panel.index("async function pollPublishStatus")
-        poll = panel[poll_start:panel.index("\n}\n", poll_start)]
 
-        self.assertIn("function patchPublishOverlayStatus(data, token)", panel)
-        self.assertIn("status.outerHTML = publishStatusBlock(data);", panel)
-        self.assertIn("if (data?.in_progress && patchPublishOverlayStatus(data, token))", poll)
-        self.assertLess(poll.index("patchPublishOverlayStatus"), poll.index("await renderPublishOverlay"))
+        # Polls only reschedule while the job is running.
+        self.assertIn("if (session.publish?.in_progress) scheduleDeliverPoll(session, token);", panel)
+        # The editable input is disabled whenever the poll loop could rebuild it.
+        self.assertIn("data-deliver-slug", panel)
+        slug_line = next(line for line in panel.splitlines() if "data-deliver-slug" in line)
+        self.assertIn("busy || publish || setupNeeded ? 'disabled'", slug_line)
