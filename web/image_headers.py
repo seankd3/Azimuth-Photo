@@ -41,7 +41,12 @@ _JPEG_SOF_MARKERS = {
     0xCF,
 }
 _rotational_devices: dict[int, bool] = {}
-_libc = ctypes.CDLL(None, use_errno=True)
+try:
+    _libc = ctypes.CDLL(None, use_errno=True)
+except (OSError, TypeError):
+    # No process-wide libc handle outside POSIX (Windows). The residency
+    # probe below already degrades to None via its AttributeError guard.
+    _libc = None
 
 
 def _is_rotational_device(filepath: str) -> bool:
