@@ -7,13 +7,14 @@ import logging
 import os
 import threading
 import time
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager, suppress
 
 
 USER_VISIBLE = "user_visible"
 MANUAL_BULK = "manual_bulk"
 AMBIENT_WARMING = "ambient_warming"
 OWNER_LEASE_SECONDS = 15 * 60
+LEASE_HEARTBEAT_SECONDS = OWNER_LEASE_SECONDS / 3
 
 log = logging.getLogger(__name__)
 
@@ -195,6 +196,34 @@ def lost_ownership(kind: str, *, gpu: bool = False) -> bool:
         if _manual_owner != name:
             return True
         return gpu and _gpu_owner != name
+
+
+@asynccontextmanager
+async def lease_heartbeat(
+    kind: str,
+    *,
+    gpu: bool = False,
+    interval_seconds: float = LEASE_HEARTBEAT_SECONDS,
+):
+    """Keep leases fresh while one non-interruptible model load is running."""
+
+    name = str(kind or "bulk").strip() or "bulk"
+
+    async def renew_until_cancelled() -> None:
+        while True:
+            await asyncio.sleep(interval_seconds)
+            if manual_owner() == name:
+                claim_manual_owner(name)
+            if gpu and gpu_owner() == name:
+                claim_gpu_owner(name)
+
+    heartbeat = asyncio.create_task(renew_until_cancelled())
+    try:
+        yield
+    finally:
+        heartbeat.cancel()
+        with suppress(asyncio.CancelledError):
+            await heartbeat
 
 
 async def wait_for_gpu_turn(kind: str, *, poll_seconds: float = 0.5) -> None:

@@ -55,6 +55,28 @@ class CacheStatusTests(BackendTestCase):
             work_coordination.release_manual_owner("captions")
             work_coordination.release_gpu_owner("captions")
 
+    async def test_model_load_heartbeat_renews_manual_and_gpu_leases(self):
+        work_coordination.release_manual_owner("captions")
+        work_coordination.release_gpu_owner("captions")
+        work_coordination.claim_manual_owner("captions")
+        work_coordination.claim_gpu_owner("captions")
+        try:
+            manual_before = work_coordination._manual_owner_updated_at
+            gpu_before = work_coordination._gpu_owner_updated_at
+
+            async with work_coordination.lease_heartbeat(
+                "captions",
+                gpu=True,
+                interval_seconds=0.001,
+            ):
+                await asyncio.sleep(0.01)
+
+            self.assertGreater(work_coordination._manual_owner_updated_at, manual_before)
+            self.assertGreater(work_coordination._gpu_owner_updated_at, gpu_before)
+        finally:
+            work_coordination.release_manual_owner("captions")
+            work_coordination.release_gpu_owner("captions")
+
     async def test_coordination_status_surfaces_waiting_owner(self):
         work_coordination.release_manual_owner("captions")
         work_coordination.claim_manual_owner("captions")

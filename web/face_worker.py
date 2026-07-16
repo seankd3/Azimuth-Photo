@@ -371,7 +371,8 @@ async def _run_face_worker_loop() -> None:
                 message=f"People is scanning {len(rows)} of {pending} queued cached previews.",
             )
             with work_coordination.manual_bulk("people"):
-                await loop.run_in_executor(None, _load_face_app, config)
+                async with work_coordination.lease_heartbeat("people"):
+                    await loop.run_in_executor(None, _load_face_app, config)
 
             with work_coordination.manual_bulk("people"):
                 for row in rows:

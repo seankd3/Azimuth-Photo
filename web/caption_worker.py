@@ -451,7 +451,8 @@ async def _run_caption_worker_loop() -> None:
             )
             with work_coordination.manual_bulk("captions"):
                 try:
-                    await loop.run_in_executor(_caption_executor, _load_model, caption_config)
+                    async with work_coordination.lease_heartbeat("captions", gpu=True):
+                        await loop.run_in_executor(_caption_executor, _load_model, caption_config)
                     _reset_model_load_failures()
                 except Exception as exc:
                     if _is_cuda_oom_error(exc):
