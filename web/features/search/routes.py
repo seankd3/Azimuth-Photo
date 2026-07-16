@@ -194,13 +194,16 @@ async def api_similar(image_id: int, limit: int = 50):
         img_id = int(img["id"])
         idx = id_to_idx.get(img_id)
         score = float(similarities[idx]) if idx is not None else 0.0
-        results.append(app_helpers.image_card(img, "sm", similarity=score))
+        card = app_helpers.image_card(img, "sm", similarity=score)
+        card["preview_ready"] = True
+        results.append(card)
     if satellite.is_satellite_mode() and results:
         cached_ids = await _cached_image_ids([int(result["id"]) for result in results], "sm")
-        results = [
-            result if int(result["id"]) in cached_ids else {key: value for key, value in result.items() if key != "thumb_url"}
-            for result in results
-        ]
+        for result in results:
+            ready = int(result["id"]) in cached_ids
+            result["preview_ready"] = ready
+            if not ready:
+                result.pop("thumb_url", None)
 
     return {
         "images": results,

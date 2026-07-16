@@ -980,6 +980,7 @@ class SearchTests(BackendTestCase):
         self.assertEqual(result["visible_images"], 2)
         self.assertEqual(result["total_images"], 4)
         self.assertEqual(result["hidden_pending_thumbnails"], 2)
+        self.assertTrue(all(card["preview_ready"] for card in result["images"]))
 
         with unittest.mock.patch.dict(
             os.environ,
@@ -992,6 +993,8 @@ class SearchTests(BackendTestCase):
         self.assertEqual(satellite_result["total_images"], 4)
         self.assertEqual(satellite_result["hidden_pending_thumbnails"], 0)
         satellite_cards = {card["id"]: card for card in satellite_result["images"]}
+        self.assertFalse(satellite_cards[hidden_best]["preview_ready"])
+        self.assertTrue(satellite_cards[visible_first]["preview_ready"])
         self.assertNotIn("thumb_url", satellite_cards[hidden_best])
         self.assertIn("thumb_url", satellite_cards[visible_first])
 
