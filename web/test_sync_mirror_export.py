@@ -134,6 +134,32 @@ class SyncMirrorExportTests(unittest.TestCase):
         self.assertEqual(payload["flag"], "rejected")
         self.assertGreater(terminator["cursor"], cursor)
 
+    def test_rating_exports_with_its_own_family_winner(self):
+        image_id = self._image("rated.jpg", "f" * 32)
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                "UPDATE develop_settings SET settings = ? WHERE image_id = ?",
+                ('{"Exposure2012":1.25,"_lr_rating":5}', image_id),
+            )
+            conn.execute(
+                "INSERT INTO oplog_family_state(content_hash, family, ts, origin, origin_seq) "
+                "VALUES (?, 'rating', 300, 'camera-a', 7)",
+                ("f" * 32,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        payload, _terminator = self._catalog_lines()
+
+        self.assertEqual(payload["develop_settings"], {"Exposure2012": 1.25})
+        self.assertEqual(payload["rating"], 5)
+        self.assertEqual(
+            payload["rating_winner_key"],
+            {"ts": 300.0, "origin": "camera-a", "origin_seq": 7},
+        )
+
     def test_thumb_pack_reads_only_existing_disk_index_entries_and_reports_skips(self):
         first_id = self._image("cached.jpg", "d" * 32)
         second_id = self._image("uncached.jpg", "e" * 32)

@@ -94,7 +94,7 @@ async def get_unclassified_images(limit: int = 200):
     return await image_repository.get_unclassified_images(
         _configured_db_path(),
         limit,
-        file_extensions=image_headers.HEADER_GEOMETRY_EXTENSIONS,
+        file_extensions=photo_metadata.PILLOW_METADATA_EXTENSIONS,
     )
 
 
@@ -266,7 +266,7 @@ async def classify_orientations_background():
             with work_coordination.manual_bulk("catalog_metadata"):
                 results, failures = await loop.run_in_executor(None, _classify_batch, rows)
             for image_id, filepath, reason, source_root, source_online in failures:
-                if not source_online:
+                if not source_online or os.path.exists(filepath):
                     _note_orientation_failure(
                         image_id,
                         reason,
