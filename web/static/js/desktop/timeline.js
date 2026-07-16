@@ -78,7 +78,7 @@ function renderMonth(month) {
         + `<span class="timeline-day-label">${esc(dayLabel(key))}</span>`
         + `<span class="timeline-day-count">${fmt(images.length)}</span>`
         + `<span class="timeline-day-thumbs">${images.slice(0, 5).map((image) => (
-            `<img src="${esc(image.thumb_url || thumbUrl('sm', image.id))}" alt="" loading="lazy" decoding="async">`
+            `<img src="${esc(image.thumb_url || thumbUrl('sm', image.id))}" alt="" loading="lazy" decoding="async" fetchpriority="low">`
         )).join('')}</span></button>`
     )).join('') : `<p class="timeline-empty-month">${month.count ? 'Thumbnails are still preparing for this month.' : 'No photos match this month.'}</p>`;
     for (const row of host.querySelectorAll('[data-day]')) {

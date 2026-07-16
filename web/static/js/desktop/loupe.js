@@ -337,6 +337,7 @@ function requestFullImage() {
     fullImageLoadingId = img.id;
     const token = renderToken;
     const large = new Image();
+    large.fetchPriority = 'high';
     let settled = false;
     const finish = ({ offline = false } = {}) => {
         if (settled) return;
@@ -385,7 +386,7 @@ function stripMarkup(start, end) {
         }
         const glyph = flagGlyph(img.flag || 'unflagged');
         markup += `<button class="loupe-thumb ${i === index ? 'cur' : ''}" data-index="${i}" data-id="${esc(img.id)}" aria-label="Photo ${i + 1}"${i === index ? ' aria-current="true"' : ''}>`
-            + `<img loading="lazy" decoding="async" src="${esc(img.thumb_url || thumbUrl('sm', img.id))}" alt="">`
+            + `<img loading="lazy" decoding="async" fetchpriority="low" src="${esc(img.thumb_url || thumbUrl('sm', img.id))}" alt="">`
             + `<span class="loupe-thumb-flag" aria-hidden="true">${glyph}</span>`
             + '</button>';
     }
@@ -468,6 +469,7 @@ function preloadNeighbors() {
     for (const neighbor of [images()[index + 1], images()[index - 1]]) {
         if (!neighbor) continue;
         const preload = new Image();
+        preload.fetchPriority = 'low';
         preload.src = thumbUrl('md', neighbor.id);
     }
 }
@@ -477,6 +479,7 @@ function preloadLargeTier() {
     for (const candidate of [images()[index - 1], current(), images()[index + 1]]) {
         if (!candidate) continue;
         const preload = new Image();
+        preload.fetchPriority = 'low';
         preload.src = thumbUrl('lg', candidate.id);
     }
 }

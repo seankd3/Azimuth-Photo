@@ -90,6 +90,7 @@ function loadLg() {
     const token = loadToken;
     const lg = new Image();
     lg.decoding = 'async';
+    lg.fetchPriority = 'high';
     let settled = false;
     const finish = ({ offline = false } = {}) => {
         if (settled) return;
@@ -125,6 +126,7 @@ function preload(offset) {
     const neighbor = list[index + offset];
     if (neighbor) {
         const pre = new Image();
+        pre.fetchPriority = 'low';
         pre.src = thumbUrl('md', neighbor.id);
     }
 }

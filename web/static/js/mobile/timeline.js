@@ -137,7 +137,7 @@ function cellFor(img, mi) {
     );
     fig.innerHTML =
         `<div class="c-check">${icon('check')}</div>`
-        + `<img alt="" loading="lazy" decoding="async" data-src="${esc(img.thumb_url || thumbUrl('sm', img.id))}">`
+        + `<img alt="" loading="lazy" decoding="async" fetchpriority="low" data-src="${esc(img.thumb_url || thumbUrl('sm', img.id))}">`
         + stackBadge(img)
         + flagBadge(img.flag);
     const image = fig.querySelector('img');
