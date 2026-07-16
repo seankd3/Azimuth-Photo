@@ -91,3 +91,18 @@ fully settled. Current direction:
 - Try to detect moved folders where feasible.
 - Ask after scans before purging externally missing files.
 - Keep Trash explicit and reversible until the user empties it.
+
+## Startup handlers and schema (doctrine, 2026-07-16)
+
+Startup handlers (`@app.on_event("startup")` and factory-appended handlers)
+have NO ordering guarantee relative to `init_db`. The 5a1b5017 incident — a
+handler querying `collection_publishes` bricked every fresh install — is the
+canonical failure. The contract is therefore:
+
+- **Every startup handler that touches the catalog must tolerate missing
+  schema** (catch `sqlite3.OperationalError`, log, and skip; a fresh library
+  has no durable state worth resuming anyway).
+- The fresh-home boot smoke (`web/test_fresh_boot.py`) is a standing release
+  gate: it boots a real subprocess server against a virgin PHOTOARCHIVE_HOME
+  in hub and satellite flavors and fails on any startup traceback. Frozen and
+  Docker artifacts get the same probe in the RC checklist drills.
