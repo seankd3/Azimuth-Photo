@@ -41,6 +41,7 @@ let panGesture = null;
 let presetsPanel = null;
 let transientSettingsOverride = null;
 let backgroundBaseRetryTimer = 0;
+let saveFailureToastShown = false;
 
 const DEVELOP_READ_TIMEOUT_MS = 10_000;
 const DEVELOP_MUTATION_TIMEOUT_MS = 20_000;
@@ -222,21 +223,68 @@ function setControlsLoading(loading) {
     panelHost.dataset.loading = String(loading);
 }
 
+function hasUnsavedEdits() {
+    return [...stateCache.values()].some((entry) => entry.unsaved);
+}
+
+function setUnsavedIndicator() {
+    let dot = toolbar.querySelector('[data-develop-unsaved]');
+    if (!dot) {
+        dot = document.createElement('span');
+        dot.dataset.developUnsaved = '';
+        dot.dataset.tip = 'Unsaved Develop edits';
+        dot.setAttribute('aria-label', 'Unsaved Develop edits');
+        dot.style.cssText = 'width:7px;height:7px;margin-left:4px;border-radius:50%;background:var(--danger);box-shadow:0 0 0 2px var(--danger-dim)';
+        toolbar.append(dot);
+    }
+    dot.hidden = !hasUnsavedEdits();
+}
+
+async function saveEntry(imageId, label) {
+    const entry = stateCache.get(Number(imageId));
+    if (!entry) return true;
+    try {
+        const response = await fetch(`/api/develop/${imageId}`, fetchOptionsWithTimeout({
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ settings: entry.settings, label }),
+        }, DEVELOP_MUTATION_TIMEOUT_MS));
+        if (!response.ok) throw new Error('save failed');
+        entry.dirty = false;
+        entry.unsaved = false;
+        settingsClipboard.markSaved(imageId);
+        if (Number(currentImage?.id) === Number(imageId)) historyPanel?.reload();
+        setUnsavedIndicator();
+        if (!hasUnsavedEdits()) saveFailureToastShown = false;
+        return true;
+    } catch {
+        entry.unsaved = true;
+        setUnsavedIndicator();
+        if (!saveFailureToastShown) {
+            saveFailureToastShown = true;
+            showToast("Couldn't save edits — retrying");
+        }
+        return false;
+    }
+}
+
+async function flushSave(imageId, label = 'Develop adjustment') {
+    const entry = stateCache.get(Number(imageId));
+    if (!entry?.dirty && !entry?.unsaved) return true;
+    clearTimeout(saveTimers.get(Number(imageId)));
+    saveTimers.delete(Number(imageId));
+    return saveEntry(imageId, label);
+}
+
 function scheduleSave(label = 'Develop adjustment') {
     if (!currentImage) return;
     const imageId = Number(currentImage.id);
+    const entry = stateCache.get(imageId);
+    if (!entry) return;
+    entry.dirty = true;
     clearTimeout(saveTimers.get(imageId));
     saveTimers.set(imageId, setTimeout(() => {
-        const entry = stateCache.get(imageId);
-        if (!entry) return;
-        fetch(`/api/develop/${imageId}`, fetchOptionsWithTimeout({
-            method: 'PUT', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ settings: entry.settings, label }),
-        }, DEVELOP_MUTATION_TIMEOUT_MS)).then((response) => {
-            if (!response.ok) throw new Error('save failed');
-            settingsClipboard.markSaved(imageId);
-            historyPanel?.reload();
-        }).catch(() => {});
+        saveTimers.delete(imageId);
+        saveEntry(imageId, label);
     }, 400));
 }
 
@@ -488,6 +536,8 @@ function scheduleBackgroundDevelopRetry(image, token) {
 }
 
 async function openImage(image) {
+    const previousImage = currentImage;
+    if (previousImage && Number(previousImage.id) !== Number(image?.id)) await flushSave(previousImage.id);
     const token = ++loadingToken;
     currentImage = image;
     transientSettingsOverride = null;
@@ -532,6 +582,7 @@ async function openImage(image) {
             };
             stateCache.set(Number(image.id), entry);
         }
+        setUnsavedIndicator();
         if (token !== loadingToken) return;
         entry.imageId = Number(image.id);
         historyPanel?.setHistory(entry.serverHistory || []);
