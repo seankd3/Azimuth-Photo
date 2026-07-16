@@ -29,9 +29,10 @@ import { closeTrash, handleTrashKey, selectAllTrash, trashOpen, trashSelectedIma
 import { showToast, undoLatestToast } from './toast.js';
 import {
     applyPreviousDevelopSettingsToGrid, copyDevelopSettingsFromGrid, createVirtualCopy,
-    closeDevelop, developOpen, holdDevelopReference, openDevelop, pasteDevelopSettingsToGrid, toggleDevelopCompare,
+    closeDevelop, developOpen, openDevelop, pasteDevelopSettingsToGrid,
 } from './develop/develop.js';
 import { shortcutSheetOpen } from './shortcut_sheet.js';
+import { foregroundLayerOpen as registeredForegroundLayerOpen } from './layers.js';
 
 function inputFocused() {
     const el = document.activeElement;
@@ -42,17 +43,7 @@ function foregroundLayerOpen() {
     return shortcutSheetOpen()
         || filtersOpen()
         || importOpen()
-        || Boolean(
-            document.querySelector('.typed-confirm')
-            || document.querySelector('#collection-picker')
-            || document.querySelector('#collection-pop-menu:not([hidden])')
-            || document.querySelector('#grid-pop-menu:not([hidden])')
-            || document.querySelector('#export-pop-menu:not([hidden])')
-            || document.querySelector('#folder-pop-menu:not([hidden])')
-            || document.querySelector('#source-pop-menu:not([hidden])')
-                        || document.querySelector('#deliver-overlay:not([hidden])')
-            || document.querySelector('#people-merge-pop'),
-        );
+        || registeredForegroundLayerOpen('keyboard');
 }
 
 export function openHelp() {
@@ -279,18 +270,17 @@ export function initKeyboard() {
             }
             return;
         }
-        if (developOpen() && !foregroundLayerOpen() && !inputFocused()) {
-            const key = event.key.toLowerCase();
-            if (key === 'y') {
+        // Develop owns its complete editing map at capture phase (develop.js):
+        // Y compare, Shift+R hold-reference, R crop, K mask, J clip, W picker.
+        // Do not let grid/lens keys leak through while the editor is open
+        // (ratings, flags, density, navigation). Modifier chords fall through
+        // to the shared Ctrl/Cmd handling below; D still toggles the editor.
+        if (developOpen() && !event.ctrlKey && !event.metaKey) {
+            if (event.key.toLowerCase() === 'd' && !foregroundLayerOpen() && !inputFocused()) {
                 event.preventDefault();
-                toggleDevelopCompare(event.altKey ? 'horizontal' : 'vertical');
-                return;
+                closeDevelop();
             }
-            if (key === 'r') {
-                event.preventDefault();
-                if (!event.repeat) holdDevelopReference(true);
-                return;
-            }
+            return;
         }
         if (event.ctrlKey || event.metaKey) {
             const key = event.key.toLowerCase();
@@ -360,9 +350,10 @@ export function initKeyboard() {
             return;
         }
         if (event.key.toLowerCase() === 'd' && !foregroundLayerOpen()) {
+            // Only reachable with the editor closed — the develop guard above
+            // owns D-toggle-close while it is open.
             event.preventDefault();
-            if (developOpen()) closeDevelop();
-            else openDevelop();
+            openDevelop();
             return;
         }
         if (event.key.toLowerCase() === 'h' && !foregroundLayerOpen()) {
@@ -531,9 +522,6 @@ export function initKeyboard() {
             event.preventDefault();
             moveFocus(-focusColumns());
         }
-    });
-    window.addEventListener('keyup', (event) => {
-        if (developOpen() && event.key.toLowerCase() === 'r') holdDevelopReference(false);
     });
     on('help:open', openHelp);
 }

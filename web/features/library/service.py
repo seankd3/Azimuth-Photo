@@ -6,7 +6,6 @@ import time
 from collections.abc import Awaitable, Callable, Collection
 from datetime import datetime
 
-import numpy as np
 from fastapi.responses import Response
 
 import embed_cache
@@ -923,6 +922,10 @@ async def api_rankings_impl(
             text_query=text_query,
             exclude_collapsed_stack_members=exclude_collapsed_stack_members,
         )
+        # Deferred: keeps numpy's ~120 ms import off the boot path; the embed
+        # matrix that reaches this branch is itself numpy, so this never misses.
+        import numpy as np
+
         _image_ids, matrix = await embed_cache.get_matrix(taste.get("model_key"))
         id_to_idx = embed_cache.get_index(taste.get("model_key"))
         taste_vector = taste.get("vector")

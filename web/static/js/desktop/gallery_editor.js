@@ -1,19 +1,15 @@
 /** Client-gallery fields and API adapter for the unified Deliver popover. */
 
-const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[char]));
+import { fetchJson } from './api.js';
+import { esc } from './dom.js';
 
-async function requestJson(url, options = {}) {
-    const response = await fetch(url, { headers: { Accept: 'application/json', ...options.headers }, ...options });
-    const payload = await response.json().catch(() => null);
-    if (!response.ok) throw new Error(payload?.error || 'Gallery request failed');
-    return payload;
+export async function listGalleryDeliveries(collectionId) {
+    return fetchJson(`/api/user-collections/${collectionId}/galleries`);
 }
 
 export async function loadGalleryDelivery(collectionId, getCollection) {
     const [listed, detail] = await Promise.all([
-        requestJson(`/api/user-collections/${collectionId}/galleries`),
+        listGalleryDeliveries(collectionId),
         getCollection(collectionId, { limit: 500 }),
     ]);
     return {
@@ -54,7 +50,7 @@ export async function saveGalleryDelivery(collectionId, gallery, payload) {
     const endpoint = gallery
         ? `/api/user-collections/${collectionId}/galleries/${gallery.id}`
         : `/api/user-collections/${collectionId}/galleries`;
-    return requestJson(endpoint, {
+    return fetchJson(endpoint, {
         method: gallery ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -62,5 +58,5 @@ export async function saveGalleryDelivery(collectionId, gallery, payload) {
 }
 
 export async function revokeGalleryDelivery(collectionId, galleryId) {
-    return requestJson(`/api/user-collections/${collectionId}/galleries/${galleryId}`, { method: 'DELETE' });
+    return fetchJson(`/api/user-collections/${collectionId}/galleries/${galleryId}`, { method: 'DELETE' });
 }

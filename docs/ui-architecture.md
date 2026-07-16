@@ -138,7 +138,10 @@ or discarded — never silently lost on Esc.
 through one poll helper: token-gated, cancelled with its surface, interval not
 loop-count. Progress shows inside the invoking surface while it is open and in
 the System peek's Background work when it isn't. No fire-and-forget downloads:
-every job ends in a success or failure toast.
+every job ends in a success or failure toast. A job is **settling** until it
+reaches a final state — automatic retries (e.g. website hook retries) count
+as settling: surfaces stay busy, polls keep running, and the copy says what
+is being retried.
 
 **One confirm grammar.** Reversible actions execute immediately with an Undo
 toast (unpublish, remove from lens). Irreversible-but-scoped actions use the

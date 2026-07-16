@@ -13,12 +13,14 @@ import {
 import { applyFlags, selectedIds, setCollectionPicker } from './selection.js';
 import { showToast } from './toast.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
-import { confirmAction, confirmTypedCount } from './trash.js';
-import { downloadExport, openExportMenu } from './export_menu.js';
+import { confirmAction } from './trash.js';
+import { exportScope, openExportMenu, savedOriginalsExportSize } from './export_menu.js';
+import { pollJob } from './jobs.js';
 import { initFoldersPanel } from './folders.js';
 import { openSourceAddFlow } from './drawer.js';
 import { openSourceRevealMenu } from './source_reveal_menu.js';
 import { icon } from '../icons.js';
+import { esc, slugifyName } from './dom.js';
 import {
     initSuggestions, loadSuggestionsOnce, openSuggestionsReview, suggestionsAreLoading, visibleSuggestions,
 } from './suggestions.js';
@@ -37,16 +39,14 @@ let collectionMenuReturn = null;
 let deliverOverlay = null;
 let deliverOverlayToken = 0;
 let deliverOverlayReturn = null;
-let deliverPollTimer = 0;
+let deliverPoll = null;
 let deliverSession = null;
 let chromeRefreshTimer = 0;
 let editingSmartCollection = null;
 let savedViews = [];
 
 const SHARED_CHANGED_EVENT = 'shares/publishes-changed';
-const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[c]));
+const DELIVER_TAB_STORAGE_KEY = 'pa_d_deliver_tab';
 const fmt = (n) => Number(n || 0).toLocaleString('en-US');
 const narrowPanel = () => window.matchMedia('(max-width: 880px)').matches;
 const emptyState = (glyph, copy, action = '') => (
@@ -247,8 +247,8 @@ function deliverOverlayIsCurrent(token) {
 }
 
 function closeDeliverOverlay() {
-    window.clearTimeout(deliverPollTimer);
-    deliverPollTimer = 0;
+    deliverPoll?.cancel();
+    deliverPoll = null;
     if (!deliverOverlay || deliverOverlay.hidden) return;
     deliverOverlayToken += 1;
     releaseFocus(deliverOverlay);
@@ -280,35 +280,96 @@ function bindDeliverTabs(onSelect) {
     }
 }
 
-/** Back-compat for callers that predate the unified Deliver surface (drawer publish-return). */
-export function openPublishOverlay(collectionId, name = 'Collection') {
-    return openDeliverOverlay(collectionId, name, null, 'website');
+function deliverDraftStorageKey(collectionId) {
+    return `pa_d_deliver_draft_${collectionId}`;
 }
 
-export async function openDeliverOverlay(collectionId, name = 'Collection', opener = null, activeTab = 'private') {
+function defaultDeliverDraft(name) {
+    return { title: name, password: '', expiry: '', slug: slugifyName(name, 'gallery') };
+}
+
+function loadDeliverDraft(collectionId, name) {
+    try {
+        const saved = JSON.parse(sessionStorage.getItem(deliverDraftStorageKey(collectionId)) || 'null');
+        if (!saved || typeof saved !== 'object') return { draft: defaultDeliverDraft(name), restored: false };
+        return {
+            draft: { ...defaultDeliverDraft(name), ...Object.fromEntries(['title', 'password', 'expiry', 'slug'].map((key) => [key, String(saved[key] || '')])) },
+            restored: true,
+        };
+    } catch {
+        return { draft: defaultDeliverDraft(name), restored: false };
+    }
+}
+
+function persistDeliverDraft(session) {
+    sessionStorage.setItem(deliverDraftStorageKey(session.collectionId), JSON.stringify(session.draft));
+}
+
+function clearDeliverDraft(session) {
+    sessionStorage.removeItem(deliverDraftStorageKey(session.collectionId));
+    session.draft = defaultDeliverDraft(session.name);
+}
+
+function tabCreatedAt(item) {
+    return Number(item?.created_at || item?.createdAt || item?.created || 0);
+}
+
+function mostRecentDelivery(deliveries = []) {
+    return [...deliveries].sort((left, right) => tabCreatedAt(right) - tabCreatedAt(left))[0] || null;
+}
+
+function resolveDeliverTab({ explicitTab, share, publish, gallery }) {
+    if (DELIVER_TABS.some(([id]) => id === explicitTab)) return explicitTab;
+    const active = [
+        ['private', share],
+        ['website', publish?.publish || publish?.job?.publish],
+        ['gallery', gallery],
+    ].filter(([, delivery]) => delivery);
+    if (active.length) {
+        active.sort(([, left], [, right]) => tabCreatedAt(right) - tabCreatedAt(left));
+        return active[0][0];
+    }
+    const savedTab = localStorage.getItem(DELIVER_TAB_STORAGE_KEY);
+    return DELIVER_TABS.some(([id]) => id === savedTab) ? savedTab : 'private';
+}
+
+export async function openDeliverOverlay(collectionId, name = 'Collection', opener = null, activeTab = null) {
     ensureDeliverOverlay();
     const token = ++deliverOverlayToken;
     deliverOverlayReturn = opener || document.activeElement;
     deliverOverlay.dataset.collectionId = String(collectionId);
     deliverOverlay.dataset.collectionName = name;
-    deliverOverlay.dataset.activeTab = activeTab;
+    const restoredDraft = loadDeliverDraft(collectionId, name);
     deliverSession = {
         collectionId,
         name,
-        activeTab,
+        activeTab: 'private',
         share: null,
         publish: null,
-        draft: { title: name, password: '', expiry: '', slug: slugifyName(name) },
+        draft: restoredDraft.draft,
+        restoredDraft: restoredDraft.restored,
     };
-    renderDeliverShell(name, activeTab);
+    renderDeliverShell(name, deliverSession.activeTab);
     bindDeliverTabs((tab) => switchDeliverTab(deliverSession, tab));
     trapFocus(deliverOverlay, deliverOverlay.querySelector('button'));
-    const [shareData, publishData] = await Promise.all([getCollectionShare(collectionId), getCollectionPublish(collectionId)]);
+    const [shareData, publishData, galleryData] = await Promise.all([
+        getCollectionShare(collectionId),
+        getCollectionPublish(collectionId),
+        import('./gallery_editor.js').then(({ listGalleryDeliveries }) => listGalleryDeliveries(collectionId)).catch(() => null),
+    ]);
     if (!deliverOverlayIsCurrent(token)) return token;
     deliverSession.share = shareData?.share || null;
     deliverSession.publish = publishData;
-    if (deliverSession.publish?.publish?.title) deliverSession.draft.title = deliverSession.publish.publish.title;
-    if (deliverSession.publish?.publish?.slug) deliverSession.draft.slug = deliverSession.publish.publish.slug;
+    const resolvedTab = resolveDeliverTab({
+        explicitTab: activeTab,
+        share: deliverSession.share,
+        publish: deliverSession.publish,
+        gallery: mostRecentDelivery(galleryData?.galleries),
+    });
+    deliverSession.activeTab = resolvedTab;
+    deliverOverlay.dataset.activeTab = resolvedTab;
+    if (!deliverSession.restoredDraft && deliverSession.publish?.publish?.title) deliverSession.draft.title = deliverSession.publish.publish.title;
+    if (!deliverSession.restoredDraft && deliverSession.publish?.publish?.slug) deliverSession.draft.slug = deliverSession.publish.publish.slug;
     renderDeliver(deliverSession, token);
     return token;
 }
@@ -415,9 +476,9 @@ function deliverStatusRows(rows) {
     )).join('') + '</div>';
 }
 
-function shareExpiryOptions() {
+function shareExpiryOptions(value = '') {
     return '<label class="share-expiry">Expires <select data-deliver-expiry>'
-        + '<option value="">Never</option><option value="7">7 days</option><option value="30">30 days</option></select></label>';
+        + `<option value=""${value === '' ? ' selected' : ''}>Never</option><option value="7"${value === '7' ? ' selected' : ''}>7 days</option><option value="30"${value === '30' ? ' selected' : ''}>30 days</option></select></label>`;
 }
 
 async function copyDeliverUrl(url) {
@@ -427,6 +488,15 @@ async function copyDeliverUrl(url) {
     } catch {
         showToast("Couldn't copy link");
     }
+}
+
+function deliveryErrorDetail(error) {
+    return error?.data?.error || error?.error || error?.message || '';
+}
+
+function showDeliveryToast(message, session, { error = null, undo = null } = {}) {
+    const detail = deliveryErrorDetail(error);
+    showToast(`${message} '${session.name}'${detail ? ` · ${detail}` : ''}`, { undo });
 }
 
 async function withBusyButton(button, action) {
@@ -457,10 +527,6 @@ function bindDeliverConfirmButton(selector, label, action) {
     });
 }
 
-function slugifyName(value) {
-    return String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 96) || 'gallery';
-}
-
 function configuredGalleryUrl(slug, publishing = {}) {
     const base = String(publishing.site_base_url || '').replace(/\/+$/, '');
     return base && slug ? `${base}/g/${slug}/` : '';
@@ -478,11 +544,24 @@ function publishLeadText(count, slug, publish, publishing = {}) {
     return publishCopyText(count, slug, publishing);
 }
 
+/** A publish job is settling until it reaches a final state — including automatic hook retries. */
+function publishJobSettling(data) {
+    const job = data?.job || null;
+    return Boolean(data?.in_progress || (job && ['publishing', 'revoking', 'hook_retrying'].includes(job.state)));
+}
+
 function publishPhaseCopy(job) {
     if (!job) return '';
     if (job.state === 'error') return 'Publishing didn’t finish.';
     if (job.state === 'hook_failed') return 'Gallery files are ready, but the website update didn’t finish.';
     if (job.state === 'revoked_hook_failed') return 'Gallery files were removed, but the website update didn’t finish.';
+    if (job.state === 'hook_retrying') {
+        const removing = (job.legacy_state || job.hook_failure_state) === 'revoked_hook_failed';
+        if (job.executing) return removing ? 'Finishing website removal…' : 'Updating website…';
+        return removing
+            ? 'Gallery files were removed — the website update didn’t finish, retrying automatically.'
+            : 'Gallery is ready — the website update didn’t finish, retrying automatically.';
+    }
     if (job.phase === 'hook') return 'Updating website…';
     if (job.phase === 'deploying') return 'Updating website…';
     if (job.phase === 'building') return 'Building gallery…';
@@ -501,7 +580,7 @@ function publishErrorBlock(job) {
     return '<div class="publish-error">'
         + '<b>Couldn\'t publish this gallery.</b>'
         + `<p>${esc(job.error || 'The website did not finish the publish. Try again when ready.')}</p>`
-        + '<button class="btn primary" id="publish-retry" type="button">Try again</button>'
+        + '<button class="btn primary" data-deliver-retry type="button">Try again</button>'
         + details
         + '</div>';
 }
@@ -513,17 +592,20 @@ function deliverPublishStatus(data) {
     const hook = publish?.hook_status || job?.hook || null;
     return '<div class="publish-status">'
         + deliverStatusRows([['Website', status || 'Ready to publish.']])
-        + (hook?.configured && !hook.ok ? `<div class="publish-error"><b>Gallery files are ready, but the website update didn’t finish.</b><p>${esc(hook.output || 'The website update did not finish successfully.')}</p></div>` : '')
-        + publishErrorBlock(job).replace('id="publish-retry"', 'data-deliver-publish-retry')
+        + (hook?.configured && !hook.ok && job?.state !== 'hook_retrying' ? `<div class="publish-error"><b>Gallery files are ready, but the website update didn’t finish.</b><p>${esc(hook.output || 'The website update did not finish successfully.')}</p></div>` : '')
+        + publishErrorBlock(job)
         + '</div>';
 }
 
 function saveDeliverDraft(session) {
     const root = deliverOverlay;
-    session.draft.title = root.querySelector('[data-deliver-title]')?.value || session.draft.title;
-    session.draft.password = root.querySelector('[data-deliver-password]')?.value || session.draft.password;
-    session.draft.expiry = root.querySelector('[data-deliver-expiry]')?.value || session.draft.expiry;
-    session.draft.slug = root.querySelector('[data-deliver-slug]')?.value || session.draft.slug;
+    for (const [key, selector] of Object.entries({
+        title: '[data-deliver-title]', password: '[data-deliver-password]', expiry: '[data-deliver-expiry]', slug: '[data-deliver-slug]',
+    })) {
+        const field = root.querySelector(selector);
+        if (field) session.draft[key] = field.value;
+    }
+    persistDeliverDraft(session);
 }
 
 function bindDeliverCommon(session, url = '') {
@@ -549,7 +631,7 @@ async function renderPrivateDeliver(session, token) {
                 + deliverPasswordRow({ protected: share.protected, value: session.draft.password, action: share.protected ? 'Change' : 'Set', clear: share.protected })
                 + '<div class="share-actions"><button data-deliver-rotate type="button">Rotate link</button><button data-deliver-revoke type="button">Revoke</button></div>'
             : '<p class="share-empty">Create a private gallery link for this collection.</p>'
-                + shareExpiryOptions()
+                + shareExpiryOptions(session.draft.expiry)
                 + deliverPasswordRow({ value: session.draft.password })
                 + '<div class="share-actions"><button data-deliver-create type="button">Create private link</button></div>');
     renderDeliverShell(session.name, 'private', body);
@@ -563,10 +645,11 @@ async function renderPrivateDeliver(session, token) {
         const result = await createCollectionShare(session.collectionId, { expiresInDays: session.draft.expiry ? Number(session.draft.expiry) : null, ...(session.draft.password ? { password: session.draft.password } : {}) });
         if (deliverOverlayIsCurrent(token) && result?.ok) {
             session.share = result.share;
-            showToast('Private link created');
+            clearDeliverDraft(session);
+            showDeliveryToast('Private link created for', session);
             emitSharedSurfacesChanged(session.collectionId);
             renderDeliver(session, token);
-        } else if (deliverOverlayIsCurrent(token)) showToast("Couldn't create private link");
+        } else if (deliverOverlayIsCurrent(token)) showDeliveryToast("Couldn't create private link for", session, { error: result });
     }));
     deliverOverlay.querySelector('[data-deliver-password-save]')?.addEventListener('click', (event) => withBusyButton(event.currentTarget, async () => {
         saveDeliverDraft(session);
@@ -575,7 +658,7 @@ async function renderPrivateDeliver(session, token) {
         if (deliverOverlayIsCurrent(token) && result?.ok) {
             session.share = result.share;
             session.draft.password = '';
-            showToast(share.protected ? 'Password changed' : 'Password set');
+            showDeliveryToast(share.protected ? 'Password changed for' : 'Password set for', session);
             emitSharedSurfacesChanged(session.collectionId);
             renderDeliver(session, token);
         }
@@ -584,7 +667,7 @@ async function renderPrivateDeliver(session, token) {
         const result = await createCollectionShare(session.collectionId, { clearPassword: true });
         if (deliverOverlayIsCurrent(token) && result?.ok) {
             session.share = result.share;
-            showToast('Password removed');
+            showDeliveryToast('Password removed for', session);
             emitSharedSurfacesChanged(session.collectionId);
             renderDeliver(session, token);
         }
@@ -593,7 +676,7 @@ async function renderPrivateDeliver(session, token) {
         const result = await createCollectionShare(session.collectionId, { rotate: true });
         if (deliverOverlayIsCurrent(token) && result?.ok) {
             session.share = result.share;
-            showToast('New private link created');
+            showDeliveryToast('New private link created for', session);
             emitSharedSurfacesChanged(session.collectionId);
             renderDeliver(session, token);
         }
@@ -602,7 +685,8 @@ async function renderPrivateDeliver(session, token) {
         const result = await revokeCollectionShare(session.collectionId);
         if (deliverOverlayIsCurrent(token) && result?.ok) {
             session.share = null;
-            showToast('Private link revoked');
+            clearDeliverDraft(session);
+            showDeliveryToast('Private link revoked for', session);
             emitSharedSurfacesChanged(session.collectionId);
             renderDeliver(session, token);
         }
@@ -616,9 +700,9 @@ function renderWebsiteDeliver(session, token) {
     const job = data?.job || null;
     const publishing = data?.publishing || {};
     const setupNeeded = publishing.enabled === false;
-    const busy = Boolean(data?.in_progress || (job && ['publishing', 'revoking'].includes(job.state)));
+    const busy = publishJobSettling(data);
     const count = Number(collectionById(session.collectionId)?.image_count || publish?.image_count || 0);
-    const slug = session.draft.slug || job?.slug || publish?.slug || slugifyName(session.name);
+    const slug = session.draft.slug || job?.slug || publish?.slug || slugifyName(session.name, 'gallery');
     const title = session.draft.title || job?.title || publish?.title || session.name;
     const url = data?.url || publish?.url || job?.url || '';
     const body = (setupNeeded ? '<div class="publish-setup"><b>Choose a publishing folder first.</b><p>Choose a folder for public galleries in System, then come back here to publish.</p><button class="btn primary" data-deliver-open-settings type="button">Open Publishing settings</button></div>' : '')
@@ -636,35 +720,44 @@ function renderWebsiteDeliver(session, token) {
     const slugInput = deliverOverlay.querySelector('[data-deliver-slug]');
     slugInput?.addEventListener('input', () => {
         saveDeliverDraft(session);
-        deliverOverlay.querySelector('.publish-confirm-copy').textContent = publishLeadText(count, slugifyName(slugInput.value), publish, publishing);
+        deliverOverlay.querySelector('.publish-confirm-copy').textContent = publishLeadText(count, slugifyName(slugInput.value, 'gallery'), publish, publishing);
     });
     const startPublish = async () => {
         saveDeliverDraft(session);
-        const result = await publishCollection(session.collectionId, { slug: slugifyName(session.draft.slug || slug), title: session.draft.title.trim() || title });
+        const result = await publishCollection(session.collectionId, { slug: slugifyName(session.draft.slug || slug, 'gallery'), title: session.draft.title.trim() || title });
         if (!deliverOverlayIsCurrent(token)) return;
         if (result.ok) {
-            showToast(publish ? 'Republishing gallery' : 'Publishing gallery');
+            clearDeliverDraft(session);
+            showDeliveryToast(publish ? 'Republishing website gallery for' : 'Publishing website gallery for', session);
             emitSharedSurfacesChanged(session.collectionId);
             pollDeliverPublish(session, token, true);
         } else {
             session.publish = { ...data, job: { state: 'error', error: result.data?.error || "Couldn't start publishing." } };
+            showDeliveryToast("Couldn't publish website gallery for", session, { error: result.data });
             renderDeliver(session, token);
         }
     };
     if (publish) bindDeliverConfirmButton('[data-deliver-publish]', 'Confirm republish', startPublish);
     else deliverOverlay.querySelector('[data-deliver-publish]')?.addEventListener('click', startPublish);
-    deliverOverlay.querySelector('[data-deliver-publish-retry]')?.addEventListener('click', startPublish);
+    deliverOverlay.querySelector('[data-deliver-retry]')?.addEventListener('click', startPublish);
+    const undoUnpublish = async () => {
+        const result = await publishCollection(session.collectionId, { slug: slugifyName(slug, 'gallery'), title });
+        if (result.ok) {
+            showDeliveryToast('Republishing website gallery for', session);
+            emitSharedSurfacesChanged(session.collectionId);
+            if (deliverOverlayIsCurrent(token)) pollDeliverPublish(session, token, true);
+        } else showDeliveryToast("Couldn't republish website gallery for", session, { error: result.data });
+    };
     deliverOverlay.querySelector('[data-deliver-unpublish]')?.addEventListener('click', async () => {
-        const ok = await confirmTypedCount({ title: 'Unpublish gallery', message: `Remove this public gallery from the website? Type ${fmt(count).replace(/,/g, '')} to confirm.`, count, confirmLabel: 'Unpublish' });
-        if (!ok) return;
         const result = await revokeCollectionPublish(session.collectionId);
         if (deliverOverlayIsCurrent(token) && result.ok) {
-            showToast('Unpublishing gallery');
+            clearDeliverDraft(session);
+            showDeliveryToast('Unpublishing website gallery for', session, { undo: undoUnpublish });
             emitSharedSurfacesChanged(session.collectionId);
             pollDeliverPublish(session, token, true);
-        }
+        } else if (deliverOverlayIsCurrent(token)) showDeliveryToast("Couldn't unpublish website gallery for", session, { error: result.data });
     });
-    if (busy) scheduleDeliverPoll(session, token);
+    if (busy && !deliverPoll) scheduleDeliverPoll(session, token);
     trapFocus(deliverOverlay, deliverOverlay.querySelector('input, button'));
 }
 
@@ -703,11 +796,12 @@ async function renderGalleryDeliver(session, token) {
                 if (!deliverOverlayIsCurrent(token)) return;
                 session.galleryData.gallery = result.gallery;
                 session.draft.password = '';
-                showToast(gallery ? 'Client gallery updated' : 'Client gallery created');
+                clearDeliverDraft(session);
+                showDeliveryToast(gallery ? 'Client gallery updated for' : 'Client gallery created for', session);
                 emitSharedSurfacesChanged(session.collectionId);
                 renderGalleryDeliver(session, token);
             } catch (error) {
-                showToast(error.message || 'Could not save client gallery');
+                showDeliveryToast("Couldn't save client gallery for", session, { error });
             }
         }));
         deliverOverlay.querySelector('[data-deliver-password-save]')?.addEventListener('click', () => deliverOverlay.querySelector('[data-deliver-gallery-save]')?.click());
@@ -719,10 +813,10 @@ async function renderGalleryDeliver(session, token) {
                 }));
                 if (!deliverOverlayIsCurrent(token)) return;
                 session.galleryData.gallery = result.gallery;
-                showToast('Password removed');
+                showDeliveryToast('Password removed for', session);
                 renderGalleryDeliver(session, token);
             } catch (error) {
-                showToast(error.message || 'Could not remove password');
+                showDeliveryToast("Couldn't remove password for", session, { error });
             }
         }));
         bindDeliverConfirmButton('[data-deliver-gallery-revoke]', 'Confirm revoke', async () => {
@@ -730,11 +824,12 @@ async function renderGalleryDeliver(session, token) {
                 await galleryEditor.revokeGalleryDelivery(session.collectionId, gallery.id);
                 if (!deliverOverlayIsCurrent(token)) return;
                 session.galleryData.gallery = null;
-                showToast('Client gallery revoked');
+                clearDeliverDraft(session);
+                showDeliveryToast('Client gallery revoked for', session);
                 emitSharedSurfacesChanged(session.collectionId);
                 renderGalleryDeliver(session, token);
             } catch (error) {
-                showToast(error.message || 'Could not revoke client gallery');
+                showDeliveryToast("Couldn't revoke client gallery for", session, { error });
             }
         });
         trapFocus(deliverOverlay, deliverOverlay.querySelector('input, select, button'));
@@ -758,26 +853,32 @@ function switchDeliverTab(session, tab) {
     if (!DELIVER_TABS.some(([id]) => id === tab)) return;
     saveDeliverDraft(session);
     session.activeTab = tab;
+    deliverOverlay.dataset.activeTab = tab;
+    localStorage.setItem(DELIVER_TAB_STORAGE_KEY, tab);
     renderDeliver(session);
 }
 
 function scheduleDeliverPoll(session, token) {
-    window.clearTimeout(deliverPollTimer);
-    deliverPollTimer = window.setTimeout(() => pollDeliverPublish(session, token), 2500);
+    pollDeliverPublish(session, token);
 }
 
-async function pollDeliverPublish(session, token, immediate = false) {
-    window.clearTimeout(deliverPollTimer);
+function pollDeliverPublish(session, token, immediate = false) {
+    deliverPoll?.cancel();
     if (!deliverOverlayIsCurrent(token) || deliverSession !== session) return;
-    session.publish = await getCollectionPublish(session.collectionId);
-    if (!deliverOverlayIsCurrent(token) || deliverSession !== session) return;
-    if (session.publish?.in_progress) scheduleDeliverPoll(session, token);
-    else {
-        if (!immediate && session.publish?.job?.state === 'revoked') showToast('Gallery unpublished');
-        emitSharedSurfacesChanged(session.collectionId);
-        loadCollections();
-    }
-    if (session.activeTab === 'website') renderDeliver(session, token);
+    deliverPoll = pollJob({
+        fetchStatus: () => getCollectionPublish(session.collectionId),
+        isDone: (publish) => !publishJobSettling(publish),
+        onTick: (publish) => {
+            if (!deliverOverlayIsCurrent(token) || deliverSession !== session) return;
+            session.publish = publish;
+            if (!publishJobSettling(publish)) {
+                if (!immediate && publish?.job?.state === 'revoked') showDeliveryToast('Website gallery unpublished for', session);
+                emitSharedSurfacesChanged(session.collectionId);
+                loadCollections();
+            }
+            if (session.activeTab === 'website') renderDeliver(session, token);
+        },
+    });
 }
 
 function startCollectionRename(collectionId) {
@@ -1249,7 +1350,7 @@ export async function openCollectionPicker(imageIds, { onDone = null } = {}) {
 
 export async function exportCurrentScope(format = 'csv', size = '') {
     const params = scopeParams({ format });
-    if (size) params.set('size', size);
+    const exportSize = format === 'zip' ? (size || savedOriginalsExportSize()) : size;
     if (viewState.bestOf && viewState.bestOfLimit != null) {
         params.set('sort', 'elo');
         params.set('limit', String(viewState.bestOfLimit));
@@ -1260,12 +1361,7 @@ export async function exportCurrentScope(format = 'csv', size = '') {
         count = ids.length;
         params.set('ids', ids.join(','));
     }
-    downloadExport(params, {
-        count: format === 'zip' ? count : 0,
-        message: format === 'zip'
-            ? `Preparing ${count} file${count === 1 ? '' : 's'}`
-            : `Exporting ${count} photo${count === 1 ? '' : 's'} as ${format.toUpperCase()}`,
-    });
+    exportScope({ format, size: exportSize, count, query: params });
 }
 
 export function openScopeExportMenu(anchor) {

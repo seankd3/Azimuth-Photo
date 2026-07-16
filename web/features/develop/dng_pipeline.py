@@ -241,11 +241,14 @@ def apply_baseline_exposure(
     *,
     file_baseline_exposure: float | None = None,
 ) -> np.ndarray:
-    """DNG stage 4. Per-file BaselineExposure wins over profile, then zero."""
+    """DNG stage 4: file BaselineExposure plus the active profile's offset."""
     if file_baseline_exposure is None:
         exposure = _finite_number((profile or {}).get("baseline_exposure"), 0.0)
     else:
         exposure = _finite_number(file_baseline_exposure, 0.0)
+    # DNG 1.7.1 BaselineExposureOffset is profile-scoped and additive.  This
+    # remains active when a LinearRaw base already includes the per-file tag.
+    exposure += _finite_number((profile or {}).get("baseline_exposure_offset"), 0.0)
     return np.asarray(linear_prophoto, dtype=np.float32) * np.float32(np.exp2(exposure))
 
 

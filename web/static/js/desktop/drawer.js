@@ -793,14 +793,6 @@ function renderRemote() {
     return `<section class="dr-sec" data-remote-state="${esc(state)}" data-remote-hub="1"><h3>Remote access</h3>${body}</section>`;
 }
 
-function renderSharedHome() {
-    return '<section class="dr-sec"><h3>Sharing</h3>'
-        + '<div class="drawer-action-row">'
-        + '<span>Private links and website galleries live together in Shared.</span>'
-        + '<button class="btn" id="drawer-open-shared" type="button">Open Shared view</button>'
-        + '</div></section>';
-}
-
 function detailsSection(title, description, body) {
     return `<details class="dr-sec dr-details" data-settings-section="${esc(title)}"${openSettingSections.has(title) ? ' open' : ''}>`
         + `<summary><span>${esc(title)}</span></summary>`
@@ -1318,6 +1310,7 @@ async function submitSourceAdd({ path, form }, { onSuccess } = {}) {
 function closeSourceAddFlow() {
     if (!sourceAddFlow) return;
     clearSourcePickerSelection();
+    releaseFocus(sourceAddFlow);
     sourceAddFlow.remove();
     sourceAddFlow = null;
     if (sourceAddFlowReturn && document.contains(sourceAddFlowReturn)) {
@@ -1356,10 +1349,11 @@ export function openSourceAddFlow({ onSuccess } = {}) {
     sourceAddFlow.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') {
             event.preventDefault();
+            event.stopPropagation();
             closeSourceAddFlow();
         }
     });
-    sourceAddFlow.querySelector('[data-source-picker-toggle]')?.focus();
+    trapFocus(sourceAddFlow, sourceAddFlow.querySelector('[data-source-picker-toggle]'));
     return true;
 }
 
@@ -1534,8 +1528,8 @@ async function returnToPublish() {
         showToast('Open Publish from the collection when ready');
         return;
     }
-    const { openPublishOverlay } = await import('./panel.js');
-    openPublishOverlay(target.collectionId, target.name || 'Collection');
+    const { openDeliverOverlay } = await import('./panel.js');
+    openDeliverOverlay(target.collectionId, target.name || 'Collection', null, target.tab);
 }
 
 function aiInstallActive(status = aiStatus || {}) {
@@ -1797,10 +1791,6 @@ function bindDrawerActions(body = document.getElementById('drawer-body')) {
         renderCurrentSystemSurface();
         showToast(result.dry_run ? 'HTTPS ready (dry-run)' : 'HTTPS ready on your tailnet');
     }));
-    body.querySelector('#drawer-open-shared')?.addEventListener('click', () => {
-        closeSystemDrawer();
-        setActiveLens('shared');
-    });
     body.querySelector('#drawer-thumb-size')?.addEventListener('change', (event) => {
         const previous = viewState.thumbSize;
         setThumbSize(event.target.value);
@@ -1832,6 +1822,7 @@ function resolvePublishReturnTarget() {
     return {
         collectionId: Number(overlay?.dataset.collectionId) || 0,
         name: overlay?.dataset.collectionName || 'Collection',
+        tab: overlay?.dataset.activeTab || 'website',
     };
 }
 
@@ -1905,14 +1896,12 @@ export function initDrawer() {
         }
     });
     document.addEventListener('click', (event) => {
-        const button = event.target.closest('#publish-open-settings, [data-deliver-open-settings]');
+        const button = event.target.closest('[data-deliver-open-settings]');
         if (!button) return;
         event.preventDefault();
         event.stopImmediatePropagation();
         const returnTo = resolvePublishReturnTarget();
-        if (button.matches('[data-deliver-open-settings]')) {
-            document.querySelector('#deliver-overlay #deliver-close')?.click();
-        } else document.getElementById('publish-close')?.click();
+        document.querySelector('#deliver-overlay #deliver-close')?.click();
         openPublishingSettings({ returnTo });
     }, true);
     on('thumbsize', () => {

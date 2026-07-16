@@ -21,6 +21,7 @@ const ADD_ITEMS = [
 const clone = (value) => JSON.parse(JSON.stringify(value || {}));
 const safeText = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const sliderValue = (number) => `${number > 0 ? '+' : ''}${number.toFixed(2)}`;
+const percentValue = (value, fallback = 1) => Math.round(clamp(number(value, fallback)) * 100);
 
 function correctionId() {
     return globalThis.crypto?.randomUUID?.() || `pa-mask-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -164,12 +165,23 @@ export class MaskingController {
         return `<article class="develop-mask-card ${open ? 'selected' : ''}" data-correction="${index}">
             <header><button class="develop-mask-eye" data-mask-eye data-tip="${active ? 'Hide mask adjustment' : 'Show mask adjustment'}" aria-pressed="${active}">${active ? '◉' : '○'}</button>
             <button class="develop-mask-name" data-mask-select data-tip="Select mask; double-click to rename"><span>${safeText(correction.CorrectionName || correction.Name || `Mask ${index + 1}`)}</span></button>
-            <button data-mask-duplicate data-tip="Duplicate mask">⧉</button><button data-mask-delete data-tip="Delete mask">×</button></header>
-            ${open ? `<div class="develop-mask-card-body"><div class="develop-mask-chips">${masks.map((mask, maskIndex) => `<button class="develop-mask-chip" data-mask-chip="${maskIndex}" data-tip="${kindOf(mask)} mask; click to invert"><i>${ICONS[kindOf(mask)]}</i>${safeText(kindOf(mask).replace('CircularGradient', 'Radial').replace('Gradient', 'Linear'))}${Number(mask.MaskBlendMode) === 1 ? ' −' : ''}</button>`).join('')}<button data-mask-add-part data-tip="Add to or subtract from this mask">+</button></div>
+            <button data-mask-duplicate data-tip="Duplicate mask">⧉</button><button data-mask-delete data-tip="Delete mask">×</button>${this.correctionAmountHtml(correction)}</header>
+            ${open ? `<div class="develop-mask-card-body"><div class="develop-mask-chips">${masks.map((mask, maskIndex) => this.maskRowHtml(mask, maskIndex)).join('')}<button data-mask-add-part data-tip="Add to or subtract from this mask" aria-label="Add or subtract a mask part">+</button></div>
             <div class="develop-mask-tools"><button data-mask-invert data-tip="Invert all masks in this adjustment">Invert</button><button data-mask-overlay data-tip="Toggle red mask overlay (O)" aria-pressed="${this.overlayShown}">Overlay</button></div>
             ${masks.map((mask, maskIndex) => this.rangeHtml(mask, maskIndex)).join('')}
             ${GROUPS.map(([name, sliders]) => `<div class="develop-mask-slider-group"><b>${name}</b>${sliders.map(([key, label, step]) => this.sliderHtml(correction, key, label, step)).join('')}</div>`).join('')}</div>` : ''}
         </article>`;
+    }
+
+    correctionAmountHtml(correction) {
+        const current = percentValue(correction.CorrectionAmount);
+        return `<label class="develop-mask-slider" data-correction-amount data-min="0" data-max="100" data-step="1" style="grid-column:2 / -1;padding-right:4px" data-tip="Drag to adjust correction amount; double-click to reset"><span>Amount</span><input type="range" min="0" max="100" step="1" value="${current}" style="--mask-slider-pct:${current}%" aria-label="Correction amount"><output>${current}</output></label>`;
+    }
+
+    maskRowHtml(mask, maskIndex) {
+        const kind = kindOf(mask);
+        const current = percentValue(mask.MaskValue);
+        return `<div style="display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:6px;width:100%"><button class="develop-mask-chip" data-mask-chip="${maskIndex}" data-tip="${kind} mask; click to invert"><i>${ICONS[kind]}</i>${safeText(kind.replace('CircularGradient', 'Radial').replace('Gradient', 'Linear'))}${Number(mask.MaskBlendMode) === 1 ? ' −' : ''}</button><label class="develop-mask-slider" data-mask-value="${maskIndex}" data-min="0" data-max="100" data-step="1" style="grid-template-columns:42px minmax(0,1fr) 26px" data-tip="Drag to adjust mask density; double-click to reset"><span>Density</span><input type="range" min="0" max="100" step="1" value="${current}" style="--mask-slider-pct:${current}%" aria-label="${kind} mask density"><output>${current}</output></label></div>`;
     }
 
     sliderHtml(correction, key, label, step = 1) {
@@ -236,6 +248,16 @@ export class MaskingController {
                 const mask = this.correction(index).CorrectionMasks[Number(chip.dataset.maskChip)]; mask.MaskInverted = !mask.MaskInverted;
                 this.emit('Invert Mask'); this.render();
             }));
+            card.querySelector('[data-correction-amount]') && this.bindPercentSlider(card.querySelector('[data-correction-amount]'), {
+                read: () => percentValue(this.correction(index)?.CorrectionAmount),
+                write: (value) => { this.correction(index).CorrectionAmount = value / 100; },
+                label: 'Correction Amount',
+            });
+            card.querySelectorAll('[data-mask-value]').forEach((row) => this.bindPercentSlider(row, {
+                read: () => percentValue(this.rangePart(index, Number(row.dataset.maskValue))?.MaskValue),
+                write: (value) => { this.rangePart(index, Number(row.dataset.maskValue)).MaskValue = value / 100; },
+                label: 'Mask Density',
+            }));
             card.querySelectorAll('[data-local-setting]').forEach((row) => this.bindSlider(row, index));
             card.querySelectorAll('[data-range-setting]').forEach((row) => this.bindRangeSlider(row, index));
             card.querySelectorAll('[data-range-invert]').forEach((button) => button.addEventListener('click', () => {
@@ -269,6 +291,56 @@ export class MaskingController {
         input.addEventListener('input', () => { commit(!began); began = true; });
         input.addEventListener('change', () => commit(!began));
         row.addEventListener('dblclick', () => { input.value = '0'; commit(true); });
+    }
+
+    bindPercentSlider(row, { read, write, label }) {
+        const input = row.querySelector('input');
+        const min = Number(row.dataset.min);
+        const max = Number(row.dataset.max);
+        const step = Number(row.dataset.step) || 1;
+        const setValue = (value, history = true) => {
+            const next = Math.max(min, Math.min(max, Math.round(value / step) * step));
+            input.value = String(next);
+            write(next);
+            row.querySelector('output').textContent = String(next);
+            this.emit(label, { history });
+        };
+        let began = false;
+        input.addEventListener('pointerdown', () => { began = false; });
+        input.addEventListener('input', () => { setValue(Number(input.value), !began); began = true; });
+        input.addEventListener('change', () => setValue(Number(input.value), !began));
+        row.addEventListener('pointerdown', (event) => {
+            if (event.target === input || event.button !== 0) return;
+            event.preventDefault();
+            const startX = event.clientX;
+            const startValue = read();
+            began = false;
+            row.setPointerCapture(event.pointerId);
+            const move = (next) => {
+                const sensitivity = next.shiftKey ? .1 : 1;
+                const delta = (next.clientX - startX) / Math.max(120, row.clientWidth) * (max - min) * sensitivity;
+                setValue(startValue + delta, !began); began = true;
+            };
+            const end = () => {
+                row.removeEventListener('pointermove', move);
+                row.removeEventListener('pointerup', end);
+                row.removeEventListener('pointercancel', end);
+            };
+            row.addEventListener('pointermove', move);
+            row.addEventListener('pointerup', end);
+            row.addEventListener('pointercancel', end);
+        });
+        row.addEventListener('dblclick', () => setValue(max));
+        input.addEventListener('keydown', (event) => {
+            const direction = event.key === 'ArrowUp' || event.key === 'ArrowRight' ? 1 : (event.key === 'ArrowDown' || event.key === 'ArrowLeft' ? -1 : 0);
+            if (!direction) return;
+            event.preventDefault();
+            setValue(Number(input.value) + direction * step * (event.shiftKey ? 10 : 1));
+        });
+        row.addEventListener('wheel', (event) => {
+            event.preventDefault();
+            setValue(Number(input.value) + (event.deltaY < 0 ? 1 : -1) * step * (event.shiftKey ? 10 : 1));
+        }, { passive: false });
     }
 
     rangePart(correctionIndex, maskIndex) {

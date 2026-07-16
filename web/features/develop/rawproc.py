@@ -50,7 +50,9 @@ BASE_MAGIC = b"PABASE1\0"
 BASE_HEADER = struct.Struct("<8sII")
 MAX_BASE_EDGE = 2048
 MEMORY_BASE_LIMIT = 2
-SOURCE_META_VERSION = 1
+# v2: native EXIF fallback fills camera_model on machines without ExifTool.
+# v3: cached metadata carries ISO so NR defaults never shell out per request.
+SOURCE_META_VERSION = 3
 UINT16_FULL_SCALE = np.float32(np.iinfo(np.uint16).max)
 
 
@@ -468,6 +470,7 @@ def decode_base(path: str | os.PathLike[str]) -> tuple[np.ndarray, dict[str, Any
     color_matrix = None
     color_matrix2 = None
     forward_matrix = None
+    iso = None
     from features.develop import lossydng
 
     if source.suffix.lower() == ".dng" and lossydng.is_linear_dng(str(source)):
@@ -481,6 +484,7 @@ def decode_base(path: str | os.PathLike[str]) -> tuple[np.ndarray, dict[str, Any
         color_matrix = lossy_meta.get("color_matrix1")
         color_matrix2 = lossy_meta.get("color_matrix2")
         forward_matrix = lossy_meta.get("forward_matrix")
+        iso = _finite_positive(lossy_meta.get("iso"))
     else:
         try:
             with rawpy.imread(str(source)) as raw:
@@ -489,6 +493,7 @@ def decode_base(path: str | os.PathLike[str]) -> tuple[np.ndarray, dict[str, Any
                 color_matrix = _rawpy_color_matrix(raw)
                 saturation_level = _finite_positive(raw.white_level)
                 white_levels = [saturation_level] * 4 if saturation_level is not None else []
+                iso = _finite_positive(getattr(getattr(raw, "metadata", None), "iso_speed", None))
                 postprocess_args = {
                     "use_camera_wb": True,
                     "output_bps": 16,
@@ -518,7 +523,10 @@ def decode_base(path: str | os.PathLike[str]) -> tuple[np.ndarray, dict[str, Any
                     # common gain at the linear decode boundary.
                     green_wb = _finite_positive(camera_wb[1]) if len(camera_wb) > 1 else None
                     wb_scale = np.float32(max(valid_wb) / (green_wb or min(valid_wb)))
-                    linear_rgb = np.asarray(rgb, dtype=np.float32) * wb_scale
+                    # In-place ops keep dev-perf's no-temporaries win while the
+                    # float frame is still linear for highlight reconstruction.
+                    linear_rgb = np.asarray(rgb, dtype=np.float32)
+                    np.multiply(linear_rgb, wb_scale, out=linear_rgb)
                     clip_levels = derive_libraw_clip_levels(
                         white_levels,
                         raw.black_level_per_channel,
@@ -527,7 +535,9 @@ def decode_base(path: str | os.PathLike[str]) -> tuple[np.ndarray, dict[str, Any
                     )
                     if clip_levels is not None:
                         linear_rgb = reconstruct_highlights(linear_rgb, clip_levels)
-                    rgb = np.asarray(np.clip(np.rint(linear_rgb), 0, UINT16_FULL_SCALE), dtype=np.uint16)
+                    np.rint(linear_rgb, out=linear_rgb)
+                    np.clip(linear_rgb, 0, UINT16_FULL_SCALE, out=linear_rgb)
+                    rgb = linear_rgb.astype(np.uint16)
         except Exception as exc:
             raise RawDecodeError(f"RAW decode failed: {exc}") from exc
     rgb = _resize_linear_uint16(np.asarray(rgb, dtype=np.uint16))
@@ -545,6 +555,8 @@ def decode_base(path: str | os.PathLike[str]) -> tuple[np.ndarray, dict[str, Any
         "linear": True,
         "base_kind": "raw",
     }
+    if iso is not None:
+        meta["iso"] = iso
     if as_shot_neutral and forward_matrix and (color_matrix or color_matrix2):
         meta["color"] = {
             "as_shot_neutral": [float(v) for v in as_shot_neutral],

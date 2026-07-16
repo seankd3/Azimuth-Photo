@@ -27,6 +27,7 @@ import {
 import { motionMs } from './motion.js';
 import { showToast } from './toast.js';
 import { icon } from '../icons.js';
+import { esc, slugifyName } from './dom.js';
 
 const SHARED_CHANGED_EVENT = 'shares/publishes-changed';
 const EMPTY_TREE = { nodes: [], links: [], root_ids: [] };
@@ -58,19 +59,11 @@ const collapsedCollections = new Set();
 const collapsedWebsite = new Set();
 const collapsedPrivate = new Set();
 
-const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (character) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[character]));
-
 const fmt = (value) => Number(value || 0).toLocaleString('en-US');
 const num = (value) => Number(value || 0);
 
 function pluralPhotos(count) {
     return `${fmt(count)} photo${Number(count) === 1 ? '' : 's'}`;
-}
-
-function slugFor(value) {
-    return String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'collection';
 }
 
 function button(label, action, { className = 'mini-btn', tip = label, attrs = '', iconName = '' } = {}) {
@@ -89,7 +82,7 @@ function loadingHtml() {
 }
 
 function errorHtml() {
-    return `<div class="publishing-error"><b>Couldn’t load Publishing</b><p>${esc(loadError || 'The archive did not respond.')}</p>${button('Try again', 'retry', { className: 'btn', tip: 'Reload Publishing' })}</div>`;
+    return `<div class="publishing-error"><b>Couldn’t load Shared</b><p>${esc(loadError || 'The archive did not respond.')}</p>${button('Try again', 'retry', { className: 'btn', tip: 'Reload Shared' })}</div>`;
 }
 
 function animateOpen(element) {
@@ -446,7 +439,7 @@ async function createFromCollection(collection, area, parentId, position) {
         source_collection_id: num(collection.id),
         position,
         title: collection.name || source.name || 'Untitled collection',
-        slug: slugFor(collection.name || source.name),
+        slug: slugifyName(collection.name || source.name),
         image_count: num(source.own_image_count),
         share_token: null,
         share_protected: false,

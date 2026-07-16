@@ -219,8 +219,15 @@ def decode_lossy_dng(path: str, max_px: int | None = None):
         lens_model = _tag("LensModel", *tag_pages) or _tag("Lens", *tag_pages)
         focal_length_value = _tag("FocalLength", *tag_pages)
         aperture_value = _tag("FNumber", *tag_pages)
+        iso_value = _tag("ISOSpeedRatings", *tag_pages)
+        if iso_value is None:
+            iso_value = _tag("PhotographicSensitivity", *tag_pages)
         focal_length = _rationals(focal_length_value)[0] if focal_length_value is not None else None
         aperture = _rationals(aperture_value)[0] if aperture_value is not None else None
+        try:
+            iso = _rationals(iso_value)[0] if iso_value is not None else None
+        except (IndexError, TypeError, ValueError):
+            iso = None
 
         black3 = np.array((black * 3)[:3] if len(black) < 3 else black[:3], dtype=np.float64)
         white3 = np.array((white * 3)[:3] if len(white) < 3 else white[:3], dtype=np.float64)
@@ -281,6 +288,7 @@ def decode_lossy_dng(path: str, max_px: int | None = None):
             "camera_model": str(camera_model).strip() if camera_model else "",
             "camera_make": str(camera_make).strip() if camera_make else "",
             "lens_model": str(lens_model).strip() if lens_model else "",
+            "iso": float(iso) if iso is not None else None,
             "focal_length": float(focal_length) if focal_length is not None else None,
             "aperture": float(aperture) if aperture is not None else None,
         }

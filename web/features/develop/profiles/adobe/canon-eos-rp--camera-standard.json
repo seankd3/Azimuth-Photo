@@ -1,7 +1,8 @@
 {
   "baseline_exposure": 0.3,
+  "baseline_exposure_offset": -0.15,
   "camera_model": "Canon EOS RP",
-  "content_hash": "9999a8b7b86b439cb3dbe25a2d3fd7ccd60495bdc5694d7fd5697f23cb185d08",
+  "content_hash": "8d5ba9f8505c21cb4d3017ad633c93c1ee161e1c96fee5bced79d8c7ee6e35b2",
   "illuminants": {
     "calibration_illuminant1": 17,
     "calibration_illuminant2": 21

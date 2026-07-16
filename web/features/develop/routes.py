@@ -181,6 +181,13 @@ def _json_settings(raw: str | None) -> dict[str, Any]:
     return result if isinstance(result, dict) else {}
 
 
+def _resolved_settings(raw: str | None, metadata: dict[str, Any] | None, source_path: str | None) -> dict[str, Any]:
+    """Add camera NR defaults at the server settings boundary, never on disk."""
+    from features.develop.noise_profiles import resolve_file_defaults
+
+    return resolve_file_defaults(_json_settings(raw), metadata, source_path)
+
+
 def _profiled_meta(meta: dict[str, Any] | None, source_path: str | None) -> dict[str, Any]:
     """Resolve Adobe styling at request time without changing the base cache."""
     result = dict(meta or {})
@@ -692,7 +699,7 @@ async def api_develop_proof_tile(
     try:
         tile = await render_proof_tile_async(
             image["filepath"],
-            _json_settings(row["settings"]) if row else {},
+            _resolved_settings(row["settings"] if row else None, cached_meta, image["filepath"]),
             u=u,
             v=v,
             edge=edge,
@@ -761,7 +768,7 @@ async def api_get_develop(image_id: int):
     meta["canvas_color_profile"] = default_render_color_profile(meta)
     row = await _load_settings(image_id)
     return {
-        "settings": _json_settings(row["settings"]) if row else {},
+        "settings": _resolved_settings(row["settings"] if row else None, meta, image["filepath"]),
         "origin": row["origin"] if row else "user",
         "meta": meta,
         "history": await _history(image_id),
@@ -942,7 +949,7 @@ async def api_export_develop(image_id: int, body: DevelopExportBody):
     row = await _load_settings(image_id)
     cached_meta = rawproc.read_base_metadata(image_id) or {}
     asshot = cached_meta.get("as_shot") if isinstance(cached_meta, dict) else {}
-    settings = _json_settings(row["settings"]) if row else {}
+    settings = _resolved_settings(row["settings"] if row else None, cached_meta, image["filepath"])
     try:
         output_path = await render_export_async(
             image["filepath"],
@@ -1033,7 +1040,7 @@ async def _run_batch_export(body: DevelopBatchExportBody) -> None:
         try:
             output_path = await render_export_async(
                 image["filepath"],
-                _json_settings(row["settings"]) if row else {},
+                _resolved_settings(row["settings"] if row else None, cached_meta, image["filepath"]),
                 output_format=body.format,
                 quality=body.quality,
                 max_px=body.max_px,
