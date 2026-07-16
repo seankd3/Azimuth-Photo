@@ -3,7 +3,7 @@
 // raw|jpg|tif file_type group aliases and flag scopes.
 
 import { getFilterOptions, getPeople, getTags, ignorePerson, labelPerson, writeFailureMessage } from './api.js';
-import { clearScope, nav, patchScope, scope, setScope } from './state.js';
+import { clearScope, nav, patchScope, scope, scopeActive, setScope } from './state.js';
 import { dismissSheetThen, openSheet } from './selection.js';
 import { showToast } from './toast.js';
 import { icon } from '../icons.js';
@@ -59,6 +59,11 @@ function rememberSearch(q) {
     }
 }
 
+function applySearchScope(patch) {
+    if (scopeActive()) patchScope(patch);
+    else setScope(patch);
+}
+
 function commitSearch(raw) {
     const q = String(raw || '').trim();
     if (!q) return;
@@ -68,14 +73,14 @@ function commitSearch(raw) {
         const kind = operator[1].toLowerCase();
         const value = operator[2].trim();
         if (!value) return;
-        setScope({
+        applySearchScope({
             [kind]: value,
             label: `${kind}:${value}`,
         });
         nav.setTab('photos');
         return;
     }
-    setScope({ q, label: q });
+    applySearchScope({ q, label: q });
     nav.setTab('photos');
 }
 
