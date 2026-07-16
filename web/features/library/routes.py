@@ -27,7 +27,8 @@ async def api_rankings(
     orientation: str = "", compared: str = "", min_stars: int = 0,
     folder: str = "", flag: str = "", date_taken: str = "", file_type: str = "",
     camera: str = "", lens: str = "", tag: str = "", q: str = "", deep: bool = False, people: str = "",
-    import_batch: int = 0, stacks: str = "expanded", request: Request = None,
+    import_batch: int = 0, stacks: str = "expanded", ids: str = "", collection_id: int = 0,
+    request: Request = None,
 ):
     if _rankings_handler is None:
         raise RuntimeError("Library routes are not configured")
@@ -54,6 +55,8 @@ async def api_rankings(
                 people=people,
                 import_batch=import_batch,
                 stacks=stacks,
+                ids=ids,
+                collection_id=collection_id,
                 request=request,
             )
     except Exception as exc:

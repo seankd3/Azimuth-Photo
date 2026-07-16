@@ -214,9 +214,10 @@ def ranking_count_cache_key(
     visible_thumb_size: str = "",
     cache_root: str = "",
     text_query: str = "",
+    collection_id: int = 0,
     exclude_collapsed_stack_members: bool = False,
 ):
-    if id_filter is not None:
+    if id_filter is not None or collection_id:
         return None
     return (
         orientation or "",
@@ -253,9 +254,10 @@ def facet_cache_key(
     cache_root: str = "",
     id_filter: set | None = None,
     text_query: str = "",
+    collection_id: int = 0,
     exclude_collapsed_stack_members: bool = False,
 ) -> tuple | None:
-    if id_filter is not None or text_query:
+    if id_filter is not None or text_query or collection_id:
         return None
     return (
         orientation or "",
@@ -350,6 +352,7 @@ def ranking_filter_parts(
     tag: str = "", caption_model_key: str = "",
     visible_thumb_size: str = "", cache_root: str = "",
     text_query: str = "",
+    collection_id: int = 0,
     include_source: bool = True,
     exclude_collapsed_stack_members: bool = False,
 ) -> tuple[list[str], list]:
@@ -470,6 +473,13 @@ def ranking_filter_parts(
                     + ")"
                 )
                 params.extend([pattern] * len(fields))
+
+    if collection_id:
+        conditions.append(
+            "EXISTS (SELECT 1 FROM collection_images ci "
+            "WHERE ci.collection_id = ? AND ci.image_id = i.id)"
+        )
+        params.append(int(collection_id))
 
     if visible_thumb_size and cache_root:
         conditions.append(
@@ -629,6 +639,7 @@ async def rankings(
     tag: str = "",
     caption_model_key: str = "",
     id_filter: set | None = None,
+    collection_id: int = 0,
     visible_thumb_size: str = "",
     cache_root: str = "",
     text_query: str = "",
@@ -661,6 +672,7 @@ async def rankings(
         visible_thumb_size=visible_thumb_size,
         cache_root=cache_root,
         text_query=text_query,
+        collection_id=collection_id,
         include_source=not all_catalog_images_active,
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
     )
@@ -678,6 +690,7 @@ async def rankings(
             visible_thumb_size
             and cache_root
             and id_filter is None
+            and not collection_id
             and all_sources_available
             and use_cache_first_visible
             and not has_absolute_folder_range(folder)
@@ -695,6 +708,7 @@ async def rankings(
                 tag=tag,
                 caption_model_key=caption_model_key,
                 text_query=text_query,
+                collection_id=collection_id,
                 include_source=False,
                 exclude_collapsed_stack_members=exclude_collapsed_stack_members,
             )
@@ -771,6 +785,7 @@ async def rankings_cached(
     tag: str = "",
     caption_model_key: str = "",
     id_filter: set | None = None,
+    collection_id: int = 0,
     visible_thumb_size: str = "",
     cache_root: str = "",
     text_query: str = "",
@@ -787,6 +802,7 @@ async def rankings_cached(
         visible_thumb_size
         and cache_root
         and id_filter is None
+        and not collection_id
         and (sort in VISIBLE_CACHE_FIRST_SORTS or bool(text_query))
         and all_sources_available_for_visible
         and await cache_entry_count(visible_thumb_size, cache_root) <= RANKING_CACHE_FIRST_VISIBLE_LIMIT
@@ -827,6 +843,7 @@ async def rankings_cached(
         tag=tag,
         caption_model_key=caption_model_key,
         id_filter=id_filter,
+        collection_id=collection_id,
         visible_thumb_size=visible_thumb_size,
         cache_root=cache_root,
         text_query=text_query,
@@ -848,11 +865,12 @@ def has_ranking_count_filters(
     tag: str = "",
     id_filter: set | None = None,
     text_query: str = "",
+    collection_id: int = 0,
     exclude_collapsed_stack_members: bool = False,
 ) -> bool:
     return bool(
         orientation or compared or min_stars > 0 or folder or flag or date_taken
-        or file_type or camera or lens or tag or id_filter is not None or text_query
+        or file_type or camera or lens or tag or id_filter is not None or text_query or collection_id
         or exclude_collapsed_stack_members
     )
 
@@ -873,6 +891,7 @@ async def count_rankings_uncached(
     tag: str = "",
     caption_model_key: str = "",
     id_filter: set | None = None,
+    collection_id: int = 0,
     visible_thumb_size: str = "",
     cache_root: str = "",
     text_query: str = "",
@@ -893,6 +912,7 @@ async def count_rankings_uncached(
         tag,
         id_filter,
         text_query,
+        collection_id,
         exclude_collapsed_stack_members,
     ):
         if not visible_thumb_size or not cache_root:
@@ -929,7 +949,7 @@ async def count_rankings_uncached(
     conn = await connection.open_async(db_path)
     try:
         all_sources_available = int(catalog_counts.get("removed_images") or 0) == 0
-        if visible_thumb_size and cache_root and id_filter is None:
+        if visible_thumb_size and cache_root and id_filter is None and not collection_id:
             conditions, params = ranking_filter_parts(
                 orientation=orientation,
                 compared=compared,
@@ -1000,6 +1020,7 @@ async def count_rankings_uncached(
             visible_thumb_size=visible_thumb_size,
             cache_root=cache_root,
             text_query=text_query,
+            collection_id=collection_id,
             include_source=not all_sources_available,
             exclude_collapsed_stack_members=exclude_collapsed_stack_members,
         )
@@ -1058,6 +1079,7 @@ async def count_rankings_uncached_with_visible_cache(
     tag: str = "",
     caption_model_key: str = "",
     id_filter: set | None = None,
+    collection_id: int = 0,
     visible_thumb_size: str = "",
     cache_root: str = "",
     text_query: str = "",
@@ -1081,6 +1103,7 @@ async def count_rankings_uncached_with_visible_cache(
         tag=tag,
         caption_model_key=caption_model_key,
         id_filter=id_filter,
+        collection_id=collection_id,
         visible_thumb_size=visible_thumb_size,
         cache_root=cache_root,
         text_query=text_query,
@@ -1106,6 +1129,7 @@ async def count_rankings_cached(
     tag: str = "",
     caption_model_key: str = "",
     id_filter: set | None = None,
+    collection_id: int = 0,
     visible_thumb_size: str = "",
     cache_root: str = "",
     text_query: str = "",
@@ -1128,6 +1152,7 @@ async def count_rankings_cached(
         visible_thumb_size=visible_thumb_size,
         cache_root=cache_root,
         text_query=text_query,
+        collection_id=collection_id,
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
     )
     if cache_key is not None:
@@ -1152,6 +1177,7 @@ async def count_rankings_cached(
         tag=tag,
         caption_model_key=caption_model_key,
         id_filter=id_filter,
+        collection_id=collection_id,
         visible_thumb_size=visible_thumb_size,
         cache_root=cache_root,
         text_query=text_query,
