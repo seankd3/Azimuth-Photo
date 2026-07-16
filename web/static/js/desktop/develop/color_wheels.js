@@ -57,7 +57,10 @@ export class ColorWheels {
             canvas.addEventListener('dblclick', () => this.reset(key));
             const luminance = host.querySelector(`[data-wheel-lum="${key}"]`);
             let gesture = null;
-            luminance.addEventListener('pointerdown', () => { gesture = { previousSettings: snapshotSettings(this.settings), settings: this.settings, changed: false }; });
+            luminance.addEventListener('pointerdown', (event) => {
+                luminance.setPointerCapture(event.pointerId);
+                gesture = { previousSettings: snapshotSettings(this.settings), settings: this.settings, changed: false };
+            });
             luminance.addEventListener('input', (event) => {
                 if (gesture && gesture.settings !== this.settings) { gesture = null; return; }
                 const value = Number(event.target.value);
