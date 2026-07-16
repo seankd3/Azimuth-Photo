@@ -25,6 +25,7 @@ from features.imports import taxonomy
 from features.library import geodata, keywords
 from features.quality import routes as quality_routes
 from features.sync import satellite
+from image_headers import read_header_dimensions
 
 
 SUPPORTED_EXTENSIONS = set(scanner.SUPPORTED_EXTENSIONS) | card.VIDEO_EXTENSIONS
@@ -526,7 +527,17 @@ async def _register_file(path: str, entry: dict, content_hash: str, *, source_ro
     root = source_root or str(originals_root())
     source = await db.add_or_restore_source(root)
     stat = await asyncio.to_thread(os.stat, path)
-    await db.insert_images_batch([(Path(path).name, path, Path(path).suffix.lower(), int(stat.st_size), float(stat.st_mtime))], source_id=int(source["id"]))
+    dimensions = await asyncio.to_thread(
+        read_header_dimensions, path, budget_seconds=scanner.SCAN_HEADER_BUDGET_SECONDS
+    )
+    if dimensions is None:
+        orientation = None
+        aspect_ratio = None
+    else:
+        width, height = dimensions
+        orientation = "landscape" if width >= height else "portrait"
+        aspect_ratio = round(width / height, 4)
+    await db.insert_images_batch([(Path(path).name, path, Path(path).suffix.lower(), int(stat.st_size), float(stat.st_mtime), orientation, aspect_ratio)], source_id=int(source["id"]))
     image_id = await import_repository.set_image_content_hash(db.DB_PATH, path, content_hash)
     if image_id is None:
         raise RuntimeError("Verified import was not registered")

@@ -66,6 +66,48 @@ class StagedImportTests(BackendTestCase):
             else:
                 os.environ["PHOTOARCHIVE_ORIGINALS_DIR"] = old_root
 
+    async def test_staged_import_registers_aspect_at_insert(self):
+        # Placeholder cards need final geometry from the first render
+        # (docs/ASPECT_AT_SCAN_SPEC.md): a canvas import must store
+        # orientation + aspect_ratio at registration, not wait for the
+        # metadata worker.
+        from PIL import Image
+
+        root = Path(self.tempdir.name)
+        originals = root / "originals"
+        old_root = os.environ.get("PHOTOARCHIVE_ORIGINALS_DIR")
+        os.environ["PHOTOARCHIVE_ORIGINALS_DIR"] = str(originals)
+        try:
+            dcim = root / "CARD" / "DCIM"
+            camera = dcim / "100CANON"
+            camera.mkdir(parents=True)
+            shot = camera / "WIDE0001.JPG"
+            Image.new("RGB", (400, 300)).save(shot, "JPEG")
+
+            scan = await self._card_scan(dcim, [self._entry(dcim, shot)])
+            job = await staging.start_commit(scan, keys="all_checked_default", mode="copy", skip_suspects=True, clear_card=False, keyword_paths=[], collection_id=None)
+            await self._wait(job)
+            self.assertEqual(job.phase, "complete")
+
+            from data import connection
+            conn = await connection.open_async(db.DB_PATH)
+            try:
+                cursor = await conn.execute(
+                    "SELECT orientation, aspect_ratio FROM images WHERE filename = ?",
+                    (shot.name,),
+                )
+                row = await cursor.fetchone()
+            finally:
+                await connection.close_async(conn, db_path=db.DB_PATH)
+            self.assertIsNotNone(row)
+            self.assertEqual(row["orientation"], "landscape")
+            self.assertAlmostEqual(float(row["aspect_ratio"]), 400 / 300, places=3)
+        finally:
+            if old_root is None:
+                os.environ.pop("PHOTOARCHIVE_ORIGINALS_DIR", None)
+            else:
+                os.environ["PHOTOARCHIVE_ORIGINALS_DIR"] = old_root
+
     async def test_alpha_png_preview_encodes_as_jpeg(self):
         from PIL import Image
 
