@@ -206,10 +206,9 @@ async function paintDisplayBlob(blob, token, phase, orientation = 1) {
     return true;
 }
 
-async function paintPlaceholder(imageId, token) {
+async function paintPlaceholder(imageId, token, orientation = 1) {
     try {
         const response = await fetch(`/api/develop/${imageId}/base.jpg`, fetchOptionsWithTimeout({}, 5_000));
-        const orientation = Number(response.headers.get('X-Develop-Orientation')) || 1;
         if (response.ok && await paintDisplayBlob(await response.blob(), token, 'base-jpg', orientation)) return;
     } catch { /* Fall through to the already-cached Library image. */ }
     try {
@@ -218,6 +217,11 @@ async function paintPlaceholder(imageId, token) {
         const response = await fetch(`${thumbUrl('lg', imageId)}?cached=1`, fetchOptionsWithTimeout({}, 5_000));
         if (response.ok) await paintDisplayBlob(await response.blob(), token, 'library-lg');
     } catch { /* The explicit staged status remains the final fallback. */ }
+}
+
+function displayOrientation(entry) {
+    const orientation = Number(entry?.settings?.Orientation ?? entry?.orientation) || 1;
+    return [3, 6, 8].includes(orientation) ? orientation : 1;
 }
 
 function setControlsLoading(loading) {
@@ -569,7 +573,6 @@ async function openImage(image) {
     setTimeout(() => {
         if (token === loadingToken && !canvas.classList.contains('ready') && !canvas.classList.contains('preview-ready')) setStatus('Developing preview…', { busy: true });
     }, 8000);
-    paintPlaceholder(image.id, token);
     try {
         let entry = stateCache.get(Number(image.id));
         const cachedEntry = Boolean(entry);
@@ -582,10 +585,12 @@ async function openImage(image) {
                     as_shot_tint: payload.meta?.as_shot?.tint ?? payload.meta?.as_shot_tint,
                     color: payload.meta?.color ?? null,
                 },
+                orientation: Number(payload.orientation) || 1,
                 undo: [], redo: [], serverHistory: payload.history || [],
             };
             stateCache.set(Number(image.id), entry);
         }
+        paintPlaceholder(image.id, token, displayOrientation(entry));
         setUnsavedIndicator();
         if (token !== loadingToken) return;
         entry.imageId = Number(image.id);

@@ -444,6 +444,7 @@ class DevelopBackendTests(unittest.TestCase):
     def test_base_endpoints_and_pregen_contract(self):
         self._write_cached_base()
         self.client.put(f"/api/develop/{self.raw_id}", json={"settings": {"Orientation": 3}})
+        entry = self.client.get(f"/api/develop/{self.raw_id}")
         # A warm preview must be a pure disk response: the route may not enter
         # the RAW decoder before the browser gets its first visible image.
         with mock.patch.object(rawproc, "ensure_base_cache", side_effect=AssertionError("must not decode warm base")):
@@ -458,9 +459,37 @@ class DevelopBackendTests(unittest.TestCase):
         self.assertEqual((width, height, parsed.dtype), (1, 1, np.dtype("<u2")))
         self.assertEqual(preview.status_code, 200)
         self.assertEqual(preview.headers["content-type"], "image/jpeg")
-        self.assertEqual(preview.headers["x-develop-orientation"], "3")
+        self.assertNotIn("x-develop-orientation", preview.headers)
+        self.assertEqual(entry.json()["orientation"], 3)
         self.assertEqual(pregen.status_code, 202)
         self.assertEqual(pregen.json()["queued"], [])
+
+    def test_fresh_import_entry_uses_source_exif_orientation(self):
+        exif = Image.Exif()
+        exif[274] = 3
+        Image.new("RGB", (8, 6), (128, 128, 128)).save(
+            self.jpg_path,
+            quality=100,
+            subsampling=0,
+            exif=exif,
+        )
+        self._write_cached_base(self.jpg_id)
+
+        async def settings_row():
+            conn = await db.get_db()
+            try:
+                return await (
+                    await conn.execute("SELECT image_id FROM develop_settings WHERE image_id = ?", (self.jpg_id,))
+                ).fetchone()
+            finally:
+                await conn.close()
+
+        self.assertIsNone(asyncio.run(settings_row()))
+
+        response = self.client.get(f"/api/develop/{self.jpg_id}")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["orientation"], 3)
 
     def test_cold_base_artifacts_start_background_generation_and_return_202(self):
         with mock.patch.object(develop_routes, "_start_base_generation") as start_generation:
