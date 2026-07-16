@@ -13,7 +13,6 @@ import tempfile
 import time
 import zipfile
 from collections.abc import Awaitable, Callable
-from http.client import IncompleteRead
 from pathlib import Path
 
 from fastapi import APIRouter, Request
@@ -25,6 +24,7 @@ from starlette.background import BackgroundTask
 from data import connection
 from core.source_files import source_file_is_safe
 from features.publishing import galleries
+from features.publishing.downloads import zip_gallery
 from features.share import auth
 from features.sync import readthrough
 import settings
@@ -361,73 +361,7 @@ async def public_gallery_download(token: str, size: str, image_id: int, request:
     )
 
 
-def _zip_gallery(gallery: dict, destination: str) -> dict:
-    """Build a local zip from frozen members. Preview sizes remain JPEG-only."""
-    import thumbnails
-
-    size = gallery["download_size"]
-    skipped = []
-    included = 0
-    with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for image in gallery["images"]:
-            filename = Path(image["filename"])
-            image_id = int(image["id"])
-            remote = int(image.get("hub_remote") or 0) == 1
-            try:
-                if remote:
-                    response = (
-                        readthrough.open_hub_original(int(image.get("hub_image_id") or 0))
-                        if size == "original"
-                        else readthrough.open_hub_preview(int(image.get("hub_image_id") or 0), size)
-                    )
-                    if response is None:
-                        raise FileNotFoundError("Hub media unavailable")
-                    arcname = (
-                        _attachment_name(image_id, filename.name)
-                        if size == "original"
-                        else _attachment_name(image_id, filename.name, suffix=".jpg")
-                    )
-                    try:
-                        with tempfile.SpooledTemporaryFile(max_size=8 * 1024 * 1024) as staged:
-                            shutil.copyfileobj(response, staged, length=1024 * 1024)
-                            staged.seek(0)
-                            with archive.open(arcname, "w") as target:
-                                shutil.copyfileobj(staged, target, length=1024 * 1024)
-                    finally:
-                        response.close()
-                elif size == "original":
-                    if not source_file_is_safe(
-                        str(image.get("filepath") or ""),
-                        str(image.get("source_path") or ""),
-                    ):
-                        raise FileNotFoundError("Local original unavailable")
-                    archive.write(
-                        image["filepath"],
-                        arcname=_attachment_name(image_id, filename.name),
-                    )
-                else:
-                    data = asyncio.run(thumbnails.get_thumbnail(image["filepath"], size, image_id))
-                    if not data:
-                        raise FileNotFoundError("Preview unavailable")
-                    archive.writestr(_attachment_name(image_id, filename.name, suffix=".jpg"), data)
-                included += 1
-            except (IncompleteRead, OSError, ValueError):
-                skipped.append({
-                    "image_id": image_id,
-                    "filename": filename.name,
-                    "reason": "hub unavailable" if remote else "source unavailable",
-                })
-        if skipped:
-            archive.writestr(
-                "azimuth-download-manifest.json",
-                json.dumps({
-                    "requested_count": len(gallery["images"]),
-                    "included_count": included,
-                    "skipped_count": len(skipped),
-                    "skipped": skipped,
-                }, indent=2),
-            )
-    return {"path": destination, "included": included, "skipped": skipped}
+_zip_gallery = zip_gallery
 
 
 @router.get("/s/gallery/{token}/download-all")
@@ -438,7 +372,7 @@ async def public_gallery_download_all(token: str, request: Request):
     handle = tempfile.NamedTemporaryFile(prefix="photoarchive-gallery-", suffix=".zip", delete=False)
     handle.close()
     try:
-        result = await asyncio.to_thread(_zip_gallery, gallery, handle.name)
+        result = await asyncio.to_thread(zip_gallery, gallery, handle.name)
     except Exception:
         Path(handle.name).unlink(missing_ok=True)
         return _public_response(JSONResponse({"error": "Could not prepare gallery download"}, status_code=422))

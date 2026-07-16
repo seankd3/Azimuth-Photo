@@ -428,7 +428,8 @@ async def resolve_token(db_path: str, token: str) -> dict | None:
         else:
             images_cursor = await conn.execute(
                 """
-                SELECT i.id, i.filename, COALESCE(i.aspect_ratio, 1.5) AS aspect_ratio, i.date_taken
+                SELECT i.id, i.filename, i.filepath, i.hub_remote, i.hub_image_id,
+                       source.path AS source_path, COALESCE(i.aspect_ratio, 1.5) AS aspect_ratio, i.date_taken
                 FROM share_images si
                 JOIN images i ON i.id = si.image_id
                 JOIN catalog_sources source ON source.id = i.source_id AND source.included = 1
