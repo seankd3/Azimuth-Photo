@@ -912,6 +912,56 @@ class CompareTests(BackendTestCase):
         self.assertEqual(duel_ids, {first, second})
         self.assertNotIn(outside, duel_ids)
 
+    async def test_scoped_search_keeps_empty_collection_disjoint_from_batch(self):
+        old_collection = compare_service._resolve_smart_collection_image_ids
+        old_batch = compare_service._get_import_batch_image_ids
+
+        async def empty_collection(_collection_id):
+            return set()
+
+        async def batch_ids(_batch_id):
+            return {42}
+
+        compare_service._resolve_smart_collection_image_ids = empty_collection
+        compare_service._get_import_batch_image_ids = batch_ids
+        try:
+            scoped = await compare_service._scoped_search(
+                {},
+                None,
+                collection_id=1,
+                import_batch=1,
+            )
+        finally:
+            compare_service._resolve_smart_collection_image_ids = old_collection
+            compare_service._get_import_batch_image_ids = old_batch
+
+        self.assertEqual(scoped["id_filter"], set())
+
+    async def test_scoped_search_intersects_ids_collection_and_batch_after_empty(self):
+        old_collection = compare_service._resolve_smart_collection_image_ids
+        old_batch = compare_service._get_import_batch_image_ids
+
+        async def collection_ids(_collection_id):
+            return {2, 3}
+
+        async def batch_ids(_batch_id):
+            return {3, 4}
+
+        compare_service._resolve_smart_collection_image_ids = collection_ids
+        compare_service._get_import_batch_image_ids = batch_ids
+        try:
+            scoped = await compare_service._scoped_search(
+                {},
+                [1],
+                collection_id=1,
+                import_batch=1,
+            )
+        finally:
+            compare_service._resolve_smart_collection_image_ids = old_collection
+            compare_service._get_import_batch_image_ids = old_batch
+
+        self.assertEqual(scoped["id_filter"], set())
+
     async def test_mosaic_next_scoped_tiny_pool_returns_not_enough_shape(self):
         source = await self._source()
         first = await self._image(source["id"], "first.jpg", elo=1500)

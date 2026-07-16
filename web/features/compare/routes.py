@@ -85,9 +85,9 @@ def _configured() -> None:
         raise RuntimeError("Compare routes are not configured")
 
 
-def _parse_scoped_ids(ids: str | None) -> tuple[list[int], JSONResponse | None]:
+def _parse_scoped_ids(ids: str | None) -> tuple[list[int] | None, JSONResponse | None]:
     if ids is None:
-        return [], None
+        return None, None
     if len(ids) > MAX_SCOPED_IDS_LENGTH:
         return [], JSONResponse(
             {"error": f"ids is limited to {MAX_SCOPED_IDS_LENGTH} characters"},
