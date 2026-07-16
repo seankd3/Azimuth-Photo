@@ -301,8 +301,12 @@ function openMenu(button, groupIndex) {
                 const coll = result.collection || {};
                 showToast('Collection created from event', {
                     undo: coll.id ? async () => {
-                        await removeFromCollection(coll.id, ids);
-                        showToast('Event photos removed from collection');
+                        const removed = await removeFromCollection(coll.id, ids);
+                        if (removed?.ok) showToast('Event photos removed from collection');
+                        else {
+                            showToast("Couldn't undo collection change");
+                            emit('collections:refresh');
+                        }
                     } : null,
                 });
             } else showToast("Couldn't create collection");

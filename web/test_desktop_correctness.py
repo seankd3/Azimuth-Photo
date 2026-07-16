@@ -11,6 +11,10 @@ def read(*parts):
     return (WEB / "static" / "js" / "desktop").joinpath(*parts).read_text(encoding="utf-8")
 
 
+def read_mobile(*parts):
+    return (WEB / "static" / "js" / "mobile").joinpath(*parts).read_text(encoding="utf-8")
+
+
 class DesktopCorrectnessTests(unittest.TestCase):
     def test_develop_keyboard_close_unmounts_even_while_grid_is_active(self):
         keyboard = read("keyboard.js")
@@ -61,3 +65,18 @@ class DesktopCorrectnessTests(unittest.TestCase):
         assign = keywords[assign_start:keywords.index("\n}\n", assign_start)]
 
         self.assertLess(assign.index("await mutation.commit;"), assign.index("showToast(`${keyword.path}"))
+
+    def test_collection_undo_only_confirms_after_the_remove_succeeds(self):
+        panel = read("panel.js")
+        events = read("events.js")
+        mobile_selection = read_mobile("selection.js")
+
+        helper_start = panel.index("async function undoCollectionAdd(")
+        helper = panel[helper_start:panel.index("\n}\n", helper_start)]
+        self.assertIn("if (!result?.ok)", helper)
+        self.assertLess(helper.index("if (!result?.ok)"), helper.index("showToast(successMessage);"))
+        self.assertIn("await loadCollections();", helper)
+        self.assertIn("if (removed?.ok) showToast('Event photos removed from collection');", events)
+        self.assertIn("emit('collections:refresh');", events)
+        self.assertEqual(mobile_selection.count("if (removed?.ok) showToast('Removed from collection');"), 2)
+        self.assertEqual(mobile_selection.count("new CustomEvent('collections-changed')"), 2)

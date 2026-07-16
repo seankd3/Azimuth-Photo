@@ -1091,6 +1091,18 @@ function patchCollectionCount(collectionId, delta) {
     };
 }
 
+async function undoCollectionAdd(collectionId, imageIds, successMessage) {
+    const result = await removeFromCollection(collectionId, imageIds);
+    if (!result?.ok) {
+        showToast("Couldn't undo collection change");
+        await loadCollections();
+        return false;
+    }
+    await loadCollections();
+    showToast(successMessage);
+    return true;
+}
+
 async function addImagesToCollection(collectionId, imageIds) {
     const coll = collections.find((c) => Number(c.id) === Number(collectionId));
     if (coll?.smart) {
@@ -1101,11 +1113,7 @@ async function addImagesToCollection(collectionId, imageIds) {
     const result = await addToCollection(collectionId, imageIds);
     if (result && result.ok) {
         showToast(`Added ${imageIds.length} to “${coll ? coll.name : 'collection'}”`, {
-            undo: async () => {
-                await removeFromCollection(collectionId, imageIds);
-                await loadCollections();
-                showToast('Removed from collection');
-            },
+            undo: () => undoCollectionAdd(collectionId, imageIds, 'Removed from collection'),
         });
         await loadCollections();
         return true;
@@ -1189,7 +1197,7 @@ export async function openCollectionPicker(imageIds, { onDone = null } = {}) {
                 close();
                 if (onDone) onDone();
                 showToast(`Created “${name}”`, {
-                    undo: async () => coll.id && removeFromCollection(coll.id, ids),
+                    undo: coll.id ? () => undoCollectionAdd(coll.id, ids, 'Collection removed') : null,
                 });
             } else showToast("Couldn't create collection");
         } finally {
@@ -1472,6 +1480,7 @@ export async function initPanel() {
     on('flags', scheduleChromeRefresh);
     on('trash:changed', scheduleChromeRefresh);
     on('import:changed', scheduleChromeRefresh);
+    on('collections:refresh', scheduleChromeRefresh);
     on('scope', () => {
         renderNewCollectionForm();
         for (const row of document.querySelectorAll('[data-source]')) row.classList.toggle('active', folderActive(row.dataset.source));

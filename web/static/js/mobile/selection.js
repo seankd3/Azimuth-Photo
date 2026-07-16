@@ -214,8 +214,12 @@ export async function openCollectionSheet(rawIds, { onDone = null } = {}) {
                 const coll = result.collection || {};
                 showToast(`Created “${name}” · ${ids.length} photos`, {
                     undo: async () => {
-                        if (coll.id) await removeFromCollection(coll.id, ids);
-                        showToast('Removed from collection');
+                        const removed = coll.id && await removeFromCollection(coll.id, ids);
+                        if (removed?.ok) showToast('Removed from collection');
+                        else {
+                            showToast("Couldn't undo collection change");
+                            document.dispatchEvent(new CustomEvent('collections-changed'));
+                        }
                     },
                 });
             } else {
@@ -258,8 +262,12 @@ export async function openCollectionSheet(rawIds, { onDone = null } = {}) {
             if (result && result.ok) {
                 showToast(`Added ${ids.length} to “${coll.name}”`, {
                     undo: async () => {
-                        await removeFromCollection(coll.id, ids);
-                        showToast('Removed from collection');
+                        const removed = await removeFromCollection(coll.id, ids);
+                        if (removed?.ok) showToast('Removed from collection');
+                        else {
+                            showToast("Couldn't undo collection change");
+                            document.dispatchEvent(new CustomEvent('collections-changed'));
+                        }
                     },
                 });
             } else {
