@@ -547,10 +547,11 @@ def apply_camera_profile_ab(srgb: np.ndarray, profile: Mapping[str, object] | No
     chroma_mix = np.clip(chroma_mix, 0.0, 1.0)
     delta0 = table[hue0, chroma0] * (1.0 - hue_mix[..., None]) + table[hue1, chroma0] * hue_mix[..., None]
     delta1 = table[hue0, chroma1] * (1.0 - hue_mix[..., None]) + table[hue1, chroma1] * hue_mix[..., None]
-    delta = delta0 * (1.0 - chroma_mix[..., None]) + delta1 * chroma_mix[..., None]
-    adjusted = lab.copy()
-    adjusted[..., 1:3] += delta
-    return linear_to_srgb(_gamut_clip_desaturate(oklab_to_linear(adjusted)))
+    np.multiply(delta0, 1.0 - chroma_mix[..., None], out=delta0)
+    np.multiply(delta1, chroma_mix[..., None], out=delta1)
+    np.add(delta0, delta1, out=delta0)
+    lab[..., 1:3] += delta0
+    return linear_to_srgb(_gamut_clip_desaturate(oklab_to_linear(lab)))
 
 
 def lens_radial_scale(
