@@ -305,6 +305,12 @@ async def _expand_restore_family_ids(conn, ids: list[int]) -> list[int]:
     return expanded
 
 
+def _failed_family_ids(plans, failure_ids):
+    """Resolve failures to the shared-file families that must fail together."""
+    family_by_image_id = {int(plan["id"]): int(plan["family_id"]) for plan in plans}
+    return {family_by_image_id.get(int(image_id), int(image_id)) for image_id in failure_ids}
+
+
 async def trash_images(db_path: str, image_ids: list[int]) -> dict:
     ids = _clean_ids(image_ids)
     if not ids:
@@ -319,7 +325,7 @@ async def trash_images(db_path: str, image_ids: list[int]) -> dict:
     try:
         ids = await _expand_trash_family_ids(conn, ids)
         rows = await _image_rows_by_id(conn, ids)
-        failed_prepare_family_ids: set[int] = set()
+        failed_prepare_ids: set[int] = set()
         for image_id in ids:
             row = rows.get(image_id)
             if row is None:
@@ -347,12 +353,12 @@ async def trash_images(db_path: str, image_ids: list[int]) -> dict:
             filepath = row.get("filepath") or ""
             if not source_root or not filepath:
                 errors.append(_error(image_id, "source path missing"))
-                failed_prepare_family_ids.add(image_id)
+                failed_prepare_ids.add(image_id)
                 continue
             dest, moved_bytes, expected_token, reason = await __to_thread_prepare_trash_move(filepath, source_root)
             if reason:
                 errors.append(_error(image_id, reason))
-                failed_prepare_family_ids.add(image_id)
+                failed_prepare_ids.add(image_id)
                 continue
             plans.append({
                 "id": image_id,
@@ -366,10 +372,11 @@ async def trash_images(db_path: str, image_ids: list[int]) -> dict:
                 "previous_trash_path": row.get("trash_path"),
             })
 
-        if failed_prepare_family_ids:
+        if failed_prepare_ids:
+            failed_family_ids = _failed_family_ids(plans, failed_prepare_ids)
             plans = [
                 plan for plan in plans
-                if int(plan["family_id"]) not in failed_prepare_family_ids
+                if int(plan["family_id"]) not in failed_family_ids
             ]
 
         if plans:
@@ -402,7 +409,7 @@ async def trash_images(db_path: str, image_ids: list[int]) -> dict:
                 plan["moved_bytes"] = moved_bytes
                 successful.append(plan)
             if failed:
-                failed_family_ids = {int(plan["family_id"]) for plan in failed}
+                failed_family_ids = _failed_family_ids(plans, (plan["id"] for plan in failed))
                 failed = [
                     plan for plan in plans
                     if int(plan["family_id"]) in failed_family_ids
@@ -525,7 +532,7 @@ async def restore_images(db_path: str, image_ids: list[int]) -> dict:
                 await catalog_repository.update_source_counts_on_conn(conn, source_id)
             await conn.commit()
 
-            failed_family_ids: set[int] = set()
+            failed_ids: set[int] = set()
             for plan in updates:
                 if plan.get("catalog_only"):
                     # Virtual copy: the master row owns the file (and its restore).
@@ -533,10 +540,11 @@ async def restore_images(db_path: str, image_ids: list[int]) -> dict:
                 warning, reason = await __to_thread_restore_from_trash(plan["trash_path"], plan["filepath"])
                 if reason:
                     errors.append(_error(plan["id"], reason))
-                    failed_family_ids.add(int(plan["family_id"]))
+                    failed_ids.add(int(plan["id"]))
                     continue
                 if warning:
                     warnings.append(_error(plan["id"], warning))
+            failed_family_ids = _failed_family_ids(updates, failed_ids)
             failed = [
                 plan for plan in updates if int(plan["family_id"]) in failed_family_ids
             ]
