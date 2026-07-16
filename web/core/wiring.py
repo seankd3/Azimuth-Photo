@@ -337,6 +337,16 @@ def configure_collection_routes(*, resolve_library_constraints=None) -> None:
             get_rankings=lambda **kwargs: db.get_rankings(**kwargs),
         )
 
+    async def resolve_smart_materialized_image_ids(query):
+        if resolve_library_constraints is None:
+            raise RuntimeError("Smart collection routes are not configured")
+        return await smart_collections.resolve_materialized_image_ids(
+            query,
+            resolve_library_constraints=resolve_library_constraints,
+            count_rankings=lambda **kwargs: db.count_rankings(**kwargs),
+            get_rankings=lambda **kwargs: db.get_rankings(**kwargs),
+        )
+
     collection_routes.configure(
         create_collection=lambda **kwargs: db.create_collection(**kwargs),
         list_collections=lambda: db.list_collections(),
@@ -349,6 +359,7 @@ def configure_collection_routes(*, resolve_library_constraints=None) -> None:
         resolve_smart_detail=resolve_smart_detail,
         resolve_smart_summary=resolve_smart_summary,
         resolve_smart_image_ids=resolve_smart_image_ids,
+        resolve_smart_materialized_image_ids=resolve_smart_materialized_image_ids,
         db_path=lambda: db.DB_PATH,
         get_images_by_ids=lambda image_ids: db.get_active_images_by_ids(image_ids),
         get_suggestions=lambda: collection_suggestions.collection_suggestions(

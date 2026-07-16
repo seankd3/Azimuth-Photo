@@ -52,6 +52,12 @@ class CollectionTests(BackendTestCase):
                 count_rankings=lambda **count_kwargs: db.count_rankings(**count_kwargs),
                 get_rankings=lambda **ranking_kwargs: db.get_rankings(**ranking_kwargs),
             ),
+            resolve_smart_materialized_image_ids=lambda query: smart_collections.resolve_materialized_image_ids(
+                query,
+                resolve_library_constraints=self._resolve_library_constraints,
+                count_rankings=lambda **count_kwargs: db.count_rankings(**count_kwargs),
+                get_rankings=lambda **ranking_kwargs: db.get_rankings(**ranking_kwargs),
+            ),
             get_suggestions=lambda: collection_suggestions.collection_suggestions(
                 db.DB_PATH,
                 db_signature=db.DB_PATH,
@@ -395,21 +401,21 @@ class CollectionTests(BackendTestCase):
         created = await collection_routes.api_create_collection(
             collection_routes.CreateCollectionBody(name="Too broad", query={"flag": "picked"})
         )
-        old_resolver = collection_routes._resolve_smart_image_ids
+        old_resolver = collection_routes._resolve_smart_materialized_image_ids
 
         async def too_many(_query):
             raise smart_collections.SmartCollectionMaterializeTooLarge(
                 smart_collections.MAX_MATERIALIZE_IMAGE_IDS + 1
             )
 
-        collection_routes._resolve_smart_image_ids = too_many
+        collection_routes._resolve_smart_materialized_image_ids = too_many
         try:
             response = await collection_routes.api_update_collection(
                 created["collection"]["id"],
                 collection_routes.UpdateCollectionBody(materialize=True),
             )
         finally:
-            collection_routes._resolve_smart_image_ids = old_resolver
+            collection_routes._resolve_smart_materialized_image_ids = old_resolver
 
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.body.decode().count("10001"), 1)
@@ -425,7 +431,7 @@ class CollectionTests(BackendTestCase):
             raise AssertionError("materialize cap should stop before loading rows")
 
         with self.assertRaises(smart_collections.SmartCollectionMaterializeTooLarge):
-            await smart_collections.resolve_image_ids(
+            await smart_collections.resolve_materialized_image_ids(
                 {"flag": "picked"},
                 resolve_library_constraints=resolve_library_constraints,
                 count_rankings=count_rankings,
