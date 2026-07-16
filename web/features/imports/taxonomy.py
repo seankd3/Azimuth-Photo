@@ -382,12 +382,16 @@ async def reclassify_misplaced_personal_photos(
                 except OSError as exc:
                     errors.append({"id": int(row["id"]), "message": str(exc)})
                     continue
-            await conn.execute(
-                "UPDATE images SET filepath = ?, source_id = ? WHERE id = ?",
-                (str(new_path), source_id, int(row["id"])),
-            )
+            try:
+                await conn.execute(
+                    "UPDATE images SET filepath = ?, source_id = ? WHERE id = ?",
+                    (str(new_path), source_id, int(row["id"])),
+                )
+                await conn.commit()
+            except Exception as exc:
+                errors.append({"id": int(row["id"]), "message": str(exc)})
+                break
             updated += 1
-        await conn.commit()
     finally:
         await connection.close_async(conn, db_path=db_path)
 
