@@ -45,6 +45,7 @@ let saveFailureToastShown = false;
 let wbPickActive = false;
 
 const DEVELOP_READ_TIMEOUT_MS = 10_000;
+const DEVELOP_ENTRY_ATTEMPTS = 2;
 const DEVELOP_MUTATION_TIMEOUT_MS = 20_000;
 const DEVELOP_BASE_BUDGET_MS = 12_000;
 const DEVELOP_BACKGROUND_RETRY_MS = 10_000;
@@ -71,6 +72,7 @@ const status = document.getElementById('develop-status');
 const panelHost = document.getElementById('develop-panels');
 const filmstrip = document.getElementById('develop-filmstrip');
 const toolbar = document.getElementById('develop-toolbar');
+const statusRetry = status.querySelector('[data-develop-retry]');
 
 function clone(value) {
     return JSON.parse(JSON.stringify(value || {}));
@@ -105,11 +107,13 @@ function chosenImage() {
     return viewState.images[viewState.focusIndex] || viewState.images[0] || null;
 }
 
-function setStatus(message = '', { busy = false, error = false } = {}) {
+function setStatus(message = '', { busy = false, error = false, retry = null } = {}) {
     status.hidden = !message;
     status.classList.toggle('busy', busy);
     status.classList.toggle('error', error);
     status.querySelector('span').textContent = message;
+    statusRetry.hidden = typeof retry !== 'function';
+    statusRetry.onclick = typeof retry === 'function' ? retry : null;
 }
 
 function originSettings(payload) {
@@ -123,13 +127,30 @@ function originSettings(payload) {
 }
 
 async function fetchDevelop(imageId) {
-    const response = await fetch(`/api/develop/${imageId}`, fetchOptionsWithTimeout({ headers: { Accept: 'application/json' } }, DEVELOP_READ_TIMEOUT_MS));
+    let response = null;
+    let fetchError = null;
+    for (let attempt = 0; attempt < DEVELOP_ENTRY_ATTEMPTS; attempt += 1) {
+        try {
+            response = await fetch(`/api/develop/${imageId}`, fetchOptionsWithTimeout({ headers: { Accept: 'application/json' } }, DEVELOP_READ_TIMEOUT_MS));
+            break;
+        } catch (error) {
+            fetchError = error;
+        }
+    }
+    if (!response) throw fetchError;
     if (response.status === 202) throw new PendingOriginalError();
     if (!response.ok) {
         const payload = await response.json().catch(() => null);
         throw new Error(payload?.error || (response.status === 404 ? 'Develop settings are not ready for this photo.' : 'Could not load develop settings.'));
     }
     return response.json();
+}
+
+function developLoadErrorMessage(error) {
+    if (['AbortError', 'TimeoutError'].includes(error?.name) || /signal timed out/i.test(error?.message || '')) {
+        return 'Develop took too long to respond.';
+    }
+    return error?.message || 'Develop could not open this photo.';
 }
 
 function parseBase(buffer, scale = 1) {
@@ -188,14 +209,14 @@ function markDevelopPaint(token, phase) {
     console.timeStamp?.(`develop-open-${phase}:${elapsed}ms`);
 }
 
-async function paintDisplayBlob(blob, token, phase, orientation = 1) {
+async function paintDisplayBlob(blob, token, phase) {
     if (!renderer || token !== loadingToken) return false;
     const bitmap = await createImageBitmap(blob);
     if (token !== loadingToken) {
         bitmap.close?.();
         return false;
     }
-    renderer.uploadDisplayPreview(bitmap, orientation);
+    renderer.uploadDisplayPreview(bitmap);
     bitmap.close?.();
     applyZoomState();
     placeholder.hidden = true;
@@ -206,10 +227,10 @@ async function paintDisplayBlob(blob, token, phase, orientation = 1) {
     return true;
 }
 
-async function paintPlaceholder(imageId, token, orientation = 1) {
+async function paintPlaceholder(imageId, token) {
     try {
         const response = await fetch(`/api/develop/${imageId}/base.jpg`, fetchOptionsWithTimeout({}, 5_000));
-        if (response.ok && await paintDisplayBlob(await response.blob(), token, 'base-jpg', orientation)) return;
+        if (response.ok && await paintDisplayBlob(await response.blob(), token, 'base-jpg')) return;
     } catch { /* Fall through to the already-cached Library image. */ }
     try {
         // Browsed photos already have this tier. cached=1 keeps a cold Develop
@@ -217,11 +238,6 @@ async function paintPlaceholder(imageId, token, orientation = 1) {
         const response = await fetch(`${thumbUrl('lg', imageId)}?cached=1`, fetchOptionsWithTimeout({}, 5_000));
         if (response.ok) await paintDisplayBlob(await response.blob(), token, 'library-lg');
     } catch { /* The explicit staged status remains the final fallback. */ }
-}
-
-function displayOrientation(entry) {
-    const orientation = Number(entry?.settings?.Orientation ?? entry?.orientation) || 1;
-    return [3, 6, 8].includes(orientation) ? orientation : 1;
 }
 
 function setControlsLoading(loading) {
@@ -573,6 +589,7 @@ async function openImage(image) {
     setTimeout(() => {
         if (token === loadingToken && !canvas.classList.contains('ready') && !canvas.classList.contains('preview-ready')) setStatus('Developing preview…', { busy: true });
     }, 8000);
+    paintPlaceholder(image.id, token);
     try {
         let entry = stateCache.get(Number(image.id));
         const cachedEntry = Boolean(entry);
@@ -585,12 +602,10 @@ async function openImage(image) {
                     as_shot_tint: payload.meta?.as_shot?.tint ?? payload.meta?.as_shot_tint,
                     color: payload.meta?.color ?? null,
                 },
-                orientation: Number(payload.orientation) || 1,
                 undo: [], redo: [], serverHistory: payload.history || [],
             };
             stateCache.set(Number(image.id), entry);
         }
-        paintPlaceholder(image.id, token, displayOrientation(entry));
         setUnsavedIndicator();
         if (token !== loadingToken) return;
         entry.imageId = Number(image.id);
@@ -616,7 +631,7 @@ async function openImage(image) {
                 if (entry) scheduleBackgroundBaseRetry(image, entry, token);
                 else scheduleBackgroundDevelopRetry(image, token);
             } else {
-                setStatus(error.message || 'Develop could not open this photo.', { error: true });
+                setStatus(developLoadErrorMessage(error), { error: true, retry: () => openImage(image) });
             }
         }
     }
