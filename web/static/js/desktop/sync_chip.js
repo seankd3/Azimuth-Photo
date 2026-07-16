@@ -1,6 +1,7 @@
 "use strict";
 
 import { fetchOptionsWithTimeout } from '../api.js';
+import { showToast } from './toast.js';
 
 const POLL_MS = 3000;
 let timer = null;
@@ -161,7 +162,14 @@ async function control(url) {
         const status = await json(url, { method: 'POST' });
         if (generation === statusGeneration) patch(status);
     } catch (error) {
-        if (generation === statusGeneration) patchOffline();
+        // A failed user command is not a hub outage — say so, and let the next
+        // status poll decide whether the chip should show offline.
+        showToast(url.includes('/pause') || url.includes('/resume')
+            ? 'Couldn’t change sync state'
+            : 'Couldn’t start sync');
+        // Re-poll after the finally block settles generation/controlInFlight,
+        // so the refresh isn't discarded by its own guards.
+        setTimeout(refresh, 0);
     } finally {
         if (generation === statusGeneration) statusGeneration += 1;
         controlInFlight -= 1;

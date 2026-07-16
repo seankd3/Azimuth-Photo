@@ -376,12 +376,15 @@ export function mountPresetsPanel(host, api) {
             const next = String(input.value || '').trim();
             if (commit && next && next !== preset.name) {
                 try {
-                    await fetch(`${API}/${preset.id}`, {
+                    const response = await fetch(`${API}/${preset.id}`, {
                         method: 'PATCH',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ name: next }),
                     });
-                } catch { /* keep list */ }
+                    if (!response.ok) throw new Error('rename failed');
+                } catch {
+                    api.notify?.('Couldn’t rename preset');
+                }
             }
             await load();
         };
@@ -394,8 +397,11 @@ export function mountPresetsPanel(host, api) {
 
     async function deletePreset(preset) {
         try {
-            await fetch(`${API}/${preset.id}`, { method: 'DELETE' });
-        } catch { /* ignore */ }
+            const response = await fetch(`${API}/${preset.id}`, { method: 'DELETE' });
+            if (!response.ok) throw new Error('delete failed');
+        } catch {
+            api.notify?.('Couldn’t delete preset');
+        }
         endPreview();
         await load();
     }
