@@ -144,7 +144,7 @@ fun OnboardingScreen(
                         text = when {
                             testing -> "Checking…"
                             testResult != null -> testResult!!
-                            else -> " ",
+                            else -> " "
                         },
                         color = if (testResult?.startsWith("✓") == true) Positive else TextSecondary,
                         style = MaterialTheme.typography.bodySmall,

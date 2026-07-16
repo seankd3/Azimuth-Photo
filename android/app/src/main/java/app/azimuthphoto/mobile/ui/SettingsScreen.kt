@@ -225,18 +225,6 @@ fun SettingsScreen(onOpenTrash: () -> Unit) {
     }
 }
 
-private fun formatBytes(bytes: Long): String {
-    if (bytes < 1024) return "$bytes B"
-    val units = listOf("KB", "MB", "GB", "TB")
-    var value = bytes.toDouble() / 1024
-    var unit = 0
-    while (value >= 1024 && unit < units.size - 1) {
-        value /= 1024
-        unit++
-    }
-    return if (value >= 10) "${value.toInt()} ${units[unit]}" else "${"%.1f".format(value)} ${units[unit]}"
-}
-
 @Composable
 private fun SectionTitle(text: String) {
     Text(text, style = MaterialTheme.typography.titleMedium, color = TextPrimary)
