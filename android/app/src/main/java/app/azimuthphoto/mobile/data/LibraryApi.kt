@@ -81,6 +81,20 @@ data class Caption(
     val has_caption: Boolean = false,
 )
 
+// ---- Filter facets (from /api/filter-options, each with library-wide counts) ----
+@Serializable data class YearFacet(val year: String = "", val count: Int = 0)
+@Serializable data class FileTypeFacet(val ext: String = "", val count: Int = 0)
+@Serializable data class CameraFacet(val camera: String = "", val count: Int = 0)
+@Serializable data class LensFacet(val lens: String = "", val count: Int = 0)
+
+@Serializable
+data class FilterOptions(
+    val years: List<YearFacet> = emptyList(),
+    val file_types: List<FileTypeFacet> = emptyList(),
+    val cameras: List<CameraFacet> = emptyList(),
+    val lenses: List<LensFacet> = emptyList(),
+)
+
 /**
  * The desktop-parity library surface: people/faces, collections/albums, places,
  * captions/tags, and visual-similar. Read paths need no auth; write paths accept
@@ -205,6 +219,51 @@ class LibraryApi(private val baseUrl: String, private val deviceToken: String? =
             obj["share"]?.jsonObject?.get("url")?.toString()?.trim('"')?.takeIf { it.isNotBlank() && it != "null" }
         }.getOrNull()
     }
+
+    suspend fun renameCollection(collectionId: Long, name: String): Boolean = withContext(Dispatchers.IO) {
+        runCatching {
+            postJson("/api/user-collections/$collectionId/rename", """{"name":${json.encodeToString(name)}}""")
+        }.isSuccess
+    }
+
+    suspend fun deleteCollection(collectionId: Long): Boolean = withContext(Dispatchers.IO) {
+        runCatching { postJson("/api/user-collections/$collectionId/delete", "{}") }.isSuccess
+    }
+
+    suspend fun removeFromCollection(collectionId: Long, imageIds: List<Long>): Boolean =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                postJson("/api/user-collections/$collectionId/images/remove", """{"image_ids":${imageIds}}""")
+            }.isSuccess
+        }
+
+    /**
+     * A smart collection is a saved search: the hub re-runs [SearchFilters.toSmartQuery]
+     * live, so the collection tracks the library. Returns the new collection id.
+     */
+    suspend fun createSmartCollection(name: String, filters: SearchFilters): Long? =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val body =
+                    """{"name":${json.encodeToString(name)},"query":${filters.toSmartQuery()}}"""
+                val out = postJson("/api/user-collections", body)
+                json.parseToJsonElement(out).jsonObject["collection"]?.jsonObject
+                    ?.get("id")?.toString()?.trim('"')?.toLongOrNull()
+            }.getOrNull()
+        }
+
+    // ---- Search / filters ----
+    suspend fun filterOptions(): FilterOptions = withContext(Dispatchers.IO) {
+        json.decodeFromString<FilterOptions>(get("/api/filter-options"))
+    }
+
+    /** The full-power library search: every /api/rankings filter, with totals for live counts. */
+    suspend fun search(filters: SearchFilters, offset: Int = 0, limit: Int = 120): RankingsPage =
+        withContext(Dispatchers.IO) {
+            json.decodeFromString<RankingsPage>(
+                get("/api/rankings?" + filters.toQueryString(offset, limit)),
+            )
+        }
 
     // ---- Places ----
     suspend fun markers(limit: Int = 5000): List<MapMarker> = withContext(Dispatchers.IO) {

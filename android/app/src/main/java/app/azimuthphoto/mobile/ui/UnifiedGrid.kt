@@ -182,6 +182,10 @@ fun PhotoGrid(
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(0.dp),
     onNearEnd: () -> Unit = {},
+    // Optional multi-select: long-press starts it, checkmarks render while any
+    // id is selected. Hosts decide what tap does in selection mode via onOpen.
+    selectedIds: Set<Long> = emptySet(),
+    onLongPress: ((ArchiveImage) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val settings by SettingsStore.flow(context).collectAsState(initial = null)
@@ -253,10 +257,10 @@ fun PhotoGrid(
                         hasRaw = row.image.isRaw,
                         durationMs = 0,
                         notBackedUp = false,
-                        showSelection = false,
-                        selected = false,
+                        showSelection = onLongPress != null && selectedIds.isNotEmpty(),
+                        selected = row.image.id in selectedIds,
                         onClick = { onOpen(row.index) },
-                        onLongClick = {},
+                        onLongClick = { onLongPress?.invoke(row.image) },
                     )
                 }
             }
