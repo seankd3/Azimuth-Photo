@@ -725,6 +725,9 @@ function render() {
             html += rowHtml(row, row.runIndex);
         }
     }
+    if (document.getElementById('scope-input')?.value.trim()) {
+        html += '<div class="sd-operator-footer">camera: · lens: · tag: · date (&quot;june 2024&quot;) · &gt; commands</div>';
+    }
     drop.innerHTML = html || '<div class="sd-empty">Type to search this archive</div>';
     const input = document.getElementById('scope-input');
     if (hot >= 0 && drop.querySelector(`#scope-option-${CSS.escape(String(hot))}`)) {
