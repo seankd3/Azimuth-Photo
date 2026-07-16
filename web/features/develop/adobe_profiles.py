@@ -210,7 +210,11 @@ def _valid_profile(payload: object) -> dict[str, Any] | None:
         values = matrices.get(key)
         if not isinstance(values, list) or len(values) != 9 or not all(isinstance(value, (int, float)) and math.isfinite(value) for value in values):
             return None
-    profile = copy.deepcopy(payload)
+    # Library payloads have just been created by json.loads(), so recursively
+    # copying every profile here only duplicates large hue/look tables before
+    # they enter the private cache. Keep the top-level normalization isolated;
+    # load_adobe_profile() still returns a defensive deep copy to callers.
+    profile = dict(payload)
     profile["camera_model"] = model
     profile["profile_name"] = name
     return profile

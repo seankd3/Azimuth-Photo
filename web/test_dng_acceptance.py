@@ -16,6 +16,11 @@ import numpy as np
 import pytest
 from PIL import Image, ImageDraw, ImageOps
 
+if os.environ.get("PHOTOARCHIVE_RUN_DNG_ACCEPTANCE") != "1":
+    # Skip before the heavy imports: importer pulls scanner/image_headers,
+    # which binds libc at import time and cannot even collect on Windows.
+    pytest.skip("PHOTOARCHIVE_RUN_DNG_ACCEPTANCE not set", allow_module_level=True)
+
 from features.develop import adobe_profiles, dng_pipeline, importer, lossydng, pipeline, rawproc, xmp_write
 
 
@@ -175,7 +180,7 @@ def _side_by_side(path: Path, ours: Image.Image, adobe: Image.Image, label: str)
     canvas.paste(ours, (0, header))
     canvas.paste(adobe, (ours.width, header))
     draw = ImageDraw.Draw(canvas)
-    draw.text((8, 9), f"Photo Archive | {label}", fill="white")
+    draw.text((8, 9), f"Azimuth Photo | {label}", fill="white")
     draw.text((ours.width + 8, 9), "Embedded Adobe preview", fill="white")
     canvas.save(path, quality=92)
 

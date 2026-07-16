@@ -174,7 +174,14 @@ async def list_galleries(db_path: str, collection_id: int) -> list[dict[str, Any
         await connection.close_async(conn, db_path=db_path)
 
 
-async def update_gallery(db_path: str, gallery_id: int, *, options: dict[str, Any], password_hash: str | None | object = ...):
+async def update_gallery(
+    db_path: str,
+    gallery_id: int,
+    *,
+    title: str | None = None,
+    options: dict[str, Any],
+    password_hash: str | None | object = ...,
+):
     clean = normalize_options(options)
     conn = await connection.open_async(db_path)
     try:
@@ -184,8 +191,9 @@ async def update_gallery(db_path: str, gallery_id: int, *, options: dict[str, An
             return None
         member_ids = {image["id"] for image in await _gallery_images(conn, int(gallery_id))}
         cover_image_id = clean["cover_image_id"] if clean["cover_image_id"] in member_ids else current["cover_image_id"]
-        fields = ["layout = ?", "theme = ?", "cover_image_id = ?", "allow_download_all = ?", "download_size = ?", "updated_at = ?"]
-        values: list[Any] = [clean["layout"], clean["theme"], cover_image_id, int(clean["allow_download_all"]), clean["download_size"], time.time()]
+        clean_title = (title or current["title"] or "Client gallery").strip() or current["title"]
+        fields = ["title = ?", "layout = ?", "theme = ?", "cover_image_id = ?", "allow_download_all = ?", "download_size = ?", "updated_at = ?"]
+        values: list[Any] = [clean_title, clean["layout"], clean["theme"], cover_image_id, int(clean["allow_download_all"]), clean["download_size"], time.time()]
         if password_hash is not ...:
             fields.append("password_hash = ?")
             values.append(password_hash)
@@ -195,6 +203,18 @@ async def update_gallery(db_path: str, gallery_id: int, *, options: dict[str, An
     finally:
         await connection.close_async(conn, db_path=db_path)
     return await get_gallery(db_path, gallery_id)
+
+
+async def delete_gallery(db_path: str, gallery_id: int) -> bool:
+    """Delete a gallery and its frozen membership, permanently invalidating its token."""
+    conn = await connection.open_async(db_path)
+    try:
+        await ensure_tables(conn)
+        cursor = await conn.execute("DELETE FROM client_galleries WHERE id = ?", (int(gallery_id),))
+        await conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        await connection.close_async(conn, db_path=db_path)
 
 
 async def gallery_allows_image(db_path: str, token: str, image_id: int) -> bool:
@@ -232,7 +252,8 @@ async def image_file(db_path: str, token: str, image_id: int) -> dict[str, Any] 
     try:
         await ensure_tables(conn)
         cursor = await conn.execute(
-            """SELECT i.id, i.filename, i.filepath, source.path AS source_path FROM client_galleries g
+            """SELECT i.id, i.filename, i.filepath, i.hub_remote, i.hub_image_id,
+                      source.path AS source_path FROM client_galleries g
                JOIN client_gallery_images gi ON gi.gallery_id = g.id
                JOIN images i ON i.id = gi.image_id
                LEFT JOIN catalog_sources source ON source.id = i.source_id
@@ -253,6 +274,7 @@ async def _gallery_row(conn, gallery_id: int):
 async def _gallery_images(conn, gallery_id: int) -> list[dict[str, Any]]:
     cursor = await conn.execute(
         """SELECT i.id, i.filename, i.filepath, i.width, i.height, i.date_taken,
+                  i.hub_remote, i.hub_image_id,
                   source.path AS source_path, gi.position
            FROM client_gallery_images gi JOIN images i ON i.id = gi.image_id
            LEFT JOIN catalog_sources source ON source.id = i.source_id

@@ -59,6 +59,8 @@ _catalog_summary_cache = catalog_repository._catalog_summary_cache
 _catalog_light_summary_cache = catalog_repository._catalog_light_summary_cache
 _date_groups_cache = ranking_repository._date_groups_cache
 _date_groups_refreshing = ranking_repository._date_groups_refreshing
+_date_histogram_cache = ranking_repository._date_histogram_cache
+_date_histogram_refreshing = ranking_repository._date_histogram_refreshing
 _map_markers_cache = ranking_repository._map_markers_cache
 _ranking_count_cache = ranking_repository._ranking_count_cache
 _visible_pairing_pool_counts_cache = rating_repository._visible_pairing_pool_counts_cache
@@ -286,25 +288,29 @@ _backfill_image_date_sources = data_schema.backfill_image_date_sources
 
 async def _backup_before_migration(conn) -> None:
     """Take a protected pre-migration snapshot when an existing catalog is
-    about to be upgraded to a newer schema. Best-effort; never blocks startup."""
+    about to be upgraded to a newer schema. Refuse migration without it."""
     try:
         cursor = await conn.execute("PRAGMA user_version")
         row = await cursor.fetchone()
         current = int(row[0]) if row else 0
-    except Exception:
+    except Exception as exc:
+        raise RuntimeError("Cannot determine catalog version before backup") from exc
+    if current < 0 or current >= SCHEMA_VERSION:
         return
-    # user_version 0 = a brand-new/pre-versioning DB about to get its tables;
-    # only guard a genuine forward upgrade of an existing versioned catalog.
-    if not (0 < current < SCHEMA_VERSION):
-        return
-    try:
-        from features.system import backups
-
-        await asyncio.to_thread(
-            backups.backup_before_migration, DB_PATH, current, SCHEMA_VERSION
+    if current == 0:
+        cursor = await conn.execute(
+            "SELECT 1 FROM sqlite_master "
+            "WHERE type = 'table' AND name NOT LIKE 'sqlite_%' LIMIT 1"
         )
-    except Exception:
-        log.exception("pre-migration backup hook failed db=%s", DB_PATH)
+        if await cursor.fetchone() is None:
+            return
+    from features.system import backups
+
+    result = await asyncio.to_thread(
+        backups.backup_before_migration, DB_PATH, current, SCHEMA_VERSION
+    )
+    if not result or not result.get("ok"):
+        raise RuntimeError("Pre-migration catalog backup failed; schema upgrade refused")
 
 
 async def init_db():
@@ -313,6 +319,8 @@ async def init_db():
     try:
         if not db_exists:
             await data_connection.enable_wal(db, db_path=DB_PATH)
+        if db_exists:
+            await _backup_before_migration(db)
         if db_exists and await _schema_is_current(db):
             await _normalize_legacy_image_state(db)
             await _refresh_source_online_states_on_conn(db)
@@ -326,8 +334,6 @@ async def init_db():
             await _ensure_metadata_fts(db)
             await db.commit()
             return
-        if db_exists:
-            await _backup_before_migration(db)
         await _apply_schema_and_migrations(db, db_exists=db_exists)
         await _migrate_catalog_sources(db)
         if await _backfill_image_date_sources(db):
@@ -415,8 +421,17 @@ async def mark_source_scan_started(source_id: int):
         _invalidate_filter_options_cache()
 
 
-async def mark_source_scan_finished(source_id: int, seen_filepaths: list[str] | None = None):
-    await catalog_repository.mark_source_scan_finished(DB_PATH, source_id, seen_filepaths)
+async def mark_source_scan_finished(
+    source_id: int,
+    seen_filepaths: list[str] | None = None,
+    excluded_directory_paths: list[str] | None = None,
+):
+    await catalog_repository.mark_source_scan_finished(
+        DB_PATH,
+        source_id,
+        seen_filepaths,
+        excluded_directory_paths,
+    )
     _invalidate_stats_cache()
     _invalidate_filter_options_cache()
     invalidate_cached_image_ids_cache()
@@ -640,6 +655,10 @@ async def set_share_favorite(
 
 async def list_share_favorites(share_id: int) -> list[dict]:
     return await share_repository.list_favorites(DB_PATH, share_id)
+
+
+async def mark_share_finished(share_id: int) -> float | None:
+    return await share_repository.mark_finished(DB_PATH, share_id)
 
 
 async def favorites_for_collection(collection_id: int) -> list[dict]:
@@ -1084,6 +1103,7 @@ async def get_rankings(limit: int = 100, offset: int = 0, sort: str = "elo",
                        file_type: str = "", camera: str = "", lens: str = "",
                        tag: str = "",
                        id_filter: set = None,
+                       collection_id: int = 0,
                        visible_thumb_size: str = "", cache_root: str = "",
                        text_query: str = "",
                        exclude_collapsed_stack_members: bool = False):
@@ -1106,6 +1126,7 @@ async def get_rankings(limit: int = 100, offset: int = 0, sort: str = "elo",
         lens=lens,
         tag=tag,
         id_filter=id_filter,
+        collection_id=collection_id,
         visible_thumb_size=visible_thumb_size,
         cache_root=cache_root,
         text_query=text_query,
@@ -1146,7 +1167,14 @@ async def rank_quality(orientation: str = "", compared: str = "", min_stars: int
 
 async def date_histogram(**kwargs) -> dict:
     kwargs.setdefault("caption_model_key", active_caption_model_key())
-    return await ranking_repository.date_histogram(DB_PATH, **kwargs)
+    force_refresh = bool(kwargs.pop("_force_refresh", False))
+    return await ranking_repository.date_histogram_cached(
+        DB_PATH,
+        get_catalog_image_counts=get_catalog_image_counts,
+        force_refresh=force_refresh,
+        ttl_seconds=FACET_CACHE_TTL_SECONDS,
+        **kwargs,
+    )
 
 
 async def scope_counts(**kwargs) -> dict:
@@ -1191,6 +1219,7 @@ async def count_rankings(orientation: str = "", compared: str = "", min_stars: i
                          file_type: str = "", camera: str = "", lens: str = "",
                          tag: str = "",
                          id_filter: set = None,
+                         collection_id: int = 0,
                          visible_thumb_size: str = "", cache_root: str = "",
                          text_query: str = "",
                          exclude_collapsed_stack_members: bool = False) -> int:
@@ -1209,6 +1238,7 @@ async def count_rankings(orientation: str = "", compared: str = "", min_stars: i
         lens=lens,
         tag=tag,
         id_filter=id_filter,
+        collection_id=collection_id,
         visible_thumb_size=visible_thumb_size,
         cache_root=cache_root,
         text_query=text_query,
@@ -1246,7 +1276,7 @@ async def get_map_markers(orientation: str = "", compared: str = "", min_stars: 
                           file_type: str = "", camera: str = "", lens: str = "",
                           tag: str = "",
                           visible_thumb_size: str = "", cache_root: str = "",
-                          id_filter: set | None = None, text_query: str = ""):
+                          id_filter: set | None = None, text_query: str = "", collection_id: int = 0):
     return await ranking_repository.map_markers_cached(
         DB_PATH,
         get_catalog_image_counts=get_catalog_image_counts,
@@ -1266,12 +1296,22 @@ async def get_map_markers(orientation: str = "", compared: str = "", min_stars: 
         cache_root=cache_root,
         id_filter=id_filter,
         text_query=text_query,
+        collection_id=collection_id,
         ttl_seconds=FACET_CACHE_TTL_SECONDS,
         caption_model_key=active_caption_model_key(),
     )
 
 
-async def get_filter_options():
+async def get_filter_options(**scope):
+    if scope:
+        scope["caption_model_key"] = scope.get("caption_model_key") or active_caption_model_key()
+        catalog_counts = await get_catalog_image_counts()
+        return await filter_options_repository.filter_options(
+            DB_PATH,
+            catalog_counts=catalog_counts,
+            active_source_ids=sorted(await get_active_source_id_set()),
+            **scope,
+        )
     try:
         return await filter_options_repository.filter_options_cached(
             DB_PATH,
@@ -1377,6 +1417,31 @@ async def store_embeddings_batch(rows: list[tuple[int, bytes]], embedding_config
     )
     _invalidate_embedding_count_cache()
     _notify_embedding_batch_stored(model_key, image_ids)
+
+
+async def poison_embedding_image(
+    *,
+    image_id: int,
+    embedding_config: dict | None = None,
+    error: str,
+    force: bool = False,
+) -> bool:
+    return await embedding_repository.poison_embedding_image(
+        DB_PATH,
+        image_id=image_id,
+        embedding_config=embedding_config or active_embedding_config(),
+        error=error,
+        force=force,
+    )
+
+
+async def clear_embedding_poison_ledger(
+    embedding_config: dict | None = None,
+) -> int:
+    return await embedding_repository.clear_embedding_poison_ledger(
+        DB_PATH,
+        embedding_config=embedding_config or active_embedding_config(),
+    )
 
 
 async def count_embeddings_for_model(embedding_config: dict, *, online_only: bool = False) -> int:

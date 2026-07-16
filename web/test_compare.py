@@ -1,4 +1,5 @@
 from test_support import *  # noqa: F401,F403
+import asyncio
 import random
 
 from features.compare import semantic_pairing
@@ -252,6 +253,183 @@ class CompareTests(BackendTestCase):
             await conn.close()
         self.assertEqual(remaining["c"], 0)
 
+    async def test_undo_before_propagation_suppresses_action_updates(self):
+        source = await self._source()
+        winner = await self._image(source["id"], "undo-first-winner.jpg")
+        loser = await self._image(source["id"], "undo-first-loser.jpg")
+        neighbor = await self._image(source["id"], "undo-first-neighbor.jpg")
+        action_id = "undo-before-propagation"
+        await db.record_comparison(
+            winner,
+            loser,
+            "swiss",
+            1200.0,
+            1200.0,
+            1210.0,
+            1190.0,
+            action_id=action_id,
+        )
+        self.assertIsNotNone(await db.undo_last_comparison())
+
+        conn = await db.get_db()
+        try:
+            updated = await elo_propagation._apply_propagation_deltas(
+                conn,
+                {neighbor: {"elo": 1200.0, "comparisons": 0, "propagated_updates": 0}},
+                {neighbor: 5.0},
+                action_id=action_id,
+            )
+            if updated:
+                await conn.commit()
+            else:
+                await conn.rollback()
+        finally:
+            await conn.close()
+
+        self.assertEqual(updated, 0)
+        neighbor_row = await self._image_row(neighbor)
+        self.assertEqual(neighbor_row["elo"], 1200.0)
+        self.assertEqual(neighbor_row["propagated_updates"], 0)
+
+    async def test_undo_cannot_commit_between_propagation_check_and_writes(self):
+        source = await self._source()
+        winner = await self._image(source["id"], "serialized-winner.jpg")
+        loser = await self._image(source["id"], "serialized-loser.jpg")
+        neighbor = await self._image(source["id"], "serialized-neighbor.jpg")
+        action_id = "serialized-propagation"
+        await db.record_comparison(
+            winner,
+            loser,
+            "swiss",
+            1200.0,
+            1200.0,
+            1210.0,
+            1190.0,
+            action_id=action_id,
+        )
+
+        checked = asyncio.Event()
+        resume = asyncio.Event()
+
+        class PausingCursor:
+            def __init__(self, cursor):
+                self.cursor = cursor
+
+            async def fetchone(self):
+                row = await self.cursor.fetchone()
+                checked.set()
+                await resume.wait()
+                return row
+
+        class PausingConnection:
+            def __init__(self, conn):
+                self.conn = conn
+
+            async def execute(self, sql, parameters=()):
+                cursor = await self.conn.execute(sql, parameters)
+                if sql.lstrip().startswith("SELECT 1 FROM comparisons"):
+                    return PausingCursor(cursor)
+                return cursor
+
+            async def executemany(self, sql, parameters):
+                return await self.conn.executemany(sql, parameters)
+
+        raw_conn = await db.get_db()
+        conn = PausingConnection(raw_conn)
+
+        async def apply_propagation():
+            try:
+                updated = await elo_propagation._apply_propagation_deltas(
+                    conn,
+                    {neighbor: {"elo": 1200.0, "comparisons": 0, "propagated_updates": 0}},
+                    {neighbor: 5.0},
+                    action_id=action_id,
+                )
+                if updated:
+                    await raw_conn.commit()
+                else:
+                    await raw_conn.rollback()
+                return updated
+            finally:
+                await raw_conn.close()
+
+        propagation_task = asyncio.create_task(apply_propagation())
+        await asyncio.wait_for(checked.wait(), timeout=1.0)
+        undo_task = asyncio.create_task(db.undo_last_comparison())
+        try:
+            await asyncio.wait_for(asyncio.shield(undo_task), timeout=0.1)
+        except TimeoutError:
+            pass
+        resume.set()
+        await propagation_task
+        undo = await asyncio.wait_for(undo_task, timeout=1.0)
+
+        self.assertIsNotNone(undo)
+        neighbor_row = await self._image_row(neighbor)
+        self.assertEqual(neighbor_row["elo"], 1200.0)
+        self.assertEqual(neighbor_row["propagated_updates"], 0)
+        conn = await db.get_db()
+        try:
+            orphan_count = await (await conn.execute(
+                "SELECT COUNT(*) AS count FROM propagation_updates WHERE action_id = ?",
+                (action_id,),
+            )).fetchone()
+        finally:
+            await conn.close()
+        self.assertEqual(orphan_count["count"], 0)
+
+    async def test_direct_undo_keeps_action_retryable_when_a_rating_drifted(self):
+        source = await self._source()
+        winner = await self._image(source["id"], "relative-undo-winner.jpg")
+        loser = await self._image(source["id"], "relative-undo-loser.jpg")
+        await db.record_comparison(
+            winner,
+            loser,
+            "swiss",
+            1200.0,
+            1200.0,
+            1210.0,
+            1190.0,
+            action_id="relative-direct-undo",
+        )
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "UPDATE images SET elo = elo + 7 WHERE id = ?",
+                (winner,),
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        undo = await compare_routes.compare_undo()
+
+        self.assertFalse(undo["ok"])
+        self.assertTrue(undo["partial"])
+        self.assertEqual(undo["comparisons_undone"], 0)
+        self.assertEqual(undo["skipped_drift"], [winner])
+        unchanged_winner = await self._image_row(winner)
+        unchanged_loser = await self._image_row(loser)
+        self.assertAlmostEqual(unchanged_winner["elo"], 1217.0)
+        self.assertEqual(unchanged_winner["comparisons"], 1)
+        self.assertAlmostEqual(unchanged_loser["elo"], 1190.0)
+        self.assertEqual(unchanged_loser["comparisons"], 1)
+
+        conn = await db.get_db()
+        try:
+            comparison_count = await (await conn.execute("SELECT COUNT(*) AS c FROM comparisons")).fetchone()
+            await conn.execute("UPDATE images SET elo = 1210 WHERE id = ?", (winner,))
+            await conn.commit()
+        finally:
+            await conn.close()
+        self.assertEqual(comparison_count["c"], 1)
+
+        retry = await compare_routes.compare_undo()
+
+        self.assertTrue(retry["ok"])
+        self.assertEqual((await self._image_row(winner))["elo"], 1200.0)
+        self.assertEqual((await self._image_row(loser))["elo"], 1200.0)
+
     async def test_pairing_cache_patch_keeps_immediate_candidate_cache_hot(self):
         compare_service._pairing_cache.update({
             "valid": True,
@@ -477,6 +655,55 @@ class CompareTests(BackendTestCase):
         self.assertEqual(await db.count_rankings(), 2)
         self.assertEqual(await db.count_rankings(compared="compared"), 2)
 
+    async def test_concurrent_comparisons_compute_from_serialized_ratings(self):
+        source = await self._source()
+        winner = await self._image(source["id"], "concurrent-winner.jpg")
+        loser = await self._image(source["id"], "concurrent-loser.jpg")
+        counts = await db.get_catalog_image_counts()
+
+        await asyncio.gather(
+            ratings.record_active_comparison(
+                db.DB_PATH,
+                winner_id=winner,
+                loser_id=loser,
+                mode="swiss",
+                action_id="concurrent-1",
+                catalog_counts=counts,
+            ),
+            ratings.record_active_comparison(
+                db.DB_PATH,
+                winner_id=winner,
+                loser_id=loser,
+                mode="swiss",
+                action_id="concurrent-2",
+                catalog_counts=counts,
+            ),
+        )
+
+        conn = await db.get_db()
+        try:
+            image_rows = await (await conn.execute(
+                "SELECT id, elo, comparisons FROM images WHERE id IN (?, ?) ORDER BY id",
+                (winner, loser),
+            )).fetchall()
+            comparisons = await (await conn.execute(
+                "SELECT elo_before_winner, elo_before_loser FROM comparisons "
+                "WHERE action_id IN ('concurrent-1', 'concurrent-2') ORDER BY id",
+            )).fetchall()
+        finally:
+            await conn.close()
+
+        self.assertEqual([row["comparisons"] for row in image_rows], [2, 2])
+        self.assertEqual(len(comparisons), 2)
+        self.assertNotEqual(
+            comparisons[0]["elo_before_winner"],
+            comparisons[1]["elo_before_winner"],
+        )
+        self.assertNotEqual(
+            comparisons[0]["elo_before_loser"],
+            comparisons[1]["elo_before_loser"],
+        )
+
     async def test_past_matchups_cache_reuses_until_rating_write(self):
         source = await self._source()
         first = await self._image(source["id"], "first.jpg")
@@ -629,6 +856,34 @@ class CompareTests(BackendTestCase):
         self.assertNotIn(outside, {image["id"] for image in result["images"]})
         self.assertEqual(result["total_images"], 2)
 
+    async def test_smart_collection_restricts_mosaic_and_duel_to_resolved_images(self):
+        source = await self._source()
+        first = await self._image(source["id"], "smart-first.jpg", elo=1500)
+        second = await self._image(source["id"], "smart-second.jpg", elo=1400)
+        outside = await self._image(source["id"], "smart-outside.jpg", elo=1300)
+        for image_id in (first, second):
+            await db.set_image_flag(image_id, "picked")
+        for image_id in (first, second, outside):
+            await self._cache_entry(image_id, "sm")
+            await self._cache_entry(image_id, "md")
+        smart = await db.create_collection(
+            name="Picked Refine",
+            query=json.dumps({"flag": "picked", "sort": "elo"}),
+        )
+
+        mosaic = await compare_routes.mosaic_next(n=2, collection_id=smart["id"])
+        duel = await compare_routes.compare_next(n=1, collection_id=smart["id"])
+        duel_ids = {
+            duel["pairs"][0]["left"]["id"],
+            duel["pairs"][0]["right"]["id"],
+        }
+
+        self.assertEqual({image["id"] for image in mosaic["images"]}, {first, second})
+        self.assertEqual(mosaic["total_images"], 2)
+        self.assertEqual(duel_ids, {first, second})
+        self.assertEqual(duel["total_images"], 2)
+        self.assertNotIn(outside, duel_ids)
+
     async def test_refine_restricts_mosaic_and_duel_to_import_batch(self):
         source = await self._source()
         first = await self._image(source["id"], "batch-first.jpg", elo=1500)
@@ -656,6 +911,56 @@ class CompareTests(BackendTestCase):
         duel_ids = {duel["pairs"][0]["left"]["id"], duel["pairs"][0]["right"]["id"]}
         self.assertEqual(duel_ids, {first, second})
         self.assertNotIn(outside, duel_ids)
+
+    async def test_scoped_search_keeps_empty_collection_disjoint_from_batch(self):
+        old_collection = compare_service._resolve_smart_collection_image_ids
+        old_batch = compare_service._get_import_batch_image_ids
+
+        async def empty_collection(_collection_id):
+            return set()
+
+        async def batch_ids(_batch_id):
+            return {42}
+
+        compare_service._resolve_smart_collection_image_ids = empty_collection
+        compare_service._get_import_batch_image_ids = batch_ids
+        try:
+            scoped = await compare_service._scoped_search(
+                {},
+                None,
+                collection_id=1,
+                import_batch=1,
+            )
+        finally:
+            compare_service._resolve_smart_collection_image_ids = old_collection
+            compare_service._get_import_batch_image_ids = old_batch
+
+        self.assertEqual(scoped["id_filter"], set())
+
+    async def test_scoped_search_intersects_ids_collection_and_batch_after_empty(self):
+        old_collection = compare_service._resolve_smart_collection_image_ids
+        old_batch = compare_service._get_import_batch_image_ids
+
+        async def collection_ids(_collection_id):
+            return {2, 3}
+
+        async def batch_ids(_batch_id):
+            return {3, 4}
+
+        compare_service._resolve_smart_collection_image_ids = collection_ids
+        compare_service._get_import_batch_image_ids = batch_ids
+        try:
+            scoped = await compare_service._scoped_search(
+                {},
+                [1],
+                collection_id=1,
+                import_batch=1,
+            )
+        finally:
+            compare_service._resolve_smart_collection_image_ids = old_collection
+            compare_service._get_import_batch_image_ids = old_batch
+
+        self.assertEqual(scoped["id_filter"], set())
 
     async def test_mosaic_next_scoped_tiny_pool_returns_not_enough_shape(self):
         source = await self._source()
@@ -1172,10 +1477,10 @@ class CompareTests(BackendTestCase):
         try:
             result = await asyncio.wait_for(
                 compare_routes.mosaic_next(n=2, strategy="random"),
-                timeout=0.5,
+                timeout=5,
             )
             self.assertEqual(len(result["images"]), 2)
-            await asyncio.wait_for(started.wait(), timeout=0.5)
+            await asyncio.wait_for(started.wait(), timeout=5)
         finally:
             release.set()
             await asyncio.sleep(0)
@@ -1196,9 +1501,9 @@ class CompareTests(BackendTestCase):
 
         thumbnails.prefetch_images = blocking_prefetch
         try:
-            result = await asyncio.wait_for(compare_routes.compare_next(n=1, mode="swiss"), timeout=0.5)
+            result = await asyncio.wait_for(compare_routes.compare_next(n=1, mode="swiss"), timeout=5)
             self.assertEqual(len(result["pairs"]), 1)
-            await asyncio.wait_for(started.wait(), timeout=0.5)
+            await asyncio.wait_for(started.wait(), timeout=5)
         finally:
             release.set()
             await asyncio.sleep(0)

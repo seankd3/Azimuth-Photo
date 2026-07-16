@@ -16,6 +16,7 @@ import numpy as np
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from data import connection as data_connection
 from features.develop import hdr, hdr_routes, rawproc, routes as develop_routes
 
 
@@ -123,6 +124,15 @@ class HdrMergeCacheTests(unittest.TestCase):
                 opened = client.get(f"/api/develop/{result['image_id']}")
         self.assertEqual(opened.status_code, 200)
         self.assertGreater(opened.json()["meta"]["hdr"]["scale"], 1.0)
+
+    def test_catalog_reads_use_fk_enabled_connection_helper(self):
+        with mock.patch.object(
+            data_connection,
+            "open_sync",
+            wraps=data_connection.open_sync,
+        ) as open_sync:
+            self.assertEqual(hdr._catalog_rows(self.db_path, None), [])
+        open_sync.assert_called_once_with(self.db_path)
 
 
 class HdrRouteTests(unittest.TestCase):

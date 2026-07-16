@@ -5,6 +5,8 @@ import json
 import os
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -29,7 +31,9 @@ except ImportError:  # Keep the repository's unittest fallback runnable in minim
 sys.path.insert(0, os.path.dirname(__file__))
 import app as app_module  # noqa: E402
 import db  # noqa: E402
-from features.develop import rawproc  # noqa: E402
+from features.develop import rawproc, routes as develop_routes  # noqa: E402
+from features.develop import render as develop_render  # noqa: E402
+from features.sync import readthrough  # noqa: E402
 
 
 RAW_ROOT = Path("/mnt/expansion/Photos/RAWS")
@@ -45,6 +49,7 @@ class DevelopBackendTests(unittest.TestCase):
         rawproc.BASE_CACHE_ROOT = Path(self.tempdir.name) / "develop-cache"
         rawproc.BASE_CACHE_DIR = rawproc.BASE_CACHE_ROOT / "base" / "v2"
         rawproc._recent_decodes.clear()
+        develop_routes._base_generation_failures.clear()
         asyncio.run(db.init_db())
         source = asyncio.run(db.add_or_restore_source(os.path.join(self.tempdir.name, "raws")))
         self.raw_path = Path(self.tempdir.name) / "raws" / "sample.dng"
@@ -63,7 +68,20 @@ class DevelopBackendTests(unittest.TestCase):
         rawproc.BASE_CACHE_DIR = self.old_cache_dir
         rawproc.BASE_CACHE_ROOT = self.old_cache_root
         rawproc._recent_decodes.clear()
-        self.tempdir.cleanup()
+        develop_routes._base_generation_failures.clear()
+        # Windows: dropped-but-uncollected sqlite handles block cleanup.
+        import gc
+        import time as _time
+
+        for attempt in range(20):
+            try:
+                self.tempdir.cleanup()
+                break
+            except PermissionError:
+                if attempt == 19:
+                    raise
+                gc.collect()
+                _time.sleep(0.2)
 
     def _image(self, source_id, path):
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -209,6 +227,232 @@ class DevelopBackendTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.json()["history"]), 40)
 
+    def test_history_rail_pins_named_snapshots_past_the_step_cap(self):
+        saved = self.client.post(
+            f"/api/develop/{self.raw_id}/snapshots",
+            json={"label": "Keeper", "settings": {"Exposure2012": 0.5}},
+        )
+        self.assertEqual(saved.status_code, 200, saved.text)
+        for index in range(45):
+            response = self.client.put(
+                f"/api/develop/{self.raw_id}",
+                json={"settings": {"Exposure2012": index / 10}, "label": f"Step {index}"},
+            )
+            self.assertEqual(response.status_code, 200)
+        history = self.client.get(f"/api/develop/{self.raw_id}/history")
+        self.assertEqual(history.status_code, 200, history.text)
+        labels = [row["label"] for row in history.json()]
+        self.assertIn("Snapshot: Keeper", labels)
+        self.assertEqual(len([l for l in labels if not l.startswith("Snapshot:")]), 40)
+
+    def test_history_rail_bounds_pinned_snapshots_as_well_as_edits(self):
+        async def insert_history():
+            conn = await db.get_db()
+            try:
+                for index in range(45):
+                    await conn.execute(
+                        "INSERT INTO develop_history (image_id, settings, label, created_at) VALUES (?, '{}', ?, ?)",
+                        (self.raw_id, f"Snapshot: {index}", f"snapshot-{index}"),
+                    )
+                for index in range(45):
+                    await conn.execute(
+                        "INSERT INTO develop_history (image_id, settings, label, created_at) VALUES (?, '{}', ?, ?)",
+                        (self.raw_id, f"Step {index}", f"step-{index}"),
+                    )
+                await conn.commit()
+            finally:
+                await conn.close()
+
+        asyncio.run(insert_history())
+        history = self.client.get(f"/api/develop/{self.raw_id}/history")
+        self.assertEqual(history.status_code, 200, history.text)
+        labels = [row["label"] for row in history.json()]
+        self.assertEqual(len(labels), 80)
+        self.assertEqual(len([label for label in labels if label.startswith("Snapshot:")]), 40)
+        self.assertEqual(len([label for label in labels if not label.startswith("Snapshot:")]), 40)
+        self.assertIn("Snapshot: 44", labels)
+        self.assertNotIn("Snapshot: 0", labels)
+
+    def test_named_snapshots_are_not_truncated_by_edit_history(self):
+        for label in ("Print", "Web"):
+            saved = self.client.post(
+                f"/api/develop/{self.raw_id}/snapshots",
+                json={"label": label, "settings": {"Exposure2012": 0.5}},
+            )
+            self.assertEqual(saved.status_code, 200, saved.text)
+        for index in range(45):
+            response = self.client.put(
+                f"/api/develop/{self.raw_id}",
+                json={"settings": {"Exposure2012": index / 10}, "label": f"Step {index}"},
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+
+        snapshots = self.client.get(f"/api/develop/{self.raw_id}/snapshots")
+
+        self.assertEqual(snapshots.status_code, 200, snapshots.text)
+        self.assertEqual(
+            [row["label"] for row in snapshots.json()["snapshots"]],
+            ["Snapshot: Web", "Snapshot: Print"],
+        )
+
+    def test_snapshot_delete_removes_only_the_named_snapshot(self):
+        first = self.client.post(f"/api/develop/{self.raw_id}/snapshots", json={"label": "Print", "settings": {"Exposure2012": 0.5}})
+        second = self.client.post(f"/api/develop/{self.raw_id}/snapshots", json={"label": "Web", "settings": {"Exposure2012": 1.5}})
+        self.assertEqual(first.status_code, 200, first.text)
+        self.assertEqual(second.status_code, 200, second.text)
+        deleted = self.client.delete(f"/api/develop/{self.raw_id}/snapshots/{first.json()['id']}")
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        remaining = self.client.get(f"/api/develop/{self.raw_id}/snapshots")
+        self.assertEqual([row["id"] for row in remaining.json()["snapshots"]], [second.json()["id"]])
+
+    def test_virtual_copy_http_has_independent_settings_and_delete_keeps_master(self):
+        created = self.client.post(f"/api/develop/{self.raw_id}/virtual-copy")
+        self.assertEqual(created.status_code, 200, created.text)
+        copy_id = created.json()["id"]
+        self.assertEqual(created.json()["filepath"], str(self.raw_path))
+        saved = self.client.put(f"/api/develop/{copy_id}", json={"settings": {"Exposure2012": 2.0}})
+        self.assertEqual(saved.status_code, 200, saved.text)
+        deleted = self.client.delete(f"/api/develop/{self.raw_id}/virtual-copy/{copy_id}")
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        async def master_exists():
+            conn = await db.get_db()
+            try:
+                return await (await conn.execute("SELECT id FROM images WHERE id = ?", (self.raw_id,))).fetchone()
+            finally:
+                await conn.close()
+        self.assertIsNotNone(asyncio.run(master_exists()))
+        self.assertEqual(self.client.get(f"/api/develop/{self.raw_id}/virtual-copies").json()["virtual_copies"], [])
+
+    def test_virtual_copy_export_joins_master_version_stack(self):
+        created = self.client.post(f"/api/develop/{self.raw_id}/virtual-copy")
+        self.assertEqual(created.status_code, 200, created.text)
+        copy_id = created.json()["id"]
+        self._write_cached_base(copy_id)
+        old_export = develop_render.EXPORT_DIRECTORY
+        old_library = develop_render.LIBRARY_EXPORT_DIRECTORY
+        develop_render.EXPORT_DIRECTORY = Path(self.tempdir.name) / "exports"
+        develop_render.LIBRARY_EXPORT_DIRECTORY = Path(self.tempdir.name) / "library-exports"
+        linear = np.full((8, 8, 3), 0.5, dtype=np.float32)
+        try:
+            with mock.patch.object(develop_render, "decode_full_resolution", return_value=linear):
+                exported = self.client.post(
+                    f"/api/develop/{copy_id}/export",
+                    json={"format": "jpeg", "save_to_library": True},
+                )
+            self.assertEqual(exported.status_code, 200, exported.text)
+            library_id = int(exported.headers["X-Develop-Library-Image-Id"])
+        finally:
+            develop_render.EXPORT_DIRECTORY = old_export
+            develop_render.LIBRARY_EXPORT_DIRECTORY = old_library
+
+        async def members():
+            conn = await db.get_db()
+            try:
+                cursor = await conn.execute(
+                    "SELECT sm.image_id FROM stack_members sm JOIN stacks s ON s.id = sm.stack_id "
+                    "WHERE s.kind = 'version' ORDER BY sm.image_id"
+                )
+                return [int(row["image_id"]) for row in await cursor.fetchall()]
+            finally:
+                await conn.close()
+
+        self.assertEqual(asyncio.run(members()), sorted([self.raw_id, library_id]))
+
+    def test_deleting_stacked_virtual_copy_repairs_stack_and_checks_parent(self):
+        created = self.client.post(f"/api/develop/{self.raw_id}/virtual-copy")
+        copy_id = int(created.json()["id"])
+
+        async def add_stack():
+            conn = await db.get_db()
+            try:
+                stack = await conn.execute(
+                    "INSERT INTO stacks(kind, representative_image_id, auto, created_at, updated_at) "
+                    "VALUES ('version', ?, 1, 1, 1)",
+                    (copy_id,),
+                )
+                await conn.executemany(
+                    "INSERT INTO stack_members(stack_id, image_id, score, added_at) VALUES (?, ?, 1, 1)",
+                    [(int(stack.lastrowid), self.raw_id), (int(stack.lastrowid), copy_id)],
+                )
+                await conn.commit()
+            finally:
+                await conn.close()
+
+        asyncio.run(add_stack())
+        wrong_parent = self.client.delete(f"/api/develop/{self.jpg_id}/virtual-copy/{copy_id}")
+        deleted = self.client.delete(f"/api/develop/{self.raw_id}/virtual-copy/{copy_id}")
+
+        self.assertEqual(wrong_parent.status_code, 404, wrong_parent.text)
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+
+        async def remaining():
+            conn = await db.get_db()
+            try:
+                image = await (await conn.execute("SELECT id FROM images WHERE id = ?", (self.raw_id,))).fetchone()
+                stack = await (await conn.execute("SELECT id FROM stacks WHERE kind = 'version'")).fetchone()
+                return image, stack
+            finally:
+                await conn.close()
+
+        master, stack = asyncio.run(remaining())
+        self.assertIsNotNone(master)
+        self.assertIsNone(stack)
+
+    def test_virtual_copy_reset_restores_xmp_baseline(self):
+        baseline = {"Exposure2012": 0.25, "FutureCrsKey": "kept"}
+
+        async def seed_xmp():
+            conn = await db.get_db()
+            try:
+                await conn.execute(
+                    "INSERT INTO develop_settings (image_id, settings, origin, xmp_path, xmp_mtime, updated_at) "
+                    "VALUES (?, ?, 'xmp', '/photos/sample.xmp', 42, ?)",
+                    (self.raw_id, json.dumps(baseline), "2026-07-10T00:00:00+00:00"),
+                )
+                await conn.execute(
+                    "INSERT INTO develop_history (image_id, settings, label, created_at) VALUES (?, ?, 'Import from XMP', ?)",
+                    (self.raw_id, json.dumps(baseline), "2026-07-10T00:00:00+00:00"),
+                )
+                await conn.commit()
+            finally:
+                await conn.close()
+
+        asyncio.run(seed_xmp())
+        created = self.client.post(f"/api/develop/{self.raw_id}/virtual-copy")
+        self.assertEqual(created.status_code, 200, created.text)
+        copy_id = created.json()["id"]
+
+        async def copied_provenance():
+            conn = await db.get_db()
+            try:
+                settings = await (
+                    await conn.execute(
+                        "SELECT origin, xmp_path, xmp_mtime FROM develop_settings WHERE image_id = ?",
+                        (copy_id,),
+                    )
+                ).fetchone()
+                history = await (
+                    await conn.execute(
+                        "SELECT settings FROM develop_history WHERE image_id = ? AND label = 'Import from XMP'",
+                        (copy_id,),
+                    )
+                ).fetchone()
+                return settings, history
+            finally:
+                await conn.close()
+
+        copied_settings, copied_history = asyncio.run(copied_provenance())
+        self.assertEqual(copied_settings["origin"], "xmp")
+        self.assertEqual(copied_settings["xmp_path"], "/photos/sample.xmp")
+        self.assertEqual(json.loads(copied_history["settings"]), baseline)
+        changed = self.client.put(f"/api/develop/{copy_id}", json={"settings": {"Exposure2012": 2}})
+        reset = self.client.post(f"/api/develop/{copy_id}/reset")
+
+        self.assertEqual(changed.status_code, 200, changed.text)
+        self.assertEqual(reset.status_code, 200, reset.text)
+        self.assertEqual(reset.json()["origin"], "xmp")
+        self.assertEqual(reset.json()["settings"], baseline)
+
     def test_base_endpoints_and_pregen_contract(self):
         self._write_cached_base()
         # A warm preview must be a pure disk response: the route may not enter
@@ -225,16 +469,98 @@ class DevelopBackendTests(unittest.TestCase):
         self.assertEqual((width, height, parsed.dtype), (1, 1, np.dtype("<u2")))
         self.assertEqual(preview.status_code, 200)
         self.assertEqual(preview.headers["content-type"], "image/jpeg")
+        self.assertNotIn("x-develop-orientation", preview.headers)
         self.assertEqual(pregen.status_code, 202)
         self.assertEqual(pregen.json()["queued"], [])
 
     def test_cold_base_artifacts_start_background_generation_and_return_202(self):
-        preview = self.client.get(f"/api/develop/{self.raw_id}/base.jpg")
-        binary = self.client.get(f"/api/develop/{self.raw_id}/base.bin")
+        with mock.patch.object(develop_routes, "_start_base_generation") as start_generation:
+            preview = self.client.get(f"/api/develop/{self.raw_id}/base.jpg")
+            binary = self.client.get(f"/api/develop/{self.raw_id}/base.bin")
         self.assertEqual(preview.status_code, 202, preview.text)
         self.assertEqual(binary.status_code, 202, binary.text)
         self.assertEqual(preview.json()["state"], "generating")
         self.assertEqual(binary.headers["retry-after"], "1")
+        self.assertEqual(start_generation.call_count, 2)
+
+    def test_remote_settings_get_does_not_wait_for_hub_base(self):
+        async def mark_remote():
+            conn = await db.get_db()
+            try:
+                await conn.execute("UPDATE images SET hub_remote = 1 WHERE id = ?", (self.raw_id,))
+                await conn.commit()
+            finally:
+                await conn.close()
+
+        asyncio.run(mark_remote())
+        self.raw_path.unlink()
+        with mock.patch.object(rawproc, "ensure_base_cache", side_effect=AssertionError("must not contact hub")):
+            response = self.client.get(f"/api/develop/{self.raw_id}")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["meta"], {"canvas_color_profile": {}})
+
+    def test_base_poll_surfaces_recent_hub_failure_as_503(self):
+        cause = readthrough.BaseReadthroughError("Could not reach the hub for this Develop base")
+        failure = rawproc.RawDecodeError(str(cause))
+        failure.__cause__ = cause
+        develop_routes._base_generation_failures[self.raw_id] = (develop_routes.time.monotonic(), failure)
+
+        response = self.client.get(f"/api/develop/{self.raw_id}/base.bin")
+
+        self.assertEqual(response.status_code, 503, response.text)
+        self.assertEqual(response.json()["reason"], "hub_unreachable")
+
+    def test_transform_auto_with_cold_base_returns_pending(self):
+        with mock.patch.object(develop_routes, "_start_base_generation") as start_generation:
+            response = self.client.post(f"/api/develop/{self.raw_id}/transform/auto")
+
+        self.assertEqual(response.status_code, 202, response.text)
+        self.assertEqual(response.json()["status"], "pending")
+        start_generation.assert_called_once()
+
+    def test_remote_auto_with_uncached_base_returns_202_without_waiting_for_hub(self):
+        async def mark_remote():
+            conn = await db.get_db()
+            try:
+                await conn.execute("UPDATE images SET hub_remote = 1 WHERE id = ?", (self.raw_id,))
+                await conn.commit()
+            finally:
+                await conn.close()
+
+        asyncio.run(mark_remote())
+        self.raw_path.unlink()
+        ensure_started = threading.Event()
+        release_ensure = threading.Event()
+        ensure_finished = threading.Event()
+
+        def slow_hub_ensure(*_args, **_kwargs):
+            ensure_started.set()
+            release_ensure.wait(timeout=2)
+            ensure_finished.set()
+
+        release_timer = threading.Timer(1.25, release_ensure.set)
+        release_timer.start()
+        try:
+            with mock.patch.object(rawproc, "ensure_base_cache", side_effect=slow_hub_ensure):
+                async def exercise_route():
+                    started = time.perf_counter()
+                    response = await develop_routes.api_develop_auto_tone(self.raw_id)
+                    elapsed = time.perf_counter() - started
+                    self.assertTrue(await asyncio.to_thread(ensure_started.wait, 1))
+                    release_ensure.set()
+                    self.assertTrue(await asyncio.to_thread(ensure_finished.wait, 1))
+                    await asyncio.sleep(0)
+                    return response, elapsed
+
+                response, elapsed = asyncio.run(exercise_route())
+        finally:
+            release_timer.cancel()
+            release_ensure.set()
+
+        self.assertEqual(response.status_code, 202, response.body)
+        self.assertEqual(json.loads(response.body)["status"], "pending")
+        self.assertLess(elapsed, 1.0)
 
     def test_get_meta_self_heals_camera_profile_and_lens_data(self):
         self._write_cached_base()
@@ -275,8 +601,8 @@ class DevelopBackendTests(unittest.TestCase):
         finally:
             await conn.close()
 
-    def _write_cached_base(self):
-        paths = rawproc.base_paths(self.raw_id)
+    def _write_cached_base(self, image_id=None):
+        paths = rawproc.base_paths(image_id or self.raw_id)
         paths.binary.parent.mkdir(parents=True, exist_ok=True)
         payload = rawproc.BASE_HEADER.pack(rawproc.BASE_MAGIC, 1, 1) + b"\0" * 6
         paths.binary.write_bytes(gzip.compress(payload))
@@ -401,6 +727,7 @@ class DevelopBackendTests(unittest.TestCase):
     def test_export_honors_resize_quality_and_sharpen_byte_sizes(self):
         from features.develop import render as develop_render
 
+        self._write_cached_base()
         export_root = Path(self.tempdir.name) / "exports"
         library_root = Path(self.tempdir.name) / "library-exports"
         old_export = develop_render.EXPORT_DIRECTORY

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import platform as py_platform
 import socket
+import time
 from collections.abc import Callable
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -19,6 +21,35 @@ from features.sync import device_auth, mdns, pairing, satellite
 
 router = APIRouter(tags=["pairing"])
 _db_path: Callable[[], str] | None = None
+
+# Redeem stays public by necessity, so failures share one throttled bucket
+# (same budget as share unlock).
+REDEEM_FAILURE_LIMIT = 5
+REDEEM_FAILURE_WINDOW_SECONDS = 15 * 60
+_redeem_failures = {"count": 0, "first_at": 0.0}
+
+
+def _redeem_retry_after(now: float | None = None) -> int | None:
+    now = time.time() if now is None else now
+    if _redeem_failures["count"] < REDEEM_FAILURE_LIMIT:
+        return None
+    remaining = _redeem_failures["first_at"] + REDEEM_FAILURE_WINDOW_SECONDS - now
+    if remaining <= 0:
+        reset_redeem_throttle_for_tests()
+        return None
+    return int(remaining) + 1
+
+
+def _record_redeem_failure(now: float | None = None) -> None:
+    now = time.time() if now is None else now
+    if not _redeem_failures["count"] or now >= _redeem_failures["first_at"] + REDEEM_FAILURE_WINDOW_SECONDS:
+        _redeem_failures.update(count=1, first_at=now)
+    else:
+        _redeem_failures["count"] += 1
+
+
+def reset_redeem_throttle_for_tests() -> None:
+    _redeem_failures.update(count=0, first_at=0.0)
 
 
 class PairRequest(BaseModel):
@@ -64,6 +95,16 @@ def _default_device_name() -> str:
         return "Device"
 
 
+def _redeem_pair_request(req: UrlRequest) -> tuple[int, bytes]:
+    """Complete the blocking urllib exchange entirely outside the event loop."""
+
+    try:
+        with urlopen(req, timeout=5) as response:  # noqa: S310 - user-supplied hub URL
+            return response.status, response.read()
+    except HTTPError as exc:
+        return exc.code, exc.read()
+
+
 @router.post("/api/devices/link")
 async def api_devices_link(request: Request):
     """Hub: mint a one-time pair code + QR for the Devices panel."""
@@ -80,6 +121,13 @@ async def api_devices_link(request: Request):
 
 @router.post("/api/pair")
 async def api_pair(body: PairRequest):
+    retry_after = _redeem_retry_after()
+    if retry_after is not None:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many pairing attempts",
+            headers={"Retry-After": str(retry_after)},
+        )
     try:
         return await pairing.pair_device(
             _configured_db_path(),
@@ -88,8 +136,10 @@ async def api_pair(body: PairRequest):
             platform=body.platform,
         )
     except LookupError as exc:
+        _record_redeem_failure()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ValueError as exc:
+        _record_redeem_failure()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
@@ -136,20 +186,20 @@ async def api_pair_connect(body: ConnectRequest):
     req = UrlRequest(
         f"{hub}/api/pair",
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json", "Accept": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            **satellite.hub_request_headers(),
+        },
         method="POST",
     )
     try:
-        with urlopen(req, timeout=10) as response:  # noqa: S310 - user-supplied hub URL
-            raw = response.read()
-            status = response.status
-    except HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")[:300]
-        raise HTTPException(status_code=400, detail=f"hub pair failed ({exc.code}): {detail}") from exc
+        status, raw = await asyncio.to_thread(_redeem_pair_request, req)
     except URLError as exc:
         raise HTTPException(status_code=400, detail=f"could not reach hub: {exc.reason}") from exc
     if not 200 <= status < 300:
-        raise HTTPException(status_code=400, detail=f"hub pair failed ({status})")
+        detail = raw.decode("utf-8", errors="replace")[:300]
+        raise HTTPException(status_code=400, detail=f"hub pair failed ({status}): {detail}")
     result = json.loads(raw.decode("utf-8"))
     token = str(result.get("device_token") or "").strip()
     hub_id = str(result.get("hub_id") or "").strip()

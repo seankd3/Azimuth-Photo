@@ -554,11 +554,22 @@ async def record_comparison(
 ) -> None:
     conn = await connection.open_async(db_path)
     try:
+        await conn.execute("BEGIN IMMEDIATE")
         await conn.execute(
             "INSERT INTO comparisons "
-            "(winner_id, loser_id, mode, elo_before_winner, elo_before_loser, action_id) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (winner_id, loser_id, mode, elo_before_winner, elo_before_loser, action_id),
+            "(winner_id, loser_id, mode, elo_before_winner, elo_before_loser, "
+            "elo_delta_winner, elo_delta_loser, action_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                winner_id,
+                loser_id,
+                mode,
+                elo_before_winner,
+                elo_before_loser,
+                new_winner_elo - elo_before_winner,
+                new_loser_elo - elo_before_loser,
+                action_id,
+            ),
         )
         await conn.execute(
             "UPDATE images SET elo = ?, comparisons = COALESCE(comparisons, 0) + 1 WHERE id = ?",
@@ -569,6 +580,9 @@ async def record_comparison(
             (new_loser_elo, loser_id),
         )
         await conn.commit()
+    except Exception:
+        await conn.rollback()
+        raise
     finally:
         await connection.close_async(conn, db_path=db_path)
 
@@ -589,6 +603,7 @@ async def record_active_comparison(
 
     conn = await connection.open_async(db_path)
     try:
+        await conn.execute("BEGIN IMMEDIATE")
         if _all_catalog_images_active(catalog_counts):
             cursor = await conn.execute(
                 "SELECT i.id, i.elo, COALESCE(i.comparisons, 0) AS comparisons, "
@@ -614,15 +629,26 @@ async def record_active_comparison(
         winner = rows.get(winner_id)
         loser = rows.get(loser_id)
         if not winner or not loser:
+            await conn.rollback()
             return None
 
         k = pairing.get_k_factor(min(winner["comparisons"], loser["comparisons"]), mode)
         new_winner_elo, new_loser_elo = pairing.update_elo(winner["elo"], loser["elo"], k)
         await conn.execute(
             "INSERT INTO comparisons "
-            "(winner_id, loser_id, mode, elo_before_winner, elo_before_loser, action_id) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (winner_id, loser_id, mode, winner["elo"], loser["elo"], action_id),
+            "(winner_id, loser_id, mode, elo_before_winner, elo_before_loser, "
+            "elo_delta_winner, elo_delta_loser, action_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                winner_id,
+                loser_id,
+                mode,
+                winner["elo"],
+                loser["elo"],
+                new_winner_elo - winner["elo"],
+                new_loser_elo - loser["elo"],
+                action_id,
+            ),
         )
         await conn.execute(
             "UPDATE images SET "
@@ -641,6 +667,9 @@ async def record_active_comparison(
             "k": k,
             "_rated_delta": rated_delta,
         }
+    except Exception:
+        await conn.rollback()
+        raise
     finally:
         await connection.close_async(conn, db_path=db_path)
 
@@ -662,6 +691,7 @@ async def record_active_mosaic_pick(
 
     conn = await connection.open_async(db_path)
     try:
+        await conn.execute("BEGIN IMMEDIATE")
         placeholders = ",".join("?" for _ in unique_ids)
         if _all_catalog_images_active(catalog_counts):
             cursor = await conn.execute(
@@ -688,6 +718,7 @@ async def record_active_mosaic_pick(
         images = {row["id"]: dict(row) for row in await cursor.fetchall()}
         missing_ids = [image_id for image_id in all_ids if image_id not in images]
         if missing_ids:
+            await conn.rollback()
             return {"ok": False, "missing_ids": missing_ids}
 
         picked_elo = images[picked_id]["elo"]
@@ -696,13 +727,23 @@ async def record_active_mosaic_pick(
         for other_id in other_ids:
             other = images[other_id]
             new_picked, new_other = pairing.update_elo(picked_elo, other["elo"], k=12.0)
-            comparison_rows.append((picked_id, other_id, picked_elo, other["elo"], action_id))
+            comparison_rows.append(
+                (
+                    picked_id,
+                    other_id,
+                    picked_elo,
+                    other["elo"],
+                    new_picked - picked_elo,
+                    new_other - other["elo"],
+                    action_id,
+                )
+            )
             loser_updates.append((other_id, new_other))
             picked_elo = new_picked
 
         if comparison_rows:
             row_placeholders = ",".join(
-                "(?, ?, 'mosaic', ?, ?, ?)" for _row in comparison_rows
+                "(?, ?, 'mosaic', ?, ?, ?, ?, ?)" for _row in comparison_rows
             )
             comparison_params = [
                 value
@@ -711,7 +752,8 @@ async def record_active_mosaic_pick(
             ]
             await conn.execute(
                 "INSERT INTO comparisons "
-                "(winner_id, loser_id, mode, elo_before_winner, elo_before_loser, action_id) "
+                "(winner_id, loser_id, mode, elo_before_winner, elo_before_loser, "
+                "elo_delta_winner, elo_delta_loser, action_id) "
                 f"VALUES {row_placeholders}",
                 comparison_params,
             )
@@ -742,6 +784,9 @@ async def record_active_mosaic_pick(
             "loser_updates": loser_updates,
             "_rated_delta": rated_delta,
         }
+    except Exception:
+        await conn.rollback()
+        raise
     finally:
         await connection.close_async(conn, db_path=db_path)
 
@@ -749,30 +794,35 @@ async def record_active_mosaic_pick(
 async def undo_last_comparison(db_path: str) -> dict | None:
     conn = await connection.open_async(db_path)
     try:
+        await conn.execute("BEGIN IMMEDIATE")
         cursor = await conn.execute(
             "SELECT id, action_id FROM comparisons ORDER BY id DESC LIMIT 1"
         )
         latest = await cursor.fetchone()
         if not latest:
+            await conn.rollback()
             return None
 
         action_id = latest["action_id"]
         if action_id:
             cursor = await conn.execute(
-                "SELECT id, winner_id, loser_id, elo_before_winner, elo_before_loser, action_id "
+                "SELECT id, winner_id, loser_id, elo_before_winner, elo_before_loser, "
+                "elo_delta_winner, elo_delta_loser, action_id "
                 "FROM comparisons WHERE action_id = ? ORDER BY id ASC",
                 (action_id,),
             )
             rows = await cursor.fetchall()
         else:
             cursor = await conn.execute(
-                "SELECT id, winner_id, loser_id, elo_before_winner, elo_before_loser, action_id "
+                "SELECT id, winner_id, loser_id, elo_before_winner, elo_before_loser, "
+                "elo_delta_winner, elo_delta_loser, action_id "
                 "FROM comparisons WHERE id = ?",
                 (latest["id"],),
             )
             rows = await cursor.fetchall()
 
         if not rows:
+            await conn.rollback()
             return None
 
         propagation_rows = []
@@ -784,9 +834,80 @@ async def undo_last_comparison(db_path: str) -> dict | None:
             )
             propagation_rows = await cursor.fetchall()
 
+        direct_deltas: dict[int, float] = {}
+        relative_expected_elo: dict[int, float] = {}
+        legacy_restore_elo: dict[int, float] = {}
+        comparison_decrements: dict[int, int] = {}
+        for row in rows:
+            winner_id = int(row["winner_id"])
+            loser_id = int(row["loser_id"])
+            if row["elo_delta_winner"] is None:
+                legacy_restore_elo.setdefault(winner_id, float(row["elo_before_winner"]))
+            else:
+                winner_delta = float(row["elo_delta_winner"])
+                direct_deltas[winner_id] = direct_deltas.get(winner_id, 0.0) + winner_delta
+                relative_expected_elo[winner_id] = (
+                    float(row["elo_before_winner"]) + winner_delta
+                )
+            if row["elo_delta_loser"] is None:
+                legacy_restore_elo.setdefault(loser_id, float(row["elo_before_loser"]))
+            else:
+                loser_delta = float(row["elo_delta_loser"])
+                direct_deltas[loser_id] = direct_deltas.get(loser_id, 0.0) + loser_delta
+                relative_expected_elo[loser_id] = (
+                    float(row["elo_before_loser"]) + loser_delta
+                )
+            comparison_decrements[winner_id] = comparison_decrements.get(winner_id, 0) + 1
+            comparison_decrements[loser_id] = comparison_decrements.get(loser_id, 0) + 1
+
+        relative_updates = {
+            image_id: delta
+            for image_id, delta in direct_deltas.items()
+            if image_id not in legacy_restore_elo
+        }
+        skipped_drift: list[int] = []
+        if relative_updates:
+            placeholders = ",".join("?" for _ in relative_updates)
+            cursor = await conn.execute(
+                f"SELECT id, elo FROM images WHERE id IN ({placeholders})",
+                tuple(relative_updates),
+            )
+            current_elo = {
+                int(row["id"]): None if row["elo"] is None else float(row["elo"])
+                for row in await cursor.fetchall()
+            }
+            applicable_updates = {
+                image_id: delta
+                for image_id, delta in relative_updates.items()
+                if current_elo.get(image_id) == relative_expected_elo[image_id]
+            }
+            skipped_drift = sorted(set(relative_updates) - set(applicable_updates))
+            if skipped_drift:
+                await conn.rollback()
+                last_row = rows[-1]
+                return {
+                    "winner_id": last_row["winner_id"],
+                    "loser_id": last_row["loser_id"],
+                    "comparisons_undone": 0,
+                    "propagations_undone": 0,
+                    "action_id": action_id,
+                    "skipped_drift": skipped_drift,
+                    "partial": True,
+                }
+            if applicable_updates:
+                await conn.executemany(
+                    "UPDATE images SET elo = COALESCE(elo, 0) - ?, "
+                    "comparisons = MAX(COALESCE(comparisons, 0) - ?, 0) WHERE id = ?",
+                    [
+                        (delta, comparison_decrements.get(image_id, 0), image_id)
+                        for image_id, delta in applicable_updates.items()
+                    ],
+                )
+
         # Subtract the recorded delta instead of restoring the absolute
         # elo_before snapshot, so ratings written by other actions between
-        # propagation and undo are preserved.
+        # propagation and undo are preserved. This runs only after every
+        # direct side passed the drift check above.
         if propagation_rows:
             await conn.executemany(
                 "UPDATE images SET elo = COALESCE(elo, 0) - ?, "
@@ -796,23 +917,12 @@ async def undo_last_comparison(db_path: str) -> dict | None:
                     for row in propagation_rows
                 ],
             )
-
-        restore_elo: dict[int, float] = {}
-        comparison_decrements: dict[int, int] = {}
-        for row in rows:
-            winner_id = int(row["winner_id"])
-            loser_id = int(row["loser_id"])
-            restore_elo.setdefault(winner_id, float(row["elo_before_winner"]))
-            restore_elo.setdefault(loser_id, float(row["elo_before_loser"]))
-            comparison_decrements[winner_id] = comparison_decrements.get(winner_id, 0) + 1
-            comparison_decrements[loser_id] = comparison_decrements.get(loser_id, 0) + 1
-
-        if restore_elo:
+        if legacy_restore_elo:
             await conn.executemany(
                 "UPDATE images SET elo = ?, comparisons = MAX(COALESCE(comparisons, 0) - ?, 0) WHERE id = ?",
                 [
                     (elo, comparison_decrements.get(image_id, 0), image_id)
-                    for image_id, elo in restore_elo.items()
+                    for image_id, elo in legacy_restore_elo.items()
                 ],
             )
 
@@ -829,6 +939,10 @@ async def undo_last_comparison(db_path: str) -> dict | None:
             "comparisons_undone": len(rows),
             "propagations_undone": len(propagation_rows),
             "action_id": action_id,
+            "skipped_drift": skipped_drift,
         }
+    except Exception:
+        await conn.rollback()
+        raise
     finally:
         await connection.close_async(conn, db_path=db_path)

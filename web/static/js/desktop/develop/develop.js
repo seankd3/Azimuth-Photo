@@ -1,6 +1,9 @@
-import { thumbUrl } from '../api.js';
+import { previewThumbUrl, thumbUrl } from '../api.js';
+import { fetchOptionsWithTimeout } from '../../api.js';
 import { on, selection, viewState } from '../state.js';
+import { applyFlags } from '../selection.js';
 import { showToast } from '../toast.js';
+import { releaseFocus, trapFocus } from '../focusTrap.js';
 import { CropController } from './crop.js';
 import { DevelopRenderer } from './gl.js';
 import { DevelopHistogram } from './histogram.js';
@@ -8,7 +11,7 @@ import { sampleBasePatch, solveWhiteBalance } from './wb_picker.js';
 import { DevelopPanels } from './panels.js';
 import { mountPresetsPanel } from './presets.js';
 import { mountHistoryPanel } from './history_panel.js';
-import { openExportDialog, openSyncDialog } from './export_dialog.js';
+import { openExportDialog, openSyncDialog, SYNC_GROUPS } from './export_dialog.js';
 import { DevelopSettingsClipboard, applyPrevious, openCopyDialog, pasteClipboard } from './settings_clipboard.js';
 import { DevelopCompareView, SoftProofPopover } from './compare_view.js';
 import { ProofTileController } from './proof_tile.js';
@@ -25,8 +28,6 @@ let renderer = null;
 let panels = null;
 let crop = null;
 let histogram = null;
-let wbPickActive = false;
-const clipOverlay = { shadow: false, highlight: false };
 let masking = null;
 let heal = null;
 let loadingToken = 0;
@@ -40,6 +41,24 @@ let proofTile = null;
 let panGesture = null;
 let presetsPanel = null;
 let transientSettingsOverride = null;
+let backgroundBaseRetryTimer = 0;
+let saveFailureToastShown = false;
+let wbPickActive = false;
+const clipOverlay = { shadow: false, highlight: false };
+
+const DEVELOP_READ_TIMEOUT_MS = 10_000;
+const DEVELOP_ENTRY_ATTEMPTS = 2;
+const DEVELOP_MUTATION_TIMEOUT_MS = 20_000;
+const DEVELOP_BASE_BUDGET_MS = 12_000;
+const DEVELOP_BACKGROUND_RETRY_MS = 10_000;
+const HUB_ORIGINAL_PENDING = 'Original is still on the hub — retrying in background';
+
+class PendingOriginalError extends Error {
+    constructor() {
+        super(HUB_ORIGINAL_PENDING);
+        this.name = 'PendingOriginalError';
+    }
+}
 
 const zoomState = {
     mode: 'fit',
@@ -55,6 +74,7 @@ const status = document.getElementById('develop-status');
 const panelHost = document.getElementById('develop-panels');
 const filmstrip = document.getElementById('develop-filmstrip');
 const toolbar = document.getElementById('develop-toolbar');
+const statusRetry = status.querySelector('[data-develop-retry]');
 
 function clone(value) {
     return JSON.parse(JSON.stringify(value || {}));
@@ -89,11 +109,15 @@ function chosenImage() {
     return viewState.images[viewState.focusIndex] || viewState.images[0] || null;
 }
 
-function setStatus(message = '', { busy = false, error = false } = {}) {
+function setStatus(message = '', { busy = false, error = false, retry = null } = {}) {
     status.hidden = !message;
     status.classList.toggle('busy', busy);
     status.classList.toggle('error', error);
     status.querySelector('span').textContent = message;
+    if (statusRetry) {
+        statusRetry.hidden = typeof retry !== 'function';
+        statusRetry.onclick = typeof retry === 'function' ? retry : null;
+    }
 }
 
 function originSettings(payload) {
@@ -107,12 +131,30 @@ function originSettings(payload) {
 }
 
 async function fetchDevelop(imageId) {
-    const response = await fetch(`/api/develop/${imageId}`, { headers: { Accept: 'application/json' } });
+    let response = null;
+    let fetchError = null;
+    for (let attempt = 0; attempt < DEVELOP_ENTRY_ATTEMPTS; attempt += 1) {
+        try {
+            response = await fetch(`/api/develop/${imageId}`, fetchOptionsWithTimeout({ headers: { Accept: 'application/json' } }, DEVELOP_READ_TIMEOUT_MS));
+            break;
+        } catch (error) {
+            fetchError = error;
+        }
+    }
+    if (!response) throw fetchError;
+    if (response.status === 202) throw new PendingOriginalError();
     if (!response.ok) {
         const payload = await response.json().catch(() => null);
         throw new Error(payload?.error || (response.status === 404 ? 'Develop settings are not ready for this photo.' : 'Could not load develop settings.'));
     }
     return response.json();
+}
+
+function developLoadErrorMessage(error) {
+    if (['AbortError', 'TimeoutError'].includes(error?.name) || /signal timed out/i.test(error?.message || '')) {
+        return 'Develop took too long to respond.';
+    }
+    return error?.message || 'Develop could not open this photo.';
 }
 
 function parseBase(buffer, scale = 1) {
@@ -138,20 +180,29 @@ function parseBase(buffer, scale = 1) {
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function fetchBaseWithRetry(imageId, token, scale = 1) {
-    for (let attempt = 0; attempt <= 20; attempt += 1) {
+async function fetchBaseWithRetry(imageId, token, scale = 1, { quiet = false } = {}) {
+    const deadline = performance.now() + DEVELOP_BASE_BUDGET_MS;
+    for (let attempt = 0; performance.now() < deadline; attempt += 1) {
         if (token !== loadingToken) return null;
-        if (attempt === 2) setStatus('Reading source image from disk…', { busy: true });
-        if (attempt === 8) setStatus('Developing preview…', { busy: true });
-        const response = await fetch(`/api/develop/${imageId}/base.bin`);
+        if (!quiet && attempt === 2) setStatus('Reading source image from disk…', { busy: true });
+        if (!quiet && attempt === 8) setStatus('Developing preview…', { busy: true });
+        let response = null;
+        try {
+            response = await fetch(`/api/develop/${imageId}/base.bin`, fetchOptionsWithTimeout({}, Math.max(1_000, Math.min(4_000, deadline - performance.now()))));
+        } catch {
+            if (performance.now() >= deadline) break;
+            await delay(750);
+            continue;
+        }
         if (response.ok) return parseBase(await response.arrayBuffer(), scale);
         if (![202, 404, 503].includes(response.status)) {
             const payload = await response.json().catch(() => null);
             throw new Error(payload?.error || 'The image preview could not be loaded.');
         }
-        if (attempt < 20) await delay(response.status === 202 ? 500 : 1000);
+        const waitMs = response.status === 202 ? 500 : 1_000;
+        if (performance.now() + waitMs < deadline) await delay(waitMs);
     }
-    throw new Error('The image preview is still being prepared. Try again in a moment.');
+    throw new PendingOriginalError();
 }
 
 function markDevelopPaint(token, phase) {
@@ -182,13 +233,13 @@ async function paintDisplayBlob(blob, token, phase) {
 
 async function paintPlaceholder(imageId, token) {
     try {
-        const response = await fetch(`/api/develop/${imageId}/base.jpg`);
+        const response = await fetch(`/api/develop/${imageId}/base.jpg`, fetchOptionsWithTimeout({}, 5_000));
         if (response.ok && await paintDisplayBlob(await response.blob(), token, 'base-jpg')) return;
     } catch { /* Fall through to the already-cached Library image. */ }
     try {
         // Browsed photos already have this tier. cached=1 keeps a cold Develop
         // open from doing a second RAW decode just to make a placeholder.
-        const response = await fetch(`${thumbUrl('lg', imageId)}?cached=1`);
+        const response = await fetch(`${thumbUrl('lg', imageId)}?cached=1`, fetchOptionsWithTimeout({}, 5_000));
         if (response.ok) await paintDisplayBlob(await response.blob(), token, 'library-lg');
     } catch { /* The explicit staged status remains the final fallback. */ }
 }
@@ -198,21 +249,68 @@ function setControlsLoading(loading) {
     panelHost.dataset.loading = String(loading);
 }
 
+function hasUnsavedEdits() {
+    return [...stateCache.values()].some((entry) => entry.unsaved);
+}
+
+function setUnsavedIndicator() {
+    let dot = toolbar.querySelector('[data-develop-unsaved]');
+    if (!dot) {
+        dot = document.createElement('span');
+        dot.dataset.developUnsaved = '';
+        dot.dataset.tip = 'Unsaved Develop edits';
+        dot.setAttribute('aria-label', 'Unsaved Develop edits');
+        dot.style.cssText = 'width:7px;height:7px;margin-left:4px;border-radius:50%;background:var(--danger);box-shadow:0 0 0 2px var(--danger-dim)';
+        toolbar.append(dot);
+    }
+    dot.hidden = !hasUnsavedEdits();
+}
+
+async function saveEntry(imageId, label) {
+    const entry = stateCache.get(Number(imageId));
+    if (!entry) return true;
+    try {
+        const response = await fetch(`/api/develop/${imageId}`, fetchOptionsWithTimeout({
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ settings: entry.settings, label }),
+        }, DEVELOP_MUTATION_TIMEOUT_MS));
+        if (!response.ok) throw new Error('save failed');
+        entry.dirty = false;
+        entry.unsaved = false;
+        settingsClipboard.markSaved(imageId);
+        if (Number(currentImage?.id) === Number(imageId)) historyPanel?.reload();
+        setUnsavedIndicator();
+        if (!hasUnsavedEdits()) saveFailureToastShown = false;
+        return true;
+    } catch {
+        entry.unsaved = true;
+        setUnsavedIndicator();
+        if (!saveFailureToastShown) {
+            saveFailureToastShown = true;
+            showToast("Couldn't save edits — retrying");
+        }
+        return false;
+    }
+}
+
+async function flushSave(imageId, label = 'Develop adjustment') {
+    const entry = stateCache.get(Number(imageId));
+    if (!entry?.dirty && !entry?.unsaved) return true;
+    clearTimeout(saveTimers.get(Number(imageId)));
+    saveTimers.delete(Number(imageId));
+    return saveEntry(imageId, label);
+}
+
 function scheduleSave(label = 'Develop adjustment') {
     if (!currentImage) return;
     const imageId = Number(currentImage.id);
+    const entry = stateCache.get(imageId);
+    if (!entry) return;
+    entry.dirty = true;
     clearTimeout(saveTimers.get(imageId));
     saveTimers.set(imageId, setTimeout(() => {
-        const entry = stateCache.get(imageId);
-        if (!entry) return;
-        fetch(`/api/develop/${imageId}`, {
-            method: 'PUT', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ settings: entry.settings, label }),
-        }).then((response) => {
-            if (!response.ok) throw new Error('save failed');
-            settingsClipboard.markSaved(imageId);
-            historyPanel?.reload();
-        }).catch(() => {});
+        saveTimers.delete(imageId);
+        saveEntry(imageId, label);
     }, 400));
 }
 
@@ -327,7 +425,7 @@ function restoreHistoricalSettings(settings, label) {
 export async function createVirtualCopy() {
     if (!currentImage || !isRaw(currentImage)) return;
     try {
-        const response = await fetch(`/api/develop/${currentImage.id}/virtual-copy`, { method: 'POST' });
+        const response = await fetch(`/api/develop/${currentImage.id}/virtual-copy`, fetchOptionsWithTimeout({ method: 'POST' }, DEVELOP_MUTATION_TIMEOUT_MS));
         if (!response.ok) throw new Error('copy failed');
         const copy = await response.json();
         showToast('Virtual copy created');
@@ -357,7 +455,7 @@ function applySettingsPatch(patch, label) {
 async function requestAutoTone() {
     if (!currentImage) return;
     try {
-        const response = await fetch(`/api/develop/${currentImage.id}/auto`, { method: 'POST' });
+        const response = await fetch(`/api/develop/${currentImage.id}/auto`, fetchOptionsWithTimeout({ method: 'POST' }, DEVELOP_MUTATION_TIMEOUT_MS));
         if (!response.ok) throw new Error();
         const payload = await response.json();
         applySettingsPatch(payload.patch || {}, 'Auto tone');
@@ -403,18 +501,76 @@ function redo() {
 }
 
 function syncFilmstrip() {
-    filmstrip.innerHTML = viewState.images.map((image, index) => `<button class="develop-thumb ${Number(image.id) === Number(currentImage?.id) ? 'cur' : ''}" data-index="${index}" data-tip="${developTip(image)}" aria-label="${String(image.filename || `Photo ${index + 1}`).replaceAll('"', '&quot;')}"><img src="${image.thumb_url || thumbUrl('sm', image.id)}" loading="lazy" decoding="async" alt=""></button>`).join('');
-    filmstrip.querySelector('.cur')?.scrollIntoView({ block: 'nearest', inline: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+    const imageIds = viewState.images.map((image) => Number(image.id)).join(',');
+    const currentId = Number(currentImage?.id);
+    if (filmstrip.dataset.imageIds !== imageIds) {
+        filmstrip.dataset.imageIds = imageIds;
+        filmstrip.innerHTML = viewState.images.map((image, index) => {
+            const previewSrc = previewThumbUrl(image);
+            const preview = previewSrc
+                ? `<img src="${previewSrc}" loading="lazy" decoding="async" alt="">`
+                : '<span class="preview-thumb-pending" aria-hidden="true"></span>';
+            return `<button class="develop-thumb ${previewSrc ? '' : 'preview-pending'} ${Number(image.id) === currentId ? 'cur' : ''}" data-index="${index}" data-image-id="${image.id}" data-tip="${developTip(image)}" aria-label="${String(image.filename || `Photo ${index + 1}`).replaceAll('"', '&quot;')}">${preview}</button>`;
+        }).join('');
+    } else {
+        filmstrip.querySelector('.develop-thumb.cur')?.classList.remove('cur');
+        filmstrip.querySelector(`[data-image-id="${currentId}"]`)?.classList.add('cur');
+    }
+    filmstrip.querySelector(`[data-image-id="${currentId}"]`)?.scrollIntoView({ block: 'nearest', inline: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
 }
 
 function pregenNeighbors(image) {
     const index = viewState.images.findIndex((item) => Number(item.id) === Number(image.id));
     const imageIds = viewState.images.slice(Math.max(0, index - 2), index + 3).map((item) => Number(item.id));
     if (!imageIds.length) return;
-    fetch('/api/develop/pregen', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image_ids: imageIds }) }).catch(() => {});
+    fetch('/api/develop/pregen', fetchOptionsWithTimeout({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image_ids: imageIds }) }, DEVELOP_MUTATION_TIMEOUT_MS)).catch(() => {});
+}
+
+function applyDevelopBase(entry, base, token) {
+    if (!base || token !== loadingToken || !renderer) return false;
+    renderer.uploadSource(base.rgba, base.width, base.height);
+    entry.base = base;
+    renderer.setSettings(renderedSettings(entry), entry.meta);
+    applyZoomState();
+    masking?.rebuildRasters();
+    canvas.classList.remove('preview-ready');
+    canvas.classList.add('ready');
+    placeholder.hidden = true;
+    histogram?.setLoading(false);
+    setControlsLoading(false);
+    const elapsed = Math.round(performance.now() - Number(root.dataset.developOpenedAt || performance.now()));
+    root.dataset.developFullMs = String(elapsed);
+    console.timeStamp?.(`develop-open-full:${elapsed}ms`);
+    setStatus('');
+    crop.setSettings(entry.settings);
+    presetsPanel?.imageReady();
+    return true;
+}
+
+function scheduleBackgroundBaseRetry(image, entry, token) {
+    window.clearTimeout(backgroundBaseRetryTimer);
+    backgroundBaseRetryTimer = window.setTimeout(async () => {
+        if (token !== loadingToken || Number(currentImage?.id) !== Number(image.id)) return;
+        try {
+            const base = await fetchBaseWithRetry(image.id, token, Number(entry.meta?.hdr?.scale) || 1, { quiet: true });
+            if (!applyDevelopBase(entry, base, token)) scheduleBackgroundBaseRetry(image, entry, token);
+        } catch (error) {
+            if (error instanceof PendingOriginalError && token === loadingToken) scheduleBackgroundBaseRetry(image, entry, token);
+        }
+    }, DEVELOP_BACKGROUND_RETRY_MS);
+}
+
+function scheduleBackgroundDevelopRetry(image, token) {
+    window.clearTimeout(backgroundBaseRetryTimer);
+    backgroundBaseRetryTimer = window.setTimeout(() => {
+        if (token === loadingToken && Number(currentImage?.id) === Number(image.id)) openImage(image);
+    }, DEVELOP_BACKGROUND_RETRY_MS);
 }
 
 async function openImage(image) {
+    setWbPick(false);
+    const previousImage = currentImage;
+    if (previousImage && Number(previousImage.id) !== Number(image?.id)) await flushSave(previousImage.id);
     const token = ++loadingToken;
     currentImage = image;
     transientSettingsOverride = null;
@@ -446,6 +602,7 @@ async function openImage(image) {
     paintPlaceholder(image.id, token);
     try {
         let entry = stateCache.get(Number(image.id));
+        const cachedEntry = Boolean(entry);
         if (!entry) {
             const payload = await fetchDevelop(image.id);
             entry = {
@@ -459,9 +616,12 @@ async function openImage(image) {
             };
             stateCache.set(Number(image.id), entry);
         }
+        setUnsavedIndicator();
         if (token !== loadingToken) return;
         entry.imageId = Number(image.id);
         historyPanel?.setHistory(entry.serverHistory || []);
+        // Cached entries can hold a pre-edit rail; refresh it from the server.
+        if (cachedEntry) void historyPanel?.reload();
         applySettings(entry);
         if (!renderer) {
             setStatus('WebGL2 is required for Develop.', { error: true });
@@ -470,27 +630,19 @@ async function openImage(image) {
         setStatus('Reading source image from disk…', { busy: true });
         const base = await fetchBaseWithRetry(image.id, token, Number(entry.meta?.hdr?.scale) || 1);
         if (!base || token !== loadingToken) return;
-        renderer.uploadSource(base.rgba, base.width, base.height);
-        entry.base = base;
-        renderer.setSettings(renderedSettings(entry), entry.meta);
-        applyZoomState();
-        masking?.rebuildRasters();
-        canvas.classList.remove('preview-ready');
-        canvas.classList.add('ready');
-        placeholder.hidden = true;
-        histogram?.setLoading(false);
-        setControlsLoading(false);
-        const elapsed = Math.round(performance.now() - Number(root.dataset.developOpenedAt || performance.now()));
-        root.dataset.developFullMs = String(elapsed);
-        console.timeStamp?.(`develop-open-full:${elapsed}ms`);
-        setStatus('');
-        crop.setSettings(entry.settings);
-        presetsPanel?.imageReady();
+        applyDevelopBase(entry, base, token);
     } catch (error) {
         if (token === loadingToken) {
             setControlsLoading(false);
             histogram?.setLoading(false);
-            setStatus(error.message || 'Develop could not open this photo.', { error: true });
+            if (error instanceof PendingOriginalError) {
+                setStatus(HUB_ORIGINAL_PENDING, { error: true });
+                const entry = stateCache.get(Number(image.id));
+                if (entry) scheduleBackgroundBaseRetry(image, entry, token);
+                else scheduleBackgroundDevelopRetry(image, token);
+            } else {
+                setStatus(developLoadErrorMessage(error), { error: true, retry: () => openImage(image) });
+            }
         }
     }
 }
@@ -583,40 +735,6 @@ function wheelZoom(event) {
     else setZoomLevel(levels[next], event);
 }
 
-function setClipOverlay(shadow, highlight) {
-    clipOverlay.shadow = Boolean(shadow);
-    clipOverlay.highlight = Boolean(highlight);
-    renderer?.setClipOverlay(clipOverlay.shadow, clipOverlay.highlight);
-    histogram?.setClipState(clipOverlay.shadow, clipOverlay.highlight);
-}
-
-function setWbPick(active) {
-    wbPickActive = Boolean(active) && Boolean(currentImage);
-    stage.classList.toggle('wb-picking', wbPickActive);
-    stage.style.cursor = wbPickActive ? 'crosshair' : '';
-    const button = document.querySelector('[data-wb-pick]');
-    button?.classList.toggle('active', wbPickActive);
-    button?.setAttribute('aria-pressed', String(wbPickActive));
-}
-
-function pickWhiteBalance(event) {
-    window.__wbDebug = { active: wbPickActive, button: event.button, ready: !!renderer?.ready, img: !!currentImage, base: !!(currentImage && stateCache.get(Number(currentImage.id))?.base) };
-    if (!wbPickActive || event.button !== 0 || !renderer?.ready || !currentImage) return false;
-    const entry = stateCache.get(Number(currentImage.id));
-    if (!entry?.base) { showToast('The image is still loading'); return true; }
-    const point = renderer.canvasToImage(event.clientX, event.clientY);
-    if (point.u < 0 || point.u > 1 || point.v < 0 || point.v > 1) return true;
-    const sample = sampleBasePatch(entry.base, point.u, point.v);
-    const asShot = entry.meta?.as_shot || {};
-    const solved = sample && solveWhiteBalance(sample, entry.meta?.color, Number(asShot.temperature) || 5500, Number(asShot.tint) || 0);
-    if (!solved) { showToast('Could not sample that spot'); return true; }
-    applySettingsPatch({ WhiteBalance: 'Custom', Temperature: solved.temperature, Tint: solved.tint }, 'White balance picker');
-    panels?.setSettings(stateCache.get(Number(currentImage.id))?.settings || {});
-    setWbPick(false);
-    showToast(`White balance: ${solved.temperature}K, tint ${solved.tint > 0 ? '+' : ''}${solved.tint}`);
-    return true;
-}
-
 function beginPan(event) {
     if (pickWhiteBalance(event)) { event.preventDefault(); event.stopPropagation(); return; }
     if (event.button !== 0 || !renderer?.ready || proofTile?.held) return;
@@ -655,6 +773,39 @@ function showBefore(show) {
     toolbar.querySelector('[data-action="before"]').setAttribute('aria-pressed', String(show));
 }
 
+function setWbPick(active) {
+    wbPickActive = Boolean(active) && Boolean(currentImage);
+    stage.classList.toggle('wb-picking', wbPickActive);
+    stage.style.cursor = wbPickActive ? 'crosshair' : '';
+    const button = document.querySelector('[data-wb-pick]');
+    button?.classList.toggle('active', wbPickActive);
+    button?.setAttribute('aria-pressed', String(wbPickActive));
+}
+
+function setClipOverlay(shadow, highlight) {
+    clipOverlay.shadow = Boolean(shadow);
+    clipOverlay.highlight = Boolean(highlight);
+    renderer?.setClipOverlay(clipOverlay.shadow, clipOverlay.highlight);
+    histogram?.setClipState(clipOverlay.shadow, clipOverlay.highlight);
+}
+
+function pickWhiteBalance(event) {
+    if (!wbPickActive || event.button !== 0 || !renderer?.ready || !currentImage) return false;
+    const entry = stateCache.get(Number(currentImage.id));
+    if (!entry?.base) { showToast('The image is still loading'); return true; }
+    const point = renderer.canvasToImage(event.clientX, event.clientY);
+    if (point.u < 0 || point.u > 1 || point.v < 0 || point.v > 1) return true;
+    const sample = sampleBasePatch(entry.base, point.u, point.v);
+    const asShot = entry.meta?.as_shot || {};
+    const solved = sample && solveWhiteBalance(sample, entry.meta?.color, Number(asShot.temperature) || 5500, Number(asShot.tint) || 0);
+    if (!solved) { showToast('Could not sample that spot'); return true; }
+    applySettingsPatch({ WhiteBalance: 'Custom', Temperature: solved.temperature, Tint: solved.tint }, 'White balance picker');
+    panels?.setSettings(stateCache.get(Number(currentImage.id))?.settings || {});
+    setWbPick(false);
+    showToast(`White balance: ${solved.temperature}K, tint ${solved.tint > 0 ? '+' : ''}${solved.tint}`);
+    return true;
+}
+
 async function comparisonPreview(image) {
     if (!image) return null;
     let entry = stateCache.get(Number(image.id));
@@ -671,7 +822,7 @@ async function comparisonPreview(image) {
         stateCache.set(Number(image.id), entry);
     }
     if (!entry.base) {
-        const response = await fetch(`/api/develop/${image.id}/base.bin`);
+        const response = await fetch(`/api/develop/${image.id}/base.bin`, fetchOptionsWithTimeout({}, DEVELOP_READ_TIMEOUT_MS));
         if (!response.ok) throw new Error('Reference preview is still being prepared.');
         entry.base = parseBase(await response.arrayBuffer(), Number(entry.meta?.hdr?.scale) || 1);
     }
@@ -687,20 +838,33 @@ export function holdDevelopReference(held) {
 }
 
 function closePopover() {
+    const trigger = activePopover?.trigger;
+    releaseFocus(activePopover);
     activePopover?.remove();
     activePopover = null;
+    trigger?.focus?.({ preventScroll: true });
 }
 
 function anchoredPopover(button, html) {
     closePopover();
     activePopover = document.createElement('div');
     activePopover.className = 'develop-popover';
+    activePopover.setAttribute('role', 'dialog');
+    activePopover.setAttribute('aria-modal', 'true');
+    activePopover.trigger = button;
     activePopover.innerHTML = html;
     root.appendChild(activePopover);
     const buttonRect = button.getBoundingClientRect();
     const rootRect = root.getBoundingClientRect();
     activePopover.style.left = `${Math.max(8, Math.min(rootRect.width - 250, buttonRect.left - rootRect.left))}px`;
     activePopover.style.top = `${buttonRect.bottom - rootRect.top + 6}px`;
+    activePopover.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') return;
+        event.preventDefault();
+        event.stopPropagation();
+        closePopover();
+    });
+    trapFocus(activePopover, activePopover.querySelector('input, select, button'));
     return activePopover;
 }
 
@@ -708,12 +872,22 @@ function gridAnchoredPopover(button, html) {
     closePopover();
     activePopover = document.createElement('div');
     activePopover.className = 'develop-popover';
+    activePopover.setAttribute('role', 'dialog');
+    activePopover.setAttribute('aria-modal', 'true');
+    activePopover.trigger = button;
     activePopover.innerHTML = html;
     activePopover.style.position = 'fixed';
     document.body.appendChild(activePopover);
     const rect = button?.getBoundingClientRect?.() || { left: window.innerWidth * .5, bottom: 40 };
     activePopover.style.left = `${Math.max(8, Math.min(window.innerWidth - 250, rect.left))}px`;
     activePopover.style.top = `${Math.max(8, Math.min(window.innerHeight - 360, rect.bottom + 6))}px`;
+    activePopover.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') return;
+        event.preventDefault();
+        event.stopPropagation();
+        closePopover();
+    });
+    trapFocus(activePopover, activePopover.querySelector('input, select, button'));
     return activePopover;
 }
 
@@ -723,6 +897,16 @@ function openCopyPopover(button) {
         button, sourceId: currentImage?.id, settings: entry?.settings,
         anchoredPopover, closePopover, showToast, clipboard: settingsClipboard,
     });
+}
+
+function copyAllSettings() {
+    const entry = currentImage && stateCache.get(Number(currentImage.id));
+    if (!settingsClipboard.copy({
+        sourceId: currentImage?.id,
+        settings: entry?.settings,
+        groups: SYNC_GROUPS.map(([id]) => id),
+    })) return;
+    showToast('Settings copied');
 }
 
 function applySyncedSettings(payload) {
@@ -829,7 +1013,7 @@ function openSyncPopover(button) {
 async function resetCurrent() {
     if (!isDevelopImage(currentImage)) return;
     try {
-        const response = await fetch(`/api/develop/${currentImage.id}/reset`, { method: 'POST' });
+        const response = await fetch(`/api/develop/${currentImage.id}/reset`, fetchOptionsWithTimeout({ method: 'POST' }, DEVELOP_MUTATION_TIMEOUT_MS));
         if (!response.ok) throw new Error();
         const payload = await response.json().catch(() => null);
         const entry = stateCache.get(Number(currentImage.id));
@@ -868,6 +1052,10 @@ function unmount() {
     heal?.toggle(false);
     proofTile?.setHeld(false);
     presetsPanel?.endPreview();
+}
+
+export function closeDevelop() {
+    unmount();
 }
 
 export function developOpen() {
@@ -924,7 +1112,7 @@ function bindUi() {
         const proofButton = document.createElement('button');
         proofButton.type = 'button';
         proofButton.dataset.action = 'proof';
-        proofButton.dataset.tip = 'Hold for original-pixel proof (P)';
+        proofButton.dataset.tip = 'Hold for original-pixel proof (Shift+P)';
         proofButton.setAttribute('aria-label', 'Hold for original 1:1 proof');
         proofButton.setAttribute('aria-pressed', 'false');
         proofButton.textContent = '1:1';
@@ -1000,6 +1188,27 @@ function editingField(event) {
     return event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement || event.target?.isContentEditable;
 }
 
+function flagCurrent(flag) {
+    if (!currentImage) return;
+    applyFlags([currentImage.id], flag);
+}
+
+function closeTransient() {
+    const hasTransient = Boolean(
+        activePopover || softProof?.popover || crop?.active || wbPickActive || beforeHeld || proofTile?.held || compare?.mode !== 'off',
+    );
+    if (!hasTransient) return false;
+    closePopover();
+    softProof?.popover?.remove();
+    if (softProof) softProof.popover = null;
+    crop?.setActive(false);
+    setWbPick(false);
+    showBefore(false);
+    proofTile?.setHeld(false);
+    compare?.holdReference(false);
+    return true;
+}
+
 function canNavigateFrom(event) {
     return event.target === document.body || event.target === stage || event.target === canvas;
 }
@@ -1016,7 +1225,7 @@ function handleKey(event) {
     const key = event.key.toLowerCase();
     if (event.ctrlKey || event.metaKey) {
         if (key === 'z') { event.preventDefault(); event.stopImmediatePropagation(); event.shiftKey ? redo() : undo(); }
-        else if (event.shiftKey && key === 'c') { event.preventDefault(); event.stopImmediatePropagation(); openCopyPopover(toolbar.querySelector('[data-action="copy"]')); }
+        else if (event.shiftKey && key === 'c') { event.preventDefault(); event.stopImmediatePropagation(); copyAllSettings(); }
         else if (event.shiftKey && key === 'v') { event.preventDefault(); event.stopImmediatePropagation(); pasteSettings(); }
         else if (event.altKey && key === 'v') { event.preventDefault(); event.stopImmediatePropagation(); fromPrevious(); }
         else if (event.code === 'Quote') { event.preventDefault(); event.stopImmediatePropagation(); createVirtualCopy(); }
@@ -1045,18 +1254,28 @@ function handleKey(event) {
         event.preventDefault(); event.stopImmediatePropagation(); if (!event.repeat) masking?.togglePanel();
     } else if (key === 'z') {
         event.preventDefault(); event.stopImmediatePropagation(); if (!event.repeat) toggleZoom();
-    } else if (key === 'p') {
+    } else if (event.shiftKey && key === 'p') {
         event.preventDefault(); event.stopImmediatePropagation();
         if (!event.repeat) {
             toolbar.querySelector('[data-action="proof"]')?.setAttribute('aria-pressed', 'true');
             proofTile?.setHeld(true);
         }
+    } else if (key === 'p') {
+        event.preventDefault(); event.stopImmediatePropagation();
+        if (!event.repeat) flagCurrent(currentImage?.flag === 'picked' ? 'unflagged' : 'picked');
+    } else if (key === 'x') {
+        event.preventDefault(); event.stopImmediatePropagation();
+        if (!event.repeat) flagCurrent('rejected');
+    } else if (key === 'u') {
+        event.preventDefault(); event.stopImmediatePropagation();
+        if (!event.repeat) flagCurrent('unflagged');
     } else if (event.code === 'Space') {
         event.preventDefault(); event.stopImmediatePropagation();
         if (!spaceHeld) { spaceHeld = true; if (zoomScale() > 1) stage.style.cursor = 'grab'; }
     } else if (event.key === 'Escape') {
-        if (wbPickActive) { setWbPick(false); return; }
-        closePopover(); crop.setActive(false);
+        if (closeTransient()) {
+            event.preventDefault(); event.stopImmediatePropagation();
+        }
     }
 }
 
@@ -1064,7 +1283,7 @@ function handleKeyUp(event) {
     if (!mounted) return;
     if (event.key === '\\') showBefore(false);
     if (event.key.toLowerCase() === 'r') holdDevelopReference(false);
-    if (event.key.toLowerCase() === 'p') {
+    if (event.key.toLowerCase() === 'p' || event.key === 'Shift') {
         toolbar.querySelector('[data-action="proof"]')?.setAttribute('aria-pressed', 'false');
         proofTile?.setHeld(false);
     }
@@ -1121,7 +1340,7 @@ function init() {
             stage, canvas,
             onAutoLevel: async () => {
                 if (!currentImage) return null;
-                const response = await fetch(`/api/develop/${currentImage.id}/transform/auto`, { method: 'POST' });
+                const response = await fetch(`/api/develop/${currentImage.id}/transform/auto`, fetchOptionsWithTimeout({ method: 'POST' }, DEVELOP_MUTATION_TIMEOUT_MS));
                 return response.ok ? response.json() : null;
             },
         },
@@ -1179,6 +1398,7 @@ function init() {
             const entry = currentImage && stateCache.get(Number(currentImage.id));
             return clone(entry?.settings || {});
         },
+        notify: showToast,
     });
     historyPanel = mountHistoryPanel(presetsPanel?.root, {
         getEntry: () => currentImage && stateCache.get(Number(currentImage.id)),

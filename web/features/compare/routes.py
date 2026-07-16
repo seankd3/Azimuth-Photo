@@ -85,9 +85,9 @@ def _configured() -> None:
         raise RuntimeError("Compare routes are not configured")
 
 
-def _parse_scoped_ids(ids: str | None) -> tuple[list[int], JSONResponse | None]:
+def _parse_scoped_ids(ids: str | None) -> tuple[list[int] | None, JSONResponse | None]:
     if ids is None:
-        return [], None
+        return None, None
     if len(ids) > MAX_SCOPED_IDS_LENGTH:
         return [], JSONResponse(
             {"error": f"ids is limited to {MAX_SCOPED_IDS_LENGTH} characters"},
@@ -396,6 +396,8 @@ async def compare_undo():
     _configured()
     result = await _undo_last_comparison()
     if result:
+        if result.get("skipped_drift"):
+            return {"ok": False, "partial": True, **result}
         _invalidate_pairing_cache(matchups=True)
         return {"ok": True, **result}
     return JSONResponse({"error": "Nothing to undo"}, status_code=400)

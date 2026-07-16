@@ -1,15 +1,15 @@
-// Mobile app entry: four tabs (Photos / Search / Refine / Library),
-// offline awareness, and the timeline pinch-zoom fallback.
+// Mobile app entry: four tabs (Photos / Search / Refine / Library)
+// and offline awareness.
 
 import { emit, nav, setNetworkOnline } from './state.js';
 import { initToast } from './toast.js';
-import { initTimeline, reload, stepZoom } from './timeline.js';
+import { initTimeline, reload } from './timeline.js';
 import { initScrubber } from './scrubber.js';
 import { initSelection } from './selection.js';
 import { initViewer } from './viewer.js';
 import { initRefine, showRefine } from './refine.js';
 import { initSearch, showSearch } from './search.js';
-import { initLibrary, showLibrary } from './library.js';
+import { initLibrary, popCollectionView, showLibrary } from './library.js';
 import { initHistory, onHistoryTab, replaceTab } from './history.js';
 import { mountIconSprite } from '../icons.js';
 import { initWriteQueue } from './write_queue.js';
@@ -34,16 +34,31 @@ const TABS = ['photos', 'search', 'refine', 'library'];
 const scrollMemory = new Map();
 let activeTab = '';
 
+const OWNED_OFFLINE_MODULES = [
+    '/static/js/mobile/backup.js',
+    '/static/js/mobile/offline.js',
+    '/static/js/mobile/sharing.js',
+];
+
 secureContextBanner();
+
+function warmOwnedOfflineModules() {
+    if (!window.isSecureContext || !('serviceWorker' in navigator)) return;
+    const warm = () => {
+        if (!navigator.serviceWorker.controller) return;
+        OWNED_OFFLINE_MODULES.forEach((url) => void fetch(url).catch(() => {}));
+    };
+    navigator.serviceWorker.ready.then(warm).catch(() => {});
+    navigator.serviceWorker.addEventListener('controllerchange', warm);
+}
 
 function setTab(tab) {
     if (!TABS.includes(tab)) return;
     if (tab === activeTab) {
-        if (tab === 'photos') {
-            const pane = document.getElementById('tab-photos');
-            pane?.scrollTo({ top: 0, behavior: 'smooth' });
-            scrollMemory.set('photos', 0);
-        }
+        if (tab === 'library' && popCollectionView()) return;
+        const pane = document.getElementById(`tab-${tab}`);
+        pane?.scrollTo({ top: 0, behavior: 'smooth' });
+        scrollMemory.set(tab, 0);
         return;
     }
     const currentPane = document.getElementById(`tab-${activeTab}`);
@@ -133,44 +148,13 @@ function installOfflineBanner() {
     sync();
 }
 
-// Two-finger pinch on the timeline steps the Google-Photos zoom
-// levels: 3-col day ↔ 5-col dense ↔ month list.
-function installTimelinePinch() {
-    const pane = document.getElementById('tab-photos');
-    let pinchDist = null;
-    let pinchStepped = false;
-    pane.addEventListener('touchstart', (e) => {
-        if (e.touches.length === 2) {
-            pinchDist = Math.hypot(
-                e.touches[0].clientX - e.touches[1].clientX,
-                e.touches[0].clientY - e.touches[1].clientY,
-            );
-            pinchStepped = false;
-        }
-    }, { passive: true });
-    pane.addEventListener('touchmove', (e) => {
-        if (e.touches.length !== 2 || pinchDist == null) return;
-        const d = Math.hypot(
-            e.touches[0].clientX - e.touches[1].clientX,
-            e.touches[0].clientY - e.touches[1].clientY,
-        );
-        // One discrete level per gesture: pinch in = denser/months, out = bigger.
-        if (!pinchStepped && Math.abs(d - pinchDist) > 70) {
-            stepZoom(d < pinchDist ? 1 : -1);
-            pinchStepped = true;
-        }
-    }, { passive: true });
-    pane.addEventListener('touchend', () => {
-        pinchDist = null;
-    }, { passive: true });
-}
-
 async function boot() {
     await mountIconSprite();
     initHistory('photos');
     onHistoryTab(setTab);
     initToast();
     initWriteQueue();
+    warmOwnedOfflineModules();
     installTabbar();
     installOfflineBanner();
     initSelection();
@@ -180,7 +164,6 @@ async function boot() {
     initSearch();
     initRefine();
     initLibrary();
-    installTimelinePinch();
     setTab('photos');
 }
 

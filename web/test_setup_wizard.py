@@ -122,6 +122,25 @@ class WizardHubCardContracts(unittest.TestCase):
         self.assertIn("json('/api/discover')", template)
         self.assertIn("Connected — your library will sync in the background.", template)
 
+    def test_finish_enters_library_without_waiting_for_import_results(self):
+        template_path = os.path.join(os.path.dirname(__file__), "templates", "setup.html")
+        with open(template_path, encoding="utf-8") as handle:
+            template = handle.read()
+
+        finish_handler = template[template.index("finishBtn.addEventListener('click'"):]
+        self.assertNotIn("/api/rankings?limit=1", finish_handler)
+        self.assertIn("window.location.assign('/d');", finish_handler)
+
+    def test_folder_path_focus_replaces_the_prefill_and_import_trims_it(self):
+        template_path = os.path.join(os.path.dirname(__file__), "templates", "setup.html")
+        with open(template_path, encoding="utf-8") as handle:
+            template = handle.read()
+
+        self.assertIn("pathInput.addEventListener('focus', () => pathInput.select());", template)
+        start_import = template[template.index("async function startImport()"):]
+        self.assertIn("const folder = pathInput.value.trim() || chosen.trim();", start_import)
+        self.assertIn("body: JSON.stringify({ folder }),", start_import)
+
 
 class AttachHubTests(BackendTestCase):
     async def test_attach_persists_and_starts_sync(self):

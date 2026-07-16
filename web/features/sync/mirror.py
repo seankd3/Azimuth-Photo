@@ -15,7 +15,10 @@ from urllib.parse import urlencode
 from core import cache_events
 from data import connection
 from data.repositories import catalog as catalog_repository
-from features.sync import satellite
+from features.sync import family_clock, satellite
+from features.sync.develop_merge import preserve_local_rating
+from features.sync.executor import run_sync_work
+from features.trash import service as trash_service
 
 
 RequestFn = Callable[..., Awaitable[tuple[int, dict[str, str], bytes]]]
@@ -33,12 +36,15 @@ _IMAGE_COLUMNS = {
     "file_size", "width", "height", "latitude", "longitude", "location_source", "missing_at", "trashed_at",
     "hub_image_id", "hub_remote",
 }
+# Commit mirror batches so a long hub export never holds a write lock for seconds
+# while interactive reads (stats/grid) wait on busy_timeout.
+_MIRROR_COMMIT_EVERY = 250
 
 
 async def _urllib_request(method: str, url: str, *, body: bytes | None = None, headers: dict | None = None) -> tuple[int, dict[str, str], bytes]:
     def request() -> tuple[int, dict[str, str], bytes]:
         request_headers = dict(headers or {})
-        request_headers.update(satellite.device_auth_headers())
+        request_headers.update(satellite.hub_request_headers())
         req = urllib.request.Request(url, data=body, headers=request_headers, method=method)
         try:
             with urllib.request.urlopen(req, timeout=20) as response:  # noqa: S310 - configured tailnet hub.
@@ -46,7 +52,7 @@ async def _urllib_request(method: str, url: str, *, body: bytes | None = None, h
         except urllib.error.HTTPError as error:
             return error.code, dict(error.headers or {}), error.read()
 
-    return await asyncio.to_thread(request)
+    return await run_sync_work(request)
 
 
 async def ensure_mirror_schema(db_path: str) -> None:
@@ -62,6 +68,7 @@ async def ensure_mirror_schema(db_path: str) -> None:
         await conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_images_hub_image_id ON images(hub_image_id) WHERE hub_image_id IS NOT NULL")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_images_hub_remote ON images(hub_remote, hub_image_id)")
         await conn.executescript(_MIRROR_DDL)
+        await family_clock.migrate_legacy_states(conn)
         await conn.commit()
     finally:
         await connection.close_async(conn, db_path=db_path)
@@ -120,6 +127,8 @@ class MirrorPuller:
                     continue
                 await self._apply_row(conn, source_id, row, available_columns)
                 applied += 1
+                if applied % _MIRROR_COMMIT_EVERY == 0:
+                    await conn.commit()
             await self._set_state(conn, "cursor", str(new_cursor))
             # The library service short-circuits on these denormalized counts;
             # a mirror that fills rows without them makes All Photos look like
@@ -129,7 +138,9 @@ class MirrorPuller:
         finally:
             await connection.close_async(conn, db_path=self.db_path)
 
-        cache_events.invalidate_stats_cache()
+        if applied > 0:
+            cache_events.invalidate_stats_cache()
+            trash_service.invalidate_pending_hub_trash_refs(self.db_path)
 
         self._status.update(
             cursor=new_cursor,
@@ -190,10 +201,15 @@ class MirrorPuller:
                 values.pop("filepath", None)
                 values.pop("source_id", None)
                 values["hub_remote"] = 0
+            else:
+                # Hub paths can move (mount migrations, re-filed folders) — the
+                # mirror must follow, or the folder tree shows the old layout forever.
+                values["filepath"] = str(remote.get("filepath") or "")
             values["hub_image_id"] = hub_image_id
             assignments = ", ".join(f"{column} = ?" for column in values)
             await conn.execute(f"UPDATE images SET {assignments} WHERE id = ?", (*values.values(), image_id))
         await self._apply_develop(conn, image_id, remote)
+        await self._apply_rating(conn, image_id, remote, available_columns)
         await self._apply_keywords(conn, image_id, remote.get("keywords"))
 
     @staticmethod
@@ -210,6 +226,8 @@ class MirrorPuller:
             values["status"] = "trashed"
             if "trashed_at" in available_columns:
                 values["trashed_at"] = float(remote.get("trashed_at") or time.time())
+        elif "trash_pending_hub" in available_columns:
+            values["trash_pending_hub"] = 0
         return values
 
     @staticmethod
@@ -218,15 +236,76 @@ class MirrorPuller:
         updated_at = remote.get("develop_updated_at")
         if not isinstance(settings, dict) or not updated_at:
             return
-        current = await (await conn.execute("SELECT updated_at, origin FROM develop_settings WHERE image_id = ?", (image_id,))).fetchone()
-        if current and str(current["updated_at"] or "") > str(updated_at) and current["origin"] == "user":
+        current = await (await conn.execute(
+            "SELECT develop.settings, develop.updated_at, images.content_hash "
+            "FROM images LEFT JOIN develop_settings develop ON develop.image_id = images.id "
+            "WHERE images.id = ?",
+            (image_id,),
+        )).fetchone()
+        if current is None:
             return
+        content_hash = str(current["content_hash"] or "")
+        row_key = family_clock.legacy_key(current["updated_at"]) if current["updated_at"] is not None else None
+        state_key = await family_clock.state_key(conn, content_hash, "develop") if content_hash else None
+        existing = family_clock.newest_key(row_key, state_key)
+        incoming = family_clock.legacy_key(updated_at)
+        if existing is not None and incoming[0] <= existing[0]:
+            return
+        settings = dict(settings)
+        settings.pop("_lr_rating", None)
+        settings = preserve_local_rating(settings, current["settings"])
         await conn.execute(
             """INSERT INTO develop_settings(image_id, settings, origin, updated_at)
                VALUES (?, ?, ?, ?)
                ON CONFLICT(image_id) DO UPDATE SET settings = excluded.settings, origin = excluded.origin, updated_at = excluded.updated_at""",
             (image_id, json.dumps(settings, separators=(",", ":")), remote.get("develop_origin") or "hub", updated_at),
         )
+        if content_hash:
+            await family_clock.record_state(conn, content_hash, "develop", incoming)
+
+    @staticmethod
+    async def _apply_rating(
+        conn,
+        image_id: int,
+        remote: dict[str, Any],
+        available_columns: set[str],
+    ) -> None:
+        winner = remote.get("rating_winner_key")
+        if "rating" not in remote or not isinstance(winner, dict):
+            return
+        try:
+            incoming = family_clock.winner_key(winner)
+        except (KeyError, TypeError, ValueError):
+            return
+        row = await (await conn.execute(
+            "SELECT content_hash FROM images WHERE id = ?",
+            (image_id,),
+        )).fetchone()
+        if row is None or not row["content_hash"]:
+            return
+        content_hash = str(row["content_hash"])
+        existing = await family_clock.state_key(conn, content_hash, "rating")
+        if existing is not None and incoming <= existing:
+            return
+        rating = remote["rating"]
+        if "rating" in available_columns:
+            await conn.execute("UPDATE images SET rating = ? WHERE id = ?", (rating, image_id))
+        else:
+            current = await (await conn.execute(
+                "SELECT origin FROM develop_settings WHERE image_id = ?",
+                (image_id,),
+            )).fetchone()
+            settings = json.dumps({"_lr_rating": rating}, separators=(",", ":"))
+            await conn.execute(
+                "INSERT INTO develop_settings(image_id, settings, origin, updated_at) "
+                "VALUES (?, ?, ?, '') ON CONFLICT(image_id) DO UPDATE SET settings=json_set("
+                "CASE WHEN json_valid(develop_settings.settings) THEN "
+                "  CASE WHEN json_type(develop_settings.settings) = 'object' "
+                "    THEN develop_settings.settings ELSE '{}' END "
+                "ELSE '{}' END, '$._lr_rating', ?)",
+                (image_id, settings, current["origin"] if current else "sync", rating),
+            )
+        await family_clock.record_state(conn, content_hash, "rating", incoming)
 
     @staticmethod
     async def _apply_keywords(conn, image_id: int, paths: Any) -> None:

@@ -10,8 +10,10 @@ from starlette.middleware.gzip import GZipMiddleware
 
 from core import background as background_runtime
 from core.browser_origin import BrowserOriginGuardMiddleware
+from core.owner_auth import OwnerAuthMiddleware
 from core.static_assets import StaticAssetContext, warm_templates
 from features.access import routes as access_routes
+from features.auth import routes as auth_routes
 from features.ai import routes as ai_routes
 from features.cache import routes as cache_routes
 from features.captions import routes as caption_routes
@@ -191,6 +193,7 @@ def create_base_app(*, base_dir: str | None = None, title: str = "Azimuth Photo"
     app.add_middleware(SelectiveGZipMiddleware, minimum_size=1000)
     app.add_middleware(StaticCacheHeadersMiddleware, max_age=300)
     app.add_middleware(BrowserOriginGuardMiddleware)
+    app.add_middleware(OwnerAuthMiddleware)
     app.mount("/static", StaticFiles(directory=os.path.join(root, "static")), name="static")
     return app
 
@@ -251,6 +254,7 @@ def register_app_lifecycle(shell: AppShell, dependencies: AppLifecycleDependenci
         await background_runtime.run_shutdown(
             thumbnails=dependencies.thumbnails,
             background_task_tracker=shell.background_task_tracker,
+            caption_worker=dependencies.caption_worker,
         )
 
     shell.app.router.on_startup.append(startup)
@@ -495,6 +499,8 @@ def create_app_shell(
     object.__setattr__(shell, "runtime_services", configure_app_runtime_services(shell))
     page_routes.configure(templates=templates, template_context=shell.template_context)
     app.include_router(page_routes.router)
+    auth_routes.configure(templates=templates)
+    app.include_router(auth_routes.router)
     app.include_router(access_routes.router)
     app.include_router(people_routes.router)
     dev_routes.configure(started_at=static_assets.started_at, git_commit=static_assets.git_commit)

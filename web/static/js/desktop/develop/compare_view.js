@@ -139,7 +139,7 @@ export class SoftProofPopover {
         this.onChange = onChange;
         this.state = { profile: 'off', warning: false };
         this.button = document.createElement('button');
-        this.button.dataset.action = 'proof';
+        this.button.dataset.action = 'soft-proof';
         this.button.dataset.tip = 'Soft proof: target gamut and warning';
         this.button.textContent = 'Proof';
         toolbar.querySelector('.develop-toolbar-spacer')?.before(this.button);

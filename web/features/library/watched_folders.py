@@ -11,6 +11,7 @@ from collections.abc import Callable
 import db
 import scanner
 from data import connection
+from data.repositories import catalog as catalog_repository
 
 
 log = logging.getLogger(__name__)
@@ -124,15 +125,41 @@ async def remove_folder(db_path: str, folder_id: int) -> bool:
         await connection.close_async(conn, db_path=db_path)
 
 
-def _newer_image_rows(path: str, *, recursive: bool, after: float | None):
+def _newer_image_rows(
+    path: str,
+    *,
+    recursive: bool,
+    after: float | None,
+    known_signatures: set[tuple[str, str, int]],
+):
     root = normalize_path(path)
     for row in scanner.walk_images(root):
         if not recursive and os.path.dirname(row[1]) != root:
             continue
         modified_at = row[4]
-        if after is not None and (modified_at is None or modified_at <= after):
+        signature = (str(row[0]), str(row[1]), int(row[3] or 0))
+        if (
+            signature in known_signatures
+            and after is not None
+            and (modified_at is None or modified_at <= after)
+        ):
             continue
         yield row
+
+
+def _collect_newer_image_rows(
+    path: str,
+    *,
+    recursive: bool,
+    after: float | None,
+    known_signatures: set[tuple[str, str, int]],
+) -> list[tuple]:
+    return list(_newer_image_rows(
+        path,
+        recursive=recursive,
+        after=after,
+        known_signatures=known_signatures,
+    ))
 
 
 async def _mark_scanned(db_path: str, folder_id: int, scanned_at: float) -> None:
@@ -162,13 +189,21 @@ async def scan_folder(db_path: str, folder_id: int, *, allow_disabled: bool = Fa
             return {'ok': False, 'folder': folder, 'registered': 0, 'error': 'Catalog scan already in progress'}
 
         source = await db.add_or_restore_source(folder['path'])
+        known_signatures = await catalog_repository.image_signatures_for_source(
+            db_path, int(source['id'])
+        )
         registered = 0
         batch = []
         started_at = time.time()
         try:
-            for row in _newer_image_rows(
-                folder['path'], recursive=folder['recursive'], after=folder.get('last_scan_at')
-            ):
+            rows = await asyncio.to_thread(
+                _collect_newer_image_rows,
+                folder['path'],
+                recursive=folder['recursive'],
+                after=folder.get('last_scan_at'),
+                known_signatures=known_signatures,
+            )
+            for row in rows:
                 batch.append(row)
                 if len(batch) >= SCAN_BATCH_SIZE:
                     await db.insert_images_batch(batch, source_id=int(source['id']))

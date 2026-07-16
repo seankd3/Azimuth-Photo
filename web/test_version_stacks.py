@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import unittest
 from unittest import mock
+import sqlite3
+import tempfile
 
 from features.stacks import builders
 
@@ -55,8 +57,8 @@ class VersionStackBuilderTests(unittest.TestCase):
         raw = self._row(30, "IMG_4023.dng")
         edit = self._row(31, "renamed-export.jpg", file_modified_at=400.0)
         fallback = {
-            "/catalog/IMG_4023.dng": ("2024-06-01 14:10:10", "canon eos r5"),
-            "/catalog/renamed-export.jpg": ("2024-06-01 14:10:10", "canon eos r5"),
+            builders._metadata_key(raw["filepath"]): ("2024-06-01 14:10:10", "canon eos r5"),
+            builders._metadata_key(edit["filepath"]): ("2024-06-01 14:10:10", "canon eos r5"),
         }
 
         with mock.patch.object(builders, "_exiftool_version_metadata", return_value=fallback) as exiftool:
@@ -74,6 +76,41 @@ class VersionStackBuilderTests(unittest.TestCase):
         }
 
         self.assertEqual(builders.build_version_groups("unused.db", rows), [])
+
+    def test_active_rows_exclude_virtual_copies_from_version_matching(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            db_path = f"{tempdir}/versions.db"
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.executescript(
+                    """
+                    CREATE TABLE catalog_sources (id INTEGER PRIMARY KEY, path TEXT, display_name TEXT);
+                    CREATE TABLE images (
+                        id INTEGER PRIMARY KEY,
+                        filename TEXT NOT NULL,
+                        filepath TEXT NOT NULL,
+                        source_id INTEGER,
+                        file_ext TEXT,
+                        status TEXT,
+                        missing_at REAL,
+                        vc_of INTEGER REFERENCES images(id)
+                    );
+                    INSERT INTO images (id, filename, filepath, file_ext, status) VALUES
+                        (1, 'IMG_4026.dng', '/catalog/IMG_4026.dng', 'dng', 'kept'),
+                        (2, 'IMG_4026.dng', '/catalog/IMG_4026.dng', 'dng', 'kept'),
+                        (3, 'IMG_4026.jpg', '/catalog/IMG_4026.jpg', 'jpg', 'kept');
+                    UPDATE images SET vc_of = 1 WHERE id = 2;
+                    """
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            rows = builders._active_rows(db_path)
+            groups = builders.build_version_groups(db_path, rows)
+
+        self.assertEqual(set(rows), {1, 3})
+        self.assertEqual([(set(group[0]), group[1]) for group in groups], [({1, 3}, 3)])
 
 
 if __name__ == "__main__":

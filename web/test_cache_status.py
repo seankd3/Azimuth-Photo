@@ -1,9 +1,150 @@
+from core import capabilities as _capabilities
 from test_support import *  # noqa: F401,F403
+import contextlib
 import unittest.mock
 
 
 class CacheStatusTests(BackendTestCase):
+    async def test_shutdown_cancels_media_warm_tasks(self):
+        started = asyncio.Event()
+
+        async def block_prefetch(*_args, **_kwargs):
+            started.set()
+            await asyncio.Event().wait()
+
+        old_prefetch = thumbnails.prefetch_images
+        thumbnails.prefetch_images = block_prefetch
+        try:
+            media_warm.schedule_thumbnail_prefetch(
+                [{"id": 1}],
+                "sm",
+                limit=1,
+            )
+            await asyncio.wait_for(started.wait(), timeout=1)
+
+            await media_warm.cancel_background_tasks()
+
+            self.assertEqual(media_warm._background_tasks, set())
+            self.assertEqual(media_warm._thumbnail_prefetch_inflight, set())
+        finally:
+            thumbnails.prefetch_images = old_prefetch
+
+    async def test_stale_work_owners_are_stolen_after_lease_expires(self):
+        work_coordination.release_manual_owner("captions")
+        work_coordination.release_gpu_owner("captions")
+        work_coordination.claim_manual_owner("captions")
+        work_coordination.claim_gpu_owner("captions")
+        try:
+            expired_at = time.time() - work_coordination.OWNER_LEASE_SECONDS - 1
+            work_coordination._manual_owner_updated_at = expired_at
+            work_coordination._gpu_owner_updated_at = expired_at
+
+            await asyncio.wait_for(
+                work_coordination.wait_for_manual_turn("embeddings", poll_seconds=0.001),
+                timeout=0.1,
+            )
+            await asyncio.wait_for(
+                work_coordination.wait_for_gpu_turn("embeddings", poll_seconds=0.001),
+                timeout=0.1,
+            )
+
+            self.assertEqual(work_coordination.manual_owner(), "embeddings")
+            self.assertEqual(work_coordination.gpu_owner(), "embeddings")
+        finally:
+            work_coordination.release_manual_owner("embeddings")
+            work_coordination.release_gpu_owner("embeddings")
+            work_coordination.release_manual_owner("captions")
+            work_coordination.release_gpu_owner("captions")
+
+    async def test_model_load_heartbeat_renews_manual_and_gpu_leases(self):
+        work_coordination.release_manual_owner("captions")
+        work_coordination.release_gpu_owner("captions")
+        work_coordination.claim_manual_owner("captions")
+        work_coordination.claim_gpu_owner("captions")
+        try:
+            manual_before = work_coordination._manual_owner_updated_at
+            gpu_before = work_coordination._gpu_owner_updated_at
+
+            async with work_coordination.lease_heartbeat(
+                "captions",
+                gpu=True,
+                interval_seconds=0.001,
+            ):
+                # Windows event-loop timers tick at ~15ms; give the heartbeat
+                # a window it can actually fire in.
+                await asyncio.sleep(0.05)
+
+            self.assertGreater(work_coordination._manual_owner_updated_at, manual_before)
+            self.assertGreater(work_coordination._gpu_owner_updated_at, gpu_before)
+        finally:
+            work_coordination.release_manual_owner("captions")
+            work_coordination.release_gpu_owner("captions")
+
+    async def test_coordination_status_surfaces_waiting_owner(self):
+        work_coordination.release_manual_owner("captions")
+        work_coordination.claim_manual_owner("captions")
+        waiter = asyncio.create_task(
+            work_coordination.wait_for_manual_turn("embeddings", poll_seconds=0.01)
+        )
+        try:
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+            status = work_coordination.status()
+            self.assertEqual(status["manual_waiters"], ["embeddings"])
+            self.assertEqual(status["waiting_for_owner"], ["embeddings"])
+        finally:
+            waiter.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await waiter
+            work_coordination.release_manual_owner("captions")
+
+    async def test_concurrent_media_missing_marks_share_one_source_count_update(self):
+        source = await self._source("missing-burst")
+        image_ids = [
+            await self._image(source["id"], f"missing-{index}.jpg")
+            for index in range(24)
+        ]
+        original_update = catalog_repository.update_source_counts_on_conn
+        update_calls = 0
+
+        async def counted_update(conn, source_id=None):
+            nonlocal update_calls
+            update_calls += 1
+            return await original_update(conn, source_id)
+
+        with unittest.mock.patch.object(
+            catalog_repository,
+            "update_source_counts_on_conn",
+            side_effect=counted_update,
+        ):
+            changed = await asyncio.gather(*(
+                catalog_repository.mark_image_missing(db.DB_PATH, image_id)
+                for image_id in image_ids
+            ))
+
+        self.assertTrue(all(changed))
+        self.assertEqual(update_calls, 1)
+
+    async def test_missing_media_response_stays_prompt_when_catalog_writer_is_busy(self):
+        source = await self._source("missing-under-lock")
+        image_id = await self._image(source["id"], "gone.jpg")
+        writer = sqlite3.connect(db.DB_PATH, timeout=0.1)
+        try:
+            writer.execute("BEGIN IMMEDIATE")
+            started = time.perf_counter()
+            response = await media_routes.serve_thumbnail(HeaderRequest(), "sm", image_id)
+            elapsed = time.perf_counter() - started
+        finally:
+            writer.rollback()
+            writer.close()
+
+        self.assertEqual(response.status_code, 410)
+        self.assertLess(elapsed, 2.0)
+        self.assertIsNone((await self._image_row(image_id))["missing_at"])
+
     async def test_search_and_people_start_previews_dependency(self):
+        if not _capabilities.capability_status("search")["available"]:
+            self.skipTest("AI search capability unavailable — matches AI-optional installs")
         old_manual_mode = thumbnails._pregen_manual_mode
         old_manual_pause = thumbnails._pregen_manual_pause
         try:
@@ -217,7 +358,7 @@ class CacheStatusTests(BackendTestCase):
                 thumbnail_cache_entries._write_queue.clear()
                 thumbnail_cache_entries._write_queue.extend(old_queue)
 
-    async def test_thumbnail_append_preserves_visible_facet_cache(self):
+    async def test_thumbnail_append_invalidates_visible_facet_cache(self):
         root = thumbnails.SSD_CACHE_DIR
         key = db._facet_cache_key(visible_thumb_size="sm", cache_root=root)
         cached_groups = [{"date": "2026-05", "label": "May 2026", "count": 1}]
@@ -226,17 +367,17 @@ class CacheStatusTests(BackendTestCase):
 
         db.note_cached_image_ids_added(root, "sm", [123])
 
-        self.assertIn(key, db._date_groups_cache)
-        self.assertIn(key, db._map_markers_cache)
+        self.assertNotIn(key, db._date_groups_cache)
+        self.assertNotIn(key, db._map_markers_cache)
 
-    async def test_thumbnail_append_preserves_visible_count_cache(self):
+    async def test_thumbnail_append_invalidates_visible_count_cache(self):
         root = thumbnails.SSD_CACHE_DIR
         key = db._ranking_count_cache_key(visible_thumb_size="sm", cache_root=root)
         db._ranking_count_cache[key] = {"value": 12, "expires": db._time.time() + 30.0}
 
         db.note_cached_image_ids_added(root, "sm", [123])
 
-        self.assertIn(key, db._ranking_count_cache)
+        self.assertNotIn(key, db._ranking_count_cache)
 
     async def test_thumbnail_memory_warm_reads_cached_sm_md_and_lg(self):
         calls = []
@@ -576,6 +717,32 @@ class CacheStatusTests(BackendTestCase):
         self.assertEqual(full.status_code, 410)
         self.assertIsNotNone(row["missing_at"])
 
+    async def test_trashed_image_serves_cached_thumbnail_without_marking_original_missing(self):
+        source = await self._source("trashed-media")
+        image_id = await self._image(source["id"], "trashed.jpg")
+        cached_path = os.path.join(self.tempdir.name, "trashed-cache.jpg")
+        with open(cached_path, "wb") as handle:
+            handle.write(b"cached trash thumbnail")
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "UPDATE images SET status = 'trashed', trashed_at = 1, trash_path = ? WHERE id = ?",
+                (os.path.join(source["path"], ".trash", "trashed.jpg"), image_id),
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        old_path_entry = thumbnails.fast_disk_path_entry
+        thumbnails.fast_disk_path_entry = lambda _size, _image_id: ("trash-sig", cached_path)
+        try:
+            response = await media_routes.serve_thumbnail(HeaderRequest(), "sm", image_id)
+        finally:
+            thumbnails.fast_disk_path_entry = old_path_entry
+
+        self.assertIsInstance(response, FileResponse)
+        self.assertIsNone((await self._image_row(image_id))["missing_at"])
+
     async def test_offline_source_uses_cached_preview_without_marking_image_missing(self):
         source = await self._source("offline-media")
         image_id = await self._image(source["id"], "offline.jpg")
@@ -600,6 +767,39 @@ class CacheStatusTests(BackendTestCase):
         self.assertEqual(uncached_response.status_code, 404)
         self.assertEqual(json.loads(uncached_response.body)["reason"], "source_offline")
         self.assertIsNone((await self._image_row(image_id))["missing_at"])
+
+    async def test_dead_hub_thumb_returns_204_and_enqueues_background_fill(self):
+        source = await self._source("hub-media")
+        image_id = await self._image(source["id"], "remote.jpg")
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "UPDATE images SET hub_remote = 1, hub_image_id = 901 WHERE id = ?",
+                (image_id,),
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        async def dead_hub(*_args, **_kwargs):
+            await asyncio.sleep(30)
+
+        with (
+            unittest.mock.patch.object(media_routes.satellite, "hub_url", return_value="http://dead-hub"),
+            unittest.mock.patch.object(media_routes, "_urllib_request", side_effect=dead_hub),
+            unittest.mock.patch.object(media_routes, "_schedule_remote_media_prefetch") as enqueue,
+            unittest.mock.patch.object(thumbnails, "_memory_get_entry_fast", return_value=None),
+            unittest.mock.patch.object(thumbnails, "fast_disk_path_entry", return_value=None),
+            unittest.mock.patch.object(thumbnails, "fast_disk_read_entry", return_value=None),
+        ):
+            started = time.perf_counter()
+            response = await media_routes.serve_thumbnail(HeaderRequest(), "sm", image_id)
+            elapsed = time.perf_counter() - started
+
+        self.assertEqual(response.status_code, 204)
+        self.assertLessEqual(elapsed, 3.0)
+        enqueue.assert_called_once()
+        self.assertEqual(enqueue.call_args.args[1], "sm")
 
     async def test_zero_byte_image_is_quarantined_and_logged_once(self):
         source = await self._source("zero-media")

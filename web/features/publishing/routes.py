@@ -7,9 +7,8 @@ gallery is a private share token scoped to a collection snapshot.
 from __future__ import annotations
 
 import asyncio
-import html
-import json
 import os
+import shutil
 import tempfile
 import time
 import zipfile
@@ -17,14 +16,18 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 from fastapi import APIRouter, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
+from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 
 from data import connection
 from core.source_files import source_file_is_safe
 from features.publishing import galleries
+from features.publishing.downloads import zip_gallery
 from features.share import auth
+from features.sync import readthrough
+import settings
 
 
 router = APIRouter()
@@ -33,6 +36,7 @@ ThumbnailResponse = Callable[..., Awaitable[Response]]
 _db_path: DbPathProvider | None = None
 _thumbnail_response: ThumbnailResponse | None = None
 _unlock_failures: dict[str, tuple[int, float]] = {}
+_templates = Jinja2Templates(directory=str(Path(__file__).resolve().parents[2] / "templates"))
 MAX_UNLOCK_PASSWORD_LENGTH = 256
 UNLOCK_FAILURE_LIMIT = 5
 UNLOCK_FAILURE_WINDOW_SECONDS = 15 * 60
@@ -137,9 +141,19 @@ async def api_update_gallery(collection_id: int, gallery_id: int, body: GalleryB
     elif body.password is not None:
         password_hash = auth.hash_password(body.password) if body.password else None
     updated = await galleries.update_gallery(
-        _configured_db_path(), gallery_id, options=_options(body), password_hash=password_hash
+        _configured_db_path(), gallery_id, title=body.title,
+        options=_options(body), password_hash=password_hash,
     )
     return {"ok": True, "gallery": _owner_payload(request, updated)}
+
+
+@router.delete("/api/user-collections/{collection_id}/galleries/{gallery_id}")
+async def api_delete_gallery(collection_id: int, gallery_id: int):
+    current = await galleries.get_gallery(_configured_db_path(), gallery_id)
+    if current is None or current["collection_id"] != collection_id:
+        return JSONResponse({"error": "Gallery not found"}, status_code=404)
+    await galleries.delete_gallery(_configured_db_path(), gallery_id)
+    return {"ok": True}
 
 
 def _public_page_payload(gallery: dict) -> dict:
@@ -151,24 +165,35 @@ def _public_page_payload(gallery: dict) -> dict:
         filename = str(image.get("filename") or f"photo-{image_id}.jpg")
         images.append({
             "id": image_id, "filename": filename,
-            "label": f"Photo {index} of {len(gallery['images'])}",
-            "aspect": max(0.45, min(2.4, float(image.get("width") or 1) / max(1, float(image.get("height") or 1)))),
+            "display_label": f"Photo {index} of {len(gallery['images'])}",
+            "aspect_ratio": max(0.45, min(2.4, float(image.get("width") or 1) / max(1, float(image.get("height") or 1)))),
             "thumb": f"/s/gallery/{token}/thumb/sm/{image_id}",
-            "preview": f"/s/gallery/{token}/thumb/lg/{image_id}",
+            "preview": f"/s/gallery/{token}/thumb/md/{image_id}",
+            "full": f"/s/gallery/{token}/thumb/lg/{image_id}",
+            "og_thumb": f"/s/gallery/{token}/thumb/md/{image_id}",
             "download": f"/s/gallery/{token}/download/{download_size}/{image_id}",
+            "download_name": _attachment_name(image_id, filename, suffix=".jpg"),
         })
+    cover = next((image for image in images if image["id"] == gallery.get("cover_image_id")), None)
     return {
-        "token": token, "title": gallery["title"], "layout": gallery["layout"], "theme": gallery["theme"],
-        "download_size": download_size, "allow_download_all": gallery["allow_download_all"], "images": images,
+        "token": token, "name": gallery["title"], "photo_count": len(images),
+        "download_size_label": f"{download_size} gallery copy", "images": images,
+        "download_all_url": f"/s/gallery/{token}/download-all" if gallery["allow_download_all"] else "",
+        "cover_image": cover["full"] if cover else "",
     }
 
 
-def _safe_json(value: dict) -> str:
-    return json.dumps(value, separators=(",", ":")).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+def _brand_payload() -> dict:
+    config = settings.get_settings()
+    site_url = str(config.get("publish_site_base_url") or "").strip().rstrip("/")
+    site_label = site_url.removeprefix("https://").removeprefix("http://").removeprefix("www.")
+    name = str(config.get("share_brand_name") or "").strip() or site_label or "Your photographer"
+    return {"name": name, "site_url": site_url, "site_label": site_label}
 
 
 def _public_response(response: Response) -> Response:
     response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Cache-Control"] = "private, no-store"
     return response
 
 
@@ -191,20 +216,48 @@ async def _safe_original(image: dict) -> bool:
     )
 
 
-def _gallery_html(data: dict) -> str:
-    title = html.escape(str(data["title"]))
-    state = _safe_json(data)
-    all_button = '<button id="download-all">Download all</button>' if data["allow_download_all"] else ''
-    return f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{title}</title>
-<style>
-:root{{--ink:#202126;--muted:#6a6870;--paper:#f7f5f0;--card:#fff;--accent:#996e40;--line:#ded9d0}}body[data-theme="dark"]{{--ink:#f4f2ef;--muted:#c1bcb5;--paper:#161616;--card:#212121;--line:#3a3937}}body[data-theme="warm"]{{--ink:#372b22;--muted:#796557;--paper:#f4eadc;--card:#fffaf1;--line:#decdb8;--accent:#b36136}}*{{box-sizing:border-box}}body{{margin:0;background:var(--paper);color:var(--ink);font:16px/1.5 ui-sans-serif,system-ui,sans-serif}}main{{max-width:1400px;margin:auto;padding:clamp(22px,5vw,72px)}}header{{display:flex;justify-content:space-between;gap:24px;align-items:end;margin-bottom:30px;border-bottom:1px solid var(--line);padding-bottom:20px}}h1{{font:600 clamp(28px,5vw,52px)/1.06 ui-serif,Georgia,serif;margin:0}}header p{{margin:7px 0 0;color:var(--muted)}}button{{border:0;border-radius:999px;padding:11px 17px;background:var(--ink);color:var(--paper);font:inherit;cursor:pointer}}#grid{{gap:8px}}#grid[data-layout="grid"]{{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr))}}#grid[data-layout="masonry"]{{columns:260px 4;display:block}}#grid[data-layout="slideshow"]{{display:flex;overflow:auto;scroll-snap-type:x mandatory;padding-bottom:12px}}.photo{{position:relative;display:block;overflow:hidden;background:var(--card);border-radius:5px;break-inside:avoid;margin:0 0 8px;cursor:zoom-in}}[data-layout="slideshow"] .photo{{flex:0 0 min(78vw,940px);scroll-snap-align:center}}.photo img{{display:block;width:100%;aspect-ratio:var(--aspect);object-fit:cover;transition:transform .2s}}.photo:hover img{{transform:scale(1.015)}}.photo a{{position:absolute;right:10px;bottom:10px;color:white;background:#0009;text-decoration:none;border-radius:999px;padding:7px 10px;font-size:13px}}#lightbox[hidden]{{display:none}}#lightbox{{position:fixed;inset:0;background:#000e;z-index:2;display:grid;place-items:center;padding:24px}}#lightbox img{{max-width:95vw;max-height:84vh}}#lightbox button{{position:absolute;right:24px;top:20px}}.lock{{min-height:72vh;display:grid;place-items:center;text-align:center}}.lock form{{display:grid;gap:10px;width:min(340px,100%)}}.lock input{{padding:12px;border:1px solid var(--line);border-radius:8px;font:inherit}}
-</style></head><body data-theme="{html.escape(data['theme'])}"><main><header><div><h1>{title}</h1><p>{len(data['images'])} photo{'s' if len(data['images']) != 1 else ''} · {html.escape(data['download_size'])} downloads</p></div>{all_button}</header><section id="grid" data-layout="{html.escape(data['layout'])}"></section></main><div id="lightbox" hidden><button id="close" aria-label="Close">×</button><img alt=""></div><script id="gallery-data" type="application/json">{state}</script><script>const d=JSON.parse(document.querySelector('#gallery-data').textContent),g=document.querySelector('#grid'),l=document.querySelector('#lightbox'),i=l.querySelector('img');g.innerHTML=d.images.map((p,n)=>`<article class="photo" style="--aspect:${{p.aspect}}" data-index="${{n}}"><img loading="lazy" src="${{p.thumb}}" alt="${{p.label}}"><a href="${{p.download}}" download>Download</a></article>`).join('');g.onclick=e=>{{if(e.target.closest('a'))return;const p=e.target.closest('.photo');if(!p)return;const x=d.images[Number(p.dataset.index)];i.src=x.preview;i.alt=x.label;l.hidden=false}};document.querySelector('#close').onclick=()=>{{l.hidden=true;i.removeAttribute('src')}};document.querySelector('#download-all')?.addEventListener('click',()=>location.href=`/s/gallery/${{d.token}}/download-all`)</script></body></html>'''
+def _stream_hub_response(response):
+    try:
+        while chunk := response.read(1024 * 1024):
+            yield chunk
+    finally:
+        response.close()
 
 
-def _locked_html(token: str, gallery: dict, error: bool = False) -> str:
-    title = html.escape(gallery["title"])
-    message = "That password did not unlock this gallery." if error else ""
-    return f'''<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>{title}</title><style>body{{font:16px system-ui;margin:0;background:#f7f5f0;color:#202126}}main{{min-height:100vh;display:grid;place-items:center;padding:24px}}form{{display:grid;gap:12px;width:min(340px,100%)}}input,button{{font:inherit;padding:12px;border-radius:8px;border:1px solid #d8d2c9}}button{{background:#202126;color:#fff}}</style><main><form method="post" action="/s/gallery/{html.escape(token)}/unlock"><h1>{title}</h1><p>This client gallery is password protected.</p><input name="password" type="password" autocomplete="current-password" autofocus required><button>Unlock</button><small>{message}</small></form></main>'''
+def _hub_media_type(response, default: str) -> str:
+    headers = getattr(response, "headers", None)
+    if headers is None:
+        return default
+    get_content_type = getattr(headers, "get_content_type", None)
+    if callable(get_content_type):
+        return get_content_type()
+    return headers.get("Content-Type", default)
+
+
+def _gallery_response(request: Request, gallery: dict) -> Response:
+    page = _public_page_payload(gallery)
+    return _templates.TemplateResponse(request, "share_gallery.html", {
+        "not_found": False, "locked": False, "token": page["token"],
+        "collection_name": page["name"], "photo_count": page["photo_count"],
+        "date_range": "", "brand": _brand_payload(), "gallery_json": page,
+        "cover_image": page["cover_image"],
+        "og_image": f"{str(request.base_url).rstrip('/')}{page['images'][0]['og_thumb']}" if page["images"] else "",
+        "favorites_enabled": False,
+    })
+
+
+def _locked_response(request: Request, token: str, gallery: dict, *, unlock_error: bool = False, throttle_seconds: int | None = None, status_code: int = 200) -> Response:
+    response = _templates.TemplateResponse(request, "share_gallery.html", {
+        "not_found": False, "locked": True, "token": token,
+        "collection_name": gallery["title"], "photo_count": gallery["image_count"],
+        "date_range": "", "brand": _brand_payload(), "unlock_error": unlock_error,
+        "throttle_seconds": throttle_seconds,
+        "throttle_minutes": ((throttle_seconds or 0) + 59) // 60 if throttle_seconds else None,
+        "unlock_action": f"/s/gallery/{token}/unlock",
+    }, status_code=status_code)
+    if throttle_seconds is not None:
+        response.headers["Retry-After"] = str(throttle_seconds)
+    return response
 
 
 def _is_unlocked(request: Request, gallery: dict) -> bool:
@@ -217,11 +270,16 @@ async def public_gallery(token: str, request: Request):
     if gallery is None:
         return _public_response(HTMLResponse("<h1>Gallery unavailable</h1>", status_code=404))
     if not _is_unlocked(request, gallery):
-        return _public_response(HTMLResponse(_locked_html(token, gallery, request.query_params.get("e") == "1")))
+        return _public_response(_locked_response(request, token, gallery, unlock_error=request.query_params.get("e") == "1"))
     if not request.cookies.get(auth.VIEW_COOKIE_NAME):
         await galleries.record_view(_configured_db_path(), token)
-    response = HTMLResponse(_gallery_html(_public_page_payload(gallery)))
-    auth.set_view_cookie(response, token, request=request)
+    response = _gallery_response(request, gallery)
+    auth.set_view_cookie(
+        response,
+        token,
+        request=request,
+        path=auth.gallery_cookie_path(token),
+    )
     return _public_response(response)
 
 
@@ -242,7 +300,7 @@ async def public_gallery_unlock(token: str, request: Request):
     if gallery is None:
         return _public_response(HTMLResponse("<h1>Gallery unavailable</h1>", status_code=404))
     if _unlock_retry_after(token) is not None:
-        return _public_response(HTMLResponse(_locked_html(token, gallery), status_code=429))
+        return _public_response(_locked_response(request, token, gallery, throttle_seconds=_unlock_retry_after(token), status_code=429))
     password = await auth.read_form_password(request)
     if password is None or len(password) > MAX_UNLOCK_PASSWORD_LENGTH or not auth.verify_password(password, gallery.get("password_hash")):
         count, started = _unlock_failures.get(token, (0, time.time()))
@@ -284,6 +342,22 @@ async def public_gallery_download(token: str, size: str, image_id: int, request:
             f'attachment; filename="{_attachment_name(image_id, image["filename"], suffix=".jpg")}"'
         )
         return _public_response(response)
+    if int(image.get("hub_remote") or 0) == 1:
+        remote = await asyncio.to_thread(
+            readthrough.open_hub_original,
+            int(image.get("hub_image_id") or 0),
+        )
+        if remote is None:
+            return _public_response(JSONResponse(
+                {"error": "Original unavailable", "reason": "hub_original_unavailable"},
+                status_code=404,
+            ))
+        filename = _attachment_name(image_id, image["filename"])
+        return _public_response(StreamingResponse(
+            _stream_hub_response(remote),
+            media_type=_hub_media_type(remote, "application/octet-stream"),
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        ))
     if not await _safe_original(image):
         return _public_response(JSONResponse({"error": "Not found"}, status_code=404))
     return _public_response(
@@ -291,28 +365,7 @@ async def public_gallery_download(token: str, size: str, image_id: int, request:
     )
 
 
-def _zip_gallery(gallery: dict, destination: str) -> str:
-    """Build a local zip from frozen members. Preview sizes remain JPEG-only."""
-    import thumbnails
-
-    size = gallery["download_size"]
-    with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for image in gallery["images"]:
-            filename = Path(image["filename"])
-            if size == "original":
-                if not source_file_is_safe(
-                    str(image.get("filepath") or ""),
-                    str(image.get("source_path") or ""),
-                ):
-                    continue
-                archive.write(
-                    image["filepath"],
-                    arcname=_attachment_name(int(image["id"]), filename.name),
-                )
-            else:
-                data = asyncio.run(thumbnails.get_thumbnail(image["filepath"], size, int(image["id"])))
-                archive.writestr(f"{filename.stem}.jpg", data)
-    return destination
+_zip_gallery = zip_gallery
 
 
 @router.get("/s/gallery/{token}/download-all")
@@ -323,7 +376,7 @@ async def public_gallery_download_all(token: str, request: Request):
     handle = tempfile.NamedTemporaryFile(prefix="photoarchive-gallery-", suffix=".zip", delete=False)
     handle.close()
     try:
-        await asyncio.to_thread(_zip_gallery, gallery, handle.name)
+        result = await asyncio.to_thread(zip_gallery, gallery, handle.name)
     except Exception:
         Path(handle.name).unlink(missing_ok=True)
         return _public_response(JSONResponse({"error": "Could not prepare gallery download"}, status_code=422))
@@ -331,6 +384,7 @@ async def public_gallery_download_all(token: str, request: Request):
         FileResponse(
             handle.name,
             filename=f"{gallery['title']}.zip",
+            headers={"X-Azimuth-Skipped-Count": str(len(result["skipped"]))},
             background=BackgroundTask(lambda: Path(handle.name).unlink(missing_ok=True)),
         )
     )

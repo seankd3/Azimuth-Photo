@@ -5,8 +5,10 @@ from collections.abc import Awaitable, Callable
 
 from core.source_files import inspect_source_file
 from data.repositories.catalog import SuspiciousEmptyScan
+from image_headers import HEADER_GEOMETRY_EXTENSIONS, read_header_dimensions
 
-SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".dng", ".cr2", ".cr3", ".tif", ".tiff", ".webp"}
+SUPPORTED_EXTENSIONS = HEADER_GEOMETRY_EXTENSIONS - {".bmp", ".gif"}
+SCAN_HEADER_BUDGET_SECONDS = 0.005
 
 MarkSourceScanStarted = Callable[[int], Awaitable[None]]
 InsertImagesBatch = Callable[..., Awaitable[None]]
@@ -50,10 +52,41 @@ def _configured(provider, name: str):
     return provider
 
 
-def walk_images(folder: str):
+# Unambiguous derivative/app-data directories that must never enter the library.
+JUNK_DIRECTORY_NAMES = {
+    "previewcache",
+    "__macosx",
+    "luminar neo catalog",
+    "lightroom catalog",
+    ".thumbnails",
+    ".lrt",
+}
+JUNK_DIRECTORY_SUFFIXES = (".lrdata", ".lrcat-data")
+
+
+def is_junk_directory(name: str) -> bool:
+    normalized = name.lower()
+    return normalized in JUNK_DIRECTORY_NAMES or normalized.endswith(JUNK_DIRECTORY_SUFFIXES)
+
+
+def is_junk_file(name: str) -> bool:
+    return name.startswith("._")  # AppleDouble sidecars
+
+
+def walk_images(folder: str, *, excluded_directory_paths: list[str] | None = None):
     """Yield image rows with cheap filesystem metadata."""
     for root, _dirs, files in os.walk(folder):
+        included_dirs = []
+        for directory in _dirs:
+            if is_junk_directory(directory):
+                if excluded_directory_paths is not None:
+                    excluded_directory_paths.append(os.path.join(root, directory))
+            else:
+                included_dirs.append(directory)
+        _dirs[:] = included_dirs
         for f in files:
+            if is_junk_file(f):
+                continue
             file_ext = os.path.splitext(f)[1].lower()
             if file_ext in SUPPORTED_EXTENSIONS:
                 filepath = os.path.join(root, f)
@@ -62,7 +95,26 @@ def walk_images(folder: str):
                     continue
                 file_size = int(file_stat.st_size)
                 file_modified_at = float(file_stat.st_mtime)
-                yield f, filepath, file_ext, file_size, file_modified_at
+                dimensions = read_header_dimensions(
+                    filepath,
+                    budget_seconds=SCAN_HEADER_BUDGET_SECONDS,
+                )
+                if dimensions is None:
+                    orientation = None
+                    aspect_ratio = None
+                else:
+                    width, height = dimensions
+                    orientation = "landscape" if width >= height else "portrait"
+                    aspect_ratio = round(width / height, 4)
+                yield (
+                    f,
+                    filepath,
+                    file_ext,
+                    file_size,
+                    file_modified_at,
+                    orientation,
+                    aspect_ratio,
+                )
 
 
 def try_begin_scan() -> bool:
@@ -97,12 +149,13 @@ async def scan_folder(folder: str, source_id: int | None = None, on_batch=None):
     batch = []
     batch_size = 100
     seen_filepaths = []
+    excluded_directory_paths = []
 
     try:
         if source_id is not None:
             await _configured(_mark_source_scan_started, "mark_source_scan_started")(source_id)
 
-        for row in walk_images(folder):
+        for row in walk_images(folder, excluded_directory_paths=excluded_directory_paths):
             batch.append(row)
             seen_filepaths.append(row[1])
             scan_state["total_found"] += 1
@@ -126,6 +179,7 @@ async def scan_folder(folder: str, source_id: int | None = None, on_batch=None):
             await _configured(_mark_source_scan_finished, "mark_source_scan_finished")(
                 source_id,
                 seen_filepaths=seen_filepaths,
+                excluded_directory_paths=excluded_directory_paths,
             )
     except SuspiciousEmptyScan as exc:
         scan_state["warning"] = str(exc)

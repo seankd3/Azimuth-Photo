@@ -36,9 +36,13 @@ const SHELL_URLS = [
     '/static/icons/icon.svg',
     '/static/js/icons.js',
     '/static/js/people_labels.js',
+    '/static/js/previews.js',
+    '/static/js/worker_state.js',
     '/static/js/api.js',
     '/static/js/mobile/api.js',
     '/static/js/mobile/bootstrap.js',
+    '/static/js/mobile/caption_cache.js',
+    '/static/js/mobile/flag_scope.js',
     '/static/js/mobile/flags.js',
     '/static/js/mobile/haptics.js',
     '/static/js/mobile/history.js',
@@ -53,6 +57,7 @@ const SHELL_URLS = [
     '/static/js/mobile/timeline.js',
     '/static/js/mobile/toast.js',
     '/static/js/mobile/viewer.js',
+    '/static/js/mobile/viewer_momentum.js',
     '/static/js/mobile/write_queue.js',
 ];
 

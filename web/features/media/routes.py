@@ -9,9 +9,14 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 
 from core import requests as request_helpers
 from core.source_files import inspect_source_file
+from data import connection as data_connection
 from data.repositories import images as image_repository
 from features.sync import satellite
-from features.sync.prefetch import ThumbPrefetcher, _urllib_request
+from features.sync.prefetch import (
+    ThumbPrefetcher,
+    _foreground_urllib_request as _urllib_request,
+    _urllib_request as _background_urllib_request,
+)
 import thumbnails
 
 
@@ -26,6 +31,8 @@ _db_path: DbPathProvider | None = None
 _mark_image_missing: MarkImageMissing | None = None
 _browser_image_extensions = thumbnails.BROWSER_ORIGINAL_EXTENSIONS
 log = logging.getLogger(__name__)
+_REMOTE_MEDIA_FOREGROUND_TIMEOUT_SECONDS = 2.0
+_remote_prefetch_tasks: dict[tuple[int, str], asyncio.Task] = {}
 
 
 def configure(
@@ -91,7 +98,11 @@ async def _source_error_response(image, state: str) -> JSONResponse | None:
     if state in {"missing", "corrupt"}:
         changed = False
         if _mark_image_missing is not None:
-            changed = await _mark_image_missing(image_id)
+            try:
+                changed = await _mark_image_missing(image_id)
+            except Exception as exc:
+                if not data_connection.is_sqlite_locked_error(exc):
+                    raise
         if changed:
             log.warning(
                 "worker=media_request image_id=%s marked unavailable reason=%s path=%r",
@@ -129,31 +140,93 @@ async def _source_error_response(image, state: str) -> JSONResponse | None:
     return None
 
 
+def _remote_media_endpoint(remote_id: int, tier: str) -> str:
+    if tier == thumbnails.FULL_TIER:
+        return f"/api/full/{remote_id}"
+    return f"/api/thumb/{tier}/{remote_id}"
+
+
+def _remote_media_pending_response(tier: str) -> Response:
+    if tier != thumbnails.FULL_TIER:
+        return Response(status_code=204, headers={"Cache-Control": "no-store"})
+    return JSONResponse(
+        {
+            "error": "Hub media is still loading",
+            "reason": "hub_media_pending",
+        },
+        status_code=503,
+        headers={"Cache-Control": "no-store", "Retry-After": "2"},
+    )
+
+
+def _cache_remote_media(image, tier: str, data: bytes) -> str:
+    remote_id = int(image["hub_image_id"])
+    image_id = int(image["id"])
+    signature = ThumbPrefetcher._signature(remote_id, data)
+    thumbnails._write_thumbnail_to_disk(tier, image_id, signature, data, hot=False)
+    if tier != thumbnails.FULL_TIER:
+        thumbnails._memory_put(tier, image_id, signature, data)
+    return signature
+
+
+async def _prefetch_remote_media(image: dict, tier: str) -> None:
+    hub = satellite.hub_url().rstrip("/")
+    if not hub:
+        return
+    remote_id = int(image["hub_image_id"])
+    try:
+        status_code, _headers, data = await _background_urllib_request(
+            "GET",
+            hub + _remote_media_endpoint(remote_id, tier),
+        )
+        if 200 <= status_code < 300 and data:
+            await asyncio.to_thread(_cache_remote_media, image, tier, data)
+    except Exception as exc:
+        log.debug(
+            "worker=hub_media_prefetch image_id=%s tier=%s error=%s",
+            image.get("id"),
+            tier,
+            exc,
+        )
+
+
+def _schedule_remote_media_prefetch(image, tier: str) -> None:
+    image_data = dict(image)
+    key = (int(image_data["id"]), tier)
+    existing = _remote_prefetch_tasks.get(key)
+    if existing is not None and not existing.done():
+        return
+    task = asyncio.create_task(_prefetch_remote_media(image_data, tier))
+    _remote_prefetch_tasks[key] = task
+    task.add_done_callback(lambda _done, task_key=key: _remote_prefetch_tasks.pop(task_key, None))
+
+
 async def _remote_media_response(image, tier: str) -> Response:
     hub = satellite.hub_url().rstrip("/")
     if not hub:
-        return JSONResponse(
-            {"error": "Hub unreachable", "reason": "hub_unreachable"},
-            status_code=503,
-        )
+        return _remote_media_pending_response(tier)
     remote_id = int(image["hub_image_id"])
-    endpoint = f"/api/full/{remote_id}" if tier == thumbnails.FULL_TIER else f"/api/thumb/{tier}/{remote_id}"
+    endpoint = _remote_media_endpoint(remote_id, tier)
     try:
-        status_code, response_headers, data = await _urllib_request("GET", hub + endpoint)
-    except Exception:
-        return JSONResponse(
-            {"error": "Hub unreachable", "reason": "hub_unreachable"},
-            status_code=503,
+        status_code, response_headers, data = await asyncio.wait_for(
+            _urllib_request("GET", hub + endpoint, headers=satellite.hub_request_headers()),
+            timeout=_REMOTE_MEDIA_FOREGROUND_TIMEOUT_SECONDS,
         )
+    except Exception:
+        _schedule_remote_media_prefetch(image, tier)
+        return _remote_media_pending_response(tier)
     if not 200 <= status_code < 300:
+        if status_code >= 500:
+            _schedule_remote_media_prefetch(image, tier)
+            return _remote_media_pending_response(tier)
         return JSONResponse(
             {"error": "Hub media unavailable", "reason": "hub_media_unavailable"},
             status_code=status_code,
         )
-    signature = ThumbPrefetcher._signature(remote_id, data)
-    thumbnails._write_thumbnail_to_disk(tier, int(image["id"]), signature, data, hot=False)
-    if tier != thumbnails.FULL_TIER:
-        thumbnails._memory_put(tier, int(image["id"]), signature, data)
+    if not data:
+        _schedule_remote_media_prefetch(image, tier)
+        return _remote_media_pending_response(tier)
+    signature = _cache_remote_media(image, tier, data)
     media_type = next(
         (value for key, value in response_headers.items() if key.lower() == "content-type"),
         "image/jpeg",
@@ -172,16 +245,24 @@ async def thumbnail_response(request: Request, size: str, image_id: int, cached:
 
     image = None
     source_state = "available"
+    cache_only = cached
     if not cached:
         image = await image_repository.get_media_image_by_id(_configured_db_path(), image_id)
         if not image:
             return JSONResponse({"error": "Image not found"}, status_code=404)
-        source_state = await _source_state(image)
-        source_error = await _source_error_response(image, source_state)
-        if source_error is not None:
-            return source_error
+        if image["status"] == "trashed":
+            # Local originals were intentionally moved, but a mirrored Trash row
+            # can still be read through from its hub when no cached preview exists.
+            source_state = await _source_state(image)
+            cache_only = source_state != "remote"
+        else:
+            source_state = await _source_state(image)
+            source_error = await _source_error_response(image, source_state)
+            if source_error is not None:
+                return source_error
 
-    # Cached probes remain DB-free; normal requests validate the original first.
+    # Cached probes remain DB-free. Active images validate the original first;
+    # trashed rows are cache-only because their original path was intentionally moved.
     request_etag = request.headers.get("if-none-match")
     entry = thumbnails._memory_get_entry_fast(size, image_id)
     if entry is None:
@@ -208,7 +289,7 @@ async def thumbnail_response(request: Request, size: str, image_id: int, cached:
         if request_etag == headers["ETag"]:
             return Response(status_code=304, headers=headers)
         return Response(content=data, media_type="image/jpeg", headers=headers)
-    if cached:
+    if cache_only:
         return Response(status_code=204, headers={"Cache-Control": "no-store"})
 
     if source_state == "remote":

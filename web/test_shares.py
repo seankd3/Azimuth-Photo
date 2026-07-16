@@ -1,5 +1,6 @@
 import asyncio
 import time
+from pathlib import Path
 
 from fastapi.responses import Response
 from fastapi.testclient import TestClient
@@ -35,6 +36,7 @@ class ShareTests(BackendTestCase):
                 on,
                 client_name=client_name,
             ),
+            mark_finished=lambda share_id: db.mark_share_finished(share_id),
             list_favorites=lambda share_id: db.list_share_favorites(share_id),
             favorites_for_collection=lambda collection_id: db.favorites_for_collection(collection_id),
             thumbnail_response=self._thumbnail_response,
@@ -92,6 +94,23 @@ class ShareTests(BackendTestCase):
         self.assertFalse(await db.share_token_allows_image(share["token"], first))
         self.assertTrue(await db.share_token_allows_image(share["token"], second))
 
+    async def test_tokened_share_media_never_enters_shared_caches(self):
+        collection, first, _second, _third = await self._collection_with_images()
+        share = await db.create_or_rotate_share(collection["id"])
+
+        def probe():
+            with TestClient(app_module.app) as client:
+                thumb = client.get(f"/s/{share['token']}/thumb/sm/{first}")
+                image = client.get(f"/s/{share['token']}/img/{first}")
+                return thumb, image
+
+        thumb, image = await asyncio.to_thread(probe)
+
+        self.assertEqual(thumb.status_code, 200)
+        self.assertEqual(image.status_code, 200)
+        self.assertEqual(thumb.headers.get("cache-control"), "private, no-store")
+        self.assertEqual(image.headers.get("cache-control"), "private, no-store")
+
     async def test_unicode_filename_roundtrips_through_private_share(self):
         source = await self._source("share-unicode")
         image_id = await self._image(source["id"], "été 📸.jpg")
@@ -135,6 +154,22 @@ class ShareTests(BackendTestCase):
         self.assertIsNone(active)
         self.assertIsNone(resolved)
 
+    async def test_share_revoke_http_hides_public_token_and_owner_payload(self):
+        collection, *_ = await self._collection_with_images()
+        share = await db.create_or_rotate_share(collection["id"])
+
+        def revoke_and_probe():
+            with TestClient(app_module.app) as client:
+                revoked = client.post(f"/api/user-collections/{collection['id']}/share/revoke")
+                public = client.get(f"/s/{share['token']}")
+                owner = client.get(f"/api/user-collections/{collection['id']}/share")
+                return revoked, public, owner
+
+        revoked, public, owner = await asyncio.to_thread(revoke_and_probe)
+        self.assertEqual(revoked.status_code, 200, revoked.text)
+        self.assertEqual(public.status_code, 404)
+        self.assertIsNone(owner.json()["share"])
+
     async def test_resolve_token_rejects_expired_share(self):
         collection, *_ = await self._collection_with_images()
         share = await db.create_or_rotate_share(collection["id"], expires_at=time.time() - 60)
@@ -144,6 +179,21 @@ class ShareTests(BackendTestCase):
 
         self.assertIsNone(resolved)
         self.assertEqual(active["token"], share["token"])
+        self.assertTrue(active["expired"])
+
+        def probe():
+            with TestClient(app_module.app) as client:
+                owner = client.get(f"/api/user-collections/{collection['id']}/share")
+                shared = client.get("/api/shares")
+                return owner, shared
+
+        owner, shared = await asyncio.to_thread(probe)
+        self.assertTrue(owner.json()["share"]["expired"])
+        item = next(row for row in shared.json()["items"] if row["collection_id"] == collection["id"])
+        self.assertTrue(item["private_link"]["expired"])
+
+        with (Path(__file__).parent / "static/js/desktop/panel.js").open(encoding="utf-8") as handle:
+            self.assertIn("Expired - rotate to renew", handle.read())
 
     async def test_token_allows_only_member_images(self):
         collection, first, _second, third = await self._collection_with_images()
@@ -210,6 +260,7 @@ class ShareTests(BackendTestCase):
         self.assertIn("Download photo", ok.text)
         self.assertIn("Photo 1 of 2", ok.text)
         self.assertIn("your photographer sees these", ok.text)
+        self.assertIn('property="og:image"', ok.text)
         self.assertEqual(ok.headers.get("referrer-policy"), "no-referrer")
         self.assertEqual(missing.status_code, 404)
         self.assertIn("Share unavailable", missing.text)
@@ -231,27 +282,30 @@ class ShareTests(BackendTestCase):
                     f"/s/{share['token']}/favorite",
                     json={"image_id": second, "on": True},
                 )
+                done = client.post(f"/s/{share['token']}/favorite", json={"done": True})
                 not_member = client.post(
                     f"/s/{share['token']}/favorite",
                     json={"image_id": third, "on": True},
                 )
                 owner = client.get(f"/api/user-collections/{collection['id']}/share/favorites")
-                return initial, first_on, second_on, not_member, owner
+                return initial, first_on, second_on, done, not_member, owner
             finally:
                 client.close()
 
-        initial, first_on, second_on, not_member, owner = await asyncio.to_thread(probe)
+        initial, first_on, second_on, done, not_member, owner = await asyncio.to_thread(probe)
 
         self.assertEqual(initial.status_code, 200)
-        self.assertEqual(initial.json(), {"favorites": []})
+        self.assertEqual(initial.json(), {"favorites": [], "done": False})
         self.assertEqual(first_on.status_code, 200)
         self.assertEqual(first_on.json()["favorites"], [first])
         self.assertEqual(second_on.status_code, 200)
         self.assertEqual(second_on.json()["favorites"], [first, second])
+        self.assertTrue(done.json()["done"])
         self.assertEqual(not_member.status_code, 404)
         self.assertEqual(not_member.headers.get("referrer-policy"), "no-referrer")
         self.assertEqual(owner.status_code, 200)
         self.assertEqual(owner.json()["count"], 2)
+        self.assertIsNotNone(owner.json()["client_finished_at"])
         self.assertEqual([row["image_id"] for row in owner.json()["favorites"]], [first, second])
 
     async def test_shared_surfaces_aggregate_private_and_website_state(self):

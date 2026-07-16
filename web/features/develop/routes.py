@@ -18,7 +18,7 @@ from data import connection
 from data.repositories import images as image_repository
 from data.repositories import stacks as stack_repository
 from features.develop import rawproc, transform, virtual_copies
-from features.sync import oplog
+from features.sync import oplog, readthrough
 
 
 router = APIRouter()
@@ -27,6 +27,10 @@ _db_path: DbPathProvider | None = None
 _pregen_tasks: set[asyncio.Task] = set()
 _batch_tasks: set[asyncio.Task] = set()
 _base_generation_tasks: dict[int, asyncio.Task] = {}
+_base_generation_failures: dict[int, tuple[float, rawproc.RawDecodeError]] = {}
+_BASE_FAILURE_TTL_SECONDS = 5.0
+HISTORY_EDIT_LIMIT = 40
+HISTORY_SNAPSHOT_LIMIT = 40
 _batch_status: dict[str, Any] = {
     "state": "idle",
     "started_at": None,
@@ -83,11 +87,11 @@ SYNC_GROUP_KEYS: dict[str, tuple[str, ...]] = {
     "detail": (
         "Sharpness",
         "SharpenRadius",
-        "SharpenDetail",
         "SharpenEdgeMasking",
         "LuminanceSmoothing",
         "ColorNoiseReduction",
-        "LuminanceNoiseReductionDetail",
+        "LuminanceDetail",
+        "LuminanceContrast",
         "ColorNoiseReductionDetail",
         "ColorNoiseReductionSmoothness",
     ),
@@ -340,7 +344,30 @@ async def _history(image_id: int) -> list[dict[str, Any]]:
     conn = await connection.open_async(_configured_db_path())
     try:
         cursor = await conn.execute(
-            "SELECT id, settings, label, created_at FROM develop_history WHERE image_id = ? ORDER BY id DESC LIMIT 40",
+            # Named snapshots are pinned separately from edits, but each lane is capped.
+            "WITH pinned AS ("
+            "  SELECT id, settings, label, created_at FROM develop_history "
+            "  WHERE image_id = ? AND label LIKE 'Snapshot:%' ORDER BY id DESC LIMIT ?"
+            "), recent AS ("
+            "  SELECT id, settings, label, created_at FROM develop_history "
+            "  WHERE image_id = ? AND label NOT LIKE 'Snapshot:%' ORDER BY id DESC LIMIT ?"
+            ") SELECT * FROM pinned UNION ALL SELECT * FROM recent ORDER BY id DESC",
+            (image_id, HISTORY_SNAPSHOT_LIMIT, image_id, HISTORY_EDIT_LIMIT),
+        )
+        return [
+            {**dict(row), "settings": _json_settings(row["settings"])}
+            for row in await cursor.fetchall()
+        ]
+    finally:
+        await connection.close_async(conn, db_path=_configured_db_path())
+
+
+async def _snapshots(image_id: int) -> list[dict[str, Any]]:
+    conn = await connection.open_async(_configured_db_path())
+    try:
+        cursor = await conn.execute(
+            "SELECT id, settings, label, created_at FROM develop_history "
+            "WHERE image_id = ? AND label LIKE 'Snapshot:%' ORDER BY id DESC",
             (image_id,),
         )
         return [
@@ -360,8 +387,31 @@ def _cached_base(image_id: int, image: dict) -> rawproc.BasePaths | None:
     return rawproc.cached_base_paths(image_id, image["filepath"])
 
 
+def _recent_base_failure(image_id: int) -> rawproc.RawDecodeError | None:
+    failure = _base_generation_failures.get(image_id)
+    if failure is None:
+        return None
+    failed_at, error = failure
+    if time.monotonic() - failed_at < _BASE_FAILURE_TTL_SECONDS:
+        return error
+    _base_generation_failures.pop(image_id, None)
+    return None
+
+
+def _base_error_response(error: rawproc.RawDecodeError) -> JSONResponse:
+    if isinstance(error.__cause__, readthrough.BaseReadthroughError):
+        return JSONResponse(
+            {"error": str(error), "reason": "hub_unreachable"},
+            status_code=503,
+            headers={"Cache-Control": "no-store", "Retry-After": "5"},
+        )
+    return JSONResponse({"error": str(error)}, status_code=422)
+
+
 def _start_base_generation(image_id: int, image: dict) -> None:
     """Start the existing rawproc single-flight generator without holding a request open."""
+    if _recent_base_failure(image_id) is not None:
+        return
     existing = _base_generation_tasks.get(image_id)
     if existing is not None and not existing.done():
         return
@@ -369,10 +419,13 @@ def _start_base_generation(image_id: int, image: dict) -> None:
     async def generate() -> None:
         try:
             await _ensure_base(image_id, image)
-        except Exception:
-            # The polling request will surface the decode error if it is retried;
-            # do not leave an unobserved task exception in the server log.
-            pass
+            _base_generation_failures.pop(image_id, None)
+        except rawproc.RawDecodeError as exc:
+            _base_generation_failures[image_id] = (time.monotonic(), exc)
+        except Exception as exc:
+            failure = rawproc.RawDecodeError(str(exc) or "Develop base generation failed")
+            failure.__cause__ = exc
+            _base_generation_failures[image_id] = (time.monotonic(), failure)
         finally:
             _base_generation_tasks.pop(image_id, None)
 
@@ -381,10 +434,25 @@ def _start_base_generation(image_id: int, image: dict) -> None:
 
 def _base_generating_response(image_id: int) -> JSONResponse:
     return JSONResponse(
-        {"image_id": image_id, "state": "generating"},
+        {"image_id": image_id, "state": "generating", "status": "pending"},
         status_code=202,
         headers={"Cache-Control": "no-store", "Retry-After": "1"},
     )
+
+
+def _cached_base_or_pending(
+    image_id: int,
+    image: dict,
+) -> tuple[rawproc.BasePaths | None, JSONResponse | None]:
+    """Keep request-path Develop verbs cache-only while a base fills behind them."""
+
+    paths = _cached_base(image_id, image)
+    if paths is not None:
+        return paths, None
+    if failure := _recent_base_failure(image_id):
+        return None, _base_error_response(failure)
+    _start_base_generation(image_id, image)
+    return None, _base_generating_response(image_id)
 
 
 async def _upsert_settings(image_id: int, incoming: dict[str, Any], label: str | None) -> dict[str, Any]:
@@ -510,6 +578,8 @@ async def api_develop_base_bin(image_id: int):
         return error
     paths = _cached_base(image_id, image)
     if paths is None:
+        if failure := _recent_base_failure(image_id):
+            return _base_error_response(failure)
         _start_base_generation(image_id, image)
         return _base_generating_response(image_id)
     return FileResponse(
@@ -526,9 +596,15 @@ async def api_develop_base_jpg(image_id: int):
         return error
     paths = _cached_base(image_id, image)
     if paths is None:
+        if failure := _recent_base_failure(image_id):
+            return _base_error_response(failure)
         _start_base_generation(image_id, image)
         return _base_generating_response(image_id)
-    return FileResponse(paths.preview, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=31536000, immutable"})
+    return FileResponse(
+        paths.preview,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
 
 
 @router.post("/api/develop/{image_id}/auto")
@@ -544,10 +620,10 @@ async def api_develop_auto_tone(image_id: int):
     image, error = await _image_or_error(image_id)
     if error:
         return error
-    try:
-        paths, cached_meta = await _ensure_base(image_id, image)
-    except rawproc.RawDecodeError as exc:
-        return JSONResponse({"error": str(exc)}, status_code=422)
+    paths, pending = _cached_base_or_pending(image_id, image)
+    if pending is not None:
+        return pending
+    cached_meta = rawproc.read_base_metadata(image_id) or {}
     row = await _load_settings(image_id)
     settings = _json_settings(row["settings"]) if row else {}
     asshot = cached_meta.get("as_shot") if isinstance(cached_meta, dict) else {}
@@ -607,13 +683,11 @@ async def api_develop_proof_tile(
         return error
     from features.develop.render import RenderError, render_proof_tile_async
 
+    _paths, pending = _cached_base_or_pending(image_id, image)
+    if pending is not None:
+        return pending
     row = await _load_settings(image_id)
     cached_meta = rawproc.read_base_metadata(image_id) or {}
-    if not cached_meta.get("color"):
-        try:
-            _paths, cached_meta = await _ensure_base(image_id, image)
-        except rawproc.RawDecodeError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=422)
     asshot = cached_meta.get("as_shot") if isinstance(cached_meta, dict) else {}
     try:
         tile = await render_proof_tile_async(
@@ -648,10 +722,17 @@ async def api_develop_transform_auto(image_id: int):
     image, error = await _image_or_error(image_id)
     if error:
         return error
-    paths, _meta = await _ensure_base(image_id, image)
-    import gzip
-    payload = await asyncio.to_thread(paths.binary.read_bytes)
-    linear_u16, _width, _height = rawproc.parse_base_payload(gzip.decompress(payload))
+    paths, pending = _cached_base_or_pending(image_id, image)
+    if pending is not None:
+        return pending
+    try:
+        import gzip
+        payload = await asyncio.to_thread(paths.binary.read_bytes)
+        linear_u16, _width, _height = rawproc.parse_base_payload(gzip.decompress(payload))
+    except rawproc.RawDecodeError as exc:
+        return _base_error_response(exc)
+    except (OSError, ValueError) as exc:
+        return JSONResponse({"error": str(exc)}, status_code=422)
     result = await asyncio.to_thread(transform.auto_level_settings, linear_u16.astype("float32") / 65535.0)
     if result is None:
         return JSONResponse({"error": "No reliable horizon found"}, status_code=422)
@@ -663,11 +744,21 @@ async def api_get_develop(image_id: int):
     image, error = await _image_or_error(image_id)
     if error:
         return error
-    try:
-        _paths, meta = await _ensure_base(image_id, image)
-    except rawproc.RawDecodeError as exc:
-        return JSONResponse({"error": str(exc)}, status_code=422)
+    if image.get("hub_remote") and _cached_base(image_id, image) is None:
+        meta = rawproc.read_base_metadata(image_id) or {}
+    else:
+        try:
+            _paths, meta = await _ensure_base(image_id, image)
+        except rawproc.RawDecodeError as exc:
+            return _base_error_response(exc)
     meta = _profiled_meta(meta, image["filepath"])
+    # Keep the interactive canvas on the same cache-native color contract as
+    # render_display_preview().  _profiled_meta() also carries the resolved
+    # Adobe profile for UI/profile workflows; without this explicit payload,
+    # WebGL enabled that extra pipeline for an otherwise unedited RAW.
+    from features.develop.render import default_render_color_profile
+
+    meta["canvas_color_profile"] = default_render_color_profile(meta)
     row = await _load_settings(image_id)
     return {
         "settings": _json_settings(row["settings"]) if row else {},
@@ -727,6 +818,9 @@ async def api_delete_virtual_copy(image_id: int, copy_id: int):
     conn = await connection.open_async(_configured_db_path())
     try:
         await conn.execute("BEGIN")
+        if not await virtual_copies.is_virtual_copy_of(conn, image_id, copy_id):
+            await conn.rollback()
+            return JSONResponse({"error": "Virtual copy not found"}, status_code=404)
         deleted = await virtual_copies.delete_virtual_copy(conn, copy_id)
         if not deleted:
             await conn.rollback()
@@ -745,8 +839,7 @@ async def api_list_snapshots(image_id: int):
     _image, error = await _image_or_error(image_id)
     if error:
         return error
-    history = await _history(image_id)
-    return {"snapshots": [entry for entry in history if str(entry["label"] or "").lower().startswith("snapshot:")]}
+    return {"snapshots": await _snapshots(image_id)}
 
 
 @router.post("/api/develop/{image_id}/snapshots")
@@ -831,6 +924,9 @@ async def api_export_develop(image_id: int, body: DevelopExportBody):
         return error
     if body.format not in {"jpeg", "tiff16"}:
         return JSONResponse({"error": "format must be jpeg or tiff16"}, status_code=400)
+    _paths, pending = _cached_base_or_pending(image_id, image)
+    if pending is not None:
+        return pending
     # The RENDER lane owns the shared full-resolution pipeline. Keep this
     # endpoint's contract ready without duplicating color math in RAWPROC.
     try:
@@ -845,11 +941,6 @@ async def api_export_develop(image_id: int, body: DevelopExportBody):
         return JSONResponse({"error": "Develop export renderer is not installed yet"}, status_code=503)
     row = await _load_settings(image_id)
     cached_meta = rawproc.read_base_metadata(image_id) or {}
-    if not cached_meta.get("color"):
-        try:
-            _paths, cached_meta = await _ensure_base(image_id, image)
-        except Exception:
-            pass
     asshot = cached_meta.get("as_shot") if isinstance(cached_meta, dict) else {}
     settings = _json_settings(row["settings"]) if row else {}
     try:
@@ -887,7 +978,7 @@ async def api_export_develop(image_id: int, body: DevelopExportBody):
                 download_name=filename,
             )
             library_info["version_stack"] = await stack_repository.join_version_stack(
-                _configured_db_path(), image_id, int(library_info["library_image_id"])
+                _configured_db_path(), int(image.get("vc_of") or image_id), int(library_info["library_image_id"])
             )
         except Exception as exc:
             return JSONResponse({"error": f"Export rendered but library save failed: {exc}"}, status_code=422)
@@ -977,7 +1068,7 @@ async def _run_batch_export(body: DevelopBatchExportBody) -> None:
                     download_name=filename,
                 )
                 result["library"]["version_stack"] = await stack_repository.join_version_stack(
-                    _configured_db_path(), image_id, int(result["library"]["library_image_id"])
+                    _configured_db_path(), int(image.get("vc_of") or image_id), int(result["library"]["library_image_id"])
                 )
             _batch_status["results"].append(result)
         except (rawproc.RawDecodeError, RenderError, ValueError, OSError) as exc:

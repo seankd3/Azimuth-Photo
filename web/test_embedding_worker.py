@@ -2,13 +2,16 @@ import asyncio
 import os
 import sqlite3
 import sys
+import threading
 import time
 import unittest
+import unittest.mock
 
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
 import embedding_worker  # noqa: E402
+from core import work_coordination  # noqa: E402
 
 
 class FakeImage:
@@ -34,6 +37,209 @@ class FakeModel:
 
 
 class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_embedding_ownership_loss_unloads_before_reentering_waits(self):
+        wait_order = []
+
+        async def wait_for_gpu_owner(*_args, **_kwargs):
+            wait_order.append("gpu")
+
+        async def wait_for_manual_owner(*_args, **_kwargs):
+            wait_order.append("manual")
+
+        with (
+            unittest.mock.patch.object(
+                work_coordination,
+                "lost_ownership",
+                return_value=True,
+            ),
+            unittest.mock.patch.object(embedding_worker, "_unload_model") as unload_model,
+            unittest.mock.patch.object(
+                work_coordination,
+                "wait_for_gpu_turn",
+                side_effect=wait_for_gpu_owner,
+            ) as wait_for_gpu,
+            unittest.mock.patch.object(
+                work_coordination,
+                "wait_for_manual_turn",
+                side_effect=wait_for_manual_owner,
+            ) as wait_for_manual,
+        ):
+            retained = await embedding_worker._renew_embedding_turn()
+
+        self.assertFalse(retained)
+        unload_model.assert_called_once_with()
+        self.assertEqual(wait_order, ["manual", "gpu"])
+        wait_for_gpu.assert_awaited_once_with("embeddings")
+        wait_for_manual.assert_awaited_once_with("embeddings")
+
+    async def test_embedding_shutdown_cancels_search_load_and_gpu_executors(self):
+        old_embed_executor = embedding_worker._embed_executor
+        old_preload_executor = embedding_worker._preload_executor
+        fake_embed_executor = unittest.mock.Mock()
+        fake_preload_executor = unittest.mock.Mock()
+        embedding_worker._embed_executor = fake_embed_executor
+        embedding_worker._preload_executor = fake_preload_executor
+        load_task = asyncio.create_task(asyncio.Event().wait())
+        residency_task = asyncio.create_task(asyncio.Event().wait())
+        embedding_worker._search_model_load_task = load_task
+        embedding_worker._search_model_residency_task = residency_task
+        try:
+            await embedding_worker.shutdown_embedding_worker()
+
+            self.assertTrue(load_task.cancelled())
+            self.assertTrue(residency_task.cancelled())
+            self.assertIsNone(embedding_worker._search_model_load_task)
+            self.assertIsNone(embedding_worker._search_model_residency_task)
+            fake_embed_executor.shutdown.assert_called_once_with(
+                wait=False,
+                cancel_futures=True,
+            )
+            fake_preload_executor.shutdown.assert_called_once_with(
+                wait=False,
+                cancel_futures=True,
+            )
+        finally:
+            embedding_worker._embed_executor.shutdown(
+                wait=False,
+                cancel_futures=True,
+            )
+            embedding_worker._preload_executor.shutdown(
+                wait=False,
+                cancel_futures=True,
+            )
+            embedding_worker._embed_executor = old_embed_executor
+            embedding_worker._preload_executor = old_preload_executor
+
+    async def test_embedding_immediate_claim_does_not_report_waiting(self):
+        observed_states = []
+
+        async def candidates(**_kwargs):
+            return [{"id": 1, "filepath": "/test/1.jpg"}]
+
+        async def stop_at_gpu_wait(*_args, **_kwargs):
+            observed_states.append(embedding_worker.get_worker_status()["state"])
+            raise asyncio.CancelledError
+
+        embedding_worker._get_unembedded_images = candidates
+        embedding_worker._model = object()
+        embedding_worker._loaded_model_dir = "/tmp/test-model"
+        embedding_worker._loaded_model_id = "test-model"
+        embedding_worker._loaded_model_revision = "main"
+
+        with (
+            unittest.mock.patch.object(
+                work_coordination,
+                "wait_for_gpu_turn",
+                side_effect=stop_at_gpu_wait,
+            ),
+            unittest.mock.patch.object(
+                work_coordination,
+                "manual_turn_blocked",
+                return_value=False,
+            ),
+            unittest.mock.patch.object(
+                work_coordination,
+                "gpu_turn_blocked",
+                return_value=False,
+            ),
+        ):
+            with self.assertRaises(asyncio.CancelledError):
+                await embedding_worker.run_embedding_worker()
+
+        self.assertNotIn(observed_states[0], {"waiting_for_turn", "waiting_for_gpu"})
+
+    async def test_embedding_reports_manual_wait_only_when_blocked(self):
+        async def stop_at_manual_wait(*_args, **_kwargs):
+            raise asyncio.CancelledError
+
+        with (
+            unittest.mock.patch.object(
+                work_coordination,
+                "manual_turn_blocked",
+                return_value=True,
+            ),
+            unittest.mock.patch.object(
+                work_coordination,
+                "wait_for_manual_turn",
+                side_effect=stop_at_manual_wait,
+            ),
+        ):
+            with self.assertRaises(asyncio.CancelledError):
+                await embedding_worker._wait_for_embedding_turn()
+
+        self.assertEqual(embedding_worker.get_worker_status()["state"], "waiting_for_turn")
+
+    async def test_embedding_cooldown_sleep_reports_waiting_retry(self):
+        observed_states = []
+
+        async def candidates(**_kwargs):
+            return [{"id": 1, "filepath": "/test/1.jpg"}]
+
+        async def stop_at_sleep(_seconds):
+            observed_states.append(embedding_worker.get_worker_status()["state"])
+            raise asyncio.CancelledError
+
+        embedding_worker._get_unembedded_images = candidates
+        embedding_worker._embed_retry_after[1] = time.time() + 600
+        embedding_worker._model = object()
+        embedding_worker._loaded_model_dir = "/tmp/test-model"
+        embedding_worker._loaded_model_id = "test-model"
+        embedding_worker._loaded_model_revision = "main"
+
+        with unittest.mock.patch.object(
+            embedding_worker.asyncio,
+            "sleep",
+            side_effect=stop_at_sleep,
+        ):
+            with self.assertRaises(asyncio.CancelledError):
+                await embedding_worker.run_embedding_worker()
+
+        self.assertEqual(observed_states, ["waiting_retry"])
+
+    async def test_worker_cancellation_releases_gpu_and_manual_owners(self):
+        processing_started = asyncio.Event()
+
+        async def candidates(**_kwargs):
+            return [{"id": 1, "filepath": "/test/1.jpg"}]
+
+        async def block_processing(*_args, **_kwargs):
+            processing_started.set()
+            await asyncio.Future()
+
+        embedding_worker._get_unembedded_images = candidates
+        embedding_worker._model = object()
+        embedding_worker._loaded_model_dir = "/tmp/test-model"
+        embedding_worker._loaded_model_id = "test-model"
+        embedding_worker._loaded_model_revision = "main"
+        for owner in (work_coordination.manual_owner(),):
+            if owner:
+                work_coordination.release_manual_owner(owner)
+        for owner in (work_coordination.gpu_owner(),):
+            if owner:
+                work_coordination.release_gpu_owner(owner)
+
+        task = None
+        try:
+            with unittest.mock.patch.object(
+                embedding_worker,
+                "_process_embedding_candidates",
+                side_effect=block_processing,
+            ):
+                task = asyncio.create_task(embedding_worker.run_embedding_worker())
+                await asyncio.wait_for(processing_started.wait(), timeout=1)
+                task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await task
+
+            self.assertIsNone(work_coordination.manual_owner())
+            self.assertIsNone(work_coordination.gpu_owner())
+        finally:
+            if task is not None and not task.done():
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+            work_coordination.release_manual_owner("embeddings")
+            work_coordination.release_gpu_owner("embeddings")
+
     async def test_sqlite_lock_is_retryable_embedding_contention(self):
         self.assertTrue(
             embedding_worker._is_sqlite_locked_error(
@@ -55,6 +261,7 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
                 "_count_embeddings_for_model",
                 "_get_unembedded_images",
                 "_store_embeddings_batch",
+                "_poison_embedding_image",
                 "_get_embedding_count",
             )
         }
@@ -79,6 +286,7 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.old_loaded_model_id = embedding_worker._loaded_model_id
         self.old_loaded_model_revision = embedding_worker._loaded_model_revision
         self.old_search_model_load_task = embedding_worker._search_model_load_task
+        self.old_search_model_residency_task = embedding_worker._search_model_residency_task
         self.old_model_load_retry_after = embedding_worker._model_load_retry_after
         self.old_model_load_error_key = embedding_worker._model_load_error_key
 
@@ -88,6 +296,7 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.cached_model_keys = []
         self.preload_calls = []
         self.missing_ids = set()
+        self.poisoned = []
 
         def fake_preload(image_refs):
             self.preload_calls.append([image_id for image_id, _path in image_refs])
@@ -109,6 +318,10 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
         async def fake_count(*_args, **_kwargs):
             return len(self.stored)
 
+        async def fake_poison(**kwargs):
+            self.poisoned.append(kwargs)
+            return bool(kwargs.get("force"))
+
         async def fake_empty_dict(*_args, **_kwargs):
             return {}
 
@@ -128,6 +341,7 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
             count_embeddings_for_model=fake_count,
             get_unembedded_images=fake_empty_list,
             store_embeddings_batch=fake_store,
+            poison_embedding_image=fake_poison,
             get_embedding_count=fake_count,
         )
         embedding_worker.embed_cache.add_vectors = fake_add_vectors
@@ -150,12 +364,14 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
 
         embedding_worker._embedding_history.clear()
         embedding_worker._embed_retry_after.clear()
+        embedding_worker._embedding_oom_circuit.reset()
         embedding_worker._embedding_manual_pause = False
         embedding_worker._model = None
         embedding_worker._loaded_model_dir = None
         embedding_worker._loaded_model_id = None
         embedding_worker._loaded_model_revision = None
         embedding_worker._search_model_load_task = None
+        embedding_worker._search_model_residency_task = None
         embedding_worker._model_load_retry_after = 0.0
         embedding_worker._model_load_error_key = None
         embedding_worker._batch_control.update({
@@ -207,17 +423,22 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
         embedding_worker._embedding_pause_reason = self.old_pause_reason
         embedding_worker._embedding_history.clear()
         embedding_worker._embedding_history.extend(self.old_history)
-        embedding_worker._model = self.old_model
-        embedding_worker._loaded_model_dir = self.old_loaded_model_dir
-        embedding_worker._loaded_model_id = self.old_loaded_model_id
-        embedding_worker._loaded_model_revision = self.old_loaded_model_revision
         task = embedding_worker._search_model_load_task
         if task is not None and not task.done():
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
+        residency_task = embedding_worker._unload_model()
+        if residency_task is not None and not residency_task.done():
+            await asyncio.gather(residency_task, return_exceptions=True)
         embedding_worker._search_model_load_task = self.old_search_model_load_task
+        embedding_worker._search_model_residency_task = self.old_search_model_residency_task
+        embedding_worker._model = self.old_model
+        embedding_worker._loaded_model_dir = self.old_loaded_model_dir
+        embedding_worker._loaded_model_id = self.old_loaded_model_id
+        embedding_worker._loaded_model_revision = self.old_loaded_model_revision
         embedding_worker._model_load_retry_after = self.old_model_load_retry_after
         embedding_worker._model_load_error_key = self.old_model_load_error_key
+        embedding_worker._embedding_oom_circuit.reset()
 
     def rows(self, count):
         return [
@@ -230,12 +451,24 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
 
     async def process(self, rows, model=None):
         loop = asyncio.get_running_loop()
-        return await embedding_worker._process_embedding_candidates(
-            loop,
-            model or FakeModel(),
-            rows,
-            batch_pause_seconds=0.0,
-        )
+        for owner in (work_coordination.manual_owner(),):
+            if owner:
+                work_coordination.release_manual_owner(owner)
+        for owner in (work_coordination.gpu_owner(),):
+            if owner:
+                work_coordination.release_gpu_owner(owner)
+        work_coordination.claim_manual_owner("embeddings")
+        work_coordination.claim_gpu_owner("embeddings")
+        try:
+            return await embedding_worker._process_embedding_candidates(
+                loop,
+                model or FakeModel(),
+                rows,
+                batch_pause_seconds=0.0,
+            )
+        finally:
+            work_coordination.release_manual_owner("embeddings")
+            work_coordination.release_gpu_owner("embeddings")
 
     async def test_candidate_window_splits_into_chunks_without_duplicate_stores(self):
         model = FakeModel()
@@ -248,6 +481,32 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.stored_ids(), list(range(1, 11)))
         self.assertEqual(len(set(self.stored_ids())), 10)
         self.assertEqual([len(call) for call in model.calls], [4, 4, 2])
+
+    async def test_candidate_chunks_renew_manual_then_gpu_leases(self):
+        wait_order = []
+
+        async def wait_for_manual_owner(*_args, **_kwargs):
+            wait_order.append("manual")
+
+        async def wait_for_gpu_owner(*_args, **_kwargs):
+            wait_order.append("gpu")
+
+        with (
+            unittest.mock.patch.object(
+                work_coordination,
+                "wait_for_manual_turn",
+                side_effect=wait_for_manual_owner,
+            ),
+            unittest.mock.patch.object(
+                work_coordination,
+                "wait_for_gpu_turn",
+                side_effect=wait_for_gpu_owner,
+            ),
+        ):
+            result = await self.process(self.rows(10))
+
+        self.assertEqual(result["chunks"], 3)
+        self.assertEqual(wait_order, ["manual", "gpu"] * 3)
 
     async def test_preload_encode_pipeline_preserves_result_ordering(self):
         result = await self.process(self.rows(6))
@@ -327,6 +586,19 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status["oom_backoffs"], 1)
         self.assertIsNotNone(status["batch_growth_paused_until"])
 
+    async def test_repeated_single_image_ooms_poison_images_and_open_circuit(self):
+        model = FakeModel(oom_above=0)
+
+        result = await self.process(self.rows(3), model)
+
+        self.assertEqual(result["stored"], 0)
+        self.assertEqual(result["failed"], 3)
+        self.assertEqual([item["image_id"] for item in self.poisoned], [1, 2, 3])
+        self.assertEqual([item["force"] for item in self.poisoned], [False, False, True])
+        self.assertEqual(sorted(embedding_worker._embed_retry_after), [1, 2])
+        self.assertTrue(embedding_worker._embedding_manual_pause)
+        self.assertIn("out-of-memory", embedding_worker.get_worker_status()["message"])
+
     async def test_failed_image_retry_cooldown_still_works(self):
         self.missing_ids = {2}
 
@@ -377,6 +649,154 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status["state"], "error")
         self.assertIn("torch", status["last_error"])
 
+    async def test_bulk_model_load_starts_search_model_residency(self):
+        observed = []
+
+        async def stop_after_model_load(**_kwargs):
+            task = embedding_worker._search_model_residency_task
+            observed.append((
+                embedding_worker.get_worker_status()["state"],
+                task is not None and not task.done(),
+            ))
+            raise asyncio.CancelledError
+
+        embedding_worker._load_model = lambda *_args: object()
+        embedding_worker._get_unembedded_images = stop_after_model_load
+
+        with self.assertRaises(asyncio.CancelledError):
+            await embedding_worker.run_embedding_worker()
+
+        self.assertEqual(observed, [("resident", True)])
+
+    async def test_search_model_loader_waits_for_fresh_caption_lease(self):
+        load_started = threading.Event()
+
+        def fake_load(_model_dir, _model_id):
+            load_started.set()
+            return object()
+
+        embedding_worker._load_model = fake_load
+        current_manual_owner = work_coordination.manual_owner()
+        if current_manual_owner:
+            work_coordination.release_manual_owner(current_manual_owner)
+        current_gpu_owner = work_coordination.gpu_owner()
+        if current_gpu_owner:
+            work_coordination.release_gpu_owner(current_gpu_owner)
+        work_coordination.claim_manual_owner("captions")
+        work_coordination.claim_gpu_owner("captions")
+        task = asyncio.create_task(embedding_worker.ensure_model_loaded_for_search())
+        try:
+            await asyncio.sleep(0.05)
+
+            self.assertFalse(load_started.is_set())
+            self.assertFalse(task.done())
+            self.assertEqual(work_coordination.manual_owner(), "captions")
+            self.assertEqual(work_coordination.gpu_owner(), "captions")
+
+            work_coordination.release_manual_owner("captions")
+            work_coordination.release_gpu_owner("captions")
+            self.assertTrue(await asyncio.wait_for(task, timeout=2))
+            self.assertTrue(load_started.is_set())
+        finally:
+            if not task.done():
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+            work_coordination.release_manual_owner("captions")
+            work_coordination.release_gpu_owner("captions")
+
+        embedding_worker._unload_model()
+        self.assertIsNone(work_coordination.manual_owner())
+        self.assertIsNone(work_coordination.gpu_owner())
+
+    async def test_search_model_unload_lets_captions_claim_before_next_heartbeat(self):
+        heartbeat_seconds = 0.2
+        embedding_worker._load_model = lambda *_args: object()
+
+        with unittest.mock.patch.object(
+            work_coordination,
+            "LEASE_HEARTBEAT_SECONDS",
+            heartbeat_seconds,
+        ):
+            self.assertTrue(await embedding_worker.ensure_model_loaded_for_search())
+            embedding_worker._unload_model()
+
+            await asyncio.wait_for(
+                work_coordination.wait_for_manual_turn("captions", poll_seconds=0.001),
+                timeout=heartbeat_seconds / 2,
+            )
+            await asyncio.wait_for(
+                work_coordination.wait_for_gpu_turn("captions", poll_seconds=0.001),
+                timeout=heartbeat_seconds / 2,
+            )
+
+        self.assertEqual(work_coordination.manual_owner(), "captions")
+        self.assertEqual(work_coordination.gpu_owner(), "captions")
+        work_coordination.release_manual_owner("captions")
+        work_coordination.release_gpu_owner("captions")
+
+    async def test_search_model_residency_unloads_after_lease_is_stolen(self):
+        embedding_worker._load_model = lambda *_args: object()
+
+        with unittest.mock.patch.object(
+            work_coordination,
+            "LEASE_HEARTBEAT_SECONDS",
+            0.01,
+        ):
+            self.assertTrue(await embedding_worker.ensure_model_loaded_for_search())
+            expired_at = time.time() - work_coordination.OWNER_LEASE_SECONDS - 1
+            work_coordination._manual_owner_updated_at = expired_at
+            work_coordination._gpu_owner_updated_at = expired_at
+            work_coordination.claim_manual_owner("captions")
+            work_coordination.claim_gpu_owner("captions")
+
+            async def wait_for_unload():
+                while embedding_worker.search_model_ready():
+                    await asyncio.sleep(0.001)
+
+            await asyncio.wait_for(wait_for_unload(), timeout=0.1)
+
+        self.assertFalse(embedding_worker.search_model_ready())
+        self.assertFalse(embedding_worker.get_worker_status()["ready"])
+        self.assertEqual(work_coordination.manual_owner(), "captions")
+        self.assertEqual(work_coordination.gpu_owner(), "captions")
+        work_coordination.release_manual_owner("captions")
+        work_coordination.release_gpu_owner("captions")
+
+    async def test_search_model_residency_renews_both_leases(self):
+        embedding_worker._load_model = lambda *_args: object()
+
+        with unittest.mock.patch.object(
+            work_coordination,
+            "LEASE_HEARTBEAT_SECONDS",
+            0.01,
+        ):
+            self.assertTrue(await embedding_worker.ensure_model_loaded_for_search())
+            manual_before = work_coordination._manual_owner_updated_at
+            gpu_before = work_coordination._gpu_owner_updated_at
+
+            async def wait_for_renewal():
+                while (
+                    work_coordination._manual_owner_updated_at <= manual_before
+                    or work_coordination._gpu_owner_updated_at <= gpu_before
+                ):
+                    await asyncio.sleep(0.001)
+
+            await asyncio.wait_for(wait_for_renewal(), timeout=0.1)
+
+        self.assertEqual(work_coordination.manual_owner(), "embeddings")
+        self.assertEqual(work_coordination.gpu_owner(), "embeddings")
+
+    async def test_search_model_load_failure_releases_both_owners(self):
+        def fail_load(*_args):
+            raise RuntimeError("load failed")
+
+        embedding_worker._load_model = fail_load
+
+        self.assertFalse(await embedding_worker.ensure_model_loaded_for_search())
+
+        self.assertIsNone(work_coordination.manual_owner())
+        self.assertIsNone(work_coordination.gpu_owner())
+
     async def test_start_search_model_load_warms_model_in_background_once(self):
         calls = []
         model = object()
@@ -397,6 +817,9 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(loaded)
         self.assertEqual(calls, [("/tmp/test-model", "test-model")])
         self.assertTrue(embedding_worker.search_model_ready())
+        status = embedding_worker.get_worker_status()
+        self.assertEqual(status["state"], "resident")
+        self.assertEqual(status["message"], "Search model warm.")
 
     async def test_missing_dependency_blocks_background_model_load(self):
         embedding_worker.settings.get_settings = lambda: {

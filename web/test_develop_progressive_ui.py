@@ -14,10 +14,12 @@ WEB = Path(__file__).parent
 
 def test_develop_progressive_loader_prefers_cached_base_then_library_fallback():
     source = (WEB / "static/js/desktop/develop/develop.js").read_text(encoding="utf-8")
-    assert "fetch(`/api/develop/${imageId}/base.jpg`)" in source
+    assert "fetch(`/api/develop/${imageId}/base.jpg`, fetchOptionsWithTimeout" in source
     assert "thumbUrl('lg', imageId)}?cached=1" in source
     assert source.index("base.jpg") < source.index("thumbUrl('lg', imageId)}?cached=1")
-    assert "response.status === 202 ? 500 : 1000" in source
+    assert "DEVELOP_BASE_BUDGET_MS = 12_000" in source
+    assert "throw new PendingOriginalError()" in source
+    assert "Original is still on the hub — retrying in background" in source
     assert "root.dataset.developOpenMs" in source
     assert "setControlsLoading(true)" in source
     assert "histogram?.setLoading(true)" in source
@@ -26,7 +28,21 @@ def test_develop_progressive_loader_prefers_cached_base_then_library_fallback():
 def test_gl_preview_is_display_referred_and_swaps_to_linear_source():
     source = (WEB / "static/js/desktop/develop/gl.js").read_text(encoding="utf-8")
     assert "const DISPLAY_PREVIEW_FRAGMENT" in source
+    assert "void main() { outColor = texture(u_preview, vec2(v_uv.x, 1.0 - v_uv.y)); }" in source
     assert "uploadDisplayPreview(image)" in source
+    loader = (WEB / "static/js/desktop/develop/develop.js").read_text(encoding="utf-8")
+    assert "paintPlaceholder(image.id, token)" in loader
+    assert "displayOrientation" not in loader
+    assert "X-Develop-Orientation" not in loader
     assert "this.displayPreview = true" in source
     assert "this.displayPreview = false" in source
     assert "gl.useProgram(this.displayPreviewProgram)" in source
+
+
+def test_develop_entry_timeout_retries_once_then_offers_manual_retry():
+    loader = (WEB / "static/js/desktop/develop/develop.js").read_text(encoding="utf-8")
+    template = (WEB / "templates/desktop.html").read_text(encoding="utf-8")
+    assert "const DEVELOP_ENTRY_ATTEMPTS = 2" in loader
+    assert "attempt < DEVELOP_ENTRY_ATTEMPTS" in loader
+    assert "data-develop-retry" in template
+    assert "retry: () => openImage(image)" in loader

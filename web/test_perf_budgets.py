@@ -16,6 +16,7 @@ import db
 import settings
 import thumbnails
 from features.library import service as library_service
+from features.collections import suggestions as collection_suggestions
 from thumbnails import cache_entries as thumbnail_cache_entries
 
 
@@ -33,6 +34,8 @@ BUDGET_MS = {
     "filter_options": 125,
     "visible_library_query": 125,
     "thumbnail_signatures": 20,
+    "collection_suggestions_cold": 750,
+    "collection_suggestions_cached": 30,
 }
 
 
@@ -42,6 +45,7 @@ def _clear_query_caches() -> None:
     db._invalidate_ranking_count_cache()
     db.clear_filter_options_cache()
     library_service.invalidate_rankings_response_cache()
+    collection_suggestions.invalidate_cache()
 
 
 def _median_ms(label, operation, *, clear_caches=None) -> float:
@@ -66,7 +70,7 @@ def _assert_budget(label: str, measured_ms: float) -> None:
 @pytest.fixture(scope="module")
 def perf_catalog():
     """One realistic, fully cached catalog shared by every perf-budget case."""
-    tempdir = tempfile.TemporaryDirectory(prefix="azimuth-perf-", dir="/mnt/expansion/tmp")
+    tempdir = tempfile.TemporaryDirectory(prefix="azimuth-perf-")
     old_db_path = db.DB_PATH
     old_settings_path = settings.SETTINGS_PATH
     old_settings_state = settings._settings
@@ -248,3 +252,42 @@ def test_thumbnail_signature_budget(perf_catalog):
 
     measured_ms = _median_ms("thumbnail signatures", operation)
     _assert_budget("thumbnail_signatures", measured_ms)
+
+
+def test_collection_suggestions_cold_budget(perf_catalog):
+    def operation():
+        response = asyncio.run(
+            collection_suggestions.collection_suggestions(
+                db.DB_PATH,
+                db_signature=db.DB_PATH,
+            )
+        )
+        assert isinstance(response["suggestions"], list)
+
+    measured_ms = _median_ms(
+        "collection suggestions cold",
+        operation,
+        clear_caches=collection_suggestions.invalidate_cache,
+    )
+    _assert_budget("collection_suggestions_cold", measured_ms)
+
+
+def test_collection_suggestions_cached_budget(perf_catalog):
+    asyncio.run(
+        collection_suggestions.collection_suggestions(
+            db.DB_PATH,
+            db_signature=db.DB_PATH,
+        )
+    )
+
+    def operation():
+        response = asyncio.run(
+            collection_suggestions.collection_suggestions(
+                db.DB_PATH,
+                db_signature=db.DB_PATH,
+            )
+        )
+        assert isinstance(response["suggestions"], list)
+
+    measured_ms = _median_ms("collection suggestions cached", operation)
+    _assert_budget("collection_suggestions_cached", measured_ms)

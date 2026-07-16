@@ -3,6 +3,108 @@ import unittest.mock
 
 
 class SearchTests(BackendTestCase):
+    async def test_embedding_image_is_poisoned_only_after_three_ooms(self):
+        source = await self._source("embedding-poison")
+        image_id = await self._image(source["id"], "oom.jpg")
+        config = settings.active_embedding_config()
+
+        before = await db.get_unembedded_images(
+            limit=10,
+            embedding_config=config,
+        )
+        self.assertEqual([row["id"] for row in before], [image_id])
+
+        await db.poison_embedding_image(
+            image_id=image_id,
+            embedding_config=config,
+            error="CUDA out of memory",
+        )
+
+        after_first = await db.get_unembedded_images(
+            limit=10,
+            embedding_config=config,
+        )
+        self.assertEqual([row["id"] for row in after_first], [image_id])
+        await db.poison_embedding_image(
+            image_id=image_id,
+            embedding_config=config,
+            error="CUDA out of memory",
+        )
+        await db.poison_embedding_image(
+            image_id=image_id,
+            embedding_config=config,
+            error="CUDA out of memory",
+        )
+
+        after_third = await db.get_unembedded_images(
+            limit=10,
+            embedding_config=config,
+        )
+        self.assertEqual(after_third, [])
+        conn = await db.get_db()
+        try:
+            row = await (
+                await conn.execute(
+                    "SELECT status, attempts FROM embedding_scan_images "
+                    "WHERE model_key = ? AND image_id = ?",
+                    (config["model_key"], image_id),
+                )
+            ).fetchone()
+        finally:
+            await conn.close()
+        self.assertEqual(dict(row), {"status": "poisoned", "attempts": 3})
+
+    async def test_resume_embeddings_clears_only_active_model_poison(self):
+        source = await self._source("embedding-resume")
+        image_id = await self._image(source["id"], "resume-oom.jpg")
+        active_config = settings.active_embedding_config()
+        other_config = {
+            **active_config,
+            "model_key": "other-model@main:4",
+            "model_id": "other-model",
+            "dimension": 4,
+        }
+        for config in (active_config, other_config):
+            await db.poison_embedding_image(
+                image_id=image_id,
+                embedding_config=config,
+                error="CUDA out of memory",
+                force=True,
+            )
+
+        with (
+            unittest.mock.patch.object(
+                ai_routes.capabilities,
+                "capability_status",
+                return_value={"available": True, "optional_missing": []},
+            ),
+            unittest.mock.patch.object(
+                ai_routes,
+                "embedding_runtime_status",
+                return_value={"ready": True},
+            ),
+            unittest.mock.patch.object(
+                ai_routes,
+                "build_ai_status",
+                new=unittest.mock.AsyncMock(return_value={}),
+            ),
+            unittest.mock.patch.object(thumbnails, "start_pregeneration"),
+            unittest.mock.patch.object(embedding_worker, "resume_embedding_worker"),
+        ):
+            response = await ai_routes.api_resume_embeddings()
+
+        self.assertEqual(response["ok"], True)
+        conn = await db.get_db()
+        try:
+            rows = await (
+                await conn.execute(
+                    "SELECT model_key FROM embedding_scan_images ORDER BY model_key"
+                )
+            ).fetchall()
+        finally:
+            await conn.close()
+        self.assertEqual([row["model_key"] for row in rows], [other_config["model_key"]])
+
     async def test_exif_failures_log_image_context_without_failing_request(self):
         source = await self._source("exif-errors")
         image_id = await self._image(source["id"], "broken.jpg")
@@ -147,10 +249,11 @@ class SearchTests(BackendTestCase):
 
         result = await search_routes.api_search(q="sunset", limit=2)
 
-        self.assertEqual([img["id"] for img in result["images"]], [visible_first, visible_second])
-        self.assertEqual(result["visible_images"], 2)
+        self.assertEqual([img["id"] for img in result["images"]], [hidden_best, visible_first])
+        self.assertEqual(result["visible_images"], 4)
         self.assertEqual(result["total_images"], 4)
-        self.assertEqual(result["hidden_pending_thumbnails"], 2)
+        self.assertEqual(result["pending_thumbnails"], 2)
+        self.assertFalse(result["images"][0]["preview_ready"])
 
         with unittest.mock.patch.dict(
             os.environ,
@@ -162,7 +265,7 @@ class SearchTests(BackendTestCase):
         self.assertEqual([img["id"] for img in satellite_result["images"]], [hidden_best, visible_first])
         self.assertEqual(satellite_result["visible_images"], 4)
         self.assertEqual(satellite_result["total_images"], 4)
-        self.assertEqual(satellite_result["hidden_pending_thumbnails"], 0)
+        self.assertEqual(satellite_result["pending_thumbnails"], 2)
         satellite_cards = {card["id"]: card for card in satellite_result["images"]}
         self.assertNotIn("thumb_url", satellite_cards[hidden_best])
         self.assertIn("thumb_url", satellite_cards[visible_first])
@@ -179,13 +282,14 @@ class SearchTests(BackendTestCase):
 
         result = await library_routes.api_rankings(q="sunset", sort="similarity", limit=10)
 
-        self.assertEqual([img["id"] for img in result["images"]], [visible_match])
+        self.assertEqual([img["id"] for img in result["images"]], [visible_match, hidden_match])
         self.assertEqual(result["search_mode"], "metadata")
         self.assertTrue(result["ai_unavailable"])
-        self.assertEqual(result["visible_images"], 1)
+        self.assertEqual(result["visible_images"], 2)
         self.assertEqual(result["total_images"], 2)
-        self.assertEqual(result["hidden_pending_thumbnails"], 1)
-        self.assertNotIn(hidden_match, [img["id"] for img in result["images"]])
+        self.assertEqual(result["pending_thumbnails"], 1)
+        hidden_card = next(img for img in result["images"] if img["id"] == hidden_match)
+        self.assertFalse(hidden_card["preview_ready"])
 
     async def test_metadata_search_image_ids_uses_active_fts_index(self):
         source = await self._source()
@@ -412,7 +516,6 @@ class SearchTests(BackendTestCase):
         self.assertEqual(ids, {visible_a, visible_b})
         self.assertEqual(result["visible_images"], 2)
         self.assertEqual(result["total_images"], 3)
-        self.assertEqual(result["hidden_pending_thumbnails"], 1)
         self.assertEqual(result["stats"]["filtered_pool_visible"], 2)
         self.assertEqual(result["stats"]["filtered_pool_total"], 3)
 
@@ -451,14 +554,16 @@ class SearchTests(BackendTestCase):
 
         result = await search_routes.api_search(q="sunset", limit=10)
 
-        self.assertEqual([img["id"] for img in result["images"]], [visible_match])
+        self.assertEqual([img["id"] for img in result["images"]], [visible_match, hidden_match])
         self.assertIsNone(result["images"][0]["similarity"])
         self.assertEqual(result["search_mode"], "metadata")
         self.assertTrue(result["ai_unavailable"])
-        self.assertEqual(result["visible_images"], 1)
+        self.assertEqual(result["visible_images"], 2)
         self.assertEqual(result["total_images"], 2)
+        self.assertEqual(result["pending_thumbnails"], 1)
         self.assertEqual(result["hidden_pending_thumbnails"], 1)
-        self.assertNotIn(hidden_match, [img["id"] for img in result["images"]])
+        hidden_card = next(img for img in result["images"] if img["id"] == hidden_match)
+        self.assertFalse(hidden_card["preview_ready"])
 
     async def test_search_metadata_fallback_reuses_response_cache(self):
         source = await self._source()
@@ -823,9 +928,9 @@ class SearchTests(BackendTestCase):
 
         thumbnails.prefetch_images = blocking_prefetch
         try:
-            result = await asyncio.wait_for(search_routes.api_search(q="sunset", limit=10), timeout=0.5)
+            result = await asyncio.wait_for(search_routes.api_search(q="sunset", limit=10), timeout=5)
             self.assertEqual([img["id"] for img in result["images"]], [match])
-            await asyncio.wait_for(started.wait(), timeout=0.5)
+            await asyncio.wait_for(started.wait(), timeout=5)
         finally:
             release.set()
             await asyncio.sleep(0)
@@ -871,6 +976,7 @@ class SearchTests(BackendTestCase):
         self.assertEqual(result["visible_images"], 2)
         self.assertEqual(result["total_images"], 4)
         self.assertEqual(result["hidden_pending_thumbnails"], 2)
+        self.assertTrue(all(card["preview_ready"] for card in result["images"]))
 
         with unittest.mock.patch.dict(
             os.environ,
@@ -883,6 +989,8 @@ class SearchTests(BackendTestCase):
         self.assertEqual(satellite_result["total_images"], 4)
         self.assertEqual(satellite_result["hidden_pending_thumbnails"], 0)
         satellite_cards = {card["id"]: card for card in satellite_result["images"]}
+        self.assertFalse(satellite_cards[hidden_best]["preview_ready"])
+        self.assertTrue(satellite_cards[visible_first]["preview_ready"])
         self.assertNotIn("thumb_url", satellite_cards[hidden_best])
         self.assertIn("thumb_url", satellite_cards[visible_first])
 

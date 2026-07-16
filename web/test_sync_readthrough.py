@@ -8,6 +8,7 @@ import io
 import json
 import os
 import sqlite3
+from contextlib import closing
 import struct
 import tempfile
 import threading
@@ -18,6 +19,7 @@ from unittest import mock
 
 import numpy as np
 
+from data import connection as data_connection
 from features.sync import readthrough
 from features.media import routes as media_routes
 import thumbnails
@@ -86,7 +88,7 @@ class ReadthroughTests(unittest.TestCase):
         os.environ["PHOTOARCHIVE_MODE"] = "satellite"
         os.environ["PHOTOARCHIVE_HUB_URL"] = f"http://127.0.0.1:{self.server.server_port}"
         self.db_path = str(Path(self.tempdir.name) / "catalog.db")
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             conn.execute("CREATE TABLE images (id INTEGER PRIMARY KEY, content_hash TEXT)")
             conn.execute("INSERT INTO images VALUES (1, ?)", ("a" * 32,))
 
@@ -113,8 +115,17 @@ class ReadthroughTests(unittest.TestCase):
         self.assertTrue(paths.metadata.exists())
         self.assertTrue(paths.preview.exists())
 
+    def test_content_hash_lookup_uses_fk_enabled_connection_helper(self):
+        with mock.patch.object(
+            data_connection,
+            "open_sync",
+            wraps=data_connection.open_sync,
+        ) as open_sync:
+            self.assertEqual(readthrough._content_hash_for_image(1, self.db_path), "a" * 32)
+        open_sync.assert_called_once_with(self.db_path)
+
     def test_missing_hub_base_is_an_honest_error(self):
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             conn.execute("UPDATE images SET content_hash = ? WHERE id = 1", ("b" * 32,))
         original = readthrough._request
 

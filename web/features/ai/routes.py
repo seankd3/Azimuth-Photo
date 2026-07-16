@@ -331,6 +331,7 @@ async def api_resume_embeddings():
         )
     try:
         import embedding_worker
+        import db
     except ImportError:
         return JSONResponse({"error": "Embeddings not available"}, status_code=503)
     try:
@@ -338,6 +339,7 @@ async def api_resume_embeddings():
         thumbnails.start_pregeneration()
     except ImportError:
         pass
+    await db.clear_embedding_poison_ledger(settings.active_embedding_config())
     embedding_worker.resume_embedding_worker()
     invalidate_ai_status_response_cache()
     invalidate_settings_response_cache()

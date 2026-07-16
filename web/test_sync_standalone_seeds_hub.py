@@ -11,6 +11,7 @@ import gzip
 import json
 import os
 import sqlite3
+from contextlib import closing
 import tempfile
 import unittest
 from pathlib import Path
@@ -98,7 +99,7 @@ class StandaloneSeedsHubTests(unittest.TestCase):
         colors = [(40, 80, 120), (200, 40, 40), (40, 180, 90)]
         paths = [self._write_image(f"seed-{index}.jpg", color) for index, color in enumerate(colors, start=1)]
 
-        with sqlite3.connect(self.standalone_db) as conn:
+        with closing(sqlite3.connect(self.standalone_db)) as conn, conn:
             source_id = conn.execute(
                 "INSERT INTO catalog_sources(path, display_name) VALUES (?, ?)",
                 (str(self.root / "standalone-originals"), "Standalone roll"),
@@ -127,13 +128,13 @@ class StandaloneSeedsHubTests(unittest.TestCase):
             db.DB_PATH = self.standalone_db
 
             # Empty hub before sync.
-            with sqlite3.connect(self.hub_db) as conn:
+            with closing(sqlite3.connect(self.hub_db)) as conn, conn:
                 self.assertEqual(conn.execute("SELECT COUNT(*) FROM images").fetchone()[0], 0)
 
             worker = SyncWorker(db_path=self.standalone_db, hub=hub_url, request=self._request)
             await worker.sync_once()
 
-            with sqlite3.connect(self.hub_db) as conn:
+            with closing(sqlite3.connect(self.hub_db)) as conn, conn:
                 rows = conn.execute(
                     "SELECT filename, content_hash, flag FROM images ORDER BY filename"
                 ).fetchall()
@@ -152,7 +153,7 @@ class StandaloneSeedsHubTests(unittest.TestCase):
             picked = next(row for row in rows if row[0] == "seed-1.jpg")
             self.assertEqual(picked[2], "picked")
 
-            with sqlite3.connect(self.hub_db) as conn:
+            with closing(sqlite3.connect(self.hub_db)) as conn, conn:
                 hub_image_id = conn.execute(
                     "SELECT id FROM images WHERE filename = ?", ("seed-1.jpg",)
                 ).fetchone()[0]
@@ -165,7 +166,7 @@ class StandaloneSeedsHubTests(unittest.TestCase):
 
             # Idempotent: second pass does not duplicate.
             await worker.sync_once()
-            with sqlite3.connect(self.hub_db) as conn:
+            with closing(sqlite3.connect(self.hub_db)) as conn, conn:
                 self.assertEqual(conn.execute("SELECT COUNT(*) FROM images").fetchone()[0], 3)
 
         asyncio.run(scenario())

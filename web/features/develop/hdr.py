@@ -17,7 +17,6 @@ import sqlite3
 import subprocess
 import threading
 import time
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
@@ -25,7 +24,9 @@ import imagecodecs
 import numpy as np
 from PIL import Image
 
+from core.dates import parse_taken_timestamp
 from core.runtime_paths import apply_environment_defaults, resolve_runtime_paths
+from data import connection as data_connection
 
 apply_environment_defaults()
 
@@ -69,17 +70,11 @@ def _number(value: Any) -> float | None:
 
 def _timestamp(value: Any) -> float | None:
     if isinstance(value, (int, float)):
-        return float(value)
+        return parse_taken_timestamp(value)
     text = str(value or "").strip()
     if not text:
         return None
-    text = text.replace(":", "-", 2).replace("Z", "+00:00")
-    for candidate in (text, text.replace(" ", "T", 1)):
-        try:
-            return datetime.fromisoformat(candidate).timestamp()
-        except ValueError:
-            pass
-    return None
+    return parse_taken_timestamp(text.replace(":", "-", 2))
 
 
 def _shutter_seconds(row: dict[str, Any]) -> float | None:
@@ -115,8 +110,7 @@ def exposure_ev(row: dict[str, Any]) -> float | None:
 def _catalog_rows(db_path: str, image_ids: Iterable[int] | None) -> list[dict[str, Any]]:
     """Read all useful image columns, including future exposure columns if added."""
 
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
+    conn = data_connection.open_sync(db_path)
     try:
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(images)")}
         optional = [name for name in _EXIF_FIELDS if name in columns]
@@ -132,7 +126,7 @@ def _catalog_rows(db_path: str, image_ids: Iterable[int] | None) -> list[dict[st
         rows = conn.execute(f"SELECT {', '.join(selected)} FROM images WHERE {where}", params).fetchall()
         return [dict(row) for row in rows if Path(row["filepath"]).suffix.lower() in RAW_EXTENSIONS and os.path.exists(row["filepath"])]
     finally:
-        conn.close()
+        data_connection.close_sync(conn, db_path=db_path)
 
 
 def _exiftool_rows(paths: list[str]) -> dict[str, dict[str, Any]]:

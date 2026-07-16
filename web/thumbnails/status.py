@@ -265,6 +265,7 @@ def pregen_status(
 
     return {
         **dict(pregen_state),
+        "priority_scope": pregen_state.get("priority_scope") or None,
         "idle_seconds": round(max(0.0, idle_seconds), 2),
         "phases": phases,
         "preview": preview,

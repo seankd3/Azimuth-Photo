@@ -3,7 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import io
+import json
+import sqlite3
+from contextlib import closing
+import time
 import unittest
+import zipfile
+from pathlib import Path
+from unittest import mock
 
 from fastapi.responses import Response
 from fastapi.testclient import TestClient
@@ -94,17 +102,227 @@ class GalleryTests(BackendTestCase):
         self.assertEqual(created.status_code, 200, created.text)
         self.assertIn("/s/gallery/", created.json()["gallery"]["url"])
         self.assertEqual(locked.status_code, 200)
-        self.assertIn("password protected", locked.text)
+        self.assertIn("lock-card", locked.text)
+        self.assertIn("lock-card", locked.text)
         self.assertEqual(wrong.status_code, 303)
         self.assertEqual(unlocked.status_code, 200)
         self.assertIn("Password gallery", unlocked.text)
-        self.assertIn('data-layout="slideshow"', unlocked.text)
+        self.assertIn('id="gallery-data"', unlocked.text)
+        self.assertIn("brand-line", unlocked.text)
+        self.assertIn('property="og:image"', unlocked.text)
+        self.assertNotIn('property="og:image"', locked.text)
         self.assertNotIn('id="download-all"', unlocked.text)
         self.assertEqual(thumb.status_code, 200)
         self.assertEqual(good_download.status_code, 200)
         self.assertEqual(good_download.content, f"md-{first}".encode("ascii"))
         self.assertEqual(blocked_download.status_code, 404)
         self.assertEqual(zip_blocked.status_code, 404)
+
+    async def test_client_gallery_lock_throttle_uses_shared_lock_copy(self):
+        collection, first, _second = await self._collection()
+        gallery = await galleries.create_gallery(
+            db.DB_PATH, collection_id=collection["id"], title="Protected",
+            image_ids=[first], options={}, password_hash=gallery_routes.auth.hash_password("open-sesame"),
+        )
+        gallery_routes._unlock_failures[gallery["token"]] = (5, time.time())
+
+        def probe():
+            with TestClient(app_module.app) as client:
+                return client.post(f"/s/gallery/{gallery['token']}/unlock", data={"password": "wrong"})
+
+        response = await asyncio.to_thread(probe)
+        self.assertEqual(response.status_code, 429)
+        self.assertIn("Too many tries. Please wait about", response.text)
+        self.assertIn("lock-card", response.text)
+
+    async def test_tokened_gallery_media_never_enters_shared_caches(self):
+        collection, first, _second = await self._collection()
+        gallery = await galleries.create_gallery(
+            db.DB_PATH,
+            collection_id=collection["id"],
+            title="Cache-safe gallery",
+            image_ids=[first],
+            options={"download_size": "md"},
+        )
+
+        def probe():
+            with TestClient(app_module.app) as client:
+                thumb = client.get(f"/s/gallery/{gallery['token']}/thumb/sm/{first}")
+                archive = client.get(f"/s/gallery/{gallery['token']}/download-all")
+                return thumb, archive
+
+        thumb, archive = await asyncio.to_thread(probe)
+
+        self.assertEqual(thumb.status_code, 200)
+        self.assertEqual(archive.status_code, 200)
+        self.assertEqual(thumb.headers.get("cache-control"), "private, no-store")
+        self.assertEqual(archive.headers.get("cache-control"), "private, no-store")
+
+    async def test_delete_gallery_revokes_its_token(self):
+        collection, first, _second = await self._collection()
+
+        def probe():
+            with TestClient(app_module.app) as client:
+                created = client.post(
+                    f"/api/user-collections/{collection['id']}/galleries",
+                    json={"title": "Disposable gallery"},
+                )
+                gallery = created.json()["gallery"]
+                deleted = client.delete(
+                    f"/api/user-collections/{collection['id']}/galleries/{gallery['id']}",
+                )
+                public = client.get(f"/s/gallery/{gallery['token']}")
+                listed = client.get(f"/api/user-collections/{collection['id']}/galleries")
+                return created, deleted, public, listed
+
+        created, deleted, public, listed = await asyncio.to_thread(probe)
+
+        self.assertEqual(created.status_code, 200)
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        self.assertEqual(deleted.json(), {"ok": True})
+        self.assertEqual(public.status_code, 404)
+        self.assertEqual(listed.json()["galleries"], [])
+
+    async def test_gallery_zip_preview_names_are_attachment_safe(self):
+        collection, first, _second = await self._collection()
+        gallery = await galleries.create_gallery(
+            db.DB_PATH,
+            collection_id=collection["id"],
+            title="Safe preview zip",
+            image_ids=[first],
+            options={"download_size": "md"},
+        )
+        with closing(sqlite3.connect(db.DB_PATH)) as conn, conn:
+            conn.execute("UPDATE images SET filename = ? WHERE id = ?", (r"..\..\evil.jpg", first))
+
+        async def preview(_filepath, _size, _image_id):
+            return b"preview"
+
+        def probe():
+            with mock.patch("thumbnails.get_thumbnail", preview):
+                with TestClient(app_module.app) as client:
+                    return client.get(f"/s/gallery/{gallery['token']}/download-all")
+
+        archive = await asyncio.to_thread(probe)
+
+        self.assertEqual(archive.status_code, 200, archive.text)
+        with zipfile.ZipFile(io.BytesIO(archive.content)) as payload:
+            self.assertEqual(payload.namelist(), [gallery_routes._attachment_name(first, r"..\..\evil.jpg", suffix=".jpg")])
+
+    async def test_gallery_patch_renames_owner_payload_and_public_page(self):
+        collection, _first, _second = await self._collection()
+
+        def probe():
+            with TestClient(app_module.app) as client:
+                created = client.post(
+                    f"/api/user-collections/{collection['id']}/galleries",
+                    json={"title": "Old gallery title"},
+                )
+                gallery = created.json()["gallery"]
+                renamed = client.patch(
+                    f"/api/user-collections/{collection['id']}/galleries/{gallery['id']}",
+                    json={"title": "Summer favorites"},
+                )
+                public = client.get(f"/s/gallery/{gallery['token']}")
+                return renamed, public
+
+        renamed, public = await asyncio.to_thread(probe)
+
+        self.assertEqual(renamed.status_code, 200, renamed.text)
+        self.assertEqual(renamed.json()["gallery"]["title"], "Summer favorites")
+        self.assertIn("<h1>Summer favorites</h1>", public.text)
+        self.assertNotIn("Old gallery title", public.text)
+
+    async def test_client_gallery_renders_its_selected_cover(self):
+        collection, first, second = await self._collection()
+        gallery = await galleries.create_gallery(
+            db.DB_PATH, collection_id=collection["id"], title="Covered gallery", image_ids=[first, second],
+            options={"cover_image_id": second},
+        )
+        def probe():
+            with TestClient(app_module.app) as client:
+                return client.get(f"/s/gallery/{gallery['token']}")
+        response = await asyncio.to_thread(probe)
+        self.assertIn('class="cover-hero"', response.text)
+        self.assertIn(f'/s/gallery/{gallery["token"]}/thumb/lg/{second}', response.text)
+
+    async def test_hub_mirror_original_and_zip_are_streamed_or_manifested(self):
+        collection, local_id, remote_id = await self._collection()
+        local = await self._image_row(local_id)
+        Path(local["filepath"]).parent.mkdir(parents=True, exist_ok=True)
+        Path(local["filepath"]).write_bytes(b"local original")
+        with closing(sqlite3.connect(db.DB_PATH)) as conn, conn:
+            conn.execute(
+                "UPDATE images SET hub_remote = 1, hub_image_id = 90210 WHERE id = ?",
+                (remote_id,),
+            )
+        gallery = await galleries.create_gallery(
+            db.DB_PATH,
+            collection_id=collection["id"],
+            title="Mirror delivery",
+            image_ids=[local_id, remote_id],
+            options={"download_size": "original"},
+        )
+
+        def available_probe():
+            with mock.patch.object(
+                gallery_routes.readthrough,
+                "open_hub_original",
+                side_effect=lambda _image_id: io.BytesIO(b"hub original"),
+            ):
+                with TestClient(app_module.app) as client:
+                    original = client.get(
+                        f"/s/gallery/{gallery['token']}/download/original/{remote_id}"
+                    )
+                    archive = client.get(f"/s/gallery/{gallery['token']}/download-all")
+                    return original, archive
+
+        original, archive = await asyncio.to_thread(available_probe)
+        self.assertEqual(original.status_code, 200, original.text)
+        self.assertEqual(original.content, b"hub original")
+        self.assertEqual(archive.headers["x-azimuth-skipped-count"], "0")
+        with zipfile.ZipFile(io.BytesIO(archive.content)) as payload:
+            self.assertEqual(payload.read("first.jpg"), b"local original")
+            self.assertEqual(payload.read("second.jpg"), b"hub original")
+
+        def unavailable_probe():
+            with mock.patch.object(gallery_routes.readthrough, "open_hub_original", return_value=None):
+                with TestClient(app_module.app) as client:
+                    return client.get(f"/s/gallery/{gallery['token']}/download-all")
+
+        short_archive = await asyncio.to_thread(unavailable_probe)
+        self.assertEqual(short_archive.status_code, 200, short_archive.text)
+        self.assertEqual(short_archive.headers["x-azimuth-skipped-count"], "1")
+        with zipfile.ZipFile(io.BytesIO(short_archive.content)) as payload:
+            self.assertEqual(payload.read("first.jpg"), b"local original")
+            manifest = json.loads(payload.read("azimuth-download-manifest.json"))
+        self.assertEqual(manifest["included_count"], 1)
+        self.assertEqual(manifest["skipped_count"], 1)
+        self.assertEqual(manifest["skipped"][0]["image_id"], remote_id)
+
+    async def test_gallery_view_cookie_covers_gallery_path_and_prevents_recount(self):
+        collection, first, _second = await self._collection()
+        gallery = await galleries.create_gallery(
+            db.DB_PATH,
+            collection_id=collection["id"],
+            title="Count once",
+            image_ids=[first],
+            options={},
+        )
+
+        def probe():
+            with TestClient(app_module.app) as client:
+                first_view = client.get(f"/s/gallery/{gallery['token']}")
+                second_view = client.get(f"/s/gallery/{gallery['token']}")
+                return first_view, second_view
+
+        first_view, second_view = await asyncio.to_thread(probe)
+        refreshed = await galleries.get_gallery(db.DB_PATH, gallery["id"])
+
+        self.assertEqual(first_view.status_code, 200, first_view.text)
+        self.assertEqual(second_view.status_code, 200, second_view.text)
+        self.assertIn(f"Path=/s/gallery/{gallery['token']}", first_view.headers["set-cookie"])
+        self.assertEqual(refreshed["view_count"], 1)
 
     async def test_export_preset_round_trip_and_print_recipe(self):
         print_options = export_presets.print_ready_options(color_space="adobe_rgb", border_px=48)
@@ -127,6 +345,16 @@ class GalleryTests(BackendTestCase):
         self.assertEqual(preset["options"]["border_px"], 48)
         self.assertEqual(listed.status_code, 200)
         self.assertEqual(listed.json()["presets"][0]["name"], "Fine art print")
+
+    async def test_production_router_resolves_export_presets_before_image_route(self):
+        def probe():
+            with TestClient(app_module.app) as client:
+                return client.get("/api/develop/export-presets")
+
+        response = await asyncio.to_thread(probe)
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json(), {"presets": []})
 
 
 if __name__ == "__main__":

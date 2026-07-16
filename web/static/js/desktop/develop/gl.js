@@ -6,7 +6,8 @@ import {
     CAMERA_PROFILE_TWO_PI, CLARITY_FACTOR, DNG_LINEAR_SRGB_TO_PROPHOTO, DNG_PROPHOTO_TO_LINEAR_SRGB,
     CLARITY_RESIDUAL_MAX, CONTRAST_FACTOR, CONTRAST_S_STRENGTH,
     SIGMOID_FILM_POWER, SIGMOID_PAPER_POWER, SIGMOID_PAPER_EXP, SIGMOID_FILM_FOG, DEHAZE_AIRLIGHT_FACTOR, DEHAZE_SATURATION_FACTOR,
-    GRAIN_CELL_SIZE_MIN, GRAIN_CELL_SIZE_RANGE, GRAIN_FACTOR, GRAIN_HASH_MULTIPLIER,
+    GRAIN_CELL_SIZE_MIN, GRAIN_CELL_SIZE_RANGE, GRAIN_FACTOR, GRAIN_FREQUENCY_MIN,
+    GRAIN_FREQUENCY_RANGE, GRAIN_HASH_MULTIPLIER,
     GRAIN_HASH_SHIFT, GRAIN_OUTPUT_MASK, GRAIN_OUTPUT_SHIFT, GRAIN_SEED,
     GRAIN_X_MULTIPLIER, GRAIN_Y_MULTIPLIER, GRAY_MIXER_FACTOR, HSL_LUMINANCE_FACTOR,
     HUE_SHIFT_DEGREES, LENS_AUTO_CROP_EDGE_SAMPLES, LENS_IMAGE_CENTER, LENS_MANUAL_DISTORTION_FACTOR,
@@ -42,6 +43,7 @@ import { RETOUCH_SETTINGS_KEY } from './heal.js';
 import { buildFilmTables, FILM_GLSL, FILM_LOGE_MAX, FILM_LOGE_MIN } from './film.js';
 import { DNG_GLSL, packDngTable, packDngTone } from './dng_glsl.js';
 import { markFrameDone } from './perf_overlay.js';
+import { GEOMETRY_FRAGMENT } from './geometry_gl.js';
 
 const FILM_STOCK_CACHE = new Map();
 
@@ -347,6 +349,14 @@ export function wbGains(asShotTemperature, asShotTint, temperature, tint) {
     return [0, 1, 2].map((i) => Math.min(Math.max((wa[i] / wa[1]) / (wu[i] / wu[1]), 0.125), 8));
 }
 
+// Production Develop responses carry the exact color payload used by
+// render_display_preview().  Fall back to the historical metadata shape for
+// standalone parity/debug callers that do not come through the API.
+function canvasColorProfile(meta = {}) {
+    const explicit = meta?.canvas_color_profile;
+    return explicit && typeof explicit === 'object' && !Array.isArray(explicit) ? explicit : meta;
+}
+
 const XYZD50_TO_SRGB = [
     [3.1338561, -1.6168667, -0.4906146],
     [-0.9787684, 1.9161415, 0.0334540],
@@ -589,24 +599,7 @@ float lensVignetteGain(vec2 sourceUv) {
         * smoothstep(midpoint, 1.0, clamp(radius, 0.0, 1.0));
     return max(0.0, (u_lensVignetting ? 1.0 + (profile - 1.0) * u_lensVignettingScale : 1.0) * manual);
 }
-vec2 orientedUv(vec2 uv) {
-    if (u_applyGeometry) {
-        if (u_orientation == 3) uv = vec2(1.0) - uv;
-        else if (u_orientation == 6) uv = vec2(uv.y, 1.0 - uv.x);
-        else if (u_orientation == 8) uv = vec2(1.0 - uv.y, uv.x);
-        vec2 cropSize = max(u_crop.zw - u_crop.xy, vec2(.0001));
-        vec2 p = u_crop.xy + uv * cropSize;
-        vec2 center = (u_crop.xy + u_crop.zw) * .5;
-        vec2 q = p - center;
-        float aspect = u_sourceSize.x / max(u_sourceSize.y, 1.0);
-        q.x *= aspect;
-        float a = radians(u_angle);
-        q = mat2(cos(a), -sin(a), sin(a), cos(a)) * q;
-        q.x /= aspect;
-        uv = center + q;
-    }
-    vec3 transformed = u_transformInverse * vec3((uv - .5) * 2.0, 1.0);
-    uv = transformed.z == 0.0 ? vec2(-1.0) : transformed.xy / transformed.z * .5 + .5;
+vec2 lensUv(vec2 uv) {
     if (u_lensProfile) uv = vec2(.5) + (uv - vec2(.5)) * u_lensAutoCrop;
     return lensDistortedUv(uv);
 }
@@ -644,7 +637,7 @@ vec3 applyCalibration(vec3 rgb) {
     return max(rgb * shadowMultiplier, vec3(0.0));
 }
 vec3 applyScene(vec2 uv, out vec2 imageUv) {
-    imageUv = orientedUv(uv);
+    imageUv = lensUv(uv);
     if (any(lessThan(imageUv, vec2(0.0))) || any(greaterThan(imageUv, vec2(1.0)))) return vec3(0.0);
     vec3 rgb = texture(u_source, imageUv).rgb * lensVignetteGain(imageUv);
     if (u_applyWb) rgb = max(u_wbMatrix * rgb, vec3(0.0));
@@ -688,7 +681,7 @@ vec3 applyColor(vec2 uv, out vec2 imageUv) {
     vec3 c = linearToSrgb(clamp(u_dngActive ? u_dngProPhotoToSrgb * rgb : rgb, 0.0, 1.0));
     if (u_filmActive) {
         float glow = texture(u_filmGlow, uv).r;
-        vec3 film = filmTransform(rgb, glow, imageUv * u_sourceSize, min(u_sourceSize.x, u_sourceSize.y));
+        vec3 film = filmTransform(rgb, glow, uv * u_sourceSize, min(u_sourceSize.x, u_sourceSize.y));
         c = mix(c, film, clamp(u_filmStrength, 0.0, 1.0));
     } else {
         if (u_hdrSigmoid) {
@@ -803,7 +796,72 @@ precision highp float;
 in vec2 v_uv;
 out vec4 outColor;
 uniform sampler2D u_preview;
-void main() { outColor = texture(u_preview, v_uv); }`;
+void main() { outColor = texture(u_preview, vec2(v_uv.x, 1.0 - v_uv.y)); }`;
+
+const PRE_DETAIL_FUNCTIONS = `
+bool hueWindow(float hue, float lo, float hi) {
+    return lo <= hi ? hue >= lo && hue <= hi : hue >= lo || hue <= hi;
+}
+vec3 defringeAt(vec3 c, float L, vec2 uv) {
+    if (u_defringePurple.x <= 0.0 && u_defringeGreen.x <= 0.0) return c;
+    float sharp = texture(u_blurSharp, uv).r;
+    float edge = smoothstep(${f(DEFRINGE_EDGE_LOW)}, ${f(DEFRINGE_EDGE_HIGH)}, abs(L - sharp));
+    vec3 hsv = rgbToHsv(c);
+    float hue = hsv.x * 360.0;
+    float amount = 0.0;
+    if (u_defringePurple.x > 0.0 && hueWindow(hue, u_defringePurple.y * ${f(DEFRINGE_HUE_SCALE)}, u_defringePurple.z * ${f(DEFRINGE_HUE_SCALE)})) amount = u_defringePurple.x;
+    if (u_defringeGreen.x > 0.0 && hueWindow(hue, u_defringeGreen.y * ${f(DEFRINGE_HUE_SCALE)}, u_defringeGreen.z * ${f(DEFRINGE_HUE_SCALE)})) amount = max(amount, u_defringeGreen.x);
+    hsv.y *= 1.0 - amount * edge;
+    return hsvToRgb(hsv);
+}
+vec3 luminanceNoiseReduceAt(vec3 c, float L, vec2 uv) {
+    if (u_luminanceSmoothing <= 0.0) return c;
+    float center = texture(u_lumaNr, uv).r;
+    vec2 dx = vec2(1.0 / max(u_sourceSize.x * .5, 1.0), 0.0);
+    vec2 dy = vec2(0.0, 1.0 / max(u_sourceSize.y * .5, 1.0));
+    float total = ${f(NR_LUMA_SPATIAL_CENTER)};
+    float filtered = center * ${f(NR_LUMA_SPATIAL_CENTER)};
+    for (int i = 0; i < 4; i++) {
+        vec2 offset = i == 0 ? dx : i == 1 ? -dx : i == 2 ? dy : -dy;
+        float neighbor = texture(u_lumaNr, uv + offset).r;
+        float weight = ${f(NR_LUMA_SPATIAL_AXIS)} * exp(-pow(neighbor - center, 2.0) / (2.0 * ${f(NR_LUMA_SIGMA)} * ${f(NR_LUMA_SIGMA)}));
+        filtered += neighbor * weight;
+        total += weight;
+    }
+    float sharp = texture(u_blurSharp, uv).r;
+    float edge = smoothstep(${f(NR_DETAIL_EDGE_LOW)}, ${f(NR_DETAIL_EDGE_HIGH)}, abs(L - sharp));
+    float amount = setting(u_luminanceSmoothing) * (1.0 - edge * setting(u_luminanceDetail));
+    float residual = filtered / total - L;
+    c += vec3(residual * amount);
+    c += vec3(-residual * amount * setting(u_luminanceContrast) * ${f(NR_CONTRAST_RESIDUAL)});
+    return clamp(c, 0.0, 1.0);
+}`;
+
+const PRE_DETAIL_FRAGMENT = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+out vec4 outColor;
+${COLOR_UNIFORMS}
+uniform sampler2D u_blurSharp;
+uniform sampler2D u_lumaNr;
+uniform float u_luminanceSmoothing;
+uniform float u_luminanceDetail;
+uniform float u_luminanceContrast;
+uniform vec4 u_defringePurple;
+uniform vec4 u_defringeGreen;
+${COLOR_MATH}
+${DNG_GLSL}
+${FILM_SHADER}
+${COLOR_FUNCTION}
+${PRE_DETAIL_FUNCTIONS}
+void main() {
+    vec2 imageUv;
+    vec3 c = applyColor(v_uv, imageUv);
+    float L = dot(c, LUMW);
+    c = defringeAt(c, L, v_uv);
+    c = luminanceNoiseReduceAt(c, L, v_uv);
+    outColor = vec4(c, 1.0);
+}`;
 
 const MAIN_FRAGMENT = `#version 300 es
 precision highp float;
@@ -824,6 +882,7 @@ uniform float u_vignette;
 uniform vec3 u_vignetteShape;
 uniform float u_grain;
 uniform float u_grainSize;
+uniform float u_grainFrequency;
 uniform uint u_seed;
 uniform sampler2D u_lumaNr;
 uniform float u_luminanceSmoothing;
@@ -831,8 +890,12 @@ uniform float u_colorNoiseReduction;
 uniform float u_luminanceDetail;
 uniform float u_luminanceContrast;
 uniform float u_sharpenMasking;
+uniform sampler2D u_preDetail;
+uniform bool u_preDetailActive;
 uniform int u_softProofProfile;
 uniform bool u_gamutWarning;
+uniform bool u_clipShadow;
+uniform bool u_clipHighlight;
 uniform mat3 u_srgbToXyz;
 uniform mat3 u_xyzToSrgb;
 uniform mat3 u_proofToXyz;
@@ -901,67 +964,44 @@ float noiseHash(ivec2 pixel) {
     h = (h ^ (h >> ${GRAIN_HASH_SHIFT}u)) * ${GRAIN_HASH_MULTIPLIER}u;
     return float((h >> ${GRAIN_OUTPUT_SHIFT}u) & ${GRAIN_OUTPUT_MASK}u) / 65535.0;
 }
-bool hueWindow(float hue, float lo, float hi) {
-    return lo <= hi ? hue >= lo && hue <= hi : hue >= lo || hue <= hi;
+${PRE_DETAIL_FUNCTIONS}
+int reflectedIndex(int value, int size) {
+    if (size <= 1) return 0;
+    if (value < 0) return min(-value, size - 1);
+    if (value >= size) return max(2 * size - value - 2, 0);
+    return value;
 }
-vec3 defringe(vec3 c, float L) {
-    if (u_defringePurple.x <= 0.0 && u_defringeGreen.x <= 0.0) return c;
-    float sharp = texture(u_blurSharp, v_uv).r;
-    float edge = smoothstep(${f(DEFRINGE_EDGE_LOW)}, ${f(DEFRINGE_EDGE_HIGH)}, abs(L - sharp));
-    vec3 hsv = rgbToHsv(c);
-    float hue = hsv.x * 360.0;
-    float amount = 0.0;
-    if (u_defringePurple.x > 0.0 && hueWindow(hue, u_defringePurple.y * ${f(DEFRINGE_HUE_SCALE)}, u_defringePurple.z * ${f(DEFRINGE_HUE_SCALE)})) amount = u_defringePurple.x;
-    if (u_defringeGreen.x > 0.0 && hueWindow(hue, u_defringeGreen.y * ${f(DEFRINGE_HUE_SCALE)}, u_defringeGreen.z * ${f(DEFRINGE_HUE_SCALE)})) amount = max(amount, u_defringeGreen.x);
-    hsv.y *= 1.0 - amount * edge;
-    return hsvToRgb(hsv);
-}
-vec3 noiseReduce(vec3 c, float L) {
-    if (u_luminanceSmoothing > 0.0) {
-        float center = texture(u_lumaNr, v_uv).r;
-        vec2 dx = vec2(1.0 / max(u_sourceSize.x * .5, 1.0), 0.0);
-        vec2 dy = vec2(0.0, 1.0 / max(u_sourceSize.y * .5, 1.0));
-        float total = ${f(NR_LUMA_SPATIAL_CENTER)};
-        float filtered = center * ${f(NR_LUMA_SPATIAL_CENTER)};
-        for (int i = 0; i < 4; i++) {
-            vec2 offset = i == 0 ? dx : i == 1 ? -dx : i == 2 ? dy : -dy;
-            float neighbor = texture(u_lumaNr, v_uv + offset).r;
-            float weight = ${f(NR_LUMA_SPATIAL_AXIS)} * exp(-pow(neighbor - center, 2.0) / (2.0 * ${f(NR_LUMA_SIGMA)} * ${f(NR_LUMA_SIGMA)}));
-            filtered += neighbor * weight;
-            total += weight;
-        }
-        float sharp = texture(u_blurSharp, v_uv).r;
-        float edge = smoothstep(${f(NR_DETAIL_EDGE_LOW)}, ${f(NR_DETAIL_EDGE_HIGH)}, abs(L - sharp));
-        float amount = setting(u_luminanceSmoothing) * (1.0 - edge * setting(u_luminanceDetail));
-        float residual = filtered / total - L;
-        c += vec3(residual * amount);
-        c += vec3(-residual * amount * setting(u_luminanceContrast) * ${f(NR_CONTRAST_RESIDUAL)});
-    }
-    if (u_colorNoiseReduction > 0.0) {
-        vec3 lab = linearToOklab(srgbToLinear(clamp(c, 0.0, 1.0)));
-        vec2 stepUv = 1.0 / u_sourceSize;
-        vec2 averageAb = lab.yz;
-        for (int i = 0; i < 4; i++) {
-            vec2 offset = i == 0 ? vec2(stepUv.x, 0.0) : i == 1 ? vec2(-stepUv.x, 0.0) : i == 2 ? vec2(0.0, stepUv.y) : vec2(0.0, -stepUv.y);
-            vec2 unused;
-            averageAb += linearToOklab(srgbToLinear(applyColor(clamp(v_uv + offset, 0.0, 1.0), unused))).yz;
-        }
-        lab.yz = mix(lab.yz, averageAb / 5.0, setting(u_colorNoiseReduction));
-        c = linearToSrgb(gamutClipDesat(oklabToLinear(lab), lab));
-    }
-    return clamp(c, 0.0, 1.0);
+vec3 colorNoiseReduce(vec3 c, vec2 uv) {
+    if (u_colorNoiseReduction <= 0.0) return c;
+    ivec2 size = textureSize(u_preDetail, 0);
+    ivec2 pixel = clamp(ivec2(floor(uv * vec2(size))), ivec2(0), size - 1);
+    vec3 lab = linearToOklab(srgbToLinear(clamp(c, 0.0, 1.0)));
+    vec2 averageAb = lab.yz;
+    averageAb += linearToOklab(srgbToLinear(texelFetch(u_preDetail, ivec2(reflectedIndex(pixel.x - 1, size.x), pixel.y), 0).rgb)).yz;
+    averageAb += linearToOklab(srgbToLinear(texelFetch(u_preDetail, ivec2(reflectedIndex(pixel.x + 1, size.x), pixel.y), 0).rgb)).yz;
+    averageAb += linearToOklab(srgbToLinear(texelFetch(u_preDetail, ivec2(pixel.x, reflectedIndex(pixel.y - 1, size.y)), 0).rgb)).yz;
+    averageAb += linearToOklab(srgbToLinear(texelFetch(u_preDetail, ivec2(pixel.x, reflectedIndex(pixel.y + 1, size.y)), 0).rgb)).yz;
+    lab.yz = mix(lab.yz, averageAb / 5.0, setting(u_colorNoiseReduction));
+    return clamp(linearToSrgb(gamutClipDesat(oklabToLinear(lab), lab)), 0.0, 1.0);
 }
 void main() {
     vec2 imageUv;
-    vec3 c = applyColor(v_uv, imageUv);
+    vec3 c;
+    if (u_preDetailActive) {
+        c = texture(u_preDetail, v_uv).rgb;
+        imageUv = v_uv;
+    } else {
+        c = applyColor(v_uv, imageUv);
+        float sourceL = dot(c, LUMW);
+        c = defringeAt(c, sourceL, v_uv);
+        c = luminanceNoiseReduceAt(c, sourceL, v_uv);
+    }
+    c = colorNoiseReduce(c, v_uv);
     float L = dot(c, LUMW);
-    c = defringe(c, L);
-    c = noiseReduce(c, L);
-    L = dot(c, LUMW);
     vec2 localBlurs = vec2(texture(u_blurLarge, v_uv).r, texture(u_blurSmall, v_uv).r);
     for (int i = 0; i < ${LOCAL_RENDER_CAP}; i++) {
         if (u_localActive[i] == 0) continue;
-        float m = clamp(localMask(i, imageUv) * u_localAmount[i], 0.0, 2.0);
+        float m = clamp(localMask(i, v_uv) * u_localAmount[i], 0.0, 2.0);
         if (m > 1e-6) c = applyLocalCorrection(srgbToLinear(c), L, localBlurs, u_localLightA[i], u_localLightB[i], u_localEffects[i], u_localColor[i], m);
     }
     if (u_useLarge) {
@@ -986,7 +1026,7 @@ void main() {
         vec2 center = (u_crop.xy + u_crop.zw) * .5;
         float cropAspect = (u_crop.z - u_crop.x) * u_sourceSize.x / max((u_crop.w - u_crop.y) * u_sourceSize.y, 1.0);
         float roundness = 1.0 + setting(u_vignetteShape.z) * ${f(VIGNETTE_ROUNDNESS_FACTOR)};
-        vec2 p = imageUv - center;
+        vec2 p = v_uv - center;
         p.x *= 2.0 * cropAspect / max(roundness, 1e-6);
         p.y *= 2.0 * max(roundness, 1e-6);
         float rho = length(p);
@@ -997,7 +1037,9 @@ void main() {
     }
     if (u_grain > 0.0) {
         float cell = ${f(GRAIN_CELL_SIZE_MIN)} + clamp(u_grainSize / 100.0, 0.0, 1.0) * ${f(GRAIN_CELL_SIZE_RANGE)};
-        ivec2 pixel = ivec2(floor(imageUv * u_sourceSize / cell));
+        float frequency = ${f(GRAIN_FREQUENCY_MIN)} + clamp(u_grainFrequency / 100.0, 0.0, 1.0) * ${f(GRAIN_FREQUENCY_RANGE)};
+        vec2 topDownUv = vec2(v_uv.x, 1.0 - v_uv.y);
+        ivec2 pixel = ivec2(floor((topDownUv * u_sourceSize - .5) / cell * frequency));
         c += vec3((noiseHash(pixel) - .5) * setting(u_grain) * ${f(GRAIN_FACTOR)});
     }
     if (u_maskOverlay >= 0) {
@@ -1023,8 +1065,6 @@ uniform int u_retouchActive[${RETOUCH_RENDER_CAP}];
 uniform vec4 u_retouchSourceData[${RETOUCH_RENDER_CAP}];
 uniform vec4 u_retouchDestinationData[${RETOUCH_RENDER_CAP}];
 uniform bool u_healOverlay;
-uniform bool u_clipShadow;
-uniform bool u_clipHighlight;
 
 vec3 ringMean(vec2 center, float radius) {
     vec3 total = vec3(0.0);
@@ -1182,6 +1222,8 @@ export class DevelopRenderer {
         if (!this.gl) throw new Error('WebGL2 is required for Develop');
         if (!this.gl.getExtension('EXT_color_buffer_float')) throw new Error('Float render targets are unavailable');
         this.mainProgram = program(this.gl, MAIN_FRAGMENT);
+        this.preDetailProgram = program(this.gl, PRE_DETAIL_FRAGMENT);
+        this.geometryProgram = program(this.gl, GEOMETRY_FRAGMENT);
         this.lumaProgram = program(this.gl, LUMA_FRAGMENT);
         this.filmLumaProgram = program(this.gl, FILM_LUMA_FRAGMENT);
         this.blurProgram = program(this.gl, BLUR_FRAGMENT);
@@ -1238,7 +1280,7 @@ export class DevelopRenderer {
         const buffer = gl.createBuffer();
         gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
         gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]), gl.STATIC_DRAW);
-        for (const p of [this.mainProgram, this.lumaProgram, this.filmLumaProgram, this.blurProgram, this.retouchProgram, this.displayPreviewProgram]) {
+        for (const p of [this.mainProgram, this.preDetailProgram, this.geometryProgram, this.lumaProgram, this.filmLumaProgram, this.blurProgram, this.retouchProgram, this.displayPreviewProgram]) {
             const location = gl.getAttribLocation(p, 'a_position');
             gl.enableVertexAttribArray(location);
             gl.vertexAttribPointer(location, 2, gl.FLOAT, false, 0, 0);
@@ -1282,9 +1324,9 @@ export class DevelopRenderer {
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+        // The present shader reconciles bitmap Y with the array-backed full render.
         gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
         this.displayPreview = true;
         this.width = width;
         this.height = height;
@@ -1311,15 +1353,17 @@ export class DevelopRenderer {
             gl.deleteFramebuffer(item.framebuffer);
             gl.deleteTexture(item.texture);
         }
-        if (this.retouchTarget) {
-            gl.deleteFramebuffer(this.retouchTarget.framebuffer);
-            gl.deleteTexture(this.retouchTarget.texture);
+        for (const item of [this.retouchTarget, this.preDetailTarget, this.processedTarget]) if (item) {
+            gl.deleteFramebuffer(item.framebuffer);
+            gl.deleteTexture(item.texture);
         }
         [this.lumaTarget, this.blurTemp, this.blurLarge, this.blurSmall, this.blurSharp] = next;
         this.targets = next;
         [this.filmLumaTarget, this.filmBlurTemp, this.filmGlow] = filmNext;
         this.filmTargets = filmNext;
         this.retouchTarget = target(gl, this.width, this.height);
+        this.preDetailTarget = target(gl, this.width, this.height);
+        this.processedTarget = target(gl, this.width, this.height);
     }
 
     updateBaseCurve(profile = null, settings = {}, baseKind = 'raw') {
@@ -1449,9 +1493,10 @@ export class DevelopRenderer {
     setSettings(settings, meta = this.meta, _opts = {}) {
         this.settings = effectiveLookSettings(settings || {});
         this.meta = meta || {};
-        const baseKind = this.meta.base_kind || 'raw';
-        const adobeProfile = this.meta.adobe_profile || this.meta.color?.adobe_profile || null;
-        const profile = baseKind === 'display' || adobeProfile ? null : (this.meta.camera_profile || this.meta.color?.camera_profile || null);
+        this.colorProfile = canvasColorProfile(this.meta);
+        const baseKind = this.colorProfile.base_kind || this.meta.base_kind || 'raw';
+        const adobeProfile = this.colorProfile.adobe_profile || this.colorProfile.color?.adobe_profile || null;
+        const profile = baseKind === 'display' || adobeProfile ? null : (this.colorProfile.camera_profile || this.colorProfile.color?.camera_profile || null);
         const profileKey = profile?.slug || profile?.model || '';
         const look = this.settings.Look;
         const lookKey = JSON.stringify([
@@ -1643,7 +1688,9 @@ export class DevelopRenderer {
             Number(grain.shadowBias ?? 0.35),
         );
         gl.uniform1f(uniform('u_filmStrength'), filmPercent('pa_FilmStrength'));
-        const adobe = this.meta.adobe_profile || this.meta.color?.adobe_profile || null;
+        const colorProfile = this.colorProfile || canvasColorProfile(this.meta);
+        const color = colorProfile.color || colorProfile;
+        const adobe = colorProfile.adobe_profile || colorProfile.color?.adobe_profile || null;
         gl.uniform1i(uniform('u_dngActive'), adobe ? 1 : 0);
         gl.uniform1i(uniform('u_dngHueActive'), adobe && this.dngHueDims[0] ? 1 : 0);
         gl.uniform1i(uniform('u_dngLookActive'), adobe && this.dngLookDims[0] ? 1 : 0);
@@ -1653,10 +1700,10 @@ export class DevelopRenderer {
         gl.uniform1i(uniform('u_dngLookEncoding'), Number(adobe?.look_table_encoding || 0));
         gl.uniformMatrix3fv(uniform('u_dngSrgbToProPhoto'), false, matrixColumnMajor(DNG_LINEAR_SRGB_TO_PROPHOTO));
         gl.uniformMatrix3fv(uniform('u_dngProPhotoToSrgb'), false, matrixColumnMajor(DNG_PROPHOTO_TO_LINEAR_SRGB));
-        const baseIncludesBaselineExposure = this.meta.color?.forward_matrix != null;
+        const baseIncludesBaselineExposure = color.forward_matrix != null;
         gl.uniform1f(uniform('u_dngBaselineExposure'), baseIncludesBaselineExposure ? 0 : Number(adobe?.baseline_exposure || 0));
-        const displayBase = this.meta.base_kind === 'display';
-        const profile = displayBase ? null : (this.meta.camera_profile || this.meta.color?.camera_profile || null);
+        const displayBase = (colorProfile.base_kind || this.meta.base_kind) === 'display';
+        const profile = displayBase ? null : (colorProfile.camera_profile || colorProfile.color?.camera_profile || null);
         const profileTable = new Float32Array(CAMERA_PROFILE_HUE_BINS * CAMERA_PROFILE_CHROMA_BINS * 2);
         if (Array.isArray(profile?.oklab_ab_delta)) {
             let cursor = 0;
@@ -1705,7 +1752,7 @@ export class DevelopRenderer {
         const asShotTint = Number(this.meta.as_shot_tint || 0);
         const userT = numberSetting(s, 'Temperature', asShotT);
         const userTint = numberSetting(s, 'Tint');
-        let wb = wbMatrix(this.meta.color, asShotT, asShotTint, userT, userTint);
+        let wb = wbMatrix(color, asShotT, asShotTint, userT, userTint);
         if (!wb) {
             const gains = wbGains(asShotT, asShotTint, userT, userTint);
             wb = [[gains[0], 0, 0], [0, gains[1], 0], [0, 0, gains[2]]];
@@ -1811,8 +1858,6 @@ export class DevelopRenderer {
         gl.uniform4fv(uniform('u_retouchSourceData[0]'), sourceData);
         gl.uniform4fv(uniform('u_retouchDestinationData[0]'), destinationData);
         gl.uniform1i(uniform('u_healOverlay'), this.healOverlay ? 1 : 0);
-        gl.uniform1i(uniform('u_clipShadow'), this.clipShadow ? 1 : 0);
-        gl.uniform1i(uniform('u_clipHighlight'), this.clipHighlight ? 1 : 0);
     }
 
     drawColorTarget() {
@@ -1842,6 +1887,57 @@ export class DevelopRenderer {
         this.setProgramView(this.filmLumaProgram);
         gl.bindFramebuffer(gl.FRAMEBUFFER, this.filmLumaTarget.framebuffer);
         gl.viewport(0, 0, this.filmLumaTarget.width, this.filmLumaTarget.height);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+    }
+
+    bindPreDetailUniforms(program) {
+        const gl = this.gl;
+        const uniform = (name) => gl.getUniformLocation(program, name);
+        gl.uniform1i(uniform('u_blurSharp'), 4);
+        gl.uniform1i(uniform('u_lumaNr'), 7);
+        gl.uniform1f(uniform('u_luminanceSmoothing'), numberSetting(this.settings, 'LuminanceSmoothing'));
+        gl.uniform1f(uniform('u_luminanceDetail'), numberSetting(this.settings, 'LuminanceDetail'));
+        gl.uniform1f(uniform('u_luminanceContrast'), numberSetting(this.settings, 'LuminanceContrast'));
+        const defringe = (name, defaults) => gl.uniform4f(uniform(`u_defringe${name}`),
+            Math.max(0, Math.min(1, numberSetting(this.settings, `Defringe${name}Amount`) / 100)),
+            numberSetting(this.settings, `Defringe${name}HueLo`, defaults[0]), numberSetting(this.settings, `Defringe${name}HueHi`, defaults[1]), 0);
+        defringe('Purple', [30, 70]);
+        defringe('Green', [40, 60]);
+    }
+
+    drawPreDetailTarget() {
+        const gl = this.gl;
+        gl.useProgram(this.preDetailProgram);
+        bindUnit(gl, this.source, 0);
+        bindUnit(gl, this.curve, 1);
+        bindUnit(gl, this.blurSharp.texture, 4);
+        bindUnit(gl, this.baseCurve, 5);
+        bindUnit(gl, this.lumaTarget.texture, 7);
+        this.bindFilmUnits();
+        this.bindDngUnits();
+        this.uniforms(this.preDetailProgram);
+        this.bindPreDetailUniforms(this.preDetailProgram);
+        this.setProgramView(this.preDetailProgram);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, this.preDetailTarget.framebuffer);
+        gl.viewport(0, 0, this.width, this.height);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+    }
+
+    drawGeometryTarget() {
+        const gl = this.gl;
+        const uniform = (name) => gl.getUniformLocation(this.geometryProgram, name);
+        gl.useProgram(this.geometryProgram);
+        bindUnit(gl, this.processedTarget.texture, 0);
+        gl.uniform1i(uniform('u_developed'), 0);
+        gl.uniform2f(uniform('u_sourceSize'), this.width, this.height);
+        gl.uniform4f(uniform('u_crop'), numberSetting(this.settings, 'CropLeft'), numberSetting(this.settings, 'CropTop'), numberSetting(this.settings, 'CropRight'), numberSetting(this.settings, 'CropBottom'));
+        gl.uniform1f(uniform('u_angle'), numberSetting(this.settings, 'CropAngle'));
+        gl.uniform1i(uniform('u_orientation'), numberSetting(this.settings, 'Orientation', 1));
+        gl.uniform1i(uniform('u_applyGeometry'), this.geometryEnabled ? 1 : 0);
+        gl.uniformMatrix3fv(uniform('u_transformInverse'), false, transformInverseColumnMajor(this.settings));
+        this.setProgramView(this.geometryProgram, this.view);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.viewport(0, 0, this.canvas.width, this.canvas.height);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
     }
 
@@ -1909,6 +2005,8 @@ export class DevelopRenderer {
             if (textureValue !== 0 || localTexture) this.blur(BLUR_SMALL_FACTOR * minSide, this.blurSmall);
             if (sharpness > 0 || defringe || nr) this.blur(sharpness > 0 ? numberSetting(this.settings, 'SharpenRadius', 1) : 1, this.blurSharp);
         }
+        const usePreDetail = defringe || nr;
+        if (usePreDetail) this.drawPreDetailTarget();
         gl.useProgram(this.mainProgram);
         bindUnit(gl, this.source, 0);
         bindUnit(gl, this.curve, 1);
@@ -1918,16 +2016,19 @@ export class DevelopRenderer {
         bindUnit(gl, this.baseCurve, 5);
         bindUnit(gl, this.maskAtlas, 6);
         bindUnit(gl, this.lumaTarget.texture, 7);
+        bindUnit(gl, this.preDetailTarget.texture, 14);
         this.bindFilmUnits();
         this.bindDngUnits();
         this.uniforms(this.mainProgram);
-        this.setProgramView(this.mainProgram, spots.length ? null : this.view);
+        this.setProgramView(this.mainProgram);
         this.localUniforms();
         const uniform = (name) => gl.getUniformLocation(this.mainProgram, name);
         gl.uniform1i(uniform('u_blurLarge'), 2);
         gl.uniform1i(uniform('u_blurSmall'), 3);
         gl.uniform1i(uniform('u_blurSharp'), 4);
         gl.uniform1i(uniform('u_lumaNr'), 7);
+        gl.uniform1i(uniform('u_preDetail'), 14);
+        gl.uniform1i(uniform('u_preDetailActive'), usePreDetail ? 1 : 0);
         gl.uniform1i(uniform('u_useLarge'), clarity !== 0 ? 1 : 0);
         gl.uniform1i(uniform('u_useSmall'), textureValue !== 0 ? 1 : 0);
         gl.uniform1i(uniform('u_useSharp'), sharpness > 0 ? 1 : 0);
@@ -1939,10 +2040,9 @@ export class DevelopRenderer {
         gl.uniform3f(uniform('u_vignetteShape'), numberSetting(this.settings, 'PostCropVignetteMidpoint', 50), numberSetting(this.settings, 'PostCropVignetteFeather', 50), numberSetting(this.settings, 'PostCropVignetteRoundness'));
         gl.uniform1f(uniform('u_grain'), numberSetting(this.settings, 'GrainAmount'));
         gl.uniform1f(uniform('u_grainSize'), numberSetting(this.settings, 'GrainSize', 25));
-        gl.uniform1f(uniform('u_luminanceSmoothing'), numberSetting(this.settings, 'LuminanceSmoothing'));
+        gl.uniform1f(uniform('u_grainFrequency'), numberSetting(this.settings, 'GrainFrequency', 50));
         gl.uniform1f(uniform('u_colorNoiseReduction'), numberSetting(this.settings, 'ColorNoiseReduction'));
-        gl.uniform1f(uniform('u_luminanceDetail'), numberSetting(this.settings, 'LuminanceDetail'));
-        gl.uniform1f(uniform('u_luminanceContrast'), numberSetting(this.settings, 'LuminanceContrast'));
+        this.bindPreDetailUniforms(this.mainProgram);
         const proofProfile = { off: 0, srgb: 1, 'adobe-rgb': 2, 'display-p3': 3, paper: 4 }[this.softProof?.profile] ?? 0;
         const [proofToXyz, xyzToProof] = proofMatrices(this.softProof?.profile);
         const columnMajor = (matrix) => new Float32Array([
@@ -1950,28 +2050,26 @@ export class DevelopRenderer {
         ]);
         gl.uniform1i(uniform('u_softProofProfile'), proofProfile);
         gl.uniform1i(uniform('u_gamutWarning'), this.softProof?.warning ? 1 : 0);
+        gl.uniform1i(uniform('u_clipShadow'), this.clipShadow ? 1 : 0);
+        gl.uniform1i(uniform('u_clipHighlight'), this.clipHighlight ? 1 : 0);
         gl.uniformMatrix3fv(uniform('u_srgbToXyz'), false, columnMajor(SOFT_PROOF_SRGB_TO_XYZ));
         gl.uniformMatrix3fv(uniform('u_xyzToSrgb'), false, columnMajor(SOFT_PROOF_XYZ_TO_SRGB));
         gl.uniformMatrix3fv(uniform('u_proofToXyz'), false, columnMajor(proofToXyz));
         gl.uniformMatrix3fv(uniform('u_xyzToProof'), false, columnMajor(xyzToProof));
-        const defringeUniform = (name, defaults) => gl.uniform4f(uniform(`u_defringe${name}`),
-            Math.max(0, Math.min(1, numberSetting(this.settings, `Defringe${name}Amount`) / 100)),
-            numberSetting(this.settings, `Defringe${name}HueLo`, defaults[0]), numberSetting(this.settings, `Defringe${name}HueHi`, defaults[1]), 0);
-        defringeUniform('Purple', [30, 70]);
-        defringeUniform('Green', [40, 60]);
         gl.uniform1ui(uniform('u_seed'), GRAIN_SEED >>> 0);
-        gl.bindFramebuffer(gl.FRAMEBUFFER, spots.length ? this.retouchTarget.framebuffer : null);
-        gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, spots.length ? this.retouchTarget.framebuffer : this.processedTarget.framebuffer);
+        gl.viewport(0, 0, this.width, this.height);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
         if (spots.length) {
             gl.useProgram(this.retouchProgram);
-            this.setProgramView(this.retouchProgram, this.view);
+            this.setProgramView(this.retouchProgram);
             bindUnit(gl, this.retouchTarget.texture, 0);
             this.retouchUniforms(spots);
-            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-            gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, this.processedTarget.framebuffer);
+            gl.viewport(0, 0, this.width, this.height);
             gl.drawArrays(gl.TRIANGLES, 0, 6);
         }
+        this.drawGeometryTarget();
         this.canvas.dispatchEvent(new CustomEvent('develop:rendered'));
         markFrameDone();
     }
@@ -1997,9 +2095,9 @@ export class DevelopRenderer {
             gl.deleteFramebuffer(item.framebuffer);
             gl.deleteTexture(item.texture);
         }
-        if (this.retouchTarget) {
-            gl.deleteFramebuffer(this.retouchTarget.framebuffer);
-            gl.deleteTexture(this.retouchTarget.texture);
+        for (const item of [this.retouchTarget, this.preDetailTarget, this.processedTarget]) if (item) {
+            gl.deleteFramebuffer(item.framebuffer);
+            gl.deleteTexture(item.texture);
         }
         gl.deleteTexture(this.source);
         gl.deleteTexture(this.curve);
@@ -2033,20 +2131,26 @@ export function syntheticLinearRgba(size = 64) {
     return data;
 }
 
-export async function renderSyntheticPixels(settings = {}, meta = {}) {
+export async function renderSyntheticPixels(settings = {}, meta = {}, options = {}) {
     const canvas = document.createElement('canvas');
     canvas.width = 64;
     canvas.height = 64;
     const renderer = new DevelopRenderer(canvas);
-    renderer.geometryEnabled = false;
-    renderer.uploadSource(syntheticLinearRgba(64), 64, 64);
+    renderer.geometryEnabled = Boolean(options.geometry);
+    const sourceSize = Array.isArray(options.sourceSize) ? options.sourceSize : [64, 64];
+    const source = Array.isArray(options.sourceRgba) ? new Float32Array(options.sourceRgba) : syntheticLinearRgba(64);
+    renderer.uploadSource(source, Number(sourceSize[0]), Number(sourceSize[1]));
+    if (Array.isArray(options.outputSize) && options.outputSize.length === 2) {
+        renderer.canvas.width = Math.max(1, Number(options.outputSize[0]) || 1);
+        renderer.canvas.height = Math.max(1, Number(options.outputSize[1]) || 1);
+    }
     renderer.setSettings(settings, { as_shot_temperature: 5150, as_shot_tint: 0, ...meta });
     await renderer.waitForFilm();
     if (Array.isArray(settings.MaskGroupBasedCorrections)) {
         renderer.setMaskRasters(await buildMaskRasters({ corrections: settings.MaskGroupBasedCorrections, width: 64, height: 64 }));
     }
     renderer.render();
-    const result = renderer.readPixels(64, 64);
+    const result = renderer.readPixels(renderer.canvas.width, renderer.canvas.height);
     renderer.destroy();
     return result;
 }

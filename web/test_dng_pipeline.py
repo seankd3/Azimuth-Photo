@@ -283,6 +283,6 @@ def test_dng_shadow_stress_golden_disables_unrelated_default_sharpening():
         capture_output=True,
         text=True,
     )
-    # WebGL deliberately has Lightroom's implicit detail default. The DNG-only
-    # stress must override it instead of attributing sharpening to LUT error.
-    assert json.loads(result.stdout) == 40
+    # Empty settings must stay empty in both twins.  An implicit WebGL-only
+    # sharpening default made the live canvas diverge from the Python preview.
+    assert json.loads(result.stdout) == 0

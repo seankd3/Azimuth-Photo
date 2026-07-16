@@ -174,6 +174,8 @@ export const GRAIN_OUTPUT_MASK = 0xFFFF;
 export const GRAIN_OUTPUT_DIVISOR = 65535.0;
 export const GRAIN_CELL_SIZE_MIN = 1.0;
 export const GRAIN_CELL_SIZE_RANGE = 7.0;
+export const GRAIN_FREQUENCY_MIN = 0.5;
+export const GRAIN_FREQUENCY_RANGE = 1.0;
 export const SOFT_PROOF_SRGB_TO_XYZ = Object.freeze([
     Object.freeze([0.4124564, 0.3575761, 0.1804375]), Object.freeze([0.2126729, 0.7151522, 0.0721750]), Object.freeze([0.0193339, 0.1191920, 0.9503041]),
 ]);
@@ -251,6 +253,7 @@ export const PARITY_TABLE = Object.freeze({
     GRAIN_FACTOR, GRAIN_SEED, GRAIN_X_MULTIPLIER, GRAIN_Y_MULTIPLIER,
     GRAIN_HASH_MULTIPLIER, GRAIN_HASH_SHIFT, GRAIN_OUTPUT_SHIFT, GRAIN_OUTPUT_MASK,
     GRAIN_OUTPUT_DIVISOR, GRAIN_CELL_SIZE_MIN, GRAIN_CELL_SIZE_RANGE,
+    GRAIN_FREQUENCY_MIN, GRAIN_FREQUENCY_RANGE,
     LOCAL_RENDER_CAP, LOCAL_MASK_DOWNSAMPLE, LOCAL_MASK_ATLAS_COLUMNS,
     LOCAL_EXPOSURE_EV_SCALE, LOCAL_SLIDER_SCALE, LOCAL_WB_MIRED_SCALE,
     LOCAL_WB_TEMP_FACTOR, LOCAL_WB_TINT_FACTOR, LOCAL_HUE_DEGREES,
@@ -264,8 +267,8 @@ export const DEFAULTS = Object.freeze({
     Exposure2012: 0, Contrast2012: 0, Highlights2012: 0, Shadows2012: 0,
     Whites2012: 0, Blacks2012: 0, Texture: 0, Clarity2012: 0, Dehaze: 0,
     Vibrance: 0, Saturation: 0, ConvertToGrayscale: false,
-    Sharpness: 40, SharpenRadius: 1, SharpenDetail: 25, SharpenEdgeMasking: 0,
-    LuminanceSmoothing: 0, ColorNoiseReduction: 0,
+    Sharpness: 0, SharpenRadius: 1, SharpenEdgeMasking: 0,
+    LuminanceSmoothing: 0, LuminanceDetail: 50, LuminanceContrast: 0, ColorNoiseReduction: 0,
     DefringePurpleAmount: 0, DefringePurpleHueLo: 30, DefringePurpleHueHi: 70,
     DefringeGreenAmount: 0, DefringeGreenHueLo: 40, DefringeGreenHueHi: 60,
     PostCropVignetteAmount: 0, PostCropVignetteMidpoint: 50,

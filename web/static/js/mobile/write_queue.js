@@ -5,6 +5,7 @@
 // truth (service workers cannot read it).
 
 import { emit } from './state.js';
+import { showToast } from './toast.js';
 
 const STORAGE_KEY = 'pa-m-write-queue-v1';
 const BASE_RETRY_MS = 500;
@@ -15,11 +16,18 @@ let queue = [];
 let retryTimer = null;
 let draining = false;
 let syncListenerBound = false;
+let nextItemId = 1;
+const pendingOutcomes = new Map();
 
 function loadQueue() {
     try {
         const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
-        return Array.isArray(saved) ? saved.filter((item) => item?.url && item?.body) : [];
+        const items = Array.isArray(saved) ? saved.filter((item) => item?.url && item?.body) : [];
+        for (const item of items) {
+            item.id = Number(item.id) || nextItemId++;
+            nextItemId = Math.max(nextItemId, item.id + 1);
+        }
+        return items;
     } catch {
         return [];
     }
@@ -73,7 +81,22 @@ async function send(item) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(item.body),
     });
-    if (!response.ok) throw new Error(`write failed: ${response.status}`);
+    if (!response.ok) {
+        const error = new Error(`write failed: ${response.status}`);
+        error.status = response.status;
+        throw error;
+    }
+}
+
+function finish(item, outcome) {
+    const result = { id: item.id, url: item.url, body: item.body, ...outcome };
+    pendingOutcomes.get(item.id)?.(result);
+    pendingOutcomes.delete(item.id);
+}
+
+function isTerminalFailure(error) {
+    const status = Number(error?.status || 0);
+    return status >= 400 && status < 500 && status !== 408 && status !== 429;
 }
 
 export async function drainWrites() {
@@ -92,7 +115,16 @@ export async function drainWrites() {
                 queue.shift();
                 saveQueue();
                 updateBadge();
-            } catch {
+                finish(item, { status: 'committed' });
+            } catch (error) {
+                if (isTerminalFailure(error)) {
+                    queue.shift();
+                    saveQueue();
+                    updateBadge();
+                    finish(item, { status: 'failed', statusCode: Number(error.status) });
+                    showToast('Couldn’t save change');
+                    continue;
+                }
                 item.attempts = Number(item.attempts || 0) + 1;
                 item.nextAttemptAt = Date.now() + retryDelay(item.attempts);
                 saveQueue();
@@ -108,17 +140,21 @@ export async function drainWrites() {
 }
 
 export function enqueueWrite(url, body) {
-    queue.push({
+    const item = {
+        id: nextItemId++,
         url,
         body,
         attempts: 0,
         nextAttemptAt: Date.now(),
-    });
+    };
+    queue.push(item);
     saveQueue();
     updateBadge();
     void drainWrites();
     void requestBackgroundSync();
-    return { queued: true };
+    return new Promise((resolve) => {
+        pendingOutcomes.set(item.id, resolve);
+    });
 }
 
 export function queueLength() {

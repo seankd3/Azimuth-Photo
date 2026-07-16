@@ -162,7 +162,9 @@ def infer_source_kind(
     if kind == "video":
         return "video"
     haystack = " ".join(
-        part.lower() for part in (path, rel_path, filename) if part
+        part.replace("\\", "/").lower()
+        for part in (path, rel_path, filename)
+        if part
     )
     if any(marker in haystack for marker in _EXPORT_PATH_MARKERS):
         return "export"
@@ -175,6 +177,84 @@ def infer_source_kind(
     # sits in — this beats the weak "/camera/" markers and the card flag.
     if ext in UNAMBIGUOUS_RAW_EXTENSIONS:
         return "camera_card"
+    if any(marker in haystack for marker in _WEAK_PHONE_PATH_MARKERS):
+        return "phone"
+    if ext in {".heic", ".heif"}:
+        return "phone"
+    if card_source:
+        return "camera_card"
+    if ext in FILM_SCAN_EXTENSIONS:
+        return "film_scan"
+    return "unknown"
+
+
+# EXIF provenance signals. Makers announce themselves: phones in Make, scanners
+# in Make, editing software in the Software tag. These beat weak path guessing
+# but never a strong path marker or an unambiguous camera-RAW extension.
+PHONE_MAKES = (
+    "google", "apple", "samsung", "oneplus", "xiaomi", "huawei",
+    "motorola", "oppo", "vivo", "nothing", "sony xperia", "lge", "lg electronics",
+)
+SCANNER_MAKES = (
+    "epson", "noritsu", "fujifilm frontier", "frontier", "nikon scan",
+    "pakon", "plustek", "reflecta", "minolta dimage scan", "canoscan",
+)
+EXPORT_SOFTWARE = (
+    "lightroom", "adobe photoshop", "capture one", "darktable", "rawtherapee",
+    "affinity photo", "luminar", "azimuth", "photoarchive", "gimp",
+)
+
+# User-facing category per source kind, and the destination tree per category.
+CATEGORY_BY_KIND = {
+    "camera_card": "raw", "unknown": "raw", "phone": "personal",
+    "film_scan": "film", "export": "export", "video": "video",
+}
+DEST_BY_CATEGORY = {
+    "raw": DEST_RAWS, "personal": DEST_PERSONAL, "film": DEST_FILM,
+    "export": DEST_EXPORTS, "video": DEST_VIDEO,
+}
+KIND_BY_CATEGORY = {
+    "raw": "camera_card", "personal": "phone", "film": "film_scan",
+    "export": "export", "video": "video",
+}
+IMPORT_CATEGORIES = ("raw", "personal", "film", "export")
+
+
+def classify_source_kind(
+    *,
+    filename: str,
+    path: str = "",
+    rel_path: str = "",
+    card_source: bool = False,
+    kind: str = "image",
+    camera_make: str = "",
+    software: str = "",
+) -> SourceKind:
+    """infer_source_kind plus EXIF provenance, with explicit precedence:
+    strong path markers > unambiguous RAW extension > EXIF software/make >
+    weak path markers / HEIC > card flag > TIFF > unknown."""
+    if kind == "video":
+        return "video"
+    haystack = " ".join(
+        part.replace("\\", "/").lower() for part in (path, rel_path, filename) if part
+    )
+    if any(marker in haystack for marker in _EXPORT_PATH_MARKERS):
+        return "export"
+    if any(marker in haystack for marker in _FILM_PATH_MARKERS):
+        return "film_scan"
+    if any(marker in haystack for marker in _STRONG_PHONE_PATH_MARKERS):
+        return "phone"
+    ext = extension_of(filename)
+    if ext in UNAMBIGUOUS_RAW_EXTENSIONS:
+        return "camera_card"
+    make = (camera_make or "").lower()
+    stamped = (software or "").lower()
+    if stamped and any(marker in stamped for marker in EXPORT_SOFTWARE):
+        return "export"
+    if make and any(marker in make for marker in SCANNER_MAKES):
+        return "film_scan"
+    if make and any(marker in make for marker in PHONE_MAKES):
+        return "phone"
     if any(marker in haystack for marker in _WEAK_PHONE_PATH_MARKERS):
         return "phone"
     if ext in {".heic", ".heif"}:

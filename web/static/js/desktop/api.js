@@ -1,49 +1,77 @@
-import { fetchJson } from '../api.js';
+import { FetchJsonError, fetchJson as sharedFetchJson, fetchOptionsWithTimeout } from '../api.js';
+import { previewThumbUrl as sharedPreviewThumbUrl } from '../previews.js';
+import { showToast } from './toast.js';
 
-export { fetchJson };
+function reportApiFailure({ status = 0, error = null } = {}) {
+    const cause = error?.cause || error;
+    if (!status || cause?.name === 'AbortError' || cause?.name === 'TimeoutError') {
+        showToast("The library isn't responding.");
+        return;
+    }
+    showToast(`Request failed (${status})`);
+}
 
-export async function postJson(url, body = null) {
+async function requestWithStatus(url, options = {}) {
+    const { timeoutMs, ...fetchOptions } = options;
+    const defaultTimeoutMs = /^(POST|PUT|PATCH|DELETE)$/i.test(fetchOptions.method || 'GET') ? 20_000 : 10_000;
+    let response = null;
     try {
-        const options = { method: 'POST' };
-        if (body != null) {
-            options.headers = { 'Content-Type': 'application/json' };
-            options.body = JSON.stringify(body);
-        }
-        const response = await fetch(url, options);
-        if (!response.ok) return null;
-        return await response.json();
-    } catch {
-        return null;
+        response = await fetch(url, fetchOptionsWithTimeout(fetchOptions, timeoutMs ?? defaultTimeoutMs));
+    } catch (error) {
+        reportApiFailure({ error });
+        return { ok: false, status: 0, data: null };
+    }
+    const data = response.status === 204 ? null : await response.json().catch(() => null);
+    if (!response.ok) reportApiFailure({ status: response.status });
+    return { ok: response.ok, status: response.status, data };
+}
+
+export async function fetchJson(url, options = {}) {
+    try {
+        return await sharedFetchJson(url, { timeoutMs: 10_000, ...options });
+    } catch (error) {
+        reportApiFailure({ status: error?.status, error });
+        throw error;
     }
 }
 
-export async function postJsonWithStatus(url, body = null) {
-    try {
-        const options = { method: 'POST', headers: { Accept: 'application/json' } };
-        if (body != null) {
-            options.headers['Content-Type'] = 'application/json';
-            options.body = JSON.stringify(body);
-        }
-        const response = await fetch(url, options);
-        const data = await response.json().catch(() => null);
-        return { ok: response.ok, status: response.status, data };
-    } catch {
-        return { ok: false, status: 0, data: null };
+export async function requestJson(url, options = {}) {
+    const result = await requestWithStatus(url, options);
+    if (result.ok) return result.data;
+    throw new FetchJsonError(result.data?.detail || result.data?.error || 'Request failed', {
+        url,
+        status: result.status,
+    });
+}
+
+function jsonRequestOptions(method, body = null, options = {}) {
+    const requestOptions = { ...options, method, headers: { Accept: 'application/json', ...(options.headers || {}) } };
+    if (body != null) {
+        requestOptions.headers['Content-Type'] = 'application/json';
+        requestOptions.body = JSON.stringify(body);
     }
+    return requestOptions;
+}
+
+export async function postJson(url, body = null, options = {}) {
+    const result = await requestWithStatus(url, jsonRequestOptions('POST', body, options));
+    return result.ok ? result.data : null;
+}
+
+export async function postJsonWithStatus(url, body = null, options = {}) {
+    return requestWithStatus(url, jsonRequestOptions('POST', body, options));
 }
 
 export async function deleteJsonWithStatus(url) {
-    try {
-        const response = await fetch(url, { method: 'DELETE', headers: { Accept: 'application/json' } });
-        const data = await response.json().catch(() => null);
-        return { ok: response.ok, status: response.status, data };
-    } catch {
-        return { ok: false, status: 0, data: null };
-    }
+    return requestWithStatus(url, jsonRequestOptions('DELETE'));
 }
 
 export function thumbUrl(size, imageId) {
     return `/api/thumb/${size}/${imageId}`;
+}
+
+export function previewThumbUrl(image, size = 'sm') {
+    return sharedPreviewThumbUrl(image, size); // Shared guard: if (image.preview_ready === false) return '';
 }
 
 export async function getRankings(params, options = {}) {
@@ -63,12 +91,15 @@ export async function getFolderTree() {
     return fetchJson('/api/folders/tree', { defaultValue: null });
 }
 
-export async function revealFolder(path) {
-    return postJsonWithStatus('/api/reveal', { path });
+export async function revealFolder(path, sourceId = null) {
+    const body = { path };
+    if (Number(sourceId) > 0) body.source_id = Number(sourceId);
+    return postJsonWithStatus('/api/reveal', body);
 }
 
-export async function getFilterOptions() {
-    return fetchJson('/api/filter-options', { defaultValue: null });
+export async function getFilterOptions(params = new URLSearchParams()) {
+    const query = params.toString();
+    return fetchJson(`/api/filter-options${query ? `?${query}` : ''}`, { defaultValue: null });
 }
 
 export async function getTags({ q = '', limit = 100 } = {}) {
@@ -292,8 +323,9 @@ export async function listCollections() {
     return fetchJson('/api/user-collections', { defaultValue: null });
 }
 
-export async function getCollection(collectionId, { limit = 500, offset = 0 } = {}) {
-    return fetchJson(`/api/user-collections/${collectionId}?limit=${limit}&offset=${offset}`, { defaultValue: null });
+export async function getCollection(collectionId, { limit = 500, offset = 0, signal = null } = {}) {
+    const fetchOptions = signal ? { signal } : undefined;
+    return fetchJson(`/api/user-collections/${collectionId}?limit=${limit}&offset=${offset}`, { defaultValue: null, fetchOptions });
 }
 
 export async function createCollection(name, imageIds = [], description = '', query = null) {
@@ -370,22 +402,11 @@ export async function listSharedSurfaces() {
 }
 
 async function publishingMutation(method, url, body = null) {
-    const options = { method, headers: { Accept: 'application/json' } };
-    if (body != null) {
-        options.headers['Content-Type'] = 'application/json';
-        options.body = JSON.stringify(body);
+    const result = await requestWithStatus(url, jsonRequestOptions(method, body));
+    if (!result.ok) {
+        throw new Error(result.data?.error || result.data?.detail || `Request failed (${result.status})`);
     }
-    let response = null;
-    try {
-        response = await fetch(url, options);
-    } catch {
-        throw new Error('The archive did not respond');
-    }
-    const data = await response.json().catch(() => null);
-    if (!response.ok) {
-        throw new Error(data?.error || data?.detail || `Request failed (${response.status})`);
-    }
-    return data;
+    return result.data;
 }
 
 export async function getCollectionTree() {
@@ -465,16 +486,8 @@ export async function listSavedViews() {
 }
 
 async function savedViewMutation(method, url, body = null) {
-    try {
-        const response = await fetch(url, {
-            method,
-            headers: body ? { 'Content-Type': 'application/json' } : undefined,
-            body: body ? JSON.stringify(body) : undefined,
-        });
-        return response.ok ? await response.json() : null;
-    } catch {
-        return null;
-    }
+    const result = await requestWithStatus(url, jsonRequestOptions(method, body));
+    return result.ok ? result.data : null;
 }
 
 export const createSavedView = (name, query) =>
@@ -519,21 +532,22 @@ export async function getStackRebuildStatus() {
     return fetchJson('/api/stacks/rebuild/status', { defaultValue: null });
 }
 
-export async function getTrash({ limit = 200, offset = 0 } = {}) {
+export async function getTrash({ limit = 200, offset = 0, signal = null } = {}) {
     const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
-    return fetchJson(`/api/trash?${params.toString()}`, { defaultValue: null });
+    const fetchOptions = signal ? { signal } : undefined;
+    return fetchJson(`/api/trash?${params.toString()}`, { defaultValue: null, fetchOptions });
 }
 
 export async function trashImages(imageIds) {
-    return postJson('/api/images/trash', { ids: imageIds });
+    return postJsonWithStatus('/api/images/trash', { ids: imageIds });
 }
 
 export async function restoreImages(imageIds) {
-    return postJson('/api/images/restore', { ids: imageIds });
+    return postJsonWithStatus('/api/images/restore', { ids: imageIds });
 }
 
 export async function emptyTrash() {
-    return postJson('/api/trash/empty');
+    return postJsonWithStatus('/api/trash/empty');
 }
 
 export async function getMapMarkers(params) {
@@ -541,11 +555,11 @@ export async function getMapMarkers(params) {
 }
 
 export async function writeFlag(imageId, flag) {
-    return postJson(`/api/image/${imageId}/flag`, { flag });
+    return postJsonWithStatus(`/api/image/${imageId}/flag`, { flag });
 }
 
 export async function writeFlags(imageIds, flag) {
-    return postJson('/api/images/flag', { image_ids: imageIds, flag });
+    return postJsonWithStatus('/api/images/flag', { image_ids: imageIds, flag });
 }
 
 export async function mosaicNext(n, params, exclude = '', strategy = 'explore', gridElo = 0) {
@@ -567,4 +581,31 @@ export async function compareUndo() {
 
 export async function getPropagationLast() {
     return fetchJson('/api/propagation/last', { defaultValue: null });
+}
+
+
+// --- staged import (IMPORT_SPEC v1) ---
+
+export async function getImportSources() {
+    return fetchJson('/api/import/sources', { defaultValue: { sources: [] } });
+}
+
+export async function browseImportPath(path) {
+    return fetchJson(`/api/import/browse?path=${encodeURIComponent(path)}`, { defaultValue: { dirs: [] } });
+}
+
+export async function startImportScan(path, includeSubfolders) {
+    return postJson('/api/import/scan', { path, include_subfolders: includeSubfolders });
+}
+
+export async function getImportScan(scanId, offset = 0) {
+    return fetchJson(`/api/import/scan/${scanId}?offset=${offset}`, { defaultValue: null });
+}
+
+export async function commitImportScan(body) {
+    return postJson('/api/import/commit', body);
+}
+
+export async function getImportJob(jobId) {
+    return fetchJson(`/api/import/jobs/${jobId}`, { defaultValue: null });
 }

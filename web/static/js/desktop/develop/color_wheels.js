@@ -4,10 +4,6 @@ const WHEELS = Object.freeze([
     ['Shadow', 'Shadows'], ['Midtone', 'Midtones'], ['Highlight', 'Highlights'], ['Global', 'Global'],
 ]);
 
-function snapshot(settings) {
-    return JSON.parse(JSON.stringify(settings || {}));
-}
-
 function polar(event, canvas) {
     const rect = canvas.getBoundingClientRect();
     const x = (event.clientX - rect.left) / rect.width * canvas.width;
@@ -19,7 +15,13 @@ function polar(event, canvas) {
     return { hue: (Math.atan2(dy, dx) * 180 / Math.PI + 360) % 360, saturation: Math.min(100, Math.hypot(dx, dy) / (canvas.width * .39) * 100) };
 }
 
+function snapshotSettings(settings) {
+    return JSON.parse(JSON.stringify(settings || {}));
+}
+
 function discFor(canvas, cache) {
+    // The hue disc never changes — regenerating its per-pixel ImageData on
+    // every puck move makes dragging visibly laggy, so cache one per canvas.
     const cached = cache.get(canvas);
     if (cached?.width === canvas.width && cached.height === canvas.height) return cached.canvas;
     const disc = document.createElement('canvas');
@@ -44,7 +46,7 @@ function discFor(canvas, cache) {
     return disc;
 }
 
-function drawPuck(canvas, hue, saturation, cache) {
+function drawWheel(canvas, hue, saturation, cache) {
     const context = canvas.getContext('2d');
     const { width, height } = canvas;
     const center = width / 2;
@@ -68,69 +70,67 @@ export class ColorWheels {
             const canvas = host.querySelector(`[data-wheel="${key}"] canvas`);
             canvas.addEventListener('pointerdown', (event) => this.drag(event, key, canvas));
             canvas.addEventListener('dblclick', () => this.reset(key));
-            this.bindLuminance(host.querySelector(`[data-wheel-lum="${key}"]`), key);
+            const luminance = host.querySelector(`[data-wheel-lum="${key}"]`);
+            let gesture = null;
+            luminance.addEventListener('pointerdown', (event) => {
+                luminance.setPointerCapture(event.pointerId);
+                gesture = { previousSettings: snapshotSettings(this.settings), settings: this.settings, changed: false };
+            });
+            luminance.addEventListener('input', (event) => {
+                if (gesture && gesture.settings !== this.settings) { gesture = null; return; }
+                const value = Number(event.target.value);
+                gesture &&= { ...gesture, changed: gesture.changed || value !== numberSetting(gesture.previousSettings, `ColorGrade${key}Lum`) };
+                this.change(`${key}Lum`, value, `${key} luminance`, gesture ? { history: false } : undefined);
+            });
+            const finishGesture = () => {
+                if (!gesture?.changed || gesture.settings !== this.settings) { gesture = null; return; }
+                this.change(`${key}Lum`, numberSetting(this.settings, `ColorGrade${key}Lum`), `${key} luminance`, { previousSettings: gesture.previousSettings });
+                gesture = null;
+            };
+            luminance.addEventListener('pointerup', finishGesture);
+            luminance.addEventListener('pointercancel', finishGesture);
         }
     }
 
-    emit(suffix, value, label, options) {
+    change(suffix, value, label, options) {
         const key = `ColorGrade${suffix}`;
         this.settings[key] = value;
         this.onChange(key, value, 'Color Grading: ' + label, options);
-    }
-
-    bindLuminance(input, key) {
-        let previousSettings = null;
-        let changed = false;
-        input.addEventListener('pointerdown', () => { previousSettings = snapshot(this.settings); changed = false; });
-        input.addEventListener('input', () => {
-            if (!previousSettings) previousSettings = snapshot(this.settings);
-            const value = Number(input.value);
-            if (value === numberSetting(this.settings, `ColorGrade${key}Lum`)) return;
-            changed = true;
-            this.emit(`${key}Lum`, value, `${key} luminance`, { history: false });
-        });
-        input.addEventListener('change', () => {
-            if (changed) this.emit(`${key}Lum`, Number(input.value), `${key} luminance`, { previousSettings });
-            previousSettings = null; changed = false;
-        });
+        this.draw();
     }
 
     drag(event, key, canvas) {
         canvas.setPointerCapture(event.pointerId);
-        const previousSettings = snapshot(this.settings);
+        const previousSettings = snapshotSettings(this.settings);
+        const gestureSettings = this.settings;
         let changed = false;
         const update = (next) => {
+            if (this.settings !== gestureSettings) return;
             const value = polar(next, canvas);
-            const hue = Math.round(value.hue), saturation = Math.round(value.saturation);
-            if (hue === numberSetting(this.settings, `ColorGrade${key}Hue`) && saturation === numberSetting(this.settings, `ColorGrade${key}Sat`)) return;
+            const hue = Math.round(value.hue);
+            const saturation = Math.round(value.saturation);
+            changed ||= hue !== numberSetting(previousSettings, `ColorGrade${key}Hue`) || saturation !== numberSetting(previousSettings, `ColorGrade${key}Sat`);
+            // One emit + one puck redraw per move: two change() calls would
+            // double-render and repaint all four wheels mid-drag.
             this.settings[`ColorGrade${key}Hue`] = hue;
             this.settings[`ColorGrade${key}Sat`] = saturation;
             this.onChange(`ColorGrade${key}Hue`, hue, 'Color Grading: ' + key + ' color', { history: false });
-            drawPuck(canvas, hue, saturation, this.discs);
-            changed = true;
+            drawWheel(canvas, hue, saturation, this.discs);
         };
         const done = () => {
             canvas.removeEventListener('pointermove', update); canvas.removeEventListener('pointerup', done); canvas.removeEventListener('pointercancel', done);
-            if (changed) this.onChange(`ColorGrade${key}Hue`, this.settings[`ColorGrade${key}Hue`], 'Color Grading: ' + key + ' color', { previousSettings });
+            if (changed && this.settings === gestureSettings) this.change(`${key}Hue`, numberSetting(this.settings, `ColorGrade${key}Hue`), `${key} color`, { previousSettings });
         };
         update(event); canvas.addEventListener('pointermove', update); canvas.addEventListener('pointerup', done); canvas.addEventListener('pointercancel', done);
     }
 
     reset(key) {
-        const previousSettings = snapshot(this.settings);
-        for (const suffix of ['Hue', 'Sat']) this.settings[`ColorGrade${key}${suffix}`] = 0;
-        this.emit(`${key}Lum`, 0, `${key} reset`, { previousSettings });
-        this.draw();
-    }
-
-    drawWheel(key) {
-        const canvas = this.host.querySelector(`[data-wheel="${key}"] canvas`);
-        drawPuck(canvas, numberSetting(this.settings, `ColorGrade${key}Hue`), numberSetting(this.settings, `ColorGrade${key}Sat`), this.discs);
+        for (const suffix of ['Hue', 'Sat', 'Lum']) this.change(`${key}${suffix}`, 0, `${key} reset`);
     }
 
     draw() {
         for (const [key] of WHEELS) {
-            this.drawWheel(key);
+            drawWheel(this.host.querySelector(`[data-wheel="${key}"] canvas`), numberSetting(this.settings, `ColorGrade${key}Hue`), numberSetting(this.settings, `ColorGrade${key}Sat`), this.discs);
             this.host.querySelector(`[data-wheel-lum="${key}"]`).value = numberSetting(this.settings, `ColorGrade${key}Lum`);
         }
     }

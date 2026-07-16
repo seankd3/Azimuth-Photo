@@ -1,4 +1,6 @@
+import os
 import sqlite3
+from contextlib import closing
 import tempfile
 import unittest
 
@@ -18,6 +20,7 @@ class VirtualCopiesTest(unittest.IsolatedAsyncioTestCase):
                 filename TEXT NOT NULL,
                 filepath TEXT NOT NULL,
                 status TEXT DEFAULT 'kept',
+                missing_at REAL,
                 vc_of INTEGER REFERENCES images(id) ON DELETE CASCADE
             );
             CREATE TABLE develop_settings (
@@ -34,6 +37,26 @@ class VirtualCopiesTest(unittest.IsolatedAsyncioTestCase):
                 settings TEXT NOT NULL,
                 label TEXT,
                 created_at TEXT NOT NULL
+            );
+            CREATE TABLE collections (
+                id INTEGER PRIMARY KEY,
+                cover_image_id INTEGER REFERENCES images(id)
+            );
+            CREATE TABLE collection_images (
+                collection_id INTEGER REFERENCES collections(id),
+                image_id INTEGER REFERENCES images(id),
+                position INTEGER,
+                added_at REAL
+            );
+            CREATE TABLE stacks (
+                id INTEGER PRIMARY KEY,
+                representative_image_id INTEGER REFERENCES images(id)
+            );
+            CREATE TABLE stack_members (
+                stack_id INTEGER REFERENCES stacks(id),
+                image_id INTEGER REFERENCES images(id),
+                score REAL,
+                added_at REAL
             );
             INSERT INTO images (id, filename, filepath) VALUES (1, 'original.dng', '/photos/original.dng');
             INSERT INTO develop_settings (image_id, settings, origin, updated_at)
@@ -109,3 +132,10 @@ class VirtualCopiesTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(child["image_id"], 1)
         finally:
             await connection.close_async(conn, db_path=legacy_path)
+        backup_path = f"{legacy_path}.pre-virtual-copies.bak"
+        self.assertTrue(os.path.exists(backup_path))
+        with closing(sqlite3.connect(backup_path)) as backup, backup:
+            table_sql = backup.execute(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'images'"
+            ).fetchone()[0]
+        self.assertIn("filepath TEXT NOT NULL UNIQUE", table_sql)

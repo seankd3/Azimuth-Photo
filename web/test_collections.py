@@ -52,6 +52,12 @@ class CollectionTests(BackendTestCase):
                 count_rankings=lambda **count_kwargs: db.count_rankings(**count_kwargs),
                 get_rankings=lambda **ranking_kwargs: db.get_rankings(**ranking_kwargs),
             ),
+            resolve_smart_materialized_image_ids=lambda query: smart_collections.resolve_materialized_image_ids(
+                query,
+                resolve_library_constraints=self._resolve_library_constraints,
+                count_rankings=lambda **count_kwargs: db.count_rankings(**count_kwargs),
+                get_rankings=lambda **ranking_kwargs: db.get_rankings(**ranking_kwargs),
+            ),
             get_suggestions=lambda: collection_suggestions.collection_suggestions(
                 db.DB_PATH,
                 db_signature=db.DB_PATH,
@@ -395,21 +401,21 @@ class CollectionTests(BackendTestCase):
         created = await collection_routes.api_create_collection(
             collection_routes.CreateCollectionBody(name="Too broad", query={"flag": "picked"})
         )
-        old_resolver = collection_routes._resolve_smart_image_ids
+        old_resolver = collection_routes._resolve_smart_materialized_image_ids
 
         async def too_many(_query):
             raise smart_collections.SmartCollectionMaterializeTooLarge(
                 smart_collections.MAX_MATERIALIZE_IMAGE_IDS + 1
             )
 
-        collection_routes._resolve_smart_image_ids = too_many
+        collection_routes._resolve_smart_materialized_image_ids = too_many
         try:
             response = await collection_routes.api_update_collection(
                 created["collection"]["id"],
                 collection_routes.UpdateCollectionBody(materialize=True),
             )
         finally:
-            collection_routes._resolve_smart_image_ids = old_resolver
+            collection_routes._resolve_smart_materialized_image_ids = old_resolver
 
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.body.decode().count("10001"), 1)
@@ -425,7 +431,7 @@ class CollectionTests(BackendTestCase):
             raise AssertionError("materialize cap should stop before loading rows")
 
         with self.assertRaises(smart_collections.SmartCollectionMaterializeTooLarge):
-            await smart_collections.resolve_image_ids(
+            await smart_collections.resolve_materialized_image_ids(
                 {"flag": "picked"},
                 resolve_library_constraints=resolve_library_constraints,
                 count_rankings=count_rankings,
@@ -469,6 +475,36 @@ class CollectionTests(BackendTestCase):
         prime_cache()
         await collection_routes.api_delete_collection(created["collection"]["id"])
         self.assertTrue(cache_empty())
+
+    async def test_suggestion_cursor_tracks_catalog_and_caption_changes(self):
+        source = await self._source()
+        image_id = await self._image(source["id"], "cursor.jpg")
+        model_key = settings.active_caption_config()["model_key"]
+
+        initial = await collection_suggestions._suggestion_cursor(db.DB_PATH, model_key)
+        await db.set_image_flag(image_id, "picked")
+        catalog_changed = await collection_suggestions._suggestion_cursor(db.DB_PATH, model_key)
+        await db.store_caption_result(
+            image_id=image_id,
+            caption_config=settings.active_caption_config(),
+            caption="First caption.",
+            tags=["first"],
+            status="done",
+        )
+        caption_added = await collection_suggestions._suggestion_cursor(db.DB_PATH, model_key)
+        await asyncio.sleep(0.001)
+        await db.store_caption_result(
+            image_id=image_id,
+            caption_config=settings.active_caption_config(),
+            caption="Replacement caption.",
+            tags=["second"],
+            status="done",
+        )
+        caption_replaced = await collection_suggestions._suggestion_cursor(db.DB_PATH, model_key)
+
+        self.assertGreater(catalog_changed[0], initial[0])
+        self.assertNotEqual(caption_added[1], catalog_changed[1])
+        self.assertNotEqual(caption_replaced[1], caption_added[1])
 
     async def test_smart_collection_share_snapshots_membership(self):
         source = await self._source()

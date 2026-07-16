@@ -11,6 +11,7 @@ import time
 from datetime import datetime
 from pathlib import PurePath
 
+from core.dates import safe_datetime_fromtimestamp, safe_timestamp
 from data import connection as data_connection
 from data.repositories import stacks as stack_repository
 from features.search.similarity import scan_duplicate_pairs
@@ -42,13 +43,18 @@ _TRAILING_VARIANT_COUNTER_RE = re.compile(r"-\d+$")
 _VARIANT_MARKER_SUFFIXES = tuple(sorted(VARIANT_MARKER_TOKENS, key=len, reverse=True))
 
 
+def _metadata_key(path: str) -> str:
+    """Platform-stable exiftool metadata key for a catalog filepath."""
+    return os.path.normcase(os.path.abspath(path))
+
+
 def _active_rows(db_path: str) -> dict[int, dict]:
     conn = data_connection.open_sync(db_path)
     try:
         cursor = conn.execute(
             "SELECT i.*, s.path AS source_path, s.display_name AS source_name "
             "FROM images i LEFT JOIN catalog_sources s ON s.id = i.source_id "
-            "WHERE i.status IN ('kept', 'maybe') AND i.missing_at IS NULL"
+            "WHERE i.status IN ('kept', 'maybe') AND i.missing_at IS NULL AND i.vc_of IS NULL"
         )
         return {int(row["id"]): dict(row) for row in cursor.fetchall()}
     finally:
@@ -66,7 +72,7 @@ def _capture_ts(value) -> float | None:
         ("%Y-%m-%d", 10),
     ):
         try:
-            return datetime.strptime(text[:length], fmt).timestamp()
+            return safe_timestamp(datetime.strptime(text[:length], fmt))
         except ValueError:
             continue
     return None
@@ -127,7 +133,10 @@ def _version_capture_key(row: dict) -> tuple[str, str] | None:
     model = " ".join(str(row.get("camera_model") or "").split()).casefold()
     if timestamp is None or not model:
         return None
-    return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S"), model
+    captured_at = safe_datetime_fromtimestamp(timestamp)
+    if captured_at is None:
+        return None
+    return captured_at.strftime("%Y-%m-%d %H:%M:%S"), model
 
 
 def _exiftool_version_metadata(rows: list[dict]) -> dict[str, tuple[str, str]]:
@@ -159,9 +168,10 @@ def _exiftool_version_metadata(rows: list[dict]) -> dict[str, tuple[str, str]]:
             path = str(item.get("SourceFile") or "")
             timestamp = _capture_ts(item.get("DateTimeOriginal"))
             model = " ".join(str(item.get("Model") or "").split()).casefold()
-            if path and timestamp is not None and model:
-                metadata[os.path.normcase(os.path.abspath(path))] = (
-                    datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S"),
+            captured_at = safe_datetime_fromtimestamp(timestamp) if timestamp is not None else None
+            if path and captured_at is not None and model:
+                metadata[_metadata_key(path)] = (
+                    captured_at.strftime("%Y-%m-%d %H:%M:%S"),
                     model,
                 )
     return metadata
@@ -334,7 +344,7 @@ def build_version_groups(db_path: str, rows: dict[int, dict] | None = None):
 
     def capture_key(row: dict) -> tuple[str, str] | None:
         return _version_capture_key(row) or fallback_metadata.get(
-            os.path.normcase(os.path.abspath(str(row.get("filepath") or "")))
+            _metadata_key(str(row.get("filepath") or ""))
         )
 
     raw_by_stem: dict[str, list[int]] = {}

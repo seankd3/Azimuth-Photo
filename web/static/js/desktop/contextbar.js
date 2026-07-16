@@ -7,12 +7,8 @@ import { showToast } from './toast.js';
 import { icon } from '../icons.js';
 import { personLabel as cleanPersonLabel } from '../people_labels.js';
 import { getRankings } from './api.js';
+import { escapeHtml as esc, formatCount as fmt, MONTH_NAMES } from './dom.js';
 
-const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[c]));
-const fmt = (n) => Number(n || 0).toLocaleString('en-US');
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 let thumbInputTimer = 0;
 let tasteAvailable = false;
 
@@ -57,7 +53,7 @@ function dateLabel(value) {
     if (value === 'undated') return 'Undated';
     const match = String(value || '').match(/^(\d{4})-(\d{2})$/);
     if (!match) return value;
-    return `${MONTHS[Number(match[2]) - 1] || match[2]} ${match[1]}`;
+    return `${MONTH_NAMES.short[Number(match[2]) - 1] || match[2]} ${match[1]}`;
 }
 
 function chipHtml(key, label, extra = '', className = '', title = label) {
@@ -102,7 +98,7 @@ function renderChips() {
         const labels = { compared: 'Ranked', uncompared: 'Unranked', direct_uncompared: 'Not compared yet', confident: 'High confidence' };
         chips.push(chipHtml('compared', labels[scope.compared] || scope.compared));
     }
-    if (scope.min_stars) chips.push(chipHtml('min_stars', `${scope.min_stars}+ rating`));
+    if (scope.min_stars) chips.push(chipHtml('min_stars', `Elo ${scope.min_stars}+`));
     if (viewState.bestOf) chips.push(chipHtml('bestOf', 'Best of'));
     if (chips.length > 1) chips.push(`<button class="chip ghost" data-clear-all="1">${icon('x')}<span>Clear all</span></button>`);
     document.getElementById('ctx-crumbs').innerHTML = chips.join('');
@@ -139,10 +135,14 @@ function render() {
     renderQuality();
     if (viewState.bestOf) {
         const shown = viewState.bestOfLimit == null ? viewState.images.length : viewState.bestOfLimit;
-        const total = viewState.bestOfTotal || viewState.visibleImages;
+        const total = (viewState.bestOfTotal || viewState.visibleImages) + viewState.hiddenPendingThumbnails;
         document.getElementById('ctx-count').innerHTML = `Top <b>${fmt(shown)}</b> of ${fmt(total)}`;
     } else {
-        document.getElementById('ctx-count').innerHTML = `<b>${fmt(viewState.visibleImages)}</b> photos`;
+        const visible = fmt(viewState.visibleImages);
+        const total = viewState.visibleImages + viewState.hiddenPendingThumbnails;
+        document.getElementById('ctx-count').innerHTML = viewState.hiddenPendingThumbnails
+            ? `<b>${visible}</b> of ${fmt(total)} photos`
+            : `<b>${visible}</b> photos`;
     }
     document.getElementById('btn-bestof').classList.toggle('active', viewState.bestOf);
     const filterCount = nonSearchFacetCount();
@@ -239,4 +239,23 @@ export function scopeTokenHtml() {
     }
     const label = describeScope();
     return `<span class="scope-token" title="${esc(label)}"><span class="tk-glyph">${icon('house')}</span><b title="${esc(label)}">${esc(label)}</b>${count}</span>`;
+}
+
+export function scopeTokenFacetKey() {
+    if (scope.people) return 'people';
+    if (scope.collectionId) return 'collectionId';
+    if (scope.import_batch) return 'import_batch';
+    if (scope.similarIds.length) return 'similarIds';
+    if (scope.q) return 'q';
+    if (scope.tag) return 'tag';
+    if (scope.flag) return 'flag';
+    if (folderChip()) return 'folder';
+    if (scope.date_taken) return 'date_taken';
+    if (scope.file_type) return 'file_type';
+    if (scope.camera) return 'camera';
+    if (scope.lens) return 'lens';
+    if (scope.orientation) return 'orientation';
+    if (scope.compared) return 'compared';
+    if (scope.min_stars) return 'min_stars';
+    return '';
 }

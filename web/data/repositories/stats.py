@@ -158,7 +158,7 @@ async def full_stats(db_path: str) -> dict:
                 "      OR COALESCE(propagated_updates, 0) > 0 "
                 "      OR ABS(COALESCE(elo, 1200.0) - 1200.0) > 0.0001 "
                 "    THEN 1 ELSE 0 END) AS rated_images "
-                "FROM images "
+                "FROM images INDEXED BY idx_images_status "
                 "WHERE status IN ('kept', 'maybe') AND missing_at IS NULL"
             )
             ranking_counts = await cursor.fetchone()
@@ -573,7 +573,7 @@ async def ai_status_counts(
                 "      OR COALESCE(propagated_updates, 0) > 0 "
                 "      OR ABS(COALESCE(elo, 1200.0) - 1200.0) > 0.0001 "
                 "    THEN 1 ELSE 0 END) AS rated_images "
-                "FROM images "
+                "FROM images INDEXED BY idx_images_status "
                 "WHERE status IN ('kept', 'maybe') AND missing_at IS NULL"
             )
             ranking_counts = await cursor.fetchone()

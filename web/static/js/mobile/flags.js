@@ -3,12 +3,12 @@
 // previous flag values back — real writes both ways.
 
 import { writeFlag, writeFlags } from './api.js';
-import { byId, emit } from './state.js';
+import { byId, emit, on } from './state.js';
 import { showToast } from './toast.js';
 import { tick } from './haptics.js';
 
 const FLAG_LABELS = {
-    picked: 'Picked',
+    picked: 'Favorited',
     rejected: 'Rejected',
     unflagged: 'Flag cleared',
 };
@@ -23,10 +23,12 @@ function setLocal(ids, flagById) {
 }
 
 async function write(ids, flag) {
-    if (ids.length === 1) {
-        return await writeFlag(ids[0], flag) !== null;
-    }
-    return await writeFlags(ids, flag) !== null;
+    // enqueueWrite resolves {status} on drain — it is never null, so map the
+    // real outcome (a terminal 4xx resolves status: failed) to the boolean.
+    const result = ids.length === 1
+        ? await writeFlag(ids[0], flag)
+        : await writeFlags(ids, flag);
+    return Boolean(result) && result.status !== "failed";
 }
 
 async function writeBack(prev) {
@@ -42,6 +44,14 @@ async function writeBack(prev) {
     return ok;
 }
 
+function rollback(ids, prev, appliedFlag) {
+    const restore = new Map();
+    for (const id of ids) {
+        if ((byId.get(id) || {}).flag === appliedFlag) restore.set(id, prev.get(id));
+    }
+    if (restore.size) setLocal([...restore.keys()], restore);
+}
+
 export async function applyFlags(rawIds, flag, { toast = true } = {}) {
     const ids = [...new Set(rawIds.map(Number))].filter((id) => id > 0);
     if (!ids.length) return false;
@@ -52,11 +62,10 @@ export async function applyFlags(rawIds, flag, { toast = true } = {}) {
     }
 
     setLocal(ids, flag);
-    const ok = await write(ids, flag);
-    if (!ok) {
-        setLocal(ids, prev);
-        return false;
-    }
+    const outcome = write(ids, flag);
+    void outcome.then((ok) => {
+        if (!ok) rollback(ids, prev, flag);
+    });
 
     if (toast) {
         const label = ids.length === 1
@@ -74,3 +83,8 @@ export async function applyFlags(rawIds, flag, { toast = true } = {}) {
     }
     return true;
 }
+
+on('flag-write', ({ ids, status }) => {
+    if (status !== 'committed') return;
+    emit('flags', { ids, flagOf: (id) => (byId.get(id) || {}).flag || 'unflagged' });
+});

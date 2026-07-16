@@ -2,14 +2,11 @@
 // Month totals come from the lightweight date APIs; a month fetch is deferred
 // until its band approaches the viewport, so a long archive stays immediate.
 
-import { getDateGroups, getDateHistogram, getRankings, thumbUrl } from './api.js';
+import { getDateGroups, getDateHistogram, getRankings, previewThumbUrl } from './api.js';
 import { on, scopeParams, setActiveLens, setScope } from './state.js';
+import { escapeHtml as esc, formatCount as fmt, MONTH_NAMES } from './dom.js';
 
 const MONTH_SAMPLE_LIMIT = 5000;
-const MONTHS = [
-    'January', 'February', 'March', 'April', 'May', 'June',
-    'July', 'August', 'September', 'October', 'November', 'December',
-];
 
 let mounted = false;
 let initialized = false;
@@ -17,17 +14,14 @@ let generation = 0;
 let months = [];
 let monthSamples = new Map();
 let monthObserver = null;
+let thumbnailPollTimer = 0;
 let scrubDragging = false;
-
-const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (char) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[char]));
-const fmt = (value) => Number(value || 0).toLocaleString('en-US');
+let savedScrollTop = 0;
 
 function monthLabel(key) {
     if (key === 'undated') return 'Undated';
     const [year, month] = String(key).split('-');
-    return `${MONTHS[Number(month) - 1] || month} ${year}`;
+    return `${MONTH_NAMES.long[Number(month) - 1] || month} ${year}`;
 }
 
 function dayKey(image) {
@@ -66,6 +60,13 @@ function scopeForMonth(month) {
     return params;
 }
 
+function sampleThumbHtml(image) {
+    const previewSrc = previewThumbUrl(image);
+    return previewSrc
+        ? `<img src="${esc(previewSrc)}" alt="" loading="lazy" decoding="async" fetchpriority="low">`
+        : '<span class="preview-thumb-pending" aria-hidden="true"></span>';
+}
+
 function renderMonth(month) {
     const host = document.getElementById(monthId(month.key))?.querySelector('.timeline-days');
     if (!host) return;
@@ -85,9 +86,7 @@ function renderMonth(month) {
         `<button class="timeline-day" type="button" data-day="${key}" aria-label="Open ${esc(dayLabel(key))}, ${fmt(images.length)} photos">`
         + `<span class="timeline-day-label">${esc(dayLabel(key))}</span>`
         + `<span class="timeline-day-count">${fmt(images.length)}</span>`
-        + `<span class="timeline-day-thumbs">${images.slice(0, 5).map((image) => (
-            `<img src="${esc(image.thumb_url || thumbUrl('sm', image.id))}" alt="" loading="lazy" decoding="async">`
-        )).join('')}</span></button>`
+        + `<span class="timeline-day-thumbs">${images.slice(0, 5).map(sampleThumbHtml).join('')}</span></button>`
     )).join('') : `<p class="timeline-empty-month">${month.count ? 'Thumbnails are still preparing for this month.' : 'No photos match this month.'}</p>`;
     for (const row of host.querySelectorAll('[data-day]')) {
         row.addEventListener('click', () => {
@@ -95,6 +94,7 @@ function renderMonth(month) {
             setActiveLens('grid');
         });
     }
+    scheduleThumbnailPoll();
 }
 
 async function loadMonth(month, seq) {
@@ -109,6 +109,58 @@ async function loadMonth(month, seq) {
         monthSamples.set(month.key, []);
         renderMonth(month);
     }
+}
+
+function samplesMatch(current, incoming) {
+    return current.length === incoming.length
+        && current.every((image, index) => Number(image.id) === Number(incoming[index]?.id)
+            && image.date_taken === incoming[index]?.date_taken
+            && image.preview_ready === incoming[index]?.preview_ready);
+}
+
+function visibleSampledMonths() {
+    const canvasRect = document.getElementById('canvas')?.getBoundingClientRect();
+    if (!canvasRect) return [];
+    return months.filter((month) => {
+        if (!monthSamples.has(month.key)) return false;
+        const rect = document.getElementById(monthId(month.key))?.getBoundingClientRect();
+        return rect && rect.bottom >= canvasRect.top && rect.top <= canvasRect.bottom;
+    });
+}
+
+function stopThumbnailPoll() {
+    window.clearTimeout(thumbnailPollTimer);
+    thumbnailPollTimer = 0;
+}
+
+function visiblePendingPreviews() {
+    return visibleSampledMonths().some((month) => (
+        monthSamples.get(month.key)?.some((image) => image.preview_ready === false)
+    ));
+}
+
+function scheduleThumbnailPoll() {
+    if (!mounted || thumbnailPollTimer || !visiblePendingPreviews()) return;
+    thumbnailPollTimer = window.setTimeout(async () => {
+        thumbnailPollTimer = 0;
+        await refreshVisibleMonths(generation);
+        scheduleThumbnailPoll();
+    }, 3000);
+}
+
+async function refreshVisibleMonths(seq) {
+    await Promise.all(visibleSampledMonths().map(async (month) => {
+        try {
+            const data = await getRankings(scopeForMonth(month));
+            if (!mounted || seq !== generation) return;
+            const incoming = data?.images || [];
+            if (samplesMatch(monthSamples.get(month.key) || [], incoming)) return;
+            monthSamples.set(month.key, incoming);
+            renderMonth(month);
+        } catch {
+            // Keep the last visible month samples when the background refresh is unavailable.
+        }
+    }));
 }
 
 function observeMonths(seq) {
@@ -166,10 +218,16 @@ function scrubTo(clientY) {
     jumpToMonth(month, 'auto');
 }
 
-async function load() {
+function monthSignature(nextMonths) {
+    return nextMonths.map((month) => `${month.key}:${month.count}`).join('|');
+}
+
+async function load({ keepVisible = false } = {}) {
     const seq = ++generation;
-    monthSamples = new Map();
-    document.getElementById('timeline-flow').innerHTML = '<div class="timeline-loading"><i class="skel"></i><i class="skel"></i><i class="skel"></i></div>';
+    if (!keepVisible) {
+        monthSamples = new Map();
+        document.getElementById('timeline-flow').innerHTML = '<div class="timeline-loading"><i class="skel"></i><i class="skel"></i><i class="skel"></i></div>';
+    }
     try {
         const params = scopeParams();
         params.delete('sort');
@@ -177,10 +235,17 @@ async function load() {
         if (!mounted || seq !== generation) return;
         const counts = new Map((histogram?.months || []).map((item) => [item.month, Number(item.count) || 0]));
         const visibleGroups = new Map((groups?.groups || []).map((group) => [group.date || 'undated', Number(group.count) || 0]));
-        months = [...counts.entries()].map(([key, count]) => ({ key, count }));
+        const nextMonths = [...counts.entries()].map(([key, count]) => ({ key, count }));
         if (Number(histogram?.undated) || visibleGroups.has('undated')) {
-            months.push({ key: 'undated', count: Number(histogram?.undated) || visibleGroups.get('undated') || 0 });
+            nextMonths.push({ key: 'undated', count: Number(histogram?.undated) || visibleGroups.get('undated') || 0 });
         }
+        if (keepVisible && monthSignature(nextMonths) === monthSignature(months)) {
+            observeMonths(seq);
+            refreshVisibleMonths(seq);
+            return;
+        }
+        months = nextMonths;
+        if (keepVisible) monthSamples = new Map();
         renderRiver();
         observeMonths(seq);
     } catch {
@@ -194,7 +259,13 @@ async function load() {
 export function initTimeline() {
     if (initialized) return;
     initialized = true;
-    on('scope', () => { if (mounted) load(); });
+    on('scope', () => {
+        stopThumbnailPoll();
+        generation += 1;
+        months = [];
+        monthSamples = new Map();
+        if (mounted) load();
+    });
     const rail = () => document.getElementById('timeline-scrubber');
     document.addEventListener('pointerdown', (event) => {
         if (!event.target.closest('#timeline-scrubber')) return;
@@ -209,12 +280,20 @@ export function initTimeline() {
 export function mountTimeline() {
     mounted = true;
     document.getElementById('view-timeline').classList.add('active');
-    load();
+    if (months.length) {
+        observeMonths(generation);
+        renderScrubber();
+        scheduleThumbnailPoll();
+        requestAnimationFrame(() => document.getElementById('canvas').scrollTo({ top: savedScrollTop, behavior: 'auto' }));
+        load({ keepVisible: true });
+    } else load();
 }
 
 export function unmountTimeline() {
+    savedScrollTop = document.getElementById('canvas').scrollTop;
     mounted = false;
     generation += 1;
+    stopThumbnailPoll();
     if (monthObserver) monthObserver.disconnect();
     monthObserver = null;
     document.getElementById('view-timeline').classList.remove('active');

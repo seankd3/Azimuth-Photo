@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 import stat
 
+from core.path_groups import safe_commonpath
+
 
 def inspect_source_file(path: str, source_root: str = "") -> tuple[str, os.stat_result | None]:
     """Return a safe-to-read state without following a final symlink."""
@@ -25,7 +27,7 @@ def inspect_source_file(path: str, source_root: str = "") -> tuple[str, os.stat_
         try:
             real_path = os.path.realpath(path)
             real_root = os.path.realpath(source_root)
-            if os.path.commonpath((real_root, real_path)) != real_root:
+            if safe_commonpath((real_root, real_path)) != real_root:
                 return "unsafe", None
         except (OSError, ValueError):
             return "unsafe", None

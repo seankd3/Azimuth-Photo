@@ -1,7 +1,12 @@
 import { byId, on, selection, viewState } from './state.js';
+import { requestJson } from './api.js';
 import { showToast } from './toast.js';
 
 const RECENT_KEY = 'pa_d_recent_keywords';
+const loadingRows = (label, count = 3) => `<div aria-label="${label}" aria-busy="true">${Array.from(
+    { length: count },
+    () => '<div class="chrome-skel nav-row skel"></div>',
+).join('')}</div>`;
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (char) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 }[char]));
@@ -10,11 +15,11 @@ let keywords = [];
 let armedKeyword = null;
 let painterActive = false;
 let renderedImageId = null;
+let attachedKeywords = [];
+const keywordMutationVersions = new Map();
 
 async function request(url, options = {}) {
-    const response = await fetch(url, options);
-    if (!response.ok) throw new Error((await response.json().catch(() => ({}))).detail || 'Request failed');
-    return response.status === 204 ? null : response.json();
+    return requestJson(url, options);
 }
 
 const post = (url, body) => request(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -42,6 +47,58 @@ function keywordById(keywordId) {
     return keywords.find((keyword) => Number(keyword.id) === Number(keywordId)) || null;
 }
 
+function mutationKey(imageId, keywordId) {
+    return `${Number(imageId)}:${Number(keywordId)}`;
+}
+
+function beginKeywordMutation(imageId, keywordId) {
+    const key = mutationKey(imageId, keywordId);
+    const version = (keywordMutationVersions.get(key) || 0) + 1;
+    keywordMutationVersions.set(key, version);
+    return version;
+}
+
+function keywordMutationIsLatest(imageId, keywordId, version) {
+    return keywordMutationVersions.get(mutationKey(imageId, keywordId)) === version;
+}
+
+function renderPanel(image) {
+    const host = document.getElementById('keywords-panel');
+    if (!host || !image || Number(image.id) !== renderedImageId) return;
+    host.innerHTML = panelHtml(image, attachedKeywords);
+    bindPanel(host, image, attachedKeywords);
+}
+
+function patchAttachedKeyword(imageId, keyword, direct) {
+    if (Number(imageId) !== renderedImageId) return null;
+    const index = attachedKeywords.findIndex((item) => Number(item.id) === Number(keyword.id));
+    const previousDirect = index >= 0 && Boolean(Number(attachedKeywords[index].direct));
+    if (direct) {
+        if (index >= 0) attachedKeywords[index] = { ...attachedKeywords[index], ...keyword, direct: 1 };
+        else attachedKeywords = [...attachedKeywords, { ...keyword, direct: 1 }];
+    } else if (index >= 0) {
+        attachedKeywords[index] = { ...attachedKeywords[index], direct: 0 };
+    }
+    renderPanel(activeImage());
+    return previousDirect;
+}
+
+function assignOptimistically(keyword, imageIds, direct) {
+    const mutations = imageIds.map((imageId) => {
+        const version = beginKeywordMutation(imageId, keyword.id);
+        return { imageId, version, previousDirect: patchAttachedKeyword(imageId, keyword, direct) };
+    });
+    const endpoint = direct ? '/api/keywords/assign' : '/api/keywords/unassign';
+    const commit = post(endpoint, { keyword_id: Number(keyword.id), image_ids: imageIds }).catch((error) => {
+        for (const mutation of mutations) {
+            if (!keywordMutationIsLatest(mutation.imageId, keyword.id, mutation.version)) continue;
+            if (mutation.previousDirect != null) patchAttachedKeyword(mutation.imageId, keyword, mutation.previousDirect);
+        }
+        throw error;
+    });
+    return { commit };
+}
+
 async function loadKeywords() {
     const payload = await request('/api/keywords');
     keywords = payload.keywords || [];
@@ -63,10 +120,10 @@ function suggestions(query) {
 
 async function assign(keyword, imageIds = targetIds()) {
     if (!imageIds.length) return showToast('Focus or select photos first');
-    await post('/api/keywords/assign', { keyword_id: Number(keyword.id), image_ids: imageIds });
+    const mutation = assignOptimistically(keyword, imageIds, true);
     armedKeyword = keyword;
     remember(Number(keyword.id));
-    await render();
+    await mutation.commit;
     showToast(`${keyword.path} · ${imageIds.length} photo${imageIds.length === 1 ? '' : 's'}`);
 }
 
@@ -116,10 +173,20 @@ function bindPanel(host, image, attached) {
     }
     for (const button of host.querySelectorAll('[data-keyword-remove]')) {
         button.addEventListener('click', async () => {
-            try {
-                await post('/api/keywords/unassign', { keyword_id: Number(button.dataset.keywordRemove), image_ids: [Number(image.id)] });
-                await render();
-            } catch (error) { showToast(error.message || "Couldn't remove keyword"); }
+            const keyword = keywordById(button.dataset.keywordRemove);
+            if (!keyword) return;
+            const mutation = assignOptimistically(keyword, [Number(image.id)], false);
+            showToast(`Removed ${keyword.path}`, {
+                undo: async () => {
+                    try {
+                        if (!await mutation.commit.then(() => true, () => false)) return;
+                        const restore = assignOptimistically(keyword, [Number(image.id)], true);
+                        await restore.commit;
+                        showToast(`Restored ${keyword.path}`);
+                    } catch (error) { showToast(error.message || "Couldn't restore keyword"); }
+                },
+            });
+            mutation.commit.catch((error) => showToast(error.message || "Couldn't remove keyword"));
         });
     }
     if (attached.length && !armedKeyword) armedKeyword = attached.find((keyword) => Number(keyword.direct)) || null;
@@ -129,17 +196,19 @@ export async function render() {
     const host = document.getElementById('keywords-panel');
     if (!host) return;
     const image = activeImage();
+    void renderIptcMetadata(image);
     renderedImageId = Number(image?.id) || null;
+    attachedKeywords = [];
     if (!image) {
         host.innerHTML = panelHtml(null, []);
         return;
     }
-    host.innerHTML = '<div class="panel-empty">Loading keywords…</div>';
+    host.innerHTML = loadingRows('Loading keywords');
     try {
         const payload = await request(`/api/images/${image.id}/keywords`);
         if (renderedImageId !== Number(image.id)) return;
-        host.innerHTML = panelHtml(image, payload.keywords || []);
-        bindPanel(host, image, payload.keywords || []);
+        attachedKeywords = payload.keywords || [];
+        renderPanel(image);
     } catch {
         if (renderedImageId === Number(image.id)) host.innerHTML = '<div class="panel-empty">Couldn’t load keywords.</div>';
     }
@@ -153,7 +222,7 @@ export async function renderIptcMetadata(image) {
         return;
     }
     const imageId = Number(image.id);
-    host.innerHTML = '<div class="panel-empty">Loading IPTC…</div>';
+    host.innerHTML = loadingRows('Loading IPTC fields', 2);
     try {
         const payload = await request(`/api/images/${imageId}/iptc`);
         if (Number(activeImage()?.id) !== imageId) return;
@@ -214,14 +283,23 @@ export function handleKeywordPainterKey(event) {
 
 export async function paintImage(imageId) {
     if (!painterActive || !armedKeyword) return false;
+    const keyword = armedKeyword;
     try {
         const payload = await request(`/api/images/${imageId}/keywords`);
-        const direct = (payload.keywords || []).some((keyword) => Number(keyword.id) === Number(armedKeyword.id) && Number(keyword.direct));
+        const direct = (payload.keywords || []).some((item) => Number(item.id) === Number(keyword.id) && Number(item.direct));
         await post(direct ? '/api/keywords/unassign' : '/api/keywords/assign', {
-            keyword_id: Number(armedKeyword.id), image_ids: [Number(imageId)],
+            keyword_id: Number(keyword.id), image_ids: [Number(imageId)],
         });
-        showToast(`${direct ? 'Removed' : 'Added'} · ${armedKeyword.path}`);
         if (Number(imageId) === renderedImageId) await render();
+        showToast(`${direct ? 'Removed' : 'Added'} · ${keyword.path}`, direct ? {
+            undo: async () => {
+                try {
+                    await post('/api/keywords/assign', { keyword_id: Number(keyword.id), image_ids: [Number(imageId)] });
+                    if (Number(imageId) === renderedImageId) await render();
+                    showToast(`Restored ${keyword.path}`);
+                } catch (error) { showToast(error.message || "Couldn't restore keyword"); }
+            },
+        } : {});
         return true;
     } catch (error) {
         showToast(error.message || "Couldn't paint keyword");

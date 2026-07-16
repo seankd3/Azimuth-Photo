@@ -1,3 +1,5 @@
+import { MONTH_NAMES } from './dom.js';
+
 const listeners = new Map();
 const PANEL_KEY = 'pa_d_left_collapsed';
 const RIGHT_PANEL_KEY = 'pa_d_right_collapsed';
@@ -5,7 +7,7 @@ const THUMB_KEY = 'pa_d_thumb_size';
 const PREFS_KEY = 'pa_d_prefs';
 const LENS_KEY = 'pa_d_lens';
 const PERSISTENT_LENSES = new Set(['grid', 'events', 'timeline', 'people', 'map']);
-const VALID_LENSES = new Set([...PERSISTENT_LENSES, 'refine', 'suggestions', 'loupe', 'duplicates', 'trash', 'shared']);
+const VALID_LENSES = new Set([...PERSISTENT_LENSES, 'refine', 'suggestions', 'loupe', 'duplicates', 'trash', 'shared', 'system']);
 const DEFAULT_PREFS = {
     density: 'comfortable',
     badgeCheck: true,
@@ -23,7 +25,6 @@ const SMART_QUERY_KEYS = [
     'tag', 'orientation', 'compared', 'min_stars', 'sort',
 ];
 const SMART_ACTIVE_KEYS = SMART_QUERY_KEYS.filter((key) => key !== 'sort');
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const SORT_VARIANTS = {
     similarity: { desc: 'similarity', asc: 'similarity' },
     elo: { desc: 'elo', asc: 'elo_asc' },
@@ -97,6 +98,7 @@ export const scope = {
 
 export const viewState = {
     visibleImages: 0,
+    hiddenPendingThumbnails: 0,
     sortQuality: null,
     images: [],
     generation: 0,
@@ -232,8 +234,7 @@ export function scopeActive() {
 export function nonSearchFacetCount() {
     return [
         scope.people, scope.flag, folderValues().length, scope.date_taken, scope.file_type, scope.camera,
-        scope.lens, scope.tag, scope.orientation, scope.compared, scope.min_stars, scope.import_batch,
-        scope.collectionId, scope.similarIds.length,
+        scope.lens, scope.tag, scope.orientation, scope.compared, scope.min_stars,
     ].filter(Boolean).length;
 }
 
@@ -253,6 +254,7 @@ export function scopeParams(extra = {}) {
     if (scope.compared) params.set('compared', scope.compared);
     if (scope.min_stars) params.set('min_stars', scope.min_stars);
     if (scope.import_batch) params.set('import_batch', scope.import_batch);
+    if (scope.collectionId) params.set('collection_id', scope.collectionId);
     if (scope.sort) params.set('sort', scope.sort);
     params.set('stacks', viewState.prefs.collapseStacks ? 'collapsed' : 'expanded');
     for (const [key, value] of Object.entries(extra)) {
@@ -286,6 +288,11 @@ export function setScope(patch = {}, { merge = false, pushHash = true } = {}) {
     viewState.focusIndex = 0;
     emit('scope', scope);
     if (pushHash) writeHash();
+}
+
+export function navigateToScope(patch = {}, options = {}) {
+    setActiveLens('grid');
+    setScope(patch, options);
 }
 
 export function patchScope(patch, { pushHash = true } = {}) {
@@ -411,8 +418,15 @@ export function clearFacet(key) {
     patchScope(patch);
 }
 
-export function setRankingsMeta({ visibleImages, sortQuality, searchMode = '', searchSources = [] }) {
+export function setRankingsMeta({
+    visibleImages,
+    hiddenPendingThumbnails = 0,
+    sortQuality,
+    searchMode = '',
+    searchSources = [],
+}) {
     viewState.visibleImages = Number(visibleImages) || 0;
+    viewState.hiddenPendingThumbnails = Math.max(0, Number(hiddenPendingThumbnails) || 0);
     viewState.sortQuality = sortQuality || null;
     viewState.searchMode = String(searchMode || '');
     viewState.searchSources = Array.isArray(searchSources) ? searchSources.filter(Boolean).map(String) : [];
@@ -553,7 +567,7 @@ function smartDateLabel(value) {
     if (value === 'undated') return 'Undated';
     const match = String(value || '').match(/^(\d{4})-(\d{2})$/);
     if (!match) return value;
-    return `${MONTHS[Number(match[2]) - 1] || match[2]} ${match[1]}`;
+    return `${MONTH_NAMES.short[Number(match[2]) - 1] || match[2]} ${match[1]}`;
 }
 
 export function smartQueryFromScope() {

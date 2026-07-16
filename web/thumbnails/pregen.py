@@ -3,6 +3,9 @@ import time
 from collections import deque
 from dataclasses import asdict, dataclass
 
+from data.repositories import rankings as ranking_repository
+from data.repositories.common import stage_temp_ids
+
 
 WINDOW_SECONDS = 30 * 60
 
@@ -92,6 +95,91 @@ async def candidate_batch(get_db, cursor_state: dict, limit: int):
         if rows:
             update_cursor_from_row(cursor_state, rows[-1])
         return rows
+    finally:
+        await conn.close()
+
+
+async def priority_candidate_batch(
+    get_db,
+    scope: dict,
+    processed_ids: set[int],
+    limit: int,
+    *,
+    cache_root: str,
+    preview_size: str,
+    resolve_collection_scope,
+):
+    requested_collection_id = int(scope.get("collection_id") or 0)
+    image_ids, collection_id = await resolve_collection_scope(
+        None,
+        requested_collection_id,
+    )
+    select = (
+        "SELECT i.id, i.source_id, i.filepath, i.file_size, i.file_modified_at, "
+        + (
+            "(SELECT name FROM collections WHERE id = ?) AS priority_collection_name "
+            if requested_collection_id
+            else "NULL AS priority_collection_name "
+        )
+        + "FROM images i JOIN catalog_sources s ON s.id = i.source_id "
+    )
+    conditions = [
+        "s.included = 1",
+        "s.online = 1",
+        "i.missing_at IS NULL",
+        "NOT EXISTS ("
+        "SELECT 1 FROM cache_entries c "
+        "WHERE c.cache_root = ? AND c.size = ? AND c.image_id = i.id"
+        ")",
+    ]
+    params = [requested_collection_id] if requested_collection_id else []
+    params.extend([cache_root, preview_size])
+    scope_ids = None
+    excluded_ids = None
+    scope_join = ""
+
+    folder_filter = ranking_repository.folder_filter_sql(scope.get("folder"))
+    if folder_filter is not None:
+        condition, folder_params = folder_filter
+        conditions.append(condition)
+        params.extend(folder_params)
+    if image_ids is not None:
+        scope_ids = sorted(int(image_id) for image_id in image_ids)
+        if not scope_ids:
+            return []
+        scope_join = (
+            "JOIN temp_priority_scope_ids priority_scope "
+            "ON priority_scope.image_id = i.id "
+        )
+    elif collection_id:
+        conditions.append(
+            "EXISTS (SELECT 1 FROM collection_images ci "
+            "WHERE ci.collection_id = ? AND ci.image_id = i.id)"
+        )
+        params.append(collection_id)
+    if processed_ids:
+        excluded_ids = sorted(int(image_id) for image_id in processed_ids)
+        conditions.append(
+            "NOT EXISTS (SELECT 1 FROM temp_priority_processed_ids processed "
+            "WHERE processed.image_id = i.id)"
+        )
+    params.append(max(1, int(limit)))
+
+    conn = await get_db()
+    try:
+        if scope_ids is not None:
+            await stage_temp_ids(conn, "temp_priority_scope_ids", scope_ids)
+        if excluded_ids is not None:
+            await stage_temp_ids(conn, "temp_priority_processed_ids", excluded_ids)
+        cursor = await conn.execute(
+            select
+            + scope_join
+            + "WHERE "
+            + " AND ".join(conditions)
+            + " ORDER BY i.filepath ASC, i.id ASC LIMIT ?",
+            params,
+        )
+        return await cursor.fetchall()
     finally:
         await conn.close()
 
@@ -367,5 +455,9 @@ def background_decision(
     )
 
 
-def should_pause_for_priority() -> bool:
-    return False
+def should_pause_for_priority(
+    idle_seconds: float,
+    *,
+    settle_seconds: float,
+) -> bool:
+    return max(0.0, float(idle_seconds)) < max(0.0, float(settle_seconds))

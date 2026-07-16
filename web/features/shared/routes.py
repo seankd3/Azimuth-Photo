@@ -34,21 +34,22 @@ async def api_list_shared_surfaces(request: Request):
     _configured()
     shares = await _list_shares()
     publishes = await _list_publishes()
-    by_collection: dict[int, dict] = {}
+    by_owner: dict[tuple[str, int], dict] = {}
 
     for share in shares:
-        collection_id = int(share["collection_id"])
-        item = by_collection.setdefault(collection_id, _base_item(share))
+        owner = _share_owner(share)
+        item = by_owner.setdefault(owner, _base_item(share))
         item["private_link"] = _private_link_payload(request, share)
 
     for publish in publishes:
         collection_id = int(publish["collection_id"])
-        item = by_collection.setdefault(collection_id, _base_item(publish))
+        owner = ("collection", collection_id)
+        item = by_owner.setdefault(owner, _base_item(publish))
         item["website"] = _website_payload(publish)
         if not item.get("photo_count"):
             item["photo_count"] = int(publish.get("image_count") or 0)
 
-    items = list(by_collection.values())
+    items = list(by_owner.values())
     items.sort(
         key=lambda item: max(
             float((item.get("private_link") or {}).get("created_at") or 0),
@@ -59,10 +60,22 @@ async def api_list_shared_surfaces(request: Request):
     return {"items": items}
 
 
+def _share_owner(share: dict) -> tuple[str, int]:
+    collection_id = share.get("collection_id")
+    if collection_id is not None:
+        return ("collection", int(collection_id))
+    return ("published_node", int(share["published_node_id"]))
+
+
 def _base_item(row: dict) -> dict:
+    collection_id = row.get("collection_id")
+    published_node_id = row.get("published_node_id")
     cover_image_id = row.get("cover_image_id")
     return {
-        "collection_id": int(row["collection_id"]),
+        "collection_id": int(collection_id) if collection_id is not None else None,
+        "published_node_id": (
+            int(published_node_id) if published_node_id is not None else None
+        ),
         "name": row.get("collection_name") or row.get("title") or "Collection",
         "photo_count": int(row.get("photo_count") or row.get("image_count") or 0),
         "cover_image_id": int(cover_image_id) if cover_image_id is not None else None,
@@ -83,6 +96,7 @@ def _private_link_payload(request: Request, share: dict) -> dict:
         "last_viewed_at": share.get("last_viewed_at"),
         "created_at": share.get("created_at"),
         "expires_at": share.get("expires_at"),
+        "expired": bool(share.get("expired")),
         "pick_count": int(share.get("pick_count") or 0),
     }
 

@@ -13,6 +13,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 from core import work_coordination
 from data import connection as data_connection
+from features.library import preview_priority
+from features.library import service as library_service
 from PIL import Image
 from . import budget as thumbnail_budget
 from . import cache_entries as thumbnail_cache_entries
@@ -91,6 +93,7 @@ _pregen_status = {
     "last_generated_at": None,
     "generated_this_session": 0,
     "last_error": "",
+    "priority_scope": None,
 }
 _pregen_bookkeeping = pregen.SessionBookkeeping()
 _pregen_history = _pregen_bookkeeping.history
@@ -1098,6 +1101,31 @@ async def _pregen_bulk_candidate_batch(limit: int):
     )
 
 
+async def _pregen_priority_candidate_batch(limit: int, processed_ids: set[int]):
+    for scope in preview_priority.recent_scopes():
+        rows = await pregen.priority_candidate_batch(
+            data_providers.get_db,
+            scope,
+            processed_ids,
+            limit,
+            cache_root=SSD_CACHE_DIR,
+            preview_size="sm",
+            resolve_collection_scope=library_service._resolve_collection_scope,
+        )
+        if rows:
+            collection_name = rows[0]["priority_collection_name"] or ""
+            return rows, preview_priority.scope_label(
+                scope,
+                collection_name=collection_name,
+            )
+        preview_priority.discard_scope(scope)
+    return [], None
+
+
+def _set_pregen_priority_scope(label: str | None) -> None:
+    _pregen_status["priority_scope"] = label or None
+
+
 async def _pregen_full_candidate_batch(limit: int):
     return await pregen.candidate_batch(
         data_providers.get_db,
@@ -1196,13 +1224,16 @@ async def _run_pregen_bulk_batch(generate_batch: int | None = None) -> int:
         bulk_tier_budgets=_bulk_tier_budgets,
         bulk_tier_room=_bulk_tier_room,
         full_tier_room=_full_tier_room,
+        pregen_priority_candidate_batch=_pregen_priority_candidate_batch,
         pregen_bulk_candidate_batch=_pregen_bulk_candidate_batch,
         reset_pregen_bulk_cursor=_reset_pregen_bulk_cursor,
+        set_priority_scope=_set_pregen_priority_scope,
         bulk_candidate_signatures=_bulk_candidate_signatures,
         full_candidate_signature=_full_candidate_signature,
         prefetch_executor=_prefetch_executor,
         generate_thumbnail_set_sync=_generate_thumbnail_set_sync,
         record_pregen_result=_record_pregen_result,
+        activity_burst_items=PREGENERATE_ACTIVITY_BURST_ITEMS,
     )
 
 
@@ -1229,6 +1260,7 @@ async def _run_full_warm_batch(generate_batch: int | None = None) -> int:
         pregen_state=_pregen_status,
         current_time=_current_time,
         record_pregen_batch=_record_pregen_batch,
+        activity_burst_items=PREGENERATE_ACTIVITY_BURST_ITEMS,
     )
 
 
@@ -1488,7 +1520,10 @@ def _pregen_background_decision():
 
 
 def _pregen_should_pause_for_priority() -> bool:
-    return False
+    return pregen.should_pause_for_priority(
+        get_idle_seconds(),
+        settle_seconds=PREGENERATE_IDLE_SECONDS,
+    )
 
 
 async def run_prefetch_worker():
@@ -1525,3 +1560,7 @@ def stop_prefetch():
     _prefetching = False
     _flush_write_queue()
     thumbnail_cache_entries.close_persistent_conn()
+
+
+async def cancel_background_tasks() -> None:
+    await full_cache.cancel_inflight_tasks(_inflight)

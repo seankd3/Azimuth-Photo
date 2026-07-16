@@ -70,6 +70,17 @@ class UiContractsTests(BackendTestCase):
         self.assertIn("from '../api.js'", mobile_api)
         self.assertIn("export async function fetchJson", shared_api)
 
+    async def test_desktop_api_notifies_when_post_helpers_fail(self):
+        base_dir = os.path.dirname(__file__)
+        with open(os.path.join(base_dir, "static", "js", "desktop", "api.js"), encoding="utf-8") as fh:
+            desktop_api = fh.read()
+
+        self.assertIn("function reportApiFailure", desktop_api)
+        self.assertIn("if (!response.ok) reportApiFailure({ status: response.status });", desktop_api)
+        self.assertIn("const result = await requestWithStatus(url, jsonRequestOptions('POST', body, options));", desktop_api)
+        self.assertIn('showToast("The library isn\'t responding.");', desktop_api)
+        self.assertIn("return result.ok ? result.data : null;", desktop_api)
+
     async def test_service_worker_precaches_mobile_shell_only(self):
         base_dir = os.path.dirname(__file__)
         with open(os.path.join(base_dir, "static", "sw.js"), encoding="utf-8") as fh:
@@ -124,12 +135,64 @@ class UiContractsTests(BackendTestCase):
         self.assertIn("getRankings", cull_brief)
         self.assertIn("key === 'z'", cull_brief)
 
+    async def test_desktop_smart_collection_id_reaches_all_scoped_consumers(self):
+        base_dir = os.path.dirname(__file__)
+        desktop_dir = os.path.join(base_dir, "static", "js", "desktop")
+        with open(os.path.join(desktop_dir, "state.js"), encoding="utf-8") as fh:
+            state = fh.read()
+        with open(os.path.join(desktop_dir, "timeline.js"), encoding="utf-8") as fh:
+            timeline = fh.read()
+        with open(os.path.join(desktop_dir, "cull_brief.js"), encoding="utf-8") as fh:
+            cull_brief = fh.read()
+        with open(os.path.join(desktop_dir, "filters.js"), encoding="utf-8") as fh:
+            filters = fh.read()
+
+        self.assertIn("if (scope.collectionId) params.set('collection_id', scope.collectionId);", state)
+        self.assertNotIn("scope.collectionId && !scope.collectionSmart", state)
+        self.assertIn("scopeParams({ limit: MONTH_SAMPLE_LIMIT", timeline)
+        self.assertIn("scopeParams({ limit: SCOPE_PAGE_LIMIT", cull_brief)
+        self.assertIn("getFilterOptions(scopeParams())", filters)
+
+    async def test_map_uses_the_server_resolved_scope(self):
+        base_dir = os.path.dirname(__file__)
+        with open(os.path.join(base_dir, "static", "js", "desktop", "map.js"), encoding="utf-8") as fh:
+            map_module = fh.read()
+
+        self.assertIn("await getMapMarkers(scopeParams())", map_module)
+        self.assertIn("marker.preview_ready !== false && marker.thumb_url", map_module)
+        self.assertNotIn("loadCollectionMarkers", map_module)
+        self.assertNotIn("getCollection,", map_module)
+
     async def test_develop_history_refresh_bypasses_the_empty_pre_save_cache(self):
         base_dir = os.path.dirname(__file__)
         with open(os.path.join(base_dir, "static", "js", "desktop", "develop", "history_panel.js"), encoding="utf-8") as fh:
             history_panel = fh.read()
 
         self.assertIn("cache: 'no-store'", history_panel)
+
+    async def test_source_rows_offer_the_complete_scope_menu(self):
+        base_dir = os.path.dirname(__file__)
+        with open(os.path.join(base_dir, "static", "js", "desktop", "panel.js"), encoding="utf-8") as fh:
+            panel = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "desktop", "source_reveal_menu.js"), encoding="utf-8") as fh:
+            source_reveal_menu = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "desktop", "file_manager.js"), encoding="utf-8") as fh:
+            file_manager = fh.read()
+
+        self.assertIn("openSourceRevealMenu", panel)
+        self.assertIn("row.addEventListener('contextmenu'", panel)
+        self.assertIn("openSourceRevealMenu(row.dataset.source, row, count, {", panel)
+        self.assertIn("revealFolder(path, sourceId)", source_reveal_menu)
+        self.assertIn('data-act="scope"', source_reveal_menu)
+        self.assertIn('data-act="refine"', source_reveal_menu)
+        self.assertIn('data-act="reveal"', source_reveal_menu)
+        self.assertIn('data-act="export"', source_reveal_menu)
+        self.assertIn("fileManagerMenuLabel()", source_reveal_menu)
+        self.assertIn("revealAvailable", source_reveal_menu)
+        self.assertIn("revealAvailable ?", source_reveal_menu)
+        self.assertIn("node.reveal_available !== false", (open(os.path.join(base_dir, "static", "js", "desktop", "folders.js"), encoding="utf-8")).read())
+        self.assertIn("'Open in Explorer'", file_manager)
+        self.assertNotIn("Reveal in Explorer", file_manager)
 
     async def test_template_context_versions_static_assets(self):
         context = app_module.app.state.photoarchive_shell.template_context(HeaderRequest())

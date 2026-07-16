@@ -16,7 +16,14 @@ from pydantic import BaseModel, Field
 import settings
 from data.repositories import shares as share_repository
 from features.publish.builder import build_public_gallery_bundle, export_website_tree
-from features.publish.deployer import GalleryDeployer, HookStatus, PublishConflict, PublishDeployError, PublishSetupError
+from features.publish.deployer import (
+    GalleryDeployer,
+    HookStatus,
+    PublishConflict,
+    PublishDeployError,
+    PublishSetupError,
+    configured_publish_hook,
+)
 from features.publish import nodes as published_nodes
 from features.share import auth as share_auth
 
@@ -305,6 +312,8 @@ async def api_export_published_area(area: str):
 @router.post("/api/user-collections/{collection_id}/publish")
 async def api_publish_collection(collection_id: int, payload: PublishBody):
     _configured()
+    if _job_in_progress(collection_id):
+        return JSONResponse({"error": "A publish job is already in progress"}, status_code=409)
     if not _publish_enabled():
         return JSONResponse({"error": "Choose a publishing folder before publishing this gallery."}, status_code=409)
     collection = await _get_collection(collection_id, limit=1, offset=0)
@@ -321,6 +330,8 @@ async def api_publish_collection(collection_id: int, payload: PublishBody):
         title = collection["name"] or slug
     if not await _slug_available(slug, collection_id=collection_id):
         return JSONResponse({"error": "Slug is already published"}, status_code=409)
+    if _job_in_progress(collection_id):
+        return JSONResponse({"error": "A publish job is already in progress"}, status_code=409)
     _start_job(collection_id, "publishing", slug=slug, title=title)
     _schedule(_run_publish_job(collection_id, slug, title))
     return JSONResponse({"job": "publishing", "slug": slug, "title": title}, status_code=202)
@@ -343,9 +354,13 @@ async def api_get_collection_publish(collection_id: int):
 @router.post("/api/user-collections/{collection_id}/publish/revoke")
 async def api_revoke_collection_publish(collection_id: int):
     _configured()
+    if _job_in_progress(collection_id):
+        return JSONResponse({"error": "A publish job is already in progress"}, status_code=409)
     publish = await _get_publish(collection_id)
     if publish is None:
         return JSONResponse({"error": "Publish not found"}, status_code=404)
+    if _job_in_progress(collection_id):
+        return JSONResponse({"error": "A publish job is already in progress"}, status_code=409)
     _start_job(collection_id, "revoking", slug=publish["slug"], title=publish["title"])
     _schedule(_run_revoke_job(collection_id, publish["slug"]))
     return JSONResponse({"job": "revoking", "slug": publish["slug"]}, status_code=202)
@@ -470,6 +485,11 @@ def _start_job(collection_id: int, state: str, *, slug: str, title: str) -> None
     }
 
 
+def _job_in_progress(collection_id: int) -> bool:
+    job = _jobs.get(int(collection_id))
+    return bool(job and job.get("state") in {"publishing", "revoking"})
+
+
 def _update_job(collection_id: int, **fields) -> None:
     job = _jobs.get(int(collection_id))
     if job:
@@ -560,7 +580,7 @@ def _publishing_config_payload() -> dict:
     return {
         "enabled": bool(publish_dir),
         "publish_dir": publish_dir,
-        "hook_configured": bool(str(config.get("publish_hook") or "").strip()),
+        "hook_configured": bool(configured_publish_hook()),
         "site_base_url": str(config.get("publish_site_base_url") or "").strip(),
         "setup_prompt": "" if publish_dir else "Choose a folder for published galleries before publishing.",
     }

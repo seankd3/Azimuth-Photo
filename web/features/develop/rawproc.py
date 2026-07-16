@@ -22,6 +22,8 @@ from typing import Any
 import numpy as np
 from PIL import Image, ImageOps
 
+from core.runtime_paths import resolve_runtime_paths
+
 try:
     import rawpy
 except ImportError:  # pragma: no cover - rawpy is an application dependency.
@@ -37,7 +39,7 @@ from .lens import normalized_source_metadata, read_exif, resolve_lens_correction
 RAW_EXTENSIONS = {".dng", ".cr2", ".cr3"}
 DISPLAY_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp"}
 OPTIONAL_DISPLAY_EXTENSIONS = {".heic"}
-BASE_CACHE_ROOT = Path(os.environ.get("PHOTOARCHIVE_DEVELOP_CACHE_DIR", "/mnt/expansion/PhotoArchiveCache/develop"))
+BASE_CACHE_ROOT = Path(resolve_runtime_paths().develop_cache_dir)
 # v3: lossy-DNG decode applies OpcodeList2 MapPolynomial (true linear); v2 bases are ~EVs too bright.
 BASE_CACHE_DIR = BASE_CACHE_ROOT / "base" / "v3"
 # v4: native LibRaw/legacy LinearRaw bases honor the camera/DNG saturation

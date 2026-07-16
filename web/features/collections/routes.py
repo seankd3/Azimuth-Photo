@@ -41,6 +41,7 @@ _collection_is_smart: CollectionIsSmart | None = None
 _resolve_smart_detail: ResolveSmartDetail | None = None
 _resolve_smart_summary: ResolveSmartSummary | None = None
 _resolve_smart_image_ids: ResolveSmartImageIds | None = None
+_resolve_smart_materialized_image_ids: ResolveSmartImageIds | None = None
 _db_path: DbPath | None = None
 _get_images_by_ids: GetImagesByIds | None = None
 
@@ -89,6 +90,7 @@ def configure(
     resolve_smart_detail: ResolveSmartDetail | None = None,
     resolve_smart_summary: ResolveSmartSummary | None = None,
     resolve_smart_image_ids: ResolveSmartImageIds | None = None,
+    resolve_smart_materialized_image_ids: ResolveSmartImageIds | None = None,
     db_path: DbPath | None = None,
     get_images_by_ids: GetImagesByIds | None = None,
 ) -> None:
@@ -96,7 +98,8 @@ def configure(
     global _rename_collection, _delete_collection
     global _add_collection_images, _remove_collection_images, _get_suggestions
     global _collection_is_smart, _resolve_smart_detail, _resolve_smart_summary
-    global _resolve_smart_image_ids, _db_path, _get_images_by_ids
+    global _resolve_smart_image_ids, _resolve_smart_materialized_image_ids
+    global _db_path, _get_images_by_ids
     _create_collection = create_collection
     _list_collections = list_collections
     _get_collection = get_collection
@@ -109,6 +112,7 @@ def configure(
     _resolve_smart_detail = resolve_smart_detail
     _resolve_smart_summary = resolve_smart_summary
     _resolve_smart_image_ids = resolve_smart_image_ids
+    _resolve_smart_materialized_image_ids = resolve_smart_materialized_image_ids
     _db_path = db_path
     _get_images_by_ids = get_images_by_ids
 
@@ -220,14 +224,14 @@ async def _collection_update(
 
     materialize_ids = None
     if bool(payload.materialize):
-        if _resolve_smart_image_ids is None:
+        if _resolve_smart_materialized_image_ids is None:
             raise RuntimeError("Collection routes are not configured")
         current = await _get_collection(collection_id, limit=1, offset=0)
         if current is None:
             return JSONResponse({"error": "Collection not found"}, status_code=404)
         if current.get("smart"):
             try:
-                materialize_ids = await _resolve_smart_image_ids(current["query"] or {})
+                materialize_ids = await _resolve_smart_materialized_image_ids(current["query"] or {})
             except smart.SmartCollectionMaterializeTooLarge as exc:
                 return JSONResponse(
                     {

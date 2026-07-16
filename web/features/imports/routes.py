@@ -31,6 +31,7 @@ class CommitRequest(BaseModel):
     mode: Literal["copy", "add"]
     skip_suspects: bool = True
     clear_card: bool = False
+    category: Literal["raw", "personal", "film", "export"] | None = None
     keywords: list[str] = Field(default_factory=list)
     collection_id: int | None = None
 
@@ -106,6 +107,7 @@ async def api_import_commit(body: CommitRequest):
             clear_card=body.clear_card,
             keyword_paths=body.keywords,
             collection_id=body.collection_id,
+            category=body.category,
         )
     except ValueError as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)

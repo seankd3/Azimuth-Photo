@@ -1,5 +1,7 @@
 """Image lookup queries used by media, export, search, and compare flows."""
 
+import json
+
 from data import connection
 from data.repositories.common import chunked
 
@@ -116,7 +118,28 @@ async def set_image_orientation(db_path: str, image_id: int, orientation: str):
         await connection.close_async(conn, db_path=db_path)
 
 
-async def get_unclassified_images(db_path: str, limit: int = 200):
+async def get_unclassified_images(
+    db_path: str,
+    limit: int = 200,
+    *,
+    file_extensions: set[str] | frozenset[str] | None = None,
+):
+    extension_clause = ""
+    params: list = []
+    if file_extensions:
+        normalized_extensions = sorted({
+            form
+            for extension in file_extensions
+            for form in {
+                str(extension).strip().lower().lstrip("."),
+                f".{str(extension).strip().lower().lstrip('.')}",
+            }
+            if form and form != "."
+        })
+        placeholders = ",".join("?" for _extension in normalized_extensions)
+        extension_clause = f"AND LOWER(COALESCE(i.file_ext, '')) IN ({placeholders}) "
+        params.extend(normalized_extensions)
+    params.append(limit)
     conn = await connection.open_async(db_path)
     try:
         cursor = await conn.execute(
@@ -127,8 +150,9 @@ async def get_unclassified_images(db_path: str, limit: int = 200):
             "AND i.status IN ('kept', 'maybe') "
             "AND i.missing_at IS NULL "
             "AND COALESCE(i.hub_remote, 0) = 0 "
+            f"{extension_clause}"
             "LIMIT ?",
-            (limit,),
+            params,
         )
         return await cursor.fetchall()
     finally:
@@ -246,6 +270,55 @@ async def set_image_flag(db_path: str, image_id: int, flag: str):
                 "UPDATE images SET flag = ? WHERE id = ?",
                 (flag, image_id),
             )
+            await conn.commit()
+        finally:
+            await connection.close_async(conn, db_path=db_path)
+
+    await connection.run_with_busy_retry(_write)
+
+
+async def get_image_rating(db_path: str, image_id: int) -> int:
+    """Read the user star rating (_lr_rating) — 0 when unrated."""
+    conn = await connection.open_async(db_path)
+    try:
+        row = await (await conn.execute(
+            "SELECT settings FROM develop_settings WHERE image_id = ?", (image_id,)
+        )).fetchone()
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+    try:
+        value = json.loads(row["settings"]).get("_lr_rating", 0) if row else 0
+    except (TypeError, ValueError, json.JSONDecodeError):
+        value = 0
+    try:
+        return max(0, min(5, int(value)))
+    except (TypeError, ValueError):
+        return 0
+
+
+async def set_image_rating(db_path: str, image_id: int, rating: int):
+    """Store a user star rating as _lr_rating without disturbing other develop keys."""
+
+    async def _write() -> None:
+        conn = await connection.open_async(db_path)
+        try:
+            cursor = await conn.execute(
+                "UPDATE develop_settings SET settings = json_set("
+                "CASE WHEN json_valid(settings) THEN "
+                "  CASE WHEN json_type(settings) = 'object' THEN settings ELSE '{}' END "
+                "ELSE '{}' END, '$._lr_rating', ?) WHERE image_id = ?",
+                (rating, image_id),
+            )
+            if cursor.rowcount == 0:
+                payload = json.dumps({"_lr_rating": rating}, separators=(",", ":"))
+                await conn.execute(
+                    "INSERT INTO develop_settings (image_id, settings, origin, updated_at) VALUES (?, ?, 'user', '') "
+                    "ON CONFLICT(image_id) DO UPDATE SET settings = json_set("
+                    "CASE WHEN json_valid(develop_settings.settings) THEN "
+                    "  CASE WHEN json_type(develop_settings.settings) = 'object' THEN develop_settings.settings ELSE '{}' END "
+                    "ELSE '{}' END, '$._lr_rating', ?)",
+                    (image_id, payload, rating),
+                )
             await conn.commit()
         finally:
             await connection.close_async(conn, db_path=db_path)

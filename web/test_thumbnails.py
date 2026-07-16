@@ -6,12 +6,15 @@ import tempfile
 import time
 import unittest
 from contextlib import closing
+from unittest import mock
 
 from PIL import Image
 
 sys.path.insert(0, os.path.dirname(__file__))
 import thumbnails  # noqa: E402
 from data import schema as data_schema  # noqa: E402
+from features.library import preview_priority  # noqa: E402
+from features.library import service as library_service  # noqa: E402
 from thumbnails import budget as thumbnail_budget  # noqa: E402
 from thumbnails import cache_entries as thumbnail_cache_entries  # noqa: E402
 from thumbnails import config as thumbnail_config  # noqa: E402
@@ -21,6 +24,7 @@ from thumbnails import generation as thumbnail_generation  # noqa: E402
 from thumbnails import jobs as thumbnail_jobs  # noqa: E402
 from thumbnails import maintenance as thumbnail_maintenance  # noqa: E402
 from thumbnails import pregen as thumbnail_pregen  # noqa: E402
+from thumbnails import pregen_worker as thumbnail_pregen_worker  # noqa: E402
 from thumbnails import runtime as thumbnail_runtime  # noqa: E402
 from thumbnails import status as thumbnail_status  # noqa: E402
 
@@ -168,6 +172,15 @@ class ThumbnailConfigFacadeTests(unittest.TestCase):
 
 
 class ThumbnailBudgetFacadeTests(unittest.TestCase):
+    def test_empty_catalog_keeps_disk_budget_uninitialized_for_first_import(self):
+        allocations = thumbnail_config.allocate_disk_budget(
+            100 * 1024 * 1024,
+            needed_bytes={tier: 0 for tier in thumbnails.ALL_TIERS},
+            profile="original_heavy",
+        )
+
+        self.assertEqual(allocations, {tier: 0 for tier in thumbnails.ALL_TIERS})
+
     def test_budget_module_owns_archive_estimates_and_facade_math(self):
         with tempfile.TemporaryDirectory() as tempdir:
             db_path = os.path.join(tempdir, "budget.db")
@@ -497,6 +510,18 @@ class ThumbnailJobsFacadeTests(unittest.TestCase):
 
 
 class ThumbnailPregenFacadeTests(unittest.TestCase):
+    def test_full_cache_shutdown_cancels_inflight_tasks(self):
+        async def scenario():
+            task = asyncio.create_task(asyncio.Event().wait())
+            inflight = {("full", 1, "sig"): task}
+
+            await thumbnail_full_cache.cancel_inflight_tasks(inflight)
+
+            self.assertTrue(task.cancelled())
+            self.assertEqual(inflight, {})
+
+        asyncio.run(scenario())
+
     def test_pregen_state_mutation_remains_facaded_from_pregen_module(self):
         base_status = {
             "enabled": True,
@@ -591,7 +616,18 @@ class ThumbnailPregenFacadeTests(unittest.TestCase):
             {"decision": "manual"},
         )
         self.assertEqual(calls, ["called"])
-        self.assertFalse(thumbnail_pregen.should_pause_for_priority())
+        self.assertTrue(
+            thumbnail_pregen.should_pause_for_priority(
+                0.25,
+                settle_seconds=1.0,
+            )
+        )
+        self.assertFalse(
+            thumbnail_pregen.should_pause_for_priority(
+                1.0,
+                settle_seconds=1.0,
+            )
+        )
 
     def test_session_bookkeeping_remains_facaded_from_pregen_module(self):
         old_history = thumbnails._pregen_history
@@ -1112,6 +1148,7 @@ class ThumbnailStatusPayloadTests(unittest.TestCase):
         )
 
         self.assertEqual(result["state"], "running")
+        self.assertIsNone(result["priority_scope"])
         self.assertNotIn("governor", result)
         self.assertEqual(result["idle_seconds"], 12.35)
         self.assertEqual(result["phases"]["sm"]["count"], 2)
@@ -1216,6 +1253,7 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
         thumbnails._last_user_activity = thumbnails.time.monotonic() - 30.0
         thumbnails._reset_pregen_bulk_cursor()
         thumbnails._reset_pregen_full_cursor()
+        preview_priority.clear_scopes()
         thumbnails._disk_stats_cache.clear()
         thumbnails._disk_stats_cache.update(self.old_disk_stats_cache)
         with thumbnails._write_queue_lock:
@@ -1248,13 +1286,15 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
         thumbnails._thumbnail_retry_after.clear()
         thumbnails._reset_pregen_bulk_cursor()
         thumbnails._reset_pregen_full_cursor()
+        preview_priority.clear_scopes()
         with thumbnails._write_queue_lock:
             thumbnails._write_queue.clear()
         thumbnails._clear_cache_metadata_lock_backoff()
         self.tempdir.cleanup()
 
-    def _make_image(self) -> str:
-        path = os.path.join(self.tempdir.name, "source.jpg")
+    def _make_image(self, name: str = "source.jpg") -> str:
+        path = os.path.join(self.tempdir.name, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         Image.new("RGB", (1200, 800), color=(120, 80, 40)).save(path, "JPEG", quality=90)
         os.utime(path, (time.time(), 1712345678.25))
         return path
@@ -2296,6 +2336,47 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
         )
         self.assertEqual(needed, {})
 
+    def test_rankings_scope_signal_prioritizes_the_browsed_folder_without_moving_cursor(self):
+        backlog = self._make_image("a-backlog/backlog.jpg")
+        priority = self._make_image("z-Film Scans/priority.jpg")
+        self._add_catalog_original(1, backlog)
+        self._add_catalog_original(2, priority)
+        cursor_before = dict(thumbnails._pregen_bulk_cursor)
+
+        library_service._record_preview_priority_scope(
+            {"hidden_pending_thumbnails": 1},
+            folder=os.path.dirname(priority),
+            collection_id=0,
+        )
+        warmed = asyncio.run(thumbnails._run_pregen_bulk_batch(generate_batch=1))
+
+        self.assertGreater(warmed, 0)
+        self.assertIsNone(thumbnails.fast_disk_path_entry("sm", 1))
+        self.assertIsNotNone(thumbnails.fast_disk_path_entry("sm", 2))
+        self.assertEqual(thumbnails._pregen_bulk_cursor, cursor_before)
+        self.assertEqual(thumbnails._pregen_status["priority_scope"], "z-Film Scans")
+
+    def test_drained_priority_scope_falls_back_to_normal_cursor_order(self):
+        backlog = self._make_image("a-backlog/backlog.jpg")
+        priority = self._make_image("z-Film Scans/priority.jpg")
+        self._add_catalog_original(1, backlog)
+        self._add_catalog_original(2, priority)
+        signatures, file_size, _modified_at = self._catalog_signatures(priority, image_id=2)
+        thumbnails._generate_thumbnail_set_sync(
+            priority,
+            2,
+            signatures,
+            source_bytes=file_size,
+        )
+        preview_priority.record_scope(folder=os.path.dirname(priority), timestamp=123.0)
+
+        warmed = asyncio.run(thumbnails._run_pregen_bulk_batch(generate_batch=1))
+
+        self.assertGreater(warmed, 0)
+        self.assertIsNotNone(thumbnails.fast_disk_path_entry("sm", 1))
+        self.assertEqual(preview_priority.recent_scopes(), [])
+        self.assertIsNone(thumbnails._pregen_status["priority_scope"])
+
     def test_bulk_candidate_respects_lg_budget_room(self):
         path = self._make_image()
         stat = os.stat(path)
@@ -2433,10 +2514,96 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
         finally:
             thumbnails.PREGENERATE_GENERATE_BATCH = old_batch
 
-    def test_pregeneration_does_not_pause_for_priority_after_activity(self):
+    def test_pregeneration_yields_after_activity_then_resumes_when_idle(self):
         thumbnails.note_user_activity()
 
+        self.assertTrue(thumbnails._pregen_should_pause_for_priority())
+        thumbnails._last_user_activity = (
+            thumbnails.time.monotonic() - thumbnails.PREGENERATE_IDLE_SECONDS
+        )
         self.assertFalse(thumbnails._pregen_should_pause_for_priority())
+
+    def test_pregeneration_makes_a_bounded_burst_during_continuous_activity(self):
+        path = self._make_image()
+        for image_id in range(1, 6):
+            self._add_catalog_original(image_id, path)
+        thumbnails.note_user_activity()
+
+        warmed = asyncio.run(thumbnails._run_pregen_bulk_batch(generate_batch=16))
+        cached = [
+            image_id
+            for image_id in range(1, 6)
+            if thumbnails.fast_disk_path_entry("sm", image_id) is not None
+        ]
+
+        self.assertGreater(warmed, 0)
+        self.assertEqual(
+            len(cached),
+            thumbnails.PREGENERATE_ACTIVITY_BURST_ITEMS,
+        )
+
+    def test_prefetch_worker_reports_activity_yield_instead_of_complete(self):
+        old_sleep = thumbnails.asyncio.sleep
+        old_cache_target_total = thumbnails._cache_target_total
+        old_run_bulk = thumbnails._run_pregen_bulk_batch
+        old_run_full = thumbnails._run_full_warm_batch
+        old_flush_write_queue = thumbnails._flush_write_queue
+        old_flush_orientation = thumbnails.flush_orientation_updates
+        old_background_decision = thumbnails._pregen_background_decision
+        try:
+            thumbnails._prefetching = True
+            thumbnails._pregen_manual_pause = False
+            thumbnails._pregen_manual_mode = True
+            thumbnails._disk_allocations.update({
+                "sm": 64 * 1024 * 1024,
+                "md": 0,
+                "lg": 0,
+                thumbnails.FULL_TIER: 0,
+            })
+
+            async def fake_sleep(_seconds):
+                thumbnails._prefetching = False
+
+            async def fake_cache_target_total():
+                return 10
+
+            async def fake_run_bulk(generate_batch=None):
+                return thumbnail_pregen_worker.PREGEN_YIELDED
+
+            async def fake_flush_orientation():
+                return None
+
+            thumbnails.asyncio.sleep = fake_sleep
+            thumbnails._cache_target_total = fake_cache_target_total
+            thumbnails._run_pregen_bulk_batch = fake_run_bulk
+            thumbnails._run_full_warm_batch = mock.AsyncMock(return_value=0)
+            thumbnails._flush_write_queue = lambda: True
+            thumbnails.flush_orientation_updates = fake_flush_orientation
+            thumbnails._pregen_background_decision = lambda: thumbnail_pregen.BackgroundDecision(
+                mode="manual",
+                intensity=1.0,
+                pause=False,
+                sleep_seconds=0.0,
+                thumbnail_batch_size=16,
+                thumbnail_pause_seconds=0.25,
+                embedding_pause_seconds=0.25,
+                reason="manual background work",
+                checked_at=1.0,
+            )
+
+            asyncio.run(thumbnails.run_prefetch_worker())
+
+            self.assertEqual(thumbnails._pregen_status["state"], "waiting")
+            self.assertIn("browsing", thumbnails._pregen_status["message"].lower())
+            thumbnails._run_full_warm_batch.assert_not_awaited()
+        finally:
+            thumbnails.asyncio.sleep = old_sleep
+            thumbnails._cache_target_total = old_cache_target_total
+            thumbnails._run_pregen_bulk_batch = old_run_bulk
+            thumbnails._run_full_warm_batch = old_run_full
+            thumbnails._flush_write_queue = old_flush_write_queue
+            thumbnails.flush_orientation_updates = old_flush_orientation
+            thumbnails._pregen_background_decision = old_background_decision
 
     def test_prefetch_worker_caps_manual_batch_to_configured_batch(self):
         old_batch = thumbnails.PREGENERATE_GENERATE_BATCH

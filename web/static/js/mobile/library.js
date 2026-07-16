@@ -4,23 +4,26 @@
 // each member's ranking signals.
 
 import {
-    createCollection, fetchJson, getAiStatus, getCacheStatus, getCatalog, getCollection, getCounts,
-    createCollectionShare, deleteCollection, getCollectionShare, getCollectionShareFavorites, getFoldersTree, getPeopleStatus, listCollections,
-    renameCollection, revokeCollectionShare, setBackgroundWork, thumbUrl, writeFailureMessage,
+    createCollection, deleteCollection, fetchJson, getAiStatus, getCacheStatus, getCatalog, getCollection, getCounts,
+    getFoldersTree, getPeopleStatus, listCollections,
+    renameCollection, setBackgroundWork, thumbUrl, writeFailureMessage,
 } from './api.js';
-import { nav, on, rememberImages, setScope, clearScope } from './state.js';
+import { applySmartScopeSort, nav, on, patchScope, setScope, clearScope, scopePatchFromSmartQuery } from './state.js';
 import { canInstall, promptInstall } from './install.js';
 import { dismissSheetThen, openSheet } from './selection.js';
 import { showToast } from './toast.js';
-import { openViewer } from './viewer.js';
 import { applyFlags } from './flags.js';
-import { dismissLayer, pushLayer, registerLayer, syncLayerClosed } from './history.js';
 import { icon } from '../icons.js';
+import { openCollectionShareSheet, renderSharedView } from './sharing.js';
+import { offlineSummary, openOfflineStatusSheet } from './offline.js';
+import { renderBackupView, stopBackupView } from './backup.js';
+import { INACTIVE_WORKER_STATES, normalizeWorkerState } from '../worker_state.js';
 
 // Matches RANK_QUALITY_MIN_SIGNALS in data/repositories/rankings.py.
 const SORT_QUALITY_MIN_SIGNALS = 3;
 const DISMISSED_SUGGESTIONS_KEY = 'pa_m_dismissed_suggestions';
 const TOAST_ACTION_RESET_MS = 6200;
+// Shared contract: const INACTIVE_WORKER_STATES = new Set(['idle', 'ready', 'paused', 'complete', 'caught_up', 'error', 'disabled', 'unavailable', 'stale']);
 
 let root = null;
 let built = false;
@@ -34,8 +37,6 @@ let suggestionsLoading = false;
 let suggestionsLoaded = false;
 let showingCollection = false;
 let loadError = false;
-let collectionListScroll = 0;
-let collectionToken = 0;
 let workStatus = null;
 let workPollTimer = null;
 let workLoading = false;
@@ -189,8 +190,11 @@ function render() {
     }
 
     html += '<div class="ms-sec" style="padding-left:0;padding-right:0"><h3>Quick access</h3>'
-        + `<button class="m-lib-row" data-q="picked"><span class="g">${icon('star')}</span><span class="body">Picked</span><span class="n num">${fmtInt(counts && counts.picked)}</span></button>`
+        + `<button class="m-lib-row" data-q="picked"><span class="g">${icon('heart')}</span><span class="body">Favorites<span class="sub">Favorited photos</span></span><span class="n num">${fmtInt(counts && counts.picked)}</span></button>`
         + `<button class="m-lib-row" data-q="rejected"><span class="g">${icon('x')}</span><span class="body">Rejected</span><span class="n num">${fmtInt(counts && counts.rejected)}</span></button>`
+        + `<button class="m-lib-row" id="ml-offline"><span class="g">${icon('download')}</span><span class="body">Available offline<span class="sub">Saved on this phone</span></span><span class="n num">${fmtInt(offlineSummary().count)}</span></button>`
+        + `<button class="m-lib-row" id="ml-backup"><span class="g">${icon('upload')}</span><span class="body">Backup<span class="sub">Uploads and phone storage</span></span></button>`
+        + `<button class="m-lib-row" id="ml-shared"><span class="g">${icon('share-2')}</span><span class="body">Shared with me</span></button>`
         + `<button class="m-lib-row" data-q="all"><span class="g">${icon('house')}</span><span class="body">All photos</span><span class="n num">${fmtInt(counts && counts.total)}</span></button></div>`;
 
     html += '<div class="ms-sec" style="padding-left:0;padding-right:0"><h3>Sources</h3>';
@@ -230,11 +234,28 @@ function render() {
         });
     }
     root.querySelector('#ml-new').addEventListener('click', newCollectionSheet);
+    root.querySelector('#ml-shared')?.addEventListener('click', () => {
+        showingCollection = true;
+        renderSharedView(root, () => {
+            showingCollection = false;
+            render();
+        });
+    });
+    root.querySelector('#ml-offline')?.addEventListener('click', openOfflineStatusSheet);
+    root.querySelector('#ml-backup')?.addEventListener('click', () => {
+        showingCollection = true;
+        stopWorkPolling();
+        renderBackupView(root, () => {
+            showingCollection = false;
+            render();
+            startWorkPolling();
+        });
+    });
     for (const el of root.querySelectorAll('.m-lib-row[data-q]')) {
         el.addEventListener('click', () => {
             const q = el.dataset.q;
             if (q === 'all') clearScope();
-            else setScope({ flag: q, label: q === 'picked' ? 'Picked' : 'Rejected' });
+            else setScope({ flag: q, label: q === 'picked' ? 'Favorites' : 'Rejected' });
             nav.setTab('photos');
         });
     }
@@ -248,6 +269,11 @@ function render() {
 
 /* ---------- background work glass box ---------- */
 const pct = (value) => (value == null ? null : Math.max(0, Math.min(100, Number(value) || 0)));
+
+function workerStateIsActive(value) {
+    const state = normalizeWorkerState(value);
+    return Boolean(state) && !INACTIVE_WORKER_STATES.has(state);
+}
 
 function workRows() {
     const ai = workStatus && workStatus.ai;
@@ -266,7 +292,7 @@ function workRows() {
                 ? `${fmtInt(ai.embedded)} / ${fmtInt(ai.total_images)} indexed`
                 : 'Checking status…',
             paused: Boolean(ai && ai.embedding_manual_pause),
-            running: Boolean(ai && ['embedding', 'loading_model'].includes(ai.worker_state)),
+            running: workerStateIsActive(ai && ai.worker_state),
         },
         {
             key: 'cache',
@@ -277,7 +303,7 @@ function workRows() {
                 ? `${fmtInt(preview.count)} / ${fmtInt(preview.total)} previews`
                 : 'Checking status…',
             paused: Boolean(cachePregen.manual_pause),
-            running: cachePregen.state === 'running',
+            running: !cachePregen.manual_pause && workerStateIsActive(cachePregen.state),
         },
         {
             key: 'people',
@@ -288,7 +314,7 @@ function workRows() {
                 ? `${fmtInt((peopleStatus.counts || {}).people)} people · ${fmtInt((peopleStatus.counts || {}).pending_cached_images)} pending`
                 : 'Checking status…',
             paused: Boolean(peopleStatus && !peopleStatus.active),
-            running: Boolean(peopleStatus && peopleStatus.active && peopleWorker.state !== 'idle'),
+            running: workerStateIsActive(peopleWorker.state),
         },
     ];
 }
@@ -646,68 +672,31 @@ function newCollectionSheet() {
 }
 
 /* ---------- collection drill-in ---------- */
-async function openCollectionView(coll) {
-    const pane = document.getElementById('tab-library');
-    if (!showingCollection && pane) collectionListScroll = pane.scrollTop;
-    const token = ++collectionToken;
-    showingCollection = true;
-    root.innerHTML =
-        `<div class="ml-head"><button class="ml-back" id="ml-back">${icon('chevron-left')} Library</button><h3>${esc(coll.name)}</h3><button class="ml-more" id="ml-more" aria-label="Collection actions">${icon('ellipsis')}</button></div>`
-        + `<div class="ml-coll-grid">${'<div class="skel-cell"></div>'.repeat(9)}</div>`;
-    if (pane) pane.scrollTop = 0;
-    pushLayer('collection');
-    root.querySelector('#ml-back').addEventListener('click', () => dismissLayer('collection', closeCollectionView));
-    root.querySelector('#ml-more').addEventListener('click', () => openCollectionActionsSheet(coll));
-
-    let data = null;
-    try {
-        data = await getCollection(coll.id, 1000);
-    } catch {
-        if (token !== collectionToken || !showingCollection) return;
-        root.innerHTML =
-            `<div class="ml-head"><button class="ml-back" id="ml-back">${icon('chevron-left')} Library</button><h3>${esc(coll.name)}</h3><button class="ml-more" id="ml-more" aria-label="Collection actions">${icon('ellipsis')}</button></div>`
-            + '<div class="ms-empty">Couldn\'t load this collection.</div>'
-            + '<button class="sheet-btn" id="ml-coll-retry" type="button">Try again</button>';
-        root.querySelector('#ml-back')?.addEventListener('click', () => dismissLayer('collection', closeCollectionView));
-        root.querySelector('#ml-more')?.addEventListener('click', () => openCollectionActionsSheet(coll));
-        root.querySelector('#ml-coll-retry')?.addEventListener('click', () => openCollectionView(coll));
+function openCollectionView(coll) {
+    if (coll.smart) {
+        setScope({
+            ...scopePatchFromSmartQuery(coll.query || {}),
+            smartName: coll.name || 'Smart collection',
+            smartCollectionId: String(coll.id),
+            smartQuery: coll.query || {},
+        });
+        applySmartScopeSort(coll.query && coll.query.sort);
+        nav.setTab('photos');
         return;
     }
-    if (token !== collectionToken || !showingCollection) return;
-    const images = (data && data.collection && data.collection.images) || [];
-    rememberImages(images);
-    const pct = sortedPctCache.get(coll.id);
-    const grid = images.map((img, i) =>
-        `<figure class="mcell" data-i="${i}" role="button" aria-label="${esc(img.filename || img.id)}">`
-        + `<img loading="lazy" decoding="async" src="${esc(thumbUrl('sm', img.id))}" onload="this.classList.add('ld')" alt="">`
-        + '</figure>'
-    ).join('');
-    root.innerHTML =
-        `<div class="ml-head"><button class="ml-back" id="ml-back">${icon('chevron-left')} Library</button><h3>${esc(coll.name)}</h3><button class="ml-more" id="ml-more" aria-label="Collection actions">${icon('ellipsis')}</button></div>`
-        + `<div class="ms-empty">${fmtInt(images.length)} photos${pct == null ? '' : ` · ${pct}% sorted`}</div>`
-        + `<div class="ml-coll-grid">${grid || '<div class="ms-empty" style="grid-column:span 3">No photos in this collection.</div>'}</div>`;
-    root.querySelector('#ml-back').addEventListener('click', () => dismissLayer('collection', closeCollectionView));
-    root.querySelector('#ml-more').addEventListener('click', () => openCollectionActionsSheet(coll));
-    root.querySelector('.ml-coll-grid').addEventListener('click', (e) => {
-        const cell = e.target.closest('.mcell[data-i]');
-        if (cell) openViewer(images, Number(cell.dataset.i));
+    setScope({
+        collectionId: String(coll.id),
+        label: coll.name || 'Collection',
     });
+    nav.setTab('photos');
 }
 
-function closeCollectionView({ fromHistory = false } = {}) {
-    if (!showingCollection) return;
-    collectionToken += 1;
-    showingCollection = false;
-    render();
-    requestAnimationFrame(() => {
-        const pane = document.getElementById('tab-library');
-        if (pane) pane.scrollTop = collectionListScroll;
-    });
-    loadAll();
-    if (!fromHistory) syncLayerClosed('collection');
+export function popCollectionView() {
+    return false;
 }
 
-function openCollectionActionsSheet(coll) {
+/** Rename / share / delete for the collection currently open as a timeline scope. */
+export function openCollectionActionsSheet(coll) {
     const sheet = openSheet(
         `<h3>${esc(coll.name)}</h3>`
         + '<input class="sheet-input" id="ml-rename-name" type="text" autocomplete="off">'
@@ -718,17 +707,23 @@ function openCollectionActionsSheet(coll) {
     );
     const input = sheet.querySelector('#ml-rename-name');
     input.value = coll.name || '';
-    sheet.querySelector('#ml-rename-save').addEventListener('click', async () => {
+    sheet.querySelector('#ml-rename-save').addEventListener('click', () => {
         const next = input.value.trim();
         if (!next || next === coll.name) return;
         dismissSheetThen(async () => {
             const result = await renameCollection(coll.id, next);
             if (result && result.ok) {
-                showToast(`Renamed to “${next}”`);
+                showToast(`Renamed to \u201c${next}\u201d`);
                 collections = null;
-                coll.name = next;
-                await loadAll();
-                openCollectionView(coll);
+                if (coll.smart) patchScope({ smartName: next });
+                else {
+                    setScope({
+                        collectionId: String(coll.id),
+                        collectionSmart: false,
+                        label: next,
+                    });
+                }
+                document.dispatchEvent(new CustomEvent('collections-changed'));
             } else {
                 showToast(writeFailureMessage());
             }
@@ -746,251 +741,23 @@ function openCollectionActionsSheet(coll) {
         confirm.hidden = true;
         deleteButton.hidden = false;
     });
-    confirm.querySelector('[data-yes]')?.addEventListener('click', async () => {
+    confirm.querySelector('[data-yes]')?.addEventListener('click', () => {
         dismissSheetThen(async () => {
             const result = await deleteCollection(coll.id);
             if (result && result.ok) {
-                showToast(`Deleted “${coll.name}”`);
+                showToast('Collection deleted \u2014 photos stay in your library');
                 collections = null;
-                counts = null;
-                dismissLayer('collection', closeCollectionView);
-                await loadAll();
+                clearScope();
+                nav.setTab('library');
+                document.dispatchEvent(new CustomEvent('collections-changed'));
             } else {
                 showToast(writeFailureMessage());
             }
         });
     });
-    input.focus();
-    input.select();
-}
-
-function formatShareDate(value) {
-    if (value == null) return 'Never';
-    const date = new Date(Number(value) * 1000);
-    if (Number.isNaN(date.getTime())) return '—';
-    return date.toLocaleString([], {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: 'numeric',
-        minute: '2-digit',
-    });
-}
-
-function formatRelativeShareDate(value) {
-    if (value == null) return 'never';
-    const date = new Date(Number(value) * 1000);
-    if (Number.isNaN(date.getTime())) return 'unknown';
-    const diffSeconds = Math.round((date.getTime() - Date.now()) / 1000);
-    const ranges = [
-        ['year', 31536000],
-        ['month', 2592000],
-        ['week', 604800],
-        ['day', 86400],
-        ['hour', 3600],
-        ['minute', 60],
-    ];
-    const formatter = new Intl.RelativeTimeFormat([], { numeric: 'auto' });
-    for (const [unit, seconds] of ranges) {
-        if (Math.abs(diffSeconds) >= seconds) {
-            return formatter.format(Math.round(diffSeconds / seconds), unit);
-        }
-    }
-    return formatter.format(diffSeconds, 'second');
-}
-
-function shareStatsLine(share) {
-    const count = Number(share?.view_count || 0);
-    if (!count) return 'Never opened';
-    return `Opened ${fmtInt(count)} ${count === 1 ? 'time' : 'times'} · last ${formatRelativeShareDate(share.last_viewed_at)}`;
-}
-
-function clientPickIds(pickData) {
-    return ((pickData && pickData.favorites) || [])
-        .map((row) => Number(row && row.image_id))
-        .filter((id) => id > 0);
-}
-
-function sharePicksRow(pickData) {
-    const ids = clientPickIds(pickData);
-    const count = Number(pickData?.count ?? ids.length);
-    return `<button class="sheet-row" id="ml-share-apply-picks" data-mutating ${ids.length ? '' : 'disabled'}>`
-        + `<span class="g">${icon('heart')}</span>`
-        + '<span class="body">Client picks</span>'
-        + `<span class="n num">${fmtInt(count)}</span></button>`;
-}
-
-async function applyShareFavoritesAsPicks(coll, ids) {
-    if (!ids.length) {
-        showToast('No client picks yet');
-        return;
-    }
-    const data = await getCollection(coll.id, 1000);
-    rememberImages((data && data.collection && data.collection.images) || []);
-    dismissSheetThen(() => applyFlags(ids, 'picked'));
-}
-
-function shareExpiryControl() {
-    return '<label class="share-expiry">Expires <select class="sheet-input" id="ml-share-expiry">'
-        + '<option value="">Never</option>'
-        + '<option value="7">7 days</option>'
-        + '<option value="30">30 days</option>'
-        + '</select></label>';
-}
-
-function sharePasswordControl(share) {
-    const isProtected = Boolean(share?.protected);
-    return '<div class="share-password-mobile">'
-        + '<div class="share-password-mobile-head"><span>Password</span>'
-        + (isProtected ? '<b>Protected</b>' : '')
-        + '</div>'
-        + `<input class="sheet-input" id="ml-share-password" type="password" autocomplete="new-password" placeholder="${isProtected ? 'Protected' : 'No password'}">`
-        + (share ? `<button class="sheet-row" id="ml-share-password-save" data-mutating><span class="g">${icon('lock')}</span>${isProtected ? 'Change password' : 'Set password'}</button>` : '')
-        + (isProtected ? `<button class="sheet-row" id="ml-share-password-clear" data-mutating><span class="g">${icon('x')}</span>Remove password</button>` : '')
-        + '</div>';
-}
-
-async function copyOrShareLink(url, title) {
-    if (navigator.share) {
-        try {
-            await navigator.share({ title, url });
-            return;
-        } catch (error) {
-            if (error && error.name === 'AbortError') return;
-        }
-    }
-    try {
-        await navigator.clipboard.writeText(url);
-        showToast('Link copied');
-    } catch {
-        showToast("Couldn't copy link");
-    }
-}
-
-async function openCollectionShareSheet(coll) {
-    let sheet = openSheet(`<h3>Share ${esc(coll.name)}</h3><div class="ms-empty">Loading…</div>`);
-    const data = await getCollectionShare(coll.id);
-    await renderCollectionShareSheet(coll, data && data.share);
-    sheet = document.getElementById('m-sheet');
-    return sheet;
-}
-
-async function renderCollectionShareSheet(coll, share) {
-    const pickData = share ? await getCollectionShareFavorites(coll.id) : null;
-    const sheet = openSheet(
-        `<h3>Share ${esc(coll.name)}</h3>`
-        + (share
-            ? '<div class="sheet-meta">'
-                + `<div><span>Link</span><b>${esc(share.url)}</b></div>`
-                + `<div><span>Created</span><b>${esc(formatShareDate(share.created_at))}</b></div>`
-                + `<div><span>Expires</span><b>${esc(formatShareDate(share.expires_at))}</b></div>`
-                + `<div><span>Stats</span><b>${esc(shareStatsLine(share))}</b></div></div>`
-                + sharePicksRow(pickData)
-                + sharePasswordControl(share)
-                + '<button class="sheet-btn" id="ml-share-copy">Share…</button>'
-                + `<button class="sheet-row" id="ml-share-rotate" data-mutating><span class="g">${icon('refresh-cw')}</span>Rotate link</button>`
-                + '<div class="sheet-confirm" id="ml-share-rotate-confirm" hidden>Invalidate old link? <button data-yes="1">Yes</button><button data-no="1">No</button></div>'
-                + `<button class="sheet-row" id="ml-share-revoke" data-mutating><span class="g">${icon('x')}</span>Revoke</button>`
-                + '<div class="sheet-confirm" id="ml-share-revoke-confirm" hidden>Revoke link? <button data-yes="1">Yes</button><button data-no="1">No</button></div>'
-            : '<div class="ms-empty">Create a private gallery link for this collection.</div>'
-                + shareExpiryControl()
-                + sharePasswordControl(null)
-                + '<button class="sheet-btn" id="ml-share-create" data-mutating>Create share link</button>')
-    );
-    const pickIds = clientPickIds(pickData);
-    sheet.querySelector('#ml-share-copy')?.addEventListener('click', () => copyOrShareLink(share.url, coll.name));
-    sheet.querySelector('#ml-share-apply-picks')?.addEventListener('click', () => applyShareFavoritesAsPicks(coll, pickIds));
-    sheet.querySelector('#ml-share-create')?.addEventListener('click', async (event) => {
-        const button = event.currentTarget;
-        if (!button || button.disabled) return;
-        button.disabled = true;
-        try {
-            const value = sheet.querySelector('#ml-share-expiry')?.value || '';
-            const password = sheet.querySelector('#ml-share-password')?.value || '';
-            const result = await createCollectionShare(coll.id, {
-                expiresInDays: value ? Number(value) : null,
-                ...(password ? { password } : {}),
-            });
-            if (result && result.ok) {
-                showToast('Share link created');
-                renderCollectionShareSheet(coll, result.share);
-            } else {
-                showToast(writeFailureMessage());
-            }
-        } finally {
-            if (document.contains(button)) button.disabled = false;
-        }
-    });
-    sheet.querySelector('#ml-share-password-save')?.addEventListener('click', async () => {
-        const password = sheet.querySelector('#ml-share-password')?.value || '';
-        if (!password) {
-            showToast('Enter a password');
-            return;
-        }
-        const result = await createCollectionShare(coll.id, { password });
-        if (result && result.ok) {
-            showToast(share.protected ? 'Password changed' : 'Password set');
-            renderCollectionShareSheet(coll, result.share);
-        } else {
-            showToast(writeFailureMessage());
-        }
-    });
-    sheet.querySelector('#ml-share-password-clear')?.addEventListener('click', async () => {
-        const result = await createCollectionShare(coll.id, { clearPassword: true });
-        if (result && result.ok) {
-            showToast('Password removed');
-            renderCollectionShareSheet(coll, result.share);
-        } else {
-            showToast(writeFailureMessage());
-        }
-    });
-    bindSheetConfirm(sheet, '#ml-share-rotate', '#ml-share-rotate-confirm', async () => {
-        const result = await createCollectionShare(coll.id, { rotate: true });
-        if (result && result.ok) {
-            showToast('New share link created');
-            renderCollectionShareSheet(coll, result.share);
-        } else {
-            showToast(writeFailureMessage());
-        }
-    });
-    bindSheetConfirm(sheet, '#ml-share-revoke', '#ml-share-revoke-confirm', async () => {
-        const result = await revokeCollectionShare(coll.id);
-        if (result && result.ok) {
-            showToast('Share link revoked');
-            renderCollectionShareSheet(coll, null);
-        } else {
-            showToast(writeFailureMessage());
-        }
-    });
-}
-
-function bindSheetConfirm(sheet, buttonSelector, confirmSelector, action) {
-    const button = sheet.querySelector(buttonSelector);
-    const confirm = sheet.querySelector(confirmSelector);
-    if (!button || !confirm) return;
-    button.addEventListener('click', () => {
-        button.hidden = true;
-        confirm.hidden = false;
-        confirm.querySelector('[data-yes]')?.focus();
-    });
-    confirm.querySelector('[data-no]')?.addEventListener('click', () => {
-        confirm.hidden = true;
-        button.hidden = false;
-    });
-    const yes = confirm.querySelector('[data-yes]');
-    yes?.addEventListener('click', async () => {
-        if (!yes || yes.disabled) return;
-        yes.disabled = true;
-        try {
-            await action();
-        } finally {
-            if (document.contains(yes)) yes.disabled = false;
-        }
-    });
 }
 
 export function initLibrary() {
-    registerLayer('collection', { close: closeCollectionView });
     on('installable', () => {
         if (!showingCollection && built) render();
     });
@@ -998,9 +765,19 @@ export function initLibrary() {
     on('flags', () => {
         counts = null;   // flag writes change picked/rejected counts
     });
+    on('offline-availability', () => {
+        if (built && !showingCollection) render();
+    });
+    document.addEventListener('collections-changed', () => {
+        collections = null;
+        if (built && !showingCollection) loadAll();
+    });
     on('tab', (tab) => {
         if (tab === 'library') startWorkPolling();
-        else stopWorkPolling();
+        else {
+            stopWorkPolling();
+            stopBackupView();
+        }
     });
 }
 

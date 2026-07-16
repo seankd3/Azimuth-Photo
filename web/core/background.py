@@ -140,9 +140,28 @@ def install_idle_activity_middleware(app, *, thumbnails, excluded_paths=None):
     return track_idle_activity_middleware
 
 
-async def run_shutdown(*, thumbnails, background_task_tracker: BackgroundTaskTracker) -> None:
+async def run_shutdown(
+    *,
+    thumbnails,
+    background_task_tracker: BackgroundTaskTracker,
+    caption_worker=None,
+) -> None:
     thumbnails.stop_prefetch()
     await background_task_tracker.cancel_all()
+    await thumbnails.cancel_background_tasks()
+
+    from features.media import warm as media_warm
+    await media_warm.cancel_background_tasks()
+
+    try:
+        import embedding_worker
+
+        await embedding_worker.shutdown_embedding_worker()
+    except ImportError:
+        pass
+
+    if caption_worker is not None:
+        caption_worker.shutdown_caption_worker()
 
 
 async def run_startup(
@@ -211,11 +230,11 @@ async def run_startup(
         await _gather_logged(
             "common_filter_cache_warmup",
             *(
-                api_rankings(limit=60, file_type=file_type)
+                api_rankings(limit=100, file_type=file_type, stacks="collapsed")
                 for file_type in file_types
             ),
             *(
-                api_rankings(limit=60, q=file_type)
+                api_rankings(limit=100, q=file_type, stacks="collapsed")
                 for file_type in file_types
             ),
             *(
@@ -238,7 +257,7 @@ async def run_startup(
             get_filter_options(),
             build_ai_status(),
             get_date_groups(visible_thumb_size="sm", cache_root=cache_root()),
-            api_rankings(limit=60),
+            api_rankings(limit=100, stacks="collapsed"),
             mosaic_next(n=12, strategy="explore"),
             api_folders(max_depth=0),
             api_folders(max_depth=1),
@@ -302,7 +321,7 @@ async def run_startup(
             ),
             get_visible_past_matchups("md"),
             api_folders(max_depth=1),
-            api_rankings(limit=50),
+            api_rankings(limit=100, stacks="collapsed"),
             api_rankings(limit=50, sort="resolution"),
             api_settings(),
         )

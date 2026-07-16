@@ -218,6 +218,21 @@ async def revoke_device(db_path: str, device_id: int) -> dict[str, Any]:
         await connection.close_async(conn, db_path=db_path)
 
 
+async def revoke_all_devices(db_path: str) -> int:
+    """Revoke every active device. Called when the owner key is first set so a
+    device paired during the pre-key setup window cannot retain owner access."""
+    await ensure_devices_schema(db_path)
+    conn = await connection.open_async(db_path)
+    try:
+        cursor = await conn.execute(
+            "UPDATE devices SET revoked_at = ? WHERE revoked_at IS NULL", (time.time(),)
+        )
+        await conn.commit()
+        return int(cursor.rowcount or 0)
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+
+
 async def authenticate_device_token(db_path: str, token: str | None) -> dict[str, Any] | None:
     """Return the active device row for a raw token, or None if unknown/revoked."""
     raw = str(token or "").strip()

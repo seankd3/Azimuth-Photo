@@ -6,6 +6,9 @@ from functools import partial
 from core import work_coordination
 
 
+PREGEN_YIELDED = -2
+
+
 async def run_pregen_bulk_batch(
     generate_batch: int | None = None,
     *,
@@ -22,15 +25,21 @@ async def run_pregen_bulk_batch(
     bulk_tier_budgets,
     bulk_tier_room,
     full_tier_room,
+    pregen_priority_candidate_batch,
     pregen_bulk_candidate_batch,
     reset_pregen_bulk_cursor,
+    set_priority_scope,
     bulk_candidate_signatures,
     full_candidate_signature,
     prefetch_executor,
     generate_thumbnail_set_sync,
     record_pregen_result,
+    activity_burst_items: int,
 ) -> int:
+    set_priority_scope(None)
     generate_batch = generate_batch or default_generate_batch
+    if should_pause_for_priority():
+        generate_batch = min(generate_batch, max(1, int(activity_burst_items)))
     tier_budgets = bulk_tier_budgets()
     if all(tier_budgets.get(size, 0) <= 0 for size in thumb_tiers):
         return 0
@@ -43,30 +52,16 @@ async def run_pregen_bulk_batch(
     full_budget = int(disk_allocations.get(full_tier, 0) or 0)
     full_room = {"bytes": full_tier_room(full_budget)} if full_budget > 0 else {"bytes": 0}
     pending = []
-    scanned_batches = 0
     max_scan_batches = 4
-    reached_end = False
 
-    while len(pending) < generate_batch and scanned_batches < max_scan_batches:
-        if not is_prefetching() or is_manual_paused():
-            break
-        if should_pause_for_priority():
-            break
-
-        rows = await pregen_bulk_candidate_batch(scan_batch)
-        if not rows:
-            reset_pregen_bulk_cursor()
-            reached_end = True
-            if pending:
-                break
-            rows = await pregen_bulk_candidate_batch(scan_batch)
-            if not rows:
-                return 0
-
+    def collect_candidates(rows) -> None:
         for row in rows:
             if not is_prefetching() or is_manual_paused():
                 break
-            if should_pause_for_priority():
+            if (
+                should_pause_for_priority()
+                and len(pending) >= max(1, int(activity_burst_items))
+            ):
                 break
             size_signatures, source_size = bulk_candidate_signatures(row, tier_room, tier_budgets)
             full_item = (
@@ -86,8 +81,58 @@ async def run_pregen_bulk_batch(
             if len(pending) >= generate_batch:
                 break
 
+    priority_processed_ids: set[int] = set()
+    priority_scanned_batches = 0
+    while len(pending) < generate_batch and priority_scanned_batches < max_scan_batches:
+        if not is_prefetching() or is_manual_paused():
+            break
+        candidate_scan_batch = (
+            min(scan_batch, max(1, int(activity_burst_items)))
+            if should_pause_for_priority()
+            else scan_batch
+        )
+        rows, priority_label = await pregen_priority_candidate_batch(
+            candidate_scan_batch,
+            priority_processed_ids,
+        )
+        if not rows:
+            break
+        set_priority_scope(priority_label)
+        priority_processed_ids.update(int(row["id"]) for row in rows)
+        collect_candidates(rows)
+        priority_scanned_batches += 1
+
+    scanned_batches = 0
+    reached_end = False
+    use_normal_candidates = not pending
+    if use_normal_candidates:
+        set_priority_scope(None)
+    while (
+        use_normal_candidates
+        and len(pending) < generate_batch
+        and scanned_batches < max_scan_batches
+    ):
+        if not is_prefetching() or is_manual_paused():
+            break
+        candidate_scan_batch = (
+            min(scan_batch, max(1, int(activity_burst_items)))
+            if should_pause_for_priority()
+            else scan_batch
+        )
+        rows = await pregen_bulk_candidate_batch(candidate_scan_batch)
+        if not rows:
+            reset_pregen_bulk_cursor()
+            reached_end = True
+            if pending:
+                break
+            rows = await pregen_bulk_candidate_batch(candidate_scan_batch)
+            if not rows:
+                return 0
+
+        collect_candidates(rows)
+
         scanned_batches += 1
-        if len(rows) < scan_batch:
+        if len(rows) < candidate_scan_batch:
             reset_pregen_bulk_cursor()
             reached_end = True
             break
@@ -125,7 +170,10 @@ async def run_pregen_bulk_batch(
             completed += record_pregen_result(await task)
             if idx % 8 == 0 and not should_pause_for_priority():
                 await asyncio.to_thread(flush_write_queue)
-        if should_pause_for_priority():
+        if (
+            should_pause_for_priority()
+            and idx >= max(1, int(activity_burst_items))
+        ):
             break
     if not should_pause_for_priority():
         await asyncio.to_thread(flush_write_queue)
@@ -157,8 +205,11 @@ async def run_full_warm_batch(
     pregen_state: dict,
     current_time,
     record_pregen_batch,
+    activity_burst_items: int,
 ) -> int:
     generate_batch = generate_batch or default_generate_batch
+    if should_pause_for_priority():
+        generate_batch = min(generate_batch, max(1, int(activity_burst_items)))
     full_budget = int(disk_allocations.get(full_tier, 0) or 0)
     if full_budget <= 0 or not cache_root:
         return 0
@@ -177,23 +228,28 @@ async def run_full_warm_batch(
     while len(pending) < generate_batch and scanned_batches < max_scan_batches:
         if not is_prefetching() or is_manual_paused():
             break
-        if should_pause_for_priority():
-            break
-
-        rows = await pregen_full_candidate_batch(scan_batch)
+        candidate_scan_batch = (
+            min(scan_batch, max(1, int(activity_burst_items)))
+            if should_pause_for_priority()
+            else scan_batch
+        )
+        rows = await pregen_full_candidate_batch(candidate_scan_batch)
         if not rows:
             reset_pregen_full_cursor()
             reached_end = True
             if pending:
                 break
-            rows = await pregen_full_candidate_batch(scan_batch)
+            rows = await pregen_full_candidate_batch(candidate_scan_batch)
             if not rows:
                 return 0
 
         for row in rows:
             if not is_prefetching() or is_manual_paused():
                 break
-            if should_pause_for_priority():
+            if (
+                should_pause_for_priority()
+                and len(pending) >= max(1, int(activity_burst_items))
+            ):
                 break
             item = full_candidate_signature(row, full_room, full_budget)
             if item is None:
@@ -203,7 +259,7 @@ async def run_full_warm_batch(
                 break
 
         scanned_batches += 1
-        if len(rows) < scan_batch:
+        if len(rows) < candidate_scan_batch:
             reset_pregen_full_cursor()
             reached_end = True
             break
@@ -217,6 +273,8 @@ async def run_full_warm_batch(
 
     loop = asyncio.get_running_loop()
     originals_written = 0
+    processed = 0
+    yielded_for_activity = False
     wave_size = 1
 
     async def cache_full_item(item: dict) -> tuple[dict, str]:
@@ -235,14 +293,21 @@ async def run_full_warm_batch(
         tasks = [asyncio.create_task(cache_full_item(item)) for item in wave]
         for task in asyncio.as_completed(tasks):
             item, result = await task
+            processed += 1
             if result != item["filepath"] and fast_disk_has(full_tier, item["id"], item["signature"]):
                 originals_written += 1
                 item_bytes = int(item.get("source_size") or 0)
                 pregen_state["last_generated_at"] = current_time()
                 pregen_state["generated_this_session"] += 1
                 record_pregen_batch(1, thumbnails_written=0, source_bytes=item_bytes)
-        if should_pause_for_priority():
+        if (
+            should_pause_for_priority()
+            and processed >= max(1, int(activity_burst_items))
+        ):
+            yielded_for_activity = True
             break
+    if yielded_for_activity and originals_written <= 0:
+        return PREGEN_YIELDED
     return originals_written
 
 
@@ -335,6 +400,15 @@ async def run_prefetch_worker_loop(
 
                 await flush_orientation_updates()
 
+            if generated == PREGEN_YIELDED:
+                set_pregen_state(
+                    "waiting",
+                    "Cache warming yielded to active browsing and will continue shortly.",
+                )
+                no_progress_scan_passes = 0
+                await sleep(max(0.25, batch_pause_seconds()))
+                continue
+
             if generated <= 0 and full_budget > 0:
                 set_pregen_state(
                     "running",
@@ -346,6 +420,15 @@ async def run_prefetch_worker_loop(
                         generate_batch=max(1, min(8, generate_batch)),
                     )
                 generated = full_generated if full_generated != 0 else generated
+
+            if generated == PREGEN_YIELDED:
+                set_pregen_state(
+                    "waiting",
+                    "Cache warming yielded to active browsing and will continue shortly.",
+                )
+                no_progress_scan_passes = 0
+                await sleep(max(0.25, batch_pause_seconds()))
+                continue
 
             if generated == 0:
                 no_progress_scan_passes = 0

@@ -27,7 +27,8 @@ async def api_rankings(
     orientation: str = "", compared: str = "", min_stars: int = 0,
     folder: str = "", flag: str = "", date_taken: str = "", file_type: str = "",
     camera: str = "", lens: str = "", tag: str = "", q: str = "", deep: bool = False, people: str = "",
-    import_batch: int = 0, stacks: str = "expanded", request: Request = None,
+    import_batch: int = 0, stacks: str = "expanded", ids: str = "", collection_id: int = 0,
+    request: Request = None,
 ):
     if _rankings_handler is None:
         raise RuntimeError("Library routes are not configured")
@@ -54,6 +55,8 @@ async def api_rankings(
                 people=people,
                 import_batch=import_batch,
                 stacks=stacks,
+                ids=ids,
+                collection_id=collection_id,
                 request=request,
             )
     except Exception as exc:
@@ -63,6 +66,7 @@ async def api_rankings(
             "images": [],
             "total_images": 0,
             "visible_images": 0,
+            "pending_thumbnails": 0,
             "hidden_pending_thumbnails": 0,
             "total_kept": 0,
             "status_stale": True,
@@ -81,7 +85,7 @@ async def api_date_groups(
     orientation: str = "", compared: str = "", min_stars: int = 0,
     folder: str = "", flag: str = "", date_taken: str = "", file_type: str = "",
     camera: str = "", lens: str = "", tag: str = "", people: str = "", q: str = "", deep: bool = False,
-    import_batch: int = 0, stacks: str = "expanded", request: Request = None,
+    import_batch: int = 0, stacks: str = "expanded", collection_id: int = 0, request: Request = None,
 ):
     """Return date groups with counts for the scrubber, respecting active filters."""
     return await library_service.date_groups_payload(
@@ -100,6 +104,7 @@ async def api_date_groups(
         import_batch=import_batch,
         deep=deep,
         stacks=stacks,
+        collection_id=collection_id,
     )
 
 
@@ -108,7 +113,8 @@ async def api_date_histogram(
     orientation: str = "", compared: str = "", min_stars: int = 0,
     folder: str = "", flag: str = "", date_taken: str = "", file_type: str = "",
     camera: str = "", lens: str = "", tag: str = "", people: str = "", q: str = "", deep: bool = False,
-    import_batch: int = 0, stacks: str = "expanded", request: Request = None,
+    import_batch: int = 0, stacks: str = "expanded", collection_id: int = 0,
+    request: Request = None,
 ):
     """Return whole-scope month counts for the timeline scrubber and month view."""
     return await library_service.date_histogram_payload(
@@ -127,6 +133,7 @@ async def api_date_histogram(
         import_batch=import_batch,
         deep=deep,
         stacks=stacks,
+        collection_id=collection_id,
     )
 
 
@@ -161,7 +168,7 @@ async def api_map_markers(
     orientation: str = "", compared: str = "", min_stars: int = 0,
     folder: str = "", flag: str = "", date_taken: str = "", file_type: str = "",
     camera: str = "", lens: str = "", tag: str = "", people: str = "", q: str = "", deep: bool = False,
-    import_batch: int = 0, request: Request = None,
+    import_batch: int = 0, collection_id: int = 0, request: Request = None,
 ):
     """Return images with GPS data for map display."""
     return await library_service.map_markers_payload(
@@ -179,13 +186,36 @@ async def api_map_markers(
         q=q,
         import_batch=import_batch,
         deep=deep,
+        collection_id=collection_id,
     )
 
 
 @router.get("/api/filter-options")
-async def api_filter_options():
+async def api_filter_options(
+    orientation: str = "", compared: str = "", min_stars: int = 0,
+    folder: str = "", flag: str = "", date_taken: str = "", file_type: str = "",
+    camera: str = "", lens: str = "", tag: str = "", people: str = "", q: str = "", deep: bool = False,
+    import_batch: int = 0, stacks: str = "expanded", collection_id: int = 0, request: Request = None,
+):
     """Return metadata-backed filter choices for the bottom bar."""
-    return await library_service.filter_options_payload()
+    return await library_service.filter_options_payload(
+        orientation=orientation,
+        compared=compared,
+        min_stars=min_stars,
+        folder=repeated_query_values(request, "folder", folder),
+        flag=flag,
+        date_taken=date_taken,
+        file_type=file_type,
+        camera=camera,
+        lens=lens,
+        tag=tag,
+        people=people,
+        q=q,
+        deep=deep,
+        import_batch=import_batch,
+        stacks=stacks,
+        collection_id=collection_id,
+    )
 
 
 @router.get("/api/stats")

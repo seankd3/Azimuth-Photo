@@ -50,7 +50,23 @@ class FakeThumbnails:
 
 
 class PublishBuilderTests(BackendTestCase):
-    async def test_bundle_uses_sm_md_stable_names_and_static_relative_urls(self):
+    async def test_export_pruning_skips_symlinked_directories(self):
+        root = Path(self.tempdir.name) / "export-root"
+        stale = root / "stale"
+        outside = Path(self.tempdir.name) / "outside"
+        stale.mkdir(parents=True)
+        outside.mkdir()
+        sentinel = outside / "keep.txt"
+        sentinel.write_text("outside", encoding="utf-8")
+        (root / "linked-outside").symlink_to(outside, target_is_directory=True)
+
+        await asyncio.to_thread(publish_builder._prune_orphaned_export_dirs, root, set())
+
+        self.assertFalse(stale.exists())
+        self.assertTrue((root / "linked-outside").is_symlink())
+        self.assertTrue(sentinel.exists())
+
+    async def test_bundle_uses_sm_md_lg_stable_names_and_static_relative_urls(self):
         settings.save_settings({
             "share_brand_name": "Northstar Studio",
             "publish_site_base_url": "https://photos.example.test",
@@ -107,15 +123,16 @@ class PublishBuilderTests(BackendTestCase):
         self.assertTrue((dest / "index.html").exists())
         self.assertEqual((dest / "thumb" / "sm" / "101.jpg").read_bytes(), b"sm-a")
         self.assertEqual((dest / "img" / "101.jpg").read_bytes(), b"md-a")
+        self.assertEqual((dest / "lg" / "101.jpg").read_bytes(), b"lg-101")
         self.assertEqual((dest / "thumb" / "sm" / "202.jpg").read_bytes(), b"sm-202")
         self.assertEqual((dest / "img" / "202.jpg").read_bytes(), b"md-202")
-        self.assertFalse((dest / "lg").exists())
+        self.assertEqual((dest / "lg" / "202.jpg").read_bytes(), b"lg-202")
         html = (dest / "index.html").read_text(encoding="utf-8")
         self.assertIn("./thumb/sm/101.jpg", html)
         self.assertIn("./img/101.jpg", html)
+        self.assertIn("./lg/101.jpg", html)
         self.assertIn("Northstar Studio", html)
         self.assertIn("https://photos.example.test", html)
-        self.assertIn("Download all", html)
         self.assertIn("Download photo", html)
         self.assertIn("Photo 1 of 2", html)
         self.assertIn("gallery-size copy", html)
@@ -125,8 +142,8 @@ class PublishBuilderTests(BackendTestCase):
         self.assertEqual(summary.photo_count, 2)
         self.assertEqual(summary.cover, "/g/selected-landscapes/thumb/sm/101.jpg")
         self.assertGreater(summary.bundle_bytes, 0)
-        self.assertGreaterEqual(summary.file_count, 5)
-        self.assertEqual({call[1] for call in thumbs.calls}, {"sm", "md"})
+        self.assertGreaterEqual(summary.file_count, 7)
+        self.assertEqual({call[1] for call in thumbs.calls}, {"sm", "md", "lg"})
 
     async def test_bundle_skips_one_unreadable_member_instead_of_aborting_publish(self):
         templates = app_module.app.state.photoarchive_shell.templates
@@ -269,15 +286,17 @@ class PublishDeployerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_name:
             public_g = Path(temp_name)
             pid_path = public_g / "child.pid"
-            command = (
-                f"{sys.executable} -c "
-                + shlex.quote(
-                    "import pathlib, subprocess, time; "
-                    "p = subprocess.Popen(['sleep', '30']); "
-                    f"pathlib.Path({str(pid_path)!r}).write_text(str(p.pid)); "
-                    "time.sleep(30)"
-                )
+            # A script file sidesteps sh-vs-cmd quoting; python-as-sleep works
+            # on every platform (there is no `sleep` binary on Windows).
+            hang_script = public_g / "hang_hook.py"
+            hang_script.write_text(
+                "import pathlib, subprocess, sys, time\n"
+                "p = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])\n"
+                f"pathlib.Path({str(pid_path)!r}).write_text(str(p.pid))\n"
+                "time.sleep(30)\n",
+                encoding="utf-8",
             )
+            command = f'"{sys.executable}" "{hang_script}"'
 
             result = default_command_runner(command, public_g, 1)
 
@@ -447,16 +466,26 @@ class PublishDeployerTests(unittest.TestCase):
 
     def _process_exited(self, pid):
         for _ in range(20):
-            status = subprocess.run(
-                ["ps", "-o", "stat=", "-p", str(pid)],
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-            if status.returncode != 0 or not status.stdout.strip():
-                return True
-            if status.stdout.strip().startswith("Z"):
-                return True
+            if os.name == "nt":
+                status = subprocess.run(
+                    ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                if str(pid) not in status.stdout:
+                    return True
+            else:
+                status = subprocess.run(
+                    ["ps", "-o", "stat=", "-p", str(pid)],
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                if status.returncode != 0 or not status.stdout.strip():
+                    return True
+                if status.stdout.strip().startswith("Z"):
+                    return True
             time.sleep(0.1)
         return False
 
@@ -493,6 +522,7 @@ class PublishRouteTests(BackendTestCase):
     async def asyncSetUp(self):
         await super().asyncSetUp()
         self.tasks = []
+        publish_routes._jobs.clear()
         templates = app_module.app.state.photoarchive_shell.templates
         self.cache = Path(self.tempdir.name) / "cache"
         self.cache.mkdir()
@@ -560,6 +590,48 @@ class PublishRouteTests(BackendTestCase):
         self.assertEqual(revoke.status_code, 202)
         await asyncio.gather(*self.tasks)
         self.assertIsNone(await db.get_collection_publish(collection["id"]))
+
+    async def test_publish_and_revoke_reject_conflicting_queued_job(self):
+        source = await self._source()
+        image_id = await self._image(source["id"], "queued.jpg")
+        collection = await db.create_collection(name="Queued gallery", image_ids=[image_id])
+        await db.upsert_collection_publish(
+            collection_id=collection["id"],
+            slug="queued-gallery",
+            title="Queued gallery",
+            image_count=1,
+            bundle_bytes=0,
+            last_commit=None,
+        )
+
+        def publish_then_revoke():
+            with TestClient(app_module.app) as client:
+                publish = client.post(
+                    f"/api/user-collections/{collection['id']}/publish",
+                    json={"slug": "queued-gallery", "title": "Queued gallery"},
+                )
+                revoke = client.post(f"/api/user-collections/{collection['id']}/publish/revoke")
+                return publish, revoke
+
+        publish, blocked_revoke = await asyncio.to_thread(publish_then_revoke)
+        self.assertEqual(publish.status_code, 202)
+        self.assertEqual(blocked_revoke.status_code, 409)
+        await asyncio.gather(*self.tasks)
+        self.tasks.clear()
+
+        def revoke_then_publish():
+            with TestClient(app_module.app) as client:
+                revoke = client.post(f"/api/user-collections/{collection['id']}/publish/revoke")
+                publish = client.post(
+                    f"/api/user-collections/{collection['id']}/publish",
+                    json={"slug": "queued-gallery", "title": "Queued gallery"},
+                )
+                return revoke, publish
+
+        revoke, blocked_publish = await asyncio.to_thread(revoke_then_publish)
+        self.assertEqual(revoke.status_code, 202)
+        self.assertEqual(blocked_publish.status_code, 409)
+        await asyncio.gather(*self.tasks)
 
     async def test_unexpected_publish_failure_is_logged_without_leaking_internal_path(self):
         publish_routes._start_job(77, "publishing", slug="private", title="Private")

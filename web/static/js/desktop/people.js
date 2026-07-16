@@ -1,11 +1,12 @@
 import {
     getPeople, getPeopleStatus, ignorePerson, labelPerson, mergePeople, rejectMergeSuggestion,
 } from './api.js';
-import { on, setActiveLens, setRankingsMeta, setScope } from './state.js';
+import { navigateToScope, on, setRankingsMeta } from './state.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
 import { showToast } from './toast.js';
 import { icon } from '../icons.js';
 import { personLabel as cleanPersonLabel, isUnnamedPersonLabel } from '../people_labels.js';
+import { escapeHtml as esc, formatCount as fmt } from './dom.js';
 
 let mounted = false;
 let initialized = false;
@@ -21,10 +22,6 @@ let reviewFocusIndex = 0;
 
 const hiddenPeople = new Set();
 const ignoreTimers = new Map();
-const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[c]));
-const fmt = (n) => Number(n || 0).toLocaleString('en-US');
 const countFor = (person) => Number(person?.image_count || person?.photo_count || person?.face_count || 0);
 const thumbFor = (person = {}) => person.face_thumb_url || person.thumb_url || person.image_thumb_url || '';
 const displayLabel = (person, fallback = '') => cleanPersonLabel(person, fallback);
@@ -185,21 +182,24 @@ async function load() {
     loadError = false;
     const seq = ++generation;
     render();
-    const [data, status] = await Promise.all([getPeople(500), getPeopleStatus()]);
-    if (seq !== generation) return;
-    loading = false;
-    peopleStatus = status;
-    if (!data) {
+    try {
+        const [data, status] = await Promise.all([getPeople(500), getPeopleStatus()]);
+        if (seq !== generation) return;
+        peopleStatus = status;
+        if (!data) throw new Error('People response was empty');
+        peopleData = data;
+        const total = allPeople().length;
+        setRankingsMeta({ visibleImages: total, sortQuality: null });
+    } catch {
+        if (seq !== generation) return;
         peopleData = null;
         loadError = true;
         setRankingsMeta({ visibleImages: 0, sortQuality: null });
+    } finally {
+        if (seq !== generation) return;
+        loading = false;
         render();
-        return;
     }
-    peopleData = data;
-    const total = allPeople().length;
-    setRankingsMeta({ visibleImages: total, sortQuality: null });
-    render();
 }
 
 function findPerson(id) {
@@ -237,12 +237,11 @@ function focusReviewCard(index = reviewFocusIndex) {
 
 function openPerson(person) {
     if (!person || !person.id) return;
-    setScope({
+    navigateToScope({
         people: person.id,
         personLabel: isNamed(person) ? displayLabel(person) : '',
         personThumb: thumbFor(person),
     });
-    setActiveLens('grid');
 }
 
 function closeMenus() {
@@ -259,6 +258,32 @@ function closeMergePopover() {
         pop.remove();
     }
     pendingMerge = null;
+}
+
+function mergeSourceName() {
+    return personActionLabel(findPerson(mergeSourceId) || { label: 'person' });
+}
+
+function syncMergeBanner() {
+    let banner = document.getElementById('people-merge-banner');
+    if (!mergeSourceId) {
+        banner?.remove();
+        return;
+    }
+    if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'people-merge-banner';
+        banner.className = 'people-merge-banner';
+        banner.setAttribute('role', 'status');
+        document.body.appendChild(banner);
+    }
+    banner.textContent = `Merging ${mergeSourceName()} — click a person to merge into, Esc cancels`;
+}
+
+function disarmMerge() {
+    closeMergePopover();
+    mergeSourceId = null;
+    syncMergeBanner();
 }
 
 function focusPersonCard(personId) {
@@ -344,11 +369,12 @@ function requestIgnore(card, person) {
 
 async function runMerge(sourceId, targetId, trigger = null, options = {}) {
     if (!sourceId || !targetId || String(sourceId) === String(targetId)) return false;
+    if (String(mergeSourceId) === String(sourceId)) disarmMerge();
     trigger?.classList.add('is-pending');
     const result = await mergePeople(sourceId, targetId);
     if (result && result.ok) {
         showToast('People merged');
-        mergeSourceId = null;
+        disarmMerge();
         if (options.suggestionId) {
             removeSuggestion(options.suggestionId);
             render();
@@ -470,10 +496,14 @@ export function initPeople() {
         } else if (action === 'merge-start') {
             event.stopPropagation();
             closeMenus();
+            if (String(mergeSourceId) === String(card.dataset.personId)) {
+                disarmMerge();
+                return;
+            }
             mergeSourceId = card.dataset.personId;
             render();
             focusPersonCard(mergeSourceId);
-            showToast('Choose a different person to merge with');
+            syncMergeBanner();
         } else if (action === 'ignore') {
             event.stopPropagation();
             requestIgnore(card, person);
@@ -482,6 +512,11 @@ export function initPeople() {
             const personId = card.dataset.personId;
             render();
             focusPersonCard(personId);
+        } else if (mergeSourceId && String(mergeSourceId) === String(card.dataset.personId) && !event.target.closest('form')) {
+            event.stopPropagation();
+            disarmMerge();
+            render();
+            focusPersonCard(card.dataset.personId);
         } else if (mergeSourceId && String(mergeSourceId) !== String(card.dataset.personId) && !event.target.closest('form')) {
             event.stopPropagation();
             showMergePopover(mergeSourceId, card.dataset.personId, card.getBoundingClientRect());
@@ -572,6 +607,15 @@ export function initPeople() {
     });
     document.addEventListener('keydown', (event) => {
         if (event.key !== 'Escape') return;
+        if (mergeSourceId) {
+            const sourceId = mergeSourceId;
+            event.preventDefault();
+            event.stopPropagation();
+            disarmMerge();
+            render();
+            focusPersonCard(sourceId);
+            return;
+        }
         if (document.getElementById('people-merge-pop')) {
             event.preventDefault();
             event.stopPropagation();
@@ -595,6 +639,5 @@ export function unmountPeople() {
     generation += 1;
     loading = false;
     document.getElementById('view-people').classList.remove('active');
-    document.getElementById('people-merge-pop')?.remove();
-    mergeSourceId = null;
+    disarmMerge();
 }

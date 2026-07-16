@@ -4,9 +4,9 @@
 // jumps across the WHOLE archive (undated photos land in a proper
 // "Undated" section at the end, matching the SQL sort order).
 
-import { getDateHistogram, getRankings, getStack, thumbUrl } from './api.js';
+import { getDateHistogram, getRankings, getScanStatus, getStack, previewThumbUrl, thumbUrl } from './api.js';
 import {
-    byId, clearScope, clearSelection, emit, on, rememberImages,
+    byId, clearScope, clearSelection, emit, nav, on, rememberImages,
     isOffline, scope, scopeActive, scopeParams, selState, selection, selectionChanged,
     setViewPrefs, viewPrefs,
 } from './state.js';
@@ -17,8 +17,13 @@ import { openViewer } from './viewer.js';
 import { tick } from './haptics.js';
 import { icon } from '../icons.js';
 import { personLabel } from '../people_labels.js';
+import { openPersonSheet } from './search.js';
+import { openCollectionActionsSheet } from './library.js';
+import { restoresFilteredMembership } from './flag_scope.js';
+import { createPendingPreviewPoll, pendingCount, pendingPreviewCount as countPendingPreviews } from '../previews.js';
 
 const PAGE = 120;
+const MAX_WINDOW = PAGE * 3;
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const FULL_MONTHS = [
     'January', 'February', 'March', 'April', 'May', 'June',
@@ -38,6 +43,20 @@ const COMPARED_LABELS = {
     direct_uncompared: 'Not compared yet',
     confident: 'High confidence',
 };
+const SMART_SCOPE_FIELDS = {
+    q: 'q',
+    people: 'people',
+    flag: 'flag',
+    date_taken: 'dateTaken',
+    file_type: 'fileType',
+    camera: 'camera',
+    lens: 'lens',
+    tag: 'tag',
+    orientation: 'orientation',
+    folder: 'folder',
+    compared: 'compared',
+    min_stars: 'minStars',
+};
 
 let pane = null;
 let timeline = null;
@@ -51,10 +70,12 @@ let images = [];
 let startOffset = 0;
 let histogram = { months: [], undated: 0, total: 0 };
 let monthOffsets = [];
+let daySectionOffsets = [];
 let zoomIdx = 0;                 // 0 = 3-col · 1 = 5-col dense · 2 = month list
 let generation = 0;
 let loadingNext = false;
 let loadingPrev = false;
+let initialLoading = false;
 let endReached = false;
 let flatIds = [];
 let suppressClickUntil = 0;
@@ -62,6 +83,17 @@ let currentSortQuality = null;
 let longPressPending = false;
 let cancelLongPressGesture = () => {};
 let tasteAvailable = false;
+let renderedSelection = new Set();
+let pendingPreviewTotal = 0;
+let preparingPollTimer = 0;
+// Timer ownership moved from `let thumbnailPollTimer = 0;` into the shared controller.
+const thumbnailPoll = createPendingPreviewPoll({
+    active: () => document.body.dataset.tab === 'photos',
+    refresh: async () => {
+        if (scope.similarImages || !canRefreshPendingThumbnails()) await refreshPendingPreviews();
+        else await refreshFirstPagePreviews();
+    },
+});
 
 async function loadTasteStatus() {
     const data = await getRankings(new URLSearchParams({ sort: 'taste', limit: '0' })).catch(() => null);
@@ -111,7 +143,7 @@ const imgObserver = new IntersectionObserver((entries) => {
 /* ---------- cells & day sections ---------- */
 function flagBadge(flag) {
     if (flag !== 'picked' && flag !== 'rejected') return '';
-    return `<span class="c-flag ${flag}">${flag === 'picked' ? icon('star') : icon('x')}</span>`;
+    return `<span class="c-flag ${flag}">${flag === 'picked' ? icon('heart') : icon('x')}</span>`;
 }
 
 function stackBadge(img) {
@@ -124,7 +156,9 @@ function stackBadge(img) {
 function cellFor(img, mi) {
     const fig = document.createElement('figure');
     const stackCount = Number(img.stack_count) || 0;
-    fig.className = 'mcell';
+    const previewReady = img.preview_ready !== false;
+    const previewSrc = previewThumbUrl(img);
+    fig.className = `mcell${previewReady ? '' : ' preview-pending'}`;
     fig.dataset.id = String(img.id);
     fig.dataset.mi = String(mi);
     fig.setAttribute('role', 'button');
@@ -134,12 +168,16 @@ function cellFor(img, mi) {
     );
     fig.innerHTML =
         `<div class="c-check">${icon('check')}</div>`
-        + `<img alt="" loading="lazy" decoding="async" data-src="${esc(img.thumb_url || thumbUrl('sm', img.id))}">`
+        + `<img alt="" loading="lazy" decoding="async" fetchpriority="low" data-preview-src="${esc(previewSrc)}"${previewReady ? ` data-src="${esc(previewSrc)}"` : ''}>`
+        + `<span class="c-placeholder-name">${esc(img.filename || '')}</span>`
         + stackBadge(img)
         + flagBadge(img.flag);
     const image = fig.querySelector('img');
-    image.addEventListener('load', () => image.classList.add('ld'));
-    imgObserver.observe(image);
+    image.addEventListener('load', () => {
+        image.classList.add('ld');
+        fig.classList.remove('preview-pending');
+    });
+    if (previewReady) imgObserver.observe(image);
     if (selection.has(Number(img.id))) fig.classList.add('sel');
     return fig;
 }
@@ -161,6 +199,14 @@ function mkDaySection(dk, d) {
     return sec;
 }
 
+function mkMonthHeader(key) {
+    const header = document.createElement('div');
+    header.className = 'm-month-head';
+    header.dataset.month = key;
+    header.textContent = monthLabel(key);
+    return header;
+}
+
 const dayIds = (sec) => [...sec.querySelectorAll('.mcell[data-id]:not([data-stack-member])')]
     .map((c) => Number(c.dataset.id));
 
@@ -178,8 +224,8 @@ function toggleDay(sec) {
     selectionChanged();
 }
 
-function updateDayChecks() {
-    for (const sec of timeline.querySelectorAll('.m-day')) {
+function updateDayChecks(sections = null) {
+    for (const sec of sections || timeline.querySelectorAll('.m-day')) {
         const ids = dayIds(sec);
         const all = ids.length > 0 && ids.every((id) => selection.has(id));
         const chk = sec.querySelector('.m-day-check');
@@ -288,7 +334,21 @@ function renderOfflineEmpty() {
     timeline.querySelector('.m-offline-empty')?.addEventListener('click', reload);
 }
 
+function renderPreparingState() {
+    timeline.innerHTML = '<div class="ms-empty" style="padding:48px 24px;text-align:center">'
+        + '<b>Preparing your photos</b><br>'
+        + '<span>Finding photos and getting the first cards ready. They’ll appear here in a moment.</span></div>';
+    clearTimeout(preparingPollTimer);
+    preparingPollTimer = setTimeout(() => reload(), 1500);
+}
+
 function renderEmpty() {
+    clearTimeout(preparingPollTimer);
+    if (pendingPreviewTotal) {
+        timeline.innerHTML = '<div class="ms-empty" style="padding:48px 24px;text-align:center">'
+            + `<b>${esc(`${fmtInt(pendingPreviewTotal)} photos preparing previews — check back shortly`)}</b></div>`;
+        return;
+    }
     timeline.innerHTML = '<div class="ms-empty" style="padding:48px 24px;text-align:center">'
         + '<b>No photos yet</b><br><span>Add a source in the desktop app. Photos will appear here as they’re scanned.</span></div>';
 }
@@ -301,6 +361,9 @@ function appendImages(batch) {
     for (const img of batch) {
         const d = parseDate(img.date_taken);
         const dk = d ? dayKey(d) : 'undated';
+        const month = d ? monthKeyOf(d) : 'undated';
+        const previousMonth = lastDay?.dataset.month;
+        if (!lastDay || previousMonth !== month) frag.appendChild(mkMonthHeader(month));
         if (!lastDay || lastDay.dataset.day !== dk) {
             lastDay = mkDaySection(dk, d);
             frag.appendChild(lastDay);
@@ -311,6 +374,43 @@ function appendImages(batch) {
     timeline.appendChild(frag);
     timeline.classList.toggle('selmode', selState.mode);
     updateDayChecks();
+    cacheDaySectionOffsets();
+}
+
+function firstVisibleCell() {
+    const paneTop = pane.getBoundingClientRect().top;
+    return [...timeline.querySelectorAll('.mcell[data-id]:not([data-stack-member])')]
+        .find((cell) => cell.getBoundingClientRect().bottom >= paneTop) || null;
+}
+
+function trimWindowFromStart() {
+    if (images.length <= MAX_WINDOW) return;
+    const anchor = firstVisibleCell();
+    const anchorId = anchor?.dataset.id;
+    const oldTop = anchor?.getBoundingClientRect().top || 0;
+    const dropped = images.length - MAX_WINDOW;
+    images = images.slice(dropped);
+    startOffset += dropped;
+    let remaining = dropped;
+    for (const sec of [...timeline.querySelectorAll('.m-day')]) {
+        const grid = sec.querySelector('.m-day-grid');
+        const cells = [...grid.querySelectorAll('.mcell[data-id]:not([data-stack-member])')];
+        const removeCount = Math.min(remaining, cells.length);
+        cells.slice(0, removeCount).forEach((cell) => cell.remove());
+        remaining -= removeCount;
+        if (!grid.querySelector('.mcell[data-id]:not([data-stack-member])')) {
+            const monthHead = sec.previousElementSibling?.classList.contains('m-month-head')
+                ? sec.previousElementSibling
+                : null;
+            sec.remove();
+            if (monthHead && monthHead.nextElementSibling?.dataset.month !== monthHead.dataset.month) monthHead.remove();
+        }
+        if (!remaining) break;
+    }
+    reindexCells();
+    cacheDaySectionOffsets();
+    const nextAnchor = anchorId && timeline.querySelector(`.mcell[data-id="${anchorId}"]`);
+    if (nextAnchor) pane.scrollTop += nextAnchor.getBoundingClientRect().top - oldTop;
 }
 
 function renderFixedImages(batch) {
@@ -329,6 +429,7 @@ function renderFixedImages(batch) {
     timeline.appendChild(sec);
     timeline.classList.toggle('selmode', selState.mode);
     updateDayChecks();
+    cacheDaySectionOffsets();
 }
 
 function prependImages(batch) {
@@ -362,6 +463,14 @@ function prependImages(batch) {
     pane.scrollTop += pane.scrollHeight - prevHeight;
     reindexCells();
     updateDayChecks();
+    cacheDaySectionOffsets();
+}
+
+function cacheDaySectionOffsets() {
+    daySectionOffsets = [...timeline.querySelectorAll('.m-day')].map((section) => ({
+        top: section.offsetTop,
+        month: section.dataset.month,
+    }));
 }
 
 /* ---------- month (zoomed-out) view ---------- */
@@ -384,9 +493,14 @@ function renderMonths() {
             }
         }
         const card = document.createElement('button');
-        card.className = 'm-month-card';
+        const coverId = Number(entry.coverId) || 0;
+        card.className = `m-month-card ${coverId ? 'has-cover' : 'preview-pending'}`;
+        card.dataset.month = entry.key;
         card.setAttribute('aria-label', `${monthLabel(entry.key)}, ${entry.count} photos`);
-        card.innerHTML = `<b>${esc(entry.key === 'undated' ? 'Undated' : FULL_MONTHS[Number(entry.key.slice(5)) - 1])}</b>`
+        card.innerHTML = (coverId
+            ? `<img src="${esc(thumbUrl('sm', coverId))}" alt="" loading="lazy" decoding="async">`
+            : '')
+            + `<b>${esc(entry.key === 'undated' ? 'Undated' : FULL_MONTHS[Number(entry.key.slice(5)) - 1])}</b>`
             + `<span class="num">${fmtInt(entry.count)} photos</span>`;
         card.addEventListener('click', () => {
             setZoom(0);
@@ -398,10 +512,29 @@ function renderMonths() {
         wrap.innerHTML = '<div class="ms-empty" style="grid-column:span 2">No photos yet. Add a source in the desktop app.</div>';
     }
     timeline.appendChild(wrap);
+    daySectionOffsets = [];
 }
 
 /* ---------- zoom levels ---------- */
-export function setZoom(i) {
+function zoomAnchorAt(clientX, clientY) {
+    const cell = document.elementFromPoint(clientX, clientY)?.closest('.mcell[data-id]');
+    if (!cell || !timeline.contains(cell)) return null;
+    return {
+        id: cell.dataset.id,
+        top: cell.getBoundingClientRect().top - pane.getBoundingClientRect().top,
+    };
+}
+
+function restoreZoomAnchor(anchor) {
+    if (!anchor) return;
+    requestAnimationFrame(() => {
+        const cell = timeline.querySelector(`.mcell[data-id="${anchor.id}"]`);
+        if (!cell) return;
+        pane.scrollTop += cell.getBoundingClientRect().top - pane.getBoundingClientRect().top - anchor.top;
+    });
+}
+
+export function setZoom(i, { anchor = null } = {}) {
     const next = clamp(i, 0, 2);
     if (next === zoomIdx) return;
     const was = zoomIdx;
@@ -419,6 +552,7 @@ export function setZoom(i) {
     if (ctl) ctl.innerHTML = icon(zoomIdx === 2 ? 'rows-3' : zoomIdx === 1 ? 'grid-3x3' : 'layout-grid', 'icon icon-lg');
     updateMonthPill(false);
     endEl.hidden = zoomIdx === 2 || !endReached;
+    restoreZoomAnchor(anchor);
 }
 
 export function stepZoom(dir) {
@@ -427,6 +561,54 @@ export function stepZoom(dir) {
 
 export function zoomLevel() {
     return zoomIdx;
+}
+
+// Semantic zoom stays deliberately discrete (day grid → dense grid → months),
+// but the pinch itself is continuous: each threshold can be crossed in either
+// direction during one gesture. Keeping the touched photo anchored means the
+// switch feels like a zoom instead of a navigation jump.
+function installPinchZoom() {
+    let pinch = null;
+
+    const distance = (touches) => Math.hypot(
+        touches[0].clientX - touches[1].clientX,
+        touches[0].clientY - touches[1].clientY,
+    );
+    const midpoint = (touches) => ({
+        x: (touches[0].clientX + touches[1].clientX) / 2,
+        y: (touches[0].clientY + touches[1].clientY) / 2,
+    });
+    const reset = () => {
+        pinch = null;
+        timeline.classList.remove('m-pinching');
+    };
+
+    pane.addEventListener('touchstart', (event) => {
+        if (event.touches.length !== 2 || selection.size || initialLoading) return;
+        const startDistance = distance(event.touches);
+        if (startDistance < 24) return;
+        pinch = { startDistance, startZoom: zoomIdx };
+        timeline.classList.add('m-pinching');
+    }, { passive: true });
+
+    pane.addEventListener('touchmove', (event) => {
+        if (!pinch || event.touches.length !== 2) return;
+        event.preventDefault();
+        const currentDistance = distance(event.touches);
+        const point = midpoint(event.touches);
+        // A doubling/halving spans the full semantic zoom range. Round only
+        // after measuring the continuous pinch so one gesture can cross both
+        // levels naturally instead of being capped at a single step.
+        const delta = Math.log2(pinch.startDistance / Math.max(currentDistance, 1)) * 2;
+        const target = clamp(Math.round(pinch.startZoom + delta), 0, 2);
+        if (target === zoomIdx) return;
+        setZoom(target, { anchor: zoomAnchorAt(point.x, point.y) });
+    }, { passive: false });
+
+    pane.addEventListener('touchend', (event) => {
+        if (event.touches.length < 2) reset();
+    }, { passive: true });
+    pane.addEventListener('touchcancel', reset, { passive: true });
 }
 
 function rebuildLoaded() {
@@ -445,18 +627,19 @@ export function updateMonthPill(show) {
         pill.classList.remove('on');
         return;
     }
-    const secs = timeline.querySelectorAll('.m-day');
-    if (!secs.length) {
+    if (!daySectionOffsets.length) {
         pill.classList.remove('on');
         return;
     }
     const top = pane.scrollTop + 70;
-    let cur = secs[0];
-    for (const s of secs) {
-        if (s.offsetTop <= top) cur = s;
-        else break;
+    let low = 0;
+    let high = daySectionOffsets.length - 1;
+    while (low < high) {
+        const mid = Math.ceil((low + high) / 2);
+        if (daySectionOffsets[mid].top <= top) low = mid;
+        else high = mid - 1;
     }
-    pill.textContent = monthLabel(cur.dataset.month);
+    pill.textContent = monthLabel(daySectionOffsets[low].month);
     if (show) {
         pill.classList.add('on');
         clearTimeout(pillTimer);
@@ -469,37 +652,143 @@ function rankingParams(offset) {
     return scopeParams({ limit: PAGE, offset, sort: viewPrefs.sort || 'date_taken' });
 }
 
-async function loadHistogram() {
+function stopThumbnailPoll() { thumbnailPoll.stop(); }
+
+function canRefreshPendingThumbnails() {
+    return document.body.dataset.tab === 'photos' && !initialLoading && !selection.size && pane?.scrollTop <= 160;
+}
+
+function scheduleThumbnailPoll() { thumbnailPoll.schedule(); }
+
+function updateThumbnailPoll(pending) { thumbnailPoll.update(pending); }
+
+function hiddenPendingThumbnailCount(data) {
+    return Math.max(0, Number(data?.hidden_pending_thumbnails) || 0);
+}
+
+function pendingPreviewCopy() {
+    return `${fmtInt(pendingPreviewTotal)} more preparing previews…`;
+}
+
+function renderEndMarker() {
+    const base = scopeActive() ? "That's all for this filter." : "That's everything.";
+    endEl.replaceChildren();
+    const summary = document.createElement('span');
+    summary.textContent = base;
+    endEl.append(summary);
+    if (pendingPreviewTotal) {
+        const pending = document.createElement('span');
+        pending.className = 'm-pending-previews';
+        pending.textContent = pendingPreviewCopy();
+        endEl.append(pending);
+    }
+    endEl.hidden = zoomIdx === 2 || !endReached || images.length === 0;
+}
+
+function pendingPreviewCount(images) {
+    return countPendingPreviews(images); // Shared predicate: image?.preview_ready === false.
+}
+
+function sharpenPreview(image) {
+    const id = Number(image?.id);
+    if (!id || !image.preview_ready) return false;
+    const known = byId.get(id);
+    if (known) Object.assign(known, image);
+    const loaded = images.find((item) => Number(item?.id) === id);
+    if (loaded) Object.assign(loaded, image);
+    let changed = false;
+    for (const cell of timeline.querySelectorAll(`.mcell[data-id="${id}"].preview-pending`)) {
+        const img = cell.querySelector('img[data-preview-src]');
+        if (!img) continue;
+        cell.classList.remove('preview-pending');
+        img.src = previewThumbUrl(image) || img.dataset.previewSrc;
+        changed = true;
+    }
+    return changed;
+}
+
+async function refreshPendingPreviews() {
+    const ids = images
+        .filter((image) => image && !image.preview_ready)
+        .map((image) => Number(image.id))
+        .filter((id) => id > 0);
+    const before = thumbnailPoll.count;
+    let landed = 0;
+    if (ids.length) {
+        const params = scopeParams({ limit: Math.min(ids.length, 5000), offset: 0, sort: viewPrefs.sort || 'date_taken' });
+        params.set('ids', ids.join(','));
+        const data = await getRankings(params).catch(() => null);
+        if (data && Array.isArray(data.images)) {
+            for (const image of data.images) landed += sharpenPreview(image) ? 1 : 0;
+        }
+    }
+    if (zoomIdx === 2) await loadHistogram();
+    updateThumbnailPoll(Math.max(0, before - landed));
+}
+
+async function refreshFirstPagePreviews() {
+    const page = await getRankings(rankingParams(0)).catch(() => null);
+    if (!page || !Array.isArray(page.images)) return;
+    const current = startOffset === 0 ? images.slice(0, page.images.length) : [];
+    const sameRows = current.length === page.images.length
+        && page.images.every((image, index) => Number(image.id) === Number(current[index]?.id));
+    if (!sameRows) {
+        reload();
+        return;
+    }
+    updateThumbnailPoll(pendingCount(page));
+    pendingPreviewTotal = hiddenPendingThumbnailCount(page);
+    currentSortQuality = page.sort_quality || null;
+    for (const image of page.images) sharpenPreview(image);
+    if (zoomIdx === 2) await loadHistogram();
+    renderScopeBar();
+    renderEndMarker();
+}
+
+async function loadHistogram(requestGeneration = generation) {
     let data = null;
     try {
         data = await getDateHistogram(scopeParams());
     } catch {
         return;
     }
-    if (!data) return;
+    if (!data || requestGeneration !== generation) return;
     histogram = data;
     monthOffsets = [];
     let offset = 0;
     for (const m of data.months || []) {
-        monthOffsets.push({ key: m.month, offset, count: m.count });
+        monthOffsets.push({ key: m.month, offset, count: m.count, coverId: m.cover_id });
         offset += m.count;
     }
     if (data.undated > 0) {
         monthOffsets.push({ key: 'undated', offset, count: data.undated });
+    }
+    if (zoomIdx === 2) {
+        for (const entry of monthOffsets) {
+            const coverId = Number(entry.coverId) || 0;
+            const card = timeline.querySelector(`.m-month-card[data-month="${entry.key}"]`);
+            if (!coverId || !card?.classList.contains('preview-pending')) continue;
+            card.insertAdjacentHTML('afterbegin', `<img src="${esc(thumbUrl('sm', coverId))}" alt="" loading="lazy" decoding="async">`);
+            card.classList.remove('preview-pending');
+            card.classList.add('has-cover');
+        }
     }
     emit('histogram', histogram);
 }
 
 export async function reload() {
     const gen = ++generation;
+    clearTimeout(preparingPollTimer);
+    initialLoading = true;
     stackRequest += 1;
     closeExpandedStack();
     images = [];
     flatIds = [];
     startOffset = 0;
     endReached = false;
+    pendingPreviewTotal = 0;
     currentSortQuality = null;
-    endEl.hidden = true;
+    renderEndMarker();
     renderSkeleton();
     renderScopeBar();
     if (scope.similarImages) {
@@ -509,18 +798,22 @@ export async function reload() {
         histogram = { months: [], undated: 0, total: images.length };
         monthOffsets = [];
         renderFixedImages(images);
+        updateThumbnailPoll(pendingPreviewCount(images));
         endReached = true;
-        endEl.hidden = true;
+        renderEndMarker();
         renderScopeBar();
         updateMonthPill(false);
         pane.scrollTop = 0;
+        initialLoading = false;
         return;
     }
     let page = null;
+    let scanStatus = null;
     try {
-        [, page] = await Promise.all([
-            loadHistogram(),
+        [, page, scanStatus] = await Promise.all([
+            loadHistogram(gen),
             getRankings(rankingParams(0)),
+            getScanStatus().catch(() => null),
         ]);
     } catch {
         page = null;
@@ -529,11 +822,14 @@ export async function reload() {
     timeline.innerHTML = '';
     timeline.classList.toggle('m-z5', zoomIdx === 1);
     if (page && Array.isArray(page.images)) {
+        updateThumbnailPoll(pendingCount(page));
+        pendingPreviewTotal = hiddenPendingThumbnailCount(page);
         images = page.images;
         currentSortQuality = page.sort_quality || null;
         rememberImages(images);
         if (zoomIdx === 2) renderMonths();
         else if (images.length) appendImages(images);
+        else if (scanStatus?.scanning) renderPreparingState();
         else renderEmpty();
         endReached = page.images.length < PAGE;
     } else if (isOffline()) {
@@ -541,14 +837,15 @@ export async function reload() {
     } else {
         timeline.innerHTML = '<div class="ms-empty" style="padding:40px 16px;text-align:center">Couldn\'t load photos.</div>';
     }
-    endEl.hidden = zoomIdx === 2 || !endReached || images.length === 0;
+    renderEndMarker();
     renderScopeBar();
     updateMonthPill(false);
     pane.scrollTop = 0;
+    initialLoading = false;
 }
 
 export async function loadMore() {
-    if (loadingNext || endReached || zoomIdx === 2) return;
+    if (initialLoading || loadingNext || endReached || zoomIdx === 2) return;
     loadingNext = true;
     const gen = generation;
     let page = null;
@@ -561,18 +858,23 @@ export async function loadMore() {
     }
     loadingNext = false;
     if (gen !== generation || !page || !Array.isArray(page.images)) return;
+    updateThumbnailPoll(pendingCount(page));
+    pendingPreviewTotal = hiddenPendingThumbnailCount(page);
     if (!page.images.length) {
         endReached = true;
-        endEl.hidden = false;
+        renderEndMarker();
+        renderScopeBar();
         return;
     }
     images = images.concat(page.images);
     rememberImages(page.images);
     appendImages(page.images);
+    trimWindowFromStart();
     if (page.images.length < PAGE) {
         endReached = true;
-        endEl.hidden = false;
     }
+    renderEndMarker();
+    renderScopeBar();
 }
 
 async function loadPrev() {
@@ -591,10 +893,14 @@ async function loadPrev() {
     }
     loadingPrev = false;
     if (gen !== generation || !page || !Array.isArray(page.images) || !page.images.length) return;
+    updateThumbnailPoll(pendingCount(page));
+    pendingPreviewTotal = hiddenPendingThumbnailCount(page);
     images = page.images.concat(images);
     startOffset = newStart;
     rememberImages(page.images);
     prependImages(page.images);
+    renderEndMarker();
+    renderScopeBar();
 }
 
 /* ---------- jumps (scrubber + month view) ---------- */
@@ -644,6 +950,7 @@ export async function jumpToMonth(key) {
     if (gen !== generation) return;
     timeline.innerHTML = '';
     if (page && Array.isArray(page.images)) {
+        updateThumbnailPoll(pendingCount(page));
         images = page.images;
         rememberImages(images);
         appendImages(images);
@@ -668,32 +975,99 @@ function renderScopeBar() {
     const chip = (kind, label, clear, img = '') =>
         `<span class="chip">${img}<span class="chip-kind">${esc(kind)}</span><b>${esc(label)}</b>`
         + `<span class="chip-x" role="button" aria-label="Clear ${esc(kind)}" data-clear="${clear}">${icon('x')}</span></span>`;
-    if (scope.people) {
+    const smartQuery = scope.smartQuery || {};
+    const smartSets = (queryKey) => {
+        const scopeKey = SMART_SCOPE_FIELDS[queryKey];
+        return Boolean(
+            scope.smartName && scopeKey && smartQuery[queryKey] !== undefined
+            && smartQuery[queryKey] !== null && smartQuery[queryKey] !== ''
+            && scope[scopeKey] === String(smartQuery[queryKey]),
+        );
+    };
+    if (scope.smartName) {
+        chips.push(`<span class="chip smart"><span class="g">${icon('sparkles')}</span><b>${esc(scope.smartName)}</b>`
+            + `<span class="chip-x" role="button" aria-label="Clear smart collection" data-clear="smartName">${icon('x')}</span></span>`);
+    }
+    if (scope.people && !smartSets('people')) {
         const face = scope.thumb ? `<img src="${esc(scope.thumb)}" alt="">` : '';
         chips.push(chip('person', personLabel({ label: scope.peopleLabel }), 'people', face));
     }
-    if (scope.q) chips.push(chip('search', scope.q, 'q'));
-    if (scope.flag) chips.push(chip('flag', scope.flag === 'picked' ? 'Picked' : 'Rejected', 'flag'));
-    if (scope.fileType) chips.push(chip('type', scope.fileType.toUpperCase(), 'fileType'));
-    if (scope.camera) chips.push(chip('camera', scope.camera, 'camera'));
-    if (scope.lens) chips.push(chip('lens', scope.lens, 'lens'));
-    if (scope.tag) chips.push(chip('tag', scope.tag, 'tag'));
-    if (scope.orientation) chips.push(chip('orientation', scope.orientation === 'landscape' ? 'Landscape' : 'Portrait', 'orientation'));
-    if (scope.folder) chips.push(chip('folder', scope.label || scope.folder.split('/').filter(Boolean).pop() || scope.folder, 'folder'));
-    if (scope.compared) chips.push(chip('ranking', COMPARED_LABELS[scope.compared] || scope.compared, 'compared'));
-    if (scope.minStars) chips.push(chip('rating', `${scope.minStars}+ stars`, 'minStars'));
+    if (scope.q && !smartSets('q')) chips.push(chip('search', scope.q, 'q'));
+    if (scope.flag && !smartSets('flag')) chips.push(chip('flag', scope.flag === 'picked' ? 'Favorited' : 'Rejected', 'flag'));
+    if (scope.dateTaken && !smartSets('date_taken')) chips.push(chip('date', scope.dateTaken, 'dateTaken'));
+    if (scope.fileType && !smartSets('file_type')) chips.push(chip('type', scope.fileType.toUpperCase(), 'fileType'));
+    if (scope.camera && !smartSets('camera')) chips.push(chip('camera', scope.camera, 'camera'));
+    if (scope.lens && !smartSets('lens')) chips.push(chip('lens', scope.lens, 'lens'));
+    if (scope.tag && !smartSets('tag')) chips.push(chip('tag', scope.tag, 'tag'));
+    if (scope.orientation && !smartSets('orientation')) chips.push(chip('orientation', scope.orientation === 'landscape' ? 'Landscape' : 'Portrait', 'orientation'));
+    if (scope.folder && !smartSets('folder')) chips.push(chip('folder', scope.label || scope.folder.split('/').filter(Boolean).pop() || scope.folder, 'folder'));
+    if (scope.compared && !smartSets('compared')) chips.push(chip('ranking', COMPARED_LABELS[scope.compared] || scope.compared, 'compared'));
+    if (scope.minStars && !smartSets('min_stars')) chips.push(chip('rating', `${scope.minStars}+ stars`, 'minStars'));
+    if (scope.collectionId) chips.push(chip('collection', scope.label || 'Collection', 'collectionId'));
     if (scope.similarId) chips.push(chip('similar', scope.label || 'Similar', 'similarId'));
     if (chips.length > 1) chips.push(`<button class="chip ghost" data-clear-all="1">${icon('x')}<span>Clear all</span></button>`);
     let html = chips.join('');
     html += `<span class="m-scope-count num">${fmtInt(histogram.total)} photos</span>`;
+    if (pendingPreviewTotal) html += `<span class="m-scope-pending">${esc(pendingPreviewCopy())}</span>`;
     if (currentSortQuality && Number(currentSortQuality.total) > 0) {
         html += `<span class="m-scope-quality num">${fmtInt(currentSortQuality.percent)}% sorted</span>`;
     }
     bar.innerHTML = html;
+    const collectionChip = bar.querySelector('.chip-x[data-clear="collectionId"]')?.closest('.chip');
+    const smartChip = bar.querySelector('.chip-x[data-clear="smartName"]')?.closest('.chip');
+    const actionChip = scope.smartCollectionId ? smartChip : collectionChip;
+    if (actionChip) {
+        actionChip.setAttribute('role', 'button');
+        actionChip.tabIndex = 0;
+        const openCollectionActions = (event) => {
+            if (event.target.closest('.chip-x')) return;
+            openCollectionActionsSheet({
+                id: scope.smartCollectionId || scope.collectionId,
+                name: scope.smartName || scope.label || 'Collection',
+                smart: Boolean(scope.smartCollectionId) || scope.collectionSmart,
+            });
+        };
+        actionChip.addEventListener('click', openCollectionActions);
+        actionChip.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                openCollectionActions(event);
+            }
+        });
+    }
+    const personChip = bar.querySelector('.chip-x[data-clear="people"]')?.closest('.chip');
+    if (personChip) {
+        personChip.setAttribute('role', 'button');
+        personChip.tabIndex = 0;
+        const openPersonActions = (event) => {
+            if (event.target.closest('.chip-x')) return;
+            openPersonSheet({ id: scope.people, label: scope.peopleLabel });
+        };
+        personChip.addEventListener('click', openPersonActions);
+        personChip.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                openPersonActions(event);
+            }
+        });
+    }
     for (const x of bar.querySelectorAll('.chip-x')) {
         x.addEventListener('click', () => {
             const field = x.dataset.clear;
-            scope[field] = '';
+            if (field === 'collectionId' || field === 'smartName') {
+                clearScope();
+                nav.setTab('library');
+                return;
+            }
+            const smartQueryKey = Object.keys(SMART_SCOPE_FIELDS).find(
+                (queryKey) => SMART_SCOPE_FIELDS[queryKey] === field,
+            );
+            const smartValue = smartQueryKey ? smartQuery[smartQueryKey] : undefined;
+            if (scope.smartName && smartValue !== undefined && smartValue !== null && smartValue !== '') {
+                scope[field] = String(smartValue);
+            } else {
+                scope[field] = '';
+            }
             if (field === 'similarId') {
                 scope.similarImages = null;
                 scope.label = '';
@@ -757,16 +1131,32 @@ function installSelectionGestures() {
     let anchorMi = -1;
     let dragPoint = null;
     let dragFrame = null;
+    let dragRange = null;
 
     function applyDragRange(mi) {
         const a = Math.min(anchorMi, mi);
         const b = Math.max(anchorMi, mi);
-        selection.clear();
-        for (const id of dragBase) selection.add(id);
-        for (let i = a; i <= b; i++) {
-            if (flatIds[i] != null) selection.add(flatIds[i]);
+        const nextRange = { a, b };
+        const changed = [];
+        const setAt = (i, inRange) => {
+            const id = flatIds[i];
+            if (id == null) return;
+            const shouldSelect = inRange || dragBase.has(id);
+            if (selection.has(id) === shouldSelect) return;
+            if (shouldSelect) selection.add(id);
+            else selection.delete(id);
+            changed.push(id);
+        };
+        if (!dragRange) {
+            for (let i = a; i <= b; i += 1) setAt(i, true);
+        } else {
+            for (let i = dragRange.a; i < Math.min(dragRange.b + 1, a); i += 1) setAt(i, false);
+            for (let i = Math.max(dragRange.a, b + 1); i <= dragRange.b; i += 1) setAt(i, false);
+            for (let i = a; i < Math.min(b + 1, dragRange.a); i += 1) setAt(i, true);
+            for (let i = Math.max(a, dragRange.b + 1); i <= b; i += 1) setAt(i, true);
         }
-        selectionChanged();
+        dragRange = nextRange;
+        if (changed.length) selectionChanged();
     }
 
     function edgeScrollSpeed(y) {
@@ -836,6 +1226,7 @@ function installSelectionGestures() {
                 selState.mode = true;
                 dragBase = new Set(selection);
                 anchorMi = mi;
+                dragRange = null;
                 dragActive = true;
                 applyDragRange(mi);
                 dragPoint = { x: lp.x, y: lp.y };
@@ -865,6 +1256,7 @@ function installSelectionGestures() {
         longPressPending = false;
         dragActive = false;
         dragBase = null;
+        dragRange = null;
         dragPoint = null;
         if (dragFrame != null) cancelAnimationFrame(dragFrame);
         dragFrame = null;
@@ -974,17 +1366,60 @@ function installPullToRefresh() {
 /* ---------- event wiring ---------- */
 function syncSelectionCells() {
     timeline.classList.toggle('selmode', selState.mode);
-    for (const cell of timeline.querySelectorAll('.mcell[data-id]')) {
-        cell.classList.toggle('sel', selection.has(Number(cell.dataset.id)));
+    const changed = new Set([...renderedSelection, ...selection]);
+    const affectedDays = new Set();
+    for (const id of changed) {
+        if (renderedSelection.has(id) === selection.has(id)) continue;
+        for (const cell of timeline.querySelectorAll(`.mcell[data-id="${id}"]`)) {
+            cell.classList.toggle('sel', selection.has(id));
+            const day = cell.closest('.m-day');
+            if (day) affectedDays.add(day);
+        }
     }
-    updateDayChecks();
+    updateDayChecks(affectedDays);
+    renderedSelection = new Set(selection);
 }
 
 function syncFlagCells({ ids, flagOf }) {
+    if (restoresFilteredMembership(images, ids, flagOf, scope.flag)) {
+        void reload();
+        return;
+    }
     const wanted = new Set(ids);
+    const excluded = new Set(
+        scope.flag ? ids.filter((id) => flagOf(id) !== scope.flag) : [],
+    );
+    if (excluded.size) {
+        images = images.filter((image) => !excluded.has(Number(image.id)));
+        let selectionChangedByEviction = false;
+        for (const id of excluded) {
+            selectionChangedByEviction = selection.delete(id) || selectionChangedByEviction;
+        }
+        if (zoomIdx === 2) {
+            void reload();
+            return;
+        }
+        closeExpandedStack();
+        for (const cell of timeline.querySelectorAll('.mcell[data-id]')) {
+            if (excluded.has(Number(cell.dataset.id))) cell.remove();
+        }
+        for (const section of [...timeline.querySelectorAll('.m-day')]) {
+            if (section.querySelector('.mcell[data-id]:not([data-stack-member])')) continue;
+            const monthHead = section.previousElementSibling?.classList.contains('m-month-head')
+                ? section.previousElementSibling
+                : null;
+            section.remove();
+            if (monthHead && monthHead.nextElementSibling?.dataset.month !== monthHead.dataset.month) monthHead.remove();
+        }
+        reindexCells();
+        updateDayChecks();
+        cacheDaySectionOffsets();
+        if (selectionChangedByEviction) selectionChanged();
+        if (!images.length && endReached) renderEmpty();
+    }
     for (const cell of timeline.querySelectorAll('.mcell[data-id]')) {
         const id = Number(cell.dataset.id);
-        if (!wanted.has(id)) continue;
+        if (!wanted.has(id) || excluded.has(id)) continue;
         const old = cell.querySelector('.c-flag');
         if (old) old.remove();
         cell.insertAdjacentHTML('beforeend', flagBadge(flagOf(id)));
@@ -1021,6 +1456,7 @@ export function initTimeline() {
 
     installSelectionGestures();
     installPullToRefresh();
+    installPinchZoom();
     on('selection', syncSelectionCells);
     on('flags', syncFlagCells);
     on('scope', () => {
@@ -1029,6 +1465,10 @@ export function initTimeline() {
         reload();
     });
     on('view-prefs', reload);
+    on('tab', (tab) => {
+        if (tab === 'photos') scheduleThumbnailPoll();
+        else stopThumbnailPoll();
+    });
 
     reload();
     loadTasteStatus();

@@ -2,7 +2,7 @@
 
 import asyncio
 import os
-import shutil
+import sqlite3
 import uuid
 
 from date_inference import infer_image_date
@@ -10,7 +10,7 @@ from data.repositories import catalog as catalog_repository
 from core.path_groups import safe_commonpath
 
 EXPECTED_EMBEDDING_DIM = 2048  # Qwen3-VL-Embedding-2B native dimension
-SCHEMA_VERSION = 27
+SCHEMA_VERSION = 28
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS catalog_sources (
@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS images (
     row_version INTEGER NOT NULL DEFAULT 0,
     hub_image_id INTEGER DEFAULT NULL,
     hub_remote INTEGER NOT NULL DEFAULT 0,
+    trash_pending_hub INTEGER NOT NULL DEFAULT 0,
     elo REAL DEFAULT 1200.0,
     comparisons INTEGER DEFAULT 0,
     propagated_updates INTEGER DEFAULT 0,
@@ -115,6 +116,13 @@ CREATE TABLE IF NOT EXISTS oplog_settings (
 CREATE TABLE IF NOT EXISTS oplog_cursors (
     origin TEXT PRIMARY KEY,
     last_seen_origin_seq INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS oplog_pending (
+    origin TEXT NOT NULL,
+    origin_seq INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    recorded_at REAL NOT NULL,
+    PRIMARY KEY (origin, origin_seq)
 );
 
 CREATE TABLE IF NOT EXISTS devices (
@@ -201,6 +209,8 @@ CREATE TABLE IF NOT EXISTS comparisons (
     mode TEXT,
     elo_before_winner REAL,
     elo_before_loser REAL,
+    elo_delta_winner REAL DEFAULT NULL,
+    elo_delta_loser REAL DEFAULT NULL,
     action_id TEXT DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -411,6 +421,19 @@ CREATE TABLE IF NOT EXISTS embeddings_by_model (
 
 CREATE INDEX IF NOT EXISTS idx_embeddings_by_model_image_id
 ON embeddings_by_model(image_id);
+
+CREATE TABLE IF NOT EXISTS embedding_scan_images (
+    model_key TEXT NOT NULL REFERENCES embedding_models(model_key) ON DELETE CASCADE,
+    image_id INTEGER NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+    status TEXT NOT NULL,
+    error TEXT NOT NULL DEFAULT '',
+    attempts INTEGER NOT NULL DEFAULT 1,
+    scanned_at REAL NOT NULL DEFAULT (strftime('%s', 'now')),
+    PRIMARY KEY (model_key, image_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_embedding_scan_images_status
+ON embedding_scan_images(model_key, status, scanned_at);
 
 CREATE TABLE IF NOT EXISTS search_query_embeddings (
     model_key TEXT NOT NULL REFERENCES embedding_models(model_key),
@@ -682,6 +705,7 @@ CREATE TABLE IF NOT EXISTS collection_shares (
     view_count INTEGER NOT NULL DEFAULT 0,
     first_viewed_at REAL DEFAULT NULL,
     last_viewed_at REAL DEFAULT NULL,
+    client_finished_at REAL DEFAULT NULL,
     CHECK ((collection_id IS NOT NULL) != (published_node_id IS NOT NULL))
 );
 
@@ -886,6 +910,7 @@ IMAGE_COMPAT_COLUMNS = (
     ("row_version", "INTEGER NOT NULL DEFAULT 0"),
     ("hub_image_id", "INTEGER DEFAULT NULL"),
     ("hub_remote", "INTEGER NOT NULL DEFAULT 0"),
+    ("trash_pending_hub", "INTEGER NOT NULL DEFAULT 0"),
     ("width", "INTEGER DEFAULT NULL"),
     ("height", "INTEGER DEFAULT NULL"),
     ("metadata_scanned_at", "REAL DEFAULT NULL"),
@@ -897,6 +922,12 @@ IMAGE_COMPAT_COLUMNS = (
     ("trashed_at", "REAL DEFAULT NULL"),
     ("trash_path", "TEXT DEFAULT NULL"),
     ("vc_of", "INTEGER REFERENCES images(id) ON DELETE CASCADE"),
+)
+
+COMPARISON_COMPAT_COLUMNS = (
+    ("action_id", "TEXT DEFAULT NULL"),
+    ("elo_delta_winner", "REAL DEFAULT NULL"),
+    ("elo_delta_loser", "REAL DEFAULT NULL"),
 )
 
 CATALOG_SOURCE_COMPAT_COLUMNS = (
@@ -922,6 +953,7 @@ COLLECTION_SHARE_COMPAT_COLUMNS = (
     ("view_count", "INTEGER NOT NULL DEFAULT 0"),
     ("first_viewed_at", "REAL DEFAULT NULL"),
     ("last_viewed_at", "REAL DEFAULT NULL"),
+    ("client_finished_at", "REAL DEFAULT NULL"),
 )
 
 COLLECTION_PUBLISH_COMPAT_COLUMNS = (
@@ -1117,6 +1149,7 @@ COMPAT_INDEX_SQL = (
     ),
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_images_hub_image_id ON images(hub_image_id) WHERE hub_image_id IS NOT NULL",
     "CREATE INDEX IF NOT EXISTS idx_images_hub_remote ON images(hub_remote, hub_image_id)",
+    "CREATE INDEX IF NOT EXISTS idx_images_trash_pending_hub ON images(trash_pending_hub) WHERE trash_pending_hub = 1",
 )
 
 REQUIRED_TABLES = {
@@ -1129,6 +1162,7 @@ REQUIRED_TABLES = {
     "oplog_family_state",
     "oplog_settings",
     "oplog_cursors",
+    "oplog_pending",
     "devices",
     "images_metadata_fts",
     "comparisons",
@@ -1181,6 +1215,7 @@ REQUIRED_COLUMNS = {
         "row_version",
         "hub_image_id",
         "hub_remote",
+        "trash_pending_hub",
         "orientation",
         "flag",
         "propagated_updates",
@@ -1218,7 +1253,7 @@ REQUIRED_COLUMNS = {
         "last_seen_at",
         "removed_at",
     },
-    "comparisons": {"action_id"},
+    "comparisons": {"action_id", "elo_delta_winner", "elo_delta_loser"},
     "cache_metadata": {"replace_stale_thumbnails"},
     "stacks": {"kind", "representative_image_id", "auto", "created_at", "updated_at"},
     "stack_members": {"stack_id", "image_id", "score", "added_at"},
@@ -1242,6 +1277,7 @@ REQUIRED_COLUMNS = {
         "view_count",
         "first_viewed_at",
         "last_viewed_at",
+        "client_finished_at",
     },
     "collection_publishes": {
         "collection_id",
@@ -1336,6 +1372,53 @@ async def table_exists(conn, table: str) -> bool:
     return await cursor.fetchone() is not None
 
 
+def _write_local_rebuild_backup(source_path: str, temporary_path: str) -> None:
+    source = sqlite3.connect(source_path, timeout=60.0)
+    try:
+        destination = sqlite3.connect(temporary_path, timeout=60.0)
+        try:
+            source.backup(destination)
+            destination.commit()
+            quick_check = destination.execute("PRAGMA quick_check").fetchone()
+            if not quick_check or str(quick_check[0]).lower() != "ok":
+                raise RuntimeError("local schema rebuild backup failed SQLite quick_check")
+        finally:
+            destination.close()
+    finally:
+        source.close()
+
+
+async def backup_before_table_rebuild(conn, label: str) -> str | None:
+    """Atomically snapshot the live catalog immediately before a DROP rebuild."""
+
+    cursor = await conn.execute("PRAGMA database_list")
+    main = next((row for row in await cursor.fetchall() if row["name"] == "main"), None)
+    db_path = str(main["file"] or "") if main is not None else ""
+    if not db_path or db_path == ":memory:":
+        return None
+    safe_label = "".join(
+        character for character in label if character.isalnum() or character == "-"
+    )
+    if not safe_label:
+        raise ValueError("schema rebuild backup label must not be empty")
+    backup_path = f"{db_path}.pre-{safe_label}.bak"
+    temporary_path = f"{backup_path}.tmp-{uuid.uuid4().hex}"
+    try:
+        await asyncio.to_thread(
+            _write_local_rebuild_backup,
+            db_path,
+            temporary_path,
+        )
+        os.replace(temporary_path, backup_path)
+    except Exception:
+        try:
+            os.remove(temporary_path)
+        except FileNotFoundError:
+            pass
+        raise
+    return backup_path
+
+
 async def _add_columns_if_missing(conn, table: str, columns: tuple[tuple[str, str], ...]) -> None:
     if not await table_exists(conn, table):
         return
@@ -1343,10 +1426,7 @@ async def _add_columns_if_missing(conn, table: str, columns: tuple[tuple[str, st
     for col, defn in columns:
         if col in existing:
             continue
-        try:
-            await conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {defn}")
-        except Exception:
-            pass
+        await conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {defn}")
 
 
 async def prepare_existing_database_for_schema(conn) -> None:
@@ -1357,7 +1437,7 @@ async def prepare_existing_database_for_schema(conn) -> None:
     """
     await conn.execute(PRE_SCHEMA_CATALOG_SOURCES_DDL)
     await _add_columns_if_missing(conn, "images", IMAGE_COMPAT_COLUMNS)
-    await _add_columns_if_missing(conn, "comparisons", (("action_id", "TEXT DEFAULT NULL"),))
+    await _add_columns_if_missing(conn, "comparisons", COMPARISON_COMPAT_COLUMNS)
     await _add_columns_if_missing(conn, "collections", COLLECTION_COMPAT_COLUMNS)
     await _add_columns_if_missing(conn, "collection_shares", COLLECTION_SHARE_COMPAT_COLUMNS)
     await _add_columns_if_missing(conn, "collection_publishes", COLLECTION_PUBLISH_COMPAT_COLUMNS)
@@ -1380,6 +1460,7 @@ async def migrate_stack_kind_for_versions(conn) -> None:
         return
 
     await conn.commit()
+    await backup_before_table_rebuild(conn, "rebuild-stacks")
     await conn.execute("PRAGMA foreign_keys=OFF")
     try:
         await conn.executescript(
@@ -1446,15 +1527,16 @@ async def migrate_collection_shares_for_published_nodes(conn) -> None:
                 view_count INTEGER NOT NULL DEFAULT 0,
                 first_viewed_at REAL DEFAULT NULL,
                 last_viewed_at REAL DEFAULT NULL,
+                client_finished_at REAL DEFAULT NULL,
                 CHECK ((collection_id IS NOT NULL) != (published_node_id IS NOT NULL))
             );
             INSERT INTO collection_shares_new (
                 id, collection_id, published_node_id, token, created_at, expires_at,
-                revoked_at, password_hash, view_count, first_viewed_at, last_viewed_at
+                revoked_at, password_hash, view_count, first_viewed_at, last_viewed_at, client_finished_at
             )
             SELECT
                 id, collection_id, NULL, token, created_at, expires_at,
-                revoked_at, password_hash, view_count, first_viewed_at, last_viewed_at
+                revoked_at, password_hash, view_count, first_viewed_at, last_viewed_at, NULL
             FROM collection_shares;
             DROP TABLE collection_shares;
             ALTER TABLE collection_shares_new RENAME TO collection_shares;
@@ -1549,6 +1631,7 @@ async def migrate_share_owner_cascades(conn) -> None:
     statements.append("COMMIT;")
 
     await conn.commit()
+    await backup_before_table_rebuild(conn, "share-owner-cascades")
     await conn.execute("PRAGMA foreign_keys=OFF")
     try:
         await conn.executescript("\n".join(statements))
@@ -1610,19 +1693,7 @@ async def _ensure_collection_share_indexes(conn) -> None:
 
 
 async def _backup_before_v20_rebuild(conn) -> None:
-    cursor = await conn.execute("PRAGMA database_list")
-    main = next((row for row in await cursor.fetchall() if row["name"] == "main"), None)
-    db_path = str(main["file"] or "") if main is not None else ""
-    if not db_path or db_path == ":memory:":
-        return
-    backup_path = f"{db_path}.pre-v20.bak"
-    if os.path.exists(backup_path):
-        return
-    try:
-        await conn.execute("PRAGMA wal_checkpoint(FULL)")
-    except Exception:
-        pass
-    await asyncio.to_thread(shutil.copy2, db_path, backup_path)
+    await backup_before_table_rebuild(conn, "v20")
 
 
 async def ensure_compatibility_columns(conn) -> None:
@@ -1632,7 +1703,7 @@ async def ensure_compatibility_columns(conn) -> None:
         "cache_metadata",
         (("replace_stale_thumbnails", "INTEGER NOT NULL DEFAULT 0"),),
     )
-    await _add_columns_if_missing(conn, "comparisons", (("action_id", "TEXT DEFAULT NULL"),))
+    await _add_columns_if_missing(conn, "comparisons", COMPARISON_COMPAT_COLUMNS)
     await _add_columns_if_missing(conn, "catalog_sources", CATALOG_SOURCE_COMPAT_COLUMNS)
     await _add_columns_if_missing(conn, "collections", COLLECTION_COMPAT_COLUMNS)
     await _add_columns_if_missing(conn, "collection_shares", COLLECTION_SHARE_COMPAT_COLUMNS)

@@ -5,7 +5,7 @@
 // from /api/rankings offset=0 — no fake ticking.
 
 import { getRankings, mosaicNext, mosaicPick, compareUndo, thumbUrl, writeFailureMessage } from './api.js';
-import { on, rememberImages, scope, scopeActive, scopeParams } from './state.js';
+import { clearScope, on, rememberImages, scope, scopeActive, scopeParams } from './state.js';
 import { showToast } from './toast.js';
 
 const RING_CIRCUMFERENCE = 62.83;
@@ -113,11 +113,13 @@ function renderSet() {
     stage.className = `mr-stage ${mode}`;
     if (currentSet.length < need()) {
         stage.className = 'mr-stage';
-        stage.innerHTML = '<div class="mr-empty">Not enough photos to refine here.<br>Add a source on desktop, or try another view.</div>';
+        stage.innerHTML = '<div class="mr-empty">Not enough photos to refine here.<br>Add a source on desktop, or try another view.'
+            + '<button class="sheet-btn" id="mr-refine-all" type="button">Refine all photos instead</button></div>';
+        stage.querySelector('#mr-refine-all')?.addEventListener('click', clearScope);
         return;
     }
     stage.innerHTML = currentSet.map((img) =>
-        `<button class="mr-card" data-id="${img.id}" data-mutating aria-label="Pick ${esc(img.filename || img.id)}">`
+        `<button class="mr-card" data-id="${img.id}" data-mutating aria-label="Favorite ${esc(img.filename || img.id)}">`
         + `<img src="${esc(thumbUrl('md', img.id))}" decoding="async" alt=""></button>`
     ).join('');
     document.dispatchEvent(new CustomEvent('sheet-mutated'));
@@ -188,6 +190,7 @@ async function advance() {
 async function pick(winnerId) {
     if (busy || currentSet.length < need()) return;
     busy = true;
+    const previousSet = currentSet;
     const winner = currentSet.find((img) => Number(img.id) === winnerId);
     const loserIds = currentSet.filter((img) => Number(img.id) !== winnerId).map((img) => Number(img.id));
     if (!winner || !loserIds.length) {
@@ -198,7 +201,8 @@ async function pick(winnerId) {
     if (card) card.classList.add('picked');
     if (navigator.vibrate) navigator.vibrate(8);
 
-    history.push({ set: currentSet, winnerId });
+    const historyEntry = { set: previousSet, winnerId };
+    history.push(historyEntry);
     if (history.length > 20) history.shift();
     picks += 1;
     streak += 1;
@@ -208,15 +212,22 @@ async function pick(winnerId) {
     // Advance immediately (speed covenant: the loop never waits on the write).
     const write = mosaicPick(winnerId, loserIds);
     await advance();
+    const advancedSet = currentSet;
     busy = false;
 
     const result = await write;
     if (!result || !result.ok) {
-        history.pop();
+        const historyIndex = history.indexOf(historyEntry);
+        if (historyIndex >= 0) history.splice(historyIndex, 1);
         picks = Math.max(0, picks - 1);
         streak = 0;
         root.querySelector('#mr-picks').textContent = String(picks);
         root.querySelector('#mr-streak').textContent = String(streak);
+        if (currentSet === advancedSet) {
+            currentSet = previousSet;
+            renderSet();
+            if (currentSet.length >= need()) prefetchNext();
+        }
         showToast(writeFailureMessage());
         return;
     }
@@ -231,7 +242,7 @@ async function undo() {
     busy = false;
     if (!result || !result.ok) {
         history.push(last);
-        showToast(writeFailureMessage());
+        showToast(result?.partial ? 'Undo partial — ranking drifted' : writeFailureMessage());
         return;
     }
     picks = Math.max(0, picks - 1);
@@ -242,7 +253,7 @@ async function undo() {
     renderSet();
     prefetchNext();
     scheduleQualityRefresh();
-    showToast('Pick undone');
+    showToast('Favorite undone');
 }
 
 export function initRefine() {

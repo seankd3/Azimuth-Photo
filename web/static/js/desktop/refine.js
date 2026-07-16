@@ -5,6 +5,7 @@ import {
     compareUndo, getPropagationLast, getRankings, mosaicNext, mosaicPick, thumbUrl,
 } from './api.js';
 import { showToast } from './toast.js';
+import { escapeHtml as esc } from './dom.js';
 
 const MODE_KEY = 'pa_d_refine_mode';
 const SIZE_KEY = 'pa_d_refine_size';
@@ -53,10 +54,6 @@ let saveQueue = Promise.resolve();
 let saveQueueActive = false;
 let saveQueueToken = 0;
 let pickActionQueue = Promise.resolve();
-
-const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[c]));
 
 function readChoice(key, choices, fallback) {
     const saved = localStorage.getItem(key);
@@ -577,7 +574,7 @@ export async function undoRefine() {
     if (!result || !result.ok) {
         history.push(entry);
         renderUndoState();
-        showToast('Nothing to undo');
+        showToast(result?.partial ? 'Undo partial — ranking drifted' : 'Nothing to undo');
         return;
     }
     picks = Math.max(0, picks - 1);

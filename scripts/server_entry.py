@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""photoArchive server entrypoint for frozen binaries and source/Docker runs.
+"""Azimuth Photo server entrypoint for frozen binaries and source/Docker runs.
 
 Honors all existing PHOTOARCHIVE_* environment variables. With none set it
 uses platform-default data dirs (see web/core/runtime_paths.py) and serves
@@ -50,7 +50,7 @@ def _default_port() -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="photoarchive-server",
-        description="photoArchive library server (hub / standalone / satellite).",
+        description="Azimuth Photo library server (hub / standalone / satellite).",
     )
     parser.add_argument(
         "--host",

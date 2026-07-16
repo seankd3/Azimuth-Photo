@@ -123,6 +123,32 @@ class MirrorAcceptanceTests(BackendTestCase):
         second = await mirror.refresh()
         self.assertEqual(second["rows_applied"], 0)
 
+    async def test_mirror_follows_hub_filepath_moves(self):
+        """Hub paths can move (mount migrations, re-filed folders); the mirror must follow."""
+        mirror = MirrorPuller(db_path=db.DB_PATH, hub="http://hub", request=self._request)
+        first = await mirror.refresh()
+        self.assertEqual(first["rows_applied"], 200)
+
+        moved = "/hub-moved/2026/hub-1.jpg"
+        self.rows[0]["filepath"] = moved
+        conn = await db.get_db()
+        try:
+            await conn.execute("DELETE FROM sync_mirror_state WHERE key = 'cursor'")
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        await mirror.refresh()
+        conn = await db.get_db()
+        try:
+            row = await (await conn.execute(
+                "SELECT filepath, hub_remote FROM images WHERE hub_image_id = 1"
+            )).fetchone()
+            self.assertEqual(int(row["hub_remote"]), 1)
+            self.assertEqual(row["filepath"], moved)
+        finally:
+            await conn.close()
+
     async def test_mirror_reports_skipped_unhashed_rows(self):
         self.rows = [
             {
@@ -161,3 +187,106 @@ class MirrorAcceptanceTests(BackendTestCase):
             self.assertEqual(int(count["c"]), 1)
         finally:
             await conn.close()
+
+
+class MirrorDevelopGuardTests(BackendTestCase):
+    async def test_mirror_develop_preserves_local_rating(self):
+        source = await self._source()
+        image_id = await self._image(source["id"], "rated.jpg")
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "INSERT INTO develop_settings(image_id, settings, origin, updated_at) "
+                "VALUES (?, ?, 'user', '')",
+                (image_id, json.dumps({"Exposure2012": 0.25, "_lr_rating": 4})),
+            )
+            await MirrorPuller._apply_develop(conn, image_id, {
+                "develop_settings": {"Exposure2012": 1.0},
+                "develop_updated_at": "2026-07-16T02:00:00Z",
+                "develop_origin": "hub",
+            })
+            await conn.commit()
+            row = await (await conn.execute(
+                "SELECT settings FROM develop_settings WHERE image_id = ?", (image_id,)
+            )).fetchone()
+        finally:
+            await conn.close()
+
+        self.assertEqual(json.loads(row["settings"]), {"Exposure2012": 1.0, "_lr_rating": 4})
+
+    async def test_mirror_never_rewinds_newer_local_develop_regardless_of_origin(self):
+        from features.sync.mirror import MirrorPuller
+
+        source = await self._source()
+        image_id = await self._image(source["id"], "guarded.jpg")
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "INSERT INTO develop_settings(image_id, settings, origin, updated_at) "
+                "VALUES (?, '{\"Exposure2012\":1.0}', 'sync', '2026-07-15T10:00:00Z')",
+                (image_id,),
+            )
+            await conn.commit()
+            # Older hub snapshot must not clobber the newer oplog-applied local row.
+            await MirrorPuller._apply_develop(conn, image_id, {
+                "develop_settings": {"Exposure2012": -5.0},
+                "develop_updated_at": "2026-07-14T10:00:00Z",
+                "develop_origin": "hub",
+            })
+            await conn.commit()
+            row = await (await conn.execute(
+                "SELECT settings FROM develop_settings WHERE image_id = ?", (image_id,)
+            )).fetchone()
+            self.assertIn(chr(34) + "Exposure2012" + chr(34) + ":1.0", row["settings"])
+            # A genuinely newer hub snapshot still applies.
+            await MirrorPuller._apply_develop(conn, image_id, {
+                "develop_settings": {"Exposure2012": 2.5},
+                "develop_updated_at": "2026-07-16T10:00:00Z",
+                "develop_origin": "hub",
+            })
+            await conn.commit()
+            row = await (await conn.execute(
+                "SELECT settings FROM develop_settings WHERE image_id = ?", (image_id,)
+            )).fetchone()
+            self.assertIn(chr(34) + "Exposure2012" + chr(34) + ":2.5", row["settings"])
+        finally:
+            await conn.close()
+
+    async def test_mirror_develop_consults_newer_family_clock(self):
+        from features.sync import family_clock
+
+        source = await self._source()
+        image_id = await self._image(source["id"], "family-clock-guarded.jpg")
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "UPDATE images SET content_hash = ? WHERE id = ?",
+                ("f" * 32, image_id),
+            )
+            content_hash = str((await (await conn.execute(
+                "SELECT content_hash FROM images WHERE id = ?", (image_id,)
+            )).fetchone())["content_hash"])
+            await conn.execute(
+                "INSERT INTO develop_settings(image_id, settings, origin, updated_at) "
+                "VALUES (?, '{\"Exposure2012\":1.0}', 'sync', '2026-07-16T02:00:00Z')",
+                (image_id,),
+            )
+            await family_clock.record_state(
+                conn,
+                content_hash,
+                "develop",
+                family_clock.legacy_key("2026-07-16T05:00:00Z"),
+            )
+            await MirrorPuller._apply_develop(conn, image_id, {
+                "develop_settings": {"Exposure2012": -2.0},
+                "develop_updated_at": "2026-07-16T04:00:00Z",
+                "develop_origin": "hub",
+            })
+            row = await (await conn.execute(
+                "SELECT settings, updated_at FROM develop_settings WHERE image_id = ?", (image_id,)
+            )).fetchone()
+        finally:
+            await conn.close()
+
+        self.assertEqual(json.loads(row["settings"]), {"Exposure2012": 1.0})
+        self.assertEqual(row["updated_at"], "2026-07-16T02:00:00Z")

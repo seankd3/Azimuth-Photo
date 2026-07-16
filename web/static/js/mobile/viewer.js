@@ -1,17 +1,21 @@
 // GP-class photo viewer on a pure-black canvas.
 // Gesture grammar (from the One prototype):
 //   2 fingers  → live pinch zoom + pan (midpoint-anchored)
-//   1 finger   → pan when zoomed · swipe down/left/right at 1x
+//   1 finger   → pan when zoomed · swipe up to favorite · swipe down to close · swipe left/right to browse at 1x
 //   double-tap → 1x ↔ 2.5x at the tap point
 // Flags are real writes with undo.
 
-import { getExif, getImageCaption, getSimilar, thumbUrl } from './api.js';
+import { getExif, getImageCaption, getSimilar, thumbUrl, writeRating } from './api.js';
 import { applyFlags } from './flags.js';
-import { byId, nav as appNav, on, rememberImages, setScope } from './state.js';
+import { byId, emit, nav as appNav, on, rememberImages, setScope } from './state.js';
 import { dismissSheetThen, openCollectionSheet, openSheet } from './selection.js';
 import { showToast } from './toast.js';
 import { dismissLayer, dismissLayerThen, pushLayer, registerLayer, syncLayerClosed } from './history.js';
 import { icon } from '../icons.js';
+import { createMomentum } from './viewer_momentum.js';
+import { openPhotoShareSheet } from './sharing.js';
+import { isAvailableOffline, toggleOfflineAvailability } from './offline.js';
+import { cacheCaptionRequest } from './caption_cache.js';
 
 let root = null;
 let stage = null;
@@ -24,13 +28,18 @@ let list = [];
 let index = -1;
 let needMore = null;
 let loadToken = 0;
+let incomingStageImage = null;
+const mediumPreloads = new Map();
+const captionCache = new Map();
 
 let zScale = 1;
 let tx = 0;
 let ty = 0;
 let zoomed = false;
+let panMomentum = null;
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const LARGE_IMAGE_TIMEOUT_MS = 8000;
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 }[c]));
@@ -56,6 +65,7 @@ function clampPan() {
 }
 
 function resetZoom() {
+    panMomentum?.stop();
     zScale = 1;
     tx = 0;
     ty = 0;
@@ -84,36 +94,93 @@ function loadLg() {
     const token = loadToken;
     const lg = new Image();
     lg.decoding = 'async';
-    lg.onload = () => {
-        if (token === loadToken) img.src = lg.src;
+    lg.fetchPriority = 'high';
+    let settled = false;
+    const finish = ({ offline = false } = {}) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timeout);
+        if (offline && token === loadToken) setViewerOffline(true);
     };
+    const timeout = window.setTimeout(() => finish({ offline: true }), LARGE_IMAGE_TIMEOUT_MS);
+    lg.onload = () => {
+        if (token === loadToken) {
+            img.src = lg.src;
+            setViewerOffline(false);
+        }
+        finish();
+    };
+    lg.onerror = () => finish({ offline: true });
     lg.src = thumbUrl('lg', image.id);
+}
+
+function setViewerOffline(offline) {
+    let chip = stage?.querySelector('.viewer-offline-chip');
+    if (!chip && stage) {
+        chip = document.createElement('span');
+        chip.className = 'viewer-offline-chip';
+        chip.textContent = 'Original offline';
+        chip.hidden = true;
+        stage.append(chip);
+    }
+    if (chip) chip.hidden = !offline;
 }
 
 function preload(offset) {
     const neighbor = list[index + offset];
     if (neighbor) {
-        const pre = new Image();
-        pre.src = thumbUrl('md', neighbor.id);
+        let pre = mediumPreloads.get(Number(neighbor.id));
+        if (!pre) {
+            pre = new Image();
+            pre.fetchPriority = 'low';
+            pre.src = thumbUrl('md', neighbor.id);
+            mediumPreloads.set(Number(neighbor.id), pre);
+        }
+        preloadCaption(neighbor.id);
     }
 }
 
-function showCurrent() {
+function preloadCaption(imageId) {
+    const id = Number(imageId);
+    if (!id) return Promise.resolve(null);
+    return cacheCaptionRequest(captionCache, id, () => getImageCaption(id));
+}
+
+function upgradeToMedium(image, token) {
+    const medium = new Image();
+    medium.decoding = 'async';
+    medium.fetchPriority = 'high';
+    medium.onload = async () => {
+        if (medium.decode) await medium.decode().catch(() => {});
+        if (!viewerRequestCurrent(image.id, token)) return;
+        img.src = medium.src;
+    };
+    medium.src = thumbUrl('md', image.id);
+}
+
+function showCurrent({ stageReady = false } = {}) {
     const image = current();
     if (!image) return;
     loadToken += 1;
     const token = loadToken;
+    setViewerOffline(false);
     resetZoom();
-    img.src = thumbUrl('md', image.id);
+    if (!stageReady) {
+        img.fetchPriority = 'high';
+        // preview_ready exception: opening Viewer intentionally uses its progressive proxy-to-full loader.
+        img.src = image.thumb_url || thumbUrl('sm', image.id);
+        upgradeToMedium(image, token);
+    }
     loadLg();
     const date = image.date_taken ? String(image.date_taken).slice(0, 16).replace('T', ' · ') : '';
     cap.textContent = [image.filename, date].filter(Boolean).join('  —  ');
-    getImageCaption(image.id).then((data) => {
+    preloadCaption(image.id).then((data) => {
         if (!viewerRequestCurrent(image.id, token)) return;
         const caption = data?.has_caption ? String(data.caption || '').trim() : '';
         cap.textContent = [caption || image.filename, date].filter(Boolean).join('  —  ');
     });
     syncFlagButtons();
+    syncOfflineButton();
     preload(1);
     preload(-1);
     if (needMore && index >= list.length - 5) needMore();
@@ -122,23 +189,48 @@ function showCurrent() {
 function syncFlagButtons() {
     const image = current();
     const flag = image ? (byId.get(Number(image.id)) || image).flag || 'unflagged' : 'unflagged';
-    document.getElementById('mv-pick').classList.toggle('on-pick', flag === 'picked');
-    document.getElementById('mv-reject').classList.toggle('on-reject', flag === 'rejected');
+    const favorite = document.getElementById('mv-pick');
+    const reject = document.getElementById('mv-reject');
+    favorite.classList.toggle('on-pick', flag === 'picked');
+    favorite.setAttribute('aria-pressed', String(flag === 'picked'));
+    reject.classList.toggle('on-reject', flag === 'rejected');
+    reject.setAttribute('aria-pressed', String(flag === 'rejected'));
     if (flagBadge) {
         flagBadge.hidden = flag === 'unflagged';
         flagBadge.className = `mv-flag ${flag}`;
-        flagBadge.textContent = flag === 'picked' ? 'Picked' : 'Rejected';
+        flagBadge.textContent = flag === 'picked' ? 'Favorited' : 'Rejected';
     }
 }
 
-function cullSwipe(flag) {
+function syncOfflineButton() {
+    const image = current();
+    const button = document.getElementById('mv-offline');
+    const available = Boolean(image && isAvailableOffline(image.id));
+    button.classList.toggle('on-offline', available);
+    button.setAttribute('aria-pressed', String(available));
+    button.setAttribute('aria-label', available ? 'Remove offline availability' : 'Make available offline');
+}
+
+function favoriteSwipe() {
     const image = current();
     if (!image) return;
-    root.classList.remove('cull-picked', 'cull-rejected');
+    root.classList.remove('cull-picked');
     void root.offsetWidth;
-    root.classList.add(flag === 'picked' ? 'cull-picked' : 'cull-rejected');
-    setTimeout(() => root.classList.remove('cull-picked', 'cull-rejected'), 260);
-    void applyFlags([image.id], flag);
+    root.classList.add('cull-picked');
+    window.setTimeout(() => root.classList.remove('cull-picked'), 260);
+    void applyFlags([image.id], 'picked');
+}
+
+function settleDismissSwipe() {
+    img.style.transition = 'transform .16s cubic-bezier(.2,.7,.2,1)';
+    root.style.transition = 'background .16s cubic-bezier(.2,.7,.2,1)';
+    img.style.transform = `translateY(${window.innerHeight * .22}px) scale(.78)`;
+    root.style.background = 'rgba(0,0,0,0)';
+    window.setTimeout(() => {
+        img.style.transition = '';
+        root.style.transition = '';
+        dismissViewer();
+    }, 150);
 }
 
 function nav(dir) {
@@ -146,6 +238,56 @@ function nav(dir) {
     if (next < 0 || next >= list.length) return;
     index = next;
     showCurrent();
+}
+
+function settlePhotoSwipe(direction) {
+    const next = index + direction;
+    if (next < 0 || next >= list.length) {
+        img.style.transform = '';
+        return;
+    }
+    const neighbor = list[next];
+    const preloaded = mediumPreloads.get(Number(neighbor.id));
+    if (!preloaded?.complete || !preloaded.naturalWidth) {
+        img.style.transition = 'transform .16s cubic-bezier(.2,.7,.2,1)';
+        img.style.transform = `translateX(${direction > 0 ? -window.innerWidth : window.innerWidth}px)`;
+        window.setTimeout(() => {
+            img.style.transition = '';
+            nav(direction);
+        }, 150);
+        return;
+    }
+    incomingStageImage?.remove();
+    incomingStageImage = null;
+    const travel = direction > 0 ? -window.innerWidth : window.innerWidth;
+    const incoming = document.createElement('img');
+    incoming.className = 'viewer-swipe-incoming';
+    incoming.alt = '';
+    incoming.decoding = 'async';
+    incoming.src = preloaded.src;
+    incoming.style.transform = `translateX(${-travel}px)`;
+    stage.append(incoming);
+    incomingStageImage = incoming;
+    const finish = (event) => {
+        if (incomingStageImage !== incoming) return;
+        if (event.target !== incoming || event.propertyName !== 'transform') return;
+        incoming.removeEventListener('transitionend', finish);
+        img.src = incoming.src;
+        incoming.remove();
+        incomingStageImage = null;
+        img.style.transition = '';
+        img.style.transform = '';
+        index = next;
+        showCurrent({ stageReady: true });
+    };
+    incoming.addEventListener('transitionend', finish);
+    window.setTimeout(() => finish({ target: incoming, propertyName: 'transform' }), 350);
+    requestAnimationFrame(() => {
+        img.style.transition = 'transform .16s cubic-bezier(.2,.7,.2,1)';
+        incoming.style.transition = 'transform .16s cubic-bezier(.2,.7,.2,1)';
+        img.style.transform = `translateX(${travel}px)`;
+        incoming.style.transform = 'translateX(0)';
+    });
 }
 
 export function openViewer(imageList, startIndex, { loadMore = null } = {}) {
@@ -162,9 +304,12 @@ export function openViewer(imageList, startIndex, { loadMore = null } = {}) {
 
 export function closeViewer({ fromHistory = false } = {}) {
     if (!openState) return;
+    resetZoom();
     openState = false;
     root.hidden = true;
     root.style.background = '';
+    incomingStageImage?.remove();
+    incomingStageImage = null;
     img.style.transform = '';
     document.body.classList.remove('viewer-open');
     document.body.style.overflow = '';
@@ -177,6 +322,20 @@ function dismissViewer() {
 
 function dismissViewerThen(afterClose = null) {
     dismissLayerThen('viewer', closeViewer, afterClose);
+}
+
+function imageRating(image) {
+    const value = Number(image?.rating ?? image?.stars ?? image?._lr_rating ?? 0);
+    return Number.isFinite(value) ? clamp(Math.round(value), 0, 5) : 0;
+}
+
+function syncRatingButtons(sheet, rating) {
+    for (const button of sheet.querySelectorAll('[data-rating]')) {
+        const value = Number(button.dataset.rating);
+        const active = value <= rating;
+        button.classList.toggle('on', active);
+        button.setAttribute('aria-pressed', String(active));
+    }
 }
 
 function infoSheet() {
@@ -204,6 +363,11 @@ function infoSheet() {
     const sheet = openSheet(
         '<h3>Info</h3>'
         + `<button class="sheet-row" id="mv-similar"><span class="g">${icon('scan-search')}</span>Find similar</button>`
+        + '<div class="sheet-rating"><span>Rating</span><div class="sheet-stars" role="group" aria-label="Star rating">'
+        + [1, 2, 3, 4, 5].map((rating) =>
+            `<button type="button" data-rating="${rating}" aria-label="Set ${rating} star rating">${icon('star')}</button>`
+        ).join('')
+        + '</div></div>'
         + '<div class="sheet-caption" id="mv-caption">'
         + '<div class="sheet-caption-label">Caption</div>'
         + '<div class="sheet-caption-text sheet-caption-muted">Loading…</div>'
@@ -214,6 +378,36 @@ function infoSheet() {
         + '<details class="sheet-details"><summary>More details</summary>'
         + '<div class="sheet-meta" id="mv-exif"><div><span>Loading</span><b>…</b></div></div></details>'
     );
+    syncRatingButtons(sheet, imageRating(image));
+    const ratingGeneration = loadToken;
+    fetch(`/api/image/${image.id}/rating`, { headers: { Accept: 'application/json' } })
+        .then((response) => (response.ok ? response.json() : null))
+        .then((data) => {
+            if (!data || !viewerRequestCurrent(image.id, ratingGeneration)) return;
+            image.rating = data.rating;
+            const known = byId.get(Number(image.id));
+            if (known) known.rating = data.rating;
+            if (sheet.isConnected) syncRatingButtons(sheet, imageRating(image));
+        })
+        .catch(() => {});
+    for (const button of sheet.querySelectorAll('[data-rating]')) {
+        button.addEventListener('click', () => {
+            const target = image;
+            const value = Number(button.dataset.rating);
+            const previous = imageRating(target);
+            const rating = previous === value ? 0 : value;
+            target.rating = rating;
+            const known = byId.get(Number(target.id));
+            if (known) known.rating = rating;
+            syncRatingButtons(sheet, rating);
+            void writeRating(target.id, rating).then((result) => {
+                if (result.status !== 'failed' || imageRating(target) !== rating) return;
+                target.rating = previous;
+                if (known) known.rating = previous;
+                if (sheet.isConnected) syncRatingButtons(sheet, previous);
+            });
+        });
+    }
     sheet.querySelector('#mv-similar').addEventListener('click', async () => {
         let data = null;
         try {
@@ -354,10 +548,12 @@ function installGestures() {
         if (zoomed) {
             gest = 'pan';
             sw = { x: t.clientX, y: t.clientY, tx0: tx, ty0: ty, moved: 0 };
+            panMomentum?.stop();
+            panMomentum?.record(t.clientX, t.clientY);
             root.classList.add('dragging');
         } else {
             gest = 'swipe';
-            sw = { x: t.clientX, y: t.clientY, mode: null, res: 0 };
+            sw = { x: t.clientX, y: t.clientY, mode: null, res: 0, startedAt: performance.now() };
         }
     }, { passive: true });
 
@@ -387,6 +583,7 @@ function installGestures() {
             ty = sw.ty0 + (t.clientY - sw.y);
             clampPan();
             applyT();
+            panMomentum?.record(t.clientX, t.clientY);
             return;
         }
         if (gest === 'swipe' && sw && e.touches.length === 1) {
@@ -456,6 +653,7 @@ function installGestures() {
                     }
                 }
                 gest = null;
+                panMomentum?.release();
                 sw = null;
                 root.classList.remove('dragging');
             }
@@ -482,16 +680,17 @@ function installGestures() {
                 sw = null;
                 return;
             }
-            if (sw.mode === 'down' && dy > 90) {
+            const elapsed = Math.max(1, performance.now() - (sw.startedAt || performance.now()));
+            const vx = dx / elapsed;
+            const vy = dy / elapsed;
+            if (sw.mode === 'down' && (dy > 90 || vy > 0.75)) {
+                settleDismissSwipe();
+            } else if (sw.mode === 'up' && (dy < -60 || vy < -0.75)) {
                 img.style.transform = '';
-                cullSwipe('rejected');
-            } else if (sw.mode === 'up' && dy < -60) {
-                img.style.transform = '';
-                cullSwipe('picked');
-            } else if (sw.mode === 'h' && Math.abs(sw.res) > 70) {
-                img.style.transform = '';
+                favoriteSwipe();
+            } else if (sw.mode === 'h' && (Math.abs(sw.res) > 70 || Math.abs(vx) > 0.65)) {
                 const dir = dx < 0 ? 1 : -1;
-                nav(dir);
+                settlePhotoSwipe(dir);
             } else {
                 img.style.transform = '';
             }
@@ -501,6 +700,7 @@ function installGestures() {
     }, { passive: true });
 
     stage.addEventListener('touchcancel', () => {
+        panMomentum?.stop();
         gest = null;
         sw = null;
         pin = null;
@@ -520,35 +720,56 @@ export function initViewer() {
     stage = document.getElementById('mv-stage');
     img = document.getElementById('mv-img');
     cap = document.getElementById('mv-cap');
+    panMomentum = createMomentum({
+        read: () => ({ x: tx, y: ty }),
+        write: (x, y) => {
+            tx = x;
+            ty = y;
+            applyT();
+        },
+        constrain: (x, y) => {
+            const rect = stage.getBoundingClientRect();
+            const maxX = (rect.width * (zScale - 1)) / 2;
+            const maxY = (rect.height * (zScale - 1)) / 2;
+            return { x: clamp(x, -maxX, maxX), y: clamp(y, -maxY, maxY) };
+        },
+    });
     flagBadge = document.createElement('div');
     flagBadge.id = 'mv-flag';
     flagBadge.hidden = true;
     stage.appendChild(flagBadge);
-    const done = document.createElement('button');
-    done.id = 'mv-done';
-    done.type = 'button';
-    done.textContent = 'Done';
-    root.appendChild(done);
-
     registerLayer('viewer', { close: closeViewer });
 
     document.getElementById('mv-close').addEventListener('click', dismissViewer);
-    done.addEventListener('click', dismissViewer);
     document.getElementById('mv-pick').addEventListener('click', () => {
         const image = current();
-        if (image) applyFlags([image.id], 'picked');
+        const flag = image ? (byId.get(Number(image.id)) || image).flag || 'unflagged' : '';
+        if (image) applyFlags([image.id], flag === 'picked' ? 'unflagged' : 'picked');
     });
     document.getElementById('mv-reject').addEventListener('click', () => {
         const image = current();
-        if (image) applyFlags([image.id], 'rejected');
-    });
-    document.getElementById('mv-unflag').addEventListener('click', () => {
-        const image = current();
-        if (image) applyFlags([image.id], 'unflagged');
+        const flag = image ? (byId.get(Number(image.id)) || image).flag || 'unflagged' : '';
+        if (image) applyFlags([image.id], flag === 'rejected' ? 'unflagged' : 'rejected');
     });
     document.getElementById('mv-coll').addEventListener('click', () => {
         const image = current();
         if (image) openCollectionSheet([Number(image.id)]);
+    });
+    document.getElementById('mv-share').addEventListener('click', () => {
+        const image = current();
+        if (image) openPhotoShareSheet(image);
+    });
+    document.getElementById('mv-offline').addEventListener('click', async () => {
+        const image = current();
+        if (!image) return;
+        const button = document.getElementById('mv-offline');
+        button.disabled = true;
+        try {
+            await toggleOfflineAvailability(image);
+            syncOfflineButton();
+        } finally {
+            button.disabled = false;
+        }
     });
     document.getElementById('mv-info').addEventListener('click', infoSheet);
 
@@ -570,5 +791,10 @@ export function initViewer() {
     }
 
     on('flags', syncFlagButtons);
+    on('rating-write', ({ status, imageId }) => {
+        if (status !== 'committed') return;
+        emit('rating', { imageId, rating: imageRating(byId.get(imageId)) });
+    });
+    on('offline-availability', syncOfflineButton);
     installGestures();
 }

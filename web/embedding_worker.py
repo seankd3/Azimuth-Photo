@@ -1,5 +1,5 @@
 """
-Embedding worker for photoArchive.
+Embedding worker for Azimuth Photo.
 
 Background worker that embeds images using Qwen3-VL-Embedding-2B (int4).
 Embeddings power: text search, find similar, Elo propagation, duplicate
@@ -17,15 +17,24 @@ from typing import Any
 
 import numpy as np
 
+def _new_embed_executor() -> ThreadPoolExecutor:
+    return ThreadPoolExecutor(max_workers=1, thread_name_prefix="embed-gpu")
+
+
+def _new_preload_executor() -> ThreadPoolExecutor:
+    return ThreadPoolExecutor(max_workers=1, thread_name_prefix="embed-preload")
+
+
 # Dedicated executors — separate CPU prep from GPU encode
-_embed_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="embed-gpu")
-_preload_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="embed-preload")
+_embed_executor = _new_embed_executor()
+_preload_executor = _new_preload_executor()
 
 import ai_models
 import embed_cache
 import settings
 import thumbnails
 from core import work_coordination
+from workers.caption_health import CaptionOomCircuit
 
 log = logging.getLogger("embedding_worker")
 log.setLevel(logging.INFO)
@@ -53,6 +62,7 @@ _loaded_model_id = None
 _loaded_model_revision = None
 _model_load_lock = None
 _search_model_load_task = None
+_search_model_residency_task = None
 _model_load_retry_after = 0.0
 _model_load_error_key = None
 _worker_status = {
@@ -91,6 +101,7 @@ _worker_status = {
 }
 _embedding_history = deque()
 _embed_retry_after: dict[int, float] = {}
+_embedding_oom_circuit = CaptionOomCircuit(threshold=3)
 _embedding_manual_pause = True
 _embedding_manual_pause_message = "Search is stopped until you start it from Background Work."
 _embedding_pause_reason = ""
@@ -112,6 +123,7 @@ _get_catalog_image_counts: AsyncDictProvider | None = None
 _count_embeddings_for_model: AsyncIntProvider | None = None
 _get_unembedded_images: AsyncListProvider | None = None
 _store_embeddings_batch: AsyncNoneProvider | None = None
+_poison_embedding_image: AsyncNoneProvider | None = None
 _get_embedding_count: AsyncIntProvider | None = None
 
 
@@ -121,11 +133,12 @@ def configure(
     count_embeddings_for_model: AsyncIntProvider | None = None,
     get_unembedded_images: AsyncListProvider | None = None,
     store_embeddings_batch: AsyncNoneProvider | None = None,
+    poison_embedding_image: AsyncNoneProvider | None = None,
     get_embedding_count: AsyncIntProvider | None = None,
 ) -> None:
     global _get_catalog_image_counts
     global _count_embeddings_for_model, _get_unembedded_images
-    global _store_embeddings_batch, _get_embedding_count
+    global _store_embeddings_batch, _poison_embedding_image, _get_embedding_count
     if get_catalog_image_counts is not None:
         _get_catalog_image_counts = get_catalog_image_counts
     if count_embeddings_for_model is not None:
@@ -134,6 +147,8 @@ def configure(
         _get_unembedded_images = get_unembedded_images
     if store_embeddings_batch is not None:
         _store_embeddings_batch = store_embeddings_batch
+    if poison_embedding_image is not None:
+        _poison_embedding_image = poison_embedding_image
     if get_embedding_count is not None:
         _get_embedding_count = get_embedding_count
 
@@ -230,14 +245,137 @@ def _clear_cuda_cache():
         pass
 
 
-def _unload_model() -> None:
+def _cancel_search_model_residency_task() -> asyncio.Task | None:
+    global _search_model_residency_task
+
+    task = _search_model_residency_task
+    _search_model_residency_task = None
+    if task is None or task.done():
+        return task
+    try:
+        current_task = asyncio.current_task()
+    except RuntimeError:
+        current_task = None
+    if task is not current_task:
+        task.cancel()
+    return task
+
+
+def _release_embedding_owners() -> None:
+    work_coordination.release_manual_owner("embeddings")
+    work_coordination.release_gpu_owner("embeddings")
+
+
+def _unload_model() -> asyncio.Task | None:
     global _model, _loaded_model_dir, _loaded_model_id, _loaded_model_revision
+    residency_task = _cancel_search_model_residency_task()
     _model = None
     _loaded_model_dir = None
     _loaded_model_id = None
     _loaded_model_revision = None
     _clear_cuda_cache()
-    work_coordination.release_gpu_owner("embeddings")
+    _release_embedding_owners()
+    return residency_task
+
+
+async def _maintain_search_model_residency() -> None:
+    global _search_model_residency_task
+
+    current_task = asyncio.current_task()
+    heartbeat_seconds = work_coordination.LEASE_HEARTBEAT_SECONDS
+    try:
+        async with work_coordination.lease_heartbeat(
+            "embeddings",
+            gpu=True,
+            interval_seconds=heartbeat_seconds,
+        ):
+            while _model is not None:
+                await asyncio.sleep(heartbeat_seconds)
+                if work_coordination.lost_ownership("embeddings", gpu=True):
+                    _unload_model()
+                    _set_worker_status(
+                        "idle",
+                        "Search model released for other background work.",
+                        ready=False,
+                    )
+                    return
+    finally:
+        _release_embedding_owners()
+        if _search_model_residency_task is current_task:
+            _search_model_residency_task = None
+
+
+def _start_search_model_residency_task() -> bool:
+    global _search_model_residency_task
+
+    if _model is None:
+        return False
+    task = _search_model_residency_task
+    if task is not None and not task.done():
+        return True
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return False
+    _search_model_residency_task = loop.create_task(
+        _maintain_search_model_residency()
+    )
+    return True
+
+
+def _retain_search_model_residency(config: dict, model_id: str) -> bool:
+    if work_coordination.lost_ownership("embeddings", gpu=True):
+        return False
+    if not _start_search_model_residency_task():
+        return False
+    _set_worker_status(
+        "resident",
+        "Search model warm.",
+        ready=True,
+        config=config,
+    )
+    return True
+
+
+async def _wait_for_embedding_turn() -> None:
+    if work_coordination.manual_turn_blocked("embeddings"):
+        _set_worker_status(
+            "waiting_for_turn",
+            "Search is waiting for other background work.",
+            ready=False,
+        )
+    await work_coordination.wait_for_manual_turn("embeddings")
+    if work_coordination.gpu_turn_blocked("embeddings"):
+        _set_worker_status(
+            "waiting_for_gpu",
+            "Search is waiting for the GPU.",
+            ready=False,
+        )
+    await work_coordination.wait_for_gpu_turn("embeddings")
+
+
+async def _renew_embedding_turn() -> bool:
+    retained = not work_coordination.lost_ownership("embeddings", gpu=True)
+    if not retained:
+        _unload_model()
+    await _wait_for_embedding_turn()
+    return retained
+
+
+async def shutdown_embedding_worker() -> None:
+    global _embed_executor, _preload_executor, _search_model_load_task
+    task = _search_model_load_task
+    if task is not None and not task.done():
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+    _search_model_load_task = None
+    residency_task = _unload_model()
+    if residency_task is not None and not residency_task.done():
+        await asyncio.gather(residency_task, return_exceptions=True)
+    _embed_executor.shutdown(wait=False, cancel_futures=True)
+    _preload_executor.shutdown(wait=False, cancel_futures=True)
+    _embed_executor = _new_embed_executor()
+    _preload_executor = _new_preload_executor()
 
 
 def _set_worker_status(
@@ -391,6 +529,7 @@ def resume_embedding_worker() -> dict:
     _embedding_manual_pause = False
     _embedding_manual_pause_message = ""
     _embedding_pause_reason = ""
+    _embedding_oom_circuit.reset()
     work_coordination.claim_manual_owner("embeddings")
     _clear_model_load_failure()
     _set_worker_status("idle", "Search will run from Background Work.", ready=_model is not None)
@@ -577,7 +716,9 @@ async def _ensure_model_loaded_for_config(config: dict, reason: str) -> bool:
     model_dir, model_id, model_revision = _model_values(config)
 
     if _model_is_current(model_dir, model_id, model_revision):
-        return True
+        if _retain_search_model_residency(config, model_id):
+            return True
+        _unload_model()
     if not ai_models.model_files_present(model_dir):
         return False
     if _block_model_load_for_missing_dependency(model_dir, model_id, model_revision):
@@ -587,28 +728,36 @@ async def _ensure_model_loaded_for_config(config: dict, reason: str) -> bool:
 
     async with _get_model_load_lock():
         if _model_is_current(model_dir, model_id, model_revision):
-            return True
+            if _retain_search_model_residency(config, model_id):
+                return True
+            _unload_model()
         if _model_load_blocked(model_dir, model_id, model_revision):
             return False
 
         loop = asyncio.get_running_loop()
         _set_worker_status("loading_model", f"Loading {model_id} for {reason}…", ready=False, config=config)
+        loaded = False
         try:
-            _model = await loop.run_in_executor(_embed_executor, _load_model, model_dir, model_id)
+            await _wait_for_embedding_turn()
+            _set_worker_status("loading_model", f"Loading {model_id} for {reason}…", ready=False, config=config)
+            with work_coordination.manual_bulk("embeddings"):
+                async with work_coordination.lease_heartbeat("embeddings", gpu=True):
+                    _model = await loop.run_in_executor(_embed_executor, _load_model, model_dir, model_id)
             _loaded_model_dir = model_dir
             _loaded_model_id = model_id
             _loaded_model_revision = model_revision
             _clear_model_load_failure()
-            _set_worker_status("ready", f"{model_id} loaded locally.", ready=True, config=config)
+            if not _retain_search_model_residency(config, model_id):
+                raise RuntimeError("Could not start search model residency heartbeat")
+            loaded = True
             return True
         except Exception as exc:
-            _model = None
-            _loaded_model_dir = None
-            _loaded_model_id = None
-            _loaded_model_revision = None
             _note_model_load_failure(model_dir, model_id, model_revision, exc)
             log.error(f"Search model load error: {exc}", exc_info=True)
             return False
+        finally:
+            if not loaded:
+                _unload_model()
 
 
 async def ensure_model_loaded_for_search() -> bool:
@@ -789,9 +938,14 @@ async def _process_embedding_candidates(
     first_failure_error = None
     preload_future = None
     preload_rows = None
+    ownership_lost = False
 
     while index < len(rows):
         if _embedding_manual_pause:
+            break
+        if not await _renew_embedding_turn():
+            await _discard_preload_future(preload_future)
+            ownership_lost = True
             break
 
         active_batch_size, _target = _refresh_batch_status(embedding_config)
@@ -874,12 +1028,33 @@ async def _process_embedding_candidates(
                 failure = f"{type(e).__name__}: {e}"
                 first_failure_error = first_failure_error or failure
                 failed_total += chunk_len
+                circuit_open = _embedding_oom_circuit.record_failure()
                 for row in chunk_rows:
-                    _schedule_embed_retry(int(row["id"]), failure)
+                    image_id = int(row["id"])
+                    poisoned = await _configured(
+                        _poison_embedding_image,
+                        "poison_embedding_image",
+                    )(
+                        image_id=image_id,
+                        embedding_config=embedding_config,
+                        error=failure,
+                        force=circuit_open,
+                    )
+                    if poisoned:
+                        _embed_retry_after.pop(image_id, None)
+                    else:
+                        _schedule_embed_retry(image_id, failure)
                 index = next_index
+                if circuit_open:
+                    pause_embedding_worker(
+                        "Search paused after repeated GPU out-of-memory failures. "
+                        "Free GPU memory, then start Search again."
+                    )
 
             preload_future = None
             preload_rows = None
+            if _embedding_manual_pause:
+                break
             await asyncio.sleep(0)
             continue
 
@@ -912,6 +1087,7 @@ async def _process_embedding_candidates(
                 log.warning(f"Warm embedding cache update skipped: {exc}")
             await _log_stored_embedding_batch(len(batch), embedding_config)
             _note_successful_embedding_batch(embedding_config)
+            _embedding_oom_circuit.reset()
         store_seconds = time.perf_counter() - store_started
 
         if batch_pause_seconds:
@@ -949,10 +1125,19 @@ async def _process_embedding_candidates(
         "failed": failed_total,
         "chunks": chunks_completed,
         "first_error": first_failure_error,
+        "lost_ownership": ownership_lost,
     }
 
 
 async def run_embedding_worker():
+    try:
+        await _run_embedding_worker_loop()
+    finally:
+        work_coordination.release_manual_owner("embeddings")
+        _unload_model()
+
+
+async def _run_embedding_worker_loop():
     """Main background loop: embed images for search, similarity, and Elo propagation."""
     loop = asyncio.get_running_loop()
 
@@ -1001,7 +1186,7 @@ async def run_embedding_worker():
             if needs_model_load and _model_load_blocked(model_dir, model_id, model_revision):
                 wait_for = max(1, int(_model_load_retry_after - time.time()))
                 _set_worker_status(
-                    "error",
+                    "waiting_retry",
                     f"Model load failed; retrying in about {wait_for}s.",
                     ready=False,
                     last_error=_worker_status.get("last_error", ""),
@@ -1015,15 +1200,28 @@ async def run_embedding_worker():
                             continue
                         _set_worker_status("loading_model", f"Loading {model_id} from disk…", ready=False)
                         try:
-                            await work_coordination.wait_for_gpu_turn("embeddings")
-                            await work_coordination.wait_for_manual_turn("embeddings")
+                            await _wait_for_embedding_turn()
+                            _set_worker_status(
+                                "loading_model",
+                                f"Loading {model_id} from disk…",
+                                ready=False,
+                            )
                             with work_coordination.manual_bulk("embeddings"):
-                                _model = await loop.run_in_executor(_embed_executor, _load_model, model_dir, model_id)
+                                async with work_coordination.lease_heartbeat("embeddings", gpu=True):
+                                    _model = await loop.run_in_executor(
+                                        _embed_executor,
+                                        _load_model,
+                                        model_dir,
+                                        model_id,
+                                    )
                             _loaded_model_dir = model_dir
                             _loaded_model_id = model_id
                             _loaded_model_revision = model_revision
                             _clear_model_load_failure()
-                            _set_worker_status("ready", f"{model_id} loaded locally.", ready=True)
+                            if not _retain_search_model_residency(config, model_id):
+                                raise RuntimeError(
+                                    "Could not start search model residency heartbeat"
+                                )
                         except Exception as exc:
                             _unload_model()
                             _note_model_load_failure(model_dir, model_id, model_revision, exc)
@@ -1059,8 +1257,7 @@ async def run_embedding_worker():
                 "next_retry_at": next_retry_at,
             })
             if unembedded:
-                await work_coordination.wait_for_gpu_turn("embeddings")
-                await work_coordination.wait_for_manual_turn("embeddings")
+                await _wait_for_embedding_turn()
                 _set_worker_status(
                     "embedding",
                     f"Embedding {len(unembedded)} images in batches up to {governed_batch_size}…",
@@ -1088,7 +1285,7 @@ async def run_embedding_worker():
             if candidates and cooled_down:
                 wait_for = max(1, int(next_retry_at - time.time())) if next_retry_at else 5
                 _set_worker_status(
-                    "embedding",
+                    "waiting_retry",
                     f"Waiting to retry {cooled_down} unavailable files in about {wait_for}s.",
                     ready=True,
                 )

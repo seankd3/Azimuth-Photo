@@ -1,6 +1,7 @@
 import asyncio
 import os
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -64,6 +65,114 @@ class StagedImportTests(BackendTestCase):
                 os.environ.pop("PHOTOARCHIVE_ORIGINALS_DIR", None)
             else:
                 os.environ["PHOTOARCHIVE_ORIGINALS_DIR"] = old_root
+
+    async def test_alpha_png_preview_encodes_as_jpeg(self):
+        from PIL import Image
+
+        root = Path(self.tempdir.name)
+        source = root / "alpha.png"
+        Image.new("RGBA", (64, 48), (200, 60, 60, 128)).save(source)
+        scan = await self._card_scan(root, [self._entry(root, source)])
+        scan.card_source = False
+        data = staging.thumbnail_bytes(scan, scan.entries[0])
+        self.assertEqual(data[:3], b"\xff\xd8\xff")
+
+    async def test_mixed_folder_classifies_itself_from_provenance(self):
+        from PIL import Image
+
+        root = Path(self.tempdir.name)
+        originals = root / "library"
+        old_root = os.environ.get("PHOTOARCHIVE_ORIGINALS_DIR")
+        os.environ["PHOTOARCHIVE_ORIGINALS_DIR"] = str(originals)
+        try:
+            shoot = root / "dump"
+            shoot.mkdir()
+            (shoot / "CANON0001.CR3").write_bytes(b"raw camera bytes")
+            phone_exif = Image.Exif()
+            phone_exif[271] = "Google"
+            phone_exif[272] = "Pixel 10a"
+            Image.new("RGB", (32, 24), (10, 90, 40)).save(shoot / "PXL_PLAIN.jpg", exif=phone_exif)
+            edited_exif = Image.Exif()
+            edited_exif[305] = "Adobe Lightroom 14.2 (Windows)"
+            Image.new("RGB", (32, 24), (90, 10, 40)).save(shoot / "final-edit.jpg", exif=edited_exif)
+            Image.new("RGB", (32, 24), (40, 10, 90)).save(
+                shoot / "roll12-frame08.tif", tiffinfo={271: "EPSON", 272: "Perfection V600"}
+            )
+
+            scan = staging.Scan(
+                id="scan-classify", path=str(shoot), include_subfolders=False,
+                card_source=False, status="done",
+            )
+            staging._enumerate_scan(scan)
+            by_name = {entry["name"]: entry for entry in scan.entries}
+            self.assertEqual(by_name["CANON0001.CR3"]["category"], "raw")
+            self.assertEqual(by_name["PXL_PLAIN.jpg"]["category"], "personal")
+            self.assertEqual(by_name["final-edit.jpg"]["category"], "export")
+            self.assertEqual(by_name["roll12-frame08.tif"]["category"], "film")
+
+            staging._scans[scan.id] = scan
+            job = await staging.start_commit(scan, keys="all_checked_default", mode="copy", skip_suspects=True, clear_card=False, keyword_paths=[], collection_id=None)
+            await self._wait(job)
+            self.assertEqual(job.phase, "complete")
+            landed = {path.name: path for path in originals.rglob("*") if path.is_file()}
+            self.assertIn("RAWS", str(landed["CANON0001.CR3"]))
+            self.assertIn("Personal Photos", str(landed["PXL_PLAIN.jpg"]))
+            self.assertIn("Exported Edits", str(landed["final-edit.jpg"]))
+            self.assertIn("Film Scans", str(landed["roll12-frame08.tif"]))
+        finally:
+            if old_root is None:
+                os.environ.pop("PHOTOARCHIVE_ORIGINALS_DIR", None)
+            else:
+                os.environ["PHOTOARCHIVE_ORIGINALS_DIR"] = old_root
+
+    async def test_category_correction_is_remembered_for_the_source(self):
+        from PIL import Image
+
+        root = Path(self.tempdir.name)
+        originals = root / "library"
+        old_root = os.environ.get("PHOTOARCHIVE_ORIGINALS_DIR")
+        os.environ["PHOTOARCHIVE_ORIGINALS_DIR"] = str(originals)
+        try:
+            scans_dir = root / "scanner-drops"
+            scans_dir.mkdir()
+            Image.new("RGB", (32, 24), (5, 5, 5)).save(scans_dir / "frame01.jpg")
+
+            scan = staging.Scan(id="scan-mem1", path=str(scans_dir), include_subfolders=False, card_source=False, status="done")
+            staging._enumerate_scan(scan)
+            self.assertEqual(scan.entries[0]["category"], "raw")  # bare JPEG defaults to RAWS
+            staging._scans[scan.id] = scan
+            job = await staging.start_commit(scan, keys="all_checked_default", mode="copy", skip_suspects=True, clear_card=False, keyword_paths=[], collection_id=None, category="film")
+            await self._wait(job)
+            self.assertEqual(job.phase, "complete")
+            landed = [path for path in originals.rglob("frame01*") if path.is_file()]
+            self.assertIn("Film Scans", str(landed[0]))
+
+            # The correction sticks: the same source now classifies itself.
+            rescan = staging.Scan(id="scan-mem2", path=str(scans_dir), include_subfolders=False, card_source=False, status="done")
+            staging._enumerate_scan(rescan)
+            self.assertEqual(rescan.entries[0]["category"], "film")
+        finally:
+            if old_root is None:
+                os.environ.pop("PHOTOARCHIVE_ORIGINALS_DIR", None)
+            else:
+                os.environ["PHOTOARCHIVE_ORIGINALS_DIR"] = old_root
+
+    async def test_junk_directories_and_appledouble_files_are_fenced_out(self):
+        from PIL import Image
+
+        root = Path(self.tempdir.name) / "messy"
+        (root / ".lrt" / "previews").mkdir(parents=True)
+        (root / "PreviewCache").mkdir()
+        (root / "__MACOSX").mkdir()
+        Image.new("RGB", (16, 12)).save(root / "keeper.jpg")
+        Image.new("RGB", (16, 12)).save(root / ".lrt" / "previews" / "cache0001.jpg")
+        Image.new("RGB", (16, 12)).save(root / "PreviewCache" / "cache0002.jpg")
+        Image.new("RGB", (16, 12)).save(root / "__MACOSX" / "._keeper.jpg")
+        Image.new("RGB", (16, 12)).save(root / "._sidecar.jpg")
+
+        scan = staging.Scan(id="scan-junk", path=str(root), include_subfolders=True, card_source=False, status="done")
+        staging._enumerate_scan(scan)
+        self.assertEqual([entry["name"] for entry in scan.entries], ["keeper.jpg"])
 
     async def test_card_copy_collisions_duplicates_clear_and_rerun(self):
         root = Path(self.tempdir.name)
@@ -132,6 +241,57 @@ class StagedImportTests(BackendTestCase):
             await self._wait(no_op)
             self.assertEqual(no_op.status()["files_done"], 0)
             self.assertEqual(no_op.status()["skipped_duplicates"], 0)
+        finally:
+            if old_root is None:
+                os.environ.pop("PHOTOARCHIVE_ORIGINALS_DIR", None)
+            else:
+                os.environ["PHOTOARCHIVE_ORIGINALS_DIR"] = old_root
+
+    async def test_cancel_mid_job_persists_partial_batch_without_clearing_uncopied_card_file(self):
+        root = Path(self.tempdir.name)
+        originals = root / "originals"
+        old_root = os.environ.get("PHOTOARCHIVE_ORIGINALS_DIR")
+        os.environ["PHOTOARCHIVE_ORIGINALS_DIR"] = str(originals)
+        try:
+            camera = root / "CARD" / "DCIM" / "100CANON"
+            camera.mkdir(parents=True)
+            first = camera / "FIRST.CR3"
+            second = camera / "SECOND.CR3"
+            first.write_bytes(b"first safely copied file")
+            second.write_bytes(b"second must remain on card")
+            scan = await self._card_scan(
+                root / "CARD" / "DCIM",
+                [self._entry(root / "CARD" / "DCIM", first), self._entry(root / "CARD" / "DCIM", second)],
+            )
+
+            original_import_entry = staging._import_entry
+
+            async def cancel_after_first(job, entry):
+                await original_import_entry(job, entry)
+                if entry["name"] == first.name:
+                    staging.request_cancel(job)
+
+            with patch.object(staging, "_import_entry", side_effect=cancel_after_first):
+                job = await staging.start_commit(
+                    scan,
+                    keys="all_checked_default",
+                    mode="copy",
+                    skip_suspects=True,
+                    clear_card=True,
+                    keyword_paths=[],
+                    collection_id=None,
+                )
+                await self._wait(job)
+
+            batch = await staging.import_repository.import_batch(db.DB_PATH, job.batch_id)
+            self.assertEqual(job.phase, "cancelled")
+            self.assertEqual(batch["status"], "cancelled")
+            self.assertEqual(batch["imported_files"], 1)
+            self.assertEqual(batch["total_files"], 2)
+            self.assertEqual(len(batch["images"]), 1)
+            self.assertTrue(Path(batch["images"][0]["filepath"]).is_file())
+            self.assertFalse(first.exists(), "a verified and registered copy may be cleared from the card")
+            self.assertTrue(second.exists(), "an uncopied card original must never be cleared")
         finally:
             if old_root is None:
                 os.environ.pop("PHOTOARCHIVE_ORIGINALS_DIR", None)

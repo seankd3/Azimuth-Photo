@@ -43,6 +43,7 @@ def configure_database_backed_providers() -> None:
         count_embeddings_for_model=lambda config, **kwargs: db.count_embeddings_for_model(config, **kwargs),
         get_unembedded_images=lambda **kwargs: db.get_unembedded_images(**kwargs),
         store_embeddings_batch=lambda rows, **kwargs: db.store_embeddings_batch(rows, **kwargs),
+        poison_embedding_image=lambda **kwargs: db.poison_embedding_image(**kwargs),
         get_embedding_count=lambda: db.get_embedding_count(),
     )
     caption_worker.configure(
@@ -336,6 +337,16 @@ def configure_collection_routes(*, resolve_library_constraints=None) -> None:
             get_rankings=lambda **kwargs: db.get_rankings(**kwargs),
         )
 
+    async def resolve_smart_materialized_image_ids(query):
+        if resolve_library_constraints is None:
+            raise RuntimeError("Smart collection routes are not configured")
+        return await smart_collections.resolve_materialized_image_ids(
+            query,
+            resolve_library_constraints=resolve_library_constraints,
+            count_rankings=lambda **kwargs: db.count_rankings(**kwargs),
+            get_rankings=lambda **kwargs: db.get_rankings(**kwargs),
+        )
+
     collection_routes.configure(
         create_collection=lambda **kwargs: db.create_collection(**kwargs),
         list_collections=lambda: db.list_collections(),
@@ -348,6 +359,7 @@ def configure_collection_routes(*, resolve_library_constraints=None) -> None:
         resolve_smart_detail=resolve_smart_detail,
         resolve_smart_summary=resolve_smart_summary,
         resolve_smart_image_ids=resolve_smart_image_ids,
+        resolve_smart_materialized_image_ids=resolve_smart_materialized_image_ids,
         db_path=lambda: db.DB_PATH,
         get_images_by_ids=lambda image_ids: db.get_active_images_by_ids(image_ids),
         get_suggestions=lambda: collection_suggestions.collection_suggestions(
@@ -427,6 +439,7 @@ def configure_share_routes(*, templates, resolve_library_constraints=None) -> No
             on,
             client_name=client_name,
         ),
+        mark_finished=lambda share_id: db.mark_share_finished(share_id),
         list_favorites=lambda share_id: db.list_share_favorites(share_id),
         favorites_for_collection=lambda collection_id: db.favorites_for_collection(collection_id),
         thumbnail_response=media_routes.thumbnail_response,
@@ -480,6 +493,25 @@ def configure_shared_routes() -> None:
     )
 
 
+def _smart_collection_image_ids_resolver(resolve_library_constraints):
+    import db
+    from features.collections import smart as smart_collections
+
+    async def resolve(collection_id: int) -> set[int] | None:
+        collection = await db.get_collection(collection_id, limit=1)
+        if not collection or not collection.get("smart"):
+            return None
+        image_ids = await smart_collections.resolve_image_ids(
+            collection.get("query") or {},
+            resolve_library_constraints=resolve_library_constraints,
+            count_rankings=lambda **kwargs: db.count_rankings(**kwargs),
+            get_rankings=lambda **kwargs: db.get_rankings(**kwargs),
+        )
+        return set(image_ids)
+
+    return resolve
+
+
 def configure_library_service(
     *,
     resolve_library_constraints,
@@ -509,7 +541,7 @@ def configure_library_service(
         db_signature=lambda: db.DB_PATH,
         get_date_groups=lambda **kwargs: db.get_date_groups(**kwargs),
         get_map_markers=lambda **kwargs: db.get_map_markers(**kwargs),
-        get_filter_options=lambda: db.get_filter_options(),
+        get_filter_options=lambda **kwargs: db.get_filter_options(**kwargs),
         get_stats=lambda: db.get_stats(),
         count_rankings=lambda **kwargs: db.count_rankings(**kwargs),
         get_rankings=lambda **kwargs: db.get_rankings(**kwargs),
@@ -525,6 +557,7 @@ def configure_library_service(
             size,
             cache_root,
         ),
+        resolve_smart_collection_image_ids=_smart_collection_image_ids_resolver(resolve_library_constraints),
         rankings_response_cache_ttl_seconds=rankings_response_cache_ttl_seconds,
     )
 
@@ -602,6 +635,7 @@ def configure_compare_service(
     get_visible_pairing_pool_counts=None,
     get_top_images=None,
     get_collection_image_ids=None,
+    resolve_smart_collection_image_ids=None,
     get_import_batch_image_ids=None,
 ) -> None:
     import db
@@ -639,6 +673,8 @@ def configure_compare_service(
         get_top_images=get_top_images or (lambda **kwargs: db.get_top_images(**kwargs)),
         get_collection_image_ids=get_collection_image_ids
         or (lambda collection_id: db.collection_image_ids(collection_id)),
+        resolve_smart_collection_image_ids=resolve_smart_collection_image_ids
+        or _smart_collection_image_ids_resolver(resolve_library_constraints),
         get_import_batch_image_ids=get_import_batch_image_ids
         or (lambda batch_id: db.get_import_batch_image_ids(batch_id)),
     )
@@ -713,8 +749,11 @@ def configure_export_routes(
     db_path,
     get_import_batch_image_ids=None,
 ) -> None:
+    from features.library import service as library_service
+
     export_routes.configure(
         resolve_library_constraints=resolve_library_constraints,
+        resolve_collection_scope=library_service._resolve_collection_scope,
         db_path=db_path,
         get_import_batch_image_ids=get_import_batch_image_ids,
     )

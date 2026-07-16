@@ -8,11 +8,14 @@ export class FetchJsonError extends Error {
     }
 }
 
-function optionsWithTimeout(fetchOptions, timeoutMs) {
-    if (!timeoutMs || fetchOptions?.signal || typeof AbortSignal === 'undefined' || !AbortSignal.timeout) {
+export function fetchOptionsWithTimeout(fetchOptions, timeoutMs) {
+    if (!timeoutMs || typeof AbortSignal === 'undefined' || !AbortSignal.timeout) {
         return fetchOptions;
     }
-    return { ...(fetchOptions || {}), signal: AbortSignal.timeout(timeoutMs) };
+    const timeout = AbortSignal.timeout(timeoutMs);
+    if (!fetchOptions?.signal) return { ...(fetchOptions || {}), signal: timeout };
+    if (AbortSignal.any) return { ...(fetchOptions || {}), signal: AbortSignal.any([fetchOptions.signal, timeout]) };
+    return fetchOptions;
 }
 
 export async function fetchJson(url, {
@@ -22,7 +25,7 @@ export async function fetchJson(url, {
 } = {}) {
     let response = null;
     try {
-        response = await fetch(url, optionsWithTimeout(fetchOptions, timeoutMs));
+        response = await fetch(url, fetchOptionsWithTimeout(fetchOptions, timeoutMs));
     } catch (error) {
         throw new FetchJsonError(`Request failed: ${url}`, { url, cause: error });
     }

@@ -5,10 +5,17 @@ from __future__ import annotations
 from pathlib import Path
 import sys
 
-from data.schema import SCHEMA_VERSION
-
-
 VERSION_FILE = Path(__file__).resolve().parents[2] / "VERSION"
+
+# Satellite ⇄ hub wire-contract revision. Bump this whenever an existing
+# cross-node request or response changes meaning; app releases alone do not
+# imply compatibility.
+API_REV = 2
+CAPABILITIES = frozenset({
+    "trash.scoped_empty",
+    "sync.catalog_v2",
+    "thumbs.trash_readthrough",
+})
 
 
 def _version_file() -> Path:
@@ -24,9 +31,9 @@ def app_version() -> str:
     return _version_file().read_text(encoding="utf-8").strip()
 
 
-def version_payload(*, mode: str) -> dict[str, str | int]:
+def version_payload() -> dict[str, str | int | list[str]]:
     return {
-        "version": app_version(),
-        "schema_version": SCHEMA_VERSION,
-        "mode": mode,
+        "app_version": app_version(),
+        "api_rev": API_REV,
+        "capabilities": sorted(CAPABILITIES),
     }

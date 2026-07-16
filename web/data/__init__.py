@@ -1,2 +1,1 @@
-"""Data-layer modules for the photoArchive modular monolith."""
-
+"""Data-layer modules for the Azimuth Photo modular monolith."""

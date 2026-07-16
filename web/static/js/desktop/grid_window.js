@@ -62,6 +62,12 @@ function createChunk(startIndex, images) {
         el: document.createElement('div'),
         start: Number(startIndex) || 0,
         count: (images || []).length,
+        aspects: (images || []).map((image) => {
+            const ratio = Number(image?.aspect_ratio) || (Number(image?.width) && Number(image?.height)
+                ? Number(image.width) / Number(image.height)
+                : 1.5);
+            return Math.max(.45, Math.min(3.8, ratio));
+        }),
         height: 0,
         live: true,
     };
@@ -84,7 +90,7 @@ function insertChunk(startIndex, images, { preserveScroll = false } = {}) {
     const oldTop = scroller.scrollTop;
     const chunk = createChunk(startIndex, images);
     const next = chunks.find((item) => item.start > chunk.start);
-    host.insertBefore(chunk.el, next?.el || null);
+    host.insertBefore(chunk.el, next?.el || host.querySelector('#grid-pending-notice'));
     chunks.push(chunk);
     chunks.sort((a, b) => a.start - b.start);
     ensureObserver().observe(chunk.el);
@@ -96,14 +102,25 @@ function insertChunk(startIndex, images, { preserveScroll = false } = {}) {
     return chunk.el;
 }
 
-function measuredHeight(chunk) {
-    const probe = document.createElement('div');
-    probe.className = 'grid-chunk grid-measure';
-    probe.innerHTML = chunkHtml(chunk);
-    flow().appendChild(probe);
-    const height = probe.offsetHeight || chunk.height || 1;
-    probe.remove();
-    return height;
+function estimatedHeight(chunk) {
+    const host = flow();
+    const styles = getComputedStyle(host);
+    const rootStyles = getComputedStyle(document.documentElement);
+    const thumbHeight = Number.parseFloat(rootStyles.getPropertyValue('--thumb-h')) || 176;
+    const gap = Number.parseFloat(rootStyles.getPropertyValue('--cell-gap')) || 0;
+    const width = Math.max(1, host.clientWidth
+        - (Number.parseFloat(styles.paddingLeft) || 0)
+        - (Number.parseFloat(styles.paddingRight) || 0));
+    let rows = 1;
+    let lineWidth = 0;
+    for (const ratio of chunk.aspects || []) {
+        const basis = ratio * thumbHeight;
+        if (lineWidth && lineWidth + gap + basis > width) {
+            rows += 1;
+            lineWidth = basis;
+        } else lineWidth += (lineWidth ? gap : 0) + basis;
+    }
+    return Math.max(1, rows * thumbHeight + Math.max(0, rows - 1) * gap);
 }
 
 export function configureGridWindow(options = {}) {
@@ -141,7 +158,7 @@ export function invalidateHeights({ remeasureGhosts = false } = {}) {
         if (chunk.live) {
             chunk.height = chunk.el.offsetHeight || chunk.height;
         } else if (chunk.height) {
-            if (remeasureGhosts) chunk.height = measuredHeight(chunk);
+            if (remeasureGhosts) chunk.height = estimatedHeight(chunk);
             chunk.el.style.height = `${chunk.height}px`;
         }
     }

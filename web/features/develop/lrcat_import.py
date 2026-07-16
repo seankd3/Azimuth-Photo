@@ -334,14 +334,13 @@ def _store_rating(conn: sqlite3.Connection, image_id: int, rating: int, *, ratin
     if settings.get("_lr_rating") == rating:
         return False
     settings["_lr_rating"] = rating
-    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     payload = json.dumps(settings, separators=(",", ":"), ensure_ascii=True)
     if row:
-        conn.execute("UPDATE develop_settings SET settings = ?, updated_at = ? WHERE image_id = ?", (payload, now, image_id))
+        conn.execute("UPDATE develop_settings SET settings = ? WHERE image_id = ?", (payload, image_id))
     else:
         conn.execute(
-            "INSERT INTO develop_settings (image_id, settings, origin, updated_at) VALUES (?, ?, 'lrcat', ?)",
-            (image_id, payload, now),
+            "INSERT INTO develop_settings (image_id, settings, origin, updated_at) VALUES (?, ?, 'lrcat', '')",
+            (image_id, payload),
         )
     return True
 
@@ -418,7 +417,7 @@ async def _persist_collections(db_path: str, pending: dict[str, list[int]], *, d
 def import_lrcat(catalog_path: str, db_path: str, dry_run: bool = False) -> dict[str, Any]:
     """Import one catalog, returning truthful match and write counts.
 
-    Lightroom source files are copied before SQLite reads; photoArchive writes
+    Lightroom source files are copied before SQLite reads; Azimuth Photo writes
     are entirely skipped for ``dry_run``.
     """
 

@@ -8,6 +8,27 @@ import { FilmStockPicker } from './film_panel.js';
 import { LensPanel } from './lens_panel.js';
 import { CalibrationPanel } from './calibration_panel.js';
 
+const PANEL_OPEN_STORAGE_KEY = 'dev.panels.open';
+let storedPanelOpenStates = null;
+
+function readPanelOpenStates() {
+    try {
+        const value = JSON.parse(window.localStorage.getItem(PANEL_OPEN_STORAGE_KEY) || 'null');
+        return value && typeof value === 'object' ? value : null;
+    } catch {
+        return null;
+    }
+}
+
+function savePanelOpenStates() {
+    try { window.localStorage.setItem(PANEL_OPEN_STORAGE_KEY, JSON.stringify(storedPanelOpenStates)); } catch { /* Panel defaults remain usable. */ }
+}
+
+const WB_PRESETS = Object.freeze({
+    Daylight: [5500, 10], Cloudy: [6500, 10], Shade: [7500, 10],
+    Tungsten: [2850, 0], Fluorescent: [3800, 21], Flash: [5500, 0],
+});
+
 const slider = (key, label, min, max, step = 1, fallback = DEFAULTS[key] ?? 0) => ({ key, label, min, max, step, fallback });
 const BASIC = [slider('Temperature', 'Temp', 2000, 50000, 50, 5500), slider('Tint', 'Tint', -150, 150)];
 const TONE = [
@@ -21,8 +42,8 @@ const PRESENCE = [
     slider('Saturation', 'Saturation', -100, 100),
 ];
 const DETAIL = [
-    slider('Sharpness', 'Amount', 0, 150, 1, 40), slider('SharpenRadius', 'Radius', .5, 3, .1, 1),
-    slider('SharpenDetail', 'Detail', 0, 100, 1, 25), slider('SharpenEdgeMasking', 'Masking', 0, 100),
+    slider('Sharpness', 'Amount', 0, 150), slider('SharpenRadius', 'Radius', .5, 3, .1, 1),
+    slider('SharpenEdgeMasking', 'Masking', 0, 100),
     slider('LuminanceSmoothing', 'Luminance NR', 0, 100), slider('LuminanceDetail', 'NR Detail', 0, 100, 1, 50),
     slider('LuminanceContrast', 'NR Contrast', 0, 100), slider('ColorNoiseReduction', 'Color NR', 0, 100),
     slider('DefringePurpleAmount', 'Purple Defringe', 0, 100), slider('DefringePurpleHueLo', 'Purple Hue Low', 0, 100), slider('DefringePurpleHueHi', 'Purple Hue High', 0, 100),
@@ -41,14 +62,6 @@ const FILM = [
     { ...slider('pa_FilmGrain', 'Grain', 0, 100, 1, 100), tip: 'Scale density-dependent emulsion grain' },
     { ...slider('pa_FilmGrainSize', 'Grain Size', 0, 100, 1, 100), tip: 'Scale the physical grain-clump pitch' },
 ];
-const WB_PRESETS = Object.freeze({
-    Daylight: [5500, 10], Cloudy: [6500, 10], Shade: [7500, 10],
-    Tungsten: [2850, 0], Fluorescent: [3800, 21], Flash: [5500, 0],
-});
-
-function snapshot(settings) {
-    return JSON.parse(JSON.stringify(settings || {}));
-}
 
 function displayValue(value, step) {
     const decimals = step < .1 ? 2 : step < 1 ? 1 : 0;
@@ -58,9 +71,14 @@ function displayValue(value, step) {
 }
 
 function section(title, id, inner, open = true) {
-    return `<details class="develop-section" data-section="${id}" ${open ? 'open' : ''}>`
+    const isOpen = typeof storedPanelOpenStates?.[id] === 'boolean' ? storedPanelOpenStates[id] : open;
+    return `<details class="develop-section" data-section="${id}" ${isOpen ? 'open' : ''}>`
         + `<summary data-tip="Expand or collapse ${title}"><span>${title}</span><span aria-hidden="true">⌄</span></summary>`
         + `<div class="develop-section-body">${inner}</div></details>`;
+}
+
+function snapshotSettings(settings) {
+    return JSON.parse(JSON.stringify(settings || {}));
 }
 
 function sliderHtml(config) {
@@ -100,7 +118,7 @@ class CurveEditor {
             this.deleteSelected();
         });
         root.querySelector('[data-curve-reset]').addEventListener('click', () => {
-            const previousSettings = snapshot(this.settings);
+            const previousSettings = snapshotSettings(this.settings);
             delete this.settings[this.channel];
             this.onChange(this.channel, undefined, 'Tone Curve', { previousSettings });
             this.selectedIndex = -1;
@@ -142,7 +160,7 @@ class CurveEditor {
         }
         this.dragIndex = nearest;
         this.selectedIndex = nearest;
-        const previousSettings = snapshot(this.settings);
+        const previousSettings = snapshotSettings(this.settings);
         let moved = false;
         this.canvas.setPointerCapture(event.pointerId);
         const move = (next) => {
@@ -166,7 +184,7 @@ class CurveEditor {
     }
 
     addPoint(event) {
-        const previousSettings = snapshot(this.settings);
+        const previousSettings = snapshotSettings(this.settings);
         const points = this.points();
         const [x, y] = this.coords(event);
         points.push([x, y]);
@@ -180,7 +198,7 @@ class CurveEditor {
     }
 
     deletePoint(points, index) {
-        const previousSettings = snapshot(this.settings);
+        const previousSettings = snapshotSettings(this.settings);
         points.splice(index, 1);
         this.selectedIndex = -1;
         this.commit(points, { previousSettings });
@@ -231,6 +249,7 @@ export class DevelopPanels {
         this.host = host;
         this.onChange = onChange;
         this.settings = {};
+        storedPanelOpenStates = readPanelOpenStates();
         host.innerHTML = section('Histogram', 'histogram', '<div id="develop-histogram-slot"></div>')
             + section('Basic', 'basic', '<small data-adobe-profile hidden style="display:block;margin:-3px 0 8px;color:var(--text-3);font-size:var(--fs-caption)"></small><div class="develop-wb-row"><select id="develop-wb" data-tip="White balance mode" aria-label="White balance"><option>As Shot</option><option>Custom</option><option>Daylight</option><option>Cloudy</option><option>Shade</option><option>Tungsten</option><option>Fluorescent</option><option>Flash</option></select><button data-wb-pick data-tip="White balance eyedropper — click a neutral area (W)" aria-label="White balance eyedropper" aria-pressed="false">⌖</button><button data-wb-reset data-tip="Reset white balance to As Shot">As Shot</button><button data-auto-tone data-tip="Auto tone — deterministic histogram fit">Auto</button></div>' + slidersHtml(BASIC))
             + section('Tone', 'tone', slidersHtml(TONE))
@@ -248,6 +267,13 @@ export class DevelopPanels {
             + section('Masking', 'masking', '<div id="develop-masking"></div>', false)
             + section('Healing', 'healing', '<div id="develop-healing"></div>', false)
             + '<p class="develop-v1-note">Manual defringe and circular heal/clone spots are available. Automatic lateral CA remains planned.</p>';
+        host.addEventListener('toggle', (event) => {
+            const details = event.target;
+            if (!(details instanceof HTMLDetailsElement) || !details.matches('.develop-section')) return;
+            storedPanelOpenStates ??= {};
+            storedPanelOpenStates[details.dataset.section] = details.open;
+            savePanelOpenStates();
+        }, true);
         host.querySelector('#develop-histogram-slot').replaceWith(histogramHost);
         host.querySelector('#develop-crop-slot').replaceWith(cropHost);
         host.querySelector('#develop-transform-slot').replaceWith(transformHost);
@@ -270,35 +296,38 @@ export class DevelopPanels {
     bindSliders() {
         for (const row of this.host.querySelectorAll('.develop-slider')) {
             const input = row.querySelector('input');
-            const updateFromPointer = (event, startX, startValue, options) => {
+            const updateFromPointer = (event, startX, startValue) => {
                 const min = Number(row.dataset.min);
                 const max = Number(row.dataset.max);
                 const step = Number(row.dataset.step);
                 const sensitivity = event.shiftKey ? .1 : 1;
                 const delta = (event.clientX - startX) / Math.max(120, row.clientWidth) * (max - min) * sensitivity;
                 const value = Math.max(min, Math.min(max, Math.round((startValue + delta) / step) * step));
-                const changed = value !== numberSetting(this.settings, row.dataset.setting, Number(row.dataset.default));
-                if (changed) this.change(row.dataset.setting, value, row.querySelector('.develop-slider-label').textContent, options);
+                this.change(row.dataset.setting, value, row.querySelector('.develop-slider-label').textContent, { history: false });
                 this.syncSlider(row);
-                return changed;
+                return value;
             };
             row.addEventListener('pointerdown', (event) => {
                 if (event.target === input) return;
                 event.preventDefault();
                 const startX = event.clientX;
                 const startValue = numberSetting(this.settings, row.dataset.setting, Number(row.dataset.default));
-                const previousSettings = snapshot(this.settings);
-                let moved = false;
+                const previousSettings = snapshotSettings(this.settings);
+                const gestureSettings = this.settings;
+                let changed = false;
                 row.setPointerCapture(event.pointerId);
                 const move = (next) => {
-                    moved = updateFromPointer(next, startX, startValue, { history: false }) || moved;
+                    if (this.settings !== gestureSettings) return;
+                    changed ||= updateFromPointer(next, startX, startValue) !== startValue;
                 };
                 const up = () => {
                     row.removeEventListener('pointermove', move);
                     row.removeEventListener('pointerup', up);
                     row.removeEventListener('pointercancel', up);
                     row.classList.remove('dragging');
-                    if (moved) this.change(row.dataset.setting, numberSetting(this.settings, row.dataset.setting, Number(row.dataset.default)), row.querySelector('.develop-slider-label').textContent, { previousSettings });
+                    if (changed && this.settings === gestureSettings) {
+                        this.change(row.dataset.setting, numberSetting(this.settings, row.dataset.setting, startValue), row.querySelector('.develop-slider-label').textContent, { previousSettings });
+                    }
                 };
                 row.classList.add('dragging');
                 row.addEventListener('pointermove', move);
@@ -334,6 +363,7 @@ export class DevelopPanels {
                 }
             });
             row.addEventListener('wheel', (event) => {
+                if (!event.altKey && document.activeElement !== input) return;
                 event.preventDefault();
                 const step = Number(row.dataset.step) || 1;
                 const direction = event.deltaY < 0 ? 1 : -1;
@@ -372,7 +402,7 @@ export class DevelopPanels {
     }
 
     applyWbPreset(preset) {
-        const previousSettings = snapshot(this.settings);
+        const previousSettings = snapshotSettings(this.settings);
         if (preset === 'As Shot') {
             this.change('Temperature', undefined, 'White Balance', { history: false });
             this.change('Tint', undefined, 'White Balance', { history: false });

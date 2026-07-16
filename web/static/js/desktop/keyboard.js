@@ -22,14 +22,14 @@ import { releaseFocus, trapFocus } from './focusTrap.js';
 import { activeLens, switchLens } from './lenses.js';
 import { reviewPeopleMergeByKey } from './people.js';
 import { closeFilters, filtersOpen } from './filters.js';
-import { closeImport, importOpen } from './importer.js';
+import { closeImport, importOpen } from './import_stage.js';
 import { closeGridContextMenu, gridContextMenuOpen } from './context_menu.js';
 import { closeDuplicates, duplicatesOpen } from './duplicates.js';
-import { closeTrash, trashOpen, trashSelectedImages } from './trash.js';
+import { closeTrash, handleTrashKey, selectAllTrash, trashOpen, trashSelectedImages } from './trash.js';
 import { showToast, undoLatestToast } from './toast.js';
 import {
     applyPreviousDevelopSettingsToGrid, copyDevelopSettingsFromGrid, createVirtualCopy,
-    developOpen, openDevelop, pasteDevelopSettingsToGrid,
+    closeDevelop, developOpen, openDevelop, pasteDevelopSettingsToGrid,
 } from './develop/develop.js';
 import { shortcutSheetOpen } from './shortcut_sheet.js';
 
@@ -50,8 +50,7 @@ function foregroundLayerOpen() {
             || document.querySelector('#export-pop-menu:not([hidden])')
             || document.querySelector('#folder-pop-menu:not([hidden])')
             || document.querySelector('#source-pop-menu:not([hidden])')
-            || document.querySelector('#share-overlay:not([hidden])')
-            || document.querySelector('#publish-overlay:not([hidden])')
+                        || document.querySelector('#deliver-overlay:not([hidden])')
             || document.querySelector('#people-merge-pop'),
         );
 }
@@ -77,7 +76,6 @@ function flagTarget(flag) {
     }
     if (selection.size) {
         const ids = [...selection];
-        clearSelection();
         applyFlags(ids, flag);
         return;
     }
@@ -224,6 +222,11 @@ function escapeOneLayer() {
         closeLoupe();
         return true;
     }
+    if (document.getElementById('people-merge-banner')) return false;
+    if (selection.size) {
+        clearSelection();
+        return true;
+    }
     if (duplicatesOpen()) {
         closeDuplicates();
         return true;
@@ -236,6 +239,10 @@ function escapeOneLayer() {
         closeRefine();
         return true;
     }
+    if (developOpen()) {
+        closeDevelop();
+        return true;
+    }
     if (systemDrawerOpen()) {
         closeSystemDrawer();
         return true;
@@ -244,8 +251,8 @@ function escapeOneLayer() {
         closeLeftDrawer();
         return true;
     }
-    if (selection.size) {
-        clearSelection();
+    if (activeLens() !== 'grid') {
+        switchLens('grid');
         return true;
     }
     return false;
@@ -272,9 +279,18 @@ export function initKeyboard() {
             }
             return;
         }
-        // Develop owns its complete editing map. Do not let grid/lens keys leak
-        // through while the editor is open (ratings, flags, density, navigation).
-        if (developOpen()) return;
+        // Develop owns its complete editing map at capture phase (develop.js):
+        // Y compare, Shift+R hold-reference, R crop, K mask, J clip, W picker.
+        // Do not let grid/lens keys leak through while the editor is open
+        // (ratings, flags, density, navigation). Modifier chords fall through
+        // to the shared Ctrl/Cmd handling below; D still toggles the editor.
+        if (developOpen() && !event.ctrlKey && !event.metaKey) {
+            if (event.key.toLowerCase() === 'd' && !foregroundLayerOpen() && !inputFocused()) {
+                event.preventDefault();
+                closeDevelop();
+            }
+            return;
+        }
         if (event.ctrlKey || event.metaKey) {
             const key = event.key.toLowerCase();
             if (foregroundLayerOpen() || inputFocused()) return;
@@ -284,7 +300,6 @@ export function initKeyboard() {
                 return;
             }
             if (key === 'k') {
-                if (activeLens() !== 'grid') return;
                 event.preventDefault();
                 openCommandPalette();
                 return;
@@ -312,11 +327,19 @@ export function initKeyboard() {
                     return;
                 }
             }
-            if (activeLens() !== 'grid') return;
             if (key === 'z') {
+                // Develop owns its edit-history undo at capture phase; other lenses use
+                // the global toast stack for undoable library actions.
+                if (developOpen()) return;
                 if (undoLatestToast()) event.preventDefault();
                 return;
             }
+            if (activeLens() === 'trash' && key === 'a') {
+                const count = selectAllTrash();
+                if (count) event.preventDefault();
+                return;
+            }
+            if (activeLens() !== 'grid') return;
             if (key === 'a') {
                 const count = selectLoadedImages();
                 if (count) {
@@ -337,7 +360,8 @@ export function initKeyboard() {
         }
         if (event.key.toLowerCase() === 'd' && !foregroundLayerOpen()) {
             event.preventDefault();
-            if (!developOpen()) openDevelop();
+            if (developOpen()) closeDevelop();
+            else openDevelop();
             return;
         }
         if (event.key.toLowerCase() === 'h' && !foregroundLayerOpen()) {
@@ -387,7 +411,9 @@ export function initKeyboard() {
             return;
         }
         if (trashOpen()) {
-            if (event.key.toLowerCase() === 'g') {
+            if (handleTrashKey(event)) {
+                event.preventDefault();
+            } else if (event.key.toLowerCase() === 'g') {
                 event.preventDefault();
                 closeTrash();
             }
@@ -455,7 +481,7 @@ export function initKeyboard() {
             const rating = Number(event.key);
             const next = Number(scope.min_stars || 0) === rating ? '' : rating;
             patchScope({ min_stars: next });
-            showToast(next ? `Rating ${rating}+` : 'Rating filter cleared');
+            showToast(next ? `Elo ${rating}+` : 'Elo filter cleared');
         } else if (event.key === 'Delete' || event.key === 'Backspace') {
             if (selection.size) {
                 event.preventDefault();

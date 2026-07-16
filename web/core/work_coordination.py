@@ -3,22 +3,30 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import threading
 import time
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager, suppress
 
 
 USER_VISIBLE = "user_visible"
 MANUAL_BULK = "manual_bulk"
 AMBIENT_WARMING = "ambient_warming"
+OWNER_LEASE_SECONDS = 15 * 60
+LEASE_HEARTBEAT_SECONDS = OWNER_LEASE_SECONDS / 3
+
+log = logging.getLogger(__name__)
 
 _lock = threading.Lock()
 _manual_active: dict[str, int] = {}
 _manual_updated_at = 0.0
 _manual_owner: str | None = None
+_manual_owner_updated_at = 0.0
+_manual_waiters: set[str] = set()
 _gpu_owner: str | None = None
 _gpu_owner_updated_at = 0.0
+_gpu_waiters: set[str] = set()
 _gpu_owner_flag_path = os.environ.get(
     "PHOTOARCHIVE_GPU_OWNER_FLAG",
     "/tmp/photoarchive-gpu-owner.flag",
@@ -27,6 +35,27 @@ _gpu_owner_flag_path = os.environ.get(
 
 def _now() -> float:
     return time.time()
+
+
+def _lease_expired(updated_at: float, *, now: float) -> bool:
+    return bool(updated_at and now - updated_at >= OWNER_LEASE_SECONDS)
+
+
+def _log_stale_owner_steal(
+    lane: str,
+    previous_owner: str,
+    new_owner: str,
+    *,
+    age_seconds: float,
+) -> None:
+    log.warning(
+        "worker=work_coordination lane=%s event=stale_owner_stolen previous_owner=%s "
+        "new_owner=%s age_seconds=%.1f",
+        lane,
+        previous_owner,
+        new_owner,
+        age_seconds,
+    )
 
 
 @contextmanager
@@ -59,22 +88,39 @@ def finish_manual_bulk(kind: str) -> None:
 
 
 def claim_manual_owner(kind: str) -> str:
-    global _manual_owner, _manual_updated_at
+    global _manual_owner, _manual_owner_updated_at
     name = str(kind or "bulk").strip() or "bulk"
+    now = _now()
+    stolen_owner = None
+    stolen_age = 0.0
     with _lock:
-        if _manual_owner is None:
+        if _manual_owner is None or _manual_owner == name or _lease_expired(
+            _manual_owner_updated_at,
+            now=now,
+        ):
+            if _manual_owner not in (None, name):
+                stolen_owner = _manual_owner
+                stolen_age = now - _manual_owner_updated_at
             _manual_owner = name
-            _manual_updated_at = _now()
-        return _manual_owner
+            _manual_owner_updated_at = now
+        owner = _manual_owner
+    if stolen_owner is not None:
+        _log_stale_owner_steal(
+            "manual",
+            stolen_owner,
+            name,
+            age_seconds=stolen_age,
+        )
+    return owner
 
 
 def release_manual_owner(kind: str) -> None:
-    global _manual_owner, _manual_updated_at
+    global _manual_owner, _manual_owner_updated_at
     name = str(kind or "bulk").strip() or "bulk"
     with _lock:
         if _manual_owner == name:
             _manual_owner = None
-            _manual_updated_at = _now()
+            _manual_owner_updated_at = _now()
 
 
 def manual_owner() -> str | None:
@@ -102,12 +148,29 @@ def claim_gpu_owner(kind: str) -> str:
     """
     global _gpu_owner, _gpu_owner_updated_at
     name = str(kind or "gpu").strip() or "gpu"
+    now = _now()
+    stolen_owner = None
+    stolen_age = 0.0
     with _lock:
-        if _gpu_owner is None:
+        if _gpu_owner is None or _gpu_owner == name or _lease_expired(
+            _gpu_owner_updated_at,
+            now=now,
+        ):
+            if _gpu_owner not in (None, name):
+                stolen_owner = _gpu_owner
+                stolen_age = now - _gpu_owner_updated_at
             _gpu_owner = name
-            _gpu_owner_updated_at = _now()
+            _gpu_owner_updated_at = now
             _write_gpu_owner_flag(_gpu_owner)
-        return _gpu_owner
+        owner = _gpu_owner
+    if stolen_owner is not None:
+        _log_stale_owner_steal(
+            "gpu",
+            stolen_owner,
+            name,
+            age_seconds=stolen_age,
+        )
+    return owner
 
 
 def release_gpu_owner(kind: str) -> None:
@@ -125,33 +188,104 @@ def gpu_owner() -> str | None:
         return _gpu_owner
 
 
+def lost_ownership(kind: str, *, gpu: bool = False) -> bool:
+    """Return whether a worker no longer owns every lane it is using."""
+
+    name = str(kind or "bulk").strip() or "bulk"
+    with _lock:
+        if _manual_owner != name:
+            return True
+        return gpu and _gpu_owner != name
+
+
+def manual_turn_blocked(kind: str) -> bool:
+    name = str(kind or "bulk").strip() or "bulk"
+    with _lock:
+        return (
+            _manual_owner is not None
+            and _manual_owner != name
+            and not _lease_expired(_manual_owner_updated_at, now=_now())
+        )
+
+
+def gpu_turn_blocked(kind: str) -> bool:
+    name = str(kind or "gpu").strip() or "gpu"
+    with _lock:
+        return (
+            _gpu_owner is not None
+            and _gpu_owner != name
+            and not _lease_expired(_gpu_owner_updated_at, now=_now())
+        )
+
+
+@asynccontextmanager
+async def lease_heartbeat(
+    kind: str,
+    *,
+    gpu: bool = False,
+    interval_seconds: float = LEASE_HEARTBEAT_SECONDS,
+):
+    """Keep leases fresh while one non-interruptible model load is running."""
+
+    name = str(kind or "bulk").strip() or "bulk"
+
+    async def renew_until_cancelled() -> None:
+        while True:
+            await asyncio.sleep(interval_seconds)
+            if manual_owner() == name:
+                claim_manual_owner(name)
+            if gpu and gpu_owner() == name:
+                claim_gpu_owner(name)
+
+    heartbeat = asyncio.create_task(renew_until_cancelled())
+    try:
+        yield
+    finally:
+        heartbeat.cancel()
+        with suppress(asyncio.CancelledError):
+            await heartbeat
+
+
 async def wait_for_gpu_turn(kind: str, *, poll_seconds: float = 0.5) -> None:
     name = str(kind or "gpu").strip() or "gpu"
-    while True:
+    try:
+        while True:
+            with _lock:
+                owner = _gpu_owner
+                blocked = owner is not None and owner != name and not _lease_expired(
+                    _gpu_owner_updated_at,
+                    now=_now(),
+                )
+                if blocked:
+                    _gpu_waiters.add(name)
+            if not blocked:
+                if claim_gpu_owner(name) == name:
+                    return
+            await asyncio.sleep(poll_seconds)
+    finally:
         with _lock:
-            owner = _gpu_owner
-        if owner is None or owner == name:
-            claim_gpu_owner(name)
-            return
-        await asyncio.sleep(poll_seconds)
+            _gpu_waiters.discard(name)
 
 
 async def wait_for_manual_turn(kind: str, *, poll_seconds: float = 0.25) -> None:
-    global _manual_owner, _manual_updated_at
     name = str(kind or "bulk").strip() or "bulk"
-    while True:
+    try:
+        while True:
+            with _lock:
+                owner = _manual_owner
+                blocked = owner is not None and owner != name and not _lease_expired(
+                    _manual_owner_updated_at,
+                    now=_now(),
+                )
+                if blocked:
+                    _manual_waiters.add(name)
+            if not blocked:
+                if claim_manual_owner(name) == name:
+                    return
+            await asyncio.sleep(poll_seconds)
+    finally:
         with _lock:
-            owner = _manual_owner
-            if owner is None:
-                claim = True
-            else:
-                claim = False
-            if owner is None or owner == name:
-                if claim:
-                    _manual_owner = name
-                    _manual_updated_at = _now()
-                return
-        await asyncio.sleep(poll_seconds)
+            _manual_waiters.discard(name)
 
 
 def manual_bulk_active() -> bool:
@@ -163,9 +297,13 @@ def status() -> dict:
     with _lock:
         active = dict(_manual_active)
         owner = _manual_owner
+        manual_owner_updated_at = _manual_owner_updated_at
+        manual_waiters = sorted(_manual_waiters)
         gpu_owner_value = _gpu_owner
         updated_at = _manual_updated_at
         gpu_updated_at = _gpu_owner_updated_at
+        gpu_waiters = sorted(_gpu_waiters)
+    waiting_for_owner = sorted(set(manual_waiters + gpu_waiters))
     return {
         "lanes": {
             "user_visible": {"priority": 0, "state": "ready"},
@@ -181,7 +319,12 @@ def status() -> dict:
         },
         "manual_active": sorted(active),
         "manual_owner": owner,
+        "manual_owner_updated_at": manual_owner_updated_at,
+        "manual_waiters": manual_waiters,
         "gpu_owner": gpu_owner_value,
+        "gpu_waiters": gpu_waiters,
+        "waiting_for_owner": waiting_for_owner,
+        "owner_lease_seconds": OWNER_LEASE_SECONDS,
         "gpu_owner_flag_path": _gpu_owner_flag_path,
         "gpu_owner_updated_at": gpu_updated_at,
         "updated_at": updated_at,

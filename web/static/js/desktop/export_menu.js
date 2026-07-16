@@ -1,26 +1,22 @@
 import { releaseFocus, trapFocus } from './focusTrap.js';
 import { showToast } from './toast.js';
-import { icon } from '../icons.js';
+import { getRankings } from './api.js';
+import { scope, scopeParams, viewState } from './state.js';
+import { openExportDialog } from './develop/export_dialog.js';
 
 export const ZIP_EXPORT_MAX = 2000;
+const SCOPE_EXPORT_PAGE_SIZE = 1000;
+const SCOPE_EXPORT_PROGRESS_DELAY_MS = 1000;
 
 let menu = null;
 let returnEl = null;
-let onChoose = null;
-
-function moveMenuFocus(delta) {
-    const items = [...menu.querySelectorAll('button:not([disabled])')];
-    if (!items.length) return;
-    const index = Math.max(0, items.indexOf(document.activeElement));
-    items[(index + delta + items.length) % items.length].focus();
-}
-
 function ensureMenu() {
     if (menu) return menu;
     menu = document.createElement('div');
     menu.id = 'export-pop-menu';
-    menu.className = 'pop-menu grid-pop-menu export-pop-menu';
-    menu.setAttribute('role', 'menu');
+    menu.className = 'develop-popover export-pop-menu';
+    menu.setAttribute('role', 'dialog');
+    menu.setAttribute('aria-modal', 'true');
     menu.hidden = true;
     document.body.appendChild(menu);
     menu.addEventListener('keydown', (event) => {
@@ -28,15 +24,12 @@ function ensureMenu() {
             event.preventDefault();
             event.stopPropagation();
             closeExportMenu();
-        } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-            event.preventDefault();
-            moveMenuFocus(event.key === 'ArrowDown' ? 1 : -1);
         }
     });
     return menu;
 }
 
-function clampPosition(anchor) {
+function positionDialog(anchor) {
     const rect = anchor.getBoundingClientRect();
     const menuRect = menu.getBoundingClientRect();
     const left = Math.max(8, Math.min(window.innerWidth - menuRect.width - 8, rect.left));
@@ -45,23 +38,45 @@ function clampPosition(anchor) {
     menu.style.top = `${top}px`;
 }
 
-function render({ allowSizes = true } = {}) {
-    menu.innerHTML = '<div class="pm-group">'
-        + `<button data-format="csv">${icon('download')} CSV</button>`
-        + `<button data-format="json">${icon('download')} JSON</button>`
-        + '</div><div class="pm-group">'
-        + '<div class="pm-label">Download files (zip)</div>'
-        + `<button data-format="zip" data-size="original">${icon('download')} Original${allowSizes ? '' : ''}</button>`
-        + (allowSizes ? `<button data-format="zip" data-size="lg">${icon('download')} Large</button><button data-format="zip" data-size="md">${icon('download')} Medium</button>` : '')
-        + '</div>';
-    for (const button of menu.querySelectorAll('button[data-format]')) {
-        button.setAttribute('role', 'menuitem');
-        button.addEventListener('click', () => {
-            const format = button.dataset.format;
-            const size = button.dataset.size || '';
-            closeExportMenu();
-            if (onChoose) onChoose({ format, size });
-        });
+function anchoredPopover(anchor, html) {
+    const popover = ensureMenu();
+    releaseFocus(popover);
+    popover.innerHTML = html;
+    popover.hidden = false;
+    popover.style.position = 'fixed';
+    positionDialog(anchor);
+    trapFocus(popover, popover.querySelector('button, input, select'));
+    return popover;
+}
+
+async function scopedImageIds() {
+    if (scope.similarIds.length) return scope.similarIds.map(Number).filter((id) => id > 0);
+    const bestOf = viewState.bestOf && viewState.bestOfLimit != null;
+    const maxIds = bestOf ? Math.max(0, Number(viewState.bestOfLimit) || 0) : Infinity;
+    const imageIds = [];
+    let offset = 0;
+    let showProgress = false;
+    const progressTimer = setTimeout(() => {
+        showProgress = true;
+        showToast('Preparing photos for export…');
+    }, SCOPE_EXPORT_PROGRESS_DELAY_MS);
+    try {
+        while (offset < maxIds) {
+            const limit = Math.min(SCOPE_EXPORT_PAGE_SIZE, maxIds - offset);
+            const payload = await getRankings(scopeParams({
+                limit,
+                offset,
+                ...(bestOf ? { sort: 'elo' } : {}),
+            }));
+            const images = payload?.images || [];
+            imageIds.push(...images.map((image) => Number(image.id)).filter((id) => id > 0));
+            offset += images.length;
+            if (showProgress) showToast(`Preparing ${imageIds.length.toLocaleString('en-US')} photos for export…`);
+            if (images.length < limit) break;
+        }
+        return imageIds;
+    } finally {
+        clearTimeout(progressTimer);
     }
 }
 
@@ -70,11 +85,18 @@ export function openExportMenu(anchor, choose, options = {}) {
     ensureMenu();
     releaseFocus(menu);
     returnEl = anchor;
-    onChoose = choose;
-    render(options);
-    menu.hidden = false;
-    clampPosition(anchor);
-    trapFocus(menu, menu.querySelector('button'));
+    const popover = openExportDialog({
+        button: anchor,
+        imageIds: options.imageIds || null,
+        getImageIds: options.imageIds ? null : scopedImageIds,
+        anchoredPopover,
+        closePopover: closeExportMenu,
+        showToast,
+        onDataExport: (format) => choose({ format }),
+        onOriginalsExport: (_ids, size) => choose({ format: 'zip', size }),
+    });
+    requestAnimationFrame(() => positionDialog(anchor));
+    return popover;
 }
 
 export function closeExportMenu() {
@@ -92,7 +114,7 @@ export function downloadExport(params, { count = 0, message = '' } = {}) {
     }
     const link = document.getElementById('download-link');
     link.href = `/api/export?${params.toString()}`;
-    link.download = format === 'zip' ? 'photoarchive-export.zip' : `photoarchive-export.${format}`;
+    link.download = format === 'zip' ? 'azimuth-photo-export.zip' : `azimuth-photo-export.${format}`;
     link.click();
     showToast(message || (format === 'zip' ? 'Preparing zip download' : `Exporting as ${format.toUpperCase()}`));
     return true;

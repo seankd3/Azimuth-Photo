@@ -1,7 +1,7 @@
 import {
     byId, emit, on, rememberImages, setActiveLens, viewState,
 } from './state.js';
-import { getImageExif, getStack, thumbUrl, writeFlag } from './api.js';
+import { getImageExif, getStack, previewThumbUrl, thumbUrl, writeFlag } from './api.js';
 import { applyFlags, beginFlagMutation, flagMutationIsLatest } from './selection.js';
 import { openCollectionPicker } from './panel.js';
 import { requestMorePhotos } from './grid.js';
@@ -10,9 +10,12 @@ import { icon } from '../icons.js';
 
 const ZOOM_STEP = 1.15;
 const MAX_SCALE = 4;
-const PREFETCH_AHEAD = 10;
+const PREFETCH_AHEAD = 50;
 const LOAD_WAIT_MS = 5000;
+const FULL_IMAGE_TIMEOUT_MS = 8000;
 const KEYBOARD_PAN_STEP = 48;
+const STRIP_ITEM_PITCH = 68;
+const STRIP_OVERSCAN = 12;
 
 let index = 0;
 let open = false;
@@ -32,7 +35,11 @@ let lightMode = 'normal';
 let infoMode = 'off';
 let returnLens = 'grid';
 let stripSignature = '';
+let stripStart = 0;
+let stripEnd = 0;
+let stripScrollFrame = 0;
 let previousStripIndex = -1;
+let navDirection = 1;
 const exifCache = new Map();
 const INFO_MODES = ['off', 'basic', 'full'];
 const RAW_EXTENSIONS = new Set(['arw', 'cr2', 'cr3', 'dng', 'nef', 'orf', 'raf', 'rw2']);
@@ -71,7 +78,7 @@ function flagLabel(flag) {
 }
 
 function flagGlyph(flag) {
-    if (flag === 'picked') return icon('star');
+    if (flag === 'picked') return icon('flag');
     if (flag === 'rejected') return icon('x');
     return '';
 }
@@ -80,7 +87,7 @@ function caption(img) {
     const name = img.filename || img.id;
     const elo = Math.round(Number(img.elo) || 0);
     const flag = flagLabel(img.flag || 'unflagged');
-    return [name, `${index + 1} / ${scopeTotal() || images().length}`, `Rating ${elo}`, flag]
+    return [name, `${index + 1} / ${scopeTotal() || images().length}`, `Elo ${elo}`, flag]
         .filter(Boolean)
         .map(esc)
         .join(' · ');
@@ -309,6 +316,21 @@ function useMediumTier() {
     }
 }
 
+function upgradeStageToMedium(img, token) {
+    const image = document.getElementById('loupe-img');
+    if (!img || !image) return;
+    const medium = new Image();
+    medium.decoding = 'async';
+    medium.fetchPriority = 'high';
+    medium.onload = async () => {
+        if (medium.decode) await medium.decode().catch(() => {});
+        if (!open || token !== renderToken || Number(current()?.id) !== Number(img.id)) return;
+        image.dataset.tier = 'md';
+        image.src = medium.src;
+    };
+    medium.src = thumbUrl('md', img.id);
+}
+
 function requestFullImage() {
     const img = current();
     const image = document.getElementById('loupe-img');
@@ -316,17 +338,34 @@ function requestFullImage() {
     fullImageLoadingId = img.id;
     const token = renderToken;
     const large = new Image();
+    large.fetchPriority = 'high';
+    let settled = false;
+    const finish = ({ offline = false } = {}) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timeout);
+        if (Number(fullImageLoadingId) === Number(img.id)) fullImageLoadingId = null;
+        if (offline && open && token === renderToken) setLoupeOffline(true);
+    };
+    const timeout = window.setTimeout(() => finish({ offline: true }), FULL_IMAGE_TIMEOUT_MS);
     large.onload = async () => {
         if (large.decode) await large.decode().catch(() => {});
-        if (!open || token !== renderToken || !current() || Number(current().id) !== Number(img.id)) return;
+        if (!open || token !== renderToken || !current() || Number(current().id) !== Number(img.id)) {
+            finish();
+            return;
+        }
         image.dataset.tier = 'lg';
         image.src = large.src;
-        fullImageLoadingId = null;
+        setLoupeOffline(false);
+        finish();
     };
-    large.onerror = () => {
-        if (Number(fullImageLoadingId) === Number(img.id)) fullImageLoadingId = null;
-    };
+    large.onerror = () => finish({ offline: true });
     large.src = thumbUrl('lg', img.id);
+}
+
+function setLoupeOffline(offline) {
+    const chip = document.getElementById('loupe-offline-chip');
+    if (chip) chip.hidden = !offline;
 }
 
 function updateFlagControls() {
@@ -337,26 +376,73 @@ function updateFlagControls() {
     }
 }
 
-function stripMarkup() {
-    return images().map((img, i) => {
-        if (!img) return '';
+function stripMarkup(start, end) {
+    let markup = '';
+    const list = images();
+    for (let i = start; i < end; i += 1) {
+        const img = list[i];
+        if (!img) {
+            markup += '<span aria-hidden="true" style="flex:0 0 62px"></span>';
+            continue;
+        }
         const glyph = flagGlyph(img.flag || 'unflagged');
-        return `<button class="loupe-thumb ${i === index ? 'cur' : ''}" data-index="${i}" data-id="${esc(img.id)}" aria-label="Photo ${i + 1}"${i === index ? ' aria-current="true"' : ''}>`
-            + `<img loading="lazy" decoding="async" src="${esc(img.thumb_url || thumbUrl('sm', img.id))}" alt="">`
+        const previewSrc = previewThumbUrl(img);
+        markup += `<button class="loupe-thumb ${i === index ? 'cur' : ''}" data-index="${i}" data-id="${esc(img.id)}" aria-label="Photo ${i + 1}"${i === index ? ' aria-current="true"' : ''}>`
+            + (previewSrc
+                ? `<img loading="lazy" decoding="async" fetchpriority="low" src="${esc(previewSrc)}" alt="">`
+                : '<span class="preview-thumb-pending" aria-hidden="true"></span>')
             + `<span class="loupe-thumb-flag" aria-hidden="true">${glyph}</span>`
             + '</button>';
-    }).join('');
+    }
+    return markup;
+}
+
+function stripWindow(host, targetIndex) {
+    const visible = Math.max(1, Math.ceil(host.clientWidth / STRIP_ITEM_PITCH));
+    const size = visible + STRIP_OVERSCAN * 2;
+    const start = Math.max(0, Math.min(images().length - size, targetIndex - Math.floor(size / 2)));
+    return { start, end: Math.min(images().length, start + size) };
+}
+
+function paintStrip(start, end, scrollLeft) {
+    const host = document.getElementById('loupe-strip');
+    const before = start * STRIP_ITEM_PITCH;
+    const after = Math.max(0, images().length - end) * STRIP_ITEM_PITCH;
+    host.innerHTML = (before ? `<span aria-hidden="true" style="flex:0 0 ${before}px"></span>` : '')
+        + stripMarkup(start, end)
+        + (after ? `<span aria-hidden="true" style="flex:0 0 ${after}px"></span>` : '');
+    stripStart = start;
+    stripEnd = end;
+    host.scrollLeft = scrollLeft;
 }
 
 function renderStrip() {
     const host = document.getElementById('loupe-strip');
-    const signature = images().map((img) => Number(img?.id) || 0).join(',');
-    if (signature !== stripSignature) {
-        host.innerHTML = stripMarkup();
+    const list = images();
+    const nearStart = Math.max(0, index - STRIP_OVERSCAN);
+    const nearEnd = Math.min(list.length, index + STRIP_OVERSCAN + 1);
+    const signature = `${list.length}:${list.slice(nearStart, nearEnd).map((img) => Number(img?.id) || 0).join(',')}`;
+    if (signature !== stripSignature || index < stripStart || index >= stripEnd) {
+        const { start, end } = stripWindow(host, index);
+        const centered = Math.max(0, index * STRIP_ITEM_PITCH - (host.clientWidth - STRIP_ITEM_PITCH) / 2);
+        paintStrip(start, end, centered);
         stripSignature = signature;
-        previousStripIndex = index;
+        previousStripIndex = -1;
     }
     updateStrip();
+}
+
+function virtualizeStripScroll() {
+    if (!open) return;
+    const host = document.getElementById('loupe-strip');
+    const visibleStart = Math.max(0, Math.floor(host.scrollLeft / STRIP_ITEM_PITCH));
+    const visibleEnd = visibleStart + Math.max(1, Math.ceil(host.clientWidth / STRIP_ITEM_PITCH));
+    if (visibleStart >= stripStart + STRIP_OVERSCAN / 2
+        && visibleEnd <= stripEnd - STRIP_OVERSCAN / 2) return;
+    const { start, end } = stripWindow(host, Math.floor((visibleStart + visibleEnd) / 2));
+    if (start === stripStart && end === stripEnd) return;
+    paintStrip(start, end, host.scrollLeft);
+    previousStripIndex = index;
 }
 
 function updateStripFlag(imageId) {
@@ -384,10 +470,17 @@ function updateStrip() {
 }
 
 function preloadNeighbors() {
-    for (const neighbor of [images()[index + 1], images()[index - 1]]) {
+    const direction = navDirection || 1;
+    const warm = [1, 2, 3].map((distance) => images()[index + direction * distance]);
+    for (const neighbor of warm) {
         if (!neighbor) continue;
-        const preload = new Image();
-        preload.src = thumbUrl('md', neighbor.id);
+        const queue = window.requestIdleCallback || ((callback) => window.setTimeout(callback, 0));
+        queue(() => {
+            if (!open) return;
+            const preload = new Image();
+            preload.fetchPriority = 'low';
+            preload.src = thumbUrl('md', neighbor.id);
+        });
     }
 }
 
@@ -396,6 +489,7 @@ function preloadLargeTier() {
     for (const candidate of [images()[index - 1], current(), images()[index + 1]]) {
         if (!candidate) continue;
         const preload = new Image();
+        preload.fetchPriority = 'low';
         preload.src = thumbUrl('lg', candidate.id);
     }
 }
@@ -428,13 +522,17 @@ function render() {
     fullImageLoadingId = null;
     const token = renderToken;
     const image = document.getElementById('loupe-img');
+    setLoupeOffline(false);
     image.dataset.imageId = String(img.id);
-    image.dataset.tier = 'md';
+    image.fetchPriority = 'high';
+    image.dataset.tier = 'sm';
     image.onload = () => {
         if (token !== renderToken) return;
         setImageMetrics({ focus });
     };
-    image.src = thumbUrl('md', img.id);
+    // preview_ready exception: opening Loupe intentionally uses its progressive proxy-to-full loader.
+    image.src = img.thumb_url || thumbUrl('sm', img.id);
+    upgradeStageToMedium(img, token);
     const size = imageSizeFromMetadata(img, image);
     naturalWidth = size.width;
     naturalHeight = size.height;
@@ -466,6 +564,23 @@ function resolveImageWaiters() {
     imageWaiters = remaining;
 }
 
+function discardTrashedImages(imageIds) {
+    if (!open || !imageIds?.length) return;
+    const trashed = new Set(imageIds.map(Number));
+    const currentId = Number(current()?.id);
+    viewState.images = viewState.images.filter((image) => !image || !trashed.has(Number(image.id)));
+    if (sessionImages) sessionImages = sessionImages.filter((image) => !trashed.has(Number(image?.id)));
+    const remaining = images();
+    if (!remaining.length) {
+        closeLoupe();
+        return;
+    }
+    const currentIndex = remaining.findIndex((image) => Number(image?.id) === currentId);
+    index = currentIndex >= 0 ? currentIndex : index % remaining.length;
+    navDirection = 1;
+    render();
+}
+
 function waitForImage(targetIndex) {
     if (images().length > targetIndex && images()[targetIndex]) return Promise.resolve(true);
     return new Promise((resolve) => {
@@ -481,8 +596,9 @@ function waitForImage(targetIndex) {
 async function ensureImageAvailable(targetIndex) {
     if (!isGridScope()) return Boolean(images()[targetIndex]);
     if (images()[targetIndex]) return true;
-    await requestMorePhotos();
-    return waitForImage(targetIndex);
+    const waiting = waitForImage(targetIndex);
+    requestMorePhotos();
+    return waiting;
 }
 
 function maybeRequestMore() {
@@ -536,6 +652,8 @@ export function unmountLoupe() {
     document.getElementById('view-loupe').classList.remove('active');
     setLightMode('normal');
     stripSignature = '';
+    stripStart = 0;
+    stripEnd = 0;
     previousStripIndex = -1;
     requestAnimationFrame(() => {
         const target = document.querySelector(`.cell[data-id="${endedImageId}"]`)
@@ -555,8 +673,14 @@ export async function navLoupe(delta) {
     const targetIndex = index + delta;
     if (targetIndex < 0) return;
     if (scopeTotal() && targetIndex >= scopeTotal()) return;
+    const pending = !images()[targetIndex];
+    if (pending) document.getElementById('loupe-cap').textContent = 'Loading next photo…';
     const available = await ensureImageAvailable(targetIndex);
-    if (!available) return;
+    if (!available) {
+        if (pending) updateChrome();
+        return;
+    }
+    navDirection = Math.sign(delta) || navDirection;
     index = targetIndex;
     render();
 }
@@ -565,6 +689,7 @@ export async function navLoupeTo(targetIndex) {
     if (!open || !images().length) return;
     const bounded = Math.max(0, Math.min(images().length - 1, Number(targetIndex)));
     if (bounded === index) return;
+    navDirection = Math.sign(bounded - index) || navDirection;
     index = bounded;
     render();
 }
@@ -741,6 +866,14 @@ function ensureLoupeChrome() {
     const strip = document.getElementById('loupe-strip');
 
     if (captionEl.parentElement !== bar) bar.prepend(captionEl);
+    if (!document.getElementById('loupe-offline-chip')) {
+        const offline = document.createElement('span');
+        offline.id = 'loupe-offline-chip';
+        offline.className = 'loupe-offline-chip';
+        offline.textContent = 'Original offline';
+        offline.hidden = true;
+        stage.append(offline);
+    }
     if (!document.getElementById('loupe-zoom')) {
         const zoom = document.createElement('div');
         zoom.id = 'loupe-zoom';
@@ -834,12 +967,17 @@ export function initLoupe() {
     ensureLoupeChrome();
     bindPointer();
     bindKeyboard();
-    document.getElementById('loupe-strip').addEventListener('click', (event) => {
+    const strip = document.getElementById('loupe-strip');
+    strip.addEventListener('click', (event) => {
         const item = event.target.closest('.loupe-thumb[data-index]');
         if (!item) return;
         index = Number(item.dataset.index);
         render();
     });
+    strip.addEventListener('scroll', () => {
+        window.cancelAnimationFrame(stripScrollFrame);
+        stripScrollFrame = window.requestAnimationFrame(virtualizeStripScroll);
+    }, { passive: true });
     on('loupe:open', ({
         id, index: startIndex, images: sourceImages, returnLens: sourceLens,
     }) => openLoupe({
@@ -875,6 +1013,7 @@ export function initLoupe() {
             if (img && current() && Number(img.id) === Number(current().id)) updateChrome();
         }
     });
+    on('trash:changed', ({ imageIds } = {}) => discardTrashedImages(imageIds));
     on('images', () => {
         resolveImageWaiters();
         if (!open || !isGridScope()) return;

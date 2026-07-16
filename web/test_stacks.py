@@ -518,6 +518,18 @@ class StackRouteTests(unittest.TestCase):
                 self.assertEqual(payload["kind"], "manual")
                 self.assertFalse(payload["auto"])
                 self.assertEqual(payload["representative"]["id"], second)
+                unstacked = client.post(f"/api/stacks/{payload['id']}/unstack")
+                self.assertEqual(unstacked.status_code, 200, unstacked.text)
+                self.assertEqual(asyncio.run(stack_repository.get_stack(db.DB_PATH, payload["id"])), None)
+                async def member_count():
+                    conn = await db.get_db()
+                    try:
+                        return (await (await conn.execute(
+                            "SELECT COUNT(*) AS count FROM stack_members WHERE image_id IN (?, ?)", (first, second)
+                        )).fetchone())["count"]
+                    finally:
+                        await conn.close()
+                self.assertEqual(asyncio.run(member_count()), 0)
             finally:
                 db.DB_PATH = old_db_path
                 cache_events.invalidate_stats_cache()

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import os
 import time
 import uuid
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
@@ -11,6 +13,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 from data import connection
+from features.sync import family_clock
+from features.sync.develop_merge import preserve_local_rating
 from features.sync.validation import validate_content_hash
 
 
@@ -23,6 +27,14 @@ FAMILIES = frozenset({
     "collection_meta", "collection_membership",
 })
 JsonRequest = Callable[[str, str, dict[str, Any]], Awaitable[dict[str, Any]]]
+
+
+# The schema is defensive-called from every public operation. Remember the
+# physical database so steady-state calls avoid opening SQLite solely for DDL.
+_schema_ready: dict[str, tuple[int, int]] = {}
+_schema_locks: dict[str, asyncio.Lock] = {}
+_pending_entry_counts: dict[str, int] = {}
+_pending_entry_count_versions: dict[str, int] = {}
 
 OPLOG_DDL = """
 CREATE TABLE IF NOT EXISTS oplog (
@@ -37,14 +49,6 @@ CREATE TABLE IF NOT EXISTS oplog (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_oplog_origin_seq ON oplog(origin, origin_seq);
 CREATE INDEX IF NOT EXISTS idx_oplog_content_family ON oplog(content_hash, family);
-CREATE TABLE IF NOT EXISTS oplog_family_state (
-    content_hash TEXT NOT NULL,
-    family TEXT NOT NULL,
-    ts REAL NOT NULL,
-    origin TEXT NOT NULL,
-    origin_seq INTEGER NOT NULL,
-    PRIMARY KEY (content_hash, family)
-);
 CREATE TABLE IF NOT EXISTS oplog_settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -52,6 +56,13 @@ CREATE TABLE IF NOT EXISTS oplog_settings (
 CREATE TABLE IF NOT EXISTS oplog_cursors (
     origin TEXT PRIMARY KEY,
     last_seen_origin_seq INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS oplog_pending (
+    origin TEXT NOT NULL,
+    origin_seq INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    recorded_at REAL NOT NULL,
+    PRIMARY KEY (origin, origin_seq)
 );
 """
 
@@ -101,13 +112,52 @@ def _iso_timestamp(value: float) -> str:
     return datetime.fromtimestamp(value, timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-async def ensure_schema(db_path: str) -> None:
-    conn = await connection.open_async(db_path)
+def _database_identity(db_path: str) -> tuple[int, int] | None:
+    if db_path == ":memory:":
+        return None
     try:
-        await conn.executescript(OPLOG_DDL)
-        await conn.commit()
-    finally:
-        await connection.close_async(conn, db_path=db_path)
+        stat_result = os.stat(db_path)
+    except OSError:
+        return None
+    return (int(stat_result.st_dev), int(stat_result.st_ino))
+
+
+def _invalidate_pending_entry_count(db_path: str) -> None:
+    _pending_entry_counts.pop(db_path, None)
+    _pending_entry_count_versions[db_path] = _pending_entry_count_versions.get(db_path, 0) + 1
+
+
+async def ensure_schema(db_path: str) -> None:
+    identity = _database_identity(db_path)
+    if identity is not None and _schema_ready.get(db_path) == identity:
+        return
+    if identity is not None:
+        _invalidate_pending_entry_count(db_path)
+    if db_path == ":memory:":
+        conn = await connection.open_async(db_path)
+        try:
+            await conn.executescript(OPLOG_DDL)
+            await family_clock.migrate_legacy_states(conn)
+            await conn.commit()
+        finally:
+            await connection.close_async(conn, db_path=db_path)
+        return
+
+    lock = _schema_locks.setdefault(db_path, asyncio.Lock())
+    async with lock:
+        identity = _database_identity(db_path)
+        if identity is not None and _schema_ready.get(db_path) == identity:
+            return
+        conn = await connection.open_async(db_path)
+        try:
+            await conn.executescript(OPLOG_DDL)
+            await family_clock.migrate_legacy_states(conn)
+            await conn.commit()
+        finally:
+            await connection.close_async(conn, db_path=db_path)
+        identity = _database_identity(db_path)
+        if identity is not None:
+            _schema_ready[db_path] = identity
 
 
 async def _device_id_on_conn(conn) -> str:
@@ -176,26 +226,19 @@ def _normalize_entry(entry: Mapping[str, Any], *, receive_time: float) -> dict[s
 
 
 def _winner_key(entry: Mapping[str, Any]) -> tuple[float, str, int]:
-    return float(entry["ts"]), str(entry["origin"]), int(entry["origin_seq"])
+    return family_clock.winner_key(entry)
 
 
 async def _state_key(conn, identity: str, family: str) -> tuple[float, str, int] | None:
-    row = await (await conn.execute(
-        "SELECT ts, origin, origin_seq FROM oplog_family_state WHERE content_hash = ? AND family = ?",
-        (identity, family),
-    )).fetchone()
-    return (float(row["ts"]), str(row["origin"]), int(row["origin_seq"])) if row else None
+    return await family_clock.state_key(conn, identity, family)
 
 
 async def _record_winner(conn, entry: Mapping[str, Any], *, identity: str | None = None) -> None:
-    await conn.execute(
-        "INSERT INTO oplog_family_state(content_hash, family, ts, origin, origin_seq) VALUES (?, ?, ?, ?, ?) "
-        "ON CONFLICT(content_hash, family) DO UPDATE SET "
-        "ts=excluded.ts, origin=excluded.origin, origin_seq=excluded.origin_seq",
-        (
-            identity or str(entry["content_hash"]), entry["family"], entry["ts"],
-            entry["origin"], entry["origin_seq"],
-        ),
+    await family_clock.record_state(
+        conn,
+        identity or str(entry["content_hash"]),
+        str(entry["family"]),
+        _winner_key(entry),
     )
 
 
@@ -250,20 +293,24 @@ async def _apply_lww_family(conn, image_id: int, entry: Mapping[str, Any]) -> No
         if "rating" in columns:
             await conn.execute("UPDATE images SET rating = ? WHERE id = ?", (value, image_id))
         else:
-            row = await (await conn.execute(
-                "SELECT settings FROM develop_settings WHERE image_id = ?", (image_id,)
-            )).fetchone()
-            settings = json.loads(row["settings"] or "{}") if row else {}
-            settings["_lr_rating"] = value
+            settings = _json_payload({"_lr_rating": value})
             await conn.execute(
-                "INSERT INTO develop_settings(image_id, settings, origin, updated_at) VALUES (?, ?, 'sync', ?) "
-                "ON CONFLICT(image_id) DO UPDATE SET settings=excluded.settings",
-                (image_id, _json_payload(settings), _iso_timestamp(float(entry["ts"]))),
+                "INSERT INTO develop_settings(image_id, settings, origin, updated_at) VALUES (?, ?, 'sync', '') "
+                "ON CONFLICT(image_id) DO UPDATE SET settings=json_set("
+                "CASE WHEN json_valid(develop_settings.settings) THEN "
+                "  CASE WHEN json_type(develop_settings.settings) = 'object' "
+                "    THEN develop_settings.settings ELSE '{}' END "
+                "ELSE '{}' END, '$._lr_rating', ?)",
+                (image_id, settings, value),
             )
     elif family == "develop":
         settings_value = payload.get("settings")
         if not isinstance(settings_value, dict):
             raise ValueError("develop payload must contain full settings")
+        row = await (await conn.execute(
+            "SELECT settings FROM develop_settings WHERE image_id = ?", (image_id,)
+        )).fetchone()
+        settings_value = preserve_local_rating(settings_value, row["settings"] if row else None)
         updated_at = str(payload.get("updated_at") or _iso_timestamp(float(entry["ts"])))
         await conn.execute(
             "INSERT INTO develop_settings(image_id, settings, origin, updated_at) VALUES (?, ?, ?, ?) "
@@ -439,12 +486,94 @@ async def _apply_entry_on_conn(conn, entry: Mapping[str, Any]) -> str:
         if current is None or _winner_key(entry) > current:
             await _record_winner(conn, entry)
         return "applied"
-    current = await _state_key(conn, str(entry["content_hash"]), family)
+    if family == "iptc":
+        await conn.executescript(KEYWORD_IPTC_DDL)
+    state_key = await _state_key(conn, str(entry["content_hash"]), family)
+    row_key = await family_clock.row_key(conn, int(image["id"]), family)
+    current = family_clock.newest_key(state_key, row_key)
     if current is not None and _winner_key(entry) <= current:
         return "stale-or-replayed"
     await _apply_lww_family(conn, int(image["id"]), entry)
     await _record_winner(conn, entry)
     return "applied"
+
+
+_SOFT_FAILURES = frozenset({"unknown-content-hash", "unknown-collection-uuid"})
+
+
+async def _record_apply_result(
+    conn,
+    entry: Mapping[str, Any],
+    result: str,
+    *,
+    recorded_at: float,
+) -> None:
+    identity = (str(entry["origin"]), int(entry["origin_seq"]))
+    if result in _SOFT_FAILURES:
+        await conn.execute(
+            "INSERT INTO oplog_pending(origin, origin_seq, reason, recorded_at) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(origin, origin_seq) DO UPDATE SET "
+            "reason=excluded.reason, recorded_at=excluded.recorded_at",
+            (*identity, result, recorded_at),
+        )
+        return
+    await conn.execute(
+        "DELETE FROM oplog_pending WHERE origin = ? AND origin_seq = ?",
+        identity,
+    )
+
+
+async def retry_pending_entries(db_path: str) -> dict[str, int]:
+    """Re-apply durable soft failures whose catalog dependencies may now exist."""
+
+    await ensure_schema(db_path)
+    conn = await connection.open_async(db_path)
+    retried = 0
+    applied = 0
+    still_pending = 0
+    try:
+        await conn.execute("BEGIN IMMEDIATE")
+        rows = await (await conn.execute(
+            "SELECT oplog.origin, oplog.origin_seq, oplog.content_hash, oplog.family, "
+            "oplog.payload, oplog.ts, oplog.applied_from "
+            "FROM oplog_pending JOIN oplog USING (origin, origin_seq) "
+            "ORDER BY oplog_pending.recorded_at, oplog_pending.origin, oplog_pending.origin_seq"
+        )).fetchall()
+        for row in rows:
+            entry = _entry_dict(row)
+            result = await _apply_entry_on_conn(conn, entry)
+            await _record_apply_result(conn, entry, result, recorded_at=time.time())
+            retried += 1
+            if result in _SOFT_FAILURES:
+                still_pending += 1
+            else:
+                applied += 1
+        await conn.commit()
+    except Exception:
+        await conn.rollback()
+        raise
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+    if retried:
+        _invalidate_pending_entry_count(db_path)
+    return {"retried": retried, "applied": applied, "still_pending": still_pending}
+
+
+async def pending_entry_count(db_path: str) -> int:
+    await ensure_schema(db_path)
+    cached = _pending_entry_counts.get(db_path)
+    if cached is not None:
+        return cached
+    version = _pending_entry_count_versions.get(db_path, 0)
+    conn = await connection.open_async(db_path)
+    try:
+        row = await (await conn.execute("SELECT COUNT(*) AS count FROM oplog_pending")).fetchone()
+        count = int(row["count"])
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+    if version == _pending_entry_count_versions.get(db_path, 0):
+        _pending_entry_counts[db_path] = count
+    return count
 
 
 async def apply_entries(
@@ -481,6 +610,7 @@ async def apply_entries(
             )).fetchone()
             canonical = _entry_dict(stored)
             result = await _apply_entry_on_conn(conn, canonical)
+            await _record_apply_result(conn, canonical, result, recorded_at=received_at)
             results.append({"origin": canonical["origin"], "origin_seq": canonical["origin_seq"], "result": result})
         await conn.commit()
     except Exception:
@@ -488,6 +618,10 @@ async def apply_entries(
         raise
     finally:
         await connection.close_async(conn, db_path=db_path)
+    if normalized:
+        _invalidate_pending_entry_count(db_path)
+    if any(item["result"] == "applied" for item in results):
+        await retry_pending_entries(db_path)
     return {
         "received": len(normalized),
         "inserted": inserted,
@@ -540,6 +674,7 @@ async def append_entry(
         )
         await _apply_entry_on_conn(conn, entry)
         await conn.commit()
+        _invalidate_pending_entry_count(db_path)
         return entry
     except Exception:
         await conn.rollback()
@@ -818,6 +953,7 @@ async def origin_entries(db_path: str, origin: str, *, after: int = 0, limit: in
 async def exchange_with_hub(db_path: str, request: JsonRequest) -> dict[str, int]:
     """Push locally authored entries, then pull and apply every unseen hub page."""
 
+    await retry_pending_entries(db_path)
     local_device = await device_id(db_path)
     pushed = 0
     after = await push_cursor(db_path)

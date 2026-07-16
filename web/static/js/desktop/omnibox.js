@@ -1,12 +1,12 @@
 import {
-    getFilterOptions, getFolders, getPeople, getRankings, getTags, listCollections, thumbUrl,
+    getFilterOptions, getFolders, getPeople, getRankings, getTags, listCollections, previewThumbUrl, thumbUrl,
 } from './api.js';
 import {
-    emit, folderLabel, folderValues, on, patchScope, scope, scopeActive, setScope, setSort, smartQueryActive, smartQuerySummary, toggleBestOf,
+    clearFacet, emit, folderLabel, folderValues, navigateToScope, on, patchScope, scope, scopeActive, setSort, smartQueryActive, smartQuerySummary, toggleBestOf,
 } from './state.js';
 import { currentFocusedImage } from './grid.js';
 import { openLoupe, toggleLoupeLights } from './loupe.js';
-import { scopeTokenHtml } from './contextbar.js';
+import { scopeTokenFacetKey, scopeTokenHtml } from './contextbar.js';
 import {
     exportCurrentScope, requestDeleteCurrentCollection, requestNewCollection,
     requestRenameCurrentCollection, requestSaveCurrentView, requestSaveSmartCollection, requestShareCurrentCollection, toggleLeftPanel,
@@ -15,6 +15,7 @@ import { switchLens } from './lenses.js';
 import { openSuggestionsReview } from './suggestions.js';
 import { icon } from '../icons.js';
 import { isUnnamedPersonLabel, personLabel } from '../people_labels.js';
+import { showToast } from './toast.js';
 
 const RECENT_KEY = 'pa_d_recent_scopes';
 const LIVE_DELAY_MS = 250;
@@ -77,7 +78,7 @@ const COMMANDS = [
     { icon: 'map-pin', label: 'Switch lens: map', kbd: 'M', run: () => switchLens('map') },
     { icon: 'panel-left', label: 'Toggle left panel', kbd: '[', run: toggleLeftPanel },
     { icon: 'keyboard', label: 'Keyboard shortcuts', kbd: '?', run: () => emit('help:open') },
-    { icon: 'house', label: 'Clear view / All photos', run: () => setScope({}) },
+    { icon: 'house', label: 'Clear view / All photos', run: () => navigateToScope({}) },
     { icon: 'arrow-down-wide-narrow', label: 'Sort by rating', run: () => setSort('elo') },
     { icon: 'calendar', label: 'Sort by date', run: () => setSort('date_taken') },
     { icon: 'file-type', label: 'Sort by filename', run: () => setSort('filename') },
@@ -89,6 +90,7 @@ let folders = [];
 let tags = [];
 let filterOptions = null;
 let dataPromise = null;
+let dataSeq = 0;
 let rows = [];
 let hot = -1;
 let liveTimer = null;
@@ -192,7 +194,7 @@ function scopeIcon(value) {
 }
 
 function remember(value) {
-    const storedScope = { ...value };
+    const storedScope = { ...value, folder: [...folderValues(value.folder)], similarIds: [...(value.similarIds || [])] };
     const values = recentScopes().filter((item) => JSON.stringify(item.scope) !== JSON.stringify(storedScope));
     values.unshift({ label: scopeLabel(storedScope), scope: storedScope });
     storeRecents(values);
@@ -200,24 +202,30 @@ function remember(value) {
 
 async function ensureSuggestionData() {
     if (dataPromise) return dataPromise;
-    dataPromise = Promise.all([
-        getPeople(500),
-        listCollections(),
-        getFolders(null),
-        getFilterOptions(),
-        getTags({ limit: 100 }),
-    ]).then(([peopleData, collectionData, folderData, optionsData, tagData]) => {
-        people = flattenPeople(peopleData);
-        collections = (collectionData && collectionData.collections) || [];
-        folders = (folderData && folderData.folders) || [];
-        filterOptions = optionsData || {};
-        tags = (tagData && tagData.tags) || [];
+    const seq = ++dataSeq;
+    const apply = (promise, update) => promise.then((data) => {
+        if (seq !== dataSeq) return;
+        update(data);
         render();
-    }).catch(() => {});
+    });
+    const loads = [
+        apply(getFilterOptions(), (data) => {
+            filterOptions = data || {};
+            people = flattenPeople(data);
+        }),
+        apply(listCollections(), (data) => { collections = (data && data.collections) || []; }),
+        apply(getFolders(null), (data) => { folders = (data && data.folders) || []; }),
+        apply(getTags({ limit: 100 }), (data) => { tags = (data && data.tags) || []; }),
+        apply(getPeople(500), (data) => { people = flattenPeople(data); }),
+    ];
+    dataPromise = Promise.allSettled(loads).then((results) => {
+        if (seq === dataSeq && results.some((result) => result.status === 'rejected')) dataPromise = null;
+    });
     return dataPromise;
 }
 
 function invalidateSuggestionData() {
+    dataSeq += 1;
     dataPromise = null;
     if (document.getElementById('scopebox')?.classList.contains('open')) ensureSuggestionData();
 }
@@ -225,6 +233,7 @@ function invalidateSuggestionData() {
 function open() {
     document.getElementById('scopebox').classList.add('open');
     document.getElementById('scope-input')?.setAttribute('aria-expanded', 'true');
+    render();
 }
 
 function close() {
@@ -260,9 +269,10 @@ function photoStripHtml(items) {
         + items.map((row) => {
             const index = row.runIndex;
             const img = row.photo;
-            const cls = `sd-photo ${index === hot ? 'hot' : ''}`;
+            const previewSrc = previewThumbUrl(img);
+            const cls = `sd-photo ${previewSrc ? '' : 'preview-pending'} ${index === hot ? 'hot' : ''}`;
             return `<button id="scope-option-${index}" class="${cls}" role="option" aria-selected="${index === hot ? 'true' : 'false'}" data-index="${index}" aria-label="${esc(img.filename || `Photo ${img.id}`)}" title="${esc(img.filename || `Photo ${img.id}`)}" style="--ar:${aspect(img)}">`
-                + `<img src="${esc(img.thumb_url || thumbUrl('sm', img.id))}" alt="">`
+                + (previewSrc ? `<img src="${esc(previewSrc)}" alt="">` : '<span class="preview-thumb-pending" aria-hidden="true"></span>')
                 + '</button>';
         }).join('')
         + '</div>';
@@ -292,11 +302,6 @@ function flattenPeople(peopleData) {
         }
     }
     return [...seen.values()];
-}
-
-function idQuery(term) {
-    const text = String(term || '').trim().toLowerCase();
-    return text.match(/^(?:#|id:?)?\d+$/) ? text.replace(/\D/g, '') : '';
 }
 
 function skeletonPhotosHtml() {
@@ -375,15 +380,15 @@ function buildPhotoRows(term) {
 }
 
 function buildPeopleRows(term) {
-    const idTerm = idQuery(term);
+    const unnamedPrefix = String(term || '').trim().toLowerCase();
+    const searchesUnnamed = unnamedPrefix && 'unnamed'.startsWith(unnamedPrefix);
     const matches = people
         .map((person) => {
             const label = personLabel(person);
             const named = !isUnnamedPersonLabel(label);
-            const idMatch = idTerm && String(person.id).includes(idTerm);
-            return { person, label: named ? label : 'Add name', named, idMatch };
+            return { person, label: named ? label : 'Add name', named };
         })
-        .filter((item) => (item.named && includesText(item.label, term)) || (!item.named && item.idMatch))
+        .filter((item) => (item.named && includesText(item.label, term)) || (!item.named && searchesUnnamed))
         .sort((a, b) => Number(b.named) - Number(a.named) || personCount(b.person) - personCount(a.person))
         .slice(0, MAX_SECTION_ROWS);
     if (!matches.length) return [];
@@ -394,7 +399,7 @@ function buildPeopleRows(term) {
             thumb: personThumb(person),
             label,
             labelHtml: named ? highlight(label, term) : esc(label),
-            meta: named ? fmt(personCount(person)) : `Unnamed · ${fmt(personCount(person))} photos`,
+            meta: named ? fmt(personCount(person)) : `Unnamed · ${fmt(person.face_count || personCount(person))} faces`,
             navRow: 10 + i,
             run: () => applyScope({
                 people: person.id,
@@ -716,6 +721,9 @@ function render() {
             html += rowHtml(row, row.runIndex);
         }
     }
+    if (document.getElementById('scope-input')?.value.trim()) {
+        html += '<div class="sd-operator-footer">camera: · lens: · tag: · date (&quot;june 2024&quot;) · &gt; commands</div>';
+    }
     drop.innerHTML = html || '<div class="sd-empty">Type to search this archive</div>';
     const input = document.getElementById('scope-input');
     if (hot >= 0 && drop.querySelector(`#scope-option-${CSS.escape(String(hot))}`)) {
@@ -798,9 +806,7 @@ function run(index) {
 
 function applyScope(patch, { keepFocus = false, merge = true } = {}) {
     const clean = { ...patch };
-    const next = merge ? { ...scope, ...clean } : clean;
-    remember(next);
-    setScope(clean, { merge });
+    navigateToScope(clean, { merge });
     const input = document.getElementById('scope-input');
     input.value = '';
     if (keepFocus) {
@@ -815,7 +821,6 @@ function applyScope(patch, { keepFocus = false, merge = true } = {}) {
 
 function applySearch(term) {
     applyScope({ q: term, deep: pendingDeep == null ? scope.deep : pendingDeep, sort: 'similarity' });
-    switchLens('grid');
 }
 
 function toggleDeepSearch() {
@@ -826,10 +831,7 @@ function toggleDeepSearch() {
 
 function openPhotoResult(term, photo, images) {
     const deep = pendingDeep == null ? scope.deep : pendingDeep;
-    const next = { ...scope, q: term, deep, sort: 'similarity' };
-    remember(next);
-    setScope({ q: term, deep, sort: 'similarity' }, { merge: true });
-    switchLens('grid');
+    navigateToScope({ q: term, deep, sort: 'similarity' }, { merge: true });
     document.getElementById('scope-input').value = '';
     close();
     requestAnimationFrame(() => {
@@ -844,23 +846,30 @@ function openPhotoResult(term, photo, images) {
 function applyFacet({ key, value, remove, closeAfter = false }) {
     const input = document.getElementById('scope-input');
     const nextQ = remainingQuery(input.value, remove.start, remove.end);
+    const leavingScopedResults = Boolean(value) && (scope.collectionId || scope.similarIds.length);
+    const previousScope = { ...scope, folder: [...folderValues()], similarIds: [...scope.similarIds] };
     const patch = {
         [key]: String(value || ''),
         q: nextQ || scope.q || '',
-        collectionId: '',
-        collectionName: '',
-        collectionSmart: false,
-        similarIds: [],
-        similarSourceId: '',
-        similarLimit: 100,
-        similarLabel: '',
+        ...(leavingScopedResults ? {
+            collectionId: '',
+            collectionName: '',
+            collectionSmart: false,
+            similarIds: [],
+            similarSourceId: '',
+            similarLimit: 100,
+            similarLabel: '',
+        } : {}),
     };
     if (key === 'people') {
         patch.personLabel = '';
         patch.personThumb = '';
     }
-    remember({ ...scope, ...patch });
-    setScope(patch, { merge: true });
+    navigateToScope(patch, { merge: true });
+    if (leavingScopedResults) {
+        const name = previousScope.collectionName || previousScope.similarLabel || 'this view';
+        showToast(`Left '${name}'`, { undo: () => navigateToScope(previousScope) });
+    }
     input.value = '';
     input.focus();
     if (closeAfter) close();
@@ -1029,7 +1038,8 @@ export function initOmnibox() {
         } else if (event.key === 'Backspace' && scopeActive() && inputAtTokenBoundary(input)) {
             event.preventDefault();
             if (tokenSelected) {
-                setScope({});
+                const facet = scopeTokenFacetKey();
+                if (facet) clearFacet(facet);
                 setTokenSelected(false);
                 input.focus();
                 hot = -1;
@@ -1058,7 +1068,8 @@ export function initOmnibox() {
     document.addEventListener('pointerdown', (event) => {
         if (!box.contains(event.target)) close();
     });
-    on('scope', () => {
+    on('scope', (nextScope) => {
+        remember(nextScope);
         tokenSelected = false;
         renderToken();
     });
@@ -1068,5 +1079,4 @@ export function initOmnibox() {
     on('trash:changed', invalidateSuggestionData);
     on('flags', invalidateSuggestionData);
     renderToken();
-    ensureSuggestionData();
 }

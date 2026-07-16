@@ -196,6 +196,7 @@
                     </section>
                     <section id="view-duplicates" class="view duplicates-view" aria-label="Stacks"></section>
                     <section id="view-trash" class="view trash-view" aria-label="Trash"></section>
+                    <section id="view-system" class="view system-view" aria-label="System settings"></section>
                     <section id="view-shared" class="view shared-view" aria-label="Publishing">
                         <div id="publishing" class="publishing-layout">
                             <section class="publishing-pane" data-pub-pane="collections" aria-labelledby="publishing-collections-title">
@@ -238,11 +239,78 @@
                                     <img id="develop-placeholder" alt="RAW preview" hidden>
                                     <canvas id="develop-canvas" aria-label="Developed photo preview"></canvas>
                                     <div id="develop-crop-overlay" hidden></div>
-                                    <div id="develop-status" role="status" aria-live="polite"><i aria-hidden="true"></i><span>Choose a RAW photo in Grid, then open Develop.</span></div>
+                                    <div id="develop-status" role="status" aria-live="polite"><i aria-hidden="true"></i><span>Choose a RAW photo in Grid, then open Develop.</span><button class="btn" type="button" data-develop-retry hidden>Try again</button></div>
                                 </div>
                                 <div id="develop-filmstrip" aria-label="Develop filmstrip"></div>
                             </div>
                             <aside id="develop-right" aria-label="Develop adjustments"><div id="develop-panels"></div></aside>                        </div>
+                    </section>
+                    <section id="view-import" class="view import-stage-view" aria-label="Import">
+                        <div class="imps-layout">
+                            <header class="imps-top">
+                                <h2 class="imps-title">Import</h2>
+                                <div class="imps-seg" role="group" aria-label="Import mode">
+                                    <button id="imps-mode-copy" class="active" aria-pressed="true" data-tip="Copy into the originals tree, organized by date">Copy</button>
+                                    <button id="imps-mode-add" aria-pressed="false" data-tip="Register in place without copying">Add</button>
+                                </div>
+                                <span id="imps-status" class="imps-statusline" role="status" aria-live="polite">Choose a card or folder to stage photos.</span>
+                                <button id="imps-close" class="icon-btn" data-tip="Close (Esc)" aria-label="Close import"><svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg></button>
+                            </header>
+                            <div id="imps-scanbar"><i></i></div>
+                            <aside class="imps-rail" aria-label="Import sources">
+                                <div id="imps-sources"></div>
+                                <label class="imps-toggle"><input id="imps-subfolders" type="checkbox" checked> Include subfolders</label>
+                            </aside>
+                            <div class="imps-main">
+                                <div class="imps-gridbar">
+                                    <div class="imps-seg" role="group" aria-label="Show">
+                                        <button id="imps-filter-new" class="active">New</button>
+                                        <button id="imps-filter-all">All</button>
+                                    </div>
+                                    <button id="imps-check-all" class="imps-linkbtn">Check all</button>
+                                    <button id="imps-uncheck-all" class="imps-linkbtn">Uncheck all</button>
+                                    <span class="imps-gridbar-spacer"></span>
+                                    <input id="imps-size" class="ctl-range" type="range" min="96" max="260" step="4" aria-label="Thumbnail size">
+                                </div>
+                                <div id="imps-scroll">
+                                    <div id="imps-grid"><div id="imps-sentinel" aria-hidden="true"></div></div>
+                                    <div id="imps-empty" class="imps-empty-state">
+                                        <p><b>See everything before it enters the library.</b></p>
+                                        <p>Pick a card or folder on the left — photos stage here with duplicates already spotted.</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <aside class="imps-right" aria-label="Import options">
+                                <details class="dr-details" open>
+                                    <summary><span>File handling</span></summary>
+                                    <div class="imps-panel">
+                                        <label class="imps-toggle"><input id="imps-skip-suspects" type="checkbox" checked> Don’t import suspected duplicates</label>
+                                        <label class="imps-toggle" id="imps-clear-card-row" hidden><input id="imps-clear-card" type="checkbox" checked> Clear card as files verify</label>
+                                    </div>
+                                </details>
+                                <details class="dr-details" open>
+                                    <summary><span>Apply during import</span></summary>
+                                    <div class="imps-panel">
+                                        <label class="imps-field">Keywords<input id="imps-keywords" autocomplete="off" placeholder="alaska, aerial"></label>
+                                    </div>
+                                </details>
+                                <details class="dr-details" open>
+                                    <summary><span>Destination</span></summary>
+                                    <div class="imps-panel" id="imps-destination"></div>
+                                </details>
+                            </aside>
+                            <footer class="imps-commitbar">
+                                <span id="imps-summary">Nothing staged</span>
+                                <label class="imps-as">as <select id="imps-category" aria-label="Import category">
+                                    <option value="">Auto</option>
+                                    <option value="raw">RAW shoot</option>
+                                    <option value="personal">Personal</option>
+                                    <option value="film">Film scans</option>
+                                    <option value="export">Exported edits</option>
+                                </select></label>
+                                <button id="imps-commit" class="btn primary" disabled>Import</button>
+                            </footer>
+                        </div>
                     </section>
                     <section id="view-refine" class="view refine-view" aria-label="Refine">
                         <div id="refine">

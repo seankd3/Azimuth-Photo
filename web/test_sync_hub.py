@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime
 import gzip
 import hashlib
 import json
@@ -16,6 +17,7 @@ from PIL import Image
 
 import db
 from features.develop import rawproc
+from features.library import keywords
 from features.sync import device_auth, hashing, hub, hub_routes
 
 
@@ -161,6 +163,9 @@ class SyncHubTests(unittest.TestCase):
         image_id = self.upload(content_hash, payload, split=len(payload) // 2)
         destination = self.raws / "2024" / "2024-06-07" / "field.jpg"
         self.assertEqual(destination.read_bytes(), payload)
+        original = self.client.get(f"/api/sync/original/{image_id}")
+        self.assertEqual(original.status_code, 200, original.text)
+        self.assertEqual(original.content, payload)
 
         manifest = self.client.post(
             "/api/sync/manifest",
@@ -312,6 +317,218 @@ class SyncHubTests(unittest.TestCase):
         self.assertTrue(base.headers["content-type"].startswith("multipart/mixed"))
         self.assertIn(b"PABASE1", gzip.decompress(rawproc.base_paths(image_id).binary.read_bytes()))
         self.assertIn(b'filename="base.json"', base.content)
+
+    def test_metadata_rating_preserves_develop_edit_interleaved_with_upsert(self):
+        payload = self.image_bytes("rating-race.jpg", (40, 50, 60))
+        content_hash = self.declare("rating-race.jpg", payload)
+        image_id = self.upload(content_hash, payload)
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                "INSERT INTO develop_settings(image_id, settings, origin, updated_at) VALUES (?, ?, 'user', 'before')",
+                (image_id, json.dumps({"Exposure2012": 0.0})),
+            )
+            conn.execute(
+                "CREATE TRIGGER interleave_develop_before_rating BEFORE INSERT ON develop_settings "
+                f"WHEN NEW.image_id = {image_id} BEGIN "
+                "UPDATE develop_settings SET settings = json_set(settings, '$.Exposure2012', 2.25) "
+                "WHERE image_id = NEW.image_id; END"
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        response = self.client.post("/api/sync/metadata", json={"items": [{
+            "content_hash": content_hash,
+            "rating": 5,
+            "rating_updated_at": "2026-07-16T01:00:00Z",
+        }]})
+
+        self.assertEqual(response.status_code, 200, response.text)
+        conn = sqlite3.connect(self.db_path)
+        try:
+            settings = json.loads(conn.execute(
+                "SELECT settings FROM develop_settings WHERE image_id = ?", (image_id,)
+            ).fetchone()[0])
+        finally:
+            conn.close()
+        self.assertEqual(settings, {"Exposure2012": 2.25, "_lr_rating": 5})
+
+    def test_rating_clock_does_not_block_older_develop_family(self):
+        payload = self.image_bytes("rating-develop-order.jpg", (25, 35, 45))
+        content_hash = self.declare("rating-develop-order.jpg", payload)
+        image_id = self.upload(content_hash, payload)
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                "INSERT INTO develop_settings(image_id, settings, origin, updated_at) VALUES (?, ?, 'sync', ?)",
+                (image_id, json.dumps({"Exposure2012": 0.25}), "2026-07-16T00:00:00Z"),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        rating_at = "2026-07-16T03:00:00Z"
+        rating = self.client.post("/api/sync/metadata", json={"items": [{
+            "content_hash": content_hash,
+            "rating": 4,
+            "rating_updated_at": rating_at,
+        }]})
+        self.assertEqual(rating.status_code, 200, rating.text)
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            updated_at = conn.execute(
+                "SELECT updated_at FROM develop_settings WHERE image_id = ?", (image_id,)
+            ).fetchone()[0]
+        finally:
+            conn.close()
+        self.assertEqual(updated_at, "2026-07-16T00:00:00Z")
+
+        older = self.client.post("/api/sync/metadata", json={"items": [{
+            "content_hash": content_hash,
+            "develop_settings": {"Exposure2012": 1.0},
+            "develop_updated_at": "2026-07-16T02:00:00Z",
+        }]})
+        self.assertEqual(older.status_code, 200, older.text)
+        self.assertIn("develop", older.json()["items"][0]["applied"])
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            settings = json.loads(conn.execute(
+                "SELECT settings FROM develop_settings WHERE image_id = ?", (image_id,)
+            ).fetchone()[0])
+            family_clocks = dict(conn.execute(
+                "SELECT family, ts FROM oplog_family_state WHERE content_hash = ?",
+                (content_hash,),
+            ))
+        finally:
+            conn.close()
+        self.assertEqual(settings, {"Exposure2012": 1.0, "_lr_rating": 4})
+        self.assertEqual(family_clocks["rating"], datetime.fromisoformat(rating_at.replace("Z", "+00:00")).timestamp())
+        self.assertEqual(family_clocks["develop"], datetime.fromisoformat("2026-07-16T02:00:00+00:00").timestamp())
+
+        newer = self.client.post("/api/sync/metadata", json={"items": [{
+            "content_hash": content_hash,
+            "develop_settings": {"Exposure2012": 1.5},
+            "develop_updated_at": "2026-07-16T04:00:00Z",
+        }]})
+        self.assertEqual(newer.status_code, 200, newer.text)
+        conn = sqlite3.connect(self.db_path)
+        try:
+            settings = json.loads(conn.execute(
+                "SELECT settings FROM develop_settings WHERE image_id = ?", (image_id,)
+            ).fetchone()[0])
+        finally:
+            conn.close()
+        self.assertEqual(settings, {"Exposure2012": 1.5, "_lr_rating": 4})
+
+    def test_older_sync_does_not_rewind_imported_develop_without_family_clock(self):
+        payload = self.image_bytes("lrcat-develop-order.jpg", (35, 45, 55))
+        content_hash = self.declare("lrcat-develop-order.jpg", payload)
+        image_id = self.upload(content_hash, payload)
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                "INSERT INTO develop_settings(image_id, settings, origin, updated_at) "
+                "VALUES (?, ?, 'lrcat', ?)",
+                (
+                    image_id,
+                    json.dumps({"Exposure2012": 2.0}),
+                    "2026-07-16T05:00:00Z",
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        response = self.client.post("/api/sync/metadata", json={"items": [{
+            "content_hash": content_hash,
+            "develop_settings": {"Exposure2012": -2.0},
+            "develop_updated_at": "2026-07-16T04:00:00Z",
+        }]})
+
+        self.assertEqual(response.status_code, 200, response.text)
+        result = response.json()["items"][0]
+        self.assertIn(
+            {"family": "develop", "reason": "hub-newer-or-equal"},
+            result["skipped"],
+        )
+        conn = sqlite3.connect(self.db_path)
+        try:
+            row = conn.execute(
+                "SELECT settings, origin, updated_at FROM develop_settings WHERE image_id = ?",
+                (image_id,),
+            ).fetchone()
+            family_clock = conn.execute(
+                "SELECT ts FROM oplog_family_state "
+                "WHERE content_hash = ? AND family = 'develop'",
+                (content_hash,),
+            ).fetchone()
+        finally:
+            conn.close()
+        self.assertEqual(json.loads(row[0]), {"Exposure2012": 2.0})
+        self.assertEqual(row[1:], ("lrcat", "2026-07-16T05:00:00Z"))
+        self.assertIsNone(family_clock)
+
+    def test_older_sync_does_not_rewind_imported_iptc_without_family_clock(self):
+        payload = self.image_bytes("lrcat-iptc-order.jpg", (45, 55, 65))
+        content_hash = self.declare("lrcat-iptc-order.jpg", payload)
+        image_id = self.upload(content_hash, payload)
+        asyncio.run(keywords.ensure_schema())
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                "INSERT INTO iptc_fields(image_id, title, caption, copyright, creator, updated_at) "
+                "VALUES (?, 'Imported title', '', '', '', '2026-07-16T05:00:00Z')",
+                (image_id,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        response = self.client.post("/api/sync/metadata", json={"items": [{
+            "content_hash": content_hash,
+            "iptc": {"title": "Older title", "updated_at": "2026-07-16T04:00:00Z"},
+        }]})
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIn(
+            {"family": "iptc", "reason": "hub-newer-or-equal"},
+            response.json()["items"][0]["skipped"],
+        )
+        conn = sqlite3.connect(self.db_path)
+        try:
+            row = conn.execute(
+                "SELECT title, updated_at FROM iptc_fields WHERE image_id = ?",
+                (image_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        self.assertEqual(row, ("Imported title", "2026-07-16T05:00:00Z"))
+
+    def test_first_synced_rating_seeds_a_neutral_develop_clock(self):
+        payload = self.image_bytes("first-rating.jpg", (55, 65, 75))
+        content_hash = self.declare("first-rating.jpg", payload)
+        image_id = self.upload(content_hash, payload)
+
+        response = self.client.post("/api/sync/metadata", json={"items": [{
+            "content_hash": content_hash,
+            "rating": 5,
+            "rating_updated_at": "2026-07-16T03:00:00Z",
+        }]})
+
+        self.assertEqual(response.status_code, 200, response.text)
+        conn = sqlite3.connect(self.db_path)
+        try:
+            row = conn.execute(
+                "SELECT settings, updated_at FROM develop_settings WHERE image_id = ?",
+                (image_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        self.assertEqual(json.loads(row[0]), {"_lr_rating": 5})
+        self.assertEqual(row[1], "")
 
     def test_hash_backfill_batch_and_endpoint(self):
         path = self.root / "legacy.jpg"

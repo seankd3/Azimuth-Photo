@@ -211,10 +211,11 @@ class LocalCorrectionTests(unittest.TestCase):
         self.assertEqual([mask["What"] for correction in settings["MaskGroupBasedCorrections"] for mask in correction["CorrectionMasks"]], ["Mask/Gradient", "Mask/Paint"])
         output = pipeline.apply_pipeline(synthetic_linear_image(), settings, asshot_temperature=5150)
         stats = [float(output.mean()), float(output.std()), *np.percentile(output, [10, 50, 90])]
-        # Detail2 golden refresh: SharpenEdgeMasking now gates the shared sharpen residual before local masks.
+        # Refresh for the Contrast2012 smoothstep S-curve on top of the
+        # GrainFrequency hash-grid change (both intentional).
         np.testing.assert_allclose(
             stats,
-            [0.6760845184326172, 0.2612098157405853, 0.30513950884342195, 0.7013335227966309, 0.9906456410884857],
+            [0.6757814288139343, 0.2611185908317566, 0.30564949810504916, 0.6978363990783691, 0.9895257413387298],
             rtol=0.0,
             atol=2e-6,
         )

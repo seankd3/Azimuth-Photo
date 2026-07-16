@@ -11,6 +11,7 @@ from data import connection as data_connection
 
 
 def _share_summary(row) -> dict:
+    expires_at = float(row["expires_at"]) if row["expires_at"] is not None else None
     return {
         "id": int(row["id"]),
         "collection_id": int(row["collection_id"]) if row["collection_id"] is not None else None,
@@ -19,7 +20,8 @@ def _share_summary(row) -> dict:
         ),
         "token": row["token"],
         "created_at": float(row["created_at"]),
-        "expires_at": float(row["expires_at"]) if row["expires_at"] is not None else None,
+        "expires_at": expires_at,
+        "expired": expires_at is not None and expires_at <= time.time(),
         "revoked_at": float(row["revoked_at"]) if row["revoked_at"] is not None else None,
         "password_hash": row["password_hash"],
         "view_count": int(row["view_count"] or 0),
@@ -29,6 +31,7 @@ def _share_summary(row) -> dict:
         "last_viewed_at": (
             float(row["last_viewed_at"]) if row["last_viewed_at"] is not None else None
         ),
+        "client_finished_at": float(row["client_finished_at"]) if row["client_finished_at"] is not None else None,
     }
 
 
@@ -41,6 +44,7 @@ def _favorite_summary(row) -> dict:
 
 
 def _shared_collection_summary(row) -> dict:
+    expires_at = float(row["expires_at"]) if row["expires_at"] is not None else None
     return {
         "collection_id": int(row["collection_id"]) if row["collection_id"] is not None else None,
         "published_node_id": (
@@ -52,7 +56,8 @@ def _shared_collection_summary(row) -> dict:
         "id": int(row["share_id"]),
         "token": row["token"],
         "created_at": float(row["created_at"]),
-        "expires_at": float(row["expires_at"]) if row["expires_at"] is not None else None,
+        "expires_at": expires_at,
+        "expired": expires_at is not None and expires_at <= time.time(),
         "password_hash": row["password_hash"],
         "view_count": int(row["view_count"] or 0),
         "first_viewed_at": (
@@ -214,7 +219,6 @@ async def create_published_node_share(
 
 
 async def list_active_shares(db_path: str) -> list[dict]:
-    now = time.time()
     conn = await data_connection.open_async(db_path)
     try:
         cursor = await conn.execute(
@@ -248,12 +252,11 @@ async def list_active_shares(db_path: str) -> list[dict]:
             LEFT JOIN published_nodes node ON node.id = s.published_node_id
             LEFT JOIN share_images si ON si.share_id = s.id
             LEFT JOIN share_favorites sf ON sf.share_id = s.id
-            WHERE {_active_unexpired_clause("s")}
+            WHERE s.revoked_at IS NULL
               AND (c.id IS NOT NULL OR node.id IS NOT NULL)
             GROUP BY s.id, c.id, node.id
             ORDER BY s.created_at DESC, s.id DESC
             """,
-            (now,),
         )
         summaries = []
         for row in await cursor.fetchall():
@@ -385,6 +388,7 @@ async def resolve_token(db_path: str, token: str) -> dict | None:
                 s.view_count,
                 s.first_viewed_at,
                 s.last_viewed_at,
+                s.client_finished_at,
                 COUNT(i.id) AS image_count,
                 MIN(i.date_taken) AS date_min,
                 MAX(i.date_taken) AS date_max
@@ -426,7 +430,8 @@ async def resolve_token(db_path: str, token: str) -> dict | None:
         else:
             images_cursor = await conn.execute(
                 """
-                SELECT i.id, i.filename, COALESCE(i.aspect_ratio, 1.5) AS aspect_ratio, i.date_taken
+                SELECT i.id, i.filename, i.filepath, i.hub_remote, i.hub_image_id,
+                       source.path AS source_path, COALESCE(i.aspect_ratio, 1.5) AS aspect_ratio, i.date_taken
                 FROM share_images si
                 JOIN images i ON i.id = si.image_id
                 JOIN catalog_sources source ON source.id = i.source_id AND source.included = 1
@@ -574,6 +579,24 @@ async def favorites_for_collection(db_path: str, collection_id: int) -> list[dic
         await data_connection.close_async(conn, db_path=db_path)
 
 
+async def mark_finished(db_path: str, share_id: int) -> float | None:
+    now = time.time()
+    conn = await data_connection.open_async(db_path)
+    try:
+        cursor = await conn.execute(
+            "UPDATE collection_shares SET client_finished_at = COALESCE(client_finished_at, ?) WHERE id = ?",
+            (now, int(share_id)),
+        )
+        await conn.commit()
+        if not cursor.rowcount:
+            return None
+        cursor = await conn.execute("SELECT client_finished_at FROM collection_shares WHERE id = ?", (int(share_id),))
+        row = await cursor.fetchone()
+        return float(row["client_finished_at"]) if row else None
+    finally:
+        await data_connection.close_async(conn, db_path=db_path)
+
+
 async def _collection_exists(conn, collection_id: int) -> bool:
     cursor = await conn.execute("SELECT 1 FROM collections WHERE id = ?", (int(collection_id),))
     return await cursor.fetchone() is not None
@@ -700,6 +723,10 @@ async def _published_subtree_images_on_conn(conn, root_node_id: int) -> list[dic
             membership.added_at,
             i.id,
             i.filename,
+            i.filepath,
+            i.hub_remote,
+            i.hub_image_id,
+            source.path AS source_path,
             COALESCE(i.aspect_ratio, 1.5) AS aspect_ratio,
             i.date_taken
         FROM published_node_images membership

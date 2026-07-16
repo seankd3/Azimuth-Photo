@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from fractions import Fraction
 from typing import Any
 
+from core.dates import parse_taken_timestamp as _parse_taken_timestamp
 from data import connection
 
 
@@ -100,6 +101,7 @@ def _pillow_metadata(filepath: str) -> dict[str, Any]:
             "camera_make": make or None,
             "camera_model": model or None,
             "lens": _text(exif_ifd.get(42036)) or None,
+            "software": _text(exif.get(305)) or None,
             "date_taken": _parse_exif_date(exif_ifd.get(36867) or exif_ifd.get(36868) or exif.get(306)),
         }
 
@@ -153,26 +155,7 @@ def location_can_replace(existing_source: str | None, new_source: str, *, has_co
 
 
 def parse_taken_timestamp(value: Any) -> float | None:
-    raw = _text(value)
-    if not raw:
-        return None
-    try:
-        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-        if parsed.tzinfo is None:
-            # EXIF date_taken is naive local wall time. Interpreting it in the
-            # host timezone keeps photo-trail math consistent AND aligns with
-            # true-UTC Google Timeline points (stacks/builders treats these
-            # strings as local the same way).
-            return parsed.timestamp()
-        return parsed.timestamp()
-    except ValueError:
-        pass
-    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y:%m:%d %H:%M:%S", "%Y-%m-%d"):
-        try:
-            return datetime.strptime(raw[:19], fmt).timestamp()
-        except ValueError:
-            continue
-    return None
+    return _parse_taken_timestamp(_text(value))
 
 
 def distance_km(left: tuple[float, float], right: tuple[float, float]) -> float:

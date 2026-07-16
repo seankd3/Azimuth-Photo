@@ -26,13 +26,14 @@ const fs = require('fs');
         check=True,
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     return json.loads(result.stdout)
 
 
 def test_shortcut_sheet_entries_are_backed_by_keyboard_bindings():
     shortcuts = load_shortcuts()
-    keyboard = "\n".join(source.read_text() for source in (
+    keyboard = "\n".join(source.read_text(encoding="utf-8") for source in (
         KEYBOARD_SOURCE, DEVELOP_SOURCE, PAINTER_SOURCE,
     ))
 

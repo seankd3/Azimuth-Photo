@@ -12,7 +12,7 @@ function emptyState() {
     return {
         suggestions: [], index: 0, loaded: false, busy: false,
         initialCount: 0, picked: 0, rejected: 0, skipped: 0,
-        scopeKind: '', lastAccept: null,
+        scopeKind: '', lastAccept: null, loadError: false,
     };
 }
 
@@ -41,6 +41,11 @@ function scopeDescription() {
 function updateBanner() {
     const el = banner();
     if (!el) return;
+    if (state.loadError) {
+        el.hidden = false;
+        el.innerHTML = '<span>Couldn\'t load cull suggestions.</span><button class="btn" type="button" data-cull-retry>Try again</button>';
+        return;
+    }
     const count = state.suggestions.length;
     el.hidden = count === 0;
     const copy = el.querySelector('span');
@@ -135,6 +140,7 @@ async function undoAccept(receipt = state.lastAccept) {
     if (!receipt || receipt.undone || state.busy) return false;
     state.busy = true;
     try {
+        if (!await receipt.commit) return false;
         const results = await Promise.all([...restoreGroups(receipt.suggestion)].map(([flag, ids]) => writeFlags(ids, flag)));
         if (results.some((result) => !result?.ok)) throw new Error('restore failed');
         receipt.undone = true;
@@ -160,17 +166,8 @@ async function undoAccept(receipt = state.lastAccept) {
 async function acceptCurrent() {
     const suggestion = current();
     if (!suggestion || state.busy) return;
-    state.busy = true;
-    renderReview();
-    const result = await postJson('/api/quality/autocull/apply', { stack_ids: [suggestion.stack_id] });
-    state.busy = false;
-    if (!result?.ok) {
-        renderReview();
-        showToast(result?.error || 'Couldn’t apply this suggestion');
-        return;
-    }
     const picked = suggestion.members.find((member) => member.suggested_pick);
-    const receipt = { suggestion, index: state.index, undone: false };
+    const receipt = { suggestion, index: state.index, undone: false, commit: null, finished: state.suggestions.length === 1 };
     state.lastAccept = receipt;
     state.picked += 1;
     state.rejected += Math.max(0, suggestion.member_count - 1);
@@ -186,16 +183,53 @@ async function acceptCurrent() {
             { undo: () => undoAccept(receipt) },
         );
     }
-    document.dispatchEvent(new CustomEvent('photoarchive:cull-applied', { detail: result }));
+    receipt.commit = postJson('/api/quality/autocull/apply', { stack_ids: [suggestion.stack_id] })
+        .then((result) => {
+            if (!result?.ok) throw new Error(result?.error || 'Couldn’t apply this suggestion');
+            document.dispatchEvent(new CustomEvent('photoarchive:cull-applied', { detail: result }));
+            return true;
+        })
+        .catch((error) => {
+            if (!receipt.undone) {
+                state.picked = Math.max(0, state.picked - 1);
+                state.rejected = Math.max(0, state.rejected - Math.max(0, suggestion.member_count - 1));
+                const restoreIndex = Math.min(receipt.index, state.suggestions.length);
+                state.suggestions.splice(restoreIndex, 0, suggestion);
+                state.index = state.suggestions.length === 1
+                    ? 0
+                    : Math.min(state.suggestions.length - 1, state.index + (restoreIndex <= state.index ? 1 : 0));
+                updateBanner();
+                if (receipt.finished || !host()?.hidden) renderReview();
+            }
+            showToast(error.message || 'Couldn’t apply this suggestion');
+            return false;
+        });
+}
+
+function undoSkip(receipt) {
+    if (!receipt || receipt.undone || state.busy) return false;
+    receipt.undone = true;
+    state.skipped = Math.max(0, state.skipped - 1);
+    state.suggestions.splice(Math.min(receipt.index, state.suggestions.length), 0, receipt.suggestion);
+    state.index = Math.min(receipt.index, state.suggestions.length - 1);
+    updateBanner();
+    renderReview();
+    return true;
 }
 
 function skipCurrent() {
-    if (!current() || state.busy) return;
+    const suggestion = current();
+    if (!suggestion || state.busy) return;
+    const receipt = { suggestion, index: state.index, undone: false };
     state.skipped += 1;
     state.suggestions.splice(state.index, 1);
     if (state.index >= state.suggestions.length) state.index = Math.max(0, state.suggestions.length - 1);
     updateBanner();
-    advance();
+    if (!state.suggestions.length) finishReview({ undo: () => undoSkip(receipt) });
+    else {
+        advance();
+        showToast('Skipped', { undo: () => undoSkip(receipt) });
+    }
 }
 
 function togglePreviewZoom(preview) {
@@ -249,10 +283,23 @@ export async function refreshCullBrief() {
     return payload;
 }
 
+async function refreshCullBriefWithErrorState() {
+    try {
+        await refreshCullBrief();
+    } catch {
+        state = { ...emptyState(), loaded: true, loadError: true };
+        updateBanner();
+    }
+}
+
 export function initCullBrief() {
     if (initialized) return;
     initialized = true;
     banner()?.addEventListener('click', (event) => {
+        if (event.target.closest('[data-cull-retry]')) {
+            refreshCullBriefWithErrorState();
+            return;
+        }
         if (!event.target.closest('[data-cull-review]')) return;
         state.index = 0;
         renderReview();
@@ -274,8 +321,8 @@ export function initCullBrief() {
         else if (key === 'z') { event.preventDefault(); event.stopImmediatePropagation(); undoAccept(); }
         else if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); closeReview(); }
     });
-    document.addEventListener('photoarchive:import-complete', () => { refreshCullBrief(); });
-    setTimeout(() => { refreshCullBrief().catch(() => {}); }, 3000);
+    document.addEventListener('photoarchive:import-complete', refreshCullBriefWithErrorState);
+    setTimeout(refreshCullBriefWithErrorState, 3000);
 }
 
 window.__photoArchiveCullBrief = { init: initCullBrief, refresh: refreshCullBrief };

@@ -1,11 +1,13 @@
 """Ranking query SQL fragments and constants."""
 
+import re
 import asyncio
 from datetime import datetime
 import time as _time
 
 from data import connection
-from data.repositories.common import chunked as _chunked
+from data.repositories.catalog import HUB_MIRROR_SOURCE_PATH
+from data.repositories.common import chunked as _chunked, stage_temp_ids
 
 RANKING_SORTS = {
     "elo": "i.elo DESC",
@@ -116,9 +118,12 @@ IMAGE_ROW_SELECT = (
 
 _date_groups_cache: dict[tuple, dict] = {}
 _date_groups_refreshing: set[tuple] = set()
+_date_histogram_cache: dict[tuple, dict] = {}
+_date_histogram_refreshing: set[tuple] = set()
 _map_markers_cache: dict[tuple, dict] = {}
 _ranking_count_cache: dict[tuple, dict] = {}
 _rankable_image_ids_cache = {"ids": frozenset(), "expires": 0}
+_MONTH_SOURCE_INDEX = "idx_images_active_month_source"
 
 
 def escape_like(value: str) -> str:
@@ -128,6 +133,13 @@ def escape_like(value: str) -> str:
         .replace("%", "\\%")
         .replace("_", "\\_")
     )
+
+
+_WINDOWS_ABS_RE = re.compile(r"^[A-Za-z]:[/\\]")
+
+
+def _is_windows_absolute(value: str) -> bool:
+    return bool(_WINDOWS_ABS_RE.match(value)) or value.startswith("\\\\")
 
 
 def normalized_folder_values(folder) -> list[str]:
@@ -140,7 +152,18 @@ def normalized_folder_values(folder) -> list[str]:
     normalized = []
     seen = set()
     for value in values:
-        clean = str(value or "").strip().rstrip("/")
+        raw = str(value or "").strip()
+        if raw == HUB_MIRROR_SOURCE_PATH:
+            clean = raw
+        else:
+            # Folder keys travel the API as '/'; local Windows rows store '\'.
+            # Canonicalize here so both range and LIKE predicates line up with
+            # whatever separators the matching rows actually use.
+            clean = raw.rstrip("/\\")
+            if _is_windows_absolute(clean):
+                clean = clean.replace("/", "\\")
+            elif not clean.startswith("/"):
+                clean = clean.replace("\\", "/")
         if not clean or clean in seen:
             continue
         seen.add(clean)
@@ -169,16 +192,24 @@ def folder_filter_sql(folder) -> tuple[str, list] | None:
     parts = []
     params = []
     for value in values:
-        if value.startswith("/"):
+        if value == HUB_MIRROR_SOURCE_PATH:
+            parts.append("i.source_id IN (SELECT id FROM catalog_sources WHERE path = ?)")
+            params.append(value)
+        elif value.startswith("/") or _is_windows_absolute(value):
             # Absolute folder scopes are hot (grid browse): a range predicate
             # rides idx_images_active_filepath instead of a LIKE full scan
             # (folder-scoped rankings on 141k rows: seconds -> milliseconds).
-            prefix = f"{value}/"
+            sep = "/" if value.startswith("/") else "\\"
+            prefix = f"{value}{sep}"
             parts.append("(i.filepath >= ? AND i.filepath < ?)")
             params.extend([prefix, _prefix_upper_bound(prefix)])
         else:
-            parts.append("i.filepath LIKE ? ESCAPE '\\'")
-            params.append(f"%/{escape_like(value)}/%")
+            # Relative scopes must match rows from local sources (native
+            # separators) and hub mirrors ('/') alike.
+            posix_like = escape_like(value)
+            native_like = escape_like(value.replace("/", "\\"))
+            parts.append("(i.filepath LIKE ? ESCAPE '\\' OR i.filepath LIKE ? ESCAPE '\\')")
+            params.extend([f"%/{posix_like}/%", f"%\\\\{native_like}\\\\%"])
     if len(parts) == 1:
         return parts[0], params
     return f"({' OR '.join(parts)})", params
@@ -187,7 +218,9 @@ def folder_filter_sql(folder) -> tuple[str, list] | None:
 def has_absolute_folder_range(folder) -> bool:
     """Return whether every requested folder can use the filepath range indexes."""
     values = normalized_folder_values(folder)
-    return bool(values) and all(value.startswith("/") for value in values)
+    return bool(values) and all(
+        value.startswith("/") or _is_windows_absolute(value) for value in values
+    )
 
 
 def ranking_count_cache_key(
@@ -206,9 +239,10 @@ def ranking_count_cache_key(
     visible_thumb_size: str = "",
     cache_root: str = "",
     text_query: str = "",
+    collection_id: int = 0,
     exclude_collapsed_stack_members: bool = False,
 ):
-    if id_filter is not None:
+    if id_filter is not None or collection_id:
         return None
     return (
         orientation or "",
@@ -245,9 +279,10 @@ def facet_cache_key(
     cache_root: str = "",
     id_filter: set | None = None,
     text_query: str = "",
+    collection_id: int = 0,
     exclude_collapsed_stack_members: bool = False,
 ) -> tuple | None:
-    if id_filter is not None or text_query:
+    if id_filter is not None or text_query or collection_id:
         return None
     return (
         orientation or "",
@@ -274,6 +309,8 @@ def invalidate_ranking_count_cache() -> None:
 def invalidate_facet_caches() -> None:
     _date_groups_cache.clear()
     _date_groups_refreshing.clear()
+    _date_histogram_cache.clear()
+    _date_histogram_refreshing.clear()
     _map_markers_cache.clear()
 
 
@@ -290,22 +327,32 @@ def invalidate_visible_facet_caches(cache_root: str | None = None, size: str | N
         invalidate_facet_caches()
         return
 
-    for cache in (_date_groups_cache, _map_markers_cache):
+    for cache, refreshing in (
+        (_date_groups_cache, _date_groups_refreshing),
+        (_date_histogram_cache, _date_histogram_refreshing),
+        (_map_markers_cache, None),
+    ):
         for key in list(cache.keys()):
             key_size = key[11]
             key_root = key[12]
             if key_size and key_root and cache_scope_matches(key_root, key_size, cache_root, size):
                 cache.pop(key, None)
-                _date_groups_refreshing.discard(key)
+                if refreshing is not None:
+                    refreshing.discard(key)
 
 
 def invalidate_rating_facet_caches() -> None:
-    for cache in (_date_groups_cache, _map_markers_cache):
+    for cache, refreshing in (
+        (_date_groups_cache, _date_groups_refreshing),
+        (_date_histogram_cache, _date_histogram_refreshing),
+        (_map_markers_cache, None),
+    ):
         for key in list(cache.keys()):
             _orientation, compared, min_stars, *_rest = key
             if compared or int(min_stars or 0) > 0:
                 cache.pop(key, None)
-                _date_groups_refreshing.discard(key)
+                if refreshing is not None:
+                    refreshing.discard(key)
 
 
 def invalidate_visible_cache_dependent_counts(cache_root: str | None = None, size: str | None = None) -> None:
@@ -330,6 +377,7 @@ def ranking_filter_parts(
     tag: str = "", caption_model_key: str = "",
     visible_thumb_size: str = "", cache_root: str = "",
     text_query: str = "",
+    collection_id: int = 0,
     include_source: bool = True,
     exclude_collapsed_stack_members: bool = False,
 ) -> tuple[list[str], list]:
@@ -451,6 +499,13 @@ def ranking_filter_parts(
                 )
                 params.extend([pattern] * len(fields))
 
+    if collection_id:
+        conditions.append(
+            "EXISTS (SELECT 1 FROM collection_images ci "
+            "WHERE ci.collection_id = ? AND ci.image_id = i.id)"
+        )
+        params.append(int(collection_id))
+
     if visible_thumb_size and cache_root:
         conditions.append(
             "EXISTS ("
@@ -541,6 +596,36 @@ def ranking_count_image_source(
     return "images i"
 
 
+async def _month_source_index_available(conn) -> bool:
+    cursor = await conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ? LIMIT 1",
+        (_MONTH_SOURCE_INDEX,),
+    )
+    return await cursor.fetchone() is not None
+
+
+def date_histogram_image_source(
+    *,
+    folder: str = "",
+    id_filter: set | None,
+    text_query: str,
+    month_index_available: bool,
+) -> str:
+    """Pick a forced index for month histograms when the planner path is safe.
+
+    Absolute folder scopes keep the filepath+date index. Unscoped / all-photos
+    histograms use the month index when present. Filtered text/id search scopes
+    fall back to the planner — INDEXED BY would be wrong there.
+    """
+    if id_filter is not None or text_query:
+        return "images i"
+    if has_absolute_folder_range(folder):
+        return "images i INDEXED BY idx_images_active_filepath_date_taken"
+    if month_index_available:
+        return f"images i INDEXED BY {_MONTH_SOURCE_INDEX}"
+    return "images i"
+
+
 def folder_page_projection(sort: str) -> tuple[str, str] | None:
     """Small tuple carried through a folder sort before loading full card rows."""
     if sort == "elo":
@@ -579,6 +664,7 @@ async def rankings(
     tag: str = "",
     caption_model_key: str = "",
     id_filter: set | None = None,
+    collection_id: int = 0,
     visible_thumb_size: str = "",
     cache_root: str = "",
     text_query: str = "",
@@ -611,23 +697,31 @@ async def rankings(
         visible_thumb_size=visible_thumb_size,
         cache_root=cache_root,
         text_query=text_query,
+        collection_id=collection_id,
         include_source=not all_catalog_images_active,
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
     )
 
+    staged_id_filter = None
     if id_filter is not None:
         if not id_filter:
             return []
-        placeholders = ",".join("?" * len(id_filter))
-        conditions.append(f"i.id IN ({placeholders})")
-        params.extend(id_filter)
+        staged_id_filter = id_filter
 
     conn = await connection.open_async(db_path)
     try:
+        id_filter_join = ""
+        if staged_id_filter is not None:
+            await stage_temp_ids(conn, "temp_ranking_scope_ids", staged_id_filter)
+            id_filter_join = (
+                "JOIN temp_ranking_scope_ids ranking_scope "
+                "ON ranking_scope.image_id = i.id "
+            )
         if (
             visible_thumb_size
             and cache_root
             and id_filter is None
+            and not collection_id
             and all_sources_available
             and use_cache_first_visible
             and not has_absolute_folder_range(folder)
@@ -645,6 +739,7 @@ async def rankings(
                 tag=tag,
                 caption_model_key=caption_model_key,
                 text_query=text_query,
+                collection_id=collection_id,
                 include_source=False,
                 exclude_collapsed_stack_members=exclude_collapsed_stack_members,
             )
@@ -671,6 +766,7 @@ async def rankings(
             if not all_catalog_images_active
             else ""
         )
+        source_join += id_filter_join
         page_projection = (
             folder_page_projection(sort)
             if has_absolute_folder_range(folder) and id_filter is None and not text_query
@@ -721,6 +817,7 @@ async def rankings_cached(
     tag: str = "",
     caption_model_key: str = "",
     id_filter: set | None = None,
+    collection_id: int = 0,
     visible_thumb_size: str = "",
     cache_root: str = "",
     text_query: str = "",
@@ -737,6 +834,7 @@ async def rankings_cached(
         visible_thumb_size
         and cache_root
         and id_filter is None
+        and not collection_id
         and (sort in VISIBLE_CACHE_FIRST_SORTS or bool(text_query))
         and all_sources_available_for_visible
         and await cache_entry_count(visible_thumb_size, cache_root) <= RANKING_CACHE_FIRST_VISIBLE_LIMIT
@@ -777,6 +875,7 @@ async def rankings_cached(
         tag=tag,
         caption_model_key=caption_model_key,
         id_filter=id_filter,
+        collection_id=collection_id,
         visible_thumb_size=visible_thumb_size,
         cache_root=cache_root,
         text_query=text_query,
@@ -798,11 +897,12 @@ def has_ranking_count_filters(
     tag: str = "",
     id_filter: set | None = None,
     text_query: str = "",
+    collection_id: int = 0,
     exclude_collapsed_stack_members: bool = False,
 ) -> bool:
     return bool(
         orientation or compared or min_stars > 0 or folder or flag or date_taken
-        or file_type or camera or lens or tag or id_filter is not None or text_query
+        or file_type or camera or lens or tag or id_filter is not None or text_query or collection_id
         or exclude_collapsed_stack_members
     )
 
@@ -823,6 +923,7 @@ async def count_rankings_uncached(
     tag: str = "",
     caption_model_key: str = "",
     id_filter: set | None = None,
+    collection_id: int = 0,
     visible_thumb_size: str = "",
     cache_root: str = "",
     text_query: str = "",
@@ -843,6 +944,7 @@ async def count_rankings_uncached(
         tag,
         id_filter,
         text_query,
+        collection_id,
         exclude_collapsed_stack_members,
     ):
         if not visible_thumb_size or not cache_root:
@@ -879,7 +981,7 @@ async def count_rankings_uncached(
     conn = await connection.open_async(db_path)
     try:
         all_sources_available = int(catalog_counts.get("removed_images") or 0) == 0
-        if visible_thumb_size and cache_root and id_filter is None:
+        if visible_thumb_size and cache_root and id_filter is None and not collection_id:
             conditions, params = ranking_filter_parts(
                 orientation=orientation,
                 compared=compared,
@@ -950,6 +1052,7 @@ async def count_rankings_uncached(
             visible_thumb_size=visible_thumb_size,
             cache_root=cache_root,
             text_query=text_query,
+            collection_id=collection_id,
             include_source=not all_sources_available,
             exclude_collapsed_stack_members=exclude_collapsed_stack_members,
         )
@@ -1008,6 +1111,7 @@ async def count_rankings_uncached_with_visible_cache(
     tag: str = "",
     caption_model_key: str = "",
     id_filter: set | None = None,
+    collection_id: int = 0,
     visible_thumb_size: str = "",
     cache_root: str = "",
     text_query: str = "",
@@ -1031,6 +1135,7 @@ async def count_rankings_uncached_with_visible_cache(
         tag=tag,
         caption_model_key=caption_model_key,
         id_filter=id_filter,
+        collection_id=collection_id,
         visible_thumb_size=visible_thumb_size,
         cache_root=cache_root,
         text_query=text_query,
@@ -1056,6 +1161,7 @@ async def count_rankings_cached(
     tag: str = "",
     caption_model_key: str = "",
     id_filter: set | None = None,
+    collection_id: int = 0,
     visible_thumb_size: str = "",
     cache_root: str = "",
     text_query: str = "",
@@ -1078,6 +1184,7 @@ async def count_rankings_cached(
         visible_thumb_size=visible_thumb_size,
         cache_root=cache_root,
         text_query=text_query,
+        collection_id=collection_id,
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
     )
     if cache_key is not None:
@@ -1102,6 +1209,7 @@ async def count_rankings_cached(
         tag=tag,
         caption_model_key=caption_model_key,
         id_filter=id_filter,
+        collection_id=collection_id,
         visible_thumb_size=visible_thumb_size,
         cache_root=cache_root,
         text_query=text_query,
@@ -1283,7 +1391,10 @@ async def date_histogram(
     tag: str = "",
     caption_model_key: str = "",
     id_filter: set | None = None,
+    collection_id: int = 0,
     text_query: str = "",
+    visible_thumb_size: str = "",
+    cache_root: str = "",
     exclude_collapsed_stack_members: bool = False,
 ) -> dict:
     """Month histogram for the whole filtered scope.
@@ -1304,31 +1415,61 @@ async def date_histogram(
         tag=tag,
         caption_model_key=caption_model_key,
         text_query=text_query,
+        collection_id=collection_id,
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
-    )
-    image_source = (
-        "images i INDEXED BY idx_images_active_filepath_date_taken"
-        if has_absolute_folder_range(folder) and id_filter is None and not text_query
-        else "images i"
-    )
-    select = (
-        "SELECT substr(i.date_taken, 1, 7) AS month, COUNT(*) AS count "
-        f"FROM {image_source} "
-        "JOIN catalog_sources s ON s.id = i.source_id WHERE "
     )
     conn = await connection.open_async(db_path)
     try:
-        buckets: dict[str, int] = {}
+        month_index_available = await _month_source_index_available(conn)
+        image_source = date_histogram_image_source(
+            folder=folder,
+            id_filter=id_filter,
+            text_query=text_query,
+            month_index_available=month_index_available,
+        )
+        preview_expression = "1"
+        preview_params = []
+        if visible_thumb_size and cache_root:
+            preview_expression = (
+                "EXISTS (SELECT 1 FROM cache_entries c "
+                "WHERE c.cache_root = ? AND c.size = ? AND c.image_id = i.id)"
+            )
+            preview_params = [cache_root, visible_thumb_size]
+        select = (
+            "SELECT month, COUNT(*) AS count, "
+            "MAX(CASE WHEN month_rank = 1 AND preview_ready = 1 THEN id END) AS cover_id, "
+            "MAX(CASE WHEN month_rank = 1 AND preview_ready = 1 THEN elo END) AS cover_elo FROM ("
+            "SELECT ready_rows.*, ROW_NUMBER() OVER (PARTITION BY month "
+            "ORDER BY preview_ready DESC, elo DESC, id DESC) AS month_rank FROM ("
+            "SELECT i.id, substr(i.date_taken, 1, 7) AS month, i.elo, "
+            f"{preview_expression} AS preview_ready "
+            f"FROM {image_source} JOIN catalog_sources s ON s.id = i.source_id WHERE "
+        )
+        buckets: dict[str, dict] = {}
         undated = 0
 
         async def accumulate(where: str, query_params: list) -> None:
             nonlocal undated
-            cursor = await conn.execute(select + where + " GROUP BY month", query_params)
+            cursor = await conn.execute(
+                select + where + ") ready_rows) ranked GROUP BY month",
+                [*preview_params, *query_params],
+            )
             for row in await cursor.fetchall():
                 month = row["month"]
                 count = int(row["count"] or 0)
                 if month and len(month) == 7:
-                    buckets[month] = buckets.get(month, 0) + count
+                    bucket = buckets.setdefault(
+                        month,
+                        {"count": 0, "cover_id": None, "cover_order": (float("-inf"), -1)},
+                    )
+                    bucket["count"] += count
+                    cover_order = (
+                        float(row["cover_elo"]) if row["cover_elo"] is not None else float("-inf"),
+                        int(row["cover_id"] or -1),
+                    )
+                    if cover_order > bucket["cover_order"]:
+                        bucket["cover_id"] = row["cover_id"]
+                        bucket["cover_order"] = cover_order
                 else:
                     undated += count
 
@@ -1344,16 +1485,127 @@ async def date_histogram(
             await accumulate(" AND ".join(conditions), list(params))
 
         months = [
-            {"month": month, "count": count}
-            for month, count in sorted(buckets.items(), reverse=True)
+            {"month": month, "count": bucket["count"], "cover_id": bucket["cover_id"]}
+            for month, bucket in sorted(buckets.items(), reverse=True)
         ]
         return {
             "months": months,
             "undated": undated,
-            "total": sum(buckets.values()) + undated,
+            "total": sum(bucket["count"] for bucket in buckets.values()) + undated,
         }
     finally:
         await connection.close_async(conn, db_path=db_path)
+
+
+async def date_histogram_cached(
+    db_path: str,
+    *,
+    get_catalog_image_counts,
+    orientation: str = "",
+    compared: str = "",
+    min_stars: int = 0,
+    folder: str = "",
+    flag: str = "",
+    date_taken: str = "",
+    file_type: str = "",
+    camera: str = "",
+    lens: str = "",
+    tag: str = "",
+    caption_model_key: str = "",
+    id_filter: set | None = None,
+    collection_id: int = 0,
+    text_query: str = "",
+    visible_thumb_size: str = "",
+    cache_root: str = "",
+    force_refresh: bool = False,
+    ttl_seconds: float = FACET_CACHE_TTL_SECONDS,
+    exclude_collapsed_stack_members: bool = False,
+) -> dict:
+    cache_key = facet_cache_key(
+        orientation=orientation,
+        compared=compared,
+        min_stars=min_stars,
+        folder=folder,
+        flag=flag,
+        date_taken=date_taken,
+        file_type=file_type,
+        camera=camera,
+        lens=lens,
+        tag=tag,
+        caption_model_key=caption_model_key,
+        id_filter=id_filter,
+        text_query=text_query,
+        collection_id=collection_id,
+        visible_thumb_size=visible_thumb_size,
+        cache_root=cache_root,
+        exclude_collapsed_stack_members=exclude_collapsed_stack_members,
+    )
+    now = _time.time()
+    cached = _date_histogram_cache.get(cache_key) if cache_key is not None else None
+    if cached and not force_refresh:
+        if cached["expires"] > now:
+            return cached["data"]
+        if cache_key not in _date_histogram_refreshing:
+            _date_histogram_refreshing.add(cache_key)
+
+            async def _refresh_date_histogram():
+                try:
+                    await date_histogram_cached(
+                        db_path,
+                        get_catalog_image_counts=get_catalog_image_counts,
+                        orientation=orientation,
+                        compared=compared,
+                        min_stars=min_stars,
+                        folder=folder,
+                        flag=flag,
+                        date_taken=date_taken,
+                        file_type=file_type,
+                        camera=camera,
+                        lens=lens,
+                        tag=tag,
+                        caption_model_key=caption_model_key,
+                        id_filter=id_filter,
+                        collection_id=collection_id,
+                        text_query=text_query,
+                        visible_thumb_size=visible_thumb_size,
+                        cache_root=cache_root,
+                        force_refresh=True,
+                        ttl_seconds=ttl_seconds,
+                        exclude_collapsed_stack_members=exclude_collapsed_stack_members,
+                    )
+                finally:
+                    _date_histogram_refreshing.discard(cache_key)
+
+            asyncio.create_task(_refresh_date_histogram())
+        return cached["data"]
+
+    catalog_counts = await get_catalog_image_counts()
+    histogram = await date_histogram(
+        db_path,
+        orientation=orientation,
+        compared=compared,
+        min_stars=min_stars,
+        folder=folder,
+        flag=flag,
+        date_taken=date_taken,
+        file_type=file_type,
+        camera=camera,
+        lens=lens,
+        tag=tag,
+        caption_model_key=caption_model_key,
+        id_filter=id_filter,
+        collection_id=collection_id,
+        text_query=text_query,
+        visible_thumb_size=visible_thumb_size,
+        cache_root=cache_root,
+        exclude_collapsed_stack_members=exclude_collapsed_stack_members,
+    )
+    if cache_key is not None and int(catalog_counts.get("active_images") or 0) > 0:
+        _date_histogram_cache[cache_key] = {
+            "data": histogram,
+            "expires": _time.time() + ttl_seconds,
+        }
+    return histogram
 
 
 async def scope_counts(
@@ -1475,12 +1727,15 @@ async def date_groups(
         include_source=not all_sources_available,
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
     )
+    staged_id_filter = None
     if id_filter is not None:
         if not id_filter:
             return []
-        placeholders = ",".join("?" for _ in id_filter)
-        conditions.append(f"i.id IN ({placeholders})")
-        params.extend(int(image_id) for image_id in id_filter)
+        staged_id_filter = id_filter
+        conditions.append(
+            "EXISTS (SELECT 1 FROM temp_date_group_scope_ids scope_ids "
+            "WHERE scope_ids.image_id = i.id)"
+        )
 
     select_sql = (
         "SELECT "
@@ -1490,6 +1745,8 @@ async def date_groups(
     )
     conn = await connection.open_async(db_path)
     try:
+        if staged_id_filter is not None:
+            await stage_temp_ids(conn, "temp_date_group_scope_ids", staged_id_filter)
         if visible_thumb_size and cache_root:
             if has_absolute_folder_range(folder):
                 image_source = "images i INDEXED BY idx_images_active_filepath_date_taken"
@@ -1707,6 +1964,7 @@ async def map_markers(
     cache_root: str = "",
     id_filter: set | None = None,
     text_query: str = "",
+    collection_id: int = 0,
 ) -> dict:
     if int(catalog_counts.get("active_images") or 0) <= 0:
         return empty_map_markers()
@@ -1725,23 +1983,29 @@ async def map_markers(
         tag=tag,
         caption_model_key=caption_model_key,
         text_query=text_query,
+        collection_id=collection_id,
         include_source=not all_sources_available,
     )
+    staged_id_filter = None
     if id_filter is not None:
         if not id_filter:
             return empty_map_markers()
-        placeholders = ",".join("?" for _ in id_filter)
-        conditions.append(f"i.id IN ({placeholders})")
-        params.extend(int(image_id) for image_id in id_filter)
+        staged_id_filter = id_filter
+        conditions.append(
+            "EXISTS (SELECT 1 FROM temp_map_scope_ids scope_ids "
+            "WHERE scope_ids.image_id = i.id)"
+        )
 
     gps_conditions = conditions + ["i.latitude IS NOT NULL", "i.longitude IS NOT NULL"]
     gps_image_source = (
         "images i INDEXED BY idx_images_active_filepath_elo"
-        if has_absolute_folder_range(folder) and id_filter is None and not text_query
+        if has_absolute_folder_range(folder) and id_filter is None and not text_query and not collection_id
         else "images i INDEXED BY idx_images_active_gps_count"
     )
     conn = await connection.open_async(db_path)
     try:
+        if staged_id_filter is not None:
+            await stage_temp_ids(conn, "temp_map_scope_ids", staged_id_filter)
         if all_sources_available:
             gps_total_cursor = await conn.execute(
                 f"SELECT COUNT(*) AS count FROM {gps_image_source} "
@@ -1814,6 +2078,7 @@ async def map_markers(
                 "filename": row["filename"],
                 "lat": row["latitude"],
                 "lng": row["longitude"],
+                "preview_ready": True,
                 "thumb_url": f"/api/thumb/sm/{row['id']}",
             }
             for row in await cursor.fetchall()
@@ -1851,6 +2116,7 @@ async def map_markers_cached(
     cache_root: str = "",
     id_filter: set | None = None,
     text_query: str = "",
+    collection_id: int = 0,
     ttl_seconds: float = FACET_CACHE_TTL_SECONDS,
 ):
     cache_key = facet_cache_key(
@@ -1869,6 +2135,7 @@ async def map_markers_cached(
         cache_root=cache_root,
         id_filter=id_filter,
         text_query=text_query,
+        collection_id=collection_id,
     )
     now = _time.time()
     cached = _map_markers_cache.get(cache_key) if cache_key is not None else None
@@ -1898,6 +2165,7 @@ async def map_markers_cached(
         tag=tag,
         id_filter=id_filter,
         text_query=text_query,
+        collection_id=collection_id,
     )
     if not has_filters:
         total_count = active_images
@@ -1915,6 +2183,7 @@ async def map_markers_cached(
             tag=tag,
             id_filter=id_filter,
             text_query=text_query,
+            collection_id=collection_id,
         )
 
     visible_total_count = total_count
@@ -1938,6 +2207,7 @@ async def map_markers_cached(
                 visible_thumb_size=visible_thumb_size,
                 cache_root=cache_root,
                 text_query=text_query,
+                collection_id=collection_id,
             )
 
     result = await map_markers(
@@ -1960,6 +2230,7 @@ async def map_markers_cached(
         cache_root=cache_root,
         id_filter=id_filter,
         text_query=text_query,
+        collection_id=collection_id,
     )
     if cache_key is not None:
         _map_markers_cache[cache_key] = {

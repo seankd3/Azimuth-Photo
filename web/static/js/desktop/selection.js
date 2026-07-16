@@ -147,7 +147,7 @@ function exportSelection(anchor) {
             count: format === 'zip' ? imageIds.length : 0,
             message: format === 'zip' ? `Preparing ${imageIds.length} files` : `Exporting ${imageIds.length} photos as ${format.toUpperCase()}`,
         });
-    });
+    }, { imageIds });
 }
 
 function render({ imageIds = null } = {}) {
@@ -173,17 +173,14 @@ export function initSelection() {
     on('images', render);
     document.getElementById('sel-pick').addEventListener('click', () => {
         const imageIds = ids();
-        clearSelection();
         applyFlags(imageIds, 'picked');
     });
     document.getElementById('sel-reject').addEventListener('click', () => {
         const imageIds = ids();
-        clearSelection();
         applyFlags(imageIds, 'rejected');
     });
     document.getElementById('sel-clear-flags').addEventListener('click', () => {
         const imageIds = ids();
-        clearSelection();
         applyFlags(imageIds, 'unflagged');
     });
     document.getElementById('sel-collection').addEventListener('click', () => {

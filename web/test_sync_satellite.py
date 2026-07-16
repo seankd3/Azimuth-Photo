@@ -11,6 +11,8 @@ from fastapi.testclient import TestClient
 from test_support import BackendTestCase
 from features.library import keywords
 from features.sync.sync_worker import SyncWorker
+from features.sync import satellite_routes
+import app as app_module
 
 
 class SatelliteSyncTests(BackendTestCase):
@@ -105,3 +107,47 @@ class SatelliteSyncTests(BackendTestCase):
         await worker.sync_once()
         self.assertEqual(self.hub_files, uploads)
         self.assertEqual(len(self.hub_metadata), metadata_count)
+
+    async def test_timeout_failures_backoff_instead_of_hot_loop(self):
+        async def request(method, url, *, body=None, headers=None):
+            raise TimeoutError("satellite sync failed: timed out")
+
+        worker = SyncWorker(db_path=__import__("db").DB_PATH, hub="http://hub", request=request)
+        self.assertEqual(worker._next_idle_seconds, 15.0)
+        worker._note_failure(TimeoutError("timed out"))
+        self.assertEqual(worker.status()["backoff_seconds"], 30.0)
+        worker._note_failure(TimeoutError("timed out"))
+        self.assertEqual(worker.status()["backoff_seconds"], 60.0)
+        worker._clear_backoff()
+        self.assertEqual(worker.status()["backoff_seconds"], 0)
+
+    async def test_sync_chip_now_pause_resume_mutate_the_worker_state(self):
+        class Worker:
+            def __init__(self):
+                self.paused = False
+                self.now_calls = 0
+            def pause(self): self.paused = True
+            def resume(self): self.paused = False
+            def sync_now(self): self.now_calls += 1
+            def status(self): return {"paused": self.paused, "queue_depth": 0}
+
+        worker = Worker()
+        old_get_worker = satellite_routes.get_worker
+        old_satellite_mode = satellite_routes.satellite.is_satellite_mode
+        satellite_routes.get_worker = lambda: worker
+        satellite_routes.satellite.is_satellite_mode = lambda: True
+        try:
+            def drive():
+                with TestClient(app_module.app) as client:
+                    now = client.post("/api/sync/now")
+                    paused = client.post("/api/sync/pause")
+                    resumed = client.post("/api/sync/resume")
+                    return now, paused, resumed
+            now, paused, resumed = await __import__("asyncio").to_thread(drive)
+        finally:
+            satellite_routes.get_worker = old_get_worker
+            satellite_routes.satellite.is_satellite_mode = old_satellite_mode
+        self.assertEqual(now.status_code, 200)
+        self.assertEqual(worker.now_calls, 1)
+        self.assertTrue(paused.json()["paused"])
+        self.assertFalse(resumed.json()["paused"])

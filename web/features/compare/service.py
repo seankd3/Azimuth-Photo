@@ -52,6 +52,7 @@ _get_rankings: Callable[..., Awaitable[list]] | None = None
 _get_visible_pairing_pool_counts: Callable[..., Awaitable[dict]] | None = None
 _get_top_images: Callable[..., Awaitable[list]] | None = None
 _get_collection_image_ids: Callable[..., Awaitable[list[int] | None]] | None = None
+_resolve_smart_collection_image_ids: Callable[[int], Awaitable[set[int] | None]] | None = None
 _get_import_batch_image_ids: Callable[[int], Awaitable[set[int] | None]] | None = None
 
 
@@ -76,6 +77,7 @@ def configure(
     get_visible_pairing_pool_counts: Callable[..., Awaitable[dict]] | None = None,
     get_top_images: Callable[..., Awaitable[list]] | None = None,
     get_collection_image_ids: Callable[..., Awaitable[list[int] | None]] | None = None,
+    resolve_smart_collection_image_ids: Callable[[int], Awaitable[set[int] | None]] | None = None,
     get_import_batch_image_ids: Callable[[int], Awaitable[set[int] | None]] | None = None,
 ) -> None:
     global _invalidate_rankings_cache, _invalidate_interaction_response_cache, _cache_root
@@ -86,7 +88,7 @@ def configure(
     global _get_active_images_by_ids, _get_visible_images_for_pairing
     global _get_visible_orientation_pairing_pool_counts, _count_rankings
     global _get_rankings, _get_visible_pairing_pool_counts, _get_top_images
-    global _get_collection_image_ids, _get_import_batch_image_ids
+    global _get_collection_image_ids, _resolve_smart_collection_image_ids, _get_import_batch_image_ids
     _invalidate_rankings_cache = invalidate_rankings_cache
     _invalidate_interaction_response_cache = invalidate_interaction_response_cache
     _cache_root = cache_root
@@ -122,6 +124,8 @@ def configure(
         _get_top_images = get_top_images
     if get_collection_image_ids is not None:
         _get_collection_image_ids = get_collection_image_ids
+    if resolve_smart_collection_image_ids is not None:
+        _resolve_smart_collection_image_ids = resolve_smart_collection_image_ids
     if get_import_batch_image_ids is not None:
         _get_import_batch_image_ids = get_import_batch_image_ids
 
@@ -154,24 +158,22 @@ async def _scoped_search(
     collection_id: int = 0,
     import_batch: int = 0,
 ) -> dict:
-    scoped_ids = set(int(image_id) for image_id in ids or [] if int(image_id) > 0)
+    scoped_ids = (
+        None
+        if ids is None
+        else {int(image_id) for image_id in ids if int(image_id) > 0}
+    )
     if collection_id and collection_id > 0:
-        collection_ids = await _configured(_get_collection_image_ids)(int(collection_id))
+        collection_ids = await _configured(_resolve_smart_collection_image_ids)(int(collection_id))
         if collection_ids is None:
-            scoped_ids = set()
-        elif scoped_ids:
-            scoped_ids.intersection_update(int(image_id) for image_id in collection_ids)
-        else:
-            scoped_ids = {int(image_id) for image_id in collection_ids}
+            collection_ids = await _configured(_get_collection_image_ids)(int(collection_id))
+        collection_scope = {int(image_id) for image_id in collection_ids or []}
+        scoped_ids = collection_scope if scoped_ids is None else scoped_ids.intersection(collection_scope)
     if import_batch and import_batch > 0:
         batch_ids = await _configured(_get_import_batch_image_ids)(int(import_batch))
-        if batch_ids is None:
-            scoped_ids = set()
-        elif scoped_ids:
-            scoped_ids.intersection_update(int(image_id) for image_id in batch_ids)
-        else:
-            scoped_ids = {int(image_id) for image_id in batch_ids}
-    if not scoped_ids and not ids and not collection_id and not import_batch:
+        batch_scope = {int(image_id) for image_id in batch_ids or []}
+        scoped_ids = batch_scope if scoped_ids is None else scoped_ids.intersection(batch_scope)
+    if scoped_ids is None:
         return search
     scoped = dict(search)
     current_filter = scoped.get("id_filter")

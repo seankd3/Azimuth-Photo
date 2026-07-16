@@ -45,7 +45,6 @@ CARD_KEYS = {
     "latitude",
     "longitude",
     "created_at",
-    "thumb_url",
 }
 EXPORT_FIELD_NAMES = [
     "rank",
@@ -290,7 +289,10 @@ class ApiShapeTests(unittest.TestCase):
 
     def assertCardShape(self, card, thumb_size="sm", *, contextual=()):
         self.assertTrue(CARD_KEYS.issubset(card.keys()))
-        self.assertEqual(card["thumb_url"], f"/api/thumb/{thumb_size}/{card['id']}")
+        if card.get("preview_ready", True):
+            self.assertEqual(card["thumb_url"], f"/api/thumb/{thumb_size}/{card['id']}")
+        else:
+            self.assertNotIn("thumb_url", card)
         for key in ("similarity", "date_group"):
             if key in contextual:
                 self.assertIn(key, card)
@@ -302,9 +304,13 @@ class ApiShapeTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
 
-        self.assertEqual(data["visible_images"], 3)
+        self.assertEqual(data["visible_images"], 4)
         self.assertEqual(data["total_images"], 4)
-        self.assertEqual(data["hidden_pending_thumbnails"], 1)
+        self.assertEqual(data["pending_thumbnails"], 1)
+        self.assertEqual(data["hidden_pending_thumbnails"], data["pending_thumbnails"])
+        self.assertEqual(len(data["images"]), 4)
+        self.assertTrue(all("preview_ready" in card for card in data["images"]))
+        self.assertEqual(sum(not card["preview_ready"] for card in data["images"]), 1)
         for card in data["images"]:
             self.assertCardShape(card)
 
@@ -318,7 +324,7 @@ class ApiShapeTests(unittest.TestCase):
 
         self.assertEqual(satellite["visible_images"], 4)
         self.assertEqual(satellite["total_images"], 4)
-        self.assertEqual(satellite["hidden_pending_thumbnails"], 0)
+        self.assertEqual(satellite["pending_thumbnails"], 1)
         self.assertEqual(len(satellite["images"]), 4)
 
     def test_date_group_rankings_include_contextual_group_only(self):
@@ -434,6 +440,7 @@ class ApiShapeTests(unittest.TestCase):
             [marker["thumb_url"] for marker in data["markers"]],
             [f"/api/thumb/sm/{self.ids[0]}", f"/api/thumb/sm/{self.ids[1]}"],
         )
+        self.assertTrue(all(marker["preview_ready"] for marker in data["markers"]))
 
         conn = sqlite3.connect(db.DB_PATH)
         try:
@@ -456,6 +463,8 @@ class ApiShapeTests(unittest.TestCase):
         self.assertEqual(satellite["gps_total_count"], 3)
         self.assertEqual(satellite["hidden_pending_thumbnails"], 0)
         markers = {marker["id"]: marker for marker in satellite["markers"]}
+        self.assertTrue(markers[self.ids[0]]["preview_ready"])
+        self.assertFalse(markers[self.ids[3]]["preview_ready"])
         self.assertEqual(markers[self.ids[0]]["thumb_url"], f"/api/thumb/sm/{self.ids[0]}")
         self.assertNotIn("thumb_url", markers[self.ids[3]])
 
@@ -606,6 +615,39 @@ class ApiShapeTests(unittest.TestCase):
         self.assertEqual(lines[0], ",".join(EXPORT_FIELD_NAMES))
         self.assertIn("sunset-alpha.jpg", lines[1])
 
+    def test_scope_export_pages_past_the_api_default_limit(self):
+        total = 10001
+        offsets = []
+
+        async def paged_rankings(_db_path, *, limit, offset, **_kwargs):
+            offsets.append(offset)
+            return [
+                {
+                    "id": index + 1,
+                    "filename": f"scope-{index + 1}.jpg",
+                    "filepath": f"/catalog/scope-{index + 1}.jpg",
+                    "elo": 1200.0,
+                    "comparisons": 0,
+                    "propagated_updates": 0,
+                    "status": "kept",
+                    "flag": "unflagged",
+                }
+                for index in range(offset, min(offset + limit, total))
+            ]
+
+        with mock.patch.object(
+            export_routes.ranking_repository,
+            "rankings",
+            side_effect=paged_rankings,
+        ):
+            response = self.client.get("/api/export?format=json")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(len(data), total)
+        self.assertEqual(data[-1]["filename"], "scope-10001.jpg")
+        self.assertEqual(offsets, [0, 10000])
+
     def test_export_zip_streams_original_files_for_requested_ids(self):
         first_path = os.path.join(self.tempdir.name, "catalog", "sunset-alpha.jpg")
         second_path = os.path.join(self.tempdir.name, "catalog", "portrait-beta.jpg")
@@ -619,7 +661,7 @@ class ApiShapeTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             response.headers["content-disposition"],
-            'attachment; filename="photoarchive-export-2.zip"',
+            'attachment; filename="azimuth-photo-export-2.zip"',
         )
         with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
             names = sorted(archive.namelist())
@@ -664,6 +706,7 @@ class ApiShapeTests(unittest.TestCase):
             manifest = archive.read("manifest.txt").decode("utf-8")
             self.assertIn(f"{self.ids[1]}: source file unavailable", manifest)
 
+    @unittest.skipIf(os.name == "nt", "creating symlinks requires Windows developer privileges")
     def test_export_zip_skips_symlinks_and_paths_outside_library(self):
         first_path = os.path.join(self.tempdir.name, "catalog", "sunset-alpha.jpg")
         symlink_path = os.path.join(self.tempdir.name, "catalog", "portrait-beta.jpg")
@@ -691,6 +734,15 @@ class ApiShapeTests(unittest.TestCase):
             manifest = archive.read("manifest.txt").decode("utf-8")
             self.assertIn(f"{self.ids[1]}: source path is a symlink", manifest)
             self.assertIn(f"{self.ids[2]}: outside library", manifest)
+
+    def test_reveal_rejects_hub_paths_as_nonlocal(self):
+        response = self.client.post("/api/reveal", json={"path": "hub://Family/Trip"})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json(),
+            {"ok": False, "error": "Reveal is only available for local folders"},
+        )
 
     def test_export_zip_stops_when_original_byte_cap_is_reached(self):
         first_path = os.path.join(self.tempdir.name, "catalog", "sunset-alpha.jpg")

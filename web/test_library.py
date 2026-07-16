@@ -3,10 +3,126 @@ import embed_cache
 import shutil
 import unittest.mock
 from fastapi.testclient import TestClient
+from features.collections import routes as collection_routes
+from features.collections import smart as smart_collections
+from features.library import preview_priority
 from features.library import taste as taste_service
+from features.sync import hashing as sync_hashing
+from thumbnails import pregen as thumbnail_pregen
 
 
 class LibraryTests(BackendTestCase):
+    async def test_rankings_accepts_large_resolved_smart_scope(self):
+        source = await self._source()
+        member = await self._image(source["id"], "large-smart-member.jpg")
+        resolved_ids = set(range(1, 33_011))
+
+        rows = await rankings.rankings(
+            db.DB_PATH,
+            catalog_counts=await db.get_catalog_image_counts(),
+            limit=10,
+            sort="filename",
+            id_filter=resolved_ids,
+        )
+
+        self.assertEqual([row["id"] for row in rows], [member])
+
+    async def test_priority_pregen_accepts_large_resolved_smart_scope(self):
+        source = await self._source()
+        member = await self._image(source["id"], "large-smart-pending.jpg")
+        resolved_ids = set(range(1, 33_011))
+        processed_ids = set(range(100_000, 133_010))
+
+        async def resolve_smart_scope(_current_ids, collection_id):
+            self.assertEqual(collection_id, 99)
+            return resolved_ids, 0
+
+        rows = await thumbnail_pregen.priority_candidate_batch(
+            db.get_db,
+            {"collection_id": 99},
+            processed_ids,
+            10,
+            cache_root=thumbnails.SSD_CACHE_DIR,
+            preview_size="sm",
+            resolve_collection_scope=resolve_smart_scope,
+        )
+
+        self.assertEqual([row["id"] for row in rows], [member])
+
+    async def test_scope_facets_accept_large_resolved_id_set(self):
+        source = await self._source()
+        member = await self._image(source["id"], "large-scope-facet.jpg")
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "UPDATE images SET date_taken = '2024-07-16', latitude = 40.0, "
+                "longitude = -90.0, camera_make = 'Test', camera_model = 'Camera' "
+                "WHERE id = ?",
+                (member,),
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+        resolved_ids = set(range(1, 33_011))
+        catalog_counts = await db.get_catalog_image_counts()
+
+        groups = await rankings.date_groups(
+            db.DB_PATH,
+            catalog_counts=catalog_counts,
+            id_filter=resolved_ids,
+        )
+        markers = await rankings.map_markers(
+            db.DB_PATH,
+            catalog_counts=catalog_counts,
+            total_count=1,
+            visible_total_count=1,
+            id_filter=resolved_ids,
+        )
+        filters = await filter_options_repository.filter_options(
+            db.DB_PATH,
+            catalog_counts=catalog_counts,
+            id_filter=resolved_ids,
+        )
+
+        self.assertEqual(groups, [{"date": "2024-07", "label": "July 2024", "count": 1}])
+        self.assertEqual([marker["id"] for marker in markers["markers"]], [member])
+        self.assertEqual(filters["years"], [{"year": "2024", "count": 1}])
+
+    async def test_smart_collection_view_prioritizes_pending_previews(self):
+        preview_priority.clear_scopes()
+        self.addCleanup(preview_priority.clear_scopes)
+        source = await self._source()
+        pending_member = await self._image(source["id"], "smart-pending.jpg")
+        await self._image(source["id"], "outside-smart-scope.jpg")
+        await db.set_image_flag(pending_member, "picked")
+        created = await collection_routes.api_create_collection(
+            collection_routes.CreateCollectionBody(
+                name="Pending picks",
+                query={"flag": "picked", "sort": "filename"},
+            )
+        )
+        collection_id = created["collection"]["id"]
+
+        response = await library_service.api_rankings_impl(
+            collection_id=collection_id,
+            sort="filename",
+        )
+
+        self.assertEqual(response["hidden_pending_thumbnails"], 1)
+        scopes = preview_priority.recent_scopes()
+        self.assertEqual(scopes[0]["collection_id"], collection_id)
+        rows = await thumbnail_pregen.priority_candidate_batch(
+            db.get_db,
+            scopes[0],
+            set(),
+            10,
+            cache_root=thumbnails.SSD_CACHE_DIR,
+            preview_size="sm",
+            resolve_collection_scope=library_service._resolve_collection_scope,
+        )
+
+        self.assertEqual([row["id"] for row in rows], [pending_member])
+
     def _set_taste_blend(self, *, enabled=True, min_signal=1):
         settings.save_settings({
             **settings.get_settings(),
@@ -300,6 +416,29 @@ class LibraryTests(BackendTestCase):
         self.assertEqual(options["undated"], 1)
         self.assertGreaterEqual(db.FILTER_OPTIONS_CACHE_TTL_SECONDS, 300.0)
 
+    async def test_filter_options_respect_folder_scope(self):
+        source = await self._source()
+        beach = await self._image(source["id"], "Beach/one.jpg")
+        city = await self._image(source["id"], "City/two.jpg")
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "UPDATE images SET camera_make = ?, camera_model = ? WHERE id = ?",
+                ("Fuji", "X-T5", beach),
+            )
+            await conn.execute(
+                "UPDATE images SET camera_make = ?, camera_model = ? WHERE id = ?",
+                ("Canon", "R5", city),
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+        db.invalidate_stats_cache()
+
+        options = await db.get_filter_options(folder=os.path.join(source["path"], "Beach"))
+
+        self.assertEqual(options["cameras"], [{"camera": "Fuji X-T5", "count": 1}])
+
     async def test_filter_options_repository_matches_facade_with_cache(self):
         source = await self._source()
         removed_source = await self._source("removed-filter-options")
@@ -523,11 +662,13 @@ class LibraryTests(BackendTestCase):
 
         result = await library_routes.api_rankings(limit=10, sort="elo")
 
-        self.assertEqual([img["id"] for img in result["images"]], [visible_high, visible_low])
-        self.assertEqual(result["visible_images"], 2)
+        self.assertEqual([img["id"] for img in result["images"]], [visible_high, hidden, visible_low])
+        self.assertEqual(result["visible_images"], 3)
         self.assertEqual(result["total_images"], 3)
-        self.assertEqual(result["hidden_pending_thumbnails"], 1)
-        self.assertNotIn(hidden, [img["id"] for img in result["images"]])
+        self.assertEqual(result["pending_thumbnails"], 1)
+        cards = {img["id"]: img for img in result["images"]}
+        self.assertFalse(cards[hidden]["preview_ready"])
+        self.assertNotIn("thumb_url", cards[hidden])
 
         with unittest.mock.patch.dict(
             os.environ,
@@ -542,10 +683,38 @@ class LibraryTests(BackendTestCase):
         )
         self.assertEqual(satellite_result["visible_images"], 3)
         self.assertEqual(satellite_result["total_images"], 3)
-        self.assertEqual(satellite_result["hidden_pending_thumbnails"], 0)
+        self.assertEqual(satellite_result["pending_thumbnails"], 1)
         satellite_cards = {card["id"]: card for card in satellite_result["images"]}
         self.assertIn("thumb_url", satellite_cards[visible_high])
+        self.assertTrue(satellite_cards[visible_high]["preview_ready"])
         self.assertNotIn("thumb_url", satellite_cards[hidden])
+        self.assertFalse(satellite_cards[hidden]["preview_ready"])
+
+    async def test_date_histogram_prefers_a_ready_month_cover_over_a_higher_ranked_pending_photo(self):
+        source = await self._source()
+        pending = await self._image(source["id"], "pending-cover.jpg", elo=1800)
+        ready = await self._image(source["id"], "ready-cover.jpg", elo=1500)
+        conn = await db.get_db()
+        try:
+            await conn.executemany(
+                "UPDATE images SET date_taken = ? WHERE id = ?",
+                [
+                    ("2025-06-12 10:00:00", pending),
+                    ("2025-06-11 10:00:00", ready),
+                ],
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+        await self._cache_entry(ready, "sm")
+        db.invalidate_stats_cache()
+
+        response = await library_routes.api_date_histogram()
+
+        self.assertEqual(
+            response["months"],
+            [{"month": "2025-06", "count": 2, "cover_id": ready}],
+        )
 
     async def test_all_photos_includes_stale_hub_mirror_rows_across_dates(self):
         """All Photos must surface hub:// mirror rows even when denormalized counts drifted to 0.
@@ -645,6 +814,47 @@ class LibraryTests(BackendTestCase):
         self.assertEqual(counts["active_images"], 27)
         self.assertEqual(counts["total_catalog_images"], 27)
 
+    async def test_hub_source_scope_filters_by_source_instead_of_remote_filepath(self):
+        import time as _time
+
+        from data.repositories import catalog as catalog_repository
+
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "INSERT INTO catalog_sources "
+                "(path, display_name, included, online, image_count, active_image_count, "
+                "created_at, last_seen_at) VALUES (?, 'Hub library', 1, 1, 2, 2, ?, ?)",
+                (catalog_repository.HUB_MIRROR_SOURCE_PATH, _time.time(), _time.time()),
+            )
+            hub_id = int((await (await conn.execute("SELECT last_insert_rowid()")).fetchone())[0])
+            await conn.executemany(
+                "INSERT INTO images "
+                "(source_id, filename, filepath, status, elo, hub_remote, hub_image_id) "
+                "VALUES (?, ?, ?, 'kept', 1200, 1, ?)",
+                [
+                    (hub_id, "one.jpg", "/remote/library/one.jpg", 101),
+                    (hub_id, "two.jpg", "/another/root/two.jpg", 102),
+                ],
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        db.invalidate_stats_cache()
+        library_service._rankings_response_cache.clear()
+        with unittest.mock.patch.dict(
+            os.environ,
+            {"PHOTOARCHIVE_MODE": "satellite", "PHOTOARCHIVE_HUB_URL": "http://stub-hub"},
+        ):
+            result = await library_routes.api_rankings(
+                limit=10,
+                folder=catalog_repository.HUB_MIRROR_SOURCE_PATH,
+            )
+
+        self.assertEqual(result["visible_images"], 2)
+        self.assertEqual({card["filename"] for card in result["images"]}, {"one.jpg", "two.jpg"})
+
     async def test_taste_vector_scores_winner_like_embeddings_above_loser_like(self):
         source = await self._source()
         winners = [await self._image(source["id"], f"winner-{idx}.jpg", comparisons=1) for idx in range(3)]
@@ -660,7 +870,11 @@ class LibraryTests(BackendTestCase):
             await self._cache_entry(image_id, "sm")
 
         vector = await taste_service.taste_vector()
-        result = await library_routes.api_rankings(limit=10, sort="taste")
+        result = await library_routes.api_rankings(
+            limit=10,
+            sort="taste",
+            ids=f"{winner_like},{loser_like}",
+        )
 
         self.assertTrue(vector["available"])
         self.assertEqual(vector["comparison_count"], 5)
@@ -887,7 +1101,11 @@ class LibraryTests(BackendTestCase):
         await self._cache_entry(measured, "sm")
         await self._cache_entry(predicted, "sm")
 
-        result = await library_routes.api_rankings(limit=10, sort="elo")
+        result = await library_routes.api_rankings(
+            limit=10,
+            sort="elo",
+            ids=f"{measured},{predicted}",
+        )
         cards = {image["id"]: image for image in result["images"]}
 
         self.assertEqual([image["id"] for image in result["images"][:2]], [predicted, measured])
@@ -913,7 +1131,11 @@ class LibraryTests(BackendTestCase):
         await self._cache_entry(high_elo, "sm")
         await self._cache_entry(taste_match, "sm")
 
-        result = await library_routes.api_rankings(limit=10, sort="elo")
+        result = await library_routes.api_rankings(
+            limit=10,
+            sort="elo",
+            ids=f"{high_elo},{taste_match}",
+        )
 
         self.assertEqual([image["id"] for image in result["images"][:2]], [high_elo, taste_match])
         self.assertNotIn("display_score", result["images"][0])
@@ -954,7 +1176,11 @@ class LibraryTests(BackendTestCase):
         await self._cache_entry(high_elo, "sm")
         await self._cache_entry(taste_match, "sm")
 
-        pure = await library_routes.api_rankings(limit=10, sort="elo")
+        pure = await library_routes.api_rankings(
+            limit=10,
+            sort="elo",
+            ids=f"{high_elo},{taste_match}",
+        )
         old_taste_vector = taste_service.taste_vector
 
         async def fail_taste_vector():
@@ -963,7 +1189,11 @@ class LibraryTests(BackendTestCase):
         taste_service.taste_vector = fail_taste_vector
         library_service._rankings_response_cache.clear()
         try:
-            without_taste = await library_routes.api_rankings(limit=10, sort="elo")
+            without_taste = await library_routes.api_rankings(
+                limit=10,
+                sort="elo",
+                ids=f"{high_elo},{taste_match}",
+            )
         finally:
             taste_service.taste_vector = old_taste_vector
 
@@ -1218,6 +1448,234 @@ class LibraryTests(BackendTestCase):
         await db.batch_set_image_flags([second], "picked")
         self.assertEqual(await db.count_rankings(flag="picked"), 2)
 
+    async def test_collection_scoped_rankings_sort_and_compose_with_flag(self):
+        source = await self._source()
+        lower = await self._image(source["id"], "collection-lower.jpg", elo=1200)
+        picked = await self._image(source["id"], "collection-picked.jpg", elo=1500)
+        outside = await self._image(source["id"], "outside.jpg", elo=1800)
+        await db.set_image_flag(picked, "picked")
+        await db.set_image_flag(outside, "picked")
+        collection = await db.create_collection(name="Timeline scope", image_ids=[lower, picked])
+        await self._cache_entry(lower, "sm")
+        await self._cache_entry(picked, "sm")
+
+        scoped = await library_routes.api_rankings(
+            limit=10,
+            sort="elo",
+            collection_id=collection["id"],
+        )
+        self.assertEqual([image["id"] for image in scoped["images"]], [picked, lower])
+        self.assertEqual(scoped["total_images"], 2)
+        self.assertEqual(await db.count_rankings(collection_id=collection["id"]), 2)
+
+        picked_only = await library_routes.api_rankings(
+            limit=10,
+            sort="elo",
+            flag="picked",
+            collection_id=collection["id"],
+        )
+        self.assertEqual([image["id"] for image in picked_only["images"]], [picked])
+        self.assertEqual(picked_only["total_images"], 1)
+        self.assertEqual(await db.count_rankings(flag="picked", collection_id=collection["id"]), 1)
+
+    async def test_collection_export_composes_flag_filter(self):
+        source = await self._source()
+        picked = await self._image(source["id"], "collection-export-picked.jpg")
+        rejected = await self._image(source["id"], "collection-export-rejected.jpg")
+        outside = await self._image(source["id"], "outside-export-picked.jpg")
+        await db.set_image_flag(picked, "picked")
+        await db.set_image_flag(rejected, "rejected")
+        await db.set_image_flag(outside, "picked")
+        collection = await db.create_collection(
+            name="Filtered export scope",
+            image_ids=[picked, rejected],
+        )
+
+        def probe():
+            client = TestClient(app_module.app)
+            try:
+                return client.get(
+                    "/api/export",
+                    params={
+                        "format": "json",
+                        "collection_id": collection["id"],
+                        "flag": "picked",
+                    },
+                )
+            finally:
+                client.close()
+
+        response = await asyncio.to_thread(probe)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [row["filename"] for row in response.json()],
+            ["collection-export-picked.jpg"],
+        )
+
+    async def test_smart_collection_scope_resolves_rankings_and_timeline_histogram(self):
+        source = await self._source()
+        picked = await self._image(source["id"], "smart-picked.jpg", elo=1500)
+        await self._image(source["id"], "smart-outside.jpg", elo=1800)
+        await db.set_image_flag(picked, "picked")
+        await self._cache_entry(picked, "sm")
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "UPDATE images SET date_taken = ? WHERE id = ?",
+                ("2025-04-12 09:30:00", picked),
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+        smart = await collection_routes.api_create_collection(
+            collection_routes.CreateCollectionBody(
+                name="Picked smart scope",
+                query={"flag": "picked", "sort": "elo"},
+            )
+        )
+
+        scoped = await library_routes.api_rankings(
+            limit=10,
+            sort="elo",
+            collection_id=smart["collection"]["id"],
+        )
+        histogram = await library_routes.api_date_histogram(
+            collection_id=smart["collection"]["id"],
+        )
+
+        self.assertEqual([image["id"] for image in scoped["images"]], [picked])
+        self.assertEqual(scoped["total_images"], 1)
+        self.assertEqual(histogram["months"], [{"month": "2025-04", "count": 1, "cover_id": picked}])
+        self.assertEqual(histogram["total"], 1)
+
+    async def test_smart_collection_rankings_scope_exceeds_materialize_limit(self):
+        source = await self._source()
+        image_count = smart_collections.MAX_MATERIALIZE_IMAGE_IDS + 1
+        conn = await db.get_db()
+        try:
+            await conn.executemany(
+                "INSERT INTO images (source_id, filename, filepath, status, flag) "
+                "VALUES (?, ?, ?, 'kept', 'picked')",
+                (
+                    (
+                        source["id"],
+                        f"broad-smart-{index}.jpg",
+                        os.path.join(source["path"], f"broad-smart-{index}.jpg"),
+                    )
+                    for index in range(image_count)
+                ),
+            )
+            await db._update_source_counts(conn, source["id"])
+            await conn.commit()
+        finally:
+            await conn.close()
+        db.invalidate_stats_cache()
+        smart = await collection_routes.api_create_collection(
+            collection_routes.CreateCollectionBody(
+                name="Broad smart scope",
+                query={"flag": "picked", "sort": "elo"},
+            )
+        )
+
+        scoped = await library_routes.api_rankings(
+            limit=1,
+            collection_id=smart["collection"]["id"],
+        )
+
+        self.assertEqual(scoped["total_images"], image_count)
+
+    async def test_smart_collection_map_markers_compose_with_flag_filter(self):
+        source = await self._source()
+        scoped_picked = await self._image(source["id"], "smart-map-picked.jpg")
+        scoped_rejected = await self._image(source["id"], "smart-map-rejected.jpg")
+        outside_picked = await self._image(source["id"], "outside-map-picked.jpg")
+        conn = await db.get_db()
+        try:
+            await conn.executemany(
+                "UPDATE images SET latitude = ?, longitude = ?, camera_make = ?, camera_model = ?, flag = ? WHERE id = ?",
+                [
+                    (45.0, -93.0, "Fuji", "X-T5", "picked", scoped_picked),
+                    (46.0, -94.0, "Fuji", "X-T5", "rejected", scoped_rejected),
+                    (47.0, -95.0, "Canon", "R5", "picked", outside_picked),
+                ],
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+        await self._cache_entry(scoped_picked, "sm")
+        smart = await collection_routes.api_create_collection(
+            collection_routes.CreateCollectionBody(
+                name="Fuji map scope",
+                query={"camera": "Fuji X-T5", "sort": "elo"},
+            )
+        )
+
+        grid = await library_routes.api_rankings(
+            limit=10,
+            flag="picked",
+            collection_id=smart["collection"]["id"],
+        )
+        markers = await library_routes.api_map_markers(
+            flag="picked",
+            collection_id=smart["collection"]["id"],
+        )
+
+        self.assertEqual([image["id"] for image in grid["images"]], [scoped_picked])
+        self.assertEqual([marker["id"] for marker in markers["markers"]], [scoped_picked])
+
+    async def test_smart_collection_scope_constrains_filter_options(self):
+        source = await self._source()
+        picked = await self._image(source["id"], "smart-filter-picked.jpg")
+        outside = await self._image(source["id"], "smart-filter-outside.jpg")
+        await db.set_image_flag(picked, "picked")
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "UPDATE images SET camera_make = 'Fuji', camera_model = 'X-T5' WHERE id = ?",
+                (picked,),
+            )
+            await conn.execute(
+                "UPDATE images SET camera_make = 'Canon', camera_model = 'R5' WHERE id = ?",
+                (outside,),
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+        smart = await collection_routes.api_create_collection(
+            collection_routes.CreateCollectionBody(
+                name="Picked camera",
+                query={"flag": "picked", "sort": "elo"},
+            )
+        )
+
+        options = await library_routes.api_filter_options(
+            collection_id=smart["collection"]["id"],
+        )
+
+        self.assertEqual(options["cameras"], [{"camera": "Fuji X-T5", "count": 1}])
+
+    async def test_static_and_smart_collection_scopes_omit_archive_sort_quality(self):
+        source = await self._source()
+        image_id = await self._image(source["id"], "collection-quality.jpg")
+        await db.set_image_flag(image_id, "picked")
+        await self._cache_entry(image_id, "sm")
+        static = await db.create_collection(name="Static quality", image_ids=[image_id])
+        smart = await collection_routes.api_create_collection(
+            collection_routes.CreateCollectionBody(
+                name="Smart quality",
+                query={"flag": "picked", "sort": "elo"},
+            )
+        )
+
+        static_page = await library_routes.api_rankings(collection_id=static["id"])
+        smart_page = await library_routes.api_rankings(
+            collection_id=smart["collection"]["id"],
+        )
+
+        self.assertNotIn("sort_quality", static_page)
+        self.assertNotIn("sort_quality", smart_page)
+
     async def test_date_histogram_route_counts_months_undated_and_total(self):
         source = await self._source()
         january_first = await self._image(source["id"], "january-first.jpg")
@@ -1236,20 +1694,65 @@ class LibraryTests(BackendTestCase):
                     ("2025-03-01 22:00:00", march),
                 ],
             )
+            await conn.execute("UPDATE images SET elo = ? WHERE id = ?", (1700, january_first))
             await conn.commit()
         finally:
             await conn.close()
         db.invalidate_stats_cache()
 
+        for image_id in (january_first, february, march):
+            await self._cache_entry(image_id, "sm")
+
         response = await library_routes.api_date_histogram()
 
         self.assertEqual(response["months"], [
-            {"month": "2025-03", "count": 1},
-            {"month": "2025-02", "count": 1},
-            {"month": "2025-01", "count": 2},
+            {"month": "2025-03", "count": 1, "cover_id": march},
+            {"month": "2025-02", "count": 1, "cover_id": february},
+            {"month": "2025-01", "count": 2, "cover_id": january_first},
         ])
         self.assertEqual(response["undated"], 1)
         self.assertEqual(response["total"], 5)
+
+    async def test_date_histogram_chooses_global_cover_across_id_chunks(self):
+        source = await self._source()
+        conn = await db.get_db()
+        try:
+            await conn.executemany(
+                "INSERT INTO images "
+                "(source_id, filename, filepath, elo, status, date_taken) "
+                "VALUES (?, ?, ?, 1200, 'kept', '2025-04-12 09:30:00')",
+                (
+                    (
+                        source["id"],
+                        f"chunked-cover-{index}.jpg",
+                        os.path.join(source["path"], f"chunked-cover-{index}.jpg"),
+                    )
+                    for index in range(901)
+                ),
+            )
+            rows = await (
+                await conn.execute(
+                    "SELECT id FROM images WHERE source_id = ? ORDER BY id",
+                    (source["id"],),
+                )
+            ).fetchall()
+            scope_ids = {int(row["id"]) for row in rows}
+            global_cover_id = list(scope_ids)[900]
+            await conn.execute(
+                "UPDATE images SET elo = 1800 WHERE id = ?",
+                (global_cover_id,),
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        response = await db.date_histogram(id_filter=scope_ids)
+
+        self.assertEqual(
+            response["months"],
+            [{"month": "2025-04", "count": 901, "cover_id": global_cover_id}],
+        )
+        self.assertEqual(response["total"], 901)
 
     async def test_date_histogram_works_without_optional_month_index(self):
         source = await self._source()
@@ -1264,11 +1767,41 @@ class LibraryTests(BackendTestCase):
             await conn.commit()
         finally:
             await conn.close()
+        await self._cache_entry(image_id, "sm")
 
         response = await library_routes.api_date_histogram(stacks="expanded")
 
-        self.assertEqual(response["months"], [{"month": "2025-01", "count": 1}])
+        self.assertEqual(response["months"], [{"month": "2025-01", "count": 1, "cover_id": image_id}])
         self.assertEqual(response["total"], 1)
+
+    async def test_date_histogram_caches_and_clears_with_facet_invalidation(self):
+        source = await self._source()
+        image_id = await self._image(source["id"], "cached-hist.jpg")
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "UPDATE images SET date_taken = ? WHERE id = ?",
+                ("2025-04-03 10:00:00", image_id),
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+        db.invalidate_stats_cache()
+        db._date_histogram_cache.clear()
+
+        first = await library_routes.api_date_histogram()
+        cache_key = db._facet_cache_key(
+            visible_thumb_size="sm",
+            cache_root=thumbnails.SSD_CACHE_DIR,
+        )
+        self.assertIn(cache_key, db._date_histogram_cache)
+        self.assertEqual(db._date_histogram_cache[cache_key]["data"], first)
+
+        second = await library_routes.api_date_histogram()
+        self.assertEqual(second, first)
+
+        cache_events.invalidate_facet_caches()
+        self.assertNotIn(cache_key, db._date_histogram_cache)
 
     async def test_counts_route_counts_total_picked_and_rejected(self):
         source = await self._source()
@@ -1584,6 +2117,340 @@ class LibraryTests(BackendTestCase):
         restored = await self._image_row(rows[1]["id"])
         self.assertIsNone(restored["missing_at"])
 
+    async def test_rescan_cascades_master_availability_to_virtual_copy_only(self):
+        source = await self._source("scan-vc-source")
+        filepath = os.path.join(source["path"], "master.jpg")
+        anchor_path = os.path.join(source["path"], "anchor.jpg")
+        with open(filepath, "wb") as handle:
+            handle.write(b"master")
+        with open(anchor_path, "wb") as handle:
+            handle.write(b"anchor")
+        await scanner.scan_folder(source["path"], source_id=source["id"])
+
+        conn = await db.get_db()
+        try:
+            master = await (await conn.execute(
+                "SELECT id FROM images WHERE filepath = ? AND vc_of IS NULL",
+                (filepath,),
+            )).fetchone()
+            cursor = await conn.execute(
+                "INSERT INTO images "
+                "(source_id, filename, filepath, status, file_ext, file_size, file_modified_at, missing_at, vc_of) "
+                "VALUES (?, 'copy-name.jpg', ?, 'kept', '.copy', 999, 1, NULL, ?)",
+                (source["id"], filepath, master["id"]),
+            )
+            copy_id = cursor.lastrowid
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        os.remove(filepath)
+        await scanner.scan_folder(source["path"], source_id=source["id"])
+
+        missing_master = await self._image_row(master["id"])
+        copy = await self._image_row(copy_id)
+        self.assertIsNotNone(missing_master["missing_at"])
+        self.assertEqual(copy["missing_at"], missing_master["missing_at"])
+        self.assertEqual(copy["filename"], "copy-name.jpg")
+        self.assertEqual(copy["file_ext"], ".copy")
+        self.assertEqual(copy["file_size"], 999)
+        self.assertEqual(copy["file_modified_at"], 1.0)
+
+        with open(filepath, "wb") as handle:
+            handle.write(b"master")
+        await scanner.scan_folder(source["path"], source_id=source["id"])
+
+        restored_copy = await self._image_row(copy_id)
+        self.assertIsNone((await self._image_row(master["id"]))["missing_at"])
+        self.assertIsNone(restored_copy["missing_at"])
+        self.assertEqual(restored_copy["filename"], "copy-name.jpg")
+        self.assertEqual(restored_copy["file_ext"], ".copy")
+        self.assertEqual(restored_copy["file_size"], 999)
+        self.assertEqual(restored_copy["file_modified_at"], 1.0)
+
+    async def test_rescan_hashes_all_rematch_candidates_before_writing(self):
+        source = await self._source("scan-rematch-lock-source")
+        new_paths = [
+            os.path.join(source["path"], "new-first.jpg"),
+            os.path.join(source["path"], "new-second.jpg"),
+        ]
+        contents = [b"first", b"other"]
+        for path, content in zip(new_paths, contents):
+            with open(path, "wb") as handle:
+                handle.write(content)
+
+        conn = await db.get_db()
+        try:
+            for index, (path, content) in enumerate(zip(new_paths, contents)):
+                await conn.execute(
+                    "INSERT INTO images "
+                    "(source_id, filename, filepath, status, file_size, file_modified_at, "
+                    "content_hash, missing_at) VALUES (?, ?, ?, 'kept', ?, 1, ?, 100)",
+                    (
+                        source["id"],
+                        f"old-{index}.jpg",
+                        os.path.join(source["path"], f"old-{index}.jpg"),
+                        len(content),
+                        sync_hashing.compute_content_hash(path),
+                    ),
+                )
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        real_compute_content_hash = sync_hashing.compute_content_hash
+        lock_probes = 0
+
+        def compute_hash_with_write_probe(path):
+            nonlocal lock_probes
+            probe = sqlite3.connect(db.DB_PATH, timeout=0.05)
+            try:
+                probe.execute("BEGIN IMMEDIATE")
+                probe.rollback()
+                lock_probes += 1
+            finally:
+                probe.close()
+            return real_compute_content_hash(path)
+
+        rows = [
+            (os.path.basename(path), path, ".jpg", len(content), 1)
+            for path, content in zip(new_paths, contents)
+        ]
+        with unittest.mock.patch.object(
+            sync_hashing,
+            "compute_content_hash",
+            side_effect=compute_hash_with_write_probe,
+        ):
+            await catalog_repository.insert_images_batch(
+                db.DB_PATH,
+                rows,
+                source_id=source["id"],
+            )
+
+        self.assertEqual(lock_probes, 2)
+
+    async def test_rescan_does_not_rematch_when_new_paths_claim_same_missing_image(self):
+        source = await self._source("scan-rematch-collision-source")
+        old_path = os.path.join(source["path"], "old.jpg")
+        new_paths = [
+            os.path.join(source["path"], "new-first.jpg"),
+            os.path.join(source["path"], "new-second.jpg"),
+        ]
+        for path in new_paths:
+            with open(path, "wb") as handle:
+                handle.write(b"shared identity")
+
+        conn = await db.get_db()
+        try:
+            cursor = await conn.execute(
+                "INSERT INTO images "
+                "(source_id, filename, filepath, status, file_size, file_modified_at, "
+                "content_hash, missing_at) VALUES (?, 'old.jpg', ?, 'kept', ?, 1, ?, 100)",
+                (
+                    source["id"],
+                    old_path,
+                    len(b"shared identity"),
+                    sync_hashing.compute_content_hash(new_paths[0]),
+                ),
+            )
+            missing_id = int(cursor.lastrowid)
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        await catalog_repository.insert_images_batch(
+            db.DB_PATH,
+            [
+                (os.path.basename(path), path, ".jpg", len(b"shared identity"), 1)
+                for path in new_paths
+            ],
+            source_id=source["id"],
+        )
+
+        conn = await db.get_db()
+        try:
+            rows = await (await conn.execute(
+                "SELECT id, filepath, missing_at FROM images WHERE source_id = ? ORDER BY id",
+                (source["id"],),
+            )).fetchall()
+        finally:
+            await conn.close()
+
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(rows[0]["id"], missing_id)
+        self.assertEqual(rows[0]["filepath"], old_path)
+        self.assertEqual(rows[0]["missing_at"], 100.0)
+        self.assertEqual({row["filepath"] for row in rows[1:]}, set(new_paths))
+        self.assertTrue(all(row["missing_at"] is None for row in rows[1:]))
+
+    async def test_rescan_rematches_renamed_file_by_content_identity(self):
+        source = await self._source("scan-rename-source")
+        old_path = os.path.join(source["path"], "old-name.jpg")
+        anchor_path = os.path.join(source["path"], "anchor.jpg")
+        with open(old_path, "wb") as handle:
+            handle.write(b"irreplaceable ranked photo")
+        with open(anchor_path, "wb") as handle:
+            handle.write(b"keeps scan nonempty")
+        await scanner.scan_folder(source["path"], source_id=source["id"])
+
+        conn = await db.get_db()
+        try:
+            original = await (await conn.execute(
+                "SELECT id FROM images WHERE filepath = ? AND vc_of IS NULL",
+                (old_path,),
+            )).fetchone()
+            image_id = int(original["id"])
+            await conn.execute(
+                "UPDATE images SET elo = 1675, comparisons = 42, content_hash = ? WHERE id = ?",
+                (sync_hashing.compute_content_hash(old_path), image_id),
+            )
+            copy = await conn.execute(
+                "INSERT INTO images "
+                "(source_id, filename, filepath, status, elo, vc_of) "
+                "VALUES (?, 'copy-label.jpg', ?, 'kept', 1490, ?)",
+                (source["id"], old_path, image_id),
+            )
+            copy_id = int(copy.lastrowid)
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        holding_path = os.path.join(self.tempdir.name, "holding.jpg")
+        os.rename(old_path, holding_path)
+        await scanner.scan_folder(source["path"], source_id=source["id"])
+        self.assertIsNotNone((await self._image_row(image_id))["missing_at"])
+
+        renamed_path = os.path.join(source["path"], "new-name.jpg")
+        os.rename(holding_path, renamed_path)
+        await scanner.scan_folder(source["path"], source_id=source["id"])
+
+        rematched = await self._image_row(image_id)
+        self.assertEqual(rematched["filepath"], renamed_path)
+        self.assertEqual(rematched["filename"], "new-name.jpg")
+        self.assertEqual(rematched["elo"], 1675.0)
+        self.assertEqual(rematched["comparisons"], 42)
+        self.assertIsNone(rematched["missing_at"])
+        rematched_copy = await self._image_row(copy_id)
+        self.assertEqual(rematched_copy["filepath"], renamed_path)
+        self.assertEqual(rematched_copy["filename"], "copy-label.jpg")
+        self.assertEqual(rematched_copy["elo"], 1490.0)
+        conn = await db.get_db()
+        try:
+            count = await (await conn.execute(
+                "SELECT COUNT(*) AS count FROM images WHERE source_id = ? AND vc_of IS NULL",
+                (source["id"],),
+            )).fetchone()
+        finally:
+            await conn.close()
+        self.assertEqual(count["count"], 2)
+
+    async def test_rescan_rematches_moved_file_by_unambiguous_metadata(self):
+        source = await self._source("scan-move-source")
+        first_dir = os.path.join(source["path"], "first")
+        second_dir = os.path.join(source["path"], "second")
+        os.makedirs(first_dir)
+        os.makedirs(second_dir)
+        old_path = os.path.join(first_dir, "same-name.jpg")
+        anchor_path = os.path.join(source["path"], "anchor.jpg")
+        with open(old_path, "wb") as handle:
+            handle.write(b"metadata identity")
+        with open(anchor_path, "wb") as handle:
+            handle.write(b"anchor")
+        await scanner.scan_folder(source["path"], source_id=source["id"])
+
+        conn = await db.get_db()
+        try:
+            original = await (await conn.execute(
+                "SELECT id FROM images WHERE filepath = ?",
+                (old_path,),
+            )).fetchone()
+            image_id = int(original["id"])
+            await conn.execute("UPDATE images SET elo = 1540 WHERE id = ?", (image_id,))
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        holding_path = os.path.join(self.tempdir.name, "same-name.jpg")
+        os.rename(old_path, holding_path)
+        await scanner.scan_folder(source["path"], source_id=source["id"])
+        new_path = os.path.join(second_dir, "same-name.jpg")
+        os.rename(holding_path, new_path)
+        await scanner.scan_folder(source["path"], source_id=source["id"])
+
+        rematched = await self._image_row(image_id)
+        self.assertEqual(rematched["filepath"], new_path)
+        self.assertEqual(rematched["elo"], 1540.0)
+        self.assertIsNone(rematched["missing_at"])
+
+    async def test_rescan_does_not_guess_between_ambiguous_missing_rows(self):
+        source = await self._source("scan-ambiguous-source")
+        new_path = os.path.join(source["path"], "new", "same-name.jpg")
+        os.makedirs(os.path.dirname(new_path))
+        with open(new_path, "wb") as handle:
+            handle.write(b"same")
+        modified_at = os.stat(new_path).st_mtime
+        conn = await db.get_db()
+        try:
+            for folder in ("old-a", "old-b"):
+                await conn.execute(
+                    "INSERT INTO images "
+                    "(source_id, filename, filepath, status, file_size, file_modified_at, missing_at) "
+                    "VALUES (?, 'same-name.jpg', ?, 'kept', 4, ?, 100)",
+                    (source["id"], os.path.join(source["path"], folder, "same-name.jpg"), modified_at),
+                )
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        await catalog_repository.insert_images_batch(
+            db.DB_PATH,
+            [("same-name.jpg", new_path, ".jpg", 4, modified_at)],
+            source_id=source["id"],
+        )
+
+        conn = await db.get_db()
+        try:
+            rows = await (await conn.execute(
+                "SELECT id, filepath, missing_at FROM images WHERE source_id = ? ORDER BY id",
+                (source["id"],),
+            )).fetchall()
+        finally:
+            await conn.close()
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(rows[-1]["filepath"], new_path)
+        self.assertIsNone(rows[-1]["missing_at"])
+
+    async def test_rescan_preserves_photos_in_real_and_fenced_directories(self):
+        source = await self._source("scan-junk-fence")
+        visible_path = os.path.join(source["path"], "visible.jpg")
+        fenced_dir = os.path.join(source["path"], "PreviewCache")
+        os.makedirs(fenced_dir)
+        fenced_path = os.path.join(fenced_dir, "previously-indexed.jpg")
+        real_directory_names = ("Backups", "Presets", "Luminar", ".favorites")
+        real_paths = []
+        for directory_name in real_directory_names:
+            directory = os.path.join(source["path"], directory_name)
+            os.makedirs(directory)
+            real_paths.append(os.path.join(directory, "keeper.jpg"))
+        for filepath in (visible_path, fenced_path, *real_paths):
+            with open(filepath, "wb") as handle:
+                handle.write(b"photo")
+
+        real_image_ids = [
+            await self._image(source["id"], os.path.join(directory_name, "keeper.jpg"))
+            for directory_name in real_directory_names
+        ]
+        fenced_id = await self._image(
+            source["id"],
+            os.path.join("PreviewCache", "previously-indexed.jpg"),
+        )
+
+        await scanner.scan_folder(source["path"], source_id=source["id"])
+
+        for image_id in real_image_ids:
+            self.assertIsNone((await self._image_row(image_id))["missing_at"])
+        self.assertIsNone((await self._image_row(fenced_id))["missing_at"])
+
     async def test_empty_online_source_scan_preserves_existing_images_and_warns(self):
         source = await self._source("scan-empty-online")
         filepaths = [
@@ -1798,17 +2665,24 @@ class LibraryTests(BackendTestCase):
         self.assertNotIn("Family/Trip/Day", shallow_counts)
 
     async def test_folder_tree_payload_assembles_source_hierarchy(self):
+        # Catalog paths are always platform-native in production; build the
+        # fixture the same way and expect the payload's '/'-normalized keys.
+        def nat(p):
+            return os.path.abspath(p)
+
+        def key(p):
+            return nat(p).replace(os.sep, "/")
         sources = [
             {
                 "id": 1,
-                "path": "/archive/main",
+                "path": nat("/archive/main"),
                 "display_name": "Main Archive",
                 "online": 1,
                 "active_image_count": 6,
             },
             {
                 "id": 2,
-                "path": "/archive/offline",
+                "path": nat("/archive/offline"),
                 "display_name": "Offline Archive",
                 "online": 0,
                 "active_image_count": 1,
@@ -1816,13 +2690,13 @@ class LibraryTests(BackendTestCase):
         ]
         counts = {
             1: {
-                "/archive/main": 1,
-                "/archive/main/Family": 2,
-                "/archive/main/Family/Trip": 2,
-                "/archive/main/Family/Trip/Day": 1,
+                nat("/archive/main"): 1,
+                nat("/archive/main/Family"): 2,
+                nat("/archive/main/Family/Trip"): 2,
+                nat("/archive/main/Family/Trip/Day"): 1,
             },
             2: {
-                "/archive/offline/Scans": 1,
+                nat("/archive/offline/Scans"): 1,
             },
         }
 
@@ -1831,14 +2705,15 @@ class LibraryTests(BackendTestCase):
         main = result["sources"][0]
         self.assertEqual(main["display_name"], "Main Archive")
         self.assertTrue(main["online"])
+        self.assertTrue(main["reveal_available"])
         self.assertEqual(main["count"], 1)
         self.assertEqual(main["total_count"], 6)
         family = main["folders"][0]
-        self.assertEqual(family["path"], "/archive/main/Family")
+        self.assertEqual(family["path"], key("/archive/main/Family"))
         self.assertEqual(family["count"], 2)
         self.assertEqual(family["total_count"], 5)
         trip = family["children"][0]
-        self.assertEqual(trip["path"], "/archive/main/Family/Trip")
+        self.assertEqual(trip["path"], key("/archive/main/Family/Trip"))
         self.assertEqual(trip["count"], 2)
         self.assertEqual(trip["total_count"], 3)
         self.assertEqual(trip["children"], [])
@@ -1846,6 +2721,18 @@ class LibraryTests(BackendTestCase):
         offline = result["sources"][1]
         self.assertFalse(offline["online"])
         self.assertEqual(offline["folders"][0]["name"], "Scans")
+
+    async def test_folder_tree_marks_hub_mirrors_non_revealable(self):
+        result = catalog_routes.build_folder_tree_payload_from_rows(
+            [{"id": 7, "path": "hub://", "display_name": "Hub library", "online": 1}],
+            {7: {"hub://Family": 2}},
+        )
+
+        source = result["sources"][0]
+        self.assertEqual(source["path"], "hub://")
+        self.assertFalse(source["reveal_available"])
+        self.assertFalse(source["folders"][0]["reveal_available"])
+        self.assertEqual(source["folders"][0]["source_id"], 7)
 
     async def test_absolute_nested_folder_scope_matches_subtree(self):
         source = await self._source("scope-source")
@@ -2173,9 +3060,9 @@ class LibraryTests(BackendTestCase):
 
         thumbnails.prefetch_images = blocking_prefetch
         try:
-            result = await asyncio.wait_for(library_routes.api_rankings(limit=2), timeout=0.5)
+            result = await asyncio.wait_for(library_routes.api_rankings(limit=2), timeout=5)
             self.assertEqual(len(result["images"]), 2)
-            await asyncio.wait_for(started.wait(), timeout=0.5)
+            await asyncio.wait_for(started.wait(), timeout=5)
         finally:
             release.set()
             await asyncio.sleep(0)

@@ -1,11 +1,13 @@
 import os
 import sqlite3
 import time
+from unittest import mock
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from test_support import *  # noqa: F401,F403
+from features.develop import virtual_copies
 from features.library import watched_folders, watched_routes
 
 
@@ -79,6 +81,104 @@ class WatchedFolderTests(BackendTestCase):
         result = await watched_folders.scan_folder(db.DB_PATH, folder['id'])
         self.assertTrue(result['ok'])
         self.assertEqual(result['registered'], 1)
+
+    async def test_scan_offloads_disk_walk_from_event_loop(self):
+        inbox = os.path.join(self.tempdir.name, 'off-loop-watch')
+        os.makedirs(inbox)
+        with open(os.path.join(inbox, 'photo.jpg'), 'wb') as handle:
+            handle.write(b'image')
+
+        folder = await watched_folders.add_folder(db.DB_PATH, inbox)
+        real_to_thread = asyncio.to_thread
+        with mock.patch.object(
+            watched_folders.asyncio,
+            'to_thread',
+            wraps=real_to_thread,
+        ) as to_thread:
+            result = await watched_folders.scan_folder(db.DB_PATH, folder['id'])
+
+        self.assertTrue(result['ok'])
+        self.assertEqual(result['registered'], 1)
+        to_thread.assert_awaited_once()
+
+    async def test_incremental_scan_finds_new_file_with_preserved_old_mtime(self):
+        inbox = os.path.join(self.tempdir.name, 'preserved-mtime')
+        os.makedirs(inbox)
+        old_mtime = time.time() - 86400
+        first = os.path.join(inbox, 'first.jpg')
+        with open(first, 'wb') as handle:
+            handle.write(b'first image')
+        os.utime(first, (old_mtime, old_mtime))
+
+        folder = await watched_folders.add_folder(db.DB_PATH, inbox)
+        initial = await watched_folders.scan_folder(db.DB_PATH, folder['id'])
+        self.assertEqual(initial['registered'], 1)
+
+        preserved = os.path.join(inbox, 'copied-with-old-time.jpg')
+        with open(preserved, 'wb') as handle:
+            handle.write(b'preserved image')
+        os.utime(preserved, (old_mtime, old_mtime))
+
+        incremental = await watched_folders.scan_folder(db.DB_PATH, folder['id'])
+
+        self.assertEqual(incremental['registered'], 1)
+        conn = sqlite3.connect(db.DB_PATH)
+        try:
+            paths = {row[0] for row in conn.execute('SELECT filepath FROM images')}
+        finally:
+            conn.close()
+        self.assertIn(preserved, paths)
+
+    async def test_watched_folder_rematch_restores_virtual_copy_availability(self):
+        inbox = os.path.join(self.tempdir.name, 'vc-rematch')
+        os.makedirs(inbox)
+        original = os.path.join(inbox, 'photo.jpg')
+        with open(original, 'wb') as handle:
+            handle.write(b'virtual copy source')
+
+        folder = await watched_folders.add_folder(db.DB_PATH, inbox, recursive=True)
+        initial = await watched_folders.scan_folder(db.DB_PATH, folder['id'])
+        self.assertEqual(initial['registered'], 1)
+
+        conn = await db.get_db()
+        try:
+            master = await (await conn.execute(
+                'SELECT id FROM images WHERE filepath = ? AND vc_of IS NULL', (original,)
+            )).fetchone()
+            copy = await virtual_copies.create_virtual_copy(conn, int(master['id']))
+            await conn.commit()
+            master_id = int(master['id'])
+            copy_id = int(copy['id'])
+        finally:
+            await conn.close()
+
+        moved_dir = os.path.join(inbox, 'moved')
+        os.makedirs(moved_dir)
+        moved = os.path.join(moved_dir, 'photo.jpg')
+        os.rename(original, moved)
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                'UPDATE images SET missing_at = 100 WHERE id IN (?, ?)',
+                (master_id, copy_id),
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        rematch = await watched_folders.scan_folder(db.DB_PATH, folder['id'])
+        self.assertEqual(rematch['registered'], 1)
+        conn = await db.get_db()
+        try:
+            rows = await (await conn.execute(
+                'SELECT id, filepath, missing_at FROM images WHERE id IN (?, ?) ORDER BY id',
+                (master_id, copy_id),
+            )).fetchall()
+        finally:
+            await conn.close()
+
+        self.assertEqual([row['filepath'] for row in rows], [moved, moved])
+        self.assertTrue(all(row['missing_at'] is None for row in rows))
 
     async def test_watched_folder_ui_contract(self):
         base_dir = os.path.dirname(__file__)

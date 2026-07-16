@@ -42,6 +42,28 @@ git. `PHOTOARCHIVE_HOME` selects one managed root; granular environment
 overrides can select the catalog, settings, previews, models, embedding cache,
 Develop cache, exports, backups, run directory, and log directory separately.
 
+## Owner Authentication
+
+Everything the owner can do is protected by a single **owner key**, created by
+the setup wizard on first run (only its scrypt hash is stored). Browsers unlock
+once at `/unlock` and receive a signed 90-day session cookie; scripts and
+satellites send `Authorization: Bearer <owner key>`; paired devices authenticate
+with their existing device tokens. Requests from the server's own loopback
+address are exempt — sitting at the server keyboard is also the recovery path
+if the key is lost (visit Settings from the server machine and set a new key,
+which signs out every browser session but keeps paired devices working).
+
+Installs that predate owner authentication stay unlocked until a key is set;
+`/api/auth/status` reports `configured: false` so the UI can surface an
+"Unsecured" notice. Share links, published client galleries, the unlock page,
+static assets, `/api/version`, and pairing-code redemption (single-use,
+expiring, rate-limited) are the only routes reachable without a credential.
+
+The after-publish hook (`publish_hook`) executes a shell command, so it is
+server-side configuration only: set the `PHOTOARCHIVE_PUBLISH_HOOK` environment
+variable or edit the settings file on the server. The settings API rejects
+writes to it and never returns the configured command.
+
 ## Local AI
 
 The embedding model is installed locally from Hugging Face when you choose to

@@ -3,6 +3,7 @@ import { emit, on, setScope } from './state.js';
 import { showToast } from './toast.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
 import { icon } from '../icons.js';
+import { escapeHtml as esc, formatCount as fmt } from './dom.js';
 
 let modal = null;
 let selectedFiles = [];
@@ -10,11 +11,9 @@ let optionsLoaded = false;
 let importOptions = null;
 let recentImports = null;
 let currentUpload = null;
+let previewUrls = [];
 
-const fmt = (n) => Number(n || 0).toLocaleString('en-US');
-const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[c]));
+const MAX_IMPORT_PREVIEWS = 12;
 
 function entryFile(entry) {
     return new Promise((resolve, reject) => entry.file(resolve, reject));
@@ -73,6 +72,34 @@ function setProgress(percent) {
     if (bar) bar.style.width = `${Math.max(0, Math.min(100, Number(percent) || 0))}%`;
 }
 
+function clearImportPreviewUrls() {
+    for (const url of previewUrls) URL.revokeObjectURL(url);
+    previewUrls = [];
+}
+
+function renderImportPreview() {
+    const grid = modal?.querySelector('#import-preview-grid');
+    if (!grid) return;
+    clearImportPreviewUrls();
+    const entries = selectedFiles.slice(0, MAX_IMPORT_PREVIEWS);
+    grid.hidden = entries.length === 0;
+    if (!entries.length) {
+        grid.innerHTML = '';
+        return;
+    }
+    grid.innerHTML = entries.map((entry) => {
+        const url = URL.createObjectURL(entry.file);
+        previewUrls.push(url);
+        const name = entry.file.name || 'Photo';
+        return `<figure class="import-preview-item" title="${esc(entry.relativePath || name)}">`
+            + `<span class="import-preview-media"><img src="${esc(url)}" alt=""><span class="import-preview-fallback">${icon('image')}</span></span>`
+            + `<figcaption class="import-preview-name">${esc(name)}</figcaption></figure>`;
+    }).join('');
+    for (const image of grid.querySelectorAll('img')) {
+        image.addEventListener('error', () => image.closest('.import-preview-item')?.classList.add('preview-unavailable'), { once: true });
+    }
+}
+
 function setSelectedFiles(files) {
     selectedFiles = (files || []).filter((item) => item?.file);
     const summary = modal.querySelector('#import-selection-summary');
@@ -81,6 +108,7 @@ function setSelectedFiles(files) {
         : 'No photos selected';
     const start = modal.querySelector('#import-start');
     if (start) start.disabled = selectedFiles.length === 0;
+    renderImportPreview();
     setStatus(selectedFiles.length ? 'Ready to import.' : 'Choose photos to import.');
     setProgress(0);
 }
@@ -132,10 +160,13 @@ function renderImportHistory() {
         const total = Number(batch.total_files || 0);
         const skipped = Number(batch.skipped_files || 0);
         const collisions = Number(batch.collision_count || 0);
-        const counts = `${fmt(imported)} imported${total ? ` / ${fmt(total)} files` : ''}${skipped ? ` · ${fmt(skipped)} skipped` : ''}${collisions ? ` · ${fmt(collisions)} renamed` : ''}`;
+        const cancelled = batch.status === 'cancelled';
+        const counts = cancelled
+            ? `Cancelled - ${fmt(imported)} of ${fmt(total)} imported${skipped ? ` · ${fmt(skipped)} skipped` : ''}`
+            : `${fmt(imported)} imported${total ? ` / ${fmt(total)} files` : ''}${skipped ? ` · ${fmt(skipped)} skipped` : ''}${collisions ? ` · ${fmt(collisions)} renamed` : ''}`;
         const label = batch.name || `Import ${id}`;
         return `<button class="import-history-row" data-import-batch="${id}" data-tip="Scope the grid to this import batch">`
-            + `<span><b>${esc(label)}</b><small>${esc(timeLabel(batch.started_at || batch.created_at))} · ${esc(batch.status || 'complete')}</small></span>`
+            + `<span><b>${esc(label)}</b><small>${esc(timeLabel(batch.started_at || batch.created_at))}${cancelled ? '' : ` · ${esc(batch.status || 'complete')}`}</small></span>`
             + `<em>${esc(counts)}</em></button>`;
     }).join('');
     for (const row of host.querySelectorAll('[data-import-batch]')) {
@@ -266,6 +297,7 @@ function modalHtml() {
         + '<div id="import-drop-zone" class="import-drop" tabindex="0"><b>Drop photos or folders</b><span id="import-selection-summary">No photos selected</span></div>'
         + '<div class="import-actions"><button class="btn" id="import-files">Choose files</button><button class="btn" id="import-folder">Choose folder</button></div>'
         + '<input id="import-file-input" type="file" multiple accept="image/*,.dng,.cr3,.tif,.tiff,.webp" hidden><input id="import-folder-input" type="file" webkitdirectory directory multiple hidden>'
+        + '<div id="import-preview-grid" class="import-preview-grid" aria-label="Selected photo previews" hidden></div>'
         + '<div class="import-grid">'
         + '<label>Shoot name<input id="import-shoot-name" autocomplete="off"></label>'
         + '<label>Date<input id="import-shoot-date" type="date"></label>'
@@ -347,6 +379,7 @@ export function openImport() {
 export function closeImport() {
     if (!modal || modal.hidden) return;
     if (currentUpload) currentUpload.abort();
+    clearImportPreviewUrls();
     modal.hidden = true;
     releaseFocus(modal);
 }

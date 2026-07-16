@@ -17,6 +17,8 @@ Library sorts. It never opens the real archive or creates source image files.
 | `GET /api/filter-options` | 21.9 ms | 125 ms |
 | Library thumbnail-visible query | 25.2 ms | 125 ms |
 | 2,000 thumbnail signatures | 3.5 ms | 20 ms |
+| Collection suggestions, cold | 37.5 ms | 750 ms |
+| Collection suggestions, cached | 3.0 ms | 30 ms |
 
 Each check asserts the median of three calls. Route and query caches are cleared
 before each sample so the budget continues to cover the real data path; the

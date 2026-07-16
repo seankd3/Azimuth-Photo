@@ -14,6 +14,7 @@ from typing import Any
 import ai_models
 import settings
 from core import work_coordination
+from workers.caption_health import CaptionOomCircuit
 
 
 log = logging.getLogger("caption_worker")
@@ -32,7 +33,12 @@ CAPTION_PROMPT = (
     "scene, style, lighting, and colors."
 )
 
-_caption_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="caption-gpu")
+def _new_caption_executor() -> ThreadPoolExecutor:
+    return ThreadPoolExecutor(max_workers=1, thread_name_prefix="caption-gpu")
+
+
+_caption_executor = _new_caption_executor()
+_oom_circuit = CaptionOomCircuit(threshold=3)
 _model = None
 _processor = None
 _loaded_key: tuple[str, str, str, str] | None = None
@@ -133,21 +139,33 @@ def manual_pause_active() -> bool:
     return _caption_manual_pause
 
 
+def _release_worker_owners() -> None:
+    work_coordination.release_manual_owner("captions")
+    _unload_model()
+
+
+def _enter_paused(message: str) -> None:
+    _release_worker_owners()
+    _set_status(state="paused", ready=False, message=message, last_error="")
+
+
 def pause_caption_worker(message: str = "Captions are stopped.") -> dict[str, Any]:
     global _caption_manual_pause, _caption_manual_pause_message
     _caption_manual_pause = True
     _caption_manual_pause_message = message
-    work_coordination.release_manual_owner("captions")
-    _unload_model()
-    _set_status(state="paused", ready=False, message=message)
+    _enter_paused(message)
     return get_worker_status()
 
 
 def resume_caption_worker() -> dict[str, Any]:
     global _caption_manual_pause, _caption_manual_pause_message, _model_load_failure_count
+    app_config = settings.get_settings()
+    if not bool(app_config.get("caption_scan_enabled", False)):
+        settings.save_settings({**app_config, "caption_scan_enabled": True})
     _caption_manual_pause = False
     _caption_manual_pause_message = ""
     _model_load_failure_count = 0
+    _oom_circuit.reset()
     work_coordination.claim_manual_owner("captions")
     _set_status(state="idle", message="Captions will scan cached previews.", model_load_failures=0)
     return get_worker_status()
@@ -206,6 +224,36 @@ def _unload_model() -> None:
     _loaded_key = None
     _clear_cuda_cache()
     work_coordination.release_gpu_owner("captions")
+
+
+async def _wait_for_caption_turn() -> None:
+    if work_coordination.manual_turn_blocked("captions"):
+        _set_status(
+            state="waiting_for_turn",
+            ready=False,
+            message="Captions are waiting for other background work.",
+        )
+    await work_coordination.wait_for_manual_turn("captions")
+    if work_coordination.gpu_turn_blocked("captions"):
+        _set_status(
+            state="waiting_for_gpu",
+            ready=False,
+            message="Captions are waiting for the GPU.",
+        )
+    await work_coordination.wait_for_gpu_turn("captions")
+
+
+async def _renew_caption_turn() -> None:
+    if work_coordination.lost_ownership("captions", gpu=True):
+        _unload_model()
+    await _wait_for_caption_turn()
+
+
+def shutdown_caption_worker() -> None:
+    global _caption_executor
+    _release_worker_owners()
+    _caption_executor.shutdown(wait=False, cancel_futures=True)
+    _caption_executor = _new_caption_executor()
 
 
 def _load_model(config: dict[str, Any]):
@@ -328,6 +376,13 @@ def _caption_cached_preview(cache_path: str, config: dict[str, Any]) -> dict[str
 
 
 async def run_caption_worker() -> None:
+    try:
+        await _run_caption_worker_loop()
+    finally:
+        _release_worker_owners()
+
+
+async def _run_caption_worker_loop() -> None:
     _set_status(running=True, session_started_at=time.time())
     batch_size = 1
     while True:
@@ -344,18 +399,14 @@ async def run_caption_worker() -> None:
                 prompt_version=caption_config["prompt_version"],
             )
             if _caption_manual_pause or not bool(app_config.get("caption_scan_enabled", False)):
-                _unload_model()
-                _set_status(
-                    state="paused",
-                    ready=False,
-                    message=_caption_manual_pause_message or "Captions are stopped.",
-                    last_error="",
+                _enter_paused(
+                    _caption_manual_pause_message or "Captions are stopped."
                 )
                 await asyncio.sleep(WORKER_SLEEP_SECONDS)
                 continue
 
             if not ai_models.model_files_present(caption_config["model_dir"]):
-                _unload_model()
+                _release_worker_owners()
                 _set_status(
                     state="waiting_for_model",
                     ready=False,
@@ -370,8 +421,7 @@ async def run_caption_worker() -> None:
             )(caption_config=caption_config, cache_root=str(app_config.get("ssd_cache_dir") or ""))
             _set_status(pending_cached_images=pending, last_error="")
             if pending <= 0:
-                work_coordination.release_manual_owner("captions")
-                _unload_model()
+                _release_worker_owners()
                 _set_status(
                     state="idle",
                     ready=True,
@@ -393,11 +443,11 @@ async def run_caption_worker() -> None:
                 limit=batch_size,
             )
             if not rows:
+                _release_worker_owners()
                 await asyncio.sleep(WORKER_SLEEP_SECONDS)
                 continue
 
-            await work_coordination.wait_for_gpu_turn("captions")
-            await work_coordination.wait_for_manual_turn("captions")
+            await _wait_for_caption_turn()
             loop = asyncio.get_running_loop()
             _set_status(
                 state="captioning",
@@ -406,13 +456,14 @@ async def run_caption_worker() -> None:
             )
             with work_coordination.manual_bulk("captions"):
                 try:
-                    await loop.run_in_executor(_caption_executor, _load_model, caption_config)
+                    async with work_coordination.lease_heartbeat("captions", gpu=True):
+                        await loop.run_in_executor(_caption_executor, _load_model, caption_config)
                     _reset_model_load_failures()
                 except Exception as exc:
                     if _is_cuda_oom_error(exc):
                         batch_size = max(1, batch_size // 2)
                         _set_status(oom_backoffs=int(_status.get("oom_backoffs") or 0) + 1)
-                    _unload_model()
+                    _release_worker_owners()
                     paused = _record_model_load_failure(exc)
                     if paused:
                         log.error("Caption worker paused after repeated model load failures: %s", exc, exc_info=True)
@@ -431,6 +482,7 @@ async def run_caption_worker() -> None:
                         await asyncio.sleep(MODEL_LOAD_FAILURE_RETRY_SECONDS)
                     continue
                 for row in rows:
+                    await _renew_caption_turn()
                     image_id = int(row["id"])
                     cache_path = str(row.get("cache_path") or "")
                     try:
@@ -449,11 +501,18 @@ async def run_caption_worker() -> None:
                             status="done",
                         )
                         captioned += 1
+                        _oom_circuit.reset()
                     except Exception as exc:
-                        if _is_cuda_oom_error(exc):
+                        is_oom = _is_cuda_oom_error(exc)
+                        pause_after_error = False
+                        if is_oom:
                             batch_size = max(1, batch_size // 2)
                             _set_status(oom_backoffs=int(_status.get("oom_backoffs") or 0) + 1)
                             _clear_cuda_cache()
+                            if batch_size == 1:
+                                pause_after_error = _oom_circuit.record_failure()
+                        else:
+                            _oom_circuit.reset()
                         await _configured(_store_caption_result, "store_caption_result")(
                             image_id=image_id,
                             caption_config=caption_config,
@@ -463,6 +522,14 @@ async def run_caption_worker() -> None:
                             error=str(exc),
                         )
                         _set_status(last_error=str(exc))
+                        if pause_after_error:
+                            pause_caption_worker(
+                                "Captions paused after repeated GPU out-of-memory failures. "
+                                "Free GPU memory, then start Captions again."
+                            )
+                            break
+                if _caption_manual_pause:
+                    continue
             elapsed = round(time.perf_counter() - started, 3)
             _set_status(
                 state="ready",
@@ -474,6 +541,7 @@ async def run_caption_worker() -> None:
                 session_captioned=int(_status.get("session_captioned") or 0) + captioned,
             )
         except Exception as exc:
+            _release_worker_owners()
             _set_status(
                 state="error",
                 ready=False,

@@ -3,8 +3,8 @@ import {
     getAiStatus, getCacheStatus, getCaptionStatus, getCatalog, getMetadataStatus, getPairStatus,
     getPeopleStatus, getRemoteAccess, getScanStatus, getSettings, getSyncStatus, getVersion, installAiModel, listDevices,
     pauseAiEmbeddings,
-    pauseCaptionScan, pausePeopleScan, removeCatalogSource, rescanCatalogSource, resetSettings, resumeAiEmbeddings,
-    resumeCaptionScan, resumePeopleScan, revokeDevice, revealFolder, saveSettings, startCachePregen, startMetadataScan, stopCachePregen,
+    pauseCaptionScan, pausePeopleScan, removeCatalogSource, rescanCatalogSource, resumeAiEmbeddings,
+    resumeCaptionScan, resumePeopleScan, revokeDevice, saveSettings, startCachePregen, startMetadataScan, stopCachePregen,
     stopMetadataScan,
 } from './api.js';
 import {
@@ -20,7 +20,8 @@ import {
 import {
     bindLibraryHealth, refreshLibraryHealth, renderLibraryHealth, stopLibraryHealthPolling,
 } from './library_health.js';
-import { icon } from '../icons.js';
+import { openSourceRevealMenu } from './source_reveal_menu.js';
+import { INACTIVE_WORKER_STATES, normalizeWorkerState } from '../worker_state.js';
 
 let open = false;
 let drawerTimer = null;
@@ -28,6 +29,8 @@ let activityTimer = null;
 let installTimer = null;
 let scanTimer = null;
 let scanSourceId = null;
+let installTimerGeneration = 0;
+let scanTimerGeneration = 0;
 let catalog = null;
 let aiStatus = null;
 let cacheStatus = null;
@@ -43,18 +46,17 @@ let discoverPayload = null;
 let settingsPageData = null;
 let versionData = null;
 let savedSettings = {};
-let draftSettings = {};
-let dirtySettings = new Set();
 let openSettingSections = new Set();
-let resetConfirmArmed = false;
 let publishReturn = null;
 let publishingFocusPending = false;
 let thumbnailCachePolicy = 'keep';
+let systemSurfaceRender = null;
+let pendingModelPreset = null;
+const settingTimers = new Map();
 const busyActions = new Set();
-
-const MODEL_SAVE_FIELDS = ['embed_model_preset', 'embed_model_id', 'embed_model_revision', 'embed_model_dir', 'embed_model_dim'];
-const CAPTION_MODEL_FIELDS = ['caption_model_preset', 'caption_model_id', 'caption_model_revision', 'caption_model_dir', 'caption_model_quantization', 'caption_prompt_version'];
-const THUMB_FIELDS = ['thumb_size_sm', 'thumb_size_md', 'thumb_size_lg', 'thumb_quality'];
+const workerActionGenerations = new Map();
+const workerActionsInFlight = new Set();
+// Shared contract: const INACTIVE_WORKER_STATES = new Set(['idle', 'ready', 'paused', 'complete', 'caught_up', 'error', 'disabled', 'unavailable', 'stale']);
 const SETTING_DEFS = {
     embed_model_preset: { type: 'select' },
     memory_cache_gb: { type: 'number', min: 0, max: 64, step: 0.25, unit: 'GB' },
@@ -80,7 +82,6 @@ const SETTING_DEFS = {
     caption_model_preset: { type: 'select' },
     caption_batch_size: { type: 'number', min: 1, max: 4, step: 1 },
     publish_dir: { type: 'text' },
-    publish_hook: { type: 'text' },
     publish_site_base_url: { type: 'text' },
     share_brand_name: { type: 'text' },
     require_device_token: { type: 'checkbox' },
@@ -114,32 +115,39 @@ function progress(done, total) {
     return t > 0 ? pct((d / t) * 100) : 0;
 }
 
-function applySettingsData(data, { preserveDirtyExcept = null } = {}) {
+function workerStateIsActive(status) {
+    const worker = (status && status.worker) || {};
+    const index = (status && status.embedding_index) || {};
+    const state = normalizeWorkerState(index.worker_state || (status && status.worker_state) || worker.state);
+    return Boolean(state) && !INACTIVE_WORKER_STATES.has(state);
+}
+
+function cachePregenStateIsActive(status) {
+    const pregen = (status && status.pregen) || {};
+    return !pregen.manual_pause && workerStateIsActive({ worker: pregen });
+}
+
+function metadataStateIsActive(status) {
+    return !status?.manual_pause && workerStateIsActive(status);
+}
+
+
+function applySettingsData(data) {
     if (!data) return;
-    const previousDraft = { ...draftSettings };
-    const previousDirty = new Set(dirtySettings);
     settingsPageData = data;
     savedSettings = { ...(data.settings || {}) };
-    draftSettings = { ...savedSettings };
-    dirtySettings = new Set();
-    if (preserveDirtyExcept) {
-        for (const field of previousDirty) {
-            if (preserveDirtyExcept.has(field)) continue;
-            draftSettings[field] = previousDraft[field];
-            if (!sameSettingValue(field, draftSettings[field], savedSettings[field])) dirtySettings.add(field);
-        }
-    }
     aiStatus = data.ai_status || aiStatus;
     cacheStatus = data.cache_stats || cacheStatus;
     peopleStatus = data.people_status || peopleStatus;
     metadataStatus = data.metadata_status || metadataStatus;
     catalog = data.catalog || catalog;
-    resetConfirmArmed = false;
 }
 
 function settingValue(field) {
-    if (Object.prototype.hasOwnProperty.call(draftSettings, field)) return draftSettings[field];
+    if (field === 'embed_model_preset' && pendingModelPreset != null) return pendingModelPreset;
     if (Object.prototype.hasOwnProperty.call(savedSettings, field)) return savedSettings[field];
+    const defaults = settingsPageData?.defaults || {};
+    if (Object.prototype.hasOwnProperty.call(defaults, field)) return defaults[field];
     return '';
 }
 
@@ -154,18 +162,42 @@ function normalizeSettingValue(field, value) {
     return String(value == null ? '' : value);
 }
 
-function sameSettingValue(field, left, right) {
-    const def = SETTING_DEFS[field] || {};
-    if (def.type === 'number') return Number(left) === Number(right);
-    if (def.type === 'checkbox') return Boolean(left) === Boolean(right);
-    return String(left == null ? '' : left) === String(right == null ? '' : right);
+async function applySetting(field, value, { patch = null, undoPatch = null, control = null } = {}) {
+    const next = normalizeSettingValue(field, value);
+    const previous = savedSettings[field];
+    const payload = patch || { [field]: next };
+    const result = await saveSettings(payload);
+    if (!result?.ok) {
+        showToast('Couldn’t save setting');
+        return false;
+    }
+    applySettingsData(result);
+    showToast('Setting saved', {
+        undo: async () => {
+            const rollback = undoPatch || (field === 'caption_model_preset'
+                ? captionPresetConfig(previous)
+                : { [field]: previous });
+            const undone = await saveSettings(rollback);
+            if (!undone?.ok) throw new Error('undo failed');
+            applySettingsData(undone);
+            renderCurrentSystemSurface();
+            showToast('Setting restored');
+        },
+    });
+    renderActivity();
+    if (control && document.activeElement === control) patchSettingSurface(field);
+    else renderCurrentSystemSurface();
+    if (field === 'publish_dir' && publishReturn && String(next).trim()) {
+        showToast('Publishing folder saved');
+        returnToPublish();
+    }
+    return true;
 }
 
-function setDraftSetting(field, value) {
-    draftSettings[field] = normalizeSettingValue(field, value);
-    if (sameSettingValue(field, draftSettings[field], savedSettings[field])) dirtySettings.delete(field);
-    else dirtySettings.add(field);
-    resetConfirmArmed = false;
+function applyPreference(patch) {
+    const previous = Object.fromEntries(Object.keys(patch).map((key) => [key, viewState.prefs[key]]));
+    patchPrefs(patch);
+    showToast('Setting saved', { undo: () => patchPrefs(previous) });
 }
 
 function embeddingPresetConfig(key = settingValue('embed_model_preset')) {
@@ -203,19 +235,6 @@ function collectCaptionSettings() {
     return captionPresetConfig(settingValue('caption_model_preset'));
 }
 
-function collectDirtySettings() {
-    const payload = {};
-    for (const field of dirtySettings) {
-        payload[field] = draftSettings[field];
-    }
-    if (dirtySettings.has('embed_model_preset')) Object.assign(payload, collectModelSettings());
-    if (dirtySettings.has('caption_model_preset')) Object.assign(payload, collectCaptionSettings());
-    if (THUMB_FIELDS.some((field) => dirtySettings.has(field))) {
-        payload.thumbnail_cache_policy = thumbnailCachePolicy;
-    }
-    return payload;
-}
-
 function recommendedMemoryGb(settings = {}) {
     const systemRam = Number(settings.system_memory_gb || 0);
     if (systemRam >= 32) return 4;
@@ -224,30 +243,31 @@ function recommendedMemoryGb(settings = {}) {
     return 0.5;
 }
 
-function drawerEditing() {
-    const body = document.getElementById('drawer-body');
-    const active = document.activeElement;
-    if (!body || !active || !body.contains(active)) return false;
-    return ['INPUT', 'SELECT', 'TEXTAREA'].includes(active.tagName);
+function peopleProgress(status) {
+    const worker = (status && status.worker) || {};
+    if (worker.progress_pct != null) return pct(worker.progress_pct);
+    const counts = (status && status.counts) || {};
+    const scanned = Object.values(counts.scan || {})
+        .reduce((total, count) => total + (Number(count) || 0), 0);
+    const pending = Number(counts.pending_cached_images) || 0;
+    const countProgress = progress(scanned, scanned + pending);
+    return workerStateIsActive(status) ? Math.max(5, countProgress) : countProgress;
 }
 
-function hasInvalidSetting() {
-    const body = document.getElementById('drawer-body');
-    return Boolean(body && body.querySelector('[data-setting-field]:invalid'));
+function captionProgress(status) {
+    const worker = status?.worker || {};
+    const counts = status?.counts || {};
+    return worker.progress_pct != null ? pct(worker.progress_pct) : progress(counts.captioned || 0, (counts.captioned || 0) + (counts.pending_cached_images || 0));
 }
 
 function activeProgress() {
     const ai = pct(aiStatus && aiStatus.progress_pct);
     const pregen = cacheStatus && cacheStatus.pregen ? cacheStatus.pregen : {};
-    const cache = pct((pregen.preview && pregen.preview.progress_pct) || pregen.progress_pct);
-    const peopleWorker = (peopleStatus && peopleStatus.worker) || {};
-    const people = peopleWorker.progress_pct != null ? pct(peopleWorker.progress_pct) : 0;
-    const captionWorker = (captionStatus && captionStatus.worker) || {};
-    const captionCounts = (captionStatus && captionStatus.counts) || {};
-    const caption = captionWorker.progress_pct != null
-        ? pct(captionWorker.progress_pct)
-        : progress(captionCounts.captioned || 0, (captionCounts.captioned || 0) + (captionCounts.pending_cached_images || 0));
-    const metadata = metadataStatus && metadataStatus.manual_pause ? 0 : (metadataStatus && metadataStatus.active ? 50 : 0);
+    const cacheProgress = pct((pregen.preview && pregen.preview.progress_pct) || pregen.progress_pct);
+    const cache = cachePregenStateIsActive(cacheStatus) && cacheProgress <= 0 ? 50 : cacheProgress;
+    const people = peopleProgress(peopleStatus);
+    const caption = captionProgress(captionStatus);
+    const metadata = metadataStateIsActive(metadataStatus) ? 50 : 0;
     return { ai, cache, people, captions: caption, metadata };
 }
 
@@ -303,7 +323,8 @@ function captionLine() {
 
 function metadataLine() {
     if (!metadataStatus) return 'Status unknown';
-    const state = metadataStatus.manual_pause ? 'paused' : metadataStatus.active ? 'running' : 'idle';
+    const worker = metadataStatus.worker || {};
+    const state = metadataStatus.manual_pause ? 'paused' : worker.state || (metadataStatus.active ? 'running' : 'idle');
     const count = Number(metadataStatus.pending || metadataStatus.remaining || 0);
     return `${state}${count ? ` · ${fmt(count)} pending` : ''}`;
 }
@@ -315,7 +336,8 @@ function statusText(name, data) {
     if (name === 'Cache') {
         const pregen = (data && data.pregen) || {};
         const preview = pregen.preview || {};
-        return `${fmt(preview.count)} / ${fmt(preview.total)} · ${pregen.state || 'idle'}`;
+        const priority = pregen.priority_scope ? ` · Prioritizing: ${pregen.priority_scope}` : '';
+        return `${fmt(preview.count)} / ${fmt(preview.total)} · ${pregen.state || 'idle'}${priority}`;
     }
     if (name === 'Captions') {
         const worker = (data && data.worker) || {};
@@ -344,8 +366,13 @@ function renderActivity() {
     const peoplePaused = peopleStatus && peopleStatus.worker && peopleStatus.worker.manual_pause;
     const captionsPaused = captionStatus && !captionStatus.active;
     const metadataPaused = metadataStatus && metadataStatus.manual_pause;
+    const workerActive = workerStateIsActive(aiStatus)
+        || cachePregenStateIsActive(cacheStatus)
+        || workerStateIsActive(peopleStatus)
+        || workerStateIsActive(captionStatus)
+        || metadataStateIsActive(metadataStatus);
     widget.classList.toggle('paused', Boolean(aiPaused || cachePaused || peoplePaused || captionsPaused || metadataPaused));
-    widget.classList.toggle('active', Object.values(values).some((value) => value > 0 && value < 100));
+    widget.classList.toggle('active', workerActive || Object.values(values).some((value) => value > 0 && value < 100));
     pop.innerHTML = [
         ['AI', values.ai, aiStatus || {}],
         ['Cache', values.cache, cacheStatus || {}],
@@ -372,7 +399,7 @@ async function refreshActivity() {
     captionStatus = captions || captionStatus;
     metadataStatus = metadata || metadataStatus;
     renderActivity();
-    if (open && !drawerEditing()) renderDrawer();
+    if (open) patchDrawerStatus();
 }
 
 function sourceName(source) {
@@ -381,6 +408,11 @@ function sourceName(source) {
 
 function sourceCount(source) {
     return source.active_image_count != null ? source.active_image_count : source.image_count;
+}
+
+function sourceStatusLine(source) {
+    const online = Number(source.online) === 1 || source.online === true;
+    return `${fmt(sourceCount(source))} photos · ${lastScan(source)}${online ? '' : ' · offline'}`;
 }
 
 function lastScan(source) {
@@ -400,77 +432,6 @@ function dateTime(value) {
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-function revealMenuLabel() {
-    const platform = navigator.platform || '';
-    if (/Win/i.test(platform)) return 'Reveal in Explorer';
-    if (/Mac/i.test(platform)) return 'Reveal in Finder';
-    return 'Open in file manager';
-}
-
-let sourceMenu = null;
-let sourceMenuReturn = null;
-
-function ensureSourceMenu() {
-    if (sourceMenu) return sourceMenu;
-    sourceMenu = document.createElement('div');
-    sourceMenu.id = 'source-pop-menu';
-    sourceMenu.className = 'pop-menu grid-pop-menu folder-pop-menu';
-    sourceMenu.setAttribute('role', 'menu');
-    sourceMenu.hidden = true;
-    document.body.appendChild(sourceMenu);
-    sourceMenu.addEventListener('keydown', (event) => {
-        if (event.key === 'Escape') {
-            event.preventDefault();
-            event.stopPropagation();
-            closeSourceMenu();
-        }
-    });
-    document.addEventListener('pointerdown', (event) => {
-        if (!sourceMenu || sourceMenu.hidden || sourceMenu.contains(event.target)) return;
-        closeSourceMenu();
-    });
-    return sourceMenu;
-}
-
-function closeSourceMenu() {
-    if (!sourceMenu || sourceMenu.hidden) return;
-    sourceMenu.hidden = true;
-    releaseFocus(sourceMenu);
-    if (sourceMenuReturn && document.contains(sourceMenuReturn) && sourceMenuReturn.focus) {
-        sourceMenuReturn.focus({ preventScroll: true });
-    }
-}
-
-async function revealSourcePath(path) {
-    if (!path) return;
-    const result = await revealFolder(path);
-    if (result?.ok && result?.data?.ok) {
-        showToast('Opened in file manager');
-        return;
-    }
-    showToast(result?.data?.error || 'Couldn’t open folder');
-}
-
-function openSourceMenu(path, anchor) {
-    if (!path || !anchor) return;
-    ensureSourceMenu();
-    releaseFocus(sourceMenu);
-    sourceMenuReturn = anchor;
-    sourceMenu.innerHTML = '<div class="pm-group">'
-        + `<button data-act="reveal" role="menuitem">${icon('folder-open')} ${esc(revealMenuLabel())}</button>`
-        + '</div>';
-    sourceMenu.hidden = false;
-    const rect = anchor.getBoundingClientRect();
-    const menuRect = sourceMenu.getBoundingClientRect();
-    sourceMenu.style.left = `${Math.max(8, Math.min(window.innerWidth - menuRect.width - 8, rect.left + 18))}px`;
-    sourceMenu.style.top = `${Math.max(8, Math.min(window.innerHeight - menuRect.height - 8, rect.top + 18))}px`;
-    sourceMenu.querySelector('[data-act="reveal"]')?.addEventListener('click', () => {
-        closeSourceMenu();
-        revealSourcePath(path);
-    });
-    trapFocus(sourceMenu, sourceMenu.querySelector('button'));
-}
-
 function renderSources() {
     const sources = (catalog && catalog.sources) || [];
     const rows = sources.length ? sources.map((source) => {
@@ -478,10 +439,10 @@ function renderSources() {
         const id = Number(source.id);
         const scanning = scanSourceId === id;
         const path = source.path || '';
-        return `<article class="src-card" data-source-id="${id}" data-source-path="${esc(path)}">`
+        return `<article class="src-card" data-source-id="${id}" data-source-path="${esc(path)}" data-source-count="${Number(sourceCount(source)) || 0}">`
             + `<span class="sc-dot ${online ? 'on' : ''}"></span><div>`
             + `<div class="sc-name" title="${esc(sourceName(source))}">${esc(sourceName(source))}</div>`
-            + `<div class="sc-sub">${fmt(sourceCount(source))} photos · ${esc(lastScan(source))}${online ? '' : ' · offline'}</div>`
+            + `<div class="sc-sub">${esc(sourceStatusLine(source))}</div>`
             + '<div class="src-actions">'
             + `<button class="mini-btn" data-act="rescan" ${online ? '' : 'aria-disabled="true" disabled'}>Rescan</button>`
             + '<button class="mini-btn btn-danger" data-act="remove">Remove</button></div>'
@@ -505,26 +466,30 @@ function workerRow(key, label, value, detail, paused, actionLabel, note = '') {
         + `<button class="mini-btn" data-worker-action="${key}">${esc(actionLabel || (paused ? 'Resume' : 'Pause'))}</button></div>`;
 }
 
-function renderWork() {
+function workItems() {
     const pregen = (cacheStatus && cacheStatus.pregen) || {};
     const preview = pregen.preview || {};
     const worker = (peopleStatus && peopleStatus.worker) || {};
-    const counts = (peopleStatus && peopleStatus.counts) || {};
-    const peoplePct = worker.progress_pct != null
-        ? pct(worker.progress_pct)
-        : 0;
-    const captionWorker = (captionStatus && captionStatus.worker) || {};
-    const captionCounts = (captionStatus && captionStatus.counts) || {};
-    const captionPct = captionWorker.progress_pct != null
-        ? pct(captionWorker.progress_pct)
-        : progress(captionCounts.captioned || 0, (captionCounts.captioned || 0) + (captionCounts.pending_cached_images || 0));
+    const peoplePct = peopleProgress(peopleStatus);
+    const captionPct = captionProgress(captionStatus);
     const metadataPaused = metadataStatus && metadataStatus.manual_pause;
+    const metadataActive = metadataStateIsActive(metadataStatus);
+    return [
+        ['ai', 'Visual search index', aiStatus ? aiStatus.progress_pct : 0, aiStatus ? statusText('AI', aiStatus) : 'Status unknown', aiStatus && aiStatus.embedding_manual_pause, null, 'Resume also wakes the preview cache.'],
+        ['cache', 'Preview cache', (preview.progress_pct || pregen.progress_pct || 0), cacheStatus ? statusText('Cache', cacheStatus) : 'Status unknown', pregen.manual_pause || pregen.state === 'paused', pregen.manual_pause || pregen.state === 'paused' ? 'Resume' : 'Pause', 'Pause also pauses the visual search index and People scan.'],
+        ['people', 'People scan', peoplePct, peopleStatus ? statusText('People', peopleStatus) : 'Status unknown', worker.manual_pause || !settingValue('people_scan_enabled'), null, 'Resume also wakes the preview cache.'],
+        ['captions', 'Captions', captionPct, captionStatus ? statusText('Captions', captionStatus) : 'Status unknown', captionStatus && !captionStatus.active],
+        ['metadata', 'Metadata', metadataActive ? 50 : 0, metadataLine(), metadataPaused],
+    ].map(([key, label, value, detail, paused, actionLabel, note = '']) => ({
+        key, label, value, detail, paused: Boolean(paused), actionLabel, note,
+    }));
+}
+
+function renderWork() {
     return '<section class="dr-sec"><h3>Background work</h3>'
-        + workerRow('ai', 'Visual search index', aiStatus ? aiStatus.progress_pct : 0, aiStatus ? statusText('AI', aiStatus) : 'Status unknown', aiStatus && aiStatus.embedding_manual_pause, null, 'Resume also wakes the preview cache.')
-        + workerRow('cache', 'Preview cache', (preview.progress_pct || pregen.progress_pct || 0), cacheStatus ? statusText('Cache', cacheStatus) : 'Status unknown', pregen.manual_pause || pregen.state === 'paused', pregen.manual_pause || pregen.state === 'paused' ? 'Resume' : 'Pause', 'Pause also pauses the visual search index and People scan.')
-        + workerRow('people', 'People scan', peoplePct, peopleStatus ? statusText('People', peopleStatus) : 'Status unknown', worker.manual_pause || !settingValue('people_scan_enabled'), null, 'Resume also wakes the preview cache.')
-        + workerRow('captions', 'Captions', captionPct, captionStatus ? statusText('Captions', captionStatus) : 'Status unknown', captionStatus && !captionStatus.active)
-        + workerRow('metadata', 'Metadata', metadataPaused ? 0 : 50, metadataLine(), metadataPaused)
+        + workItems().map((item) => workerRow(
+            item.key, item.label, item.value, item.detail, item.paused, item.actionLabel, item.note,
+        )).join('')
         + '</section>';
 }
 
@@ -532,13 +497,44 @@ function renderStorage() {
     const tiers = (cacheStatus && cacheStatus.disk && cacheStatus.disk.tiers) || {};
     const chips = ['sm', 'md', 'lg'].map((size) => {
         const tier = tiers[size] || {};
-        return `<span class="tier-chip"><b>${size.toUpperCase()}</b><span>${fmt(tier.count)} files</span><span>${bytes(tier.bytes)}</span></span>`;
+        return `<span class="tier-chip" data-tier-size="${size}"><b>${size.toUpperCase()}</b><span data-tier-count>${fmt(tier.count)} files</span><span data-tier-bytes>${bytes(tier.bytes)}</span></span>`;
     }).join('');
     const totalFiles = Object.values(tiers).reduce((sum, tier) => sum + Number(tier?.count || 0), 0);
     return '<section class="dr-sec"><h3>Storage</h3>'
         + `<div class="tier-chips">${chips}</div>`
         + `<button class="btn btn-danger" id="clear-cache-btn" data-cache-files="${totalFiles}">Clear cache</button>`
         + '</section>';
+}
+
+function renderPeekStorage() {
+    const tiers = (cacheStatus && cacheStatus.disk && cacheStatus.disk.tiers) || {};
+    const chips = ['sm', 'md', 'lg'].map((size) => {
+        const tier = tiers[size] || {};
+        return `<span class="tier-chip" data-tier-size="${size}"><b>${size.toUpperCase()}</b><span data-tier-count>${fmt(tier.count)} files</span><span data-tier-bytes>${bytes(tier.bytes)}</span></span>`;
+    }).join('');
+    return `<section class="dr-sec"><h3>Storage</h3><div class="tier-chips">${chips}</div></section>`;
+}
+
+function renderPeekSources() {
+    const sources = (catalog && catalog.sources) || [];
+    const rows = sources.length ? sources.map((source) => {
+        const online = Number(source.online) === 1 || source.online === true;
+        const id = Number(source.id);
+        return `<article class="src-card" data-source-id="${id}">`
+            + `<span class="sc-dot ${online ? 'on' : ''}"></span><div>`
+            + `<div class="sc-name" title="${esc(sourceName(source))}">${esc(sourceName(source))}</div>`
+            + `<div class="sc-sub">${esc(sourceStatusLine(source))}</div>`
+            + `<div class="scan-progress" ${scanSourceId === id ? '' : 'hidden'}>Scanning…</div>`
+            + '</div></article>';
+    }).join('') : '<div class="source-empty"><b>No sources connected.</b><span>Open System settings to add a photo folder.</span></div>';
+    return `<section class="dr-sec"><h3>Sources</h3><div id="drawer-sources">${rows}</div></section>`;
+}
+
+function renderPeekHealth() {
+    const sources = (catalog && catalog.sources) || [];
+    const offline = sources.filter((source) => !(Number(source.online) === 1 || source.online === true)).length;
+    const detail = offline ? `${offline} source${offline === 1 ? '' : 's'} offline` : 'All connected sources reachable';
+    return `<section class="dr-sec"><h3>Library health</h3><div class="setting-status">${esc(detail)}</div></section>`;
 }
 
 function formatSeen(value) {
@@ -560,7 +556,7 @@ function renderDevices() {
         ? active.map((device) => (
             `<div class="device-row" data-device-id="${esc(device.id)}">`
             + `<div><b>${esc(device.name)}</b>`
-            + `<span class="device-meta">${esc(device.platform || 'unknown')} · last seen ${esc(formatSeen(device.last_seen))}</span></div>`
+            + `<span class="device-meta" data-device-status>${esc(device.platform || 'unknown')} · last seen ${esc(formatSeen(device.last_seen))}</span></div>`
             + `<button class="mini-btn btn-danger" type="button" data-revoke-device="${esc(device.id)}">Revoke</button>`
             + `</div>`
         )).join('')
@@ -598,7 +594,7 @@ function renderConnectServer() {
         )).join('')
         : '<div class="setting-hint">No hubs found on the network yet.</div>';
     const connected = pairStatus && pairStatus.has_hub
-        ? `<div class="setting-status">Connected to <code>${esc(pairStatus.hub_url)}</code></div>`
+        ? `<div class="setting-status" data-setting-status="connection">Connected to <code>${esc(pairStatus.hub_url)}</code></div>`
         : '';
     const updateBanner = syncStatus && (syncStatus.server_update_available || syncStatus.server_incompatible) && !sessionStorage.getItem('azimuth-server-update-dismissed')
         ? '<div class="setting-status warn server-update-banner" role="status"><span>Your Azimuth Photo server needs an update</span><button class="mini-btn" id="dismiss-server-update" type="button">Dismiss</button></div>'
@@ -693,16 +689,15 @@ function renderSharedHome() {
         + '</div></section>';
 }
 
-function detailsSection(title, body) {
+function detailsSection(title, description, body) {
     return `<details class="dr-sec dr-details" data-settings-section="${esc(title)}"${openSettingSections.has(title) ? ' open' : ''}>`
         + `<summary><span>${esc(title)}</span></summary>`
-        + `<div class="dr-details-body">${body}</div></details>`;
+        + `<div class="dr-details-body">${description ? `<p class="setting-section-description">${esc(description)}</p>` : ''}${body}</div></details>`;
 }
 
 function settingInput(field, label, { hint = '' } = {}) {
     const def = SETTING_DEFS[field] || {};
     const value = settingValue(field);
-    const dirty = dirtySettings.has(field) ? ' dirty' : '';
     const unit = def.unit ? `<em>${esc(def.unit)}</em>` : '';
     const attrs = [
         `id="drawer-setting-${field}"`,
@@ -713,20 +708,20 @@ function settingInput(field, label, { hint = '' } = {}) {
         def.step != null ? `step="${def.step}"` : '',
         def.type === 'text' ? 'spellcheck="false" autocomplete="off"' : '',
     ].filter(Boolean).join(' ');
-    return `<label class="setting-row${dirty}" for="drawer-setting-${field}">`
+    return `<label class="setting-row" for="drawer-setting-${field}">`
         + `<span><b>${esc(label)}</b>${unit}</span>`
-        + `<input class="drawer-input" ${attrs} value="${esc(value)}">`
-        + `${hint ? `<small>${esc(hint)}</small>` : ''}</label>`;
+        + `<input class="drawer-input" ${attrs} aria-describedby="drawer-setting-${field}-validation" value="${esc(value)}">`
+        + `${hint ? `<small>${esc(hint)}</small>` : ''}`
+        + `<small id="drawer-setting-${field}-validation" class="setting-validation" aria-live="polite" hidden></small></label>`;
 }
 
 function settingSelect(field, label, options) {
     const value = String(settingValue(field));
-    const dirty = dirtySettings.has(field) ? ' dirty' : '';
-    return `<label class="setting-row${dirty}" for="drawer-setting-${field}">`
+    return `<label class="setting-row" for="drawer-setting-${field}">`
         + `<span><b>${esc(label)}</b></span>`
-        + `<select id="drawer-setting-${field}" data-setting-field="${field}">`
+        + `<select id="drawer-setting-${field}" data-setting-field="${field}" aria-describedby="drawer-setting-${field}-validation">`
         + options.map((option) => `<option value="${esc(option.value)}"${String(option.value) === value ? ' selected' : ''}>${esc(option.label)}</option>`).join('')
-        + '</select></label>';
+        + `</select><small id="drawer-setting-${field}-validation" class="setting-validation" aria-live="polite" hidden></small></label>`;
 }
 
 function settingToggle(field, label) {
@@ -746,8 +741,8 @@ function renderAiSettings() {
     const presetSelect = settingSelect('embed_model_preset', 'Model preset', presets.length ? presets : [
         { value: settingValue('embed_model_preset'), label: settingValue('embed_model_preset') || 'Current preset' },
     ]);
-    return detailsSection('AI model',
-        `<div class="setting-status">${esc(modelLine())}</div>`
+    return detailsSection('AI model', 'Choose how Azimuth understands visual and text search.',
+        `<div class="setting-status" data-setting-status="ai">${esc(modelLine())}</div>`
         + '<div class="setting-status warn">Changing model preset rebuilds the search index and can take a while.</div>'
         + presetSelect
         + (selectedPreset?.description ? `<div class="setting-hint">${esc(selectedPreset.description)}</div>` : '')
@@ -759,8 +754,8 @@ function renderAiSettings() {
 }
 
 function renderImageCacheSettings() {
-    return detailsSection('Image cache',
-        `<div class="setting-status">${esc(cacheUsageLine())}</div>`
+    return detailsSection('Image cache', 'Balance instant browsing against the memory and disk this computer can spare.',
+        `<div class="setting-status" data-setting-status="cache">${esc(cacheUsageLine())}</div>`
         + '<div class="settings-two">'
         + settingInput('memory_cache_gb', 'RAM budget')
         + settingInput('ssd_cache_gb', 'SSD budget')
@@ -779,14 +774,14 @@ function renderImageCacheSettings() {
 }
 
 function renderImportSettings() {
-    return detailsSection('Imports',
+    return detailsSection('Imports', 'Set where new photos land and which folders Azimuth watches.',
         settingInput('import_root', 'Import inbox')
         + '<div id="watched-folders-settings"></div>'
     );
 }
 
 function renderThumbnailSettings() {
-    return detailsSection('Thumbnail output',
+    return detailsSection('Thumbnail output', 'Tune generated previews. Existing previews stay put unless you choose to replace them.',
         '<div class="settings-two">'
         + settingInput('thumb_size_sm', 'Small long side')
         + settingInput('thumb_size_md', 'Medium long side')
@@ -803,8 +798,8 @@ function renderThumbnailSettings() {
 }
 
 function renderPeopleSettings() {
-    return detailsSection('People recognition',
-        `<div class="setting-status">${esc(peopleLine())}</div>`
+    return detailsSection('People recognition', 'Keep face grouping useful without changing your original photos.',
+        `<div class="setting-status" data-setting-status="people">${esc(peopleLine())}</div>`
         + settingToggle('people_scan_enabled', 'Scan for people automatically')
         + settingToggle('people_auto_install', 'Install people model automatically')
         + settingInput('face_model_id', 'Face model')
@@ -820,8 +815,8 @@ function renderCaptionSettings() {
     const rawPresets = settingsPageData && settingsPageData.caption_model_presets || [];
     const presets = rawPresets.map((preset) => ({ value: preset.key, label: preset.label || preset.key }));
     const selectedPreset = rawPresets.find((preset) => preset.key === settingValue('caption_model_preset'));
-    return detailsSection('Captions',
-        `<div class="setting-status">${esc(captionLine())}</div>`
+    return detailsSection('Captions', 'Generate searchable photo descriptions in the background.',
+        `<div class="setting-status" data-setting-status="captions">${esc(captionLine())}</div>`
         + settingToggle('caption_scan_enabled', 'Caption cached photos automatically')
         + settingSelect('caption_model_preset', 'Caption model', presets.length ? presets : [
             { value: settingValue('caption_model_preset'), label: settingValue('caption_model_preset') || 'Current model' },
@@ -831,17 +826,24 @@ function renderCaptionSettings() {
 }
 
 function renderMetadataSettings() {
-    return detailsSection('Metadata',
-        `<div class="setting-status">${esc(metadataLine())}</div>`
+    return detailsSection('Metadata', 'Keep camera, lens, and file details ready for search and filtering.',
+        `<div class="setting-status" data-setting-status="metadata">${esc(metadataLine())}</div>`
         + '<div class="setting-hint">Metadata indexing keeps searchable file details current in the background.</div>');
 }
 
 function publishingStatusNote() {
     const folder = String(settingValue('publish_dir') || '').trim();
     if (!folder) {
-        return '<div class="setting-status warn">Publishing is off until a Gallery folder is set. Empty folder disables Publish.</div>';
+        return '<div class="setting-status warn" data-setting-status="publishing">Publishing is off until a Gallery folder is set. Empty folder disables Publish.</div>';
     }
-    return `<div class="setting-status">Writing galleries to <code>${esc(folder)}</code></div>`;
+    return `<div class="setting-status" data-setting-status="publishing">Writing galleries to <code>${esc(folder)}</code></div>`;
+}
+
+function publishingStatusLine() {
+    const folder = String(settingValue('publish_dir') || '').trim();
+    return folder
+        ? `Writing galleries to ${folder}`
+        : 'Publishing is off until a Gallery folder is set. Empty folder disables Publish.';
 }
 
 function updateDrawerContext() {
@@ -866,14 +868,11 @@ function publishReturnBar() {
 }
 
 function renderPublishingSettings() {
-    return detailsSection('Publishing',
+    return detailsSection('Publishing', 'Choose where gallery files live and how links present your work.',
         publishReturnBar()
         + publishingStatusNote()
         + settingInput('publish_dir', 'Gallery folder', {
             hint: 'Required. Public gallery files are written here. Leave empty to disable publishing.',
-        })
-        + settingInput('publish_hook', 'After-publish script', {
-            hint: 'Optional. Runs after publish or unpublish. Gallery files are still saved if the script does not finish.',
         })
         + settingInput('publish_site_base_url', 'Site base URL', {
             hint: 'Display-only for in-app links (e.g. https://photos.example.com). Does not serve files.',
@@ -895,16 +894,6 @@ function renderSettingsSections() {
         + renderPeopleSettings()
         + renderCaptionSettings()
         + renderMetadataSettings();
-}
-
-function renderSettingsSaveBar() {
-    const count = dirtySettings.size;
-    const invalid = hasInvalidSetting();
-    return '<div class="drawer-savebar" role="group" aria-label="Settings actions">'
-        + `<span id="drawer-save-state">${count ? `${fmt(count)} unsaved change${count === 1 ? '' : 's'}` : 'No unsaved settings'}</span>`
-        + `<button class="btn primary" id="drawer-save-settings" type="button" ${count && !invalid ? '' : 'disabled'}>Save settings</button>`
-        + `<button class="mini-btn btn-danger" id="drawer-reset-settings" type="button">${resetConfirmArmed ? 'Confirm reset' : 'Reset defaults'}</button>`
-        + '</div>';
 }
 
 function checkbox(key, label) {
@@ -930,7 +919,7 @@ function renderPrefs() {
 function renderAbout() {
     const version = versionData?.version || 'Unknown';
     return '<section class="dr-sec"><h3>About</h3>'
-        + '<div class="setting-status"><b>Azimuth Photo</b><span>Version ' + esc(version) + '</span></div>'
+        + '<div class="setting-status"><b>Azimuth Photo</b><span> · Version ' + esc(version) + '</span></div>'
         + '</section>';
 }
 
@@ -952,19 +941,131 @@ function focusPublishingSection() {
 function renderDrawer() {
     const body = document.getElementById('drawer-body');
     if (!body) return;
-    openSettingSections = new Set(Array.from(body.querySelectorAll('.dr-details[open] summary span'))
-        .map((el) => el.textContent || ''));
-    if (publishingFocusPending || publishReturn) openSettingSections.add('Publishing');
-    body.innerHTML = renderSources() + renderLibraryHealth(catalog) + renderWork() + renderSharedHome() + renderDevices() + renderConnectServer() + renderSettingsSections() + renderStorage() + renderRemote() + renderPrefs() + renderAbout() + renderSettingsSaveBar();
-    updateDrawerContext();
-    bindDrawerActions();
-    if (publishingFocusPending && body.querySelector('.dr-details[data-settings-section="Publishing"]')) {
-        publishingFocusPending = false;
-        focusPublishingSection();
+    body.innerHTML = renderWork() + renderPeekStorage() + renderPeekHealth() + renderPeekSources()
+        + '<section class="dr-sec"><button class="btn primary" id="drawer-open-system" type="button">System settings →</button></section>';
+    bindDrawerActions(body);
+    body.querySelector('#drawer-open-system')?.addEventListener('click', () => {
+        closeSystemDrawer();
+        openSystemSettings();
+    });
+}
+
+function renderCurrentSystemSurface() {
+    if (systemSurfaceRender) systemSurfaceRender();
+    if (open || !systemSurfaceRender) renderDrawer();
+}
+
+export function renderSystemSections() {
+    return {
+        library: renderSources() + renderLibraryHealth(catalog) + renderAbout(),
+        processing: renderAiSettings() + renderPeopleSettings() + renderCaptionSettings() + renderMetadataSettings() + renderWork(),
+        performance: renderImageCacheSettings() + renderThumbnailSettings() + renderStorage(),
+        import: renderImportSettings(),
+        publishing: renderPublishingSettings(),
+        connectivity: renderDevices() + renderConnectServer() + renderRemote(),
+        preferences: renderPrefs(),
+    };
+}
+
+export function mountSystemSurface(render) {
+    systemSurfaceRender = render;
+}
+
+export function unmountSystemSurface() {
+    systemSurfaceRender = null;
+}
+
+export function bindSystemSurface(body) {
+    bindDrawerActions(body);
+}
+
+export async function refreshSystemSurface() {
+    await refreshDrawer({ initial: false });
+}
+
+function patchNodeText(root, selector, value) {
+    const node = root.querySelector(selector);
+    const text = String(value);
+    if (node && node.textContent !== text) node.textContent = text;
+}
+
+function patchDrawerStatus(workerGenerations = null) {
+    const body = systemSurfaceRender
+        ? document.getElementById('system-lens-content')
+        : document.getElementById('drawer-body');
+    if (!body) return;
+
+    for (const source of (catalog && catalog.sources) || []) {
+        const card = body.querySelector(`.src-card[data-source-id="${Number(source.id)}"]`);
+        if (!card) continue;
+        const online = Number(source.online) === 1 || source.online === true;
+        card.querySelector('.sc-dot')?.classList.toggle('on', online);
+        patchNodeText(card, '.sc-sub', sourceStatusLine(source));
+        const scanning = scanSourceId === Number(source.id);
+        const progressEl = card.querySelector('.scan-progress');
+        if (progressEl) progressEl.hidden = !scanning;
+    }
+
+    for (const item of workItems()) {
+        if (workerGenerations && (
+            workerActionsInFlight.has(item.key)
+            || workerGenerations.get(item.key) !== (workerActionGenerations.get(item.key) || 0)
+        )) continue;
+        const row = body.querySelector(`[data-worker-row="${item.key}"]`);
+        if (!row) continue;
+        patchNodeText(row, '.wr-top .v', item.detail);
+        const progressBar = row.querySelector('.wr-track i');
+        if (progressBar) progressBar.style.width = `${pct(item.value)}%`;
+        patchNodeText(row, '[data-worker-action]', item.actionLabel || (item.paused ? 'Resume' : 'Pause'));
+    }
+
+    const settingLines = {
+        ai: modelLine(),
+        cache: cacheUsageLine(),
+        people: peopleLine(),
+        captions: captionLine(),
+        metadata: metadataLine(),
+    };
+    for (const [key, value] of Object.entries(settingLines)) {
+        patchNodeText(body, `[data-setting-status="${key}"]`, value);
+    }
+
+    const tiers = (cacheStatus && cacheStatus.disk && cacheStatus.disk.tiers) || {};
+    for (const size of ['sm', 'md', 'lg']) {
+        const chip = body.querySelector(`[data-tier-size="${size}"]`);
+        const tier = tiers[size] || {};
+        if (!chip) continue;
+        patchNodeText(chip, '[data-tier-count]', `${fmt(tier.count)} files`);
+        patchNodeText(chip, '[data-tier-bytes]', bytes(tier.bytes));
+    }
+    const clearCache = body.querySelector('#clear-cache-btn');
+    if (clearCache) {
+        clearCache.dataset.cacheFiles = String(Object.values(tiers).reduce(
+            (sum, tier) => sum + Number(tier?.count || 0), 0,
+        ));
+    }
+
+    const devices = new Map(((devicesPayload && devicesPayload.devices) || []).map((device) => [String(device.id), device]));
+    for (const row of body.querySelectorAll('.device-row[data-device-id]')) {
+        const device = devices.get(row.dataset.deviceId);
+        if (!device) continue;
+        patchNodeText(row, '[data-device-status]', `${device.platform || 'unknown'} · last seen ${formatSeen(device.last_seen)}`);
+    }
+    if (pairStatus?.hub_url) patchNodeText(body, '[data-setting-status="connection"] code', pairStatus.hub_url);
+}
+
+function patchSettingSurface(field) {
+    patchDrawerStatus();
+    if (field === 'publish_dir') {
+        const body = systemSurfaceRender
+            ? document.getElementById('system-lens-content')
+            : document.getElementById('drawer-body');
+        if (body) patchNodeText(body, '[data-setting-status="publishing"]', publishingStatusLine());
     }
 }
 
-async function refreshDrawer() {
+async function refreshDrawer({ initial = false } = {}) {
+    const workerGenerations = new Map(workerActionGenerations);
     const [nextCatalog, ai, cache, people, captions, metadata, remote, settingsData, version, pair, sync, devices] = await Promise.all([
         getCatalog().catch(() => null),
         getAiStatus().catch(() => null),
@@ -980,7 +1081,7 @@ async function refreshDrawer() {
         listDevices().catch(() => null),
         refreshLibraryHealth(),
     ]);
-    if (settingsData) applySettingsData(settingsData, { preserveDirtyExcept: new Set() });
+    if (settingsData) applySettingsData(settingsData);
     catalog = nextCatalog || catalog;
     aiStatus = ai || aiStatus;
     cacheStatus = cache || cacheStatus;
@@ -993,20 +1094,28 @@ async function refreshDrawer() {
     syncStatus = sync || syncStatus;
     devicesPayload = devices || devicesPayload;
     renderActivity();
-    if (!drawerEditing()) renderDrawer();
+    const body = systemSurfaceRender
+        ? document.getElementById('system-lens-content')
+        : document.getElementById('drawer-body');
+    if (initial || !body?.children.length) renderCurrentSystemSurface();
+    else patchDrawerStatus(workerGenerations);
 }
 
 async function pollScanUntilDone(sourceId) {
+    const generation = ++scanTimerGeneration;
+    let scanning = true;
     scanSourceId = Number(sourceId) || null;
     clearInterval(scanTimer);
     const tick = async () => {
         const status = await getScanStatus().catch(() => null);
+        if (generation !== scanTimerGeneration) return;
         if (!status || !status.scanning) {
+            scanning = false;
             clearInterval(scanTimer);
             scanTimer = null;
             scanSourceId = null;
             catalog = await getCatalog().catch(() => catalog);
-            renderDrawer();
+            renderCurrentSystemSurface();
             emit('scan', { scanning: false, done: true });
             showToast('Source scan finished');
             return;
@@ -1016,8 +1125,9 @@ async function pollScanUntilDone(sourceId) {
         if (progressEl) progressEl.textContent = `Scanning · ${fmt(status.total_found || status.total_inserted || 0)} photos found · thumbnails appear as they’re ready`;
     };
     await tick();
+    if (generation !== scanTimerGeneration || !scanning) return;
     scanTimer = setInterval(tick, 1000);
-    renderDrawer();
+    renderCurrentSystemSurface();
 }
 
 async function handleSourceAction(card, action) {
@@ -1039,7 +1149,7 @@ async function handleRemove(card, mode) {
     const result = await removeCatalogSource(sourceId, mode);
     if (result && result.ok) {
         catalog = result.catalog || await getCatalog().catch(() => catalog);
-        renderDrawer();
+        renderCurrentSystemSurface();
         showToast(mode === 'keep' ? 'Source removed; photos stay in the library' : 'Source and library records removed. This can’t be undone.');
     } else showToast('Couldn’t remove source');
 }
@@ -1064,22 +1174,15 @@ function sourceAddErrorMessage(result) {
         : `Could not add that folder (${result?.status || 'unknown status'}).`;
 }
 
-function updateSaveBar() {
-    const save = document.getElementById('drawer-save-settings');
-    const reset = document.getElementById('drawer-reset-settings');
-    const state = document.getElementById('drawer-save-state');
-    const invalid = hasInvalidSetting();
-    if (save) save.disabled = !dirtySettings.size || invalid;
-    if (reset) reset.textContent = resetConfirmArmed ? 'Confirm reset' : 'Reset defaults';
-    if (state) {
-        if (invalid) state.textContent = 'Check highlighted values';
-        else state.textContent = dirtySettings.size
-            ? `${fmt(dirtySettings.size)} unsaved change${dirtySettings.size === 1 ? '' : 's'}`
-            : 'No unsaved settings';
+function settingValidationMessage(input) {
+    if (input.validity.valid) return '';
+    const label = input.closest('.setting-row')?.querySelector('b')?.textContent || 'This value';
+    if (input.validity.rangeUnderflow || input.validity.rangeOverflow) {
+        return `${label} must be between ${input.min} and ${input.max}.`;
     }
-    for (const input of document.querySelectorAll('[data-setting-field]')) {
-        input.closest('.setting-row')?.classList.toggle('dirty', dirtySettings.has(input.dataset.settingField));
-    }
+    if (input.validity.stepMismatch) return `${label} must use increments of ${input.step || 'the listed value'}.`;
+    if (input.validity.badInput) return `${label} needs a number.`;
+    return input.validationMessage || `${label} is not valid.`;
 }
 
 function bindSettingInputs(body) {
@@ -1093,21 +1196,48 @@ function bindSettingInputs(body) {
     }
     for (const input of body.querySelectorAll('[data-setting-field]')) {
         const field = input.dataset.settingField;
-        input.addEventListener('input', () => {
+        const save = () => {
+            const pending = settingTimers.get(input);
+            if (pending) clearTimeout(pending.timer);
+            settingTimers.delete(input);
+            if (!input.validity.valid) {
+                const validation = input.closest('.setting-row')?.querySelector('.setting-validation');
+                input.setAttribute('aria-invalid', 'true');
+                if (validation) {
+                    validation.hidden = false;
+                    validation.textContent = settingValidationMessage(input);
+                }
+                return;
+            }
+            input.removeAttribute('aria-invalid');
+            input.closest('.setting-row')?.querySelector('.setting-validation')?.setAttribute('hidden', '');
             const value = input.type === 'checkbox' ? input.checked : input.value;
-            setDraftSetting(field, value);
-            updateSaveBar();
-        });
-        input.addEventListener('change', () => {
-            const value = input.type === 'checkbox' ? input.checked : input.value;
-            setDraftSetting(field, value);
-            updateSaveBar();
-        });
+            if (field === 'embed_model_preset') {
+                pendingModelPreset = value;
+                return;
+            }
+            const patch = field === 'caption_model_preset' ? captionPresetConfig(value) : null;
+            return applySetting(field, value, { patch, control: input });
+        };
+        if (input.type === 'text' || input.type === 'number') {
+            input.addEventListener('input', () => {
+                const pending = settingTimers.get(input);
+                if (pending) clearTimeout(pending.timer);
+                settingTimers.set(input, { timer: setTimeout(save, 600), save });
+            });
+            input.addEventListener('blur', save);
+            input.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    save();
+                }
+            });
+        } else input.addEventListener('change', save);
     }
     for (const input of body.querySelectorAll('input[name="drawer_thumbnail_cache_policy"]')) {
         input.addEventListener('change', () => {
             thumbnailCachePolicy = input.value || 'keep';
-            updateSaveBar();
+            applySetting('thumbnail_cache_policy', thumbnailCachePolicy);
         });
     }
 }
@@ -1124,20 +1254,29 @@ async function withBusyAction(key, button, action) {
     }
 }
 
-function applyCacheDefaults() {
+async function applyCacheDefaults() {
     const defaults = (settingsPageData && settingsPageData.defaults) || {};
     const next = {
         memory_cache_gb: recommendedMemoryGb(settingsPageData.settings || savedSettings),
         ssd_cache_gb: defaults.ssd_cache_gb ?? 100,
         cache_profile: defaults.cache_profile || 'original_heavy',
     };
-    for (const [field, value] of Object.entries(next)) {
-        setDraftSetting(field, value);
-        const input = document.querySelector(`[data-setting-field="${field}"]`);
-        if (input) input.value = String(value);
+    const previous = Object.fromEntries(Object.keys(next).map((field) => [field, savedSettings[field]]));
+    const result = await saveSettings(next);
+    if (!result?.ok) {
+        showToast('Couldn’t apply cache defaults');
+        return;
     }
-    updateSaveBar();
-    showToast('Cache defaults applied; save settings to keep them');
+    applySettingsData(result);
+    renderCurrentSystemSurface();
+    showToast('Cache defaults applied', {
+        undo: async () => {
+            const undone = await saveSettings(previous);
+            if (!undone?.ok) throw new Error('undo failed');
+            applySettingsData(undone);
+            renderCurrentSystemSurface();
+        },
+    });
 }
 
 async function returnToPublish() {
@@ -1153,49 +1292,6 @@ async function returnToPublish() {
     openPublishOverlay(target.collectionId, target.name || 'Collection');
 }
 
-async function saveDrawerSettings() {
-    if (!dirtySettings.size) return;
-    if (hasInvalidSetting()) {
-        showToast('Check settings values before saving');
-        updateSaveBar();
-        return;
-    }
-    const result = await saveSettings(collectDirtySettings());
-    if (result && result.ok) {
-        applySettingsData(result);
-        renderActivity();
-        renderDrawer();
-        const folderReady = Boolean(String(settingValue('publish_dir') || '').trim());
-        if (publishReturn && folderReady) {
-            showToast('Publishing folder saved');
-            returnToPublish();
-            return;
-        }
-        showToast('Settings saved');
-    } else {
-        showToast('Couldn’t save settings');
-    }
-}
-
-async function resetDrawerSettings() {
-    if (!resetConfirmArmed) {
-        resetConfirmArmed = true;
-        updateSaveBar();
-        return;
-    }
-    const result = await resetSettings();
-    if (result && result.ok) {
-        applySettingsData(result);
-        renderActivity();
-        renderDrawer();
-        showToast('Settings reset — undo unavailable');
-    } else {
-        resetConfirmArmed = false;
-        updateSaveBar();
-        showToast('Couldn’t reset settings');
-    }
-}
-
 function aiInstallActive(status = aiStatus || {}) {
     const index = status.embedding_index || {};
     const installStatus = String(index.install_status || status.install_status || '').toLowerCase();
@@ -1203,12 +1299,14 @@ function aiInstallActive(status = aiStatus || {}) {
 }
 
 function pollModelInstall() {
+    const generation = ++installTimerGeneration;
     clearInterval(installTimer);
     const tick = async () => {
         const status = await getAiStatus();
+        if (generation !== installTimerGeneration) return;
         if (status) aiStatus = status;
         renderActivity();
-        if (open && !drawerEditing()) renderDrawer();
+        if (open) patchDrawerStatus();
         if (!aiInstallActive(status)) {
             clearInterval(installTimer);
             installTimer = null;
@@ -1218,17 +1316,30 @@ function pollModelInstall() {
     installTimer = setInterval(tick, 1500);
 }
 
+export function suspendSystemTimers() {
+    scanTimerGeneration += 1;
+    clearInterval(scanTimer);
+    scanTimer = null;
+    scanSourceId = null;
+    installTimerGeneration += 1;
+    clearInterval(installTimer);
+    installTimer = null;
+    const pendingSaves = [...settingTimers.values()];
+    for (const pending of pendingSaves) clearTimeout(pending.timer);
+    return Promise.all(pendingSaves.map((pending) => pending.save()));
+}
+
 async function saveAndInstallModel() {
     const button = document.getElementById('drawer-install-model');
     if (button) button.disabled = true;
-    const modelFields = new Set(MODEL_SAVE_FIELDS);
     const saveData = await saveSettings(collectModelSettings());
     if (!saveData || !saveData.ok) {
         showToast('Couldn’t save model settings');
         if (button) button.disabled = false;
         return;
     }
-    applySettingsData(saveData, { preserveDirtyExcept: modelFields });
+    pendingModelPreset = null;
+    applySettingsData(saveData);
     const installData = await installAiModel('active');
     if (installData && installData.ok) {
         aiStatus = installData.ai_status || aiStatus;
@@ -1238,31 +1349,48 @@ async function saveAndInstallModel() {
         showToast('Couldn’t start model install');
     }
     renderActivity();
-    renderDrawer();
+    renderCurrentSystemSurface();
 }
 
-function bindDrawerActions() {
-    const body = document.getElementById('drawer-body');
+function renderLibraryHealthSection() {
+    const body = systemSurfaceRender
+        ? document.getElementById('system-lens-content')
+        : document.getElementById('drawer-body');
+    const current = body?.querySelector('.library-health');
+    if (!body || !current) return;
+    const template = document.createElement('template');
+    template.innerHTML = renderLibraryHealth(catalog);
+    const next = template.content.firstElementChild;
+    if (!next) return;
+    current.replaceWith(next);
+    bindLibraryHealthActions(body);
+}
+
+function bindLibraryHealthActions(body) {
     bindLibraryHealth(body, {
-        rerender: () => {
-            if (!drawerEditing()) renderDrawer();
-        },
+        rerender: renderLibraryHealthSection,
         refreshCatalog: async () => {
             catalog = await getCatalog().catch(() => catalog);
-            if (!drawerEditing()) renderDrawer();
+            patchDrawerStatus();
+            renderLibraryHealthSection();
             showToast('Sources checked');
         },
     });
+}
+
+function bindDrawerActions(body = document.getElementById('drawer-body')) {
+    if (!body) return;
+    bindLibraryHealthActions(body);
     bindSettingInputs(body);
     body.querySelector('#dismiss-server-update')?.addEventListener('click', () => {
         sessionStorage.setItem('azimuth-server-update-dismissed', '1');
-        renderDrawer();
+        renderCurrentSystemSurface();
     });
     body.querySelector('#link-device-btn')?.addEventListener('click', (event) => withBusyAction('link-device', event.currentTarget, async () => {
         const result = await createDeviceLink();
         if (result && result.code) {
             linkSession = result;
-            renderDrawer();
+            renderCurrentSystemSurface();
             showToast('Pairing code ready');
         } else {
             showToast('Couldn’t create a pairing code');
@@ -1273,7 +1401,7 @@ function bindDrawerActions() {
             const result = await revokeDevice(Number(btn.dataset.revokeDevice));
             if (result && result.ok) {
                 devicesPayload = await listDevices().catch(() => devicesPayload);
-                renderDrawer();
+                renderCurrentSystemSurface();
                 showToast('Device revoked');
             } else {
                 showToast('Couldn’t revoke device');
@@ -1282,7 +1410,7 @@ function bindDrawerActions() {
     }
     body.querySelector('#discover-hubs-btn')?.addEventListener('click', (event) => withBusyAction('discover-hubs', event.currentTarget, async () => {
         discoverPayload = await discoverHubs().catch(() => null);
-        renderDrawer();
+        renderCurrentSystemSurface();
         const count = (discoverPayload && discoverPayload.hubs && discoverPayload.hubs.length) || 0;
         showToast(count ? `Found ${count} hub${count === 1 ? '' : 's'}` : 'No hubs found');
     }));
@@ -1302,15 +1430,13 @@ function bindDrawerActions() {
         const result = await connectToHub({ hubUrl, code });
         if (result && result.ok) {
             pairStatus = await getPairStatus().catch(() => pairStatus);
-            renderDrawer();
+            renderCurrentSystemSurface();
             showToast('Connected to hub');
         } else {
             showToast((result && (result.error || result.detail)) || 'Couldn’t connect');
         }
     }));
     body.querySelector('#drawer-cache-defaults')?.addEventListener('click', applyCacheDefaults);
-    body.querySelector('#drawer-save-settings')?.addEventListener('click', (event) => withBusyAction('settings-save', event.currentTarget, saveDrawerSettings));
-    body.querySelector('#drawer-reset-settings')?.addEventListener('click', (event) => withBusyAction('settings-reset', event.currentTarget, resetDrawerSettings));
     body.querySelector('#drawer-install-model')?.addEventListener('click', (event) => withBusyAction('model-install', event.currentTarget, saveAndInstallModel));
     body.querySelector('#drawer-return-publish')?.addEventListener('click', returnToPublish);
     bindSourcePicker(body, {
@@ -1321,7 +1447,7 @@ function bindDrawerActions() {
                     const data = result.data || {};
                     catalog = data.catalog || catalog;
                     clearSourcePickerSelection();
-                    renderDrawer();
+                    renderCurrentSystemSurface();
                     showToast('Source added · scanning for photos');
                     pollScanUntilDone(data.source && data.source.id);
                 } else {
@@ -1341,7 +1467,10 @@ function bindDrawerActions() {
     for (const card of body.querySelectorAll('.src-card[data-source-path]')) {
         card.addEventListener('contextmenu', (event) => {
             event.preventDefault();
-            openSourceMenu(card.dataset.sourcePath || '', card);
+            openSourceRevealMenu(card.dataset.sourcePath || '', card, card.dataset.sourceCount, {
+                sourceId: card.dataset.sourceId,
+                revealAvailable: !String(card.dataset.sourcePath || '').toLowerCase().startsWith('hub:'),
+            });
         });
     }
     for (const btn of body.querySelectorAll('[data-mode]')) {
@@ -1356,19 +1485,28 @@ function bindDrawerActions() {
     for (const btn of body.querySelectorAll('[data-worker-action]')) {
         btn.addEventListener('click', () => withBusyAction(`worker-${btn.dataset.workerAction}`, btn, async () => {
             const key = btn.dataset.workerAction;
+            workerActionGenerations.set(key, (workerActionGenerations.get(key) || 0) + 1);
+            workerActionsInFlight.add(key);
             let result = null;
-            if (key === 'ai') result = aiStatus && aiStatus.embedding_manual_pause ? await resumeAiEmbeddings() : await pauseAiEmbeddings();
-            if (key === 'cache') {
-                const pregen = (cacheStatus && cacheStatus.pregen) || {};
-                result = pregen.manual_pause || pregen.state === 'paused' ? await startCachePregen() : await stopCachePregen();
+            try {
+                if (key === 'ai') result = aiStatus && aiStatus.embedding_manual_pause ? await resumeAiEmbeddings() : await pauseAiEmbeddings();
+                if (key === 'cache') {
+                    const pregen = (cacheStatus && cacheStatus.pregen) || {};
+                    result = pregen.manual_pause || pregen.state === 'paused' ? await startCachePregen() : await stopCachePregen();
+                }
+                if (key === 'people') {
+                    const worker = (peopleStatus && peopleStatus.worker) || {};
+                    result = worker.manual_pause ? await resumePeopleScan() : await pausePeopleScan();
+                }
+                if (key === 'captions') result = captionStatus && captionStatus.active ? await pauseCaptionScan() : await resumeCaptionScan();
+                if (key === 'metadata') result = metadataStatus && metadataStatus.manual_pause ? await startMetadataScan() : await stopMetadataScan();
+                if (!result) showToast('Couldn’t update background work');
+            } catch {
+                showToast('Couldn’t update background work');
+            } finally {
+                workerActionGenerations.set(key, (workerActionGenerations.get(key) || 0) + 1);
+                workerActionsInFlight.delete(key);
             }
-            if (key === 'people') {
-                const worker = (peopleStatus && peopleStatus.worker) || {};
-                result = worker.manual_pause ? await resumePeopleScan() : await pausePeopleScan();
-            }
-            if (key === 'captions') result = captionStatus && captionStatus.active ? await pauseCaptionScan() : await resumeCaptionScan();
-            if (key === 'metadata') result = metadataStatus && metadataStatus.manual_pause ? await startMetadataScan() : await stopMetadataScan();
-            if (!result) showToast('Couldn’t update background work');
             await refreshDrawer();
         }));
     }
@@ -1384,7 +1522,7 @@ function bindDrawerActions() {
         const result = await clearCache();
         if (result && result.ok) {
             cacheStatus = result.cache_stats || await getCacheStatus().catch(() => cacheStatus);
-            renderDrawer();
+            renderCurrentSystemSurface();
             showToast('Cache cleared. Undo is unavailable.');
         } else showToast('Couldn’t clear cache');
     }));
@@ -1418,23 +1556,27 @@ function bindDrawerActions() {
                 state: 'up',
             },
         };
-        renderDrawer();
+        renderCurrentSystemSurface();
         showToast(result.dry_run ? 'HTTPS ready (dry-run)' : 'HTTPS ready on your tailnet');
     }));
     body.querySelector('#drawer-open-shared')?.addEventListener('click', () => {
         closeSystemDrawer();
         setActiveLens('shared');
     });
-    body.querySelector('#drawer-thumb-size')?.addEventListener('input', (event) => setThumbSize(event.target.value));
-    body.querySelector('[data-pref-sel="density"]')?.addEventListener('change', (event) => patchPrefs({ density: event.target.value }));
+    body.querySelector('#drawer-thumb-size')?.addEventListener('change', (event) => {
+        const previous = viewState.thumbSize;
+        setThumbSize(event.target.value);
+        showToast('Setting saved', { undo: () => setThumbSize(previous) });
+    });
+    body.querySelector('[data-pref-sel="density"]')?.addEventListener('change', (event) => applyPreference({ density: event.target.value }));
     for (const input of body.querySelectorAll('[data-pref]')) {
-        input.addEventListener('change', () => patchPrefs({ [input.dataset.pref]: input.checked }));
+        input.addEventListener('change', () => applyPreference({ [input.dataset.pref]: input.checked }));
     }
 }
 
 function startDrawerPolling() {
     clearInterval(drawerTimer);
-    refreshDrawer();
+    refreshDrawer({ initial: true });
     drawerTimer = setInterval(refreshDrawer, 5000);
 }
 
@@ -1447,41 +1589,34 @@ function stopDrawerPolling() {
 }
 
 function resolvePublishReturnTarget() {
-    const title = document.querySelector('#publish-overlay #publish-title')?.textContent || '';
-    const name = title.replace(/^Publish\s+/, '').trim() || 'Collection';
-    const sharedRow = Array.from(document.querySelectorAll('.shared-row'))
-        .find((row) => (row.dataset.name || '') === name);
-    if (sharedRow?.dataset.collectionId) {
-        return { collectionId: Number(sharedRow.dataset.collectionId), name };
-    }
-    const collRow = Array.from(document.querySelectorAll('.coll-row'))
-        .find((row) => (row.dataset.collName || '') === name);
-    if (collRow?.dataset.collId) {
-        return { collectionId: Number(collRow.dataset.collId), name };
-    }
-    if (scope.collectionId && (scope.collectionName || '') === name) {
-        return { collectionId: Number(scope.collectionId), name };
-    }
-    if (scope.collectionId) {
-        return { collectionId: Number(scope.collectionId), name: scope.collectionName || name };
-    }
-    return { collectionId: 0, name };
+    const overlay = document.getElementById('deliver-overlay');
+    return {
+        collectionId: Number(overlay?.dataset.collectionId) || 0,
+        name: overlay?.dataset.collectionName || 'Collection',
+    };
 }
 
 export function openPublishingSettings({ returnTo = null } = {}) {
     publishReturn = returnTo;
     publishingFocusPending = true;
     openSettingSections.add('Publishing');
-    if (open) {
-        renderDrawer();
-        return;
-    }
-    openSystemDrawer();
+    localStorage.setItem('pa_d_system_section', 'publishing');
+    sessionStorage.setItem('pa_d_system_focus_publish', '1');
+    document.dispatchEvent(new CustomEvent('system:section', { detail: 'publishing' }));
+    if (open) closeSystemDrawer();
+    setActiveLens('system');
+}
+
+export function openSystemSettings(section = 'library') {
+    localStorage.setItem('pa_d_system_section', section);
+    document.dispatchEvent(new CustomEvent('system:section', { detail: section }));
+    if (open) closeSystemDrawer();
+    setActiveLens('system');
 }
 
 export function openSystemDrawer() {
     if (open) {
-        if (publishingFocusPending || publishReturn) renderDrawer();
+        if (publishingFocusPending || publishReturn) renderCurrentSystemSurface();
         return;
     }
     const drawer = document.getElementById('drawer');
@@ -1502,7 +1637,6 @@ export function closeSystemDrawer() {
     const drawer = document.getElementById('drawer');
     const scrim = document.getElementById('drawer-scrim');
     open = false;
-    resetConfirmArmed = false;
     publishingFocusPending = false;
     updateDrawerContext();
     scrim.classList.remove('on');
@@ -1520,7 +1654,7 @@ export function systemDrawerOpen() {
 }
 
 export function initDrawer() {
-    document.getElementById('system-btn').addEventListener('click', openSystemDrawer);
+    document.getElementById('system-btn').addEventListener('click', () => openSystemSettings());
     document.getElementById('activity-widget').addEventListener('click', openSystemDrawer);
     document.getElementById('drawer-close').addEventListener('click', closeSystemDrawer);
     document.getElementById('drawer-scrim').addEventListener('click', closeSystemDrawer);
@@ -1532,12 +1666,14 @@ export function initDrawer() {
         }
     });
     document.addEventListener('click', (event) => {
-        const button = event.target.closest('#publish-open-settings');
+        const button = event.target.closest('#publish-open-settings, [data-deliver-open-settings]');
         if (!button) return;
         event.preventDefault();
         event.stopImmediatePropagation();
         const returnTo = resolvePublishReturnTarget();
-        document.getElementById('publish-close')?.click();
+        if (button.matches('[data-deliver-open-settings]')) {
+            document.querySelector('#deliver-overlay #deliver-close')?.click();
+        } else document.getElementById('publish-close')?.click();
         openPublishingSettings({ returnTo });
     }, true);
     on('thumbsize', () => {
@@ -1545,7 +1681,7 @@ export function initDrawer() {
         if (input) input.value = String(viewState.thumbSize);
     });
     on('prefs', () => {
-        if (open) renderDrawer();
+        if (open) renderCurrentSystemSurface();
     });
     refreshActivity();
     activityTimer = setInterval(refreshActivity, 10000);

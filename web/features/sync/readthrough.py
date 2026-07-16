@@ -25,13 +25,14 @@ from urllib.request import Request, urlopen
 import numpy as np
 from PIL import Image
 
+from data import connection as data_connection
 from features.sync import satellite
 
 
 _HASH_LENGTH = 32  # BLAKE2b-128, hex encoded.
 _BASE_MAGIC = b"PABASE1\0"
 _BASE_HEADER_BYTES = 16
-_DEFAULT_TIMEOUT_SECONDS = 20.0
+_DEFAULT_TIMEOUT_SECONDS = 5.0
 
 
 class BaseReadthroughError(RuntimeError):
@@ -50,14 +51,61 @@ def can_read_through() -> bool:
     return is_satellite_mode() and hub_url() is not None
 
 
-def _content_hash_for_image(image_id: int, db_path: str) -> str | None:
+def _open_hub_stream(endpoint: str, *, accept: str, timeout: float = _DEFAULT_TIMEOUT_SECONDS):
+    if not can_read_through():
+        return None
+    headers = {"Accept": accept}
+    headers.update(satellite.hub_request_headers())
+    request = Request(f"{hub_url()}{endpoint}", headers=headers)
     try:
-        with sqlite3.connect(db_path) as conn:
-            row = conn.execute(
-                "SELECT content_hash FROM images WHERE id = ?", (int(image_id),)
-            ).fetchone()
+        return urlopen(request, timeout=timeout)  # noqa: S310 - configured private hub URL.
+    except (HTTPError, URLError, TimeoutError, OSError):
+        return None
+
+
+def open_hub_original(hub_image_id: int, *, timeout: float = _DEFAULT_TIMEOUT_SECONDS):
+    """Open an authenticated streaming response for one hub-owned original."""
+
+    remote_id = int(hub_image_id or 0)
+    if remote_id <= 0:
+        return None
+    return _open_hub_stream(
+        f"/api/sync/original/{remote_id}",
+        accept="application/octet-stream",
+        timeout=timeout,
+    )
+
+
+def open_hub_preview(
+    hub_image_id: int,
+    size: str,
+    *,
+    timeout: float = _DEFAULT_TIMEOUT_SECONDS,
+):
+    """Open a hub preview stream for ZIP delivery of a mirrored gallery row."""
+
+    remote_id = int(hub_image_id or 0)
+    if remote_id <= 0 or size not in {"sm", "md", "lg"}:
+        return None
+    return _open_hub_stream(
+        f"/api/thumb/{size}/{remote_id}",
+        accept="image/jpeg",
+        timeout=timeout,
+    )
+
+
+def _content_hash_for_image(image_id: int, db_path: str) -> str | None:
+    conn = None
+    try:
+        conn = data_connection.open_sync(db_path)
+        row = conn.execute(
+            "SELECT content_hash FROM images WHERE id = ?", (int(image_id),)
+        ).fetchone()
     except sqlite3.Error as exc:
         raise BaseReadthroughError("Satellite content hashes are unavailable locally") from exc
+    finally:
+        if conn is not None:
+            data_connection.close_sync(conn, db_path=db_path)
     if row is None or not isinstance(row[0], str):
         return None
     value = row[0].strip().lower()
@@ -68,7 +116,7 @@ def _content_hash_for_image(image_id: int, db_path: str) -> str | None:
 
 def _request(url: str, *, timeout: float) -> tuple[bytes, str, dict[str, str]]:
     headers = {"Accept": "multipart/mixed, application/gzip, application/json"}
-    headers.update(satellite.device_auth_headers())
+    headers.update(satellite.hub_request_headers())
     request = Request(url, headers=headers)
     try:
         with urlopen(request, timeout=timeout) as response:  # noqa: S310 - hub URL is user configuration.

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import gzip
 import sqlite3
+from contextlib import closing
 import tempfile
 import unittest
 from pathlib import Path
@@ -45,7 +46,7 @@ class SyncEndToEndAcceptanceTests(unittest.TestCase):
         self.client = self.client_context.__enter__()
 
         self.thumb_paths: dict[int, Path] = {}
-        with sqlite3.connect(self.hub_db) as conn:
+        with closing(sqlite3.connect(self.hub_db)) as conn, conn:
             source_id = conn.execute(
                 "INSERT INTO catalog_sources(path, display_name) VALUES (?, ?)",
                 (str(self.root / "originals"), "Hub originals"),
@@ -94,7 +95,7 @@ class SyncEndToEndAcceptanceTests(unittest.TestCase):
 
     @staticmethod
     def _flag(catalog: str, content_hash: str) -> str:
-        with sqlite3.connect(catalog) as conn:
+        with closing(sqlite3.connect(catalog)) as conn, conn:
             return str(conn.execute(
                 "SELECT flag FROM images WHERE content_hash = ?", (content_hash,)
             ).fetchone()[0])
@@ -109,7 +110,7 @@ class SyncEndToEndAcceptanceTests(unittest.TestCase):
             mirror_status = await mirror.refresh()
             self.assertEqual(mirror_status["rows_applied"], 50)
 
-            with sqlite3.connect(self.satellite_db) as conn:
+            with closing(sqlite3.connect(self.satellite_db)) as conn, conn:
                 mirrored = conn.execute(
                     "SELECT COUNT(*), SUM(missing_at IS NOT NULL), MIN(hub_remote), MAX(hub_remote) "
                     "FROM images i JOIN catalog_sources s ON s.id = i.source_id WHERE s.path = 'hub://'"
@@ -140,7 +141,7 @@ class SyncEndToEndAcceptanceTests(unittest.TestCase):
             self.assertEqual(first_exchange["pushed"], 1)
             self.assertEqual(self._flag(self.hub_db, f"{1:032x}"), "picked")
 
-            with sqlite3.connect(self.hub_db) as conn:
+            with closing(sqlite3.connect(self.hub_db)) as conn, conn:
                 second_hub_id = int(conn.execute(
                     "SELECT id FROM images WHERE content_hash = ?", (f"{2:032x}",)
                 ).fetchone()[0])
@@ -150,7 +151,7 @@ class SyncEndToEndAcceptanceTests(unittest.TestCase):
             self.assertEqual(self._flag(self.satellite_db, f"{2:032x}"), "rejected")
 
             satellite_cursors = await oplog.local_cursors(self.satellite_db)
-            with sqlite3.connect(self.hub_db) as conn:
+            with closing(sqlite3.connect(self.hub_db)) as conn, conn:
                 hub_cursors = dict(conn.execute(
                     "SELECT origin, MAX(origin_seq) FROM oplog GROUP BY origin"
                 ))
@@ -159,6 +160,72 @@ class SyncEndToEndAcceptanceTests(unittest.TestCase):
                 await oplog.exchange_with_hub(self.satellite_db, self._json_request),
                 {"pushed": 0, "pulled": 0},
             )
+
+        asyncio.run(scenario())
+
+    def test_hub_rejected_stale_rating_cannot_rewind_through_fresh_mirror(self):
+        async def scenario():
+            content_hash = f"{1:032x}"
+            winner = {
+                "origin": "camera-a",
+                "origin_seq": 1,
+                "content_hash": content_hash,
+                "family": "rating",
+                "payload": {"value": 5},
+                "ts": 300.0,
+            }
+            stale = {
+                "origin": "camera-b",
+                "origin_seq": 1,
+                "content_hash": content_hash,
+                "family": "rating",
+                "payload": {"value": 3},
+                "ts": 250.0,
+            }
+
+            await oplog.apply_entries(
+                self.hub_db,
+                [winner],
+                applied_from="camera-a",
+                receive_time=500.0,
+            )
+            rejected = await oplog.apply_entries(
+                self.hub_db,
+                [stale],
+                applied_from="camera-b",
+                receive_time=500.0,
+            )
+            self.assertEqual(rejected["entries"][0]["result"], "stale-or-replayed")
+
+            mirror = MirrorPuller(
+                db_path=self.satellite_db,
+                hub="http://test-hub",
+                request=self._request,
+            )
+            await mirror.refresh()
+            replayed = await oplog.apply_entries(
+                self.satellite_db,
+                [stale],
+                applied_from="camera-b",
+                receive_time=500.0,
+            )
+
+            with closing(sqlite3.connect(self.satellite_db)) as conn, conn:
+                rating = conn.execute(
+                    "SELECT json_extract(develop.settings, '$._lr_rating') "
+                    "FROM images JOIN develop_settings develop ON develop.image_id = images.id "
+                    "WHERE images.content_hash = ?",
+                    (content_hash,),
+                ).fetchone()[0]
+                rating_clock = conn.execute(
+                    "SELECT ts, origin, origin_seq FROM oplog_family_state "
+                    "WHERE content_hash = ? AND family = 'rating'",
+                    (content_hash,),
+                ).fetchone()
+
+            self.assertEqual(replayed["entries"][0]["result"], "stale-or-replayed")
+            self.assertEqual(rating, 5)
+            self.assertEqual(rating_clock, (300.0, "camera-a", 1))
 
         asyncio.run(scenario())
 

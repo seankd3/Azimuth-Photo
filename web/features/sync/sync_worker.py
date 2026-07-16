@@ -17,26 +17,30 @@ import settings
 from data import connection
 from features.sync.mirror import MirrorPuller
 from features.sync.prefetch import ThumbPrefetcher
-from features.sync import oplog, satellite
-from features.sync.versioning import hub_compatibility
+from features.sync import contract, oplog, satellite
+from features.sync.executor import run_sync_work
+from features.trash import remote as trash_remote
+from features.trash import service as trash_service
 
 
 log = logging.getLogger(__name__)
 CHUNK_BYTES = 32 * 1024 * 1024
 RequestFn = Callable[..., Awaitable[tuple[int, dict, bytes]]]
+_BASE_IDLE_SECONDS = 15.0
+_MAX_BACKOFF_SECONDS = 300.0
 
 
 async def _urllib_request(method: str, url: str, *, body: bytes | None = None, headers: dict | None = None) -> tuple[int, dict, bytes]:
     def request() -> tuple[int, dict, bytes]:
         request_headers = dict(headers or {})
-        request_headers.update(satellite.device_auth_headers())
+        request_headers.update(satellite.hub_request_headers())
         req = urllib.request.Request(url, data=body, headers=request_headers, method=method)
         try:
             with urllib.request.urlopen(req, timeout=30) as response:
                 return response.status, dict(response.headers), response.read()
         except urllib.error.HTTPError as error:
             return error.code, dict(error.headers or {}), error.read()
-    return await asyncio.to_thread(request)
+    return await run_sync_work(request)
 
 
 class SyncWorker:
@@ -44,12 +48,17 @@ class SyncWorker:
         self.db_path = db_path
         self.hub = (hub or satellite.hub_url()).rstrip("/")
         self._request = request or _urllib_request
-        self.mirror = MirrorPuller(db_path=db_path, hub=self.hub, request=self._request)
-        self.prefetch = ThumbPrefetcher(db_path=db_path, hub=self.hub, request=self._request)
+        self.mirror = MirrorPuller(db_path=db_path, hub=self.hub, request=self._hub_request)
+        self.prefetch = ThumbPrefetcher(db_path=db_path, hub=self.hub, request=self._hub_request)
         self._force_mirror_refresh = False
+        self._force_contract_refresh = False
         self._paused = False
         self._stop = asyncio.Event()
         self._wake = asyncio.Event()
+        self._failure_streak = 0
+        self._pending_trash_failure_streak = 0
+        self._pending_trash_next_attempt = 0.0
+        self._next_idle_seconds = _BASE_IDLE_SECONDS
         self._status: dict[str, Any] = {
             "mode": "satellite",
             "paused": False,
@@ -59,7 +68,8 @@ class SyncWorker:
             "current_file": None,
             "recent_errors": [],
             "last_sync_at": None,
-            **hub_compatibility(None),
+            "backoff_seconds": 0,
+            "pending_hub_trash": 0,
         }
 
     def status(self) -> dict:
@@ -68,6 +78,7 @@ class SyncWorker:
             "paused": self._paused,
             "mirror": self.mirror.status(),
             "prefetch": self.prefetch.status(),
+            **contract.hub_status(self.hub),
         }
 
     def pause(self) -> None:
@@ -80,6 +91,7 @@ class SyncWorker:
 
     def sync_now(self) -> None:
         self._force_mirror_refresh = True
+        self._force_contract_refresh = True
         self._wake.set()
 
     def stop(self) -> None:
@@ -91,20 +103,46 @@ class SyncWorker:
             if not self._paused:
                 try:
                     await self.sync_once()
+                    self._clear_backoff()
                 except asyncio.CancelledError:
                     raise
                 except Exception as error:
                     self._error(error)
+                    self._note_failure(error)
             self._wake.clear()
+            idle = self._next_idle_seconds if not self._paused else 3600.0
             try:
-                await asyncio.wait_for(self._wake.wait(), timeout=15.0 if not self._paused else 3600.0)
+                await asyncio.wait_for(self._wake.wait(), timeout=idle)
             except asyncio.TimeoutError:
                 pass
+
+    def _clear_backoff(self) -> None:
+        self._failure_streak = 0
+        self._next_idle_seconds = _BASE_IDLE_SECONDS
+        self._status["backoff_seconds"] = 0
+
+    def _note_failure(self, error: Exception) -> None:
+        message = str(error).lower()
+        # Timing-out / unreachable hubs must not hot-loop every 15s.
+        transient = any(
+            token in message
+            for token in ("timed out", "timeout", "temporarily unavailable", "connection refused", "unreachable", "name or service not known")
+        )
+        if not transient:
+            self._next_idle_seconds = _BASE_IDLE_SECONDS
+            self._status["backoff_seconds"] = 0
+            return
+        self._failure_streak += 1
+        backoff = min(_MAX_BACKOFF_SECONDS, _BASE_IDLE_SECONDS * (2 ** min(self._failure_streak, 5)))
+        self._next_idle_seconds = backoff
+        self._status["backoff_seconds"] = backoff
 
     async def sync_once(self) -> None:
         if not self.hub:
             raise RuntimeError("PHOTOARCHIVE_HUB_URL is required for satellite sync")
-        await self.refresh_hub_version()
+        await self.refresh_hub_contract(force=self._force_contract_refresh)
+        self._force_contract_refresh = False
+        await self._retry_pending_hub_trash()
         items = await satellite.record_local_images(self.db_path)
         self._refresh_queue(items)
         pushed = False
@@ -137,7 +175,40 @@ class SyncWorker:
             await self._run_prefetch()
         self._status["last_sync_at"] = time.time()
         self._status["current_file"] = None
-        self._refresh_queue(await satellite.record_local_images(self.db_path))
+        self._refresh_queue(await satellite.pending_upload_snapshot(self.db_path))
+
+    async def _retry_pending_hub_trash(self) -> None:
+        """Drain durable satellite Trash work without turning it into a hot loop."""
+
+        refs = await trash_service.pending_hub_trash_refs(self.db_path)
+        self._status["pending_hub_trash"] = int(refs["count"])
+        if not refs["count"] or time.time() < self._pending_trash_next_attempt:
+            return
+        if not await contract.hub_supports(
+            "trash.scoped_empty", hub=self.hub, request=self._hub_request
+        ):
+            return
+        if len(refs["hub_image_ids"]) != refs["count"]:
+            self._schedule_pending_trash_retry("Some synced photos are missing their hub identity.")
+            return
+        try:
+            result = await trash_remote.empty_hub_trash(self.hub, refs["hub_image_ids"])
+            if result.get("errors") or int(result.get("skipped_offline") or 0):
+                raise trash_remote.HubTrashRequestError("The hub could not permanently remove every synced photo.")
+            await trash_service.empty_trash(self.db_path, image_ids=refs["image_ids"])
+        except trash_remote.HubTrashRequestError as error:
+            self._schedule_pending_trash_retry(str(error))
+            return
+        self._pending_trash_failure_streak = 0
+        self._pending_trash_next_attempt = 0.0
+        self._status["pending_hub_trash"] = int((await trash_service.pending_hub_trash_refs(self.db_path))["count"])
+
+    def _schedule_pending_trash_retry(self, message: str) -> None:
+        self._pending_trash_failure_streak += 1
+        delay = min(_MAX_BACKOFF_SECONDS, _BASE_IDLE_SECONDS * (2 ** min(self._pending_trash_failure_streak, 5)))
+        self._pending_trash_next_attempt = time.time() + delay
+        self._status["pending_hub_retry_at"] = self._pending_trash_next_attempt
+        self._error(RuntimeError(message))
 
     async def _upload(self, item: dict) -> None:
         content_hash = item["content_hash"]
@@ -153,7 +224,7 @@ class SyncWorker:
                 if not chunk:
                     raise RuntimeError(f"Original changed during sync: {item['filename']}")
                 started = time.monotonic()
-                status_code, _headers, body = await self._request(
+                status_code, _headers, body = await self._hub_request(
                     "POST",
                     self.hub + f"/api/sync/upload/{content_hash}",
                     body=chunk,
@@ -171,7 +242,7 @@ class SyncWorker:
                 offset += len(chunk)
                 self._status["bytes_remaining"] = max(0, int(self._status["bytes_remaining"]) - len(chunk))
                 await self._cap_bandwidth(len(chunk), elapsed)
-        status_code, _headers, body = await self._request(
+        status_code, _headers, body = await self._hub_request(
             "POST",
             self.hub + f"/api/sync/upload/{content_hash}",
             body=b"",
@@ -228,8 +299,8 @@ class SyncWorker:
 
     async def _run_prefetch(self) -> None:
         try:
-            await self.prefetch.prefetch_once(size="sm")
-            await self.prefetch.prefetch_once(size="md")
+            # Browse (`sm`) exclusively until complete; only then fill loupe (`md`).
+            await self.prefetch.prefetch_browse_first()
             await self.prefetch.seed_predictive()
             await self.prefetch.run_predictive_once(uploads_active=bool(self._status.get("current_file")))
         except Exception as error:
@@ -301,27 +372,21 @@ class SyncWorker:
     async def _json(self, method: str, path: str, payload: dict | None = None) -> dict:
         body = json.dumps(payload, separators=(",", ":")).encode() if payload is not None else None
         headers = {"Content-Type": "application/json"} if body is not None else {}
-        status_code, _headers, response = await self._request(method, self.hub + path, body=body, headers=headers)
+        status_code, _headers, response = await self._hub_request(method, self.hub + path, body=body, headers=headers)
         if not 200 <= status_code < 300:
             raise RuntimeError(f"sync {method} {path} failed ({status_code}): {response.decode(errors='replace')[:300]}")
         return json.loads(response or b"{}")
 
-    async def refresh_hub_version(self) -> None:
-        """Refresh compatibility non-fatally; old hubs must not stop normal sync."""
+    async def _hub_request(self, method: str, url: str, *, body: bytes | None = None, headers: dict | None = None):
+        """Attach the revision header to every request made by this satellite."""
 
-        try:
-            status_code, _headers, response = await self._request(
-                "GET", f"{self.hub}/api/version", headers={}
-            )
-            if not 200 <= status_code < 300:
-                self._status.update(hub_compatibility(None))
-                return
-            payload = json.loads(response or b"{}")
-            version = payload.get("version") if isinstance(payload, dict) else None
-            self._status.update(hub_compatibility(version))
-        except (OSError, ValueError, json.JSONDecodeError):
-            # A transient probe failure is not a compatibility verdict.
-            return
+        outbound_headers = {**dict(headers or {}), **contract.request_headers()}
+        return await self._request(method, url, body=body, headers=outbound_headers)
+
+    async def refresh_hub_contract(self, *, force: bool = False) -> None:
+        """Refresh once at startup, then use the ten-minute shared cache."""
+
+        await contract.refresh_hub_contract(self.hub, request=self._hub_request, force=force)
 
     async def _set_uploaded(self, content_hashes: set[str]) -> None:
         if not content_hashes:

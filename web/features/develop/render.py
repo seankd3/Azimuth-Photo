@@ -623,6 +623,21 @@ async def render_export_response(
     )
 
 
+def default_render_color_profile(meta: Mapping[str, object] | None) -> dict[str, object]:
+    """Return the cache-native color payload used by the default renderer.
+
+    Request-time metadata may also contain a resolved Adobe profile for the
+    profile caption and explicit profile workflows.  The known-good library
+    preview is intentionally based on the cache's as-shot decode plus its
+    fitted camera profile, so the interactive canvas must receive this exact
+    subset instead of silently switching renderers when Develop opens.
+    """
+    color = dict(meta.get("color") or {}) if isinstance(meta, Mapping) else {}
+    if isinstance(meta, Mapping) and meta.get("base_kind"):
+        color["base_kind"] = meta["base_kind"]
+    return color
+
+
 def develop_default_render(
     linear01: np.ndarray, meta: Mapping[str, object] | None, settings: Mapping[str, object] | None = None
 ) -> np.ndarray:
@@ -635,9 +650,7 @@ def develop_default_render(
     """
     settings = settings or {}
     as_shot = meta.get("as_shot") if isinstance(meta, Mapping) else None
-    color = dict(meta.get("color") or {}) if isinstance(meta, Mapping) else {}
-    if isinstance(meta, Mapping) and meta.get("base_kind"):
-        color["base_kind"] = meta["base_kind"]
+    color = default_render_color_profile(meta)
     return apply_pipeline(
         linear01,
         settings,

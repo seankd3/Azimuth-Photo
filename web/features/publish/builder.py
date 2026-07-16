@@ -1,4 +1,4 @@
-"""Build static public gallery bundles from photoArchive collections."""
+"""Build static public gallery bundles from Azimuth Photo collections."""
 
 from __future__ import annotations
 
@@ -68,6 +68,7 @@ async def build_public_gallery_bundle(
     collection_image_ids=None,
     resolve_smart_image_ids=None,
     thumbnails: Any,
+    navigation: dict | None = None,
 ) -> BundleSummary:
     collection = await get_collection(int(collection_id), limit=1, offset=0)
     if collection is None:
@@ -89,12 +90,14 @@ async def build_public_gallery_bundle(
     try:
         await asyncio.to_thread((work_target / "thumb" / "sm").mkdir, parents=True, exist_ok=True)
         await asyncio.to_thread((work_target / "img").mkdir, parents=True, exist_ok=True)
+        await asyncio.to_thread((work_target / "lg").mkdir, parents=True, exist_ok=True)
 
         gallery_images = []
         for image in images:
             image_id = int(image["id"])
             thumb_path = work_target / "thumb" / "sm" / f"{image_id}.jpg"
             preview_path = work_target / "img" / f"{image_id}.jpg"
+            download_path = work_target / "lg" / f"{image_id}.jpg"
             try:
                 await _write_cached_jpeg(
                     thumbnails=thumbnails,
@@ -108,10 +111,17 @@ async def build_public_gallery_bundle(
                     size="md",
                     output_path=preview_path,
                 )
+                await _write_cached_jpeg(
+                    thumbnails=thumbnails,
+                    image=image,
+                    size="lg",
+                    output_path=download_path,
+                )
             except GalleryImageUnavailable as exc:
                 await asyncio.gather(
                     asyncio.to_thread(thumb_path.unlink, missing_ok=True),
                     asyncio.to_thread(preview_path.unlink, missing_ok=True),
+                    asyncio.to_thread(download_path.unlink, missing_ok=True),
                 )
                 log.warning(
                     "worker=publish image_id=%s skipped unavailable image: %s",
@@ -127,8 +137,8 @@ async def build_public_gallery_bundle(
                     "date_taken": image.get("date_taken"),
                     "thumb": f"./thumb/sm/{image_id}.jpg",
                     "preview": f"./img/{image_id}.jpg",
-                    "full": f"./img/{image_id}.jpg",
-                    "download": f"./img/{image_id}.jpg",
+                    "full": f"./lg/{image_id}.jpg",
+                    "download": f"./lg/{image_id}.jpg",
                     "download_name": _download_name(image_id, image.get("filename") or ""),
                 }
             )
@@ -157,6 +167,9 @@ async def build_public_gallery_bundle(
             date_range=date_range,
             brand=brand,
             gallery_json=gallery_json,
+            og_image=(f"{str(settings.get_settings().get('publish_site_base_url') or '').rstrip('/')}/g/{slug}/img/{gallery_images[0]['id']}.jpg" if gallery_images else ""),
+            parent_gallery=(navigation or {}).get("parent"),
+            child_galleries=(navigation or {}).get("children", []),
         )
         await asyncio.to_thread((work_target / "index.html").write_text, html, "utf-8")
         bundle_bytes, file_count = await asyncio.to_thread(_bundle_size, work_target)
@@ -183,6 +196,7 @@ async def build_published_node_bundle(
     destination: str | Path,
     templates: Jinja2Templates,
     thumbnails: Any,
+    navigation: dict | None = None,
 ) -> BundleSummary:
     """Build one destination node with the legacy gallery renderer."""
 
@@ -208,6 +222,7 @@ async def build_published_node_bundle(
         get_images_by_ids=get_images_by_ids,
         collection_image_ids=collection_image_ids,
         thumbnails=thumbnails,
+        navigation=navigation,
     )
 
 
@@ -228,18 +243,27 @@ async def export_website_tree(
     root = Path(destination)
     await asyncio.to_thread(root.mkdir, parents=True, exist_ok=True)
     images_by_node: dict[int, list[dict]] = {}
+    expected_paths: set[Path] = set()
 
     async def write_subtree(node: dict, parent_path: Path) -> None:
         node_id = int(node["id"])
         images = await published_nodes.node_images(db_path, node_id) or []
         images_by_node[node_id] = images
         node_path = parent_path / node["slug"]
+        expected_paths.add(node_path.relative_to(root))
+        child_cards = []
+        for child in children.get(node_id, []):
+            child_images = await published_nodes.node_images(db_path, int(child["id"])) or []
+            cover_id = int(child_images[0]["id"]) if child_images else None
+            child_cards.append({"name": child["title"], "count": len(child_images), "url": f"./{child['slug']}/", "cover": f"./{child['slug']}/thumb/sm/{cover_id}.jpg" if cover_id else ""})
+        parent = next((item for item in tree["nodes"] if item["id"] == node.get("parent_id")), None)
         await build_published_node_bundle(
             node=node,
             images=images,
             destination=node_path,
             templates=templates,
             thumbnails=thumbnails,
+            navigation={"parent": {"name": parent["title"], "url": "../"} if parent else None, "children": child_cards},
         )
         for child in children.get(node_id, []):
             await write_subtree(child, node_path)
@@ -247,9 +271,46 @@ async def export_website_tree(
     for root_node in children.get(None, []):
         await write_subtree(root_node, root)
 
+    await asyncio.to_thread(_prune_orphaned_export_dirs, root, expected_paths)
     manifest = website_tree_manifest(tree, images_by_node)
     await asyncio.to_thread(_write_json_atomic, root / "manifest.json", manifest)
     return manifest
+
+
+def _prune_orphaned_export_dirs(root: Path, expected_paths: set[Path]) -> None:
+    """Remove stale bundle directories without ever traversing export-root symlinks."""
+    if root.is_symlink():
+        log.warning("worker=publish refusing to prune symlinked export root: %s", root)
+        return
+    try:
+        resolved_root = root.resolve(strict=True)
+    except FileNotFoundError:
+        return
+    if not resolved_root.is_dir():
+        return
+
+    keep: set[Path] = set()
+    for relative in expected_paths:
+        if relative.is_absolute() or any(part in {"", ".", ".."} for part in relative.parts):
+            raise ValueError(f"Unsafe export path: {relative}")
+        for parent in (relative, *relative.parents):
+            if parent != Path("."):
+                keep.add(parent)
+
+    for current, directories, _files in os.walk(root, topdown=False, followlinks=False):
+        current_path = Path(current)
+        for name in directories:
+            candidate = current_path / name
+            if candidate.is_symlink():
+                continue
+            try:
+                relative = candidate.relative_to(root)
+                candidate.resolve(strict=True).relative_to(resolved_root)
+            except (FileNotFoundError, ValueError):
+                log.warning("worker=publish refusing to prune outside export root: %s", candidate)
+                continue
+            if relative not in keep:
+                shutil.rmtree(candidate)
 
 
 def website_tree_manifest(tree: dict, images_by_node: dict[int, list[dict]]) -> dict:
@@ -358,6 +419,21 @@ def _replace_bundle_dir(work_target: Path, target: Path) -> None:
 
 
 def _atomic_exchange_paths(source: Path, target: Path) -> None:
+    if platform.system() == "Windows":
+        # No RENAME_EXCHANGE on NTFS: rename-aside with rollback. The window
+        # where the target is briefly absent is accepted for standalone
+        # installs; the hook/deploy layer republishes the whole bundle anyway.
+        backup = target.with_name(target.name + ".previous")
+        shutil.rmtree(backup, ignore_errors=True)
+        os.rename(target, backup)
+        try:
+            os.rename(source, target)
+        except OSError:
+            os.rename(backup, target)
+            raise
+        shutil.rmtree(backup, ignore_errors=True)
+        # The caller removes the swapped-out work dir; nothing remains here.
+        return
     if platform.system() != "Linux":
         raise RuntimeError("Atomic gallery republish requires Linux rename exchange support.")
     renameat2_syscall = _renameat2_syscall_number()

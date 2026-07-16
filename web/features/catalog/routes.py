@@ -29,6 +29,7 @@ log = logging.getLogger(__name__)
 
 class RevealBody(BaseModel):
     path: str = Field(min_length=1, max_length=4096)
+    source_id: int | None = Field(default=None, ge=1)
 
 
 InvalidatePairing = Callable[..., None]
@@ -152,7 +153,21 @@ async def scan_prefetch_on_batch(count):
         )
 
 
-async def _run_scan(folder: str, source_id: int) -> None:
+async def _is_first_run_import() -> bool:
+    if settings.get_settings().get("setup_completed"):
+        return False
+    catalog = await _configured(_get_catalog_summary)()
+    return not catalog.get("sources") and int(catalog.get("stats", {}).get("total_images") or 0) == 0
+
+
+def _start_first_run_pipeline() -> None:
+    thumbnails.start_pregeneration()
+    catalog_metadata.resume_catalog_metadata()
+
+
+async def _run_scan(folder: str, source_id: int, *, first_run: bool = False) -> None:
+    if first_run:
+        _start_first_run_pipeline()
     await scanner.scan_folder(folder, source_id=source_id, on_batch=scan_prefetch_on_batch)
     # Invalidate read caches at COMPLETION too — _catalog_changed at scan start
     # is not enough: a grid query during the scan re-primes a stale empty
@@ -185,11 +200,12 @@ async def start_scan(request: Request):
         return JSONResponse({"error": "Scan already in progress"}, status_code=409)
 
     try:
+        first_run = await _is_first_run_import()
         source = await _configured(_add_or_restore_source)(folder)
     except Exception:
         scanner.release_scan_claim()
         raise
-    asyncio.create_task(_run_scan(source["path"], int(source["id"])))
+    asyncio.create_task(_run_scan(source["path"], int(source["id"]), first_run=first_run))
     _catalog_changed(matchups=True)
     return {"status": "started", "folder": source["path"], "source_id": source["id"]}
 
@@ -475,13 +491,14 @@ async def api_add_catalog_source(request: Request):
         return JSONResponse({"error": "Scan already in progress"}, status_code=409)
 
     try:
+        first_run = await _is_first_run_import()
         source = await _configured(_add_or_restore_source)(folder)
     except Exception:
         if scan:
             scanner.release_scan_claim()
         raise
     if scan:
-        asyncio.create_task(_run_scan(source["path"], int(source["id"])))
+        asyncio.create_task(_run_scan(source["path"], int(source["id"]), first_run=first_run))
     _catalog_changed(matchups=True)
     return {
         "ok": True,
@@ -568,15 +585,18 @@ def add_folder_counts(
         rel = safe_relpath(directory, root)
         if rel is None:
             rel = directory
+    # Folder keys are '/'-separated in every payload, on every platform —
+    # the desktop JS splits on '/'. Rows may carry native or hub separators.
+    rel = rel.replace("\\", "/")
     start = 0
     while True:
-        idx = rel.find(os.sep, start)
+        idx = rel.find("/", start)
         if idx < 0:
-            if max_depth is None or rel.count(os.sep) <= max_depth:
+            if max_depth is None or rel.count("/") <= max_depth:
                 folder_counts[rel] = folder_counts.get(rel, 0) + count
             return
         key = rel[:idx]
-        if max_depth is None or key.count(os.sep) <= max_depth:
+        if max_depth is None or key.count("/") <= max_depth:
             folder_counts[key] = folder_counts.get(key, 0) + count
         start = idx + 1
 
@@ -609,7 +629,7 @@ def build_source_level_folders_payload(sources: list[tuple[int, str, int]]) -> d
             continue
         rel = safe_relpath(source_path, root) or os.path.basename(source_path.rstrip(os.sep)) or "."
         folders.append({
-            "path": rel if rel != "." else os.path.basename(source_path.rstrip(os.sep)) or ".",
+            "path": rel.replace("\\", "/") if rel != "." else os.path.basename(source_path.rstrip(os.sep)) or ".",
             "count": int(active_image_count or 0),
             "depth": 0,
         })
@@ -662,7 +682,7 @@ def build_folders_payload(max_depth: int | None = None) -> dict:
     for directory, count in directory_counts.items():
         add_folder_counts(folder_counts, root, directory, count, max_depth=max_depth)
 
-    folders = [{"path": k, "count": v, "depth": k.count(os.sep)}
+    folders = [{"path": k, "count": v, "depth": k.count("/")}
                for k, v in sorted(folder_counts.items())]
     return {"folders": folders, "root": root}
 
@@ -688,11 +708,19 @@ def folder_path_for_parts(source_path: str, parts: list[str]) -> str:
     return os.path.join(catalog_repository.normalize_source_path(source_path), *parts)
 
 
-def make_folder_node(source_path: str, parts: list[str]) -> dict:
+def make_folder_node(
+    source_path: str,
+    parts: list[str],
+    *,
+    source_id: int = 0,
+    reveal_available: bool = True,
+) -> dict:
     path = folder_path_for_parts(source_path, parts)
     return {
         "path": path,
         "name": os.path.basename(path.rstrip(os.sep)) or path,
+        "source_id": source_id,
+        "reveal_available": reveal_available,
         "count": 0,
         "total_count": 0,
         "children": [],
@@ -712,8 +740,11 @@ def serialize_folder_node(node: dict) -> dict | None:
         if serialized is not None:
             children.append(serialized)
     return {
-        "path": node["path"],
+        # API folder keys are '/' on every platform (reveal handles both).
+        "path": str(node["path"]).replace("\\", "/"),
         "name": node["name"],
+        "source_id": int(node.get("source_id") or 0),
+        "reveal_available": bool(node.get("reveal_available", True)),
         "count": int(node.get("count") or 0),
         "total_count": int(node.get("total_count") or 0),
         "children": children,
@@ -731,7 +762,13 @@ def build_folder_tree_payload_from_rows(
     for source in sources:
         source_id = int(source.get("id") or 0)
         source_path = source.get("path") or ""
-        root = make_folder_node(source_path, [])
+        reveal_available = catalog_reveal.source_has_local_folders(source_path)
+        root = make_folder_node(
+            source_path,
+            [],
+            source_id=source_id,
+            reveal_available=reveal_available,
+        )
         for directory, raw_count in directory_counts_by_source.get(source_id, {}).items():
             count = int(raw_count or 0)
             if count <= 0:
@@ -748,7 +785,12 @@ def build_folder_tree_payload_from_rows(
                 name = capped_parts[depth]
                 child = node["_children_by_name"].get(name)
                 if child is None:
-                    child = make_folder_node(source_path, capped_parts[:depth + 1])
+                    child = make_folder_node(
+                        source_path,
+                        capped_parts[:depth + 1],
+                        source_id=source_id,
+                        reveal_available=reveal_available,
+                    )
                     node["_children_by_name"][name] = child
                 child["total_count"] += count
                 node = child
@@ -757,9 +799,10 @@ def build_folder_tree_payload_from_rows(
 
         payload_sources.append({
             "id": source_id,
-            "path": catalog_repository.normalize_source_path(source_path),
+            "path": source_path if not reveal_available else catalog_repository.normalize_source_path(source_path),
             "display_name": source.get("display_name") or catalog_repository.source_display_name(source_path),
             "online": bool(source.get("online")),
+            "reveal_available": reveal_available,
             "count": int(root["count"] or 0),
             "total_count": int(root["total_count"] or 0),
             "folders": [
@@ -850,6 +893,18 @@ async def api_folders_tree():
 async def api_reveal(body: RevealBody):
     """Open a catalog folder in the host OS file manager."""
 
+    if not catalog_reveal.source_has_local_folders(body.path):
+        return JSONResponse(
+            {"ok": False, "error": "Reveal is only available for local folders"},
+            status_code=400,
+        )
+    if body.source_id is not None:
+        source = await catalog_repository.get_source(_configured_db_path(), body.source_id)
+        if source is not None and not catalog_reveal.source_has_local_folders(source["path"]):
+            return JSONResponse(
+                {"ok": False, "error": "Reveal is only available for local folders"},
+                status_code=400,
+            )
     roots = await import_repository.catalog_source_paths(_configured_db_path())
     result = await asyncio.to_thread(catalog_reveal.reveal_folder, body.path, roots)
     if result.get("ok"):

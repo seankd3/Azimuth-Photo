@@ -6,6 +6,9 @@ import asyncio
 import os
 import socket
 
+from fastapi import Request
+from fastapi.responses import JSONResponse
+
 from core import wiring
 from core.app_factory import create_app
 from features.develop import ai_mask_routes, hdr_routes, import_routes, pano_routes, preset_routes, routes as develop_routes, xmp_write_routes
@@ -16,10 +19,22 @@ from features.media import routes as media_routes
 from features.quality import routes as quality_routes
 from features.system import backup_routes, version_routes
 from features.sync import hub_routes, mdns, oplog_routes, pair_routes, pairing, satellite, satellite_routes
+from features.sync.contract import ApiRevisionMismatch
 from features.sync.sync_worker import SyncWorker, configure_worker
 
 
 app = create_app()
+
+
+@app.exception_handler(ApiRevisionMismatch)
+async def api_revision_mismatch(_request: Request, _error: ApiRevisionMismatch):
+    return JSONResponse(
+        status_code=409,
+        content={
+            "detail": "This hub needs an update before it can safely perform that action.",
+            "code": "api_rev_mismatch",
+        },
+    )
 wiring.configure_develop_routes()
 wiring.configure_develop_import_routes()
 wiring.configure_develop_preset_routes()
@@ -37,10 +52,12 @@ gallery_routes.configure(db_path=lambda: _db.DB_PATH, thumbnail_response=media_r
 export_presets.configure(db_path=lambda: _db.DB_PATH)
 hub_routes.configure(db_path=lambda: _db.DB_PATH)
 oplog_routes.configure(db_path=lambda: _db.DB_PATH)
+pair_routes.configure(db_path=lambda: _db.DB_PATH)
 app.include_router(hdr_routes.router)
 app.include_router(pano_routes.router)
 app.include_router(ai_mask_routes.router)
 app.include_router(preset_routes.router)
+app.include_router(export_presets.router)
 app.include_router(develop_routes.router)
 app.include_router(import_routes.router)
 app.include_router(xmp_write_routes.router)
@@ -48,7 +65,6 @@ app.include_router(saved_views.router)
 app.include_router(geo_routes.router)
 app.include_router(keyword_routes.router)
 app.include_router(gallery_routes.router)
-app.include_router(export_presets.router)
 app.include_router(backup_routes.router)
 app.include_router(version_routes.router)
 app.include_router(quality_routes.router)
@@ -102,7 +118,7 @@ async def _start_hub_mdns():
         str(_settings.get_settings().get("share_brand_name") or "").strip()
         or os.environ.get("PHOTOARCHIVE_LIBRARY_NAME", "").strip()
         or socket.gethostname()
-        or "photoArchive"
+        or "Azimuth Photo"
     )
     port = int(os.environ.get("PHOTOARCHIVE_PORT") or 8000)
     await asyncio.to_thread(mdns.start_hub_announce, name=name, port=port, hub_id=hub_id)

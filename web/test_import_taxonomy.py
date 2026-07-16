@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from PIL import Image
@@ -93,6 +95,40 @@ class TaxonomyRoutingTableTests(unittest.TestCase):
             ),
             "film_scan",
         )
+
+    def test_windows_phone_camera_path_routes_to_personal_photos(self):
+        kind = taxonomy.infer_source_kind(
+            filename="PXL_20260715.jpg",
+            path=r"D:\DCIM\Camera\PXL_20260715.jpg",
+        )
+
+        self.assertEqual(kind, "phone")
+        self.assertEqual(
+            taxonomy.route_destination(filename="PXL_20260715.jpg", source_kind=kind),
+            taxonomy.DEST_PERSONAL,
+        )
+
+
+class CardPlatformTests(unittest.TestCase):
+    def test_windows_fixed_drive_is_eligible_only_when_it_exposes_dcim(self):
+        self.assertTrue(card._is_windows_card_drive(card.WINDOWS_DRIVE_REMOVABLE, has_dcim=False))
+        self.assertTrue(card._is_windows_card_drive(card.WINDOWS_DRIVE_FIXED, has_dcim=True))
+        self.assertFalse(card._is_windows_card_drive(card.WINDOWS_DRIVE_FIXED, has_dcim=False))
+
+    def test_copy_verified_falls_back_when_hardlinks_are_unsupported(self):
+        with tempfile.TemporaryDirectory() as root:
+            source = Path(root) / "card" / "IMAGE.CR3"
+            destination = Path(root) / "library"
+            source.parent.mkdir()
+            source.write_bytes(b"verified exfat payload")
+
+            with patch.object(os, "link", side_effect=OSError(errno.EPERM, "hardlinks unsupported")):
+                result = card.copy_verified(str(source), str(destination), retry_count=0)
+
+            landed = Path(result["destination"])
+            self.assertEqual(landed.read_bytes(), source.read_bytes())
+            self.assertEqual(card.compute_full_hash(landed), result["full_hash"])
+            self.assertFalse(any(destination.glob("*.importing")))
 
 
 class StagedImportTaxonomyTests(BackendTestCase):
@@ -317,6 +353,47 @@ class ReclassifyGatedTests(BackendTestCase):
         good = library / "Personal Photos" / "2026" / "2026-07-10" / "PXL_stranded.jpg"
         self.assertTrue(good.is_file())
         self.assertFalse(stranded.exists())
+
+    async def test_reclassify_personal_http_moves_only_stranded_rows_and_is_idempotent(self):
+        library = Path(self.tempdir.name) / "Photos"
+        bad = library / "RAWS" / "Personal Photos" / "2026" / "2026-07-10"
+        bad.mkdir(parents=True)
+        stranded = bad / "PXL_stranded.jpg"
+        stranded.write_bytes(b"mis-nested-phone")
+        source = await db.add_or_restore_source(str(library / "RAWS"))
+        await db.insert_images_batch(
+            [(stranded.name, str(stranded), ".jpg", stranded.stat().st_size, stranded.stat().st_mtime)],
+            source_id=source["id"],
+        )
+        untouched = library / "RAWS" / "2026" / "camera.jpg"
+        untouched.parent.mkdir(parents=True)
+        untouched.write_bytes(b"camera-original")
+        await db.insert_images_batch(
+            [(untouched.name, str(untouched), ".jpg", untouched.stat().st_size, untouched.stat().st_mtime)],
+            source_id=source["id"],
+        )
+
+        from features.imports import routes as import_routes
+
+        def request():
+            with TestClient(__import__("app").app) as client:
+                return client.post(
+                    "/api/import/taxonomy/reclassify-personal",
+                    json={"confirm": True, "dry_run": False, "move_files": True},
+                )
+
+        with patch.object(import_routes.sync_hub, "default_library_root", return_value=library):
+            response = await asyncio.to_thread(request)
+            retry = await asyncio.to_thread(request)
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["updated"], 1)
+        self.assertEqual(retry.status_code, 200, retry.text)
+        self.assertEqual(retry.json()["updated"], 0)
+        moved = library / "Personal Photos" / "2026" / "2026-07-10" / "PXL_stranded.jpg"
+        self.assertTrue(moved.is_file())
+        self.assertFalse(stranded.exists())
+        self.assertTrue(untouched.is_file())
 
 
 if __name__ == "__main__":

@@ -22,6 +22,16 @@ from features.publish.builder import BundleSummary
 
 HOOK_TIMEOUT_SECONDS = 15 * 60
 HOOK_OUTPUT_LINES = 40
+HOOK_ENV = "PHOTOARCHIVE_PUBLISH_HOOK"
+
+
+def configured_publish_hook() -> str:
+    """Server-side-only: env var wins, then the on-disk settings file. The
+    hook executes shell after publish, so it is never writable via the API."""
+    return (
+        (os.environ.get(HOOK_ENV) or "").strip()
+        or str(settings.get_settings().get("publish_hook") or "").strip()
+    )
 
 _deploy_lock = asyncio.Lock()
 
@@ -37,7 +47,7 @@ class PublishConfig:
         config = settings.get_settings()
         return cls(
             publish_dir=str(config.get("publish_dir") or "").strip(),
-            publish_hook=str(config.get("publish_hook") or "").strip(),
+            publish_hook=configured_publish_hook(),
         )
 
     @property
@@ -134,7 +144,11 @@ def default_command_runner(command: str, cwd: Path, timeout_seconds: int) -> Com
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             shell=True,
-            start_new_session=True,
+            **(
+                {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+                if os.name == "nt"
+                else {"start_new_session": True}
+            ),
         )
         stdout, stderr = process.communicate(timeout=timeout_seconds)
         return CommandResult(process.returncode or 0, stdout, stderr)
@@ -374,6 +388,14 @@ def _published_rows(rows: PublishedRows) -> list[dict]:
 
 
 def _kill_process_group(process: subprocess.Popen) -> None:
+    if os.name == "nt":
+        # No killpg on Windows: taskkill /T fells the whole hook process tree.
+        subprocess.run(
+            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+            capture_output=True,
+            check=False,
+        )
+        return
     try:
         os.killpg(process.pid, signal.SIGKILL)
     except ProcessLookupError:

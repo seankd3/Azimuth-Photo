@@ -96,8 +96,8 @@ def blended_score(quality_score: float, taste_elo: float | None) -> tuple[float,
     return round((QUALITY_WEIGHT * quality) + (TASTE_WEIGHT * taste), 3), round(taste, 3)
 
 
-async def _eligible_members(conn, stack_ids: list[int] | None) -> list[dict[str, Any]]:
-    params: list[Any] = [*SUPPORTED_STACK_KINDS]
+async def _eligible_members(conn, stack_ids: list[int] | None, cache_root: str) -> list[dict[str, Any]]:
+    params: list[Any] = [cache_root, *SUPPORTED_STACK_KINDS]
     where = "s.kind IN (?, ?)"
     if stack_ids:
         where += f" AND s.id IN ({','.join('?' for _ in stack_ids)})"
@@ -105,7 +105,11 @@ async def _eligible_members(conn, stack_ids: list[int] | None) -> list[dict[str,
     cursor = await conn.execute(
         f"""
         SELECT s.id AS stack_id, s.kind AS stack_kind, i.id AS image_id,
-               i.filename, i.flag, i.elo, q.score AS quality_score
+               i.filename, i.flag, i.elo, q.score AS quality_score,
+               EXISTS (
+                   SELECT 1 FROM cache_entries c
+                   WHERE c.image_id = i.id AND c.size = 'sm' AND c.cache_root = ?
+               ) AS preview_ready
         FROM stacks s
         JOIN stack_members sm ON sm.stack_id = s.id
         JOIN images i ON i.id = sm.image_id
@@ -121,11 +125,11 @@ async def _eligible_members(conn, stack_ids: list[int] | None) -> list[dict[str,
     return [dict(row) for row in await cursor.fetchall()]
 
 
-async def suggestions(conn, *, stack_ids: list[int] | None = None) -> dict[str, Any]:
+async def suggestions(conn, *, stack_ids: list[int] | None = None, cache_root: str) -> dict[str, Any]:
     """Return fully-scored, untouched burst/variant stacks in review order."""
     await ensure_autocull_tables(conn)
     requested_ids = normalize_stack_ids(stack_ids)
-    rows = await _eligible_members(conn, requested_ids or None)
+    rows = await _eligible_members(conn, requested_ids or None, cache_root)
     taste_scores, taste_available = await _taste_scores()
     by_stack: dict[int, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
@@ -133,9 +137,9 @@ async def suggestions(conn, *, stack_ids: list[int] | None = None) -> dict[str, 
 
     result: list[dict[str, Any]] = []
     for stack_id, members in by_stack.items():
-        # A scene is eligible only when every active member has a quality score
-        # and is untouched. This avoids overwriting deliberate picks/rejects
-        # and avoids making a confident-looking choice from a partial stack.
+        # A scene is eligible only when every active member has a quality score,
+        # a ready preview, and is untouched. This avoids visual decisions from
+        # partial stacks and keeps the cull brief off the on-demand decode path.
         all_members_cursor = await conn.execute(
             """
             SELECT i.id, i.flag
@@ -148,6 +152,8 @@ async def suggestions(conn, *, stack_ids: list[int] | None = None) -> dict[str, 
         )
         all_members = [dict(row) for row in await all_members_cursor.fetchall()]
         if len(all_members) < 2 or len(members) != len(all_members):
+            continue
+        if any(not bool(member.get("preview_ready")) for member in members):
             continue
         if any(str(member.get("flag") or "unflagged") != "unflagged" for member in all_members):
             continue
@@ -163,6 +169,7 @@ async def suggestions(conn, *, stack_ids: list[int] | None = None) -> dict[str, 
                 "taste_score": taste_normalized,
                 "taste_elo": round(float(taste_scores[int(member["image_id"])]), 3) if int(member["image_id"]) in taste_scores else None,
                 "blended_score": score,
+                "preview_ready": True,
                 "thumb_url": f"/api/thumb/sm/{int(member['image_id'])}",
             })
         serialized_members.sort(key=lambda item: (-item["blended_score"], -item["quality_score"], item["id"]))
@@ -187,15 +194,15 @@ async def suggestions(conn, *, stack_ids: list[int] | None = None) -> dict[str, 
     }
 
 
-async def apply(conn, *, stack_ids: list[int]) -> dict[str, Any]:
+async def apply(conn, *, stack_ids: list[int], cache_root: str) -> dict[str, Any]:
     """Accept current suggestions atomically, keeping pre-apply flags in history."""
     ids = normalize_stack_ids(stack_ids)
     if not ids:
         return {"ok": False, "error": "stack_ids must contain at least one stack", "applied": []}
-    current = await suggestions(conn, stack_ids=ids)
+    current = await suggestions(conn, stack_ids=ids, cache_root=cache_root)
     candidates = current["suggestions"]
     if not candidates:
-        return {"ok": False, "error": "No untouched, fully-scored suggestions found", "applied": []}
+        return {"ok": False, "error": "No ready, untouched, fully-scored suggestions found", "applied": []}
 
     now = time.time()
     applied = []
