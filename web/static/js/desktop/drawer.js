@@ -471,6 +471,37 @@ function renderStorage() {
         + '</section>';
 }
 
+function renderPeekStorage() {
+    const tiers = (cacheStatus && cacheStatus.disk && cacheStatus.disk.tiers) || {};
+    const chips = ['sm', 'md', 'lg'].map((size) => {
+        const tier = tiers[size] || {};
+        return `<span class="tier-chip" data-tier-size="${size}"><b>${size.toUpperCase()}</b><span data-tier-count>${fmt(tier.count)} files</span><span data-tier-bytes>${bytes(tier.bytes)}</span></span>`;
+    }).join('');
+    return `<section class="dr-sec"><h3>Storage</h3><div class="tier-chips">${chips}</div></section>`;
+}
+
+function renderPeekSources() {
+    const sources = (catalog && catalog.sources) || [];
+    const rows = sources.length ? sources.map((source) => {
+        const online = Number(source.online) === 1 || source.online === true;
+        const id = Number(source.id);
+        return `<article class="src-card" data-source-id="${id}">`
+            + `<span class="sc-dot ${online ? 'on' : ''}"></span><div>`
+            + `<div class="sc-name" title="${esc(sourceName(source))}">${esc(sourceName(source))}</div>`
+            + `<div class="sc-sub">${esc(sourceStatusLine(source))}</div>`
+            + `<div class="scan-progress" ${scanSourceId === id ? '' : 'hidden'}>Scanning…</div>`
+            + '</div></article>';
+    }).join('') : '<div class="source-empty"><b>No sources connected.</b><span>Open System settings to add a photo folder.</span></div>';
+    return `<section class="dr-sec"><h3>Sources</h3><div id="drawer-sources">${rows}</div></section>`;
+}
+
+function renderPeekHealth() {
+    const sources = (catalog && catalog.sources) || [];
+    const offline = sources.filter((source) => !(Number(source.online) === 1 || source.online === true)).length;
+    const detail = offline ? `${offline} source${offline === 1 ? '' : 's'} offline` : 'All connected sources reachable';
+    return `<section class="dr-sec"><h3>Library health</h3><div class="setting-status">${esc(detail)}</div></section>`;
+}
+
 function formatSeen(value) {
     if (value == null) return 'Never';
     const then = Number(value) * (Number(value) > 1e12 ? 1 : 1000);
@@ -868,16 +899,13 @@ function focusPublishingSection() {
 function renderDrawer() {
     const body = document.getElementById('drawer-body');
     if (!body) return;
-    openSettingSections = new Set(Array.from(body.querySelectorAll('.dr-details[open] summary span'))
-        .map((el) => el.textContent || ''));
-    if (publishingFocusPending || publishReturn) openSettingSections.add('Publishing');
-    body.innerHTML = renderSources() + renderLibraryHealth(catalog) + renderWork() + renderSharedHome() + renderDevices() + renderConnectServer() + renderSettingsSections() + renderStorage() + renderRemote() + renderPrefs() + renderAbout();
-    updateDrawerContext();
-    bindDrawerActions();
-    if (publishingFocusPending && body.querySelector('.dr-details[data-settings-section="Publishing"]')) {
-        publishingFocusPending = false;
-        focusPublishingSection();
-    }
+    body.innerHTML = renderWork() + renderPeekStorage() + renderPeekHealth() + renderPeekSources()
+        + '<section class="dr-sec"><button class="btn primary" id="drawer-open-system" type="button">System settings →</button></section>';
+    bindDrawerActions(body);
+    body.querySelector('#drawer-open-system')?.addEventListener('click', () => {
+        closeSystemDrawer();
+        openSystemSettings();
+    });
 }
 
 function renderCurrentSystemSurface() {
