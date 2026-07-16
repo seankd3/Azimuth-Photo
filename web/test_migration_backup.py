@@ -141,6 +141,20 @@ class MigrationSafetyGateTests(unittest.IsolatedAsyncioTestCase):
             ).fetchone()[0]
         self.assertNotIn("'version'", table_sql)
 
+    async def test_add_column_failure_aborts_schema_preparation(self):
+        broken_db = os.path.join(self.tmp.name, "broken-column.db")
+        conn = await data_connection.open_async(broken_db)
+        try:
+            await conn.execute("CREATE TABLE sample (id INTEGER PRIMARY KEY)")
+            with self.assertRaises(Exception):
+                await data_schema._add_columns_if_missing(
+                    conn,
+                    "sample",
+                    (("broken", "TEXT DEFAULT ("),),
+                )
+        finally:
+            await data_connection.close_async(conn, db_path=broken_db)
+
 
 if __name__ == "__main__":
     unittest.main()

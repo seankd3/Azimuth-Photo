@@ -1410,10 +1410,7 @@ async def _add_columns_if_missing(conn, table: str, columns: tuple[tuple[str, st
     for col, defn in columns:
         if col in existing:
             continue
-        try:
-            await conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {defn}")
-        except Exception:
-            pass
+        await conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {defn}")
 
 
 async def prepare_existing_database_for_schema(conn) -> None:
