@@ -6,10 +6,16 @@ export const MONTH_NAMES = Object.freeze({
     ],
 });
 
-export function escapeHtml(value) {
+export function esc(value) {
     return String(value == null ? '' : value).replace(/[&<>"']/g, (character) => ({
         '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
     }[character]));
+}
+
+export const escapeHtml = esc;
+
+export function slugifyName(value, fallback = 'collection') {
+    return String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 96) || fallback;
 }
 
 export function formatCount(value) {

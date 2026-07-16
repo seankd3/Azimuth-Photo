@@ -1,7 +1,7 @@
 import { emit, on, scope, selection } from './state.js';
 import { applyFlags } from './selection.js';
 import { openCollectionPicker, removeImagesFromCollection } from './panel.js';
-import { downloadExport, openExportMenu } from './export_menu.js';
+import { exportScope, openExportMenu } from './export_menu.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
 import { icon } from '../icons.js';
 import { showToast } from './toast.js';
@@ -46,14 +46,7 @@ function ensureMenu() {
 function exportIds(ids, format = 'csv', size = '') {
     const imageIds = ids.map(Number).filter((id) => id > 0);
     if (!imageIds.length) return;
-    const params = new URLSearchParams({ format, ids: imageIds.join(',') });
-    if (size) params.set('size', size);
-    downloadExport(params, {
-        count: format === 'zip' ? imageIds.length : 0,
-        message: format === 'zip'
-            ? `Preparing ${imageIds.length} file${imageIds.length === 1 ? '' : 's'}`
-            : `Exporting ${imageIds.length} photo${imageIds.length === 1 ? '' : 's'} as ${format.toUpperCase()}`,
-    });
+    exportScope({ format, size, ids: imageIds });
 }
 
 async function mergeHdr(ids) {
