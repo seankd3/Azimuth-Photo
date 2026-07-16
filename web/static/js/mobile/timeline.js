@@ -170,12 +170,19 @@ function cellFor(img, mi) {
         `<div class="c-check">${icon('check')}</div>`
         + `<img alt="" loading="lazy" decoding="async" fetchpriority="low" data-preview-src="${esc(previewSrc)}"${previewReady ? ` data-src="${esc(previewSrc)}"` : ''}>`
         + `<span class="c-placeholder-name">${esc(img.filename || '')}</span>`
+        + `<span class="c-preview-error" aria-hidden="true">${icon('image')}</span>`
         + stackBadge(img)
         + flagBadge(img.flag);
     const image = fig.querySelector('img');
     image.addEventListener('load', () => {
         image.classList.add('ld');
+        fig.classList.remove('preview-pending', 'preview-error');
+    });
+    image.addEventListener('error', () => {
+        image.classList.remove('ld');
         fig.classList.remove('preview-pending');
+        fig.classList.add('preview-error');
+        fig.setAttribute('aria-label', `${img.filename || `Photo ${img.id}`} — preview unavailable`);
     });
     if (previewReady) imgObserver.observe(image);
     if (selection.has(Number(img.id))) fig.classList.add('sel');

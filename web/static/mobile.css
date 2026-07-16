@@ -299,7 +299,8 @@ body.m-scoped .m-day-head { top: calc(var(--scopebar-h) + 30px); }
     transition: transform .15s var(--ease), opacity .25s var(--ease);
 }
 .mcell img.ld { opacity: 1; }
-.mcell.preview-pending { background: var(--surface-2); }
+.mcell.preview-pending,
+.mcell.preview-error { background: var(--surface-2); }
 .mcell.preview-pending::after,
 .m-month-card.preview-pending::after {
     content: "";
@@ -324,7 +325,18 @@ body.m-scoped .m-day-head { top: calc(var(--scopebar-h) + 30px); }
     text-overflow: ellipsis;
     white-space: nowrap;
 }
-.mcell.preview-pending .c-placeholder-name { display: block; }
+.mcell.preview-pending .c-placeholder-name,
+.mcell.preview-error .c-placeholder-name { display: block; }
+.mcell .c-preview-error {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    display: none;
+    place-items: center;
+    color: var(--text-3);
+}
+.mcell .c-preview-error .icon { width: 15px; height: 15px; opacity: .72; }
+.mcell.preview-error .c-preview-error { display: grid; }
 .mcell .c-check {
     position: absolute;
     top: 5px; left: 5px;
