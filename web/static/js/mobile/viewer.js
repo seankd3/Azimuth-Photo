@@ -1,7 +1,7 @@
 // GP-class photo viewer on a pure-black canvas.
 // Gesture grammar (from the One prototype):
 //   2 fingers  → live pinch zoom + pan (midpoint-anchored)
-//   1 finger   → pan when zoomed · swipe up/down to cull · swipe left/right to browse at 1x
+//   1 finger   → pan when zoomed · swipe up to favorite · swipe down to close · swipe left/right to browse at 1x
 //   double-tap → 1x ↔ 2.5x at the tap point
 // Flags are real writes with undo.
 
@@ -177,14 +177,26 @@ function syncOfflineButton() {
     button.setAttribute('aria-label', available ? 'Remove offline availability' : 'Make available offline');
 }
 
-function cullSwipe(flag) {
+function favoriteSwipe() {
     const image = current();
     if (!image) return;
-    root.classList.remove('cull-picked', 'cull-rejected');
+    root.classList.remove('cull-picked');
     void root.offsetWidth;
-    root.classList.add(flag === 'picked' ? 'cull-picked' : 'cull-rejected');
-    window.setTimeout(() => root.classList.remove('cull-picked', 'cull-rejected'), 260);
-    void applyFlags([image.id], flag);
+    root.classList.add('cull-picked');
+    window.setTimeout(() => root.classList.remove('cull-picked'), 260);
+    void applyFlags([image.id], 'picked');
+}
+
+function settleDismissSwipe() {
+    img.style.transition = 'transform .16s cubic-bezier(.2,.7,.2,1)';
+    root.style.transition = 'background .16s cubic-bezier(.2,.7,.2,1)';
+    img.style.transform = `translateY(${window.innerHeight * .22}px) scale(.78)`;
+    root.style.background = 'rgba(0,0,0,0)';
+    window.setTimeout(() => {
+        img.style.transition = '';
+        root.style.transition = '';
+        dismissViewer();
+    }, 150);
 }
 
 function nav(dir) {
@@ -551,11 +563,10 @@ function installGestures() {
             const vx = dx / elapsed;
             const vy = dy / elapsed;
             if (sw.mode === 'down' && (dy > 90 || vy > 0.75)) {
-                img.style.transform = '';
-                cullSwipe('rejected');
+                settleDismissSwipe();
             } else if (sw.mode === 'up' && (dy < -60 || vy < -0.75)) {
                 img.style.transform = '';
-                cullSwipe('picked');
+                favoriteSwipe();
             } else if (sw.mode === 'h' && (Math.abs(sw.res) > 70 || Math.abs(vx) > 0.65)) {
                 const dir = dx < 0 ? 1 : -1;
                 settlePhotoSwipe(dir);
@@ -606,16 +617,9 @@ export function initViewer() {
     flagBadge.id = 'mv-flag';
     flagBadge.hidden = true;
     stage.appendChild(flagBadge);
-    const done = document.createElement('button');
-    done.id = 'mv-done';
-    done.type = 'button';
-    done.textContent = 'Done';
-    root.appendChild(done);
-
     registerLayer('viewer', { close: closeViewer });
 
     document.getElementById('mv-close').addEventListener('click', dismissViewer);
-    done.addEventListener('click', dismissViewer);
     document.getElementById('mv-pick').addEventListener('click', () => {
         const image = current();
         const flag = image ? (byId.get(Number(image.id)) || image).flag || 'unflagged' : '';
