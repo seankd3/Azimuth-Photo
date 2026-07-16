@@ -236,6 +236,34 @@ class DevelopBackendTests(unittest.TestCase):
             ["Snapshot: Web", "Snapshot: Print"],
         )
 
+    def test_snapshot_delete_removes_only_the_named_snapshot(self):
+        first = self.client.post(f"/api/develop/{self.raw_id}/snapshots", json={"label": "Print", "settings": {"Exposure2012": 0.5}})
+        second = self.client.post(f"/api/develop/{self.raw_id}/snapshots", json={"label": "Web", "settings": {"Exposure2012": 1.5}})
+        self.assertEqual(first.status_code, 200, first.text)
+        self.assertEqual(second.status_code, 200, second.text)
+        deleted = self.client.delete(f"/api/develop/{self.raw_id}/snapshots/{first.json()['id']}")
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        remaining = self.client.get(f"/api/develop/{self.raw_id}/snapshots")
+        self.assertEqual([row["id"] for row in remaining.json()["snapshots"]], [second.json()["id"]])
+
+    def test_virtual_copy_http_has_independent_settings_and_delete_keeps_master(self):
+        created = self.client.post(f"/api/develop/{self.raw_id}/virtual-copy")
+        self.assertEqual(created.status_code, 200, created.text)
+        copy_id = created.json()["id"]
+        self.assertEqual(created.json()["filepath"], str(self.raw_path))
+        saved = self.client.put(f"/api/develop/{copy_id}", json={"settings": {"Exposure2012": 2.0}})
+        self.assertEqual(saved.status_code, 200, saved.text)
+        deleted = self.client.delete(f"/api/develop/{self.raw_id}/virtual-copy/{copy_id}")
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        async def master_exists():
+            conn = await db.get_db()
+            try:
+                return await (await conn.execute("SELECT id FROM images WHERE id = ?", (self.raw_id,))).fetchone()
+            finally:
+                await conn.close()
+        self.assertIsNotNone(asyncio.run(master_exists()))
+        self.assertEqual(self.client.get(f"/api/develop/{self.raw_id}/virtual-copies").json()["virtual_copies"], [])
+
     def test_base_endpoints_and_pregen_contract(self):
         self._write_cached_base()
         # A warm preview must be a pure disk response: the route may not enter

@@ -136,6 +136,22 @@ class ShareTests(BackendTestCase):
         self.assertIsNone(active)
         self.assertIsNone(resolved)
 
+    async def test_share_revoke_http_hides_public_token_and_owner_payload(self):
+        collection, *_ = await self._collection_with_images()
+        share = await db.create_or_rotate_share(collection["id"])
+
+        def revoke_and_probe():
+            with TestClient(app_module.app) as client:
+                revoked = client.post(f"/api/user-collections/{collection['id']}/share/revoke")
+                public = client.get(f"/s/{share['token']}")
+                owner = client.get(f"/api/user-collections/{collection['id']}/share")
+                return revoked, public, owner
+
+        revoked, public, owner = await asyncio.to_thread(revoke_and_probe)
+        self.assertEqual(revoked.status_code, 200, revoked.text)
+        self.assertEqual(public.status_code, 404)
+        self.assertIsNone(owner.json()["share"])
+
     async def test_resolve_token_rejects_expired_share(self):
         collection, *_ = await self._collection_with_images()
         share = await db.create_or_rotate_share(collection["id"], expires_at=time.time() - 60)
