@@ -1,5 +1,5 @@
 import {
-    getFilterOptions, getFolders, getPeople, getRankings, getTags, listCollections, thumbUrl,
+    getFilterOptions, getFolders, getPeople, getRankings, getTags, listCollections, previewThumbUrl, thumbUrl,
 } from './api.js';
 import {
     clearFacet, emit, folderLabel, folderValues, navigateToScope, on, patchScope, scope, scopeActive, setSort, smartQueryActive, smartQuerySummary, toggleBestOf,
@@ -269,9 +269,10 @@ function photoStripHtml(items) {
         + items.map((row) => {
             const index = row.runIndex;
             const img = row.photo;
-            const cls = `sd-photo ${index === hot ? 'hot' : ''}`;
+            const previewSrc = previewThumbUrl(img);
+            const cls = `sd-photo ${previewSrc ? '' : 'preview-pending'} ${index === hot ? 'hot' : ''}`;
             return `<button id="scope-option-${index}" class="${cls}" role="option" aria-selected="${index === hot ? 'true' : 'false'}" data-index="${index}" aria-label="${esc(img.filename || `Photo ${img.id}`)}" title="${esc(img.filename || `Photo ${img.id}`)}" style="--ar:${aspect(img)}">`
-                + `<img src="${esc(img.thumb_url || thumbUrl('sm', img.id))}" alt="">`
+                + (previewSrc ? `<img src="${esc(previewSrc)}" alt="">` : '<span class="preview-thumb-pending" aria-hidden="true"></span>')
                 + '</button>';
         }).join('')
         + '</div>';

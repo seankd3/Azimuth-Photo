@@ -1,7 +1,7 @@
 import {
     byId, clearFacet, clearSelection, emit, nonSearchFacetCount, on, scope, scopeActive, scopeParams, selection, setBestOfTotal, setImages, setRankingsMeta, setScope, viewState,
 } from './state.js';
-import { createStack, getCatalog, getRankings, getScanStatus, getStack, thumbUrl, unstack } from './api.js';
+import { createStack, getCatalog, getRankings, getScanStatus, getStack, previewThumbUrl, thumbUrl, unstack } from './api.js';
 import { loadScopePage } from './scope_data.js';
 import {
     enterSelection, isSelectionMode, toggleSelection,
@@ -109,7 +109,7 @@ export function cellHtml(img, index) {
         : '';
     const selected = selection.has(Number(img.id));
     const previewReady = img.preview_ready !== false;
-    const previewSrc = img.thumb_url || thumbUrl('sm', img.id);
+    const previewSrc = previewThumbUrl(img);
     return `<figure class="cell ${previewReady ? '' : 'preview-pending'} ${selected ? 'sel' : ''}" data-id="${img.id}" data-idx="${index}" draggable="true" tabindex="-1" aria-selected="${selected ? 'true' : 'false'}" style="--ar:${aspect(img)}">`
         + `<img data-preview-src="${esc(previewSrc)}" ${previewReady ? `data-src="${esc(previewSrc)}"` : ''} loading="lazy" decoding="async" fetchpriority="low" alt="${esc(img.filename || '')}">`
         + `<span class="c-placeholder-name">${esc(img.filename || '')}</span>`
@@ -245,7 +245,7 @@ function sharpenPreview(image) {
         const img = cell.querySelector('img[data-preview-src]');
         if (!img) continue;
         cell.classList.remove('preview-pending');
-        img.dataset.src = image.thumb_url || img.dataset.previewSrc || thumbUrl('sm', id);
+        img.dataset.src = previewThumbUrl(image) || img.dataset.previewSrc;
         img.src = img.dataset.src;
     }
 }
