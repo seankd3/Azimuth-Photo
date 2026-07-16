@@ -80,5 +80,8 @@ Immersive Dialog (no tab-bar leak), metadata header (back·date/time·favorite·
 9. **No device-token support in the app** — if the hub enables require_device_token, backup 401s. Needs the pairing flow in the app (pa-harden owns hub auth).
 10. **BackupWorker retries forever on permanent per-item failures** — needs a terminal-failure policy + surfacing in UI.
 
+**Refine sampling (2026-07-15, Sean dogfooding + Fable-authored)**
+- **Scoped Refine didn't sample the full selection** — the candidate pool was a fixed 480-row head of a deterministic ordering (`comparisons ASC` / `elo DESC`, no tie-break), so big selections kept re-serving the same slice and elo strategies never reached the bottom of the set. Fix: scoped window now spans the whole id set (cap 5000) + new sampler-only `least_compared_shuffled` sort (`RANDOM()` tie-break) for explore, in both scoped and filtered branches; grid pagination untouched. Regression test + live 3-call proof of variety. (rankings.py / compare/service.py; prod restarted)
+
 ## OPEN (latent)
 - mobile `writeRating()` → `/api/image/{id}/rating` has no backend route; never called from UI.
