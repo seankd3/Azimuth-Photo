@@ -209,6 +209,17 @@ class UiContractsTests(BackendTestCase):
         self.assertIn("openSourceAddFlow({ onSuccess: loadCatalogChrome })", panel)
         self.assertIn("openSourceAddFlow({ onSuccess: refreshFoldersPanel })", folders)
 
+    async def test_deliver_treats_hook_retry_as_settling(self):
+        base_dir = os.path.dirname(__file__)
+        with open(os.path.join(base_dir, "static", "js", "desktop", "panel.js"), encoding="utf-8") as fh:
+            panel = fh.read()
+
+        # hook_retrying keeps the overlay busy, keeps polling, and gets honest copy
+        self.assertIn("['publishing', 'revoking', 'hook_retrying']", panel)
+        self.assertIn("isDone: (publish) => !publishJobSettling(publish)", panel)
+        self.assertIn("const busy = publishJobSettling(data)", panel)
+        self.assertIn("retrying automatically", panel)
+
     async def test_template_context_versions_static_assets(self):
         context = app_module.app.state.photoarchive_shell.template_context(HeaderRequest())
 

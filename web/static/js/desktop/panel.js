@@ -544,11 +544,24 @@ function publishLeadText(count, slug, publish, publishing = {}) {
     return publishCopyText(count, slug, publishing);
 }
 
+/** A publish job is settling until it reaches a final state — including automatic hook retries. */
+function publishJobSettling(data) {
+    const job = data?.job || null;
+    return Boolean(data?.in_progress || (job && ['publishing', 'revoking', 'hook_retrying'].includes(job.state)));
+}
+
 function publishPhaseCopy(job) {
     if (!job) return '';
     if (job.state === 'error') return 'Publishing didn’t finish.';
     if (job.state === 'hook_failed') return 'Gallery files are ready, but the website update didn’t finish.';
     if (job.state === 'revoked_hook_failed') return 'Gallery files were removed, but the website update didn’t finish.';
+    if (job.state === 'hook_retrying') {
+        const removing = (job.legacy_state || job.hook_failure_state) === 'revoked_hook_failed';
+        if (job.executing) return removing ? 'Finishing website removal…' : 'Updating website…';
+        return removing
+            ? 'Gallery files were removed — the website update didn’t finish, retrying automatically.'
+            : 'Gallery is ready — the website update didn’t finish, retrying automatically.';
+    }
     if (job.phase === 'hook') return 'Updating website…';
     if (job.phase === 'deploying') return 'Updating website…';
     if (job.phase === 'building') return 'Building gallery…';
@@ -579,7 +592,7 @@ function deliverPublishStatus(data) {
     const hook = publish?.hook_status || job?.hook || null;
     return '<div class="publish-status">'
         + deliverStatusRows([['Website', status || 'Ready to publish.']])
-        + (hook?.configured && !hook.ok ? `<div class="publish-error"><b>Gallery files are ready, but the website update didn’t finish.</b><p>${esc(hook.output || 'The website update did not finish successfully.')}</p></div>` : '')
+        + (hook?.configured && !hook.ok && job?.state !== 'hook_retrying' ? `<div class="publish-error"><b>Gallery files are ready, but the website update didn’t finish.</b><p>${esc(hook.output || 'The website update did not finish successfully.')}</p></div>` : '')
         + publishErrorBlock(job)
         + '</div>';
 }
@@ -687,7 +700,7 @@ function renderWebsiteDeliver(session, token) {
     const job = data?.job || null;
     const publishing = data?.publishing || {};
     const setupNeeded = publishing.enabled === false;
-    const busy = Boolean(data?.in_progress || (job && ['publishing', 'revoking'].includes(job.state)));
+    const busy = publishJobSettling(data);
     const count = Number(collectionById(session.collectionId)?.image_count || publish?.image_count || 0);
     const slug = session.draft.slug || job?.slug || publish?.slug || slugifyName(session.name, 'gallery');
     const title = session.draft.title || job?.title || publish?.title || session.name;
@@ -854,11 +867,11 @@ function pollDeliverPublish(session, token, immediate = false) {
     if (!deliverOverlayIsCurrent(token) || deliverSession !== session) return;
     deliverPoll = pollJob({
         fetchStatus: () => getCollectionPublish(session.collectionId),
-        isDone: (publish) => !publish?.in_progress,
+        isDone: (publish) => !publishJobSettling(publish),
         onTick: (publish) => {
             if (!deliverOverlayIsCurrent(token) || deliverSession !== session) return;
             session.publish = publish;
-            if (!publish?.in_progress) {
+            if (!publishJobSettling(publish)) {
                 if (!immediate && publish?.job?.state === 'revoked') showDeliveryToast('Website gallery unpublished for', session);
                 emitSharedSurfacesChanged(session.collectionId);
                 loadCollections();
