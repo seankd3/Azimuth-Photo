@@ -43,7 +43,7 @@ def list_stocks() -> list[dict[str, Any]]:
     stocks = []
     for path in sorted(STOCKS_DIR.glob("*.json")):
         try:
-            data = json.loads(path.read_text())
+            data = json.loads(path.read_text(encoding="utf-8"))
             stocks.append({
                 "slug": data["slug"], "name": data["name"], "iso": data.get("iso"),
                 "type": data.get("type"), "white_point_hint": data.get("white_point_hint"),
@@ -59,7 +59,7 @@ def load_stock(slug: str) -> dict[str, Any] | None:
     if not path.is_file():
         return None
     try:
-        return json.loads(path.read_text())
+        return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return None
 

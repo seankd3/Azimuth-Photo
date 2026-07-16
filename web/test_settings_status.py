@@ -1,4 +1,4 @@
-from test_support import *  # noqa: F401,F403
+﻿from test_support import *  # noqa: F401,F403
 from unittest import mock
 
 from features.catalog import metadata as catalog_metadata
@@ -399,6 +399,9 @@ class SettingsStatusTests(BackendTestCase):
         self.assertIn("8B", index["install_message"])
 
     async def test_install_model_noops_when_requested_model_is_already_installed(self):
+        from core import capabilities as _capabilities
+        if not _capabilities.capability_status("search")["available"]:
+            self.skipTest("AI search capability unavailable â€” matches AI-optional installs")
         active_config = settings.active_embedding_config()
         old_get_model_status = ai_models.get_model_status
         old_start_model_install = ai_models.start_model_install
@@ -444,6 +447,9 @@ class SettingsStatusTests(BackendTestCase):
         self.assertEqual(response["model_status"]["model_key"], active_config["model_key"])
 
     async def test_install_model_reports_conflict_when_other_model_is_downloading(self):
+        from core import capabilities as _capabilities
+        if not _capabilities.capability_status("search")["available"]:
+            self.skipTest("AI search capability unavailable â€” matches AI-optional installs")
         active_config = settings.active_embedding_config()
         other_config = settings.embedding_model_config_for_preset("qwen3-vl-embedding-2b")
         old_get_model_status = ai_models.get_model_status

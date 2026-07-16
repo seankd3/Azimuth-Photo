@@ -226,7 +226,9 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
             source = await (
                 await conn.execute("SELECT path FROM catalog_sources WHERE id = ?", (source_id,))
             ).fetchone()
-            filepath = os.path.join(source["path"], filename)
+            # Callers pass '/'-relative names; real writers always join natively,
+            # so the fixture must too or Windows rows get mixed separators.
+            filepath = os.path.join(source["path"], *str(filename).split("/"))
             cursor = await conn.execute(
                 "INSERT INTO images "
                 "(source_id, filename, filepath, elo, comparisons, propagated_updates, status, missing_at) "
