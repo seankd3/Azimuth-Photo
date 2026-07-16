@@ -22,6 +22,7 @@ from features.develop import rawproc
 from features.imports import taxonomy
 from features.library import geodata, keywords
 from features.sync import family_clock
+from features.sync.develop_merge import preserve_local_rating
 from features.sync.hashing import compute_content_hash, compute_full_hash
 from features.sync.validation import validate_content_hash
 
@@ -493,13 +494,7 @@ async def _merge_develop(conn, image_id: int, content_hash: str, item: dict[str,
     existing = max(key for key in (row_key, state_key) if key is not None) if row_key or state_key else None
     if not _is_newer(incoming, existing):
         return False, "hub-newer-or-equal"
-    settings = dict(item["develop_settings"])
-    try:
-        current_settings = json.loads(row["settings"]) if row else {}
-    except (TypeError, ValueError, json.JSONDecodeError):
-        current_settings = {}
-    if isinstance(current_settings, dict) and "_lr_rating" in current_settings:
-        settings["_lr_rating"] = current_settings["_lr_rating"]
+    settings = preserve_local_rating(item["develop_settings"], row["settings"] if row else None)
     encoded = json.dumps(settings, separators=(",", ":"), sort_keys=True)
     await conn.execute(
         "INSERT INTO develop_settings(image_id, settings, origin, updated_at) VALUES (?, ?, 'sync', ?) "

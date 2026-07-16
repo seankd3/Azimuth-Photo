@@ -16,6 +16,7 @@ from core import cache_events
 from data import connection
 from data.repositories import catalog as catalog_repository
 from features.sync import satellite
+from features.sync.develop_merge import preserve_local_rating
 from features.sync.executor import run_sync_work
 
 
@@ -236,13 +237,7 @@ class MirrorPuller:
         )).fetchone()
         if current and str(current["updated_at"] or "") > str(updated_at):
             return
-        settings = dict(settings)
-        try:
-            current_settings = json.loads(current["settings"]) if current else {}
-        except (TypeError, ValueError, json.JSONDecodeError):
-            current_settings = {}
-        if isinstance(current_settings, dict) and "_lr_rating" in current_settings:
-            settings["_lr_rating"] = current_settings["_lr_rating"]
+        settings = preserve_local_rating(settings, current["settings"] if current else None)
         await conn.execute(
             """INSERT INTO develop_settings(image_id, settings, origin, updated_at)
                VALUES (?, ?, ?, ?)
