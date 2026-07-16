@@ -233,8 +233,7 @@ export function scopeActive() {
 export function nonSearchFacetCount() {
     return [
         scope.people, scope.flag, folderValues().length, scope.date_taken, scope.file_type, scope.camera,
-        scope.lens, scope.tag, scope.orientation, scope.compared, scope.min_stars, scope.import_batch,
-        scope.collectionId, scope.similarIds.length,
+        scope.lens, scope.tag, scope.orientation, scope.compared, scope.min_stars,
     ].filter(Boolean).length;
 }
 

@@ -100,6 +100,17 @@ function selectBlock(title, body, attrs = '') {
     return `<section class="filter-sec" ${attrs}><h3>${esc(title)}</h3><div class="filter-list">${body}</div></section>`;
 }
 
+function renderReadOnlyScope() {
+    const rows = [];
+    if (scope.collectionId) rows.push([scope.collectionSmart ? 'sparkles' : 'folder', `Collection · ${scope.collectionName || 'Untitled'}`]);
+    if (scope.similarIds.length) rows.push(['scan-search', scope.similarLabel || 'Similar photos']);
+    if (scope.import_batch) rows.push(['upload', scope.importBatchLabel || `Import ${scope.import_batch}`]);
+    if (!rows.length) return '';
+    return `<section class="filter-sec filter-readonly-scope"><h3>Current scope</h3><div class="filter-list">${rows.map(([glyph, label]) => (
+        `<div class="filter-scope-row"><span class="tk-glyph">${icon(glyph)}</span><span title="${esc(label)}">${esc(label)}</span></div>`
+    )).join('')}</div></section>`;
+}
+
 function renderFlag() {
     return selectBlock('Flag', [
         ['picked', 'Picked'],
@@ -291,6 +302,7 @@ function render() {
     const peopleSearch = popover.querySelector('#filter-people-search')?.value || '';
     popover.innerHTML = `<div class="filter-pop-head"><b>Filter</b><button class="icon-btn" id="filter-close" data-tip="Close (Esc)" aria-label="Close">${icon('x')}</button></div>`
         + [
+            renderReadOnlyScope(),
             renderFlag(),
             renderPeople(),
             selectBlock('Folder', optionRows(options.folders, 'folder', (item) => item.path, (item) => item.path)

@@ -957,6 +957,8 @@ body:has(#view-loupe.active):has(#sel-pill.on) #toast { transform: translateX(-5
 .filter-search:focus-visible { border-color: var(--accent-lin); }
 .filter-row.unavailable:not(.active) { color: var(--text-3); opacity: .58; }
 .filter-row.unavailable:not(.active):hover { background: transparent; color: var(--text-3); }
+.filter-scope-row { width: 100%; min-height: 30px; display: flex; align-items: center; gap: var(--s2); padding: 6px 8px; color: var(--text-3); font-size: 13px; }
+.filter-scope-row span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .filter-empty { color: var(--text-3); font-size: 12px; padding: 5px 2px; }
 .filter-empty.chrome-empty { width: 100%; padding: 6px 2px; }
 .filter-loading { height: 280px; }
