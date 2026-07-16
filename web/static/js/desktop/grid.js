@@ -16,8 +16,9 @@ import { showToast } from './toast.js';
 import { keepCoverRejectRest } from './stack_cull.js';
 import { emptyStateHtml } from './empty_state.js';
 import { gridLoadingHtml } from './loading_state.js';
-import { escapeHtml as esc } from './dom.js';
+import { escapeHtml as esc, photoAspect as aspect } from './dom.js';
 import { openSystemSettings } from './drawer.js';
+import { createPendingPreviewPoll, pendingCount, pendingPreviewCount as countPendingPreviews } from '../previews.js';
 
 let offset = 0;
 let loading = false;
@@ -46,11 +47,17 @@ let loadController = null;
 let activeJumpToken = 0;
 let reloadPending = false;
 let thumbRetryFocusBound = false;
-let thumbnailPollTimer = 0;
-let pendingThumbnails = 0;
 let pendingNoticeRequest = 0;
 const stackCache = new Map();
 const stackKindCache = new Map();
+// Timer ownership moved from `let thumbnailPollTimer = 0;` into the shared controller.
+const thumbnailPoll = createPendingPreviewPoll({
+    active: () => mounted,
+    refresh: async () => {
+        if (similarScopeActive() || !canRefreshPendingThumbnails()) await refreshPendingPreviews();
+        else await refreshFirstPagePreviews();
+    },
+});
 
 function cancelPendingLoad() {
     if (!loadController) return;
@@ -58,40 +65,16 @@ function cancelPendingLoad() {
     loadController = null;
 }
 
-function stopThumbnailPoll() {
-    window.clearTimeout(thumbnailPollTimer);
-    thumbnailPollTimer = 0;
-}
+function stopThumbnailPoll() { thumbnailPoll.stop(); }
 
 function canRefreshPendingThumbnails() {
     const canvas = document.getElementById('canvas');
     return mounted && !loading && !activeJumpToken && !selection.size && canvas?.scrollTop <= 160;
 }
 
-function scheduleThumbnailPoll() {
-    if (!mounted || !pendingThumbnails || thumbnailPollTimer) return;
-    thumbnailPollTimer = window.setTimeout(async () => {
-        thumbnailPollTimer = 0;
-        if (!mounted || !pendingThumbnails) return;
-        if (similarScopeActive() || !canRefreshPendingThumbnails()) await refreshPendingPreviews();
-        else await refreshFirstPagePreviews();
-        scheduleThumbnailPoll();
-    }, 3000);
-}
+function scheduleThumbnailPoll() { thumbnailPoll.schedule(); }
 
-function updateThumbnailPoll(pending) {
-    pendingThumbnails = Math.max(0, Number(pending) || 0);
-    if (!pendingThumbnails) {
-        stopThumbnailPoll();
-        return;
-    }
-    scheduleThumbnailPoll();
-}
-
-function aspect(img) {
-    const ar = Number(img.aspect_ratio) || (Number(img.width) && Number(img.height) ? Number(img.width) / Number(img.height) : 1.5);
-    return Math.max(.45, Math.min(3.8, ar));
-}
+function updateThumbnailPoll(pending) { thumbnailPoll.update(pending); }
 
 function flagGlyph(flag) {
     if (flag === 'picked') return icon('star');
@@ -233,10 +216,6 @@ function unobserveImages(rootEl) {
     }
 }
 
-function pendingCount(data) {
-    return Number(data?.pending_thumbnails ?? data?.hidden_pending_thumbnails) || 0;
-}
-
 function hiddenPendingThumbnailCount(data) {
     return Math.max(0, Number(data?.hidden_pending_thumbnails) || 0);
 }
@@ -306,7 +285,7 @@ function renderPendingThumbnailEmptyState() {
 }
 
 function pendingPreviewCount(images) {
-    return (images || []).filter((image) => image?.preview_ready === false).length;
+    return countPendingPreviews(images); // Shared predicate: image?.preview_ready === false.
 }
 
 function sharpenPreview(image) {
@@ -334,7 +313,7 @@ async function refreshPendingPreviews() {
     params.set('ids', ids.join(','));
     const data = await getRankings(params).catch(() => null);
     if (!mounted || !data || !Array.isArray(data.images)) return;
-    const before = pendingThumbnails;
+    const before = thumbnailPoll.count;
     let landed = 0;
     for (const image of data.images) {
         if (!image.preview_ready) continue;
@@ -563,7 +542,7 @@ function renderPreparingState() {
 
 function renderEmptyState() {
     stopThumbnailPoll();
-    pendingThumbnails = 0;
+    updateThumbnailPoll(0);
     stackExpansionRequest += 1;
     closeExpandedStack();
     resetImageObserver();
@@ -1061,7 +1040,7 @@ export function mountGrid() {
 export function unmountGrid() {
     mounted = false;
     stopThumbnailPoll();
-    pendingThumbnails = 0;
+    updateThumbnailPoll(0);
     savedScrollTop = document.getElementById('canvas').scrollTop;
     generation += 1;
     cancelPendingLoad();

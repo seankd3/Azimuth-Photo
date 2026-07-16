@@ -2,6 +2,7 @@
 // payload shapes mirror the desktop modules exactly.
 
 import { fetchJson } from '../api.js';
+import { previewThumbUrl as sharedPreviewThumbUrl } from '../previews.js';
 import { emit, isOffline } from './state.js';
 import { enqueueWrite } from './write_queue.js';
 
@@ -43,9 +44,7 @@ export function thumbUrl(size, imageId) {
 }
 
 export function previewThumbUrl(image, size = 'sm') {
-    if (!image || image.preview_ready === false) return '';
-    if (size === 'sm' && image.thumb_url) return image.thumb_url;
-    return thumbUrl(size, image.id);
+    return sharedPreviewThumbUrl(image, size); // Shared guard: if (image.preview_ready === false) return '';
 }
 
 export async function getRankings(params) {

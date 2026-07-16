@@ -15,3 +15,8 @@ export function escapeHtml(value) {
 export function formatCount(value) {
     return Number(value || 0).toLocaleString('en-US');
 }
+
+export function photoAspect(image) {
+    const ratio = Number(image?.aspect_ratio) || (Number(image?.width) && Number(image?.height) ? Number(image.width) / Number(image.height) : 1.5);
+    return Math.max(.45, Math.min(3.8, ratio));
+}

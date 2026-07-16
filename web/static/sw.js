@@ -36,6 +36,8 @@ const SHELL_URLS = [
     '/static/icons/icon.svg',
     '/static/js/icons.js',
     '/static/js/people_labels.js',
+    '/static/js/previews.js',
+    '/static/js/worker_state.js',
     '/static/js/api.js',
     '/static/js/mobile/api.js',
     '/static/js/mobile/bootstrap.js',

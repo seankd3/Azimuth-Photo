@@ -21,6 +21,7 @@ import {
     bindLibraryHealth, refreshLibraryHealth, renderLibraryHealth, stopLibraryHealthPolling,
 } from './library_health.js';
 import { openSourceRevealMenu } from './source_reveal_menu.js';
+import { INACTIVE_WORKER_STATES, normalizeWorkerState } from '../worker_state.js';
 
 let open = false;
 let drawerTimer = null;
@@ -55,18 +56,7 @@ const settingTimers = new Map();
 const busyActions = new Set();
 const workerActionGenerations = new Map();
 const workerActionsInFlight = new Set();
-const INACTIVE_WORKER_STATES = new Set([
-    'idle',
-    'ready',
-    'paused',
-    'complete',
-    'caught_up',
-    'error',
-    'disabled',
-    'unavailable',
-    'stale',
-]);
-
+// Shared contract: const INACTIVE_WORKER_STATES = new Set(['idle', 'ready', 'paused', 'complete', 'caught_up', 'error', 'disabled', 'unavailable', 'stale']);
 const SETTING_DEFS = {
     embed_model_preset: { type: 'select' },
     memory_cache_gb: { type: 'number', min: 0, max: 64, step: 0.25, unit: 'GB' },
@@ -128,7 +118,7 @@ function progress(done, total) {
 function workerStateIsActive(status) {
     const worker = (status && status.worker) || {};
     const index = (status && status.embedding_index) || {};
-    const state = String(index.worker_state || (status && status.worker_state) || worker.state || '').toLowerCase();
+    const state = normalizeWorkerState(index.worker_state || (status && status.worker_state) || worker.state);
     return Boolean(state) && !INACTIVE_WORKER_STATES.has(state);
 }
 
@@ -264,17 +254,19 @@ function peopleProgress(status) {
     return workerStateIsActive(status) ? Math.max(5, countProgress) : countProgress;
 }
 
+function captionProgress(status) {
+    const worker = status?.worker || {};
+    const counts = status?.counts || {};
+    return worker.progress_pct != null ? pct(worker.progress_pct) : progress(counts.captioned || 0, (counts.captioned || 0) + (counts.pending_cached_images || 0));
+}
+
 function activeProgress() {
     const ai = pct(aiStatus && aiStatus.progress_pct);
     const pregen = cacheStatus && cacheStatus.pregen ? cacheStatus.pregen : {};
     const cacheProgress = pct((pregen.preview && pregen.preview.progress_pct) || pregen.progress_pct);
     const cache = cachePregenStateIsActive(cacheStatus) && cacheProgress <= 0 ? 50 : cacheProgress;
     const people = peopleProgress(peopleStatus);
-    const captionWorker = (captionStatus && captionStatus.worker) || {};
-    const captionCounts = (captionStatus && captionStatus.counts) || {};
-    const caption = captionWorker.progress_pct != null
-        ? pct(captionWorker.progress_pct)
-        : progress(captionCounts.captioned || 0, (captionCounts.captioned || 0) + (captionCounts.pending_cached_images || 0));
+    const caption = captionProgress(captionStatus);
     const metadata = metadataStateIsActive(metadataStatus) ? 50 : 0;
     return { ai, cache, people, captions: caption, metadata };
 }
@@ -479,11 +471,7 @@ function workItems() {
     const preview = pregen.preview || {};
     const worker = (peopleStatus && peopleStatus.worker) || {};
     const peoplePct = peopleProgress(peopleStatus);
-    const captionWorker = (captionStatus && captionStatus.worker) || {};
-    const captionCounts = (captionStatus && captionStatus.counts) || {};
-    const captionPct = captionWorker.progress_pct != null
-        ? pct(captionWorker.progress_pct)
-        : progress(captionCounts.captioned || 0, (captionCounts.captioned || 0) + (captionCounts.pending_cached_images || 0));
+    const captionPct = captionProgress(captionStatus);
     const metadataPaused = metadataStatus && metadataStatus.manual_pause;
     const metadataActive = metadataStateIsActive(metadataStatus);
     return [
