@@ -62,10 +62,16 @@ fun CollectionsScreen(
 ) {
     val scope = rememberCoroutineScope()
     var collections by remember { mutableStateOf<List<Collection>?>(null) }
+    var loadFailed by remember { mutableStateOf(false) }
     var creating by remember { mutableStateOf(false) }
 
     suspend fun refresh() {
-        collections = runCatching { api.collections() }.getOrDefault(emptyList())
+        runCatching { api.collections() }
+            .onSuccess {
+                collections = it
+                loadFailed = false
+            }
+            .onFailure { loadFailed = true }
     }
 
     LaunchedEffect(Unit) { refresh() }
@@ -73,7 +79,20 @@ fun CollectionsScreen(
     val loaded = collections
     if (loaded == null) {
         Box(Modifier.fillMaxSize().background(Ink), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator(color = TextSecondary)
+            if (loadFailed) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "Couldn't load collections",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextSecondary,
+                    )
+                    TextButton(onClick = { scope.launch { refresh() } }) {
+                        Text("Retry", color = TextSecondary)
+                    }
+                }
+            } else {
+                CircularProgressIndicator(color = TextSecondary)
+            }
         }
         return
     }

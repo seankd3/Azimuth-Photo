@@ -63,6 +63,7 @@ fun CollectionScreen(
     onOpenPhotos: (List<ArchiveImage>, Int) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    val toastContext = LocalContext.current
     var photos by remember(collection.id) { mutableStateOf<List<ArchiveImage>?>(null) }
     var sharing by remember { mutableStateOf(false) }
     var shareUrl by remember { mutableStateOf<String?>(null) }
@@ -100,10 +101,14 @@ fun CollectionScreen(
                         onClick = {
                             sharing = true
                             scope.launch {
-                                val published = api.publish(collection.id)
-                                val shared = api.share(collection.id)
-                                shareUrl = shared ?: published
+                                // Share only creates a private share link — never
+                                // publish (make public) as a side effect of tapping share.
+                                val link = api.share(collection.id)
                                 sharing = false
+                                if (link != null) shareUrl = link
+                                else android.widget.Toast.makeText(
+                                    toastContext, "Couldn't create a share link", android.widget.Toast.LENGTH_SHORT,
+                                ).show()
                             }
                         },
                     ) {
@@ -128,6 +133,13 @@ fun CollectionScreen(
                 contentAlignment = Alignment.Center,
             ) {
                 CircularProgressIndicator(color = TextSecondary)
+            }
+        } else if (loaded.isEmpty()) {
+            Box(
+                Modifier.fillMaxSize().padding(padding),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("No photos in this collection yet.", color = TextSecondary)
             }
         } else {
             LazyVerticalGrid(

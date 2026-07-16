@@ -47,7 +47,8 @@ fun rememberMediaTrash(onTrashed: () -> Unit): (List<Uri>) -> Unit {
 
     promptUris?.takeIf { !MediaStore.canManageMedia(context) }?.let { uris ->
         AlertDialog(
-            onDismissRequest = { launchTrash(context, uris, trashLauncher); promptUris = null },
+            // Dismissing (back / tap outside) cancels — it must not delete.
+            onDismissRequest = { promptUris = null },
             containerColor = Panel,
             title = { Text("Delete without asking each time?") },
             text = {

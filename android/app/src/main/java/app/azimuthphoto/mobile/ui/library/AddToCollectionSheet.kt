@@ -78,11 +78,34 @@ fun AddToCollectionSheet(
         if (busy) return
         busy = true
         scope.launch {
-            api.addToCollection(id, imageIds)
-            Toast.makeText(context, "Added to $name", Toast.LENGTH_SHORT).show()
-            onAdded()
+            val ok = api.addToCollection(id, imageIds)
             busy = false
-            onDismiss()
+            if (ok) {
+                Toast.makeText(context, "Added to $name", Toast.LENGTH_SHORT).show()
+                onAdded()
+                onDismiss()
+            } else {
+                Toast.makeText(context, "Couldn't add to $name", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    // Create + add as one transaction so a stray tap can't win the race and
+    // leave the freshly-created collection empty.
+    fun createAndAdd(name: String) {
+        if (busy) return
+        busy = true
+        scope.launch {
+            val id = api.createCollection(name)
+            val ok = id != null && api.addToCollection(id, imageIds)
+            busy = false
+            if (ok) {
+                Toast.makeText(context, "Added to $name", Toast.LENGTH_SHORT).show()
+                onAdded()
+                onDismiss()
+            } else {
+                Toast.makeText(context, "Couldn't create $name", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 
@@ -141,12 +164,7 @@ fun AddToCollectionSheet(
                     onClick = {
                         val name = draft.trim()
                         creating = false
-                        if (name.isNotBlank()) {
-                            scope.launch {
-                                val id = api.createCollection(name)
-                                if (id != null) addTo(id, name)
-                            }
-                        }
+                        if (name.isNotBlank()) createAndAdd(name)
                     },
                 ) {
                     Text("Create and add", color = Accent)

@@ -61,6 +61,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -74,6 +75,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -129,7 +131,9 @@ fun ViewerScreen(
     // A saved index can outlive its list (process death, mutation) — never seed
     // the pager past the end or it throws on init.
     val safeStart = startIndex.coerceIn(0, (items.size - 1).coerceAtLeast(0))
-    val pagerState = rememberPagerState(initialPage = safeStart) { items.size }
+    // Key the pager to this exact list — swapping to a different session (e.g. a
+    // single Places photo) must reset currentPage, or indexing crashes.
+    val pagerState = key(items) { rememberPagerState(initialPage = safeStart) { items.size } }
     // Silent once "Manage media" is granted; offers to enable it on first delete.
     val trashLocal = rememberMediaTrash(onTrashed = { onChanged(); onClose() })
     var chromeVisible by remember { mutableStateOf(true) }
@@ -463,12 +467,12 @@ private fun RemoteInfo(image: ArchiveImage, api: ArchiveApi?) {
     val settings by SettingsStore.flow(context).collectAsState(initial = null)
     var exif by remember(image.id) { mutableStateOf<Map<String, String>>(emptyMap()) }
     var caption by remember(image.id) { mutableStateOf<app.azimuthphoto.mobile.data.Caption?>(null) }
-    LaunchedEffect(image.id) { exif = api?.exif(image.id) ?: emptyMap() }
-    LaunchedEffect(image.id, settings?.serverUrl) {
-        settings?.serverUrl?.let { url ->
-            caption = app.azimuthphoto.mobile.data.LibraryApi(url).caption(image.id)
-        }
+    // One client per server, not one per caption load.
+    val library = remember(settings?.serverUrl) {
+        settings?.serverUrl?.let { app.azimuthphoto.mobile.data.LibraryApi(it) }
     }
+    LaunchedEffect(image.id) { exif = api?.exif(image.id) ?: emptyMap() }
+    LaunchedEffect(image.id, library) { library?.let { caption = it.caption(image.id) } }
     caption?.takeIf { it.caption.isNotBlank() }?.let { InfoLine("Caption", it.caption) }
     caption?.tags?.takeIf { it.isNotEmpty() }?.let { InfoLine("Tags", it.joinToString(", ")) }
     image.date_taken?.let {
@@ -616,14 +620,21 @@ private fun VideoPage(source: Uri, key: String, isActive: Boolean) {
             prepare()
         }
     }
-    DisposableEffect(player, hostView) {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(player, hostView, lifecycleOwner) {
         val listener = object : Player.Listener {
             override fun onIsPlayingChanged(value: Boolean) { isPlaying = value }
         }
         player.addListener(listener)
+        // Pause when the app backgrounds so playback and audio don't continue.
+        val lifecycleObserver = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) player.pause()
+        }
+        lifecycleOwner.lifecycle.addObserver(lifecycleObserver)
         onDispose {
             hostView.keepScreenOn = false
             player.removeListener(listener)
+            lifecycleOwner.lifecycle.removeObserver(lifecycleObserver)
             player.release()
         }
     }

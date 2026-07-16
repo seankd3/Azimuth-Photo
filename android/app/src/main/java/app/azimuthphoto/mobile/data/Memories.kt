@@ -4,7 +4,11 @@ import java.io.IOException
 import java.time.LocalDate
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -30,21 +34,31 @@ object Memories {
         serverUrl: String,
         today: LocalDate,
         maxYears: Int = 12,
-    ): List<Memory> = withContext(Dispatchers.IO) {
+    ): List<Memory> = coroutineScope {
         val mm = "%02d".format(today.monthValue)
         val dd = "%02d".format(today.dayOfMonth)
-        (1..maxYears).mapNotNull { yearsAgo ->
-            val year = today.year - yearsAgo
-            val images = runCatching { fetch(serverUrl, year, mm, dd) }.getOrDefault(emptyList())
-            if (images.isEmpty()) null else Memory(yearsAgo = yearsAgo, year = year, images = images)
-        }
+        // All years in parallel with an overall cap, so an offline hub can't
+        // stall the strip for minutes waiting on serial timeouts.
+        withTimeoutOrNull(12_000) {
+            (1..maxYears).map { yearsAgo ->
+                val year = today.year - yearsAgo
+                async(Dispatchers.IO) {
+                    // Skip dates that don't exist in the target year (e.g. Feb 29).
+                    val valid = runCatching { LocalDate.of(year, today.monthValue, today.dayOfMonth) }.isSuccess
+                    val images = if (!valid) emptyList()
+                    else runCatching { fetch(serverUrl, year, mm, dd) }.getOrDefault(emptyList())
+                    if (images.isEmpty()) null else Memory(yearsAgo = yearsAgo, year = year, images = images)
+                }
+            }.awaitAll().filterNotNull()
+        }.orEmpty()
     }
 
     private fun fetch(serverUrl: String, year: Int, mm: String, dd: String): List<ArchiveImage> {
         val url = "$serverUrl/api/rankings?sort=elo&date_taken=$year-$mm-$dd&limit=12"
         http.newCall(Request.Builder().url(url).build()).execute().use { response ->
             if (!response.isSuccessful) throw IOException("memories failed: HTTP ${response.code}")
-            return json.decodeFromString<RankingsPage>(response.body!!.string()).images
+            val body = response.body?.string() ?: return emptyList()
+            return json.decodeFromString<RankingsPage>(body).images
         }
     }
 }

@@ -103,7 +103,7 @@ class LibraryApi(private val baseUrl: String, private val deviceToken: String? =
     private fun get(path: String): String =
         http.newCall(builder(path).build()).execute().use { resp ->
             if (!resp.isSuccessful) throw IOException("GET $path -> HTTP ${resp.code}")
-            resp.body!!.string()
+            resp.body?.string() ?: throw IOException("GET $path -> empty body")
         }
 
     private fun postJson(path: String, body: String): String =
@@ -113,7 +113,12 @@ class LibraryApi(private val baseUrl: String, private val deviceToken: String? =
         }
 
     // ---- Absolute media URLs (share the hub's thumb/full endpoints) ----
-    fun thumb(url: String): String = if (url.startsWith("http")) url else "$baseUrl$url"
+    // Blank paths return blank so Coil shows a placeholder, never the hub homepage.
+    fun thumb(url: String): String = when {
+        url.isBlank() -> ""
+        url.startsWith("http") -> url
+        else -> "$baseUrl$url"
+    }
     fun imageThumb(imageId: Long, size: String = "sm"): String = "$baseUrl/api/thumb/$size/$imageId"
     fun imageLarge(imageId: Long): String = "$baseUrl/api/thumb/lg/$imageId"
 
@@ -197,7 +202,7 @@ class LibraryApi(private val baseUrl: String, private val deviceToken: String? =
             val obj = json.parseToJsonElement(
                 postJson("/api/user-collections/$collectionId/share", "{}"),
             ).jsonObject
-            obj["share"]?.jsonObject?.get("url")?.toString()?.trim('"')
+            obj["share"]?.jsonObject?.get("url")?.toString()?.trim('"')?.takeIf { it.isNotBlank() && it != "null" }
         }.getOrNull()
     }
 

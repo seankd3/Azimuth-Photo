@@ -1,5 +1,6 @@
 package app.azimuthphoto.mobile.ui.library
 
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -67,19 +68,25 @@ fun PersonScreen(
     var images by remember(person.id) { mutableStateOf<List<ArchiveImage>>(emptyList()) }
     var offset by remember(person.id) { mutableStateOf(0) }
     var loading by remember(person.id) { mutableStateOf(false) }
+    var pageError by remember(person.id) { mutableStateOf(false) }
     var reachedEnd by remember(person.id) { mutableStateOf(false) }
     var menuOpen by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf(false) }
+    val context = LocalContext.current
 
     val gridState = rememberLazyGridState()
 
     suspend fun loadMore() {
         if (loading || reachedEnd) return
         loading = true
-        val page = runCatching { api.personPhotos(person.id, offset, PAGE_SIZE) }.getOrDefault(emptyList())
-        images = images + page
-        offset += page.size
-        if (page.size < PAGE_SIZE) reachedEnd = true
+        pageError = false
+        runCatching { api.personPhotos(person.id, offset, PAGE_SIZE) }
+            .onSuccess { page ->
+                images = images + page
+                offset += page.size
+                if (page.size < PAGE_SIZE) reachedEnd = true
+            }
+            .onFailure { pageError = true }
         loading = false
     }
 
@@ -132,8 +139,11 @@ fun PersonScreen(
                             onClick = {
                                 menuOpen = false
                                 scope.launch {
-                                    api.ignorePerson(person.id)
-                                    onBack()
+                                    if (api.ignorePerson(person.id)) {
+                                        onBack()
+                                    } else {
+                                        Toast.makeText(context, "Couldn't hide person", Toast.LENGTH_SHORT).show()
+                                    }
                                 }
                             },
                         )
@@ -157,7 +167,7 @@ fun PersonScreen(
                         .clickable { onOpenPhotos(images, index) },
                 ) {
                     AsyncImage(
-                        model = ImageRequest.Builder(LocalContext.current)
+                        model = ImageRequest.Builder(context)
                             .data(api.imageThumb(image.id, "sm"))
                             .crossfade(false)
                             .size(256)
@@ -189,8 +199,14 @@ fun PersonScreen(
                         val next = draft.trim()
                         renaming = false
                         if (next.isNotBlank() && next != name) {
+                            val previous = name
                             name = next
-                            scope.launch { api.labelPerson(person.id, next) }
+                            scope.launch {
+                                if (!api.labelPerson(person.id, next)) {
+                                    name = previous
+                                    Toast.makeText(context, "Couldn't rename person", Toast.LENGTH_SHORT).show()
+                                }
+                            }
                         }
                     },
                 ) {

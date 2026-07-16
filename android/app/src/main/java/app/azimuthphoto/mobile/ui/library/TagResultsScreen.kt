@@ -58,6 +58,7 @@ fun TagResultsScreen(
     var images by remember(tag) { mutableStateOf<List<ArchiveImage>?>(null) }
     var offset by remember(tag) { mutableStateOf(0) }
     var loading by remember(tag) { mutableStateOf(false) }
+    var pageError by remember(tag) { mutableStateOf(false) }
     var reachedEnd by remember(tag) { mutableStateOf(false) }
 
     val gridState = rememberLazyGridState()
@@ -65,10 +66,14 @@ fun TagResultsScreen(
     suspend fun loadMore() {
         if (loading || reachedEnd) return
         loading = true
-        val page = runCatching { api.tagPhotos(tag, offset, PAGE_SIZE) }.getOrDefault(emptyList())
-        images = (images ?: emptyList()) + page
-        offset += page.size
-        if (page.size < PAGE_SIZE) reachedEnd = true
+        pageError = false
+        runCatching { api.tagPhotos(tag, offset, PAGE_SIZE) }
+            .onSuccess { page ->
+                images = (images ?: emptyList()) + page
+                offset += page.size
+                if (page.size < PAGE_SIZE) reachedEnd = true
+            }
+            .onFailure { pageError = true }
         loading = false
     }
 

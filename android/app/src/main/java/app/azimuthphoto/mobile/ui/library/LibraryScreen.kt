@@ -28,6 +28,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -96,24 +97,14 @@ fun LibraryScreen(onImmersive: (Boolean) -> Unit = {}) {
     val openPhotos: (List<ArchiveImage>, Int) -> Unit = { images, index -> viewer = images to index }
 
     LaunchedEffect(viewer != null) { onImmersive(viewer != null) }
-    viewer?.let { (images, index) ->
-        ViewerScreen(
-            items = images.map { ViewerMedia.Remote(it) },
-            startIndex = index,
-            onClose = { viewer = null },
-            api = archiveApi,
-            onAddToCollection = { id -> addToCollection = listOf(id) },
-            onFindSimilar = { image -> viewer = null; push(Route.Similar(image)) },
-        )
-        addToCollection?.let { ids ->
-            AddToCollectionSheet(api = api, imageIds = ids, onDismiss = { addToCollection = null })
-        }
-        return
-    }
+    DisposableEffect(Unit) { onDispose { onImmersive(false) } }
 
-    BackHandler(enabled = backStack.size > 1) { pop() }
+    // Back closes the viewer first (its own handler), then pops the route stack.
+    BackHandler(enabled = viewer == null && backStack.size > 1) { pop() }
 
     Box(Modifier.fillMaxSize()) {
+        // The route stays composed under the viewer, so scroll and loaded pages
+        // survive opening and closing a photo.
         when (val r = route) {
             Route.Home -> LibraryHome(
                 api = api,
@@ -139,6 +130,17 @@ fun LibraryScreen(onImmersive: (Boolean) -> Unit = {}) {
             Route.Places -> PlacesScreen(api = api, onOpenPhoto = { id -> openPhotos(listOf(ArchiveImage(id = id)), 0) })
             is Route.Tag -> TagResultsScreen(api, r.tag, onBack = { pop() }, onOpenPhotos = openPhotos)
             is Route.Similar -> SimilarScreen(archiveApi, api, r.image, onBack = { pop() }, onOpenPhotos = openPhotos)
+        }
+
+        viewer?.let { (images, index) ->
+            ViewerScreen(
+                items = images.map { ViewerMedia.Remote(it) },
+                startIndex = index,
+                onClose = { viewer = null },
+                api = archiveApi,
+                onAddToCollection = { id -> addToCollection = listOf(id) },
+                onFindSimilar = { image -> viewer = null; push(Route.Similar(image)) },
+            )
         }
     }
 
