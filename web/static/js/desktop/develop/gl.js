@@ -784,14 +784,7 @@ precision highp float;
 in vec2 v_uv;
 out vec4 outColor;
 uniform sampler2D u_preview;
-uniform int u_orientation;
-vec2 previewOrientationUv(vec2 uv) {
-    if (u_orientation == 3) return vec2(1.0) - uv;
-    if (u_orientation == 6) return vec2(uv.y, 1.0 - uv.x);
-    if (u_orientation == 8) return vec2(1.0 - uv.y, uv.x);
-    return uv;
-}
-void main() { outColor = texture(u_preview, previewOrientationUv(v_uv)); }`;
+void main() { outColor = texture(u_preview, vec2(v_uv.x, 1.0 - v_uv.y)); }`;
 
 const PRE_DETAIL_FUNCTIONS = `
 bool hueWindow(float hue, float lo, float hi) {
@@ -1230,7 +1223,6 @@ export class DevelopRenderer {
         this.ready = false;
         this.displayPreview = false;
         this.previewSource = null;
-        this.previewOrientation = 1;
         this.frame = 0;
         this.createGeometry();
         this.source = texture(this.gl, 1, 1, {
@@ -1284,7 +1276,6 @@ export class DevelopRenderer {
         const gl = this.gl;
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         this.displayPreview = false;
-        this.previewOrientation = 1;
         if (this.previewSource) {
             gl.deleteTexture(this.previewSource);
             this.previewSource = null;
@@ -1304,7 +1295,7 @@ export class DevelopRenderer {
         this.requestRender();
     }
 
-    uploadDisplayPreview(image, orientation = 1) {
+    uploadDisplayPreview(image) {
         // Paint an 8-bit display-referred preview without applying RAW settings.
         const gl = this.gl;
         const width = Number(image?.width);
@@ -1317,11 +1308,10 @@ export class DevelopRenderer {
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+        // The present shader reconciles bitmap Y with the array-backed full render.
         gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
         this.displayPreview = true;
-        this.previewOrientation = [3, 6, 8].includes(Number(orientation)) ? Number(orientation) : 1;
         this.width = width;
         this.height = height;
         this.canvas.width = width;
@@ -1955,7 +1945,6 @@ export class DevelopRenderer {
             gl.useProgram(this.displayPreviewProgram);
             bindUnit(gl, this.previewSource, 0);
             gl.uniform1i(gl.getUniformLocation(this.displayPreviewProgram, 'u_preview'), 0);
-            gl.uniform1i(gl.getUniformLocation(this.displayPreviewProgram, 'u_orientation'), this.previewOrientation);
             this.setProgramView(this.displayPreviewProgram, this.view);
             gl.bindFramebuffer(gl.FRAMEBUFFER, null);
             gl.viewport(0, 0, this.canvas.width, this.canvas.height);

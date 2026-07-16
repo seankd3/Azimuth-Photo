@@ -7,18 +7,6 @@ import time
 from PIL import Image, ImageOps
 
 
-_EXIF_TO_RAW_FLIP = {2: 1, 3: 3, 4: 2, 5: 4, 6: 6, 7: 7, 8: 5}
-_RAW_FLIP_TO_EXIF = {flip: orientation for orientation, flip in _EXIF_TO_RAW_FLIP.items()}
-
-
-def _normalized_exif_orientation(value) -> int:
-    try:
-        orientation = int(value)
-    except (TypeError, ValueError):
-        return 1
-    return orientation if 1 <= orientation <= 8 else 1
-
-
 def apply_raw_orientation(img: Image.Image, flip: int) -> Image.Image:
     """Apply libraw's container orientation to an untagged RAW image."""
     transforms = {
@@ -47,31 +35,12 @@ def _exiftool_raw_flip(filepath: str) -> int:
         orientation = int((json.loads(result.stdout) or [{}])[0].get("Orientation", 1))
     except (OSError, ValueError, TypeError, json.JSONDecodeError, IndexError):
         return 0
-    return _EXIF_TO_RAW_FLIP.get(orientation, 0)
+    return {2: 1, 3: 3, 4: 2, 5: 4, 6: 6, 7: 7, 8: 5}.get(orientation, 0)
 
 
 def _raw_preview_flip(raw, filepath: str) -> int:
     flip = getattr(getattr(raw, "sizes", None), "flip", None)
     return int(flip) if flip is not None else _exiftool_raw_flip(filepath)
-
-
-def read_source_orientation(filepath: str, *, raw_extensions: set[str]) -> int:
-    """Read the same source orientation used to make correctly oriented thumbnails."""
-    if os.path.splitext(filepath)[1].lower() in raw_extensions:
-        try:
-            import rawpy
-
-            with rawpy.imread(filepath) as raw:
-                flip = _raw_preview_flip(raw, filepath)
-        except Exception:
-            flip = _exiftool_raw_flip(filepath)
-        return _RAW_FLIP_TO_EXIF.get(flip, 1)
-
-    try:
-        with Image.open(filepath) as source:
-            return _normalized_exif_orientation(source.getexif().get(274, 1))
-    except (OSError, ValueError):
-        return 1
 
 
 def load_raw_preview(filepath: str, max_target: int) -> Image.Image | None:
@@ -84,7 +53,7 @@ def load_raw_preview(filepath: str, max_target: int) -> Image.Image | None:
         if thumb.format == rawpy.ThumbFormat.JPEG:
             with Image.open(io.BytesIO(thumb.data)) as source:
                 source.load()
-                has_embedded_orientation = _normalized_exif_orientation(source.getexif().get(274, 1)) != 1
+                has_embedded_orientation = source.getexif().get(274, 1) != 1
                 img = ImageOps.exif_transpose(source)
                 if img is source:
                     img = source.copy()

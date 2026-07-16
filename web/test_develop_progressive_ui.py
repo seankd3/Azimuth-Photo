@@ -28,14 +28,11 @@ def test_develop_progressive_loader_prefers_cached_base_then_library_fallback():
 def test_gl_preview_is_display_referred_and_swaps_to_linear_source():
     source = (WEB / "static/js/desktop/develop/gl.js").read_text(encoding="utf-8")
     assert "const DISPLAY_PREVIEW_FRAGMENT" in source
-    assert "uniform int u_orientation;" in source
-    assert "if (u_orientation == 3) return vec2(1.0) - uv;" in source
-    assert "if (u_orientation == 6) return vec2(uv.y, 1.0 - uv.x);" in source
-    assert "if (u_orientation == 8) return vec2(1.0 - uv.y, uv.x);" in source
-    assert "uploadDisplayPreview(image, orientation = 1)" in source
+    assert "void main() { outColor = texture(u_preview, vec2(v_uv.x, 1.0 - v_uv.y)); }" in source
+    assert "uploadDisplayPreview(image)" in source
     loader = (WEB / "static/js/desktop/develop/develop.js").read_text(encoding="utf-8")
-    assert "paintPlaceholder(image.id, token, displayOrientation(entry))" in loader
-    assert "orientation: Number(payload.orientation) || 1" in loader
+    assert "paintPlaceholder(image.id, token)" in loader
+    assert "displayOrientation" not in loader
     assert "X-Develop-Orientation" not in loader
     assert "this.displayPreview = true" in source
     assert "this.displayPreview = false" in source
