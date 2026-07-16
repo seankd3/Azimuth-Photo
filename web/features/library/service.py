@@ -603,8 +603,42 @@ async def scope_counts_payload(
     )
 
 
-async def filter_options_payload() -> dict:
-    return await _configured(_get_filter_options)()
+async def filter_options_payload(
+    *,
+    orientation: str = "",
+    compared: str = "",
+    min_stars: int = 0,
+    folder: str = "",
+    flag: str = "",
+    date_taken: str = "",
+    file_type: str = "",
+    camera: str = "",
+    lens: str = "",
+    tag: str = "",
+    people: str = "",
+    q: str = "",
+    deep: bool = False,
+    import_batch: int = 0,
+    stacks: str = "expanded",
+) -> dict:
+    search = await _configured_resolve_library_constraints(q, people=people, deep=deep)
+    search_ids = await _combined_import_batch_filter(search.get("id_filter"), import_batch)
+    return await _configured(_get_filter_options)(
+        orientation=orientation,
+        compared=compared,
+        min_stars=min_stars,
+        folder=folder,
+        flag=flag,
+        date_taken=date_taken,
+        file_type=file_type,
+        camera=camera,
+        lens=lens,
+        tag=tag,
+        caption_model_key=search.get("caption_model_key") or "",
+        id_filter=search_ids,
+        text_query=search.get("text_query") or "",
+        exclude_collapsed_stack_members=_exclude_collapsed_stack_members(stacks),
+    )
 
 
 async def stats_payload() -> dict:

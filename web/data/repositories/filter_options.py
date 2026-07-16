@@ -5,6 +5,7 @@ from collections import Counter
 import time as _time
 
 from data import connection
+from data.repositories.rankings import ranking_filter_parts
 
 _filter_options_cache = {"data": None, "expires": 0}
 _filter_options_refreshing = False
@@ -120,6 +121,20 @@ async def filter_options(
     *,
     catalog_counts: dict,
     active_source_ids: list[int] | tuple[int, ...] = (),
+    orientation: str = "",
+    compared: str = "",
+    min_stars: int = 0,
+    folder: str = "",
+    flag: str = "",
+    date_taken: str = "",
+    file_type: str = "",
+    camera: str = "",
+    lens: str = "",
+    tag: str = "",
+    caption_model_key: str = "",
+    id_filter: set[int] | None = None,
+    text_query: str = "",
+    exclude_collapsed_stack_members: bool = False,
 ) -> dict:
     active_images = int(catalog_counts.get("active_images") or 0)
     if active_images <= 0:
@@ -130,19 +145,36 @@ async def filter_options(
         and int(catalog_counts.get("removed_images") or 0) == 0
     )
     all_sources_available = int(catalog_counts.get("removed_images") or 0) == 0
-    if all_catalog_images_active or all_sources_available:
-        image_source_clause = ""
-        bare_source_clause = ""
-        source_params = ()
-    else:
-        if not active_source_ids:
-            return empty_filter_options()
+    if not (all_catalog_images_active or all_sources_available) and not active_source_ids:
+        return empty_filter_options()
+    conditions, params = ranking_filter_parts(
+        orientation=orientation,
+        compared=compared,
+        min_stars=min_stars,
+        folder=folder,
+        flag=flag,
+        date_taken=date_taken,
+        file_type=file_type,
+        camera=camera,
+        lens=lens,
+        tag=tag,
+        caption_model_key=caption_model_key,
+        text_query=text_query,
+        exclude_collapsed_stack_members=exclude_collapsed_stack_members,
+    )
+    if not (all_catalog_images_active or all_sources_available):
         source_placeholders = ",".join("?" for _ in active_source_ids)
-        image_source_clause = f"i.source_id IN ({source_placeholders}) AND "
-        bare_source_clause = f"source_id IN ({source_placeholders}) AND "
-        source_params = tuple(int(source_id) for source_id in active_source_ids)
+        conditions.append(f"i.source_id IN ({source_placeholders})")
+        params.extend(int(source_id) for source_id in active_source_ids)
 
-    base_where = f"{bare_source_clause}status IN ('kept', 'maybe') AND missing_at IS NULL"
+    if id_filter is not None:
+        ids = [int(image_id) for image_id in id_filter]
+        if not ids:
+            return empty_filter_options()
+        id_placeholders = ",".join("?" for _ in ids)
+        conditions.append(f"i.id IN ({id_placeholders})")
+        params.extend(ids)
+    base_where = " AND ".join(conditions)
     (
         year_rows,
         undated_rows,
@@ -155,46 +187,46 @@ async def filter_options(
             _filter_rows,
             db_path,
             "SELECT SUBSTR(date_taken, 1, 4) AS value, COUNT(*) AS count "
-            f"FROM images WHERE {base_where} "
+            f"FROM images i JOIN catalog_sources s ON s.id = i.source_id WHERE {base_where} "
             "AND date_taken IS NOT NULL AND LENGTH(date_taken) >= 4 "
             "GROUP BY value",
-            source_params,
+            params,
         ),
         asyncio.to_thread(
             _filter_rows,
             db_path,
             "SELECT COUNT(*) AS count "
-            f"FROM images WHERE {base_where} "
+            f"FROM images i JOIN catalog_sources s ON s.id = i.source_id WHERE {base_where} "
             "AND (date_taken IS NULL OR LENGTH(date_taken) < 4)",
-            source_params,
+            params,
         ),
         asyncio.to_thread(
             _filter_rows,
             db_path,
             "SELECT file_ext AS value, COUNT(*) AS count "
-            f"FROM images WHERE {base_where} "
+            f"FROM images i JOIN catalog_sources s ON s.id = i.source_id WHERE {base_where} "
             "AND file_ext IS NOT NULL AND file_ext != '' "
             "GROUP BY value",
-            source_params,
+            params,
         ),
         asyncio.to_thread(
             _filter_rows,
             db_path,
             "SELECT TRIM(COALESCE(camera_make, '') || ' ' || COALESCE(camera_model, '')) AS value, "
             "COUNT(*) AS count "
-            f"FROM images WHERE {base_where} "
+            f"FROM images i JOIN catalog_sources s ON s.id = i.source_id WHERE {base_where} "
             "AND (camera_make IS NOT NULL OR camera_model IS NOT NULL) "
             "GROUP BY value HAVING value != ''",
-            source_params,
+            params,
         ),
         asyncio.to_thread(
             _filter_rows,
             db_path,
             "SELECT lens AS value, COUNT(*) AS count "
-            f"FROM images WHERE {base_where} "
+            f"FROM images i JOIN catalog_sources s ON s.id = i.source_id WHERE {base_where} "
             "AND lens IS NOT NULL AND lens != '' "
             "GROUP BY value",
-            source_params,
+            params,
         ),
         asyncio.to_thread(
             _filter_rows,
@@ -206,15 +238,12 @@ async def filter_options(
             "JOIN catalog_sources s ON s.id = i.source_id "
             "WHERE p.status != 'ignored' "
             "AND p.merged_into_person_id IS NULL "
-            "AND s.included = 1 "
-            f"AND {image_source_clause}"
-            "i.status IN ('kept', 'maybe') "
-            "AND i.missing_at IS NULL "
+            f"AND {base_where} "
             "GROUP BY p.id "
             "HAVING count > 0 "
             "ORDER BY count DESC, LOWER(COALESCE(NULLIF(p.name, ''), 'Person ' || p.id)) ASC, p.id ASC "
             "LIMIT 200",
-            source_params,
+            params,
         ),
     )
 

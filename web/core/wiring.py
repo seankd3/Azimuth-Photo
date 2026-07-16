@@ -509,7 +509,7 @@ def configure_library_service(
         db_signature=lambda: db.DB_PATH,
         get_date_groups=lambda **kwargs: db.get_date_groups(**kwargs),
         get_map_markers=lambda **kwargs: db.get_map_markers(**kwargs),
-        get_filter_options=lambda: db.get_filter_options(),
+        get_filter_options=lambda **kwargs: db.get_filter_options(**kwargs),
         get_stats=lambda: db.get_stats(),
         count_rankings=lambda **kwargs: db.count_rankings(**kwargs),
         get_rankings=lambda **kwargs: db.get_rankings(**kwargs),

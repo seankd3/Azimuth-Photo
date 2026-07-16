@@ -71,7 +71,8 @@ function optionRows(items, key, valueOf, labelOf) {
         if (!value) return '';
         const active = key === 'folder' ? folderValues().includes(value) : String(scope[key] || '') === value;
         const label = labelOf(item);
-        return `<button class="filter-row ${active ? 'active' : ''}" data-key="${key}" data-value="${esc(value)}" title="${esc(label)}">`
+        const unavailable = Number(item.count ?? item.image_count ?? item.face_count) === 0;
+        return `<button class="filter-row ${active ? 'active' : ''} ${unavailable ? 'unavailable' : ''}" data-key="${key}" data-value="${esc(value)}" title="${esc(label)}">`
             + `<span title="${esc(label)}">${esc(label)}</span><span class="num">${esc(countLabel(item))}</span></button>`;
     }).join('');
 }
@@ -328,6 +329,7 @@ function bindRows() {
         row.addEventListener('click', () => {
             const key = row.dataset.key;
             const active = key === 'folder' ? folderValues().includes(row.dataset.value) : scope[key] === row.dataset.value;
+            if (row.classList.contains('unavailable') && !active) return;
             const value = active ? '' : row.dataset.value;
             if (row.dataset.year) expandYear(row.dataset.year);
             if (key === 'people') {
@@ -363,7 +365,7 @@ async function loadOptions({ force = false } = {}) {
     foldersLoading = true;
     tagsLoading = true;
     render();
-    const core = getFilterOptions().then((filterData) => {
+    const core = getFilterOptions(scopeParams()).then((filterData) => {
         if (seq !== loadSeq) return;
         options = {
             ...options,

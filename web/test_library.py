@@ -300,6 +300,29 @@ class LibraryTests(BackendTestCase):
         self.assertEqual(options["undated"], 1)
         self.assertGreaterEqual(db.FILTER_OPTIONS_CACHE_TTL_SECONDS, 300.0)
 
+    async def test_filter_options_respect_folder_scope(self):
+        source = await self._source()
+        beach = await self._image(source["id"], "Beach/one.jpg")
+        city = await self._image(source["id"], "City/two.jpg")
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "UPDATE images SET camera_make = ?, camera_model = ? WHERE id = ?",
+                ("Fuji", "X-T5", beach),
+            )
+            await conn.execute(
+                "UPDATE images SET camera_make = ?, camera_model = ? WHERE id = ?",
+                ("Canon", "R5", city),
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+        db.invalidate_stats_cache()
+
+        options = await db.get_filter_options(folder=os.path.join(source["path"], "Beach"))
+
+        self.assertEqual(options["cameras"], [{"camera": "Fuji X-T5", "count": 1}])
+
     async def test_filter_options_repository_matches_facade_with_cache(self):
         source = await self._source()
         removed_source = await self._source("removed-filter-options")
