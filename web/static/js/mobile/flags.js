@@ -23,10 +23,12 @@ function setLocal(ids, flagById) {
 }
 
 async function write(ids, flag) {
-    if (ids.length === 1) {
-        return await writeFlag(ids[0], flag) !== null;
-    }
-    return await writeFlags(ids, flag) !== null;
+    // enqueueWrite resolves {status} on drain — it is never null, so map the
+    // real outcome (a terminal 4xx resolves status: failed) to the boolean.
+    const result = ids.length === 1
+        ? await writeFlag(ids[0], flag)
+        : await writeFlags(ids, flag);
+    return Boolean(result) && result.status !== "failed";
 }
 
 async function writeBack(prev) {
