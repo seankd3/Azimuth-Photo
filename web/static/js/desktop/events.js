@@ -4,6 +4,7 @@ import { loadScopePage } from './scope_data.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
 import { showToast } from './toast.js';
 import { icon } from '../icons.js';
+import { toggleSelection } from './selection.js';
 
 const GAP_KEY = 'pa_d_event_gap';
 const PAGE_SIZE = 100;
@@ -21,6 +22,7 @@ const imageIndexes = new Map();
 let observer = null;
 let imageObserver = null;
 let menu = null;
+let savedScrollTop = 0;
 const expandedEvents = new Set();
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
@@ -104,8 +106,21 @@ function appendGroups(incoming) {
 function cellHtml(img, index) {
     const selected = selection.has(Number(img.id));
     return `<figure class="cell ${selected ? 'sel' : ''}" data-id="${img.id}" data-idx="${index}" tabindex="-1" aria-selected="${selected ? 'true' : 'false'}" style="--ar:${aspect(img)}">`
-        + `<img data-src="${esc(img.thumb_url || thumbUrl('sm', img.id))}" loading="lazy" decoding="async" alt="${esc(img.filename || '')}">`
+        + `<img data-src="${esc(img.thumb_url || thumbUrl('sm', img.id))}" loading="lazy" decoding="async" fetchpriority="low" alt="${esc(img.filename || '')}">`
+        + `<button class="c-check" aria-label="Select photo" tabindex="-1">${icon('check')}</button>`
         + `<span class="c-idx">${index + 1}</span><span class="c-elo"><span class="elo-chip">${Math.round(Number(img.elo) || 0)}</span></span></figure>`;
+}
+
+function patchCells(imageIds = null) {
+    const ids = Array.isArray(imageIds) ? imageIds.map(Number).filter((id) => id > 0) : [];
+    const cells = ids.length
+        ? ids.flatMap((id) => [...document.querySelectorAll(`#events-flow .cell[data-id="${id}"]`)])
+        : [...document.querySelectorAll('#events-flow .cell[data-id]')];
+    for (const cell of cells) {
+        const selected = selection.has(Number(cell.dataset.id));
+        cell.classList.toggle('sel', selected);
+        cell.setAttribute('aria-selected', String(selected));
+    }
 }
 
 function coverageDots(group) {
@@ -134,7 +149,7 @@ function groupHtml(group, groupIndex) {
         + `<span class="ev-dots" data-tip="Ranking coverage">${coverageDots(group)}</span><span class="ev-spacer"></span>`
         + `<button class="ev-menu-btn" data-menu="${groupIndex}" data-tip="Event actions" aria-label="Event actions">${icon('ellipsis')}</button></header>`
         + '<div class="event-body">'
-        + `<figure class="event-hero" data-id="${hero.id}"><img data-src="${esc(thumbUrl('md', hero.id))}" alt="${esc(hero.filename || '')}"><figcaption class="hero-cap"><span>${esc(hero.filename || '')}</span><span>${Math.round(Number(hero.elo) || 0)}</span></figcaption></figure>`
+        + `<figure class="event-hero" data-id="${hero.id}"><img data-src="${esc(thumbUrl('md', hero.id))}" fetchpriority="low" alt="${esc(hero.filename || '')}"><figcaption class="hero-cap"><span>${esc(hero.filename || '')}</span><span>${Math.round(Number(hero.elo) || 0)}</span></figcaption></figure>`
         + `<div class="event-tiles">${visibleTiles.map((img) => cellHtml(img, imageIndexes.get(Number(img.id)) ?? 0)).join('')}`
         + `${hidden > 0 ? `<button class="ev-more" data-expand="${groupIndex}">+${fmt(hidden)} more</button>` : ''}</div></div></article>`;
 }
@@ -297,13 +312,12 @@ function openMenu(button, groupIndex) {
         } else if (action === 'select') {
             ids.forEach((id) => selection.add(id));
             selectionChanged(ids);
-            render();
+            patchCells(ids);
         }
     });
 }
 
-function reload() {
-    if (!mounted) return;
+function resetData() {
     generation += 1;
     offset = 0;
     done = false;
@@ -314,8 +328,36 @@ function reload() {
     expandedEvents.clear();
     setImages([]);
     setRankingsMeta({ visibleImages: 0, sortQuality: null });
-    renderSkeleton();
+}
+
+function reload({ skeleton = true } = {}) {
+    if (!mounted) return;
+    resetData();
+    if (skeleton) renderSkeleton();
     loadPage();
+}
+
+async function revalidate() {
+    const seq = generation;
+    try {
+        const data = await loadScopePage({ limit: PAGE_SIZE, offset: 0, sort: 'date_taken' });
+        if (!mounted || seq !== generation || !data) return;
+        const incoming = data.images || [];
+        const changed = incoming.length !== Math.min(images.length, PAGE_SIZE)
+            || incoming.some((image, i) => Number(image.id) !== Number(images[i]?.id));
+        if (!changed) return;
+        resetData();
+        images = incoming;
+        incoming.forEach((image, i) => imageIndexes.set(Number(image.id), i));
+        offset = incoming.length;
+        done = incoming.length < PAGE_SIZE;
+        setImages(images);
+        setRankingsMeta({ visibleImages: data.visible_images, sortQuality: data.sort_quality });
+        render();
+        setupSentinel();
+    } catch {
+        // Keep the last successful event view visible while the refresh is unavailable.
+    }
 }
 
 export function initEvents() {
@@ -334,24 +376,39 @@ export function initEvents() {
             render();
             return;
         }
+        const check = event.target.closest('.c-check');
+        if (check) {
+            const cell = check.closest('.cell[data-id]');
+            if (cell) toggleSelection(cell.dataset.id, cell.dataset.idx, { range: event.shiftKey });
+            return;
+        }
         const cell = event.target.closest('.cell[data-id], .event-hero[data-id]');
         if (cell) emit('loupe:open', { id: Number(cell.dataset.id), index: images.findIndex((img) => Number(img.id) === Number(cell.dataset.id)) });
     });
     document.addEventListener('pointerdown', (event) => {
         if (menu && !menu.contains(event.target) && !event.target.closest('.ev-menu-btn')) closeMenu();
     });
-    on('scope', reload);
-    on('selection', render);
-    on('flags', render);
+    on('scope', () => {
+        resetData();
+        if (mounted) reload();
+    });
+    on('selection', ({ imageIds } = {}) => patchCells(imageIds));
+    on('flags', ({ imageIds } = {}) => patchCells(imageIds));
 }
 
 export function mountEvents() {
     mounted = true;
     document.getElementById('view-events').classList.add('active');
-    reload();
+    if (images.length) {
+        observeImages(document.getElementById('events-flow'));
+        setupSentinel();
+        requestAnimationFrame(() => document.getElementById('canvas').scrollTo({ top: savedScrollTop, behavior: 'auto' }));
+        revalidate();
+    } else reload();
 }
 
 export function unmountEvents() {
+    savedScrollTop = document.getElementById('canvas').scrollTop;
     mounted = false;
     generation += 1;
     closeMenu();

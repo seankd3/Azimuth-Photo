@@ -406,6 +406,7 @@ html[data-badges-check="0"] .cell .c-check { display: none; }
 html[data-badges-flag="0"] .cell .c-flag { display: none; }
 html[data-badges-elo="0"] .cell .c-elo { display: none; }
 html[data-badges-index="0"] .cell .c-idx { display: none; }
+
 #grid-sentinel { width: 100%; height: 2px; }
 .grid-end { text-align: center; color: var(--text-3); font-size: 12px; padding: var(--s5) 0 calc(var(--s5) * 2); }
 .load-error { margin: var(--s5) auto; max-width: 460px; padding: var(--s4) var(--s5); border: 1px solid var(--line); border-left: 2px solid var(--warn); border-radius: var(--r-card); background: var(--panel); }
@@ -2087,3 +2088,7 @@ body.import-stage-active #canvas > .view:not(#view-import) { display: none !impo
 .filter-folder-copy { min-width: 0; display: grid; gap: 1px; }
 .filter-folder-copy > span, .filter-folder-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .filter-folder-copy small { color: var(--text-3); font-size: var(--fs-caption); }
+
+/* Performance wave: event cells share the grid's visible selection affordance. */
+@media (hover: hover) { #events-flow .cell:hover .c-check { opacity: 1; pointer-events: auto; } }
+#events-flow .cell.sel .c-check { opacity: 1; pointer-events: auto; }

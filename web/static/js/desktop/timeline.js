@@ -15,6 +15,7 @@ let months = [];
 let monthSamples = new Map();
 let monthObserver = null;
 let scrubDragging = false;
+let savedScrollTop = 0;
 
 function monthLabel(key) {
     if (key === 'undated') return 'Undated';
@@ -78,7 +79,7 @@ function renderMonth(month) {
         + `<span class="timeline-day-label">${esc(dayLabel(key))}</span>`
         + `<span class="timeline-day-count">${fmt(images.length)}</span>`
         + `<span class="timeline-day-thumbs">${images.slice(0, 5).map((image) => (
-            `<img src="${esc(image.thumb_url || thumbUrl('sm', image.id))}" alt="" loading="lazy" decoding="async">`
+            `<img src="${esc(image.thumb_url || thumbUrl('sm', image.id))}" alt="" loading="lazy" decoding="async" fetchpriority="low">`
         )).join('')}</span></button>`
     )).join('') : `<p class="timeline-empty-month">${month.count ? 'Thumbnails are still preparing for this month.' : 'No photos match this month.'}</p>`;
     for (const row of host.querySelectorAll('[data-day]')) {
@@ -158,10 +159,16 @@ function scrubTo(clientY) {
     jumpToMonth(month, 'auto');
 }
 
-async function load() {
+function monthSignature(nextMonths) {
+    return nextMonths.map((month) => `${month.key}:${month.count}`).join('|');
+}
+
+async function load({ keepVisible = false } = {}) {
     const seq = ++generation;
-    monthSamples = new Map();
-    document.getElementById('timeline-flow').innerHTML = '<div class="timeline-loading"><i class="skel"></i><i class="skel"></i><i class="skel"></i></div>';
+    if (!keepVisible) {
+        monthSamples = new Map();
+        document.getElementById('timeline-flow').innerHTML = '<div class="timeline-loading"><i class="skel"></i><i class="skel"></i><i class="skel"></i></div>';
+    }
     try {
         const params = scopeParams();
         params.delete('sort');
@@ -169,10 +176,13 @@ async function load() {
         if (!mounted || seq !== generation) return;
         const counts = new Map((histogram?.months || []).map((item) => [item.month, Number(item.count) || 0]));
         const visibleGroups = new Map((groups?.groups || []).map((group) => [group.date || 'undated', Number(group.count) || 0]));
-        months = [...counts.entries()].map(([key, count]) => ({ key, count }));
+        const nextMonths = [...counts.entries()].map(([key, count]) => ({ key, count }));
         if (Number(histogram?.undated) || visibleGroups.has('undated')) {
-            months.push({ key: 'undated', count: Number(histogram?.undated) || visibleGroups.get('undated') || 0 });
+            nextMonths.push({ key: 'undated', count: Number(histogram?.undated) || visibleGroups.get('undated') || 0 });
         }
+        if (keepVisible && monthSignature(nextMonths) === monthSignature(months)) return;
+        months = nextMonths;
+        if (keepVisible) monthSamples = new Map();
         renderRiver();
         observeMonths(seq);
     } catch {
@@ -186,7 +196,12 @@ async function load() {
 export function initTimeline() {
     if (initialized) return;
     initialized = true;
-    on('scope', () => { if (mounted) load(); });
+    on('scope', () => {
+        generation += 1;
+        months = [];
+        monthSamples = new Map();
+        if (mounted) load();
+    });
     const rail = () => document.getElementById('timeline-scrubber');
     document.addEventListener('pointerdown', (event) => {
         if (!event.target.closest('#timeline-scrubber')) return;
@@ -201,10 +216,16 @@ export function initTimeline() {
 export function mountTimeline() {
     mounted = true;
     document.getElementById('view-timeline').classList.add('active');
-    load();
+    if (months.length) {
+        observeMonths(generation);
+        renderScrubber();
+        requestAnimationFrame(() => document.getElementById('canvas').scrollTo({ top: savedScrollTop, behavior: 'auto' }));
+        load({ keepVisible: true });
+    } else load();
 }
 
 export function unmountTimeline() {
+    savedScrollTop = document.getElementById('canvas').scrollTop;
     mounted = false;
     generation += 1;
     if (monthObserver) monthObserver.disconnect();

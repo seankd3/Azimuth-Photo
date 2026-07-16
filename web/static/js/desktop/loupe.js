@@ -39,6 +39,7 @@ let stripStart = 0;
 let stripEnd = 0;
 let stripScrollFrame = 0;
 let previousStripIndex = -1;
+let navDirection = 1;
 const exifCache = new Map();
 const INFO_MODES = ['off', 'basic', 'full'];
 const RAW_EXTENSIONS = new Set(['arw', 'cr2', 'cr3', 'dng', 'nef', 'orf', 'raf', 'rw2']);
@@ -315,6 +316,21 @@ function useMediumTier() {
     }
 }
 
+function upgradeStageToMedium(img, token) {
+    const image = document.getElementById('loupe-img');
+    if (!img || !image) return;
+    const medium = new Image();
+    medium.decoding = 'async';
+    medium.fetchPriority = 'high';
+    medium.onload = async () => {
+        if (medium.decode) await medium.decode().catch(() => {});
+        if (!open || token !== renderToken || Number(current()?.id) !== Number(img.id)) return;
+        image.dataset.tier = 'md';
+        image.src = medium.src;
+    };
+    medium.src = thumbUrl('md', img.id);
+}
+
 function requestFullImage() {
     const img = current();
     const image = document.getElementById('loupe-img');
@@ -322,6 +338,7 @@ function requestFullImage() {
     fullImageLoadingId = img.id;
     const token = renderToken;
     const large = new Image();
+    large.fetchPriority = 'high';
     let settled = false;
     const finish = ({ offline = false } = {}) => {
         if (settled) return;
@@ -370,7 +387,7 @@ function stripMarkup(start, end) {
         }
         const glyph = flagGlyph(img.flag || 'unflagged');
         markup += `<button class="loupe-thumb ${i === index ? 'cur' : ''}" data-index="${i}" data-id="${esc(img.id)}" aria-label="Photo ${i + 1}"${i === index ? ' aria-current="true"' : ''}>`
-            + `<img loading="lazy" decoding="async" src="${esc(img.thumb_url || thumbUrl('sm', img.id))}" alt="">`
+            + `<img loading="lazy" decoding="async" fetchpriority="low" src="${esc(img.thumb_url || thumbUrl('sm', img.id))}" alt="">`
             + `<span class="loupe-thumb-flag" aria-hidden="true">${glyph}</span>`
             + '</button>';
     }
@@ -450,10 +467,17 @@ function updateStrip() {
 }
 
 function preloadNeighbors() {
-    for (const neighbor of [images()[index + 1], images()[index - 1]]) {
+    const direction = navDirection || 1;
+    const warm = [1, 2, 3].map((distance) => images()[index + direction * distance]);
+    for (const neighbor of warm) {
         if (!neighbor) continue;
-        const preload = new Image();
-        preload.src = thumbUrl('md', neighbor.id);
+        const queue = window.requestIdleCallback || ((callback) => window.setTimeout(callback, 0));
+        queue(() => {
+            if (!open) return;
+            const preload = new Image();
+            preload.fetchPriority = 'low';
+            preload.src = thumbUrl('md', neighbor.id);
+        });
     }
 }
 
@@ -462,6 +486,7 @@ function preloadLargeTier() {
     for (const candidate of [images()[index - 1], current(), images()[index + 1]]) {
         if (!candidate) continue;
         const preload = new Image();
+        preload.fetchPriority = 'low';
         preload.src = thumbUrl('lg', candidate.id);
     }
 }
@@ -496,12 +521,14 @@ function render() {
     const image = document.getElementById('loupe-img');
     setLoupeOffline(false);
     image.dataset.imageId = String(img.id);
-    image.dataset.tier = 'md';
+    image.fetchPriority = 'high';
+    image.dataset.tier = 'sm';
     image.onload = () => {
         if (token !== renderToken) return;
         setImageMetrics({ focus });
     };
-    image.src = thumbUrl('md', img.id);
+    image.src = img.thumb_url || thumbUrl('sm', img.id);
+    upgradeStageToMedium(img, token);
     const size = imageSizeFromMetadata(img, image);
     naturalWidth = size.width;
     naturalHeight = size.height;
@@ -632,6 +659,7 @@ export async function navLoupe(delta) {
         if (pending) updateChrome();
         return;
     }
+    navDirection = Math.sign(delta) || navDirection;
     index = targetIndex;
     render();
 }
@@ -640,6 +668,7 @@ export async function navLoupeTo(targetIndex) {
     if (!open || !images().length) return;
     const bounded = Math.max(0, Math.min(images().length - 1, Number(targetIndex)));
     if (bounded === index) return;
+    navDirection = Math.sign(bounded - index) || navDirection;
     index = bounded;
     render();
 }

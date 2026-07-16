@@ -77,7 +77,7 @@ export function cellHtml(img, index) {
         : '';
     const selected = selection.has(Number(img.id));
     return `<figure class="cell ${img.thumb_url ? '' : 'skel'} ${selected ? 'sel' : ''}" data-id="${img.id}" data-idx="${index}" draggable="true" tabindex="-1" aria-selected="${selected ? 'true' : 'false'}" style="--ar:${aspect(img)}">`
-        + `<img data-src="${esc(img.thumb_url || thumbUrl('sm', img.id))}" loading="lazy" decoding="async" alt="${esc(img.filename || '')}">`
+        + `<img data-src="${esc(img.thumb_url || thumbUrl('sm', img.id))}" loading="lazy" decoding="async" fetchpriority="low" alt="${esc(img.filename || '')}">`
         + `<span class="c-thumb-offline" aria-live="polite">${icon('image')}<span>${esc(img.filename || 'Original offline')}</span></span>`
         + stackBadge
         + `<button class="c-check" aria-label="Select photo" tabindex="-1">${icon('check')}</button>`
@@ -136,9 +136,6 @@ function ensureImageObserver() {
             const img = entry.target;
             if (entry.isIntersecting) {
                 if (!img.src) img.src = img.dataset.src;
-            } else if (Math.abs(entry.boundingClientRect.top) > window.innerHeight * 3) {
-                img.removeAttribute('src');
-                img.classList.remove('ld');
             }
         }
     }, { root: document.getElementById('canvas'), rootMargin: '900px 0px' });
@@ -197,6 +194,17 @@ function unobserveImages(rootEl) {
     for (const img of rootEl.querySelectorAll('img[data-src]')) {
         imageObserver.unobserve(img);
     }
+}
+
+function warmMediumThumb(cell) {
+    const id = Number(cell?.dataset.id);
+    if (!id) return;
+    const queue = window.requestIdleCallback || ((callback) => window.setTimeout(callback, 0));
+    queue(() => {
+        const preload = new Image();
+        preload.fetchPriority = 'low';
+        preload.src = thumbUrl('md', id);
+    });
 }
 
 function resetImageObserver() {
@@ -725,6 +733,8 @@ export function initGrid() {
     }, { root: document.getElementById('canvas'), rootMargin: '900px 0px 900px 0px' });
     const flow = document.getElementById('grid-flow');
     flow.addEventListener('click', handleClick);
+    flow.addEventListener('pointerover', (event) => warmMediumThumb(event.target.closest('.cell[data-id]')));
+    flow.addEventListener('focusin', (event) => warmMediumThumb(event.target.closest('.cell[data-id]')));
     document.addEventListener('pointerdown', (event) => {
         if (!expandedStack || !mounted) return;
         if (event.target.closest('.stack-tray, .c-stack')) return;

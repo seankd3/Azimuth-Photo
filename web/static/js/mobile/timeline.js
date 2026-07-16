@@ -53,6 +53,7 @@ let images = [];
 let startOffset = 0;
 let histogram = { months: [], undated: 0, total: 0 };
 let monthOffsets = [];
+let daySectionOffsets = [];
 let zoomIdx = 0;                 // 0 = 3-col · 1 = 5-col dense · 2 = month list
 let generation = 0;
 let loadingNext = false;
@@ -65,6 +66,7 @@ let currentSortQuality = null;
 let longPressPending = false;
 let cancelLongPressGesture = () => {};
 let tasteAvailable = false;
+let renderedSelection = new Set();
 
 async function loadTasteStatus() {
     const data = await getRankings(new URLSearchParams({ sort: 'taste', limit: '0' })).catch(() => null);
@@ -137,7 +139,7 @@ function cellFor(img, mi) {
     );
     fig.innerHTML =
         `<div class="c-check">${icon('check')}</div>`
-        + `<img alt="" loading="lazy" decoding="async" data-src="${esc(img.thumb_url || thumbUrl('sm', img.id))}">`
+        + `<img alt="" loading="lazy" decoding="async" fetchpriority="low" data-src="${esc(img.thumb_url || thumbUrl('sm', img.id))}">`
         + stackBadge(img)
         + flagBadge(img.flag);
     const image = fig.querySelector('img');
@@ -189,8 +191,8 @@ function toggleDay(sec) {
     selectionChanged();
 }
 
-function updateDayChecks() {
-    for (const sec of timeline.querySelectorAll('.m-day')) {
+function updateDayChecks(sections = null) {
+    for (const sec of sections || timeline.querySelectorAll('.m-day')) {
         const ids = dayIds(sec);
         const all = ids.length > 0 && ids.every((id) => selection.has(id));
         const chk = sec.querySelector('.m-day-check');
@@ -325,6 +327,7 @@ function appendImages(batch) {
     timeline.appendChild(frag);
     timeline.classList.toggle('selmode', selState.mode);
     updateDayChecks();
+    cacheDaySectionOffsets();
 }
 
 function firstVisibleCell() {
@@ -341,7 +344,24 @@ function trimWindowFromStart() {
     const dropped = images.length - MAX_WINDOW;
     images = images.slice(dropped);
     startOffset += dropped;
-    rebuildLoaded();
+    let remaining = dropped;
+    for (const sec of [...timeline.querySelectorAll('.m-day')]) {
+        const grid = sec.querySelector('.m-day-grid');
+        const cells = [...grid.querySelectorAll('.mcell[data-id]:not([data-stack-member])')];
+        const removeCount = Math.min(remaining, cells.length);
+        cells.slice(0, removeCount).forEach((cell) => cell.remove());
+        remaining -= removeCount;
+        if (!grid.querySelector('.mcell[data-id]:not([data-stack-member])')) {
+            const monthHead = sec.previousElementSibling?.classList.contains('m-month-head')
+                ? sec.previousElementSibling
+                : null;
+            sec.remove();
+            if (monthHead && monthHead.nextElementSibling?.dataset.month !== monthHead.dataset.month) monthHead.remove();
+        }
+        if (!remaining) break;
+    }
+    reindexCells();
+    cacheDaySectionOffsets();
     const nextAnchor = anchorId && timeline.querySelector(`.mcell[data-id="${anchorId}"]`);
     if (nextAnchor) pane.scrollTop += nextAnchor.getBoundingClientRect().top - oldTop;
 }
@@ -362,6 +382,7 @@ function renderFixedImages(batch) {
     timeline.appendChild(sec);
     timeline.classList.toggle('selmode', selState.mode);
     updateDayChecks();
+    cacheDaySectionOffsets();
 }
 
 function prependImages(batch) {
@@ -395,6 +416,14 @@ function prependImages(batch) {
     pane.scrollTop += pane.scrollHeight - prevHeight;
     reindexCells();
     updateDayChecks();
+    cacheDaySectionOffsets();
+}
+
+function cacheDaySectionOffsets() {
+    daySectionOffsets = [...timeline.querySelectorAll('.m-day')].map((section) => ({
+        top: section.offsetTop,
+        month: section.dataset.month,
+    }));
 }
 
 /* ---------- month (zoomed-out) view ---------- */
@@ -431,6 +460,7 @@ function renderMonths() {
         wrap.innerHTML = '<div class="ms-empty" style="grid-column:span 2">No photos yet. Add a source in the desktop app.</div>';
     }
     timeline.appendChild(wrap);
+    daySectionOffsets = [];
 }
 
 /* ---------- zoom levels ---------- */
@@ -545,18 +575,19 @@ export function updateMonthPill(show) {
         pill.classList.remove('on');
         return;
     }
-    const secs = timeline.querySelectorAll('.m-day');
-    if (!secs.length) {
+    if (!daySectionOffsets.length) {
         pill.classList.remove('on');
         return;
     }
     const top = pane.scrollTop + 70;
-    let cur = secs[0];
-    for (const s of secs) {
-        if (s.offsetTop <= top) cur = s;
-        else break;
+    let low = 0;
+    let high = daySectionOffsets.length - 1;
+    while (low < high) {
+        const mid = Math.ceil((low + high) / 2);
+        if (daySectionOffsets[mid].top <= top) low = mid;
+        else high = mid - 1;
     }
-    pill.textContent = monthLabel(cur.dataset.month);
+    pill.textContent = monthLabel(daySectionOffsets[low].month);
     if (show) {
         pill.classList.add('on');
         clearTimeout(pillTimer);
@@ -878,16 +909,32 @@ function installSelectionGestures() {
     let anchorMi = -1;
     let dragPoint = null;
     let dragFrame = null;
+    let dragRange = null;
 
     function applyDragRange(mi) {
         const a = Math.min(anchorMi, mi);
         const b = Math.max(anchorMi, mi);
-        selection.clear();
-        for (const id of dragBase) selection.add(id);
-        for (let i = a; i <= b; i++) {
-            if (flatIds[i] != null) selection.add(flatIds[i]);
+        const nextRange = { a, b };
+        const changed = [];
+        const setAt = (i, inRange) => {
+            const id = flatIds[i];
+            if (id == null) return;
+            const shouldSelect = inRange || dragBase.has(id);
+            if (selection.has(id) === shouldSelect) return;
+            if (shouldSelect) selection.add(id);
+            else selection.delete(id);
+            changed.push(id);
+        };
+        if (!dragRange) {
+            for (let i = a; i <= b; i += 1) setAt(i, true);
+        } else {
+            for (let i = dragRange.a; i < Math.min(dragRange.b + 1, a); i += 1) setAt(i, false);
+            for (let i = Math.max(dragRange.a, b + 1); i <= dragRange.b; i += 1) setAt(i, false);
+            for (let i = a; i < Math.min(b + 1, dragRange.a); i += 1) setAt(i, true);
+            for (let i = Math.max(a, dragRange.b + 1); i <= b; i += 1) setAt(i, true);
         }
-        selectionChanged();
+        dragRange = nextRange;
+        if (changed.length) selectionChanged();
     }
 
     function edgeScrollSpeed(y) {
@@ -957,6 +1004,7 @@ function installSelectionGestures() {
                 selState.mode = true;
                 dragBase = new Set(selection);
                 anchorMi = mi;
+                dragRange = null;
                 dragActive = true;
                 applyDragRange(mi);
                 dragPoint = { x: lp.x, y: lp.y };
@@ -986,6 +1034,7 @@ function installSelectionGestures() {
         longPressPending = false;
         dragActive = false;
         dragBase = null;
+        dragRange = null;
         dragPoint = null;
         if (dragFrame != null) cancelAnimationFrame(dragFrame);
         dragFrame = null;
@@ -1095,10 +1144,18 @@ function installPullToRefresh() {
 /* ---------- event wiring ---------- */
 function syncSelectionCells() {
     timeline.classList.toggle('selmode', selState.mode);
-    for (const cell of timeline.querySelectorAll('.mcell[data-id]')) {
-        cell.classList.toggle('sel', selection.has(Number(cell.dataset.id)));
+    const changed = new Set([...renderedSelection, ...selection]);
+    const affectedDays = new Set();
+    for (const id of changed) {
+        if (renderedSelection.has(id) === selection.has(id)) continue;
+        for (const cell of timeline.querySelectorAll(`.mcell[data-id="${id}"]`)) {
+            cell.classList.toggle('sel', selection.has(id));
+            const day = cell.closest('.m-day');
+            if (day) affectedDays.add(day);
+        }
     }
-    updateDayChecks();
+    updateDayChecks(affectedDays);
+    renderedSelection = new Set(selection);
 }
 
 function syncFlagCells({ ids, flagOf }) {
