@@ -254,6 +254,15 @@ def _unload_model() -> None:
     work_coordination.release_gpu_owner("embeddings")
 
 
+async def _renew_embedding_turn() -> bool:
+    if not work_coordination.lost_ownership("embeddings", gpu=True):
+        return True
+    _unload_model()
+    await work_coordination.wait_for_gpu_turn("embeddings")
+    await work_coordination.wait_for_manual_turn("embeddings")
+    return False
+
+
 async def shutdown_embedding_worker() -> None:
     global _embed_executor, _preload_executor, _search_model_load_task
     task = _search_model_load_task
@@ -819,9 +828,14 @@ async def _process_embedding_candidates(
     first_failure_error = None
     preload_future = None
     preload_rows = None
+    ownership_lost = False
 
     while index < len(rows):
         if _embedding_manual_pause:
+            break
+        if not await _renew_embedding_turn():
+            await _discard_preload_future(preload_future)
+            ownership_lost = True
             break
 
         active_batch_size, _target = _refresh_batch_status(embedding_config)
@@ -996,6 +1010,7 @@ async def _process_embedding_candidates(
         "failed": failed_total,
         "chunks": chunks_completed,
         "first_error": first_failure_error,
+        "lost_ownership": ownership_lost,
     }
 
 

@@ -223,6 +223,19 @@ def _load_face_app(config: dict[str, Any]):
     return app
 
 
+def _unload_face_app() -> None:
+    global _face_app, _face_app_key
+    _face_app = None
+    _face_app_key = None
+
+
+async def _renew_face_turn() -> None:
+    if not work_coordination.lost_ownership("people"):
+        return
+    _unload_face_app()
+    await work_coordination.wait_for_manual_turn("people")
+
+
 def _detect_faces(cache_path: str, config: dict[str, Any]) -> list[dict[str, Any]]:
     import cv2
     import numpy as np
@@ -363,6 +376,7 @@ async def _run_face_worker_loop() -> None:
 
             with work_coordination.manual_bulk("people"):
                 for row in rows:
+                    await _renew_face_turn()
                     image_id = int(row["id"])
                     cache_path = str(row.get("cache_path") or "")
                     try:

@@ -12,6 +12,31 @@ from workers.caption_health import CaptionOomCircuit
 
 
 class CaptionTests(BackendTestCase):
+    async def test_caption_ownership_loss_unloads_before_reentering_waits(self):
+        with (
+            unittest.mock.patch.object(
+                work_coordination,
+                "lost_ownership",
+                return_value=True,
+            ),
+            unittest.mock.patch.object(caption_worker, "_unload_model") as unload_model,
+            unittest.mock.patch.object(
+                work_coordination,
+                "wait_for_gpu_turn",
+                new=unittest.mock.AsyncMock(),
+            ) as wait_for_gpu,
+            unittest.mock.patch.object(
+                work_coordination,
+                "wait_for_manual_turn",
+                new=unittest.mock.AsyncMock(),
+            ) as wait_for_manual,
+        ):
+            await caption_worker._renew_caption_turn()
+
+        unload_model.assert_called_once_with()
+        wait_for_gpu.assert_awaited_once_with("captions")
+        wait_for_manual.assert_awaited_once_with("captions")
+
     def test_caption_shutdown_stops_gpu_executor(self):
         old_executor = caption_worker._caption_executor
         fake_executor = unittest.mock.Mock()

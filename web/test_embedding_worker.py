@@ -35,6 +35,32 @@ class FakeModel:
 
 
 class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_embedding_ownership_loss_unloads_before_reentering_waits(self):
+        with (
+            unittest.mock.patch.object(
+                work_coordination,
+                "lost_ownership",
+                return_value=True,
+            ),
+            unittest.mock.patch.object(embedding_worker, "_unload_model") as unload_model,
+            unittest.mock.patch.object(
+                work_coordination,
+                "wait_for_gpu_turn",
+                new=unittest.mock.AsyncMock(),
+            ) as wait_for_gpu,
+            unittest.mock.patch.object(
+                work_coordination,
+                "wait_for_manual_turn",
+                new=unittest.mock.AsyncMock(),
+            ) as wait_for_manual,
+        ):
+            retained = await embedding_worker._renew_embedding_turn()
+
+        self.assertFalse(retained)
+        unload_model.assert_called_once_with()
+        wait_for_gpu.assert_awaited_once_with("embeddings")
+        wait_for_manual.assert_awaited_once_with("embeddings")
+
     async def test_embedding_shutdown_cancels_search_load_and_gpu_executors(self):
         old_embed_executor = embedding_worker._embed_executor
         old_preload_executor = embedding_worker._preload_executor
@@ -370,12 +396,24 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
 
     async def process(self, rows, model=None):
         loop = asyncio.get_running_loop()
-        return await embedding_worker._process_embedding_candidates(
-            loop,
-            model or FakeModel(),
-            rows,
-            batch_pause_seconds=0.0,
-        )
+        for owner in (work_coordination.manual_owner(),):
+            if owner:
+                work_coordination.release_manual_owner(owner)
+        for owner in (work_coordination.gpu_owner(),):
+            if owner:
+                work_coordination.release_gpu_owner(owner)
+        work_coordination.claim_manual_owner("embeddings")
+        work_coordination.claim_gpu_owner("embeddings")
+        try:
+            return await embedding_worker._process_embedding_candidates(
+                loop,
+                model or FakeModel(),
+                rows,
+                batch_pause_seconds=0.0,
+            )
+        finally:
+            work_coordination.release_manual_owner("embeddings")
+            work_coordination.release_gpu_owner("embeddings")
 
     async def test_candidate_window_splits_into_chunks_without_duplicate_stores(self):
         model = FakeModel()

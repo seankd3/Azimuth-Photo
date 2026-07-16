@@ -226,6 +226,14 @@ def _unload_model() -> None:
     work_coordination.release_gpu_owner("captions")
 
 
+async def _renew_caption_turn() -> None:
+    if not work_coordination.lost_ownership("captions", gpu=True):
+        return
+    _unload_model()
+    await work_coordination.wait_for_gpu_turn("captions")
+    await work_coordination.wait_for_manual_turn("captions")
+
+
 def shutdown_caption_worker() -> None:
     global _caption_executor
     _release_worker_owners()
@@ -469,6 +477,7 @@ async def _run_caption_worker_loop() -> None:
                         await asyncio.sleep(MODEL_LOAD_FAILURE_RETRY_SECONDS)
                     continue
                 for row in rows:
+                    await _renew_caption_turn()
                     image_id = int(row["id"])
                     cache_path = str(row.get("cache_path") or "")
                     try:

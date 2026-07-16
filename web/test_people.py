@@ -4,6 +4,25 @@ from unittest import mock
 
 
 class PeopleTests(BackendTestCase):
+    async def test_people_ownership_loss_unloads_before_reentering_wait(self):
+        with (
+            mock.patch.object(
+                work_coordination,
+                "lost_ownership",
+                return_value=True,
+            ),
+            mock.patch.object(face_worker, "_unload_face_app") as unload_model,
+            mock.patch.object(
+                work_coordination,
+                "wait_for_manual_turn",
+                new=mock.AsyncMock(),
+            ) as wait_for_manual,
+        ):
+            await face_worker._renew_face_turn()
+
+        unload_model.assert_called_once_with()
+        wait_for_manual.assert_awaited_once_with("people")
+
     async def test_disabled_people_loop_releases_manual_owner(self):
         old_pause = face_worker._face_manual_pause
         old_pause_message = face_worker._face_manual_pause_message

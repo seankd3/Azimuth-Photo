@@ -187,6 +187,16 @@ def gpu_owner() -> str | None:
         return _gpu_owner
 
 
+def lost_ownership(kind: str, *, gpu: bool = False) -> bool:
+    """Return whether a worker no longer owns every lane it is using."""
+
+    name = str(kind or "bulk").strip() or "bulk"
+    with _lock:
+        if _manual_owner != name:
+            return True
+        return gpu and _gpu_owner != name
+
+
 async def wait_for_gpu_turn(kind: str, *, poll_seconds: float = 0.5) -> None:
     name = str(kind or "gpu").strip() or "gpu"
     try:
