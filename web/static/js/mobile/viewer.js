@@ -262,6 +262,8 @@ function settlePhotoSwipe(direction) {
         }, 150);
         return;
     }
+    incomingStageImage?.remove();
+    incomingStageImage = null;
     const travel = direction > 0 ? -window.innerWidth : window.innerWidth;
     const incoming = document.createElement('img');
     incoming.className = 'viewer-swipe-incoming';

@@ -414,7 +414,14 @@ function optionsAreFresh() {
     return loaded && Date.now() - lastOptionsLoadedAt < OPTIONS_MAX_AGE_MS;
 }
 
+let optionsScopeKey = '';
+
 async function loadOptions({ force = false } = {}) {
+    const scopeKey = scopeParams().toString();
+    if (scopeKey !== optionsScopeKey) {
+        optionsScopeKey = scopeKey;
+        force = true;
+    }
     if ((optionsAreFresh() && !force) || loading) return;
     const seq = ++loadSeq;
     loading = true;

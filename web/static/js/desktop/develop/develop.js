@@ -1196,7 +1196,7 @@ function handleKey(event) {
 function handleKeyUp(event) {
     if (!mounted) return;
     if (event.key === '\\') showBefore(false);
-    if (event.shiftKey && event.key.toLowerCase() === 'p') {
+    if (event.key.toLowerCase() === 'p' || event.key === 'Shift') {
         toolbar.querySelector('[data-action="proof"]')?.setAttribute('aria-pressed', 'false');
         proofTile?.setHeld(false);
     }
