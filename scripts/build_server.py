@@ -108,6 +108,10 @@ def _python_for_venv() -> str:
     preferred = os.environ.get("PHOTOARCHIVE_BUILD_PYTHON")
     if preferred:
         return preferred
+    if os.name == "nt":
+        # PATH "python3.x" on Windows is usually the Store alias shim, which
+        # exits 0 without creating anything. The running interpreter is real.
+        return sys.executable
     for candidate in ("python3.12", "python3.11", "python3"):
         path = shutil.which(candidate)
         if path:
@@ -215,7 +219,7 @@ def run_pyinstaller(vpy: Path) -> Path:
         # Some PyInstaller layouts nest the binary one level deeper.
         candidates = list(out.rglob("photoarchive-server*"))
         raise SystemExit(f"build finished but binary missing at {exe}; found: {candidates[:8]}")
-    print(f"[build_server] ok → {exe}")
+    print(f"[build_server] ok -> {exe}")
     return out
 
 

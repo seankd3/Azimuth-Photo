@@ -21,10 +21,14 @@ class HeaderGeometryTests(unittest.TestCase):
             struct.pack_into("<HHI", data, offset, tag, 3, 1)
             struct.pack_into("<H", data, offset + 8, value)
 
-        with tempfile.NamedTemporaryFile(suffix=".cr3") as image:
+        with tempfile.NamedTemporaryFile(suffix=".cr3", delete=False) as image:
             image.write(data)
             image.flush()
+        # Windows cannot reopen a held NamedTemporaryFile; close first.
+        try:
             dimensions = image_headers.read_header_dimensions(image.name)
+        finally:
+            os.unlink(image.name)
 
         self.assertEqual(dimensions, (4000, 6000))
 
@@ -32,10 +36,14 @@ class HeaderGeometryTests(unittest.TestCase):
         ftyp = struct.pack(">I4s4sI4s", 20, b"ftyp", b"heic", 0, b"heic")
         ispe = struct.pack(">I4sIII", 20, b"ispe", 0, 4032, 3024)
         irot = struct.pack(">I4sB", 9, b"irot", 1)
-        with tempfile.NamedTemporaryFile(suffix=".heic") as image:
+        with tempfile.NamedTemporaryFile(suffix=".heic", delete=False) as image:
             image.write(ftyp + ispe + irot)
             image.flush()
+        # Windows cannot reopen a held NamedTemporaryFile; close first.
+        try:
             dimensions = image_headers.read_header_dimensions(image.name)
+        finally:
+            os.unlink(image.name)
 
         self.assertEqual(dimensions, (3024, 4032))
 

@@ -41,12 +41,17 @@ _JPEG_SOF_MARKERS = {
     0xCF,
 }
 _rotational_devices: dict[int, bool] = {}
-_libc = ctypes.CDLL(None, use_errno=True)
+# CDLL(None) means "this process's libc" — a POSIX-only idiom; the frozen
+# Windows loader turns it into a fatal import error. Rotational detection is
+# a Linux sysfs optimization anyway.
+_libc = ctypes.CDLL(None, use_errno=True) if os.name != "nt" else None
 
 
 def _is_rotational_device(filepath: str) -> bool:
     """Return Linux's cached rotational-media flag for the source device."""
 
+    if _libc is None:
+        return False
     try:
         device = int(os.stat(filepath).st_dev)
     except OSError:
