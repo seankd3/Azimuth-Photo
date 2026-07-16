@@ -2092,3 +2092,10 @@ body.import-stage-active #canvas > .view:not(#view-import) { display: none !impo
 /* Performance wave: event cells share the grid's visible selection affordance. */
 @media (hover: hover) { #events-flow .cell:hover .c-check { opacity: 1; pointer-events: auto; } }
 #events-flow .cell.sel .c-check { opacity: 1; pointer-events: auto; }
+
+/* People merge mode */
+.people-merge-banner { position: fixed; z-index: 95; top: calc(var(--topbar-h) + var(--s3)); left: 50%; transform: translateX(-50%); max-width: min(680px, calc(100vw - 32px)); padding: 7px 13px; border: 1px solid var(--accent-lin); border-radius: 999px; background: var(--surface-popover); box-shadow: 0 12px 32px rgba(0,0,0,.35); color: var(--text); font-size: var(--fs-small); }
+
+/* Smart collection drops */
+.coll-row.not-allowed { cursor: not-allowed; outline: 1px dashed var(--text-4); outline-offset: -1px; }
+.coll-row.not-allowed > * { cursor: not-allowed; }

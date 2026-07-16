@@ -260,6 +260,32 @@ function closeMergePopover() {
     pendingMerge = null;
 }
 
+function mergeSourceName() {
+    return personActionLabel(findPerson(mergeSourceId) || { label: 'person' });
+}
+
+function syncMergeBanner() {
+    let banner = document.getElementById('people-merge-banner');
+    if (!mergeSourceId) {
+        banner?.remove();
+        return;
+    }
+    if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'people-merge-banner';
+        banner.className = 'people-merge-banner';
+        banner.setAttribute('role', 'status');
+        document.body.appendChild(banner);
+    }
+    banner.textContent = `Merging ${mergeSourceName()} — click a person to merge into, Esc cancels`;
+}
+
+function disarmMerge() {
+    closeMergePopover();
+    mergeSourceId = null;
+    syncMergeBanner();
+}
+
 function focusPersonCard(personId) {
     requestAnimationFrame(() => {
         const id = String(personId || '');
@@ -343,11 +369,12 @@ function requestIgnore(card, person) {
 
 async function runMerge(sourceId, targetId, trigger = null, options = {}) {
     if (!sourceId || !targetId || String(sourceId) === String(targetId)) return false;
+    if (String(mergeSourceId) === String(sourceId)) disarmMerge();
     trigger?.classList.add('is-pending');
     const result = await mergePeople(sourceId, targetId);
     if (result && result.ok) {
         showToast('People merged');
-        mergeSourceId = null;
+        disarmMerge();
         if (options.suggestionId) {
             removeSuggestion(options.suggestionId);
             render();
@@ -469,10 +496,14 @@ export function initPeople() {
         } else if (action === 'merge-start') {
             event.stopPropagation();
             closeMenus();
+            if (String(mergeSourceId) === String(card.dataset.personId)) {
+                disarmMerge();
+                return;
+            }
             mergeSourceId = card.dataset.personId;
             render();
             focusPersonCard(mergeSourceId);
-            showToast('Choose a different person to merge with');
+            syncMergeBanner();
         } else if (action === 'ignore') {
             event.stopPropagation();
             requestIgnore(card, person);
@@ -481,6 +512,11 @@ export function initPeople() {
             const personId = card.dataset.personId;
             render();
             focusPersonCard(personId);
+        } else if (mergeSourceId && String(mergeSourceId) === String(card.dataset.personId) && !event.target.closest('form')) {
+            event.stopPropagation();
+            disarmMerge();
+            render();
+            focusPersonCard(card.dataset.personId);
         } else if (mergeSourceId && String(mergeSourceId) !== String(card.dataset.personId) && !event.target.closest('form')) {
             event.stopPropagation();
             showMergePopover(mergeSourceId, card.dataset.personId, card.getBoundingClientRect());
@@ -571,6 +607,15 @@ export function initPeople() {
     });
     document.addEventListener('keydown', (event) => {
         if (event.key !== 'Escape') return;
+        if (mergeSourceId) {
+            const sourceId = mergeSourceId;
+            event.preventDefault();
+            event.stopPropagation();
+            disarmMerge();
+            render();
+            focusPersonCard(sourceId);
+            return;
+        }
         if (document.getElementById('people-merge-pop')) {
             event.preventDefault();
             event.stopPropagation();
@@ -594,6 +639,5 @@ export function unmountPeople() {
     generation += 1;
     loading = false;
     document.getElementById('view-people').classList.remove('active');
-    document.getElementById('people-merge-pop')?.remove();
-    mergeSourceId = null;
+    disarmMerge();
 }

@@ -25,7 +25,7 @@ import { closeFilters, filtersOpen } from './filters.js';
 import { closeImport, importOpen } from './import_stage.js';
 import { closeGridContextMenu, gridContextMenuOpen } from './context_menu.js';
 import { closeDuplicates, duplicatesOpen } from './duplicates.js';
-import { closeTrash, trashOpen, trashSelectedImages } from './trash.js';
+import { closeTrash, handleTrashKey, selectAllTrash, trashOpen, trashSelectedImages } from './trash.js';
 import { showToast, undoLatestToast } from './toast.js';
 import {
     applyPreviousDevelopSettingsToGrid, copyDevelopSettingsFromGrid, createVirtualCopy,
@@ -223,6 +223,11 @@ function escapeOneLayer() {
         closeLoupe();
         return true;
     }
+    if (document.getElementById('people-merge-banner')) return false;
+    if (selection.size) {
+        clearSelection();
+        return true;
+    }
     if (duplicatesOpen()) {
         closeDuplicates();
         return true;
@@ -247,8 +252,8 @@ function escapeOneLayer() {
         closeLeftDrawer();
         return true;
     }
-    if (selection.size) {
-        clearSelection();
+    if (activeLens() !== 'grid') {
+        switchLens('grid');
         return true;
     }
     return false;
@@ -331,6 +336,11 @@ export function initKeyboard() {
                 if (undoLatestToast()) event.preventDefault();
                 return;
             }
+            if (activeLens() === 'trash' && key === 'a') {
+                const count = selectAllTrash();
+                if (count) event.preventDefault();
+                return;
+            }
             if (activeLens() !== 'grid') return;
             if (key === 'a') {
                 const count = selectLoadedImages();
@@ -403,7 +413,9 @@ export function initKeyboard() {
             return;
         }
         if (trashOpen()) {
-            if (event.key.toLowerCase() === 'g') {
+            if (handleTrashKey(event)) {
+                event.preventDefault();
+            } else if (event.key.toLowerCase() === 'g') {
                 event.preventDefault();
                 closeTrash();
             }
