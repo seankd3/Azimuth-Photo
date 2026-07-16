@@ -42,6 +42,7 @@ let presetsPanel = null;
 let transientSettingsOverride = null;
 let backgroundBaseRetryTimer = 0;
 let saveFailureToastShown = false;
+let wbPickActive = false;
 
 const DEVELOP_READ_TIMEOUT_MS = 10_000;
 const DEVELOP_MUTATION_TIMEOUT_MS = 20_000;
@@ -536,6 +537,7 @@ function scheduleBackgroundDevelopRetry(image, token) {
 }
 
 async function openImage(image) {
+    setWbPick(false);
     const previousImage = currentImage;
     if (previousImage && Number(previousImage.id) !== Number(image?.id)) await flushSave(previousImage.id);
     const token = ++loadingToken;
@@ -734,6 +736,12 @@ function showBefore(show) {
     beforeHeld = show;
     renderer.setSettings(show ? entry.origin : renderedSettings(entry), entry.meta);
     toolbar.querySelector('[data-action="before"]').setAttribute('aria-pressed', String(show));
+}
+
+function setWbPick(active) {
+    wbPickActive = Boolean(active) && Boolean(currentImage);
+    stage.classList.toggle('wb-picking', wbPickActive);
+    stage.style.cursor = wbPickActive ? 'crosshair' : '';
 }
 
 async function comparisonPreview(image) {
@@ -1111,13 +1119,14 @@ function flagCurrent(flag) {
 
 function closeTransient() {
     const hasTransient = Boolean(
-        activePopover || softProof?.popover || crop?.active || beforeHeld || proofTile?.held || compare?.mode !== 'off',
+        activePopover || softProof?.popover || crop?.active || wbPickActive || beforeHeld || proofTile?.held || compare?.mode !== 'off',
     );
     if (!hasTransient) return false;
     closePopover();
     softProof?.popover?.remove();
     if (softProof) softProof.popover = null;
     crop?.setActive(false);
+    setWbPick(false);
     showBefore(false);
     proofTile?.setHeld(false);
     compare?.holdReference(false);
