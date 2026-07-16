@@ -54,6 +54,7 @@ export function openSystemLens(section = null) {
 
 export function mountSystemLens() {
     root = document.getElementById('view-system');
+    root.classList.add('active');
     mountSystemSurface(render);
     render();
     refreshSystemSurface();
@@ -62,6 +63,7 @@ export function mountSystemLens() {
 }
 
 export function unmountSystemLens() {
+    root?.classList.remove('active');
     clearInterval(pollTimer);
     pollTimer = null;
     unmountSystemSurface();
