@@ -1079,7 +1079,7 @@ async def api_rankings_impl(
                 )
             )
     quality_task = None
-    if offset == 0 and _get_rank_quality is not None and not collection_id:
+    if offset == 0 and _get_rank_quality is not None and not requested_collection_id:
         quality_task = asyncio.create_task(
             _get_rank_quality(
                 orientation=orientation, compared=compared, min_stars=min_stars,

@@ -1381,6 +1381,27 @@ class LibraryTests(BackendTestCase):
 
         self.assertEqual(options["cameras"], [{"camera": "Fuji X-T5", "count": 1}])
 
+    async def test_static_and_smart_collection_scopes_omit_archive_sort_quality(self):
+        source = await self._source()
+        image_id = await self._image(source["id"], "collection-quality.jpg")
+        await db.set_image_flag(image_id, "picked")
+        await self._cache_entry(image_id, "sm")
+        static = await db.create_collection(name="Static quality", image_ids=[image_id])
+        smart = await collection_routes.api_create_collection(
+            collection_routes.CreateCollectionBody(
+                name="Smart quality",
+                query={"flag": "picked", "sort": "elo"},
+            )
+        )
+
+        static_page = await library_routes.api_rankings(collection_id=static["id"])
+        smart_page = await library_routes.api_rankings(
+            collection_id=smart["collection"]["id"],
+        )
+
+        self.assertNotIn("sort_quality", static_page)
+        self.assertNotIn("sort_quality", smart_page)
+
     async def test_date_histogram_route_counts_months_undated_and_total(self):
         source = await self._source()
         january_first = await self._image(source["id"], "january-first.jpg")
