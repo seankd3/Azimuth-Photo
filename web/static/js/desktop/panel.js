@@ -280,11 +280,6 @@ function bindDeliverTabs(onSelect) {
     }
 }
 
-/** Back-compat for callers that predate the unified Deliver surface (drawer publish-return). */
-export function openPublishOverlay(collectionId, name = 'Collection') {
-    return openDeliverOverlay(collectionId, name, null, 'website');
-}
-
 export async function openDeliverOverlay(collectionId, name = 'Collection', opener = null, activeTab = 'private') {
     ensureDeliverOverlay();
     const token = ++deliverOverlayToken;
@@ -501,7 +496,7 @@ function publishErrorBlock(job) {
     return '<div class="publish-error">'
         + '<b>Couldn\'t publish this gallery.</b>'
         + `<p>${esc(job.error || 'The website did not finish the publish. Try again when ready.')}</p>`
-        + '<button class="btn primary" id="publish-retry" type="button">Try again</button>'
+        + '<button class="btn primary" data-deliver-retry type="button">Try again</button>'
         + details
         + '</div>';
 }
@@ -514,7 +509,7 @@ function deliverPublishStatus(data) {
     return '<div class="publish-status">'
         + deliverStatusRows([['Website', status || 'Ready to publish.']])
         + (hook?.configured && !hook.ok ? `<div class="publish-error"><b>Gallery files are ready, but the website update didn’t finish.</b><p>${esc(hook.output || 'The website update did not finish successfully.')}</p></div>` : '')
-        + publishErrorBlock(job).replace('id="publish-retry"', 'data-deliver-publish-retry')
+        + publishErrorBlock(job)
         + '</div>';
 }
 
@@ -653,7 +648,7 @@ function renderWebsiteDeliver(session, token) {
     };
     if (publish) bindDeliverConfirmButton('[data-deliver-publish]', 'Confirm republish', startPublish);
     else deliverOverlay.querySelector('[data-deliver-publish]')?.addEventListener('click', startPublish);
-    deliverOverlay.querySelector('[data-deliver-publish-retry]')?.addEventListener('click', startPublish);
+    deliverOverlay.querySelector('[data-deliver-retry]')?.addEventListener('click', startPublish);
     deliverOverlay.querySelector('[data-deliver-unpublish]')?.addEventListener('click', async () => {
         const ok = await confirmTypedCount({ title: 'Unpublish gallery', message: `Remove this public gallery from the website? Type ${fmt(count).replace(/,/g, '')} to confirm.`, count, confirmLabel: 'Unpublish' });
         if (!ok) return;
