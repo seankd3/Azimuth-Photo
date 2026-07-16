@@ -8,7 +8,8 @@
     <title>Azimuth Photo</title>
     <link rel="icon" href="data:,">
     <link rel="stylesheet" href="/static/desktop.css?v={{ static_version }}">
-</head>
+    {% for mod in module_preloads | default([]) %}<link rel="modulepreload" href="/static/js/{{ mod }}?v={{ static_version }}">
+    {% endfor %}</head>
 <body>
     <div id="app">
         <header id="topbar">

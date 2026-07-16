@@ -257,20 +257,25 @@ async def count_images_needing_faces_on_conn(
     cache_root: str,
     retry_after_seconds: int = 86400,
 ) -> int:
-    cache_sizes = ("lg", "md", "sm")
-    placeholders = ",".join("?" for _ in cache_sizes)
     cursor = await conn.execute(
-        "SELECT COUNT(DISTINCT i.id) AS count "
-        "FROM images i "
+        "WITH ready AS ("
+        "SELECT image_id FROM face_scan_backlog INDEXED BY idx_face_scan_backlog_ready "
+        "WHERE cache_root = ? AND model_id = ? AND error_scanned_at IS NULL "
+        "UNION ALL "
+        "SELECT image_id FROM face_scan_backlog INDEXED BY idx_face_scan_backlog_retry "
+        "WHERE cache_root = ? AND model_id = ? AND error_scanned_at < ?"
+        ") "
+        "SELECT COUNT(*) AS count FROM ready "
+        "JOIN images i ON i.id = ready.image_id "
         "JOIN catalog_sources s ON s.id = i.source_id "
-        "JOIN cache_entries c ON c.image_id = i.id "
-        "LEFT JOIN face_scan_images fsi ON fsi.image_id = i.id AND fsi.model_id = ? "
-        "WHERE s.included = 1 AND i.status IN ('kept', 'maybe') "
-        "AND i.missing_at IS NULL "
-        "AND c.cache_root = ? "
-        f"AND c.size IN ({placeholders}) "
-        "AND (fsi.image_id IS NULL OR (fsi.status = 'error' AND fsi.scanned_at < ?))",
-        [model_id, cache_root, *cache_sizes, _time.time() - int(retry_after_seconds)],
+        "WHERE s.included = 1 AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL",
+        [
+            cache_root,
+            model_id,
+            cache_root,
+            model_id,
+            _time.time() - int(retry_after_seconds),
+        ],
     )
     row = await cursor.fetchone()
     return int(row["count"] or 0) if row else 0
@@ -288,6 +293,10 @@ async def store_face_scan_result(
     safe_faces = faces or []
     conn = await connection.open_async(db_path)
     try:
+        await conn.execute(
+            "INSERT OR IGNORE INTO face_scan_models(model_id) VALUES (?)",
+            (model_id,),
+        )
         cursor = await conn.execute(
             "SELECT DISTINCT fa.person_id FROM face_detections fd "
             "JOIN face_assignments fa ON fa.face_id = fd.id "
@@ -335,9 +344,13 @@ async def store_face_scan_result(
             )
             inserted_face_ids.append(int(cursor.lastrowid))
         await conn.execute(
-            "INSERT OR REPLACE INTO face_scan_images "
+            "INSERT INTO face_scan_images "
             "(image_id, model_id, status, face_count, cache_path, last_error, scanned_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "VALUES (?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(image_id, model_id) DO UPDATE SET "
+            "status = excluded.status, face_count = excluded.face_count, "
+            "cache_path = excluded.cache_path, last_error = excluded.last_error, "
+            "scanned_at = excluded.scanned_at",
             (
                 int(image_id),
                 model_id,
@@ -478,16 +491,12 @@ async def cluster_unassigned_faces(
 _ACTIVE_PEOPLE_CTE = (
     "WITH active_people AS ("
     "SELECT p.id, p.name, p.status, p.representative_face_id, "
-    "COUNT(DISTINCT pim.image_id) AS photo_count, "
-    "COALESCE(SUM(pim.face_count), 0) AS face_count, "
-    "COALESCE(MAX(pim.best_quality), 0) AS best_quality, "
-    "COALESCE(MAX(pim.latest_face_at), p.updated_at) AS latest_face_at, "
+    "p.photo_count, p.face_count, p.best_quality, "
+    "COALESCE(p.latest_face_at, p.updated_at) AS latest_face_at, "
     "CASE WHEN p.status = 'named' OR TRIM(COALESCE(p.name, '')) != '' THEN 1 ELSE 0 END AS is_named "
     "FROM people p "
-    "LEFT JOIN person_image_membership pim ON pim.person_id = p.id "
     "WHERE p.merged_into_person_id IS NULL AND p.status != 'ignored' "
-    "GROUP BY p.id "
-    "HAVING COALESCE(SUM(pim.face_count), 0) > 0"
+    "AND p.face_count > 0"
     ") "
 )
 
@@ -540,6 +549,51 @@ async def _active_people_rows_by_id(conn, person_ids: set[int]) -> list[dict]:
         params=list(ids),
         order_sql="id ASC",
     )
+
+
+async def _people_review_rows(
+    conn,
+    *,
+    limit: int,
+) -> tuple[list[dict], dict]:
+    unknown_cursor = await conn.execute(
+        "SELECT id, name, status, representative_face_id, photo_count, face_count, "
+        "best_quality, latest_face_at, 0 AS is_named "
+        "FROM people INDEXED BY idx_people_unknown_review "
+        "WHERE merged_into_person_id IS NULL AND status != 'ignored' AND status != 'named' "
+        "AND TRIM(name) = '' AND face_count > 0 "
+        f"ORDER BY {_UNKNOWN_PEOPLE_ORDER} LIMIT ?",
+        (limit * 2,),
+    )
+    unknown_rows = [dict(row) for row in await unknown_cursor.fetchall()]
+    named_cursor = await conn.execute(
+        "SELECT id, name, status, representative_face_id, photo_count, face_count, "
+        "best_quality, latest_face_at, 1 AS is_named "
+        "FROM people INDEXED BY idx_people_named_review "
+        "WHERE merged_into_person_id IS NULL AND status != 'ignored' AND face_count > 0 "
+        "AND (status = 'named' OR TRIM(name) != '') "
+        f"ORDER BY {_NAMED_PEOPLE_ORDER} LIMIT ?",
+        (limit,),
+    )
+    named_rows = [dict(row) for row in await named_cursor.fetchall()]
+    counts_cursor = await conn.execute(
+        "SELECT COUNT(*) AS people, "
+        "COALESCE(SUM(CASE WHEN status = 'named' OR TRIM(name) != '' THEN 1 ELSE 0 END), 0) "
+        "AS named_people "
+        "FROM people WHERE merged_into_person_id IS NULL AND status != 'ignored' AND face_count > 0"
+    )
+    counts_row = await counts_cursor.fetchone()
+    named_count = int(counts_row["named_people"] or 0) if counts_row else 0
+    people_count = int(counts_row["people"] or 0) if counts_row else 0
+    for rank, row in enumerate(unknown_rows, 1):
+        row["section_rank"] = rank
+    for rank, row in enumerate(named_rows, 1):
+        row["section_rank"] = rank
+    return [*unknown_rows, *named_rows], {
+        "people": people_count,
+        "named_people": named_count,
+        "unknown_people": max(0, people_count - named_count),
+    }
 
 
 async def _hydrate_people_rows(conn, rows: list[dict]) -> list[dict]:
@@ -625,6 +679,41 @@ async def _hydrate_people_rows(conn, rows: list[dict]) -> list[dict]:
     return hydrated
 
 
+async def _people_operational_counts_on_conn(
+    conn,
+    *,
+    face_model_id: str,
+    cache_root: str,
+) -> dict:
+    status_cursor = await conn.execute(
+        "SELECT status, value AS count FROM face_scan_status_counts WHERE value > 0"
+    )
+    scan_counts = {
+        str(row["status"] or "unknown"): int(row["count"] or 0)
+        for row in await status_cursor.fetchall()
+    }
+    pending_faces = await count_images_needing_faces_on_conn(
+        conn,
+        model_id=face_model_id,
+        cache_root=cache_root,
+    )
+    face_cursor = await conn.execute(
+        "SELECT value AS count FROM people_operational_metrics "
+        "WHERE metric = 'detected_faces'"
+    )
+    detected_faces = int((await face_cursor.fetchone())["count"] or 0)
+    suggestion_cursor = await conn.execute(
+        "SELECT COUNT(*) AS count FROM people_merge_suggestions WHERE status = 'pending'"
+    )
+    merge_suggestions = int((await suggestion_cursor.fetchone())["count"] or 0)
+    return {
+        "detected_faces": detected_faces,
+        "pending_cached_images": pending_faces,
+        "merge_suggestions": merge_suggestions,
+        "scan": scan_counts,
+    }
+
+
 async def _people_counts_on_conn(
     conn,
     *,
@@ -641,40 +730,21 @@ async def _people_counts_on_conn(
         "FROM active_people"
     )
     row = await cursor.fetchone()
-    people_count = int(row["people"] or 0) if row else 0
-    named_count = int(row["named_people"] or 0) if row else 0
-    unknown_count = int(row["unknown_people"] or 0) if row else 0
-
-    status_cursor = await conn.execute(
-        "SELECT status, COUNT(*) AS count FROM face_scan_images GROUP BY status"
-    )
-    scan_counts = {
-        str(row["status"] or "unknown"): int(row["count"] or 0)
-        for row in await status_cursor.fetchall()
+    counts = {
+        "people": int(row["people"] or 0) if row else 0,
+        "named_people": int(row["named_people"] or 0) if row else 0,
+        "unknown_people": int(row["unknown_people"] or 0) if row else 0,
     }
-    pending_faces = await count_images_needing_faces_on_conn(
+    counts["other_faces"] = max(
+        0,
+        counts["unknown_people"] - max(0, int(visible_most_seen_count)),
+    )
+    counts.update(await _people_operational_counts_on_conn(
         conn,
-        model_id=face_model_id,
+        face_model_id=face_model_id,
         cache_root=cache_root,
-    )
-    face_cursor = await conn.execute(
-        "SELECT COUNT(*) AS count FROM face_detections WHERE ignored = 0"
-    )
-    detected_faces = int((await face_cursor.fetchone())["count"] or 0)
-    suggestion_cursor = await conn.execute(
-        "SELECT COUNT(*) AS count FROM people_merge_suggestions WHERE status = 'pending'"
-    )
-    merge_suggestions = int((await suggestion_cursor.fetchone())["count"] or 0)
-    return {
-        "people": people_count,
-        "named_people": named_count,
-        "unknown_people": unknown_count,
-        "detected_faces": detected_faces,
-        "pending_cached_images": pending_faces,
-        "other_faces": max(0, unknown_count - max(0, int(visible_most_seen_count))),
-        "merge_suggestions": merge_suggestions,
-        "scan": scan_counts,
-    }
+    ))
+    return counts
 
 
 async def get_people_status_counts(
@@ -707,35 +777,25 @@ async def get_people_review(
     safe_limit = max(1, min(int(limit or 24), 100))
     conn = await connection.open_async(db_path)
     try:
-        most_seen_rows = await _active_people_rows(
+        review_rows, people_counts = await _people_review_rows(
             conn,
-            where_sql="is_named = 0 AND photo_count > ?",
-            params=[int(long_tail_threshold)],
-            order_sql=_UNKNOWN_PEOPLE_ORDER,
             limit=safe_limit,
         )
+        most_seen_rows = [
+            row for row in review_rows
+            if int(row["is_named"] or 0) == 0
+            and int(row["section_rank"] or 0) <= safe_limit
+            and int(row["photo_count"] or 0) > int(long_tail_threshold)
+        ]
         most_seen_ids = {int(row["id"]) for row in most_seen_rows}
-
-        named_rows = await _active_people_rows(
-            conn,
-            where_sql="is_named = 1",
-            order_sql=_NAMED_PEOPLE_ORDER,
-            limit=safe_limit,
-        )
-
-        other_where = "is_named = 0"
-        other_params: list[int] = []
-        if most_seen_ids:
-            placeholders = ",".join("?" for _ in most_seen_ids)
-            other_where += f" AND id NOT IN ({placeholders})"
-            other_params.extend(sorted(most_seen_ids))
-        other_rows = await _active_people_rows(
-            conn,
-            where_sql=other_where,
-            params=other_params,
-            order_sql=_UNKNOWN_PEOPLE_ORDER,
-            limit=safe_limit,
-        )
+        named_rows = [
+            row for row in review_rows
+            if int(row["is_named"] or 0) == 1
+        ]
+        other_rows = [
+            row for row in review_rows
+            if int(row["is_named"] or 0) == 0 and int(row["id"]) not in most_seen_ids
+        ][:safe_limit]
 
         visible_rows_by_id: dict[int, dict] = {}
         for row in [*most_seen_rows, *named_rows, *other_rows]:
@@ -796,13 +856,16 @@ async def get_people_review(
                 "confidence": round(float(row["confidence"] or 0.0), 4),
             })
 
-        counts = await _people_counts_on_conn(
+        counts = dict(people_counts)
+        counts["other_faces"] = max(
+            0,
+            counts["unknown_people"] - len(most_seen),
+        )
+        counts.update(await _people_operational_counts_on_conn(
             conn,
-            long_tail_threshold=int(long_tail_threshold),
             face_model_id=face_model_id,
             cache_root=cache_root,
-            visible_most_seen_count=len(most_seen),
-        )
+        ))
         return {
             "sections": {
                 "most_seen": most_seen,

@@ -11,6 +11,7 @@ import asyncio
 from functools import lru_cache
 import math
 import re
+import sys
 import time
 from datetime import datetime
 from pathlib import PurePosixPath
@@ -37,6 +38,8 @@ THEME_MAX_CANDIDATES = 24
 THEME_FULL_STRENGTH_COVERAGE = 0.25
 _CACHE_TTL_SECONDS = 600.0
 _DEFAULT_COHERENCE = 0.72
+SHOOT_HINT_PARSER_VERSION = 1
+_SHOOT_HINT_BACKFILL_CHUNK = 2000
 _DATE_RE = DATE_RE
 _CAMERA_STEM_RE = re.compile(
     r"^(?:IMG|DSC|PXL|DJI|LRT|R5|R5_|7N4A|_MG|MG|PHOTO|VID)[-_]?\d+",
@@ -95,6 +98,7 @@ _GENERIC_FOLDERS = {
 }
 
 _cache: dict = {"key": None, "data": None, "expires": 0.0}
+_suggestion_rebuild = {"inflight": False}
 
 
 def _parse_taken(value) -> float | None:
@@ -363,16 +367,20 @@ def _candidate_from_rows(
     reason: str,
     key: str,
     rows: list[dict],
+    ordered: bool = False,
 ) -> dict | None:
     if len(rows) < SUGGESTION_MIN_PHOTOS:
         return None
-    ordered = sorted(rows, key=lambda row: (row.get("taken") is None, row.get("taken") or 0, row["id"]))
-    ids = [int(row["id"]) for row in ordered]
-    dated = [row["taken"] for row in ordered if row.get("taken") is not None]
+    ordered_rows = rows if ordered else sorted(
+        rows,
+        key=lambda row: (row.get("taken") is None, row.get("taken") or 0, row["id"]),
+    )
+    ids = [int(row["id"]) for row in ordered_rows]
+    dated = [row["taken"] for row in ordered_rows if row.get("taken") is not None]
     start_ts = dated[0] if dated else None
     end_ts = dated[-1] if dated else None
     count = len(ids)
-    cover = max(ordered, key=lambda row: float(row.get("elo") or 0))
+    cover = max(ordered_rows, key=lambda row: float(row.get("elo") or 0))
     return {
         "kind": kind,
         "title": title,
@@ -385,19 +393,22 @@ def _candidate_from_rows(
         "_key": key,
         "_start": start_ts,
         "_end": end_ts,
-        "_camera": _best_camera(ordered),
+        "_camera": "",
         "_coherence": _DEFAULT_COHERENCE,
     }
 
 
-def _split_by_time(rows: list[dict]) -> list[list[dict]]:
+def _split_by_time(rows: list[dict], *, ordered: bool = False) -> list[list[dict]]:
     dated = [row for row in rows if row.get("taken") is not None]
     if len(dated) < len(rows) * 0.65:
         return [rows]
-    ordered = sorted(rows, key=lambda row: (row.get("taken") is None, row.get("taken") or 0, row["id"]))
+    ordered_rows = rows if ordered else sorted(
+        rows,
+        key=lambda row: (row.get("taken") is None, row.get("taken") or 0, row["id"]),
+    )
     groups: list[list[dict]] = []
     current: list[dict] = []
-    for row in ordered:
+    for row in ordered_rows:
         if current and row.get("taken") is not None and current[-1].get("taken") is not None:
             if (row["taken"] - current[-1]["taken"]) > EVENT_GAP_SECONDS:
                 groups.append(current)
@@ -408,13 +419,29 @@ def _split_by_time(rows: list[dict]) -> list[list[dict]]:
     return groups
 
 
-def _build_shoot_candidates(rows: list[dict]) -> tuple[list[dict], list[dict]]:
+def _build_shoot_candidates(rows: list[dict], *, preordered: bool = False) -> tuple[list[dict], list[dict]]:
     by_key: dict[str, dict] = {}
     unstructured: list[dict] = []
     for raw in rows:
         row = dict(raw)
-        row["taken"] = _parse_taken(row.get("date_taken")) or _parse_path_date(row.get("filepath") or "")
-        hint = shoot_hint_from_path(row.get("filepath") or "", row.get("filename") or "")
+        # Database-backed callers provide already-derived values.  Keep the
+        # legacy fallback for the small pure-function tests and other callers,
+        # but never parse a path on the persisted hot path.
+        if "taken" not in row:
+            row["taken"] = _parse_taken(row.get("date_taken")) or _parse_path_date(row.get("filepath") or "")
+        if "shoot_key" in row:
+            hint = (
+                {
+                    "key": row["shoot_key"],
+                    "title": row.get("shoot_title"),
+                    "source": row.get("shoot_source"),
+                    "date": row.get("path_date"),
+                }
+                if row.get("shoot_key")
+                else None
+            )
+        else:
+            hint = shoot_hint_from_path(row.get("filepath") or "", row.get("filename") or "")
         if not hint:
             if row["taken"] is not None:
                 unstructured.append(row)
@@ -426,7 +453,7 @@ def _build_shoot_candidates(rows: list[dict]) -> tuple[list[dict], list[dict]]:
     candidates: list[dict] = []
     for key, bucket in by_key.items():
         hint = bucket["hint"]
-        parts = _split_by_time(bucket["rows"])
+        parts = _split_by_time(bucket["rows"], ordered=preordered)
         for index, part in enumerate(parts):
             dated = [row["taken"] for row in part if row.get("taken") is not None]
             start = min(dated) if dated else hint.get("date")
@@ -449,12 +476,13 @@ def _build_shoot_candidates(rows: list[dict]) -> tuple[list[dict], list[dict]]:
                 reason=reason,
                 key=f"{key}{suffix}",
                 rows=part,
+                ordered=preordered,
             )
             if candidate:
                 candidates.append(candidate)
 
     fallback_events = group_events(
-        sorted(unstructured, key=lambda row: row["taken"]),
+        unstructured if preordered else sorted(unstructured, key=lambda row: row["taken"]),
         min_photos=SUGGESTION_MIN_PHOTOS,
     )
     fallback_candidates: list[dict] = []
@@ -467,27 +495,82 @@ def _build_shoot_candidates(rows: list[dict]) -> tuple[list[dict], list[dict]]:
             reason="Close capture times",
             key=f"event-{int(event['start'] // 86400)}-{int(event['end'] // 86400)}",
             rows=event_rows,
+            ordered=preordered,
         )
         if candidate:
             fallback_candidates.append(candidate)
     return candidates, fallback_candidates
 
 
+def _derive_shoot_hint_rows(rows) -> list[tuple]:
+    derived: list[tuple] = []
+    for row in rows:
+        filepath = str(row["filepath"] or "")
+        hint = shoot_hint_from_path(filepath, str(row["filename"] or ""))
+        derived.append((
+            int(row["id"]),
+            hint.get("key") if hint else None,
+            hint.get("title") if hint else None,
+            hint.get("source") if hint else None,
+            _parse_path_date(filepath),
+            SHOOT_HINT_PARSER_VERSION,
+        ))
+    return derived
+
+
+async def _backfill_shoot_hints(conn) -> int:
+    """Persist only absent or stale deterministic shoot-parser results."""
+    cursor = await conn.execute(
+        "SELECT i.id, i.filepath, i.filename FROM images i "
+        "LEFT JOIN image_shoot_hints h ON h.image_id = i.id "
+        "WHERE h.image_id IS NULL OR h.parser_version != ?",
+        (SHOOT_HINT_PARSER_VERSION,),
+    )
+    missing = await cursor.fetchall()
+    if not missing:
+        return 0
+    derived = await asyncio.to_thread(_derive_shoot_hint_rows, missing)
+    # Commit in bounded chunks so a first-time / version-bump backfill over the
+    # whole catalog never holds the single SQLite writer lock long enough to
+    # starve concurrent interactive writes (flags, ratings, trash). A single
+    # executemany over a 139k-row catalog held the writer lock ~2.6s; chunked
+    # commits release it between batches (systems-factor #2: keep bulk writers
+    # from monopolizing the single writer).
+    for start in range(0, len(derived), _SHOOT_HINT_BACKFILL_CHUNK):
+        await conn.executemany(
+            "INSERT INTO image_shoot_hints "
+            "(image_id, key, title, source, path_date, parser_version) "
+            "VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(image_id) DO UPDATE SET "
+            "key = excluded.key, title = excluded.title, source = excluded.source, "
+            "path_date = excluded.path_date, parser_version = excluded.parser_version",
+            derived[start:start + _SHOOT_HINT_BACKFILL_CHUNK],
+        )
+        await conn.commit()
+    return len(derived)
+
+
 async def _shoot_suggestions(db_path: str) -> list[dict]:
     conn = await connection.open_async(db_path)
     try:
+        await _backfill_shoot_hints(conn)
         cursor = await conn.execute(
-            "SELECT i.id, i.filename, i.filepath, i.date_taken, i.elo, i.camera_model "
+            "SELECT i.id, i.elo, i.camera_model, h.key AS shoot_key, "
+            "h.title AS shoot_title, h.source AS shoot_source, h.path_date, "
+            "COALESCE(CAST(strftime('%s', i.date_taken, 'utc') AS REAL), h.path_date) AS taken "
             "FROM images i JOIN catalog_sources s ON s.id = i.source_id "
+            "JOIN image_shoot_hints h ON h.image_id = i.id "
             "WHERE s.included = 1 AND i.status IN ('kept', 'maybe') "
-            "AND i.missing_at IS NULL "
-            "ORDER BY i.date_taken ASC, i.id ASC"
+            "AND i.missing_at IS NULL ORDER BY taken IS NULL, taken ASC, i.id ASC"
         )
         rows = [dict(row) for row in await cursor.fetchall()]
+        await conn.commit()
     finally:
         await connection.close_async(conn, db_path=db_path)
 
-    shoot_candidates, fallback_candidates = await asyncio.to_thread(_build_shoot_candidates, rows)
+    shoot_candidates, fallback_candidates = await asyncio.to_thread(
+        _build_shoot_candidates, rows, preordered=True
+    )
     return shoot_candidates + fallback_candidates
 
 
@@ -741,28 +824,28 @@ async def _theme_suggestions(db_path: str) -> list[dict]:
                 candidates.append(candidate)
 
         if len(top_tags) > 1:
-            cursor = await conn.execute(
-                "SELECT a.tag AS tag_a, b.tag AS tag_b, COUNT(DISTINCT a.image_id) AS count "
-                "FROM image_tags a "
-                "JOIN image_tags b ON b.model_key = a.model_key "
-                "AND b.image_id = a.image_id AND b.tag > a.tag "
-                "JOIN images i ON i.id = a.image_id "
-                "JOIN catalog_sources s ON s.id = i.source_id "
-                f"WHERE a.model_key = ? AND a.tag IN ({placeholders}) "
-                f"AND b.tag IN ({placeholders}) AND s.included = 1 "
-                "AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL "
-                "GROUP BY a.tag, b.tag HAVING count >= ? "
-                "ORDER BY count DESC, a.tag ASC, b.tag ASC LIMIT ?",
-                (model_key, *top_tags, *top_tags, threshold, THEME_MAX_CANDIDATES),
-            )
-            pair_rows = [dict(row) for row in await cursor.fetchall()]
-            for row in pair_rows:
-                tag_a = str(row["tag_a"])
-                tag_b = str(row["tag_b"])
-                tag_b_ids = {int(item["id"]) for item in members_by_tag[tag_b]}
+            # Tag-pair co-occurrence from the already-loaded per-tag member sets.
+            # The equivalent SQL self-join over image_tags was ~10.5s on the real
+            # catalog; these are in-memory set intersections of data already fetched.
+            tag_id_sets = {
+                tag: {int(item["id"]) for item in members_by_tag[tag]}
+                for tag in top_tags
+            }
+            pairs: list[tuple[str, str, set]] = []
+            for index, tag_a in enumerate(top_tags):
+                ids_a = tag_id_sets[tag_a]
+                if not ids_a:
+                    continue
+                for tag_b in top_tags[index + 1:]:
+                    shared = ids_a & tag_id_sets[tag_b]
+                    if len(shared) >= threshold:
+                        low, high = (tag_a, tag_b) if tag_a < tag_b else (tag_b, tag_a)
+                        pairs.append((low, high, shared))
+            pairs.sort(key=lambda pair: (-len(pair[2]), pair[0], pair[1]))
+            for tag_a, tag_b, shared in pairs[:THEME_MAX_CANDIDATES]:
                 candidate = _theme_candidate_from_rows(
                     tags=(tag_a, tag_b),
-                    rows=[item for item in members_by_tag[tag_a] if int(item["id"]) in tag_b_ids],
+                    rows=[item for item in members_by_tag[tag_a] if int(item["id"]) in shared],
                     captioned_count=stats["captioned"],
                     total_count=stats["total"],
                 )
@@ -805,12 +888,14 @@ def _score_coherence(candidates: list[dict], image_ids, matrix) -> list[dict]:
 async def _enrich_coherence(candidates: list[dict]) -> list[dict]:
     if not candidates:
         return candidates
-    try:
-        import embed_cache
-    except ImportError:
+    # Coherence is a ranking refinement, not a reason to make a cold
+    # suggestions request import NumPy and rebuild the embedding matrix.  Use
+    # it when another surface has already warmed the shared cache.
+    embed_cache = sys.modules.get("embed_cache")
+    if embed_cache is None:
         return candidates
     try:
-        image_ids, matrix = await embed_cache.get_matrix()
+        image_ids, matrix = embed_cache.get_warm_matrix()
     except RuntimeError:
         return candidates
     if image_ids is None or matrix is None:
@@ -938,14 +1023,7 @@ async def _existing_member_ids(db_path: str) -> set[int]:
         await connection.close_async(conn, db_path=db_path)
 
 
-async def collection_suggestions(db_path: str, *, db_signature: str = "") -> dict:
-    now = time.monotonic()
-    model_key = settings.active_caption_config()["model_key"]
-    catalog_cursor, tag_cursor = await _suggestion_cursor(db_path, model_key)
-    cache_key = (db_signature or db_path, catalog_cursor, model_key, tag_cursor)
-    if _cache["key"] == cache_key and _cache["data"] is not None and now < _cache["expires"]:
-        return _cache["data"]
-
+async def _build_suggestions(db_path: str, cache_key) -> dict:
     shoots, themes, existing = await asyncio.gather(
         _shoot_suggestions(db_path),
         _theme_suggestions(db_path),
@@ -971,14 +1049,44 @@ async def collection_suggestions(db_path: str, *, db_signature: str = "") -> dic
             candidates.append(suggestion)
 
     candidates = await _enrich_coherence(candidates)
-    candidates = await _enrich_people(db_path, candidates)
     now_ts = time.time()
     candidates.sort(key=lambda item: _candidate_rank(item, now_ts), reverse=True)
-    suggestions = [_public_suggestion(candidate) for candidate in _distinct_candidates(candidates)]
+    candidates = _distinct_candidates(candidates)
+    candidates = await _enrich_people(db_path, candidates)
+    suggestions = [_public_suggestion(candidate) for candidate in candidates]
 
     response = {"suggestions": suggestions}
-    _cache.update({"key": cache_key, "data": response, "expires": now + _CACHE_TTL_SECONDS})
+    _cache.update({"key": cache_key, "data": response, "expires": time.monotonic() + _CACHE_TTL_SECONDS})
     return response
+
+
+async def collection_suggestions(db_path: str, *, db_signature: str = "") -> dict:
+    now = time.monotonic()
+    model_key = settings.active_caption_config()["model_key"]
+    catalog_cursor, tag_cursor = await _suggestion_cursor(db_path, model_key)
+    cache_key = (db_signature or db_path, catalog_cursor, model_key, tag_cursor)
+    if _cache["key"] == cache_key and _cache["data"] is not None and now < _cache["expires"]:
+        return _cache["data"]
+    # Stale-while-revalidate: a browsing user must never wait for the multi-second
+    # rebuild. If we have ANY prior result, serve it and refresh once in the
+    # background. (Explicit changes call invalidate_cache(), which clears data so
+    # the next call rebuilds synchronously for correctness.)
+    if _cache["data"] is not None:
+        if not _suggestion_rebuild["inflight"]:
+            _suggestion_rebuild["inflight"] = True
+
+            async def _revalidate():
+                try:
+                    await _build_suggestions(db_path, cache_key)
+                except Exception:
+                    pass
+                finally:
+                    _suggestion_rebuild["inflight"] = False
+
+            asyncio.create_task(_revalidate())
+        return _cache["data"]
+    # Cold: nothing cached yet (first call since boot) — build synchronously.
+    return await _build_suggestions(db_path, cache_key)
 
 
 def invalidate_cache() -> None:

@@ -33,7 +33,6 @@ outputs/
 dist/
 build/
 *.spec
-bench-runs/
 
 # Server packaging scratch (never the shared web/.venv)
 .pkg-venv/

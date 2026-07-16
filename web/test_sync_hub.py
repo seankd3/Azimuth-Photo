@@ -60,6 +60,45 @@ class DefaultRootTests(unittest.TestCase):
                 self.assertEqual(hub.default_raws_root(), Path(home) / "custom-raws")
 
 
+class DefaultRootTests(unittest.TestCase):
+    """default_intake_root/default_raws_root must follow the resolved runtime
+    layout instead of leaking uploads into /mnt/expansion on isolated or
+    standalone installs (regression for PHOTOARCHIVE_HOME scratch instances)."""
+
+    CLEARED = ("PHOTOARCHIVE_SYNC_INTAKE_DIR", "PHOTOARCHIVE_SYNC_RAWS_DIR", "PHOTOARCHIVE_SMOKE_MODE")
+
+    def _env(self, **extra):
+        env = {key: value for key, value in os.environ.items() if key not in self.CLEARED}
+        env.update(extra)
+        return mock.patch.dict(os.environ, env, clear=True)
+
+    def test_photoarchive_home_scopes_intake_and_raws(self):
+        with tempfile.TemporaryDirectory() as home:
+            with self._env(PHOTOARCHIVE_HOME=home):
+                intake = hub.default_intake_root()
+                raws = hub.default_raws_root()
+        self.assertEqual(intake, Path(home) / "data" / "photos" / "_intake")
+        self.assertEqual(raws, Path(home) / "data" / "photos" / "RAWS")
+
+    def test_legacy_layout_keeps_expansion_fallback(self):
+        legacy = mock.Mock(layout="legacy", data_dir="/home/sean/Projects/photo-archive/web")
+        with self._env(), mock.patch.object(hub.runtime_paths, "resolve_runtime_paths", return_value=legacy):
+            intake = hub.default_intake_root()
+            raws = hub.default_raws_root()
+        self.assertEqual(intake, Path("/mnt/expansion/Photos/_intake"))
+        self.assertEqual(raws, Path("/mnt/expansion/Photos/RAWS"))
+
+    def test_env_overrides_beat_layout(self):
+        with tempfile.TemporaryDirectory() as home:
+            with self._env(
+                PHOTOARCHIVE_HOME=home,
+                PHOTOARCHIVE_SYNC_INTAKE_DIR=f"{home}/custom-intake",
+                PHOTOARCHIVE_SYNC_RAWS_DIR=f"{home}/custom-raws",
+            ):
+                self.assertEqual(hub.default_intake_root(), Path(home) / "custom-intake")
+                self.assertEqual(hub.default_raws_root(), Path(home) / "custom-raws")
+
+
 class SyncHubTests(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
@@ -181,6 +220,41 @@ class SyncHubTests(unittest.TestCase):
             content=payload,
         )
         self.assertEqual(repeat.json(), {"image_id": image_id})
+
+    def test_manifest_known_requires_live_original(self):
+        """Trashed, missing, or mirror rows must not count as backed up —
+        Free-up-space on the phone deletes local copies of "known" hashes."""
+        payload = self.image_bytes("liveness.jpg", (9, 8, 7))
+        content_hash = self.declare("liveness.jpg", payload)
+        self.upload(content_hash, payload)
+
+        def manifest_known():
+            response = self.client.post(
+                "/api/sync/manifest",
+                json={"items": [{"content_hash": content_hash, "bytes": len(payload), "filename": "liveness.jpg"}]},
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            return {row["content_hash"] for row in response.json()["known"]}
+
+        def set_row(sql: str):
+            conn = sqlite3.connect(self.db_path)
+            conn.execute(sql, (content_hash,))
+            conn.commit()
+            conn.close()
+
+        self.assertEqual(manifest_known(), {content_hash})
+
+        set_row("UPDATE images SET status = 'trashed' WHERE content_hash = ?")
+        self.assertEqual(manifest_known(), set(), "trashed row must not count as backed up")
+
+        set_row("UPDATE images SET status = 'kept', missing_at = 123.0 WHERE content_hash = ?")
+        self.assertEqual(manifest_known(), set(), "missing file must not count as backed up")
+
+        set_row("UPDATE images SET missing_at = NULL, hub_remote = 1 WHERE content_hash = ?")
+        self.assertEqual(manifest_known(), set(), "satellite mirror row must not count as backed up")
+
+        set_row("UPDATE images SET hub_remote = 0 WHERE content_hash = ?")
+        self.assertEqual(manifest_known(), {content_hash})
 
     def test_upload_rejects_wrong_hash_and_resets_resume_offset(self):
         payload = self.image_bytes("bad.jpg", (1, 2, 3))

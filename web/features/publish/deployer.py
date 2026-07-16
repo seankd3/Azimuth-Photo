@@ -270,6 +270,8 @@ class GalleryDeployer:
             progress("building")
         try:
             shutil.rmtree(public_g_dir / slug)
+        except FileNotFoundError:
+            pass
         except OSError as exc:
             raise PublishDeployError(f"Could not remove live gallery '{slug}'. It is still published.") from exc
         manifest_rows = [

@@ -45,12 +45,13 @@ async def visible_embedding_page(
     if exclude_id is not None:
         candidate_ids.discard(int(exclude_id))
     if size:
-        candidate_ids.intersection_update(
-            await cache_entry_repository.cached_image_id_set_cached(
-                db_path,
-                size=size,
-                cache_root=_configured_cache_root(),
-            )
+        # Targeted visibility for the embedding candidates only — do not load the
+        # whole ~87k cached-thumbnail set to intersect (see perf: search fix).
+        candidate_ids &= await cache_entry_repository.cached_image_ids(
+            db_path,
+            list(candidate_ids),
+            size,
+            _configured_cache_root(),
         )
     if not candidate_ids:
         total = max(0, len(image_ids) - (1 if exclude_id is not None else 0))

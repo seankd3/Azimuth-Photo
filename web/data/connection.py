@@ -137,7 +137,10 @@ def _checkpoint_temp_wal_sync(conn: sqlite3.Connection, db_path: str | None) -> 
     if not db_path or not is_ephemeral_db_path(db_path):
         return
     try:
-        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        # PASSIVE (not TRUNCATE): never take the exclusive checkpoint lock, so a
+        # large ephemeral WAL cannot stall concurrent writers on close. On the
+        # final uncontended close this still checkpoints all committed frames.
+        conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
     except sqlite3.Error:
         pass
 
@@ -146,7 +149,9 @@ async def _checkpoint_temp_wal_async(conn, db_path: str | None) -> None:
     if not db_path or not is_ephemeral_db_path(db_path):
         return
     try:
-        await conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        # PASSIVE (not TRUNCATE): never take the exclusive checkpoint lock, so a
+        # large ephemeral WAL cannot stall concurrent writers on close.
+        await conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
     except Exception:
         pass
 

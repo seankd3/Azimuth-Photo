@@ -13,7 +13,8 @@
     <link rel="icon" href="/static/icons/icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="/static/icons/icon.svg">
     <link rel="stylesheet" href="/static/mobile.css?v={{ static_version }}">
-</head>
+    {% for mod in module_preloads | default([]) %}<link rel="modulepreload" href="/static/js/{{ mod }}?v={{ static_version }}">
+    {% endfor %}</head>
 <body data-tab="photos">
     <div id="m-offline" hidden>Offline — changes need a connection</div>
 

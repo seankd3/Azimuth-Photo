@@ -64,7 +64,10 @@ export class DevelopCompareView {
         this.altCanvas.hidden = !visible;
         this.divider.hidden = !visible;
         this.label.hidden = !visible;
-        if (!visible) return;
+        if (!visible) {
+            this.canvas.style.clipPath = '';
+            return;
+        }
         const pct = `${this.position * 100}%`;
         this.canvas.style.clipPath = this.orientation === 'vertical'
             ? `inset(0 0 0 ${pct})` : `inset(${pct} 0 0 0)`;

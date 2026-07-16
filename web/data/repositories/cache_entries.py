@@ -95,15 +95,22 @@ async def cached_image_ids(
     if not image_ids or not size or not cache_root:
         return set()
     unique_ids = list(dict.fromkeys(int(image_id) for image_id in image_ids))
-    cached_all = await cached_image_id_set_cached(
-        db_path,
-        size=size,
-        cache_root=cache_root,
-        ttl_seconds=ttl_seconds,
-    )
-    if not cached_all:
-        return set()
-    return {image_id for image_id in unique_ids if image_id in cached_all}
+    del ttl_seconds  # targeted lookups do not need the full-set TTL cache
+    present: set[int] = set()
+    conn = await connection.open_async(db_path)
+    try:
+        for start in range(0, len(unique_ids), 900):
+            chunk = unique_ids[start:start + 900]
+            placeholders = ",".join("?" for _ in chunk)
+            cursor = await conn.execute(
+                "SELECT image_id FROM cache_entries "
+                f"WHERE cache_root = ? AND size = ? AND image_id IN ({placeholders})",
+                (cache_root, size, *chunk),
+            )
+            present.update(int(row["image_id"]) for row in await cursor.fetchall())
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+    return present
 
 
 async def cache_entry_count(db_path: str, *, size: str, cache_root: str) -> int:

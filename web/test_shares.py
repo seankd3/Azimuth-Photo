@@ -1,5 +1,9 @@
 import asyncio
+import glob
+import io
+import tempfile
 import time
+import zipfile
 from pathlib import Path
 
 from fastapi.responses import Response
@@ -73,6 +77,14 @@ class ShareTests(BackendTestCase):
         third = await self._image(source["id"], "third.jpg")
         collection = await db.create_collection(name="Shared set", image_ids=[first, second])
         return collection, first, second, third
+
+    async def _collection_with_duplicate_filenames(self):
+        first_source = await self._source("share-first")
+        second_source = await self._source("share-second")
+        first = await self._image(first_source["id"], "same-name.jpg")
+        second = await self._image(second_source["id"], "same-name.jpg")
+        collection = await db.create_collection(name="Duplicate names", image_ids=[first, second])
+        return collection, first, second
 
     async def test_share_create_is_idempotent_and_rotate_replaces_token(self):
         collection, *_ = await self._collection_with_images()
@@ -264,6 +276,7 @@ class ShareTests(BackendTestCase):
         self.assertIn("Northstar Studio", ok.text)
         self.assertIn("https://photos.example.test", ok.text)
         self.assertIn("Download all", ok.text)
+        self.assertIn(f'href="/s/{share["token"]}/download-all"', ok.text)
         self.assertIn("Download photo", ok.text)
         self.assertIn("Photo 1 of 2", ok.text)
         self.assertIn("your photographer sees these", ok.text)
@@ -272,6 +285,60 @@ class ShareTests(BackendTestCase):
         self.assertEqual(missing.status_code, 404)
         self.assertIn("Share unavailable", missing.text)
         self.assertEqual(missing.headers.get("referrer-policy"), "no-referrer")
+
+    async def test_public_share_download_all_returns_zip_with_unique_filenames(self):
+        collection, first, second = await self._collection_with_duplicate_filenames()
+        share = await db.create_or_rotate_share(collection["id"])
+
+        def probe():
+            with TestClient(app_module.app) as client:
+                return client.get(f"/s/{share['token']}/download-all")
+
+        pattern = f"{tempfile.gettempdir()}/photoarchive-share-*.zip"
+        before = set(glob.glob(pattern))
+        response = await asyncio.to_thread(probe)
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.headers.get("referrer-policy"), "no-referrer")
+        self.assertEqual(response.headers.get("x-azimuth-skipped-count"), "0")
+        # Streaming generator's finally must delete the temp zip once consumed.
+        self.assertEqual(set(glob.glob(pattern)) - before, set())
+        with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+            self.assertEqual(archive.namelist(), ["same-name.jpg", "same-name-2.jpg"])
+            self.assertEqual(archive.read("same-name.jpg"), f"thumb-{first}".encode("ascii"))
+            self.assertEqual(archive.read("same-name-2.jpg"), f"thumb-{second}".encode("ascii"))
+
+    async def test_protected_share_download_all_requires_unlock_cookie(self):
+        collection, first, second = await self._collection_with_duplicate_filenames()
+        share = await db.create_or_rotate_share(
+            collection["id"],
+            password_hash=share_auth.hash_password("open-sesame"),
+        )
+
+        def probe():
+            with TestClient(app_module.app) as client:
+                locked = client.get(f"/s/{share['token']}/download-all")
+                unlock = client.post(
+                    f"/s/{share['token']}/unlock",
+                    data={"password": "open-sesame"},
+                    follow_redirects=False,
+                )
+                unlocked = client.get(f"/s/{share['token']}/download-all")
+                return locked, unlock, unlocked
+
+        locked, unlock, unlocked = await asyncio.to_thread(probe)
+
+        self.assertEqual(locked.status_code, 404)
+        self.assertEqual(locked.json(), {"error": "Not found"})
+        self.assertEqual(locked.headers.get("referrer-policy"), "no-referrer")
+        self.assertEqual(unlock.status_code, 303)
+        self.assertEqual(unlocked.status_code, 200, unlocked.text)
+        with zipfile.ZipFile(io.BytesIO(unlocked.content)) as archive:
+            self.assertEqual(archive.namelist(), ["same-name.jpg", "same-name-2.jpg"])
+            self.assertEqual(
+                {archive.read(name) for name in archive.namelist()},
+                {f"thumb-{first}".encode("ascii"), f"thumb-{second}".encode("ascii")},
+            )
 
     async def test_public_favorite_routes_and_owner_count(self):
         collection, first, second, third = await self._collection_with_images()

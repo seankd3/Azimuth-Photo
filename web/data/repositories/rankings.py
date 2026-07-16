@@ -14,6 +14,9 @@ RANKING_SORTS = {
     "elo_asc": "i.elo ASC",
     "comparisons": "i.comparisons DESC",
     "least_compared": "i.comparisons ASC",
+    # Sampler-only: random tie-break so compare/Refine pools cover the whole
+    # tied tier instead of a deterministic head. Never use for grid pagination.
+    "least_compared_shuffled": "i.comparisons ASC, RANDOM()",
     "filename": "i.filename ASC",
     "filename_asc": "i.filename ASC",
     "filename_desc": "i.filename DESC",
@@ -36,6 +39,7 @@ RANKING_INDEXES = {
     "elo_asc": "idx_images_active_elo_asc",
     "comparisons": "idx_images_active_comparisons",
     "least_compared": "idx_images_active_comparisons_asc",
+    "least_compared_shuffled": "idx_images_active_comparisons_asc",
     "filename": "idx_images_active_filename",
     "filename_asc": "idx_images_active_filename",
     "filename_desc": None,
@@ -58,6 +62,7 @@ SPARSE_VISIBLE_ID_FILTER_SORTS = {
     "elo_asc",
     "comparisons",
     "least_compared",
+    "least_compared_shuffled",
     "filename",
     "filename_asc",
     "filename_desc",
@@ -74,6 +79,7 @@ SPARSE_VISIBLE_ID_FILTER_SORTS = {
 VISIBLE_CACHE_FIRST_SORTS = {
     "comparisons",
     "least_compared",
+    "least_compared_shuffled",
     "filename",
     "filename_asc",
     "filename_desc",
@@ -802,6 +808,7 @@ async def rankings_cached(
     get_catalog_image_counts,
     cache_entry_count,
     get_cached_image_id_set,
+    get_cached_image_ids,
     limit: int = 100,
     offset: int = 0,
     sort: str = "elo",
@@ -847,9 +854,12 @@ async def rankings_cached(
         and not use_cache_first_visible
     )
     if visible_thumb_size and cache_root and (id_filter is not None or use_sparse_visible_id_filter):
-        cached_ids = set(await get_cached_image_id_set(visible_thumb_size, cache_root))
         if id_filter is not None:
-            cached_ids.intersection_update(int(image_id) for image_id in id_filter)
+            # Visibility for just the filtered ids (e.g. ~789 FTS matches), not
+            # the whole ~87k cached set — cold search spent 1.6s materializing it.
+            cached_ids = set(await get_cached_image_ids(list(id_filter), visible_thumb_size, cache_root))
+        else:
+            cached_ids = set(await get_cached_image_id_set(visible_thumb_size, cache_root))
         if not cached_ids:
             return []
         if len(cached_ids) <= RANKING_VISIBLE_ID_FILTER_LIMIT:
@@ -1099,6 +1109,7 @@ async def count_rankings_uncached_with_visible_cache(
     *,
     get_catalog_image_counts,
     get_cached_image_id_set,
+    get_cached_image_ids,
     orientation: str = "",
     compared: str = "",
     min_stars: int = 0,
@@ -1119,7 +1130,7 @@ async def count_rankings_uncached_with_visible_cache(
 ) -> int:
     cached_visible_ids = None
     if visible_thumb_size and cache_root and id_filter is not None:
-        cached_visible_ids = set(await get_cached_image_id_set(visible_thumb_size, cache_root))
+        cached_visible_ids = set(await get_cached_image_ids(list(id_filter), visible_thumb_size, cache_root))
     return await count_rankings_uncached(
         db_path,
         catalog_counts=await get_catalog_image_counts(),
@@ -1149,6 +1160,7 @@ async def count_rankings_cached(
     *,
     get_catalog_image_counts,
     get_cached_image_id_set,
+    get_cached_image_ids,
     orientation: str = "",
     compared: str = "",
     min_stars: int = 0,
@@ -1197,6 +1209,7 @@ async def count_rankings_cached(
         db_path,
         get_catalog_image_counts=get_catalog_image_counts,
         get_cached_image_id_set=get_cached_image_id_set,
+        get_cached_image_ids=get_cached_image_ids,
         orientation=orientation,
         compared=compared,
         min_stars=min_stars,
@@ -2000,7 +2013,7 @@ async def map_markers(
     gps_image_source = (
         "images i INDEXED BY idx_images_active_filepath_elo"
         if has_absolute_folder_range(folder) and id_filter is None and not text_query and not collection_id
-        else "images i INDEXED BY idx_images_active_gps_count"
+        else "images i INDEXED BY idx_images_active_gps_markers"
     )
     conn = await connection.open_async(db_path)
     try:
@@ -2027,37 +2040,19 @@ async def map_markers(
             )
 
         if visible_thumb_size and cache_root:
-            if has_absolute_folder_range(folder) and id_filter is None and not text_query:
-                source_join = (
-                    "JOIN catalog_sources s ON s.id = i.source_id "
-                    if not all_sources_available
-                    else ""
-                )
-                cursor = await conn.execute(
-                    "SELECT i.id, i.filename, i.latitude, i.longitude "
-                    f"FROM {gps_image_source} {source_join}"
-                    f"WHERE {' AND '.join(gps_conditions)} AND EXISTS ("
-                    "SELECT 1 FROM cache_entries c "
-                    "WHERE c.cache_root = ? AND c.size = ? AND c.image_id = i.id)",
-                    params + [cache_root, visible_thumb_size],
-                )
-            elif all_sources_available:
-                cursor = await conn.execute(
-                    "SELECT i.id, i.filename, i.latitude, i.longitude "
-                    "FROM cache_entries c INDEXED BY sqlite_autoindex_cache_entries_1 "
-                    "CROSS JOIN images i ON i.id = c.image_id "
-                    "WHERE c.cache_root = ? AND c.size = ? "
-                    f"AND {' AND '.join(gps_conditions)}",
-                    [cache_root, visible_thumb_size] + params,
-                )
-            else:
-                cursor = await conn.execute(
-                    "SELECT i.id, i.filename, i.latitude, i.longitude FROM cache_entries c "
-                    "JOIN images i ON i.id = c.image_id "
-                    "JOIN catalog_sources s ON s.id = i.source_id "
-                    f"WHERE c.cache_root = ? AND c.size = ? AND {' AND '.join(gps_conditions)}",
-                    [cache_root, visible_thumb_size] + params,
-                )
+            source_join = (
+                "JOIN catalog_sources s ON s.id = i.source_id "
+                if not all_sources_available
+                else ""
+            )
+            cursor = await conn.execute(
+                "SELECT i.id, i.filename, i.latitude, i.longitude "
+                f"FROM {gps_image_source} {source_join}"
+                f"WHERE {' AND '.join(gps_conditions)} AND EXISTS ("
+                "SELECT 1 FROM cache_entries c "
+                "WHERE c.cache_root = ? AND c.size = ? AND c.image_id = i.id)",
+                params + [cache_root, visible_thumb_size],
+            )
         elif all_sources_available:
             cursor = await conn.execute(
                 f"SELECT i.id, i.filename, i.latitude, i.longitude FROM {gps_image_source} "

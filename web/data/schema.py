@@ -7,10 +7,13 @@ import uuid
 
 from date_inference import infer_image_date
 from data.repositories import catalog as catalog_repository
+from data.people_schema import PEOPLE_QUERY_SCHEMA
 from core.path_groups import safe_commonpath
 
 EXPECTED_EMBEDDING_DIM = 2048  # Qwen3-VL-Embedding-2B native dimension
-SCHEMA_VERSION = 29
+# 29 = develop wave (comparisons compat), 30 = main wave (people compat);
+# 31 = their union after the branch reconciliation.
+SCHEMA_VERSION = 31
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS catalog_sources (
@@ -63,6 +66,18 @@ CREATE TABLE IF NOT EXISTS images (
     trash_path TEXT DEFAULT NULL,
     vc_of INTEGER REFERENCES images(id) ON DELETE CASCADE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- v29: deterministic collection-suggestion parsing is persisted per image.
+-- Rows are populated lazily by the suggestions service and invalidated by its
+-- parser version, so schema startup never does catalog-scale filename work.
+CREATE TABLE IF NOT EXISTS image_shoot_hints (
+    image_id INTEGER PRIMARY KEY REFERENCES images(id) ON DELETE CASCADE,
+    key TEXT,
+    title TEXT,
+    source TEXT,
+    path_date REAL,
+    parser_version INTEGER NOT NULL
 );
 
 -- Develop v21: canonical Lightroom-compatible edit state.  Unknown crs keys
@@ -392,6 +407,10 @@ CREATE INDEX IF NOT EXISTS idx_images_active_gps_count
 ON images(source_id, latitude, longitude)
 WHERE status IN ('kept', 'maybe') AND missing_at IS NULL
 AND latitude IS NOT NULL AND longitude IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_images_active_gps_markers
+ON images(latitude, longitude, source_id, filename)
+WHERE status IN ('kept', 'maybe') AND missing_at IS NULL AND vc_of IS NULL
+AND latitude IS NOT NULL AND longitude IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_images_rating_signal_cover
 ON images(comparisons, propagated_updates, elo);
 CREATE INDEX IF NOT EXISTS idx_images_source_missing_rating_signal
@@ -578,7 +597,6 @@ CREATE INDEX IF NOT EXISTS idx_images_status_filepath ON images(status, filepath
 -- For LRU eviction ordering (avoids TEMP B-TREE sort during budget enforcement)
 CREATE INDEX IF NOT EXISTS idx_cache_entries_root_size_accessed_id
 ON cache_entries(cache_root, size, last_accessed, image_id);
-
 CREATE TABLE IF NOT EXISTS cache_metadata (
     cache_root TEXT PRIMARY KEY,
     thumb_config_signature TEXT NOT NULL,
@@ -792,6 +810,10 @@ CREATE TABLE IF NOT EXISTS people (
     status TEXT NOT NULL DEFAULT 'unknown',
     representative_face_id INTEGER DEFAULT NULL,
     merged_into_person_id INTEGER DEFAULT NULL REFERENCES people(id),
+    photo_count INTEGER NOT NULL DEFAULT 0,
+    face_count INTEGER NOT NULL DEFAULT 0,
+    best_quality REAL NOT NULL DEFAULT 0,
+    latest_face_at REAL NOT NULL DEFAULT 0,
     created_at REAL NOT NULL DEFAULT (strftime('%s', 'now')),
     updated_at REAL NOT NULL DEFAULT (strftime('%s', 'now'))
 );
@@ -867,7 +889,6 @@ CREATE INDEX IF NOT EXISTS idx_people_merge_suggestions_pending
 ON people_merge_suggestions(status, confidence DESC);
 CREATE INDEX IF NOT EXISTS idx_face_scan_images_status
 ON face_scan_images(model_id, status, scanned_at);
-
 -- v24: original-file integrity checksums (bit-rot audit). Additive only.
 CREATE TABLE IF NOT EXISTS image_checksums (
     image_id INTEGER PRIMARY KEY REFERENCES images(id) ON DELETE CASCADE,
@@ -878,6 +899,8 @@ CREATE TABLE IF NOT EXISTS image_checksums (
 CREATE INDEX IF NOT EXISTS idx_image_checksums_checked
 ON image_checksums(checked_at);
 """
+
+SCHEMA += PEOPLE_QUERY_SCHEMA
 
 PRE_SCHEMA_CATALOG_SOURCES_DDL = (
     "CREATE TABLE IF NOT EXISTS catalog_sources ("
@@ -933,6 +956,11 @@ COMPARISON_COMPAT_COLUMNS = (
     ("action_id", "TEXT DEFAULT NULL"),
     ("elo_delta_winner", "REAL DEFAULT NULL"),
     ("elo_delta_loser", "REAL DEFAULT NULL"),
+PEOPLE_COMPAT_COLUMNS = (
+    ("photo_count", "INTEGER NOT NULL DEFAULT 0"),
+    ("face_count", "INTEGER NOT NULL DEFAULT 0"),
+    ("best_quality", "REAL NOT NULL DEFAULT 0"),
+    ("latest_face_at", "REAL NOT NULL DEFAULT 0"),
 )
 
 CATALOG_SOURCE_COMPAT_COLUMNS = (
@@ -1070,6 +1098,12 @@ COMPAT_INDEX_SQL = (
         "WHERE status IN ('kept', 'maybe') AND missing_at IS NULL "
         "AND latitude IS NOT NULL AND longitude IS NOT NULL"
     ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_images_active_gps_markers "
+        "ON images(latitude, longitude, source_id, filename) "
+        "WHERE status IN ('kept', 'maybe') AND missing_at IS NULL AND vc_of IS NULL "
+        "AND latitude IS NOT NULL AND longitude IS NOT NULL"
+    ),
     "CREATE INDEX IF NOT EXISTS idx_images_rating_signal_cover ON images(comparisons, propagated_updates, elo)",
     "CREATE INDEX IF NOT EXISTS idx_image_tags_model_tag_image ON image_tags(model_key, tag, image_id)",
     "CREATE INDEX IF NOT EXISTS idx_image_tags_image_model ON image_tags(image_id, model_key)",
@@ -1159,11 +1193,26 @@ COMPAT_INDEX_SQL = (
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_images_hub_image_id ON images(hub_image_id) WHERE hub_image_id IS NOT NULL",
     "CREATE INDEX IF NOT EXISTS idx_images_hub_remote ON images(hub_remote, hub_image_id)",
     "CREATE INDEX IF NOT EXISTS idx_images_trash_pending_hub ON images(trash_pending_hub) WHERE trash_pending_hub = 1",
+    "CREATE INDEX IF NOT EXISTS idx_cache_entries_root_image_size ON cache_entries(cache_root, image_id, size)",
+    (
+        "CREATE INDEX IF NOT EXISTS idx_people_unknown_review "
+        "ON people(photo_count DESC, face_count DESC, best_quality DESC, latest_face_at DESC, id ASC) "
+        "WHERE merged_into_person_id IS NULL AND status != 'ignored' AND status != 'named' "
+        "AND TRIM(name) = '' AND face_count > 0"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_people_named_review "
+        "ON people(CASE WHEN TRIM(COALESCE(name, '')) = '' THEN printf('person %012d', id) "
+        "ELSE LOWER(TRIM(COALESCE(name, ''))) END, photo_count DESC, id ASC) "
+        "WHERE merged_into_person_id IS NULL AND status != 'ignored' AND face_count > 0 "
+        "AND (status = 'named' OR TRIM(name) != '')"
+    ),
 )
 
 REQUIRED_TABLES = {
     "catalog_sources",
     "images",
+    "image_shoot_hints",
     "develop_settings",
     "develop_history",
     "develop_presets",
@@ -1185,6 +1234,7 @@ REQUIRED_TABLES = {
     "image_captions_fts",
     "caption_scan_images",
     "cache_entries",
+    "cache_image_presence",
     "cache_metadata",
     "import_batches",
     "import_batch_images",
@@ -1205,6 +1255,10 @@ REQUIRED_TABLES = {
     "person_image_membership",
     "people_merge_suggestions",
     "face_scan_images",
+    "face_scan_models",
+    "face_scan_backlog",
+    "people_operational_metrics",
+    "face_scan_status_counts",
     "image_checksums",
 }
 
@@ -1250,6 +1304,12 @@ REQUIRED_COLUMNS = {
         "trashed_at",
         "trash_path",
         "vc_of",
+    },
+    "people": {
+        "photo_count",
+        "face_count",
+        "best_quality",
+        "latest_face_at",
     },
     "catalog_sources": {
         "display_name",
@@ -1325,6 +1385,7 @@ REQUIRED_INDEXES = {
     "idx_images_visible_comparisons_elo",
     "idx_images_missing_file_ext_source_size",
     "idx_images_active_camera_sort_desc",
+    "idx_images_active_gps_markers",
     "idx_images_rating_signal_cover",
     "idx_embeddings_by_model_image_id",
     "idx_search_query_embeddings_used",
@@ -1334,6 +1395,7 @@ REQUIRED_INDEXES = {
     "idx_caption_scan_images_status",
     "idx_cache_entries_root_size_bytes",
     "idx_cache_entries_root_size_accessed_id",
+    "idx_cache_entries_root_image_size",
     "idx_import_batches_created",
     "idx_import_batch_images_image",
     "idx_stacks_kind",
@@ -1358,12 +1420,16 @@ REQUIRED_INDEXES = {
     "idx_share_favorites_share_visitor",
     "idx_collection_publishes_updated",
     "idx_people_status_seen",
+    "idx_people_unknown_review",
+    "idx_people_named_review",
     "idx_face_detections_image_model",
     "idx_face_detections_status_model",
     "idx_face_assignments_person",
     "idx_person_image_membership_image",
     "idx_people_merge_suggestions_pending",
     "idx_face_scan_images_status",
+    "idx_face_scan_backlog_ready",
+    "idx_face_scan_backlog_retry",
     "idx_image_checksums_checked",
     "idx_images_vc_of",
     "idx_images_row_version",
@@ -1452,6 +1518,8 @@ async def prepare_existing_database_for_schema(conn) -> None:
     await conn.execute(PRE_SCHEMA_CATALOG_SOURCES_DDL)
     await _add_columns_if_missing(conn, "images", IMAGE_COMPAT_COLUMNS)
     await _add_columns_if_missing(conn, "comparisons", COMPARISON_COMPAT_COLUMNS)
+    await _add_columns_if_missing(conn, "people", PEOPLE_COMPAT_COLUMNS)
+    await _add_columns_if_missing(conn, "comparisons", (("action_id", "TEXT DEFAULT NULL"),))
     await _add_columns_if_missing(conn, "collections", COLLECTION_COMPAT_COLUMNS)
     await _add_columns_if_missing(conn, "collection_shares", COLLECTION_SHARE_COMPAT_COLUMNS)
     await _add_columns_if_missing(conn, "collection_publishes", COLLECTION_PUBLISH_COMPAT_COLUMNS)
@@ -1760,6 +1828,7 @@ async def _backup_before_v20_rebuild(conn) -> None:
 
 async def ensure_compatibility_columns(conn) -> None:
     await _add_columns_if_missing(conn, "images", IMAGE_COMPAT_COLUMNS)
+    await _add_columns_if_missing(conn, "people", PEOPLE_COMPAT_COLUMNS)
     await _add_columns_if_missing(
         conn,
         "cache_metadata",
@@ -1890,6 +1959,37 @@ async def backfill_image_tags(conn) -> None:
     )
 
 
+async def backfill_people_query_aggregates(conn) -> None:
+    await conn.execute(
+        "UPDATE people SET "
+        "photo_count = (SELECT COUNT(*) FROM person_image_membership pim WHERE pim.person_id = people.id), "
+        "face_count = COALESCE((SELECT SUM(face_count) FROM person_image_membership pim WHERE pim.person_id = people.id), 0), "
+        "best_quality = COALESCE((SELECT MAX(best_quality) FROM person_image_membership pim WHERE pim.person_id = people.id), 0), "
+        "latest_face_at = COALESCE((SELECT MAX(latest_face_at) FROM person_image_membership pim WHERE pim.person_id = people.id), 0)"
+    )
+    await conn.execute(
+        "UPDATE people_operational_metrics SET value = ("
+        "SELECT COUNT(*) FROM face_detections WHERE ignored = 0"
+        ") WHERE metric = 'detected_faces'"
+    )
+    await conn.execute("DELETE FROM face_scan_status_counts")
+    await conn.execute(
+        "INSERT INTO face_scan_status_counts(status, value) "
+        "SELECT status, COUNT(*) FROM face_scan_images GROUP BY status"
+    )
+
+
+async def backfill_cache_image_presence(conn) -> None:
+    await conn.execute(
+        "INSERT OR IGNORE INTO cache_image_presence(cache_root, image_id) "
+        "SELECT cache_root, image_id FROM cache_entries GROUP BY cache_root, image_id"
+    )
+    await conn.execute(
+        "INSERT OR IGNORE INTO face_scan_models(model_id) "
+        "SELECT DISTINCT model_id FROM face_scan_images WHERE model_id != ''"
+    )
+
+
 async def _executescript_in_transaction(conn, script: str) -> None:
     try:
         await conn.executescript(f"BEGIN;\n{script}\nCOMMIT;")
@@ -1902,6 +2002,9 @@ async def _executescript_in_transaction(conn, script: str) -> None:
 
 
 async def apply_schema_and_migrations(conn, *, db_exists: bool) -> None:
+    cursor = await conn.execute("PRAGMA user_version")
+    row = await cursor.fetchone()
+    previous_schema_version = int(row[0] if row is not None else 0)
     if db_exists:
         await prepare_existing_database_for_schema(conn)
     await _executescript_in_transaction(conn, SCHEMA)
@@ -1927,6 +2030,9 @@ async def apply_schema_and_migrations(conn, *, db_exists: bool) -> None:
         await backfill_share_images(conn)
         await backfill_image_tags(conn)
         await backfill_legacy_aspect_ratios(conn)
+        if previous_schema_version < 30:
+            await backfill_people_query_aggregates(conn)
+            await backfill_cache_image_presence(conn)
         await conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         await conn.commit()
     except Exception:

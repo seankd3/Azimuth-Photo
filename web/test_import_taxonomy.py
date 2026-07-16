@@ -6,6 +6,7 @@ import asyncio
 import errno
 import importlib
 import os
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -567,6 +568,78 @@ class MoveJournalRecoveryTests(BackendTestCase):
         self.assertEqual(result, {"redone": 0, "undone": 0, "ambiguous": 0, "lost": 1})
         self.assertEqual(image["filepath"], str(old_path))
         self.assertEqual(await self._journal_count(), 0)
+
+    async def test_reclassify_commit_failure_keeps_prior_moves_durable(self):
+        from data import connection
+
+        root = Path(self.tempdir.name)
+        library = root / "Photos"
+        bad = library / "RAWS" / "Personal Photos" / "2026" / "2026-07-10"
+        bad.mkdir(parents=True)
+        stranded = [bad / "PXL_first.jpg", bad / "PXL_second.jpg"]
+        for index, path in enumerate(stranded, start=1):
+            path.write_bytes(f"mis-nested-phone-{index}".encode())
+        source = await db.add_or_restore_source(str(library / "RAWS"))
+        await db.insert_images_batch(
+            [(path.name, str(path), ".jpg", path.stat().st_size, path.stat().st_mtime) for path in stranded],
+            source_id=source["id"],
+        )
+        conn = await db.get_db()
+        try:
+            rows = await (
+                await conn.execute(
+                    "SELECT id FROM images WHERE filepath IN (?, ?) ORDER BY filepath",
+                    tuple(str(path) for path in stranded),
+                )
+            ).fetchall()
+            image_ids = [int(row["id"]) for row in rows]
+        finally:
+            await conn.close()
+
+        real_open_async = connection.open_async
+
+        class FailCommitAfterSecondFileUpdate:
+            def __init__(self, conn):
+                self._conn = conn
+                self.file_updates = 0
+
+            def __getattr__(self, name):
+                return getattr(self._conn, name)
+
+            async def execute(self, sql, parameters=None):
+                if sql.startswith("UPDATE images SET filepath"):
+                    self.file_updates += 1
+                return await self._conn.execute(sql, parameters)
+
+            async def commit(self):
+                if self.file_updates >= 2:
+                    raise sqlite3.OperationalError("simulated second-row commit failure")
+                await self._conn.commit()
+
+        async def open_with_commit_failure(*args, **kwargs):
+            return FailCommitAfterSecondFileUpdate(await real_open_async(*args, **kwargs))
+
+        with patch.object(connection, "open_async", side_effect=open_with_commit_failure):
+            result = await taxonomy.reclassify_misplaced_personal_photos(
+                db.DB_PATH, library, confirm=True, dry_run=False, move_files=True,
+            )
+
+        good = [library / "Personal Photos" / "2026" / "2026-07-10" / path.name for path in stranded]
+        first_row = await self._image_row(image_ids[0])
+        self.assertEqual(first_row["filepath"], str(good[0]))
+        self.assertTrue(good[0].is_file())
+        self.assertFalse(stranded[0].exists())
+        self.assertEqual(result["updated"], 1)
+        self.assertEqual(len(result["errors"]), 1)
+
+        healed = await taxonomy.reclassify_misplaced_personal_photos(
+            db.DB_PATH, library, confirm=True, dry_run=False, move_files=True,
+        )
+        self.assertEqual(healed["updated"], 1)
+        for image_id, path in zip(image_ids, good, strict=True):
+            row = await self._image_row(image_id)
+            self.assertEqual(row["filepath"], str(path))
+            self.assertTrue(path.is_file())
 
 
 if __name__ == "__main__":

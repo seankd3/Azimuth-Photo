@@ -38,3 +38,22 @@ Use the reported medians to update the table and `BUDGET_MS` together. Set each
 budget to roughly five times the measured median, rounded up to a practical
 millisecond value. Do not re-baseline to hide an unexplained regression: compare
 against the existing budget first and fix or explicitly accept the product tradeoff.
+
+## Live-catalog measurements (139k images, omarchy prod)
+
+Synthetic budgets above ≠ the real system. Dated spot-measurements of live prod
+(`curl` total time, hub on omarchy, catalog ~139k images):
+
+| Endpoint | 2026-07-15 (cold) | 2026-07-15 (warm) |
+| --- | ---: | ---: |
+| `GET /api/rankings?limit=100&sort=elo` | 439 ms | 1.6 ms |
+| `GET /api/rankings?limit=100&sort=date_taken` | 809 ms | — |
+| `GET /api/date-histogram` | 94 ms | — |
+| `GET /api/counts` | 105 ms | — |
+| `GET /api/filter-options` | 3 ms | — |
+| `GET /api/collections/suggestions` | **11.0 s** | 19 ms |
+
+Method: measure ~40 min after a service restart (route caches cold for the slow
+paths, OS page cache warm). Re-measure after any query-shape change and append a
+column — do not overwrite history. Top offender: cold collection suggestions
+(once per boot; was reported at 60 s on 2026-07-15 pre-merge, now 11 s).
