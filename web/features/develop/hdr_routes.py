@@ -9,7 +9,6 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from features.develop import hdr
 
 
 router = APIRouter()
@@ -38,12 +37,16 @@ def _configured_db_path() -> str:
 
 @router.post("/api/develop/hdr/detect")
 async def api_detect_hdr_brackets(body: HdrDetectBody):
+    from features.develop import hdr  # deferred: keeps HDR pixel libraries off boot until an HDR request
+
     brackets = await asyncio.to_thread(hdr.detect_brackets, _configured_db_path(), body.image_ids)
     return {"brackets": brackets}
 
 
 @router.post("/api/develop/hdr/merge", status_code=202)
 async def api_merge_hdr(body: HdrMergeBody):
+    from features.develop import hdr  # deferred: keeps HDR pixel libraries off boot until an HDR request
+
     image_ids = list(dict.fromkeys(image_id for image_id in body.image_ids if image_id > 0))
     if len(image_ids) < 3:
         return JSONResponse({"error": "HDR merge needs at least three images"}, status_code=400)
@@ -54,4 +57,6 @@ async def api_merge_hdr(body: HdrMergeBody):
 
 @router.get("/api/develop/hdr/status")
 async def api_hdr_status():
+    from features.develop import hdr  # deferred: keeps HDR pixel libraries off boot until an HDR request
+
     return hdr.hdr_status()

@@ -6,7 +6,6 @@ from collections.abc import Awaitable, Callable
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-import elo_propagation
 from core.requests import json_object, positive_int
 from data import connection as data_connection
 
@@ -188,6 +187,7 @@ async def mosaic_pick(request: Request):
     K=12 per pair.
     """
     _configured()
+    import elo_propagation  # deferred: keeps numpy off boot until a comparison propagation is queued
     body, error = await json_object(request)
     if error:
         return error
@@ -261,6 +261,7 @@ async def mosaic_pick(request: Request):
 async def propagation_last():
     """Return the number of images affected by the last Elo propagation."""
     from core import propagation_queue
+    import elo_propagation  # deferred: keeps numpy off boot until propagation status is requested
 
     return {
         "count": elo_propagation.last_propagation_count,
@@ -271,6 +272,8 @@ async def propagation_last():
 @router.post("/api/propagation/predict")
 async def propagation_predict(request: Request):
     """Precompute propagation counts for each possible winner in a grid."""
+    import elo_propagation  # deferred: keeps numpy off boot until propagation prediction is requested
+
     body, error = await json_object(request)
     if error:
         return error
@@ -342,6 +345,7 @@ async def compare_next(
 @router.post("/api/compare")
 async def submit_comparison(request: Request):
     _configured()
+    import elo_propagation  # deferred: keeps numpy off boot until a comparison propagation is queued
     body, error = await json_object(request)
     if error:
         return error

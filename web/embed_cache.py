@@ -5,7 +5,8 @@ Used by: search, find similar, duplicates, collections, Elo propagation.
 Rebuilt when the embedding count changes (new images embedded).
 """
 
-import numpy as np
+from __future__ import annotations
+
 import asyncio
 from collections.abc import Callable
 import json
@@ -88,6 +89,8 @@ def _matrix_view(cache: dict | None = None):
 
 
 def _rows_to_matrix(rows, *, overallocate: bool = True):
+    import numpy as np  # deferred: keeps numpy off boot until the embedding matrix is loaded
+
     if not rows:
         return [], None
 
@@ -139,6 +142,8 @@ def _snapshot_paths(model_key: str):
 
 
 def _load_snapshot_sync(expected_count: int, model_key: str):
+    import numpy as np  # deferred: keeps numpy off boot until an embedding snapshot is loaded
+
     matrix_path, ids_path, meta_path = _snapshot_paths(model_key)
     try:
         with open(meta_path, "r", encoding="utf-8") as f:
@@ -162,6 +167,8 @@ def _load_snapshot_sync(expected_count: int, model_key: str):
 
 
 def _save_snapshot_sync(image_ids: list[int], matrix: np.ndarray, model_key: str):
+    import numpy as np  # deferred: keeps numpy off boot until an embedding snapshot is saved
+
     matrix_path, ids_path, meta_path = _snapshot_paths(model_key)
     try:
         os.makedirs(SNAPSHOT_DIR, exist_ok=True)
@@ -333,6 +340,8 @@ def get_warm_matrix(model_key: str | None = None):
 
 def add_vectors(rows: list[tuple[int, np.ndarray]], model_key: str | None = None):
     """Append freshly stored vectors to the warm cache without a full DB rebuild."""
+    import numpy as np  # deferred: keeps numpy off boot until new embeddings are added
+
     model_key = _target_model_key(model_key)
     cache = _caches.get(model_key)
     if (

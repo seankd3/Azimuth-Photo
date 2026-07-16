@@ -23,6 +23,7 @@ from typing import Any, Callable, Iterable
 import imagecodecs
 import numpy as np
 from PIL import Image
+from core import pil_limits  # noqa: F401  # disables the decompression-bomb limit process-wide
 
 from core.dates import parse_taken_timestamp
 from core.runtime_paths import apply_environment_defaults, resolve_runtime_paths

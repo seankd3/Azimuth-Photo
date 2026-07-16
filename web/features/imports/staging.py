@@ -272,6 +272,7 @@ def thumbnail_bytes(scan: Scan, entry: dict) -> bytes:
     cached.parent.mkdir(parents=True, exist_ok=True)
     if entry["kind"] == "video":
         from PIL import Image
+        from core import pil_limits  # noqa: F401  # disables the decompression-bomb limit process-wide
         import io
         image = Image.new("RGB", (320, 180), (45, 45, 45))
     else:

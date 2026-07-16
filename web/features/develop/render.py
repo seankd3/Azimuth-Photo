@@ -27,6 +27,7 @@ from typing import Mapping
 
 import numpy as np
 from PIL import Image
+from core import pil_limits  # noqa: F401  # disables the decompression-bomb limit process-wide
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 

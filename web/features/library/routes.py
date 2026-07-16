@@ -5,8 +5,6 @@ from fastapi import APIRouter, Request
 
 from core.requests import repeated_query_values
 from data import connection as data_connection
-from features.library import service as library_service
-from features.library import storage
 
 
 router = APIRouter()
@@ -24,6 +22,8 @@ def configure(
 
 @router.get("/api/storage/overview")
 async def api_storage_overview():
+    from features.library import storage  # deferred: keeps quality-scoring numpy off boot until storage is requested
+
     return await storage.overview_payload()
 
 
@@ -94,6 +94,8 @@ async def api_date_groups(
     import_batch: int = 0, stacks: str = "expanded", collection_id: int = 0, request: Request = None,
 ):
     """Return date groups with counts for the scrubber, respecting active filters."""
+    from features.library import service as library_service  # deferred: keeps numpy off boot until a Library metadata request
+
     return await library_service.date_groups_payload(
         orientation=orientation,
         compared=compared,
@@ -123,6 +125,8 @@ async def api_date_histogram(
     request: Request = None,
 ):
     """Return whole-scope month counts for the timeline scrubber and month view."""
+    from features.library import service as library_service  # deferred: keeps numpy off boot until a Library metadata request
+
     return await library_service.date_histogram_payload(
         orientation=orientation,
         compared=compared,
@@ -151,6 +155,8 @@ async def api_counts(
     import_batch: int = 0, stacks: str = "expanded", request: Request = None,
 ):
     """Return cheap total/picked/rejected counts for the scope in one call."""
+    from features.library import service as library_service  # deferred: keeps numpy off boot until a Library metadata request
+
     return await library_service.scope_counts_payload(
         orientation=orientation,
         compared=compared,
@@ -177,6 +183,8 @@ async def api_map_markers(
     import_batch: int = 0, collection_id: int = 0, request: Request = None,
 ):
     """Return images with GPS data for map display."""
+    from features.library import service as library_service  # deferred: keeps numpy off boot until a Library metadata request
+
     return await library_service.map_markers_payload(
         orientation=orientation,
         compared=compared,
@@ -204,6 +212,8 @@ async def api_filter_options(
     import_batch: int = 0, stacks: str = "expanded", collection_id: int = 0, request: Request = None,
 ):
     """Return metadata-backed filter choices for the bottom bar."""
+    from features.library import service as library_service  # deferred: keeps numpy off boot until a Library metadata request
+
     return await library_service.filter_options_payload(
         orientation=orientation,
         compared=compared,
@@ -226,4 +236,6 @@ async def api_filter_options(
 
 @router.get("/api/stats")
 async def api_stats():
+    from features.library import service as library_service  # deferred: keeps numpy off boot until a Library metadata request
+
     return await library_service.stats_payload()

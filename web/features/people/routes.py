@@ -175,6 +175,7 @@ async def api_people(limit: int = 24):
 
 def _render_face_thumbnail(face: dict, output_size: int) -> tuple[str, bytes] | None:
     from PIL import Image as PILImage, ImageOps
+    from core import pil_limits  # noqa: F401  # disables the decompression-bomb limit process-wide
 
     cache_path = str(face.get("cache_path") or "")
     if not cache_path or not os.path.isfile(cache_path):

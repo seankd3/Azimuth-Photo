@@ -5,6 +5,8 @@ import subprocess
 import time
 
 from PIL import Image, ImageOps
+from core import pil_limits  # noqa: F401  # disables the decompression-bomb limit process-wide
+
 
 
 def apply_raw_orientation(img: Image.Image, flip: int) -> Image.Image:

@@ -3,9 +3,6 @@ import os
 from datetime import datetime
 from fractions import Fraction
 
-from PIL import Image as PILImage
-from PIL.ExifTags import GPSTAGS, IFD, TAGS
-
 from core.dates import safe_datetime_fromtimestamp
 METADATA_EXTRACTOR_VERSION = 3
 PILLOW_METADATA_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp", ".bmp", ".gif"}
@@ -130,6 +127,9 @@ def _apply_sidecar_metadata(metadata: dict, filepath: str) -> None:
 
 
 def _merge_exif_tags(exif_raw) -> dict:
+    from PIL.ExifTags import GPSTAGS, IFD, TAGS  # deferred: keeps Pillow off boot until image EXIF is parsed
+    from core import pil_limits  # noqa: F401  # disables the decompression-bomb limit process-wide
+
     all_tags = {}
     if not exif_raw:
         return all_tags
@@ -194,6 +194,9 @@ def _dms_to_decimal(dms_tuple, ref: str = ""):
 
 def extract_image_metadata(filepath: str) -> dict:
     """Return normalized display/query metadata for an image path."""
+    from PIL import Image as PILImage  # deferred: keeps Pillow off boot until image metadata is parsed
+    from core import pil_limits  # noqa: F401  # disables the decompression-bomb limit process-wide
+
     filename = os.path.basename(filepath)
     file_ext = os.path.splitext(filename)[1].lower()
     metadata = {

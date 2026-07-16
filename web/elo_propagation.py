@@ -1,5 +1,4 @@
-"""
-Elo propagation via embedding similarity.
+"""Elo propagation via embedding similarity.
 
 When a comparison is recorded, propagate scaled Elo adjustments to
 visually similar images. This dramatically accelerates ranking for
@@ -9,13 +8,13 @@ Direct comparisons are always source of truth — propagation only
 nudges images that haven't been extensively compared yet.
 """
 
+from __future__ import annotations
+
 import asyncio
 from collections.abc import Awaitable, Callable
 import logging
 import sqlite3
 from typing import Any
-
-import numpy as np
 
 import embed_cache
 
@@ -137,6 +136,8 @@ def _find_similar(image_id, image_ids, matrix, id_to_idx, threshold, max_n):
 
 def _rank_similar_from_scores(image_id, image_ids, similarities, threshold, max_n):
     """Rank precomputed similarity scores. Returns [(id, similarity), ...]."""
+    import numpy as np  # deferred: keeps numpy off boot until Elo propagation ranks similar images
+
     candidate_count = min(len(image_ids), max_n + 1)
     if candidate_count <= 0:
         return []

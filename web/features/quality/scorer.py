@@ -37,7 +37,6 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-import numpy as np
 
 IMAGE_QUALITY_DDL = """
 CREATE TABLE IF NOT EXISTS image_quality (
@@ -88,6 +87,7 @@ async def ensure_image_quality(conn) -> None:
 
 def _decode_gray(jpeg_bytes: bytes):
     import cv2
+    import numpy as np  # deferred: keeps numpy off boot until a preview quality score is requested
 
     arr = np.frombuffer(jpeg_bytes, dtype=np.uint8)
     bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
@@ -135,6 +135,8 @@ def _crop_box(gray: np.ndarray, x: float, y: float, bw: float, bh: float) -> np.
 
 
 def _exposure_clip_fraction(gray: np.ndarray) -> float:
+    import numpy as np  # deferred: keeps numpy off boot until a preview quality score is requested
+
     if gray.size == 0:
         return 0.0
     lo = int(round(255 * 0.01))
@@ -150,6 +152,8 @@ def _motion_blur_anisotropy(gray: np.ndarray) -> float:
     fences, and architecture also raise anisotropy. Treat as a soft cue.
     """
     import cv2
+    import numpy as np  # deferred: keeps numpy off boot until a preview quality score is requested
+
 
     h, w = gray.shape[:2]
     if h < 16 or w < 16:

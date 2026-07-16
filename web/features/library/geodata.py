@@ -87,6 +87,7 @@ def _parse_exif_date(value: Any) -> str | None:
 
 def _pillow_metadata(filepath: str) -> dict[str, Any]:
     from PIL import Image
+    from core import pil_limits  # noqa: F401  # disables the decompression-bomb limit process-wide
 
     with Image.open(filepath) as image:
         exif = image.getexif()
