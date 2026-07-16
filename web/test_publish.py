@@ -19,6 +19,7 @@ from features.publish import routes as publish_routes
 from features.publish.builder import BundleSummary, build_public_gallery_bundle
 from features.publish.deployer import (
     CommandResult,
+    DeployResult,
     GalleryDeployer,
     PublishConfig,
     PublishDeployError,
@@ -374,6 +375,32 @@ class PublishDeployerTests(unittest.TestCase):
             self.assertFalse(deleted)
             manifest = json.loads((public_g / "manifest.json").read_text(encoding="utf-8"))
             self.assertEqual(manifest["galleries"][0]["slug"], "selected")
+
+    def test_revoke_retry_persists_when_gallery_directory_is_already_missing(self):
+        with tempfile.TemporaryDirectory() as temp_name:
+            public_g = Path(temp_name) / "g"
+            row = {
+                "collection_id": 7,
+                "slug": "selected",
+                "title": "Selected",
+                "image_count": 1,
+                "published_at": 123.4,
+            }
+            persisted = []
+            deployer = GalleryDeployer(PublishConfig(publish_dir=str(public_g)))
+
+            result = deployer._revoke_sync(
+                "selected",
+                7,
+                [row],
+                lambda hook: persisted.append(hook),
+                None,
+            )
+
+            self.assertIsInstance(result, DeployResult)
+            self.assertEqual(persisted, [result.hook])
+            manifest = json.loads((public_g / "manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["galleries"], [])
 
     def test_republish_uses_atomic_directory_exchange(self):
         with tempfile.TemporaryDirectory() as temp_name:
