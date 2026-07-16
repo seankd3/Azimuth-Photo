@@ -73,6 +73,30 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertIn("scrollTop <= 160", timeline)
         self.assertIn("on('tab', (tab) =>", timeline)
 
+    def test_similar_pending_previews_poll_by_id_and_sharpen_on_both_shells(self):
+        grid = read("grid.js")
+        timeline = read_mobile("timeline.js")
+
+        for source in (grid, timeline):
+            self.assertIn("function pendingPreviewCount(images)", source)
+            self.assertIn("image?.preview_ready === false", source)
+            self.assertIn("params.set('ids', ids.join(','));", source)
+            self.assertIn("sharpenPreview(image)", source)
+
+        self.assertIn(
+            "data.source === 'similar' ? pendingPreviewCount(next) : pendingCount(data)",
+            grid,
+        )
+        self.assertIn(
+            "if (similarScopeActive() || !canRefreshPendingThumbnails()) await refreshPendingPreviews();",
+            grid,
+        )
+        self.assertIn("updateThumbnailPoll(pendingPreviewCount(images));", timeline)
+        self.assertIn(
+            "if (scope.similarImages || !canRefreshPendingThumbnails()) await refreshPendingPreviews();",
+            timeline,
+        )
+
     def test_events_keep_pending_previews_off_the_thumbnail_decode_path(self):
         events = read("events.js")
         cell_html = events[events.index("function cellHtml"):events.index("function patchCells")]
