@@ -190,6 +190,7 @@ async function advance() {
 async function pick(winnerId) {
     if (busy || currentSet.length < need()) return;
     busy = true;
+    const previousSet = currentSet;
     const winner = currentSet.find((img) => Number(img.id) === winnerId);
     const loserIds = currentSet.filter((img) => Number(img.id) !== winnerId).map((img) => Number(img.id));
     if (!winner || !loserIds.length) {
@@ -200,7 +201,8 @@ async function pick(winnerId) {
     if (card) card.classList.add('picked');
     if (navigator.vibrate) navigator.vibrate(8);
 
-    history.push({ set: currentSet, winnerId });
+    const historyEntry = { set: previousSet, winnerId };
+    history.push(historyEntry);
     if (history.length > 20) history.shift();
     picks += 1;
     streak += 1;
@@ -210,15 +212,22 @@ async function pick(winnerId) {
     // Advance immediately (speed covenant: the loop never waits on the write).
     const write = mosaicPick(winnerId, loserIds);
     await advance();
+    const advancedSet = currentSet;
     busy = false;
 
     const result = await write;
     if (!result || !result.ok) {
-        history.pop();
+        const historyIndex = history.indexOf(historyEntry);
+        if (historyIndex >= 0) history.splice(historyIndex, 1);
         picks = Math.max(0, picks - 1);
         streak = 0;
         root.querySelector('#mr-picks').textContent = String(picks);
         root.querySelector('#mr-streak').textContent = String(streak);
+        if (currentSet === advancedSet) {
+            currentSet = previousSet;
+            renderSet();
+            if (currentSet.length >= need()) prefetchNext();
+        }
         showToast(writeFailureMessage());
         return;
     }
