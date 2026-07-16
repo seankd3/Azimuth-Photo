@@ -10,7 +10,7 @@ from data.repositories import catalog as catalog_repository
 from core.path_groups import safe_commonpath
 
 EXPECTED_EMBEDDING_DIM = 2048  # Qwen3-VL-Embedding-2B native dimension
-SCHEMA_VERSION = 28
+SCHEMA_VERSION = 29
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS catalog_sources (
@@ -63,6 +63,18 @@ CREATE TABLE IF NOT EXISTS images (
     trash_path TEXT DEFAULT NULL,
     vc_of INTEGER REFERENCES images(id) ON DELETE CASCADE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- v29: deterministic collection-suggestion parsing is persisted per image.
+-- Rows are populated lazily by the suggestions service and invalidated by its
+-- parser version, so schema startup never does catalog-scale filename work.
+CREATE TABLE IF NOT EXISTS image_shoot_hints (
+    image_id INTEGER PRIMARY KEY REFERENCES images(id) ON DELETE CASCADE,
+    key TEXT,
+    title TEXT,
+    source TEXT,
+    path_date REAL,
+    parser_version INTEGER NOT NULL
 );
 
 -- Develop v21: canonical Lightroom-compatible edit state.  Unknown crs keys
@@ -1125,6 +1137,7 @@ COMPAT_INDEX_SQL = (
 REQUIRED_TABLES = {
     "catalog_sources",
     "images",
+    "image_shoot_hints",
     "develop_settings",
     "develop_history",
     "develop_presets",

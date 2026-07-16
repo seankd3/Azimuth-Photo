@@ -184,7 +184,12 @@ def _fixture_metrics(*, scratch: Path, iterations: int) -> tuple[dict[str, float
                 )
 
             develop_ms, develop_statuses = _develop_open(session, int(manifest["raw_image_id"]))
-            suggestions_cold, suggestions_cached, suggestion_count = _suggestions(session)
+            # Prime persisted suggestion inputs before the measured fresh
+            # process.  This keeps the KPI about an ordinary cold response,
+            # not a once-per-parser-version migration backfill.
+            status, _payload, _elapsed = session.json_fetch("/api/collections/suggestions")
+            if status != 200:
+                raise RuntimeError(f"collection suggestions priming returned {status}")
             sync_status, _payload = _timed_gets(
                 session, "/api/sync/status", max(3, min(iterations, 5))
             )
@@ -194,6 +199,12 @@ def _fixture_metrics(*, scratch: Path, iterations: int) -> tuple[dict[str, float
             session.fetch("/")
             session.fetch("/api/rankings?limit=100&offset=100&sort=date_taken")
             peak_rss_mb = _peak_rss_mb(server.process.pid)
+
+    # A process restart clears the response TTL without discarding the fixture
+    # database, so this is a true cold request after lazy derived-data backfill.
+    with type(probe_server)(log_path=scratch / "bench-server.log") as suggestion_server:
+        with _Session(suggestion_server.base_url) as session:
+            suggestions_cold, suggestions_cached, suggestion_count = _suggestions(session)
 
     metrics = {
         "server_boot_first_200_ms": boot_ms,
