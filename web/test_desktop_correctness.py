@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import json
+import re
 import subprocess
 import unittest
 
@@ -244,26 +245,71 @@ class DesktopCorrectnessTests(unittest.TestCase):
 
     def test_collection_scope_pages_compose_filters_through_rankings(self):
         scope_data = read("scope_data.js")
-        page_loader = scope_data[
-            scope_data.index("export async function loadScopePage"):
-            scope_data.index("export async function loadCollectionImages")
-        ]
+        page_loader = scope_data[scope_data.index("export async function loadScopePage"):]
 
         self.assertIn("const params = scopeParams({ limit, offset });", page_loader)
         self.assertIn("getRankings(params, options)", page_loader)
         self.assertNotIn("getCollection(", page_loader)
-        self.assertIn("getCollection(", scope_data[scope_data.index("export async function loadCollectionImages"):])
+        self.assertNotIn("loadCollectionImages", scope_data)
+        self.assertNotIn("loadCollectionImageIds", scope_data)
 
     def test_collection_scope_export_uses_server_composition(self):
         panel = read("panel.js")
+        export_menu = read("export_menu.js")
         export_scope = panel[
             panel.index("export async function exportCurrentScope"):
             panel.index("export function openScopeExportMenu")
+        ]
+        shared_dialog_scope = export_menu[
+            export_menu.index("async function scopedImageIds"):
+            export_menu.index("export function openExportMenu")
         ]
 
         self.assertIn("const params = scopeParams({ format });", export_scope)
         self.assertNotIn("loadCollectionImageIds", export_scope)
         self.assertIn("Preparing ${count} file", export_scope)
+        self.assertIn("getRankings(scopeParams({", shared_dialog_scope)
+        self.assertNotIn("loadCollectionImageIds", shared_dialog_scope)
+
+    def test_collection_membership_loaders_stay_out_of_scope_consumers(self):
+        js_root = WEB / "static" / "js"
+        allowed_get_collection_sites = {
+            ("desktop/api.js", "export async function getCollection(collectionId, { limit = 500, offset = 0, signal = null } = {}) {"),
+            ("desktop/gallery_editor.js", "getCollection(collectionId, { limit: 500 }),"),
+            ("desktop/panel.js", "const data = await getCollection(collectionId, { limit: 1000 });"),
+            ("desktop/panel.js", "const detail = await getCollection(collectionId, { limit: 1000, offset });"),
+            ("mobile/api.js", "export async function getCollection(collectionId, limit = 500) {"),
+            ("mobile/library.js", "data = await getCollection(coll.id, 500);"),
+            ("mobile/sharing.js", "const data = await getCollection(collection.id, 1000);"),
+        }
+        allowed_id_loader_sites = set()
+
+        def matching_sites(pattern):
+            sites = set()
+            for path in js_root.rglob("*.js"):
+                source = path.read_text(encoding="utf-8")
+                lines = source.splitlines()
+                for match in re.finditer(pattern, source):
+                    line_number = source.count("\n", 0, match.start())
+                    sites.add((path.relative_to(js_root).as_posix(), lines[line_number].strip()))
+            return sites
+
+        class_rule = (
+            "Collection scopes must resolve through server composition (scopeParams plus "
+            "getRankings or another composed endpoint), never raw collection membership. "
+            "getCollection and loadCollectionImageIds are membership-chrome only; add a site "
+            "to this explicit allowlist only after a conscious membership-UI decision."
+        )
+        self.assertEqual(
+            matching_sites(r"\bgetCollection\s*\("),
+            allowed_get_collection_sites,
+            class_rule,
+        )
+        self.assertEqual(
+            matching_sites(r"\bloadCollectionImageIds\b"),
+            allowed_id_loader_sites,
+            class_rule,
+        )
 
     def test_collection_month_counts_compose_filters_through_histogram(self):
         filters = read("filters.js")
