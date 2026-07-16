@@ -229,10 +229,21 @@ def _unload_face_app() -> None:
     _face_app_key = None
 
 
+async def _wait_for_face_turn() -> None:
+    if work_coordination.manual_turn_blocked("people"):
+        _set_status(
+            state="waiting_for_turn",
+            ready=False,
+            message="People is waiting for other background work.",
+            last_error="",
+        )
+    await work_coordination.wait_for_manual_turn("people")
+
+
 async def _renew_face_turn() -> None:
     if work_coordination.lost_ownership("people"):
         _unload_face_app()
-    await work_coordination.wait_for_manual_turn("people")
+    await _wait_for_face_turn()
 
 
 def _detect_faces(cache_path: str, config: dict[str, Any]) -> list[dict[str, Any]]:
@@ -358,13 +369,7 @@ async def _run_face_worker_loop() -> None:
                 continue
 
             loop = asyncio.get_running_loop()
-            _set_status(
-                state="waiting_for_turn",
-                ready=False,
-                message="People is waiting for other background work.",
-                last_error="",
-            )
-            await work_coordination.wait_for_manual_turn("people")
+            await _wait_for_face_turn()
             _set_status(
                 state="scanning",
                 ready=True,

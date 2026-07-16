@@ -89,7 +89,7 @@ class CaptionTests(BackendTestCase):
             )
             caption_worker._caption_executor = old_executor
 
-    async def test_caption_acquires_manual_before_gpu_owner(self):
+    async def test_caption_immediate_claim_does_not_report_waiting(self):
         old_dependencies = (
             caption_worker._count_images_needing_captions,
             caption_worker._get_images_needing_captions,
@@ -135,12 +135,22 @@ class CaptionTests(BackendTestCase):
                     "wait_for_gpu_turn",
                     side_effect=stop_at_gpu_wait,
                 ),
+                unittest.mock.patch.object(
+                    work_coordination,
+                    "manual_turn_blocked",
+                    return_value=False,
+                ),
+                unittest.mock.patch.object(
+                    work_coordination,
+                    "gpu_turn_blocked",
+                    return_value=False,
+                ),
                 unittest.mock.patch.object(caption_worker, "_clear_cuda_cache"),
             ):
                 with self.assertRaises(asyncio.CancelledError):
                     await caption_worker.run_caption_worker()
 
-            self.assertEqual(observed_states, ["waiting_for_turn"])
+            self.assertNotIn(observed_states[0], {"waiting_for_turn", "waiting_for_gpu"})
         finally:
             (
                 caption_worker._count_images_needing_captions,
@@ -148,6 +158,33 @@ class CaptionTests(BackendTestCase):
                 caption_worker._store_caption_result,
             ) = old_dependencies
             caption_worker._caption_manual_pause = old_pause
+            caption_worker._status.clear()
+            caption_worker._status.update(old_status)
+
+    async def test_caption_reports_manual_wait_only_when_blocked(self):
+        old_status = dict(caption_worker._status)
+
+        async def stop_at_manual_wait(*_args, **_kwargs):
+            raise asyncio.CancelledError
+
+        try:
+            with (
+                unittest.mock.patch.object(
+                    work_coordination,
+                    "manual_turn_blocked",
+                    return_value=True,
+                ),
+                unittest.mock.patch.object(
+                    work_coordination,
+                    "wait_for_manual_turn",
+                    side_effect=stop_at_manual_wait,
+                ),
+            ):
+                with self.assertRaises(asyncio.CancelledError):
+                    await caption_worker._wait_for_caption_turn()
+
+            self.assertEqual(caption_worker.get_worker_status()["state"], "waiting_for_turn")
+        finally:
             caption_worker._status.clear()
             caption_worker._status.update(old_status)
 

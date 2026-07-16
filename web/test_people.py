@@ -4,6 +4,29 @@ from unittest import mock
 
 
 class PeopleTests(BackendTestCase):
+    async def test_people_immediate_claim_does_not_report_waiting(self):
+        old_status = dict(face_worker._status)
+        face_worker._set_status(state="scanning")
+        try:
+            with (
+                mock.patch.object(
+                    work_coordination,
+                    "manual_turn_blocked",
+                    return_value=False,
+                ),
+                mock.patch.object(
+                    work_coordination,
+                    "wait_for_manual_turn",
+                    new=mock.AsyncMock(),
+                ),
+            ):
+                await face_worker._wait_for_face_turn()
+
+            self.assertEqual(face_worker.get_worker_status()["state"], "scanning")
+        finally:
+            face_worker._status.clear()
+            face_worker._status.update(old_status)
+
     async def test_people_ownership_loss_unloads_before_reentering_wait(self):
         with (
             mock.patch.object(

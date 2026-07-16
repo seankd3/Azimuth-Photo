@@ -198,6 +198,26 @@ def lost_ownership(kind: str, *, gpu: bool = False) -> bool:
         return gpu and _gpu_owner != name
 
 
+def manual_turn_blocked(kind: str) -> bool:
+    name = str(kind or "bulk").strip() or "bulk"
+    with _lock:
+        return (
+            _manual_owner is not None
+            and _manual_owner != name
+            and not _lease_expired(_manual_owner_updated_at, now=_now())
+        )
+
+
+def gpu_turn_blocked(kind: str) -> bool:
+    name = str(kind or "gpu").strip() or "gpu"
+    with _lock:
+        return (
+            _gpu_owner is not None
+            and _gpu_owner != name
+            and not _lease_expired(_gpu_owner_updated_at, now=_now())
+        )
+
+
 @asynccontextmanager
 async def lease_heartbeat(
     kind: str,

@@ -104,7 +104,7 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
             embedding_worker._embed_executor = old_embed_executor
             embedding_worker._preload_executor = old_preload_executor
 
-    async def test_embedding_acquires_manual_before_gpu_owner(self):
+    async def test_embedding_immediate_claim_does_not_report_waiting(self):
         observed_states = []
 
         async def candidates(**_kwargs):
@@ -120,15 +120,48 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
         embedding_worker._loaded_model_id = "test-model"
         embedding_worker._loaded_model_revision = "main"
 
-        with unittest.mock.patch.object(
-            work_coordination,
-            "wait_for_gpu_turn",
-            side_effect=stop_at_gpu_wait,
+        with (
+            unittest.mock.patch.object(
+                work_coordination,
+                "wait_for_gpu_turn",
+                side_effect=stop_at_gpu_wait,
+            ),
+            unittest.mock.patch.object(
+                work_coordination,
+                "manual_turn_blocked",
+                return_value=False,
+            ),
+            unittest.mock.patch.object(
+                work_coordination,
+                "gpu_turn_blocked",
+                return_value=False,
+            ),
         ):
             with self.assertRaises(asyncio.CancelledError):
                 await embedding_worker.run_embedding_worker()
 
-        self.assertEqual(observed_states, ["waiting_for_turn"])
+        self.assertNotIn(observed_states[0], {"waiting_for_turn", "waiting_for_gpu"})
+
+    async def test_embedding_reports_manual_wait_only_when_blocked(self):
+        async def stop_at_manual_wait(*_args, **_kwargs):
+            raise asyncio.CancelledError
+
+        with (
+            unittest.mock.patch.object(
+                work_coordination,
+                "manual_turn_blocked",
+                return_value=True,
+            ),
+            unittest.mock.patch.object(
+                work_coordination,
+                "wait_for_manual_turn",
+                side_effect=stop_at_manual_wait,
+            ),
+        ):
+            with self.assertRaises(asyncio.CancelledError):
+                await embedding_worker._wait_for_embedding_turn()
+
+        self.assertEqual(embedding_worker.get_worker_status()["state"], "waiting_for_turn")
 
     async def test_embedding_cooldown_sleep_reports_waiting_retry(self):
         observed_states = []
