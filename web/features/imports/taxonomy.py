@@ -399,6 +399,13 @@ async def reclassify_misplaced_personal_photos(
     """
     from data import connection
     from data.repositories import catalog as catalog_repository
+    from features.imports import move_journal
+
+    recovery_conn = await connection.open_async(db_path)
+    try:
+        recovery = await move_journal.recover(recovery_conn)
+    finally:
+        await connection.close_async(recovery_conn, db_path=db_path)
 
     preview = await preview_misplaced_personal_photos(db_path, library_root)
     if not confirm or dry_run:
@@ -408,6 +415,7 @@ async def reclassify_misplaced_personal_photos(
             "moved": 0,
             "updated": 0,
             "errors": [],
+            "recovery": recovery,
             **preview,
         }
 
@@ -449,8 +457,23 @@ async def reclassify_misplaced_personal_photos(
                                 "message": f"destination exists: {new_path}",
                             })
                             continue
+                        await move_journal.record_intent(
+                            conn,
+                            image_id=int(row["id"]),
+                            old_path=old_path,
+                            new_path=new_path,
+                            new_source_id=source_id,
+                        )
                         await _to_thread_move(old_path, new_path)
+                        await move_journal.apply_and_clear(
+                            conn,
+                            image_id=int(row["id"]),
+                            new_path=new_path,
+                            new_source_id=source_id,
+                        )
                         moved += 1
+                        updated += 1
+                        continue
                     elif not new_path.exists():
                         errors.append({
                             "id": int(row["id"]),
@@ -475,6 +498,7 @@ async def reclassify_misplaced_personal_photos(
         "moved": moved,
         "updated": updated,
         "errors": errors,
+        "recovery": recovery,
         "prefix": preview["prefix"],
         "count": preview["count"],
         "destination_root": str(good_root),
