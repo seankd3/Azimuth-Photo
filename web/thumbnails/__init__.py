@@ -4,6 +4,8 @@ Do Not Add New Logic Here: put implementation in the owning thumbnail modules
 and keep this package facade as stable exports for existing callers.
 """
 
+from __future__ import annotations
+
 import asyncio
 import os
 import sqlite3
@@ -14,8 +16,6 @@ from concurrent.futures import ThreadPoolExecutor
 from core import work_coordination
 from data import connection as data_connection
 from features.library import preview_priority
-from features.library import service as library_service
-from PIL import Image
 from . import budget as thumbnail_budget
 from . import cache_entries as thumbnail_cache_entries
 from . import config as thumbnail_config
@@ -23,7 +23,6 @@ from . import config_metadata as thumbnail_config_metadata
 from . import data_providers
 from . import disk_store
 from . import full_cache
-from . import generation
 from . import jobs as thumbnail_jobs
 from . import maintenance as thumbnail_maintenance
 from . import pregen
@@ -39,8 +38,6 @@ from .runtime import is_sqlite_locked as _is_sqlite_locked
 from .runtime import replace_executor as _replace_executor
 
 configure_data_providers = data_providers.configure
-
-Image.MAX_IMAGE_PIXELS = None
 
 for _name in thumbnail_config.DEFAULT_EXPORT_NAMES:
     globals()[_name] = getattr(thumbnail_config, _name)
@@ -676,12 +673,17 @@ def _cache_full_image_bytes_sync(
     )
 
 
-_load_raw_preview = generation.load_raw_preview
+def _load_raw_preview(filepath: str, max_target: int):
+    from . import generation  # deferred: keeps Pillow off boot until thumbnail pixels are requested
+
+    return generation.load_raw_preview(filepath, max_target)
 
 
 def _load_source_image(
     filepath: str, max_target: int, prefer_draft: bool, image_id: int | None = None
 ) -> Image.Image:
+    from . import generation  # deferred: keeps Pillow off boot until thumbnail pixels are requested
+
     return generation.load_source_image(
         filepath,
         max_target,
@@ -698,6 +700,8 @@ def _load_source_image_from_bytes(
     max_target: int,
     prefer_draft: bool,
 ) -> Image.Image:
+    from . import generation  # deferred: keeps Pillow off boot until thumbnail pixels are requested
+
     return generation.load_source_image_from_bytes(
         filepath,
         data,
@@ -708,10 +712,15 @@ def _load_source_image_from_bytes(
     )
 
 
-_resize_to_long_side = generation.resize_to_long_side
+def _resize_to_long_side(image: Image.Image, max_target: int) -> Image.Image:
+    from . import generation  # deferred: keeps Pillow off boot until thumbnail pixels are requested
+
+    return generation.resize_to_long_side(image, max_target)
 
 
 def _queue_orientation(image_id: int, img: Image.Image):
+    from . import generation  # deferred: keeps Pillow off boot until thumbnail pixels are requested
+
     return generation.queue_orientation(
         image_id,
         img,
@@ -721,6 +730,8 @@ def _queue_orientation(image_id: int, img: Image.Image):
 
 
 def _thumbnail_jpeg_bytes(variant: Image.Image, size: str) -> bytes:
+    from . import generation  # deferred: keeps Pillow off boot until thumbnail pixels are requested
+
     return generation.thumbnail_jpeg_bytes(variant, size, THUMB_QUALITY)
 
 
@@ -732,6 +743,8 @@ def _encode_and_cache_thumbnail(
     *,
     hot: bool,
 ) -> tuple[Image.Image, bytes, bool]:
+    from . import generation  # deferred: keeps Pillow off boot until thumbnail pixels are requested
+
     return generation.encode_and_cache_thumbnail(
         size,
         image_id,
@@ -753,6 +766,8 @@ def _planned_thumbnail_sizes(
     include_smaller_tiers: bool = False,
     allow_stale_fallback: bool = True,
 ) -> list[str]:
+    from . import generation  # deferred: keeps Pillow off boot until thumbnail pixels are requested
+
     return generation.planned_thumbnail_sizes(
         filepath,
         image_id,
@@ -780,6 +795,8 @@ def _generate_missing_thumbnails_sync(
     hot: bool = False,
     allow_stale_fallback: bool = True,
 ):
+    from . import generation  # deferred: keeps Pillow off boot until thumbnail pixels are requested
+
     return generation.generate_missing_thumbnails(
         filepath,
         requested_size,
@@ -809,6 +826,8 @@ def _generate_thumbnail_set_sync(
     full_item: dict | None = None,
     hot: bool = False,
 ) -> dict:
+    from . import generation  # deferred: keeps Pillow off boot until thumbnail pixels are requested
+
     return generation.generate_thumbnail_set(
         filepath,
         image_id,
@@ -999,6 +1018,8 @@ async def get_full_image_path(filepath: str, image_id: int) -> str:
 
 
 def load_embedding_image(filepath: str, image_id: int, *, require_cached: bool = False) -> Image.Image | None:
+    from . import generation  # deferred: keeps Pillow off boot until an embedding image is requested
+
     return generation.load_embedding_image(
         filepath,
         image_id,
@@ -1015,6 +1036,8 @@ def load_embedding_image(filepath: str, image_id: int, *, require_cached: bool =
 
 
 async def flush_orientation_updates():
+    from . import generation  # deferred: keeps Pillow off boot until thumbnail orientation work runs
+
     return await generation.flush_orientation_updates(
         orientation_lock=_orientation_lock,
         orientation_queue=_orientation_queue,
@@ -1102,6 +1125,8 @@ async def _pregen_bulk_candidate_batch(limit: int):
 
 
 async def _pregen_priority_candidate_batch(limit: int, processed_ids: set[int]):
+    from features.library import service as library_service  # deferred: keeps numpy off boot until preview pre-generation runs
+
     for scope in preview_priority.recent_scopes():
         rows = await pregen.priority_candidate_batch(
             data_providers.get_db,

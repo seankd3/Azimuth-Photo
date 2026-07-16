@@ -17,8 +17,8 @@ from pydantic import BaseModel, Field
 from data import connection
 from data.repositories import images as image_repository
 from data.repositories import stacks as stack_repository
-from features.develop import rawproc, transform, virtual_copies
-from features.sync import oplog, readthrough
+from features.develop import virtual_copies
+from features.sync import oplog
 
 
 router = APIRouter()
@@ -306,6 +306,8 @@ async def _write_synced_settings(
 
 
 async def _image_or_error(image_id: int):
+    from features.develop import rawproc  # deferred: keeps RAW decoding libraries off boot until a Develop request
+
     image = await image_repository.get_image_by_id(_configured_db_path(), image_id)
     if not image:
         return None, JSONResponse({"error": "Image not found"}, status_code=404)
@@ -379,11 +381,15 @@ async def _snapshots(image_id: int) -> list[dict[str, Any]]:
 
 
 async def _ensure_base(image_id: int, image: dict) -> tuple[rawproc.BasePaths, dict[str, Any]]:
+    from features.develop import rawproc  # deferred: keeps RAW decoding libraries off boot until base generation
+
     return await asyncio.to_thread(rawproc.ensure_base_cache, image_id, image["filepath"])
 
 
 def _cached_base(image_id: int, image: dict) -> rawproc.BasePaths | None:
     """Cheap cache probe for progressive Develop responses; never decodes RAW."""
+    from features.develop import rawproc  # deferred: keeps RAW decoding libraries off boot until a Develop request
+
     return rawproc.cached_base_paths(image_id, image["filepath"])
 
 
@@ -399,6 +405,8 @@ def _recent_base_failure(image_id: int) -> rawproc.RawDecodeError | None:
 
 
 def _base_error_response(error: rawproc.RawDecodeError) -> JSONResponse:
+    from features.sync import readthrough  # deferred: keeps numpy and Pillow off boot until a base-generation error is handled
+
     if isinstance(error.__cause__, readthrough.BaseReadthroughError):
         return JSONResponse(
             {"error": str(error), "reason": "hub_unreachable"},
@@ -410,6 +418,8 @@ def _base_error_response(error: rawproc.RawDecodeError) -> JSONResponse:
 
 def _start_base_generation(image_id: int, image: dict) -> None:
     """Start the existing rawproc single-flight generator without holding a request open."""
+    from features.develop import rawproc  # deferred: keeps RAW decoding libraries off boot until base generation
+
     if _recent_base_failure(image_id) is not None:
         return
     existing = _base_generation_tasks.get(image_id)
@@ -616,6 +626,7 @@ async def api_develop_auto_tone(image_id: int):
 
     from features.develop import autotone
     from features.develop.pipeline import _apply_white_balance
+    from features.develop import rawproc  # deferred: keeps RAW decoding libraries off boot until Auto Tone runs
 
     image, error = await _image_or_error(image_id)
     if error:
@@ -678,6 +689,8 @@ async def api_develop_proof_tile(
     v: float = Query(..., ge=0.0, le=1.0),
     edge: int = Query(1024, ge=128, le=2048),
 ):
+    from features.develop import rawproc  # deferred: keeps RAW decoding libraries off boot until a proof tile is requested
+
     image, error = await _image_or_error(image_id)
     if error:
         return error
@@ -719,6 +732,8 @@ async def api_develop_proof_tile(
 
 @router.post("/api/develop/{image_id}/transform/auto")
 async def api_develop_transform_auto(image_id: int):
+    from features.develop import rawproc, transform  # deferred: keeps pixel libraries off boot until auto transform runs
+
     image, error = await _image_or_error(image_id)
     if error:
         return error
@@ -741,6 +756,8 @@ async def api_develop_transform_auto(image_id: int):
 
 @router.get("/api/develop/{image_id}")
 async def api_get_develop(image_id: int):
+    from features.develop import rawproc  # deferred: keeps RAW decoding libraries off boot until Develop metadata is requested
+
     image, error = await _image_or_error(image_id)
     if error:
         return error
@@ -898,6 +915,8 @@ async def api_reset_develop(image_id: int):
 
 
 async def _pregen(image_ids: list[int]) -> None:
+    from features.develop import rawproc  # deferred: keeps RAW decoding libraries off boot until preview pre-generation
+
     for image_id in image_ids:
         image, error = await _image_or_error(image_id)
         if error:
@@ -919,6 +938,8 @@ async def api_develop_pregen(body: DevelopPregenBody):
 
 @router.post("/api/develop/{image_id}/export")
 async def api_export_develop(image_id: int, body: DevelopExportBody):
+    from features.develop import rawproc  # deferred: keeps RAW decoding libraries off boot until a Develop export runs
+
     image, error = await _image_or_error(image_id)
     if error:
         return error
@@ -999,6 +1020,8 @@ async def api_export_develop(image_id: int, body: DevelopExportBody):
 
 
 async def _run_batch_export(body: DevelopBatchExportBody) -> None:
+    from features.develop import rawproc  # deferred: keeps RAW decoding libraries off boot until batch export runs
+
     from features.develop.render import (
         RenderError,
         _download_name_for,

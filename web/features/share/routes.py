@@ -12,7 +12,6 @@ from pydantic import BaseModel, Field
 
 import settings
 from features.share import auth
-from features.publishing.downloads import zip_gallery
 from pathlib import Path
 from starlette.background import BackgroundTask
 
@@ -494,6 +493,8 @@ async def public_share_favorite(token: str, payload: FavoriteBody, request: Requ
 @router.get("/s/{token}/download-all")
 async def public_share_download_all(token: str, request: Request):
     _configured()
+    from features.publishing.downloads import zip_gallery  # deferred: keeps remote preview pixel libraries off boot until a gallery download is requested
+
     collection = await _resolve_token(token)
     if collection is None or not auth.is_unlocked(request, collection):
         return _public_response(JSONResponse({"error": "Not found"}, status_code=404))

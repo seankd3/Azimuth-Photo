@@ -22,8 +22,6 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
-import numpy as np
-from PIL import Image
 
 from data import connection as data_connection
 from features.sync import satellite
@@ -201,6 +199,9 @@ def _write_atomic(path: Path, data: bytes) -> None:
 
 
 def _write_preview(binary: bytes, preview_path: Path) -> None:
+    import numpy as np  # deferred: keeps numpy off boot until a hub base preview is materialized
+    from PIL import Image  # deferred: keeps Pillow off boot until a hub base preview is materialized
+
     payload = gzip.decompress(binary)
     width = int.from_bytes(payload[8:12], "little")
     height = int.from_bytes(payload[12:16], "little")

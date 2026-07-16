@@ -20,7 +20,6 @@ from core import runtime_paths
 from core.source_files import inspect_source_file
 from data import connection
 from data.repositories import catalog as catalog_repository
-from features.develop import rawproc
 from features.imports import taxonomy
 from features.library import geodata, keywords
 from features.sync import family_clock
@@ -628,6 +627,8 @@ async def merge_metadata(db_path: str, items: Iterable[dict[str, Any]]) -> dict[
 
 
 async def base_artifacts(db_path: str, content_hash: str) -> tuple[rawproc.BasePaths, dict[str, Any]]:
+    from features.develop import rawproc  # deferred: keeps RAW decoding libraries off boot until a hub base is requested
+
     await ensure_sync_schema(db_path)
     conn = await connection.open_async(db_path)
     try:

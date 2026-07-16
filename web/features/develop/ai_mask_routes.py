@@ -12,7 +12,6 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
 from data.repositories import images as image_repository
-from features.develop import ai_masks, rawproc
 
 
 router = APIRouter()
@@ -36,6 +35,8 @@ def _configured_db_path() -> str:
 
 
 async def _image_or_error(image_id: int):
+    from features.develop import rawproc  # deferred: keeps RAW decoding libraries off boot until an AI-mask request
+
     image = await image_repository.get_image_by_id(_configured_db_path(), image_id)
     if not image:
         return None, JSONResponse({"error": "Image not found"}, status_code=404)
@@ -49,6 +50,8 @@ async def _image_or_error(image_id: int):
 
 @router.post("/api/develop/{image_id}/ai-mask")
 async def api_create_ai_mask(image_id: int, body: AiMaskRequest):
+    from features.develop import ai_masks, rawproc  # deferred: keeps pixel and RAW libraries off boot until an AI-mask request
+
     image, error = await _image_or_error(image_id)
     if error:
         return error
@@ -64,6 +67,8 @@ async def api_create_ai_mask(image_id: int, body: AiMaskRequest):
 
 @router.get("/api/develop/ai-mask/{cache_key}.png")
 async def api_get_ai_mask(cache_key: str):
+    from features.develop import ai_masks  # deferred: keeps Pillow and numpy off boot until an AI-mask request
+
     path = ai_masks.mask_path(cache_key)
     if path is None or not path.exists():
         return JSONResponse({"error": "AI mask not found"}, status_code=404)

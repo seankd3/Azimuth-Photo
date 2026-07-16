@@ -6,6 +6,8 @@ import time
 
 from PIL import Image, ImageOps
 
+Image.MAX_IMAGE_PIXELS = None
+
 
 def apply_raw_orientation(img: Image.Image, flip: int) -> Image.Image:
     """Apply libraw's container orientation to an untagged RAW image."""

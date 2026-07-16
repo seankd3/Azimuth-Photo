@@ -9,7 +9,6 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from features.develop import pano
 
 
 router = APIRouter()
@@ -38,12 +37,16 @@ def _configured_db_path() -> str:
 
 @router.post("/api/develop/pano/detect")
 async def api_detect_pano_sequences(body: PanoDetectBody):
+    from features.develop import pano  # deferred: keeps panorama pixel libraries off boot until a panorama request
+
     sequences = await asyncio.to_thread(pano.detect_sequences, _configured_db_path(), body.image_ids)
     return {"sequences": sequences}
 
 
 @router.post("/api/develop/pano/merge", status_code=202)
 async def api_merge_pano(body: PanoMergeBody):
+    from features.develop import pano  # deferred: keeps panorama pixel libraries off boot until a panorama request
+
     image_ids = list(dict.fromkeys(image_id for image_id in body.image_ids if image_id > 0))
     if len(image_ids) < 2:
         return JSONResponse({"error": "Panorama merge needs at least two images"}, status_code=400)
@@ -56,4 +59,6 @@ async def api_merge_pano(body: PanoMergeBody):
 
 @router.get("/api/develop/pano/status")
 async def api_pano_status():
+    from features.develop import pano  # deferred: keeps panorama pixel libraries off boot until a panorama request
+
     return pano.pano_status()

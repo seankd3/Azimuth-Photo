@@ -1,11 +1,11 @@
 """Personal taste vector construction for Library sorting."""
 
+from __future__ import annotations
+
 import asyncio
 from collections.abc import Callable
 import hashlib
 import time
-
-import numpy as np
 
 import embed_cache
 import settings
@@ -120,6 +120,8 @@ def _unavailable(reason: str, *, comparison_count: int = 0, winner_count: int = 
 
 
 def _normalize(vector: np.ndarray) -> np.ndarray | None:
+    import numpy as np  # deferred: keeps numpy off boot until a taste vector is computed
+
     norm = float(np.linalg.norm(vector))
     if not np.isfinite(norm) or norm <= 0:
         return None
@@ -127,6 +129,8 @@ def _normalize(vector: np.ndarray) -> np.ndarray | None:
 
 
 def taste_vector_signature(taste: dict | None) -> tuple:
+    import numpy as np  # deferred: keeps numpy off boot until a taste vector is compared
+
     if not taste or not taste.get("available"):
         return (
             False,
@@ -164,6 +168,8 @@ def elo_confidence(comparisons: int, *, scale: int = ELO_CONFIDENCE_COMPARISONS)
 
 
 def taste_to_elo(similarity: float | None) -> float | None:
+    import numpy as np  # deferred: keeps numpy off boot until a taste score is rendered
+
     if similarity is None:
         return None
     try:
@@ -218,6 +224,8 @@ async def taste_scaled_scores(taste: dict) -> dict[int, float] | None:
 
 
 def _compute_scaled_scores(image_ids, matrix: np.ndarray, vector) -> dict[int, float]:
+    import numpy as np  # deferred: keeps numpy off boot until taste scores are computed
+
     vector = np.asarray(vector, dtype=np.float32)
     row_norms = np.linalg.norm(matrix, axis=1)
     valid = row_norms > 0
@@ -233,6 +241,8 @@ def _compute_scaled_scores(image_ids, matrix: np.ndarray, vector) -> dict[int, f
 
 async def taste_vector() -> dict:
     """Return the learned taste vector and availability metadata."""
+    import numpy as np  # deferred: keeps numpy off boot until a taste vector is requested
+
     model_key = _active_model_key()
     db_path = _configured(_db_path, "db_path")()
     db_signature = _configured(_db_signature, "db_signature")()

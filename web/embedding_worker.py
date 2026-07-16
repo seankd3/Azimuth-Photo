@@ -1,10 +1,11 @@
-"""
-Embedding worker for Azimuth Photo.
+"""Embedding worker for Azimuth Photo.
 
 Background worker that embeds images using Qwen3-VL-Embedding-2B (int4).
 Embeddings power: text search, find similar, Elo propagation, duplicate
 detection, and auto-collections.
 """
+
+from __future__ import annotations
 
 import asyncio
 import importlib.util
@@ -14,8 +15,6 @@ from collections import deque
 from collections.abc import Awaitable, Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
-
-import numpy as np
 
 def _new_embed_executor() -> ThreadPoolExecutor:
     return ThreadPoolExecutor(max_workers=1, thread_name_prefix="embed-gpu")
@@ -585,6 +584,8 @@ def _target_embedding_dim() -> int:
 
 
 def _coerce_embedding_dim(vec: np.ndarray, target_dim: int | None = None) -> np.ndarray:
+    import numpy as np  # deferred: keeps numpy off boot until an embedding is encoded
+
     target_dim = int(target_dim or _target_embedding_dim())
     coerced = np.asarray(vec, dtype=np.float32)
     if coerced.shape[0] > target_dim:
@@ -863,10 +864,14 @@ def encode_text(query: str, config: dict | None = None) -> np.ndarray | None:
 
 
 def vec_to_blob(vec: np.ndarray) -> bytes:
+    import numpy as np  # deferred: keeps numpy off boot until an embedding is stored
+
     return np.asarray(vec, dtype=np.float32).tobytes()
 
 
 def blob_to_vec(blob: bytes) -> np.ndarray:
+    import numpy as np  # deferred: keeps numpy off boot until an embedding is read
+
     return np.frombuffer(blob, dtype=np.float32).copy()
 
 

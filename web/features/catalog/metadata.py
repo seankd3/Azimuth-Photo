@@ -8,7 +8,6 @@ from collections.abc import Callable
 
 from date_inference import infer_image_date
 import image_headers
-import photo_metadata
 from core import work_coordination
 from data.repositories import catalog as catalog_repository
 from data.repositories import images as image_repository
@@ -91,6 +90,8 @@ def catalog_metadata_status() -> dict:
 
 
 async def get_unclassified_images(limit: int = 200):
+    import photo_metadata  # deferred: keeps Pillow off boot until catalog metadata work runs
+
     return await image_repository.get_unclassified_images(
         _configured_db_path(),
         limit,
@@ -312,6 +313,8 @@ async def classify_orientations_background():
 
 
 def metadata_update_tuple(image_id: int, metadata: dict):
+    import photo_metadata  # deferred: keeps Pillow off boot until catalog metadata work runs
+
     width = metadata.get("width")
     height = metadata.get("height")
     orientation = None
@@ -368,6 +371,8 @@ def metadata_update_tuple(image_id: int, metadata: dict):
 
 async def scan_metadata_background():
     """Backfill EXIF/file metadata used for library filters and sorts."""
+    import photo_metadata  # deferred: keeps Pillow off boot until catalog metadata work runs
+
     loop = asyncio.get_event_loop()
 
     def _extract_batch(rows):
