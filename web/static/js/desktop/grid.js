@@ -45,6 +45,8 @@ let loadController = null;
 let activeJumpToken = 0;
 let reloadPending = false;
 let thumbRetryFocusBound = false;
+let thumbnailPollTimer = 0;
+let hiddenPendingThumbnails = 0;
 const stackCache = new Map();
 const stackKindCache = new Map();
 
@@ -52,6 +54,35 @@ function cancelPendingLoad() {
     if (!loadController) return;
     loadController.abort();
     loadController = null;
+}
+
+function stopThumbnailPoll() {
+    window.clearTimeout(thumbnailPollTimer);
+    thumbnailPollTimer = 0;
+}
+
+function canRefreshPendingThumbnails() {
+    const canvas = document.getElementById('canvas');
+    return mounted && !loading && !activeJumpToken && !selection.size && canvas?.scrollTop <= 160;
+}
+
+function scheduleThumbnailPoll() {
+    if (!mounted || !hiddenPendingThumbnails || thumbnailPollTimer) return;
+    thumbnailPollTimer = window.setTimeout(() => {
+        thumbnailPollTimer = 0;
+        if (!mounted || !hiddenPendingThumbnails) return;
+        if (canRefreshPendingThumbnails()) loadFirstPage();
+        scheduleThumbnailPoll();
+    }, 3000);
+}
+
+function updateThumbnailPoll(pending) {
+    hiddenPendingThumbnails = Math.max(0, Number(pending) || 0);
+    if (!hiddenPendingThumbnails) {
+        stopThumbnailPoll();
+        return;
+    }
+    scheduleThumbnailPoll();
 }
 
 function aspect(img) {
@@ -402,6 +433,8 @@ async function hydrateFirstRunEmpty(request) {
 }
 
 function renderEmptyState() {
+    stopThumbnailPoll();
+    hiddenPendingThumbnails = 0;
     stackExpansionRequest += 1;
     closeExpandedStack();
     resetImageObserver();
@@ -539,6 +572,7 @@ async function loadPage({ direction = 'after', start = null, jump = false } = {}
     document.getElementById('grid-end').hidden = !done || next.length === 0;
     if (next.length === 0 && done) renderEmptyState();
     else {
+        updateThumbnailPoll(data.hidden_pending_thumbnails);
         const chunkEl = direction === 'before'
             ? prependChunk(requestStart, incoming)
             : (render({ append: !wasEmpty, start: requestStart, images: incoming }), ensureChunkLive(requestStart));
@@ -891,6 +925,8 @@ export function mountGrid() {
 
 export function unmountGrid() {
     mounted = false;
+    stopThumbnailPoll();
+    hiddenPendingThumbnails = 0;
     savedScrollTop = document.getElementById('canvas').scrollTop;
     generation += 1;
     cancelPendingLoad();

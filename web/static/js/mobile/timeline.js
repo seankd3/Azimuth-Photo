@@ -68,6 +68,8 @@ let longPressPending = false;
 let cancelLongPressGesture = () => {};
 let tasteAvailable = false;
 let renderedSelection = new Set();
+let thumbnailPollTimer = 0;
+let hiddenPendingThumbnails = 0;
 
 async function loadTasteStatus() {
     const data = await getRankings(new URLSearchParams({ sort: 'taste', limit: '0' })).catch(() => null);
@@ -606,6 +608,34 @@ function rankingParams(offset) {
     return scopeParams({ limit: PAGE, offset, sort: viewPrefs.sort || 'date_taken' });
 }
 
+function stopThumbnailPoll() {
+    clearTimeout(thumbnailPollTimer);
+    thumbnailPollTimer = 0;
+}
+
+function canRefreshPendingThumbnails() {
+    return document.body.dataset.tab === 'photos' && !initialLoading && !selection.size && pane?.scrollTop <= 160;
+}
+
+function scheduleThumbnailPoll() {
+    if (!hiddenPendingThumbnails || thumbnailPollTimer || document.body.dataset.tab !== 'photos') return;
+    thumbnailPollTimer = setTimeout(() => {
+        thumbnailPollTimer = 0;
+        if (!hiddenPendingThumbnails || document.body.dataset.tab !== 'photos') return;
+        if (canRefreshPendingThumbnails()) reload();
+        scheduleThumbnailPoll();
+    }, 3000);
+}
+
+function updateThumbnailPoll(pending) {
+    hiddenPendingThumbnails = Math.max(0, Number(pending) || 0);
+    if (!hiddenPendingThumbnails) {
+        stopThumbnailPoll();
+        return;
+    }
+    scheduleThumbnailPoll();
+}
+
 async function loadHistogram() {
     let data = null;
     try {
@@ -642,6 +672,7 @@ export async function reload() {
     renderSkeleton();
     renderScopeBar();
     if (scope.similarImages) {
+        updateThumbnailPoll(0);
         if (gen !== generation) return;
         images = scope.similarImages;
         rememberImages(images);
@@ -669,6 +700,7 @@ export async function reload() {
     timeline.innerHTML = '';
     timeline.classList.toggle('m-z5', zoomIdx === 1);
     if (page && Array.isArray(page.images)) {
+        updateThumbnailPoll(page.hidden_pending_thumbnails);
         images = page.images;
         currentSortQuality = page.sort_quality || null;
         rememberImages(images);
@@ -702,6 +734,7 @@ export async function loadMore() {
     }
     loadingNext = false;
     if (gen !== generation || !page || !Array.isArray(page.images)) return;
+    updateThumbnailPoll(page.hidden_pending_thumbnails);
     if (!page.images.length) {
         endReached = true;
         endEl.hidden = false;
@@ -733,6 +766,7 @@ async function loadPrev() {
     }
     loadingPrev = false;
     if (gen !== generation || !page || !Array.isArray(page.images) || !page.images.length) return;
+    updateThumbnailPoll(page.hidden_pending_thumbnails);
     images = page.images.concat(images);
     startOffset = newStart;
     rememberImages(page.images);
@@ -786,6 +820,7 @@ export async function jumpToMonth(key) {
     if (gen !== generation) return;
     timeline.innerHTML = '';
     if (page && Array.isArray(page.images)) {
+        updateThumbnailPoll(page.hidden_pending_thumbnails);
         images = page.images;
         rememberImages(images);
         appendImages(images);
@@ -1271,6 +1306,10 @@ export function initTimeline() {
         reload();
     });
     on('view-prefs', reload);
+    on('tab', (tab) => {
+        if (tab === 'photos') scheduleThumbnailPoll();
+        else stopThumbnailPoll();
+    });
 
     reload();
     loadTasteStatus();
