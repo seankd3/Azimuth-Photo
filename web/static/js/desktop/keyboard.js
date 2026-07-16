@@ -50,8 +50,7 @@ function foregroundLayerOpen() {
             || document.querySelector('#export-pop-menu:not([hidden])')
             || document.querySelector('#folder-pop-menu:not([hidden])')
             || document.querySelector('#source-pop-menu:not([hidden])')
-            || document.querySelector('#share-overlay:not([hidden])')
-            || document.querySelector('#publish-overlay:not([hidden])')
+                        || document.querySelector('#deliver-overlay:not([hidden])')
             || document.querySelector('#people-merge-pop'),
         );
 }

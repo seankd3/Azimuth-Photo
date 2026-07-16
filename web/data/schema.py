@@ -953,6 +953,7 @@ COLLECTION_SHARE_COMPAT_COLUMNS = (
     ("view_count", "INTEGER NOT NULL DEFAULT 0"),
     ("first_viewed_at", "REAL DEFAULT NULL"),
     ("last_viewed_at", "REAL DEFAULT NULL"),
+    ("client_finished_at", "REAL DEFAULT NULL"),
 )
 
 COLLECTION_PUBLISH_COMPAT_COLUMNS = (
@@ -1526,15 +1527,16 @@ async def migrate_collection_shares_for_published_nodes(conn) -> None:
                 view_count INTEGER NOT NULL DEFAULT 0,
                 first_viewed_at REAL DEFAULT NULL,
                 last_viewed_at REAL DEFAULT NULL,
+                client_finished_at REAL DEFAULT NULL,
                 CHECK ((collection_id IS NOT NULL) != (published_node_id IS NOT NULL))
             );
             INSERT INTO collection_shares_new (
                 id, collection_id, published_node_id, token, created_at, expires_at,
-                revoked_at, password_hash, view_count, first_viewed_at, last_viewed_at
+                revoked_at, password_hash, view_count, first_viewed_at, last_viewed_at, client_finished_at
             )
             SELECT
                 id, collection_id, NULL, token, created_at, expires_at,
-                revoked_at, password_hash, view_count, first_viewed_at, last_viewed_at
+                revoked_at, password_hash, view_count, first_viewed_at, last_viewed_at, NULL
             FROM collection_shares;
             DROP TABLE collection_shares;
             ALTER TABLE collection_shares_new RENAME TO collection_shares;
