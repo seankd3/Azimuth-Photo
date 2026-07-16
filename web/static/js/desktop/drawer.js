@@ -6,7 +6,7 @@ import {
     pauseAiEmbeddings,
     pauseCaptionScan, pausePeopleScan, removeCatalogSource, rescanCatalogSource, resumeAiEmbeddings,
     resumeCaptionScan, resumePeopleScan, revokeDevice, saveSettings, startCachePregen, startMetadataScan, stopCachePregen,
-    stopMetadataScan, startFreeUpSpace, cancelFreeUpJob,
+    stopMetadataScan, startFreeUpSpace, cancelFreeUpJob, getStorageOverview, revealFolder,
 } from './api.js';
 import {
     emit, on, patchPrefs, scope, setActiveLens, setThumbSize, viewState,
@@ -33,6 +33,7 @@ let scanSourceId = null;
 let installTimerGeneration = 0;
 let scanTimerGeneration = 0;
 let catalog = null;
+let storageOverview = null;
 let aiStatus = null;
 let cacheStatus = null;
 let peopleStatus = null;
@@ -61,6 +62,8 @@ const settingTimers = new Map();
 const busyActions = new Set();
 const workerActionGenerations = new Map();
 const workerActionsInFlight = new Set();
+let sourceAddFlow = null;
+let sourceAddFlowReturn = null;
 // Shared contract: const INACTIVE_WORKER_STATES = new Set(['idle', 'ready', 'paused', 'complete', 'caught_up', 'error', 'disabled', 'unavailable', 'stale']);
 const SETTING_DEFS = {
     embed_model_preset: { type: 'select' },
@@ -429,6 +432,52 @@ function lastScan(source) {
     return `scanned ${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
 }
 
+function archiveHomeName(path) {
+    const clean = String(path || '').replace(/\/+$/, '');
+    return clean.split('/').filter(Boolean).pop() || clean || 'Archive home';
+}
+
+function archiveSummary(overview) {
+    const parts = ['Your archive'];
+    if (overview?.photo_count != null) parts.push(`${fmt(overview.photo_count)} photos`);
+    if (overview?.originals_bytes != null) parts.push(bytes(overview.originals_bytes));
+    if (overview?.disk_free_bytes != null) {
+        parts.push(`${bytes(overview.disk_free_bytes)} free${overview.disk_label ? ` on ${overview.disk_label}` : ''}`);
+    }
+    return parts.join(' · ');
+}
+
+function renderArchiveOverview() {
+    const overview = storageOverview;
+    const homePath = overview?.home_path || '';
+    const home = archiveHomeName(homePath);
+    return '<section class="dr-sec"><h3>Archive</h3><div class="setting-status archive-overview">'
+        + `<b>${esc(archiveSummary(overview))}</b>`
+        + (homePath
+            ? `<div class="archive-home"><span><b title="${esc(home)}">${esc(home)}</b><code title="${esc(homePath)}">${esc(homePath)}</code></span><button class="mini-btn" type="button" data-archive-open="${esc(homePath)}">Open</button></div>`
+            : '<span class="archive-unavailable">Archive details are unavailable right now.</span>')
+        + '</div></section>';
+}
+
+function bindArchiveOpen(scopeEl) {
+    scopeEl.querySelector('[data-archive-open]')?.addEventListener('click', async (event) => {
+        const result = await revealFolder(event.currentTarget.dataset.archiveOpen || '');
+        if (result?.ok && result?.data?.ok) showToast('Opened archive home');
+        else showToast(result?.data?.error || 'Couldn’t open archive home');
+    });
+}
+
+function patchArchiveOverview(body) {
+    const card = body.querySelector('.archive-overview');
+    if (!card || !storageOverview) return;
+    const wrap = document.createElement('div');
+    wrap.innerHTML = renderArchiveOverview();
+    const next = wrap.querySelector('.archive-overview');
+    if (!next || card.innerHTML === next.innerHTML) return;
+    card.innerHTML = next.innerHTML;
+    bindArchiveOpen(card);
+}
+
 function dateTime(value) {
     const raw = Number(value || 0);
     if (!raw) return 'not published';
@@ -505,7 +554,8 @@ function renderStorage() {
         return `<span class="tier-chip" data-tier-size="${size}"><b>${size.toUpperCase()}</b><span data-tier-count>${fmt(tier.count)} files</span><span data-tier-bytes>${bytes(tier.bytes)}</span></span>`;
     }).join('');
     const totalFiles = Object.values(tiers).reduce((sum, tier) => sum + Number(tier?.count || 0), 0);
-    return '<section class="dr-sec"><h3>Storage</h3>'
+    return '<section class="dr-sec"><h3>Cache</h3>'
+        + '<p class="setting-hint">Previews only — your photos live in the Archive.</p>'
         + `<div class="tier-chips">${chips}</div>`
         + `<button class="btn btn-danger" id="clear-cache-btn" data-cache-files="${totalFiles}">Clear cache</button>`
         + '</section>';
@@ -517,7 +567,7 @@ function renderPeekStorage() {
         const tier = tiers[size] || {};
         return `<span class="tier-chip" data-tier-size="${size}"><b>${size.toUpperCase()}</b><span data-tier-count>${fmt(tier.count)} files</span><span data-tier-bytes>${bytes(tier.bytes)}</span></span>`;
     }).join('');
-    return `<section class="dr-sec"><h3>Storage</h3><div class="tier-chips">${chips}</div></section>`;
+    return `<section class="dr-sec"><h3>Cache</h3><div class="tier-chips">${chips}</div></section>`;
 }
 
 function renderPeekSources() {
@@ -1003,7 +1053,7 @@ function focusPublishingSection() {
 function renderDrawer() {
     const body = document.getElementById('drawer-body');
     if (!body) return;
-    body.innerHTML = renderWork() + renderPeekStorage() + renderPeekHealth() + renderPeekSources()
+    body.innerHTML = renderArchiveOverview() + renderWork() + renderPeekStorage() + renderPeekHealth() + renderPeekSources()
         + '<section class="dr-sec"><button class="btn primary" id="drawer-open-system" type="button">System settings →</button></section>';
     bindDrawerActions(body);
     body.querySelector('#drawer-open-system')?.addEventListener('click', () => {
@@ -1019,7 +1069,7 @@ function renderCurrentSystemSurface() {
 
 export function renderSystemSections() {
     return {
-        library: renderSources() + renderLibraryHealth(catalog) + renderAbout(),
+        library: renderArchiveOverview() + renderSources() + renderLibraryHealth(catalog) + renderAbout(),
         processing: renderAiSettings() + renderPeopleSettings() + renderCaptionSettings() + renderMetadataSettings() + renderWork(),
         performance: renderImageCacheSettings() + renderThumbnailSettings() + renderStorage(),
         import: renderImportSettings(),
@@ -1057,6 +1107,7 @@ function patchDrawerStatus(workerGenerations = null) {
         : document.getElementById('drawer-body');
     if (!body) return;
 
+    patchArchiveOverview(body);
     for (const source of (catalog && catalog.sources) || []) {
         const card = body.querySelector(`.src-card[data-source-id="${Number(source.id)}"]`);
         if (!card) continue;
@@ -1132,7 +1183,7 @@ function patchSettingSurface(field) {
 
 async function refreshDrawer({ initial = false } = {}) {
     const workerGenerations = new Map(workerActionGenerations);
-    const [nextCatalog, ai, cache, people, captions, metadata, remote, settingsData, version, pair, sync, devices] = await Promise.all([
+    const [nextCatalog, ai, cache, people, captions, metadata, remote, settingsData, version, pair, sync, devices, overview] = await Promise.all([
         getCatalog().catch(() => null),
         getAiStatus().catch(() => null),
         getCacheStatus().catch(() => null),
@@ -1145,6 +1196,7 @@ async function refreshDrawer({ initial = false } = {}) {
         getPairStatus().catch(() => null),
         getSyncStatus().catch(() => null),
         listDevices().catch(() => null),
+        getStorageOverview().catch(() => null),
         refreshLibraryHealth(),
     ]);
     if (settingsData) applySettingsData(settingsData);
@@ -1163,6 +1215,7 @@ async function refreshDrawer({ initial = false } = {}) {
         const available = await getFreeable(freeupOlderDays).catch(() => null);
         freeableStatus = available || { files: 0, bytes: 0, unavailable: true };
     }
+    storageOverview = overview || storageOverview;
     renderActivity();
     const body = systemSurfaceRender
         ? document.getElementById('system-lens-content')
@@ -1242,6 +1295,72 @@ function sourceAddErrorMessage(result) {
     return bodyError
         ? `Could not add that folder (${result?.status || 'unknown status'}): ${bodyError}.`
         : `Could not add that folder (${result?.status || 'unknown status'}).`;
+}
+
+async function submitSourceAdd({ path, form }, { onSuccess } = {}) {
+    await withBusyAction('source-add', form?.querySelector('button[type="submit"]'), async () => {
+        const result = await addCatalogSource(path, true);
+        if (result && result.ok) {
+            const data = result.data || {};
+            catalog = data.catalog || catalog;
+            clearSourcePickerSelection();
+            await onSuccess?.(data);
+            showToast('Source added · scanning for photos');
+            pollScanUntilDone(data.source && data.source.id);
+        } else {
+            const message = sourceAddErrorMessage(result);
+            setSourceAddError(message);
+            showToast(message);
+        }
+    });
+}
+
+function closeSourceAddFlow() {
+    if (!sourceAddFlow) return;
+    clearSourcePickerSelection();
+    sourceAddFlow.remove();
+    sourceAddFlow = null;
+    if (sourceAddFlowReturn && document.contains(sourceAddFlowReturn)) {
+        sourceAddFlowReturn.focus({ preventScroll: true });
+    }
+    sourceAddFlowReturn = null;
+}
+
+export function openSourceAddFlow({ onSuccess } = {}) {
+    if (!document.body) return false;
+    if (sourceAddFlow) {
+        sourceAddFlow.querySelector('[data-source-picker-toggle]')?.focus();
+        return true;
+    }
+    sourceAddFlowReturn = document.activeElement;
+    sourceAddFlow = document.createElement('div');
+    sourceAddFlow.id = 'source-add-flow';
+    sourceAddFlow.className = 'modal-scrim';
+    sourceAddFlow.innerHTML = '<section class="modal-card source-add-flow-card" role="dialog" aria-modal="true" aria-label="Add photo folder">'
+        + '<header class="source-add-flow-head"><div><p>Archive</p><h2>Add photo folder</h2></div><button class="mini-btn" type="button" data-source-add-close>Close</button></header>'
+        + `<div class="source-add-flow-body">${renderSourceAddUi()}</div></section>`;
+    document.body.append(sourceAddFlow);
+    bindSourcePicker(sourceAddFlow, {
+        onSubmit: async (payload) => submitSourceAdd(payload, {
+            onSuccess: async (data) => {
+                closeSourceAddFlow();
+                await onSuccess?.(data);
+            },
+        }),
+    });
+    clearSourcePickerSelection();
+    sourceAddFlow.querySelector('[data-source-add-close]')?.addEventListener('click', closeSourceAddFlow);
+    sourceAddFlow.addEventListener('click', (event) => {
+        if (event.target === sourceAddFlow) closeSourceAddFlow();
+    });
+    sourceAddFlow.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            closeSourceAddFlow();
+        }
+    });
+    sourceAddFlow.querySelector('[data-source-picker-toggle]')?.focus();
+    return true;
 }
 
 function settingValidationMessage(input) {
@@ -1567,24 +1686,9 @@ function bindDrawerActions(body = document.getElementById('drawer-body')) {
     body.querySelector('#drawer-install-model')?.addEventListener('click', (event) => withBusyAction('model-install', event.currentTarget, saveAndInstallModel));
     body.querySelector('#drawer-return-publish')?.addEventListener('click', returnToPublish);
     bindSourcePicker(body, {
-        onSubmit: async ({ path, form }) => {
-            await withBusyAction('source-add', form?.querySelector('button[type="submit"]'), async () => {
-                const result = await addCatalogSource(path, true);
-                if (result && result.ok) {
-                    const data = result.data || {};
-                    catalog = data.catalog || catalog;
-                    clearSourcePickerSelection();
-                    renderCurrentSystemSurface();
-                    showToast('Source added · scanning for photos');
-                    pollScanUntilDone(data.source && data.source.id);
-                } else {
-                    const message = sourceAddErrorMessage(result);
-                    setSourceAddError(message);
-                    showToast(message);
-                }
-            });
-        },
+        onSubmit: (payload) => submitSourceAdd(payload, { onSuccess: renderCurrentSystemSurface }),
     });
+    bindArchiveOpen(body);
     for (const btn of body.querySelectorAll('[data-act]')) {
         btn.addEventListener('click', () => {
             if (btn.getAttribute('aria-disabled') === 'true') return;

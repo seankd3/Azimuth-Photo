@@ -4,6 +4,7 @@ import { emit, folderActive, folderValues, navigateToScope, on, scopeParams } fr
 import { showToast } from './toast.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
 import { fileManagerMenuLabel } from './file_manager.js';
+import { openSourceAddFlow } from './drawer.js';
 import { icon } from '../icons.js';
 
 const EXPANDED_KEY = 'pa_d_folder_expanded';
@@ -279,7 +280,9 @@ function renderTree() {
         host.innerHTML = '<div class="chrome-empty"><span class="chrome-empty-glyph">'
             + icon('folder')
             + '</span><span>No folders yet.</span><button type="button" id="folders-add-source">Add a source</button></div>';
-        host.querySelector('#folders-add-source')?.addEventListener('click', () => document.getElementById('system-btn')?.click());
+        host.querySelector('#folders-add-source')?.addEventListener('click', () => {
+            openSourceAddFlow({ onSuccess: refreshFoldersPanel });
+        });
         return;
     }
     const html = sources.map((source) => renderSource(source, query)).filter(Boolean).join('');

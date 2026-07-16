@@ -194,6 +194,21 @@ class UiContractsTests(BackendTestCase):
         self.assertIn("'Open in Explorer'", file_manager)
         self.assertNotIn("Reveal in Explorer", file_manager)
 
+    async def test_empty_source_states_open_the_shared_picker_inline(self):
+        base_dir = os.path.dirname(__file__)
+        desktop_dir = os.path.join(base_dir, "static", "js", "desktop")
+        with open(os.path.join(desktop_dir, "drawer.js"), encoding="utf-8") as fh:
+            drawer = fh.read()
+        with open(os.path.join(desktop_dir, "panel.js"), encoding="utf-8") as fh:
+            panel = fh.read()
+        with open(os.path.join(desktop_dir, "folders.js"), encoding="utf-8") as fh:
+            folders = fh.read()
+
+        self.assertIn("export function openSourceAddFlow", drawer)
+        self.assertIn("renderSourceAddUi()", drawer)
+        self.assertIn("openSourceAddFlow({ onSuccess: loadCatalogChrome })", panel)
+        self.assertIn("openSourceAddFlow({ onSuccess: refreshFoldersPanel })", folders)
+
     async def test_template_context_versions_static_assets(self):
         context = app_module.app.state.photoarchive_shell.template_context(HeaderRequest())
 
