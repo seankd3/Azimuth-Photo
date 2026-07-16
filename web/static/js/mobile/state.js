@@ -51,6 +51,7 @@ export const scope = {
     folder: '',
     compared: '',
     minStars: '',
+    collectionId: '',
     similarId: '',
     similarImages: null,
     label: '',
@@ -64,7 +65,7 @@ export function scopeActive() {
     return Boolean(
         scope.q || scope.people || scope.flag || scope.fileType || scope.camera
         || scope.lens || scope.tag || scope.orientation || scope.folder || scope.compared
-        || scope.minStars || scope.similarId
+        || scope.minStars || scope.collectionId || scope.similarId
     );
 }
 
@@ -81,6 +82,7 @@ export function scopeParams(extra = {}) {
     if (scope.folder) params.set('folder', scope.folder);
     if (scope.compared) params.set('compared', scope.compared);
     if (scope.minStars) params.set('min_stars', scope.minStars);
+    if (scope.collectionId) params.set('collection_id', scope.collectionId);
     params.set('stacks', viewPrefs.collapseStacks ? 'collapsed' : 'expanded');
     for (const [key, value] of Object.entries(extra)) {
         if (value !== undefined && value !== null && value !== '') params.set(key, String(value));
@@ -100,6 +102,7 @@ export function setScope(patch) {
     scope.folder = '';
     scope.compared = '';
     scope.minStars = '';
+    scope.collectionId = '';
     scope.similarId = '';
     scope.similarImages = null;
     scope.label = '';

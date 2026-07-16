@@ -7,7 +7,7 @@ import {
     listCollections, removeFromCollection, thumbUrl, writeFailureMessage,
 } from './api.js';
 import { applyFlags } from './flags.js';
-import { clearSelection, on, selection } from './state.js';
+import { clearSelection, emit, on, scope, selection } from './state.js';
 import { showToast } from './toast.js';
 import {
     dismissLayer, dismissLayerThen, layerActive, pushLayer, registerLayer, syncLayerClosed,
@@ -287,13 +287,21 @@ export function exportImages(ids, format = 'csv', size = '') {
 export function initSelection() {
     const bottomBar = document.createElement('div');
     bottomBar.id = 'm-sel-actions';
-    bottomBar.innerHTML =
-        `<button type="button" data-action="clear" aria-label="Clear selection">${icon('x')}</button>`
-        + '<span class="msa-count">0 selected</span>'
-        + `<button type="button" data-action="pick">${icon('heart')}<span>Favorite</span></button>`
-        + `<button type="button" data-action="reject">${icon('ban')}<span>Reject</span></button>`
-        + `<button type="button" data-action="collection" data-mutating aria-label="Add to collection">${icon('plus')}</button>`
-        + `<button type="button" data-action="more" aria-label="More selection actions">${icon('ellipsis')}</button>`;
+    const renderActions = () => {
+        bottomBar.classList.toggle('collection-scope', Boolean(scope.collectionId));
+        const collectionAction = scope.collectionId
+            ? `<button type="button" data-action="remove-collection" data-mutating>${icon('minus')}<span>Remove</span></button>`
+            : `<button type="button" data-action="collection" data-mutating aria-label="Add to collection">${icon('plus')}</button>`;
+        bottomBar.innerHTML =
+            `<button type="button" data-action="clear" aria-label="Clear selection">${icon('x')}</button>`
+            + '<span class="msa-count">0 selected</span>'
+            + `<button type="button" data-action="pick">${icon('heart')}<span>Favorite</span></button>`
+            + `<button type="button" data-action="reject">${icon('ban')}<span>Reject</span></button>`
+            + collectionAction
+            + `<button type="button" data-action="more" aria-label="More selection actions">${icon('ellipsis')}</button>`;
+        bottomBar.querySelector('.msa-count').textContent = `${selection.size} selected`;
+    };
+    renderActions();
     document.body.appendChild(bottomBar);
     document.dispatchEvent(new CustomEvent('selection-actions-mutated'));
 
@@ -304,6 +312,27 @@ export function initSelection() {
     const rejectSelection = () => {
         const ids = [...selection];
         dismissLayerThen('selection', clearSelection, () => applyFlags(ids, 'rejected'));
+    };
+    const removeSelectionFromCollection = () => {
+        const ids = [...selection];
+        const collectionId = Number(scope.collectionId) || 0;
+        const collectionName = scope.label || 'collection';
+        if (!collectionId || !ids.length) return;
+        dismissLayerThen('selection', clearSelection, async () => {
+            const result = await removeFromCollection(collectionId, ids);
+            if (!(result && result.ok)) {
+                showToast(writeFailureMessage());
+                return;
+            }
+            emit('scope', scope);
+            showToast(`Removed ${ids.length} from “${collectionName}”`, {
+                undo: async () => {
+                    const restored = await addToCollection(collectionId, ids);
+                    if (restored && restored.ok) emit('scope', scope);
+                    else showToast(writeFailureMessage());
+                },
+            });
+        });
     };
     const openMoreActions = () => {
         const ids = [...selection];
@@ -335,6 +364,7 @@ export function initSelection() {
         if (n > 0 && !layerActive('selection')) pushLayer('selection');
         else if (n === 0) syncLayerClosed('selection');
     });
+    on('scope', renderActions);
 
     registerLayer('sheet', { close: closeSheet });
     registerLayer('selection', { close: clearSelection });
@@ -352,6 +382,7 @@ export function initSelection() {
                 onDone: () => dismissLayer('selection', clearSelection),
             });
         }
+        else if (btn.dataset.action === 'remove-collection') removeSelectionFromCollection();
         else if (btn.dataset.action === 'more') openMoreActions();
     });
 

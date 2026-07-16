@@ -600,6 +600,7 @@ body[data-tab="photos"] #m-scrub { display: block; }
     transition: opacity .18s var(--ease), transform .18s var(--ease);
 }
 #m-sel-actions.on { opacity: 1; transform: none; pointer-events: auto; }
+#m-sel-actions.collection-scope { grid-template-columns: 44px minmax(40px, 1fr) auto auto minmax(76px, auto) 44px; }
 body.sheet-keyboard #m-sel-actions.on { opacity: 0; transform: translateY(16px); pointer-events: none; }
 #m-sel-actions button {
     min-height: 44px;

@@ -1359,6 +1359,7 @@ async def date_histogram(
     tag: str = "",
     caption_model_key: str = "",
     id_filter: set | None = None,
+    collection_id: int = 0,
     text_query: str = "",
     exclude_collapsed_stack_members: bool = False,
 ) -> dict:
@@ -1380,6 +1381,7 @@ async def date_histogram(
         tag=tag,
         caption_model_key=caption_model_key,
         text_query=text_query,
+        collection_id=collection_id,
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
     )
     conn = await connection.open_async(db_path)
@@ -1450,6 +1452,7 @@ async def date_histogram_cached(
     tag: str = "",
     caption_model_key: str = "",
     id_filter: set | None = None,
+    collection_id: int = 0,
     text_query: str = "",
     force_refresh: bool = False,
     ttl_seconds: float = FACET_CACHE_TTL_SECONDS,
@@ -1469,6 +1472,7 @@ async def date_histogram_cached(
         caption_model_key=caption_model_key,
         id_filter=id_filter,
         text_query=text_query,
+        collection_id=collection_id,
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
     )
     now = _time.time()
@@ -1496,6 +1500,7 @@ async def date_histogram_cached(
                         tag=tag,
                         caption_model_key=caption_model_key,
                         id_filter=id_filter,
+                        collection_id=collection_id,
                         text_query=text_query,
                         force_refresh=True,
                         ttl_seconds=ttl_seconds,
@@ -1522,6 +1527,7 @@ async def date_histogram_cached(
         tag=tag,
         caption_model_key=caption_model_key,
         id_filter=id_filter,
+        collection_id=collection_id,
         text_query=text_query,
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
     )

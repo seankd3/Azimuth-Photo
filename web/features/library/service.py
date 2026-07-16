@@ -566,6 +566,7 @@ async def date_histogram_payload(
     deep: bool = False,
     import_batch: int = 0,
     stacks: str = "expanded",
+    collection_id: int = 0,
 ) -> dict:
     search = await _configured_resolve_library_constraints(q, people=people, deep=deep)
     search_ids = await _combined_import_batch_filter(search.get("id_filter"), import_batch)
@@ -582,6 +583,7 @@ async def date_histogram_payload(
         lens=lens,
         tag=tag,
         id_filter=search_ids,
+        collection_id=collection_id,
         text_query=search.get("text_query") or "",
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
     )
