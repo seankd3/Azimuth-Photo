@@ -37,3 +37,12 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertIn("if (committed && scope.flag", grid)
         self.assertIn("viewState.images.some((image) =>", grid)
         self.assertIn("loadFirstPage();", grid[grid.index("if (committed && scope.flag"):])
+
+    def test_loupe_removes_trashed_photos_from_grid_and_session_lists(self):
+        loupe = read("loupe.js")
+
+        self.assertIn("function discardTrashedImages(imageIds)", loupe)
+        self.assertIn("viewState.images = viewState.images.filter", loupe)
+        self.assertIn("sessionImages = sessionImages.filter", loupe)
+        self.assertIn("if (!remaining.length) {\n        closeLoupe();", loupe)
+        self.assertIn("on('trash:changed', ({ imageIds } = {}) => discardTrashedImages(imageIds));", loupe)
