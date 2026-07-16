@@ -11,7 +11,7 @@ img { display: block; max-width: 100%; }
     --accent: #7aa8d4; --accent-fg: #071018; --accent-dim: rgba(122,168,212,.14); --accent-lin: rgba(122,168,212,.38);
     --ok: #56a789; --warn: #d4a04f; --danger: #d4786c; --danger-rgb: 212 120 108;
     --danger-dim: rgb(var(--danger-rgb) / .16); --danger-line: rgb(var(--danger-rgb) / .38); --danger-hover: #b55a52;
-    --surface-raised: #101113; --surface-chrome: #111214; --surface-popover: #16181b; --surface-ink: #0f1012; --surface-theater: #050505;
+    --surface-raised: #101113; --surface-2: var(--card); --surface-chrome: #111214; --surface-popover: #16181b; --surface-ink: #0f1012; --surface-theater: #050505;
     --z-tooltip: 400; --z-popover: 470; --z-toast: 500; --z-drawer: 540; --z-help: 570; --z-confirm: 580; --z-modal: 600;
     --dur-fast: .12s; --dur-base: .18s; --dur-slow: .24s;
     --dur-ctrl: var(--dur-fast); --dur-panel: var(--dur-slow);
@@ -358,6 +358,16 @@ body.loupe-lights-out #ctxbar { display: none; }
 .cell:has(.c-stack:focus-visible), .cell:has(.c-menu:focus-visible) { overflow: visible; z-index: 6; }
 .cell img { width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity var(--dur-base) var(--ease); }
 .cell img.ld { opacity: 1; }
+.cell.preview-pending { background: var(--surface-2); }
+.cell.preview-pending::after {
+    content: ""; position: absolute; inset: 0; z-index: 0; transform: translateX(-100%);
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,.055), transparent);
+    animation: preview-shimmer 1.2s var(--ease) infinite;
+}
+@keyframes preview-shimmer { to { transform: translateX(100%); } }
+.c-placeholder-name { display: none; position: absolute; left: 7px; right: 7px; bottom: 6px; z-index: 2; overflow: hidden; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
+.cell.preview-pending .c-placeholder-name { display: block; }
+.cell.preview-pending .c-elo { display: none; }
 .cell .c-thumb-offline { position: absolute; inset: 0; display: none; place-content: center; justify-items: center; gap: 6px; padding: 12px; color: var(--text-3); background: var(--surface-raised); font-size: var(--fs-micro); text-align: center; }
 .cell .c-thumb-offline .icon { width: 16px; height: 16px; opacity: .72; }
 .cell .c-thumb-offline span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }

@@ -249,10 +249,12 @@ class SearchTests(BackendTestCase):
 
         result = await search_routes.api_search(q="sunset", limit=2)
 
-        self.assertEqual([img["id"] for img in result["images"]], [visible_first, visible_second])
-        self.assertEqual(result["visible_images"], 2)
+        self.assertEqual([img["id"] for img in result["images"]], [hidden_best, visible_first])
+        self.assertEqual(result["visible_images"], 4)
         self.assertEqual(result["total_images"], 4)
+        self.assertEqual(result["pending_thumbnails"], 2)
         self.assertEqual(result["hidden_pending_thumbnails"], 2)
+        self.assertFalse(result["images"][0]["preview_ready"])
 
         with unittest.mock.patch.dict(
             os.environ,
@@ -264,7 +266,8 @@ class SearchTests(BackendTestCase):
         self.assertEqual([img["id"] for img in satellite_result["images"]], [hidden_best, visible_first])
         self.assertEqual(satellite_result["visible_images"], 4)
         self.assertEqual(satellite_result["total_images"], 4)
-        self.assertEqual(satellite_result["hidden_pending_thumbnails"], 0)
+        self.assertEqual(satellite_result["pending_thumbnails"], 2)
+        self.assertEqual(satellite_result["hidden_pending_thumbnails"], 2)
         satellite_cards = {card["id"]: card for card in satellite_result["images"]}
         self.assertNotIn("thumb_url", satellite_cards[hidden_best])
         self.assertIn("thumb_url", satellite_cards[visible_first])
@@ -281,13 +284,15 @@ class SearchTests(BackendTestCase):
 
         result = await library_routes.api_rankings(q="sunset", sort="similarity", limit=10)
 
-        self.assertEqual([img["id"] for img in result["images"]], [visible_match])
+        self.assertEqual([img["id"] for img in result["images"]], [visible_match, hidden_match])
         self.assertEqual(result["search_mode"], "metadata")
         self.assertTrue(result["ai_unavailable"])
-        self.assertEqual(result["visible_images"], 1)
+        self.assertEqual(result["visible_images"], 2)
         self.assertEqual(result["total_images"], 2)
+        self.assertEqual(result["pending_thumbnails"], 1)
         self.assertEqual(result["hidden_pending_thumbnails"], 1)
-        self.assertNotIn(hidden_match, [img["id"] for img in result["images"]])
+        hidden_card = next(img for img in result["images"] if img["id"] == hidden_match)
+        self.assertFalse(hidden_card["preview_ready"])
 
     async def test_metadata_search_image_ids_uses_active_fts_index(self):
         source = await self._source()
@@ -553,14 +558,16 @@ class SearchTests(BackendTestCase):
 
         result = await search_routes.api_search(q="sunset", limit=10)
 
-        self.assertEqual([img["id"] for img in result["images"]], [visible_match])
+        self.assertEqual([img["id"] for img in result["images"]], [visible_match, hidden_match])
         self.assertIsNone(result["images"][0]["similarity"])
         self.assertEqual(result["search_mode"], "metadata")
         self.assertTrue(result["ai_unavailable"])
-        self.assertEqual(result["visible_images"], 1)
+        self.assertEqual(result["visible_images"], 2)
         self.assertEqual(result["total_images"], 2)
+        self.assertEqual(result["pending_thumbnails"], 1)
         self.assertEqual(result["hidden_pending_thumbnails"], 1)
-        self.assertNotIn(hidden_match, [img["id"] for img in result["images"]])
+        hidden_card = next(img for img in result["images"] if img["id"] == hidden_match)
+        self.assertFalse(hidden_card["preview_ready"])
 
     async def test_search_metadata_fallback_reuses_response_cache(self):
         source = await self._source()

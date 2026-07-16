@@ -91,7 +91,7 @@ class MobileOfflineContractsTests(unittest.TestCase):
 
         self.assertIn("running: !cachePregen.manual_pause && workerStateIsActive(cachePregen.state)", library)
 
-    def test_pending_previews_only_replace_an_empty_mobile_month_view(self):
+    def test_pending_previews_render_as_real_mobile_cards_and_month_placeholders(self):
         timeline = self.read("static", "js", "mobile", "timeline.js")
         preparing = timeline[
             timeline.index("function renderPreparingState"):
@@ -103,12 +103,11 @@ class MobileOfflineContractsTests(unittest.TestCase):
         ]
 
         self.assertIn("Preparing your photos", preparing)
-        self.assertIn("pending.toLocaleString('en-US')", preparing)
-        self.assertIn("updateThumbnailPoll(pending)", preparing)
-        self.assertIn("if (hiddenPendingThumbnails > 0)", preparing)
-        self.assertIn("renderPreparingState(hiddenPendingThumbnails)", preparing)
-        self.assertIn("if (hiddenPendingThumbnails > 0 && !images.length)", months)
-        self.assertIn("renderPreparingState(hiddenPendingThumbnails)", months)
+        self.assertNotIn("hiddenPendingThumbnails", preparing)
+        self.assertIn("preview-pending", timeline)
+        self.assertIn("c-placeholder-name", timeline)
+        self.assertIn("coverId ? 'has-cover' : 'preview-pending'", months)
+        self.assertNotIn("renderPreparingState", months)
 
     def test_info_sheet_rating_stays_bound_to_its_displayed_photo(self):
         viewer = self.read("static", "js", "mobile", "viewer.js")

@@ -52,6 +52,8 @@ img { display: block; max-width: 100%; }
     --scopebar-h: calc(52px + var(--chrome-sat));
     --selection-actions-h: 72px;
     --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    --surface-2: var(--card);
+    --fs-micro: 10px;
 }
 
 body.m-bannered { --chrome-sat: 0px; }
@@ -295,6 +297,32 @@ body.m-scoped .m-day-head { top: calc(var(--scopebar-h) + 30px); }
     transition: transform .15s var(--ease), opacity .25s var(--ease);
 }
 .mcell img.ld { opacity: 1; }
+.mcell.preview-pending { background: var(--surface-2); }
+.mcell.preview-pending::after,
+.m-month-card.preview-pending::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .055), transparent);
+    animation: preview-shimmer 1.2s var(--ease) infinite;
+}
+@keyframes preview-shimmer { to { transform: translateX(100%); } }
+.mcell .c-placeholder-name {
+    display: none;
+    position: absolute;
+    left: 6px;
+    right: 6px;
+    bottom: 6px;
+    z-index: 2;
+    overflow: hidden;
+    color: var(--text-3);
+    font-size: var(--fs-micro);
+    line-height: 1.2;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.mcell.preview-pending .c-placeholder-name { display: block; }
 .mcell .c-check {
     position: absolute;
     top: 5px; left: 5px;
@@ -429,6 +457,8 @@ body.m-scoped #m-months { padding-top: calc(var(--scopebar-h) + 4px); }
 .m-month-card.has-cover b,
 .m-month-card.has-cover span { position: relative; z-index: 1; }
 .m-month-card.has-cover span { color: rgba(255, 255, 255, .8); }
+.m-month-card.preview-pending b,
+.m-month-card.preview-pending span { position: relative; z-index: 1; }
 .m-month-year {
     grid-column: span 2;
     padding: 14px 2px 2px;

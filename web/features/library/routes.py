@@ -66,6 +66,7 @@ async def api_rankings(
             "images": [],
             "total_images": 0,
             "visible_images": 0,
+            "pending_thumbnails": 0,
             "hidden_pending_thumbnails": 0,
             "total_kept": 0,
             "status_stale": True,

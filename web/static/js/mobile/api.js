@@ -77,6 +77,10 @@ export async function getDateHistogram(params) {
     return fetchJson(`/api/date-histogram?${params.toString()}`, { defaultValue: null });
 }
 
+export async function getScanStatus() {
+    return fetchJson('/api/scan/status', { defaultValue: null });
+}
+
 export async function getCounts(params) {
     return fetchJson(`/api/counts?${params.toString()}`, { defaultValue: null });
 }
