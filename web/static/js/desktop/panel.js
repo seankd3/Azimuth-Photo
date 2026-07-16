@@ -661,7 +661,7 @@ async function renderPrivateDeliver(session, token) {
             showDeliveryToast(share.protected ? 'Password changed for' : 'Password set for', session);
             emitSharedSurfacesChanged(session.collectionId);
             renderDeliver(session, token);
-        }
+        } else if (deliverOverlayIsCurrent(token)) showDeliveryToast("Couldn't set password for", session, { error: result });
     }));
     deliverOverlay.querySelector('[data-deliver-password-clear]')?.addEventListener('click', async () => {
         const result = await createCollectionShare(session.collectionId, { clearPassword: true });
@@ -670,7 +670,7 @@ async function renderPrivateDeliver(session, token) {
             showDeliveryToast('Password removed for', session);
             emitSharedSurfacesChanged(session.collectionId);
             renderDeliver(session, token);
-        }
+        } else if (deliverOverlayIsCurrent(token)) showDeliveryToast("Couldn't remove password for", session, { error: result });
     });
     bindDeliverConfirmButton('[data-deliver-rotate]', 'Confirm rotate', async () => {
         const result = await createCollectionShare(session.collectionId, { rotate: true });
@@ -679,7 +679,7 @@ async function renderPrivateDeliver(session, token) {
             showDeliveryToast('New private link created for', session);
             emitSharedSurfacesChanged(session.collectionId);
             renderDeliver(session, token);
-        }
+        } else if (deliverOverlayIsCurrent(token)) showDeliveryToast("Couldn't rotate the private link for", session, { error: result });
     });
     bindDeliverConfirmButton('[data-deliver-revoke]', 'Confirm revoke', async () => {
         const result = await revokeCollectionShare(session.collectionId);
@@ -689,7 +689,7 @@ async function renderPrivateDeliver(session, token) {
             showDeliveryToast('Private link revoked for', session);
             emitSharedSurfacesChanged(session.collectionId);
             renderDeliver(session, token);
-        }
+        } else if (deliverOverlayIsCurrent(token)) showDeliveryToast("Couldn't revoke the private link for", session, { error: result });
     });
     trapFocus(deliverOverlay, deliverOverlay.querySelector('input, select, button'));
 }

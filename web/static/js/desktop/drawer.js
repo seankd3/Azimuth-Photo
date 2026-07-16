@@ -177,6 +177,12 @@ async function applySetting(field, value, { patch = null, undoPatch = null, cont
     const result = await saveSettings(payload);
     if (!result?.ok) {
         showToast('Couldn’t save setting');
+        // The browser already flipped the control — put it back so the UI
+        // doesn't show a state the server refused.
+        if (control) {
+            if (control.type === 'checkbox') control.checked = Boolean(previous);
+            else control.value = previous == null ? '' : String(previous);
+        }
         return false;
     }
     applySettingsData(result);
@@ -1418,9 +1424,18 @@ function bindSettingInputs(body) {
         } else input.addEventListener('change', save);
     }
     for (const input of body.querySelectorAll('input[name="drawer_thumbnail_cache_policy"]')) {
-        input.addEventListener('change', () => {
-            thumbnailCachePolicy = input.value || 'keep';
-            applySetting('thumbnail_cache_policy', thumbnailCachePolicy);
+        input.addEventListener('change', async () => {
+            const next = input.value || 'keep';
+            // Commit local state only if the server accepted it; otherwise put
+            // the radio group back on the saved policy.
+            if (await applySetting('thumbnail_cache_policy', next)) {
+                thumbnailCachePolicy = next;
+            } else {
+                const saved = String(savedSettings.thumbnail_cache_policy || thumbnailCachePolicy || 'keep');
+                for (const radio of body.querySelectorAll('input[name="drawer_thumbnail_cache_policy"]')) {
+                    radio.checked = radio.value === saved;
+                }
+            }
         });
     }
 }

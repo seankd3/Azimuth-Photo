@@ -261,16 +261,41 @@ function idsFrom(image, imageIds) {
     return [...new Set(ids.map(Number).filter((id) => id > 0))];
 }
 
+// Data exports (csv/json) are small enough to fetch, so a server failure can
+// toast honestly instead of the anchor silently downloading an error body.
+// Zips keep the streaming anchor — buffering multi-GB archives in a blob is worse.
+export async function fetchDataExport(params, { showToast, filename, message = '' }) {
+    showToast?.(message || `Exporting as ${(params.get('format') || 'csv').toUpperCase()}`);
+    try {
+        const response = await fetch(`/api/export?${params.toString()}`, fetchOptionsWithTimeout({}, MUTATION_TIMEOUT_MS));
+        if (!response.ok) throw new Error('export failed');
+        const url = URL.createObjectURL(await response.blob());
+        const link = document.getElementById('download-link');
+        link.href = url;
+        link.download = filename;
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 30_000);
+        return true;
+    } catch {
+        showToast?.("Couldn't export — try again");
+        return false;
+    }
+}
+
 function downloadLegacyExport(imageIds, format, { showToast, size = '' } = {}) {
     const ids = idsFrom(null, imageIds);
     if (!ids.length) return;
     const params = new URLSearchParams({ format, ids: ids.join(',') });
     if (size) params.set('size', size);
+    if (format !== 'zip') {
+        void fetchDataExport(params, { showToast, filename: `azimuth-photo-export.${format}` });
+        return;
+    }
     const link = document.getElementById('download-link');
     link.href = `/api/export?${params.toString()}`;
-    link.download = format === 'zip' ? 'azimuth-photo-export.zip' : `azimuth-photo-export.${format}`;
+    link.download = 'azimuth-photo-export.zip';
     link.click();
-    showToast?.(format === 'zip' ? 'Preparing original files' : `Exporting as ${format.toUpperCase()}`);
+    showToast?.('Preparing original files');
 }
 
 function setActiveTab(popover, tab, { remember = true } = {}) {

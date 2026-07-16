@@ -289,6 +289,14 @@ async function saveEntry(imageId, label) {
             saveFailureToastShown = true;
             showToast("Couldn't save edits — retrying");
         }
+        // Make "retrying" true: re-arm the debounce timer so the flush actually
+        // re-attempts, coalescing with any newer edits (scheduleSave clears it).
+        if (!saveTimers.has(Number(imageId))) {
+            saveTimers.set(Number(imageId), setTimeout(() => {
+                saveTimers.delete(Number(imageId));
+                if (stateCache.get(Number(imageId))?.unsaved) saveEntry(imageId, label);
+            }, DEVELOP_BACKGROUND_RETRY_MS));
+        }
         return false;
     }
 }
@@ -1340,8 +1348,11 @@ function init() {
             stage, canvas,
             onAutoLevel: async () => {
                 if (!currentImage) return null;
+                // Throw on failure so the panel can tell "request failed" from
+                // the honest "analysed fine, no horizon found" (null).
                 const response = await fetch(`/api/develop/${currentImage.id}/transform/auto`, fetchOptionsWithTimeout({ method: 'POST' }, DEVELOP_MUTATION_TIMEOUT_MS));
-                return response.ok ? response.json() : null;
+                if (!response.ok) throw new Error('auto-level request failed');
+                return response.json();
             },
         },
         masking: { toolbar, stage, canvas, getImageId: () => currentImage?.id, getRenderer: () => renderer },

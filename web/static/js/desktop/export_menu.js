@@ -2,7 +2,7 @@ import { releaseFocus, trapFocus } from './focusTrap.js';
 import { showToast } from './toast.js';
 import { getRankings } from './api.js';
 import { scope, scopeParams, viewState } from './state.js';
-import { cancelBatchExportPoll, openExportDialog, savedOriginalsExportSize } from './develop/export_dialog.js';
+import { cancelBatchExportPoll, fetchDataExport, openExportDialog, savedOriginalsExportSize } from './develop/export_dialog.js';
 
 export { savedOriginalsExportSize };
 
@@ -115,11 +115,15 @@ export function downloadExport(params, { count = 0, message = '' } = {}) {
         showToast(`Zip export tops out at ${ZIP_EXPORT_MAX.toLocaleString('en-US')} photos`);
         return false;
     }
+    if (format !== 'zip') {
+        void fetchDataExport(params, { showToast, filename: `azimuth-photo-export.${format}`, message });
+        return true;
+    }
     const link = document.getElementById('download-link');
     link.href = `/api/export?${params.toString()}`;
-    link.download = format === 'zip' ? 'azimuth-photo-export.zip' : `azimuth-photo-export.${format}`;
+    link.download = 'azimuth-photo-export.zip';
     link.click();
-    showToast(message || (format === 'zip' ? 'Preparing zip download' : `Exporting as ${format.toUpperCase()}`));
+    showToast(message || 'Preparing zip download');
     return true;
 }
 

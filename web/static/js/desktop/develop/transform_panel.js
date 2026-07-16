@@ -52,7 +52,13 @@ export class TransformPanel {
             input.addEventListener('dblclick', () => this.set(input.dataset.transformSetting, Number(input.defaultValue), input.closest('label').querySelector('span').textContent));
         }
         this.host.querySelector('[data-transform-auto]').addEventListener('click', async () => {
-            const result = await this.onAutoLevel?.();
+            let result;
+            try {
+                result = await this.onAutoLevel?.();
+            } catch {
+                // Request failure is not "no horizon" — say what actually happened.
+                return this.status('Couldn’t reach the server — try again.');
+            }
             if (!result) return this.status('No clear horizon found. Try Guided.');
             this.apply(result, 'Auto Upright');
             this.status('Horizon levelled.');
