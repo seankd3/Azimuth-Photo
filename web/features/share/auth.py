@@ -17,6 +17,7 @@ from core.requests import RequestBodyTooLarge, read_body_limited
 
 COOKIE_NAME = "pa_s"
 VIEW_COOKIE_NAME = "pa_v"
+VISITOR_COOKIE_NAME = "pa_sv"
 SECRET_ENV = "PHOTOARCHIVE_SHARE_SECRET"
 SCRYPT_N = 2**14
 SCRYPT_R = 8
@@ -143,6 +144,41 @@ def set_view_cookie(
         samesite="lax",
         secure=request_is_secure(request) if request is not None else False,
     )
+
+
+def visitor_id(request: Request) -> str | None:
+    """Return this browser's anonymous share visitor id, if it has one."""
+
+    value = (request.cookies.get(VISITOR_COOKIE_NAME) or "").strip()
+    if len(value) != 32 or any(not (character.isalnum() or character in "-_") for character in value):
+        return None
+    return value
+
+
+def new_visitor_id() -> str:
+    return secrets.token_urlsafe(24)
+
+
+def set_visitor_cookie(
+    response: Response,
+    token: str,
+    visitor: str,
+    *,
+    request: Request | None = None,
+) -> None:
+    response.set_cookie(
+        VISITOR_COOKIE_NAME,
+        visitor,
+        max_age=UNLOCK_MAX_AGE_SECONDS,
+        path=share_cookie_path(token),
+        httponly=True,
+        samesite="lax",
+        secure=request_is_secure(request) if request is not None else False,
+    )
+
+
+def visitor_label(visitor: str) -> str:
+    return "legacy" if visitor == "legacy" else visitor[:8]
 
 
 def is_unlocked(request: Request, share: dict | None) -> bool:

@@ -40,6 +40,7 @@ def _favorite_summary(row) -> dict:
         "image_id": int(row["image_id"]),
         "client_name": row["client_name"],
         "created_at": float(row["created_at"]),
+        "visitor_id": row["visitor_id"],
     }
 
 
@@ -123,8 +124,8 @@ async def create_or_rotate_share(
                     await conn.execute(
                         """
                         INSERT OR IGNORE INTO share_favorites
-                            (share_id, image_id, client_name, created_at)
-                        SELECT ?, image_id, client_name, created_at
+                            (share_id, visitor_id, image_id, client_name, created_at)
+                        SELECT ?, visitor_id, image_id, client_name, created_at
                         FROM share_favorites
                         WHERE share_id = ?
                         """,
@@ -508,9 +509,11 @@ async def set_favorite(
     image_id: int,
     on: bool,
     client_name: str | None = None,
+    visitor_id: str = "legacy",
 ) -> bool:
     now = time.time()
     clean_name = (client_name or "").strip()[:120] or None
+    clean_visitor_id = (visitor_id or "").strip()[:128] or "legacy"
     conn = await data_connection.open_async(db_path)
     try:
         if not await _share_contains_image(conn, int(share_id), int(image_id)):
@@ -518,17 +521,17 @@ async def set_favorite(
         if on:
             await conn.execute(
                 """
-                INSERT INTO share_favorites (share_id, image_id, client_name, created_at)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(share_id, image_id) DO UPDATE SET
+                INSERT INTO share_favorites (share_id, visitor_id, image_id, client_name, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(share_id, visitor_id, image_id) DO UPDATE SET
                     client_name = COALESCE(excluded.client_name, share_favorites.client_name)
                 """,
-                (int(share_id), int(image_id), clean_name, now),
+                (int(share_id), clean_visitor_id, int(image_id), clean_name, now),
             )
         else:
             await conn.execute(
-                "DELETE FROM share_favorites WHERE share_id = ? AND image_id = ?",
-                (int(share_id), int(image_id)),
+                "DELETE FROM share_favorites WHERE share_id = ? AND visitor_id = ? AND image_id = ?",
+                (int(share_id), clean_visitor_id, int(image_id)),
             )
         await conn.commit()
         return True
@@ -536,17 +539,23 @@ async def set_favorite(
         await data_connection.close_async(conn, db_path=db_path)
 
 
-async def list_favorites(db_path: str, share_id: int) -> list[dict]:
+async def list_favorites(
+    db_path: str,
+    share_id: int,
+    *,
+    visitor_id: str | None = None,
+) -> list[dict]:
     conn = await data_connection.open_async(db_path)
     try:
         cursor = await conn.execute(
             """
-            SELECT image_id, client_name, created_at
+            SELECT image_id, client_name, created_at, visitor_id
             FROM share_favorites
             WHERE share_id = ?
+              AND (? IS NULL OR visitor_id = ?)
             ORDER BY created_at ASC, image_id ASC
             """,
-            (int(share_id),),
+            (int(share_id), visitor_id, visitor_id),
         )
         return [_favorite_summary(row) for row in await cursor.fetchall()]
     finally:
@@ -561,7 +570,8 @@ async def favorites_for_collection(db_path: str, collection_id: int) -> list[dic
             return []
         cursor = await conn.execute(
             """
-            SELECT sf.image_id, sf.client_name, sf.created_at
+            SELECT sf.image_id, MIN(sf.client_name) AS client_name, MIN(sf.created_at) AS created_at,
+                   'merged' AS visitor_id
             FROM share_favorites sf
             JOIN share_images si
                 ON si.share_id = sf.share_id
@@ -570,11 +580,46 @@ async def favorites_for_collection(db_path: str, collection_id: int) -> list[dic
             JOIN catalog_sources source ON source.id = i.source_id AND source.included = 1
             WHERE sf.share_id = ?
               AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL
-            ORDER BY sf.created_at ASC, sf.image_id ASC
+            GROUP BY sf.image_id
+            ORDER BY MIN(sf.created_at) ASC, sf.image_id ASC
             """,
             (int(active["id"]),),
         )
         return [_favorite_summary(row) for row in await cursor.fetchall()]
+    finally:
+        await data_connection.close_async(conn, db_path=db_path)
+
+
+async def favorite_visitors_for_collection(db_path: str, collection_id: int) -> list[dict]:
+    """Return the active share's picks grouped by anonymous visitor."""
+
+    conn = await data_connection.open_async(db_path)
+    try:
+        active = await _active_share_on_conn(conn, int(collection_id))
+        if active is None:
+            return []
+        cursor = await conn.execute(
+            """
+            SELECT sf.visitor_id, sf.image_id
+            FROM share_favorites sf
+            JOIN share_images si
+                ON si.share_id = sf.share_id
+                AND si.image_id = sf.image_id
+            JOIN images i ON i.id = si.image_id
+            JOIN catalog_sources source ON source.id = i.source_id AND source.included = 1
+            WHERE sf.share_id = ?
+              AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL
+            ORDER BY sf.visitor_id ASC, sf.created_at ASC, sf.image_id ASC
+            """,
+            (int(active["id"]),),
+        )
+        groups: dict[str, list[int]] = {}
+        for row in await cursor.fetchall():
+            groups.setdefault(str(row["visitor_id"]), []).append(int(row["image_id"]))
+        return [
+            {"visitor_id": visitor_id, "count": len(image_ids), "image_ids": image_ids}
+            for visitor_id, image_ids in groups.items()
+        ]
     finally:
         await data_connection.close_async(conn, db_path=db_path)
 
