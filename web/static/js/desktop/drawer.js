@@ -254,17 +254,19 @@ function peopleProgress(status) {
     return workerStateIsActive(status) ? Math.max(5, countProgress) : countProgress;
 }
 
+function captionProgress(status) {
+    const worker = status?.worker || {};
+    const counts = status?.counts || {};
+    return worker.progress_pct != null ? pct(worker.progress_pct) : progress(counts.captioned || 0, (counts.captioned || 0) + (counts.pending_cached_images || 0));
+}
+
 function activeProgress() {
     const ai = pct(aiStatus && aiStatus.progress_pct);
     const pregen = cacheStatus && cacheStatus.pregen ? cacheStatus.pregen : {};
     const cacheProgress = pct((pregen.preview && pregen.preview.progress_pct) || pregen.progress_pct);
     const cache = cachePregenStateIsActive(cacheStatus) && cacheProgress <= 0 ? 50 : cacheProgress;
     const people = peopleProgress(peopleStatus);
-    const captionWorker = (captionStatus && captionStatus.worker) || {};
-    const captionCounts = (captionStatus && captionStatus.counts) || {};
-    const caption = captionWorker.progress_pct != null
-        ? pct(captionWorker.progress_pct)
-        : progress(captionCounts.captioned || 0, (captionCounts.captioned || 0) + (captionCounts.pending_cached_images || 0));
+    const caption = captionProgress(captionStatus);
     const metadata = metadataStateIsActive(metadataStatus) ? 50 : 0;
     return { ai, cache, people, captions: caption, metadata };
 }
@@ -468,11 +470,7 @@ function workItems() {
     const preview = pregen.preview || {};
     const worker = (peopleStatus && peopleStatus.worker) || {};
     const peoplePct = peopleProgress(peopleStatus);
-    const captionWorker = (captionStatus && captionStatus.worker) || {};
-    const captionCounts = (captionStatus && captionStatus.counts) || {};
-    const captionPct = captionWorker.progress_pct != null
-        ? pct(captionWorker.progress_pct)
-        : progress(captionCounts.captioned || 0, (captionCounts.captioned || 0) + (captionCounts.pending_cached_images || 0));
+    const captionPct = captionProgress(captionStatus);
     const metadataPaused = metadataStatus && metadataStatus.manual_pause;
     const metadataActive = metadataStateIsActive(metadataStatus);
     return [
