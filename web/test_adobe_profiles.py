@@ -87,6 +87,35 @@ class AdobeProfilesTests(unittest.TestCase):
                 profiles.ADOBE_PROFILES_DIR = original
                 profiles.clear_adobe_profile_cache()
 
+    def test_stale_profile_index_rebuilds_before_loading_changed_profile(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            original = profiles.ADOBE_PROFILES_DIR
+            try:
+                profiles.ADOBE_PROFILES_DIR = directory
+                payload = {
+                    "camera_model": "Canon Test",
+                    "profile_name": "Adobe Standard",
+                    "matrices": {key: [1.0] * 9 for key in ("color_matrix1", "color_matrix2", "forward_matrix1", "forward_matrix2")},
+                    "illuminants": {"calibration_illuminant1": 17, "calibration_illuminant2": 21},
+                }
+                profile_path = directory / "test.json"
+                profile_path.write_text(json.dumps(payload), encoding="utf-8")
+                profiles.clear_adobe_profile_cache()
+                profiles._profile_index()
+                self.assertTrue((directory / "_index.json").is_file())
+
+                payload["profile_name"] = "Adobe Standard Updated"
+                payload["tone_curve"] = [[0.0, 0.0], [1.0, 0.75]]
+                profile_path.write_text(json.dumps(payload), encoding="utf-8")
+
+                updated = profiles.load_adobe_profile("Canon Test")
+                self.assertEqual(updated["profile_name"], "Adobe Standard Updated")
+                self.assertEqual(updated["tone_curve"][-1], [1.0, 0.75])
+            finally:
+                profiles.ADOBE_PROFILES_DIR = original
+                profiles.clear_adobe_profile_cache()
+
     def test_resolver_falls_back_to_library_then_none(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
