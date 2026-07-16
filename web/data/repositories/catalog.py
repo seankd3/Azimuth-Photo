@@ -362,6 +362,7 @@ async def mark_source_missing_files_on_conn(
     source_id: int,
     seen_filepaths: list[str],
     missing_at: float,
+    excluded_directory_paths: list[str] | None = None,
 ):
     await conn.execute(
         "CREATE TEMP TABLE IF NOT EXISTS source_scan_seen (filepath TEXT PRIMARY KEY)"
@@ -374,6 +375,16 @@ async def mark_source_missing_files_on_conn(
             [(filepath,) for filepath in unique_seen],
         )
     await conn.execute(
+        "CREATE TEMP TABLE IF NOT EXISTS source_scan_excluded (directory_prefix TEXT PRIMARY KEY)"
+    )
+    await conn.execute("DELETE FROM source_scan_excluded")
+    unique_excluded = list(dict.fromkeys(excluded_directory_paths or []))
+    if unique_excluded:
+        await conn.executemany(
+            "INSERT OR IGNORE INTO source_scan_excluded(directory_prefix) VALUES (?)",
+            [(os.path.join(path, ""),) for path in unique_excluded],
+        )
+    await conn.execute(
         "UPDATE images SET missing_at = NULL "
         "WHERE source_id = ? AND filepath IN (SELECT filepath FROM source_scan_seen) "
         "AND COALESCE(file_size, -1) != 0",
@@ -382,10 +393,15 @@ async def mark_source_missing_files_on_conn(
     await conn.execute(
         "UPDATE images SET missing_at = ? "
         "WHERE source_id = ? AND missing_at IS NULL "
-        "AND filepath NOT IN (SELECT filepath FROM source_scan_seen)",
+        "AND filepath NOT IN (SELECT filepath FROM source_scan_seen) "
+        "AND NOT EXISTS ("
+        "  SELECT 1 FROM source_scan_excluded "
+        "  WHERE instr(images.filepath, source_scan_excluded.directory_prefix) = 1"
+        ")",
         (missing_at, source_id),
     )
     await conn.execute("DELETE FROM source_scan_seen")
+    await conn.execute("DELETE FROM source_scan_excluded")
 
 
 async def add_or_restore_source(db_path: str, path: str):
@@ -419,6 +435,7 @@ async def mark_source_scan_finished(
     db_path: str,
     source_id: int,
     seen_filepaths: list[str] | None = None,
+    excluded_directory_paths: list[str] | None = None,
 ):
     conn = await connection.open_async(db_path)
     try:
@@ -450,7 +467,13 @@ async def mark_source_scan_finished(
             (now, now, 1, source_id),
         )
         if seen_filepaths is not None and not suspicious_empty_scan:
-            await mark_source_missing_files_on_conn(conn, source_id, seen_filepaths, now)
+            await mark_source_missing_files_on_conn(
+                conn,
+                source_id,
+                seen_filepaths,
+                now,
+                excluded_directory_paths=excluded_directory_paths,
+            )
         await update_source_counts_on_conn(conn, source_id)
         await conn.commit()
         if suspicious_empty_scan:

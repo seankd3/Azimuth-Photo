@@ -417,8 +417,17 @@ async def mark_source_scan_started(source_id: int):
         _invalidate_filter_options_cache()
 
 
-async def mark_source_scan_finished(source_id: int, seen_filepaths: list[str] | None = None):
-    await catalog_repository.mark_source_scan_finished(DB_PATH, source_id, seen_filepaths)
+async def mark_source_scan_finished(
+    source_id: int,
+    seen_filepaths: list[str] | None = None,
+    excluded_directory_paths: list[str] | None = None,
+):
+    await catalog_repository.mark_source_scan_finished(
+        DB_PATH,
+        source_id,
+        seen_filepaths,
+        excluded_directory_paths,
+    )
     _invalidate_stats_cache()
     _invalidate_filter_options_cache()
     invalidate_cached_image_ids_cache()

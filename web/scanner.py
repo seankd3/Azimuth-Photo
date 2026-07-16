@@ -50,26 +50,38 @@ def _configured(provider, name: str):
     return provider
 
 
-# Derivative/app-data directories that must never enter the library: timelapse
-# and editor caches, preset packs, macOS zip litter, and any dot-directory.
+# Unambiguous derivative/app-data directories that must never enter the library.
 JUNK_DIRECTORY_NAMES = {
-    "previewcache", "backups", "__macosx", "presets",
-    "luminar", "luminar neo catalog", "lightroom catalog",
+    "previewcache",
+    "__macosx",
+    "luminar neo catalog",
+    "lightroom catalog",
+    ".thumbnails",
+    ".lrt",
 }
+JUNK_DIRECTORY_SUFFIXES = (".lrdata", ".lrcat-data")
 
 
 def is_junk_directory(name: str) -> bool:
-    return name.startswith(".") or name.lower() in JUNK_DIRECTORY_NAMES
+    normalized = name.lower()
+    return normalized in JUNK_DIRECTORY_NAMES or normalized.endswith(JUNK_DIRECTORY_SUFFIXES)
 
 
 def is_junk_file(name: str) -> bool:
     return name.startswith("._")  # AppleDouble sidecars
 
 
-def walk_images(folder: str):
+def walk_images(folder: str, *, excluded_directory_paths: list[str] | None = None):
     """Yield image rows with cheap filesystem metadata."""
     for root, _dirs, files in os.walk(folder):
-        _dirs[:] = [d for d in _dirs if not is_junk_directory(d)]
+        included_dirs = []
+        for directory in _dirs:
+            if is_junk_directory(directory):
+                if excluded_directory_paths is not None:
+                    excluded_directory_paths.append(os.path.join(root, directory))
+            else:
+                included_dirs.append(directory)
+        _dirs[:] = included_dirs
         for f in files:
             if is_junk_file(f):
                 continue
@@ -116,12 +128,13 @@ async def scan_folder(folder: str, source_id: int | None = None, on_batch=None):
     batch = []
     batch_size = 100
     seen_filepaths = []
+    excluded_directory_paths = []
 
     try:
         if source_id is not None:
             await _configured(_mark_source_scan_started, "mark_source_scan_started")(source_id)
 
-        for row in walk_images(folder):
+        for row in walk_images(folder, excluded_directory_paths=excluded_directory_paths):
             batch.append(row)
             seen_filepaths.append(row[1])
             scan_state["total_found"] += 1
@@ -145,6 +158,7 @@ async def scan_folder(folder: str, source_id: int | None = None, on_batch=None):
             await _configured(_mark_source_scan_finished, "mark_source_scan_finished")(
                 source_id,
                 seen_filepaths=seen_filepaths,
+                excluded_directory_paths=excluded_directory_paths,
             )
     except SuspiciousEmptyScan as exc:
         scan_state["warning"] = str(exc)
