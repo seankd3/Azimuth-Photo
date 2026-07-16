@@ -74,6 +74,7 @@ DEFAULT_SETTINGS = {
     "share_cookie_secret": "",
     "owner_key_hash": "",
     "owner_session_epoch": 0,
+    "import_category_memory": {},
     "sync_bandwidth_mbps": 0,
     "sync_thumb_budget_gb": 8,
     "hub_url": "",
@@ -88,6 +89,7 @@ PRIVATE_SETTING_KEYS = {
     "device_token",
     "owner_key_hash",
     "owner_session_epoch",
+    "import_category_memory",
 }
 # Server-side-only configuration: readable (masked) but never writable via the API.
 SERVER_ONLY_SETTING_KEYS = {"publish_hook"}
@@ -540,6 +542,12 @@ def normalize_settings(raw: dict | None) -> dict:
         normalized["owner_session_epoch"] = max(0, int(raw.get("owner_session_epoch") or 0))
     except (TypeError, ValueError):
         normalized["owner_session_epoch"] = 0
+    category_memory = raw.get("import_category_memory")
+    normalized["import_category_memory"] = {
+        str(path): str(category)
+        for path, category in (category_memory.items() if isinstance(category_memory, dict) else ())
+        if str(category) in {"raw", "personal", "film", "export"}  # taxonomy.IMPORT_CATEGORIES
+    }
     normalized["hub_url"] = str(raw.get("hub_url") or "").strip().rstrip("/")
     normalized["device_token"] = str(raw.get("device_token") or "").strip()
     normalized["paired_hub_id"] = str(raw.get("paired_hub_id") or "").strip()

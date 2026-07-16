@@ -51,6 +51,7 @@ class ImportJob:
     entries: list[dict]
     mode: str
     clear_card: bool
+    category: str | None
     keywords: list[str]
     collection_id: int | None
     batch_id: int
@@ -197,8 +198,16 @@ async def _scan_worker(scan: Scan) -> None:
         scan.status = "error"
 
 
+def _remembered_category(path: str) -> str | None:
+    memory = settings.get_settings().get("import_category_memory") or {}
+    category = str(memory.get(str(path)) or "")
+    return category if category in taxonomy.IMPORT_CATEGORIES else None
+
+
 def _enumerate_scan(scan: Scan) -> None:
     root = Path(scan.path)
+    remembered = _remembered_category(scan.path)
+    remembered_kind = taxonomy.KIND_BY_CATEGORY.get(remembered) if remembered else None
     paths = root.rglob("*") if scan.include_subfolders else root.glob("*")
     for path in paths:
         try:
@@ -208,6 +217,16 @@ def _enumerate_scan(scan: Scan) -> None:
             metadata = geodata.extract_file_metadata(str(path)) if path.suffix.lower() not in card.VIDEO_EXTENSIONS else {}
             modified = safe_datetime_fromtimestamp(stat.st_mtime)
             taken_at = metadata.get("date_taken") or (modified.strftime("%Y-%m-%d %H:%M:%S") if modified else "")
+            kind = "video" if path.suffix.lower() in card.VIDEO_EXTENSIONS else "image"
+            source_kind = remembered_kind if (remembered_kind and kind != "video") else taxonomy.classify_source_kind(
+                filename=path.name,
+                path=str(path),
+                rel_path=str(path.relative_to(root)).replace(os.sep, "/"),
+                card_source=bool(scan.card_source),
+                kind=kind,
+                camera_make=str(metadata.get("camera_make") or ""),
+                software=str(metadata.get("software") or ""),
+            )
             scan.entries.append({
                 "key": uuid.uuid4().hex,
                 "name": path.name,
@@ -216,7 +235,9 @@ def _enumerate_scan(scan: Scan) -> None:
                 "size": int(stat.st_size),
                 "mtime": float(stat.st_mtime),
                 "taken_at": taken_at,
-                "kind": "video" if path.suffix.lower() in card.VIDEO_EXTENSIONS else "image",
+                "kind": kind,
+                "source_kind": source_kind,
+                "category": taxonomy.CATEGORY_BY_KIND.get(source_kind, "raw"),
                 "suspect": False,
                 "suspect_reason": "",
             })
@@ -294,6 +315,7 @@ async def start_commit(
     clear_card: bool,
     keyword_paths: list[str],
     collection_id: int | None,
+    category: str | None = None,
 ) -> ImportJob:
     if scan.status != "done":
         raise ValueError("Scan is not ready to import")
@@ -301,6 +323,14 @@ async def start_commit(
         raise ValueError("Import mode must be copy or add")
     if scan.card_source and mode != "copy":
         raise ValueError("Removable cards must be copied before import")
+    if category is not None and category not in taxonomy.IMPORT_CATEGORIES:
+        raise ValueError("Unknown import category")
+    if category:
+        # The correction is remembered: this source classifies itself from now on.
+        current = settings.get_settings()
+        memory = dict(current.get("import_category_memory") or {})
+        memory[str(scan.path)] = category
+        settings.save_settings({**current, "import_category_memory": memory})
     if keys == "all_checked_default":
         selected = [entry for entry in scan.entries if not (skip_suspects and entry["suspect"])]
     elif isinstance(keys, list):
@@ -318,7 +348,8 @@ async def start_commit(
     })
     job = ImportJob(
         id=uuid.uuid4().hex, scan=scan, entries=selected, mode=mode,
-        clear_card=bool(clear_card and scan.card_source), keywords=[str(path) for path in keyword_paths if str(path).strip()],
+        clear_card=bool(clear_card and scan.card_source),
+        category=category, keywords=[str(path) for path in keyword_paths if str(path).strip()],
         collection_id=collection_id, batch_id=batch_id,
     )
     _jobs[job.id] = job
@@ -380,6 +411,11 @@ async def _import_entry(job: ImportJob, entry: dict) -> None:
 
 
 def _source_kind_for_entry(job: ImportJob, entry: dict) -> taxonomy.SourceKind:
+    if job.category and str(entry.get("kind") or "image") != "video":
+        return taxonomy.KIND_BY_CATEGORY.get(job.category, "unknown")
+    stored = str(entry.get("source_kind") or "")
+    if stored:
+        return stored
     return taxonomy.infer_source_kind(
         filename=entry["name"],
         path=entry.get("path", ""),

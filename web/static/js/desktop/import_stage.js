@@ -11,6 +11,8 @@ import { showToast } from './toast.js';
 import { icon } from '../icons.js';
 import { escapeHtml as esc, formatCount as fmt } from './dom.js';
 
+const CATEGORY_TREES = { raw: 'RAWS', personal: 'Personal Photos', film: 'Film Scans', export: 'Exported Edits', video: 'Video' };
+const CATEGORY_SHORT = { raw: 'RAW', personal: 'personal', film: 'film', export: 'exports', video: 'video' };
 const SCAN_POLL_MS = 1000;
 const JOB_POLL_MS = 1000;
 const RENDER_CHUNK = 400;
@@ -35,6 +37,7 @@ let mode = 'copy';
 let skipSuspects = true;
 let clearCard = true;
 let thumbPx = Number(localStorage.getItem('importThumbPx')) || 148;
+let categoryOverride = '';            // '' = the app decides (per-file EXIF/source diagnosis)
 let committing = false;
 
 let thumbObserver = null;
@@ -63,6 +66,11 @@ function visibleEntries() {
 
 function checkedEntries() {
     return entries.filter((entry) => checked.has(entry.key));
+}
+
+function effectiveCategory(entry) {
+    if (entry.kind === 'video') return 'video';
+    return categoryOverride || entry.category || 'raw';
 }
 
 // ---------------------------------------------------------------- sources rail
@@ -131,6 +139,8 @@ async function toggleDir(path) {
 function selectSource(row) {
     source = row;
     mode = 'copy';
+    categoryOverride = '';
+    if (els.category) els.category.value = '';
     renderSources();
     syncModeSeg();
     startScan();
@@ -253,7 +263,7 @@ function syncDestination() {
     const staged = checkedEntries();
     const trees = new Map(); // tree -> Map(year -> Map(date -> count))
     for (const entry of staged) {
-        const tree = entry.kind === 'video' ? 'Video' : 'RAWS';
+        const tree = CATEGORY_TREES[effectiveCategory(entry)] || 'RAWS';
         const date = String(entry.taken_at || '').slice(0, 10) || 'Unknown date';
         const year = date.slice(0, 4);
         const years = trees.get(tree) || new Map();
@@ -320,10 +330,24 @@ function syncCommit() {
     const staged = checkedEntries();
     const bytes = staged.reduce((total, entry) => total + (Number(entry.size) || 0), 0);
     const skipped = entries.filter((entry) => entry.suspect && !checked.has(entry.key)).length;
+    const byCategory = new Map();
+    for (const entry of staged) {
+        const category = effectiveCategory(entry);
+        byCategory.set(category, (byCategory.get(category) || 0) + 1);
+    }
+    const breakdown = byCategory.size > 1
+        ? ' — ' + [...byCategory.entries()].sort((a, b) => b[1] - a[1])
+            .map(([category, count]) => `${fmt(count)} ${CATEGORY_SHORT[category] || category}`).join(' · ')
+        : '';
     els.summary.innerHTML = staged.length
-        ? `Import <b>${fmt(staged.length)}</b> photo${staged.length === 1 ? '' : 's'} (${fmtBytes(bytes)})`
+        ? `Import <b>${fmt(staged.length)}</b> photo${staged.length === 1 ? '' : 's'} (${fmtBytes(bytes)})${breakdown}`
             + (skipped ? ` · ${fmt(skipped)} duplicate${skipped === 1 ? '' : 's'} skipped` : '')
         : 'Nothing staged';
+    if (els.category && !committing) {
+        const dominant = [...byCategory.entries()].sort((a, b) => b[1] - a[1])[0];
+        els.category.options[0].text = dominant && !categoryOverride
+            ? `Auto — ${CATEGORY_TREES[dominant[0]] || 'RAWS'}` : 'Auto';
+    }
     els.commit.disabled = !staged.length || committing || scanStatus === 'scanning';
     els.commit.textContent = committing ? 'Importing…' : (scanStatus === 'scanning' ? 'Scanning…' : 'Import');
 }
@@ -350,6 +374,7 @@ async function commit() {
         mode,
         skip_suspects: skipSuspects,
         clear_card: source?.kind === 'card' && clearCard,
+        category: categoryOverride || null,
         keywords: els.keywords.value.split(',').map((word) => word.trim()).filter(Boolean),
     };
     const result = await commitImportScan(body);
@@ -417,6 +442,8 @@ export function openImport() {
     renderedCount = 0;
     els.grid.querySelectorAll('.imps-cell').forEach((cell) => cell.remove());
     els.keywords.value = '';
+    categoryOverride = '';
+    if (els.category) els.category.value = '';
     syncAll();
     loadSources();
 }
@@ -460,6 +487,7 @@ export function initImportStage() {
         keywords: root.querySelector('#imps-keywords'),
         destination: root.querySelector('#imps-destination'),
         summary: root.querySelector('#imps-summary'),
+        category: root.querySelector('#imps-category'),
         commit: root.querySelector('#imps-commit'),
     };
     els.size.value = String(thumbPx);
@@ -512,6 +540,11 @@ export function initImportStage() {
     els.skipSuspects.addEventListener('change', () => { skipSuspects = els.skipSuspects.checked; });
     els.clearCard.addEventListener('change', () => { clearCard = els.clearCard.checked; });
     els.grid.addEventListener('click', onGridClick);
+    els.category.addEventListener('change', () => {
+        categoryOverride = els.category.value;
+        syncCommit();
+        syncDestination();
+    });
     els.commit.addEventListener('click', commit);
 
     document.getElementById('import-view')?.addEventListener('click', openImport);

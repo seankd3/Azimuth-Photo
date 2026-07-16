@@ -2073,4 +2073,7 @@ body.import-stage-active #canvas > .view:not(#view-import) { display: none !impo
 .imps-commitbar { grid-area: commit; display: flex; align-items: center; justify-content: flex-end; gap: var(--s4); padding: 0 var(--s4); border-top: 1px solid var(--line); background: var(--panel); }
 #imps-summary { color: var(--text-2); font-size: var(--fs-small); }
 #imps-summary b { color: var(--text); }
+.imps-as { display: flex; align-items: center; gap: var(--s1); color: var(--text-4); font-size: var(--fs-small); }
+.imps-as select { background: var(--card); border: 1px solid var(--line); border-radius: var(--r-ctl); color: var(--text-2); font-size: var(--fs-small); padding: 3px var(--s2); cursor: pointer; }
+.imps-as select:focus { outline: none; border-color: var(--accent); }
 #imps-commit { min-width: 120px; }

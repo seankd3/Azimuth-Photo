@@ -77,6 +77,86 @@ class StagedImportTests(BackendTestCase):
         data = staging.thumbnail_bytes(scan, scan.entries[0])
         self.assertEqual(data[:3], b"\xff\xd8\xff")
 
+    async def test_mixed_folder_classifies_itself_from_provenance(self):
+        from PIL import Image
+
+        root = Path(self.tempdir.name)
+        originals = root / "library"
+        old_root = os.environ.get("PHOTOARCHIVE_ORIGINALS_DIR")
+        os.environ["PHOTOARCHIVE_ORIGINALS_DIR"] = str(originals)
+        try:
+            shoot = root / "dump"
+            shoot.mkdir()
+            (shoot / "CANON0001.CR3").write_bytes(b"raw camera bytes")
+            phone_exif = Image.Exif()
+            phone_exif[271] = "Google"
+            phone_exif[272] = "Pixel 10a"
+            Image.new("RGB", (32, 24), (10, 90, 40)).save(shoot / "PXL_PLAIN.jpg", exif=phone_exif)
+            edited_exif = Image.Exif()
+            edited_exif[305] = "Adobe Lightroom 14.2 (Windows)"
+            Image.new("RGB", (32, 24), (90, 10, 40)).save(shoot / "final-edit.jpg", exif=edited_exif)
+            Image.new("RGB", (32, 24), (40, 10, 90)).save(
+                shoot / "roll12-frame08.tif", tiffinfo={271: "EPSON", 272: "Perfection V600"}
+            )
+
+            scan = staging.Scan(
+                id="scan-classify", path=str(shoot), include_subfolders=False,
+                card_source=False, status="done",
+            )
+            staging._enumerate_scan(scan)
+            by_name = {entry["name"]: entry for entry in scan.entries}
+            self.assertEqual(by_name["CANON0001.CR3"]["category"], "raw")
+            self.assertEqual(by_name["PXL_PLAIN.jpg"]["category"], "personal")
+            self.assertEqual(by_name["final-edit.jpg"]["category"], "export")
+            self.assertEqual(by_name["roll12-frame08.tif"]["category"], "film")
+
+            staging._scans[scan.id] = scan
+            job = await staging.start_commit(scan, keys="all_checked_default", mode="copy", skip_suspects=True, clear_card=False, keyword_paths=[], collection_id=None)
+            await self._wait(job)
+            self.assertEqual(job.phase, "complete")
+            landed = {path.name: path for path in originals.rglob("*") if path.is_file()}
+            self.assertIn("RAWS", str(landed["CANON0001.CR3"]))
+            self.assertIn("Personal Photos", str(landed["PXL_PLAIN.jpg"]))
+            self.assertIn("Exported Edits", str(landed["final-edit.jpg"]))
+            self.assertIn("Film Scans", str(landed["roll12-frame08.tif"]))
+        finally:
+            if old_root is None:
+                os.environ.pop("PHOTOARCHIVE_ORIGINALS_DIR", None)
+            else:
+                os.environ["PHOTOARCHIVE_ORIGINALS_DIR"] = old_root
+
+    async def test_category_correction_is_remembered_for_the_source(self):
+        from PIL import Image
+
+        root = Path(self.tempdir.name)
+        originals = root / "library"
+        old_root = os.environ.get("PHOTOARCHIVE_ORIGINALS_DIR")
+        os.environ["PHOTOARCHIVE_ORIGINALS_DIR"] = str(originals)
+        try:
+            scans_dir = root / "scanner-drops"
+            scans_dir.mkdir()
+            Image.new("RGB", (32, 24), (5, 5, 5)).save(scans_dir / "frame01.jpg")
+
+            scan = staging.Scan(id="scan-mem1", path=str(scans_dir), include_subfolders=False, card_source=False, status="done")
+            staging._enumerate_scan(scan)
+            self.assertEqual(scan.entries[0]["category"], "raw")  # bare JPEG defaults to RAWS
+            staging._scans[scan.id] = scan
+            job = await staging.start_commit(scan, keys="all_checked_default", mode="copy", skip_suspects=True, clear_card=False, keyword_paths=[], collection_id=None, category="film")
+            await self._wait(job)
+            self.assertEqual(job.phase, "complete")
+            landed = [path for path in originals.rglob("frame01*") if path.is_file()]
+            self.assertIn("Film Scans", str(landed[0]))
+
+            # The correction sticks: the same source now classifies itself.
+            rescan = staging.Scan(id="scan-mem2", path=str(scans_dir), include_subfolders=False, card_source=False, status="done")
+            staging._enumerate_scan(rescan)
+            self.assertEqual(rescan.entries[0]["category"], "film")
+        finally:
+            if old_root is None:
+                os.environ.pop("PHOTOARCHIVE_ORIGINALS_DIR", None)
+            else:
+                os.environ["PHOTOARCHIVE_ORIGINALS_DIR"] = old_root
+
     async def test_card_copy_collisions_duplicates_clear_and_rerun(self):
         root = Path(self.tempdir.name)
         originals = root / "originals"

@@ -101,6 +101,7 @@ def _pillow_metadata(filepath: str) -> dict[str, Any]:
             "camera_make": make or None,
             "camera_model": model or None,
             "lens": _text(exif_ifd.get(42036)) or None,
+            "software": _text(exif.get(305)) or None,
             "date_taken": _parse_exif_date(exif_ifd.get(36867) or exif_ifd.get(36868) or exif.get(306)),
         }
 
