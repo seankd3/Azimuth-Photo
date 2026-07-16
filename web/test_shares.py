@@ -36,6 +36,7 @@ class ShareTests(BackendTestCase):
                 on,
                 client_name=client_name,
             ),
+            mark_finished=lambda share_id: db.mark_share_finished(share_id),
             list_favorites=lambda share_id: db.list_share_favorites(share_id),
             favorites_for_collection=lambda collection_id: db.favorites_for_collection(collection_id),
             thumbnail_response=self._thumbnail_response,
@@ -259,6 +260,7 @@ class ShareTests(BackendTestCase):
         self.assertIn("Download photo", ok.text)
         self.assertIn("Photo 1 of 2", ok.text)
         self.assertIn("your photographer sees these", ok.text)
+        self.assertIn('property="og:image"', ok.text)
         self.assertEqual(ok.headers.get("referrer-policy"), "no-referrer")
         self.assertEqual(missing.status_code, 404)
         self.assertIn("Share unavailable", missing.text)
@@ -280,27 +282,30 @@ class ShareTests(BackendTestCase):
                     f"/s/{share['token']}/favorite",
                     json={"image_id": second, "on": True},
                 )
+                done = client.post(f"/s/{share['token']}/favorite", json={"done": True})
                 not_member = client.post(
                     f"/s/{share['token']}/favorite",
                     json={"image_id": third, "on": True},
                 )
                 owner = client.get(f"/api/user-collections/{collection['id']}/share/favorites")
-                return initial, first_on, second_on, not_member, owner
+                return initial, first_on, second_on, done, not_member, owner
             finally:
                 client.close()
 
-        initial, first_on, second_on, not_member, owner = await asyncio.to_thread(probe)
+        initial, first_on, second_on, done, not_member, owner = await asyncio.to_thread(probe)
 
         self.assertEqual(initial.status_code, 200)
-        self.assertEqual(initial.json(), {"favorites": []})
+        self.assertEqual(initial.json(), {"favorites": [], "done": False})
         self.assertEqual(first_on.status_code, 200)
         self.assertEqual(first_on.json()["favorites"], [first])
         self.assertEqual(second_on.status_code, 200)
         self.assertEqual(second_on.json()["favorites"], [first, second])
+        self.assertTrue(done.json()["done"])
         self.assertEqual(not_member.status_code, 404)
         self.assertEqual(not_member.headers.get("referrer-policy"), "no-referrer")
         self.assertEqual(owner.status_code, 200)
         self.assertEqual(owner.json()["count"], 2)
+        self.assertIsNotNone(owner.json()["client_finished_at"])
         self.assertEqual([row["image_id"] for row in owner.json()["favorites"]], [first, second])
 
     async def test_shared_surfaces_aggregate_private_and_website_state(self):

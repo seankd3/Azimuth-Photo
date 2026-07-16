@@ -690,6 +690,7 @@ CREATE TABLE IF NOT EXISTS collection_shares (
     view_count INTEGER NOT NULL DEFAULT 0,
     first_viewed_at REAL DEFAULT NULL,
     last_viewed_at REAL DEFAULT NULL,
+    client_finished_at REAL DEFAULT NULL,
     CHECK ((collection_id IS NOT NULL) != (published_node_id IS NOT NULL))
 );
 
@@ -1254,6 +1255,7 @@ REQUIRED_COLUMNS = {
         "view_count",
         "first_viewed_at",
         "last_viewed_at",
+        "client_finished_at",
     },
     "collection_publishes": {
         "collection_id",

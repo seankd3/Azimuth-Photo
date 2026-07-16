@@ -31,6 +31,7 @@ def _share_summary(row) -> dict:
         "last_viewed_at": (
             float(row["last_viewed_at"]) if row["last_viewed_at"] is not None else None
         ),
+        "client_finished_at": float(row["client_finished_at"]) if row["client_finished_at"] is not None else None,
     }
 
 
@@ -428,7 +429,8 @@ async def resolve_token(db_path: str, token: str) -> dict | None:
         else:
             images_cursor = await conn.execute(
                 """
-                SELECT i.id, i.filename, COALESCE(i.aspect_ratio, 1.5) AS aspect_ratio, i.date_taken
+                SELECT i.id, i.filename, i.filepath, i.hub_remote, i.hub_image_id,
+                       source.path AS source_path, COALESCE(i.aspect_ratio, 1.5) AS aspect_ratio, i.date_taken
                 FROM share_images si
                 JOIN images i ON i.id = si.image_id
                 JOIN catalog_sources source ON source.id = i.source_id AND source.included = 1
@@ -572,6 +574,24 @@ async def favorites_for_collection(db_path: str, collection_id: int) -> list[dic
             (int(active["id"]),),
         )
         return [_favorite_summary(row) for row in await cursor.fetchall()]
+    finally:
+        await data_connection.close_async(conn, db_path=db_path)
+
+
+async def mark_finished(db_path: str, share_id: int) -> float | None:
+    now = time.time()
+    conn = await data_connection.open_async(db_path)
+    try:
+        cursor = await conn.execute(
+            "UPDATE collection_shares SET client_finished_at = COALESCE(client_finished_at, ?) WHERE id = ?",
+            (now, int(share_id)),
+        )
+        await conn.commit()
+        if not cursor.rowcount:
+            return None
+        cursor = await conn.execute("SELECT client_finished_at FROM collection_shares WHERE id = ?", (int(share_id),))
+        row = await cursor.fetchone()
+        return float(row["client_finished_at"]) if row else None
     finally:
         await data_connection.close_async(conn, db_path=db_path)
 

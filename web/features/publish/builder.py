@@ -68,6 +68,7 @@ async def build_public_gallery_bundle(
     collection_image_ids=None,
     resolve_smart_image_ids=None,
     thumbnails: Any,
+    navigation: dict | None = None,
 ) -> BundleSummary:
     collection = await get_collection(int(collection_id), limit=1, offset=0)
     if collection is None:
@@ -89,12 +90,14 @@ async def build_public_gallery_bundle(
     try:
         await asyncio.to_thread((work_target / "thumb" / "sm").mkdir, parents=True, exist_ok=True)
         await asyncio.to_thread((work_target / "img").mkdir, parents=True, exist_ok=True)
+        await asyncio.to_thread((work_target / "lg").mkdir, parents=True, exist_ok=True)
 
         gallery_images = []
         for image in images:
             image_id = int(image["id"])
             thumb_path = work_target / "thumb" / "sm" / f"{image_id}.jpg"
             preview_path = work_target / "img" / f"{image_id}.jpg"
+            download_path = work_target / "lg" / f"{image_id}.jpg"
             try:
                 await _write_cached_jpeg(
                     thumbnails=thumbnails,
@@ -108,10 +111,17 @@ async def build_public_gallery_bundle(
                     size="md",
                     output_path=preview_path,
                 )
+                await _write_cached_jpeg(
+                    thumbnails=thumbnails,
+                    image=image,
+                    size="lg",
+                    output_path=download_path,
+                )
             except GalleryImageUnavailable as exc:
                 await asyncio.gather(
                     asyncio.to_thread(thumb_path.unlink, missing_ok=True),
                     asyncio.to_thread(preview_path.unlink, missing_ok=True),
+                    asyncio.to_thread(download_path.unlink, missing_ok=True),
                 )
                 log.warning(
                     "worker=publish image_id=%s skipped unavailable image: %s",
@@ -127,8 +137,8 @@ async def build_public_gallery_bundle(
                     "date_taken": image.get("date_taken"),
                     "thumb": f"./thumb/sm/{image_id}.jpg",
                     "preview": f"./img/{image_id}.jpg",
-                    "full": f"./img/{image_id}.jpg",
-                    "download": f"./img/{image_id}.jpg",
+                    "full": f"./lg/{image_id}.jpg",
+                    "download": f"./lg/{image_id}.jpg",
                     "download_name": _download_name(image_id, image.get("filename") or ""),
                 }
             )
@@ -157,6 +167,9 @@ async def build_public_gallery_bundle(
             date_range=date_range,
             brand=brand,
             gallery_json=gallery_json,
+            og_image=(f"{str(settings.get_settings().get('publish_site_base_url') or '').rstrip('/')}/g/{slug}/img/{gallery_images[0]['id']}.jpg" if gallery_images else ""),
+            parent_gallery=(navigation or {}).get("parent"),
+            child_galleries=(navigation or {}).get("children", []),
         )
         await asyncio.to_thread((work_target / "index.html").write_text, html, "utf-8")
         bundle_bytes, file_count = await asyncio.to_thread(_bundle_size, work_target)
@@ -183,6 +196,7 @@ async def build_published_node_bundle(
     destination: str | Path,
     templates: Jinja2Templates,
     thumbnails: Any,
+    navigation: dict | None = None,
 ) -> BundleSummary:
     """Build one destination node with the legacy gallery renderer."""
 
@@ -208,6 +222,7 @@ async def build_published_node_bundle(
         get_images_by_ids=get_images_by_ids,
         collection_image_ids=collection_image_ids,
         thumbnails=thumbnails,
+        navigation=navigation,
     )
 
 
@@ -236,12 +251,19 @@ async def export_website_tree(
         images_by_node[node_id] = images
         node_path = parent_path / node["slug"]
         expected_paths.add(node_path.relative_to(root))
+        child_cards = []
+        for child in children.get(node_id, []):
+            child_images = await published_nodes.node_images(db_path, int(child["id"])) or []
+            cover_id = int(child_images[0]["id"]) if child_images else None
+            child_cards.append({"name": child["title"], "count": len(child_images), "url": f"./{child['slug']}/", "cover": f"./{child['slug']}/thumb/sm/{cover_id}.jpg" if cover_id else ""})
+        parent = next((item for item in tree["nodes"] if item["id"] == node.get("parent_id")), None)
         await build_published_node_bundle(
             node=node,
             images=images,
             destination=node_path,
             templates=templates,
             thumbnails=thumbnails,
+            navigation={"parent": {"name": parent["title"], "url": "../"} if parent else None, "children": child_cards},
         )
         for child in children.get(node_id, []):
             await write_subtree(child, node_path)
