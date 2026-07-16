@@ -46,3 +46,11 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertIn("sessionImages = sessionImages.filter", loupe)
         self.assertIn("if (!remaining.length) {\n        closeLoupe();", loupe)
         self.assertIn("on('trash:changed', ({ imageIds } = {}) => discardTrashedImages(imageIds));", loupe)
+
+    def test_duplicate_undo_reapplies_server_flags_when_the_undo_write_fails(self):
+        duplicates = read("duplicates.js")
+        undo_start = duplicates.index("undo: async () => {")
+        undo = duplicates[undo_start:duplicates.index("    });", undo_start)]
+
+        self.assertIn("if (!undone) setFlagsLocally(normalized);", undo)
+        self.assertLess(undo.index("const undone = await writeGrouped(previous);"), undo.index("if (!undone) setFlagsLocally(normalized);"))
