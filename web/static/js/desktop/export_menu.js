@@ -1,7 +1,6 @@
 import { releaseFocus, trapFocus } from './focusTrap.js';
 import { showToast } from './toast.js';
 import { getRankings } from './api.js';
-import { loadCollectionImageIds } from './scope_data.js';
 import { scope, scopeParams, viewState } from './state.js';
 import { openExportDialog } from './develop/export_dialog.js';
 
@@ -50,7 +49,6 @@ function anchoredPopover(anchor, html) {
 
 async function scopedImageIds() {
     if (scope.similarIds.length) return scope.similarIds.map(Number).filter((id) => id > 0);
-    if (scope.collectionId) return loadCollectionImageIds(scope.collectionId);
     const bestOf = viewState.bestOf && viewState.bestOfLimit != null;
     const payload = await getRankings(scopeParams({
         limit: bestOf ? viewState.bestOfLimit : 50000,

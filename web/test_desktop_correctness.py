@@ -256,14 +256,21 @@ class DesktopCorrectnessTests(unittest.TestCase):
 
     def test_collection_scope_export_uses_server_composition(self):
         panel = read("panel.js")
+        export_menu = read("export_menu.js")
         export_scope = panel[
             panel.index("export async function exportCurrentScope"):
             panel.index("export function openScopeExportMenu")
+        ]
+        shared_dialog_scope = export_menu[
+            export_menu.index("async function scopedImageIds"):
+            export_menu.index("export function openExportMenu")
         ]
 
         self.assertIn("const params = scopeParams({ format });", export_scope)
         self.assertNotIn("loadCollectionImageIds", export_scope)
         self.assertIn("Preparing ${count} file", export_scope)
+        self.assertIn("getRankings(scopeParams({", shared_dialog_scope)
+        self.assertNotIn("loadCollectionImageIds", shared_dialog_scope)
 
     def test_collection_month_counts_compose_filters_through_histogram(self):
         filters = read("filters.js")
