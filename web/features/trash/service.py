@@ -145,7 +145,7 @@ def _restore_from_trash(trash_path: str | None, filepath: str) -> tuple[str | No
         return "Original file was missing when trashed", ""
     trash_stat, reason = _regular_file_lstat(trash_path)
     if reason == "missing":
-        return "Trash file is missing; restored catalog row only", ""
+        return None, "trash file is missing"
     if trash_stat is None:
         return None, reason
     if os.path.lexists(filepath):
@@ -154,7 +154,7 @@ def _restore_from_trash(trash_path: str | None, filepath: str) -> tuple[str | No
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
         final_stat, reason = _regular_file_lstat(trash_path)
         if reason == "missing":
-            return "Trash file is missing; restored catalog row only", ""
+            return None, "trash file is missing"
         if final_stat is None:
             return None, reason
         if not _same_stat_token(final_stat, _stat_token(trash_stat)):
@@ -165,7 +165,7 @@ def _restore_from_trash(trash_path: str | None, filepath: str) -> tuple[str | No
         # platforms where Python cannot express a no-follow rename.
         final_stat, reason = _regular_file_lstat(trash_path)
         if final_stat is None:
-            return (("Trash file is missing; restored catalog row only", "") if reason == "missing" else (None, reason))
+            return (None, "trash file is missing" if reason == "missing" else reason)
         if not _same_stat_token(final_stat, _stat_token(trash_stat)):
             return None, "trash path changed before restore"
         os.rename(trash_path, filepath)
@@ -529,43 +529,55 @@ async def list_trash(db_path: str, *, limit: int = 100, offset: int = 0) -> dict
         await data_connection.close_async(conn, db_path=db_path)
 
 
-def _remove_trash_file(path: str | None, source_root: str | None) -> tuple[int, str]:
+def _guard_trash_file(
+    path: str | None,
+    source_root: str | None,
+) -> tuple[tuple[int, int, int, int] | None, int, str]:
     if not path:
-        return 0, ""
+        return None, 0, ""
     if not source_root:
-        return 0, "source root is unavailable"
+        return None, 0, "source root is unavailable"
     try:
         trash_root = (Path(source_root) / ".trash").resolve()
         candidate = Path(path).resolve(strict=False)
         candidate.relative_to(trash_root)
     except (OSError, ValueError):
-        return 0, "trash path is outside source trash"
+        return None, 0, "trash path is outside source trash"
     try:
         lstat_result = os.lstat(path)
     except FileNotFoundError:
-        return 0, ""
+        return None, 0, ""
     except OSError as exc:
-        return 0, str(exc)
+        return None, 0, str(exc)
     if stat.S_ISLNK(lstat_result.st_mode):
-        return 0, "trash path is a symlink"
+        return None, 0, "trash path is a symlink"
     if not stat.S_ISREG(lstat_result.st_mode):
-        return 0, "trash path is not a regular file"
-    expected_token = _stat_token(lstat_result)
-    size = int(lstat_result.st_size or 0)
+        return None, 0, "trash path is not a regular file"
+    return _stat_token(lstat_result), int(lstat_result.st_size or 0), ""
+
+
+def _remove_trash_file(
+    path: str | None,
+    expected_token: tuple[int, int, int, int] | None,
+) -> tuple[bool, str]:
+    if not path:
+        return False, ""
     try:
-        # Re-lstat immediately before remove narrows the local TOCTOU window on
-        # platforms where Python cannot express a no-follow unlink.
-        final_stat, reason = _regular_file_lstat(path)
-        if reason == "missing":
-            return 0, ""
-        if final_stat is None:
-            return 0, reason
+        # This re-lstat must stay immediately before remove: the earlier guard
+        # is only a snapshot for this final TOCTOU check.
+        final_stat = os.lstat(path)
+        if stat.S_ISLNK(final_stat.st_mode):
+            return False, "trash path is a symlink"
+        if not stat.S_ISREG(final_stat.st_mode):
+            return False, "trash path is not a regular file"
         if not _same_stat_token(final_stat, expected_token):
-            return 0, "trash path changed before delete"
+            return False, "trash path changed before delete"
         os.remove(path)
+    except FileNotFoundError:
+        return False, ""
     except OSError as exc:
-        return 0, str(exc)
-    return size, ""
+        return False, str(exc)
+    return True, ""
 
 
 def _prune_empty_trash_dirs(paths: list[str]) -> None:
@@ -630,11 +642,9 @@ async def _purge_trash_rows(
     image_ids: list[int] | None = None,
 ) -> dict:
     rows = await _trash_rows(db_path, older_than=older_than, image_ids=image_ids)
-    deletable_ids: list[int] = []
-    paths_to_prune: list[str] = []
+    guard_passed: list[tuple[int, str | None, tuple[int, int, int, int] | None, int]] = []
     errors: list[Error] = []
     skipped_offline = 0
-    freed_bytes = 0
     for row in rows:
         image_id = int(row["id"])
         trash_path = row.get("trash_path")
@@ -644,20 +654,38 @@ async def _purge_trash_rows(
         if not int(row["source_online"]) and trash_path:
             skipped_offline += 1
             continue
-        freed, reason = await __to_thread_remove_trash_file(trash_path, row.get("source_path"))
+        expected_token, size, reason = await __to_thread_guard_trash_file(
+            trash_path,
+            row.get("source_path"),
+        )
         if reason:
             errors.append(_error(image_id, reason))
             continue
-        freed_bytes += freed
-        deletable_ids.append(image_id)
-        if trash_path:
-            paths_to_prune.append(trash_path)
+        guard_passed.append((image_id, trash_path, expected_token, size))
 
     deleted_ids: list[int] = []
-    if deletable_ids:
-        deleted_ids, delete_errors = await _delete_emptied_catalog_rows(db_path, deletable_ids)
+    if guard_passed:
+        deleted_ids, delete_errors = await _delete_emptied_catalog_rows(
+            db_path,
+            [image_id for image_id, _path, _token, _size in guard_passed],
+        )
         errors.extend(delete_errors)
-    await __to_thread_prune_empty_trash_dirs(paths_to_prune)
+
+    freed_bytes = 0
+    removed_paths: list[str] = []
+    deleted = set(deleted_ids)
+    for image_id, trash_path, expected_token, size in guard_passed:
+        if image_id not in deleted or not trash_path:
+            continue
+        removed, reason = await __to_thread_remove_trash_file(trash_path, expected_token)
+        if reason:
+            errors.append(_error(image_id, reason))
+            continue
+        if removed:
+            freed_bytes += size
+            removed_paths.append(trash_path)
+
+    await __to_thread_prune_empty_trash_dirs(removed_paths)
     return {
         "deleted_count": len(deleted_ids),
         "freed_bytes": int(freed_bytes),
@@ -790,10 +818,22 @@ async def _delete_emptied_catalog_rows(db_path: str, image_ids: list[int]) -> tu
     return deleted, errors
 
 
-async def __to_thread_remove_trash_file(path: str | None, source_root: str | None) -> tuple[int, str]:
+async def __to_thread_guard_trash_file(
+    path: str | None,
+    source_root: str | None,
+) -> tuple[tuple[int, int, int, int] | None, int, str]:
     import asyncio
 
-    return await asyncio.to_thread(_remove_trash_file, path, source_root)
+    return await asyncio.to_thread(_guard_trash_file, path, source_root)
+
+
+async def __to_thread_remove_trash_file(
+    path: str | None,
+    expected_token: tuple[int, int, int, int] | None,
+) -> tuple[bool, str]:
+    import asyncio
+
+    return await asyncio.to_thread(_remove_trash_file, path, expected_token)
 
 
 async def __to_thread_prune_empty_trash_dirs(paths: list[str]) -> None:
