@@ -86,11 +86,6 @@ class MobileOfflineContractsTests(unittest.TestCase):
         self.assertIn("running: !cachePregen.manual_pause && workerStateIsActive(cachePregen.state)", library)
         self.assertIn("running: workerStateIsActive(peopleWorker.state)", library)
 
-    def test_cache_pregen_wait_remains_active_on_mobile(self):
-        library = self.read("static", "js", "mobile", "library.js")
-
-        self.assertIn("running: !cachePregen.manual_pause && workerStateIsActive(cachePregen.state)", library)
-
     def test_pending_previews_render_as_real_mobile_cards_and_month_placeholders(self):
         timeline = self.read("static", "js", "mobile", "timeline.js")
         preparing = timeline[
