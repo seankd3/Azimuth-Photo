@@ -218,14 +218,32 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertIn("workerActionsInFlight.has(item.key)", drawer)
         self.assertIn("workerActionGenerations.set(key, (workerActionGenerations.get(key) || 0) + 1);", drawer)
 
-    def test_background_lease_waits_remain_active_on_desktop(self):
+    def test_background_workers_default_new_productive_states_to_active(self):
         drawer = read("drawer.js")
 
-        for state in ("waiting_for_gpu", "waiting_for_turn", "waiting_retry", "waiting_for_model"):
+        self.assertIn("const INACTIVE_WORKER_STATES = new Set([", drawer)
+        for state in ("idle", "paused", "complete", "caught_up", "error", "disabled", "unavailable", "stale"):
             self.assertIn(f"'{state}'", drawer)
+        self.assertIn("return Boolean(state) && !INACTIVE_WORKER_STATES.has(state);", drawer)
+        self.assertNotIn("const ACTIVE_WORKER_STATES", drawer)
+        self.assertNotIn("const CACHE_ACTIVE_PREGEN_STATES", drawer)
+        self.assertNotIn("const METADATA_ACTIVE_WORKER_STATES", drawer)
         self.assertIn("workerStateIsActive(aiStatus)", drawer)
         self.assertIn("workerStateIsActive(peopleStatus)", drawer)
         self.assertIn("workerStateIsActive(captionStatus)", drawer)
+
+    def test_people_progress_uses_scan_counts_with_an_active_floor(self):
+        drawer = read("drawer.js")
+        people_progress = drawer[
+            drawer.index("function peopleProgress"):
+            drawer.index("function activeProgress")
+        ]
+
+        self.assertIn("counts.scan", people_progress)
+        self.assertIn("counts.pending_cached_images", people_progress)
+        self.assertIn("workerStateIsActive(status)", people_progress)
+        self.assertIn("Math.max(5, countProgress)", people_progress)
+        self.assertEqual(drawer.count("peopleProgress(peopleStatus)"), 2)
 
     def test_metadata_activity_uses_metadata_worker_states_and_pause(self):
         drawer = read("drawer.js")
@@ -235,12 +253,10 @@ class DesktopCorrectnessTests(unittest.TestCase):
         ]
 
         self.assertIn("worker.state", metadata_line)
-        for state in ("running", "waiting", "waiting_retry"):
-            self.assertIn(f"'{state}'", drawer)
         self.assertIn("!status?.manual_pause", drawer)
-        self.assertIn("Boolean(status?.active)", drawer)
+        self.assertIn("workerStateIsActive(status)", drawer)
+        self.assertNotIn("Boolean(status?.active)", drawer)
         self.assertEqual(drawer.count("metadataStateIsActive(metadataStatus)"), 3)
-        self.assertNotIn("workerStateIsActive(metadataStatus)", drawer)
 
     def test_cache_waiting_keeps_system_activity_active(self):
         drawer = read("drawer.js")
@@ -253,9 +269,9 @@ class DesktopCorrectnessTests(unittest.TestCase):
             drawer.index("async function refreshActivity")
         ]
 
-        self.assertIn("const CACHE_ACTIVE_PREGEN_STATES = new Set(['running', 'waiting']);", drawer)
         self.assertIn("function cachePregenStateIsActive(status)", drawer)
         self.assertIn("!pregen.manual_pause", drawer)
+        self.assertIn("workerStateIsActive({ worker: pregen })", drawer)
         self.assertIn("cachePregenStateIsActive(cacheStatus) && cacheProgress <= 0 ? 50 : cacheProgress", active_progress)
         self.assertIn("|| cachePregenStateIsActive(cacheStatus)", activity)
 
