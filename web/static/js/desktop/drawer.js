@@ -877,7 +877,7 @@ function renderPrefs() {
 function renderAbout() {
     const version = versionData?.version || 'Unknown';
     return '<section class="dr-sec"><h3>About</h3>'
-        + '<div class="setting-status"><b>Azimuth Photo</b><span>Version ' + esc(version) + '</span></div>'
+        + '<div class="setting-status"><b>Azimuth Photo</b><span> · Version ' + esc(version) + '</span></div>'
         + '</section>';
 }
 
