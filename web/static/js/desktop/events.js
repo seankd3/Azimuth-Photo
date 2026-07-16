@@ -4,6 +4,7 @@ import { loadScopePage } from './scope_data.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
 import { showToast } from './toast.js';
 import { icon } from '../icons.js';
+import { toggleSelection } from './selection.js';
 
 const GAP_KEY = 'pa_d_event_gap';
 const PAGE_SIZE = 100;
@@ -106,7 +107,20 @@ function cellHtml(img, index) {
     const selected = selection.has(Number(img.id));
     return `<figure class="cell ${selected ? 'sel' : ''}" data-id="${img.id}" data-idx="${index}" tabindex="-1" aria-selected="${selected ? 'true' : 'false'}" style="--ar:${aspect(img)}">`
         + `<img data-src="${esc(img.thumb_url || thumbUrl('sm', img.id))}" loading="lazy" decoding="async" fetchpriority="low" alt="${esc(img.filename || '')}">`
+        + `<button class="c-check" aria-label="Select photo" tabindex="-1">${icon('check')}</button>`
         + `<span class="c-idx">${index + 1}</span><span class="c-elo"><span class="elo-chip">${Math.round(Number(img.elo) || 0)}</span></span></figure>`;
+}
+
+function patchCells(imageIds = null) {
+    const ids = Array.isArray(imageIds) ? imageIds.map(Number).filter((id) => id > 0) : [];
+    const cells = ids.length
+        ? ids.flatMap((id) => [...document.querySelectorAll(`#events-flow .cell[data-id="${id}"]`)])
+        : [...document.querySelectorAll('#events-flow .cell[data-id]')];
+    for (const cell of cells) {
+        const selected = selection.has(Number(cell.dataset.id));
+        cell.classList.toggle('sel', selected);
+        cell.setAttribute('aria-selected', String(selected));
+    }
 }
 
 function coverageDots(group) {
@@ -298,7 +312,7 @@ function openMenu(button, groupIndex) {
         } else if (action === 'select') {
             ids.forEach((id) => selection.add(id));
             selectionChanged(ids);
-            render();
+            patchCells(ids);
         }
     });
 }
@@ -362,6 +376,12 @@ export function initEvents() {
             render();
             return;
         }
+        const check = event.target.closest('.c-check');
+        if (check) {
+            const cell = check.closest('.cell[data-id]');
+            if (cell) toggleSelection(cell.dataset.id, cell.dataset.idx, { range: event.shiftKey });
+            return;
+        }
         const cell = event.target.closest('.cell[data-id], .event-hero[data-id]');
         if (cell) emit('loupe:open', { id: Number(cell.dataset.id), index: images.findIndex((img) => Number(img.id) === Number(cell.dataset.id)) });
     });
@@ -372,8 +392,8 @@ export function initEvents() {
         resetData();
         if (mounted) reload();
     });
-    on('selection', render);
-    on('flags', render);
+    on('selection', ({ imageIds } = {}) => patchCells(imageIds));
+    on('flags', ({ imageIds } = {}) => patchCells(imageIds));
 }
 
 export function mountEvents() {
