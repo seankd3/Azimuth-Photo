@@ -700,7 +700,6 @@ function sharpenPreview(image) {
     for (const cell of timeline.querySelectorAll(`.mcell[data-id="${id}"].preview-pending`)) {
         const img = cell.querySelector('img[data-preview-src]');
         if (!img) continue;
-        cell.classList.remove('preview-pending');
         img.src = previewThumbUrl(image) || img.dataset.previewSrc;
         changed = true;
     }

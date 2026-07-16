@@ -287,7 +287,6 @@ function sharpenPreview(image) {
         if (!cell.classList.contains('preview-pending')) continue;
         const img = cell.querySelector('img[data-preview-src]');
         if (!img) continue;
-        cell.classList.remove('preview-pending');
         img.dataset.src = previewThumbUrl(image) || img.dataset.previewSrc;
         img.src = img.dataset.src;
     }
