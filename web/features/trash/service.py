@@ -20,6 +20,15 @@ TRASH_WRITE_BUSY_TIMEOUT_SECONDS = 0.1
 TRASH_WRITE_RETRY_BACKOFF_SECONDS = 0.1
 
 
+_pending_hub_trash_refs_cache: dict[str, tuple[int, tuple[int, ...], tuple[int, ...]]] = {}
+_pending_hub_trash_refs_versions: dict[str, int] = {}
+
+
+def invalidate_pending_hub_trash_refs(db_path: str) -> None:
+    _pending_hub_trash_refs_cache.pop(db_path, None)
+    _pending_hub_trash_refs_versions[db_path] = _pending_hub_trash_refs_versions.get(db_path, 0) + 1
+
+
 def _clean_ids(values) -> list[int]:
     ids: list[int] = []
     seen: set[int] = set()
@@ -434,6 +443,7 @@ async def trash_images(db_path: str, image_ids: list[int]) -> dict:
         raise
     finally:
         await data_connection.close_async(conn, db_path=db_path)
+    invalidate_pending_hub_trash_refs(db_path)
     return {
         "trashed": trashed,
         "errors": errors,
@@ -564,6 +574,7 @@ async def restore_images(db_path: str, image_ids: list[int]) -> dict:
         raise
     finally:
         await data_connection.close_async(conn, db_path=db_path)
+    invalidate_pending_hub_trash_refs(db_path)
     return {"restored": restored, "errors": errors, "warnings": warnings}
 
 
@@ -786,6 +797,8 @@ async def _purge_trash_rows(
         if trash_path:
             paths_to_prune.append(trash_path)
     await __to_thread_prune_empty_trash_dirs(paths_to_prune)
+    if deleted_ids:
+        invalidate_pending_hub_trash_refs(db_path)
     return {
         "deleted_count": len(deleted_ids),
         "freed_bytes": int(freed_bytes),
@@ -845,9 +858,15 @@ async def mark_hub_trash_pending(db_path: str, image_ids: list[int]) -> None:
         await conn.commit()
     finally:
         await data_connection.close_async(conn, db_path=db_path)
+    invalidate_pending_hub_trash_refs(db_path)
 
 
 async def pending_hub_trash_refs(db_path: str) -> dict:
+    cached = _pending_hub_trash_refs_cache.get(db_path)
+    if cached is not None:
+        count, image_ids, hub_image_ids = cached
+        return {"count": count, "image_ids": list(image_ids), "hub_image_ids": list(hub_image_ids)}
+    version = _pending_hub_trash_refs_versions.get(db_path, 0)
     conn = await data_connection.open_async(db_path)
     try:
         cursor = await conn.execute(
@@ -855,13 +874,17 @@ async def pending_hub_trash_refs(db_path: str) -> dict:
             "AND COALESCE(hub_remote, 0) = 1 AND COALESCE(trash_pending_hub, 0) = 1"
         )
         rows = await cursor.fetchall()
-        return {
-            "count": len(rows),
-            "image_ids": [int(row["id"]) for row in rows],
-            "hub_image_ids": _clean_ids(row["hub_image_id"] for row in rows),
-        }
+        result = (
+            len(rows),
+            tuple(int(row["id"]) for row in rows),
+            tuple(_clean_ids(row["hub_image_id"] for row in rows)),
+        )
     finally:
         await data_connection.close_async(conn, db_path=db_path)
+    if version == _pending_hub_trash_refs_versions.get(db_path, 0):
+        _pending_hub_trash_refs_cache[db_path] = result
+    count, image_ids, hub_image_ids = result
+    return {"count": count, "image_ids": list(image_ids), "hub_image_ids": list(hub_image_ids)}
 
 
 async def purge_expired_trash(
