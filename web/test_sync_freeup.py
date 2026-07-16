@@ -99,6 +99,64 @@ class FreeUpSpaceTests(BackendTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.body, b"hub-readthrough")
 
+    async def test_hub_have_requires_matching_bytes_not_mere_existence(self):
+        # A truncated/corrupted hub original at the right path must NOT read as present:
+        # deleting the satellite copy on an existence-only signal loses the photo.
+        image_id, path, content_hash = await self._synced_original(
+            "onhub.raw", b"the true original bytes on the hub"
+        )
+        # This DB doubles as the "hub": the row is the hub's kept original.
+        present = await hub.have_content_hashes(db.DB_PATH, [content_hash])
+        self.assertEqual(present, [content_hash])  # intact bytes -> present
+
+        path.write_bytes(b"truncated")  # same path, wrong (shorter) bytes
+        present = await hub.have_content_hashes(db.DB_PATH, [content_hash])
+        self.assertEqual(present, [])  # corrupted hub copy -> NOT present
+        _ = image_id
+
+    async def test_pre_unlink_reconfirm_stops_deletion_when_hub_loses_copy(self):
+        image_id, path, content_hash = await self._synced_original(
+            "vanishes.raw", b"present at batch time, gone by unlink"
+        )
+        calls = {"n": 0}
+
+        async def confirm_then_lose(content_hashes: list[str]) -> set[str]:
+            # First call = the batch confirmation (present). Second call = the
+            # per-file re-confirm immediately before unlink (hub has since lost it).
+            calls["n"] += 1
+            return set(content_hashes) if calls["n"] == 1 else set()
+
+        job = freeup.FreeUpJob(older_than_days=0)
+        await freeup.run_job(job, db.DB_PATH, confirm=confirm_then_lose, log_path=self.log_path)
+
+        self.assertGreaterEqual(calls["n"], 2)  # it re-confirmed per file
+        self.assertEqual(job.files_done, 0)
+        self.assertTrue(path.exists())  # original preserved
+        self.assertEqual((await self._image_row(image_id))["hub_remote"], 0)
+
+    async def test_recovery_never_marks_remote_when_source_is_offline(self):
+        # delete_ready journalled, but the file is absent because its SOURCE ROOT is
+        # gone (unplugged), not because it was deleted. Recovery must leave it local.
+        image_id, path, content_hash = await self._synced_original(
+            "oncard.raw", b"still on the card, source unplugged"
+        )
+        offline_root = str(Path(self.tempdir.name) / "unplugged-card")
+        freeup._append_log(
+            self.log_path,
+            {
+                "event": "delete_ready",
+                "image_id": image_id,
+                "path": str(Path(offline_root) / "oncard.raw"),
+                "source_path": offline_root,
+                "content_hash": content_hash,
+            },
+        )
+        recovered = await freeup.recover_incomplete_deletions(db.DB_PATH, log_path=self.log_path)
+        self.assertEqual(recovered, 0)
+        self.assertEqual((await self._image_row(image_id))["hub_remote"], 0)
+        self.assertTrue(path.exists())
+        _ = content_hash
+
     async def test_locally_modified_file_is_skipped_by_final_rehash_guard(self):
         image_id, path, _content_hash = await self._synced_original(
             "edited.raw", b"bytes that reached the hub"

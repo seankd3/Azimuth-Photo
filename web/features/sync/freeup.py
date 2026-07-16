@@ -284,7 +284,17 @@ async def recover_incomplete_deletions(db_path: str, *, log_path: Path | None = 
     recovered = 0
     for (image_id, content_hash), event in pending.items():
         filepath = str(event.get("path") or "")
-        if not filepath or await run_sync_work(os.path.exists, filepath):
+        if not filepath:
+            continue
+        # Only a *definitively* missing file on an *online* source is a completed
+        # deletion. If the source root itself is absent (unplugged card/drive), the
+        # file's absence is meaningless and must never be marked remote -- that would
+        # hide a photo still physically on disk once the volume returns.
+        source_path = str(event.get("source_path") or "")
+        if source_path and not await run_sync_work(os.path.isdir, source_path):
+            continue
+        state, _file_stat = await run_sync_work(inspect_source_file, filepath, source_path)
+        if state != "missing":
             continue
         conn = await connection.open_async(db_path)
         try:
@@ -394,11 +404,23 @@ async def run_job(
             if job.cancel_requested:
                 job.phase = "cancelled"
                 return
+            # The batch confirmation can be minutes old; re-confirm THIS hash with the
+            # hub immediately before unlinking so a hub-side trash/purge/loss since the
+            # batch check cannot cost the only remaining copy.
+            try:
+                fresh = await confirm([content_hash])
+            except Exception as error:  # noqa: BLE001 - any confirm failure must NOT delete
+                job.errors.append({"path": filepath, "error": str(error)})
+                continue
+            if content_hash not in fresh:
+                job.skipped_state += 1
+                continue
             ready = {
                 "event": "delete_ready",
                 "job_id": job.id,
                 "image_id": image_id,
                 "path": filepath,
+                "source_path": str(candidate.get("source_path") or ""),
                 "content_hash": content_hash,
                 "hub_image_id": int(candidate["hub_image_id"]),
                 "hub_confirmed": True,
