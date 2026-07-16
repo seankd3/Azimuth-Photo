@@ -13,7 +13,7 @@ import {
 import { applyFlags, selectedIds, setCollectionPicker } from './selection.js';
 import { showToast } from './toast.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
-import { confirmAction, confirmTypedCount } from './trash.js';
+import { confirmAction } from './trash.js';
 import { exportScope, openExportMenu, savedOriginalsExportSize } from './export_menu.js';
 import { pollJob } from './jobs.js';
 import { initFoldersPanel } from './folders.js';
@@ -492,6 +492,15 @@ async function copyDeliverUrl(url) {
     }
 }
 
+function deliveryErrorDetail(error) {
+    return error?.data?.error || error?.error || error?.message || '';
+}
+
+function showDeliveryToast(message, session, { error = null, undo = null } = {}) {
+    const detail = deliveryErrorDetail(error);
+    showToast(`${message} '${session.name}'${detail ? ` · ${detail}` : ''}`, { undo });
+}
+
 async function withBusyButton(button, action) {
     if (!button || button.disabled) return;
     button.disabled = true;
@@ -630,10 +639,10 @@ async function renderPrivateDeliver(session, token) {
         if (deliverOverlayIsCurrent(token) && result?.ok) {
             session.share = result.share;
             clearDeliverDraft(session);
-            showToast('Private link created');
+            showDeliveryToast('Private link created for', session);
             emitSharedSurfacesChanged(session.collectionId);
             renderDeliver(session, token);
-        } else if (deliverOverlayIsCurrent(token)) showToast("Couldn't create private link");
+        } else if (deliverOverlayIsCurrent(token)) showDeliveryToast("Couldn't create private link for", session, { error: result });
     }));
     deliverOverlay.querySelector('[data-deliver-password-save]')?.addEventListener('click', (event) => withBusyButton(event.currentTarget, async () => {
         saveDeliverDraft(session);
@@ -642,7 +651,7 @@ async function renderPrivateDeliver(session, token) {
         if (deliverOverlayIsCurrent(token) && result?.ok) {
             session.share = result.share;
             session.draft.password = '';
-            showToast(share.protected ? 'Password changed' : 'Password set');
+            showDeliveryToast(share.protected ? 'Password changed for' : 'Password set for', session);
             emitSharedSurfacesChanged(session.collectionId);
             renderDeliver(session, token);
         }
@@ -651,7 +660,7 @@ async function renderPrivateDeliver(session, token) {
         const result = await createCollectionShare(session.collectionId, { clearPassword: true });
         if (deliverOverlayIsCurrent(token) && result?.ok) {
             session.share = result.share;
-            showToast('Password removed');
+            showDeliveryToast('Password removed for', session);
             emitSharedSurfacesChanged(session.collectionId);
             renderDeliver(session, token);
         }
@@ -660,7 +669,7 @@ async function renderPrivateDeliver(session, token) {
         const result = await createCollectionShare(session.collectionId, { rotate: true });
         if (deliverOverlayIsCurrent(token) && result?.ok) {
             session.share = result.share;
-            showToast('New private link created');
+            showDeliveryToast('New private link created for', session);
             emitSharedSurfacesChanged(session.collectionId);
             renderDeliver(session, token);
         }
@@ -670,7 +679,7 @@ async function renderPrivateDeliver(session, token) {
         if (deliverOverlayIsCurrent(token) && result?.ok) {
             session.share = null;
             clearDeliverDraft(session);
-            showToast('Private link revoked');
+            showDeliveryToast('Private link revoked for', session);
             emitSharedSurfacesChanged(session.collectionId);
             renderDeliver(session, token);
         }
@@ -712,11 +721,12 @@ function renderWebsiteDeliver(session, token) {
         if (!deliverOverlayIsCurrent(token)) return;
         if (result.ok) {
             clearDeliverDraft(session);
-            showToast(publish ? 'Republishing gallery' : 'Publishing gallery');
+            showDeliveryToast(publish ? 'Republishing website gallery for' : 'Publishing website gallery for', session);
             emitSharedSurfacesChanged(session.collectionId);
             pollDeliverPublish(session, token, true);
         } else {
             session.publish = { ...data, job: { state: 'error', error: result.data?.error || "Couldn't start publishing." } };
+            showDeliveryToast("Couldn't publish website gallery for", session, { error: result.data });
             renderDeliver(session, token);
         }
     };
@@ -724,14 +734,13 @@ function renderWebsiteDeliver(session, token) {
     else deliverOverlay.querySelector('[data-deliver-publish]')?.addEventListener('click', startPublish);
     deliverOverlay.querySelector('[data-deliver-retry]')?.addEventListener('click', startPublish);
     deliverOverlay.querySelector('[data-deliver-unpublish]')?.addEventListener('click', async () => {
-        const ok = await confirmTypedCount({ title: 'Unpublish gallery', message: `Remove this public gallery from the website? Type ${fmt(count).replace(/,/g, '')} to confirm.`, count, confirmLabel: 'Unpublish' });
-        if (!ok) return;
         const result = await revokeCollectionPublish(session.collectionId);
         if (deliverOverlayIsCurrent(token) && result.ok) {
-            showToast('Unpublishing gallery');
+            clearDeliverDraft(session);
+            showDeliveryToast('Unpublishing website gallery for', session, { undo: startPublish });
             emitSharedSurfacesChanged(session.collectionId);
             pollDeliverPublish(session, token, true);
-        }
+        } else if (deliverOverlayIsCurrent(token)) showDeliveryToast("Couldn't unpublish website gallery for", session, { error: result.data });
     });
     if (busy && !deliverPoll) scheduleDeliverPoll(session, token);
     trapFocus(deliverOverlay, deliverOverlay.querySelector('input, button'));
@@ -773,11 +782,11 @@ async function renderGalleryDeliver(session, token) {
                 session.galleryData.gallery = result.gallery;
                 session.draft.password = '';
                 clearDeliverDraft(session);
-                showToast(gallery ? 'Client gallery updated' : 'Client gallery created');
+                showDeliveryToast(gallery ? 'Client gallery updated for' : 'Client gallery created for', session);
                 emitSharedSurfacesChanged(session.collectionId);
                 renderGalleryDeliver(session, token);
             } catch (error) {
-                showToast(error.message || 'Could not save client gallery');
+                showDeliveryToast("Couldn't save client gallery for", session, { error });
             }
         }));
         deliverOverlay.querySelector('[data-deliver-password-save]')?.addEventListener('click', () => deliverOverlay.querySelector('[data-deliver-gallery-save]')?.click());
@@ -789,10 +798,10 @@ async function renderGalleryDeliver(session, token) {
                 }));
                 if (!deliverOverlayIsCurrent(token)) return;
                 session.galleryData.gallery = result.gallery;
-                showToast('Password removed');
+                showDeliveryToast('Password removed for', session);
                 renderGalleryDeliver(session, token);
             } catch (error) {
-                showToast(error.message || 'Could not remove password');
+                showDeliveryToast("Couldn't remove password for", session, { error });
             }
         }));
         bindDeliverConfirmButton('[data-deliver-gallery-revoke]', 'Confirm revoke', async () => {
@@ -801,11 +810,11 @@ async function renderGalleryDeliver(session, token) {
                 if (!deliverOverlayIsCurrent(token)) return;
                 session.galleryData.gallery = null;
                 clearDeliverDraft(session);
-                showToast('Client gallery revoked');
+                showDeliveryToast('Client gallery revoked for', session);
                 emitSharedSurfacesChanged(session.collectionId);
                 renderGalleryDeliver(session, token);
             } catch (error) {
-                showToast(error.message || 'Could not revoke client gallery');
+                showDeliveryToast("Couldn't revoke client gallery for", session, { error });
             }
         });
         trapFocus(deliverOverlay, deliverOverlay.querySelector('input, select, button'));
@@ -848,7 +857,7 @@ function pollDeliverPublish(session, token, immediate = false) {
             if (!deliverOverlayIsCurrent(token) || deliverSession !== session) return;
             session.publish = publish;
             if (!publish?.in_progress) {
-                if (!immediate && publish?.job?.state === 'revoked') showToast('Gallery unpublished');
+                if (!immediate && publish?.job?.state === 'revoked') showDeliveryToast('Website gallery unpublished for', session);
                 emitSharedSurfacesChanged(session.collectionId);
                 loadCollections();
             }
