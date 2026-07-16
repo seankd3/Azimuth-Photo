@@ -73,6 +73,20 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertIn("scrollTop <= 160", timeline)
         self.assertIn("on('tab', (tab) =>", timeline)
 
+    def test_events_keep_pending_previews_off_the_thumbnail_decode_path(self):
+        events = read("events.js")
+        cell_html = events[events.index("function cellHtml"):events.index("function patchCells")]
+        group_html = events[events.index("function groupHtml"):events.index("function render()")]
+
+        self.assertIn("previewThumbUrl(img)", cell_html)
+        self.assertIn("preview-pending", cell_html)
+        self.assertIn("previewSrc ? `data-src=", cell_html)
+        self.assertIn("image.preview_ready !== false", events)
+        self.assertIn("previewThumbUrl(hero, 'md')", group_html)
+        self.assertIn("async function refreshPendingPreviews()", events)
+        self.assertIn("params.set('ids', ids.join(','));", events)
+        self.assertIn("stopThumbnailPoll();", events[events.index("export function unmountEvents"):])
+
     def test_warm_events_revalidates_group_coverage_after_flags_change(self):
         events = read("events.js")
 
