@@ -280,6 +280,11 @@ function bindDeliverTabs(onSelect) {
     }
 }
 
+/** Back-compat for callers that predate the unified Deliver surface (drawer publish-return). */
+export function openPublishOverlay(collectionId, name = 'Collection') {
+    return openDeliverOverlay(collectionId, name, null, 'website');
+}
+
 export async function openDeliverOverlay(collectionId, name = 'Collection', opener = null, activeTab = 'private') {
     ensureDeliverOverlay();
     const token = ++deliverOverlayToken;
