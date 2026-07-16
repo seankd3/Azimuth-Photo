@@ -48,6 +48,7 @@ _get_visible_pairing_pool_counts: Callable[..., Awaitable[dict]] | None = None
 _get_cached_image_ids: Callable[..., Awaitable[set[int]]] | None = None
 _get_import_batch_image_ids: Callable[[int], Awaitable[set[int] | None]] | None = None
 _get_stack_representative_counts: Callable[[list[int]], Awaitable[dict[int, dict]]] | None = None
+_resolve_smart_collection_image_ids: Callable[[int], Awaitable[set[int] | None]] | None = None
 
 
 def configure(
@@ -68,6 +69,7 @@ def configure(
     get_rankings: Callable[..., Awaitable[list]],
     get_visible_pairing_pool_counts: Callable[..., Awaitable[dict]],
     get_cached_image_ids: Callable[..., Awaitable[set[int]]],
+    resolve_smart_collection_image_ids: Callable[[int], Awaitable[set[int] | None]],
     rankings_response_cache_ttl_seconds: Callable[[], float] | None = None,
     get_rank_quality: Callable[..., Awaitable[dict]] | None = None,
     get_date_histogram: Callable[..., Awaitable[dict]] | None = None,
@@ -79,7 +81,7 @@ def configure(
     global _extension_search_terms, _db_signature, _get_date_groups, _get_map_markers
     global _get_filter_options, _get_stats, _count_rankings, _get_rankings
     global _get_visible_pairing_pool_counts, _get_cached_image_ids, _get_rank_quality
-    global _get_date_histogram, _get_scope_counts
+    global _get_date_histogram, _get_scope_counts, _resolve_smart_collection_image_ids
     _resolve_library_constraints = resolve_library_constraints
     _cache_root = cache_root
     _clamp_int = clamp_int
@@ -96,6 +98,7 @@ def configure(
     _get_rankings = get_rankings
     _get_visible_pairing_pool_counts = get_visible_pairing_pool_counts
     _get_cached_image_ids = get_cached_image_ids
+    _resolve_smart_collection_image_ids = resolve_smart_collection_image_ids
     _get_rank_quality = get_rank_quality
     _get_date_histogram = get_date_histogram
     _get_scope_counts = get_scope_counts
@@ -402,6 +405,16 @@ def _combine_id_scopes(current_ids, requested_ids: set[int] | None):
     return set(int(image_id) for image_id in current_ids).intersection(requested_ids)
 
 
+async def _resolve_collection_scope(current_ids, collection_id: int) -> tuple[set[int] | None, int]:
+    collection_id = int(collection_id or 0)
+    if collection_id <= 0:
+        return current_ids, 0
+    smart_ids = await _configured(_resolve_smart_collection_image_ids)(collection_id)
+    if smart_ids is None:
+        return current_ids, collection_id
+    return _combine_id_scopes(current_ids, smart_ids), 0
+
+
 def _normalize_stacks_mode(value: str = "") -> str:
     return "collapsed" if (value or "").strip().lower() == "collapsed" else "expanded"
 
@@ -602,6 +615,7 @@ async def date_histogram_payload(
 ) -> dict:
     search = await _configured_resolve_library_constraints(q, people=people, deep=deep)
     search_ids = await _combined_import_batch_filter(search.get("id_filter"), import_batch)
+    search_ids, collection_id = await _resolve_collection_scope(search_ids, collection_id)
     exclude_collapsed_stack_members = _exclude_collapsed_stack_members(stacks)
     return await _configured(_get_date_histogram)(
         orientation=orientation,
@@ -712,6 +726,8 @@ async def api_rankings_impl(
     search = await _configured_resolve_library_constraints(q, people=people, deep=deep)
     search_ids = await _combined_import_batch_filter(search["id_filter"], import_batch)
     search_ids = _combine_id_scopes(search_ids, _id_scope(ids))
+    requested_collection_id = int(collection_id or 0)
+    search_ids, collection_id = await _resolve_collection_scope(search_ids, requested_collection_id)
     stacks_mode = _normalize_stacks_mode(stacks)
     exclude_collapsed_stack_members = _exclude_collapsed_stack_members(stacks_mode)
     search_scores = search["scores"]
@@ -736,7 +752,7 @@ async def api_rankings_impl(
     db_sort = "elo" if sort == "similarity" and not search_scores else sort
     blend_context = (
         await _ranking_taste_blend_context(db_sort)
-        if sort != "taste" and not collection_id and not (sort == "similarity" and search_scores)
+        if sort != "taste" and not requested_collection_id and not (sort == "similarity" and search_scores)
         else {"active": False, "cache_key": ("taste_blend", "bypassed")}
     )
     rankings_cache_key = None
@@ -748,7 +764,7 @@ async def api_rankings_impl(
     cacheable_embedding_search = search_mode in ("embedding", "fused", "captions")
     cacheable_search = cacheable_metadata_search or cacheable_embedding_search
     normalized_search_query = _configured_normalize_search_query(q) if search["active"] else ""
-    if (not search["active"] or cacheable_search) and not collection_id and not _id_scope(ids):
+    if (not search["active"] or cacheable_search) and not requested_collection_id and not _id_scope(ids):
         rankings_cache_key = (
             _configured_db_signature(),
             _configured_cache_root(),

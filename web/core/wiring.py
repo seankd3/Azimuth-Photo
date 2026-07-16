@@ -493,8 +493,21 @@ def configure_library_service(
     rankings_response_cache_ttl_seconds,
 ) -> None:
     import db
+    from features.collections import smart as smart_collections
     from features.library import service as library_service
     from features.library import taste as taste_service
+
+    async def resolve_smart_collection_image_ids(collection_id: int) -> set[int] | None:
+        collection = await db.get_collection(collection_id, limit=1)
+        if not collection or not collection.get("smart"):
+            return None
+        image_ids = await smart_collections.resolve_image_ids(
+            collection.get("query") or {},
+            resolve_library_constraints=resolve_library_constraints,
+            count_rankings=lambda **kwargs: db.count_rankings(**kwargs),
+            get_rankings=lambda **kwargs: db.get_rankings(**kwargs),
+        )
+        return set(image_ids)
 
     taste_service.configure(
         db_path=lambda: db.DB_PATH,
@@ -527,6 +540,7 @@ def configure_library_service(
             size,
             cache_root,
         ),
+        resolve_smart_collection_image_ids=resolve_smart_collection_image_ids,
         rankings_response_cache_ttl_seconds=rankings_response_cache_ttl_seconds,
     )
 

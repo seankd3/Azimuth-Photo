@@ -3,6 +3,7 @@ import embed_cache
 import shutil
 import unittest.mock
 from fastapi.testclient import TestClient
+from features.collections import routes as collection_routes
 from features.library import taste as taste_service
 from features.sync import hashing as sync_hashing
 
@@ -1312,6 +1313,42 @@ class LibraryTests(BackendTestCase):
         self.assertEqual([image["id"] for image in picked_only["images"]], [picked])
         self.assertEqual(picked_only["total_images"], 1)
         self.assertEqual(await db.count_rankings(flag="picked", collection_id=collection["id"]), 1)
+
+    async def test_smart_collection_scope_resolves_rankings_and_timeline_histogram(self):
+        source = await self._source()
+        picked = await self._image(source["id"], "smart-picked.jpg", elo=1500)
+        await self._image(source["id"], "smart-outside.jpg", elo=1800)
+        await db.set_image_flag(picked, "picked")
+        await self._cache_entry(picked, "sm")
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "UPDATE images SET date_taken = ? WHERE id = ?",
+                ("2025-04-12 09:30:00", picked),
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+        smart = await collection_routes.api_create_collection(
+            collection_routes.CreateCollectionBody(
+                name="Picked smart scope",
+                query={"flag": "picked", "sort": "elo"},
+            )
+        )
+
+        scoped = await library_routes.api_rankings(
+            limit=10,
+            sort="elo",
+            collection_id=smart["collection"]["id"],
+        )
+        histogram = await library_routes.api_date_histogram(
+            collection_id=smart["collection"]["id"],
+        )
+
+        self.assertEqual([image["id"] for image in scoped["images"]], [picked])
+        self.assertEqual(scoped["total_images"], 1)
+        self.assertEqual(histogram["months"], [{"month": "2025-04", "count": 1, "cover_id": picked}])
+        self.assertEqual(histogram["total"], 1)
 
     async def test_date_histogram_route_counts_months_undated_and_total(self):
         source = await self._source()
