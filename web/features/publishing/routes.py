@@ -174,10 +174,12 @@ def _public_page_payload(gallery: dict) -> dict:
             "download": f"/s/gallery/{token}/download/{download_size}/{image_id}",
             "download_name": _attachment_name(image_id, filename, suffix=".jpg"),
         })
+    cover = next((image for image in images if image["id"] == gallery.get("cover_image_id")), None)
     return {
         "token": token, "name": gallery["title"], "photo_count": len(images),
         "download_size_label": f"{download_size} gallery copy", "images": images,
         "download_all_url": f"/s/gallery/{token}/download-all" if gallery["allow_download_all"] else "",
+        "cover_image": cover["full"] if cover else "",
     }
 
 
@@ -238,6 +240,7 @@ def _gallery_response(request: Request, gallery: dict) -> Response:
         "not_found": False, "locked": False, "token": page["token"],
         "collection_name": page["name"], "photo_count": page["photo_count"],
         "date_range": "", "brand": _brand_payload(), "gallery_json": page,
+        "cover_image": page["cover_image"],
         "og_image": f"{str(request.base_url).rstrip('/')}{page['images'][0]['og_thumb']}" if page["images"] else "",
         "favorites_enabled": False,
     })

@@ -232,6 +232,19 @@ class GalleryTests(BackendTestCase):
         self.assertIn("<h1>Summer favorites</h1>", public.text)
         self.assertNotIn("Old gallery title", public.text)
 
+    async def test_client_gallery_renders_its_selected_cover(self):
+        collection, first, second = await self._collection()
+        gallery = await galleries.create_gallery(
+            db.DB_PATH, collection_id=collection["id"], title="Covered gallery", image_ids=[first, second],
+            options={"cover_image_id": second},
+        )
+        def probe():
+            with TestClient(app_module.app) as client:
+                return client.get(f"/s/gallery/{gallery['token']}")
+        response = await asyncio.to_thread(probe)
+        self.assertIn('class="cover-hero"', response.text)
+        self.assertIn(f'/s/gallery/{gallery["token"]}/thumb/lg/{second}', response.text)
+
     async def test_hub_mirror_original_and_zip_are_streamed_or_manifested(self):
         collection, local_id, remote_id = await self._collection()
         local = await self._image_row(local_id)
