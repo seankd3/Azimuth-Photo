@@ -330,6 +330,19 @@ async def run_startup(
 
     track_background_task(_warm_priority_interaction_caches())
 
+    async def _warm_collection_suggestions():
+        # Populate the suggestions cache off the request path so the first user
+        # after a boot gets it instantly instead of paying the multi-second build.
+        await asyncio.sleep(2.0)
+        try:
+            import db as _db
+            from features.collections import suggestions as _suggestions
+            await _suggestions.collection_suggestions(_db.DB_PATH)
+        except Exception:
+            log.debug("collection suggestions warmup skipped", exc_info=True)
+
+    track_background_task(_warm_collection_suggestions())
+
     track_background_task(_start_background_daemon(thumbnails.run_prefetch_worker))
     track_background_task(_start_background_daemon(_cleanup_stale_cache_temps_when_quiet, delay=20.0))
     track_background_task(_start_background_daemon(classify_orientations_background))
