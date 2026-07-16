@@ -267,8 +267,7 @@ function renderPendingThumbnailEmptyState() {
     const flow = document.getElementById('grid-flow');
     const count = viewState.hiddenPendingThumbnails;
     flow.innerHTML = emptyStateHtml({
-        title: `All ${count.toLocaleString('en-US')} photos here are still preparing previews`,
-        detail: 'They’ll appear here as they’re ready.',
+        title: `All ${count.toLocaleString('en-US')} photos matching this view are still sharpening`,
         iconName: 'loader',
     });
     loadPausedPreviewHint(flow.querySelector('.empty-state p'));
