@@ -109,6 +109,7 @@ fun SearchScreen(onImmersive: (Boolean) -> Unit = {}) {
 
     var archiveImages by remember { mutableStateOf<List<ArchiveImage>>(emptyList()) }
     var visibleTotal by remember { mutableStateOf(0L) }
+    var exhausted by remember { mutableStateOf(false) }
     var firstPageLoading by remember { mutableStateOf(false) }
     var pageLoading by remember { mutableStateOf(false) }
     var archiveError by remember { mutableStateOf(false) }
@@ -147,6 +148,7 @@ fun SearchScreen(onImmersive: (Boolean) -> Unit = {}) {
     LaunchedEffect(filters, activeBucket, retryTick) {
         archiveImages = emptyList()
         visibleTotal = 0L
+        exhausted = false
         archiveError = false
         firstPageLoading = false
         localItems = emptyList()
@@ -161,7 +163,9 @@ fun SearchScreen(onImmersive: (Boolean) -> Unit = {}) {
         runCatching { libApi.search(filters, 0, PAGE_SIZE) }
             .onSuccess { page ->
                 archiveImages = page.images
-                visibleTotal = page.visible_images
+                // total_images = real match count; visible_images only counts
+                // thumb-ready photos and undercounts while the hub processes.
+                visibleTotal = page.total_images
             }
             .onFailure { archiveError = true }
         firstPageLoading = false
@@ -176,7 +180,7 @@ fun SearchScreen(onImmersive: (Boolean) -> Unit = {}) {
     }
 
     fun loadNextPage() {
-        if (pageLoading || firstPageLoading || archiveError) return
+        if (pageLoading || firstPageLoading || archiveError || exhausted) return
         if (archiveImages.isEmpty() || archiveImages.size >= visibleTotal) return
         pageLoading = true
         val launched = filters
@@ -185,7 +189,10 @@ fun SearchScreen(onImmersive: (Boolean) -> Unit = {}) {
                 .onSuccess { page ->
                     if (filters == launched) {
                         archiveImages = (archiveImages + page.images).distinctBy { it.id }
-                        visibleTotal = page.visible_images
+                        visibleTotal = page.total_images
+                        // The hub only serves thumb-ready images; an empty page
+                        // before total_images means the rest are still processing.
+                        if (page.images.isEmpty()) exhausted = true
                     }
                 }
             pageLoading = false
@@ -197,7 +204,7 @@ fun SearchScreen(onImmersive: (Boolean) -> Unit = {}) {
         val draft = refineDraft ?: return@LaunchedEffect
         refineCount = null
         delay(350)
-        refineCount = runCatching { libApi.search(draft, 0, 1).visible_images }.getOrNull()
+        refineCount = runCatching { libApi.search(draft, 0, 1).total_images }.getOrNull()
     }
 
     LaunchedEffect(archiveViewerIndex != null || localViewerIndex != null) {
