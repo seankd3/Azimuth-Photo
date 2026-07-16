@@ -649,6 +649,25 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status["state"], "error")
         self.assertIn("torch", status["last_error"])
 
+    async def test_bulk_model_load_starts_search_model_residency(self):
+        observed = []
+
+        async def stop_after_model_load(**_kwargs):
+            task = embedding_worker._search_model_residency_task
+            observed.append((
+                embedding_worker.get_worker_status()["state"],
+                task is not None and not task.done(),
+            ))
+            raise asyncio.CancelledError
+
+        embedding_worker._load_model = lambda *_args: object()
+        embedding_worker._get_unembedded_images = stop_after_model_load
+
+        with self.assertRaises(asyncio.CancelledError):
+            await embedding_worker.run_embedding_worker()
+
+        self.assertEqual(observed, [("resident", True)])
+
     async def test_search_model_loader_waits_for_fresh_caption_lease(self):
         load_started = threading.Event()
 
@@ -798,7 +817,9 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(loaded)
         self.assertEqual(calls, [("/tmp/test-model", "test-model")])
         self.assertTrue(embedding_worker.search_model_ready())
-        self.assertEqual(embedding_worker.get_worker_status()["state"], "idle")
+        status = embedding_worker.get_worker_status()
+        self.assertEqual(status["state"], "resident")
+        self.assertEqual(status["message"], "Search model warm.")
 
     async def test_missing_dependency_blocks_background_model_load(self):
         embedding_worker.settings.get_settings = lambda: {

@@ -329,8 +329,8 @@ def _retain_search_model_residency(config: dict, model_id: str) -> bool:
     if not _start_search_model_residency_task():
         return False
     _set_worker_status(
-        "idle",
-        f"{model_id} ready for search.",
+        "resident",
+        "Search model warm.",
         ready=True,
         config=config,
     )
@@ -1218,7 +1218,10 @@ async def _run_embedding_worker_loop():
                             _loaded_model_id = model_id
                             _loaded_model_revision = model_revision
                             _clear_model_load_failure()
-                            _set_worker_status("ready", f"{model_id} loaded locally.", ready=True)
+                            if not _retain_search_model_residency(config, model_id):
+                                raise RuntimeError(
+                                    "Could not start search model residency heartbeat"
+                                )
                         except Exception as exc:
                             _unload_model()
                             _note_model_load_failure(model_dir, model_id, model_revision, exc)
