@@ -2,7 +2,6 @@ import { emit, on, scope, selection } from './state.js';
 import { applyFlags } from './selection.js';
 import { openCollectionPicker, removeImagesFromCollection } from './panel.js';
 import { downloadExport } from './export_menu.js';
-import { queueBatchExport } from './develop/export_dialog.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
 import { icon } from '../icons.js';
 import { showToast } from './toast.js';
@@ -74,6 +73,7 @@ async function mergeHdr(ids) {
 
 async function batchDevelopExport(ids) {
     try {
+        const { queueBatchExport } = await import('./develop/export_dialog.js');
         await queueBatchExport(ids, { format: 'jpeg', quality: 92, sharpen: 'screen_standard' }, { showToast });
     } catch (error) {
         showToast(error?.message || 'Develop batch export could not start');

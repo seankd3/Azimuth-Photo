@@ -690,6 +690,7 @@ async function editRawFromLoupe() {
     const stack = await versionStackForCurrent();
     const raw = (stack?.members || []).find(isRaw);
     if (!raw) return;
+    await import('./develop/develop.js');
     emit('develop:open-image', { image: raw });
 }
 

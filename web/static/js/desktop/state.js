@@ -119,6 +119,15 @@ export const viewState = {
 export const byId = new Map();
 export const selection = new Set();
 export const selState = { mode: false, lastIndex: null };
+let developIsOpen = false;
+
+export function developOpen() {
+    return developIsOpen;
+}
+
+export function setDevelopOpen(open) {
+    developIsOpen = Boolean(open);
+}
 
 export function folderValues(value = scope.folder) {
     if (Array.isArray(value)) return value.map((item) => String(item || '')).filter(Boolean);

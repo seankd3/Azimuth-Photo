@@ -1,6 +1,6 @@
 import { thumbUrl } from '../api.js';
 import { fetchOptionsWithTimeout } from '../../api.js';
-import { on, selection, viewState } from '../state.js';
+import { on, selection, setDevelopOpen, viewState } from '../state.js';
 import { showToast } from '../toast.js';
 import { releaseFocus, trapFocus } from '../focusTrap.js';
 import { CropController } from './crop.js';
@@ -896,6 +896,7 @@ async function resetCurrent() {
 
 export function openDevelop() {
     mounted = true;
+    setDevelopOpen(true);
     root.classList.add('active');
     document.body.classList.add('develop-active');
     for (const button of document.querySelectorAll('#view-switch button[data-view]')) {
@@ -911,6 +912,7 @@ export function openDevelop() {
 
 function unmount() {
     mounted = false;
+    setDevelopOpen(false);
     ++loadingToken;
     closePopover();
     showBefore(false);
@@ -920,10 +922,6 @@ function unmount() {
     heal?.toggle(false);
     proofTile?.setHeld(false);
     presetsPanel?.endPreview();
-}
-
-export function developOpen() {
-    return mounted;
 }
 
 function updateTabState() {
