@@ -1,5 +1,8 @@
 """Image lookup queries used by media, export, search, and compare flows."""
 
+import json
+import time
+
 from data import connection
 from data.repositories.common import chunked
 
@@ -246,6 +249,39 @@ async def set_image_flag(db_path: str, image_id: int, flag: str):
                 "UPDATE images SET flag = ? WHERE id = ?",
                 (flag, image_id),
             )
+            await conn.commit()
+        finally:
+            await connection.close_async(conn, db_path=db_path)
+
+    await connection.run_with_busy_retry(_write)
+
+
+async def set_image_rating(db_path: str, image_id: int, rating: int):
+    """Store a user star rating as _lr_rating without disturbing other develop keys."""
+
+    async def _write() -> None:
+        conn = await connection.open_async(db_path)
+        try:
+            row = await (await conn.execute(
+                "SELECT settings FROM develop_settings WHERE image_id = ?", (image_id,)
+            )).fetchone()
+            try:
+                settings = json.loads(row["settings"]) if row else {}
+            except (TypeError, ValueError, json.JSONDecodeError):
+                settings = {}
+            settings["_lr_rating"] = rating
+            payload = json.dumps(settings, separators=(",", ":"), ensure_ascii=True)
+            now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            if row:
+                await conn.execute(
+                    "UPDATE develop_settings SET settings = ?, updated_at = ? WHERE image_id = ?",
+                    (payload, now, image_id),
+                )
+            else:
+                await conn.execute(
+                    "INSERT INTO develop_settings (image_id, settings, origin, updated_at) VALUES (?, ?, user, ?)",
+                    (image_id, payload, now),
+                )
             await conn.commit()
         finally:
             await connection.close_async(conn, db_path=db_path)

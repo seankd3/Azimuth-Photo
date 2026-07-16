@@ -90,6 +90,10 @@ export async function writeFlags(imageIds, flag) {
     return enqueueWrite('/api/images/flag', { image_ids: imageIds, flag });
 }
 
+export async function writeRating(imageId, rating) {
+    return enqueueWrite(`/api/image/${imageId}/rating`, { rating });
+}
+
 // Refine: same typed payloads as the compare mosaic and undo API.
 export async function mosaicNext(n, params, exclude = '') {
     const query = new URLSearchParams(params);

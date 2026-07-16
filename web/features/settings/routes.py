@@ -195,6 +195,26 @@ async def api_set_image_flag(image_id: int, request: Request):
     return {"ok": True, "id": image_id, "flag": flag}
 
 
+@router.post("/api/image/{image_id}/rating")
+async def api_set_image_rating(image_id: int, request: Request):
+    _configured()
+    body, error = await json_object(request)
+    if error:
+        return error
+    rating = body.get("rating", 0)
+    if isinstance(rating, bool) or not isinstance(rating, (int, float)) or int(rating) != rating or not 0 <= int(rating) <= 5:
+        return JSONResponse({"error": "rating must be an integer 0-5"}, status_code=400)
+    rating = int(rating)
+
+    image = await image_repository.get_image_by_id(_configured_db_path(), image_id)
+    if not image:
+        return JSONResponse({"error": "Image not found"}, status_code=404)
+
+    await image_repository.set_image_rating(_configured_db_path(), image_id, rating)
+    await oplog.append_rating(_configured_db_path(), image_id, rating)
+    return {"ok": True, "id": image_id, "rating": rating}
+
+
 @router.post("/api/images/flag")
 async def api_batch_set_flag(request: Request):
     _configured()
