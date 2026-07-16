@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from core import runtime_paths
+from core.source_files import inspect_source_file
 from data import connection
 from data.repositories import catalog as catalog_repository
 from features.develop import rawproc
@@ -171,6 +172,56 @@ async def manifest(db_path: str, items: Iterable[dict[str, Any]]) -> dict[str, l
             if content_hash in known_by_hash
         ],
     }
+
+
+async def have_content_hashes(db_path: str, content_hashes: Iterable[str]) -> list[str]:
+    """Return requested identities backed by an active original on this hub now."""
+
+    hashes = list(dict.fromkeys(validate_content_hash(value) for value in content_hashes))
+    if not hashes:
+        return []
+    conn = await connection.open_async(db_path)
+    try:
+        placeholders = ",".join("?" for _ in hashes)
+        rows = await (
+            await conn.execute(
+                f"SELECT i.content_hash, i.filepath, i.file_size, s.path AS source_path "
+                f"FROM images i JOIN catalog_sources s ON s.id = i.source_id "
+                f"WHERE i.content_hash IN ({placeholders}) "
+                "AND COALESCE(i.hub_remote, 0) = 0 "
+                "AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL",
+                hashes,
+            )
+        ).fetchall()
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+
+    def identity_verified() -> set[str]:
+        # "present" must mean the hub holds bytes of this exact identity RIGHT NOW,
+        # not merely a non-empty file at the path. A satellite deletes its only local
+        # copy on this answer, so a truncated/bit-rotted hub file must NOT qualify:
+        # require the size to match and re-derive the content hash from the live bytes.
+        present: set[str] = set()
+        for row in rows:
+            content_hash = str(row["content_hash"])
+            if content_hash in present:
+                continue
+            filepath = str(row["filepath"] or "")
+            state, file_stat = inspect_source_file(filepath, str(row["source_path"] or ""))
+            if state != "available" or file_stat is None:
+                continue
+            expected_size = row["file_size"]
+            if expected_size is not None and int(file_stat.st_size) != int(expected_size):
+                continue
+            try:
+                if compute_content_hash(filepath) == content_hash:
+                    present.add(content_hash)
+            except OSError:
+                continue
+        return present
+
+    present = await asyncio.to_thread(identity_verified)
+    return [content_hash for content_hash in hashes if content_hash in present]
 
 
 def upload_part_path(intake_root: Path, content_hash: str) -> Path:

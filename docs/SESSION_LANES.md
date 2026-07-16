@@ -1,5 +1,12 @@
 # Session lanes — Azimuth Photo (charter, 2026-07-16)
 
+ORG MODEL: Sean = CEO (product vision, decisions). Quality session = CTO
+(cross-cutting standards, post-merge verdicts, arbitration between lanes).
+Each session below = a MANAGER for its lane: managers own their territory,
+decompose work, and delegate execution to subagents/Codex/Grok lanes — managers
+orchestrate, subagents do the real work. Thread titles may drift; the LANE is
+canonical, not the title.
+
 One session = one lane. Check this file + LANES.md before any fan-out, merge, or
 cleanup. Findings outside your lane route to the owner (send_message), not fixed
 in place. Program directives go to exactly ONE session.

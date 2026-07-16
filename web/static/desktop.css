@@ -1194,6 +1194,11 @@ body:has(#view-loupe.active):has(#sel-pill.on) #toast { transform: translateX(-5
 .tier-chips { display: flex; gap: var(--s2); flex-wrap: wrap; margin-bottom: var(--s3); }
 .tier-chip { display: flex; flex-direction: column; gap: 1px; min-width: 86px; padding: 6px 9px; border: 1px solid var(--line); border-radius: var(--r-ctl); background: var(--card); color: var(--text-2); font-size: 11px; font-variant-numeric: tabular-nums; }
 .tier-chip b { color: var(--text); font-size: var(--fs-ui); }
+.freeup-summary { color: var(--text-2); font-size: var(--fs-ui); line-height: var(--lh-body); }
+.freeup-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--s3); align-items: end; margin-top: var(--s3); }
+.freeup-controls label { display: grid; gap: 5px; color: var(--text-3); font-size: var(--fs-caption); }
+.freeup-controls select { height: 30px; min-width: 0; padding: 0 var(--s2); border: 1px solid var(--line); border-radius: var(--r-ctl); background: var(--bg); color: var(--text); }
+.freeup-progress { padding-bottom: 0; }
 .remote-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--s2); align-items: center; }
 .remote-url { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); font-size: 12px; }
 .pair-link-card {
@@ -1443,6 +1448,7 @@ body:has(#view-loupe.active):has(#sel-pill.on) #toast { transform: translateX(-5
     .event-hero { flex: none; min-height: 200px; }
     .shared-row { grid-template-columns: 1fr; }
     .drawer-action-row { grid-template-columns: 1fr; }
+    .freeup-controls { grid-template-columns: 1fr; }
     .publish-return { grid-template-columns: 1fr; }
     #events-flow { padding-right: var(--s3); }
     #grid-flow.has-scrubber { padding-right: var(--s3); }

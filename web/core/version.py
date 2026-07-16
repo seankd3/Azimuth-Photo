@@ -28,7 +28,13 @@ def _version_file() -> Path:
 def app_version() -> str:
     """Return the release version without depending on an installed package."""
 
-    return _version_file().read_text(encoding="utf-8").strip()
+    try:
+        return _version_file().read_text(encoding="utf-8").strip()
+    except OSError:
+        # A missing VERSION must never take down /api/version — satellites use
+        # it for the compatibility handshake.
+        return "0.0.0-unknown"
+
 
 
 def version_payload() -> dict[str, str | int | list[str]]:
