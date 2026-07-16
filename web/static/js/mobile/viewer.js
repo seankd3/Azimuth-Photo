@@ -385,7 +385,7 @@ function infoSheet() {
     );
     syncRatingButtons(sheet, imageRating(image));
     const ratingGeneration = loadToken;
-    fetch(`/api/image/${image.id}/rating`, { headers: { Accept: application/json } })
+    fetch(`/api/image/${image.id}/rating`, { headers: { Accept: 'application/json' } })
         .then((response) => (response.ok ? response.json() : null))
         .then((data) => {
             if (!data || !viewerRequestCurrent(image.id, ratingGeneration)) return;
