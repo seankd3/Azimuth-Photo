@@ -1,3 +1,4 @@
+import os
 import sqlite3
 import tempfile
 import unittest
@@ -130,3 +131,10 @@ class VirtualCopiesTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(child["image_id"], 1)
         finally:
             await connection.close_async(conn, db_path=legacy_path)
+        backup_path = f"{legacy_path}.pre-virtual-copies.bak"
+        self.assertTrue(os.path.exists(backup_path))
+        with sqlite3.connect(backup_path) as backup:
+            table_sql = backup.execute(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'images'"
+            ).fetchone()[0]
+        self.assertIn("filepath TEXT NOT NULL UNIQUE", table_sql)

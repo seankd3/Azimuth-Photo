@@ -4,6 +4,7 @@ import shutil
 import unittest.mock
 from fastapi.testclient import TestClient
 from features.library import taste as taste_service
+from features.sync import hashing as sync_hashing
 
 
 class LibraryTests(BackendTestCase):
@@ -1704,6 +1705,309 @@ class LibraryTests(BackendTestCase):
         self.assertEqual([row["filename"] for row in rows], ["first.jpg", "second.jpg"])
         restored = await self._image_row(rows[1]["id"])
         self.assertIsNone(restored["missing_at"])
+
+    async def test_rescan_cascades_master_availability_to_virtual_copy_only(self):
+        source = await self._source("scan-vc-source")
+        filepath = os.path.join(source["path"], "master.jpg")
+        anchor_path = os.path.join(source["path"], "anchor.jpg")
+        with open(filepath, "wb") as handle:
+            handle.write(b"master")
+        with open(anchor_path, "wb") as handle:
+            handle.write(b"anchor")
+        await scanner.scan_folder(source["path"], source_id=source["id"])
+
+        conn = await db.get_db()
+        try:
+            master = await (await conn.execute(
+                "SELECT id FROM images WHERE filepath = ? AND vc_of IS NULL",
+                (filepath,),
+            )).fetchone()
+            cursor = await conn.execute(
+                "INSERT INTO images "
+                "(source_id, filename, filepath, status, file_ext, file_size, file_modified_at, missing_at, vc_of) "
+                "VALUES (?, 'copy-name.jpg', ?, 'kept', '.copy', 999, 1, NULL, ?)",
+                (source["id"], filepath, master["id"]),
+            )
+            copy_id = cursor.lastrowid
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        os.remove(filepath)
+        await scanner.scan_folder(source["path"], source_id=source["id"])
+
+        missing_master = await self._image_row(master["id"])
+        copy = await self._image_row(copy_id)
+        self.assertIsNotNone(missing_master["missing_at"])
+        self.assertEqual(copy["missing_at"], missing_master["missing_at"])
+        self.assertEqual(copy["filename"], "copy-name.jpg")
+        self.assertEqual(copy["file_ext"], ".copy")
+        self.assertEqual(copy["file_size"], 999)
+        self.assertEqual(copy["file_modified_at"], 1.0)
+
+        with open(filepath, "wb") as handle:
+            handle.write(b"master")
+        await scanner.scan_folder(source["path"], source_id=source["id"])
+
+        restored_copy = await self._image_row(copy_id)
+        self.assertIsNone((await self._image_row(master["id"]))["missing_at"])
+        self.assertIsNone(restored_copy["missing_at"])
+        self.assertEqual(restored_copy["filename"], "copy-name.jpg")
+        self.assertEqual(restored_copy["file_ext"], ".copy")
+        self.assertEqual(restored_copy["file_size"], 999)
+        self.assertEqual(restored_copy["file_modified_at"], 1.0)
+
+    async def test_rescan_hashes_all_rematch_candidates_before_writing(self):
+        source = await self._source("scan-rematch-lock-source")
+        new_paths = [
+            os.path.join(source["path"], "new-first.jpg"),
+            os.path.join(source["path"], "new-second.jpg"),
+        ]
+        contents = [b"first", b"other"]
+        for path, content in zip(new_paths, contents):
+            with open(path, "wb") as handle:
+                handle.write(content)
+
+        conn = await db.get_db()
+        try:
+            for index, (path, content) in enumerate(zip(new_paths, contents)):
+                await conn.execute(
+                    "INSERT INTO images "
+                    "(source_id, filename, filepath, status, file_size, file_modified_at, "
+                    "content_hash, missing_at) VALUES (?, ?, ?, 'kept', ?, 1, ?, 100)",
+                    (
+                        source["id"],
+                        f"old-{index}.jpg",
+                        os.path.join(source["path"], f"old-{index}.jpg"),
+                        len(content),
+                        sync_hashing.compute_content_hash(path),
+                    ),
+                )
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        real_compute_content_hash = sync_hashing.compute_content_hash
+        lock_probes = 0
+
+        def compute_hash_with_write_probe(path):
+            nonlocal lock_probes
+            probe = sqlite3.connect(db.DB_PATH, timeout=0.05)
+            try:
+                probe.execute("BEGIN IMMEDIATE")
+                probe.rollback()
+                lock_probes += 1
+            finally:
+                probe.close()
+            return real_compute_content_hash(path)
+
+        rows = [
+            (os.path.basename(path), path, ".jpg", len(content), 1)
+            for path, content in zip(new_paths, contents)
+        ]
+        with unittest.mock.patch.object(
+            sync_hashing,
+            "compute_content_hash",
+            side_effect=compute_hash_with_write_probe,
+        ):
+            await catalog_repository.insert_images_batch(
+                db.DB_PATH,
+                rows,
+                source_id=source["id"],
+            )
+
+        self.assertEqual(lock_probes, 2)
+
+    async def test_rescan_does_not_rematch_when_new_paths_claim_same_missing_image(self):
+        source = await self._source("scan-rematch-collision-source")
+        old_path = os.path.join(source["path"], "old.jpg")
+        new_paths = [
+            os.path.join(source["path"], "new-first.jpg"),
+            os.path.join(source["path"], "new-second.jpg"),
+        ]
+        for path in new_paths:
+            with open(path, "wb") as handle:
+                handle.write(b"shared identity")
+
+        conn = await db.get_db()
+        try:
+            cursor = await conn.execute(
+                "INSERT INTO images "
+                "(source_id, filename, filepath, status, file_size, file_modified_at, "
+                "content_hash, missing_at) VALUES (?, 'old.jpg', ?, 'kept', ?, 1, ?, 100)",
+                (
+                    source["id"],
+                    old_path,
+                    len(b"shared identity"),
+                    sync_hashing.compute_content_hash(new_paths[0]),
+                ),
+            )
+            missing_id = int(cursor.lastrowid)
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        await catalog_repository.insert_images_batch(
+            db.DB_PATH,
+            [
+                (os.path.basename(path), path, ".jpg", len(b"shared identity"), 1)
+                for path in new_paths
+            ],
+            source_id=source["id"],
+        )
+
+        conn = await db.get_db()
+        try:
+            rows = await (await conn.execute(
+                "SELECT id, filepath, missing_at FROM images WHERE source_id = ? ORDER BY id",
+                (source["id"],),
+            )).fetchall()
+        finally:
+            await conn.close()
+
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(rows[0]["id"], missing_id)
+        self.assertEqual(rows[0]["filepath"], old_path)
+        self.assertEqual(rows[0]["missing_at"], 100.0)
+        self.assertEqual({row["filepath"] for row in rows[1:]}, set(new_paths))
+        self.assertTrue(all(row["missing_at"] is None for row in rows[1:]))
+
+    async def test_rescan_rematches_renamed_file_by_content_identity(self):
+        source = await self._source("scan-rename-source")
+        old_path = os.path.join(source["path"], "old-name.jpg")
+        anchor_path = os.path.join(source["path"], "anchor.jpg")
+        with open(old_path, "wb") as handle:
+            handle.write(b"irreplaceable ranked photo")
+        with open(anchor_path, "wb") as handle:
+            handle.write(b"keeps scan nonempty")
+        await scanner.scan_folder(source["path"], source_id=source["id"])
+
+        conn = await db.get_db()
+        try:
+            original = await (await conn.execute(
+                "SELECT id FROM images WHERE filepath = ? AND vc_of IS NULL",
+                (old_path,),
+            )).fetchone()
+            image_id = int(original["id"])
+            await conn.execute(
+                "UPDATE images SET elo = 1675, comparisons = 42, content_hash = ? WHERE id = ?",
+                (sync_hashing.compute_content_hash(old_path), image_id),
+            )
+            copy = await conn.execute(
+                "INSERT INTO images "
+                "(source_id, filename, filepath, status, elo, vc_of) "
+                "VALUES (?, 'copy-label.jpg', ?, 'kept', 1490, ?)",
+                (source["id"], old_path, image_id),
+            )
+            copy_id = int(copy.lastrowid)
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        holding_path = os.path.join(self.tempdir.name, "holding.jpg")
+        os.rename(old_path, holding_path)
+        await scanner.scan_folder(source["path"], source_id=source["id"])
+        self.assertIsNotNone((await self._image_row(image_id))["missing_at"])
+
+        renamed_path = os.path.join(source["path"], "new-name.jpg")
+        os.rename(holding_path, renamed_path)
+        await scanner.scan_folder(source["path"], source_id=source["id"])
+
+        rematched = await self._image_row(image_id)
+        self.assertEqual(rematched["filepath"], renamed_path)
+        self.assertEqual(rematched["filename"], "new-name.jpg")
+        self.assertEqual(rematched["elo"], 1675.0)
+        self.assertEqual(rematched["comparisons"], 42)
+        self.assertIsNone(rematched["missing_at"])
+        rematched_copy = await self._image_row(copy_id)
+        self.assertEqual(rematched_copy["filepath"], renamed_path)
+        self.assertEqual(rematched_copy["filename"], "copy-label.jpg")
+        self.assertEqual(rematched_copy["elo"], 1490.0)
+        conn = await db.get_db()
+        try:
+            count = await (await conn.execute(
+                "SELECT COUNT(*) AS count FROM images WHERE source_id = ? AND vc_of IS NULL",
+                (source["id"],),
+            )).fetchone()
+        finally:
+            await conn.close()
+        self.assertEqual(count["count"], 2)
+
+    async def test_rescan_rematches_moved_file_by_unambiguous_metadata(self):
+        source = await self._source("scan-move-source")
+        first_dir = os.path.join(source["path"], "first")
+        second_dir = os.path.join(source["path"], "second")
+        os.makedirs(first_dir)
+        os.makedirs(second_dir)
+        old_path = os.path.join(first_dir, "same-name.jpg")
+        anchor_path = os.path.join(source["path"], "anchor.jpg")
+        with open(old_path, "wb") as handle:
+            handle.write(b"metadata identity")
+        with open(anchor_path, "wb") as handle:
+            handle.write(b"anchor")
+        await scanner.scan_folder(source["path"], source_id=source["id"])
+
+        conn = await db.get_db()
+        try:
+            original = await (await conn.execute(
+                "SELECT id FROM images WHERE filepath = ?",
+                (old_path,),
+            )).fetchone()
+            image_id = int(original["id"])
+            await conn.execute("UPDATE images SET elo = 1540 WHERE id = ?", (image_id,))
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        holding_path = os.path.join(self.tempdir.name, "same-name.jpg")
+        os.rename(old_path, holding_path)
+        await scanner.scan_folder(source["path"], source_id=source["id"])
+        new_path = os.path.join(second_dir, "same-name.jpg")
+        os.rename(holding_path, new_path)
+        await scanner.scan_folder(source["path"], source_id=source["id"])
+
+        rematched = await self._image_row(image_id)
+        self.assertEqual(rematched["filepath"], new_path)
+        self.assertEqual(rematched["elo"], 1540.0)
+        self.assertIsNone(rematched["missing_at"])
+
+    async def test_rescan_does_not_guess_between_ambiguous_missing_rows(self):
+        source = await self._source("scan-ambiguous-source")
+        new_path = os.path.join(source["path"], "new", "same-name.jpg")
+        os.makedirs(os.path.dirname(new_path))
+        with open(new_path, "wb") as handle:
+            handle.write(b"same")
+        modified_at = os.stat(new_path).st_mtime
+        conn = await db.get_db()
+        try:
+            for folder in ("old-a", "old-b"):
+                await conn.execute(
+                    "INSERT INTO images "
+                    "(source_id, filename, filepath, status, file_size, file_modified_at, missing_at) "
+                    "VALUES (?, 'same-name.jpg', ?, 'kept', 4, ?, 100)",
+                    (source["id"], os.path.join(source["path"], folder, "same-name.jpg"), modified_at),
+                )
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        await catalog_repository.insert_images_batch(
+            db.DB_PATH,
+            [("same-name.jpg", new_path, ".jpg", 4, modified_at)],
+            source_id=source["id"],
+        )
+
+        conn = await db.get_db()
+        try:
+            rows = await (await conn.execute(
+                "SELECT id, filepath, missing_at FROM images WHERE source_id = ? ORDER BY id",
+                (source["id"],),
+            )).fetchall()
+        finally:
+            await conn.close()
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(rows[-1]["filepath"], new_path)
+        self.assertIsNone(rows[-1]["missing_at"])
 
     async def test_rescan_preserves_photos_in_real_and_fenced_directories(self):
         source = await self._source("scan-junk-fence")

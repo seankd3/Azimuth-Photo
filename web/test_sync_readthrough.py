@@ -18,6 +18,7 @@ from unittest import mock
 
 import numpy as np
 
+from data import connection as data_connection
 from features.sync import readthrough
 from features.media import routes as media_routes
 import thumbnails
@@ -112,6 +113,15 @@ class ReadthroughTests(unittest.TestCase):
         self.assertTrue(paths.binary.exists())
         self.assertTrue(paths.metadata.exists())
         self.assertTrue(paths.preview.exists())
+
+    def test_content_hash_lookup_uses_fk_enabled_connection_helper(self):
+        with mock.patch.object(
+            data_connection,
+            "open_sync",
+            wraps=data_connection.open_sync,
+        ) as open_sync:
+            self.assertEqual(readthrough._content_hash_for_image(1, self.db_path), "a" * 32)
+        open_sync.assert_called_once_with(self.db_path)
 
     def test_missing_hub_base_is_an_honest_error(self):
         with sqlite3.connect(self.db_path) as conn:

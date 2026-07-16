@@ -252,6 +252,41 @@ class CompareTests(BackendTestCase):
             await conn.close()
         self.assertEqual(remaining["c"], 0)
 
+    async def test_direct_undo_skips_only_side_with_rating_drift(self):
+        source = await self._source()
+        winner = await self._image(source["id"], "relative-undo-winner.jpg")
+        loser = await self._image(source["id"], "relative-undo-loser.jpg")
+        await db.record_comparison(
+            winner,
+            loser,
+            "swiss",
+            1200.0,
+            1200.0,
+            1210.0,
+            1190.0,
+            action_id="relative-direct-undo",
+        )
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "UPDATE images SET elo = elo + 7 WHERE id = ?",
+                (winner,),
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        undo = await db.undo_last_comparison()
+
+        self.assertEqual(undo["comparisons_undone"], 1)
+        self.assertEqual(undo["skipped_drift"], [winner])
+        restored_winner = await self._image_row(winner)
+        restored_loser = await self._image_row(loser)
+        self.assertAlmostEqual(restored_winner["elo"], 1217.0)
+        self.assertEqual(restored_winner["comparisons"], 1)
+        self.assertAlmostEqual(restored_loser["elo"], 1200.0)
+        self.assertEqual(restored_loser["comparisons"], 0)
+
     async def test_pairing_cache_patch_keeps_immediate_candidate_cache_hot(self):
         compare_service._pairing_cache.update({
             "valid": True,
@@ -476,6 +511,55 @@ class CompareTests(BackendTestCase):
         self.assertNotIn(compared_key, db._ranking_count_cache)
         self.assertEqual(await db.count_rankings(), 2)
         self.assertEqual(await db.count_rankings(compared="compared"), 2)
+
+    async def test_concurrent_comparisons_compute_from_serialized_ratings(self):
+        source = await self._source()
+        winner = await self._image(source["id"], "concurrent-winner.jpg")
+        loser = await self._image(source["id"], "concurrent-loser.jpg")
+        counts = await db.get_catalog_image_counts()
+
+        await asyncio.gather(
+            ratings.record_active_comparison(
+                db.DB_PATH,
+                winner_id=winner,
+                loser_id=loser,
+                mode="swiss",
+                action_id="concurrent-1",
+                catalog_counts=counts,
+            ),
+            ratings.record_active_comparison(
+                db.DB_PATH,
+                winner_id=winner,
+                loser_id=loser,
+                mode="swiss",
+                action_id="concurrent-2",
+                catalog_counts=counts,
+            ),
+        )
+
+        conn = await db.get_db()
+        try:
+            image_rows = await (await conn.execute(
+                "SELECT id, elo, comparisons FROM images WHERE id IN (?, ?) ORDER BY id",
+                (winner, loser),
+            )).fetchall()
+            comparisons = await (await conn.execute(
+                "SELECT elo_before_winner, elo_before_loser FROM comparisons "
+                "WHERE action_id IN ('concurrent-1', 'concurrent-2') ORDER BY id",
+            )).fetchall()
+        finally:
+            await conn.close()
+
+        self.assertEqual([row["comparisons"] for row in image_rows], [2, 2])
+        self.assertEqual(len(comparisons), 2)
+        self.assertNotEqual(
+            comparisons[0]["elo_before_winner"],
+            comparisons[1]["elo_before_winner"],
+        )
+        self.assertNotEqual(
+            comparisons[0]["elo_before_loser"],
+            comparisons[1]["elo_before_loser"],
+        )
 
     async def test_past_matchups_cache_reuses_until_rating_write(self):
         source = await self._source()

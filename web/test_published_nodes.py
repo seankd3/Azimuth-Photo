@@ -108,6 +108,7 @@ class PublishedNodeTests(BackendTestCase):
         self.assertEqual(image_count, 1)
         self.assertEqual(favorite_count, 1)
         self.assertTrue(os.path.exists(f"{migration_path}.pre-v20.bak"))
+        self.assertTrue(os.path.exists(f"{migration_path}.pre-share-owner-cascades.bak"))
         self.assertEqual(
             next(row["on_delete"] for row in image_fks if row["from"] == "share_id"),
             "CASCADE",

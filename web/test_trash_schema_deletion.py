@@ -205,6 +205,12 @@ class TrashSchemaDeletionTests(BackendTestCase):
                 (target_image_id,),
             )
             support_values = await self._support_rows(conn, survivor_ids)
+            orphan_favorite = await conn.execute(
+                "INSERT INTO share_favorites(share_id, image_id, client_name, created_at) "
+                "VALUES (?, ?, 'Target favorite', 1)",
+                (support_values[("collection_shares", "id")], target_image_id),
+            )
+            orphan_favorite_id = int(orphan_favorite.lastrowid)
             relations = await self._image_foreign_keys(conn)
             self.assertGreaterEqual(len(relations), 31)
             self.assertGreaterEqual(len({relation["table"] for relation in relations}), 30)
@@ -266,6 +272,15 @@ class TrashSchemaDeletionTests(BackendTestCase):
                     )
                 ).fetchone(),
                 "multi-hop autocull history dependent survived",
+            )
+            self.assertIsNone(
+                await (
+                    await conn.execute(
+                        "SELECT 1 FROM share_favorites WHERE id = ?",
+                        (orphan_favorite_id,),
+                    )
+                ).fetchone(),
+                "share favorite without an image FK survived",
             )
             violations = await (await conn.execute("PRAGMA foreign_key_check")).fetchall()
             self.assertEqual(violations, [])

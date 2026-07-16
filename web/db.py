@@ -288,25 +288,24 @@ _backfill_image_date_sources = data_schema.backfill_image_date_sources
 
 async def _backup_before_migration(conn) -> None:
     """Take a protected pre-migration snapshot when an existing catalog is
-    about to be upgraded to a newer schema. Best-effort; never blocks startup."""
+    about to be upgraded to a newer schema. Refuse migration without it."""
     try:
         cursor = await conn.execute("PRAGMA user_version")
         row = await cursor.fetchone()
         current = int(row[0]) if row else 0
-    except Exception:
-        return
+    except Exception as exc:
+        raise RuntimeError("Cannot determine catalog version before backup") from exc
     # user_version 0 = a brand-new/pre-versioning DB about to get its tables;
     # only guard a genuine forward upgrade of an existing versioned catalog.
     if not (0 < current < SCHEMA_VERSION):
         return
-    try:
-        from features.system import backups
+    from features.system import backups
 
-        await asyncio.to_thread(
-            backups.backup_before_migration, DB_PATH, current, SCHEMA_VERSION
-        )
-    except Exception:
-        log.exception("pre-migration backup hook failed db=%s", DB_PATH)
+    result = await asyncio.to_thread(
+        backups.backup_before_migration, DB_PATH, current, SCHEMA_VERSION
+    )
+    if not result or not result.get("ok"):
+        raise RuntimeError("Pre-migration catalog backup failed; schema upgrade refused")
 
 
 async def init_db():

@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from core.runtime_paths import resolve_runtime_paths
+from data import connection as data_connection
 
 log = logging.getLogger(__name__)
 
@@ -109,16 +110,16 @@ def _parse_backup_name(name: str) -> datetime | None:
 
 def _sqlite_backup_to_path(source_db: str, dest_db: str) -> None:
     """Copy a live SQLite database via the BACKUP API (not a file copy)."""
-    src = sqlite3.connect(source_db, timeout=60.0)
+    src = data_connection.open_sync(source_db, timeout=60.0)
     try:
-        dst = sqlite3.connect(dest_db, timeout=60.0)
+        dst = data_connection.open_sync(dest_db, timeout=60.0)
         try:
             src.backup(dst)
             dst.commit()
         finally:
-            dst.close()
+            data_connection.close_sync(dst, db_path=dest_db)
     finally:
-        src.close()
+        data_connection.close_sync(src, db_path=source_db)
 
 
 def catalog_quick_check(db_path: str) -> dict[str, Any]:
@@ -217,13 +218,13 @@ def create_snapshot(
 
 def backup_before_migration(
     db_path: str, from_version: int, to_version: int
-) -> dict[str, Any] | None:
+) -> dict[str, Any]:
     """Snapshot an existing catalog immediately before a schema migration.
 
     Reuses the time-machine snapshot engine with a protected ``premigrate``
     label so the pre-upgrade catalog is always restorable if the new schema
-    misbehaves. Best-effort: a backup failure is logged loudly but does not
-    block startup, because migrations are forward-only and tested.
+    misbehaves. Failures propagate so startup cannot run a destructive
+    migration without a verified snapshot.
     """
     try:
         result = create_snapshot(db_path, label=PREMIGRATE_LABEL)
@@ -236,12 +237,12 @@ def backup_before_migration(
         return result
     except Exception:
         log.exception(
-            "catalog_backup premigration FAILED from=v%s to=v%s db=%s — proceeding with migration",
+            "catalog_backup premigration FAILED from=v%s to=v%s db=%s — migration refused",
             from_version,
             to_version,
             db_path,
         )
-        return None
+        raise
 
 
 def list_backups() -> list[dict[str, Any]]:
