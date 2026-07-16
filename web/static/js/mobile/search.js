@@ -60,8 +60,13 @@ function rememberSearch(q) {
 }
 
 function applySearchScope(patch) {
-    if (scopeActive()) patchScope(patch);
-    else setScope(patch);
+    if (scope.similarId || scope.similarImages) {
+        setScope(patch);
+    } else if (scopeActive()) {
+        patchScope(patch);
+    } else {
+        setScope(patch);
+    }
 }
 
 function commitSearch(raw) {
