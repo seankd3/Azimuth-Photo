@@ -255,6 +255,8 @@ def thumbnail_bytes(scan: Scan, entry: dict) -> bytes:
         )
     try:
         resized = thumbnails.generation.resize_to_long_side(image, THUMB_MAX_EDGE)
+        if resized.mode not in ("RGB", "L"):
+            resized = resized.convert("RGB")  # alpha PNG/HEIC cannot encode as JPEG
         data = thumbnails.generation.thumbnail_jpeg_bytes(resized, "sm", 85)
         resized.close()
     finally:

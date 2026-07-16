@@ -66,6 +66,17 @@ class StagedImportTests(BackendTestCase):
             else:
                 os.environ["PHOTOARCHIVE_ORIGINALS_DIR"] = old_root
 
+    async def test_alpha_png_preview_encodes_as_jpeg(self):
+        from PIL import Image
+
+        root = Path(self.tempdir.name)
+        source = root / "alpha.png"
+        Image.new("RGBA", (64, 48), (200, 60, 60, 128)).save(source)
+        scan = await self._card_scan(root, [self._entry(root, source)])
+        scan.card_source = False
+        data = staging.thumbnail_bytes(scan, scan.entries[0])
+        self.assertEqual(data[:3], b"\xff\xd8\xff")
+
     async def test_card_copy_collisions_duplicates_clear_and_rerun(self):
         root = Path(self.tempdir.name)
         originals = root / "originals"
