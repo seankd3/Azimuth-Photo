@@ -246,3 +246,13 @@ class CatalogSourceRouteTests(BackendTestCase):
                 catalog_metadata.resume_catalog_metadata()
             else:
                 catalog_metadata.pause_catalog_metadata()
+    async def test_metadata_scan_start_and_stop_flip_worker_state(self):
+        started = await self._request("POST", "/api/catalog/metadata/start")
+        self.assertEqual(started.status_code, 200, started.text)
+        self.assertTrue(started.json()["metadata_status"]["active"])
+        self.assertFalse(started.json()["metadata_status"]["manual_pause"])
+
+        stopped = await self._request("POST", "/api/catalog/metadata/stop")
+        self.assertEqual(stopped.status_code, 200, stopped.text)
+        self.assertFalse(stopped.json()["metadata_status"]["active"])
+        self.assertTrue(stopped.json()["metadata_status"]["manual_pause"])

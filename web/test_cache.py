@@ -55,3 +55,14 @@ class CacheRouteTests(BackendTestCase):
             thumbnails.configure(old_settings)
         self.assertEqual(refused.status_code, 400, refused.text)
         self.assertIsNotNone(await self._image_row(image_id))
+
+    async def test_pregen_start_and_stop_flip_cache_worker_state(self):
+        started = await self._request("POST", "/api/cache/pregen/start")
+        self.assertEqual(started.status_code, 200, started.text)
+        self.assertEqual(started.json()["cache"]["pregen"]["state"], "running")
+        self.assertFalse(started.json()["cache"]["pregen"]["manual_pause"])
+
+        stopped = await self._request("POST", "/api/cache/pregen/stop")
+        self.assertEqual(stopped.status_code, 200, stopped.text)
+        self.assertEqual(stopped.json()["cache"]["pregen"]["state"], "paused")
+        self.assertTrue(stopped.json()["cache"]["pregen"]["manual_pause"])

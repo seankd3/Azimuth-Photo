@@ -7,6 +7,7 @@ from fractions import Fraction
 
 from PIL import Image
 
+from test_support import BackendTestCase, db
 from features.library import geodata
 from features.library.timeline_import import parse_timeline_file, parse_timeline_payload
 
@@ -100,6 +101,58 @@ class GeoDataTests(unittest.TestCase):
         conn.execute("INSERT INTO images(id, filepath) VALUES (1, ?)", (image_path,))
         conn.commit()
         conn.close()
+
+
+class GeoTimelineImportRouteTests(BackendTestCase):
+    async def _request(self, method, path, **kwargs):
+        from fastapi.testclient import TestClient
+
+        def send():
+            with TestClient(__import__("app").app) as client:
+                return client.request(method, path, **kwargs)
+
+        return await asyncio.to_thread(send)
+
+    async def test_timeline_import_http_fills_missing_gps_without_downgrading_exif(self):
+        source = await self._source()
+        inferred_id = await self._image(source["id"], "timeline.jpg")
+        exif_id = await self._image(source["id"], "camera-gps.jpg")
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "UPDATE images SET date_taken = ?, latitude = ?, longitude = ?, location_source = ? WHERE id = ?",
+                ("2024-01-01T00:00:10Z", 41.5, -87.75, "exif", exif_id),
+            )
+            await conn.execute(
+                "UPDATE images SET date_taken = ? WHERE id = ?",
+                ("2024-01-01T00:00:10Z", inferred_id),
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+        timeline_path = os.path.join(self.tempdir.name, "Records.json")
+        with open(timeline_path, "w", encoding="utf-8") as handle:
+            json.dump({"locations": [{
+                "timestampMs": "1704067210000",
+                "latitudeE7": 415000000,
+                "longitudeE7": -877500000,
+            }]}, handle)
+
+        response = await self._request("POST", "/api/geo/timeline/import", json={"path": timeline_path})
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["points_imported"], 1)
+        self.assertEqual(response.json()["inference"]["timeline"], 1)
+        inferred = await self._image_row(inferred_id)
+        exif = await self._image_row(exif_id)
+        self.assertEqual(
+            (inferred["latitude"], inferred["longitude"], inferred["location_source"]),
+            (41.5, -87.75, "timeline"),
+        )
+        self.assertEqual(
+            (exif["latitude"], exif["longitude"], exif["location_source"]),
+            (41.5, -87.75, "exif"),
+        )
 
 
 if __name__ == "__main__":
