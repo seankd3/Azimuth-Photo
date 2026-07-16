@@ -1,4 +1,5 @@
 import os
+import re
 import sqlite3
 
 from fastapi import APIRouter, Request
@@ -21,10 +22,71 @@ def configure(*, templates, template_context) -> None:
     _template_context = template_context
 
 
+_MODULE_PRELOAD_CACHE: dict = {}
+_IMPORT_FROM_RE = re.compile(r"""from\s*['"](\.\.?/[^'"]+?\.js)['"]""")
+_IMPORT_SIDE_RE = re.compile(r"""^\s*import\s+['"](\.\.?/[^'"]+?\.js)['"]""")
+
+
+def _module_static_imports(text: str) -> list:
+    deps = []
+    for line in text.splitlines():
+        stripped = line.lstrip()
+        if stripped.startswith("//") or stripped.startswith("*"):
+            continue
+        if "import(" in line or "import (" in line:  # dynamic import -> lazy chunk
+            continue
+        m = _IMPORT_FROM_RE.search(line) or _IMPORT_SIDE_RE.search(line)
+        if m:
+            deps.append(m.group(1))
+    return deps
+
+
+def _eager_module_preloads(entry: str) -> list:
+    """Modules statically reachable from `entry` (relative to static/js/) for
+    <link rel=modulepreload>. Excludes the entry and dynamically-imported chunks."""
+    cached = _MODULE_PRELOAD_CACHE.get(entry)
+    if cached is not None:
+        return cached
+    js_root = os.path.join(_STATIC_DIR, "js")
+    ordered: list = []
+    seen: set = set()
+    queue = [entry]
+    while queue:
+        rel = queue.pop(0)
+        if rel in seen:
+            continue
+        seen.add(rel)
+        path = os.path.normpath(os.path.join(js_root, rel))
+        if not path.startswith(js_root) or not os.path.isfile(path):
+            continue
+        if rel != entry:
+            ordered.append(rel)
+        try:
+            text = open(path, encoding="utf-8").read()
+        except OSError:
+            continue
+        cur_dir = os.path.dirname(rel)
+        for dep in _module_static_imports(text):
+            dep_rel = os.path.normpath(os.path.join(cur_dir, dep)).replace(os.sep, "/")
+            if dep_rel not in seen:
+                queue.append(dep_rel)
+    _MODULE_PRELOAD_CACHE[entry] = ordered
+    return ordered
+
+
 def _render(request: Request, template_name: str):
     if _templates is None or _template_context is None:
         raise RuntimeError("Page routes are not configured")
-    return _templates.TemplateResponse(request, template_name, _template_context(request))
+    context = dict(_template_context(request))
+    if template_name == "desktop.html":
+        # Preload the browse-critical eager graph. Exclude the heavy RAW develop
+        # editor (develop/**) so it does not high-priority-crowd first paint; it
+        # still loads on demand for editing.
+        context["module_preloads"] = [
+            mod for mod in _eager_module_preloads("desktop/bootstrap.js")
+            if "/develop/" not in mod
+        ]
+    return _templates.TemplateResponse(request, template_name, context)
 
 
 def needs_setup() -> bool:
