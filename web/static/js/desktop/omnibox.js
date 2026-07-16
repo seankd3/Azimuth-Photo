@@ -64,7 +64,7 @@ const COMMANDS = [
     { icon: 'star', label: 'Toggle Best of', kbd: 'B', run: toggleBestOf },
     { icon: 'download', label: 'Export CSV', run: () => exportCurrentScope('csv') },
     { icon: 'download', label: 'Export JSON', run: () => exportCurrentScope('json') },
-    { icon: 'download', label: 'Download files (zip)', run: () => exportCurrentScope('zip', 'original') },
+    { icon: 'download', label: 'Download files (zip)', run: () => exportCurrentScope('zip') },
     { icon: 'plus', label: 'New collection', run: requestNewCollection },
     { icon: 'bookmark', label: 'Save current view', run: requestSaveCurrentView },
     { icon: 'sparkles', label: 'Save as Smart Collection', meta: () => smartQuerySummary(), when: smartQueryActive, run: requestSaveSmartCollection },

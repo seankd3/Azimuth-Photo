@@ -208,15 +208,18 @@ class DevelopParityTests(unittest.TestCase):
         )
         expected = np.array(
             [
-                # GrainFrequency refresh: Roughness now changes the rendered hash grid.
-                0.6304848790168762, 0.2532420754432678, 0.0, 1.0, 7747.39794921875, 0.0,
-                0.6478832364082336, 1.0, 0.6974471211433411,
-                0.7885599136352539, 0.62953782081604, 0.9150823950767517,
+                # Refresh for the Contrast2012 smoothstep S-curve landing on top of
+                # the GrainFrequency hash-grid change (both intentional).
+                0.6494200229644775, 0.2593097388744354, 0.0, 1.0, 7980.07275390625, 0.0,
+                0.6723297536373138, 1.0, 0.7094041705131531,
+                0.8083137273788452, 0.6816521286964417, 0.9150823950767517,
                 0.9150823950767517, 0.9150823950767517,
             ],
             dtype=np.float64,
         )
-        np.testing.assert_allclose(stats, expected, rtol=0.0, atol=2e-6)
+        # rtol covers cross-platform BLAS drift on the large-magnitude sum stat
+        # (Windows vs Linux differ by ~5e-4 at magnitude ~8e3).
+        np.testing.assert_allclose(stats, expected, rtol=1e-6, atol=2e-6)
 
     def test_torture_settings_match_webgl(self):
         settings = torture_settings()

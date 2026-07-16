@@ -137,3 +137,13 @@ class VersionEndpointTests(unittest.TestCase):
             response.json(),
             {"deleted_count": 0, "freed_bytes": 0, "errors": [], "skipped_offline": 0},
         )
+
+
+def test_app_version_survives_a_missing_version_file(monkeypatch, tmp_path):
+    from core import version
+
+    monkeypatch.setattr(version, "_version_file", lambda: tmp_path / "no-such-VERSION")
+    assert version.app_version() == "0.0.0-unknown"
+    payload = version.version_payload()
+    assert payload["app_version"] == "0.0.0-unknown"
+    assert payload["api_rev"] == version.API_REV

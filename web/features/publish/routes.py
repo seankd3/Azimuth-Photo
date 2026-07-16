@@ -60,6 +60,10 @@ _thumbnails = None
 _jobs: dict[int, dict] = {}
 _db_path: DbPath | None = None
 _create_published_node_share: CreatePublishedNodeShare | None = None
+_scheduled_hook_retries: set[int] = set()
+
+HOOK_RETRY_BASE_SECONDS = 30
+HOOK_RETRY_MAX_SECONDS = 15 * 60
 
 
 class PublishBody(BaseModel):
@@ -346,7 +350,7 @@ async def api_get_collection_publish(collection_id: int):
         "publish": _publish_payload(publish),
         "url": _public_url(publish["slug"]) if publish else None,
         "job": job,
-        "in_progress": bool(job and job.get("state") in {"publishing", "revoking"}),
+        "in_progress": _job_in_progress(collection_id),
         "publishing": _publishing_config_payload(),
     }
 
@@ -399,6 +403,8 @@ async def _run_publish_job(collection_id: int, slug: str, title: str) -> None:
             )
 
         def persist_publish(summary, hook):
+            hook_failed = bool(hook and not hook.ok)
+            attempts = 1 if hook_failed else 0
             return asyncio.run(
                 _upsert_publish(
                     collection_id=collection_id,
@@ -410,6 +416,10 @@ async def _run_publish_job(collection_id: int, slug: str, title: str) -> None:
                     hook_exit_code=hook.returncode if hook and hook.configured else None,
                     hook_output=hook.output if hook and hook.configured else "",
                     hook_ran_at=hook.ran_at if hook and hook.configured else None,
+                    hook_pending=hook_failed,
+                    hook_attempts=attempts,
+                    hook_next_retry_at=_next_hook_retry_at(attempts) if hook_failed else None,
+                    hook_pending_operation="publish" if hook_failed else "",
                 )
             )
 
@@ -423,14 +433,16 @@ async def _run_publish_job(collection_id: int, slug: str, title: str) -> None:
             progress=progress,
         )
         row = result.publish_row
-        state = "hook_failed" if result.hook and not result.hook.ok else "live"
-        _finish_job(
-            collection_id,
-            state,
-            publish=_publish_payload(row),
-            push_error=result.push_error,
-            hook=result.hook,
-        )
+        if result.hook and not result.hook.ok:
+            _queue_hook_retry(row, legacy_state="hook_failed", force=True)
+        else:
+            _finish_job(
+                collection_id,
+                "live",
+                publish=_publish_payload(row),
+                push_error=result.push_error,
+                hook=result.hook,
+            )
     except (PublishConflict, PublishDeployError, PublishSetupError) as exc:
         _fail_job(collection_id, exc, operation="publish")
     except Exception as exc:
@@ -446,8 +458,27 @@ async def _run_revoke_job(collection_id: int, slug: str) -> None:
         def published_rows():
             return asyncio.run(_list_publishes())
 
-        def persist_revoke(_hook):
-            return asyncio.run(_delete_publish(collection_id))
+        def persist_revoke(hook):
+            if hook is None or hook.ok:
+                return asyncio.run(_delete_publish(collection_id))
+            attempts = 1
+            return asyncio.run(
+                _upsert_publish(
+                    collection_id=collection_id,
+                    slug=publish["slug"],
+                    title=publish["title"],
+                    image_count=publish["image_count"],
+                    bundle_bytes=publish["bundle_bytes"],
+                    last_commit=publish.get("last_commit"),
+                    hook_exit_code=hook.returncode if hook.configured else None,
+                    hook_output=hook.output if hook.configured else "",
+                    hook_ran_at=hook.ran_at if hook.configured else None,
+                    hook_pending=True,
+                    hook_attempts=attempts,
+                    hook_next_retry_at=_next_hook_retry_at(attempts),
+                    hook_pending_operation="revoke",
+                )
+            )
 
         result = await _deployer.revoke(
             slug=slug,
@@ -456,8 +487,11 @@ async def _run_revoke_job(collection_id: int, slug: str) -> None:
             persist_revoke=persist_revoke,
             progress=progress,
         )
-        state = "revoked_hook_failed" if result.hook and not result.hook.ok else "revoked"
-        _finish_job(collection_id, state, publish=None, push_error=result.push_error, hook=result.hook)
+        if result.hook and not result.hook.ok:
+            row = await _get_publish(collection_id)
+            _queue_hook_retry(row, legacy_state="revoked_hook_failed", force=True)
+        else:
+            _finish_job(collection_id, "revoked", publish=None, push_error=result.push_error, hook=result.hook)
     except (PublishConflict, PublishDeployError, PublishSetupError) as exc:
         _fail_job(collection_id, exc, operation="revoke")
     except Exception as exc:
@@ -487,7 +521,13 @@ def _start_job(collection_id: int, state: str, *, slug: str, title: str) -> None
 
 def _job_in_progress(collection_id: int) -> bool:
     job = _jobs.get(int(collection_id))
-    return bool(job and job.get("state") in {"publishing", "revoking"})
+    return bool(
+        job
+        and (
+            job.get("state") in {"publishing", "revoking"}
+            or (job.get("state") == "hook_retrying" and job.get("executing"))
+        )
+    )
 
 
 def _update_job(collection_id: int, **fields) -> None:
@@ -513,7 +553,159 @@ def _finish_job(
         completed_at=time.time(),
         push_error=push_error,
         hook=_hook_payload(hook),
+        retrying=False,
+        executing=False,
+        next_retry_at=None,
     )
+
+
+def _next_hook_retry_at(attempts: int, *, now: float | None = None) -> float:
+    delay = min(HOOK_RETRY_MAX_SECONDS, HOOK_RETRY_BASE_SECONDS * (2 ** max(0, int(attempts) - 1)))
+    return (time.time() if now is None else float(now)) + delay
+
+
+def _queue_hook_retry(row: dict | None, *, legacy_state: str, force: bool = False) -> None:
+    if not row or not row.get("hook_pending"):
+        return
+    collection_id = int(row["collection_id"])
+    if _job_in_progress(collection_id) and not force:
+        return
+    next_retry_at = float(row.get("hook_next_retry_at") or time.time())
+    _jobs[collection_id] = {
+        "state": "hook_retrying",
+        "legacy_state": legacy_state,
+        "hook_failure_state": legacy_state,
+        "phase": "waiting to retry hook",
+        "slug": row["slug"],
+        "title": row["title"],
+        "started_at": time.time(),
+        "completed_at": None,
+        "error": None,
+        "status_code": None,
+        "hook": _hook_payload(row),
+        "retrying": True,
+        "executing": False,
+        "next_retry_at": next_retry_at,
+        "attempts": int(row.get("hook_attempts") or 0),
+        "publish": _publish_payload(row),
+        "url": _public_url(row["slug"]),
+    }
+    if collection_id in _scheduled_hook_retries:
+        return
+    _scheduled_hook_retries.add(collection_id)
+    _schedule(_wait_for_hook_retry(collection_id, row["hook_pending_operation"], next_retry_at))
+
+
+async def resume_pending_hook_retries() -> None:
+    """Restore durable hook confirmations after the app process starts."""
+    _configured()
+    for row in await _list_publishes():
+        if row.get("hook_pending") and row.get("hook_pending_operation") in {"publish", "revoke"}:
+            legacy_state = "hook_failed" if row["hook_pending_operation"] == "publish" else "revoked_hook_failed"
+            _queue_hook_retry(row, legacy_state=legacy_state)
+
+
+async def _wait_for_hook_retry(collection_id: int, operation: str, expected_retry_at: float) -> None:
+    rescheduled = False
+    try:
+        await asyncio.sleep(max(0, expected_retry_at - time.time()))
+        if _job_in_progress(collection_id):
+            return
+        row = await _get_publish(collection_id)
+        if not _retry_is_current(row, operation, expected_retry_at):
+            return
+        _update_job(
+            collection_id,
+            state="hook_retrying",
+            phase="retrying hook",
+            executing=True,
+            retrying=True,
+        )
+        assert _deployer is not None
+        hook = await _deployer.retry_hook()
+        if hook.ok:
+            await _finalize_hook_retry(row, operation, hook)
+            return
+        _scheduled_hook_retries.discard(collection_id)
+        await _record_hook_retry_failure(row, operation, hook)
+        rescheduled = True
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        log.exception(
+            "worker=publish operation=hook_retry collection_id=%s failed unexpectedly",
+            collection_id,
+        )
+        row = await _get_publish(collection_id)
+        if _retry_is_current(row, operation, expected_retry_at):
+            _scheduled_hook_retries.discard(collection_id)
+            _queue_hook_retry(row, legacy_state=_legacy_hook_state(operation), force=True)
+            rescheduled = True
+    finally:
+        if not rescheduled:
+            _scheduled_hook_retries.discard(collection_id)
+
+
+def _retry_is_current(row: dict | None, operation: str, expected_retry_at: float) -> bool:
+    return bool(
+        row
+        and row.get("hook_pending")
+        and row.get("hook_pending_operation") == operation
+        and float(row.get("hook_next_retry_at") or 0) == float(expected_retry_at)
+    )
+
+
+async def _finalize_hook_retry(row: dict, operation: str, hook: HookStatus) -> None:
+    collection_id = int(row["collection_id"])
+    if operation == "revoke":
+        await _delete_publish(collection_id)
+        _finish_job(collection_id, "revoked", publish=None, push_error=None, hook=hook)
+        return
+    published = await _upsert_publish_from_row(row, hook=hook)
+    _finish_job(collection_id, "live", publish=_publish_payload(published), push_error=None, hook=hook)
+
+
+async def _record_hook_retry_failure(row: dict, operation: str, hook: HookStatus) -> None:
+    attempts = int(row.get("hook_attempts") or 0) + 1
+    pending = await _upsert_publish_from_row(
+        row,
+        hook=hook,
+        hook_pending=True,
+        hook_attempts=attempts,
+        hook_next_retry_at=_next_hook_retry_at(attempts),
+        hook_pending_operation=operation,
+    )
+    _queue_hook_retry(pending, legacy_state=_legacy_hook_state(operation), force=True)
+
+
+async def _upsert_publish_from_row(
+    row: dict,
+    *,
+    hook: HookStatus,
+    hook_pending: bool = False,
+    hook_attempts: int = 0,
+    hook_next_retry_at: float | None = None,
+    hook_pending_operation: str = "",
+) -> dict:
+    return await _upsert_publish(
+        collection_id=int(row["collection_id"]),
+        slug=row["slug"],
+        title=row["title"],
+        image_count=int(row.get("image_count") or 0),
+        bundle_bytes=int(row.get("bundle_bytes") or 0),
+        last_commit=row.get("last_commit"),
+        hook_exit_code=hook.returncode if hook.configured else None,
+        hook_output=hook.output if hook.configured else "",
+        hook_ran_at=hook.ran_at if hook.configured else None,
+        hook_pending=hook_pending,
+        hook_attempts=hook_attempts,
+        hook_next_retry_at=hook_next_retry_at,
+        hook_pending_operation=hook_pending_operation,
+    )
+
+
+def _legacy_hook_state(operation: str) -> str:
+    return "hook_failed" if operation == "publish" else "revoked_hook_failed"
 
 
 def _fail_job(collection_id: int, exc: Exception, *, operation: str) -> None:
@@ -560,6 +752,11 @@ def _publish_payload(row: dict | None) -> dict | None:
     payload = dict(row)
     payload["url"] = _public_url(row["slug"])
     payload["hook_status"] = _hook_payload(row)
+    payload["retrying"] = bool(row.get("hook_pending"))
+    payload["next_retry_at"] = row.get("hook_next_retry_at")
+    payload["attempts"] = int(row.get("hook_attempts") or 0)
+    if payload["retrying"]:
+        payload["hook_failure_state"] = _legacy_hook_state(row.get("hook_pending_operation") or "publish")
     return payload
 
 

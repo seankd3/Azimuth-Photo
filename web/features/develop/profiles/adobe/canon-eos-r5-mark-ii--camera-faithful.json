@@ -1,7 +1,8 @@
 {
   "baseline_exposure": 0.52,
+  "baseline_exposure_offset": -0.5,
   "camera_model": "Canon EOS R5 Mark II",
-  "content_hash": "92966523021e7d1179f3600ff6774ef52caeda16a9d2f9fc8039a593113488a9",
+  "content_hash": "173e2bc5370809d043895e15188b014148c10bd6f71c6c6bebc33cea23049bb5",
   "illuminants": {
     "calibration_illuminant1": 17,
     "calibration_illuminant2": 21

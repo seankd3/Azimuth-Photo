@@ -4,7 +4,8 @@ import {
     CALIBRATION_SHADOW_TINT_SCALE, CAMERA_PROFILE_BIN_CENTER,
     CAMERA_PROFILE_CHROMA_BINS, CAMERA_PROFILE_HUE_BINS, CAMERA_PROFILE_PI,
     CAMERA_PROFILE_TWO_PI, CLARITY_FACTOR, DNG_LINEAR_SRGB_TO_PROPHOTO, DNG_PROPHOTO_TO_LINEAR_SRGB,
-    CLARITY_RESIDUAL_MAX, CONTRAST_FACTOR, DEHAZE_AIRLIGHT_FACTOR, DEHAZE_SATURATION_FACTOR,
+    CLARITY_RESIDUAL_MAX, CONTRAST_FACTOR, CONTRAST_S_STRENGTH,
+    SIGMOID_FILM_POWER, SIGMOID_PAPER_POWER, SIGMOID_PAPER_EXP, SIGMOID_FILM_FOG, DEHAZE_AIRLIGHT_FACTOR, DEHAZE_SATURATION_FACTOR,
     GRAIN_CELL_SIZE_MIN, GRAIN_CELL_SIZE_RANGE, GRAIN_FACTOR, GRAIN_FREQUENCY_MIN,
     GRAIN_FREQUENCY_RANGE, GRAIN_HASH_MULTIPLIER,
     GRAIN_HASH_SHIFT, GRAIN_OUTPUT_MASK, GRAIN_OUTPUT_SHIFT, GRAIN_SEED,
@@ -539,6 +540,12 @@ uniform vec3 u_gradeGlobal;
 uniform float u_gradeBlending;
 uniform float u_gradeBalance;
 uniform bool u_dngActive;
+uniform bool u_hdrSigmoid;
+vec3 sigmoidView(vec3 v) {
+    // Twin of features/develop/sigmoid_view.py (darktable log-logistic port).
+    vec3 f = pow(vec3(${f(SIGMOID_FILM_FOG)}) + max(v, vec3(0.0)), vec3(${f(SIGMOID_FILM_POWER)}));
+    return clamp(pow(f / (vec3(${f(SIGMOID_PAPER_EXP)}) + f), vec3(${f(SIGMOID_PAPER_POWER)})), 0.0, 1.0);
+}
 uniform bool u_dngHueActive;
 uniform bool u_dngLookActive;
 uniform sampler2D u_dngHueSat;
@@ -658,9 +665,11 @@ vec3 applyScene(vec2 uv, out vec2 imageUv) {
     rgb *= exp2(deltaEv);
     float Y2 = dot(rgb, LUMW);
     float t = pow(clamp(Y2, 0.0, 1.0), 1.0 / 2.2);
-    float t3 = .5 + (t - .5) * (1.0 + ${f(CONTRAST_FACTOR)} * setting(u_contrast));
+    float cC = setting(u_contrast);
+    float tS = t * t * (3.0 - 2.0 * t);  // smoothstep S twin of pipeline._region_tone_map
+    float t3 = t + sign(cC) * ${f(CONTRAST_S_STRENGTH)} * abs(cC) * (tS - t);
     t3 = t3 < 0.0 ? 0.0 : (t3 > 1.0 ? 1.0 + (t3 - 1.0) / (1.0 + 4.0 * (t3 - 1.0)) : t3);
-    rgb *= pow(max(t3, 0.0), 2.2) / max(Y2, 1e-6);
+    rgb *= pow(max(t3, 0.0), 2.2) / max(u_hdrSigmoid ? min(Y2, 1.0) : Y2, 1e-6);
     float d = setting(u_dehaze);
     if (abs(d) > 1e-5) rgb = max((rgb - vec3(${f(DEHAZE_AIRLIGHT_FACTOR)} * d)) / (1.0 - ${f(DEHAZE_AIRLIGHT_FACTOR)} * d), vec3(0.0));
     return rgb;
@@ -675,7 +684,10 @@ vec3 applyColor(vec2 uv, out vec2 imageUv) {
         vec3 film = filmTransform(rgb, glow, uv * u_sourceSize, min(u_sourceSize.x, u_sourceSize.y));
         c = mix(c, film, clamp(u_filmStrength, 0.0, 1.0));
     } else {
-        if (u_dngActive) {
+        if (u_hdrSigmoid) {
+            vec3 sceneSrgb = u_dngActive ? max(u_dngProPhotoToSrgb * rgb, vec3(0.0)) : max(rgb, vec3(0.0));
+            c = linearToSrgb(sigmoidView(sceneSrgb));
+        } else if (u_dngActive) {
             c = linearToSrgb(clamp(u_dngProPhotoToSrgb * dngApplyTone(rgb), 0.0, 1.0));
         } else {
             c = vec3(texture(u_baseCurve, vec2(c.r, .5)).r, texture(u_baseCurve, vec2(c.g, .5)).r, texture(u_baseCurve, vec2(c.b, .5)).r);
@@ -882,6 +894,8 @@ uniform sampler2D u_preDetail;
 uniform bool u_preDetailActive;
 uniform int u_softProofProfile;
 uniform bool u_gamutWarning;
+uniform bool u_clipShadow;
+uniform bool u_clipHighlight;
 uniform mat3 u_srgbToXyz;
 uniform mat3 u_xyzToSrgb;
 uniform mat3 u_proofToXyz;
@@ -1037,6 +1051,8 @@ void main() {
     if (u_softProofProfile > 0) c = linearToSrgb(u_xyzToSrgb * (u_proofToXyz * clamp(proof, 0.0, 1.0)));
     if (u_softProofProfile == 4) c = vec3(${f(SOFT_PROOF_PAPER_BLACK)}) + c * ${f(SOFT_PROOF_PAPER_WHITE - SOFT_PROOF_PAPER_BLACK)};
     if (u_gamutWarning && outsideProof) c = mix(c, vec3(1.0, .08, .48), .42);
+    if (u_clipHighlight && any(greaterThanEqual(c, vec3(254.5 / 255.0)))) c = vec3(1.0, .12, .12);
+    if (u_clipShadow && all(lessThanEqual(c, vec3(0.5 / 255.0)))) c = vec3(.16, .35, 1.0);
     outColor = vec4(clamp(c, 0.0, 1.0), 1.0);
 }`;
 
@@ -1592,6 +1608,12 @@ export class DevelopRenderer {
         this.requestRender();
     }
 
+    setClipOverlay(shadow, highlight) {
+        this.clipShadow = Boolean(shadow);
+        this.clipHighlight = Boolean(highlight);
+        this.requestRender();
+    }
+
     setHealOverlay(show) {
         this.healOverlay = Boolean(show);
         this.requestRender();
@@ -1701,6 +1723,7 @@ export class DevelopRenderer {
         gl.uniform2fv(uniform('u_cameraAbDelta[0]'), profileTable);
         gl.uniform1fv(uniform('u_cameraChromaEdges[0]'), new Float32Array(profileEdges));
         const lens = this.meta.lens_correction || this.meta.color?.lens_correction || null;
+        gl.uniform1i(uniform('u_hdrSigmoid'), this.meta.hdr ? 1 : 0);
         const lensEnabled = boolSetting(s, 'LensProfileEnable') && !this.meta.hdr && !!lens;
         const distortion = lens?.distortion || null;
         const lensModel = { poly3: 1, poly5: 2, ptlens: 3 }[String(distortion?.model || '').toLowerCase()] || 0;
@@ -2027,6 +2050,8 @@ export class DevelopRenderer {
         ]);
         gl.uniform1i(uniform('u_softProofProfile'), proofProfile);
         gl.uniform1i(uniform('u_gamutWarning'), this.softProof?.warning ? 1 : 0);
+        gl.uniform1i(uniform('u_clipShadow'), this.clipShadow ? 1 : 0);
+        gl.uniform1i(uniform('u_clipHighlight'), this.clipHighlight ? 1 : 0);
         gl.uniformMatrix3fv(uniform('u_srgbToXyz'), false, columnMajor(SOFT_PROOF_SRGB_TO_XYZ));
         gl.uniformMatrix3fv(uniform('u_xyzToSrgb'), false, columnMajor(SOFT_PROOF_XYZ_TO_SRGB));
         gl.uniformMatrix3fv(uniform('u_proofToXyz'), false, columnMajor(proofToXyz));

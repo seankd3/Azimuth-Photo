@@ -1,11 +1,12 @@
 import {
     addCatalogSource, applyRemoteAccessServe, clearCache, connectToHub, createDeviceLink, discoverHubs,
     getAiStatus, getCacheStatus, getCaptionStatus, getCatalog, getMetadataStatus, getPairStatus,
-    getPeopleStatus, getRemoteAccess, getScanStatus, getSettings, getSyncStatus, getVersion, installAiModel, listDevices,
+    getFreeable, getFreeUpJob, getPeopleStatus, getRemoteAccess, getScanStatus, getSettings, getSyncStatus, getVersion,
+    installAiModel, listDevices,
     pauseAiEmbeddings,
     pauseCaptionScan, pausePeopleScan, removeCatalogSource, rescanCatalogSource, resumeAiEmbeddings,
     resumeCaptionScan, resumePeopleScan, revokeDevice, saveSettings, startCachePregen, startMetadataScan, stopCachePregen,
-    stopMetadataScan,
+    stopMetadataScan, startFreeUpSpace, cancelFreeUpJob, getStorageOverview, revealFolder,
 } from './api.js';
 import {
     emit, on, patchPrefs, scope, setActiveLens, setThumbSize, viewState,
@@ -32,6 +33,7 @@ let scanSourceId = null;
 let installTimerGeneration = 0;
 let scanTimerGeneration = 0;
 let catalog = null;
+let storageOverview = null;
 let aiStatus = null;
 let cacheStatus = null;
 let peopleStatus = null;
@@ -40,6 +42,10 @@ let metadataStatus = null;
 let remoteAccess = null;
 let pairStatus = null;
 let syncStatus = null;
+let freeableStatus = null;
+let freeupJob = null;
+let freeupOlderDays = 30;
+let freeupTimer = null;
 let devicesPayload = null;
 let linkSession = null;
 let discoverPayload = null;
@@ -56,6 +62,8 @@ const settingTimers = new Map();
 const busyActions = new Set();
 const workerActionGenerations = new Map();
 const workerActionsInFlight = new Set();
+let sourceAddFlow = null;
+let sourceAddFlowReturn = null;
 // Shared contract: const INACTIVE_WORKER_STATES = new Set(['idle', 'ready', 'paused', 'complete', 'caught_up', 'error', 'disabled', 'unavailable', 'stale']);
 const SETTING_DEFS = {
     embed_model_preset: { type: 'select' },
@@ -424,6 +432,52 @@ function lastScan(source) {
     return `scanned ${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
 }
 
+function archiveHomeName(path) {
+    const clean = String(path || '').replace(/\/+$/, '');
+    return clean.split('/').filter(Boolean).pop() || clean || 'Archive home';
+}
+
+function archiveSummary(overview) {
+    const parts = ['Your archive'];
+    if (overview?.photo_count != null) parts.push(`${fmt(overview.photo_count)} photos`);
+    if (overview?.originals_bytes != null) parts.push(bytes(overview.originals_bytes));
+    if (overview?.disk_free_bytes != null) {
+        parts.push(`${bytes(overview.disk_free_bytes)} free${overview.disk_label ? ` on ${overview.disk_label}` : ''}`);
+    }
+    return parts.join(' · ');
+}
+
+function renderArchiveOverview() {
+    const overview = storageOverview;
+    const homePath = overview?.home_path || '';
+    const home = archiveHomeName(homePath);
+    return '<section class="dr-sec"><h3>Archive</h3><div class="setting-status archive-overview">'
+        + `<b>${esc(archiveSummary(overview))}</b>`
+        + (homePath
+            ? `<div class="archive-home"><span><b title="${esc(home)}">${esc(home)}</b><code title="${esc(homePath)}">${esc(homePath)}</code></span><button class="mini-btn" type="button" data-archive-open="${esc(homePath)}">Open</button></div>`
+            : '<span class="archive-unavailable">Archive details are unavailable right now.</span>')
+        + '</div></section>';
+}
+
+function bindArchiveOpen(scopeEl) {
+    scopeEl.querySelector('[data-archive-open]')?.addEventListener('click', async (event) => {
+        const result = await revealFolder(event.currentTarget.dataset.archiveOpen || '');
+        if (result?.ok && result?.data?.ok) showToast('Opened archive home');
+        else showToast(result?.data?.error || 'Couldn’t open archive home');
+    });
+}
+
+function patchArchiveOverview(body) {
+    const card = body.querySelector('.archive-overview');
+    if (!card || !storageOverview) return;
+    const wrap = document.createElement('div');
+    wrap.innerHTML = renderArchiveOverview();
+    const next = wrap.querySelector('.archive-overview');
+    if (!next || card.innerHTML === next.innerHTML) return;
+    card.innerHTML = next.innerHTML;
+    bindArchiveOpen(card);
+}
+
 function dateTime(value) {
     const raw = Number(value || 0);
     if (!raw) return 'not published';
@@ -500,7 +554,8 @@ function renderStorage() {
         return `<span class="tier-chip" data-tier-size="${size}"><b>${size.toUpperCase()}</b><span data-tier-count>${fmt(tier.count)} files</span><span data-tier-bytes>${bytes(tier.bytes)}</span></span>`;
     }).join('');
     const totalFiles = Object.values(tiers).reduce((sum, tier) => sum + Number(tier?.count || 0), 0);
-    return '<section class="dr-sec"><h3>Storage</h3>'
+    return '<section class="dr-sec"><h3>Cache</h3>'
+        + '<p class="setting-hint">Previews only — your photos live in the Archive.</p>'
         + `<div class="tier-chips">${chips}</div>`
         + `<button class="btn btn-danger" id="clear-cache-btn" data-cache-files="${totalFiles}">Clear cache</button>`
         + '</section>';
@@ -512,7 +567,7 @@ function renderPeekStorage() {
         const tier = tiers[size] || {};
         return `<span class="tier-chip" data-tier-size="${size}"><b>${size.toUpperCase()}</b><span data-tier-count>${fmt(tier.count)} files</span><span data-tier-bytes>${bytes(tier.bytes)}</span></span>`;
     }).join('');
-    return `<section class="dr-sec"><h3>Storage</h3><div class="tier-chips">${chips}</div></section>`;
+    return `<section class="dr-sec"><h3>Cache</h3><div class="tier-chips">${chips}</div></section>`;
 }
 
 function renderPeekSources() {
@@ -535,6 +590,63 @@ function renderPeekHealth() {
     const offline = sources.filter((source) => !(Number(source.online) === 1 || source.online === true)).length;
     const detail = offline ? `${offline} source${offline === 1 ? '' : 's'} offline` : 'All connected sources reachable';
     return `<section class="dr-sec"><h3>Library health</h3><div class="setting-status">${esc(detail)}</div></section>`;
+}
+
+function freeupActive() {
+    return Boolean(freeupJob && ['queued', 'confirming', 'deleting'].includes(freeupJob.phase));
+}
+
+function hubDisplayName() {
+    try {
+        return new URL(pairStatus?.hub_url || '').hostname.split('.')[0] || 'your hub';
+    } catch {
+        return 'your hub';
+    }
+}
+
+function freeupSummary() {
+    if (freeableStatus?.unavailable) return 'Hub unavailable — reconnect to check what is safe to free.';
+    if (!freeableStatus) return 'Checking synced originals…';
+    if (!Number(freeableStatus.files || 0)) return 'No synced originals match this age.';
+    return `${bytes(freeableStatus.bytes)} safe to free — everything already on ${hubDisplayName()}`;
+}
+
+function freeupJobDetail() {
+    if (!freeupJob) return '';
+    if (freeupJob.phase === 'confirming') return 'Confirming originals with the hub…';
+    const done = Number(freeupJob.files_done || 0);
+    const total = Number(freeupJob.files_total || 0);
+    if (freeupJob.phase === 'cancelled') return `Stopped · ${bytes(freeupJob.bytes_freed)} freed`;
+    if (freeupJob.phase === 'failed') return 'Stopped — the remaining originals are untouched';
+    if (freeupJob.phase === 'completed') return `Done · ${bytes(freeupJob.bytes_freed)} freed`;
+    return `${fmt(done)} of ${fmt(total)} files · ${bytes(freeupJob.bytes_freed)} freed`;
+}
+
+function renderFreeUp() {
+    if (!pairStatus || pairStatus.mode !== 'satellite' || !pairStatus.has_hub) return '';
+    const active = freeupActive();
+    const canStart = Number(freeableStatus?.files || 0) > 0;
+    const progressValue = freeupJob
+        ? progress(freeupJob.files_done, freeupJob.files_total)
+        : 0;
+    const jobRow = freeupJob
+        ? '<div class="work-row freeup-progress" data-freeup-job>'
+            + '<div class="wr-body"><div class="wr-top"><span>Local originals</span>'
+            + `<span class="v" data-freeup-job-detail>${esc(freeupJobDetail())}</span></div>`
+            + `<div class="wr-track"><i data-freeup-progress style="width:${progressValue}%"></i></div></div></div>`
+        : '';
+    return '<section class="dr-sec" id="freeup-panel"><h3>Free up space</h3>'
+        + `<div class="freeup-summary" data-freeup-summary>${esc(freeupSummary())}</div>`
+        + '<div class="freeup-controls">'
+        + '<label for="freeup-age"><span>Older than</span><select id="freeup-age"'
+        + `${active ? ' disabled' : ''}>`
+        + `<option value="30"${freeupOlderDays === 30 ? ' selected' : ''}>30 days</option>`
+        + `<option value="90"${freeupOlderDays === 90 ? ' selected' : ''}>90 days</option>`
+        + `<option value="365"${freeupOlderDays === 365 ? ' selected' : ''}>1 year</option>`
+        + `<option value="0"${freeupOlderDays === 0 ? ' selected' : ''}>Everything synced</option>`
+        + '</select></label>'
+        + `<button class="btn primary" id="freeup-btn" type="button"${active || canStart ? '' : ' disabled'}>${active ? 'Cancel' : 'Free up space'}</button>`
+        + '</div>' + jobRow + '</section>';
 }
 
 function formatSeen(value) {
@@ -679,14 +791,6 @@ function renderRemote() {
     }
 
     return `<section class="dr-sec" data-remote-state="${esc(state)}" data-remote-hub="1"><h3>Remote access</h3>${body}</section>`;
-}
-
-function renderSharedHome() {
-    return '<section class="dr-sec"><h3>Sharing</h3>'
-        + '<div class="drawer-action-row">'
-        + '<span>Private links and website galleries live together in Shared.</span>'
-        + '<button class="btn" id="drawer-open-shared" type="button">Open Shared view</button>'
-        + '</div></section>';
 }
 
 function detailsSection(title, description, body) {
@@ -941,7 +1045,7 @@ function focusPublishingSection() {
 function renderDrawer() {
     const body = document.getElementById('drawer-body');
     if (!body) return;
-    body.innerHTML = renderWork() + renderPeekStorage() + renderPeekHealth() + renderPeekSources()
+    body.innerHTML = renderArchiveOverview() + renderWork() + renderPeekStorage() + renderPeekHealth() + renderPeekSources()
         + '<section class="dr-sec"><button class="btn primary" id="drawer-open-system" type="button">System settings →</button></section>';
     bindDrawerActions(body);
     body.querySelector('#drawer-open-system')?.addEventListener('click', () => {
@@ -957,12 +1061,12 @@ function renderCurrentSystemSurface() {
 
 export function renderSystemSections() {
     return {
-        library: renderSources() + renderLibraryHealth(catalog) + renderAbout(),
+        library: renderArchiveOverview() + renderSources() + renderLibraryHealth(catalog) + renderAbout(),
         processing: renderAiSettings() + renderPeopleSettings() + renderCaptionSettings() + renderMetadataSettings() + renderWork(),
         performance: renderImageCacheSettings() + renderThumbnailSettings() + renderStorage(),
         import: renderImportSettings(),
         publishing: renderPublishingSettings(),
-        connectivity: renderDevices() + renderConnectServer() + renderRemote(),
+        connectivity: renderDevices() + renderConnectServer() + renderFreeUp() + renderRemote(),
         preferences: renderPrefs(),
     };
 }
@@ -995,6 +1099,7 @@ function patchDrawerStatus(workerGenerations = null) {
         : document.getElementById('drawer-body');
     if (!body) return;
 
+    patchArchiveOverview(body);
     for (const source of (catalog && catalog.sources) || []) {
         const card = body.querySelector(`.src-card[data-source-id="${Number(source.id)}"]`);
         if (!card) continue;
@@ -1052,6 +1157,10 @@ function patchDrawerStatus(workerGenerations = null) {
         patchNodeText(row, '[data-device-status]', `${device.platform || 'unknown'} · last seen ${formatSeen(device.last_seen)}`);
     }
     if (pairStatus?.hub_url) patchNodeText(body, '[data-setting-status="connection"] code', pairStatus.hub_url);
+    patchNodeText(body, '[data-freeup-summary]', freeupSummary());
+    patchNodeText(body, '[data-freeup-job-detail]', freeupJobDetail());
+    const freeupProgress = body.querySelector('[data-freeup-progress]');
+    if (freeupProgress) freeupProgress.style.width = `${progress(freeupJob?.files_done, freeupJob?.files_total)}%`;
 }
 
 function patchSettingSurface(field) {
@@ -1066,7 +1175,7 @@ function patchSettingSurface(field) {
 
 async function refreshDrawer({ initial = false } = {}) {
     const workerGenerations = new Map(workerActionGenerations);
-    const [nextCatalog, ai, cache, people, captions, metadata, remote, settingsData, version, pair, sync, devices] = await Promise.all([
+    const [nextCatalog, ai, cache, people, captions, metadata, remote, settingsData, version, pair, sync, devices, overview] = await Promise.all([
         getCatalog().catch(() => null),
         getAiStatus().catch(() => null),
         getCacheStatus().catch(() => null),
@@ -1079,6 +1188,7 @@ async function refreshDrawer({ initial = false } = {}) {
         getPairStatus().catch(() => null),
         getSyncStatus().catch(() => null),
         listDevices().catch(() => null),
+        getStorageOverview().catch(() => null),
         refreshLibraryHealth(),
     ]);
     if (settingsData) applySettingsData(settingsData);
@@ -1093,6 +1203,11 @@ async function refreshDrawer({ initial = false } = {}) {
     pairStatus = pair || pairStatus;
     syncStatus = sync || syncStatus;
     devicesPayload = devices || devicesPayload;
+    if (pairStatus?.mode === 'satellite' && pairStatus.has_hub && freeableStatus == null && !freeupActive()) {
+        const available = await getFreeable(freeupOlderDays).catch(() => null);
+        freeableStatus = available || { files: 0, bytes: 0, unavailable: true };
+    }
+    storageOverview = overview || storageOverview;
     renderActivity();
     const body = systemSurfaceRender
         ? document.getElementById('system-lens-content')
@@ -1172,6 +1287,74 @@ function sourceAddErrorMessage(result) {
     return bodyError
         ? `Could not add that folder (${result?.status || 'unknown status'}): ${bodyError}.`
         : `Could not add that folder (${result?.status || 'unknown status'}).`;
+}
+
+async function submitSourceAdd({ path, form }, { onSuccess } = {}) {
+    await withBusyAction('source-add', form?.querySelector('button[type="submit"]'), async () => {
+        const result = await addCatalogSource(path, true);
+        if (result && result.ok) {
+            const data = result.data || {};
+            catalog = data.catalog || catalog;
+            clearSourcePickerSelection();
+            await onSuccess?.(data);
+            showToast('Source added · scanning for photos');
+            pollScanUntilDone(data.source && data.source.id);
+        } else {
+            const message = sourceAddErrorMessage(result);
+            setSourceAddError(message);
+            showToast(message);
+        }
+    });
+}
+
+function closeSourceAddFlow() {
+    if (!sourceAddFlow) return;
+    clearSourcePickerSelection();
+    releaseFocus(sourceAddFlow);
+    sourceAddFlow.remove();
+    sourceAddFlow = null;
+    if (sourceAddFlowReturn && document.contains(sourceAddFlowReturn)) {
+        sourceAddFlowReturn.focus({ preventScroll: true });
+    }
+    sourceAddFlowReturn = null;
+}
+
+export function openSourceAddFlow({ onSuccess } = {}) {
+    if (!document.body) return false;
+    if (sourceAddFlow) {
+        sourceAddFlow.querySelector('[data-source-picker-toggle]')?.focus();
+        return true;
+    }
+    sourceAddFlowReturn = document.activeElement;
+    sourceAddFlow = document.createElement('div');
+    sourceAddFlow.id = 'source-add-flow';
+    sourceAddFlow.className = 'modal-scrim';
+    sourceAddFlow.innerHTML = '<section class="modal-card source-add-flow-card" role="dialog" aria-modal="true" aria-label="Add photo folder">'
+        + '<header class="source-add-flow-head"><div><p>Archive</p><h2>Add photo folder</h2></div><button class="mini-btn" type="button" data-source-add-close>Close</button></header>'
+        + `<div class="source-add-flow-body">${renderSourceAddUi()}</div></section>`;
+    document.body.append(sourceAddFlow);
+    bindSourcePicker(sourceAddFlow, {
+        onSubmit: async (payload) => submitSourceAdd(payload, {
+            onSuccess: async (data) => {
+                closeSourceAddFlow();
+                await onSuccess?.(data);
+            },
+        }),
+    });
+    clearSourcePickerSelection();
+    sourceAddFlow.querySelector('[data-source-add-close]')?.addEventListener('click', closeSourceAddFlow);
+    sourceAddFlow.addEventListener('click', (event) => {
+        if (event.target === sourceAddFlow) closeSourceAddFlow();
+    });
+    sourceAddFlow.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            event.stopPropagation();
+            closeSourceAddFlow();
+        }
+    });
+    trapFocus(sourceAddFlow, sourceAddFlow.querySelector('[data-source-picker-toggle]'));
+    return true;
 }
 
 function settingValidationMessage(input) {
@@ -1254,6 +1437,63 @@ async function withBusyAction(key, button, action) {
     }
 }
 
+async function refreshFreeable() {
+    freeableStatus = null;
+    renderDrawer();
+    const available = await getFreeable(freeupOlderDays).catch(() => null);
+    freeableStatus = available || { files: 0, bytes: 0, unavailable: true };
+    renderDrawer();
+}
+
+function stopFreeUpPolling() {
+    clearTimeout(freeupTimer);
+    freeupTimer = null;
+}
+
+function pollFreeUpJob(jobId) {
+    stopFreeUpPolling();
+    const tick = async () => {
+        const status = await getFreeUpJob(jobId).catch(() => null);
+        if (!status) {
+            freeupTimer = window.setTimeout(tick, 1200);
+            return;
+        }
+        freeupJob = status;
+        patchDrawerStatus();
+        if (freeupActive()) {
+            freeupTimer = window.setTimeout(tick, 800);
+            return;
+        }
+        stopFreeUpPolling();
+        const available = await getFreeable(freeupOlderDays).catch(() => null);
+        freeableStatus = available || { files: 0, bytes: 0, unavailable: true };
+        renderDrawer();
+        if (status.phase === 'completed') showToast(`${bytes(status.bytes_freed)} freed from this computer`);
+        else if (status.phase === 'cancelled') showToast(`Free up space stopped · ${bytes(status.bytes_freed)} freed`);
+        else showToast('Free up space stopped — remaining originals are untouched');
+    };
+    tick();
+}
+
+async function handleFreeUpAction() {
+    if (freeupActive()) {
+        const status = await cancelFreeUpJob(freeupJob.job_id);
+        if (status) {
+            freeupJob = status;
+            patchDrawerStatus();
+        }
+        return;
+    }
+    const job = await startFreeUpSpace(freeupOlderDays);
+    if (!job?.job_id) {
+        showToast('Couldn’t start Free up space');
+        return;
+    }
+    freeupJob = job;
+    renderDrawer();
+    pollFreeUpJob(job.job_id);
+}
+
 async function applyCacheDefaults() {
     const defaults = (settingsPageData && settingsPageData.defaults) || {};
     const next = {
@@ -1288,8 +1528,8 @@ async function returnToPublish() {
         showToast('Open Publish from the collection when ready');
         return;
     }
-    const { openPublishOverlay } = await import('./panel.js');
-    openPublishOverlay(target.collectionId, target.name || 'Collection');
+    const { openDeliverOverlay } = await import('./panel.js');
+    openDeliverOverlay(target.collectionId, target.name || 'Collection', null, target.tab);
 }
 
 function aiInstallActive(status = aiStatus || {}) {
@@ -1440,24 +1680,9 @@ function bindDrawerActions(body = document.getElementById('drawer-body')) {
     body.querySelector('#drawer-install-model')?.addEventListener('click', (event) => withBusyAction('model-install', event.currentTarget, saveAndInstallModel));
     body.querySelector('#drawer-return-publish')?.addEventListener('click', returnToPublish);
     bindSourcePicker(body, {
-        onSubmit: async ({ path, form }) => {
-            await withBusyAction('source-add', form?.querySelector('button[type="submit"]'), async () => {
-                const result = await addCatalogSource(path, true);
-                if (result && result.ok) {
-                    const data = result.data || {};
-                    catalog = data.catalog || catalog;
-                    clearSourcePickerSelection();
-                    renderCurrentSystemSurface();
-                    showToast('Source added · scanning for photos');
-                    pollScanUntilDone(data.source && data.source.id);
-                } else {
-                    const message = sourceAddErrorMessage(result);
-                    setSourceAddError(message);
-                    showToast(message);
-                }
-            });
-        },
+        onSubmit: (payload) => submitSourceAdd(payload, { onSuccess: renderCurrentSystemSurface }),
     });
+    bindArchiveOpen(body);
     for (const btn of body.querySelectorAll('[data-act]')) {
         btn.addEventListener('click', () => {
             if (btn.getAttribute('aria-disabled') === 'true') return;
@@ -1526,6 +1751,13 @@ function bindDrawerActions(body = document.getElementById('drawer-body')) {
             showToast('Cache cleared. Undo is unavailable.');
         } else showToast('Couldn’t clear cache');
     }));
+    body.querySelector('#freeup-age')?.addEventListener('change', (event) => {
+        freeupOlderDays = Number(event.currentTarget.value || 0);
+        refreshFreeable();
+    });
+    body.querySelector('#freeup-btn')?.addEventListener('click', (event) => withBusyAction(
+        'freeup', event.currentTarget, handleFreeUpAction,
+    ));
     body.querySelector('#copy-remote')?.addEventListener('click', async (event) => {
         if (event.currentTarget.getAttribute('aria-disabled') === 'true') return;
         const url = (remoteAccess && remoteAccess.tailscale && remoteAccess.tailscale.https_url)
@@ -1559,10 +1791,6 @@ function bindDrawerActions(body = document.getElementById('drawer-body')) {
         renderCurrentSystemSurface();
         showToast(result.dry_run ? 'HTTPS ready (dry-run)' : 'HTTPS ready on your tailnet');
     }));
-    body.querySelector('#drawer-open-shared')?.addEventListener('click', () => {
-        closeSystemDrawer();
-        setActiveLens('shared');
-    });
     body.querySelector('#drawer-thumb-size')?.addEventListener('change', (event) => {
         const previous = viewState.thumbSize;
         setThumbSize(event.target.value);
@@ -1586,6 +1814,7 @@ function stopDrawerPolling() {
     clearInterval(installTimer);
     installTimer = null;
     stopLibraryHealthPolling();
+    if (!freeupActive()) stopFreeUpPolling();
 }
 
 function resolvePublishReturnTarget() {
@@ -1593,6 +1822,7 @@ function resolvePublishReturnTarget() {
     return {
         collectionId: Number(overlay?.dataset.collectionId) || 0,
         name: overlay?.dataset.collectionName || 'Collection',
+        tab: overlay?.dataset.activeTab || 'website',
     };
 }
 
@@ -1666,14 +1896,12 @@ export function initDrawer() {
         }
     });
     document.addEventListener('click', (event) => {
-        const button = event.target.closest('#publish-open-settings, [data-deliver-open-settings]');
+        const button = event.target.closest('[data-deliver-open-settings]');
         if (!button) return;
         event.preventDefault();
         event.stopImmediatePropagation();
         const returnTo = resolvePublishReturnTarget();
-        if (button.matches('[data-deliver-open-settings]')) {
-            document.querySelector('#deliver-overlay #deliver-close')?.click();
-        } else document.getElementById('publish-close')?.click();
+        document.querySelector('#deliver-overlay #deliver-close')?.click();
         openPublishingSettings({ returnTo });
     }, true);
     on('thumbsize', () => {

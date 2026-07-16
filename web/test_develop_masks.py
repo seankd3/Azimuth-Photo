@@ -211,11 +211,11 @@ class LocalCorrectionTests(unittest.TestCase):
         self.assertEqual([mask["What"] for correction in settings["MaskGroupBasedCorrections"] for mask in correction["CorrectionMasks"]], ["Mask/Gradient", "Mask/Paint"])
         output = pipeline.apply_pipeline(synthetic_linear_image(), settings, asshot_temperature=5150)
         stats = [float(output.mean()), float(output.std()), *np.percentile(output, [10, 50, 90])]
-        # GrainFrequency refresh: the torture fixture's Roughness value now scales
-        # the shared Python/WebGL hash grid instead of being a dead setting.
+        # Refresh for the Contrast2012 smoothstep S-curve on top of the
+        # GrainFrequency hash-grid change (both intentional).
         np.testing.assert_allclose(
             stats,
-            [0.6623320579528809, 0.25693196058273315, 0.3028943568468094, 0.6797678470611572, 0.9878529727458955],
+            [0.6757814288139343, 0.2611185908317566, 0.30564949810504916, 0.6978363990783691, 0.9895257413387298],
             rtol=0.0,
             atol=2e-6,
         )

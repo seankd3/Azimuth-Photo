@@ -1,7 +1,8 @@
 {
   "baseline_exposure": 0.35,
+  "baseline_exposure_offset": -0.35,
   "camera_model": "Sony ILCE-7RM4A",
-  "content_hash": "d1639ae4f47b558f776fdc1da6495423902682f75c3a307379edb5896e7e8fe2",
+  "content_hash": "ddb5f42fcc854a00b48203314da29287d06036cf1f7155bec2182f48936c0cd2",
   "illuminants": {
     "calibration_illuminant1": 17,
     "calibration_illuminant2": 21

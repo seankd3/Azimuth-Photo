@@ -28,6 +28,7 @@ RUN pip install --no-cache-dir -r /app/web/requirements.txt
 
 COPY web/ /app/web/
 COPY scripts/server_entry.py /app/scripts/server_entry.py
+COPY VERSION /app/VERSION
 
 RUN useradd --create-home --uid 1000 --shell /usr/sbin/nologin photoarchive \
     && mkdir -p /photos /data \

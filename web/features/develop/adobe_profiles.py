@@ -95,6 +95,7 @@ def _profile_content(profile: Mapping[str, Any]) -> dict[str, Any]:
             "matrices",
             "illuminants",
             "baseline_exposure",
+            "baseline_exposure_offset",
             "tone_curve",
             "hue_sat_map",
             "look_table",
@@ -130,6 +131,7 @@ def _profile_from_pages(pages: Iterable[object], source_file: str) -> dict[str, 
     illuminant1 = _scalar(_tag(pages, "CalibrationIlluminant1"))
     illuminant2 = _scalar(_tag(pages, "CalibrationIlluminant2"))
     baseline_exposure = _scalar(_tag(pages, "BaselineExposure"))
+    baseline_exposure_offset = _scalar(_tag(pages, "BaselineExposureOffset"))
     if illuminant1 is None or illuminant2 is None:
         return None
 
@@ -146,6 +148,8 @@ def _profile_from_pages(pages: Iterable[object], source_file: str) -> dict[str, 
     }
     if baseline_exposure is not None:
         profile["baseline_exposure"] = baseline_exposure
+    if baseline_exposure_offset is not None:
+        profile["baseline_exposure_offset"] = baseline_exposure_offset
 
     tone = _numbers(_tag(pages, "ProfileToneCurve"))
     if tone is not None and len(tone) % 2 == 0:
@@ -239,11 +243,22 @@ def clear_adobe_profile_cache() -> None:
     _library_profiles.cache_clear()
 
 
+def _model_key(value: object) -> str:
+    """Normalize a camera model for matching: EXIF often prefixes the make
+    ("Canon EOS R5") while catalogs store the bare model ("EOS R5")."""
+    return "".join(ch for ch in str(value or "").casefold() if ch.isalnum())
+
+
+def _model_matches(profile_model: object, requested_model: object) -> bool:
+    a, b = _model_key(profile_model), _model_key(requested_model)
+    return bool(a) and bool(b) and (a == b or a.endswith(b) or b.endswith(a))
+
+
 def load_adobe_profile(camera_model: object, profile_name: object | None = None) -> dict[str, Any] | None:
     """Load one harvested profile, preferring Adobe Standard for default renders."""
     model = _text(camera_model)
     requested_name = _text(profile_name)
-    candidates = [profile for profile in _library_profiles() if profile["camera_model"] == model]
+    candidates = [profile for profile in _library_profiles() if _model_matches(profile["camera_model"], model)]
     if requested_name:
         candidates = [profile for profile in candidates if profile["profile_name"] == requested_name]
     if not candidates:

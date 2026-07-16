@@ -24,6 +24,11 @@ function savePanelOpenStates() {
     try { window.localStorage.setItem(PANEL_OPEN_STORAGE_KEY, JSON.stringify(storedPanelOpenStates)); } catch { /* Panel defaults remain usable. */ }
 }
 
+const WB_PRESETS = Object.freeze({
+    Daylight: [5500, 10], Cloudy: [6500, 10], Shade: [7500, 10],
+    Tungsten: [2850, 0], Fluorescent: [3800, 21], Flash: [5500, 0],
+});
+
 const slider = (key, label, min, max, step = 1, fallback = DEFAULTS[key] ?? 0) => ({ key, label, min, max, step, fallback });
 const BASIC = [slider('Temperature', 'Temp', 2000, 50000, 50, 5500), slider('Tint', 'Tint', -150, 150)];
 const TONE = [
@@ -100,15 +105,23 @@ class CurveEditor {
         this.channel = 'ToneCurvePV2012';
         this.settings = {};
         this.dragIndex = -1;
+        this.selectedIndex = -1;
         root.querySelector('select').addEventListener('change', (event) => {
             this.channel = event.target.value;
             this.draw();
         });
         this.canvas.addEventListener('pointerdown', (event) => this.pointerDown(event));
         this.canvas.addEventListener('dblclick', (event) => this.addPoint(event));
+        this.canvas.addEventListener('keydown', (event) => {
+            if (event.key !== 'Backspace' && event.key !== 'Delete') return;
+            event.preventDefault();
+            this.deleteSelected();
+        });
         root.querySelector('[data-curve-reset]').addEventListener('click', () => {
+            const previousSettings = snapshotSettings(this.settings);
             delete this.settings[this.channel];
-            this.onChange(this.channel, undefined, 'Tone Curve');
+            this.onChange(this.channel, undefined, 'Tone Curve', { previousSettings });
+            this.selectedIndex = -1;
             this.draw();
         });
     }
@@ -141,20 +154,29 @@ class CurveEditor {
             if (d < distance) { distance = d; nearest = index; }
         });
         if (distance > 18) return;
+        if (event.altKey) {
+            if (nearest > 0 && nearest < points.length - 1) this.deletePoint(points, nearest);
+            return;
+        }
         this.dragIndex = nearest;
+        this.selectedIndex = nearest;
+        const previousSettings = snapshotSettings(this.settings);
+        let moved = false;
         this.canvas.setPointerCapture(event.pointerId);
         const move = (next) => {
             const [nx, ny] = this.coords(next);
             const min = nearest === 0 ? 0 : points[nearest - 1][0] + 1;
             const max = nearest === points.length - 1 ? 255 : points[nearest + 1][0] - 1;
             points[nearest] = [Math.max(min, Math.min(max, nx)), ny];
-            this.commit(points);
+            moved = true;
+            this.commit(points, { history: false });
         };
         const up = () => {
             this.canvas.removeEventListener('pointermove', move);
             this.canvas.removeEventListener('pointerup', up);
             this.canvas.removeEventListener('pointercancel', up);
             this.dragIndex = -1;
+            if (moved) this.commit(points, { previousSettings });
         };
         this.canvas.addEventListener('pointermove', move);
         this.canvas.addEventListener('pointerup', up);
@@ -162,16 +184,30 @@ class CurveEditor {
     }
 
     addPoint(event) {
+        const previousSettings = snapshotSettings(this.settings);
         const points = this.points();
         const [x, y] = this.coords(event);
         points.push([x, y]);
-        this.commit(points);
+        this.selectedIndex = points.length - 1;
+        this.commit(points, { previousSettings });
     }
 
-    commit(points) {
+    deleteSelected() {
+        const points = this.points();
+        if (this.selectedIndex > 0 && this.selectedIndex < points.length - 1) this.deletePoint(points, this.selectedIndex);
+    }
+
+    deletePoint(points, index) {
+        const previousSettings = snapshotSettings(this.settings);
+        points.splice(index, 1);
+        this.selectedIndex = -1;
+        this.commit(points, { previousSettings });
+    }
+
+    commit(points, options) {
         const value = normalizeCurve(points).map(([x, y]) => `${Math.round(x)}, ${Math.round(y)}`);
         this.settings[this.channel] = value;
-        this.onChange(this.channel, value, 'Tone Curve');
+        this.onChange(this.channel, value, 'Tone Curve', options);
         this.draw();
     }
 
@@ -207,14 +243,15 @@ class CurveEditor {
 }
 
 export class DevelopPanels {
-    constructor(host, { histogramHost, cropHost, transformHost, onChange, onAutoTone, masking, heal, transform }) {
+    constructor(host, { histogramHost, cropHost, transformHost, onChange, onAutoTone, onWbPick, masking, heal, transform }) {
         this.onAutoTone = onAutoTone;
+        this.onWbPick = onWbPick;
         this.host = host;
         this.onChange = onChange;
         this.settings = {};
         storedPanelOpenStates = readPanelOpenStates();
         host.innerHTML = section('Histogram', 'histogram', '<div id="develop-histogram-slot"></div>')
-            + section('Basic', 'basic', '<small data-adobe-profile hidden style="display:block;margin:-3px 0 8px;color:var(--text-3);font-size:var(--fs-caption)"></small><div class="develop-wb-row"><select id="develop-wb" data-tip="White balance mode" aria-label="White balance"><option>As Shot</option><option>Custom</option><option>Daylight</option><option>Cloudy</option><option>Shade</option><option>Tungsten</option><option>Fluorescent</option><option>Flash</option></select><button data-wb-reset data-tip="Reset white balance to As Shot">As Shot</button><button data-auto-tone data-tip="Auto tone — deterministic histogram fit">Auto</button></div>' + slidersHtml(BASIC))
+            + section('Basic', 'basic', '<small data-adobe-profile hidden style="display:block;margin:-3px 0 8px;color:var(--text-3);font-size:var(--fs-caption)"></small><div class="develop-wb-row"><select id="develop-wb" data-tip="White balance mode" aria-label="White balance"><option>As Shot</option><option>Custom</option><option>Daylight</option><option>Cloudy</option><option>Shade</option><option>Tungsten</option><option>Fluorescent</option><option>Flash</option></select><button data-wb-pick data-tip="White balance eyedropper — click a neutral area (W)" aria-label="White balance eyedropper" aria-pressed="false">⌖</button><button data-wb-reset data-tip="Reset white balance to As Shot">As Shot</button><button data-auto-tone data-tip="Auto tone — deterministic histogram fit">Auto</button></div>' + slidersHtml(BASIC))
             + section('Tone', 'tone', slidersHtml(TONE))
             + section('Presence', 'presence', slidersHtml(PRESENCE))
             + section('Tone Curve', 'curve', '<div class="develop-curve-tools"><select data-tip="Tone curve channel" aria-label="Tone curve channel"><option value="ToneCurvePV2012">RGB</option><option value="ToneCurvePV2012Red">Red</option><option value="ToneCurvePV2012Green">Green</option><option value="ToneCurvePV2012Blue">Blue</option></select><button data-curve-reset data-tip="Reset selected curve">Reset</button></div><canvas class="develop-curve" width="288" height="180" tabindex="0" data-tip="Drag points; double-click to add" aria-label="Tone curve editor"></canvas>')
@@ -240,7 +277,7 @@ export class DevelopPanels {
         host.querySelector('#develop-histogram-slot').replaceWith(histogramHost);
         host.querySelector('#develop-crop-slot').replaceWith(cropHost);
         host.querySelector('#develop-transform-slot').replaceWith(transformHost);
-        this.curve = new CurveEditor(host.querySelector('[data-section="curve"]'), (key, value, label) => this.change(key, value, label));
+        this.curve = new CurveEditor(host.querySelector('[data-section="curve"]'), (key, value, label, options) => this.change(key, value, label, options));
         this.colorWheels = new ColorWheels(host.querySelector('#develop-color-wheels'), (key, value, label, options) => this.change(key, value, label, options));
         this.lens = new LensPanel({ host: host.querySelector('#develop-lens-controls'), onChange: (key, value, label) => this.change(key, value, label) });
         this.calibration = new CalibrationPanel({ host: host.querySelector('#develop-calibration-controls'), onChange: (key, value, label) => this.change(key, value, label) });
@@ -307,7 +344,24 @@ export class DevelopPanels {
                 if (Number.isFinite(value)) this.change(row.dataset.setting, value, row.querySelector('.develop-slider-label').textContent);
                 this.syncSlider(row);
             });
-            input.addEventListener('focus', () => input.select());
+            input.addEventListener('focus', () => { input.dataset.revert = input.value; input.select(); });
+            input.addEventListener('keydown', (event) => {
+                const step = Number(row.dataset.step) || 1;
+                const nudge = event.key === 'ArrowUp' ? 1 : event.key === 'ArrowDown' ? -1 : 0;
+                if (nudge) {
+                    event.preventDefault();
+                    const size = event.shiftKey ? step * 10 : step;
+                    const current = numberSetting(this.settings, row.dataset.setting, Number(row.dataset.default));
+                    const value = Math.max(Number(row.dataset.min), Math.min(Number(row.dataset.max), Math.round((current + nudge * size) / step) * step));
+                    this.change(row.dataset.setting, value, row.querySelector('.develop-slider-label').textContent);
+                    this.syncSlider(row);
+                } else if (event.key === 'Escape') {
+                    input.value = input.dataset.revert ?? input.value;
+                    input.blur();
+                } else if (event.key === 'Enter') {
+                    input.blur();
+                }
+            });
             row.addEventListener('wheel', (event) => {
                 if (!event.altKey && document.activeElement !== input) return;
                 event.preventDefault();
@@ -323,18 +377,16 @@ export class DevelopPanels {
     }
 
     bindOtherControls() {
+        this.host.querySelector('[data-wb-pick]')?.addEventListener('click', () => this.onWbPick?.());
         const wb = this.host.querySelector('#develop-wb');
-        wb.addEventListener('change', () => this.change('WhiteBalance', wb.value, 'White Balance'));
-        this.host.querySelector('[data-wb-reset]').addEventListener('click', () => {
-        this.root.querySelector('[data-auto-tone]')?.addEventListener('click', async (event) => {
+        wb.addEventListener('change', () => this.applyWbPreset(wb.value));
+        this.host.querySelector('[data-auto-tone]')?.addEventListener('click', async (event) => {
             const button = event.currentTarget;
             button.disabled = true;
             try { await this.onAutoTone?.(); } finally { button.disabled = false; }
         });
-            this.change('WhiteBalance', 'As Shot', 'White Balance');
-            delete this.settings.Temperature;
-            delete this.settings.Tint;
-            this.setSettings(this.settings);
+        this.host.querySelector('[data-wb-reset]').addEventListener('click', () => {
+            this.applyWbPreset('As Shot');
         });
         const bw = this.host.querySelector('#develop-bw');
         bw.addEventListener('change', () => {
@@ -349,9 +401,27 @@ export class DevelopPanels {
         }
     }
 
+    applyWbPreset(preset) {
+        const previousSettings = snapshotSettings(this.settings);
+        if (preset === 'As Shot') {
+            this.change('Temperature', undefined, 'White Balance', { history: false });
+            this.change('Tint', undefined, 'White Balance', { history: false });
+        } else if (WB_PRESETS[preset]) {
+            const [temperature, tint] = WB_PRESETS[preset];
+            this.change('Temperature', temperature, 'White Balance', { history: false });
+            this.change('Tint', tint, 'White Balance', { history: false });
+        }
+        this.change('WhiteBalance', preset, 'White Balance', { previousSettings });
+        this.setSettings(this.settings);
+    }
+
     change(key, value, label, options) {
         if (value === undefined) delete this.settings[key];
         else this.settings[key] = value;
+        if (key === 'Temperature' || key === 'Tint') {
+            this.settings.WhiteBalance = 'Custom';
+            this.host.querySelector('#develop-wb').value = 'Custom';
+        }
         this.onChange(key, value, label, options);
     }
 

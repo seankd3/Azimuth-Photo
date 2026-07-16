@@ -1,5 +1,5 @@
 import { revealFolder } from './api.js';
-import { downloadExport, openExportMenu } from './export_menu.js';
+import { exportScope, openExportMenu } from './export_menu.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
 import { fileManagerMenuLabel } from './file_manager.js';
 import { icon } from '../icons.js';
@@ -56,12 +56,7 @@ function applySourceScope(path) {
 function exportSourceScope(path, count, anchor) {
     applySourceScope(path);
     openExportMenu(anchor, ({ format, size }) => {
-        const params = scopeParams({ format });
-        if (size) params.set('size', size);
-        downloadExport(params, {
-            count: Number(count) || 0,
-            message: format === 'zip' ? 'Preparing source zip' : `Exporting source as ${format.toUpperCase()}`,
-        });
+        exportScope({ format, size, count: Number(count) || 0, query: scopeParams() });
     });
 }
 

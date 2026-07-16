@@ -49,7 +49,7 @@ BASE_MAGIC = b"PABASE1\0"
 BASE_HEADER = struct.Struct("<8sII")
 MAX_BASE_EDGE = 2048
 MEMORY_BASE_LIMIT = 2
-SOURCE_META_VERSION = 1
+SOURCE_META_VERSION = 2  # v2: native EXIF fallback fills camera_model on machines without ExifTool
 
 
 class RawDecodeError(RuntimeError):
