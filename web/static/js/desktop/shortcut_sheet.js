@@ -14,7 +14,7 @@ export const SHORTCUTS = [
     { area: 'Library', key: 'Space', label: 'Toggle focused selection' },
     { area: 'Library', key: 'Ctrl/Cmd A', label: 'Select loaded photos' },
     { area: 'Library', key: 'P / X / U', label: 'Pick / reject / clear flag' },
-    { area: 'Library', key: '1–5', label: 'Set or clear the Elo rating floor' },
+    { area: 'Library', key: '1–5', label: 'Set or clear the Elo floor' },
     { area: 'Library', key: 'B', label: 'Toggle Best Of' },
     { area: 'Library', key: 'F', label: 'Open filters' },
     { area: 'Library', key: 'S', label: 'Stack selection or expand focused stack' },

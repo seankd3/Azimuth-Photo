@@ -77,7 +77,6 @@ function flagTarget(flag) {
     }
     if (selection.size) {
         const ids = [...selection];
-        clearSelection();
         applyFlags(ids, flag);
         return;
     }
@@ -236,6 +235,10 @@ function escapeOneLayer() {
         closeRefine();
         return true;
     }
+    if (developOpen()) {
+        switchLens('grid');
+        return true;
+    }
     if (systemDrawerOpen()) {
         closeSystemDrawer();
         return true;
@@ -294,7 +297,6 @@ export function initKeyboard() {
                 return;
             }
             if (key === 'k') {
-                if (activeLens() !== 'grid') return;
                 event.preventDefault();
                 openCommandPalette();
                 return;
@@ -322,11 +324,14 @@ export function initKeyboard() {
                     return;
                 }
             }
-            if (activeLens() !== 'grid') return;
             if (key === 'z') {
+                // Develop owns its edit-history undo at capture phase; other lenses use
+                // the global toast stack for undoable library actions.
+                if (activeLens() === 'develop') return;
                 if (undoLatestToast()) event.preventDefault();
                 return;
             }
+            if (activeLens() !== 'grid') return;
             if (key === 'a') {
                 const count = selectLoadedImages();
                 if (count) {
@@ -347,7 +352,8 @@ export function initKeyboard() {
         }
         if (event.key.toLowerCase() === 'd' && !foregroundLayerOpen()) {
             event.preventDefault();
-            if (!developOpen()) openDevelop();
+            if (developOpen()) switchLens('grid');
+            else openDevelop();
             return;
         }
         if (event.key.toLowerCase() === 'h' && !foregroundLayerOpen()) {
@@ -465,7 +471,7 @@ export function initKeyboard() {
             const rating = Number(event.key);
             const next = Number(scope.min_stars || 0) === rating ? '' : rating;
             patchScope({ min_stars: next });
-            showToast(next ? `Rating ${rating}+` : 'Rating filter cleared');
+            showToast(next ? `Elo ${rating}+` : 'Elo filter cleared');
         } else if (event.key === 'Delete' || event.key === 'Backspace') {
             if (selection.size) {
                 event.preventDefault();

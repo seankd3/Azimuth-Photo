@@ -77,7 +77,7 @@ function flagLabel(flag) {
 }
 
 function flagGlyph(flag) {
-    if (flag === 'picked') return icon('star');
+    if (flag === 'picked') return icon('flag');
     if (flag === 'rejected') return icon('x');
     return '';
 }
@@ -86,7 +86,7 @@ function caption(img) {
     const name = img.filename || img.id;
     const elo = Math.round(Number(img.elo) || 0);
     const flag = flagLabel(img.flag || 'unflagged');
-    return [name, `${index + 1} / ${scopeTotal() || images().length}`, `Rating ${elo}`, flag]
+    return [name, `${index + 1} / ${scopeTotal() || images().length}`, `Elo ${elo}`, flag]
         .filter(Boolean)
         .map(esc)
         .join(' · ');
