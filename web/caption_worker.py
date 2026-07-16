@@ -413,7 +413,17 @@ async def _run_caption_worker_loop() -> None:
                 await asyncio.sleep(WORKER_SLEEP_SECONDS)
                 continue
 
+            _set_status(
+                state="waiting_for_gpu",
+                ready=False,
+                message="Captions are waiting for the GPU.",
+            )
             await work_coordination.wait_for_gpu_turn("captions")
+            _set_status(
+                state="waiting_for_turn",
+                ready=False,
+                message="Captions are waiting for other background work.",
+            )
             await work_coordination.wait_for_manual_turn("captions")
             loop = asyncio.get_running_loop()
             _set_status(

@@ -1033,7 +1033,7 @@ async def _run_embedding_worker_loop():
             if needs_model_load and _model_load_blocked(model_dir, model_id, model_revision):
                 wait_for = max(1, int(_model_load_retry_after - time.time()))
                 _set_worker_status(
-                    "error",
+                    "waiting_retry",
                     f"Model load failed; retrying in about {wait_for}s.",
                     ready=False,
                     last_error=_worker_status.get("last_error", ""),
@@ -1047,8 +1047,23 @@ async def _run_embedding_worker_loop():
                             continue
                         _set_worker_status("loading_model", f"Loading {model_id} from disk…", ready=False)
                         try:
+                            _set_worker_status(
+                                "waiting_for_gpu",
+                                "Search is waiting for the GPU.",
+                                ready=False,
+                            )
                             await work_coordination.wait_for_gpu_turn("embeddings")
+                            _set_worker_status(
+                                "waiting_for_turn",
+                                "Search is waiting for other background work.",
+                                ready=False,
+                            )
                             await work_coordination.wait_for_manual_turn("embeddings")
+                            _set_worker_status(
+                                "loading_model",
+                                f"Loading {model_id} from disk…",
+                                ready=False,
+                            )
                             with work_coordination.manual_bulk("embeddings"):
                                 _model = await loop.run_in_executor(_embed_executor, _load_model, model_dir, model_id)
                             _loaded_model_dir = model_dir
@@ -1091,7 +1106,17 @@ async def _run_embedding_worker_loop():
                 "next_retry_at": next_retry_at,
             })
             if unembedded:
+                _set_worker_status(
+                    "waiting_for_gpu",
+                    "Search is waiting for the GPU.",
+                    ready=False,
+                )
                 await work_coordination.wait_for_gpu_turn("embeddings")
+                _set_worker_status(
+                    "waiting_for_turn",
+                    "Search is waiting for other background work.",
+                    ready=False,
+                )
                 await work_coordination.wait_for_manual_turn("embeddings")
                 _set_worker_status(
                     "embedding",
@@ -1120,7 +1145,7 @@ async def _run_embedding_worker_loop():
             if candidates and cooled_down:
                 wait_for = max(1, int(next_retry_at - time.time())) if next_retry_at else 5
                 _set_worker_status(
-                    "embedding",
+                    "waiting_retry",
                     f"Waiting to retry {cooled_down} unavailable files in about {wait_for}s.",
                     ready=True,
                 )

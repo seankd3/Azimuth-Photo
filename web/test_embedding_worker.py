@@ -35,6 +35,59 @@ class FakeModel:
 
 
 class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_embedding_reports_waiting_before_gpu_owner_wait(self):
+        observed_states = []
+
+        async def candidates(**_kwargs):
+            return [{"id": 1, "filepath": "/test/1.jpg"}]
+
+        async def stop_at_gpu_wait(*_args, **_kwargs):
+            observed_states.append(embedding_worker.get_worker_status()["state"])
+            raise asyncio.CancelledError
+
+        embedding_worker._get_unembedded_images = candidates
+        embedding_worker._model = object()
+        embedding_worker._loaded_model_dir = "/tmp/test-model"
+        embedding_worker._loaded_model_id = "test-model"
+        embedding_worker._loaded_model_revision = "main"
+
+        with unittest.mock.patch.object(
+            work_coordination,
+            "wait_for_gpu_turn",
+            side_effect=stop_at_gpu_wait,
+        ):
+            with self.assertRaises(asyncio.CancelledError):
+                await embedding_worker.run_embedding_worker()
+
+        self.assertEqual(observed_states, ["waiting_for_gpu"])
+
+    async def test_embedding_cooldown_sleep_reports_waiting_retry(self):
+        observed_states = []
+
+        async def candidates(**_kwargs):
+            return [{"id": 1, "filepath": "/test/1.jpg"}]
+
+        async def stop_at_sleep(_seconds):
+            observed_states.append(embedding_worker.get_worker_status()["state"])
+            raise asyncio.CancelledError
+
+        embedding_worker._get_unembedded_images = candidates
+        embedding_worker._embed_retry_after[1] = time.time() + 600
+        embedding_worker._model = object()
+        embedding_worker._loaded_model_dir = "/tmp/test-model"
+        embedding_worker._loaded_model_id = "test-model"
+        embedding_worker._loaded_model_revision = "main"
+
+        with unittest.mock.patch.object(
+            embedding_worker.asyncio,
+            "sleep",
+            side_effect=stop_at_sleep,
+        ):
+            with self.assertRaises(asyncio.CancelledError):
+                await embedding_worker.run_embedding_worker()
+
+        self.assertEqual(observed_states, ["waiting_retry"])
+
     async def test_worker_cancellation_releases_gpu_and_manual_owners(self):
         processing_started = asyncio.Event()
 

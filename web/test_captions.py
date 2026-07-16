@@ -12,6 +12,68 @@ from workers.caption_health import CaptionOomCircuit
 
 
 class CaptionTests(BackendTestCase):
+    async def test_caption_reports_waiting_before_gpu_owner_wait(self):
+        old_dependencies = (
+            caption_worker._count_images_needing_captions,
+            caption_worker._get_images_needing_captions,
+            caption_worker._store_caption_result,
+        )
+        old_pause = caption_worker._caption_manual_pause
+        old_status = dict(caption_worker._status)
+        observed_states = []
+
+        async def count_pending(**_kwargs):
+            return 1
+
+        async def next_image(**_kwargs):
+            return [{"id": 9, "cache_path": "/tmp/wait-caption.jpg"}]
+
+        async def stop_at_gpu_wait(*_args, **_kwargs):
+            observed_states.append(caption_worker.get_worker_status()["state"])
+            raise asyncio.CancelledError
+
+        config = {
+            "model_id": "test-caption-model",
+            "model_key": "test-caption-model@main",
+            "model_dir": "/tmp/test-caption-model",
+            "quantization": "none",
+            "prompt_version": "test-v1",
+            "batch_size": 1,
+        }
+        caption_worker.configure(
+            count_images_needing_captions=count_pending,
+            get_images_needing_captions=next_image,
+        )
+        caption_worker._caption_manual_pause = False
+        try:
+            with (
+                unittest.mock.patch.object(settings, "get_settings", return_value={
+                    "caption_scan_enabled": True,
+                    "ssd_cache_dir": "/tmp",
+                }),
+                unittest.mock.patch.object(settings, "active_caption_config", return_value=config),
+                unittest.mock.patch.object(ai_models, "model_files_present", return_value=True),
+                unittest.mock.patch.object(
+                    work_coordination,
+                    "wait_for_gpu_turn",
+                    side_effect=stop_at_gpu_wait,
+                ),
+                unittest.mock.patch.object(caption_worker, "_clear_cuda_cache"),
+            ):
+                with self.assertRaises(asyncio.CancelledError):
+                    await caption_worker.run_caption_worker()
+
+            self.assertEqual(observed_states, ["waiting_for_gpu"])
+        finally:
+            (
+                caption_worker._count_images_needing_captions,
+                caption_worker._get_images_needing_captions,
+                caption_worker._store_caption_result,
+            ) = old_dependencies
+            caption_worker._caption_manual_pause = old_pause
+            caption_worker._status.clear()
+            caption_worker._status.update(old_status)
+
     async def test_caption_cancellation_releases_gpu_and_manual_owners(self):
         old_dependencies = (
             caption_worker._count_images_needing_captions,

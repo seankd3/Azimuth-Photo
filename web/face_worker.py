@@ -347,12 +347,17 @@ async def _run_face_worker_loop() -> None:
 
             loop = asyncio.get_running_loop()
             _set_status(
-                state="scanning",
-                ready=True,
-                message=f"People is scanning {len(rows)} of {pending} queued cached previews.",
+                state="waiting_for_turn",
+                ready=False,
+                message="People is waiting for other background work.",
                 last_error="",
             )
             await work_coordination.wait_for_manual_turn("people")
+            _set_status(
+                state="scanning",
+                ready=True,
+                message=f"People is scanning {len(rows)} of {pending} queued cached previews.",
+            )
             with work_coordination.manual_bulk("people"):
                 await loop.run_in_executor(None, _load_face_app, config)
 
