@@ -839,7 +839,11 @@ function renderScopeBar() {
         collectionChip.tabIndex = 0;
         const openCollectionActions = (event) => {
             if (event.target.closest('.chip-x')) return;
-            openCollectionActionsSheet({ id: scope.collectionId, name: scope.label || 'Collection' });
+            openCollectionActionsSheet({
+                id: scope.collectionId,
+                name: scope.label || 'Collection',
+                smart: scope.collectionSmart,
+            });
         };
         collectionChip.addEventListener('click', openCollectionActions);
         collectionChip.addEventListener('keydown', (event) => {

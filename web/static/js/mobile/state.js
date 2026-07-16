@@ -52,6 +52,7 @@ export const scope = {
     compared: '',
     minStars: '',
     collectionId: '',
+    collectionSmart: false,
     similarId: '',
     similarImages: null,
     label: '',
@@ -103,6 +104,7 @@ export function setScope(patch) {
     scope.compared = '';
     scope.minStars = '';
     scope.collectionId = '';
+    scope.collectionSmart = false;
     scope.similarId = '';
     scope.similarImages = null;
     scope.label = '';
