@@ -49,7 +49,7 @@ BASE_MAGIC = b"PABASE1\0"
 BASE_HEADER = struct.Struct("<8sII")
 MAX_BASE_EDGE = 2048
 MEMORY_BASE_LIMIT = 2
-SOURCE_META_VERSION = 1
+SOURCE_META_VERSION = 2
 
 
 class RawDecodeError(RuntimeError):
@@ -427,6 +427,7 @@ def decode_base(path: str | os.PathLike[str]) -> tuple[np.ndarray, dict[str, Any
     color_matrix = None
     color_matrix2 = None
     forward_matrix = None
+    iso = None
     from features.develop import lossydng
 
     if source.suffix.lower() == ".dng" and lossydng.is_linear_dng(str(source)):
@@ -440,12 +441,14 @@ def decode_base(path: str | os.PathLike[str]) -> tuple[np.ndarray, dict[str, Any
         color_matrix = lossy_meta.get("color_matrix1")
         color_matrix2 = lossy_meta.get("color_matrix2")
         forward_matrix = lossy_meta.get("forward_matrix")
+        iso = _finite_positive(lossy_meta.get("iso"))
     else:
         try:
             with rawpy.imread(str(source)) as raw:
                 camera_wb = list(raw.camera_whitebalance or [])
                 daylight_wb = list(raw.daylight_whitebalance or [])
                 color_matrix = _rawpy_color_matrix(raw)
+                iso = _finite_positive(getattr(getattr(raw, "metadata", None), "iso_speed", None))
                 postprocess_args = {
                     "use_camera_wb": True,
                     "output_bps": 16,
@@ -491,6 +494,8 @@ def decode_base(path: str | os.PathLike[str]) -> tuple[np.ndarray, dict[str, Any
         "linear": True,
         "base_kind": "raw",
     }
+    if iso is not None:
+        meta["iso"] = iso
     if as_shot_neutral and forward_matrix and (color_matrix or color_matrix2):
         meta["color"] = {
             "as_shot_neutral": [float(v) for v in as_shot_neutral],

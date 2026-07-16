@@ -6,6 +6,7 @@ import math
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -55,6 +56,17 @@ class NoiseProfileTests(unittest.TestCase):
         high = noise_profiles.resolve_file_defaults({}, {"camera_model": "EOS R5", "ISO": 12800})
         self.assertGreater(high["LuminanceSmoothing"], low["LuminanceSmoothing"])
         self.assertGreater(high["ColorNoiseReduction"], low["ColorNoiseReduction"])
+
+    def test_file_default_resolution_never_reads_exif_for_iso_less_metadata(self):
+        with mock.patch("features.develop.lens.read_exif", side_effect=AssertionError("request-time EXIF")) as read_exif:
+            resolved = noise_profiles.resolve_file_defaults(
+                {"Exposure2012": 0.5},
+                {"camera_model": "EOS R5"},
+                "/photos/source.dng",
+            )
+
+        self.assertEqual(resolved, {"Exposure2012": 0.5})
+        read_exif.assert_not_called()
 
 
 if __name__ == "__main__":

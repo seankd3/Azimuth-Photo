@@ -112,6 +112,12 @@ def normalized_source_metadata(metadata: Mapping[str, object] | None) -> dict[st
         "camera_model": camera_model,
         "camera_make": camera_make,
         "lens_model": lens_model,
+        "iso": _number(
+            source.get("iso")
+            or source.get("ISO")
+            or source.get("PhotographicSensitivity")
+            or source.get("ISOSpeedRatings")
+        ),
         "focal_length": _number(source.get("focal_length") or source.get("FocalLength")),
         "aperture": _number(source.get("aperture") or source.get("FNumber") or source.get("Aperture")),
         "focus_distance": _number(source.get("focus_distance") or source.get("FocusDistance"), 1000.0),

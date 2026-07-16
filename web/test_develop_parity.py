@@ -14,7 +14,7 @@ from unittest import mock
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
-from features.develop import adobe_profiles, dng_pipeline  # noqa: E402
+from features.develop import adobe_profiles, dng_pipeline, rawproc  # noqa: E402
 from features.develop.camera_profile import load_camera_profile  # noqa: E402
 from features.develop.pipeline import apply_pipeline, hsv_to_rgb  # noqa: E402
 from features.develop import render as develop_render  # noqa: E402
@@ -186,6 +186,25 @@ def heavy_crop_settings() -> dict[str, object]:
 
 
 class DevelopParityTests(unittest.TestCase):
+    def test_stale_base_metadata_upgrade_persists_iso(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            paths = rawproc.BasePaths(
+                Path(tempdir) / "base.bin.gz",
+                Path(tempdir) / "base.json",
+                Path(tempdir) / "base.jpg",
+            )
+            paths.metadata.write_text(
+                '{"base_kind":"raw","camera_model":"Canon EOS R5","source_meta_version":1}',
+                encoding="utf-8",
+            )
+            with mock.patch.object(rawproc, "read_exif", return_value={"ISO": 6400}):
+                upgraded = rawproc._upgrade_cached_metadata(paths, "/photos/source.dng")
+
+            self.assertEqual(upgraded["iso"], 6400.0)
+            self.assertEqual(upgraded["source_meta_version"], rawproc.SOURCE_META_VERSION)
+            persisted = rawproc._read_base_metadata_path(paths.metadata)
+            self.assertEqual(persisted["iso"], 6400.0)
+
     def test_all_numeric_constant_names_match_javascript_twin(self):
         javascript = (Path(__file__).parent / "static/js/desktop/develop/ops_constants.js").read_text()
         for name, value in C.PARITY_TABLE.items():

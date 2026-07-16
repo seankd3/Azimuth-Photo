@@ -205,15 +205,5 @@ def resolve_file_defaults(
     metadata: Mapping[str, object] | None,
     source_path: str | PathLike[str] | None = None,
 ) -> dict[str, object]:
-    """Resolve defaults from cached metadata, falling back to the source EXIF."""
-    resolved = dict(settings or {})
-    if any(key in resolved for key in NR_KEYS):
-        return resolved
-    source_metadata = dict(metadata or {})
-    if source_path and not any(
-        source_metadata.get(key) for key in ("iso", "ISO", "PhotographicSensitivity")
-    ):
-        from .lens import read_exif
-
-        source_metadata = {**read_exif(str(source_path)), **source_metadata}
-    return resolve_defaults(resolved, source_metadata)
+    """Resolve defaults from cached base metadata without source I/O."""
+    return resolve_defaults(settings, metadata)
