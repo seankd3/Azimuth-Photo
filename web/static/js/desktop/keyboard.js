@@ -25,7 +25,7 @@ import { closeFilters, filtersOpen } from './filters.js';
 import { closeImport, importOpen } from './import_stage.js';
 import { closeGridContextMenu, gridContextMenuOpen } from './context_menu.js';
 import { closeDuplicates, duplicatesOpen } from './duplicates.js';
-import { closeTrash, trashOpen, trashSelectedImages } from './trash.js';
+import { closeTrash, handleTrashKey, selectAllTrash, trashOpen, trashSelectedImages } from './trash.js';
 import { showToast, undoLatestToast } from './toast.js';
 import {
     applyPreviousDevelopSettingsToGrid, copyDevelopSettingsFromGrid, createVirtualCopy,
@@ -331,6 +331,11 @@ export function initKeyboard() {
                 if (undoLatestToast()) event.preventDefault();
                 return;
             }
+            if (activeLens() === 'trash' && key === 'a') {
+                const count = selectAllTrash();
+                if (count) event.preventDefault();
+                return;
+            }
             if (activeLens() !== 'grid') return;
             if (key === 'a') {
                 const count = selectLoadedImages();
@@ -403,7 +408,9 @@ export function initKeyboard() {
             return;
         }
         if (trashOpen()) {
-            if (event.key.toLowerCase() === 'g') {
+            if (handleTrashKey(event)) {
+                event.preventDefault();
+            } else if (event.key.toLowerCase() === 'g') {
                 event.preventDefault();
                 closeTrash();
             }

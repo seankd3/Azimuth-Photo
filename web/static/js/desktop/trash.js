@@ -22,6 +22,7 @@ let loading = false;
 let loadGeneration = 0;
 let loadError = false;
 let loadController = null;
+let trashFocusIndex = 0;
 const busyActions = new Set();
 
 function cancelTrashLoad() {
@@ -170,7 +171,7 @@ function cellHtml(img, index) {
     const id = Number(img.id);
     const flag = img.flag || 'unflagged';
     const pending = Boolean(img.pending_hub);
-    return `<figure class="cell trash-cell ${pending ? 'pending-hub' : ''} ${selection.has(id) ? 'sel' : ''}" data-id="${id}" data-idx="${index}" tabindex="-1" style="--ar:${aspect(img)}">`
+    return `<figure class="cell trash-cell ${pending ? 'pending-hub' : ''} ${selection.has(id) ? 'sel' : ''} ${index === trashFocusIndex ? 'kb-focus' : ''}" data-id="${id}" data-idx="${index}" tabindex="${index === trashFocusIndex ? '0' : '-1'}" style="--ar:${aspect(img)}">`
         + `<img src="${esc(img.thumb_url || thumbUrl('sm', id))}" loading="lazy" decoding="async" alt="${esc(img.filename || '')}">`
         + `<span class="trash-thumb-fallback" hidden>${icon('image')}<span>${esc(img.filename || 'Photo preview unavailable')}</span></span>`
         + `<button class="c-check" aria-label="Select photo">${icon('check')}</button>`
@@ -212,6 +213,7 @@ function ensureView() {
         if (!cell) return;
         const id = Number(cell.dataset.id);
         const index = Number(cell.dataset.idx);
+        setTrashFocus(index, { focus: false });
         if (event.target.closest('.c-check') || isSelectionMode()) {
             if (event.target.closest('.c-check')) enterSelection(id, index);
             else toggleSelection(id, index, { range: event.shiftKey });
@@ -311,6 +313,7 @@ async function loadTrash() {
         return;
     }
     images = (data && data.images || []).map((img) => ({ ...img, id: Number(img.id) })).filter((img) => img.id);
+    trashFocusIndex = Math.max(0, Math.min(images.length - 1, trashFocusIndex));
     total = Number(data?.total) || images.length;
     totalBytes = Number(data?.total_bytes) || 0;
     pendingHub = Number(data?.pending_hub_count) || images.filter((image) => image.pending_hub).length;
@@ -319,11 +322,57 @@ async function loadTrash() {
     render();
 }
 
-function selectAllTrash() {
-    if (!images.length) return;
+function selectAllTrashRows() {
+    if (!images.length) return 0;
     selection.clear();
     images.forEach((img) => selection.add(Number(img.id)));
     selectionChanged(images.map((img) => Number(img.id)));
+    return images.length;
+}
+
+function trashColumns() {
+    const cells = [...root?.querySelectorAll('.trash-cell[data-idx]') || []];
+    if (cells.length < 2) return 1;
+    const top = cells[0].offsetTop;
+    return Math.max(1, cells.filter((cell) => Math.abs(cell.offsetTop - top) < 4).length);
+}
+
+function setTrashFocus(index, { focus = true } = {}) {
+    if (!images.length || !root) return false;
+    trashFocusIndex = Math.max(0, Math.min(images.length - 1, Number(index) || 0));
+    const cell = root.querySelector(`.trash-cell[data-idx="${trashFocusIndex}"]`);
+    if (!cell) return false;
+    for (const item of root.querySelectorAll('.trash-cell.kb-focus')) {
+        item.classList.remove('kb-focus');
+        item.tabIndex = -1;
+    }
+    cell.classList.add('kb-focus');
+    cell.tabIndex = 0;
+    if (focus) {
+        cell.focus({ preventScroll: true });
+        cell.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }
+    return true;
+}
+
+export function selectAllTrash() {
+    return selectAllTrashRows();
+}
+
+export function handleTrashKey(event) {
+    if (!open || loading || !images.length) return false;
+    let next = trashFocusIndex;
+    if (event.key === 'ArrowLeft') next -= 1;
+    else if (event.key === 'ArrowRight') next += 1;
+    else if (event.key === 'ArrowUp') next -= trashColumns();
+    else if (event.key === 'ArrowDown') next += trashColumns();
+    else if (event.key === 'Enter') {
+        const image = images[trashFocusIndex];
+        if (!image) return false;
+        toggleSelection(image.id, trashFocusIndex);
+        return true;
+    } else return false;
+    return setTrashFocus(next);
 }
 
 export async function trashSelectedImages() {
@@ -406,6 +455,7 @@ export function mountTrash() {
     document.getElementById('view-trash').classList.add('active');
     root.hidden = false;
     clearSelection();
+    trashFocusIndex = 0;
     loadTrash();
 }
 
