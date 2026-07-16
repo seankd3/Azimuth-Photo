@@ -454,6 +454,25 @@ function renderArchiveOverview() {
         + '</div></section>';
 }
 
+function bindArchiveOpen(scopeEl) {
+    scopeEl.querySelector('[data-archive-open]')?.addEventListener('click', async (event) => {
+        const result = await revealFolder(event.currentTarget.dataset.archiveOpen || '');
+        if (result?.ok && result?.data?.ok) showToast('Opened archive home');
+        else showToast(result?.data?.error || 'Couldn’t open archive home');
+    });
+}
+
+function patchArchiveOverview(body) {
+    const card = body.querySelector('.archive-overview');
+    if (!card || !storageOverview) return;
+    const wrap = document.createElement('div');
+    wrap.innerHTML = renderArchiveOverview();
+    const next = wrap.querySelector('.archive-overview');
+    if (!next || card.innerHTML === next.innerHTML) return;
+    card.innerHTML = next.innerHTML;
+    bindArchiveOpen(card);
+}
+
 function dateTime(value) {
     const raw = Number(value || 0);
     if (!raw) return 'not published';
@@ -972,7 +991,7 @@ function focusPublishingSection() {
 function renderDrawer() {
     const body = document.getElementById('drawer-body');
     if (!body) return;
-    body.innerHTML = renderWork() + renderPeekStorage() + renderPeekHealth() + renderPeekSources()
+    body.innerHTML = renderArchiveOverview() + renderWork() + renderPeekStorage() + renderPeekHealth() + renderPeekSources()
         + '<section class="dr-sec"><button class="btn primary" id="drawer-open-system" type="button">System settings →</button></section>';
     bindDrawerActions(body);
     body.querySelector('#drawer-open-system')?.addEventListener('click', () => {
@@ -1026,6 +1045,7 @@ function patchDrawerStatus(workerGenerations = null) {
         : document.getElementById('drawer-body');
     if (!body) return;
 
+    patchArchiveOverview(body);
     for (const source of (catalog && catalog.sources) || []) {
         const card = body.querySelector(`.src-card[data-source-id="${Number(source.id)}"]`);
         if (!card) continue;
@@ -1541,11 +1561,7 @@ function bindDrawerActions(body = document.getElementById('drawer-body')) {
     bindSourcePicker(body, {
         onSubmit: (payload) => submitSourceAdd(payload, { onSuccess: renderCurrentSystemSurface }),
     });
-    body.querySelector('[data-archive-open]')?.addEventListener('click', async (event) => {
-        const result = await revealFolder(event.currentTarget.dataset.archiveOpen || '');
-        if (result?.ok && result?.data?.ok) showToast('Opened archive home');
-        else showToast(result?.data?.error || 'Couldn’t open archive home');
-    });
+    bindArchiveOpen(body);
     for (const btn of body.querySelectorAll('[data-act]')) {
         btn.addEventListener('click', () => {
             if (btn.getAttribute('aria-disabled') === 'true') return;
