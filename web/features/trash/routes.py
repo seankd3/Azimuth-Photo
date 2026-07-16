@@ -8,9 +8,10 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
 from features.trash import service as trash_service
-from features.trash.remote import FORWARDED_HEADER, HubTrashRequestError, empty_hub_trash
-from features.sync import contract, satellite
+from features.trash.remote import FORWARDED_HEADER
+from features.sync import satellite
 from features.sync.contract import require_compatible_api_revision
+from features.sync.sync_worker import get_worker
 
 
 router = APIRouter()
@@ -89,38 +90,17 @@ async def api_empty_trash(request: Request, _payload: EmptyTrashBody | None = No
     local_ids = await trash_service.local_trash_ids(_configured_db_path())
     local_result = await trash_service.empty_trash(_configured_db_path(), image_ids=local_ids)
     mirror_refs = await trash_service.hub_mirror_trash_refs(_configured_db_path())
-    remote_result = None
-    hub_error = None
     if mirror_refs["count"]:
-        hub = satellite.hub_url()
-        if not hub:
-            hub_error = "Connect to the hub before synced photos can be permanently deleted from here."
-        elif len(mirror_refs["hub_image_ids"]) != mirror_refs["count"]:
-            hub_error = "Some synced photos are missing their hub identity. They will remain queued until the catalog sync repairs them."
-        elif not await contract.hub_supports("trash.scoped_empty", hub=hub, force=True):
-            hub_error = "The hub is running an older version. Synced photos stay queued until it updates."
-        else:
-            try:
-                remote_result = await empty_hub_trash(hub, mirror_refs["hub_image_ids"])
-                if remote_result.get("errors") or int(remote_result.get("skipped_offline") or 0):
-                    hub_error = "The hub could not permanently remove every synced photo. We'll keep trying in the background."
-            except HubTrashRequestError as exc:
-                hub_error = str(exc)
-        if hub_error:
-            await trash_service.mark_hub_trash_pending(_configured_db_path(), mirror_refs["image_ids"])
-        else:
-            mirror_result = await trash_service.empty_trash(_configured_db_path(), image_ids=mirror_refs["image_ids"])
-            local_result["deleted_count"] += mirror_result["deleted_count"]
-            local_result["freed_bytes"] += mirror_result["freed_bytes"]
-            local_result["errors"].extend(mirror_result["errors"])
-            local_result["skipped_offline"] += mirror_result["skipped_offline"]
-    if remote_result is not None:
-        local_result["hub_deleted_count"] = int(remote_result.get("deleted_count") or 0)
-        local_result["freed_bytes"] += int(remote_result.get("freed_bytes") or 0)
+        # Law 1: the request path never awaits the hub. Mirrors go pending
+        # immediately; the sync worker owns the hub leg (contract check, scoped
+        # empty, mirror purge on confirmation) and retries with backoff.
+        await trash_service.mark_hub_trash_pending(_configured_db_path(), mirror_refs["image_ids"])
+        try:
+            get_worker().sync_now()
+        except Exception:
+            pass  # No worker (hub unset / paused): the badge still tells the truth.
     pending = await trash_service.pending_hub_trash_refs(_configured_db_path())
     local_result["hub_pending"] = int(pending["count"])
-    if hub_error:
-        local_result["hub_error"] = hub_error
     if local_result["deleted_count"] or mirror_refs["count"]:
         _invalidate_after_write()
     return local_result
