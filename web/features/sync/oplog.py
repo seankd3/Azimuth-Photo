@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from data import connection
+from features.sync import family_clock
 from features.sync.validation import validate_content_hash
 
 
@@ -37,14 +38,6 @@ CREATE TABLE IF NOT EXISTS oplog (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_oplog_origin_seq ON oplog(origin, origin_seq);
 CREATE INDEX IF NOT EXISTS idx_oplog_content_family ON oplog(content_hash, family);
-CREATE TABLE IF NOT EXISTS oplog_family_state (
-    content_hash TEXT NOT NULL,
-    family TEXT NOT NULL,
-    ts REAL NOT NULL,
-    origin TEXT NOT NULL,
-    origin_seq INTEGER NOT NULL,
-    PRIMARY KEY (content_hash, family)
-);
 CREATE TABLE IF NOT EXISTS oplog_settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -112,6 +105,7 @@ async def ensure_schema(db_path: str) -> None:
     conn = await connection.open_async(db_path)
     try:
         await conn.executescript(OPLOG_DDL)
+        await family_clock.migrate_legacy_states(conn)
         await conn.commit()
     finally:
         await connection.close_async(conn, db_path=db_path)
@@ -183,26 +177,19 @@ def _normalize_entry(entry: Mapping[str, Any], *, receive_time: float) -> dict[s
 
 
 def _winner_key(entry: Mapping[str, Any]) -> tuple[float, str, int]:
-    return float(entry["ts"]), str(entry["origin"]), int(entry["origin_seq"])
+    return family_clock.winner_key(entry)
 
 
 async def _state_key(conn, identity: str, family: str) -> tuple[float, str, int] | None:
-    row = await (await conn.execute(
-        "SELECT ts, origin, origin_seq FROM oplog_family_state WHERE content_hash = ? AND family = ?",
-        (identity, family),
-    )).fetchone()
-    return (float(row["ts"]), str(row["origin"]), int(row["origin_seq"])) if row else None
+    return await family_clock.state_key(conn, identity, family)
 
 
 async def _record_winner(conn, entry: Mapping[str, Any], *, identity: str | None = None) -> None:
-    await conn.execute(
-        "INSERT INTO oplog_family_state(content_hash, family, ts, origin, origin_seq) VALUES (?, ?, ?, ?, ?) "
-        "ON CONFLICT(content_hash, family) DO UPDATE SET "
-        "ts=excluded.ts, origin=excluded.origin, origin_seq=excluded.origin_seq",
-        (
-            identity or str(entry["content_hash"]), entry["family"], entry["ts"],
-            entry["origin"], entry["origin_seq"],
-        ),
+    await family_clock.record_state(
+        conn,
+        identity or str(entry["content_hash"]),
+        str(entry["family"]),
+        _winner_key(entry),
     )
 
 
