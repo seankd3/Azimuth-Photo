@@ -161,6 +161,7 @@ PUBLIC_ROUTE_CONTRACT = {
     ("POST", "/s/{token}/unlock"),
     ("GET", "/s/{token}/thumb/{size}/{image_id}"),
     ("GET", "/s/{token}/img/{image_id}"),
+    ("GET", "/s/{token}/download-all"),
     ("GET", "/api/search"),
     ("GET", "/api/similar/{image_id}"),
     ("GET", "/api/duplicates"),

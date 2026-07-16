@@ -1,13 +1,18 @@
 import asyncio
+import json
 import os
+import tempfile
 import time
+import zipfile
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
+from starlette.background import BackgroundTask
 
 import settings
 from features.share import auth
@@ -18,6 +23,7 @@ UNLOCK_FAILURE_LIMIT = 5
 UNLOCK_FAILURE_WINDOW_SECONDS = 15 * 60
 MAX_UNLOCK_PASSWORD_LENGTH = 256
 MAX_TRACKED_UNLOCK_TOKENS = 2048
+SHARE_DOWNLOAD_TIER = "lg"
 
 CreateOrRotateShare = Callable[..., Awaitable[dict | None]]
 GetShare = Callable[[int], Awaitable[dict | None]]
@@ -218,6 +224,65 @@ def _gallery_payload(token: str, collection: dict | None) -> dict:
 def _download_name(image_id: int, filename: str) -> str:
     basename = os.path.basename(filename or "").strip() or f"photo-{image_id}.jpg"
     return basename.replace('"', "").replace("'", "")
+
+
+def _zip_arcname(image_id: int, filename: str, used_names: set[str]) -> str:
+    basename = str(filename or "").replace("\\", "/").rsplit("/", 1)[-1]
+    stem = Path(basename).stem
+    safe_stem = "".join(char if char.isalnum() or char in "._- " else "_" for char in stem)
+    safe_stem = safe_stem.strip(" .")[:180] or f"photo-{image_id}"
+    candidate = f"{safe_stem}.jpg"
+    suffix = 2
+    while candidate.casefold() in used_names:
+        candidate = f"{safe_stem}-{suffix}.jpg"
+        suffix += 1
+    used_names.add(candidate.casefold())
+    return candidate
+
+
+async def _write_share_zip(collection: dict, request: Request, destination: str) -> dict:
+    skipped = []
+    included = 0
+    used_names: set[str] = {"azimuth-download-manifest.json"}
+    with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for image in collection.get("images") or []:
+            image_id = int(image["id"])
+            filename = str(image.get("filename") or f"photo-{image_id}.jpg")
+            try:
+                response = await _thumbnail_response(request, SHARE_DOWNLOAD_TIER, image_id)
+                if response.status_code != 200:
+                    raise FileNotFoundError("Gallery-ready image unavailable")
+                arcname = _zip_arcname(image_id, filename, used_names)
+                response_path = getattr(response, "path", None)
+                if response_path:
+                    archive.write(response_path, arcname=arcname)
+                else:
+                    body = getattr(response, "body", None)
+                    if body is None:
+                        raise FileNotFoundError("Gallery-ready image unavailable")
+                    archive.writestr(arcname, body)
+                included += 1
+            except (OSError, ValueError):
+                skipped.append({
+                    "image_id": image_id,
+                    "filename": Path(filename.replace("\\", "/")).name,
+                    "reason": "preview unavailable",
+                })
+        if skipped:
+            archive.writestr(
+                "azimuth-download-manifest.json",
+                json.dumps({
+                    "requested_count": len(collection.get("images") or []),
+                    "included_count": included,
+                    "skipped_count": len(skipped),
+                    "skipped": skipped,
+                }, indent=2),
+            )
+    return {"path": destination, "included": included, "skipped": skipped}
+
+
+def _zip_share(collection: dict, request: Request, destination: str) -> dict:
+    return asyncio.run(_write_share_zip(collection, request, destination))
 
 
 def _favorite_ids(favorites: list[dict]) -> list[int]:
@@ -504,5 +569,28 @@ async def public_share_image(request: Request, token: str, image_id: int):
     allowed = await _token_allows_image(token, image_id)
     if not allowed:
         return _public_response(JSONResponse({"error": "Not found"}, status_code=404))
-    response = await _thumbnail_response(request, "lg", image_id)
+    response = await _thumbnail_response(request, SHARE_DOWNLOAD_TIER, image_id)
     return _public_response(response)
+
+
+@router.get("/s/{token}/download-all")
+async def public_share_download_all(token: str, request: Request):
+    _configured()
+    collection = await _resolve_token(token)
+    if collection is None or not auth.is_unlocked(request, collection):
+        return _public_response(JSONResponse({"error": "Not found"}, status_code=404))
+    handle = tempfile.NamedTemporaryFile(prefix="photoarchive-share-", suffix=".zip", delete=False)
+    handle.close()
+    try:
+        result = await asyncio.to_thread(_zip_share, collection, request, handle.name)
+    except Exception:
+        Path(handle.name).unlink(missing_ok=True)
+        return _public_response(JSONResponse({"error": "Could not prepare share download"}, status_code=422))
+    return _public_response(
+        FileResponse(
+            handle.name,
+            filename=f"{collection.get('name') or 'Shared photos'}.zip",
+            headers={"X-Azimuth-Skipped-Count": str(len(result["skipped"]))},
+            background=BackgroundTask(lambda: Path(handle.name).unlink(missing_ok=True)),
+        )
+    )
