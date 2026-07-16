@@ -199,6 +199,17 @@ function unobserveImages(rootEl) {
     }
 }
 
+function warmMediumThumb(cell) {
+    const id = Number(cell?.dataset.id);
+    if (!id) return;
+    const queue = window.requestIdleCallback || ((callback) => window.setTimeout(callback, 0));
+    queue(() => {
+        const preload = new Image();
+        preload.fetchPriority = 'low';
+        preload.src = thumbUrl('md', id);
+    });
+}
+
 function resetImageObserver() {
     if (imageObserver) imageObserver.disconnect();
     imageObserver = null;
@@ -718,6 +729,8 @@ export function initGrid() {
     }, { root: document.getElementById('canvas'), rootMargin: '900px 0px 900px 0px' });
     const flow = document.getElementById('grid-flow');
     flow.addEventListener('click', handleClick);
+    flow.addEventListener('pointerover', (event) => warmMediumThumb(event.target.closest('.cell[data-id]')));
+    flow.addEventListener('focusin', (event) => warmMediumThumb(event.target.closest('.cell[data-id]')));
     document.addEventListener('pointerdown', (event) => {
         if (!expandedStack || !mounted) return;
         if (event.target.closest('.stack-tray, .c-stack')) return;

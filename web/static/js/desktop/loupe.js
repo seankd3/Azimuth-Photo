@@ -39,6 +39,7 @@ let stripStart = 0;
 let stripEnd = 0;
 let stripScrollFrame = 0;
 let previousStripIndex = -1;
+let navDirection = 1;
 const exifCache = new Map();
 const INFO_MODES = ['off', 'basic', 'full'];
 const RAW_EXTENSIONS = new Set(['arw', 'cr2', 'cr3', 'dng', 'nef', 'orf', 'raf', 'rw2']);
@@ -466,11 +467,17 @@ function updateStrip() {
 }
 
 function preloadNeighbors() {
-    for (const neighbor of [images()[index + 1], images()[index - 1]]) {
+    const direction = navDirection || 1;
+    const warm = [1, 2, 3].map((distance) => images()[index + direction * distance]);
+    for (const neighbor of warm) {
         if (!neighbor) continue;
-        const preload = new Image();
-        preload.fetchPriority = 'low';
-        preload.src = thumbUrl('md', neighbor.id);
+        const queue = window.requestIdleCallback || ((callback) => window.setTimeout(callback, 0));
+        queue(() => {
+            if (!open) return;
+            const preload = new Image();
+            preload.fetchPriority = 'low';
+            preload.src = thumbUrl('md', neighbor.id);
+        });
     }
 }
 
@@ -652,6 +659,7 @@ export async function navLoupe(delta) {
         if (pending) updateChrome();
         return;
     }
+    navDirection = Math.sign(delta) || navDirection;
     index = targetIndex;
     render();
 }
@@ -660,6 +668,7 @@ export async function navLoupeTo(targetIndex) {
     if (!open || !images().length) return;
     const bounded = Math.max(0, Math.min(images().length - 1, Number(targetIndex)));
     if (bounded === index) return;
+    navDirection = Math.sign(bounded - index) || navDirection;
     index = bounded;
     render();
 }
