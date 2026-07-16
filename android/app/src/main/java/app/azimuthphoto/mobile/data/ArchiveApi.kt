@@ -130,6 +130,13 @@ class ArchiveApi(private val baseUrl: String) {
             .execute().use { it.isSuccessful }
     }
 
+    /** Mark one hub photo as a favorite, or clear its favorite flag. */
+    suspend fun setFlag(imageId: Long, flag: String): Boolean = withContext(Dispatchers.IO) {
+        val body = json.encodeToString(ImageFlagBody(flag)).toRequestBody(JSON_TYPE)
+        http.newCall(Request.Builder().url("$baseUrl/api/image/$imageId/flag").post(body).build())
+            .execute().use { it.isSuccessful }
+    }
+
     /** EXIF fields for the info sheet; shapes vary, so everything renders defensively. */
     suspend fun exif(imageId: Long): Map<String, String> = withContext(Dispatchers.IO) {
         runCatching {
@@ -186,6 +193,9 @@ class ArchiveApi(private val baseUrl: String) {
 
 @Serializable
 private data class ImageIdsBody(val ids: List<Long>)
+
+@Serializable
+private data class ImageFlagBody(val flag: String)
 
 data class ArchiveStats(val photoCount: Long?)
 
