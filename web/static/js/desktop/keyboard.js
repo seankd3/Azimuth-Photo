@@ -223,6 +223,11 @@ function escapeOneLayer() {
         closeLoupe();
         return true;
     }
+    if (document.getElementById('people-merge-banner')) return false;
+    if (selection.size) {
+        clearSelection();
+        return true;
+    }
     if (duplicatesOpen()) {
         closeDuplicates();
         return true;
@@ -247,8 +252,8 @@ function escapeOneLayer() {
         closeLeftDrawer();
         return true;
     }
-    if (selection.size) {
-        clearSelection();
+    if (activeLens() !== 'grid') {
+        switchLens('grid');
         return true;
     }
     return false;
