@@ -300,11 +300,15 @@ class DesktopCorrectnessTests(unittest.TestCase):
 
     def test_export_poll_reports_when_the_export_status_cannot_be_checked(self):
         export_dialog = read("develop", "export_dialog.js")
-        poll_start = export_dialog.index("async function pollBatchStatus")
+        poll_start = export_dialog.index("function pollBatchStatus")
         poll = export_dialog[poll_start:export_dialog.index("\n}\n", poll_start)]
 
-        self.assertEqual(poll.count("showToast?.('Export status unknown — check Exports later');"), 3)
-        self.assertLess(poll.index("if (!response.ok)"), poll.index("const status = await response.json();"))
+        # The ux14 poll grammar reports an unknown status as an error state on
+        # BOTH failure shapes (non-ok response and thrown fetch), and the error
+        # tick tells the user instead of going quiet.
+        self.assertEqual(poll.count("return { state: 'error', error: 'Export status unavailable' };"), 2)
+        self.assertIn("showToast?.(`Develop export failed · ${status.error || 'Check Exports later'}`);", poll)
+        self.assertLess(poll.index("if (!response.ok)"), poll.index("return response.json();"))
 
     def test_cull_brief_startup_failure_keeps_a_retry_state_visible(self):
         cull_brief = read("cull_brief.js")
@@ -348,7 +352,10 @@ class DesktopCorrectnessTests(unittest.TestCase):
 
         self.assertIn("const params = scopeParams({ format });", export_scope)
         self.assertNotIn("loadCollectionImageIds", export_scope)
-        self.assertIn("Preparing ${count} file", export_scope)
+        # The count-honest "Preparing N files" toast moved into exportScope
+        # (export_menu.js), which exportCurrentScope now delegates to.
+        self.assertIn("exportScope({ format", export_scope)
+        self.assertIn("Preparing ${exportCount} file", export_menu)
         self.assertIn("getRankings(scopeParams({", shared_dialog_scope)
         self.assertIn("while (offset < maxIds)", shared_dialog_scope)
         self.assertIn("SCOPE_EXPORT_PAGE_SIZE", shared_dialog_scope)
@@ -523,8 +530,10 @@ class DesktopCorrectnessTests(unittest.TestCase):
         # for that whole window — so a rebuild can never clobber live typing.
         panel = read("panel.js")
 
-        # Polls only reschedule while the job is running.
-        self.assertIn("if (session.publish?.in_progress) scheduleDeliverPoll(session, token);", panel)
+        # Polls only reschedule while the job is busy (in_progress or a
+        # settling publish/revoke/hook-retry state — the ux14 grammar).
+        self.assertIn("if (busy && !deliverPoll) scheduleDeliverPoll(session, token);", panel)
+        self.assertIn("isDone: (publish) => !publishJobSettling(publish),", panel)
         # The editable input is disabled whenever the poll loop could rebuild it.
         self.assertIn("data-deliver-slug", panel)
         slug_markup = next(
