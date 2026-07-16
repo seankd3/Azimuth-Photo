@@ -106,13 +106,18 @@ async def priority_candidate_batch(
     *,
     cache_root: str,
     preview_size: str,
+    resolve_collection_scope,
 ):
-    collection_id = int(scope.get("collection_id") or 0)
+    requested_collection_id = int(scope.get("collection_id") or 0)
+    image_ids, collection_id = await resolve_collection_scope(
+        None,
+        requested_collection_id,
+    )
     select = (
         "SELECT i.id, i.source_id, i.filepath, i.file_size, i.file_modified_at, "
         + (
             "(SELECT name FROM collections WHERE id = ?) AS priority_collection_name "
-            if collection_id
+            if requested_collection_id
             else "NULL AS priority_collection_name "
         )
         + "FROM images i JOIN catalog_sources s ON s.id = i.source_id "
@@ -126,7 +131,7 @@ async def priority_candidate_batch(
         "WHERE c.cache_root = ? AND c.size = ? AND c.image_id = i.id"
         ")",
     ]
-    params = [collection_id] if collection_id else []
+    params = [requested_collection_id] if requested_collection_id else []
     params.extend([cache_root, preview_size])
 
     folder_filter = ranking_repository.folder_filter_sql(scope.get("folder"))
@@ -134,7 +139,13 @@ async def priority_candidate_batch(
         condition, folder_params = folder_filter
         conditions.append(condition)
         params.extend(folder_params)
-    if collection_id:
+    if image_ids is not None:
+        ordered_ids = sorted(int(image_id) for image_id in image_ids)
+        if not ordered_ids:
+            return []
+        conditions.append(f"i.id IN ({','.join('?' for _ in ordered_ids)})")
+        params.extend(ordered_ids)
+    elif collection_id:
         conditions.append(
             "EXISTS (SELECT 1 FROM collection_images ci "
             "WHERE ci.collection_id = ? AND ci.image_id = i.id)"

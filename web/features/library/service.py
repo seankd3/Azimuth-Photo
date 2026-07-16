@@ -842,7 +842,7 @@ async def api_rankings_impl(
             _record_preview_priority_scope(
                 cached_data,
                 folder=folder,
-                collection_id=collection_id,
+                collection_id=requested_collection_id,
             )
             if request is not None and cached.get("json") is not None:
                 return Response(content=cached["json"], media_type="application/json")
@@ -968,7 +968,7 @@ async def api_rankings_impl(
         }
         if rankings_cache_key is not None:
             cache_rankings_response(rankings_cache_key, response)
-        _record_preview_priority_scope(response, folder=folder, collection_id=collection_id)
+        _record_preview_priority_scope(response, folder=folder, collection_id=requested_collection_id)
         return response
 
     if sort == "similarity" and search_scores:
@@ -1030,7 +1030,7 @@ async def api_rankings_impl(
         }
         if rankings_cache_key is not None:
             cache_rankings_response(rankings_cache_key, response)
-        _record_preview_priority_scope(response, folder=folder, collection_id=collection_id)
+        _record_preview_priority_scope(response, folder=folder, collection_id=requested_collection_id)
         return response
 
     if search_ids is not None and not search_ids:
@@ -1291,5 +1291,5 @@ async def api_rankings_impl(
             pass
     if rankings_cache_key is not None:
         cache_rankings_response(rankings_cache_key, response)
-    _record_preview_priority_scope(response, folder=folder, collection_id=collection_id)
+    _record_preview_priority_scope(response, folder=folder, collection_id=requested_collection_id)
     return response

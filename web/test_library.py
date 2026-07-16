@@ -5,11 +5,48 @@ import unittest.mock
 from fastapi.testclient import TestClient
 from features.collections import routes as collection_routes
 from features.collections import smart as smart_collections
+from features.library import preview_priority
 from features.library import taste as taste_service
 from features.sync import hashing as sync_hashing
+from thumbnails import pregen as thumbnail_pregen
 
 
 class LibraryTests(BackendTestCase):
+    async def test_smart_collection_view_prioritizes_pending_previews(self):
+        preview_priority.clear_scopes()
+        self.addCleanup(preview_priority.clear_scopes)
+        source = await self._source()
+        pending_member = await self._image(source["id"], "smart-pending.jpg")
+        await self._image(source["id"], "outside-smart-scope.jpg")
+        await db.set_image_flag(pending_member, "picked")
+        created = await collection_routes.api_create_collection(
+            collection_routes.CreateCollectionBody(
+                name="Pending picks",
+                query={"flag": "picked", "sort": "filename"},
+            )
+        )
+        collection_id = created["collection"]["id"]
+
+        response = await library_service.api_rankings_impl(
+            collection_id=collection_id,
+            sort="filename",
+        )
+
+        self.assertEqual(response["hidden_pending_thumbnails"], 1)
+        scopes = preview_priority.recent_scopes()
+        self.assertEqual(scopes[0]["collection_id"], collection_id)
+        rows = await thumbnail_pregen.priority_candidate_batch(
+            db.get_db,
+            scopes[0],
+            set(),
+            10,
+            cache_root=thumbnails.SSD_CACHE_DIR,
+            preview_size="sm",
+            resolve_collection_scope=library_service._resolve_collection_scope,
+        )
+
+        self.assertEqual([row["id"] for row in rows], [pending_member])
+
     def _set_taste_blend(self, *, enabled=True, min_signal=1):
         settings.save_settings({
             **settings.get_settings(),

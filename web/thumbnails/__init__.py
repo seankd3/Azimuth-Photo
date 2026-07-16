@@ -14,6 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 from core import work_coordination
 from data import connection as data_connection
 from features.library import preview_priority
+from features.library import service as library_service
 from PIL import Image
 from . import budget as thumbnail_budget
 from . import cache_entries as thumbnail_cache_entries
@@ -1109,6 +1110,7 @@ async def _pregen_priority_candidate_batch(limit: int, processed_ids: set[int]):
             limit,
             cache_root=SSD_CACHE_DIR,
             preview_size="sm",
+            resolve_collection_scope=library_service._resolve_collection_scope,
         )
         if rows:
             collection_name = rows[0]["priority_collection_name"] or ""
