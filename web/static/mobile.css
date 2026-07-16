@@ -1520,3 +1520,14 @@ body.viewer-open #m-toast { bottom: calc(72px + var(--sab)); }
     flex: none;
 }
 #m-toast .t-undo[hidden] { display: none; }
+
+/* Performance wave: a decoded neighbor crosses the stage instead of replacing it. */
+.viewer-swipe-incoming {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    pointer-events: none;
+    will-change: transform;
+}

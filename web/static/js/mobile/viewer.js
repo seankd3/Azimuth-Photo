@@ -27,6 +27,8 @@ let list = [];
 let index = -1;
 let needMore = null;
 let loadToken = 0;
+let incomingStageImage = null;
+const mediumPreloads = new Map();
 
 let zScale = 1;
 let tx = 0;
@@ -125,9 +127,13 @@ function setViewerOffline(offline) {
 function preload(offset) {
     const neighbor = list[index + offset];
     if (neighbor) {
-        const pre = new Image();
-        pre.fetchPriority = 'low';
-        pre.src = thumbUrl('md', neighbor.id);
+        let pre = mediumPreloads.get(Number(neighbor.id));
+        if (!pre) {
+            pre = new Image();
+            pre.fetchPriority = 'low';
+            pre.src = thumbUrl('md', neighbor.id);
+            mediumPreloads.set(Number(neighbor.id), pre);
+        }
     }
 }
 
@@ -143,16 +149,18 @@ function upgradeToMedium(image, token) {
     medium.src = thumbUrl('md', image.id);
 }
 
-function showCurrent() {
+function showCurrent({ stageReady = false } = {}) {
     const image = current();
     if (!image) return;
     loadToken += 1;
     const token = loadToken;
     setViewerOffline(false);
     resetZoom();
-    img.fetchPriority = 'high';
-    img.src = image.thumb_url || thumbUrl('sm', image.id);
-    upgradeToMedium(image, token);
+    if (!stageReady) {
+        img.fetchPriority = 'high';
+        img.src = image.thumb_url || thumbUrl('sm', image.id);
+        upgradeToMedium(image, token);
+    }
     loadLg();
     const date = image.date_taken ? String(image.date_taken).slice(0, 16).replace('T', ' · ') : '';
     cap.textContent = [image.filename, date].filter(Boolean).join('  —  ');
@@ -228,12 +236,44 @@ function settlePhotoSwipe(direction) {
         img.style.transform = '';
         return;
     }
-    img.style.transition = 'transform .16s cubic-bezier(.2,.7,.2,1)';
-    img.style.transform = `translateX(${direction > 0 ? -window.innerWidth : window.innerWidth}px)`;
-    window.setTimeout(() => {
+    const neighbor = list[next];
+    const preloaded = mediumPreloads.get(Number(neighbor.id));
+    if (!preloaded?.complete || !preloaded.naturalWidth) {
+        img.style.transition = 'transform .16s cubic-bezier(.2,.7,.2,1)';
+        img.style.transform = `translateX(${direction > 0 ? -window.innerWidth : window.innerWidth}px)`;
+        window.setTimeout(() => {
+            img.style.transition = '';
+            nav(direction);
+        }, 150);
+        return;
+    }
+    const travel = direction > 0 ? -window.innerWidth : window.innerWidth;
+    const incoming = document.createElement('img');
+    incoming.className = 'viewer-swipe-incoming';
+    incoming.alt = '';
+    incoming.decoding = 'async';
+    incoming.src = preloaded.src;
+    incoming.style.transform = `translateX(${-travel}px)`;
+    stage.append(incoming);
+    incomingStageImage = incoming;
+    const finish = (event) => {
+        if (event.target !== incoming || event.propertyName !== 'transform') return;
+        incoming.removeEventListener('transitionend', finish);
+        img.src = incoming.src;
+        incoming.remove();
+        incomingStageImage = null;
         img.style.transition = '';
-        nav(direction);
-    }, 150);
+        img.style.transform = '';
+        index = next;
+        showCurrent({ stageReady: true });
+    };
+    incoming.addEventListener('transitionend', finish);
+    requestAnimationFrame(() => {
+        img.style.transition = 'transform .16s cubic-bezier(.2,.7,.2,1)';
+        incoming.style.transition = 'transform .16s cubic-bezier(.2,.7,.2,1)';
+        img.style.transform = `translateX(${travel}px)`;
+        incoming.style.transform = 'translateX(0)';
+    });
 }
 
 export function openViewer(imageList, startIndex, { loadMore = null } = {}) {
@@ -254,6 +294,8 @@ export function closeViewer({ fromHistory = false } = {}) {
     openState = false;
     root.hidden = true;
     root.style.background = '';
+    incomingStageImage?.remove();
+    incomingStageImage = null;
     img.style.transform = '';
     document.body.classList.remove('viewer-open');
     document.body.style.overflow = '';
