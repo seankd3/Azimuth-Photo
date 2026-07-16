@@ -85,6 +85,7 @@ let tasteAvailable = false;
 let renderedSelection = new Set();
 let thumbnailPollTimer = 0;
 let pendingThumbnails = 0;
+let pendingPreviewTotal = 0;
 let preparingPollTimer = 0;
 
 async function loadTasteStatus() {
@@ -336,6 +337,11 @@ function renderPreparingState() {
 
 function renderEmpty() {
     clearTimeout(preparingPollTimer);
+    if (pendingPreviewTotal) {
+        timeline.innerHTML = '<div class="ms-empty" style="padding:48px 24px;text-align:center">'
+            + `<b>${esc(`${fmtInt(pendingPreviewTotal)} photos preparing previews — check back shortly`)}</b></div>`;
+        return;
+    }
     timeline.innerHTML = '<div class="ms-empty" style="padding:48px 24px;text-align:center">'
         + '<b>No photos yet</b><br><span>Add a source in the desktop app. Photos will appear here as they’re scanned.</span></div>';
 }
@@ -672,6 +678,29 @@ function pendingCount(data) {
     return Number(data?.pending_thumbnails ?? data?.hidden_pending_thumbnails) || 0;
 }
 
+function hiddenPendingThumbnailCount(data) {
+    return Math.max(0, Number(data?.hidden_pending_thumbnails) || 0);
+}
+
+function pendingPreviewCopy() {
+    return `${fmtInt(pendingPreviewTotal)} more preparing previews…`;
+}
+
+function renderEndMarker() {
+    const base = scopeActive() ? "That's all for this filter." : "That's everything.";
+    endEl.replaceChildren();
+    const summary = document.createElement('span');
+    summary.textContent = base;
+    endEl.append(summary);
+    if (pendingPreviewTotal) {
+        const pending = document.createElement('span');
+        pending.className = 'm-pending-previews';
+        pending.textContent = pendingPreviewCopy();
+        endEl.append(pending);
+    }
+    endEl.hidden = zoomIdx === 2 || !endReached || images.length === 0;
+}
+
 function pendingPreviewCount(images) {
     return (images || []).filter((image) => image?.preview_ready === false).length;
 }
@@ -724,10 +753,12 @@ async function refreshFirstPagePreviews() {
         return;
     }
     updateThumbnailPoll(pendingCount(page));
+    pendingPreviewTotal = hiddenPendingThumbnailCount(page);
     currentSortQuality = page.sort_quality || null;
     for (const image of page.images) sharpenPreview(image);
     if (zoomIdx === 2) await loadHistogram();
     renderScopeBar();
+    renderEndMarker();
 }
 
 async function loadHistogram() {
@@ -771,9 +802,9 @@ export async function reload() {
     flatIds = [];
     startOffset = 0;
     endReached = false;
+    pendingPreviewTotal = 0;
     currentSortQuality = null;
-    endEl.textContent = scopeActive() ? "That's all for this filter." : "That's everything.";
-    endEl.hidden = true;
+    renderEndMarker();
     renderSkeleton();
     renderScopeBar();
     if (scope.similarImages) {
@@ -785,7 +816,7 @@ export async function reload() {
         renderFixedImages(images);
         updateThumbnailPoll(pendingPreviewCount(images));
         endReached = true;
-        endEl.hidden = true;
+        renderEndMarker();
         renderScopeBar();
         updateMonthPill(false);
         pane.scrollTop = 0;
@@ -808,6 +839,7 @@ export async function reload() {
     timeline.classList.toggle('m-z5', zoomIdx === 1);
     if (page && Array.isArray(page.images)) {
         updateThumbnailPoll(pendingCount(page));
+        pendingPreviewTotal = hiddenPendingThumbnailCount(page);
         images = page.images;
         currentSortQuality = page.sort_quality || null;
         rememberImages(images);
@@ -821,7 +853,7 @@ export async function reload() {
     } else {
         timeline.innerHTML = '<div class="ms-empty" style="padding:40px 16px;text-align:center">Couldn\'t load photos.</div>';
     }
-    endEl.hidden = zoomIdx === 2 || !endReached || images.length === 0;
+    renderEndMarker();
     renderScopeBar();
     updateMonthPill(false);
     pane.scrollTop = 0;
@@ -843,9 +875,11 @@ export async function loadMore() {
     loadingNext = false;
     if (gen !== generation || !page || !Array.isArray(page.images)) return;
     updateThumbnailPoll(pendingCount(page));
+    pendingPreviewTotal = hiddenPendingThumbnailCount(page);
     if (!page.images.length) {
         endReached = true;
-        endEl.hidden = false;
+        renderEndMarker();
+        renderScopeBar();
         return;
     }
     images = images.concat(page.images);
@@ -854,8 +888,9 @@ export async function loadMore() {
     trimWindowFromStart();
     if (page.images.length < PAGE) {
         endReached = true;
-        endEl.hidden = false;
     }
+    renderEndMarker();
+    renderScopeBar();
 }
 
 async function loadPrev() {
@@ -875,10 +910,13 @@ async function loadPrev() {
     loadingPrev = false;
     if (gen !== generation || !page || !Array.isArray(page.images) || !page.images.length) return;
     updateThumbnailPoll(pendingCount(page));
+    pendingPreviewTotal = hiddenPendingThumbnailCount(page);
     images = page.images.concat(images);
     startOffset = newStart;
     rememberImages(page.images);
     prependImages(page.images);
+    renderEndMarker();
+    renderScopeBar();
 }
 
 /* ---------- jumps (scrubber + month view) ---------- */
@@ -986,6 +1024,7 @@ function renderScopeBar() {
     if (chips.length > 1) chips.push(`<button class="chip ghost" data-clear-all="1">${icon('x')}<span>Clear all</span></button>`);
     let html = chips.join('');
     html += `<span class="m-scope-count num">${fmtInt(histogram.total)} photos</span>`;
+    if (pendingPreviewTotal) html += `<span class="m-scope-pending">${esc(pendingPreviewCopy())}</span>`;
     if (currentSortQuality && Number(currentSortQuality.total) > 0) {
         html += `<span class="m-scope-quality num">${fmtInt(currentSortQuality.percent)}% sorted</span>`;
     }

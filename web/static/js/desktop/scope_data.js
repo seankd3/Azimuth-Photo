@@ -18,6 +18,7 @@ export async function loadScopePage({ limit = 100, offset = 0, sort = null, sign
         return {
             images: page,
             visible_images: images.length,
+            hidden_pending_thumbnails: 0,
             total_images: images.length,
             sort_quality: null,
             source: 'similar',

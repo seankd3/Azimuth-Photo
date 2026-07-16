@@ -222,6 +222,8 @@ body.m-scoped #m-pull { top: calc(var(--top-banner-offset) + var(--scopebar-h) +
 #m-timeline { padding-top: calc(4px + var(--chrome-sat)); }
 body.m-scoped #m-timeline { padding-top: var(--scopebar-h); }
 #m-end { padding: 20px 0 32px; text-align: center; font-size: 12px; color: var(--text-3); }
+#m-end:has(.m-pending-previews) { display: grid; gap: 4px; }
+.m-pending-previews, #m-scopebar .m-scope-pending { color: var(--text-3); }
 
 .m-day { margin-bottom: 10px; }
 .m-month-head {
@@ -572,6 +574,7 @@ body[data-tab="photos"] #m-scopebar.on { display: flex; }
     border-radius: 50%;
 }
 #m-scopebar .m-scope-count { font-size: 11.5px; color: var(--text-3); white-space: nowrap; }
+#m-scopebar .m-scope-pending { font-size: 11.5px; white-space: nowrap; }
 #m-scopebar .m-scope-quality {
     font-size: 11.5px;
     color: var(--ok);

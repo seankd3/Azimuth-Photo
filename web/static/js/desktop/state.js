@@ -98,6 +98,7 @@ export const scope = {
 
 export const viewState = {
     visibleImages: 0,
+    hiddenPendingThumbnails: 0,
     sortQuality: null,
     images: [],
     generation: 0,
@@ -417,8 +418,15 @@ export function clearFacet(key) {
     patchScope(patch);
 }
 
-export function setRankingsMeta({ visibleImages, sortQuality, searchMode = '', searchSources = [] }) {
+export function setRankingsMeta({
+    visibleImages,
+    hiddenPendingThumbnails = 0,
+    sortQuality,
+    searchMode = '',
+    searchSources = [],
+}) {
     viewState.visibleImages = Number(visibleImages) || 0;
+    viewState.hiddenPendingThumbnails = Math.max(0, Number(hiddenPendingThumbnails) || 0);
     viewState.sortQuality = sortQuality || null;
     viewState.searchMode = String(searchMode || '');
     viewState.searchSources = Array.isArray(searchSources) ? searchSources.filter(Boolean).map(String) : [];
