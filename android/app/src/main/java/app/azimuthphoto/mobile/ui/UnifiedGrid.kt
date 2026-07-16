@@ -20,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.CloudUpload
 import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.PlayCircle
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -211,6 +212,7 @@ fun PhotoGrid(
                         hasRaw = row.image.isRaw,
                         durationMs = 0,
                         notBackedUp = false,
+                        isFavorite = row.image.flag == "picked",
                         showSelection = onLongPress != null && selectedIds.isNotEmpty(),
                         selected = row.image.id in selectedIds,
                         onClick = { onOpen(row.index) },
@@ -257,6 +259,7 @@ private fun UnifiedCell(
     val durationMs: Long
     val hasRaw: Boolean
     val notBackedUp: Boolean
+    val isFavorite: Boolean
     val selectable: Boolean
     when (entry) {
         is TimelineEntry.Device -> {
@@ -265,6 +268,7 @@ private fun UnifiedCell(
             durationMs = entry.item.durationMs
             hasRaw = entry.hasRaw
             notBackedUp = !entry.backedUp
+            isFavorite = false
             selectable = true
         }
         is TimelineEntry.Hub -> {
@@ -273,6 +277,7 @@ private fun UnifiedCell(
             durationMs = 0
             hasRaw = entry.image.isRaw
             notBackedUp = false
+            isFavorite = entry.image.flag == "picked"
             selectable = false
         }
     }
@@ -282,6 +287,7 @@ private fun UnifiedCell(
         hasRaw = hasRaw,
         durationMs = durationMs,
         notBackedUp = notBackedUp,
+        isFavorite = isFavorite,
         showSelection = selectionMode && selectable,
         selected = selected,
         onClick = onClick,
@@ -298,6 +304,7 @@ private fun PhotoCell(
     hasRaw: Boolean,
     durationMs: Long,
     notBackedUp: Boolean,
+    isFavorite: Boolean,
     showSelection: Boolean,
     selected: Boolean,
     onClick: () -> Unit,
@@ -368,6 +375,14 @@ private fun PhotoCell(
             Icon(
                 Icons.Outlined.CloudUpload,
                 contentDescription = "Not backed up",
+                tint = Color.White,
+                modifier = Modifier.align(Alignment.BottomEnd).padding(4.dp).size(14.dp).alpha(0.85f),
+            )
+        }
+        if (isFavorite) {
+            Icon(
+                Icons.Rounded.Favorite,
+                contentDescription = "Favorite",
                 tint = Color.White,
                 modifier = Modifier.align(Alignment.BottomEnd).padding(4.dp).size(14.dp).alpha(0.85f),
             )
