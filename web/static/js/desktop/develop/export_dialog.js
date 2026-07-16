@@ -264,23 +264,22 @@ function idsFrom(image, imageIds) {
 // Data exports (csv/json) are small enough to fetch, so a server failure can
 // toast honestly instead of the anchor silently downloading an error body.
 // Zips keep the streaming anchor — buffering multi-GB archives in a blob is worse.
-export async function fetchDataExport(params, { showToast, filename }) {
-    showToast?.(`Exporting as ${(params.get('format') || 'csv').toUpperCase()}`);
-    let response = null;
+export async function fetchDataExport(params, { showToast, filename, message = '' }) {
+    showToast?.(message || `Exporting as ${(params.get('format') || 'csv').toUpperCase()}`);
     try {
-        response = await fetch(`/api/export?${params.toString()}`, fetchOptionsWithTimeout({}, MUTATION_TIMEOUT_MS));
-    } catch { /* handled below */ }
-    if (!response?.ok) {
+        const response = await fetch(`/api/export?${params.toString()}`, fetchOptionsWithTimeout({}, MUTATION_TIMEOUT_MS));
+        if (!response.ok) throw new Error('export failed');
+        const url = URL.createObjectURL(await response.blob());
+        const link = document.getElementById('download-link');
+        link.href = url;
+        link.download = filename;
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 30_000);
+        return true;
+    } catch {
         showToast?.("Couldn't export — try again");
         return false;
     }
-    const url = URL.createObjectURL(await response.blob());
-    const link = document.getElementById('download-link');
-    link.href = url;
-    link.download = filename;
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 30_000);
-    return true;
 }
 
 function downloadLegacyExport(imageIds, format, { showToast, size = '' } = {}) {

@@ -116,7 +116,7 @@ export function downloadExport(params, { count = 0, message = '' } = {}) {
         return false;
     }
     if (format !== 'zip') {
-        void fetchDataExport(params, { showToast, filename: `azimuth-photo-export.${format}` });
+        void fetchDataExport(params, { showToast, filename: `azimuth-photo-export.${format}`, message });
         return true;
     }
     const link = document.getElementById('download-link');
