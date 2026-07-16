@@ -225,6 +225,25 @@ class OplogConvergenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(settings, {"Exposure2012": 1.5, "_lr_rating": 4})
         self.assertEqual(family_clocks, {"develop": 200.0, "rating": 300.0})
 
+    async def test_first_replayed_rating_seeds_a_neutral_develop_clock(self):
+        path = self._catalog()
+
+        await oplog.apply_entries(path, [{
+            "origin": "satellite",
+            "origin_seq": 1,
+            "content_hash": HASH_A,
+            "family": "rating",
+            "payload": {"value": 4},
+            "ts": 300.0,
+        }], applied_from="satellite", receive_time=500.0)
+
+        with sqlite3.connect(path) as conn:
+            settings, updated_at = conn.execute(
+                "SELECT settings, updated_at FROM develop_settings WHERE image_id = 1"
+            ).fetchone()
+        self.assertEqual(json.loads(settings), {"_lr_rating": 4})
+        self.assertEqual(updated_at, "")
+
     async def test_two_catalog_exchange_replay_and_triple_exchange_do_not_echo(self):
         hub = self._catalog()
         satellite = self._catalog()

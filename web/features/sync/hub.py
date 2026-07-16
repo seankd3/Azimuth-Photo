@@ -475,13 +475,13 @@ async def _merge_rating(conn, image_id: int, item: dict[str, Any]) -> tuple[bool
         )).fetchone()
         settings = json.dumps({"_lr_rating": item["rating"]}, separators=(",", ":"))
         await conn.execute(
-            "INSERT INTO develop_settings(image_id, settings, origin, updated_at) VALUES (?, ?, ?, ?) "
+            "INSERT INTO develop_settings(image_id, settings, origin, updated_at) VALUES (?, ?, ?, '') "
             "ON CONFLICT(image_id) DO UPDATE SET settings=json_set("
             "CASE WHEN json_valid(develop_settings.settings) THEN "
             "  CASE WHEN json_type(develop_settings.settings) = 'object' "
             "    THEN develop_settings.settings ELSE '{}' END "
             "ELSE '{}' END, '$._lr_rating', ?)",
-            (image_id, settings, row["origin"] if row else "sync", incoming, item["rating"]),
+            (image_id, settings, row["origin"] if row else "sync", item["rating"]),
         )
     await _record_state(conn, image_id, "rating", incoming)
     return True, "applied"

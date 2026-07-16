@@ -421,6 +421,29 @@ class SyncHubTests(unittest.TestCase):
             conn.close()
         self.assertEqual(settings, {"Exposure2012": 1.5, "_lr_rating": 4})
 
+    def test_first_synced_rating_seeds_a_neutral_develop_clock(self):
+        payload = self.image_bytes("first-rating.jpg", (55, 65, 75))
+        content_hash = self.declare("first-rating.jpg", payload)
+        image_id = self.upload(content_hash, payload)
+
+        response = self.client.post("/api/sync/metadata", json={"items": [{
+            "content_hash": content_hash,
+            "rating": 5,
+            "rating_updated_at": "2026-07-16T03:00:00Z",
+        }]})
+
+        self.assertEqual(response.status_code, 200, response.text)
+        conn = sqlite3.connect(self.db_path)
+        try:
+            row = conn.execute(
+                "SELECT settings, updated_at FROM develop_settings WHERE image_id = ?",
+                (image_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        self.assertEqual(json.loads(row[0]), {"_lr_rating": 5})
+        self.assertEqual(row[1], "")
+
     def test_hash_backfill_batch_and_endpoint(self):
         path = self.root / "legacy.jpg"
         path.write_bytes(self.image_bytes("source.jpg", (4, 5, 6)))
