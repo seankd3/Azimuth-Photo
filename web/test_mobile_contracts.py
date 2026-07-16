@@ -110,6 +110,21 @@ class MobileOfflineContractsTests(unittest.TestCase):
         self.assertIn("if (hiddenPendingThumbnails > 0 && !images.length)", months)
         self.assertIn("renderPreparingState(hiddenPendingThumbnails)", months)
 
+    def test_info_sheet_rating_stays_bound_to_its_displayed_photo(self):
+        viewer = self.read("static", "js", "mobile", "viewer.js")
+        info_sheet = viewer[viewer.index("function infoSheet()") :]
+        rating_handler = info_sheet[
+            info_sheet.index("for (const button of sheet.querySelectorAll('[data-rating]'))"):
+            info_sheet.index("sheet.querySelector('#mv-similar').addEventListener")
+        ]
+
+        self.assertIn("const target = image;", rating_handler)
+        self.assertNotIn("current()", rating_handler)
+        self.assertIn("const known = byId.get(Number(target.id));", rating_handler)
+        self.assertIn("void writeRating(target.id, rating).then((result) => {", rating_handler)
+        self.assertIn("imageRating(target) !== rating", rating_handler)
+        self.assertIn("target.rating = previous;", rating_handler)
+
     def test_smart_collection_scopes_hide_membership_actions(self):
         state = self.read("static", "js", "mobile", "state.js")
         library = self.read("static", "js", "mobile", "library.js")
