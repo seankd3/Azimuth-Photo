@@ -11,6 +11,8 @@ let loaded = false;
 let loading = false;
 let foldersLoading = false;
 let tagsLoading = false;
+let foldersLoadError = false;
+let tagsLoadError = false;
 let loadSeq = 0;
 let lastOptionsLoadedAt = 0;
 let expandedYear = '';
@@ -102,10 +104,14 @@ function sectionSearchInput(section, count, placeholder) {
     return `<input class="filter-search" id="filter-${section}-search" value="${esc(query)}" placeholder="${esc(placeholder)}" autocomplete="off">`;
 }
 
-function searchableOptionBlock(title, section, items, key, valueOf, labelOf, { placeholder, empty, loading: isLoading = false, glyph = 'search' } = {}) {
+function searchableOptionBlock(title, section, items, key, valueOf, labelOf, {
+    placeholder, empty, loading: isLoading = false, error = '', retry = '', glyph = 'search',
+} = {}) {
     const filtered = searchableItems(section, items, labelOf);
     const rows = optionRows(filtered, key, valueOf, labelOf);
-    const body = rows || (isLoading ? loadingOption(`Loading ${title.toLowerCase()}…`) : emptyOption(empty, glyph));
+    const body = rows || (isLoading
+        ? loadingOption(`Loading ${title.toLowerCase()}…`)
+        : error ? retryOption(error, retry) : emptyOption(empty, glyph));
     return `<section class="filter-sec" data-filter-section="${esc(section)}"><h3>${esc(title)}</h3>${sectionSearchInput(section, items.length, placeholder)}<div class="filter-list">${body}</div></section>`;
 }
 
@@ -117,6 +123,10 @@ function emptyOption(copy, glyph = 'search') {
 
 function loadingOption(copy) {
     return `<div class="filter-empty">${esc(copy)}</div>`;
+}
+
+function retryOption(copy, section) {
+    return `<div class="filter-empty chrome-empty"><span>${esc(copy)}</span><button type="button" class="btn" data-filter-retry="${esc(section)}">Try again</button></div>`;
 }
 
 function selectBlock(title, body, attrs = '') {
@@ -169,7 +179,9 @@ function folderRows(items) {
 function renderFolders() {
     const filtered = searchableItems('folder', options.folders, (item) => item.path);
     const rows = folderRows(filtered);
-    const body = rows || (foldersLoading ? loadingOption('Loading folders…') : emptyOption('No folders found.', 'folder'));
+    const body = rows || (foldersLoading
+        ? loadingOption('Loading folders…')
+        : foldersLoadError ? retryOption("Couldn't load folders.", 'folders') : emptyOption('No folders found.', 'folder'));
     return `<section class="filter-sec" data-filter-section="folder"><h3>Folder</h3>${sectionSearchInput('folder', options.folders.length, 'Search folders')}<div class="filter-list">${body}</div></section>`;
 }
 
@@ -351,7 +363,8 @@ function render() {
                 placeholder: 'Search lenses', empty: 'No lenses found.', loading, glyph: 'aperture',
             }),
             searchableOptionBlock('Tags', 'tags', options.tags, 'tag', (item) => item.tag || item.value, (item) => item.tag || item.value, {
-                placeholder: 'Search tags', empty: 'No caption tags yet.', loading: tagsLoading, glyph: 'tag',
+                placeholder: 'Search tags', empty: 'No caption tags yet.', loading: tagsLoading,
+                error: tagsLoadError ? "Couldn't load tags." : '', retry: 'tags', glyph: 'tag',
             }),
             selectBlock('Orientation', [
                 ['landscape', 'Landscape'],
@@ -380,6 +393,9 @@ function bindRows() {
             event.stopPropagation();
             expandYear(retry.dataset.monthsRetry, { force: true });
         });
+    }
+    for (const retry of popover.querySelectorAll('[data-filter-retry]')) {
+        retry.addEventListener('click', () => loadOptions({ force: true }));
     }
     for (const row of popover.querySelectorAll('[data-key][data-value]')) {
         row.addEventListener('click', () => {
@@ -427,6 +443,8 @@ async function loadOptions({ force = false } = {}) {
     loading = true;
     foldersLoading = true;
     tagsLoading = true;
+    foldersLoadError = false;
+    tagsLoadError = false;
     render();
     const core = getFilterOptions(scopeParams()).then((filterData) => {
         if (seq !== loadSeq) return;
@@ -451,7 +469,10 @@ async function loadOptions({ force = false } = {}) {
     const folders = getFolders().then((folderData) => {
         if (seq !== loadSeq) return;
         options.folders = (folderData && folderData.folders) || [];
-    }).catch(() => {}).finally(() => {
+    }).catch(() => {
+        if (seq !== loadSeq) return;
+        foldersLoadError = true;
+    }).finally(() => {
         if (seq !== loadSeq) return;
         foldersLoading = false;
         render();
@@ -459,7 +480,10 @@ async function loadOptions({ force = false } = {}) {
     const tags = getTags({ limit: 100 }).then((tagData) => {
         if (seq !== loadSeq) return;
         options.tags = (tagData && tagData.tags) || [];
-    }).catch(() => {}).finally(() => {
+    }).catch(() => {
+        if (seq !== loadSeq) return;
+        tagsLoadError = true;
+    }).finally(() => {
         if (seq !== loadSeq) return;
         tagsLoading = false;
         render();
@@ -473,6 +497,8 @@ function invalidateOptions() {
     loading = false;
     foldersLoading = false;
     tagsLoading = false;
+    foldersLoadError = false;
+    tagsLoadError = false;
     lastOptionsLoadedAt = 0;
     resetMonthCacheIfScopeChanged();
     if (filtersOpen()) loadOptions({ force: true });

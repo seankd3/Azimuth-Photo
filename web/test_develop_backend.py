@@ -233,6 +233,34 @@ class DevelopBackendTests(unittest.TestCase):
         self.assertIn("Snapshot: Keeper", labels)
         self.assertEqual(len([l for l in labels if not l.startswith("Snapshot:")]), 40)
 
+    def test_history_rail_bounds_pinned_snapshots_as_well_as_edits(self):
+        async def insert_history():
+            conn = await db.get_db()
+            try:
+                for index in range(45):
+                    await conn.execute(
+                        "INSERT INTO develop_history (image_id, settings, label, created_at) VALUES (?, '{}', ?, ?)",
+                        (self.raw_id, f"Snapshot: {index}", f"snapshot-{index}"),
+                    )
+                for index in range(45):
+                    await conn.execute(
+                        "INSERT INTO develop_history (image_id, settings, label, created_at) VALUES (?, '{}', ?, ?)",
+                        (self.raw_id, f"Step {index}", f"step-{index}"),
+                    )
+                await conn.commit()
+            finally:
+                await conn.close()
+
+        asyncio.run(insert_history())
+        history = self.client.get(f"/api/develop/{self.raw_id}/history")
+        self.assertEqual(history.status_code, 200, history.text)
+        labels = [row["label"] for row in history.json()]
+        self.assertEqual(len(labels), 80)
+        self.assertEqual(len([label for label in labels if label.startswith("Snapshot:")]), 40)
+        self.assertEqual(len([label for label in labels if not label.startswith("Snapshot:")]), 40)
+        self.assertIn("Snapshot: 44", labels)
+        self.assertNotIn("Snapshot: 0", labels)
+
     def test_named_snapshots_are_not_truncated_by_edit_history(self):
         for label in ("Print", "Web"):
             saved = self.client.post(

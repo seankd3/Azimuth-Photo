@@ -6,6 +6,8 @@ const POLL_MS = 3000;
 let timer = null;
 let root = null;
 let currentStatus = null;
+let controlInFlight = 0;
+let statusGeneration = 0;
 
 function formatBytes(bytes) {
     const value = Math.max(0, Number(bytes) || 0);
@@ -132,18 +134,27 @@ function patch(status) {
 }
 
 async function refresh() {
+    const generation = statusGeneration;
     try {
-        patch(await json('/api/sync/status'));
+        const status = await json('/api/sync/status');
+        if (controlInFlight || generation !== statusGeneration) return;
+        patch(status);
     } catch (error) {
+        if (controlInFlight || generation !== statusGeneration) return;
         patchOffline();
     }
 }
 
 async function control(url) {
+    const generation = ++statusGeneration;
+    controlInFlight += 1;
     try {
-        patch(await json(url, { method: 'POST' }));
+        const status = await json(url, { method: 'POST' });
+        if (generation === statusGeneration) patch(status);
     } catch (error) {
-        patchOffline();
+        if (generation === statusGeneration) patchOffline();
+    } finally {
+        controlInFlight -= 1;
     }
 }
 

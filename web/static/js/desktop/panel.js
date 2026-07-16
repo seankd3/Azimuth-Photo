@@ -612,6 +612,16 @@ async function copyPublishUrl(url) {
     }
 }
 
+function patchPublishOverlayStatus(data, token) {
+    if (!publishOverlayIsCurrent(token)) return false;
+    const status = publishOverlay.querySelector('.publish-status');
+    if (!status) return false;
+    status.outerHTML = publishStatusBlock(data);
+    const liveUrl = data?.url || data?.publish?.url || data?.job?.url || '';
+    publishOverlay.querySelector('#publish-copy')?.addEventListener('click', () => copyPublishUrl(liveUrl));
+    return true;
+}
+
 async function renderPublishOverlay(collectionId, name, data = null, token = publishOverlayToken) {
     ensurePublishOverlay();
     if (!publishOverlayIsCurrent(token)) return;
@@ -737,10 +747,14 @@ async function pollPublishStatus(collectionId, name, token, immediate = false) {
     if (!publishOverlayIsCurrent(token)) return;
     const data = await getCollectionPublish(collectionId);
     if (!publishOverlayIsCurrent(token)) return;
-    await renderPublishOverlay(collectionId, name, data, token);
-    if (data?.in_progress) {
+    if (data?.in_progress && patchPublishOverlayStatus(data, token)) {
         schedulePublishPoll(collectionId, name, token);
     } else {
+        await renderPublishOverlay(collectionId, name, data, token);
+        if (data?.in_progress) {
+            schedulePublishPoll(collectionId, name, token);
+            return;
+        }
         if (!immediate && data?.job?.state === 'revoked') showToast('Gallery unpublished');
         emitSharedSurfacesChanged(collectionId);
         await loadCollections();
@@ -1091,6 +1105,18 @@ function patchCollectionCount(collectionId, delta) {
     };
 }
 
+async function undoCollectionAdd(collectionId, imageIds, successMessage) {
+    const result = await removeFromCollection(collectionId, imageIds);
+    if (!result?.ok) {
+        showToast("Couldn't undo collection change");
+        await loadCollections();
+        return false;
+    }
+    await loadCollections();
+    showToast(successMessage);
+    return true;
+}
+
 async function addImagesToCollection(collectionId, imageIds) {
     const coll = collections.find((c) => Number(c.id) === Number(collectionId));
     if (coll?.smart) {
@@ -1101,11 +1127,7 @@ async function addImagesToCollection(collectionId, imageIds) {
     const result = await addToCollection(collectionId, imageIds);
     if (result && result.ok) {
         showToast(`Added ${imageIds.length} to “${coll ? coll.name : 'collection'}”`, {
-            undo: async () => {
-                await removeFromCollection(collectionId, imageIds);
-                await loadCollections();
-                showToast('Removed from collection');
-            },
+            undo: () => undoCollectionAdd(collectionId, imageIds, 'Removed from collection'),
         });
         await loadCollections();
         return true;
@@ -1189,7 +1211,7 @@ export async function openCollectionPicker(imageIds, { onDone = null } = {}) {
                 close();
                 if (onDone) onDone();
                 showToast(`Created “${name}”`, {
-                    undo: async () => coll.id && removeFromCollection(coll.id, ids),
+                    undo: coll.id ? () => undoCollectionAdd(coll.id, ids, 'Collection removed') : null,
                 });
             } else showToast("Couldn't create collection");
         } finally {
@@ -1472,6 +1494,7 @@ export async function initPanel() {
     on('flags', scheduleChromeRefresh);
     on('trash:changed', scheduleChromeRefresh);
     on('import:changed', scheduleChromeRefresh);
+    on('collections:refresh', scheduleChromeRefresh);
     on('scope', () => {
         renderNewCollectionForm();
         for (const row of document.querySelectorAll('[data-source]')) row.classList.toggle('active', folderActive(row.dataset.source));
