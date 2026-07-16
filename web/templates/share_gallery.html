@@ -381,6 +381,7 @@
 
       function favoriteStatusText(picked) {
         const noun = picked === 1 ? 'favorite' : 'favorites';
+        if (favoritesDone) return `Sent — your photographer has your ${picked} ${noun}.`;
         if (picked > 0) return `${picked} ${noun} saved — your photographer sees these.`;
         return 'Pick favorites as you browse.';
       }
@@ -405,7 +406,7 @@
       function syncFavoriteButtons() {
         const picked = favorites.size;
         if (pickCount) pickCount.textContent = `${picked} picked`;
-        if (pickStatus) pickStatus.textContent = favoritesDone && picked > 0 ? `Done. ${favoriteStatusText(picked)}` : favoriteStatusText(picked);
+        if (pickStatus) pickStatus.textContent = favoriteStatusText(picked);
         if (picksDone) {
           picksDone.disabled = picked === 0;
           picksDone.textContent = 'Done';
@@ -432,6 +433,7 @@
           if (!response.ok) return;
           const result = await response.json();
           favorites = new Set((result.favorites || []).map(Number).filter((id) => id > 0));
+          writeFavoritesDone(Boolean(result.done));
           writeFavorites();
           syncFavoriteButtons();
         } catch {
@@ -487,9 +489,10 @@
       });
       picksDone?.addEventListener('click', () => {
         if (!favorites.size) return;
-        writeFavoritesDone(true);
-        syncFavoriteButtons();
-        picksDone.blur();
+        fetch(`/s/${encodeURIComponent(token)}/favorite`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ done: true }),
+        }).then((response) => response.ok ? response.json() : Promise.reject())
+          .then((result) => { writeFavoritesDone(Boolean(result.done)); syncFavoriteButtons(); picksDone.blur(); });
       });
       {% endif %}
       document.addEventListener('keydown', (event) => {

@@ -31,6 +31,7 @@ RecordShareView = Callable[[str], Awaitable[dict | None]]
 ResolveToken = Callable[[str], Awaitable[dict | None]]
 TokenAllowsImage = Callable[[str, int], Awaitable[bool]]
 SetFavorite = Callable[..., Awaitable[bool]]
+MarkFinished = Callable[[int], Awaitable[float | None]]
 ListFavorites = Callable[[int], Awaitable[list[dict]]]
 FavoritesForCollection = Callable[[int], Awaitable[list[dict]]]
 ThumbnailResponse = Callable[..., Awaitable[Response]]
@@ -46,6 +47,7 @@ _record_share_view: RecordShareView | None = None
 _resolve_token: ResolveToken | None = None
 _token_allows_image: TokenAllowsImage | None = None
 _set_favorite: SetFavorite | None = None
+_mark_finished: MarkFinished | None = None
 _list_favorites: ListFavorites | None = None
 _favorites_for_collection: FavoritesForCollection | None = None
 _thumbnail_response: ThumbnailResponse | None = None
@@ -62,9 +64,10 @@ class ShareBody(BaseModel):
 
 
 class FavoriteBody(BaseModel):
-    image_id: int
-    on: bool
+    image_id: int | None = None
+    on: bool = False
     name: str | None = None
+    done: bool = False
 
 
 def configure(
@@ -78,6 +81,7 @@ def configure(
     resolve_token: ResolveToken,
     token_allows_image: TokenAllowsImage,
     set_favorite: SetFavorite,
+    mark_finished: MarkFinished | None = None,
     list_favorites: ListFavorites,
     favorites_for_collection: FavoritesForCollection,
     thumbnail_response: ThumbnailResponse,
@@ -86,7 +90,7 @@ def configure(
 ) -> None:
     global _templates, _create_or_rotate_share, _get_share, _revoke_share
     global _set_share_password, _record_share_view, _resolve_token
-    global _token_allows_image, _set_favorite, _list_favorites
+    global _token_allows_image, _set_favorite, _mark_finished, _list_favorites
     global _favorites_for_collection, _thumbnail_response
     global _get_collection, _resolve_smart_image_ids
     _templates = templates
@@ -98,6 +102,7 @@ def configure(
     _resolve_token = resolve_token
     _token_allows_image = token_allows_image
     _set_favorite = set_favorite
+    _mark_finished = mark_finished
     _list_favorites = list_favorites
     _favorites_for_collection = favorites_for_collection
     _thumbnail_response = thumbnail_response
@@ -375,7 +380,8 @@ async def api_share_favorites(collection_id: int):
         {"image_id": int(row["image_id"]), "created_at": float(row["created_at"])}
         for row in favorites
     ]
-    return {"favorites": owner_favorites, "count": len(owner_favorites)}
+    share = await _get_share(collection_id)
+    return {"favorites": owner_favorites, "count": len(owner_favorites), "client_finished_at": share.get("client_finished_at") if share else None}
 
 
 @router.get("/s/{token}", response_class=HTMLResponse)
@@ -423,7 +429,7 @@ async def public_share_favorites(token: str, request: Request):
     if collection is None or not auth.is_unlocked(request, collection):
         return _public_response(JSONResponse({"error": "Not found"}, status_code=404))
     favorites = await _list_favorites(int(collection["share_id"]))
-    return _public_response(JSONResponse({"favorites": _favorite_ids(favorites)}))
+    return _public_response(JSONResponse({"favorites": _favorite_ids(favorites), "done": bool(collection.get("client_finished_at"))}))
 
 
 @router.post("/s/{token}/favorite")
@@ -432,6 +438,12 @@ async def public_share_favorite(token: str, payload: FavoriteBody, request: Requ
     collection = await _resolve_token(token)
     if collection is None or not auth.is_unlocked(request, collection):
         return _public_response(JSONResponse({"error": "Not found"}, status_code=404))
+    if payload.done:
+        finished_at = await _mark_finished(int(collection["share_id"])) if _mark_finished else None
+        favorites = await _list_favorites(int(collection["share_id"]))
+        return _public_response(JSONResponse({"ok": finished_at is not None, "favorites": _favorite_ids(favorites), "done": finished_at is not None}))
+    if payload.image_id is None:
+        return _public_response(JSONResponse({"error": "Image required"}, status_code=422))
     ok = await _set_favorite(
         int(collection["share_id"]),
         int(payload.image_id),
@@ -441,7 +453,7 @@ async def public_share_favorite(token: str, payload: FavoriteBody, request: Requ
     if not ok:
         return _public_response(JSONResponse({"error": "Not found"}, status_code=404))
     favorites = await _list_favorites(int(collection["share_id"]))
-    return _public_response(JSONResponse({"ok": True, "favorites": _favorite_ids(favorites)}))
+    return _public_response(JSONResponse({"ok": True, "favorites": _favorite_ids(favorites), "done": False}))
 
 
 @router.get("/s/{token}/download-all")

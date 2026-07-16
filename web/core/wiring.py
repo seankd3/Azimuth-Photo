@@ -427,6 +427,7 @@ def configure_share_routes(*, templates, resolve_library_constraints=None) -> No
             on,
             client_name=client_name,
         ),
+        mark_finished=lambda share_id: db.mark_share_finished(share_id),
         list_favorites=lambda share_id: db.list_share_favorites(share_id),
         favorites_for_collection=lambda collection_id: db.favorites_for_collection(collection_id),
         thumbnail_response=media_routes.thumbnail_response,

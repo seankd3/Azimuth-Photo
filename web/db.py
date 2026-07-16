@@ -653,6 +653,10 @@ async def list_share_favorites(share_id: int) -> list[dict]:
     return await share_repository.list_favorites(DB_PATH, share_id)
 
 
+async def mark_share_finished(share_id: int) -> float | None:
+    return await share_repository.mark_finished(DB_PATH, share_id)
+
+
 async def favorites_for_collection(collection_id: int) -> list[dict]:
     return await share_repository.favorites_for_collection(DB_PATH, collection_id)
 

@@ -1,23 +1,24 @@
-# ux3-collections report
+# ux4-sharing report
 
-Branch: `ux3-collections` (not merged to `develop`).
+Branch: `ux4-sharing` (not merged to `develop`).
 
 ## Status by work-order item
 
-1. Done — `/api/rankings` accepts `collection_id` and `ids`. Collection membership composes with ranking sorts and facets; `count_rankings` uses the same collection constraint. `test_library.py` covers scoped order and `flag=picked` composition.
+1. Done — Client galleries now render `share_gallery.html`; the inline client page is removed. Locked galleries use the shared lock card and rate-limit copy.
+2. Done — Open private shares, client galleries, and static published galleries emit an `og:image`; locked shares do not.
+3. Done — Private-share download copy says “web-size copy”; published gallery downloads use the generated `lg` JPEG.
+4. Done — Private-share Download all navigates to one ZIP response at `/s/{token}/download-all`.
+5. Done — Lightbox opens its `md` preview then upgrades to `lg`; it supports pinch/pan zoom and double-tap toggle. Swipe navigation only acts at 1x.
+6. Done — A client gallery’s chosen cover is rendered as a full-width visitor hero with the gallery title and brand.
+7. Done — Static site nodes render parent back links and child-gallery cards with a cover/first-photo thumb and count.
+8. Done — Selecting Done persists `client_finished_at` on the share, returns it to the owner favorites payload, and changes the visitor confirmation to “Sent”.
 
-   Manual QA: Not run. Request `/api/rankings?collection_id=<id>&sort=elo&limit=10`; confirm only collection members appear in descending rating order. Add `flag=picked`; confirm only picked members remain.
+## Manual QA
 
-2. Done — Opening a mobile collection activates the Photos timeline with a collection scope chip. The timeline uses normal paging, selection, badges, sorting, and viewer behavior. Selected members can be removed through the selection bar; the toast restores them with Undo. Clearing the collection chip returns to Library.
-
-   Manual QA: Not run. Open a collection with more than one page of photos, scroll for another page, select photos, remove them, and use Undo. Clear the Collection chip and confirm Library opens.
-
-3. Done — `/api/date-histogram` returns `cover_id` for the highest-rated image in each dated month. Mobile month cards render the small thumbnail below a contrast scrim; cards without `cover_id` retain the text-only layout.
-
-   Manual QA: Not run. Open month view for photos spanning multiple months. Confirm month cards use representative photos and text remains legible. Confirm an undated card stays text-only.
+Not run. Click through: open an unprotected `/s/` link and a `/s/gallery/` link; verify branding, lightbox arrows/Escape/swipe, the `md`-then-`lg` image upgrade, pinch zoom, individual web-size downloads, and one ZIP download. Lock each link, submit wrong passwords until throttled, and confirm the shared lock message. Set a gallery cover and verify the hero. In a nested static export, follow child cards and the back link. Pick favorites, press Done, then inspect the owner favorites response for `client_finished_at`.
 
 ## Verification
 
-- `for f in $(git diff --name-only develop -- '*.js'); do node --check "$f" || exit 1; done` — passed.
-- `~/Projects/photo-archive/web/.venv/bin/python -m pytest test_library.py -q` from `web/` — `74 passed`.
+- `~/Projects/photo-archive/web/.venv/bin/python -m pytest test_*.py -q -k "share or publish or gallery"` from `web/` — `84 passed, 924 deselected`.
+- `node --check static/js/desktop/gallery_editor.js` — passed.
 - `git diff --check` — passed.
