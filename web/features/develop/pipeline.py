@@ -42,7 +42,7 @@ def _smoothstep(edge0: float, edge1: float, value: np.ndarray) -> np.ndarray:
 
 def _gaussian_ev(ev: np.ndarray, center: float, sigma: float = C.TONE_EV_SIGMA) -> np.ndarray:
     z = (ev - center) / max(sigma, C.TONE_EPSILON)
-    return np.exp(-0.5 * z * z).astype(np.float32)
+    return np.exp(-0.5 * z * z).astype(np.float32, copy=False)
 
 
 def linear_to_srgb(linear: np.ndarray) -> np.ndarray:
@@ -52,7 +52,7 @@ def linear_to_srgb(linear: np.ndarray) -> np.ndarray:
         linear <= C.SRGB_LINEAR_THRESHOLD,
         linear * C.SRGB_ENCODE_SCALE,
         C.SRGB_ENCODE_A * np.power(linear, C.SRGB_ENCODE_GAMMA) - C.SRGB_ENCODE_B,
-    ).astype(np.float32)
+    ).astype(np.float32, copy=False)
 
 
 def srgb_to_linear(srgb: np.ndarray) -> np.ndarray:
@@ -62,7 +62,7 @@ def srgb_to_linear(srgb: np.ndarray) -> np.ndarray:
         srgb <= C.SRGB_DECODE_THRESHOLD,
         srgb * C.SRGB_DECODE_SCALE,
         np.power((srgb + C.SRGB_DECODE_A) / C.SRGB_ENCODE_A, C.SRGB_DECODE_GAMMA),
-    ).astype(np.float32)
+    ).astype(np.float32, copy=False)
 
 
 def luma(rgb: np.ndarray) -> np.ndarray:
@@ -70,7 +70,7 @@ def luma(rgb: np.ndarray) -> np.ndarray:
         rgb[..., 0] * C.LUMA_RED
         + rgb[..., 1] * C.LUMA_GREEN
         + rgb[..., 2] * C.LUMA_BLUE
-    ).astype(np.float32)
+    ).astype(np.float32, copy=False)
 
 
 def _as_shot_temperature(settings: Mapping[str, object], explicit: float | None) -> float:
@@ -230,7 +230,7 @@ def _soft_clamp(value: np.ndarray) -> np.ndarray:
         value < 0.0,
         0.0,
         np.where(above, 1.0 + (value - 1.0) / (1.0 + C.SOFT_CLAMP_FACTOR * (value - 1.0)), value),
-    ).astype(np.float32)
+    ).astype(np.float32, copy=False)
 
 
 def _region_tone_map(rgb: np.ndarray, settings: Mapping[str, object]) -> np.ndarray:
@@ -251,13 +251,13 @@ def _region_tone_map(rgb: np.ndarray, settings: Mapping[str, object]) -> np.ndar
         + C.TONE_WHITES_FACTOR * whites * ww
         + C.TONE_BLACKS_FACTOR * blacks * wb
     )
-    rgb = (rgb * np.exp2(delta_ev)[..., None]).astype(np.float32)
+    rgb = (rgb * np.exp2(delta_ev)[..., None]).astype(np.float32, copy=False)
     y2 = luma(rgb)
     t = np.power(np.clip(y2, 0.0, 1.0), 1.0 / C.TONE_GAMMA)
     t3 = 0.5 + (t - 0.5) * (1.0 + C.CONTRAST_FACTOR * _slider(settings, "Contrast2012"))
     t3 = _soft_clamp(t3)
     gain = np.power(t3, C.TONE_GAMMA) / np.maximum(y2, C.TONE_EPSILON)
-    return (rgb * gain[..., None]).astype(np.float32)
+    return (rgb * gain[..., None]).astype(np.float32, copy=False)
 
 
 def _curve_points(raw_points: object) -> list[tuple[float, float]]:
@@ -356,13 +356,13 @@ def soft_proof_transform(srgb: np.ndarray, profile: str = "srgb") -> tuple[np.nd
 def linear_to_oklab(linear: np.ndarray) -> np.ndarray:
     lms = _matmul_rows(linear, C.OKLAB_M1)
     lms = np.sign(lms) * np.power(np.abs(lms), 1.0 / 3.0)
-    return _matmul_rows(lms, C.OKLAB_M2).astype(np.float32)
+    return _matmul_rows(lms, C.OKLAB_M2).astype(np.float32, copy=False)
 
 
 def oklab_to_linear(lab: np.ndarray) -> np.ndarray:
     lms = _matmul_rows(lab, C.OKLAB_M2_INV)
     lms = lms * lms * lms
-    return _matmul_rows(lms, C.OKLAB_M1_INV).astype(np.float32)
+    return _matmul_rows(lms, C.OKLAB_M1_INV).astype(np.float32, copy=False)
 
 
 def _gamut_clip_desaturate(linear: np.ndarray) -> np.ndarray:
@@ -397,7 +397,7 @@ def _gamut_clip_desaturate(linear: np.ndarray) -> np.ndarray:
     if np.any(still):
         clipped = np.where(still[:, None], achromatic, clipped)
     result[outside] = clipped
-    return np.clip(result, 0.0, 1.0).astype(np.float32)
+    return np.clip(result, 0.0, 1.0).astype(np.float32, copy=False)
 
 
 def scale_oklab_chroma(
@@ -522,7 +522,7 @@ def apply_camera_profile_ab(srgb: np.ndarray, profile: Mapping[str, object] | No
         - C.CAMERA_PROFILE_BIN_CENTER
     )
     hue_floor = np.floor(hue_position)
-    hue_mix = (hue_position - hue_floor).astype(np.float32)
+    hue_mix = (hue_position - hue_floor).astype(np.float32, copy=False)
     hue0 = np.mod(hue_floor.astype(np.intp), C.CAMERA_PROFILE_HUE_BINS)
     hue1 = (hue0 + 1) % C.CAMERA_PROFILE_HUE_BINS
 
@@ -739,7 +739,11 @@ def rgb_to_hsv(rgb: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     hue[blue_max] = (red[blue_max] - green[blue_max]) / delta[blue_max] + 4.0
     hue = np.mod(hue * 60.0, 360.0)
     saturation = np.divide(delta, maximum, out=np.zeros_like(delta), where=maximum > 0.0)
-    return hue.astype(np.float32), saturation.astype(np.float32), maximum.astype(np.float32)
+    return (
+        hue.astype(np.float32, copy=False),
+        saturation.astype(np.float32, copy=False),
+        maximum.astype(np.float32, copy=False),
+    )
 
 
 def hsv_to_rgb(hue: np.ndarray, saturation: np.ndarray, value: np.ndarray) -> np.ndarray:
@@ -755,7 +759,7 @@ def hsv_to_rgb(hue: np.ndarray, saturation: np.ndarray, value: np.ndarray) -> np
         ),
         axis=-1,
     )
-    return (rgb_prime + (value - chroma)[..., None]).astype(np.float32)
+    return (rgb_prime + (value - chroma)[..., None]).astype(np.float32, copy=False)
 
 
 def hsl_band_weights(hue: np.ndarray) -> np.ndarray:
@@ -1069,7 +1073,7 @@ def _scene_linear_user_ops(rgb: np.ndarray, settings: Mapping[str, object]) -> t
     if dehaze != 0.0:
         result = (result - C.DEHAZE_AIRLIGHT_FACTOR * dehaze) / (1.0 - C.DEHAZE_AIRLIGHT_FACTOR * dehaze)
         result = np.maximum(result, 0.0)
-    return result.astype(np.float32), float(dehaze)
+    return result.astype(np.float32, copy=False), float(dehaze)
 
 
 def _resolved_adobe_profile(color_profile: Mapping[str, object] | None) -> Mapping[str, object] | None:
@@ -1225,7 +1229,7 @@ def apply_pipeline(
     # §23 must be the final pixel operation, after locals and global effects.
     from .heal import apply_retouch_spots
     c = apply_retouch_spots(c, settings)
-    return np.clip(c, 0.0, 1.0).astype(np.float32)
+    return np.clip(c, 0.0, 1.0).astype(np.float32, copy=False)
 
 
 # Intentional explicit alias for route/render callers.
