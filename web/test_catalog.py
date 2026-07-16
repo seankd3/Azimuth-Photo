@@ -11,7 +11,6 @@ import db
 import scanner
 import settings
 import thumbnails
-from core import cache_events
 from features.catalog import metadata as catalog_metadata
 from features.catalog import routes as catalog_routes
 from features.library import service as library_service
@@ -100,6 +99,8 @@ class CatalogSourceRouteTests(BackendTestCase):
 
             images = await db.get_recent_active_images(limit=1)
             image_id = int(images[0]["id"])
+            empty_payload = await library_service.api_rankings_impl(limit=10)
+            self.assertEqual(empty_payload["visible_images"], 0)
             worker = asyncio.create_task(thumbnails.run_prefetch_worker())
             for _attempt in range(100):
                 if thumbnails.fast_disk_has("sm", image_id):
@@ -108,8 +109,6 @@ class CatalogSourceRouteTests(BackendTestCase):
 
             self.assertTrue(thumbnails.fast_disk_has("sm", image_id))
             await asyncio.to_thread(thumbnails._flush_write_queue)
-            db.invalidate_cached_image_ids_cache(cache_root=cache_dir, size="sm")
-            cache_events.invalidate_rankings_cache()
             payload = await library_service.api_rankings_impl(limit=10)
             self.assertEqual(payload["visible_images"], 1, payload)
             self.assertEqual(payload["hidden_pending_thumbnails"], 0, payload)

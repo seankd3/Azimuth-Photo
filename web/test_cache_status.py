@@ -353,7 +353,7 @@ class CacheStatusTests(BackendTestCase):
                 thumbnail_cache_entries._write_queue.clear()
                 thumbnail_cache_entries._write_queue.extend(old_queue)
 
-    async def test_thumbnail_append_preserves_visible_facet_cache(self):
+    async def test_thumbnail_append_invalidates_visible_facet_cache(self):
         root = thumbnails.SSD_CACHE_DIR
         key = db._facet_cache_key(visible_thumb_size="sm", cache_root=root)
         cached_groups = [{"date": "2026-05", "label": "May 2026", "count": 1}]
@@ -362,17 +362,17 @@ class CacheStatusTests(BackendTestCase):
 
         db.note_cached_image_ids_added(root, "sm", [123])
 
-        self.assertIn(key, db._date_groups_cache)
-        self.assertIn(key, db._map_markers_cache)
+        self.assertNotIn(key, db._date_groups_cache)
+        self.assertNotIn(key, db._map_markers_cache)
 
-    async def test_thumbnail_append_preserves_visible_count_cache(self):
+    async def test_thumbnail_append_invalidates_visible_count_cache(self):
         root = thumbnails.SSD_CACHE_DIR
         key = db._ranking_count_cache_key(visible_thumb_size="sm", cache_root=root)
         db._ranking_count_cache[key] = {"value": 12, "expires": db._time.time() + 30.0}
 
         db.note_cached_image_ids_added(root, "sm", [123])
 
-        self.assertIn(key, db._ranking_count_cache)
+        self.assertNotIn(key, db._ranking_count_cache)
 
     async def test_thumbnail_memory_warm_reads_cached_sm_md_and_lg(self):
         calls = []

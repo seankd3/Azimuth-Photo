@@ -253,7 +253,15 @@ def invalidate_cached_image_ids_cache(
 
 
 def note_cached_image_ids_added(cache_root: str, size: str, image_ids) -> None:
-    cache_entry_repository.note_cached_image_ids_added(cache_root, size, image_ids)
+    added_ids = tuple(image_ids or ())
+    cache_entry_repository.note_cached_image_ids_added(cache_root, size, added_ids)
+    if not added_ids:
+        return
+    invalidate_visible_cache_dependent_counts(cache_root, size)
+    invalidate_visible_facet_caches(cache_root, size)
+    if size == "sm":
+        _, library_service, *_ = _configured()
+        library_service.invalidate_rankings_response_cache()
 
 
 def invalidate_rankable_image_ids_cache() -> None:
