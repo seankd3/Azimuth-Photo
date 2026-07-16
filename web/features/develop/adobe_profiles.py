@@ -12,13 +12,16 @@ import copy
 import hashlib
 import json
 import math
+import os
 import re
+import tempfile
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 
 ADOBE_PROFILES_DIR = Path(__file__).with_name("profiles") / "adobe"
+_PROFILE_INDEX_FILE = "_index.json"
 _RATIONAL_DTYPES = {5, 10}  # TIFF RATIONAL and SRATIONAL.
 
 
@@ -220,27 +223,121 @@ def _valid_profile(payload: object) -> dict[str, Any] | None:
     return profile
 
 
-@lru_cache(maxsize=1)
-def _library_profiles() -> tuple[dict[str, Any], ...]:
-    profiles: list[dict[str, Any]] = []
+def _profile_file_stats() -> dict[str, tuple[int, int]]:
+    """Return the cheap freshness data for harvestable profile files."""
     try:
-        paths = sorted(ADOBE_PROFILES_DIR.glob("*.json"))
+        paths = sorted(
+            path
+            for path in ADOBE_PROFILES_DIR.glob("*.json")
+            if not path.name.startswith("_") and path.is_file()
+        )
     except OSError:
-        return ()
+        return {}
+    stats: dict[str, tuple[int, int]] = {}
     for path in paths:
         try:
-            profile = _valid_profile(json.loads(path.read_text(encoding="utf-8")))
-        except (OSError, ValueError):
+            stat = path.stat()
+        except OSError:
             continue
+        stats[path.name] = (stat.st_mtime_ns, stat.st_size)
+    return stats
+
+
+def _read_profile_index(stats: Mapping[str, tuple[int, int]]) -> dict[str, dict[str, Any]] | None:
+    """Return a complete, current sidecar index or None when it needs rebuilding."""
+    try:
+        payload = json.loads((ADOBE_PROFILES_DIR / _PROFILE_INDEX_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(payload, dict) or set(payload) != set(stats):
+        return None
+    for filename, (mtime_ns, size) in stats.items():
+        entry = payload.get(filename)
+        if not isinstance(entry, dict) or set(entry) != {"camera_model", "profile_name", "mtime_ns", "size"}:
+            return None
+        if (
+            not isinstance(entry["camera_model"], str)
+            or not isinstance(entry["profile_name"], str)
+            or entry["mtime_ns"] != mtime_ns
+            or entry["size"] != size
+        ):
+            return None
+    return payload
+
+
+def _write_profile_index(index: Mapping[str, Mapping[str, Any]]) -> None:
+    """Atomically persist an index when the profile directory is writable."""
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=ADOBE_PROFILES_DIR,
+            prefix=f"{_PROFILE_INDEX_FILE}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temporary = Path(handle.name)
+            json.dump(index, handle, sort_keys=True, separators=(",", ":"))
+        os.replace(temporary, ADOBE_PROFILES_DIR / _PROFILE_INDEX_FILE)
+    except (OSError, ValueError):
+        if temporary is not None:
+            try:
+                temporary.unlink()
+            except OSError:
+                pass
+
+
+def _rebuild_profile_index(stats: Mapping[str, tuple[int, int]]) -> dict[str, dict[str, Any]]:
+    """Parse the harvest once to rebuild the small selection index."""
+    index: dict[str, dict[str, Any]] = {}
+    for filename in sorted(stats):
+        model = ""
+        name = ""
+        try:
+            profile = _valid_profile(json.loads((ADOBE_PROFILES_DIR / filename).read_text(encoding="utf-8")))
+        except (OSError, ValueError):
+            profile = None
         if profile is not None:
-            profile["library_file"] = str(path)
-            profiles.append(profile)
-    return tuple(profiles)
+            model = profile["camera_model"]
+            name = profile["profile_name"]
+        mtime_ns, size = stats[filename]
+        # Keep malformed/unreadable files represented as non-selectable entries.
+        # That preserves the old tolerance without rebuilding on every process start.
+        index[filename] = {
+            "camera_model": model,
+            "profile_name": name,
+            "mtime_ns": mtime_ns,
+            "size": size,
+        }
+    _write_profile_index(index)
+    return index
+
+
+@lru_cache(maxsize=1)
+def _profile_index() -> dict[str, dict[str, Any]]:
+    """Load a current sidecar index, rebuilding it only after profile-set changes."""
+    stats = _profile_file_stats()
+    index = _read_profile_index(stats)
+    return index if index is not None else _rebuild_profile_index(stats)
+
+
+@lru_cache(maxsize=8)
+def _profile_at_path(path: str) -> dict[str, Any] | None:
+    """Parse one harvested profile, retaining only a small hot working set."""
+    try:
+        profile = _valid_profile(json.loads(Path(path).read_text(encoding="utf-8")))
+    except (OSError, ValueError):
+        return None
+    if profile is not None:
+        profile["library_file"] = path
+    return profile
 
 
 def clear_adobe_profile_cache() -> None:
     """Clear the in-process library cache (tests and rerunnable harvests)."""
-    _library_profiles.cache_clear()
+    _profile_index.cache_clear()
+    _profile_at_path.cache_clear()
 
 
 def _model_key(value: object) -> str:
@@ -258,13 +355,35 @@ def load_adobe_profile(camera_model: object, profile_name: object | None = None)
     """Load one harvested profile, preferring Adobe Standard for default renders."""
     model = _text(camera_model)
     requested_name = _text(profile_name)
-    candidates = [profile for profile in _library_profiles() if _model_matches(profile["camera_model"], model)]
-    if requested_name:
-        candidates = [profile for profile in candidates if profile["profile_name"] == requested_name]
-    if not candidates:
-        return None
-    candidates.sort(key=lambda profile: (not profile["profile_name"].casefold().startswith("adobe standard"), profile["profile_name"].casefold()))
-    return copy.deepcopy(candidates[0])
+    index = _profile_index()
+    for attempt in range(2):
+        # Fuzzy model matching (EXIF "Canon EOS R5" vs catalog "EOS R5") works
+        # on index entries exactly as it did on parsed profiles.
+        candidates = [
+            (filename, entry)
+            for filename, entry in index.items()
+            if _model_matches(entry["camera_model"], model) and (not requested_name or entry["profile_name"] == requested_name)
+        ]
+        if not candidates:
+            return None
+        candidates.sort(
+            key=lambda candidate: (
+                not candidate[1]["profile_name"].casefold().startswith("adobe standard"),
+                candidate[1]["profile_name"].casefold(),
+                candidate[0],
+            )
+        )
+        filename, entry = candidates[0]
+        profile = _profile_at_path(str(ADOBE_PROFILES_DIR / filename))
+        if profile is not None and (
+            profile["camera_model"] == entry["camera_model"] and profile["profile_name"] == entry["profile_name"]
+        ):
+            return copy.deepcopy(profile)
+        if attempt == 0:
+            _profile_at_path.cache_clear()
+            _profile_index.cache_clear()
+            index = _rebuild_profile_index(_profile_file_stats())
+    return None
 
 
 def resolve_adobe_profile(path: str | Path | None, camera_model: object) -> dict[str, Any] | None:

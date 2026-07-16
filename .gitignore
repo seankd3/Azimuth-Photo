@@ -13,6 +13,7 @@ web/settings.local.json
 web/*.db
 web/*.db-shm
 web/*.db-wal
+web/features/develop/profiles/adobe/_index.json
 __pycache__/
 
 # Android
