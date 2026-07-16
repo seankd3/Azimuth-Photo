@@ -294,7 +294,6 @@ export function initKeyboard() {
                 return;
             }
             if (key === 'k') {
-                if (activeLens() !== 'grid') return;
                 event.preventDefault();
                 openCommandPalette();
                 return;
@@ -322,11 +321,14 @@ export function initKeyboard() {
                     return;
                 }
             }
-            if (activeLens() !== 'grid') return;
             if (key === 'z') {
+                // Develop owns its edit-history undo at capture phase; other lenses use
+                // the global toast stack for undoable library actions.
+                if (activeLens() === 'develop') return;
                 if (undoLatestToast()) event.preventDefault();
                 return;
             }
+            if (activeLens() !== 'grid') return;
             if (key === 'a') {
                 const count = selectLoadedImages();
                 if (count) {
