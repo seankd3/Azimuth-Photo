@@ -7,6 +7,7 @@ import {
     byId, emit, on, rememberImages, setActiveLens,
 } from './state.js';
 import { showToast } from './toast.js';
+import { confirmAction } from './trash.js';
 import { icon } from '../icons.js';
 import { keepCoverRejectRest } from './stack_cull.js';
 import { escapeHtml as esc, formatCount as fmt } from './dom.js';
@@ -808,8 +809,18 @@ async function keepCoversEverywhere() {
         showToast('No other photos in this filter');
         return;
     }
+    const confirmed = await confirmAction({
+        title: 'Move photos to Trash',
+        message: `Move ${fmt(imageIds.length)} photo${imageIds.length === 1 ? '' : 's'} to Trash?`,
+        confirmLabel: 'Move to Trash',
+    });
+    if (!confirmed) {
+        button.disabled = false;
+        return;
+    }
     const result = await trashImages(imageIds);
     if (!result.ok) {
+        button.disabled = false;
         showToast('Couldn’t move photos to Trash');
         return;
     }
