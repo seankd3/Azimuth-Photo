@@ -70,6 +70,7 @@ export const scope = {
     collectionSmart: false,
     smartName: '',
     smartQuery: {},
+    smartPreviousSort: '',
     similarId: '',
     similarImages: null,
     label: '',
@@ -110,6 +111,9 @@ export function scopeParams(extra = {}) {
 }
 
 export function setScope(patch) {
+    const previousSmartSort = scope.smartPreviousSort;
+    const carriesSmartSort = Boolean(patch.smartName && previousSmartSort);
+    if (previousSmartSort && !patch.smartName) setViewPrefs({ sort: previousSmartSort });
     scope.q = '';
     scope.people = '';
     scope.flag = '';
@@ -126,6 +130,7 @@ export function setScope(patch) {
     scope.collectionSmart = false;
     scope.smartName = '';
     scope.smartQuery = {};
+    scope.smartPreviousSort = carriesSmartSort ? previousSmartSort : '';
     scope.similarId = '';
     scope.similarImages = null;
     scope.label = '';
@@ -140,12 +145,14 @@ export function patchScope(patch) {
     emit('scope', scope);
 }
 
-export function setViewPrefs(patch) {
+export function setViewPrefs(patch, { persist = true } = {}) {
     Object.assign(viewPrefs, patch);
-    try {
-        localStorage.setItem(VIEW_PREFS_KEY, JSON.stringify(viewPrefs));
-    } catch {
-        // Preferences are best-effort when storage is unavailable.
+    if (persist) {
+        try {
+            localStorage.setItem(VIEW_PREFS_KEY, JSON.stringify(viewPrefs));
+        } catch {
+            // Preferences are best-effort when storage is unavailable.
+        }
     }
     emit('view-prefs', viewPrefs);
 }
@@ -161,6 +168,12 @@ export function scopePatchFromSmartQuery(query = {}) {
         if (value !== undefined && value !== null) patch[scopeKey] = String(value);
     }
     return patch;
+}
+
+export function applySmartScopeSort(sort) {
+    if (!sort) return;
+    if (!scope.smartPreviousSort) scope.smartPreviousSort = viewPrefs.sort;
+    setViewPrefs({ sort: String(sort) }, { persist: false });
 }
 
 // Selection (corner-check model, long-press to enter).
