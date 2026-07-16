@@ -57,6 +57,8 @@ const settingTimers = new Map();
 const busyActions = new Set();
 const workerActionGenerations = new Map();
 const workerActionsInFlight = new Set();
+let sourceAddFlow = null;
+let sourceAddFlowReturn = null;
 // Shared contract: const INACTIVE_WORKER_STATES = new Set(['idle', 'ready', 'paused', 'complete', 'caught_up', 'error', 'disabled', 'unavailable', 'stale']);
 const SETTING_DEFS = {
     embed_model_preset: { type: 'select' },
@@ -1205,6 +1207,72 @@ function sourceAddErrorMessage(result) {
         : `Could not add that folder (${result?.status || 'unknown status'}).`;
 }
 
+async function submitSourceAdd({ path, form }, { onSuccess } = {}) {
+    await withBusyAction('source-add', form?.querySelector('button[type="submit"]'), async () => {
+        const result = await addCatalogSource(path, true);
+        if (result && result.ok) {
+            const data = result.data || {};
+            catalog = data.catalog || catalog;
+            clearSourcePickerSelection();
+            await onSuccess?.(data);
+            showToast('Source added · scanning for photos');
+            pollScanUntilDone(data.source && data.source.id);
+        } else {
+            const message = sourceAddErrorMessage(result);
+            setSourceAddError(message);
+            showToast(message);
+        }
+    });
+}
+
+function closeSourceAddFlow() {
+    if (!sourceAddFlow) return;
+    clearSourcePickerSelection();
+    sourceAddFlow.remove();
+    sourceAddFlow = null;
+    if (sourceAddFlowReturn && document.contains(sourceAddFlowReturn)) {
+        sourceAddFlowReturn.focus({ preventScroll: true });
+    }
+    sourceAddFlowReturn = null;
+}
+
+export function openSourceAddFlow({ onSuccess } = {}) {
+    if (!document.body) return false;
+    if (sourceAddFlow) {
+        sourceAddFlow.querySelector('[data-source-picker-toggle]')?.focus();
+        return true;
+    }
+    sourceAddFlowReturn = document.activeElement;
+    sourceAddFlow = document.createElement('div');
+    sourceAddFlow.id = 'source-add-flow';
+    sourceAddFlow.className = 'modal-scrim';
+    sourceAddFlow.innerHTML = '<section class="modal-card source-add-flow-card" role="dialog" aria-modal="true" aria-label="Add photo folder">'
+        + '<header class="source-add-flow-head"><div><p>Archive</p><h2>Add photo folder</h2></div><button class="mini-btn" type="button" data-source-add-close>Close</button></header>'
+        + `<div class="source-add-flow-body">${renderSourceAddUi()}</div></section>`;
+    document.body.append(sourceAddFlow);
+    bindSourcePicker(sourceAddFlow, {
+        onSubmit: async (payload) => submitSourceAdd(payload, {
+            onSuccess: async (data) => {
+                closeSourceAddFlow();
+                await onSuccess?.(data);
+            },
+        }),
+    });
+    clearSourcePickerSelection();
+    sourceAddFlow.querySelector('[data-source-add-close]')?.addEventListener('click', closeSourceAddFlow);
+    sourceAddFlow.addEventListener('click', (event) => {
+        if (event.target === sourceAddFlow) closeSourceAddFlow();
+    });
+    sourceAddFlow.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            closeSourceAddFlow();
+        }
+    });
+    sourceAddFlow.querySelector('[data-source-picker-toggle]')?.focus();
+    return true;
+}
+
 function settingValidationMessage(input) {
     if (input.validity.valid) return '';
     const label = input.closest('.setting-row')?.querySelector('b')?.textContent || 'This value';
@@ -1471,23 +1539,7 @@ function bindDrawerActions(body = document.getElementById('drawer-body')) {
     body.querySelector('#drawer-install-model')?.addEventListener('click', (event) => withBusyAction('model-install', event.currentTarget, saveAndInstallModel));
     body.querySelector('#drawer-return-publish')?.addEventListener('click', returnToPublish);
     bindSourcePicker(body, {
-        onSubmit: async ({ path, form }) => {
-            await withBusyAction('source-add', form?.querySelector('button[type="submit"]'), async () => {
-                const result = await addCatalogSource(path, true);
-                if (result && result.ok) {
-                    const data = result.data || {};
-                    catalog = data.catalog || catalog;
-                    clearSourcePickerSelection();
-                    renderCurrentSystemSurface();
-                    showToast('Source added · scanning for photos');
-                    pollScanUntilDone(data.source && data.source.id);
-                } else {
-                    const message = sourceAddErrorMessage(result);
-                    setSourceAddError(message);
-                    showToast(message);
-                }
-            });
-        },
+        onSubmit: (payload) => submitSourceAdd(payload, { onSuccess: renderCurrentSystemSurface }),
     });
     body.querySelector('[data-archive-open]')?.addEventListener('click', async (event) => {
         const result = await revealFolder(event.currentTarget.dataset.archiveOpen || '');

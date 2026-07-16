@@ -16,6 +16,7 @@ import { releaseFocus, trapFocus } from './focusTrap.js';
 import { confirmAction, confirmTypedCount } from './trash.js';
 import { downloadExport, openExportMenu } from './export_menu.js';
 import { initFoldersPanel } from './folders.js';
+import { openSourceAddFlow } from './drawer.js';
 import { openSourceRevealMenu } from './source_reveal_menu.js';
 import { icon } from '../icons.js';
 import {
@@ -978,7 +979,9 @@ function renderSources() {
             + `<span class="nr-dot ${online ? 'on' : 'off'}"></span><span class="nr-label" title="${esc(label)}">${esc(label)}</span>`
             + `<span class="nr-count">${fmt(count)}</span>${online ? '' : '<span class="nr-tag">offline</span>'}</button>`;
     }).join('') : emptyState('hard-drive', 'No sources yet.', '<button type="button" data-add-source>Add a source</button>');
-    host.querySelector('[data-add-source]')?.addEventListener('click', () => document.getElementById('system-btn')?.click());
+    host.querySelector('[data-add-source]')?.addEventListener('click', () => {
+        openSourceAddFlow({ onSuccess: loadCatalogChrome });
+    });
     for (const row of host.querySelectorAll('[data-source]')) {
         row.addEventListener('click', () => {
             navigateToScope({ folder: [row.dataset.source] });

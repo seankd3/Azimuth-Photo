@@ -981,6 +981,11 @@ body:has(#view-loupe.active):has(#sel-pill.on) #toast { transform: translateX(-5
 .filter-loading { height: 280px; }
 .modal-scrim { position: fixed; inset: 0; z-index: var(--z-modal); display: grid; place-items: center; padding: var(--s4); background: rgba(0,0,0,.58); }
 .modal-card { width: min(560px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-card); box-shadow: 0 16px 48px rgba(0,0,0,.55); }
+.source-add-flow-card { padding: var(--s4); }
+.source-add-flow-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s3); }
+.source-add-flow-head p { margin: 0 0 2px; color: var(--text-3); font-size: var(--fs-caption); letter-spacing: var(--ls-label); text-transform: uppercase; }
+.source-add-flow-head h2 { margin: 0; font-size: var(--fs-title); }
+.source-add-flow-body .source-add-ui { margin-top: var(--s4); }
 .mo-head { display: flex; align-items: center; justify-content: space-between; height: 46px; padding: 0 var(--s4); border-bottom: 1px solid var(--line); }
 .mo-head h2 { font-size: 14px; font-weight: var(--fw-semibold); }
 .mo-head button { width: 30px; height: 30px; border-radius: var(--r-ctl); color: var(--text-2); }
