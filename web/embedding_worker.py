@@ -649,8 +649,11 @@ async def _ensure_model_loaded_for_config(config: dict, reason: str) -> bool:
         loop = asyncio.get_running_loop()
         _set_worker_status("loading_model", f"Loading {model_id} for {reason}…", ready=False, config=config)
         try:
-            async with work_coordination.lease_heartbeat("embeddings", gpu=True):
-                _model = await loop.run_in_executor(_embed_executor, _load_model, model_dir, model_id)
+            await _wait_for_embedding_turn()
+            _set_worker_status("loading_model", f"Loading {model_id} for {reason}…", ready=False, config=config)
+            with work_coordination.manual_bulk("embeddings"):
+                async with work_coordination.lease_heartbeat("embeddings", gpu=True):
+                    _model = await loop.run_in_executor(_embed_executor, _load_model, model_dir, model_id)
             _loaded_model_dir = model_dir
             _loaded_model_id = model_id
             _loaded_model_revision = model_revision

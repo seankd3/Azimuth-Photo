@@ -4,6 +4,7 @@ import shutil
 import unittest.mock
 from fastapi.testclient import TestClient
 from features.collections import routes as collection_routes
+from features.collections import smart as smart_collections
 from features.library import taste as taste_service
 from features.sync import hashing as sync_hashing
 
@@ -1384,6 +1385,42 @@ class LibraryTests(BackendTestCase):
         self.assertEqual(scoped["total_images"], 1)
         self.assertEqual(histogram["months"], [{"month": "2025-04", "count": 1, "cover_id": picked}])
         self.assertEqual(histogram["total"], 1)
+
+    async def test_smart_collection_rankings_scope_exceeds_materialize_limit(self):
+        source = await self._source()
+        image_count = smart_collections.MAX_MATERIALIZE_IMAGE_IDS + 1
+        conn = await db.get_db()
+        try:
+            await conn.executemany(
+                "INSERT INTO images (source_id, filename, filepath, status, flag) "
+                "VALUES (?, ?, ?, 'kept', 'picked')",
+                (
+                    (
+                        source["id"],
+                        f"broad-smart-{index}.jpg",
+                        os.path.join(source["path"], f"broad-smart-{index}.jpg"),
+                    )
+                    for index in range(image_count)
+                ),
+            )
+            await db._update_source_counts(conn, source["id"])
+            await conn.commit()
+        finally:
+            await conn.close()
+        db.invalidate_stats_cache()
+        smart = await collection_routes.api_create_collection(
+            collection_routes.CreateCollectionBody(
+                name="Broad smart scope",
+                query={"flag": "picked", "sort": "elo"},
+            )
+        )
+
+        scoped = await library_routes.api_rankings(
+            limit=1,
+            collection_id=smart["collection"]["id"],
+        )
+
+        self.assertEqual(scoped["total_images"], image_count)
 
     async def test_smart_collection_map_markers_compose_with_flag_filter(self):
         source = await self._source()

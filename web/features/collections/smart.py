@@ -203,21 +203,22 @@ async def resolve_summary(
     return summary
 
 
-async def resolve_image_ids(
+async def _resolve_image_ids(
     query: dict,
     *,
     resolve_library_constraints: Callable[..., Awaitable[dict]],
     count_rankings: Callable[..., Awaitable[int]],
     get_rankings: Callable[..., Awaitable[list]],
     chunk_size: int = 5000,
+    materialize_limit: int | None = None,
 ) -> list[int]:
     filters = await _ranking_filter_kwargs(
         query,
         resolve_library_constraints=resolve_library_constraints,
     )
     total = await count_rankings(**filters)
-    if int(total) > MAX_MATERIALIZE_IMAGE_IDS:
-        raise SmartCollectionMaterializeTooLarge(int(total))
+    if materialize_limit is not None and int(total) > materialize_limit:
+        raise SmartCollectionMaterializeTooLarge(int(total), materialize_limit)
     image_ids: list[int] = []
     offset = 0
     while offset < total:
@@ -232,3 +233,40 @@ async def resolve_image_ids(
         image_ids.extend(int(row["id"]) for row in rows)
         offset += len(rows)
     return image_ids
+
+
+async def resolve_image_ids(
+    query: dict,
+    *,
+    resolve_library_constraints: Callable[..., Awaitable[dict]],
+    count_rankings: Callable[..., Awaitable[int]],
+    get_rankings: Callable[..., Awaitable[list]],
+    chunk_size: int = 5000,
+) -> list[int]:
+    """Resolve a live smart-collection scope without a membership cap."""
+    return await _resolve_image_ids(
+        query,
+        resolve_library_constraints=resolve_library_constraints,
+        count_rankings=count_rankings,
+        get_rankings=get_rankings,
+        chunk_size=chunk_size,
+    )
+
+
+async def resolve_materialized_image_ids(
+    query: dict,
+    *,
+    resolve_library_constraints: Callable[..., Awaitable[dict]],
+    count_rankings: Callable[..., Awaitable[int]],
+    get_rankings: Callable[..., Awaitable[list]],
+    chunk_size: int = 5000,
+) -> list[int]:
+    """Resolve membership for the explicit smart-to-static operation."""
+    return await _resolve_image_ids(
+        query,
+        resolve_library_constraints=resolve_library_constraints,
+        count_rankings=count_rankings,
+        get_rankings=get_rankings,
+        chunk_size=chunk_size,
+        materialize_limit=MAX_MATERIALIZE_IMAGE_IDS,
+    )

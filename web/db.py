@@ -295,10 +295,15 @@ async def _backup_before_migration(conn) -> None:
         current = int(row[0]) if row else 0
     except Exception as exc:
         raise RuntimeError("Cannot determine catalog version before backup") from exc
-    # user_version 0 = a brand-new/pre-versioning DB about to get its tables;
-    # only guard a genuine forward upgrade of an existing versioned catalog.
-    if not (0 < current < SCHEMA_VERSION):
+    if current < 0 or current >= SCHEMA_VERSION:
         return
+    if current == 0:
+        cursor = await conn.execute(
+            "SELECT 1 FROM sqlite_master "
+            "WHERE type = 'table' AND name NOT LIKE 'sqlite_%' LIMIT 1"
+        )
+        if await cursor.fetchone() is None:
+            return
     from features.system import backups
 
     result = await asyncio.to_thread(
@@ -314,6 +319,8 @@ async def init_db():
     try:
         if not db_exists:
             await data_connection.enable_wal(db, db_path=DB_PATH)
+        if db_exists:
+            await _backup_before_migration(db)
         if db_exists and await _schema_is_current(db):
             await _normalize_legacy_image_state(db)
             await _refresh_source_online_states_on_conn(db)
@@ -327,8 +334,6 @@ async def init_db():
             await _ensure_metadata_fts(db)
             await db.commit()
             return
-        if db_exists:
-            await _backup_before_migration(db)
         await _apply_schema_and_migrations(db, db_exists=db_exists)
         await _migrate_catalog_sources(db)
         if await _backfill_image_date_sources(db):
