@@ -343,7 +343,8 @@ async function revalidate() {
         const data = await loadScopePage({ limit: PAGE_SIZE, offset: 0, sort: 'date_taken' });
         if (!mounted || seq !== generation || !data) return;
         const incoming = data.images || [];
-        const changed = incoming.length !== Math.min(images.length, PAGE_SIZE)
+        const changed = Number(data.visible_images) !== viewState.visibleImages
+            || incoming.length !== Math.min(images.length, PAGE_SIZE)
             || incoming.some((image, i) => Number(image.id) !== Number(images[i]?.id));
         if (!changed) return;
         resetData();
