@@ -42,6 +42,20 @@ const COMPARED_LABELS = {
     direct_uncompared: 'Not compared yet',
     confident: 'High confidence',
 };
+const SMART_SCOPE_FIELDS = {
+    q: 'q',
+    people: 'people',
+    flag: 'flag',
+    date_taken: 'dateTaken',
+    file_type: 'fileType',
+    camera: 'camera',
+    lens: 'lens',
+    tag: 'tag',
+    orientation: 'orientation',
+    folder: 'folder',
+    compared: 'compared',
+    min_stars: 'minStars',
+};
 
 let pane = null;
 let timeline = null;
@@ -864,9 +878,14 @@ function renderScopeBar() {
         `<span class="chip">${img}<span class="chip-kind">${esc(kind)}</span><b>${esc(label)}</b>`
         + `<span class="chip-x" role="button" aria-label="Clear ${esc(kind)}" data-clear="${clear}">${icon('x')}</span></span>`;
     const smartQuery = scope.smartQuery || {};
-    const smartSets = (key) => Boolean(
-        scope.smartName && smartQuery[key] !== undefined && smartQuery[key] !== null && smartQuery[key] !== '',
-    );
+    const smartSets = (queryKey) => {
+        const scopeKey = SMART_SCOPE_FIELDS[queryKey];
+        return Boolean(
+            scope.smartName && scopeKey && smartQuery[queryKey] !== undefined
+            && smartQuery[queryKey] !== null && smartQuery[queryKey] !== ''
+            && scope[scopeKey] === String(smartQuery[queryKey]),
+        );
+    };
     if (scope.smartName) {
         chips.push(`<span class="chip smart"><span class="g">${icon('sparkles')}</span><b>${esc(scope.smartName)}</b>`
             + `<span class="chip-x" role="button" aria-label="Clear smart collection" data-clear="smartName">${icon('x')}</span></span>`);
