@@ -634,6 +634,49 @@ class SearchTests(BackendTestCase):
             await conn.close()
         self.assertEqual(row["query"], "fast cached query")
 
+    async def test_slow_non_deep_encode_serves_metadata_without_blocking(self):
+        import time as _time
+
+        source = await self._source()
+        match = await self._image(source["id"], "slow-encode-match.jpg")
+        await self._cache_entry(match, "sm")
+
+        def slow_encode(query, config=None):
+            _time.sleep(1.5)  # far over the as-you-type encode budget
+            vec = np.zeros(settings.active_embedding_config()["dimension"], dtype=np.float32)
+            vec[0] = 1.0
+            return vec
+
+        embedding_worker.encode_text = slow_encode
+        query_constraints._text_search_resolution_cache.clear()
+
+        started = _time.perf_counter()
+        result = await library_routes.api_rankings(q="slow encode query", sort="similarity", limit=10)
+        elapsed = _time.perf_counter() - started
+
+        # Non-deep search must not block on the slow 8B-class encode.
+        self.assertLess(elapsed, 1.0)
+        self.assertEqual(result["search_mode"], "metadata")
+        self.assertEqual(result.get("fallback_reason"), "embedding_warming")
+
+        # The background encode eventually persists the embedding for next time.
+        row = None
+        for _ in range(60):
+            conn = await db.get_db()
+            try:
+                cursor = await conn.execute(
+                    "SELECT query FROM search_query_embeddings WHERE query_key = ?",
+                    ("slow encode query",),
+                )
+                row = await cursor.fetchone()
+            finally:
+                await conn.close()
+            if row is not None:
+                break
+            await asyncio.sleep(0.1)
+        self.assertIsNotNone(row)
+        self.assertEqual(row["query"], "slow encode query")
+
     async def test_embedding_search_reuses_rankings_response_cache(self):
         source = await self._source()
         match = await self._image(source["id"], "cached-response-match.jpg")

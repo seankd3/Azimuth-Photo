@@ -13,6 +13,11 @@ logger = logging.getLogger(__name__)
 
 _text_search_resolution_cache: dict[tuple, dict] = {}
 _text_search_resolution_cache_ttl_seconds = 300.0
+# As-you-type response budget for the query encode. A warm small encode / a
+# cache hit / the test mock lands well under this; a cold 8B encode blows it
+# and we fall back to metadata while the embedding warms in the background.
+_FAST_ENCODE_BUDGET_SECONDS = 0.35
+_inflight_query_encodes: set = set()
 _CONFIG: dict[str, object] = {}
 
 
@@ -205,13 +210,27 @@ async def resolve_text_search(
                     text_vec = cached_vec
 
         if text_vec is None:
-            text_vec = await asyncio.get_event_loop().run_in_executor(
-                None,
-                encode_text,
-                embedding_worker.encode_text,
-                normalized_query,
-                active_config,
+            encode_future = asyncio.ensure_future(
+                asyncio.get_event_loop().run_in_executor(
+                    None,
+                    encode_text,
+                    embedding_worker.encode_text,
+                    normalized_query,
+                    active_config,
+                )
             )
+            if deep:
+                text_vec = await encode_future
+            else:
+                # As-you-type: only wait a short budget for the encode.
+                try:
+                    text_vec = await asyncio.wait_for(
+                        asyncio.shield(encode_future), _FAST_ENCODE_BUDGET_SECONDS
+                    )
+                except asyncio.TimeoutError:
+                    text_vec = None
+                except Exception:
+                    text_vec = None
             if text_vec is not None and store_search_query_embedding is not None:
                 text_arr = np.asarray(text_vec, dtype=np.float32)
                 if text_arr.shape[0] == int(active_config["dimension"]):
@@ -221,6 +240,41 @@ async def resolve_text_search(
                         text_arr.tobytes(),
                     )
                     text_vec = text_arr
+            elif text_vec is None and not deep and not encode_future.done():
+                # Encode is still running (slow model). Serve metadata/FTS now and
+                # persist the embedding when the background encode lands, so the
+                # next identical query is fully semantic.
+                _inflight_query_encodes.add(encode_future)
+
+                def _store_encoded(fut, config=active_config, query=normalized_query):
+                    _inflight_query_encodes.discard(fut)
+                    try:
+                        vec = fut.result()
+                    except Exception:
+                        return
+                    if vec is None or store_search_query_embedding is None:
+                        return
+                    arr = np.asarray(vec, dtype=np.float32)
+                    if arr.shape[0] != int(config["dimension"]):
+                        return
+                    try:
+                        asyncio.ensure_future(
+                            store_search_query_embedding(config, query, arr.tobytes())
+                        )
+                    except RuntimeError:
+                        pass
+
+                encode_future.add_done_callback(_store_encoded)
+                result.update({
+                    "text_query": normalized_query,
+                    "search_mode": "metadata",
+                    "search_sources": ["metadata"],
+                    "ai_unavailable": True,
+                    "fallback_reason": "embedding_warming",
+                })
+                if extension_query not in extension_search_terms and apply_metadata_ids is not None:
+                    await apply_metadata_ids(result, normalized_query)
+                return result
         if text_vec is None and start_model_load(embedding_worker):
             result.update({
                 "text_query": normalized_query,
