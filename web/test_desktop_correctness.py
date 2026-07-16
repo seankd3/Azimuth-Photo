@@ -28,11 +28,11 @@ class DesktopCorrectnessTests(unittest.TestCase):
     def test_develop_history_reload_does_not_paint_after_an_image_switch(self):
         history = read("develop", "history_panel.js")
 
-        self.assertIn("if (Number(api.getImageId?.()) !== Number(imageId)) return;", history)
-        self.assertLess(
-            history.index("if (Number(api.getImageId?.()) !== Number(imageId)) return;"),
-            history.index("controller.setHistory(fresh);"),
-        )
+        # Formatting-insensitive: the staleness guard must compare the live
+        # image id against the reload-time id and bail before painting.
+        guard = "Number(api.getImageId?.()) !== Number(imageId)"
+        self.assertIn(guard, history)
+        self.assertLess(history.index(guard), history.index("controller.setHistory(fresh);"))
 
     def test_flag_scope_reloads_after_a_committed_membership_change(self):
         grid = read("grid.js")
