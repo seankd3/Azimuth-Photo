@@ -836,20 +836,41 @@ body.sheet-keyboard #m-sel-actions.on { opacity: 0; transform: translateY(16px);
 }
 .ms-row .g { color: var(--text-3); width: 20px; text-align: center; flex: none; }
 .ms-row .g { display: inline-flex; align-items: center; justify-content: center; }
-.ms-empty { padding: 12px 4px; font-size: 12.5px; color: var(--text-3); }
-.m-offline-empty {
+.ms-empty {
     display: grid;
-    gap: 5px;
+    place-content: center;
+    justify-items: center;
+    gap: var(--s2);
+    min-height: min(320px, calc(100dvh - var(--scopebar-h) - var(--tabbar-h)));
+    padding: var(--s5) var(--s4);
+    color: var(--text-3);
+    font-size: 12.5px;
+    line-height: 1.45;
+    text-align: center;
+}
+.ms-empty-icon {
+    display: grid;
+    width: 30px;
+    height: 30px;
+    place-items: center;
+    margin-bottom: var(--s1);
+    border: 1px solid var(--line);
+    border-radius: 50%;
+    color: var(--text-3);
+    background: var(--surface-2);
+}
+.ms-empty-icon .icon { width: 14px; height: 14px; }
+.ms-empty b { color: var(--text); font-size: 14px; font-weight: 650; }
+.ms-empty > span:not(.ms-empty-icon) { max-width: 300px; color: var(--text-2); }
+.m-offline-empty {
     width: calc(100% - 32px);
     margin: 38px 16px;
-    padding: 20px 16px;
-    text-align: center;
+    min-height: 0;
+    padding: var(--s4);
     border: 1px solid var(--line);
     border-radius: var(--r-card);
     background: var(--card);
 }
-.m-offline-empty b { color: var(--text); font-size: 14px; font-weight: 650; }
-.m-offline-empty span { color: var(--text-2); }
 .m-offline-empty small { color: var(--accent); font-size: 12px; font-weight: 600; }
 
 /* ============================================================

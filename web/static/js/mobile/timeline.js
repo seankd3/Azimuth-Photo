@@ -334,6 +334,7 @@ function renderSkeleton() {
 function renderOfflineEmpty() {
     timeline.innerHTML =
         '<button class="ms-empty m-offline-empty" type="button">'
+        + `<span class="ms-empty-icon" aria-hidden="true">${icon('image')}</span>`
         + '<b>You’re offline</b>'
         + '<span>Some thumbnails may still show</span>'
         + '<small>Tap to retry</small>'
@@ -342,9 +343,10 @@ function renderOfflineEmpty() {
 }
 
 function renderPreparingState() {
-    timeline.innerHTML = '<div class="ms-empty" style="padding:48px 24px;text-align:center">'
-        + '<b>Preparing your photos</b><br>'
-        + '<span>Finding photos and getting the first cards ready. They’ll appear here in a moment.</span></div>';
+    timeline.innerHTML = '<div class="ms-empty">'
+        + `<span class="ms-empty-icon" aria-hidden="true">${icon('image')}</span>`
+        + '<b>Preparing your photos</b>'
+        + '<span>Finding photos and getting the first cards ready.</span></div>';
     clearTimeout(preparingPollTimer);
     preparingPollTimer = setTimeout(() => reload(), 1500);
 }
@@ -352,12 +354,16 @@ function renderPreparingState() {
 function renderEmpty() {
     clearTimeout(preparingPollTimer);
     if (pendingPreviewTotal) {
-        timeline.innerHTML = '<div class="ms-empty" style="padding:48px 24px;text-align:center">'
-            + `<b>${esc(`${fmtInt(pendingPreviewTotal)} photos preparing previews — check back shortly`)}</b></div>`;
+        timeline.innerHTML = '<div class="ms-empty">'
+            + `<span class="ms-empty-icon" aria-hidden="true">${icon('image')}</span>`
+            + `<b>${esc(`All ${fmtInt(pendingPreviewTotal)} photos here are still sharpening`)}</b>`
+            + '<span>Try a different view to browse other photos.</span></div>';
         return;
     }
-    timeline.innerHTML = '<div class="ms-empty" style="padding:48px 24px;text-align:center">'
-        + '<b>No photos yet</b><br><span>Add a source in the desktop app. Photos will appear here as they’re scanned.</span></div>';
+    timeline.innerHTML = '<div class="ms-empty">'
+        + `<span class="ms-empty-icon" aria-hidden="true">${icon('folder')}</span>`
+        + '<b>No photos yet</b>'
+        + '<span>Add a source in the desktop app to start your private library.</span></div>';
 }
 
 function appendImages(batch) {
