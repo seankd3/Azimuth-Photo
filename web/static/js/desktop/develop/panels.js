@@ -8,6 +8,22 @@ import { FilmStockPicker } from './film_panel.js';
 import { LensPanel } from './lens_panel.js';
 import { CalibrationPanel } from './calibration_panel.js';
 
+const PANEL_OPEN_STORAGE_KEY = 'dev.panels.open';
+let storedPanelOpenStates = null;
+
+function readPanelOpenStates() {
+    try {
+        const value = JSON.parse(window.localStorage.getItem(PANEL_OPEN_STORAGE_KEY) || 'null');
+        return value && typeof value === 'object' ? value : null;
+    } catch {
+        return null;
+    }
+}
+
+function savePanelOpenStates() {
+    try { window.localStorage.setItem(PANEL_OPEN_STORAGE_KEY, JSON.stringify(storedPanelOpenStates)); } catch { /* Panel defaults remain usable. */ }
+}
+
 const slider = (key, label, min, max, step = 1, fallback = DEFAULTS[key] ?? 0) => ({ key, label, min, max, step, fallback });
 const BASIC = [slider('Temperature', 'Temp', 2000, 50000, 50, 5500), slider('Tint', 'Tint', -150, 150)];
 const TONE = [
@@ -50,9 +66,14 @@ function displayValue(value, step) {
 }
 
 function section(title, id, inner, open = true) {
-    return `<details class="develop-section" data-section="${id}" ${open ? 'open' : ''}>`
+    const isOpen = typeof storedPanelOpenStates?.[id] === 'boolean' ? storedPanelOpenStates[id] : open;
+    return `<details class="develop-section" data-section="${id}" ${isOpen ? 'open' : ''}>`
         + `<summary data-tip="Expand or collapse ${title}"><span>${title}</span><span aria-hidden="true">⌄</span></summary>`
         + `<div class="develop-section-body">${inner}</div></details>`;
+}
+
+function snapshotSettings(settings) {
+    return JSON.parse(JSON.stringify(settings || {}));
 }
 
 function sliderHtml(config) {
@@ -191,6 +212,7 @@ export class DevelopPanels {
         this.host = host;
         this.onChange = onChange;
         this.settings = {};
+        storedPanelOpenStates = readPanelOpenStates();
         host.innerHTML = section('Histogram', 'histogram', '<div id="develop-histogram-slot"></div>')
             + section('Basic', 'basic', '<small data-adobe-profile hidden style="display:block;margin:-3px 0 8px;color:var(--text-3);font-size:var(--fs-caption)"></small><div class="develop-wb-row"><select id="develop-wb" data-tip="White balance mode" aria-label="White balance"><option>As Shot</option><option>Custom</option><option>Daylight</option><option>Cloudy</option><option>Shade</option><option>Tungsten</option><option>Fluorescent</option><option>Flash</option></select><button data-wb-reset data-tip="Reset white balance to As Shot">As Shot</button><button data-auto-tone data-tip="Auto tone — deterministic histogram fit">Auto</button></div>' + slidersHtml(BASIC))
             + section('Tone', 'tone', slidersHtml(TONE))
@@ -208,11 +230,18 @@ export class DevelopPanels {
             + section('Masking', 'masking', '<div id="develop-masking"></div>', false)
             + section('Healing', 'healing', '<div id="develop-healing"></div>', false)
             + '<p class="develop-v1-note">Manual defringe and circular heal/clone spots are available. Automatic lateral CA remains planned.</p>';
+        host.addEventListener('toggle', (event) => {
+            const details = event.target;
+            if (!(details instanceof HTMLDetailsElement) || !details.matches('.develop-section')) return;
+            storedPanelOpenStates ??= {};
+            storedPanelOpenStates[details.dataset.section] = details.open;
+            savePanelOpenStates();
+        }, true);
         host.querySelector('#develop-histogram-slot').replaceWith(histogramHost);
         host.querySelector('#develop-crop-slot').replaceWith(cropHost);
         host.querySelector('#develop-transform-slot').replaceWith(transformHost);
         this.curve = new CurveEditor(host.querySelector('[data-section="curve"]'), (key, value, label) => this.change(key, value, label));
-        this.colorWheels = new ColorWheels(host.querySelector('#develop-color-wheels'), (key, value, label) => this.change(key, value, label));
+        this.colorWheels = new ColorWheels(host.querySelector('#develop-color-wheels'), (key, value, label, options) => this.change(key, value, label, options));
         this.lens = new LensPanel({ host: host.querySelector('#develop-lens-controls'), onChange: (key, value, label) => this.change(key, value, label) });
         this.calibration = new CalibrationPanel({ host: host.querySelector('#develop-calibration-controls'), onChange: (key, value, label) => this.change(key, value, label) });
         this.masking = new MaskingController({ host: host.querySelector('#develop-masking'), onChange, ...masking });
@@ -237,21 +266,29 @@ export class DevelopPanels {
                 const sensitivity = event.shiftKey ? .1 : 1;
                 const delta = (event.clientX - startX) / Math.max(120, row.clientWidth) * (max - min) * sensitivity;
                 const value = Math.max(min, Math.min(max, Math.round((startValue + delta) / step) * step));
-                this.change(row.dataset.setting, value, row.querySelector('.develop-slider-label').textContent);
+                this.change(row.dataset.setting, value, row.querySelector('.develop-slider-label').textContent, { history: false });
                 this.syncSlider(row);
+                return value;
             };
             row.addEventListener('pointerdown', (event) => {
                 if (event.target === input) return;
                 event.preventDefault();
                 const startX = event.clientX;
                 const startValue = numberSetting(this.settings, row.dataset.setting, Number(row.dataset.default));
+                const previousSettings = snapshotSettings(this.settings);
+                let changed = false;
                 row.setPointerCapture(event.pointerId);
-                const move = (next) => updateFromPointer(next, startX, startValue);
+                const move = (next) => {
+                    changed ||= updateFromPointer(next, startX, startValue) !== startValue;
+                };
                 const up = () => {
                     row.removeEventListener('pointermove', move);
                     row.removeEventListener('pointerup', up);
                     row.removeEventListener('pointercancel', up);
                     row.classList.remove('dragging');
+                    if (changed) {
+                        this.change(row.dataset.setting, numberSetting(this.settings, row.dataset.setting, startValue), row.querySelector('.develop-slider-label').textContent, { previousSettings });
+                    }
                 };
                 row.classList.add('dragging');
                 row.addEventListener('pointermove', move);
@@ -269,6 +306,17 @@ export class DevelopPanels {
                 this.syncSlider(row);
             });
             input.addEventListener('focus', () => input.select());
+            row.addEventListener('wheel', (event) => {
+                if (!event.altKey && document.activeElement !== input) return;
+                event.preventDefault();
+                const step = Number(row.dataset.step) || 1;
+                const direction = event.deltaY < 0 ? 1 : -1;
+                const size = event.shiftKey ? step * 10 : step;
+                const current = numberSetting(this.settings, row.dataset.setting, Number(row.dataset.default));
+                const value = Math.max(Number(row.dataset.min), Math.min(Number(row.dataset.max), Math.round((current + direction * size) / step) * step));
+                this.change(row.dataset.setting, value, row.querySelector('.develop-slider-label').textContent);
+                this.syncSlider(row);
+            }, { passive: false });
         }
     }
 
@@ -299,10 +347,10 @@ export class DevelopPanels {
         }
     }
 
-    change(key, value, label) {
+    change(key, value, label, options) {
         if (value === undefined) delete this.settings[key];
         else this.settings[key] = value;
-        this.onChange(key, value, label);
+        this.onChange(key, value, label, options);
     }
 
     syncSlider(row) {

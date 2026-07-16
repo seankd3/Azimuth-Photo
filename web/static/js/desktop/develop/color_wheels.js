@@ -15,6 +15,10 @@ function polar(event, canvas) {
     return { hue: (Math.atan2(dy, dx) * 180 / Math.PI + 360) % 360, saturation: Math.min(100, Math.hypot(dx, dy) / (canvas.width * .39) * 100) };
 }
 
+function snapshotSettings(settings) {
+    return JSON.parse(JSON.stringify(settings || {}));
+}
+
 function drawWheel(canvas, hue, saturation) {
     const context = canvas.getContext('2d');
     const { width, height } = canvas;
@@ -51,21 +55,47 @@ export class ColorWheels {
             const canvas = host.querySelector(`[data-wheel="${key}"] canvas`);
             canvas.addEventListener('pointerdown', (event) => this.drag(event, key, canvas));
             canvas.addEventListener('dblclick', () => this.reset(key));
-            host.querySelector(`[data-wheel-lum="${key}"]`).addEventListener('input', (event) => this.change(`${key}Lum`, Number(event.target.value), `${key} luminance`));
+            const luminance = host.querySelector(`[data-wheel-lum="${key}"]`);
+            let gesture = null;
+            luminance.addEventListener('pointerdown', () => { gesture = { previousSettings: snapshotSettings(this.settings), changed: false }; });
+            luminance.addEventListener('input', (event) => {
+                const value = Number(event.target.value);
+                gesture &&= { ...gesture, changed: gesture.changed || value !== numberSetting(gesture.previousSettings, `ColorGrade${key}Lum`) };
+                this.change(`${key}Lum`, value, `${key} luminance`, gesture ? { history: false } : undefined);
+            });
+            const finishGesture = () => {
+                if (!gesture?.changed) { gesture = null; return; }
+                this.change(`${key}Lum`, numberSetting(this.settings, `ColorGrade${key}Lum`), `${key} luminance`, { previousSettings: gesture.previousSettings });
+                gesture = null;
+            };
+            luminance.addEventListener('pointerup', finishGesture);
+            luminance.addEventListener('pointercancel', finishGesture);
         }
     }
 
-    change(suffix, value, label) {
+    change(suffix, value, label, options) {
         const key = `ColorGrade${suffix}`;
         this.settings[key] = value;
-        this.onChange(key, value, 'Color Grading: ' + label);
+        this.onChange(key, value, 'Color Grading: ' + label, options);
         this.draw();
     }
 
     drag(event, key, canvas) {
         canvas.setPointerCapture(event.pointerId);
-        const update = (next) => { const value = polar(next, canvas); this.change(`${key}Hue`, Math.round(value.hue), `${key} color`); this.change(`${key}Sat`, Math.round(value.saturation), `${key} color`); };
-        const done = () => { canvas.removeEventListener('pointermove', update); canvas.removeEventListener('pointerup', done); canvas.removeEventListener('pointercancel', done); };
+        const previousSettings = snapshotSettings(this.settings);
+        let changed = false;
+        const update = (next) => {
+            const value = polar(next, canvas);
+            const hue = Math.round(value.hue);
+            const saturation = Math.round(value.saturation);
+            changed ||= hue !== numberSetting(previousSettings, `ColorGrade${key}Hue`) || saturation !== numberSetting(previousSettings, `ColorGrade${key}Sat`);
+            this.change(`${key}Hue`, hue, `${key} color`, { history: false });
+            this.change(`${key}Sat`, saturation, `${key} color`, { history: false });
+        };
+        const done = () => {
+            canvas.removeEventListener('pointermove', update); canvas.removeEventListener('pointerup', done); canvas.removeEventListener('pointercancel', done);
+            if (changed) this.change(`${key}Hue`, numberSetting(this.settings, `ColorGrade${key}Hue`), `${key} color`, { previousSettings });
+        };
         update(event); canvas.addEventListener('pointermove', update); canvas.addEventListener('pointerup', done); canvas.addEventListener('pointercancel', done);
     }
 

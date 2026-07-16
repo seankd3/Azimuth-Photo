@@ -1,6 +1,7 @@
 import { thumbUrl } from '../api.js';
 import { fetchOptionsWithTimeout } from '../../api.js';
 import { on, selection, viewState } from '../state.js';
+import { applyFlags } from '../selection.js';
 import { showToast } from '../toast.js';
 import { releaseFocus, trapFocus } from '../focusTrap.js';
 import { CropController } from './crop.js';
@@ -9,7 +10,7 @@ import { DevelopHistogram } from './histogram.js';
 import { DevelopPanels } from './panels.js';
 import { mountPresetsPanel } from './presets.js';
 import { mountHistoryPanel } from './history_panel.js';
-import { openExportDialog, openSyncDialog } from './export_dialog.js';
+import { openExportDialog, openSyncDialog, SYNC_GROUPS } from './export_dialog.js';
 import { DevelopSettingsClipboard, applyPrevious, openCopyDialog, pasteClipboard } from './settings_clipboard.js';
 import { DevelopCompareView, SoftProofPopover } from './compare_view.js';
 import { ProofTileController } from './proof_tile.js';
@@ -40,6 +41,8 @@ let panGesture = null;
 let presetsPanel = null;
 let transientSettingsOverride = null;
 let backgroundBaseRetryTimer = 0;
+let saveFailureToastShown = false;
+let wbPickActive = false;
 
 const DEVELOP_READ_TIMEOUT_MS = 10_000;
 const DEVELOP_MUTATION_TIMEOUT_MS = 20_000;
@@ -221,21 +224,68 @@ function setControlsLoading(loading) {
     panelHost.dataset.loading = String(loading);
 }
 
+function hasUnsavedEdits() {
+    return [...stateCache.values()].some((entry) => entry.unsaved);
+}
+
+function setUnsavedIndicator() {
+    let dot = toolbar.querySelector('[data-develop-unsaved]');
+    if (!dot) {
+        dot = document.createElement('span');
+        dot.dataset.developUnsaved = '';
+        dot.dataset.tip = 'Unsaved Develop edits';
+        dot.setAttribute('aria-label', 'Unsaved Develop edits');
+        dot.style.cssText = 'width:7px;height:7px;margin-left:4px;border-radius:50%;background:var(--danger);box-shadow:0 0 0 2px var(--danger-dim)';
+        toolbar.append(dot);
+    }
+    dot.hidden = !hasUnsavedEdits();
+}
+
+async function saveEntry(imageId, label) {
+    const entry = stateCache.get(Number(imageId));
+    if (!entry) return true;
+    try {
+        const response = await fetch(`/api/develop/${imageId}`, fetchOptionsWithTimeout({
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ settings: entry.settings, label }),
+        }, DEVELOP_MUTATION_TIMEOUT_MS));
+        if (!response.ok) throw new Error('save failed');
+        entry.dirty = false;
+        entry.unsaved = false;
+        settingsClipboard.markSaved(imageId);
+        if (Number(currentImage?.id) === Number(imageId)) historyPanel?.reload();
+        setUnsavedIndicator();
+        if (!hasUnsavedEdits()) saveFailureToastShown = false;
+        return true;
+    } catch {
+        entry.unsaved = true;
+        setUnsavedIndicator();
+        if (!saveFailureToastShown) {
+            saveFailureToastShown = true;
+            showToast("Couldn't save edits — retrying");
+        }
+        return false;
+    }
+}
+
+async function flushSave(imageId, label = 'Develop adjustment') {
+    const entry = stateCache.get(Number(imageId));
+    if (!entry?.dirty && !entry?.unsaved) return true;
+    clearTimeout(saveTimers.get(Number(imageId)));
+    saveTimers.delete(Number(imageId));
+    return saveEntry(imageId, label);
+}
+
 function scheduleSave(label = 'Develop adjustment') {
     if (!currentImage) return;
     const imageId = Number(currentImage.id);
+    const entry = stateCache.get(imageId);
+    if (!entry) return;
+    entry.dirty = true;
     clearTimeout(saveTimers.get(imageId));
     saveTimers.set(imageId, setTimeout(() => {
-        const entry = stateCache.get(imageId);
-        if (!entry) return;
-        fetch(`/api/develop/${imageId}`, fetchOptionsWithTimeout({
-            method: 'PUT', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ settings: entry.settings, label }),
-        }, DEVELOP_MUTATION_TIMEOUT_MS)).then((response) => {
-            if (!response.ok) throw new Error('save failed');
-            settingsClipboard.markSaved(imageId);
-            historyPanel?.reload();
-        }).catch(() => {});
+        saveTimers.delete(imageId);
+        saveEntry(imageId, label);
     }, 400));
 }
 
@@ -487,6 +537,9 @@ function scheduleBackgroundDevelopRetry(image, token) {
 }
 
 async function openImage(image) {
+    setWbPick(false);
+    const previousImage = currentImage;
+    if (previousImage && Number(previousImage.id) !== Number(image?.id)) await flushSave(previousImage.id);
     const token = ++loadingToken;
     currentImage = image;
     transientSettingsOverride = null;
@@ -531,6 +584,7 @@ async function openImage(image) {
             };
             stateCache.set(Number(image.id), entry);
         }
+        setUnsavedIndicator();
         if (token !== loadingToken) return;
         entry.imageId = Number(image.id);
         historyPanel?.setHistory(entry.serverHistory || []);
@@ -684,6 +738,12 @@ function showBefore(show) {
     toolbar.querySelector('[data-action="before"]').setAttribute('aria-pressed', String(show));
 }
 
+function setWbPick(active) {
+    wbPickActive = Boolean(active) && Boolean(currentImage);
+    stage.classList.toggle('wb-picking', wbPickActive);
+    stage.style.cursor = wbPickActive ? 'crosshair' : '';
+}
+
 async function comparisonPreview(image) {
     if (!image) return null;
     let entry = stateCache.get(Number(image.id));
@@ -775,6 +835,16 @@ function openCopyPopover(button) {
         button, sourceId: currentImage?.id, settings: entry?.settings,
         anchoredPopover, closePopover, showToast, clipboard: settingsClipboard,
     });
+}
+
+function copyAllSettings() {
+    const entry = currentImage && stateCache.get(Number(currentImage.id));
+    if (!settingsClipboard.copy({
+        sourceId: currentImage?.id,
+        settings: entry?.settings,
+        groups: SYNC_GROUPS.map(([id]) => id),
+    })) return;
+    showToast('Settings copied');
 }
 
 function applySyncedSettings(payload) {
@@ -976,7 +1046,7 @@ function bindUi() {
         const proofButton = document.createElement('button');
         proofButton.type = 'button';
         proofButton.dataset.action = 'proof';
-        proofButton.dataset.tip = 'Hold for original-pixel proof (P)';
+        proofButton.dataset.tip = 'Hold for original-pixel proof (Shift+P)';
         proofButton.setAttribute('aria-label', 'Hold for original 1:1 proof');
         proofButton.setAttribute('aria-pressed', 'false');
         proofButton.textContent = '1:1';
@@ -1052,6 +1122,27 @@ function editingField(event) {
     return event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement || event.target?.isContentEditable;
 }
 
+function flagCurrent(flag) {
+    if (!currentImage) return;
+    applyFlags([currentImage.id], flag);
+}
+
+function closeTransient() {
+    const hasTransient = Boolean(
+        activePopover || softProof?.popover || crop?.active || wbPickActive || beforeHeld || proofTile?.held || compare?.mode !== 'off',
+    );
+    if (!hasTransient) return false;
+    closePopover();
+    softProof?.popover?.remove();
+    if (softProof) softProof.popover = null;
+    crop?.setActive(false);
+    setWbPick(false);
+    showBefore(false);
+    proofTile?.setHeld(false);
+    compare?.holdReference(false);
+    return true;
+}
+
 function handleKey(event) {
     if (!mounted || editingField(event)) return;
     if (heal?.keydown(event)) return;
@@ -1059,7 +1150,7 @@ function handleKey(event) {
     const key = event.key.toLowerCase();
     if (event.ctrlKey || event.metaKey) {
         if (key === 'z') { event.preventDefault(); event.stopImmediatePropagation(); event.shiftKey ? redo() : undo(); }
-        else if (event.shiftKey && key === 'c') { event.preventDefault(); event.stopImmediatePropagation(); openCopyPopover(toolbar.querySelector('[data-action="copy"]')); }
+        else if (event.shiftKey && key === 'c') { event.preventDefault(); event.stopImmediatePropagation(); copyAllSettings(); }
         else if (event.shiftKey && key === 'v') { event.preventDefault(); event.stopImmediatePropagation(); pasteSettings(); }
         else if (event.altKey && key === 'v') { event.preventDefault(); event.stopImmediatePropagation(); fromPrevious(); }
         return;
@@ -1070,24 +1161,35 @@ function handleKey(event) {
         event.preventDefault(); event.stopImmediatePropagation(); if (!event.repeat) showBefore(true);
     } else if (key === 'z') {
         event.preventDefault(); event.stopImmediatePropagation(); if (!event.repeat) toggleZoom();
-    } else if (key === 'p') {
+    } else if (event.shiftKey && key === 'p') {
         event.preventDefault(); event.stopImmediatePropagation();
         if (!event.repeat) {
             toolbar.querySelector('[data-action="proof"]')?.setAttribute('aria-pressed', 'true');
             proofTile?.setHeld(true);
         }
+    } else if (key === 'p') {
+        event.preventDefault(); event.stopImmediatePropagation();
+        if (!event.repeat) flagCurrent(currentImage?.flag === 'picked' ? 'unflagged' : 'picked');
+    } else if (key === 'x') {
+        event.preventDefault(); event.stopImmediatePropagation();
+        if (!event.repeat) flagCurrent('rejected');
+    } else if (key === 'u') {
+        event.preventDefault(); event.stopImmediatePropagation();
+        if (!event.repeat) flagCurrent('unflagged');
     } else if (event.code === 'Space') {
         event.preventDefault(); event.stopImmediatePropagation();
         if (!spaceHeld) { spaceHeld = true; if (zoomScale() > 1) stage.style.cursor = 'grab'; }
     } else if (event.key === 'Escape') {
-        closePopover(); crop.setActive(false);
+        if (closeTransient()) {
+            event.preventDefault(); event.stopImmediatePropagation();
+        }
     }
 }
 
 function handleKeyUp(event) {
     if (!mounted) return;
     if (event.key === '\\') showBefore(false);
-    if (event.key.toLowerCase() === 'p') {
+    if (event.shiftKey && event.key.toLowerCase() === 'p') {
         toolbar.querySelector('[data-action="proof"]')?.setAttribute('aria-pressed', 'false');
         proofTile?.setHeld(false);
     }
