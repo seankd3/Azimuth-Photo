@@ -21,6 +21,7 @@ const imageIndexes = new Map();
 let observer = null;
 let imageObserver = null;
 let menu = null;
+let savedScrollTop = 0;
 const expandedEvents = new Set();
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
@@ -302,8 +303,7 @@ function openMenu(button, groupIndex) {
     });
 }
 
-function reload() {
-    if (!mounted) return;
+function resetData() {
     generation += 1;
     offset = 0;
     done = false;
@@ -314,8 +314,36 @@ function reload() {
     expandedEvents.clear();
     setImages([]);
     setRankingsMeta({ visibleImages: 0, sortQuality: null });
-    renderSkeleton();
+}
+
+function reload({ skeleton = true } = {}) {
+    if (!mounted) return;
+    resetData();
+    if (skeleton) renderSkeleton();
     loadPage();
+}
+
+async function revalidate() {
+    const seq = generation;
+    try {
+        const data = await loadScopePage({ limit: PAGE_SIZE, offset: 0, sort: 'date_taken' });
+        if (!mounted || seq !== generation || !data) return;
+        const incoming = data.images || [];
+        const changed = incoming.length !== Math.min(images.length, PAGE_SIZE)
+            || incoming.some((image, i) => Number(image.id) !== Number(images[i]?.id));
+        if (!changed) return;
+        resetData();
+        images = incoming;
+        incoming.forEach((image, i) => imageIndexes.set(Number(image.id), i));
+        offset = incoming.length;
+        done = incoming.length < PAGE_SIZE;
+        setImages(images);
+        setRankingsMeta({ visibleImages: data.visible_images, sortQuality: data.sort_quality });
+        render();
+        setupSentinel();
+    } catch {
+        // Keep the last successful event view visible while the refresh is unavailable.
+    }
 }
 
 export function initEvents() {
@@ -340,7 +368,10 @@ export function initEvents() {
     document.addEventListener('pointerdown', (event) => {
         if (menu && !menu.contains(event.target) && !event.target.closest('.ev-menu-btn')) closeMenu();
     });
-    on('scope', reload);
+    on('scope', () => {
+        resetData();
+        if (mounted) reload();
+    });
     on('selection', render);
     on('flags', render);
 }
@@ -348,10 +379,16 @@ export function initEvents() {
 export function mountEvents() {
     mounted = true;
     document.getElementById('view-events').classList.add('active');
-    reload();
+    if (images.length) {
+        observeImages(document.getElementById('events-flow'));
+        setupSentinel();
+        requestAnimationFrame(() => document.getElementById('canvas').scrollTo({ top: savedScrollTop, behavior: 'auto' }));
+        revalidate();
+    } else reload();
 }
 
 export function unmountEvents() {
+    savedScrollTop = document.getElementById('canvas').scrollTop;
     mounted = false;
     generation += 1;
     closeMenu();
