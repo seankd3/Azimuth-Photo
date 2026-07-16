@@ -201,6 +201,14 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertIn("if (controlInFlight || generation !== statusGeneration) return;", sync_chip)
         self.assertIn("const generation = ++statusGeneration;", sync_chip)
 
+        control = sync_chip[
+            sync_chip.index("async function control("):
+            sync_chip.index("function patchOffline()")
+        ]
+        completion_guard = "if (generation === statusGeneration) statusGeneration += 1;"
+        self.assertIn(completion_guard, control)
+        self.assertLess(control.index(completion_guard), control.index("controlInFlight -= 1;"))
+
     def test_sync_chip_surfaces_pending_metadata_operations(self):
         sync_chip = read("sync_chip.js")
 
@@ -216,7 +224,15 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertIn("const workerActionsInFlight = new Set();", drawer)
         self.assertIn("const workerGenerations = new Map(workerActionGenerations);", drawer)
         self.assertIn("workerActionsInFlight.has(item.key)", drawer)
-        self.assertIn("workerActionGenerations.set(key, (workerActionGenerations.get(key) || 0) + 1);", drawer)
+        generation_bump = "workerActionGenerations.set(key, (workerActionGenerations.get(key) || 0) + 1);"
+        action_start = drawer.index("for (const btn of body.querySelectorAll('[data-worker-action]'))")
+        worker_action = drawer[
+            action_start:
+            drawer.index("body.querySelector('#clear-cache-btn')", action_start)
+        ]
+        self.assertEqual(worker_action.count(generation_bump), 2)
+        completion_bump = worker_action.rindex(generation_bump)
+        self.assertLess(completion_bump, worker_action.index("workerActionsInFlight.delete(key);"))
 
     def test_background_workers_default_new_productive_states_to_active(self):
         drawer = read("drawer.js")

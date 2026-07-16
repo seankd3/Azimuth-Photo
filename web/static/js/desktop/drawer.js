@@ -1465,6 +1465,7 @@ function bindDrawerActions() {
             } catch {
                 showToast('Couldn’t update background work');
             } finally {
+                workerActionGenerations.set(key, (workerActionGenerations.get(key) || 0) + 1);
                 workerActionsInFlight.delete(key);
             }
             await refreshDrawer();
