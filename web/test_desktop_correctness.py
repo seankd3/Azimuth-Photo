@@ -29,3 +29,11 @@ class DesktopCorrectnessTests(unittest.TestCase):
             history.index("if (Number(api.getImageId?.()) !== Number(imageId)) return;"),
             history.index("controller.setHistory(fresh);"),
         )
+
+    def test_flag_scope_reloads_after_a_committed_membership_change(self):
+        grid = read("grid.js")
+
+        self.assertIn("on('flags', ({ imageIds, committed } = {}) =>", grid)
+        self.assertIn("if (committed && scope.flag", grid)
+        self.assertIn("viewState.images.some((image) =>", grid)
+        self.assertIn("loadFirstPage();", grid[grid.index("if (committed && scope.flag"):])
