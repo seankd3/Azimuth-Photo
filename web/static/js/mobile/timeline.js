@@ -653,8 +653,8 @@ function scheduleThumbnailPoll() {
     thumbnailPollTimer = setTimeout(async () => {
         thumbnailPollTimer = 0;
         if (!pendingThumbnails || document.body.dataset.tab !== 'photos') return;
-        if (canRefreshPendingThumbnails()) await refreshFirstPagePreviews();
-        else await refreshPendingPreviews();
+        if (scope.similarImages || !canRefreshPendingThumbnails()) await refreshPendingPreviews();
+        else await refreshFirstPagePreviews();
         scheduleThumbnailPoll();
     }, 3000);
 }
@@ -670,6 +670,10 @@ function updateThumbnailPoll(pending) {
 
 function pendingCount(data) {
     return Number(data?.pending_thumbnails ?? data?.hidden_pending_thumbnails) || 0;
+}
+
+function pendingPreviewCount(images) {
+    return (images || []).filter((image) => image?.preview_ready === false).length;
 }
 
 function sharpenPreview(image) {
@@ -773,13 +777,13 @@ export async function reload() {
     renderSkeleton();
     renderScopeBar();
     if (scope.similarImages) {
-        updateThumbnailPoll(0);
         if (gen !== generation) return;
         images = scope.similarImages;
         rememberImages(images);
         histogram = { months: [], undated: 0, total: images.length };
         monthOffsets = [];
         renderFixedImages(images);
+        updateThumbnailPoll(pendingPreviewCount(images));
         endReached = true;
         endEl.hidden = true;
         renderScopeBar();

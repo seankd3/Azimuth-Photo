@@ -2,7 +2,7 @@ import {
     byId, clearFacet, clearSelection, emit, nonSearchFacetCount, on, scope, scopeActive, scopeParams, selection, setBestOfTotal, setImages, setRankingsMeta, setScope, viewState,
 } from './state.js';
 import { createStack, getCatalog, getRankings, getScanStatus, getStack, previewThumbUrl, thumbUrl, unstack } from './api.js';
-import { loadScopePage } from './scope_data.js';
+import { loadScopePage, similarScopeActive } from './scope_data.js';
 import {
     enterSelection, isSelectionMode, toggleSelection,
 } from './selection.js';
@@ -71,8 +71,8 @@ function scheduleThumbnailPoll() {
     thumbnailPollTimer = window.setTimeout(async () => {
         thumbnailPollTimer = 0;
         if (!mounted || !pendingThumbnails) return;
-        if (canRefreshPendingThumbnails()) await refreshFirstPagePreviews();
-        else await refreshPendingPreviews();
+        if (similarScopeActive() || !canRefreshPendingThumbnails()) await refreshPendingPreviews();
+        else await refreshFirstPagePreviews();
         scheduleThumbnailPoll();
     }, 3000);
 }
@@ -233,6 +233,10 @@ function unobserveImages(rootEl) {
 
 function pendingCount(data) {
     return Number(data?.pending_thumbnails ?? data?.hidden_pending_thumbnails) || 0;
+}
+
+function pendingPreviewCount(images) {
+    return (images || []).filter((image) => image?.preview_ready === false).length;
 }
 
 function sharpenPreview(image) {
@@ -625,7 +629,7 @@ async function loadPage({ direction = 'after', start = null, jump = false } = {}
     document.getElementById('grid-end').hidden = !done || next.length === 0;
     if (next.length === 0 && done) renderEmptyState();
     else {
-        updateThumbnailPoll(pendingCount(data));
+        updateThumbnailPoll(data.source === 'similar' ? pendingPreviewCount(next) : pendingCount(data));
         const chunkEl = direction === 'before'
             ? prependChunk(requestStart, incoming)
             : (render({ append: !wasEmpty, start: requestStart, images: incoming }), ensureChunkLive(requestStart));
