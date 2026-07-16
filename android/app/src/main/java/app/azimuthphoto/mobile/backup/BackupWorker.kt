@@ -1,13 +1,16 @@
 package app.azimuthphoto.mobile.backup
 
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import android.content.pm.ServiceInfo
 import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import app.azimuthphoto.mobile.App
+import app.azimuthphoto.mobile.MainActivity
 import app.azimuthphoto.mobile.R
 import app.azimuthphoto.mobile.data.DeviceMedia
 import app.azimuthphoto.mobile.data.MediaItem
@@ -67,7 +70,9 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         }
 
         var done = 0
+        var failures = 0
         var hasTransientFailure = false
+        setForeground(foregroundInfo("Backing up 0 / ${candidates.size}", candidates.size, done))
 
         for (batch in candidates.chunked(MANIFEST_BATCH)) {
             // Hash the batch, declare it, then upload only what the hub is missing.
@@ -79,6 +84,7 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
                 } catch (e: Exception) {
                     db.upsert(item.id, "", item.sizeBytes, BackupDb.STATE_FAILED)
                     done++
+                    failures++
                 }
             }
             if (hashed.isEmpty()) continue
@@ -90,6 +96,7 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
                 for ((item, manifest) in hashed) {
                     db.upsert(item.id, manifest.content_hash, item.sizeBytes, BackupDb.STATE_FAILED)
                     done++
+                    failures++
                 }
                 publish(BackupProgress(true, candidates.size, done, lastError = e.message))
                 continue
@@ -123,13 +130,15 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
                 } catch (e: IOException) {
                     if (classifyBackupFailure(e) == BackupFailure.TRANSIENT) hasTransientFailure = true
                     db.upsert(item.id, manifest.content_hash, item.sizeBytes, BackupDb.STATE_FAILED)
+                    failures++
                 }
                 done++
-                setForeground(foregroundInfo("Backing up $done / ${candidates.size}"))
+                setForeground(foregroundInfo("Backing up $done / ${candidates.size}", candidates.size, done))
             }
         }
 
         publish(BackupProgress(running = false, total = candidates.size, done = done))
+        if (failures > 0) postFailureSummary(failures)
         FreeUpSpace.runIfEnabled(context)
         return if (hasTransientFailure) Result.retry() else Result.success()
     }
@@ -161,11 +170,13 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         progressFlow.value = progress
     }
 
-    private fun foregroundInfo(text: String): ForegroundInfo {
+    private fun foregroundInfo(text: String, total: Int = 0, done: Int = 0): ForegroundInfo {
         val notification = NotificationCompat.Builder(applicationContext, App.BACKUP_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("Azimuth Photo backup")
             .setContentText(text)
+            .setContentIntent(mainActivityIntent())
+            .setProgress(total, done, false)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
@@ -174,11 +185,34 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         )
     }
 
+    private fun postFailureSummary(failures: Int) {
+        val notification = NotificationCompat.Builder(applicationContext, App.BACKUP_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle("Azimuth Photo backup")
+            .setContentText("Backup finished — $failures items failed, will retry")
+            .setContentIntent(mainActivityIntent())
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .build()
+        applicationContext.getSystemService(NotificationManager::class.java)
+            .notify(FAILURE_NOTIFICATION_ID, notification)
+    }
+
+    private fun mainActivityIntent(): PendingIntent = PendingIntent.getActivity(
+        applicationContext,
+        0,
+        Intent(applicationContext, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        },
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    )
+
     companion object {
         /** Phone shots live in their own tree on the hub. */
         const val PHONE_FOLDER = "Personal Photos"
         const val MANIFEST_BATCH = 50
         const val NOTIFICATION_ID = 100
+        const val FAILURE_NOTIFICATION_ID = 101
         private const val TAG = "BackupWorker"
         private val uploadMutex = Mutex()
 
