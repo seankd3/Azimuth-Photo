@@ -342,6 +342,13 @@ def _caption_cached_preview(cache_path: str, config: dict[str, Any]) -> dict[str
 
 
 async def run_caption_worker() -> None:
+    try:
+        await _run_caption_worker_loop()
+    finally:
+        _release_worker_owners()
+
+
+async def _run_caption_worker_loop() -> None:
     _set_status(running=True, session_started_at=time.time())
     batch_size = 1
     while True:

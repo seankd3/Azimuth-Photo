@@ -2,6 +2,7 @@ from test_support import *  # noqa: F401,F403
 
 import caption_worker
 import contextlib
+import threading
 import unittest.mock
 from fastapi.testclient import TestClient
 from data.repositories import captions
@@ -11,6 +12,87 @@ from workers.caption_health import CaptionOomCircuit
 
 
 class CaptionTests(BackendTestCase):
+    async def test_caption_cancellation_releases_gpu_and_manual_owners(self):
+        old_dependencies = (
+            caption_worker._count_images_needing_captions,
+            caption_worker._get_images_needing_captions,
+            caption_worker._store_caption_result,
+        )
+        old_pause = caption_worker._caption_manual_pause
+        old_status = dict(caption_worker._status)
+        load_started = threading.Event()
+        allow_load_finish = threading.Event()
+
+        async def count_pending(**_kwargs):
+            return 1
+
+        async def next_image(**_kwargs):
+            return [{"id": 7, "cache_path": "/tmp/cancel-caption.jpg"}]
+
+        async def store_result(**_kwargs):
+            return None
+
+        def blocking_load(_config):
+            load_started.set()
+            allow_load_finish.wait(timeout=2)
+
+        config = {
+            "model_id": "test-caption-model",
+            "model_key": "test-caption-model@main",
+            "model_dir": "/tmp/test-caption-model",
+            "quantization": "none",
+            "prompt_version": "test-v1",
+            "batch_size": 1,
+        }
+        caption_worker.configure(
+            count_images_needing_captions=count_pending,
+            get_images_needing_captions=next_image,
+            store_caption_result=store_result,
+        )
+        caption_worker._caption_manual_pause = False
+        for owner in (work_coordination.manual_owner(),):
+            if owner:
+                work_coordination.release_manual_owner(owner)
+        for owner in (work_coordination.gpu_owner(),):
+            if owner:
+                work_coordination.release_gpu_owner(owner)
+        task = None
+        try:
+            with (
+                unittest.mock.patch.object(settings, "get_settings", return_value={
+                    "caption_scan_enabled": True,
+                    "ssd_cache_dir": "/tmp",
+                }),
+                unittest.mock.patch.object(settings, "active_caption_config", return_value=config),
+                unittest.mock.patch.object(ai_models, "model_files_present", return_value=True),
+                unittest.mock.patch.object(caption_worker, "_load_model", side_effect=blocking_load),
+                unittest.mock.patch.object(caption_worker, "_clear_cuda_cache"),
+            ):
+                task = asyncio.create_task(caption_worker.run_caption_worker())
+                loaded = await asyncio.to_thread(load_started.wait, 1)
+                self.assertTrue(loaded)
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+                self.assertIsNone(work_coordination.manual_owner())
+                self.assertIsNone(work_coordination.gpu_owner())
+        finally:
+            allow_load_finish.set()
+            if task is not None and not task.done():
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+            (
+                caption_worker._count_images_needing_captions,
+                caption_worker._get_images_needing_captions,
+                caption_worker._store_caption_result,
+            ) = old_dependencies
+            caption_worker._caption_manual_pause = old_pause
+            caption_worker._status.clear()
+            caption_worker._status.update(old_status)
+            work_coordination.release_manual_owner("captions")
+            work_coordination.release_gpu_owner("captions")
+
     def test_caption_resume_enables_persisted_scan_setting(self):
         old_pause = caption_worker._caption_manual_pause
         old_pause_message = caption_worker._caption_manual_pause_message

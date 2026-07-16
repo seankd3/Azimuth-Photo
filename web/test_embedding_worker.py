@@ -9,6 +9,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
 import embedding_worker  # noqa: E402
+from core import work_coordination  # noqa: E402
 
 
 class FakeImage:
@@ -34,6 +35,50 @@ class FakeModel:
 
 
 class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_worker_cancellation_releases_gpu_and_manual_owners(self):
+        processing_started = asyncio.Event()
+
+        async def candidates(**_kwargs):
+            return [{"id": 1, "filepath": "/test/1.jpg"}]
+
+        async def block_processing(*_args, **_kwargs):
+            processing_started.set()
+            await asyncio.Future()
+
+        embedding_worker._get_unembedded_images = candidates
+        embedding_worker._model = object()
+        embedding_worker._loaded_model_dir = "/tmp/test-model"
+        embedding_worker._loaded_model_id = "test-model"
+        embedding_worker._loaded_model_revision = "main"
+        for owner in (work_coordination.manual_owner(),):
+            if owner:
+                work_coordination.release_manual_owner(owner)
+        for owner in (work_coordination.gpu_owner(),):
+            if owner:
+                work_coordination.release_gpu_owner(owner)
+
+        task = None
+        try:
+            with unittest.mock.patch.object(
+                embedding_worker,
+                "_process_embedding_candidates",
+                side_effect=block_processing,
+            ):
+                task = asyncio.create_task(embedding_worker.run_embedding_worker())
+                await asyncio.wait_for(processing_started.wait(), timeout=1)
+                task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await task
+
+            self.assertIsNone(work_coordination.manual_owner())
+            self.assertIsNone(work_coordination.gpu_owner())
+        finally:
+            if task is not None and not task.done():
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+            work_coordination.release_manual_owner("embeddings")
+            work_coordination.release_gpu_owner("embeddings")
+
     async def test_sqlite_lock_is_retryable_embedding_contention(self):
         self.assertTrue(
             embedding_worker._is_sqlite_locked_error(

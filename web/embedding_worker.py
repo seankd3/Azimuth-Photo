@@ -977,6 +977,14 @@ async def _process_embedding_candidates(
 
 
 async def run_embedding_worker():
+    try:
+        await _run_embedding_worker_loop()
+    finally:
+        work_coordination.release_manual_owner("embeddings")
+        _unload_model()
+
+
+async def _run_embedding_worker_loop():
     """Main background loop: embed images for search, similarity, and Elo propagation."""
     loop = asyncio.get_running_loop()
 

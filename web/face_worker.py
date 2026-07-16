@@ -147,12 +147,16 @@ def request_scan_now() -> dict[str, Any]:
     return get_worker_status()
 
 
+def _enter_paused(message: str) -> None:
+    work_coordination.release_manual_owner("people")
+    _set_status(state="paused", ready=False, message=message, last_error="")
+
+
 def pause_face_worker() -> None:
     global _face_manual_pause, _face_manual_pause_message
     _face_manual_pause = True
     _face_manual_pause_message = "People is stopped."
-    work_coordination.release_manual_owner("people")
-    _set_status(state="paused", ready=False, message=_face_manual_pause_message)
+    _enter_paused(_face_manual_pause_message)
 
 
 def resume_face_worker() -> None:
@@ -257,6 +261,13 @@ def _detect_faces(cache_path: str, config: dict[str, Any]) -> list[dict[str, Any
 
 
 async def run_face_worker() -> None:
+    try:
+        await _run_face_worker_loop()
+    finally:
+        work_coordination.release_manual_owner("people")
+
+
+async def _run_face_worker_loop() -> None:
     global _scan_now
     _set_status(running=True, session_started_at=time.time())
     while True:
@@ -272,11 +283,8 @@ async def run_face_worker() -> None:
                 auto_install=bool(config.get("people_auto_install", True)),
             )
             if _face_manual_pause or not bool(config.get("people_scan_enabled", True)):
-                _set_status(
-                    state="paused",
-                    ready=False,
-                    message=_face_manual_pause_message or "People is stopped.",
-                    last_error="",
+                _enter_paused(
+                    _face_manual_pause_message or "People is stopped."
                 )
                 await asyncio.sleep(WORKER_SLEEP_SECONDS)
                 continue
@@ -419,6 +427,7 @@ async def run_face_worker() -> None:
                 session_scanned_images=int(current.get("session_scanned_images") or 0) + scanned,
             )
         except Exception as exc:
+            work_coordination.release_manual_owner("people")
             _set_status(
                 state="error",
                 ready=False,
