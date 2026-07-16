@@ -1,7 +1,46 @@
 from test_support import *  # noqa: F401,F403
+from features.catalog import metadata as catalog_metadata
 
 
 class SettingsStatusTests(BackendTestCase):
+    def test_orientation_retry_ledger_cools_then_poisons_unreadable_images(self):
+        old_ledger = dict(catalog_metadata._orientation_retry_ledger)
+        catalog_metadata._orientation_retry_ledger.clear()
+        try:
+            first_retry = catalog_metadata._note_orientation_failure(
+                1,
+                "FileNotFoundError",
+                now=100.0,
+            )
+            ready, cooled, next_retry_at = catalog_metadata._ready_orientation_rows(
+                [{"id": 1}, {"id": 2}],
+                now=101.0,
+            )
+
+            self.assertEqual([row["id"] for row in ready], [2])
+            self.assertEqual(cooled, 1)
+            self.assertEqual(next_retry_at, first_retry)
+
+            catalog_metadata._note_orientation_failure(1, "OSError", now=first_retry)
+            catalog_metadata._note_orientation_failure(
+                1,
+                "OSError",
+                now=first_retry + catalog_metadata.ORIENTATION_RETRY_SECONDS,
+            )
+            summary = catalog_metadata._orientation_retry_summary()
+            self.assertEqual(summary["poisoned"], 1)
+            self.assertEqual(
+                catalog_metadata._ready_orientation_rows([{"id": 1}], now=10_000.0)[0],
+                [],
+            )
+
+            catalog_metadata.resume_catalog_metadata()
+            self.assertEqual(catalog_metadata._orientation_retry_ledger, {})
+        finally:
+            catalog_metadata.pause_catalog_metadata()
+            catalog_metadata._orientation_retry_ledger.clear()
+            catalog_metadata._orientation_retry_ledger.update(old_ledger)
+
     async def test_ai_status_counts_only_count_active_embeddings(self):
         active_source = await self._source("active")
         offline_source = await self._source("offline", online=False)
