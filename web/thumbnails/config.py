@@ -188,6 +188,8 @@ def allocate_disk_budget(
     allocations = {tier: 0 for tier in ALL_TIERS}
     if total <= 0:
         return allocations
+    if not any(int(needed_bytes.get(tier, 0) or 0) > 0 for tier in ALL_TIERS):
+        return allocations
 
     remaining = total
     for tier in ("sm", "md"):
