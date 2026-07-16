@@ -65,16 +65,22 @@ class MobileOfflineContractsTests(unittest.TestCase):
         self.assertIn("sections.named_people", search)
         self.assertIn("people = { people: flattenPeople(data) }", search)
 
-    def test_background_lease_waits_remain_active_on_mobile(self):
+    def test_background_workers_default_new_productive_states_to_running_on_mobile(self):
         library = self.read("static", "js", "mobile", "library.js")
 
-        for state in ("waiting_for_gpu", "waiting_for_turn", "waiting_retry", "waiting_for_model"):
+        self.assertIn("const INACTIVE_WORKER_STATES = new Set([", library)
+        for state in ("idle", "paused", "complete", "caught_up", "error", "disabled", "unavailable", "stale"):
             self.assertIn(f"'{state}'", library)
+        self.assertIn("return Boolean(state) && !INACTIVE_WORKER_STATES.has(state);", library)
+        self.assertNotIn("const ACTIVE_WORKER_STATES", library)
+        self.assertIn("running: workerStateIsActive(ai && ai.worker_state)", library)
+        self.assertIn("running: !cachePregen.manual_pause && workerStateIsActive(cachePregen.state)", library)
+        self.assertIn("running: workerStateIsActive(peopleWorker.state)", library)
 
     def test_cache_pregen_wait_remains_active_on_mobile(self):
         library = self.read("static", "js", "mobile", "library.js")
 
-        self.assertIn("['running', 'waiting'].includes(cachePregen.state)", library)
+        self.assertIn("running: !cachePregen.manual_pause && workerStateIsActive(cachePregen.state)", library)
 
     def test_pending_previews_only_replace_an_empty_mobile_month_view(self):
         timeline = self.read("static", "js", "mobile", "timeline.js")

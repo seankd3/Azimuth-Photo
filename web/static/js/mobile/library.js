@@ -22,6 +22,16 @@ import { renderBackupView, stopBackupView } from './backup.js';
 const SORT_QUALITY_MIN_SIGNALS = 3;
 const DISMISSED_SUGGESTIONS_KEY = 'pa_m_dismissed_suggestions';
 const TOAST_ACTION_RESET_MS = 6200;
+const INACTIVE_WORKER_STATES = new Set([
+    'idle',
+    'paused',
+    'complete',
+    'caught_up',
+    'error',
+    'disabled',
+    'unavailable',
+    'stale',
+]);
 
 let root = null;
 let built = false;
@@ -268,6 +278,11 @@ function render() {
 /* ---------- background work glass box ---------- */
 const pct = (value) => (value == null ? null : Math.max(0, Math.min(100, Number(value) || 0)));
 
+function workerStateIsActive(value) {
+    const state = String(value || '').toLowerCase();
+    return Boolean(state) && !INACTIVE_WORKER_STATES.has(state);
+}
+
 function workRows() {
     const ai = workStatus && workStatus.ai;
     const cache = workStatus && workStatus.cache;
@@ -285,14 +300,7 @@ function workRows() {
                 ? `${fmtInt(ai.embedded)} / ${fmtInt(ai.total_images)} indexed`
                 : 'Checking status…',
             paused: Boolean(ai && ai.embedding_manual_pause),
-            running: Boolean(ai && [
-                'embedding',
-                'loading_model',
-                'waiting_for_model',
-                'waiting_for_gpu',
-                'waiting_for_turn',
-                'waiting_retry',
-            ].includes(ai.worker_state)),
+            running: workerStateIsActive(ai && ai.worker_state),
         },
         {
             key: 'cache',
@@ -303,7 +311,7 @@ function workRows() {
                 ? `${fmtInt(preview.count)} / ${fmtInt(preview.total)} previews`
                 : 'Checking status…',
             paused: Boolean(cachePregen.manual_pause),
-            running: ['running', 'waiting'].includes(cachePregen.state),
+            running: !cachePregen.manual_pause && workerStateIsActive(cachePregen.state),
         },
         {
             key: 'people',
@@ -314,7 +322,7 @@ function workRows() {
                 ? `${fmtInt((peopleStatus.counts || {}).people)} people · ${fmtInt((peopleStatus.counts || {}).pending_cached_images)} pending`
                 : 'Checking status…',
             paused: Boolean(peopleStatus && !peopleStatus.active),
-            running: Boolean(peopleStatus && peopleStatus.active && peopleWorker.state !== 'idle'),
+            running: workerStateIsActive(peopleWorker.state),
         },
     ];
 }
