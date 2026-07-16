@@ -140,7 +140,7 @@ function render() {
         + '<input id="ms-input" type="search" enterkeyhint="search" placeholder="Search your photos"'
         + ' autocomplete="off" spellcheck="false" aria-label="Search photos">'
         + `<button id="ms-clear" aria-label="Clear search" style="display:none">${icon('x')}</button></div>`
-        + '<div class="ms-hints">'
+        + '<div class="ms-hints"><span>Try:</span>'
         + '<button type="button" data-hint="camera:Sony">camera:Sony</button>'
         + '<button type="button" data-hint="lens:35mm">lens:35mm</button>'
         + '<button type="button" data-hint="tag:wedding">tag:wedding</button>'

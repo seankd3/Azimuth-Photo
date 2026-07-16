@@ -599,6 +599,7 @@ export async function reload() {
     startOffset = 0;
     endReached = false;
     currentSortQuality = null;
+    endEl.textContent = scopeActive() ? "That's all for this filter." : "That's everything.";
     endEl.hidden = true;
     renderSkeleton();
     renderScopeBar();
