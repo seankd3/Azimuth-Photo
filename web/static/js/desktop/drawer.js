@@ -344,7 +344,8 @@ function statusText(name, data) {
     if (name === 'Cache') {
         const pregen = (data && data.pregen) || {};
         const preview = pregen.preview || {};
-        return `${fmt(preview.count)} / ${fmt(preview.total)} · ${pregen.state || 'idle'}`;
+        const priority = pregen.priority_scope ? ` · Prioritizing: ${pregen.priority_scope}` : '';
+        return `${fmt(preview.count)} / ${fmt(preview.total)} · ${pregen.state || 'idle'}${priority}`;
     }
     if (name === 'Captions') {
         const worker = (data && data.worker) || {};

@@ -14,6 +14,7 @@ import helpers as app_helpers
 import settings
 from core import responses as response_helpers
 from data.repositories import rankings as ranking_repository
+from features.library import preview_priority
 from features.library import taste as taste_service
 from features.sync import satellite
 
@@ -496,6 +497,12 @@ def cache_rankings_response(cache_key, response: dict) -> None:
         del _rankings_response_cache[next(iter(_rankings_response_cache))]
 
 
+def _record_preview_priority_scope(response: dict, *, folder, collection_id: int) -> None:
+    if int(response.get("hidden_pending_thumbnails") or 0) <= 0:
+        return
+    preview_priority.record_scope(folder=folder, collection_id=collection_id)
+
+
 async def date_groups_payload(
     *,
     orientation: str = "",
@@ -830,10 +837,16 @@ async def api_rankings_impl(
         )
         cached = _rankings_response_cache.get(rankings_cache_key)
         if cached and cached["expires"] > time.monotonic():
-            _configured_schedule_result_thumbnail_memory_warm((cached.get("data") or {}).get("images") or [])
+            cached_data = cached.get("data") or {}
+            _configured_schedule_result_thumbnail_memory_warm(cached_data.get("images") or [])
+            _record_preview_priority_scope(
+                cached_data,
+                folder=folder,
+                collection_id=collection_id,
+            )
             if request is not None and cached.get("json") is not None:
                 return Response(content=cached["json"], media_type="application/json")
-            return copy_rankings_response(cached["data"])
+            return copy_rankings_response(cached_data)
 
     if sort == "taste":
         taste = await taste_service.taste_vector()
@@ -955,6 +968,7 @@ async def api_rankings_impl(
         }
         if rankings_cache_key is not None:
             cache_rankings_response(rankings_cache_key, response)
+        _record_preview_priority_scope(response, folder=folder, collection_id=collection_id)
         return response
 
     if sort == "similarity" and search_scores:
@@ -1016,6 +1030,7 @@ async def api_rankings_impl(
         }
         if rankings_cache_key is not None:
             cache_rankings_response(rankings_cache_key, response)
+        _record_preview_priority_scope(response, folder=folder, collection_id=collection_id)
         return response
 
     if search_ids is not None and not search_ids:
@@ -1276,4 +1291,5 @@ async def api_rankings_impl(
             pass
     if rankings_cache_key is not None:
         cache_rankings_response(rankings_cache_key, response)
+    _record_preview_priority_scope(response, folder=folder, collection_id=collection_id)
     return response

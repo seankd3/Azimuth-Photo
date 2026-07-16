@@ -25,8 +25,10 @@ async def run_pregen_bulk_batch(
     bulk_tier_budgets,
     bulk_tier_room,
     full_tier_room,
+    pregen_priority_candidate_batch,
     pregen_bulk_candidate_batch,
     reset_pregen_bulk_cursor,
+    set_priority_scope,
     bulk_candidate_signatures,
     full_candidate_signature,
     prefetch_executor,
@@ -34,6 +36,7 @@ async def run_pregen_bulk_batch(
     record_pregen_result,
     activity_burst_items: int,
 ) -> int:
+    set_priority_scope(None)
     generate_batch = generate_batch or default_generate_batch
     if should_pause_for_priority():
         generate_batch = min(generate_batch, max(1, int(activity_burst_items)))
@@ -49,28 +52,9 @@ async def run_pregen_bulk_batch(
     full_budget = int(disk_allocations.get(full_tier, 0) or 0)
     full_room = {"bytes": full_tier_room(full_budget)} if full_budget > 0 else {"bytes": 0}
     pending = []
-    scanned_batches = 0
     max_scan_batches = 4
-    reached_end = False
 
-    while len(pending) < generate_batch and scanned_batches < max_scan_batches:
-        if not is_prefetching() or is_manual_paused():
-            break
-        candidate_scan_batch = (
-            min(scan_batch, max(1, int(activity_burst_items)))
-            if should_pause_for_priority()
-            else scan_batch
-        )
-        rows = await pregen_bulk_candidate_batch(candidate_scan_batch)
-        if not rows:
-            reset_pregen_bulk_cursor()
-            reached_end = True
-            if pending:
-                break
-            rows = await pregen_bulk_candidate_batch(candidate_scan_batch)
-            if not rows:
-                return 0
-
+    def collect_candidates(rows) -> None:
         for row in rows:
             if not is_prefetching() or is_manual_paused():
                 break
@@ -96,6 +80,56 @@ async def run_pregen_bulk_batch(
             })
             if len(pending) >= generate_batch:
                 break
+
+    priority_processed_ids: set[int] = set()
+    priority_scanned_batches = 0
+    while len(pending) < generate_batch and priority_scanned_batches < max_scan_batches:
+        if not is_prefetching() or is_manual_paused():
+            break
+        candidate_scan_batch = (
+            min(scan_batch, max(1, int(activity_burst_items)))
+            if should_pause_for_priority()
+            else scan_batch
+        )
+        rows, priority_label = await pregen_priority_candidate_batch(
+            candidate_scan_batch,
+            priority_processed_ids,
+        )
+        if not rows:
+            break
+        set_priority_scope(priority_label)
+        priority_processed_ids.update(int(row["id"]) for row in rows)
+        collect_candidates(rows)
+        priority_scanned_batches += 1
+
+    scanned_batches = 0
+    reached_end = False
+    use_normal_candidates = not pending
+    if use_normal_candidates:
+        set_priority_scope(None)
+    while (
+        use_normal_candidates
+        and len(pending) < generate_batch
+        and scanned_batches < max_scan_batches
+    ):
+        if not is_prefetching() or is_manual_paused():
+            break
+        candidate_scan_batch = (
+            min(scan_batch, max(1, int(activity_burst_items)))
+            if should_pause_for_priority()
+            else scan_batch
+        )
+        rows = await pregen_bulk_candidate_batch(candidate_scan_batch)
+        if not rows:
+            reset_pregen_bulk_cursor()
+            reached_end = True
+            if pending:
+                break
+            rows = await pregen_bulk_candidate_batch(candidate_scan_batch)
+            if not rows:
+                return 0
+
+        collect_candidates(rows)
 
         scanned_batches += 1
         if len(rows) < candidate_scan_batch:
