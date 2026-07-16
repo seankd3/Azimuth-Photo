@@ -268,7 +268,7 @@ function renderPendingThumbnailEmptyState() {
     const count = viewState.hiddenPendingThumbnails;
     flow.innerHTML = emptyStateHtml({
         title: `All ${count.toLocaleString('en-US')} photos matching this view are still sharpening`,
-        iconName: 'loader',
+        iconName: 'image',
     });
     loadPausedPreviewHint(flow.querySelector('.empty-state p'));
 }
@@ -524,7 +524,7 @@ function renderPreparingState() {
         title: 'Preparing your photos',
         detail: 'Finding photos and getting the first cards ready. They’ll appear here in a moment.',
         actions: [],
-        iconName: 'loader',
+        iconName: 'image',
     });
 }
 
