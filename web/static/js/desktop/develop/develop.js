@@ -1,6 +1,7 @@
 import { thumbUrl } from '../api.js';
 import { fetchOptionsWithTimeout } from '../../api.js';
 import { on, selection, viewState } from '../state.js';
+import { applyFlags } from '../selection.js';
 import { showToast } from '../toast.js';
 import { releaseFocus, trapFocus } from '../focusTrap.js';
 import { CropController } from './crop.js';
@@ -976,7 +977,7 @@ function bindUi() {
         const proofButton = document.createElement('button');
         proofButton.type = 'button';
         proofButton.dataset.action = 'proof';
-        proofButton.dataset.tip = 'Hold for original-pixel proof (P)';
+        proofButton.dataset.tip = 'Hold for original-pixel proof (Shift+P)';
         proofButton.setAttribute('aria-label', 'Hold for original 1:1 proof');
         proofButton.setAttribute('aria-pressed', 'false');
         proofButton.textContent = '1:1';
@@ -1052,6 +1053,26 @@ function editingField(event) {
     return event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement || event.target?.isContentEditable;
 }
 
+function flagCurrent(flag) {
+    if (!currentImage) return;
+    applyFlags([currentImage.id], flag);
+}
+
+function closeTransient() {
+    const hasTransient = Boolean(
+        activePopover || softProof?.popover || crop?.active || beforeHeld || proofTile?.held || compare?.mode !== 'off',
+    );
+    if (!hasTransient) return false;
+    closePopover();
+    softProof?.popover?.remove();
+    if (softProof) softProof.popover = null;
+    crop?.setActive(false);
+    showBefore(false);
+    proofTile?.setHeld(false);
+    compare?.holdReference(false);
+    return true;
+}
+
 function handleKey(event) {
     if (!mounted || editingField(event)) return;
     if (heal?.keydown(event)) return;
@@ -1070,24 +1091,35 @@ function handleKey(event) {
         event.preventDefault(); event.stopImmediatePropagation(); if (!event.repeat) showBefore(true);
     } else if (key === 'z') {
         event.preventDefault(); event.stopImmediatePropagation(); if (!event.repeat) toggleZoom();
-    } else if (key === 'p') {
+    } else if (event.shiftKey && key === 'p') {
         event.preventDefault(); event.stopImmediatePropagation();
         if (!event.repeat) {
             toolbar.querySelector('[data-action="proof"]')?.setAttribute('aria-pressed', 'true');
             proofTile?.setHeld(true);
         }
+    } else if (key === 'p') {
+        event.preventDefault(); event.stopImmediatePropagation();
+        if (!event.repeat) flagCurrent(currentImage?.flag === 'picked' ? 'unflagged' : 'picked');
+    } else if (key === 'x') {
+        event.preventDefault(); event.stopImmediatePropagation();
+        if (!event.repeat) flagCurrent('rejected');
+    } else if (key === 'u') {
+        event.preventDefault(); event.stopImmediatePropagation();
+        if (!event.repeat) flagCurrent('unflagged');
     } else if (event.code === 'Space') {
         event.preventDefault(); event.stopImmediatePropagation();
         if (!spaceHeld) { spaceHeld = true; if (zoomScale() > 1) stage.style.cursor = 'grab'; }
     } else if (event.key === 'Escape') {
-        closePopover(); crop.setActive(false);
+        if (closeTransient()) {
+            event.preventDefault(); event.stopImmediatePropagation();
+        }
     }
 }
 
 function handleKeyUp(event) {
     if (!mounted) return;
     if (event.key === '\\') showBefore(false);
-    if (event.key.toLowerCase() === 'p') {
+    if (event.shiftKey && event.key.toLowerCase() === 'p') {
         toolbar.querySelector('[data-action="proof"]')?.setAttribute('aria-pressed', 'false');
         proofTile?.setHeld(false);
     }
