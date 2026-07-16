@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "measured_at": "2026-07-16T03:55:59Z",
+  "git_sha": "86895194ffff",
+  "details": {
+    "profile": "qa-5000-visible",
+    "active_images": 5003,
+    "visible_images": 4999,
+    "suggestion_count": 12,
+    "develop_statuses": [
+      202,
+      202,
+      202,
+      202,
+      202,
+      202,
+      202,
+      202,
+      202,
+      202,
+      202,
+      202,
+      202,
+      202,
+      202,
+      202,
+      202,
+      202,
+      202,
+      202,
+      200
+    ],
+    "semantic_available": false,
+    "first_page_images": 100
+  },
+  "metrics": {
+    "server_boot_first_200_ms": 1600.0,
+    "images_first_page_p50_ms": 4.8,
+    "images_first_page_p95_ms": 5.41,
+    "thumb_sm_cached_p50_ms": 6.96,
+    "thumb_sm_cached_p95_ms": 11.99,
+    "thumb_sm_cold_p50_ms": 6.83,
+    "thumb_sm_cold_p95_ms": 13.55,
+    "search_text_p50_ms": 12.47,
+    "develop_open_202_to_200_ms": 1585.89,
+    "collection_suggestions_cold_ms": 243.23,
+    "collection_suggestions_cached_ms": 7.34,
+    "sync_status_p50_ms": 2.51,
+    "peak_rss_mb": 225.05
+  },
+  "top_offenders": [
+    {
+      "metric": "server_boot_first_200_ms",
+      "value": 1600.0,
+      "disposition": "profile before changing"
+    },
+    {
+      "metric": "develop_open_202_to_200_ms",
+      "value": 1585.89,
+      "disposition": "profile before changing"
+    },
+    {
+      "metric": "collection_suggestions_cold_ms",
+      "value": 243.23,
+      "disposition": "optimized in Q3"
+    }
+  ]
+}
