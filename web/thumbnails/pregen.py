@@ -3,6 +3,8 @@ import time
 from collections import deque
 from dataclasses import asdict, dataclass
 
+from data.repositories import rankings as ranking_repository
+
 
 WINDOW_SECONDS = 30 * 60
 
@@ -92,6 +94,68 @@ async def candidate_batch(get_db, cursor_state: dict, limit: int):
         if rows:
             update_cursor_from_row(cursor_state, rows[-1])
         return rows
+    finally:
+        await conn.close()
+
+
+async def priority_candidate_batch(
+    get_db,
+    scope: dict,
+    processed_ids: set[int],
+    limit: int,
+    *,
+    cache_root: str,
+    preview_size: str,
+):
+    collection_id = int(scope.get("collection_id") or 0)
+    select = (
+        "SELECT i.id, i.source_id, i.filepath, i.file_size, i.file_modified_at, "
+        + (
+            "(SELECT name FROM collections WHERE id = ?) AS priority_collection_name "
+            if collection_id
+            else "NULL AS priority_collection_name "
+        )
+        + "FROM images i JOIN catalog_sources s ON s.id = i.source_id "
+    )
+    conditions = [
+        "s.included = 1",
+        "s.online = 1",
+        "i.missing_at IS NULL",
+        "NOT EXISTS ("
+        "SELECT 1 FROM cache_entries c "
+        "WHERE c.cache_root = ? AND c.size = ? AND c.image_id = i.id"
+        ")",
+    ]
+    params = [collection_id] if collection_id else []
+    params.extend([cache_root, preview_size])
+
+    folder_filter = ranking_repository.folder_filter_sql(scope.get("folder"))
+    if folder_filter is not None:
+        condition, folder_params = folder_filter
+        conditions.append(condition)
+        params.extend(folder_params)
+    if collection_id:
+        conditions.append(
+            "EXISTS (SELECT 1 FROM collection_images ci "
+            "WHERE ci.collection_id = ? AND ci.image_id = i.id)"
+        )
+        params.append(collection_id)
+    if processed_ids:
+        ordered_ids = sorted(int(image_id) for image_id in processed_ids)
+        conditions.append(f"i.id NOT IN ({','.join('?' for _ in ordered_ids)})")
+        params.extend(ordered_ids)
+    params.append(max(1, int(limit)))
+
+    conn = await get_db()
+    try:
+        cursor = await conn.execute(
+            select
+            + "WHERE "
+            + " AND ".join(conditions)
+            + " ORDER BY i.filepath ASC, i.id ASC LIMIT ?",
+            params,
+        )
+        return await cursor.fetchall()
     finally:
         await conn.close()
 

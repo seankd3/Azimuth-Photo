@@ -13,6 +13,8 @@ from PIL import Image
 sys.path.insert(0, os.path.dirname(__file__))
 import thumbnails  # noqa: E402
 from data import schema as data_schema  # noqa: E402
+from features.library import preview_priority  # noqa: E402
+from features.library import service as library_service  # noqa: E402
 from thumbnails import budget as thumbnail_budget  # noqa: E402
 from thumbnails import cache_entries as thumbnail_cache_entries  # noqa: E402
 from thumbnails import config as thumbnail_config  # noqa: E402
@@ -1146,6 +1148,7 @@ class ThumbnailStatusPayloadTests(unittest.TestCase):
         )
 
         self.assertEqual(result["state"], "running")
+        self.assertIsNone(result["priority_scope"])
         self.assertNotIn("governor", result)
         self.assertEqual(result["idle_seconds"], 12.35)
         self.assertEqual(result["phases"]["sm"]["count"], 2)
@@ -1250,6 +1253,7 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
         thumbnails._last_user_activity = thumbnails.time.monotonic() - 30.0
         thumbnails._reset_pregen_bulk_cursor()
         thumbnails._reset_pregen_full_cursor()
+        preview_priority.clear_scopes()
         thumbnails._disk_stats_cache.clear()
         thumbnails._disk_stats_cache.update(self.old_disk_stats_cache)
         with thumbnails._write_queue_lock:
@@ -1282,13 +1286,15 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
         thumbnails._thumbnail_retry_after.clear()
         thumbnails._reset_pregen_bulk_cursor()
         thumbnails._reset_pregen_full_cursor()
+        preview_priority.clear_scopes()
         with thumbnails._write_queue_lock:
             thumbnails._write_queue.clear()
         thumbnails._clear_cache_metadata_lock_backoff()
         self.tempdir.cleanup()
 
-    def _make_image(self) -> str:
-        path = os.path.join(self.tempdir.name, "source.jpg")
+    def _make_image(self, name: str = "source.jpg") -> str:
+        path = os.path.join(self.tempdir.name, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         Image.new("RGB", (1200, 800), color=(120, 80, 40)).save(path, "JPEG", quality=90)
         os.utime(path, (time.time(), 1712345678.25))
         return path
@@ -2329,6 +2335,47 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
             {size: 64 * 1024 * 1024 for size in thumbnails.THUMB_TIERS},
         )
         self.assertEqual(needed, {})
+
+    def test_rankings_scope_signal_prioritizes_the_browsed_folder_without_moving_cursor(self):
+        backlog = self._make_image("a-backlog/backlog.jpg")
+        priority = self._make_image("z-Film Scans/priority.jpg")
+        self._add_catalog_original(1, backlog)
+        self._add_catalog_original(2, priority)
+        cursor_before = dict(thumbnails._pregen_bulk_cursor)
+
+        library_service._record_preview_priority_scope(
+            {"hidden_pending_thumbnails": 1},
+            folder=os.path.dirname(priority),
+            collection_id=0,
+        )
+        warmed = asyncio.run(thumbnails._run_pregen_bulk_batch(generate_batch=1))
+
+        self.assertGreater(warmed, 0)
+        self.assertIsNone(thumbnails.fast_disk_path_entry("sm", 1))
+        self.assertIsNotNone(thumbnails.fast_disk_path_entry("sm", 2))
+        self.assertEqual(thumbnails._pregen_bulk_cursor, cursor_before)
+        self.assertEqual(thumbnails._pregen_status["priority_scope"], "z-Film Scans")
+
+    def test_drained_priority_scope_falls_back_to_normal_cursor_order(self):
+        backlog = self._make_image("a-backlog/backlog.jpg")
+        priority = self._make_image("z-Film Scans/priority.jpg")
+        self._add_catalog_original(1, backlog)
+        self._add_catalog_original(2, priority)
+        signatures, file_size, _modified_at = self._catalog_signatures(priority, image_id=2)
+        thumbnails._generate_thumbnail_set_sync(
+            priority,
+            2,
+            signatures,
+            source_bytes=file_size,
+        )
+        preview_priority.record_scope(folder=os.path.dirname(priority), timestamp=123.0)
+
+        warmed = asyncio.run(thumbnails._run_pregen_bulk_batch(generate_batch=1))
+
+        self.assertGreater(warmed, 0)
+        self.assertIsNotNone(thumbnails.fast_disk_path_entry("sm", 1))
+        self.assertEqual(preview_priority.recent_scopes(), [])
+        self.assertIsNone(thumbnails._pregen_status["priority_scope"])
 
     def test_bulk_candidate_respects_lg_budget_room(self):
         path = self._make_image()
