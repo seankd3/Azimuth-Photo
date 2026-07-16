@@ -805,6 +805,9 @@ async def api_delete_virtual_copy(image_id: int, copy_id: int):
     conn = await connection.open_async(_configured_db_path())
     try:
         await conn.execute("BEGIN")
+        if not await virtual_copies.is_virtual_copy_of(conn, image_id, copy_id):
+            await conn.rollback()
+            return JSONResponse({"error": "Virtual copy not found"}, status_code=404)
         deleted = await virtual_copies.delete_virtual_copy(conn, copy_id)
         if not deleted:
             await conn.rollback()
@@ -962,7 +965,7 @@ async def api_export_develop(image_id: int, body: DevelopExportBody):
                 download_name=filename,
             )
             library_info["version_stack"] = await stack_repository.join_version_stack(
-                _configured_db_path(), image_id, int(library_info["library_image_id"])
+                _configured_db_path(), int(image.get("vc_of") or image_id), int(library_info["library_image_id"])
             )
         except Exception as exc:
             return JSONResponse({"error": f"Export rendered but library save failed: {exc}"}, status_code=422)
@@ -1052,7 +1055,7 @@ async def _run_batch_export(body: DevelopBatchExportBody) -> None:
                     download_name=filename,
                 )
                 result["library"]["version_stack"] = await stack_repository.join_version_stack(
-                    _configured_db_path(), image_id, int(result["library"]["library_image_id"])
+                    _configured_db_path(), int(image.get("vc_of") or image_id), int(result["library"]["library_image_id"])
                 )
             _batch_status["results"].append(result)
         except (rawproc.RawDecodeError, RenderError, ValueError, OSError) as exc:

@@ -12,6 +12,9 @@ import re
 from datetime import datetime, timezone
 from typing import Any
 
+from data.repositories import image_deletion
+from data.repositories.common import chunked
+
 
 VC_COLUMN = "vc_of"
 VC_INDEX = "idx_images_vc_of"
@@ -150,15 +153,35 @@ async def create_virtual_copy(conn, image_id: int) -> dict[str, Any] | None:
     )
     settings_row = await settings_cursor.fetchone()
     encoded = settings_row["settings"] if settings_row is not None else "{}"
+    master_settings_cursor = await conn.execute(
+        "SELECT origin, xmp_path, xmp_mtime FROM develop_settings WHERE image_id = ?",
+        (root_id,),
+    )
+    master_settings = await master_settings_cursor.fetchone()
+    origin = str(master_settings["origin"] or "user") if master_settings is not None else "user"
+    xmp_path = master_settings["xmp_path"] if master_settings is not None else None
+    xmp_mtime = master_settings["xmp_mtime"] if master_settings is not None else None
+    baseline_cursor = await conn.execute(
+        "SELECT settings FROM develop_history WHERE image_id = ? AND label = 'Import from XMP' "
+        "ORDER BY id ASC LIMIT 1",
+        (root_id,),
+    )
+    xmp_baseline = await baseline_cursor.fetchone()
     now = _now()
     await conn.execute(
-        "INSERT INTO develop_settings (image_id, settings, origin, updated_at) VALUES (?, ?, 'user', ?)",
-        (copy_id, encoded, now),
+        "INSERT INTO develop_settings (image_id, settings, origin, xmp_path, xmp_mtime, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (copy_id, encoded, origin, xmp_path, xmp_mtime, now),
     )
     await conn.execute(
         "INSERT INTO develop_history (image_id, settings, label, created_at) VALUES (?, ?, ?, ?)",
         (copy_id, encoded, "Virtual Copy", now),
     )
+    if xmp_baseline is not None:
+        await conn.execute(
+            "INSERT INTO develop_history (image_id, settings, label, created_at) VALUES (?, ?, ?, ?)",
+            (copy_id, xmp_baseline["settings"], "Import from XMP", now),
+        )
     row = await _image_row(conn, copy_id)
     return image_to_virtual_copy(row)
 
@@ -187,7 +210,19 @@ async def list_virtual_copies(conn, image_id: int) -> list[dict[str, Any]] | Non
 
 async def delete_virtual_copy(conn, image_id: int) -> bool:
     """Delete only a copy; originals are never removable through this API."""
-    cursor = await conn.execute(
-        "DELETE FROM images WHERE id = ? AND vc_of IS NOT NULL", (image_id,)
-    )
-    return cursor.rowcount == 1
+    row = await _image_row(conn, image_id)
+    if row is None or row[VC_COLUMN] is None:
+        return False
+    expanded_ids = await image_deletion.expand_image_deletion_ids(conn, [image_id])
+    await image_deletion.prepare_image_deletion(conn, expanded_ids)
+    for ids in chunked(expanded_ids):
+        placeholders = ", ".join("?" for _ in ids)
+        await conn.execute(f"DELETE FROM images WHERE id IN ({placeholders})", ids)
+    return True
+
+
+async def is_virtual_copy_of(conn, image_id: int, copy_id: int) -> bool:
+    """Return whether ``copy_id`` belongs to the root family for ``image_id``."""
+    root_id = await _root_id(conn, image_id)
+    copy = await _image_row(conn, copy_id)
+    return bool(root_id is not None and copy is not None and copy[VC_COLUMN] == root_id)
