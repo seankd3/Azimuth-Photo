@@ -10,7 +10,7 @@ import { DevelopHistogram } from './histogram.js';
 import { DevelopPanels } from './panels.js';
 import { mountPresetsPanel } from './presets.js';
 import { mountHistoryPanel } from './history_panel.js';
-import { openExportDialog, openSyncDialog } from './export_dialog.js';
+import { openExportDialog, openSyncDialog, SYNC_GROUPS } from './export_dialog.js';
 import { DevelopSettingsClipboard, applyPrevious, openCopyDialog, pasteClipboard } from './settings_clipboard.js';
 import { DevelopCompareView, SoftProofPopover } from './compare_view.js';
 import { ProofTileController } from './proof_tile.js';
@@ -837,6 +837,16 @@ function openCopyPopover(button) {
     });
 }
 
+function copyAllSettings() {
+    const entry = currentImage && stateCache.get(Number(currentImage.id));
+    if (!settingsClipboard.copy({
+        sourceId: currentImage?.id,
+        settings: entry?.settings,
+        groups: SYNC_GROUPS.map(([id]) => id),
+    })) return;
+    showToast('Settings copied');
+}
+
 function applySyncedSettings(payload) {
     const entry = currentImage && stateCache.get(Number(currentImage.id));
     const synced = payload?.synced?.find((row) => Number(row.image_id) === Number(currentImage?.id));
@@ -1140,7 +1150,7 @@ function handleKey(event) {
     const key = event.key.toLowerCase();
     if (event.ctrlKey || event.metaKey) {
         if (key === 'z') { event.preventDefault(); event.stopImmediatePropagation(); event.shiftKey ? redo() : undo(); }
-        else if (event.shiftKey && key === 'c') { event.preventDefault(); event.stopImmediatePropagation(); openCopyPopover(toolbar.querySelector('[data-action="copy"]')); }
+        else if (event.shiftKey && key === 'c') { event.preventDefault(); event.stopImmediatePropagation(); copyAllSettings(); }
         else if (event.shiftKey && key === 'v') { event.preventDefault(); event.stopImmediatePropagation(); pasteSettings(); }
         else if (event.altKey && key === 'v') { event.preventDefault(); event.stopImmediatePropagation(); fromPrevious(); }
         return;
