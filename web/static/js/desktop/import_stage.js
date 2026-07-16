@@ -42,6 +42,7 @@ let clearCard = true;
 let thumbPx = Number(localStorage.getItem('importThumbPx')) || 148;
 let categoryOverride = '';            // '' = the app decides (per-file EXIF/source diagnosis)
 let committing = false;
+let validating = false;         // resume revalidation in flight: hold commit until the stage is proven alive
 
 let thumbObserver = null;
 let sentinelObserver = null;
@@ -163,8 +164,8 @@ async function startScan() {
     renderedCount = 0;
     els.grid.querySelectorAll('.imps-cell').forEach((cell) => cell.remove());
     syncAll();
-    const result = await startImportScan(source.path, includeSubfolders);
-    if (!mounted || token !== generation) return;
+    const result = await startImportScan(source.path, includeSubfolders).catch(() => null);
+    if (token !== generation) return; // parking mid-start must not orphan the scan
     if (!result?.scan_id) {
         scanStatus = 'error';
         syncAll();
@@ -175,9 +176,19 @@ async function startScan() {
     pollScan(token);
 }
 
+// fetchJson throws on non-OK; a dead scan (server restart, expired stage) must
+// read as null here, not as an unhandled rejection that kills the poll loop.
+async function fetchScanPage(offset) {
+    try {
+        return await getImportScan(scanId, offset);
+    } catch {
+        return null;
+    }
+}
+
 async function pollScan(token) {
     while (token === generation) { // survives close: the stage keeps filling while parked
-        const page = await getImportScan(scanId, entries.length);
+        const page = await fetchScanPage(entries.length);
         if (token !== generation) return;
         if (!page) { scanStatus = 'error'; syncAll(); return; }
         if (page.entries?.length) {
@@ -354,7 +365,8 @@ function syncCommit() {
         els.category.options[0].text = dominant && !categoryOverride
             ? `Auto — ${CATEGORY_TREES[dominant[0]] || 'RAWS'}` : 'Auto';
     }
-    els.commit.disabled = !staged.length || committing || scanStatus === 'scanning';
+    els.commit.disabled = !staged.length || committing || validating
+        || scanStatus === 'scanning' || scanStatus === 'error'; // server rejects non-done scans
     els.commit.textContent = committing ? 'Importing…' : (scanStatus === 'scanning' ? 'Scanning…' : 'Import');
 }
 
@@ -367,7 +379,9 @@ function syncPeek() {
     els.peek.classList.toggle('busy', scanStatus === 'scanning');
     els.peekText.textContent = scanStatus === 'scanning'
         ? `Import — scanning ${source.label}… ${fmt(entries.length)}`
-        : `Import — ${fmt(checked.size)} staged in ${source.label}`;
+        : (scanStatus === 'error'
+            ? `Import — ${source.label} couldn’t be read`
+            : `Import — ${fmt(checked.size)} staged in ${source.label}`);
 }
 
 function syncAll() {
@@ -480,12 +494,17 @@ function resetStage() {
 async function revalidateStage() {
     if (!scanId || scanStatus === 'scanning') return;
     const token = generation;
-    const page = await getImportScan(scanId, entries.length);
+    validating = true;
+    syncCommit();
+    const page = await fetchScanPage(entries.length);
+    validating = false;
     if (!mounted || token !== generation) return;
     if (!page) {
         showToast('That staged import expired — rescanning');
         startScan();
+        return;
     }
+    syncCommit();
 }
 
 export function openImport() {
