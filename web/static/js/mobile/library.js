@@ -17,22 +17,13 @@ import { icon } from '../icons.js';
 import { openCollectionShareSheet, renderSharedView } from './sharing.js';
 import { offlineSummary, openOfflineStatusSheet } from './offline.js';
 import { renderBackupView, stopBackupView } from './backup.js';
+import { INACTIVE_WORKER_STATES, normalizeWorkerState } from '../worker_state.js';
 
 // Matches RANK_QUALITY_MIN_SIGNALS in data/repositories/rankings.py.
 const SORT_QUALITY_MIN_SIGNALS = 3;
 const DISMISSED_SUGGESTIONS_KEY = 'pa_m_dismissed_suggestions';
 const TOAST_ACTION_RESET_MS = 6200;
-const INACTIVE_WORKER_STATES = new Set([
-    'idle',
-    'ready',
-    'paused',
-    'complete',
-    'caught_up',
-    'error',
-    'disabled',
-    'unavailable',
-    'stale',
-]);
+// Shared contract: const INACTIVE_WORKER_STATES = new Set(['idle', 'ready', 'paused', 'complete', 'caught_up', 'error', 'disabled', 'unavailable', 'stale']);
 
 let root = null;
 let built = false;
@@ -280,7 +271,7 @@ function render() {
 const pct = (value) => (value == null ? null : Math.max(0, Math.min(100, Number(value) || 0)));
 
 function workerStateIsActive(value) {
-    const state = String(value || '').toLowerCase();
+    const state = normalizeWorkerState(value);
     return Boolean(state) && !INACTIVE_WORKER_STATES.has(state);
 }
 

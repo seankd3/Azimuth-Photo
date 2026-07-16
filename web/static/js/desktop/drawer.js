@@ -21,6 +21,7 @@ import {
     bindLibraryHealth, refreshLibraryHealth, renderLibraryHealth, stopLibraryHealthPolling,
 } from './library_health.js';
 import { openSourceRevealMenu } from './source_reveal_menu.js';
+import { INACTIVE_WORKER_STATES, normalizeWorkerState } from '../worker_state.js';
 
 let open = false;
 let drawerTimer = null;
@@ -55,18 +56,7 @@ const settingTimers = new Map();
 const busyActions = new Set();
 const workerActionGenerations = new Map();
 const workerActionsInFlight = new Set();
-const INACTIVE_WORKER_STATES = new Set([
-    'idle',
-    'ready',
-    'paused',
-    'complete',
-    'caught_up',
-    'error',
-    'disabled',
-    'unavailable',
-    'stale',
-]);
-
+// Shared contract: const INACTIVE_WORKER_STATES = new Set(['idle', 'ready', 'paused', 'complete', 'caught_up', 'error', 'disabled', 'unavailable', 'stale']);
 const SETTING_DEFS = {
     embed_model_preset: { type: 'select' },
     memory_cache_gb: { type: 'number', min: 0, max: 64, step: 0.25, unit: 'GB' },
@@ -128,7 +118,7 @@ function progress(done, total) {
 function workerStateIsActive(status) {
     const worker = (status && status.worker) || {};
     const index = (status && status.embedding_index) || {};
-    const state = String(index.worker_state || (status && status.worker_state) || worker.state || '').toLowerCase();
+    const state = normalizeWorkerState(index.worker_state || (status && status.worker_state) || worker.state);
     return Boolean(state) && !INACTIVE_WORKER_STATES.has(state);
 }
 
