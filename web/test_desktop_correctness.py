@@ -34,6 +34,15 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertIn(guard, history)
         self.assertLess(history.index(guard), history.index("controller.setHistory(fresh);"))
 
+    def test_develop_status_allows_the_retry_control_to_be_absent(self):
+        develop = read("develop", "develop.js")
+        start = develop.index("function setStatus(")
+        set_status = develop[start:develop.index("\n}\n", start)]
+
+        self.assertIn("if (statusRetry) {", set_status)
+        self.assertIn("statusRetry.hidden", set_status)
+        self.assertIn("statusRetry.onclick", set_status)
+
     def test_flag_scope_reloads_after_a_committed_membership_change(self):
         grid = read("grid.js")
 

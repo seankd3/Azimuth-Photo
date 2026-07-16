@@ -112,8 +112,10 @@ function setStatus(message = '', { busy = false, error = false, retry = null } =
     status.classList.toggle('busy', busy);
     status.classList.toggle('error', error);
     status.querySelector('span').textContent = message;
-    statusRetry.hidden = typeof retry !== 'function';
-    statusRetry.onclick = typeof retry === 'function' ? retry : null;
+    if (statusRetry) {
+        statusRetry.hidden = typeof retry !== 'function';
+        statusRetry.onclick = typeof retry === 'function' ? retry : null;
+    }
 }
 
 function originSettings(payload) {
