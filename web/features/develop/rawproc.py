@@ -31,6 +31,7 @@ except ImportError:  # pragma: no cover - rawpy is an application dependency.
 
 from . import ops_constants as C
 from .camera_profile import load_camera_profile
+from .highlights_recon import reconstruct_highlights
 
 log = logging.getLogger(__name__)
 from .lens import normalized_source_metadata, read_exif, resolve_lens_correction
@@ -40,16 +41,17 @@ RAW_EXTENSIONS = {".dng", ".cr2", ".cr3"}
 DISPLAY_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp"}
 OPTIONAL_DISPLAY_EXTENSIONS = {".heic"}
 BASE_CACHE_ROOT = Path(resolve_runtime_paths().develop_cache_dir)
-# v3: lossy-DNG decode applies OpcodeList2 MapPolynomial (true linear); v2 bases are ~EVs too bright.
+# v3 remains the compatible display-image cache. Raw bases use the separately
+# versioned directory below because their decode pixels change more frequently.
 BASE_CACHE_DIR = BASE_CACHE_ROOT / "base" / "v3"
-# v4: native LibRaw/legacy LinearRaw bases honor the camera/DNG saturation
-# metadata. Display and JPEG XL DNG bases retain their compatible v3 cache.
-NATIVE_BASE_CACHE_VERSION = 4
+# v5: all raw bases reconstruct clipped channels before their final hard clip.
+RAW_BASE_CACHE_VERSION = 5
 BASE_MAGIC = b"PABASE1\0"
 BASE_HEADER = struct.Struct("<8sII")
 MAX_BASE_EDGE = 2048
 MEMORY_BASE_LIMIT = 2
 SOURCE_META_VERSION = 1
+UINT16_FULL_SCALE = np.float32(np.iinfo(np.uint16).max)
 
 
 class RawDecodeError(RuntimeError):
@@ -101,32 +103,26 @@ def is_develop_path(path: str | os.PathLike[str]) -> bool:
     return is_raw_path(path) or is_display_path(path) or is_hdr_merge_path(path) or is_pano_merge_path(path)
 
 
-def _native_base_cache_dir() -> Path:
+def _raw_base_cache_dir() -> Path:
     default_v3 = BASE_CACHE_ROOT / "base" / "v3"
     if BASE_CACHE_DIR != default_v3:
         # Tests and isolated probes override BASE_CACHE_DIR as a complete cache
         # seam; keep honoring that override instead of escaping to a sibling.
         return BASE_CACHE_DIR
-    return BASE_CACHE_ROOT / "base" / f"v{NATIVE_BASE_CACHE_VERSION}"
+    return BASE_CACHE_ROOT / "base" / f"v{RAW_BASE_CACHE_VERSION}"
 
 
-def _uses_native_base_cache(path: str | os.PathLike[str]) -> bool:
+def _uses_raw_base_cache(path: str | os.PathLike[str]) -> bool:
     source = Path(path)
     # HDR/pano merges write their bases via the merge pipeline into the
-    # default cache dir; only true camera raws move to the native v4 dir.
+    # default cache dir; only true camera raws move to the raw v5 dir.
     if is_hdr_merge_path(source) or is_pano_merge_path(source):
         return False
-    if not is_raw_path(source):
-        return False
-    if source.suffix.lower() != ".dng":
-        return True
-    from features.develop import lossydng
-
-    return not lossydng.is_lossy_dng(str(source))
+    return is_raw_path(source)
 
 
 def base_paths(image_id: int, source_path: str | os.PathLike[str] | None = None) -> BasePaths:
-    cache_dir = _native_base_cache_dir() if source_path is not None and _uses_native_base_cache(source_path) else BASE_CACHE_DIR
+    cache_dir = _raw_base_cache_dir() if source_path is not None and _uses_raw_base_cache(source_path) else BASE_CACHE_DIR
     stem = cache_dir / str(int(image_id))
     return BasePaths(binary=stem.with_suffix(".bin.gz"), metadata=stem.with_suffix(".json"), preview=stem.with_suffix(".jpg"))
 
@@ -155,6 +151,51 @@ def _finite_positive(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     return number if math.isfinite(number) and number > 0 else None
+
+
+def derive_libraw_clip_levels(
+    white_levels: Any,
+    black_levels: Any,
+    camera_whitebalance: Any,
+    *,
+    saturation_level: Any,
+) -> np.ndarray | None:
+    """Return RGB saturation boundaries after LibRaw's restored WB gain.
+
+    LibRaw scales each black-subtracted sensor channel to ``user_sat`` and
+    normalizes WB by its largest coefficient. ``decode_base`` restores the
+    discarded common gain, leaving each boundary proportional to WB/green.
+    """
+
+    saturation = _finite_positive(saturation_level)
+    try:
+        whites = list(white_levels or [])
+        blacks = list(black_levels or [])
+        wb = list(camera_whitebalance or [])
+    except TypeError:
+        return None
+    if saturation is None or len(whites) < 3 or len(wb) < 3:
+        return None
+    green_gain = _finite_positive(wb[1])
+    if green_gain is None:
+        return None
+
+    clips = np.empty(3, dtype=np.float32)
+    for channel in range(3):
+        white = _finite_positive(whites[channel])
+        gain = _finite_positive(wb[channel])
+        try:
+            black = float(blacks[channel]) if channel < len(blacks) else 0.0
+        except (TypeError, ValueError):
+            black = 0.0
+        if white is None or gain is None or not math.isfinite(black):
+            return None
+        sensor_range = max(white - black, 1.0)
+        saturation_range = max(saturation - black, 1.0)
+        clips[channel] = UINT16_FULL_SCALE * np.float32(sensor_range / saturation_range) * np.float32(
+            gain / green_gain
+        )
+    return clips
 
 
 def _matrix_3x3(values: Any) -> np.ndarray | None:
@@ -446,6 +487,8 @@ def decode_base(path: str | os.PathLike[str]) -> tuple[np.ndarray, dict[str, Any
                 camera_wb = list(raw.camera_whitebalance or [])
                 daylight_wb = list(raw.daylight_whitebalance or [])
                 color_matrix = _rawpy_color_matrix(raw)
+                saturation_level = _finite_positive(raw.white_level)
+                white_levels = [saturation_level] * 4 if saturation_level is not None else []
                 postprocess_args = {
                     "use_camera_wb": True,
                     "output_bps": 16,
@@ -460,7 +503,12 @@ def decode_base(path: str | os.PathLike[str]) -> tuple[np.ndarray, dict[str, Any
                 if camera_white:
                     valid_white = [int(value) for value in camera_white if int(value) > 0]
                     if valid_white:
-                        postprocess_args["user_sat"] = max(valid_white)
+                        saturation_level = float(max(valid_white))
+                        postprocess_args["user_sat"] = int(saturation_level)
+                        white_levels = [
+                            float(value) if _finite_positive(value) is not None else saturation_level
+                            for value in camera_white
+                        ]
                 rgb = raw.postprocess(**postprocess_args)
                 valid_wb = [float(value) for value in camera_wb[:4] if _finite_positive(value)]
                 if valid_wb:
@@ -470,10 +518,16 @@ def decode_base(path: str | os.PathLike[str]) -> tuple[np.ndarray, dict[str, Any
                     # common gain at the linear decode boundary.
                     green_wb = _finite_positive(camera_wb[1]) if len(camera_wb) > 1 else None
                     wb_scale = np.float32(max(valid_wb) / (green_wb or min(valid_wb)))
-                    rgb = np.asarray(
-                        np.clip(np.rint(np.asarray(rgb, dtype=np.float32) * wb_scale), 0, 65535),
-                        dtype=np.uint16,
+                    linear_rgb = np.asarray(rgb, dtype=np.float32) * wb_scale
+                    clip_levels = derive_libraw_clip_levels(
+                        white_levels,
+                        raw.black_level_per_channel,
+                        camera_wb,
+                        saturation_level=saturation_level,
                     )
+                    if clip_levels is not None:
+                        linear_rgb = reconstruct_highlights(linear_rgb, clip_levels)
+                    rgb = np.asarray(np.clip(np.rint(linear_rgb), 0, UINT16_FULL_SCALE), dtype=np.uint16)
         except Exception as exc:
             raise RawDecodeError(f"RAW decode failed: {exc}") from exc
     rgb = _resize_linear_uint16(np.asarray(rgb, dtype=np.uint16))
@@ -577,7 +631,7 @@ def _read_base_metadata_path(path: Path) -> dict[str, Any] | None:
 
 
 def read_base_metadata(image_id: int) -> dict[str, Any] | None:
-    native = _native_base_cache_dir() / f"{int(image_id)}.json"
+    native = _raw_base_cache_dir() / f"{int(image_id)}.json"
     legacy = base_paths(image_id).metadata
     for candidate in dict.fromkeys((native, legacy)):
         meta = _read_base_metadata_path(candidate)

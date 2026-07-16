@@ -13,12 +13,14 @@ DEFAULT_NEAR_CLIP_FRACTION = 0.2
 def _opponent_reference(linear_rgb: np.ndarray) -> np.ndarray:
     """Return each channel's cbrt-space mean of the other two channels."""
 
-    perceptual = np.cbrt(np.maximum(linear_rgb, np.float32(0.0)))
+    perceptual = np.maximum(linear_rgb, np.float32(0.0))
+    np.cbrt(perceptual, out=perceptual)
     opponent = np.empty_like(perceptual)
     opponent[..., 0] = OPPONENT_CHANNEL_WEIGHT * (perceptual[..., 1] + perceptual[..., 2])
     opponent[..., 1] = OPPONENT_CHANNEL_WEIGHT * (perceptual[..., 0] + perceptual[..., 2])
     opponent[..., 2] = OPPONENT_CHANNEL_WEIGHT * (perceptual[..., 0] + perceptual[..., 1])
-    return opponent**3
+    np.power(opponent, 3, out=opponent)
+    return opponent
 
 
 def reconstruct_highlights(
@@ -53,5 +55,7 @@ def reconstruct_highlights(
                 dtype=np.float32,
             )
 
-    rebuilt = np.maximum(rgb, reference + chrominance[None, None, :])
-    return np.where(clipped, rebuilt, rgb).astype(np.float32, copy=False)
+    reference += chrominance[None, None, :]
+    np.maximum(reference, rgb, out=reference)
+    reference[~clipped] = rgb[~clipped]
+    return reference

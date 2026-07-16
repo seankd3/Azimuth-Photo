@@ -34,6 +34,8 @@ def test_libraw_decode_restores_common_camera_wb_gain(tmp_path, monkeypatch):
     raw.camera_whitebalance = [2000.0, 1000.0, 1500.0, 1000.0]
     raw.daylight_whitebalance = [1.8, 1.0, 1.4, 0.0]
     raw.camera_white_level_per_channel = [12000, 12000, 12000, 12000]
+    raw.white_level = 12000
+    raw.black_level_per_channel = [0, 0, 0, 0]
     raw.color_matrix = None
     raw.rgb_xyz_matrix = None
     raw.postprocess.return_value = decoded
@@ -48,13 +50,26 @@ def test_libraw_decode_restores_common_camera_wb_gain(tmp_path, monkeypatch):
     assert raw.postprocess.call_args.kwargs["adjust_maximum_thr"] == 0.0
 
 
-def test_native_cache_v4_does_not_move_display_or_jxl_bases(tmp_path, monkeypatch):
+def test_libraw_clip_levels_follow_white_range_and_wb_gain():
+    clips = rawproc.derive_libraw_clip_levels(
+        [12000, 11000, 10000, 11000],
+        [2000, 1000, 1000, 1000],
+        [2.0, 1.0, 1.5, 1.0],
+        saturation_level=12000,
+    )
+
+    np.testing.assert_allclose(
+        clips / 65535.0,
+        [2.0, 10.0 / 11.0, 13.5 / 11.0],
+        rtol=1e-6,
+    )
+
+
+def test_raw_cache_v5_moves_native_and_linear_dng_bases(tmp_path, monkeypatch):
     monkeypatch.setattr(rawproc, "BASE_CACHE_ROOT", tmp_path)
     monkeypatch.setattr(rawproc, "BASE_CACHE_DIR", tmp_path / "base" / "v3")
 
-    monkeypatch.setattr(lossydng, "is_lossy_dng", lambda path: str(path).endswith("lossy.dng"))
-
-    assert rawproc.base_paths(1, "native.cr3").metadata.parent.name == "v4"
-    assert rawproc.base_paths(2, "native.dng").metadata.parent.name == "v4"
-    assert rawproc.base_paths(3, "lossy.dng").metadata.parent.name == "v3"
+    assert rawproc.base_paths(1, "native.cr3").metadata.parent.name == "v5"
+    assert rawproc.base_paths(2, "native.dng").metadata.parent.name == "v5"
+    assert rawproc.base_paths(3, "lossy.dng").metadata.parent.name == "v5"
     assert rawproc.base_paths(4, "display.jpg").metadata.parent.name == "v3"
