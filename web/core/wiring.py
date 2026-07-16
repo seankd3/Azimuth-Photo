@@ -433,15 +433,20 @@ def configure_share_routes(*, templates, resolve_library_constraints=None) -> No
         record_share_view=lambda token: db.record_share_view(token),
         resolve_token=lambda token: db.resolve_share_token(token),
         token_allows_image=lambda token, image_id: db.share_token_allows_image(token, image_id),
-        set_favorite=lambda share_id, image_id, on, client_name=None: db.set_share_favorite(
+        set_favorite=lambda share_id, image_id, on, client_name=None, visitor_id="legacy": db.set_share_favorite(
             share_id,
             image_id,
             on,
             client_name=client_name,
+            visitor_id=visitor_id,
         ),
         mark_finished=lambda share_id: db.mark_share_finished(share_id),
-        list_favorites=lambda share_id: db.list_share_favorites(share_id),
+        list_favorites=lambda share_id, visitor_id=None: db.list_share_favorites(
+            share_id,
+            visitor_id=visitor_id,
+        ),
         favorites_for_collection=lambda collection_id: db.favorites_for_collection(collection_id),
+        favorite_visitors_for_collection=lambda collection_id: db.favorite_visitors_for_collection(collection_id),
         thumbnail_response=media_routes.thumbnail_response,
         get_collection=lambda collection_id, **kwargs: db.get_collection(collection_id, **kwargs),
         resolve_smart_image_ids=resolve_smart_image_ids,

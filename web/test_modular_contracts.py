@@ -49,6 +49,7 @@ PUBLIC_ROUTE_CONTRACT = {
     ("POST", "/api/catalog/select-folder"),
     ("GET", "/api/catalog/browse"),
     ("GET", "/api/catalog"),
+    ("GET", "/api/storage/overview"),
     ("GET", "/api/remote-access"),
     ("POST", "/api/devices/link"),
     ("POST", "/api/pair"),

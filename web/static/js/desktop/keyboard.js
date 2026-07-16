@@ -32,6 +32,7 @@ import {
     closeDevelop, developOpen, openDevelop, pasteDevelopSettingsToGrid,
 } from './develop/develop.js';
 import { shortcutSheetOpen } from './shortcut_sheet.js';
+import { foregroundLayerOpen as registeredForegroundLayerOpen } from './layers.js';
 
 function inputFocused() {
     const el = document.activeElement;
@@ -42,17 +43,7 @@ function foregroundLayerOpen() {
     return shortcutSheetOpen()
         || filtersOpen()
         || importOpen()
-        || Boolean(
-            document.querySelector('.typed-confirm')
-            || document.querySelector('#collection-picker')
-            || document.querySelector('#collection-pop-menu:not([hidden])')
-            || document.querySelector('#grid-pop-menu:not([hidden])')
-            || document.querySelector('#export-pop-menu:not([hidden])')
-            || document.querySelector('#folder-pop-menu:not([hidden])')
-            || document.querySelector('#source-pop-menu:not([hidden])')
-                        || document.querySelector('#deliver-overlay:not([hidden])')
-            || document.querySelector('#people-merge-pop'),
-        );
+        || registeredForegroundLayerOpen('keyboard');
 }
 
 export function openHelp() {

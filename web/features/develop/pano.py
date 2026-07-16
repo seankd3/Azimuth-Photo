@@ -27,7 +27,6 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
-import cv2
 import imagecodecs
 import numpy as np
 from PIL import Image
@@ -43,12 +42,14 @@ PANO_MIN_FRAMES = 2
 PANO_MAX_FRAMES = 8
 PANO_MAX_GAP_SECONDS = 10.0
 
-# OpenCV stitcher status → honest failure labels (cv2 4/5 share these ints).
+# OpenCV stitcher status → honest failure labels. Literal ints (stable across
+# cv2 4/5 — they matched these getattr defaults) so importing this module does
+# not pay cv2's ~95 ms; cv2 loads lazily inside stitch_linear_arrays.
 _STITCH_STATUS_LABELS = {
-    int(getattr(cv2, "STITCHER_OK", 0)): "ok",
-    int(getattr(cv2, "STITCHER_ERR_NEED_MORE_IMGS", 1)): "need_more_images",
-    int(getattr(cv2, "STITCHER_ERR_HOMOGRAPHY_EST_FAIL", 2)): "homography_estimate_failed",
-    int(getattr(cv2, "STITCHER_ERR_CAMERA_PARAMS_ADJUST_FAIL", 3)): "camera_params_adjust_failed",
+    0: "ok",  # STITCHER_OK
+    1: "need_more_images",  # STITCHER_ERR_NEED_MORE_IMGS
+    2: "homography_estimate_failed",  # STITCHER_ERR_HOMOGRAPHY_EST_FAIL
+    3: "camera_params_adjust_failed",  # STITCHER_ERR_CAMERA_PARAMS_ADJUST_FAIL
 }
 
 _status_lock = threading.Lock()
@@ -238,6 +239,8 @@ def _downscale_max_edge(rgb: np.ndarray, max_edge: int = PANO_MAX_EDGE) -> np.nd
 
 def stitch_linear_arrays(arrays: list[np.ndarray], *, max_edge: int = PANO_MAX_EDGE) -> tuple[np.ndarray, dict[str, Any]]:
     """Stitch linear RGB frames via 8-bit sRGB OpenCV stitcher; return linear float."""
+
+    import cv2  # deferred: ~95 ms import paid only when a stitch actually runs
 
     if not (PANO_MIN_FRAMES <= len(arrays) <= PANO_MAX_FRAMES):
         raise PanoError(f"Panorama merge needs {PANO_MIN_FRAMES}–{PANO_MAX_FRAMES} frames")

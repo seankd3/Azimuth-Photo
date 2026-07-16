@@ -194,6 +194,32 @@ class UiContractsTests(BackendTestCase):
         self.assertIn("'Open in Explorer'", file_manager)
         self.assertNotIn("Reveal in Explorer", file_manager)
 
+    async def test_empty_source_states_open_the_shared_picker_inline(self):
+        base_dir = os.path.dirname(__file__)
+        desktop_dir = os.path.join(base_dir, "static", "js", "desktop")
+        with open(os.path.join(desktop_dir, "drawer.js"), encoding="utf-8") as fh:
+            drawer = fh.read()
+        with open(os.path.join(desktop_dir, "panel.js"), encoding="utf-8") as fh:
+            panel = fh.read()
+        with open(os.path.join(desktop_dir, "folders.js"), encoding="utf-8") as fh:
+            folders = fh.read()
+
+        self.assertIn("export function openSourceAddFlow", drawer)
+        self.assertIn("renderSourceAddUi()", drawer)
+        self.assertIn("openSourceAddFlow({ onSuccess: loadCatalogChrome })", panel)
+        self.assertIn("openSourceAddFlow({ onSuccess: refreshFoldersPanel })", folders)
+
+    async def test_deliver_treats_hook_retry_as_settling(self):
+        base_dir = os.path.dirname(__file__)
+        with open(os.path.join(base_dir, "static", "js", "desktop", "panel.js"), encoding="utf-8") as fh:
+            panel = fh.read()
+
+        # hook_retrying keeps the overlay busy, keeps polling, and gets honest copy
+        self.assertIn("['publishing', 'revoking', 'hook_retrying']", panel)
+        self.assertIn("isDone: (publish) => !publishJobSettling(publish)", panel)
+        self.assertIn("const busy = publishJobSettling(data)", panel)
+        self.assertIn("retrying automatically", panel)
+
     async def test_template_context_versions_static_assets(self):
         context = app_module.app.state.photoarchive_shell.template_context(HeaderRequest())
 

@@ -6,7 +6,7 @@ export const SHORTCUTS = [
     { area: 'Library', key: 'G', label: 'Grid' },
     { area: 'Library', key: 'E', label: 'Open focused photo in Loupe' },
     { area: 'Library', key: 'D', label: 'Open focused photo in Develop' },
-    { area: 'Library', key: 'O / M / Y / H', label: 'People / Map / Events / Publishing' },
+    { area: 'Library', key: 'O / M / Y / H', label: 'People / Map / Events / Shared' },
     { area: 'Library', key: 'Arrows', label: 'Move focus' },
     { area: 'Library', key: 'Home / End', label: 'First / last loaded photo' },
     { area: 'Library', key: 'Page Up / Down', label: 'Move by a page' },

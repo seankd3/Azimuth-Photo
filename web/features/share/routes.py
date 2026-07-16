@@ -32,8 +32,9 @@ ResolveToken = Callable[[str], Awaitable[dict | None]]
 TokenAllowsImage = Callable[[str, int], Awaitable[bool]]
 SetFavorite = Callable[..., Awaitable[bool]]
 MarkFinished = Callable[[int], Awaitable[float | None]]
-ListFavorites = Callable[[int], Awaitable[list[dict]]]
+ListFavorites = Callable[..., Awaitable[list[dict]]]
 FavoritesForCollection = Callable[[int], Awaitable[list[dict]]]
+FavoriteVisitorsForCollection = Callable[[int], Awaitable[list[dict]]]
 ThumbnailResponse = Callable[..., Awaitable[Response]]
 GetCollection = Callable[..., Awaitable[dict | None]]
 ResolveSmartImageIds = Callable[[dict], Awaitable[list[int]]]
@@ -50,6 +51,7 @@ _set_favorite: SetFavorite | None = None
 _mark_finished: MarkFinished | None = None
 _list_favorites: ListFavorites | None = None
 _favorites_for_collection: FavoritesForCollection | None = None
+_favorite_visitors_for_collection: FavoriteVisitorsForCollection | None = None
 _thumbnail_response: ThumbnailResponse | None = None
 _get_collection: GetCollection | None = None
 _resolve_smart_image_ids: ResolveSmartImageIds | None = None
@@ -84,6 +86,7 @@ def configure(
     mark_finished: MarkFinished | None = None,
     list_favorites: ListFavorites,
     favorites_for_collection: FavoritesForCollection,
+    favorite_visitors_for_collection: FavoriteVisitorsForCollection,
     thumbnail_response: ThumbnailResponse,
     get_collection: GetCollection | None = None,
     resolve_smart_image_ids: ResolveSmartImageIds | None = None,
@@ -91,7 +94,7 @@ def configure(
     global _templates, _create_or_rotate_share, _get_share, _revoke_share
     global _set_share_password, _record_share_view, _resolve_token
     global _token_allows_image, _set_favorite, _mark_finished, _list_favorites
-    global _favorites_for_collection, _thumbnail_response
+    global _favorites_for_collection, _favorite_visitors_for_collection, _thumbnail_response
     global _get_collection, _resolve_smart_image_ids
     _templates = templates
     _create_or_rotate_share = create_or_rotate_share
@@ -105,6 +108,7 @@ def configure(
     _mark_finished = mark_finished
     _list_favorites = list_favorites
     _favorites_for_collection = favorites_for_collection
+    _favorite_visitors_for_collection = favorite_visitors_for_collection
     _thumbnail_response = thumbnail_response
     _get_collection = get_collection
     _resolve_smart_image_ids = resolve_smart_image_ids
@@ -123,6 +127,7 @@ def _configured() -> None:
         or _set_favorite is None
         or _list_favorites is None
         or _favorites_for_collection is None
+        or _favorite_visitors_for_collection is None
         or _thumbnail_response is None
     ):
         raise RuntimeError("Share routes are not configured")
@@ -381,7 +386,21 @@ async def api_share_favorites(collection_id: int):
         for row in favorites
     ]
     share = await _get_share(collection_id)
-    return {"favorites": owner_favorites, "count": len(owner_favorites), "client_finished_at": share.get("client_finished_at") if share else None}
+    groups = await _favorite_visitors_for_collection(collection_id)
+    visitors = [
+        {
+            "visitor": auth.visitor_label(str(group["visitor_id"])),
+            "count": int(group["count"]),
+            "image_ids": group["image_ids"],
+        }
+        for group in groups
+    ]
+    return {
+        "favorites": owner_favorites,
+        "count": len(owner_favorites),
+        "client_finished_at": share.get("client_finished_at") if share else None,
+        "visitors": visitors,
+    }
 
 
 @router.get("/s/{token}", response_class=HTMLResponse)
@@ -428,7 +447,12 @@ async def public_share_favorites(token: str, request: Request):
     collection = await _resolve_token(token)
     if collection is None or not auth.is_unlocked(request, collection):
         return _public_response(JSONResponse({"error": "Not found"}, status_code=404))
-    favorites = await _list_favorites(int(collection["share_id"]))
+    visitor_id = auth.visitor_id(request)
+    favorites = (
+        await _list_favorites(int(collection["share_id"]), visitor_id=visitor_id)
+        if visitor_id is not None
+        else []
+    )
     return _public_response(JSONResponse({"favorites": _favorite_ids(favorites), "done": bool(collection.get("client_finished_at"))}))
 
 
@@ -440,20 +464,31 @@ async def public_share_favorite(token: str, payload: FavoriteBody, request: Requ
         return _public_response(JSONResponse({"error": "Not found"}, status_code=404))
     if payload.done:
         finished_at = await _mark_finished(int(collection["share_id"])) if _mark_finished else None
-        favorites = await _list_favorites(int(collection["share_id"]))
+        visitor_id = auth.visitor_id(request)
+        favorites = (
+            await _list_favorites(int(collection["share_id"]), visitor_id=visitor_id)
+            if visitor_id is not None
+            else []
+        )
         return _public_response(JSONResponse({"ok": finished_at is not None, "favorites": _favorite_ids(favorites), "done": finished_at is not None}))
     if payload.image_id is None:
         return _public_response(JSONResponse({"error": "Image required"}, status_code=422))
+    existing_visitor_id = auth.visitor_id(request)
+    visitor_id = existing_visitor_id or auth.new_visitor_id()
     ok = await _set_favorite(
         int(collection["share_id"]),
         int(payload.image_id),
         bool(payload.on),
         client_name=payload.name,
+        visitor_id=visitor_id,
     )
     if not ok:
         return _public_response(JSONResponse({"error": "Not found"}, status_code=404))
-    favorites = await _list_favorites(int(collection["share_id"]))
-    return _public_response(JSONResponse({"ok": True, "favorites": _favorite_ids(favorites), "done": False}))
+    favorites = await _list_favorites(int(collection["share_id"]), visitor_id=visitor_id)
+    response = JSONResponse({"ok": True, "favorites": _favorite_ids(favorites), "done": False})
+    if existing_visitor_id is None:
+        auth.set_visitor_cookie(response, token, visitor_id, request=request)
+    return _public_response(response)
 
 
 @router.get("/s/{token}/download-all")

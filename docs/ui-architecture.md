@@ -108,6 +108,56 @@ Patterns adopted deliberately (and their sources):
 - Keyboard map documented in-app (?); every icon-only control has a tooltip
   with its shortcut.
 
+## The Deliver grammar
+
+Delivery is one verb with three destinations, one triage surface, and one job
+model. Every surface below already exists; this section is the contract they
+converge on.
+
+**One verb: Deliver.** `Deliver(collection)` is an overlay with exactly three
+tabs — **Private link**, **Client gallery**, **Website** — one per destination.
+Anything that hands photos to someone else starts here: the collection ⋯ menu,
+the command palette, and settings return-flows all open this overlay and
+nothing else. Legacy names (`openPublishOverlay`) are gone, not shimmed.
+
+**One triage surface: the Shared lens.** The lens (sidebar + `h`) reviews
+everything delivered — links, galleries, published site — with rename, revoke,
+password, and snapshot review. The overlay creates and edits one collection's
+deliveries; the lens manages all of them. The word is **Shared** in nav, aria,
+and copy; "Publishing" survives only inside the Website tab and its settings
+section.
+
+**State and return flows.** The overlay's dataset (`collectionId`, `name`,
+`activeTab`) is the single source of truth for reopen/return targets and is
+updated on every tab switch. Reopening Deliver lands on the tab with an active
+delivery, else the last-used tab (localStorage, like the export dialog).
+Drafts (title, slug, password, expiry) persist per collection until delivered
+or discarded — never silently lost on Esc.
+
+**One job grammar.** Every delivery job (publish, zip, batch export) runs
+through one poll helper: token-gated, cancelled with its surface, interval not
+loop-count. Progress shows inside the invoking surface while it is open and in
+the System peek's Background work when it isn't. No fire-and-forget downloads:
+every job ends in a success or failure toast. A job is **settling** until it
+reaches a final state — automatic retries (e.g. website hook retries) count
+as settling: surfaces stay busy, polls keep running, and the copy says what
+is being retried.
+
+**One confirm grammar.** Reversible actions execute immediately with an Undo
+toast (unpublish, remove from lens). Irreversible-but-scoped actions use the
+two-click arm (revoke link, rotate token). Typed-count confirmation is
+reserved for bulk data destruction. Never a modal "are you sure".
+
+**One export pipeline.** All zip/data exports flow through the export dialog's
+option store (tab, sizes, prefs). Scope wrappers (selection, folder, source,
+context menu, omnibox) share one `exportScope` helper and its toast copy;
+none of them bypass saved preferences.
+
+**One layer registry.** The foreground-layer inventory (which overlays block
+shortcuts, what Esc closes first) lives in one module; keyboard.js and every
+lens consume it. Adding a delivery surface means one registration, not a
+selector hunt.
+
 ## Vocabulary
 
 User-facing words, chosen once: **Refine** (not rank/compare), **Best of**

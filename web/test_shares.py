@@ -6,6 +6,8 @@ from fastapi.responses import Response
 from fastapi.testclient import TestClient
 
 from test_support import *  # noqa: F401,F403
+from data import connection as data_connection
+from data import schema as data_schema
 from features.collections import routes as collection_routes
 from features.share import auth as share_auth
 from features.share import routes as share_routes
@@ -30,15 +32,20 @@ class ShareTests(BackendTestCase):
             record_share_view=lambda token: db.record_share_view(token),
             resolve_token=lambda token: db.resolve_share_token(token),
             token_allows_image=lambda token, image_id: db.share_token_allows_image(token, image_id),
-            set_favorite=lambda share_id, image_id, on, client_name=None: db.set_share_favorite(
+            set_favorite=lambda share_id, image_id, on, client_name=None, visitor_id="legacy": db.set_share_favorite(
                 share_id,
                 image_id,
                 on,
                 client_name=client_name,
+                visitor_id=visitor_id,
             ),
             mark_finished=lambda share_id: db.mark_share_finished(share_id),
-            list_favorites=lambda share_id: db.list_share_favorites(share_id),
+            list_favorites=lambda share_id, visitor_id=None: db.list_share_favorites(
+                share_id,
+                visitor_id=visitor_id,
+            ),
             favorites_for_collection=lambda collection_id: db.favorites_for_collection(collection_id),
+            favorite_visitors_for_collection=lambda collection_id: db.favorite_visitors_for_collection(collection_id),
             thumbnail_response=self._thumbnail_response,
         )
         collection_routes.configure(
@@ -307,6 +314,110 @@ class ShareTests(BackendTestCase):
         self.assertEqual(owner.json()["count"], 2)
         self.assertIsNotNone(owner.json()["client_finished_at"])
         self.assertEqual([row["image_id"] for row in owner.json()["favorites"]], [first, second])
+
+    async def test_share_favorites_are_isolated_per_visitor_and_owner_sees_all_sets(self):
+        collection, first, second, _third = await self._collection_with_images()
+        share = await db.create_or_rotate_share(collection["id"])
+
+        def probe():
+            visitor_a = TestClient(app_module.app)
+            visitor_b = TestClient(app_module.app)
+            try:
+                a_pick = visitor_a.post(
+                    f"/s/{share['token']}/favorite",
+                    json={"image_id": first, "on": True},
+                )
+                b_first_pick = visitor_b.post(
+                    f"/s/{share['token']}/favorite",
+                    json={"image_id": first, "on": True},
+                )
+                b_second_pick = visitor_b.post(
+                    f"/s/{share['token']}/favorite",
+                    json={"image_id": second, "on": True},
+                )
+                b_remove_a_pick = visitor_b.post(
+                    f"/s/{share['token']}/favorite",
+                    json={"image_id": first, "on": False},
+                )
+                a_favorites = visitor_a.get(f"/s/{share['token']}/favorites")
+                b_favorites = visitor_b.get(f"/s/{share['token']}/favorites")
+                owner = visitor_a.get(f"/api/user-collections/{collection['id']}/share/favorites")
+                return a_pick, b_first_pick, b_second_pick, b_remove_a_pick, a_favorites, b_favorites, owner
+            finally:
+                visitor_a.close()
+                visitor_b.close()
+
+        (
+            a_pick,
+            b_first_pick,
+            b_second_pick,
+            b_remove_a_pick,
+            a_favorites,
+            b_favorites,
+            owner,
+        ) = await asyncio.to_thread(probe)
+
+        self.assertIn("pa_sv=", a_pick.headers.get("set-cookie", ""))
+        self.assertIn(f"Path=/s/{share['token']}", a_pick.headers.get("set-cookie", ""))
+        self.assertEqual(a_pick.json()["favorites"], [first])
+        self.assertEqual(b_first_pick.json()["favorites"], [first])
+        self.assertEqual(b_second_pick.json()["favorites"], [first, second])
+        self.assertEqual(b_remove_a_pick.json()["favorites"], [second])
+        self.assertEqual(a_favorites.json()["favorites"], [first])
+        self.assertEqual(b_favorites.json()["favorites"], [second])
+        self.assertEqual([row["image_id"] for row in owner.json()["favorites"]], [first, second])
+        self.assertEqual(owner.json()["count"], 2)
+        self.assertEqual(sorted(group["count"] for group in owner.json()["visitors"]), [1, 1])
+        self.assertEqual(
+            sorted(group["image_ids"] for group in owner.json()["visitors"]),
+            [[first], [second]],
+        )
+
+    async def test_owner_keeps_legacy_share_favorites_visible(self):
+        collection, first, _second, _third = await self._collection_with_images()
+        share = await db.create_or_rotate_share(collection["id"])
+        await db.set_share_favorite(share["id"], first, True)
+
+        def probe():
+            with TestClient(app_module.app) as client:
+                return client.get(f"/api/user-collections/{collection['id']}/share/favorites")
+
+        owner = await asyncio.to_thread(probe)
+
+        self.assertEqual([row["image_id"] for row in owner.json()["favorites"]], [first])
+        self.assertEqual(owner.json()["visitors"], [{"visitor": "legacy", "count": 1, "image_ids": [first]}])
+
+    async def test_share_favorites_migration_assigns_legacy_visitor(self):
+        migration_path = str(Path(self.tempdir.name) / "legacy-favorites.db")
+        conn = await data_connection.open_async(migration_path)
+        try:
+            await conn.executescript(
+                """
+                CREATE TABLE collection_shares (id INTEGER PRIMARY KEY);
+                CREATE TABLE share_favorites (
+                    id INTEGER PRIMARY KEY,
+                    share_id INTEGER NOT NULL REFERENCES collection_shares(id) ON DELETE CASCADE,
+                    image_id INTEGER NOT NULL,
+                    client_name TEXT NULL,
+                    created_at REAL NOT NULL,
+                    UNIQUE(share_id, image_id)
+                );
+                INSERT INTO collection_shares(id) VALUES (4);
+                INSERT INTO share_favorites(id, share_id, image_id, client_name, created_at)
+                VALUES (7, 4, 9, 'Client', 11);
+                """
+            )
+            await data_schema.migrate_share_favorites_per_visitor(conn)
+            await data_schema.migrate_share_favorites_per_visitor(conn)
+            cursor = await conn.execute(
+                "SELECT visitor_id, image_id FROM share_favorites WHERE id = 7"
+            )
+            row = dict(await cursor.fetchone())
+        finally:
+            await data_connection.close_async(conn, db_path=migration_path)
+
+        self.assertEqual(row, {"visitor_id": "legacy", "image_id": 9})
+        self.assertTrue(Path(f"{migration_path}.pre-share-favorites-visitors.bak").exists())
 
     async def test_shared_surfaces_aggregate_private_and_website_state(self):
         settings.save_settings({"publish_site_base_url": "https://example.test"})

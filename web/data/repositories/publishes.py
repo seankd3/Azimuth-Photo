@@ -23,6 +23,14 @@ def _summary(row) -> dict:
         "hook_exit_code": int(row["hook_exit_code"]) if row["hook_exit_code"] is not None else None,
         "hook_output": row["hook_output"] or "",
         "hook_ran_at": float(row["hook_ran_at"]) if row["hook_ran_at"] is not None else None,
+        "hook_pending": bool(row["hook_pending"]),
+        "hook_attempts": int(row["hook_attempts"] or 0),
+        "hook_next_retry_at": (
+            float(row["hook_next_retry_at"])
+            if row["hook_next_retry_at"] is not None
+            else None
+        ),
+        "hook_pending_operation": row["hook_pending_operation"] or "",
         "collection_name": row["collection_name"] if "collection_name" in row.keys() else None,
         "cover_image_id": int(row["cover_image_id"]) if "cover_image_id" in row.keys() and row["cover_image_id"] is not None else None,
     }
@@ -82,6 +90,10 @@ async def upsert_publish(
     hook_exit_code: int | None = None,
     hook_output: str = "",
     hook_ran_at: float | None = None,
+    hook_pending: bool = False,
+    hook_attempts: int = 0,
+    hook_next_retry_at: float | None = None,
+    hook_pending_operation: str = "",
     now: float | None = None,
 ) -> dict:
     clean_slug = (slug or "").strip()
@@ -98,8 +110,9 @@ async def upsert_publish(
                 """
                 INSERT INTO collection_publishes
                     (collection_id, slug, title, published_at, updated_at, image_count, bundle_bytes,
-                     last_commit, hook_exit_code, hook_output, hook_ran_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     last_commit, hook_exit_code, hook_output, hook_ran_at, hook_pending,
+                     hook_attempts, hook_next_retry_at, hook_pending_operation)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(collection_id) DO UPDATE SET
                     slug = excluded.slug,
                     title = excluded.title,
@@ -109,7 +122,11 @@ async def upsert_publish(
                     last_commit = excluded.last_commit,
                     hook_exit_code = excluded.hook_exit_code,
                     hook_output = excluded.hook_output,
-                    hook_ran_at = excluded.hook_ran_at
+                    hook_ran_at = excluded.hook_ran_at,
+                    hook_pending = excluded.hook_pending,
+                    hook_attempts = excluded.hook_attempts,
+                    hook_next_retry_at = excluded.hook_next_retry_at,
+                    hook_pending_operation = excluded.hook_pending_operation
                 """,
                 (
                     int(collection_id),
@@ -123,6 +140,10 @@ async def upsert_publish(
                     hook_exit_code,
                     str(hook_output or ""),
                     hook_ran_at,
+                    int(bool(hook_pending)),
+                    max(0, int(hook_attempts)),
+                    hook_next_retry_at,
+                    str(hook_pending_operation or ""),
                 ),
             )
             await conn.commit()

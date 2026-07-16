@@ -619,6 +619,14 @@ async def list_trash(db_path: str, *, limit: int = 100, offset: int = 0) -> dict
             "FROM images WHERE status = 'trashed'"
         )
         total_row = await total_cursor.fetchone()
+        edited_cursor = await conn.execute(
+            "SELECT COUNT(*) AS edited FROM images i WHERE i.status = 'trashed' "
+            "AND i.vc_of IS NOT NULL AND EXISTS ("
+            "  SELECT 1 FROM develop_history h WHERE h.image_id = i.id "
+            "  AND h.label NOT IN ('Virtual Copy', 'Import from XMP')"
+            ")"
+        )
+        edited_row = await edited_cursor.fetchone()
         cursor = await conn.execute(
             "SELECT * FROM images WHERE status = 'trashed' "
             "ORDER BY trashed_at DESC, id DESC LIMIT ? OFFSET ?",
@@ -636,6 +644,9 @@ async def list_trash(db_path: str, *, limit: int = 100, offset: int = 0) -> dict
             "total": int(total_row["total"] or 0),
             "total_bytes": int(total_row["total_bytes"] or 0),
             "pending_hub_count": int(total_row["pending_hub_count"] or 0),
+            # Sean-signed decision: Empty Trash warns when edited virtual
+            # copies would be destroyed alongside their masters.
+            "edited_copy_count": int(edited_row["edited"] or 0),
         }
     finally:
         await data_connection.close_async(conn, db_path=db_path)

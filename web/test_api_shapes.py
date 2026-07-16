@@ -20,6 +20,7 @@ import settings  # noqa: E402
 import thumbnails  # noqa: E402
 from features.export import routes as export_routes  # noqa: E402
 from features.compare import service as compare_service  # noqa: E402
+from features.library import storage as library_storage  # noqa: E402
 from thumbnails import cache_entries as thumbnail_cache_entries  # noqa: E402
 
 
@@ -95,6 +96,7 @@ class ApiShapeTests(unittest.TestCase):
         db.invalidate_stats_cache()
         db.invalidate_cached_image_ids_cache()
         db.clear_filter_options_cache()
+        library_storage.invalidate_overview_cache()
         asyncio.run(db.init_db())
         settings.save_settings({})
         compare_service._pairing_cache.update({"data": None, "valid": False})
@@ -135,6 +137,7 @@ class ApiShapeTests(unittest.TestCase):
         db.invalidate_stats_cache()
         db.invalidate_cached_image_ids_cache()
         db.clear_filter_options_cache()
+        library_storage.invalidate_overview_cache()
         compare_service._pairing_cache.update({"data": None, "valid": False})
         compare_service._matchups_cache.update({"data": None, "valid": False})
         self.tempdir.cleanup()
@@ -326,6 +329,26 @@ class ApiShapeTests(unittest.TestCase):
         self.assertEqual(satellite["total_images"], 4)
         self.assertEqual(satellite["pending_thumbnails"], 1)
         self.assertEqual(len(satellite["images"]), 4)
+
+    def test_storage_overview_reports_archive_location_and_capacity(self):
+        archive_home = os.path.join(self.tempdir.name, "Archive")
+        os.makedirs(archive_home)
+        settings.save_settings({"import_root": archive_home})
+        library_storage.invalidate_overview_cache()
+
+        usage = type("Usage", (), {"total": 10_000, "free": 4_000})()
+        with mock.patch.object(library_storage.shutil, "disk_usage", return_value=usage):
+            response = self.client.get("/api/storage/overview")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json(), {
+            "home_path": archive_home,
+            "photo_count": 4,
+            "originals_bytes": 10_000,
+            "disk_free_bytes": 4_000,
+            "disk_total_bytes": 10_000,
+            "disk_label": "Archive",
+        })
 
     def test_date_group_rankings_include_contextual_group_only(self):
         response = self.client.get("/api/rankings?limit=10&sort=date_taken")

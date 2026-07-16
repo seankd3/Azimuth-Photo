@@ -14,6 +14,7 @@ from core.app_factory import create_app
 from features.develop import ai_mask_routes, hdr_routes, import_routes, pano_routes, preset_routes, routes as develop_routes, xmp_write_routes
 from features.library import geo_routes, keyword_routes, saved_views, watched_routes
 from features.publishing import routes as gallery_routes
+from features.publish import routes as publish_routes
 from features.develop import export_presets
 from features.media import routes as media_routes
 from features.quality import routes as quality_routes
@@ -122,6 +123,11 @@ async def _start_hub_mdns():
     )
     port = int(os.environ.get("PHOTOARCHIVE_PORT") or 8000)
     await asyncio.to_thread(mdns.start_hub_announce, name=name, port=port, hub_id=hub_id)
+
+
+@app.on_event("startup")
+async def _resume_publish_hook_retries():
+    await publish_routes.resume_pending_hook_retries()
 
 
 @app.on_event("shutdown")
