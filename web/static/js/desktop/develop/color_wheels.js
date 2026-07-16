@@ -57,14 +57,15 @@ export class ColorWheels {
             canvas.addEventListener('dblclick', () => this.reset(key));
             const luminance = host.querySelector(`[data-wheel-lum="${key}"]`);
             let gesture = null;
-            luminance.addEventListener('pointerdown', () => { gesture = { previousSettings: snapshotSettings(this.settings), changed: false }; });
+            luminance.addEventListener('pointerdown', () => { gesture = { previousSettings: snapshotSettings(this.settings), settings: this.settings, changed: false }; });
             luminance.addEventListener('input', (event) => {
+                if (gesture && gesture.settings !== this.settings) { gesture = null; return; }
                 const value = Number(event.target.value);
                 gesture &&= { ...gesture, changed: gesture.changed || value !== numberSetting(gesture.previousSettings, `ColorGrade${key}Lum`) };
                 this.change(`${key}Lum`, value, `${key} luminance`, gesture ? { history: false } : undefined);
             });
             const finishGesture = () => {
-                if (!gesture?.changed) { gesture = null; return; }
+                if (!gesture?.changed || gesture.settings !== this.settings) { gesture = null; return; }
                 this.change(`${key}Lum`, numberSetting(this.settings, `ColorGrade${key}Lum`), `${key} luminance`, { previousSettings: gesture.previousSettings });
                 gesture = null;
             };
@@ -83,8 +84,10 @@ export class ColorWheels {
     drag(event, key, canvas) {
         canvas.setPointerCapture(event.pointerId);
         const previousSettings = snapshotSettings(this.settings);
+        const gestureSettings = this.settings;
         let changed = false;
         const update = (next) => {
+            if (this.settings !== gestureSettings) return;
             const value = polar(next, canvas);
             const hue = Math.round(value.hue);
             const saturation = Math.round(value.saturation);
@@ -94,7 +97,7 @@ export class ColorWheels {
         };
         const done = () => {
             canvas.removeEventListener('pointermove', update); canvas.removeEventListener('pointerup', done); canvas.removeEventListener('pointercancel', done);
-            if (changed) this.change(`${key}Hue`, numberSetting(this.settings, `ColorGrade${key}Hue`), `${key} color`, { previousSettings });
+            if (changed && this.settings === gestureSettings) this.change(`${key}Hue`, numberSetting(this.settings, `ColorGrade${key}Hue`), `${key} color`, { previousSettings });
         };
         update(event); canvas.addEventListener('pointermove', update); canvas.addEventListener('pointerup', done); canvas.addEventListener('pointercancel', done);
     }

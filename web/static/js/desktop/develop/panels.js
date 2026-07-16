@@ -276,9 +276,11 @@ export class DevelopPanels {
                 const startX = event.clientX;
                 const startValue = numberSetting(this.settings, row.dataset.setting, Number(row.dataset.default));
                 const previousSettings = snapshotSettings(this.settings);
+                const gestureSettings = this.settings;
                 let changed = false;
                 row.setPointerCapture(event.pointerId);
                 const move = (next) => {
+                    if (this.settings !== gestureSettings) return;
                     changed ||= updateFromPointer(next, startX, startValue) !== startValue;
                 };
                 const up = () => {
@@ -286,7 +288,7 @@ export class DevelopPanels {
                     row.removeEventListener('pointerup', up);
                     row.removeEventListener('pointercancel', up);
                     row.classList.remove('dragging');
-                    if (changed) {
+                    if (changed && this.settings === gestureSettings) {
                         this.change(row.dataset.setting, numberSetting(this.settings, row.dataset.setting, startValue), row.querySelector('.develop-slider-label').textContent, { previousSettings });
                     }
                 };

@@ -61,9 +61,8 @@ export async function applyFlags(rawIds, flag, { toast = true } = {}) {
 
     setLocal(ids, flag);
     const outcome = write(ids, flag);
-    void outcome.then((result) => {
-        if (result.status !== 'failed') return;
-        rollback(ids, prev, flag);
+    void outcome.then((ok) => {
+        if (!ok) rollback(ids, prev, flag);
     });
 
     if (toast) {
