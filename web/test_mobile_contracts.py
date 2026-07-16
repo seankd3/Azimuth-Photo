@@ -62,6 +62,12 @@ class MobileOfflineContractsTests(unittest.TestCase):
         self.assertIn("sections.named_people", search)
         self.assertIn("people = { people: flattenPeople(data) }", search)
 
+    def test_background_lease_waits_remain_active_on_mobile(self):
+        library = self.read("static", "js", "mobile", "library.js")
+
+        for state in ("waiting_for_gpu", "waiting_for_turn", "waiting_retry"):
+            self.assertIn(f"'{state}'", library)
+
 
 if __name__ == "__main__":
     unittest.main()

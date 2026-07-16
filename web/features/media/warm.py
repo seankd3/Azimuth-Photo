@@ -9,6 +9,25 @@ from core import work_coordination
 
 _thumbnail_prefetch_inflight: set[str] = set()
 _thumbnail_memory_warm_inflight: set[str] = set()
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _track_background_task(coro) -> asyncio.Task:
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return task
+
+
+async def cancel_background_tasks() -> None:
+    tasks = list(_background_tasks)
+    for task in tasks:
+        task.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+    _background_tasks.clear()
+    _thumbnail_prefetch_inflight.clear()
+    _thumbnail_memory_warm_inflight.clear()
 
 
 def schedule_thumbnail_prefetch(rows, size: str, limit: int):
@@ -26,7 +45,7 @@ def schedule_thumbnail_prefetch(rows, size: str, limit: int):
         finally:
             _thumbnail_prefetch_inflight.discard(size)
 
-    asyncio.create_task(_run_prefetch())
+    _track_background_task(_run_prefetch())
 
 
 def schedule_cached_thumbnail_memory_warm(
@@ -68,7 +87,7 @@ def schedule_cached_thumbnail_memory_warm(
         finally:
             _thumbnail_memory_warm_inflight.discard(key)
 
-    asyncio.create_task(_run_warm())
+    _track_background_task(_run_warm())
 
 
 def schedule_result_thumbnail_memory_warm(rows, *, sm_limit: int = 48, md_limit: int = 12, lg_limit: int = 12):

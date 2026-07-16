@@ -13,6 +13,8 @@ from data.repositories import images as image_repository
 
 
 log = logging.getLogger(__name__)
+ORIENTATION_RETRY_SECONDS = 15 * 60
+ORIENTATION_POISON_THRESHOLD = 3
 
 
 DbPathProvider = Callable[[], str]
@@ -22,6 +24,7 @@ _db_path: DbPathProvider | None = None
 _invalidate_filter_options_cache: Invalidator | None = None
 _invalidate_rankings_cache: Invalidator | None = None
 _metadata_manual_pause = True
+_orientation_retry_ledger: dict[int, dict] = {}
 _status = {
     "state": "paused",
     "message": "Catalog metadata is paused until you start it from Background Work.",
@@ -31,6 +34,9 @@ _status = {
     "last_run_at": None,
     "orientation_scanned": 0,
     "metadata_scanned": 0,
+    "orientation_retry_count": 0,
+    "orientation_poisoned_count": 0,
+    "next_retry_at": None,
 }
 
 
@@ -69,6 +75,7 @@ def pause_catalog_metadata() -> dict:
 def resume_catalog_metadata() -> dict:
     global _metadata_manual_pause
     _metadata_manual_pause = False
+    _orientation_retry_ledger.clear()
     _status.update(state="waiting", message="Catalog metadata will scan the catalog.", last_error="")
     return catalog_metadata_status()
 
@@ -105,6 +112,81 @@ async def batch_update_metadata(updates: list[tuple]):
     _invalidate_filter_options()
 
 
+def _note_orientation_failure(
+    image_id: int,
+    error: str,
+    *,
+    now: float | None = None,
+    source_root: str = "",
+) -> float:
+    now = time.time() if now is None else float(now)
+    image_id = int(image_id)
+    previous = _orientation_retry_ledger.get(image_id, {})
+    attempts = int(previous.get("attempts") or 0) + 1
+    poisoned = attempts >= ORIENTATION_POISON_THRESHOLD
+    retry_at = float("inf") if poisoned else now + ORIENTATION_RETRY_SECONDS
+    _orientation_retry_ledger[image_id] = {
+        "attempts": attempts,
+        "retry_at": retry_at,
+        "error": str(error or ""),
+        "poisoned": poisoned,
+        "source_root": str(source_root or ""),
+    }
+    return retry_at
+
+
+def _clear_restored_source_failures(rows) -> None:
+    restored_roots = set()
+    for row in rows:
+        try:
+            source_root = str(row["source_root"] or "")
+        except (KeyError, TypeError):
+            continue
+        if source_root and os.path.isdir(source_root):
+            restored_roots.add(source_root)
+    if not restored_roots:
+        return
+    for image_id, record in list(_orientation_retry_ledger.items()):
+        if str(record.get("source_root") or "") in restored_roots:
+            _orientation_retry_ledger.pop(image_id, None)
+
+
+def _ready_orientation_rows(rows, *, now: float | None = None):
+    now = time.time() if now is None else float(now)
+    _clear_restored_source_failures(rows)
+    ready = []
+    cooled_down = 0
+    next_retry_at = None
+    for row in rows:
+        record = _orientation_retry_ledger.get(int(row["id"]))
+        if not record:
+            ready.append(row)
+            continue
+        retry_at = float(record.get("retry_at") or 0.0)
+        if record.get("poisoned") or retry_at > now:
+            cooled_down += 1
+            if not record.get("poisoned") and (
+                next_retry_at is None or retry_at < next_retry_at
+            ):
+                next_retry_at = retry_at
+            continue
+        ready.append(row)
+    return ready, cooled_down, next_retry_at
+
+
+def _orientation_retry_summary() -> dict[str, int]:
+    return {
+        "retrying": sum(
+            1 for record in _orientation_retry_ledger.values()
+            if not record.get("poisoned")
+        ),
+        "poisoned": sum(
+            1 for record in _orientation_retry_ledger.values()
+            if record.get("poisoned")
+        ),
+    }
+
+
 async def classify_orientations_background():
     """Continuously classify unclassified images by reading just the image header."""
     from PIL import Image as PILImage, UnidentifiedImageError
@@ -126,6 +208,7 @@ async def classify_orientations_background():
                         int(row["id"]),
                         str(row["filepath"]),
                         type(exc).__name__,
+                        str(row["source_root"] or ""),
                         os.path.isdir(str(row["source_root"] or "")),
                     )
                 )
@@ -143,7 +226,27 @@ async def classify_orientations_background():
                 continue
 
             batch_limit = 200
-            rows = await get_unclassified_images(limit=batch_limit)
+            candidate_limit = min(5000, batch_limit + len(_orientation_retry_ledger))
+            candidates = await get_unclassified_images(limit=candidate_limit)
+            rows, cooled_down, next_retry_at = _ready_orientation_rows(candidates)
+            retry_summary = _orientation_retry_summary()
+            _status.update(
+                orientation_retry_count=retry_summary["retrying"],
+                orientation_poisoned_count=retry_summary["poisoned"],
+                next_retry_at=next_retry_at,
+            )
+            if candidates and not rows:
+                wait_for = max(1, int(next_retry_at - time.time())) if next_retry_at else 60
+                _status.update(
+                    state="waiting_retry",
+                    message=(
+                        f"Waiting to retry {cooled_down} unreadable images."
+                        if next_retry_at
+                        else f"Skipping {cooled_down} repeatedly unreadable images."
+                    ),
+                )
+                await asyncio.sleep(min(wait_for, 60))
+                continue
             if not rows:
                 _status.update(state="idle", message="Orientations are caught up.", last_error="")
                 await asyncio.sleep(5)
@@ -152,9 +255,15 @@ async def classify_orientations_background():
             _status.update(state="running", message=f"Classifying {len(rows)} image orientations.")
             with work_coordination.manual_bulk("catalog_metadata"):
                 results, failures = await loop.run_in_executor(None, _classify_batch, rows)
-            for image_id, filepath, reason, source_online in failures:
+            for image_id, filepath, reason, source_root, source_online in failures:
                 if not source_online:
+                    _note_orientation_failure(
+                        image_id,
+                        reason,
+                        source_root=source_root,
+                    )
                     continue
+                _orientation_retry_ledger.pop(image_id, None)
                 changed = await image_repository.mark_image_missing(
                     _configured_db_path(),
                     image_id,
@@ -167,7 +276,10 @@ async def classify_orientations_background():
                         filepath,
                     )
             if results:
+                for _orientation, _aspect_ratio, image_id in results:
+                    _orientation_retry_ledger.pop(int(image_id), None)
                 await batch_set_orientations(results)
+            retry_summary = _orientation_retry_summary()
             _status.update(
                 state="running",
                 message=f"Classified {len(results)} image orientations.",
@@ -175,6 +287,8 @@ async def classify_orientations_background():
                 last_batch_seconds=round(time.perf_counter() - started, 3),
                 last_run_at=time.time(),
                 orientation_scanned=int(_status.get("orientation_scanned") or 0) + len(results),
+                orientation_retry_count=retry_summary["retrying"],
+                orientation_poisoned_count=retry_summary["poisoned"],
             )
             await asyncio.sleep(0.05)
         except Exception:

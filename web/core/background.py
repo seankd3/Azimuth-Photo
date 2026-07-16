@@ -140,9 +140,28 @@ def install_idle_activity_middleware(app, *, thumbnails, excluded_paths=None):
     return track_idle_activity_middleware
 
 
-async def run_shutdown(*, thumbnails, background_task_tracker: BackgroundTaskTracker) -> None:
+async def run_shutdown(
+    *,
+    thumbnails,
+    background_task_tracker: BackgroundTaskTracker,
+    caption_worker=None,
+) -> None:
     thumbnails.stop_prefetch()
     await background_task_tracker.cancel_all()
+    await thumbnails.cancel_background_tasks()
+
+    from features.media import warm as media_warm
+    await media_warm.cancel_background_tasks()
+
+    try:
+        import embedding_worker
+
+        await embedding_worker.shutdown_embedding_worker()
+    except ImportError:
+        pass
+
+    if caption_worker is not None:
+        caption_worker.shutdown_caption_worker()
 
 
 async def run_startup(

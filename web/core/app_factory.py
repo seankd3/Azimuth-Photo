@@ -254,6 +254,7 @@ def register_app_lifecycle(shell: AppShell, dependencies: AppLifecycleDependenci
         await background_runtime.run_shutdown(
             thumbnails=dependencies.thumbnails,
             background_task_tracker=shell.background_task_tracker,
+            caption_worker=dependencies.caption_worker,
         )
 
     shell.app.router.on_startup.append(startup)

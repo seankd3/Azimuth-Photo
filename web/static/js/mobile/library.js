@@ -285,7 +285,13 @@ function workRows() {
                 ? `${fmtInt(ai.embedded)} / ${fmtInt(ai.total_images)} indexed`
                 : 'Checking status…',
             paused: Boolean(ai && ai.embedding_manual_pause),
-            running: Boolean(ai && ['embedding', 'loading_model'].includes(ai.worker_state)),
+            running: Boolean(ai && [
+                'embedding',
+                'loading_model',
+                'waiting_for_gpu',
+                'waiting_for_turn',
+                'waiting_retry',
+            ].includes(ai.worker_state)),
         },
         {
             key: 'cache',

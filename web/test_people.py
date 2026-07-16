@@ -1,7 +1,108 @@
 from test_support import *  # noqa: F401,F403
+import contextlib
+from unittest import mock
 
 
 class PeopleTests(BackendTestCase):
+    async def test_people_immediate_claim_does_not_report_waiting(self):
+        old_status = dict(face_worker._status)
+        face_worker._set_status(state="scanning")
+        try:
+            with (
+                mock.patch.object(
+                    work_coordination,
+                    "manual_turn_blocked",
+                    return_value=False,
+                ),
+                mock.patch.object(
+                    work_coordination,
+                    "wait_for_manual_turn",
+                    new=mock.AsyncMock(),
+                ),
+            ):
+                await face_worker._wait_for_face_turn()
+
+            self.assertEqual(face_worker.get_worker_status()["state"], "scanning")
+        finally:
+            face_worker._status.clear()
+            face_worker._status.update(old_status)
+
+    async def test_people_ownership_loss_unloads_before_reentering_wait(self):
+        with (
+            mock.patch.object(
+                work_coordination,
+                "lost_ownership",
+                return_value=True,
+            ),
+            mock.patch.object(face_worker, "_unload_face_app") as unload_model,
+            mock.patch.object(
+                work_coordination,
+                "wait_for_manual_turn",
+                new=mock.AsyncMock(),
+            ) as wait_for_manual,
+        ):
+            await face_worker._renew_face_turn()
+
+        unload_model.assert_called_once_with()
+        wait_for_manual.assert_awaited_once_with("people")
+
+    async def test_people_retained_ownership_renews_manual_lease(self):
+        with (
+            mock.patch.object(
+                work_coordination,
+                "lost_ownership",
+                return_value=False,
+            ),
+            mock.patch.object(face_worker, "_unload_face_app") as unload_model,
+            mock.patch.object(
+                work_coordination,
+                "wait_for_manual_turn",
+                new=mock.AsyncMock(),
+            ) as wait_for_manual,
+        ):
+            await face_worker._renew_face_turn()
+
+        unload_model.assert_not_called()
+        wait_for_manual.assert_awaited_once_with("people")
+
+    async def test_disabled_people_loop_releases_manual_owner(self):
+        old_pause = face_worker._face_manual_pause
+        old_pause_message = face_worker._face_manual_pause_message
+        old_status = dict(face_worker._status)
+        sleep_started = asyncio.Event()
+
+        async def hold_sleep(_seconds):
+            sleep_started.set()
+            await asyncio.Future()
+
+        face_worker._face_manual_pause = False
+        face_worker._face_manual_pause_message = ""
+        owner = work_coordination.manual_owner()
+        if owner:
+            work_coordination.release_manual_owner(owner)
+        work_coordination.claim_manual_owner("people")
+        task = None
+        try:
+            with (
+                mock.patch.object(settings, "get_settings", return_value={
+                    "people_scan_enabled": False,
+                }),
+                mock.patch.object(face_worker.asyncio, "sleep", side_effect=hold_sleep),
+            ):
+                task = asyncio.create_task(face_worker.run_face_worker())
+                await asyncio.wait_for(sleep_started.wait(), timeout=1)
+                self.assertIsNone(work_coordination.manual_owner())
+        finally:
+            if task is not None:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+            face_worker._face_manual_pause = old_pause
+            face_worker._face_manual_pause_message = old_pause_message
+            face_worker._status.clear()
+            face_worker._status.update(old_status)
+            work_coordination.release_manual_owner("people")
+
     async def test_people_review_uses_face_crop_thumbnail(self):
         from PIL import Image, ImageDraw
 

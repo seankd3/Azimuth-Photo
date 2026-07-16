@@ -17,15 +17,24 @@ from typing import Any
 
 import numpy as np
 
+def _new_embed_executor() -> ThreadPoolExecutor:
+    return ThreadPoolExecutor(max_workers=1, thread_name_prefix="embed-gpu")
+
+
+def _new_preload_executor() -> ThreadPoolExecutor:
+    return ThreadPoolExecutor(max_workers=1, thread_name_prefix="embed-preload")
+
+
 # Dedicated executors — separate CPU prep from GPU encode
-_embed_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="embed-gpu")
-_preload_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="embed-preload")
+_embed_executor = _new_embed_executor()
+_preload_executor = _new_preload_executor()
 
 import ai_models
 import embed_cache
 import settings
 import thumbnails
 from core import work_coordination
+from workers.caption_health import CaptionOomCircuit
 
 log = logging.getLogger("embedding_worker")
 log.setLevel(logging.INFO)
@@ -91,6 +100,7 @@ _worker_status = {
 }
 _embedding_history = deque()
 _embed_retry_after: dict[int, float] = {}
+_embedding_oom_circuit = CaptionOomCircuit(threshold=3)
 _embedding_manual_pause = True
 _embedding_manual_pause_message = "Search is stopped until you start it from Background Work."
 _embedding_pause_reason = ""
@@ -112,6 +122,7 @@ _get_catalog_image_counts: AsyncDictProvider | None = None
 _count_embeddings_for_model: AsyncIntProvider | None = None
 _get_unembedded_images: AsyncListProvider | None = None
 _store_embeddings_batch: AsyncNoneProvider | None = None
+_poison_embedding_image: AsyncNoneProvider | None = None
 _get_embedding_count: AsyncIntProvider | None = None
 
 
@@ -121,11 +132,12 @@ def configure(
     count_embeddings_for_model: AsyncIntProvider | None = None,
     get_unembedded_images: AsyncListProvider | None = None,
     store_embeddings_batch: AsyncNoneProvider | None = None,
+    poison_embedding_image: AsyncNoneProvider | None = None,
     get_embedding_count: AsyncIntProvider | None = None,
 ) -> None:
     global _get_catalog_image_counts
     global _count_embeddings_for_model, _get_unembedded_images
-    global _store_embeddings_batch, _get_embedding_count
+    global _store_embeddings_batch, _poison_embedding_image, _get_embedding_count
     if get_catalog_image_counts is not None:
         _get_catalog_image_counts = get_catalog_image_counts
     if count_embeddings_for_model is not None:
@@ -134,6 +146,8 @@ def configure(
         _get_unembedded_images = get_unembedded_images
     if store_embeddings_batch is not None:
         _store_embeddings_batch = store_embeddings_batch
+    if poison_embedding_image is not None:
+        _poison_embedding_image = poison_embedding_image
     if get_embedding_count is not None:
         _get_embedding_count = get_embedding_count
 
@@ -238,6 +252,46 @@ def _unload_model() -> None:
     _loaded_model_revision = None
     _clear_cuda_cache()
     work_coordination.release_gpu_owner("embeddings")
+
+
+async def _wait_for_embedding_turn() -> None:
+    if work_coordination.manual_turn_blocked("embeddings"):
+        _set_worker_status(
+            "waiting_for_turn",
+            "Search is waiting for other background work.",
+            ready=False,
+        )
+    await work_coordination.wait_for_manual_turn("embeddings")
+    if work_coordination.gpu_turn_blocked("embeddings"):
+        _set_worker_status(
+            "waiting_for_gpu",
+            "Search is waiting for the GPU.",
+            ready=False,
+        )
+    await work_coordination.wait_for_gpu_turn("embeddings")
+
+
+async def _renew_embedding_turn() -> bool:
+    retained = not work_coordination.lost_ownership("embeddings", gpu=True)
+    if not retained:
+        _unload_model()
+    await _wait_for_embedding_turn()
+    return retained
+
+
+async def shutdown_embedding_worker() -> None:
+    global _embed_executor, _preload_executor, _search_model_load_task
+    task = _search_model_load_task
+    if task is not None and not task.done():
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+    _search_model_load_task = None
+    work_coordination.release_manual_owner("embeddings")
+    _unload_model()
+    _embed_executor.shutdown(wait=False, cancel_futures=True)
+    _preload_executor.shutdown(wait=False, cancel_futures=True)
+    _embed_executor = _new_embed_executor()
+    _preload_executor = _new_preload_executor()
 
 
 def _set_worker_status(
@@ -391,6 +445,7 @@ def resume_embedding_worker() -> dict:
     _embedding_manual_pause = False
     _embedding_manual_pause_message = ""
     _embedding_pause_reason = ""
+    _embedding_oom_circuit.reset()
     work_coordination.claim_manual_owner("embeddings")
     _clear_model_load_failure()
     _set_worker_status("idle", "Search will run from Background Work.", ready=_model is not None)
@@ -594,7 +649,8 @@ async def _ensure_model_loaded_for_config(config: dict, reason: str) -> bool:
         loop = asyncio.get_running_loop()
         _set_worker_status("loading_model", f"Loading {model_id} for {reason}…", ready=False, config=config)
         try:
-            _model = await loop.run_in_executor(_embed_executor, _load_model, model_dir, model_id)
+            async with work_coordination.lease_heartbeat("embeddings", gpu=True):
+                _model = await loop.run_in_executor(_embed_executor, _load_model, model_dir, model_id)
             _loaded_model_dir = model_dir
             _loaded_model_id = model_id
             _loaded_model_revision = model_revision
@@ -789,9 +845,14 @@ async def _process_embedding_candidates(
     first_failure_error = None
     preload_future = None
     preload_rows = None
+    ownership_lost = False
 
     while index < len(rows):
         if _embedding_manual_pause:
+            break
+        if not await _renew_embedding_turn():
+            await _discard_preload_future(preload_future)
+            ownership_lost = True
             break
 
         active_batch_size, _target = _refresh_batch_status(embedding_config)
@@ -874,12 +935,33 @@ async def _process_embedding_candidates(
                 failure = f"{type(e).__name__}: {e}"
                 first_failure_error = first_failure_error or failure
                 failed_total += chunk_len
+                circuit_open = _embedding_oom_circuit.record_failure()
                 for row in chunk_rows:
-                    _schedule_embed_retry(int(row["id"]), failure)
+                    image_id = int(row["id"])
+                    poisoned = await _configured(
+                        _poison_embedding_image,
+                        "poison_embedding_image",
+                    )(
+                        image_id=image_id,
+                        embedding_config=embedding_config,
+                        error=failure,
+                        force=circuit_open,
+                    )
+                    if poisoned:
+                        _embed_retry_after.pop(image_id, None)
+                    else:
+                        _schedule_embed_retry(image_id, failure)
                 index = next_index
+                if circuit_open:
+                    pause_embedding_worker(
+                        "Search paused after repeated GPU out-of-memory failures. "
+                        "Free GPU memory, then start Search again."
+                    )
 
             preload_future = None
             preload_rows = None
+            if _embedding_manual_pause:
+                break
             await asyncio.sleep(0)
             continue
 
@@ -912,6 +994,7 @@ async def _process_embedding_candidates(
                 log.warning(f"Warm embedding cache update skipped: {exc}")
             await _log_stored_embedding_batch(len(batch), embedding_config)
             _note_successful_embedding_batch(embedding_config)
+            _embedding_oom_circuit.reset()
         store_seconds = time.perf_counter() - store_started
 
         if batch_pause_seconds:
@@ -949,10 +1032,19 @@ async def _process_embedding_candidates(
         "failed": failed_total,
         "chunks": chunks_completed,
         "first_error": first_failure_error,
+        "lost_ownership": ownership_lost,
     }
 
 
 async def run_embedding_worker():
+    try:
+        await _run_embedding_worker_loop()
+    finally:
+        work_coordination.release_manual_owner("embeddings")
+        _unload_model()
+
+
+async def _run_embedding_worker_loop():
     """Main background loop: embed images for search, similarity, and Elo propagation."""
     loop = asyncio.get_running_loop()
 
@@ -1001,7 +1093,7 @@ async def run_embedding_worker():
             if needs_model_load and _model_load_blocked(model_dir, model_id, model_revision):
                 wait_for = max(1, int(_model_load_retry_after - time.time()))
                 _set_worker_status(
-                    "error",
+                    "waiting_retry",
                     f"Model load failed; retrying in about {wait_for}s.",
                     ready=False,
                     last_error=_worker_status.get("last_error", ""),
@@ -1015,10 +1107,20 @@ async def run_embedding_worker():
                             continue
                         _set_worker_status("loading_model", f"Loading {model_id} from disk…", ready=False)
                         try:
-                            await work_coordination.wait_for_gpu_turn("embeddings")
-                            await work_coordination.wait_for_manual_turn("embeddings")
+                            await _wait_for_embedding_turn()
+                            _set_worker_status(
+                                "loading_model",
+                                f"Loading {model_id} from disk…",
+                                ready=False,
+                            )
                             with work_coordination.manual_bulk("embeddings"):
-                                _model = await loop.run_in_executor(_embed_executor, _load_model, model_dir, model_id)
+                                async with work_coordination.lease_heartbeat("embeddings", gpu=True):
+                                    _model = await loop.run_in_executor(
+                                        _embed_executor,
+                                        _load_model,
+                                        model_dir,
+                                        model_id,
+                                    )
                             _loaded_model_dir = model_dir
                             _loaded_model_id = model_id
                             _loaded_model_revision = model_revision
@@ -1059,8 +1161,7 @@ async def run_embedding_worker():
                 "next_retry_at": next_retry_at,
             })
             if unembedded:
-                await work_coordination.wait_for_gpu_turn("embeddings")
-                await work_coordination.wait_for_manual_turn("embeddings")
+                await _wait_for_embedding_turn()
                 _set_worker_status(
                     "embedding",
                     f"Embedding {len(unembedded)} images in batches up to {governed_batch_size}…",
@@ -1088,7 +1189,7 @@ async def run_embedding_worker():
             if candidates and cooled_down:
                 wait_for = max(1, int(next_retry_at - time.time())) if next_retry_at else 5
                 _set_worker_status(
-                    "embedding",
+                    "waiting_retry",
                     f"Waiting to retry {cooled_down} unavailable files in about {wait_for}s.",
                     ready=True,
                 )

@@ -147,6 +147,21 @@ def _newer_image_rows(
         yield row
 
 
+def _collect_newer_image_rows(
+    path: str,
+    *,
+    recursive: bool,
+    after: float | None,
+    known_signatures: set[tuple[str, str, int]],
+) -> list[tuple]:
+    return list(_newer_image_rows(
+        path,
+        recursive=recursive,
+        after=after,
+        known_signatures=known_signatures,
+    ))
+
+
 async def _mark_scanned(db_path: str, folder_id: int, scanned_at: float) -> None:
     conn = await connection.open_async(db_path)
     try:
@@ -181,10 +196,14 @@ async def scan_folder(db_path: str, folder_id: int, *, allow_disabled: bool = Fa
         batch = []
         started_at = time.time()
         try:
-            for row in _newer_image_rows(
-                folder['path'], recursive=folder['recursive'],
-                after=folder.get('last_scan_at'), known_signatures=known_signatures,
-            ):
+            rows = await asyncio.to_thread(
+                _collect_newer_image_rows,
+                folder['path'],
+                recursive=folder['recursive'],
+                after=folder.get('last_scan_at'),
+                known_signatures=known_signatures,
+            )
+            for row in rows:
                 batch.append(row)
                 if len(batch) >= SCAN_BATCH_SIZE:
                     await db.insert_images_batch(batch, source_id=int(source['id']))

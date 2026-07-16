@@ -1,6 +1,7 @@
 import os
 import sqlite3
 import time
+from unittest import mock
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -79,6 +80,25 @@ class WatchedFolderTests(BackendTestCase):
         result = await watched_folders.scan_folder(db.DB_PATH, folder['id'])
         self.assertTrue(result['ok'])
         self.assertEqual(result['registered'], 1)
+
+    async def test_scan_offloads_disk_walk_from_event_loop(self):
+        inbox = os.path.join(self.tempdir.name, 'off-loop-watch')
+        os.makedirs(inbox)
+        with open(os.path.join(inbox, 'photo.jpg'), 'wb') as handle:
+            handle.write(b'image')
+
+        folder = await watched_folders.add_folder(db.DB_PATH, inbox)
+        real_to_thread = asyncio.to_thread
+        with mock.patch.object(
+            watched_folders.asyncio,
+            'to_thread',
+            wraps=real_to_thread,
+        ) as to_thread:
+            result = await watched_folders.scan_folder(db.DB_PATH, folder['id'])
+
+        self.assertTrue(result['ok'])
+        self.assertEqual(result['registered'], 1)
+        to_thread.assert_awaited_once()
 
     async def test_incremental_scan_finds_new_file_with_preserved_old_mtime(self):
         inbox = os.path.join(self.tempdir.name, 'preserved-mtime')

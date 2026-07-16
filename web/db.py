@@ -1413,6 +1413,31 @@ async def store_embeddings_batch(rows: list[tuple[int, bytes]], embedding_config
     _notify_embedding_batch_stored(model_key, image_ids)
 
 
+async def poison_embedding_image(
+    *,
+    image_id: int,
+    embedding_config: dict | None = None,
+    error: str,
+    force: bool = False,
+) -> bool:
+    return await embedding_repository.poison_embedding_image(
+        DB_PATH,
+        image_id=image_id,
+        embedding_config=embedding_config or active_embedding_config(),
+        error=error,
+        force=force,
+    )
+
+
+async def clear_embedding_poison_ledger(
+    embedding_config: dict | None = None,
+) -> int:
+    return await embedding_repository.clear_embedding_poison_ledger(
+        DB_PATH,
+        embedding_config=embedding_config or active_embedding_config(),
+    )
+
+
 async def count_embeddings_for_model(embedding_config: dict, *, online_only: bool = False) -> int:
     if online_only:
         return await embedding_repository.count_embeddings_for_model(

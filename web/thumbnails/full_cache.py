@@ -215,16 +215,22 @@ async def schedule_full_image_cache(
     task = asyncio.create_task(run_when_warmers_have_turn())
     inflight[inflight_key] = task
 
-    async def release_when_done():
-        try:
-            await task
-        except Exception:
-            pass
-        finally:
-            if inflight.get(inflight_key) is task:
-                inflight.pop(inflight_key, None)
+    def release_when_done(done_task):
+        if inflight.get(inflight_key) is done_task:
+            inflight.pop(inflight_key, None)
+        if not done_task.cancelled():
+            done_task.exception()
 
-    asyncio.create_task(release_when_done())
+    task.add_done_callback(release_when_done)
+
+
+async def cancel_inflight_tasks(inflight: dict) -> None:
+    tasks = list({task for task in inflight.values() if task is not None})
+    for task in tasks:
+        task.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+    inflight.clear()
 
 
 async def get_full_image_path(
