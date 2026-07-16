@@ -143,6 +143,7 @@ export function mountHistoryPanel(host, api) {
                 });
                 if (!response.ok) throw new Error('history failed');
                 const fresh = await response.json();
+                if (Number(api.getImageId?.()) !== Number(imageId)) return;
                 controller.setHistory(fresh);
                 const entry = api.getEntry?.();
                 // Keep the per-image cache in sync so revisiting shows this history.

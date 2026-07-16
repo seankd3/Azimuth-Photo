@@ -20,3 +20,12 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertIn("function closeDevelop() {\n    unmount();\n}", develop)
         self.assertEqual(keyboard.count("closeDevelop();"), 2)
         self.assertIn("if (developOpen()) return;", keyboard)
+
+    def test_develop_history_reload_does_not_paint_after_an_image_switch(self):
+        history = read("develop", "history_panel.js")
+
+        self.assertIn("if (Number(api.getImageId?.()) !== Number(imageId)) return;", history)
+        self.assertLess(
+            history.index("if (Number(api.getImageId?.()) !== Number(imageId)) return;"),
+            history.index("controller.setHistory(fresh);"),
+        )
