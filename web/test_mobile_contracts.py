@@ -20,6 +20,9 @@ class MobileOfflineContractsTests(unittest.TestCase):
         self.assertIn("window.addEventListener('online'", queue)
         self.assertIn("registration.sync.register(WRITE_SYNC_TAG)", queue)
         self.assertIn("drain-write-queue", queue)
+        self.assertNotIn("write-outcome", queue)
+        self.assertIn("emit('flag-write'", api)
+        self.assertIn("emit('rating-write'", api)
         self.assertNotIn("'#mv-pick'", self.read("static", "js", "mobile", "bootstrap.js"))
 
     def test_service_worker_is_secure_only_and_versioned(self):

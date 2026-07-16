@@ -264,7 +264,7 @@ async def _apply_lww_family(conn, image_id: int, entry: Mapping[str, Any]) -> No
                 "CASE WHEN json_valid(develop_settings.settings) THEN "
                 "  CASE WHEN json_type(develop_settings.settings) = 'object' "
                 "    THEN develop_settings.settings ELSE '{}' END "
-                "ELSE '{}' END, '$._lr_rating', ?), updated_at=excluded.updated_at",
+                "ELSE '{}' END, '$._lr_rating', ?)",
                 (image_id, settings, _iso_timestamp(float(entry["ts"])), value),
             )
     elif family == "develop":
