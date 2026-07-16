@@ -1,6 +1,6 @@
 import { setActiveLens } from './state.js';
 import {
-    bindSystemSurface, mountSystemSurface, refreshSystemSurface, renderSystemSections, unmountSystemSurface,
+    bindSystemSurface, mountSystemSurface, refreshSystemSurface, renderSystemSections, suspendSystemTimers, unmountSystemSurface,
 } from './drawer.js';
 
 const SECTION_KEY = 'pa_d_system_section';
@@ -66,6 +66,7 @@ export function unmountSystemLens() {
     root?.classList.remove('active');
     clearInterval(pollTimer);
     pollTimer = null;
+    suspendSystemTimers();
     unmountSystemSurface();
     root = null;
 }

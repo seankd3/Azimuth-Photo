@@ -28,6 +28,8 @@ let activityTimer = null;
 let installTimer = null;
 let scanTimer = null;
 let scanSourceId = null;
+let installTimerGeneration = 0;
+let scanTimerGeneration = 0;
 let catalog = null;
 let aiStatus = null;
 let cacheStatus = null;
@@ -1092,11 +1094,15 @@ async function refreshDrawer({ initial = false } = {}) {
 }
 
 async function pollScanUntilDone(sourceId) {
+    const generation = ++scanTimerGeneration;
+    let scanning = true;
     scanSourceId = Number(sourceId) || null;
     clearInterval(scanTimer);
     const tick = async () => {
         const status = await getScanStatus().catch(() => null);
+        if (generation !== scanTimerGeneration) return;
         if (!status || !status.scanning) {
+            scanning = false;
             clearInterval(scanTimer);
             scanTimer = null;
             scanSourceId = null;
@@ -1111,6 +1117,7 @@ async function pollScanUntilDone(sourceId) {
         if (progressEl) progressEl.textContent = `Scanning · ${fmt(status.total_found || status.total_inserted || 0)} photos found · thumbnails appear as they’re ready`;
     };
     await tick();
+    if (generation !== scanTimerGeneration || !scanning) return;
     scanTimer = setInterval(tick, 1000);
     renderCurrentSystemSurface();
 }
@@ -1182,6 +1189,8 @@ function bindSettingInputs(body) {
     for (const input of body.querySelectorAll('[data-setting-field]')) {
         const field = input.dataset.settingField;
         const save = () => {
+            const pending = settingTimers.get(input);
+            if (pending) clearTimeout(pending.timer);
             settingTimers.delete(input);
             if (!input.validity.valid) {
                 const validation = input.closest('.setting-row')?.querySelector('.setting-validation');
@@ -1200,12 +1209,13 @@ function bindSettingInputs(body) {
                 return;
             }
             const patch = field === 'caption_model_preset' ? captionPresetConfig(value) : null;
-            applySetting(field, value, { patch });
+            return applySetting(field, value, { patch });
         };
         if (input.type === 'text') {
             input.addEventListener('input', () => {
-                clearTimeout(settingTimers.get(input));
-                settingTimers.set(input, setTimeout(save, 600));
+                const pending = settingTimers.get(input);
+                if (pending) clearTimeout(pending.timer);
+                settingTimers.set(input, { timer: setTimeout(save, 600), save });
             });
             input.addEventListener('blur', save);
             input.addEventListener('keydown', (event) => {
@@ -1281,9 +1291,11 @@ function aiInstallActive(status = aiStatus || {}) {
 }
 
 function pollModelInstall() {
+    const generation = ++installTimerGeneration;
     clearInterval(installTimer);
     const tick = async () => {
         const status = await getAiStatus();
+        if (generation !== installTimerGeneration) return;
         if (status) aiStatus = status;
         renderActivity();
         if (open) patchDrawerStatus();
@@ -1294,6 +1306,19 @@ function pollModelInstall() {
     };
     tick();
     installTimer = setInterval(tick, 1500);
+}
+
+export function suspendSystemTimers() {
+    scanTimerGeneration += 1;
+    clearInterval(scanTimer);
+    scanTimer = null;
+    scanSourceId = null;
+    installTimerGeneration += 1;
+    clearInterval(installTimer);
+    installTimer = null;
+    const pendingSaves = [...settingTimers.values()];
+    for (const pending of pendingSaves) clearTimeout(pending.timer);
+    return Promise.all(pendingSaves.map((pending) => pending.save()));
 }
 
 async function saveAndInstallModel() {
